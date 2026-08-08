@@ -58,6 +58,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `catan.game.to_move` — whose decision the legal actions are, which is not the current
   player while discarding on a seven.
 - `catan.state.copy_state`, `catan.game.ROLL_ODDS`.
+- `catan.arena` — head-to-head play with the lineup rotated so every entrant sits every
+  seat the same number of times, and win rates reported with a Wilson interval. Caps
+  actions per game, which the engine's turn cap cannot do.
+- `benchmarks.baselines` — runs a lineup and records the commit and environment with the
+  result.
 
 ### Changed
 

@@ -45,9 +45,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `benchmarks.throughput` — games/sec measurement with environment recording.
 - `catan.evaluate` — handcrafted position scoring, one score per seat rather than a
   scalar, matching the planned value head. Combines victory points, expected cards per
-  turn, resource diversity, the settleable frontier the roads reach, roads, knights,
-  hand size with a discard penalty, and port rates. Weights are an ablatable dataclass
-  and are untuned. `pips` lives in `catan.board.board` so the encoder can share it.
+  turn, resource diversity, the production reachable within two roads discounted by
+  distance, progress towards the nearest purchase, roads, knights, hand size with a
+  discard penalty, and port rates. Weights are an ablatable dataclass.
+  `pips` lives in `catan.board.board` so the encoder can share it.
 - `catan.bots` — a `Bot` protocol the network will also satisfy, a random bot, and a
   max^n search over the evaluation. Depth counts decisions rather than turns; rolls are
   chance nodes weighted over all eleven outcomes rather than sampled; a beam bounds the
@@ -63,6 +64,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   actions per game, which the engine's turn cap cannot do.
 - `benchmarks.baselines` — runs a lineup and records the commit and environment with the
   result.
+- `catan.tuning` — fits the evaluation weights by hill climbing against the incumbent
+  through the arena. The scale is pinned at `victory_point`, since scaling every weight
+  alike cannot change the argmax; acceptance needs the win-rate interval's lower bound
+  to clear half, with the strictness a knob because both extremes fail.
+- `benchmarks.tune` — runs the climb, reporting each duel as it resolves.
 
 ### Changed
 

@@ -150,3 +150,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   go into a run manifest verbatim. Results are identical at any worker count.
 - The devcontainer installs Python. It previously had codex, GitHub CLI and Docker
   features but no Python at all, so it could not run this project's tests.
+- `catan.encoding` — the heterogeneous graph the model reads. Seats are rotated so
+  the player to move is always seat 0, and only information the perspective player
+  may legally know is encoded: own hand and cards exactly, opponents as counts.
+  Board adjacency is cached per board, since it never changes during a game.

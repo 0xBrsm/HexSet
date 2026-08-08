@@ -6,14 +6,20 @@ import pytest
 
 from catan.board.board import make_board, random_base_board
 from catan.board.maps import MINI_LAYOUT
-from catan.board.terrain import TERRAIN_RESOURCE, Terrain
+from catan.board.terrain import TERRAIN_RESOURCE, Resource, Terrain
 from catan.board.topology import build as build_topology
 from catan.cards import DevCard
 from catan.evaluate import ROLLS, WIN_SCORE, Evaluator, Weights
 from catan.game import start
-from catan.state import new_game, place_road, place_settlement, upgrade_to_city
+from catan.state import (
+    can_place_settlement,
+    new_game,
+    place_road,
+    place_settlement,
+    upgrade_to_city,
+)
 from catan.victory import WINNING_POINTS, victory_points
-from helpers import ROLL, a_vertex_touching, independent_vertices, mini_board
+from helpers import ROLL, a_vertex_touching, give, independent_vertices, mini_board
 
 MINI_PIPS = 3  # every mini-board producer bears the same token
 
@@ -116,25 +122,92 @@ def test_diverse_production_beats_concentrated_production():
     )
 
 
-def test_frontier_counts_only_junctions_the_roads_reach():
+def test_reach_is_nothing_without_a_position():
     board = mini_board()
     state = a_state(board)
     evaluator = Evaluator(board)
-    assert evaluator.frontier(state, 0) == 0
+    assert evaluator.reach(state, 0, evaluator.networks(state)[0]) == 0.0
+
+
+def test_reach_counts_from_a_settlement_before_any_road():
+    """Otherwise the opening placement, which matters most, would be invisible."""
+    board = mini_board()
+    state = a_state(board)
+    place_settlement(state, 0, a_vertex_touching(board, 3), connected=False)
+
+    evaluator = Evaluator(board)
+    assert evaluator.reach(state, 0, evaluator.networks(state)[0]) > 0.0
+
+
+def test_reach_follows_the_roads_that_are_built():
+    board = mini_board()
+    state = a_state(board)
+    evaluator = Evaluator(board)
+    topology = board.topology
 
     vertex = a_vertex_touching(board, 3)
     place_settlement(state, 0, vertex, connected=False)
+    before = evaluator.reach(state, 0, evaluator.networks(state)[0])
+
+    # A road moves the two-step horizon one junction further out.
+    edge = topology.vertex_edges[vertex][0]
+    place_road(state, 0, edge)
+    after = evaluator.reach(state, 0, evaluator.networks(state)[0])
+    assert after > before
+
+
+def test_reach_discounts_the_second_step():
+    board = mini_board()
+    evaluator = Evaluator(board)
+    state = a_state(board)
+    vertex = a_vertex_touching(board, 3)
+
+    full = evaluator.reach(state, 0, {vertex})
+    near_only = sum(
+        evaluator.vertex_pips[w]
+        for w in board.topology.vertex_neighbors[vertex]
+    ) / ROLLS
+    # Everything past the first ring is halved, so the total exceeds the first
+    # ring alone but by less than the second ring's face value.
+    assert full > near_only
+
+
+def test_an_opponents_buildings_cut_reach_off():
+    board = mini_board()
+    evaluator = Evaluator(board)
     topology = board.topology
+    vertex = a_vertex_touching(board, 3)
 
-    first = topology.vertex_edges[vertex][0]
-    place_road(state, 0, first)
-    # One road reaches nothing settleable: its far end abuts the settlement.
-    assert evaluator.frontier(state, 0) == 0
+    open_state = a_state(board)
+    place_settlement(open_state, 0, vertex, connected=False)
+    open_reach = evaluator.reach(open_state, 0, {vertex})
 
-    far = next(v for v in topology.edges[first] if v != vertex)
-    second = next(e for e in topology.vertex_edges[far] if e != first)
-    place_road(state, 0, second)
-    assert evaluator.frontier(state, 0) == 1
+    blocked = a_state(board)
+    place_settlement(blocked, 0, vertex, connected=False)
+    for neighbor in topology.vertex_neighbors[vertex]:
+        for beyond in topology.vertex_neighbors[neighbor]:
+            if beyond != vertex and can_place_settlement(
+                blocked, 1, beyond, connected=False
+            ):
+                place_settlement(blocked, 1, beyond, connected=False)
+    assert evaluator.reach(blocked, 0, {vertex}) < open_reach
+
+
+def test_progress_tells_a_city_hand_from_a_junk_hand():
+    board = mini_board()
+    evaluator = Evaluator(board)
+
+    empty = a_state(board)
+    assert evaluator.progress(empty, 0) == 0.0
+
+    city = a_state(board)
+    give(city, 0, Resource.WHEAT, 2)
+    give(city, 0, Resource.ORE, 3)
+    assert evaluator.progress(city, 0) == 1.0
+
+    junk = a_state(board)
+    give(junk, 0, Resource.WOOD, 5)
+    assert evaluator.progress(junk, 0) == 0.25
 
 
 def test_a_winning_position_dominates_every_other_term():
@@ -171,7 +244,8 @@ def test_weights_are_what_the_score_is_built_from():
         victory_point=0.0,
         production=0.0,
         diversity=0.0,
-        frontier=0.0,
+        reach=0.0,
+        progress=0.0,
         road=0.0,
         knight=0.0,
         card=0.0,

@@ -1,0 +1,17 @@
+[project]
+name = "catan"
+version = "0.1.0"
+description = "Graph-native Settlers of Catan engine and self-play agent"
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["catan*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

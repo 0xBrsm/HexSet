@@ -16,7 +16,7 @@ import time
 from multiprocessing import Pool
 
 from benchmarks.throughput import environment
-from catan.arena import FACTORIES
+from catan.arena import PRESETS, spawn
 from catan.board.board import random_base_board
 from catan.record import Record, record_game, write
 
@@ -26,8 +26,11 @@ BOARD_SEED_OFFSET = 1_000_000
 def _record_one(job: tuple[int, str, int]) -> Record:
     seed, bot, players = job
     board = random_base_board(random.Random(BOARD_SEED_OFFSET + seed))
-    factory = FACTORIES[bot]
-    bots = [factory(board, random.Random(seed * 16 + seat)) for seat in range(players)]
+    entrant = PRESETS[bot]
+    bots = [
+        spawn(entrant, board, random.Random(seed * 16 + seat))
+        for seat in range(players)
+    ]
     return record_game(bots, board, seed)
 
 
@@ -35,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", required=True, help="JSON lines file, appended to")
     parser.add_argument("--games", type=int, default=100)
-    parser.add_argument("--bot", default="greedy", choices=sorted(FACTORIES))
+    parser.add_argument("--bot", default="greedy", choices=sorted(PRESETS))
     parser.add_argument("--players", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--workers", type=int, default=1)

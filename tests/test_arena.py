@@ -1,17 +1,20 @@
 from __future__ import annotations
 
+import pickle
 import random
 
 import pytest
 
 from catan.arena import (
-    FACTORIES,
     MAX_ACTIONS,
+    PRESETS,
+    Entrant,
     Standing,
     compete,
     lineup_from_names,
     play,
     seat_of,
+    spawn,
     wilson,
 )
 from catan.board.board import random_base_board
@@ -97,16 +100,38 @@ def test_a_tournament_needs_opponents():
 
 
 def test_repeated_bots_are_numbered_and_unknown_ones_rejected():
-    named = [name for name, _ in lineup_from_names(["greedy", "random", "greedy"])]
+    named = [e.name for e in lineup_from_names(["greedy", "random", "greedy"])]
     assert named == ["greedy#0", "random", "greedy#1"]
     with pytest.raises(ValueError, match="unknown bots: mcts"):
         lineup_from_names(["mcts", "random"])
 
 
-def test_every_registered_bot_can_be_built():
+def test_every_preset_can_be_built():
     board = random_base_board(random.Random(0))
-    for factory in FACTORIES.values():
-        assert factory(board, random.Random(0)) is not None
+    for entrant in PRESETS.values():
+        assert spawn(entrant, board, random.Random(0)) is not None
+
+
+def test_an_unknown_bot_kind_is_refused():
+    board = random_base_board(random.Random(0))
+    with pytest.raises(ValueError, match="unknown bot kind"):
+        spawn(Entrant("bogus", kind="mcts"), board, random.Random(0))
+
+
+def test_entrants_are_picklable_so_they_can_cross_a_process():
+    """The reason entrants are data and not closures."""
+    lineup = lineup_from_names(["greedy", "search2"])
+    assert pickle.loads(pickle.dumps(lineup)) == lineup
+
+
+def test_workers_do_not_change_the_result():
+    """Parallelism may change the clock and nothing else."""
+    lineup = lineup_from_names(["greedy", "random", "greedy", "random"])
+    serial = compete(lineup, 8, seed=11, workers=1)
+    parallel = compete(lineup, 8, seed=11, workers=4)
+    assert serial.standings == parallel.standings
+    assert serial.unfinished == parallel.unfinished
+    assert serial.mean_turns == parallel.mean_turns
 
 
 def test_greedy_beats_random_play():

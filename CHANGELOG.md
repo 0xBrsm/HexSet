@@ -67,10 +67,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `catan.tuning` — fits the evaluation weights by hill climbing against the incumbent
   through the arena. The scale is pinned at `victory_point`, since scaling every weight
   alike cannot change the argmax; acceptance needs the win-rate interval's lower bound
-  to clear half, with the strictness a knob because both extremes fail.
+  to clear half, with the strictness a knob because both extremes fail. `confirm` plays
+  the fitted weights against the starting weights at a large budget, which is the only
+  way to tell a real gain from an accumulation of accepted noise.
 - `benchmarks.tune` — runs the climb, reporting each duel as it resolves.
 
 ### Changed
 
 - `catan.game.roll_dice` takes an optional explicit roll, so a search can enumerate the
   outcomes instead of sampling one.
+- `catan.arena` entrants are a frozen `Entrant` description rather than a bot-building
+  closure, replacing `FACTORIES` with `PRESETS` and `spawn`. Closures cannot be pickled,
+  so this is what lets `compete` fan out over a process pool — and it means a lineup can
+  go into a run manifest verbatim. Results are identical at any worker count.
+- The devcontainer installs Python. It previously had codex, GitHub CLI and Docker
+  features but no Python at all, so it could not run this project's tests.

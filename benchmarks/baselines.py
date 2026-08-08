@@ -33,14 +33,21 @@ def main(argv: list[str] | None = None) -> int:
         help="must divide evenly over the seats, so the rotation completes",
     )
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--json", action="store_true", help="emit machine-readable output")
     args = parser.parse_args(argv)
 
-    result = compete(lineup_from_names(args.lineup), args.games, seed=args.seed)
+    result = compete(
+        lineup_from_names(args.lineup),
+        args.games,
+        seed=args.seed,
+        workers=args.workers,
+    )
     payload = {
         "environment": environment(),
         "lineup": args.lineup,
         "seed": args.seed,
+        "workers": args.workers,
         "games": result.games,
         "unfinished": result.unfinished,
         "mean_turns": round(result.mean_turns, 1),

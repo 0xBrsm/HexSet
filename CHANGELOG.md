@@ -43,3 +43,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Board-local actions get one slot per node.
 - `catan.play` — a random player that plays full games end to end.
 - `benchmarks.throughput` — games/sec measurement with environment recording.
+- `catan.evaluate` — handcrafted position scoring, one score per seat rather than a
+  scalar, matching the planned value head. Combines victory points, expected cards per
+  turn, resource diversity, the settleable frontier the roads reach, roads, knights,
+  hand size with a discard penalty, and port rates. Weights are an ablatable dataclass
+  and are untuned. `pips` lives in `catan.board.board` so the encoder can share it.

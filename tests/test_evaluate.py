@@ -1,0 +1,188 @@
+from __future__ import annotations
+
+import random
+
+import pytest
+
+from catan.board.board import make_board, random_base_board
+from catan.board.maps import MINI_LAYOUT
+from catan.board.terrain import TERRAIN_RESOURCE, Terrain
+from catan.board.topology import build as build_topology
+from catan.cards import DevCard
+from catan.evaluate import ROLLS, WIN_SCORE, Evaluator, Weights
+from catan.game import start
+from catan.state import new_game, place_road, place_settlement, upgrade_to_city
+from catan.victory import WINNING_POINTS, victory_points
+from helpers import ROLL, a_vertex_touching, independent_vertices, mini_board
+
+MINI_PIPS = 3  # every mini-board producer bears the same token
+
+
+def mixed_board():
+    """One hex of each terrain, so a junction can touch three distinct resources."""
+    topology = build_topology(MINI_LAYOUT)
+    terrain = (
+        Terrain.DESERT,
+        Terrain.FOREST,
+        Terrain.HILLS,
+        Terrain.PASTURE,
+        Terrain.FIELDS,
+        Terrain.MOUNTAINS,
+        Terrain.FOREST,
+    )
+    tokens = (0,) + (ROLL,) * (len(terrain) - 1)
+    return make_board(topology, terrain, tokens)
+
+
+def a_state(board, players: int = 4):
+    return new_game(board, players, random.Random(0))
+
+
+def distinct_junction(board, count: int = 3) -> int:
+    """A junction touching `count` hexes, all of them different resources."""
+    for v, hexes in enumerate(board.topology.vertex_hexes):
+        resources = {TERRAIN_RESOURCE[board.terrain[h]] for h in hexes}
+        if len(hexes) == count and len(resources) == count and None not in resources:
+            return v
+    raise AssertionError(f"no junction touching {count} distinct resources")
+
+
+def test_an_empty_position_scores_every_seat_alike():
+    board = mini_board()
+    scores = Evaluator(board).evaluate(a_state(board))
+    assert len(set(scores)) == 1
+
+
+def test_production_is_expected_cards_per_turn():
+    board = mini_board()
+    state = a_state(board)
+    vertex = a_vertex_touching(board, 3)
+    place_settlement(state, 0, vertex, connected=False)
+
+    rate, kinds = Evaluator(board).production(state, 0)
+    assert rate == 3 * MINI_PIPS / ROLLS
+    assert kinds == 1
+
+
+def test_a_city_produces_twice_a_settlement():
+    board = mini_board()
+    state = a_state(board)
+    vertex = a_vertex_touching(board, 3)
+    place_settlement(state, 0, vertex, connected=False)
+    evaluator = Evaluator(board)
+    settlement_rate, _ = evaluator.production(state, 0)
+
+    upgrade_to_city(state, 0, vertex)
+    city_rate, _ = evaluator.production(state, 0)
+    assert city_rate == 2 * settlement_rate
+
+
+def test_the_robber_removes_the_hex_it_sits_on():
+    board = mini_board()
+    state = a_state(board)
+    vertex = a_vertex_touching(board, 3)
+    place_settlement(state, 0, vertex, connected=False)
+    evaluator = Evaluator(board)
+    before, _ = evaluator.production(state, 0)
+
+    state.robber = board.topology.vertex_hexes[vertex][0]
+    after, _ = evaluator.production(state, 0)
+    assert after == pytest.approx(before - MINI_PIPS / ROLLS)
+
+
+def test_gold_pays_a_rate_but_no_diversity():
+    board = mini_board(gold=True)
+    state = a_state(board)
+    place_settlement(state, 0, a_vertex_touching(board, 3), connected=False)
+
+    rate, kinds = Evaluator(board).production(state, 0)
+    assert rate > 0
+    assert kinds == 0
+
+
+def test_diverse_production_beats_concentrated_production():
+    """Same pip total, three resources against one."""
+    diverse, plain = mixed_board(), mini_board()
+    diverse_state, plain_state = a_state(diverse), a_state(plain)
+    place_settlement(diverse_state, 0, distinct_junction(diverse), connected=False)
+    place_settlement(plain_state, 0, a_vertex_touching(plain, 3), connected=False)
+
+    diverse_rate, diverse_kinds = Evaluator(diverse).production(diverse_state, 0)
+    plain_rate, plain_kinds = Evaluator(plain).production(plain_state, 0)
+    assert diverse_rate == plain_rate
+    assert (diverse_kinds, plain_kinds) == (3, 1)
+    assert Evaluator(diverse).score(diverse_state, 0) > Evaluator(plain).score(
+        plain_state, 0
+    )
+
+
+def test_frontier_counts_only_junctions_the_roads_reach():
+    board = mini_board()
+    state = a_state(board)
+    evaluator = Evaluator(board)
+    assert evaluator.frontier(state, 0) == 0
+
+    vertex = a_vertex_touching(board, 3)
+    place_settlement(state, 0, vertex, connected=False)
+    topology = board.topology
+
+    first = topology.vertex_edges[vertex][0]
+    place_road(state, 0, first)
+    # One road reaches nothing settleable: its far end abuts the settlement.
+    assert evaluator.frontier(state, 0) == 0
+
+    far = next(v for v in topology.edges[first] if v != vertex)
+    second = next(e for e in topology.vertex_edges[far] if e != first)
+    place_road(state, 0, second)
+    assert evaluator.frontier(state, 0) == 1
+
+
+def test_a_winning_position_dominates_every_other_term():
+    board = mini_board()
+    state = a_state(board)
+    for vertex in independent_vertices(board, WINNING_POINTS // 2):
+        place_settlement(state, 0, vertex, connected=False)
+        upgrade_to_city(state, 0, vertex)
+    assert victory_points(state, 0) >= WINNING_POINTS
+
+    evaluator = Evaluator(board)
+    assert evaluator.score(state, 0) > WIN_SCORE
+    assert evaluator.score(state, 1) < WIN_SCORE
+
+
+def test_hidden_victory_cards_count_only_for_the_seat_that_holds_them():
+    board = mini_board()
+    state = a_state(board)
+    state.dev_cards[0][DevCard.VICTORY_POINT] += 1
+    evaluator = Evaluator(board)
+
+    public = evaluator.score(state, 0)
+    known = evaluator.score(state, 0, knower=0)
+    assert known - public == evaluator.weights.victory_point
+    assert evaluator.score(state, 1, knower=0) == evaluator.score(state, 1)
+
+
+def test_weights_are_what_the_score_is_built_from():
+    board = mini_board()
+    state = a_state(board)
+    place_settlement(state, 0, a_vertex_touching(board, 3), connected=False)
+
+    silent = Weights(
+        victory_point=0.0,
+        production=0.0,
+        diversity=0.0,
+        frontier=0.0,
+        road=0.0,
+        knight=0.0,
+        card=0.0,
+        surplus_card=0.0,
+        port=0.0,
+    )
+    assert Evaluator(board, silent).score(state, 0) == 0.0
+
+
+def test_for_game_reads_the_board_off_the_game():
+    rng = random.Random(0)
+    game = start(random_base_board(rng), 4, rng)
+    scores = Evaluator.for_game(game).evaluate(game.state)
+    assert len(scores) == 4

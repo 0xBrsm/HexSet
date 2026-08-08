@@ -1,0 +1,188 @@
+from __future__ import annotations
+
+import random
+
+import pytest
+
+from catan.actions import Action, ActionType, apply, legal_actions
+from catan.board.board import pips, random_base_board
+from catan.board.terrain import Resource
+from catan.bots import RandomBot, SearchBot, greedy
+from catan.evaluate import Evaluator
+from catan.game import (
+    ROLL_ODDS,
+    Phase,
+    imagine,
+    is_over,
+    roll_dice,
+    start,
+    to_move,
+)
+from catan.state import place_settlement, upgrade_to_city
+from catan.victory import victory_points
+from helpers import give, independent_vertices, mini_board
+
+
+def a_game(seed: int = 0, players: int = 4):
+    rng = random.Random(seed)
+    board = random_base_board(rng)
+    return start(board, players, rng)
+
+
+def snapshot(game):
+    state = game.state
+    return (
+        game.phase,
+        game.current_player,
+        game.turns,
+        state.vertex_owner[:],
+        state.vertex_building[:],
+        state.edge_owner[:],
+        state.robber,
+        [hand[:] for hand in state.hands],
+        state.bank[:],
+        state.deck[:],
+        game.rng.getstate(),
+    )
+
+
+def play_out(game, bot, cap: int = 20000) -> int:
+    moves = 0
+    while not is_over(game):
+        apply(game, bot.choose(game))
+        moves += 1
+        if moves > cap:
+            raise AssertionError("bot did not finish a game")
+    return moves
+
+
+def nine_points_and_a_city_to_come():
+    """Player 0 one build from winning, holding exactly the cost of that build."""
+    board = mini_board()
+    game = start(board, 4, random.Random(0))
+    game.phase = Phase.MAIN
+    game.current_player = 0
+
+    spots = independent_vertices(board, 5)
+    for vertex in spots[:4]:
+        place_settlement(game.state, 0, vertex, connected=False)
+        upgrade_to_city(game.state, 0, vertex)
+    place_settlement(game.state, 0, spots[4], connected=False)
+    give(game.state, 0, Resource.WHEAT, 2)
+    give(game.state, 0, Resource.ORE, 3)
+
+    assert victory_points(game.state, 0) == 9
+    return game, spots[4]
+
+
+def test_roll_odds_are_the_dice():
+    assert sum(weight for _, weight in ROLL_ODDS) == pytest.approx(1.0)
+    assert [roll for roll, _ in ROLL_ODDS] == list(range(2, 13))
+    assert all(weight == pips(roll) / 36 for roll, weight in ROLL_ODDS)
+
+
+def test_an_explicit_roll_is_resolved_as_rolled():
+    game = a_game()
+    while game.phase is not Phase.ROLL:
+        apply(game, legal_actions(game)[0])
+
+    assert roll_dice(game, 8) == 8
+    assert game.last_roll == 8
+
+
+def test_imagining_leaves_the_real_game_untouched():
+    game = a_game()
+    for _ in range(60):
+        apply(game, RandomBot(random.Random(1)).choose(game))
+    before = snapshot(game)
+
+    copy = imagine(game, random.Random(2))
+    play_out(copy, RandomBot(random.Random(3)))
+
+    assert snapshot(game) == before
+    assert is_over(copy)
+
+
+def test_imagining_hides_the_deck_it_copies():
+    game = a_game()
+    copy = imagine(game, random.Random(4))
+    assert sorted(copy.state.deck) == sorted(game.state.deck)
+    assert copy.state.deck != game.state.deck
+
+
+def test_to_move_is_the_discarding_player_not_the_roller():
+    game = a_game()
+    while game.phase is not Phase.ROLL:
+        apply(game, legal_actions(game)[0])
+    game.current_player = 0
+    game.state.hands[2] = [4, 4, 0, 0, 0]
+    roll_dice(game, 7)
+
+    assert game.phase is Phase.DISCARD
+    assert to_move(game) == 2
+    assert all(a.type is ActionType.DISCARD for a in legal_actions(game))
+
+
+def test_a_random_bot_finishes_a_game():
+    game = a_game(seed=3)
+    play_out(game, RandomBot(random.Random(3)))
+    assert is_over(game)
+
+
+def test_greedy_finishes_a_game_sooner_than_random_play():
+    random_game = a_game(seed=5)
+    play_out(random_game, RandomBot(random.Random(5)))
+
+    greedy_game = a_game(seed=5)
+    play_out(greedy_game, greedy(Evaluator(greedy_game.state.board), random.Random(5)))
+
+    assert greedy_game.won_by is not None
+    assert greedy_game.turns < random_game.turns
+
+
+def test_greedy_takes_a_winning_build():
+    game, vertex = nine_points_and_a_city_to_come()
+    chosen = greedy(Evaluator(game.state.board), random.Random(0)).choose(game)
+    assert chosen == Action(ActionType.BUILD_CITY, vertex)
+
+
+def test_search_takes_a_winning_build():
+    game, vertex = nine_points_and_a_city_to_come()
+    bot = SearchBot(Evaluator(game.state.board), depth=2, width=4, rng=random.Random(0))
+    assert bot.choose(game) == Action(ActionType.BUILD_CITY, vertex)
+
+
+def test_choosing_does_not_disturb_the_game_or_its_random_stream():
+    game = a_game(seed=6)
+    for _ in range(60):
+        apply(game, RandomBot(random.Random(6)).choose(game))
+    before = snapshot(game)
+
+    SearchBot(Evaluator(game.state.board), depth=2, rng=random.Random(6)).choose(game)
+    assert snapshot(game) == before
+
+
+def test_a_beam_of_one_is_the_greedy_choice():
+    game = a_game(seed=8)
+    for _ in range(80):
+        apply(game, RandomBot(random.Random(8)).choose(game))
+    evaluator = Evaluator(game.state.board)
+
+    beamed = SearchBot(evaluator, depth=3, width=1, rng=random.Random(0)).choose(game)
+    assert beamed == greedy(evaluator, random.Random(0)).choose(game)
+
+
+def test_the_same_seed_plays_the_same_game():
+    def run():
+        game = a_game(seed=9)
+        bot = SearchBot(
+            Evaluator(game.state.board), depth=2, width=4, rng=random.Random(9)
+        )
+        chosen = []
+        for _ in range(30):
+            action = bot.choose(game)
+            chosen.append(action)
+            apply(game, action)
+        return chosen, snapshot(game)
+
+    assert run() == run()

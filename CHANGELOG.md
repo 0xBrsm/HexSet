@@ -48,3 +48,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   turn, resource diversity, the settleable frontier the roads reach, roads, knights,
   hand size with a discard penalty, and port rates. Weights are an ablatable dataclass
   and are untuned. `pips` lives in `catan.board.board` so the encoder can share it.
+- `catan.bots` — a `Bot` protocol the network will also satisfy, a random bot, and a
+  max^n search over the evaluation. Depth counts decisions rather than turns; rolls are
+  chance nodes weighted over all eleven outcomes rather than sampled; a beam bounds the
+  main phase's branching. `greedy` is the one-ply case.
+- `catan.game.imagine` — a copy for hypothetical play. Takes its own random stream so a
+  search cannot disturb the real game's, and shuffles the copied deck so a search
+  cannot read the card the real deck is about to deal.
+- `catan.game.to_move` — whose decision the legal actions are, which is not the current
+  player while discarding on a seven.
+- `catan.state.copy_state`, `catan.game.ROLL_ODDS`.
+
+### Changed
+
+- `catan.game.roll_dice` takes an optional explicit roll, so a search can enumerate the
+  outcomes instead of sampling one.

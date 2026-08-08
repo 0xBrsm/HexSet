@@ -31,9 +31,9 @@ def test_perturbing_moves_only_the_requested_number_of_weights():
 
 
 def test_perturbing_can_revive_a_weight_sitting_at_zero():
-    start = Weights(reach=0.0)
+    start = Weights(port=0.0)
     revived = any(
-        perturb(start, random.Random(seed), sigma=0.4, count=len(TUNABLE)).reach != 0.0
+        perturb(start, random.Random(seed), sigma=0.4, count=len(TUNABLE)).port != 0.0
         for seed in range(10)
     )
     assert revived

@@ -11,13 +11,7 @@ from catan.board.topology import build as build_topology
 from catan.cards import DevCard
 from catan.evaluate import ROLLS, WIN_SCORE, Evaluator, Weights
 from catan.game import start
-from catan.state import (
-    can_place_settlement,
-    new_game,
-    place_road,
-    place_settlement,
-    upgrade_to_city,
-)
+from catan.state import new_game, place_settlement, upgrade_to_city
 from catan.victory import WINNING_POINTS, victory_points
 from helpers import ROLL, a_vertex_touching, give, independent_vertices, mini_board
 
@@ -122,77 +116,6 @@ def test_diverse_production_beats_concentrated_production():
     )
 
 
-def test_reach_is_nothing_without_a_position():
-    board = mini_board()
-    state = a_state(board)
-    evaluator = Evaluator(board)
-    assert evaluator.reach(state, 0, evaluator.networks(state)[0]) == 0.0
-
-
-def test_reach_counts_from_a_settlement_before_any_road():
-    """Otherwise the opening placement, which matters most, would be invisible."""
-    board = mini_board()
-    state = a_state(board)
-    place_settlement(state, 0, a_vertex_touching(board, 3), connected=False)
-
-    evaluator = Evaluator(board)
-    assert evaluator.reach(state, 0, evaluator.networks(state)[0]) > 0.0
-
-
-def test_reach_follows_the_roads_that_are_built():
-    board = mini_board()
-    state = a_state(board)
-    evaluator = Evaluator(board)
-    topology = board.topology
-
-    vertex = a_vertex_touching(board, 3)
-    place_settlement(state, 0, vertex, connected=False)
-    before = evaluator.reach(state, 0, evaluator.networks(state)[0])
-
-    # A road moves the two-step horizon one junction further out.
-    edge = topology.vertex_edges[vertex][0]
-    place_road(state, 0, edge)
-    after = evaluator.reach(state, 0, evaluator.networks(state)[0])
-    assert after > before
-
-
-def test_reach_discounts_the_second_step():
-    board = mini_board()
-    evaluator = Evaluator(board)
-    state = a_state(board)
-    vertex = a_vertex_touching(board, 3)
-
-    full = evaluator.reach(state, 0, {vertex})
-    near_only = sum(
-        evaluator.vertex_pips[w]
-        for w in board.topology.vertex_neighbors[vertex]
-    ) / ROLLS
-    # Everything past the first ring is halved, so the total exceeds the first
-    # ring alone but by less than the second ring's face value.
-    assert full > near_only
-
-
-def test_an_opponents_buildings_cut_reach_off():
-    board = mini_board()
-    evaluator = Evaluator(board)
-    topology = board.topology
-    vertex = a_vertex_touching(board, 3)
-
-    open_state = a_state(board)
-    place_settlement(open_state, 0, vertex, connected=False)
-    open_reach = evaluator.reach(open_state, 0, {vertex})
-
-    blocked = a_state(board)
-    place_settlement(blocked, 0, vertex, connected=False)
-    for neighbor in topology.vertex_neighbors[vertex]:
-        for beyond in topology.vertex_neighbors[neighbor]:
-            if beyond != vertex and can_place_settlement(
-                blocked, 1, beyond, connected=False
-            ):
-                place_settlement(blocked, 1, beyond, connected=False)
-    assert evaluator.reach(blocked, 0, {vertex}) < open_reach
-
-
 def test_progress_tells_a_city_hand_from_a_junk_hand():
     board = mini_board()
     evaluator = Evaluator(board)
@@ -244,7 +167,6 @@ def test_weights_are_what_the_score_is_built_from():
         victory_point=0.0,
         production=0.0,
         diversity=0.0,
-        reach=0.0,
         progress=0.0,
         road=0.0,
         knight=0.0,

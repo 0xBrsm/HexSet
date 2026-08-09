@@ -103,6 +103,29 @@ def test_the_offer_goes_round_the_table_from_the_proposer():
     assert responders(game.state, offer) == (3, 0)
 
 
+def test_the_proposer_can_name_who_it_would_rather_ask():
+    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1), (3, Resource.ORE, 1))
+    propose_trade(game, bundle(wood=2), bundle(ore=1), ask=(3, 1))
+    assert game.pending_responders == [3, 1]
+
+
+def test_naming_cannot_add_a_player_who_cannot_cover_the_offer():
+    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1))
+    propose_trade(game, bundle(wood=2), bundle(ore=1), ask=(2, 3, 1))
+    assert game.pending_responders == [1]
+
+
+def test_players_left_out_of_the_naming_queue_behind_those_named():
+    game = stocked(
+        (0, Resource.WOOD, 2),
+        (1, Resource.ORE, 1),
+        (2, Resource.ORE, 1),
+        (3, Resource.ORE, 1),
+    )
+    propose_trade(game, bundle(wood=2), bundle(ore=1), ask=(3,))
+    assert game.pending_responders == [3, 1, 2]
+
+
 def test_going_round_wraps_past_the_last_seat():
     game = stocked((3, Resource.WOOD, 2), (0, Resource.ORE, 1), (2, Resource.ORE, 1))
     offer = Offer(3, bundle(wood=2), bundle(ore=1))

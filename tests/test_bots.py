@@ -251,6 +251,62 @@ def test_a_relative_bot_will_not_trade_the_leader_into_a_win():
     assert responds_with("relative") is ActionType.DECLINE_TRADE
 
 
+def test_only_subtracting_the_max_can_tell_opponents_apart():
+    """Why partner choice needs `paranoid`, and gets nothing from `relative`.
+
+    A trade hands the same value to whoever takes it. Subtracting the mean of
+    the others moves by that value whichever opponent received it, so the choice
+    is a tie by construction. Subtracting the largest moves only when the
+    recipient was the one in front.
+    """
+    feed_the_leader = [10.0, 21.0, 5.0, 5.0]
+    feed_a_trailer = [10.0, 20.0, 6.0, 5.0]
+
+    assert relative(feed_the_leader, 0) == pytest.approx(relative(feed_a_trailer, 0))
+    assert paranoid(feed_a_trailer, 0) > paranoid(feed_the_leader, 0)
+
+
+def a_table_where_one_seat_is_far_ahead():
+    """Seats 1 and 3 can both cover the same offer. Seat 1 has eight points."""
+    board = mini_board()
+    game = start(board, 4, random.Random(0))
+    game.phase = Phase.MAIN
+    game.current_player = 0
+
+    spots = independent_vertices(board, 6)
+    for vertex in spots[:4]:
+        place_settlement(game.state, 1, vertex, connected=False)
+        upgrade_to_city(game.state, 1, vertex)
+    place_settlement(game.state, 3, spots[4], connected=False)
+
+    for player in range(4):
+        clear_hand(game.state, player)
+    give(game.state, 0, Resource.WOOD, 2)
+    give(game.state, 1, Resource.ORE, 1)
+    give(game.state, 3, Resource.ORE, 1)
+    return game, board
+
+
+def test_a_choosing_proposer_asks_the_player_it_costs_least_to_feed():
+    game, board = a_table_where_one_seat_is_far_ahead()
+    action = Action(
+        ActionType.PROPOSE_TRADE, give=bundle(wood=2), want=bundle(ore=1)
+    )
+    bot = greedy(
+        Evaluator(board), random.Random(0), stance="paranoid", partner_choice=True
+    )
+    assert bot._addressed(game, action, 0).ask == (3, 1)
+
+
+def test_a_proposer_that_does_not_choose_names_nobody():
+    game, board = a_table_where_one_seat_is_far_ahead()
+    action = Action(
+        ActionType.PROPOSE_TRADE, give=bundle(wood=2), want=bundle(ore=1)
+    )
+    plain = greedy(Evaluator(board), random.Random(0), stance="paranoid")
+    assert plain._addressed(game, action, 0).ask == ()
+
+
 def test_the_same_seed_plays_the_same_game():
     def run():
         game = a_game(seed=9)

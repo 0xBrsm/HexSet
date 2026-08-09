@@ -52,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
         "unfinished": result.unfinished,
         "mean_turns": round(result.mean_turns, 1),
         "seconds": round(result.seconds, 1),
+        "seat_wins": list(result.seat_wins),
         "standings": [
             {
                 "name": standing.name,
@@ -77,6 +78,10 @@ def main(argv: list[str] | None = None) -> int:
             f"  {standing.win_rate:6.1%}  95% CI [{low:.1%}, {high:.1%}]"
         )
     print(f"  {result.mean_turns:.1f} turns/game, {result.unfinished} unfinished")
+    print("  by seat (even is what rotation and a correct snake draft should give):")
+    for seat, wins, (low, high) in result.seat_balance():
+        share = wins / max(1, sum(result.seat_wins))
+        print(f"    seat {seat}  {wins:>4}  {share:6.1%}  95% CI [{low:.1%}, {high:.1%}]")
     return 0
 
 

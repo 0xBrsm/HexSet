@@ -83,6 +83,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `catan.bots.SearchBot` takes a `stance` saying how a seat turns the per-seat vector
+  into the one number it maximises. `own` is plain max^n and the previous behaviour;
+  `relative` subtracts the mean of the other seats and `paranoid` the best of them.
+  Catan has one winner, so a position is worth what it is worth compared to the table,
+  and under `own` a responder took every trade that improved its own hand however much
+  it improved the proposer's. `relative` beats `own` 55.0% (95% CI [52.9%, 57.2%],
+  2000 games) while carrying weights fitted under `own`, and cuts the share of offers
+  accepted from 47.5% to 29.1%. Selectable through the `greedy-relative`,
+  `greedy-paranoid` and `search2-relative` presets.
 - `catan.arena` entrants carry which evaluation to score with, so the two can be
   played against each other directly.
 - `catan.game.roll_dice` takes an optional explicit roll, so a search can enumerate the

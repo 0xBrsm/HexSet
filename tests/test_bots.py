@@ -7,20 +7,22 @@ import pytest
 from catan.actions import Action, ActionType, apply, legal_actions
 from catan.board.board import pips, random_base_board
 from catan.board.terrain import Resource
-from catan.bots import RandomBot, SearchBot, greedy
+from catan.bots import RandomBot, SearchBot, greedy, own, paranoid, relative
 from catan.evaluate import Evaluator
 from catan.game import (
     ROLL_ODDS,
     Phase,
     imagine,
     is_over,
+    propose_trade,
     roll_dice,
     start,
     to_move,
 )
 from catan.state import place_settlement, upgrade_to_city
+from catan.trading import bundle
 from catan.victory import victory_points
-from helpers import give, independent_vertices, mini_board
+from helpers import clear_hand, give, independent_vertices, mini_board
 
 
 def a_game(seed: int = 0, players: int = 4):
@@ -170,6 +172,83 @@ def test_a_beam_of_one_is_the_greedy_choice():
 
     beamed = SearchBot(evaluator, depth=3, width=1, rng=random.Random(0)).choose(game)
     assert beamed == greedy(evaluator, random.Random(0)).choose(game)
+
+
+def test_the_stances_read_one_vector_three_ways():
+    vector = [3.0, 5.0, 1.0, 0.0]
+    assert own(vector, 0) == 3.0
+    assert relative(vector, 0) == 3.0 - 2.0
+    assert paranoid(vector, 0) == 3.0 - 5.0
+
+
+def test_a_stance_only_matters_relative_to_the_table():
+    """Lifting every seat alike is worth nothing to a bot playing relatively."""
+    before = [3.0, 5.0, 1.0, 0.0]
+    after = [value + 10 for value in before]
+    assert own(after, 0) > own(before, 0)
+    assert relative(after, 0) == pytest.approx(relative(before, 0))
+    assert paranoid(after, 0) == pytest.approx(paranoid(before, 0))
+
+
+def test_an_unknown_stance_is_refused():
+    game = a_game()
+    with pytest.raises(ValueError, match="unknown stance"):
+        SearchBot(Evaluator(game.state.board), stance="spiteful")
+
+
+def test_a_relative_bot_still_takes_a_winning_build():
+    game, vertex = nine_points_and_a_city_to_come()
+    chosen = greedy(
+        Evaluator(game.state.board), random.Random(0), stance="relative"
+    ).choose(game)
+    assert chosen == Action(ActionType.BUILD_CITY, vertex)
+
+
+def a_trade_that_wins_the_game_for_the_proposer():
+    """Player 0 is nine points and one ore short of a winning city, and asks.
+
+    The offer is good for player 1 in isolation — it moves their hand closer to
+    a settlement — and fatal in context, because taking it ends the game.
+    """
+    board = mini_board()
+    game = start(board, 4, random.Random(0))
+    game.phase = Phase.MAIN
+    game.current_player = 0
+
+    spots = independent_vertices(board, 5)
+    for vertex in spots[:4]:
+        place_settlement(game.state, 0, vertex, connected=False)
+        upgrade_to_city(game.state, 0, vertex)
+    place_settlement(game.state, 0, spots[4], connected=False)
+    assert victory_points(game.state, 0) == 9
+
+    clear_hand(game.state, 0)
+    give(game.state, 0, Resource.WHEAT, 2)
+    give(game.state, 0, Resource.ORE, 2)
+    give(game.state, 0, Resource.WOOD, 1)
+
+    clear_hand(game.state, 1)
+    give(game.state, 1, Resource.ORE, 1)
+    give(game.state, 1, Resource.BRICK, 1)
+    give(game.state, 1, Resource.WHEAT, 1)
+
+    propose_trade(game, bundle(wood=1), bundle(ore=1))
+    assert game.pending_responders == [1]
+    return game
+
+
+def test_a_relative_bot_will_not_trade_the_leader_into_a_win():
+    game = a_trade_that_wins_the_game_for_the_proposer()
+    evaluator = Evaluator(game.state.board)
+
+    def responds_with(stance: str) -> ActionType:
+        bot = SearchBot(
+            evaluator, depth=2, width=6, rng=random.Random(0), stance=stance
+        )
+        return bot.choose(game).type
+
+    assert responds_with("own") is ActionType.ACCEPT_TRADE
+    assert responds_with("relative") is ActionType.DECLINE_TRADE
 
 
 def test_the_same_seed_plays_the_same_game():

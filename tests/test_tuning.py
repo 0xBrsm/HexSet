@@ -6,7 +6,8 @@ from dataclasses import fields
 import pytest
 
 from catan.evaluate import Weights
-from catan.tuning import ANCHOR, TUNABLE, as_source, climb, duel, perturb
+from catan.evaluate_tiered import Weights as TieredWeights
+from catan.tuning import ANCHOR, as_source, climb, duel, perturb, tunable
 
 
 def changed_fields(before: Weights, after: Weights) -> set[str]:
@@ -18,8 +19,9 @@ def changed_fields(before: Weights, after: Weights) -> set[str]:
 
 
 def test_the_anchor_is_never_tuned():
-    assert ANCHOR not in TUNABLE
-    assert set(TUNABLE) | {ANCHOR} == {f.name for f in fields(Weights)}
+    names = tunable(Weights())
+    assert ANCHOR not in names
+    assert set(names) | {ANCHOR} == {f.name for f in fields(Weights)}
 
 
 def test_perturbing_moves_only_the_requested_number_of_weights():
@@ -33,10 +35,22 @@ def test_perturbing_moves_only_the_requested_number_of_weights():
 def test_perturbing_can_revive_a_weight_sitting_at_zero():
     start = Weights(port=0.0)
     revived = any(
-        perturb(start, random.Random(seed), sigma=0.4, count=len(TUNABLE)).port != 0.0
+        perturb(start, random.Random(seed), sigma=0.4, count=len(tunable(start))).port != 0.0
         for seed in range(10)
     )
     assert revived
+
+
+def test_the_tiered_weights_tune_too_and_keep_their_hierarchy():
+    """A step scaled by the weight cannot move a term out of its tier."""
+    start = TieredWeights()
+    moved = perturb(start, random.Random(3), sigma=0.4, count=len(tunable(start)))
+
+    assert moved != start
+    assert moved.victory_point == start.victory_point
+    assert moved.production > abs(moved.reachable_production_1)
+    assert abs(moved.reachable_production_1) > abs(moved.hand_synergy)
+    assert "reachable_production_1" in as_source(moved)
 
 
 def test_perturbing_leaves_the_original_alone():

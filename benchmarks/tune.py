@@ -42,6 +42,12 @@ def main(argv: list[str] | None = None) -> int:
         help="how a seat reads the per-seat vector; weights are fitted for one",
     )
     parser.add_argument(
+        "--evaluator",
+        default="default",
+        choices=("default", "tiered"),
+        help="which evaluation to fit; the two do not share a term set",
+    )
+    parser.add_argument(
         "--confirm",
         type=int,
         default=400,
@@ -71,6 +77,7 @@ def main(argv: list[str] | None = None) -> int:
         depth=args.depth,
         width=args.width if args.depth > 1 else None,
         stance=args.stance,
+        evaluator=args.evaluator,
         report=None if args.json else show,
     )
     accepted = sum(1 for step in history if step.accepted)
@@ -86,6 +93,7 @@ def main(argv: list[str] | None = None) -> int:
             width=args.width if args.depth > 1 else None,
             workers=args.workers,
             stance=args.stance,
+            evaluator=args.evaluator,
         )
     elapsed = time.perf_counter() - started
 

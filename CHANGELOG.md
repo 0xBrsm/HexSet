@@ -83,6 +83,21 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `catan.actions.Action` carries an `ask` order on `PROPOSE_TRADE`, naming who the
+  proposer would rather have take the offer. An offer stops at the first player to
+  accept, so the order is worth something, and choosing it is a tactic rather than a
+  rule — `trading.responders` stays neutral and anyone unnamed keeps its place behind
+  those named. Records carry the order, so a game with a choosing proposer replays.
+  Enabled by `SearchBot(partner_choice=True)` and the `greedy-partner` preset. It works
+  only under the `paranoid` stance: `relative` subtracts the mean of the other seats,
+  and a trade hands the same value to whoever takes it, so the mean moves identically
+  whichever opponent received it. Measured at 49.8% (95% CI [47.6%, 51.9%], 2000 games)
+  against an identical bot that does not choose — it earns nothing, and is kept because
+  it is what the real game does and puts the decision where a policy can learn it.
+- `catan.trading.responders` orders an offer round the table from the proposer rather
+  than by ascending seat index. First refusal is worth something, and seat order handed
+  it permanently to the low seats: wins by seat ran 563/532/482/423 over 2000 games,
+  chi-square 22.5 on three degrees of freedom, falling to 7.2 under rotation.
 - `catan.bots.SearchBot` takes a `stance` saying how a seat turns the per-seat vector
   into the one number it maximises. `own` is plain max^n and the previous behaviour;
   `relative` subtracts the mean of the other seats and `paranoid` the best of them.

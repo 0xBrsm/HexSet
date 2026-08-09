@@ -37,6 +37,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--width", type=int, default=6, help="beam, when depth is 2+")
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument(
+        "--stance",
+        default="own",
+        help="how a seat reads the per-seat vector; weights are fitted for one",
+    )
+    parser.add_argument(
         "--confirm",
         type=int,
         default=400,
@@ -65,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
         workers=args.workers,
         depth=args.depth,
         width=args.width if args.depth > 1 else None,
+        stance=args.stance,
         report=None if args.json else show,
     )
     accepted = sum(1 for step in history if step.accepted)
@@ -79,6 +85,7 @@ def main(argv: list[str] | None = None) -> int:
             depth=args.depth,
             width=args.width if args.depth > 1 else None,
             workers=args.workers,
+            stance=args.stance,
         )
     elapsed = time.perf_counter() - started
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
 import random
 import statistics
@@ -16,6 +17,7 @@ import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from multiprocessing import Pool
 
 from catan.actions import legal_actions
@@ -81,18 +83,50 @@ def run(games: int, players: int, seed: int, workers: int) -> Result:
     )
 
 
-def environment() -> dict[str, str]:
+REPO = Path(__file__).resolve().parents[2]
+
+
+def default_workers() -> int:
+    """Every core by default.
+
+    Defaulting to one meant a forgotten flag silently used a single core, and
+    that is exactly the kind of mistake that gets written into a results table
+    as a throughput figure. Runners print the count they used.
+    """
+    return os.cpu_count() or 1
+
+
+def _git(*args: str) -> str | None:
+    """Run git against this repo, or None if it cannot be asked.
+
+    `safe.directory` is passed on the command line rather than written to a
+    config, because the devcontainer mounts the repo as a different owner than
+    the user inside it and git refuses to read it otherwise. Without this every
+    run inside the container recorded its commit as "unknown".
+    """
     try:
-        sha = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
+        return subprocess.run(
+            ["git", "-C", str(REPO), "-c", f"safe.directory={REPO}", *args],
             capture_output=True,
             text=True,
             check=True,
         ).stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
-        sha = "unknown"
+        return None
+
+
+def environment() -> dict[str, str]:
+    """What a recorded figure was measured on, and from what source.
+
+    `dirty` matters as much as the commit. A run taken on a modified working
+    tree is not reproducible from the SHA it reports, and several figures on
+    record were taken that way before this said so.
+    """
+    sha = _git("rev-parse", "--short", "HEAD")
+    changes = _git("status", "--porcelain")
     return {
-        "commit": sha,
+        "commit": sha or "unknown",
+        "dirty": "unknown" if changes is None else str(bool(changes)).lower(),
         "python": platform.python_version(),
         "platform": platform.platform(),
         "machine": platform.machine(),
@@ -104,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--games", type=int, default=200)
     parser.add_argument("--players", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--workers", type=int, default=default_workers())
     parser.add_argument("--json", action="store_true", help="emit machine-readable output")
     args = parser.parse_args(argv)
 

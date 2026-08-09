@@ -14,7 +14,7 @@ import json
 import sys
 import time
 
-from benchmarks.throughput import environment
+from benchmarks.throughput import default_workers, environment
 from catan.arena import Z_95, wilson
 from catan.dataset import base_rate, build, split_by_game
 from catan.evaluate import TERM_NAMES, Weights
@@ -51,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
         default=400,
         help="games of fitted vs current defaults; 0 skips the check",
     )
-    parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--workers", type=int, default=default_workers())
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 

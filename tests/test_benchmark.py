@@ -22,7 +22,9 @@ def test_the_same_seed_measures_the_same_games():
 
 def test_environment_is_recorded_for_reproducibility():
     env = environment()
-    assert set(env) == {"commit", "python", "platform", "machine"}
+    assert set(env) == {"commit", "dirty", "python", "platform", "machine"}
+    # A SHA without this is not enough to reproduce a figure from.
+    assert env["dirty"] in {"true", "false", "unknown"}
     assert env["python"]
 
 

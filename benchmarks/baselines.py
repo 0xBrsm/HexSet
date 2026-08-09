@@ -11,7 +11,7 @@ import argparse
 import json
 import sys
 
-from benchmarks.throughput import environment
+from benchmarks.throughput import default_workers, environment
 from catan.arena import Z_95, compete, lineup_from_names
 
 DEFAULT_LINEUP = ("greedy", "greedy", "random", "random")
@@ -33,7 +33,7 @@ def main(argv: list[str] | None = None) -> int:
         help="must divide evenly over the seats, so the rotation completes",
     )
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--workers", type=int, default=default_workers())
     parser.add_argument("--json", action="store_true", help="emit machine-readable output")
     args = parser.parse_args(argv)
 

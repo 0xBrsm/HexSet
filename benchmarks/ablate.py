@@ -18,7 +18,7 @@ import sys
 import time
 from dataclasses import fields, replace
 
-from benchmarks.throughput import environment
+from benchmarks.throughput import default_workers, environment
 from catan.arena import Z_95, Entrant, compete, wilson
 from catan.evaluate import Weights
 
@@ -50,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=7000)
     parser.add_argument("--depth", type=int, default=1)
     parser.add_argument("--width", type=int, default=6)
-    parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--workers", type=int, default=default_workers())
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 

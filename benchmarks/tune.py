@@ -12,7 +12,7 @@ import json
 import sys
 import time
 
-from benchmarks.throughput import environment
+from benchmarks.throughput import default_workers, environment
 from catan.tuning import ACCEPT_Z, Step, as_source, climb, confirm
 
 
@@ -35,10 +35,10 @@ def main(argv: list[str] | None = None) -> int:
         "--depth", type=int, default=1, help="1 fits the greedy bot, 2+ the search bot"
     )
     parser.add_argument("--width", type=int, default=6, help="beam, when depth is 2+")
-    parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--workers", type=int, default=default_workers())
     parser.add_argument(
         "--stance",
-        default="own",
+        default="relative",
         help="how a seat reads the per-seat vector; weights are fitted for one",
     )
     parser.add_argument(

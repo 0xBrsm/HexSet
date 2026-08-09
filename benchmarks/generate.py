@@ -15,7 +15,7 @@ import sys
 import time
 from multiprocessing import Pool
 
-from benchmarks.throughput import environment
+from benchmarks.throughput import default_workers, environment
 from catan.arena import PRESETS, spawn
 from catan.board.board import random_base_board
 from catan.record import Record, record_game, write
@@ -41,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--bot", default="greedy", choices=sorted(PRESETS))
     parser.add_argument("--players", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--workers", type=int, default=default_workers())
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 

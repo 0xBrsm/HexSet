@@ -31,9 +31,9 @@ def test_perturbing_moves_only_the_requested_number_of_weights():
 
 
 def test_perturbing_can_revive_a_weight_sitting_at_zero():
-    start = Weights(port=0.0)
+    start = Weights(num_tiles=0.0)
     revived = any(
-        perturb(start, random.Random(seed), sigma=0.4, count=len(TUNABLE)).port != 0.0
+        perturb(start, random.Random(seed), sigma=0.4, count=len(TUNABLE)).num_tiles != 0.0
         for seed in range(10)
     )
     assert revived
@@ -84,7 +84,7 @@ def test_the_climb_reports_each_step_as_it_goes():
 
 
 def test_weights_round_trip_through_their_source_form():
-    original = Weights(production=1.234, surplus_card=-0.5)
+    original = Weights(production=1.234, discard_penalty=-0.5)
     restored = eval(as_source(original), {"Weights": Weights})
     for f in fields(Weights):
         assert getattr(restored, f.name) == pytest.approx(getattr(original, f.name))

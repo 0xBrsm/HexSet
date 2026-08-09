@@ -74,6 +74,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `catan.evaluate` rebuilt on the feature set catanatron's value function uses,
+  reimplemented from a description rather than ported, since it is GPLv3. Weights are
+  magnitude tiers encoding a priority order rather than blended coefficients; own
+  production is scored against the strongest opponent's; reachable production keeps the
+  player's own settled junctions in the set so building can never shrink it; longest
+  road only earns its tier once there is nowhere left to settle. Ports are gone, having
+  ablated at nothing. A `Snapshot` computes the per-seat quantities for the whole table
+  in one pass, since scoring four seats was walking the board once per seat per
+  opponent.
 - `catan.game.roll_dice` takes an optional explicit roll, so a search can enumerate the
   outcomes instead of sampling one.
 - `catan.arena` entrants are a frozen `Entrant` description rather than a bot-building

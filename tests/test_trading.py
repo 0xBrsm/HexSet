@@ -96,6 +96,19 @@ def test_only_players_who_can_cover_the_offer_are_asked():
     assert responders(game.state, offer) == (1, 3)
 
 
+def test_the_offer_goes_round_the_table_from_the_proposer():
+    """First refusal follows the proposer, so it belongs to no seat permanently."""
+    game = stocked((2, Resource.WOOD, 2), (0, Resource.ORE, 1), (3, Resource.ORE, 1))
+    offer = Offer(2, bundle(wood=2), bundle(ore=1))
+    assert responders(game.state, offer) == (3, 0)
+
+
+def test_going_round_wraps_past_the_last_seat():
+    game = stocked((3, Resource.WOOD, 2), (0, Resource.ORE, 1), (2, Resource.ORE, 1))
+    offer = Offer(3, bundle(wood=2), bundle(ore=1))
+    assert responders(game.state, offer) == (0, 2)
+
+
 def test_executing_moves_both_sides_and_conserves_the_cards():
     game = stocked((0, Resource.WOOD, 3), (2, Resource.ORE, 2))
     before = sum(sum(h) for h in game.state.hands)

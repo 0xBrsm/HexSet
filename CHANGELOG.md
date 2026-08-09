@@ -98,6 +98,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   than by ascending seat index. First refusal is worth something, and seat order handed
   it permanently to the low seats: wins by seat ran 563/532/482/423 over 2000 games,
   chi-square 22.5 on three degrees of freedom, falling to 7.2 under rotation.
+- `relative` is now the default stance for `greedy` and `search2`, since a baseline
+  whose job is to be beaten should be the best one available. `greedy-own` and
+  `search2-own` reproduce the old behaviour, so a recorded duel should name both sides
+  explicitly rather than rely on the default. Refitting the weights for a stance was
+  tried and is not needed: under `relative` the climb confirmed at 49.0% and under
+  `paranoid` at 52.2%, and the paranoid fit carrying its own weights then lost to
+  `relative` on the existing ones. Retaking the ablation under `relative` moved it a
+  lot — seven of nine terms now earn their keep against four, and `search2` beats
+  `greedy` 60.8% rather than 70.0% because `greedy` got stronger.
+- `benchmarks.throughput.environment` reports whether the working tree was dirty, and
+  asks git with `safe.directory` set on the command line, so runs inside the
+  devcontainer stop recording their commit as "unknown". Runners default `--workers`
+  to every core; defaulting to one meant a forgotten flag silently measured on a
+  single core.
+- `catan.tuning` fits either evaluation, taking an evaluator name and resolving the
+  matching `Weights` class, and takes a stance. `TUNABLE` becomes `tunable(weights)`.
 - `catan.bots.SearchBot` takes a `stance` saying how a seat turns the per-seat vector
   into the one number it maximises. `own` is plain max^n and the previous behaviour;
   `relative` subtracts the mean of the other seats and `paranoid` the best of them.

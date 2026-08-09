@@ -77,9 +77,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   magnitude tiers encoding a priority order rather than blended coefficients, own
   production is scored against the strongest opponent's, and reachable production keeps
   the player's own settled junctions in the set so building can never shrink it. Kept
-  as a comparison baseline, not as the default: tuned, it plays `catan.evaluate` to a
-  dead heat (51.3%, 95% CI [48.2%, 54.4%]) while generating data at half the rate.
-  Selectable through the `greedy-tiered` and `search2-tiered` presets.
+  as a comparison baseline, not as the default. It played `catan.evaluate` to a dead
+  heat (51.3%) under plain max^n before trading; it now loses 36.7% over 2000 games,
+  and a refit under `relative` confirmed at 48.1%, so the gap is not a stale fit.
+  Generates data at half the rate. Selectable through the `greedy-tiered` and
+  `search2-tiered` presets.
 
 ### Changed
 

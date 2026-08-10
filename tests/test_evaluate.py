@@ -182,3 +182,44 @@ def test_for_game_reads_the_board_off_the_game():
     game = start(random_base_board(rng), 4, rng)
     scores = Evaluator.for_game(game).evaluate(game.state)
     assert len(scores) == 4
+
+
+def test_the_survey_agrees_with_the_rules():
+    """The fast walk must equal the canonical functions it replaced.
+
+    `Evaluator.survey` folds production, building points and port rates into
+    one pass for speed, which means the same arithmetic now lives in two
+    places. This is what stops the fast one drifting from the real one.
+    """
+    from catan.actions import apply, legal_actions
+    from catan.economy import trade_ratios
+    from catan.board.ports import BASE_TRADE_RATIO
+    from catan.victory import building_points
+
+    rng = random.Random(11)
+    game = start(random_base_board(rng), 4, rng)
+    evaluator = Evaluator(game.state.board)
+
+    checked = with_a_port = with_a_building = 0
+    for _ in range(400):
+        options = legal_actions(game)
+        if not options:
+            break
+        apply(game, rng.choice(options))
+        for player in range(4):
+            walk = evaluator.survey(game.state, player)
+            assert walk.buildings == building_points(game.state, player)
+            assert walk.port_gain == sum(
+                BASE_TRADE_RATIO - r for r in trade_ratios(game.state, player)
+            )
+            assert (walk.rate, walk.kinds) == evaluator.production(game.state, player)
+            checked += 1
+            with_a_port += walk.port_gain > 0
+            with_a_building += walk.buildings > 0
+
+    # Agreeing on zero everywhere would pass vacuously, and the port branch is
+    # the one that would go unexercised: nobody owns a port until they settle
+    # on one.
+    assert checked > 1000
+    assert with_a_building > 100
+    assert with_a_port > 100

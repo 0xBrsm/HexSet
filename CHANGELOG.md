@@ -71,6 +71,21 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the fitted weights against the starting weights at a large budget, which is the only
   way to tell a real gain from an accumulation of accepted noise.
 - `benchmarks.tune` — runs the climb, reporting each duel as it resolves.
+- `catan.scored_games` — plays a four-candidate population and keeps every seat's
+  terminal victory points, so a game evaluates four hypotheses instead of one and the
+  losing seats say how close they came. Candidates share a board, a dice stream and
+  each other as opponents and rotate through every seat, so subtracting two candidates'
+  points *within* a game cancels board and seat variance rather than averaging it away.
+  Measurement only; nothing here decides to change a weight.
+- `benchmarks.production_curve` — maps candidate `production` values against the intact
+  weights to ask whether the weight is identifiable from self-play at all, and reuses
+  the same games to test terminal points as a proxy for wins. The answer over 18,000
+  games is that it is not: only `3.0` is distinguishable once the eight alternatives are
+  corrected for, a 58% cut, and `3.5` through `10` are indistinguishable. Terminal
+  points are a sound proxy (Pearson 0.998 across the curve, 0.907 restricted to the
+  plausible range, no significant sign conflicts). An evaluation can depend critically
+  on a term at zero while being flat over every value an optimiser would ever try, and
+  no search rule can recover a coefficient in that landscape.
 
 - `catan.evaluate_tiered` — a second evaluation, reimplemented from the design
   catanatron's value function uses (described, not ported; it is GPLv3). Weights are
@@ -116,6 +131,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   single core.
 - `catan.tuning` fits either evaluation, taking an evaluator name and resolving the
   matching `Weights` class, and takes a stance. `TUNABLE` becomes `tunable(weights)`.
+- `benchmarks.ablate` takes an `--evaluator`, so the tiered evaluation's terms can be
+  ablated the same way the default's are. It read `catan.evaluate.Weights` directly and
+  could only ever ablate the default nine.
 - `catan.bots.SearchBot` takes a `stance` saying how a seat turns the per-seat vector
   into the one number it maximises. `own` is plain max^n and the previous behaviour;
   `relative` subtracts the mean of the other seats and `paranoid` the best of them.

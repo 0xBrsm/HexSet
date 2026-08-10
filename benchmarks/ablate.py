@@ -20,7 +20,7 @@ from dataclasses import fields, replace
 
 from benchmarks.throughput import default_workers, environment
 from catan.arena import Z_95, Entrant, compete, wilson
-from catan.evaluate import Weights
+from catan.tuning import WEIGHTS
 
 
 def ablate(
@@ -31,13 +31,28 @@ def ablate(
     depth: int,
     width: int | None,
     workers: int,
+    evaluator: str = "default",
 ) -> tuple[int, int]:
     """Play weights with `term` zeroed against the intact weights."""
-    full = Weights()
+    full = WEIGHTS[evaluator]()
     crippled = replace(full, **{term: 0.0})
     kind = "greedy" if depth <= 1 else "search"
-    without = Entrant("without", kind=kind, weights=crippled, depth=depth, width=width)
-    intact = Entrant("intact", kind=kind, weights=full, depth=depth, width=width)
+    without = Entrant(
+        "without",
+        kind=kind,
+        weights=crippled,
+        depth=depth,
+        width=width,
+        evaluator=evaluator,
+    )
+    intact = Entrant(
+        "intact",
+        kind=kind,
+        weights=full,
+        depth=depth,
+        width=width,
+        evaluator=evaluator,
+    )
 
     result = compete([without, intact, without, intact], games, seed=seed, workers=workers)
     wins = sum(s.wins for s in result.standings if s.name == "without")
@@ -51,10 +66,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--depth", type=int, default=1)
     parser.add_argument("--width", type=int, default=6)
     parser.add_argument("--workers", type=int, default=default_workers())
+    parser.add_argument("--evaluator", choices=sorted(WEIGHTS), default="default")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
-    terms = [f.name for f in fields(Weights)]
+    terms = [f.name for f in fields(WEIGHTS[args.evaluator])]
     started = time.perf_counter()
     rows = []
     for term in terms:
@@ -65,6 +81,7 @@ def main(argv: list[str] | None = None) -> int:
             depth=args.depth,
             width=args.width if args.depth > 1 else None,
             workers=args.workers,
+            evaluator=args.evaluator,
         )
         low, high = wilson(wins, decided, Z_95) if decided else (0.0, 1.0)
         rows.append(

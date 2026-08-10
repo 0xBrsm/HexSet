@@ -75,12 +75,21 @@ def test_packing_round_trips_to_the_same_batch_as_collate(players):
 
 
 def test_a_packed_batch_feeds_the_net_unchanged():
+    """One float32 ULP apart, not bit-identical, and that is expected.
+
+    The round-trip test above already proves the inputs match bit for bit, so
+    any difference here is the matmul taking a different path over a strided
+    view. `allclose`'s default `atol` of 1e-8 cannot absorb a last-bit
+    difference on a logit that happens to sit near zero.
+    """
     game, space, net = a_net()
     obs = observations(3)
     layout = packing(static_graph(game.state.board.topology), 4)
 
     assert torch.allclose(
-        net(*unpack(layout, pack(layout, obs))).logits, net(*collate(obs)).logits
+        net(*unpack(layout, pack(layout, obs))).logits,
+        net(*collate(obs)).logits,
+        atol=1e-6,
     )
 
 

@@ -9,9 +9,12 @@ from catan.arena import (
     MAX_ACTIONS,
     PRESETS,
     Entrant,
+    Estimate,
     Standing,
+    Tournament,
     compete,
     lineup_from_names,
+    mean_interval,
     play,
     seat_of,
     spawn,
@@ -145,3 +148,56 @@ def test_the_default_action_cap_is_not_reached_by_ordinary_play():
     result = compete(lineup_from_names(["greedy"] * 4), 4)
     assert result.unfinished == 0
     assert MAX_ACTIONS > result.mean_turns
+
+
+def test_the_winning_entrants_points_reach_the_victory_threshold():
+    """Points are indexed by entrant, so the winner's row must show a win.
+
+    Seat-order points would put an arbitrary seat's score at the winner's
+    index, which is the one way this mapping can silently go wrong.
+    """
+    result = compete(lineup_from_names(["greedy"] * 4), 8, seed=3)
+
+    assert result.unfinished == 0
+    for winner, row in zip(result.winners, result.points):
+        assert row[winner] >= 10
+        assert row[winner] == max(row)
+
+
+def test_stronger_entrants_score_more_points_than_the_seats_they_beat():
+    result = compete(
+        lineup_from_names(["greedy", "greedy", "random", "random"]), 8, seed=5
+    )
+
+    differences = [row[0] - row[2] for _, row in result.decided()]
+    assert mean_interval(differences).lower > 0
+
+
+def test_unfinished_games_are_left_out_of_the_decided_rows():
+    result = Tournament(
+        standings=(),
+        games=3,
+        unfinished=1,
+        mean_turns=0.0,
+        seconds=0.0,
+        winners=(0, None, 0),
+        points=((10, 6), (0, 99), (9, 5)),
+    )
+
+    assert result.decided() == [(0, (10, 6)), (0, (9, 5))]
+
+
+def test_a_constant_paired_advantage_has_no_sampling_error():
+    assert mean_interval([2.0] * 20) == Estimate(2.0, 2.0, 2.0, 20)
+
+
+def test_too_few_point_samples_say_nothing_either_way():
+    estimate = mean_interval([2.0])
+    assert estimate.mean == 2.0
+    assert estimate.lower == float("-inf")
+    assert estimate.upper == float("inf")
+
+    empty = mean_interval([])
+    assert empty.samples == 0
+    assert empty.lower == float("-inf")
+    assert empty.upper == float("inf")

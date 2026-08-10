@@ -19,8 +19,8 @@ import time
 from dataclasses import fields, replace
 
 from benchmarks.throughput import default_workers, environment
-from catan.arena import Z_95, Entrant, compete, wilson
-from catan.tuning import WEIGHTS
+from catan.arena import Z_95, wilson
+from catan.tuning import WEIGHTS, duel
 
 
 def ablate(
@@ -33,30 +33,17 @@ def ablate(
     workers: int,
     evaluator: str = "default",
 ) -> tuple[int, int]:
-    """Play weights with `term` zeroed against the intact weights."""
     full = WEIGHTS[evaluator]()
-    crippled = replace(full, **{term: 0.0})
-    kind = "greedy" if depth <= 1 else "search"
-    without = Entrant(
-        "without",
-        kind=kind,
-        weights=crippled,
+    return duel(
+        replace(full, **{term: 0.0}),
+        full,
+        games,
+        seed=seed,
         depth=depth,
         width=width,
+        workers=workers,
         evaluator=evaluator,
     )
-    intact = Entrant(
-        "intact",
-        kind=kind,
-        weights=full,
-        depth=depth,
-        width=width,
-        evaluator=evaluator,
-    )
-
-    result = compete([without, intact, without, intact], games, seed=seed, workers=workers)
-    wins = sum(s.wins for s in result.standings if s.name == "without")
-    return wins, result.games - result.unfinished
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -79,11 +66,11 @@ def main(argv: list[str] | None = None) -> int:
             args.games,
             seed=args.seed,
             depth=args.depth,
-            width=args.width if args.depth > 1 else None,
+            width=args.width,
             workers=args.workers,
             evaluator=args.evaluator,
         )
-        low, high = wilson(wins, decided, Z_95) if decided else (0.0, 1.0)
+        low, high = wilson(wins, decided, Z_95)
         rows.append(
             {
                 "term": term,
@@ -111,9 +98,7 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(
                 {
                     "environment": environment(),
-                    "games": args.games,
-                    "depth": args.depth,
-                    "seed": args.seed,
+                    "settings": vars(args),
                     "seconds": round(elapsed, 1),
                     "ablations": rows,
                 },

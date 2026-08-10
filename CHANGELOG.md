@@ -61,7 +61,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `catan.state.copy_state`, `catan.game.ROLL_ODDS`.
 - `catan.arena` — head-to-head play with the lineup rotated so every entrant sits every
   seat the same number of times, and win rates reported with a Wilson interval. Caps
-  actions per game, which the engine's turn cap cannot do.
+  actions per game, which the engine's turn cap cannot do. Every seat's terminal victory
+  points are kept alongside the winner, so a game says how close the losers came rather
+  than only that they lost; `mean_interval` turns differences taken *within* a game into
+  a paired estimate, which cancels board and dice variance instead of averaging it away.
 - `benchmarks.baselines` — runs a lineup and records the commit and environment with the
   result.
 - `catan.tuning` — fits the evaluation weights by hill climbing against the incumbent
@@ -71,12 +74,6 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the fitted weights against the starting weights at a large budget, which is the only
   way to tell a real gain from an accumulation of accepted noise.
 - `benchmarks.tune` — runs the climb, reporting each duel as it resolves.
-- `catan.scored_games` — plays a four-candidate population and keeps every seat's
-  terminal victory points, so a game evaluates four hypotheses instead of one and the
-  losing seats say how close they came. Candidates share a board, a dice stream and
-  each other as opponents and rotate through every seat, so subtracting two candidates'
-  points *within* a game cancels board and seat variance rather than averaging it away.
-  Measurement only; nothing here decides to change a weight.
 - `benchmarks.production_curve` — maps candidate `production` values against the intact
   weights to ask whether the weight is identifiable from self-play at all, and reuses
   the same games to test terminal points as a proxy for wins. The answer over 18,000

@@ -24,12 +24,11 @@ from dataclasses import asdict, dataclass, replace
 from typing import Sequence
 
 from benchmarks.throughput import default_workers, environment
-from catan.arena import Z_95, wilson
+from catan.arena import Z_95, compete, mean_interval, wilson
 from catan.evaluate import Weights
-from catan.scored_games import mean_interval, scored_compete
 from catan.tuning import entrant_for
 
-DEFAULT_LEVELS = (0.0, 1.0, 2.0, 3.0, 3.5, 5.0, 7.067, 10.0, 14.0)
+DEFAULT_LEVELS = (0.0, 1.0, 2.0, 3.0, 3.5, 5.0, Weights().production, 10.0, 14.0)
 
 
 @dataclass(frozen=True)
@@ -98,23 +97,20 @@ def measure(
     """Play one production value against intact and retain both outcome signals."""
     intact = Weights()
     candidate = replace(intact, production=production)
-    entrants = (
-        entrant_for("candidate-0", candidate, 1, None),
-        entrant_for("intact-0", intact, 1, None),
-        entrant_for("candidate-1", candidate, 1, None),
-        entrant_for("intact-1", intact, 1, None),
+    # Two of each, so the pairing survives the seat rotation.
+    entrants = tuple(
+        entrant_for(f"{name}-{copy}", weights, 1, None)
+        for copy in range(2)
+        for name, weights in (("candidate", candidate), ("intact", intact))
     )
-    result = scored_compete(entrants, games, seed=seed, workers=workers)
+    result = compete(entrants, games, seed=seed, workers=workers)
 
-    candidate_indexes = {0, 2}
-    decided_rows = [
-        (winner, row)
-        for winner, row in zip(result.winners, result.points)
-        if winner is not None
-    ]
-    outcomes = [float(winner in candidate_indexes) for winner, _ in decided_rows]
-    candidate_points = [(row[0] + row[2]) / 2 for _, row in decided_rows]
-    intact_points = [(row[1] + row[3]) / 2 for _, row in decided_rows]
+    mine = [e for e, entrant in enumerate(entrants) if entrant.name.startswith("candidate")]
+    theirs = [e for e, entrant in enumerate(entrants) if entrant.name.startswith("intact")]
+    decided_rows = result.decided()
+    outcomes = [float(winner in mine) for winner, _ in decided_rows]
+    candidate_points = [statistics.mean(row[e] for e in mine) for _, row in decided_rows]
+    intact_points = [statistics.mean(row[e] for e in theirs) for _, row in decided_rows]
     differences = [
         candidate_score - intact_score
         for candidate_score, intact_score in zip(candidate_points, intact_points)
@@ -144,17 +140,17 @@ def proxy_summary(points: Sequence[CurvePoint]) -> dict[str, float | int | None]
     """Agreement between level strength as ranked by wins and by points."""
     win_rates = [point.win_rate for point in points]
     point_differences = [point.point_difference for point in points]
+    fitted = Weights().production
+
+    def distance(point: CurvePoint) -> float:
+        return abs(point.production - fitted)
+
     nonzero = [point for point in points if point.production != 0.0]
     plateau = [point for point in points if point.production >= 3.0]
-    comparisons = [
-        point for point in points if point.production != Weights().production
-    ]
-    significant = [
-        point for point in comparisons if point.win_sign
-    ]
+    comparisons = [point for point in points if point.production != fitted]
     closest = min(
-        significant,
-        key=lambda point: abs(point.production - Weights().production),
+        [point for point in comparisons if point.win_sign],
+        key=distance,
         default=None,
     )
     # Looking at eight alternatives makes a lone pointwise 95% result fairly
@@ -171,11 +167,7 @@ def proxy_summary(points: Sequence[CurvePoint]) -> dict[str, float | int | None]
             or interval[1] < 0.5
         )
     ]
-    familywise_closest = min(
-        familywise_significant,
-        key=lambda point: abs(point.production - Weights().production),
-        default=None,
-    )
+    familywise_closest = min(familywise_significant, key=distance, default=None)
     return {
         "pearson": correlation(win_rates, point_differences),
         "spearman": correlation(ranks(win_rates), ranks(point_differences)),

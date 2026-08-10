@@ -43,3 +43,110 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Board-local actions get one slot per node.
 - `catan.play` — a random player that plays full games end to end.
 - `benchmarks.throughput` — games/sec measurement with environment recording.
+- `catan.evaluate` — handcrafted position scoring, one score per seat rather than a
+  scalar, matching the planned value head. Combines victory points, expected cards per
+  turn, resource diversity, the production reachable within two roads discounted by
+  distance, progress towards the nearest purchase, roads, knights, hand size with a
+  discard penalty, and port rates. Weights are an ablatable dataclass.
+  `pips` lives in `catan.board.board` so the encoder can share it.
+- `catan.bots` — a `Bot` protocol the network will also satisfy, a random bot, and a
+  max^n search over the evaluation. Depth counts decisions rather than turns; rolls are
+  chance nodes weighted over all eleven outcomes rather than sampled; a beam bounds the
+  main phase's branching. `greedy` is the one-ply case.
+- `catan.game.imagine` — a copy for hypothetical play. Takes its own random stream so a
+  search cannot disturb the real game's, and shuffles the copied deck so a search
+  cannot read the card the real deck is about to deal.
+- `catan.game.to_move` — whose decision the legal actions are, which is not the current
+  player while discarding on a seven.
+- `catan.state.copy_state`, `catan.game.ROLL_ODDS`.
+- `catan.arena` — head-to-head play with the lineup rotated so every entrant sits every
+  seat the same number of times, and win rates reported with a Wilson interval. Caps
+  actions per game, which the engine's turn cap cannot do. Every seat's terminal victory
+  points are kept alongside the winner, so a game says how close the losers came rather
+  than only that they lost; `mean_interval` turns differences taken *within* a game into
+  a paired estimate, which cancels board and dice variance instead of averaging it away.
+- `benchmarks.baselines` — runs a lineup and records the commit and environment with the
+  result.
+- `catan.tuning` — fits the evaluation weights by hill climbing against the incumbent
+  through the arena. The scale is pinned at `victory_point`, since scaling every weight
+  alike cannot change the argmax; acceptance needs the win-rate interval's lower bound
+  to clear half, with the strictness a knob because both extremes fail. `confirm` plays
+  the fitted weights against the starting weights at a large budget, which is the only
+  way to tell a real gain from an accumulation of accepted noise.
+- `benchmarks.tune` — runs the climb, reporting each duel as it resolves.
+- `benchmarks.production_curve` — maps candidate `production` values against the intact
+  weights to ask whether the weight is identifiable from self-play at all, and reuses
+  the same games to test terminal points as a proxy for wins. The answer over 18,000
+  games is that it is not: only `3.0` is distinguishable once the eight alternatives are
+  corrected for, a 58% cut, and `3.5` through `10` are indistinguishable. Terminal
+  points are a sound proxy (Pearson 0.998 across the curve, 0.907 restricted to the
+  plausible range, no significant sign conflicts). An evaluation can depend critically
+  on a term at zero while being flat over every value an optimiser would ever try, and
+  no search rule can recover a coefficient in that landscape.
+
+- `catan.evaluate_tiered` — a second evaluation, reimplemented from the design
+  catanatron's value function uses (described, not ported; it is GPLv3). Weights are
+  magnitude tiers encoding a priority order rather than blended coefficients, own
+  production is scored against the strongest opponent's, and reachable production keeps
+  the player's own settled junctions in the set so building can never shrink it. Kept
+  as a comparison baseline, not as the default. It played `catan.evaluate` to a dead
+  heat (51.3%) under plain max^n before trading; it now loses 36.7% over 2000 games,
+  and a refit under `relative` confirmed at 48.1%, so the gap is not a stale fit.
+  Generates data at half the rate. Selectable through the `greedy-tiered` and
+  `search2-tiered` presets.
+
+### Changed
+
+- `catan.actions.Action` carries an `ask` order on `PROPOSE_TRADE`, naming who the
+  proposer would rather have take the offer. An offer stops at the first player to
+  accept, so the order is worth something, and choosing it is a tactic rather than a
+  rule — `trading.responders` stays neutral and anyone unnamed keeps its place behind
+  those named. Records carry the order, so a game with a choosing proposer replays.
+  Enabled by `SearchBot(partner_choice=True)` and the `greedy-partner` preset. It works
+  only under the `paranoid` stance: `relative` subtracts the mean of the other seats,
+  and a trade hands the same value to whoever takes it, so the mean moves identically
+  whichever opponent received it. Measured at 49.8% (95% CI [47.6%, 51.9%], 2000 games)
+  against an identical bot that does not choose — it earns nothing, and is kept because
+  it is what the real game does and puts the decision where a policy can learn it.
+- `catan.trading.responders` orders an offer round the table from the proposer rather
+  than by ascending seat index. First refusal is worth something, and seat order handed
+  it permanently to the low seats: wins by seat ran 563/532/482/423 over 2000 games,
+  chi-square 22.5 on three degrees of freedom, falling to 7.2 under rotation.
+- `relative` is now the default stance for `greedy` and `search2`, since a baseline
+  whose job is to be beaten should be the best one available. `greedy-own` and
+  `search2-own` reproduce the old behaviour, so a recorded duel should name both sides
+  explicitly rather than rely on the default. Refitting the weights for a stance was
+  tried and is not needed: under `relative` the climb confirmed at 49.0% and under
+  `paranoid` at 52.2%, and the paranoid fit carrying its own weights then lost to
+  `relative` on the existing ones. Retaking the ablation under `relative` moved it a
+  lot — seven of nine terms now earn their keep against four, and `search2` beats
+  `greedy` 60.8% rather than 70.0% because `greedy` got stronger.
+- `benchmarks.throughput.environment` reports whether the working tree was dirty, and
+  asks git with `safe.directory` set on the command line, so runs inside the
+  devcontainer stop recording their commit as "unknown". Runners default `--workers`
+  to every core; defaulting to one meant a forgotten flag silently measured on a
+  single core.
+- `catan.tuning` fits either evaluation, taking an evaluator name and resolving the
+  matching `Weights` class, and takes a stance. `TUNABLE` becomes `tunable(weights)`.
+- `benchmarks.ablate` takes an `--evaluator`, so the tiered evaluation's terms can be
+  ablated the same way the default's are. It read `catan.evaluate.Weights` directly and
+  could only ever ablate the default nine.
+- `catan.bots.SearchBot` takes a `stance` saying how a seat turns the per-seat vector
+  into the one number it maximises. `own` is plain max^n and the previous behaviour;
+  `relative` subtracts the mean of the other seats and `paranoid` the best of them.
+  Catan has one winner, so a position is worth what it is worth compared to the table,
+  and under `own` a responder took every trade that improved its own hand however much
+  it improved the proposer's. `relative` beats `own` 55.0% (95% CI [52.9%, 57.2%],
+  2000 games) while carrying weights fitted under `own`, and cuts the share of offers
+  accepted from 47.5% to 29.1%. Selectable through the `greedy-relative`,
+  `greedy-paranoid` and `search2-relative` presets.
+- `catan.arena` entrants carry which evaluation to score with, so the two can be
+  played against each other directly.
+- `catan.game.roll_dice` takes an optional explicit roll, so a search can enumerate the
+  outcomes instead of sampling one.
+- `catan.arena` entrants are a frozen `Entrant` description rather than a bot-building
+  closure, replacing `FACTORIES` with `PRESETS` and `spawn`. Closures cannot be pickled,
+  so this is what lets `compete` fan out over a process pool — and it means a lineup can
+  go into a run manifest verbatim. Results are identical at any worker count.
+- The devcontainer installs Python. It previously had codex, GitHub CLI and Docker
+  features but no Python at all, so it could not run this project's tests.

@@ -27,7 +27,7 @@ from benchmarks.throughput import environment
 from catan.actions import legal_actions, space_for
 from catan.board.board import random_base_board
 from catan.encoding import encode, static_graph
-from catan.game import start
+from catan.game import is_over, start
 from catan.model import CatanNet, ModelConfig, collate
 from catan.play import step_randomly
 
@@ -78,6 +78,25 @@ def _positions(count: int, players: int, seed: int):
     return out
 
 
+def _over(items):
+    """Cycle through positions, so a per-call cost is not one lucky phase.
+
+    `legal_actions` in particular ranges from a two-element list in
+    `TRADE_RESPOND` to a full enumeration in the main phase, so timing it
+    against a single fixed state measures whichever phase that state happened
+    to be in rather than anything about the engine.
+    """
+    index = 0
+
+    def take():
+        nonlocal index
+        item = items[index % len(items)]
+        index += 1
+        return item
+
+    return take
+
+
 def resolve_device(requested: str) -> str:
     if requested != "auto":
         return requested
@@ -100,8 +119,14 @@ def run(
 
     rng = random.Random(seed)
     stepping = start(random_base_board(rng), players, rng)
-    for _ in range(60):
+
+    def one_step() -> None:
+        nonlocal stepping
+        if is_over(stepping):
+            stepping = start(random_base_board(rng), players, rng)
         step_randomly(stepping, rng)
+
+    next_game = _over(games)
 
     with torch.no_grad():
         forward_one = _timed(lambda: net(*single), repeats, device)
@@ -115,9 +140,9 @@ def run(
         rounds=config.rounds,
         parameters=sum(p.numel() for p in net.parameters()),
         batch=batch,
-        engine_step_us=_timed(lambda: step_randomly(stepping, rng), repeats, "cpu"),
-        encode_us=_timed(lambda: encode(games[0]), repeats, "cpu"),
-        legal_actions_us=_timed(lambda: legal_actions(games[0]), repeats, "cpu"),
+        engine_step_us=_timed(one_step, repeats, "cpu"),
+        encode_us=_timed(lambda: encode(next_game()), repeats, "cpu"),
+        legal_actions_us=_timed(lambda: legal_actions(next_game()), repeats, "cpu"),
         forward_batch1_us=forward_one,
         forward_batched_us_per_position=round(forward_many / batch, 2),
         positions_per_second=round(batch / (forward_many / 1e6)),

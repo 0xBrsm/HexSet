@@ -9,6 +9,12 @@ is rather than where it was guessed to be.
 The batch figure is the one that matters. A search evaluates many leaves at
 once, so per-position cost at batch 1 is a worst case nothing in the loop will
 actually pay.
+
+The crossings are timed separately from the forward. A forward on tensors that
+are already resident says nothing about what a search pays, because a search
+has to build the batch, push it over, and pull the logits back for every
+expansion. Those three costs are `collate`, `host to device` and `device to
+host`, and they are per batch, not per position.
 """
 
 from __future__ import annotations
@@ -44,6 +50,9 @@ class Result:
     engine_step_us: float
     encode_us: float
     legal_actions_us: float
+    collate_us: float
+    host_to_device_us: float
+    device_to_host_us: float
     forward_batch1_us: float
     forward_batched_us_per_position: float
     positions_per_second: float
@@ -126,7 +135,8 @@ def run(
     net = CatanNet(space, graph, players, config).to(device).eval()
 
     observations = [encode(game) for game in games]
-    batched = [t.to(device) for t in collate(observations)]
+    host = collate(observations)
+    batched = [t.to(device) for t in host]
     single = [t[:1] for t in batched]
 
     rng = random.Random(seed)
@@ -143,6 +153,11 @@ def run(
     with torch.no_grad():
         forward_one = _timed(lambda: net(*single), repeats, device)
         forward_many = _timed(lambda: net(*batched), repeats, device)
+        prediction = net(*batched)
+
+    def read_back() -> None:
+        prediction.logits.to("cpu")
+        prediction.value.to("cpu")
 
     return Result(
         device=device,
@@ -155,6 +170,9 @@ def run(
         engine_step_us=_timed(one_step, repeats, "cpu"),
         encode_us=_timed(lambda: encode(next_game()), repeats, "cpu"),
         legal_actions_us=_timed(lambda: legal_actions(next_game()), repeats, "cpu"),
+        collate_us=_timed(lambda: collate(observations), repeats, "cpu"),
+        host_to_device_us=_timed(lambda: [t.to(device) for t in host], repeats, device),
+        device_to_host_us=_timed(read_back, repeats, device),
         forward_batch1_us=forward_one,
         forward_batched_us_per_position=round(forward_many / batch, 2),
         positions_per_second=round(batch / (forward_many / 1e6)),
@@ -197,6 +215,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  engine step        {result.engine_step_us:>9} us")
     print(f"  encode             {result.encode_us:>9} us")
     print(f"  legal_actions      {result.legal_actions_us:>9} us")
+    print(f"  collate            {result.collate_us:>9} us  per batch of {result.batch}")
+    print(f"  host to device     {result.host_to_device_us:>9} us  per batch")
+    print(f"  device to host     {result.device_to_host_us:>9} us  per batch")
     print(f"  forward, batch 1   {result.forward_batch1_us:>9} us")
     print(
         f"  forward, batch {result.batch:<3} {result.forward_batched_us_per_position:>9} us"

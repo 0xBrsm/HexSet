@@ -27,7 +27,7 @@ from benchmarks.throughput import environment
 from catan.actions import legal_actions, space_for
 from catan.board.board import random_base_board
 from catan.encoding import encode, static_graph
-from catan.game import is_over, start
+from catan.game import imagine, is_over, start
 from catan.model import CatanNet, ModelConfig, collate
 from catan.play import step_randomly
 
@@ -67,14 +67,26 @@ def _timed(fn, repeats: int, device: str) -> float:
 
 
 def _positions(count: int, players: int, seed: int):
-    """Distinct mid-game positions, so the batch is not one state repeated."""
+    """Distinct positions from one playthrough, all sharing a board.
+
+    A search evaluates many leaves of the same game, so a batch that shares a
+    board is what the training loop will actually encode. Giving each position
+    its own random board instead measures cache misses no real batch pays —
+    doing that tripled the reported `encode` cost, which was an artifact of the
+    benchmark rather than anything about the encoder.
+    """
+    rng = random.Random(seed)
+    game = start(random_base_board(rng), players, rng)
+    for _ in range(60):
+        step_randomly(game, rng)
+
     out = []
-    for i in range(count):
-        rng = random.Random(seed + i)
-        game = start(random_base_board(rng), players, rng)
-        for _ in range(60 + i % 40):
+    while len(out) < count:
+        out.append(imagine(game, random.Random(seed + len(out))))
+        for _ in range(3):
+            if is_over(game):
+                return out + [out[-1]] * (count - len(out))
             step_randomly(game, rng)
-        out.append(game)
     return out
 
 

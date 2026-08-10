@@ -34,7 +34,7 @@ from catan.actions import legal_actions, space_for
 from catan.board.board import random_base_board
 from catan.encoding import encode, static_graph
 from catan.game import imagine, is_over, start
-from catan.model import CatanNet, ModelConfig, collate
+from catan.model import CatanNet, ModelConfig, collate, pack, packing
 from catan.play import step_randomly
 
 
@@ -54,6 +54,8 @@ class Result:
     collate_us: float
     host_to_device_us: float
     device_to_host_us: float
+    pack_us: float
+    host_to_device_packed_us: float
     forward_batch1_us: float
     forward_batched_us_per_position: float
     positions_per_second: float
@@ -148,6 +150,9 @@ def run(
     batched = [t.to(device) for t in host]
     single = [t[:1] for t in batched]
 
+    layout = packing(graph, players)
+    packed = pack(layout, observations)
+
     rng = random.Random(seed)
     stepping = start(random_base_board(rng), players, rng)
 
@@ -183,6 +188,8 @@ def run(
         collate_us=_timed(lambda: collate(observations), repeats, "cpu"),
         host_to_device_us=_timed(lambda: [t.to(device) for t in host], repeats, device),
         device_to_host_us=_timed(read_back, repeats, device),
+        pack_us=_timed(lambda: pack(layout, observations), repeats, "cpu"),
+        host_to_device_packed_us=_timed(lambda: packed.to(device), repeats, device),
         forward_batch1_us=forward_one,
         forward_batched_us_per_position=round(forward_many / batch, 2),
         positions_per_second=round(batch / (forward_many / 1e6)),
@@ -237,6 +244,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  collate            {result.collate_us:>9} us  per batch of {result.batch}")
     print(f"  host to device     {result.host_to_device_us:>9} us  per batch")
     print(f"  device to host     {result.device_to_host_us:>9} us  per batch")
+    print(f"  pack               {result.pack_us:>9} us  per batch")
+    print(f"  host to device x1  {result.host_to_device_packed_us:>9} us  per batch, packed")
     print(f"  forward, batch 1   {result.forward_batch1_us:>9} us")
     print(
         f"  forward, batch {result.batch:<3} {result.forward_batched_us_per_position:>9} us"

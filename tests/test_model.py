@@ -11,7 +11,14 @@ from catan.actions import space_for  # noqa: E402
 from catan.board.board import random_base_board  # noqa: E402
 from catan.encoding import encode, static_graph  # noqa: E402
 from catan.game import start  # noqa: E402
-from catan.model import CatanNet, ModelConfig, collate  # noqa: E402
+from catan.model import (  # noqa: E402
+    CatanNet,
+    ModelConfig,
+    collate,
+    pack,
+    packing,
+    unpack,
+)
 from catan.play import step_randomly  # noqa: E402
 from catan.readout import scatter_logits  # noqa: E402
 
@@ -47,6 +54,34 @@ def test_output_shapes(players):
     assert out.value.shape == (3, players)
     assert out.give.shape == (3, 5)
     assert out.want.shape == (3, 5)
+
+
+@pytest.mark.parametrize("players", [2, 3, 4])
+def test_packing_round_trips_to_the_same_batch_as_collate(players):
+    """`pack` writes through reshaped views, which numpy may silently copy.
+
+    If a slice ever reshaped to a copy instead of a view, `pack` would stack
+    into a temporary and hand back an uninitialised buffer — garbage inputs,
+    no error. This compares it against `collate`, which builds the same batch
+    the obvious way.
+    """
+    obs = observations(3, players=players)
+    layout = packing(static_graph(a_game(players=players).state.board.topology), players)
+    packed = pack(layout, obs)
+
+    assert packed.shape == (3, layout.width)
+    for got, want in zip(unpack(layout, packed), collate(obs), strict=True):
+        assert torch.equal(got, want)
+
+
+def test_a_packed_batch_feeds_the_net_unchanged():
+    game, space, net = a_net()
+    obs = observations(3)
+    layout = packing(static_graph(game.state.board.topology), 4)
+
+    assert torch.allclose(
+        net(*unpack(layout, pack(layout, obs))).logits, net(*collate(obs)).logits
+    )
 
 
 def test_the_flat_permutation_agrees_with_the_numpy_scatter():

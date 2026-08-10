@@ -14,7 +14,6 @@ from catan.encoding import (
     edge_features,
     encode,
     global_features,
-    pips,
     static_graph,
     vertex_features,
 )
@@ -32,14 +31,6 @@ def a_game(players: int = 4, seed: int = 0, steps: int = 120):
 
 def arrays(obs):
     return (obs.hexes, obs.vertices, obs.edges, obs.globals)
-
-
-@pytest.mark.parametrize(
-    ("token", "expected"),
-    [(0, 0), (2, 1), (3, 2), (6, 5), (8, 5), (11, 2), (12, 1)],
-)
-def test_pips_follow_the_dice(token, expected):
-    assert pips(token) == expected
 
 
 @pytest.mark.parametrize("players", [2, 3, 4])

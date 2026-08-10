@@ -47,6 +47,7 @@ class Result:
     rounds: int
     parameters: int
     batch: int
+    compiled: bool
     engine_step_us: float
     encode_us: float
     legal_actions_us: float
@@ -125,7 +126,13 @@ def resolve_device(requested: str) -> str:
 
 
 def run(
-    batch: int, players: int, seed: int, device: str, config: ModelConfig, repeats: int
+    batch: int,
+    players: int,
+    seed: int,
+    device: str,
+    config: ModelConfig,
+    repeats: int,
+    compile_mode: str = "none",
 ) -> Result:
     games = _positions(batch, players, seed)
     space = space_for(games[0])
@@ -133,6 +140,8 @@ def run(
 
     torch.manual_seed(seed)
     net = CatanNet(space, graph, players, config).to(device).eval()
+    if compile_mode != "none":
+        net = torch.compile(net, mode=compile_mode)
 
     observations = [encode(game) for game in games]
     host = collate(observations)
@@ -167,6 +176,7 @@ def run(
         rounds=config.rounds,
         parameters=sum(p.numel() for p in net.parameters()),
         batch=batch,
+        compiled=compile_mode != "none",
         engine_step_us=_timed(one_step, repeats, "cpu"),
         encode_us=_timed(lambda: encode(next_game()), repeats, "cpu"),
         legal_actions_us=_timed(lambda: legal_actions(next_game()), repeats, "cpu"),
@@ -188,6 +198,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--width", type=int, default=64)
     parser.add_argument("--rounds", type=int, default=2)
     parser.add_argument("--repeats", type=int, default=50)
+    parser.add_argument(
+        "--compile",
+        dest="compile_mode",
+        default="none",
+        choices=["none", "default", "reduce-overhead", "max-autotune"],
+        help="reduce-overhead uses CUDA graphs, which is what a launch-bound model wants",
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
@@ -198,6 +215,7 @@ def main(argv: list[str] | None = None) -> int:
         device=resolve_device(args.device),
         config=ModelConfig(width=args.width, rounds=args.rounds),
         repeats=args.repeats,
+        compile_mode=args.compile_mode,
     )
     payload = {"environment": environment(), **asdict(result)}
 
@@ -207,7 +225,8 @@ def main(argv: list[str] | None = None) -> int:
 
     env = payload["environment"]
     print(f"commit {env['commit']}  dirty {env['dirty']}  {env['machine']}")
-    print(f"torch {result.torch_version} on {result.device}")
+    compiled = f", compiled {args.compile_mode}" if result.compiled else ""
+    print(f"torch {result.torch_version} on {result.device}{compiled}")
     print(
         f"width {result.width}, {result.rounds} rounds, "
         f"{result.parameters:,} parameters, {result.players} players"

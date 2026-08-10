@@ -66,6 +66,26 @@ def test_the_graph_is_cached_per_board():
     assert static_graph(topology) is static_graph(build_topology(MINI_LAYOUT))
 
 
+def test_observations_on_one_board_do_not_share_memory():
+    """The board-static template is cached and handed to every encode.
+
+    If a caller ever received the cached array itself rather than a copy, the
+    corruption would be silent and would spread to every later position on the
+    board, so this pins the copy rather than trusting it.
+    """
+    game = a_game()
+    first = encode(game)
+    second = encode(game)
+    assert first.hexes is not second.hexes
+    assert first.vertices is not second.vertices
+
+    first.hexes.fill(7.0)
+    first.vertices.fill(7.0)
+    third = encode(game)
+    assert np.array_equal(third.hexes, second.hexes)
+    assert np.array_equal(third.vertices, second.vertices)
+
+
 def test_ownership_is_one_hot():
     obs = encode(a_game())
     players = 4

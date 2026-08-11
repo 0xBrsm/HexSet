@@ -11,14 +11,19 @@ from catan.board.topology import build as build_topology
 from catan.board.maps import BASE_LAYOUT, MINI_LAYOUT
 from catan.encoding import (
     HEX_FEATURES,
+    NUM_BUILDINGS,
+    _building_points,
+    _seat,
     edge_features,
     encode,
     global_features,
     static_graph,
     vertex_features,
 )
-from catan.game import start
+from catan.game import is_over, start
 from catan.play import step_randomly
+from catan.state import NO_OWNER, Building
+from catan.victory import building_points
 
 
 def a_game(players: int = 4, seed: int = 0, steps: int = 120):
@@ -210,3 +215,88 @@ def test_encoding_holds_up_across_a_whole_game():
             obs = encode(game, perspective=seat)
             for array in arrays(obs):
                 assert np.isfinite(array).all()
+
+
+def _canonical_vertex_block(state, perspective):
+    """Building one-hot then owner one-hot, written the plain way.
+
+    `encode` reaches these same rows by table lookup on a combined key, which
+    is faster and is not obviously the same thing, so this is what it is
+    pinned to.
+    """
+    players = state.num_players
+    width = NUM_BUILDINGS + players + 1
+    out = np.zeros((state.board.topology.num_vertices, width), dtype=np.float32)
+    for v in range(out.shape[0]):
+        out[v, int(state.vertex_building[v])] = 1.0
+        owner = state.vertex_owner[v]
+        slot = players if owner == NO_OWNER else _seat(owner, perspective, players)
+        out[v, NUM_BUILDINGS + slot] = 1.0
+    return out
+
+
+def _canonical_edges(state, perspective):
+    players = state.num_players
+    out = np.zeros(
+        (state.board.topology.num_edges, edge_features(players)), dtype=np.float32
+    )
+    for e in range(out.shape[0]):
+        owner = state.edge_owner[e]
+        slot = players if owner == NO_OWNER else _seat(owner, perspective, players)
+        out[e, slot] = 1.0
+    return out
+
+
+def _check_blocks(game, players):
+    state = game.state
+    for perspective in range(players):
+        obs = encode(game, perspective=perspective)
+        block = obs.vertices[:, : NUM_BUILDINGS + players + 1]
+        assert np.array_equal(block, _canonical_vertex_block(state, perspective))
+        assert np.array_equal(obs.edges, _canonical_edges(state, perspective))
+
+
+@pytest.mark.parametrize("players", [2, 3, 4])
+def test_the_table_lookups_agree_with_the_loops(players):
+    rng = random.Random(11 + players)
+    game = start(random_base_board(rng), players, rng)
+
+    positions = 0
+    while not is_over(game) and game.turns < 40:
+        step_randomly(game, rng)
+        _check_blocks(game, players)
+        positions += players
+    assert positions > 100
+
+    # Random play this short reaches no cities, so agreeing everywhere would
+    # only say the two paths agree on settlements and empty vertices. Every
+    # building and owner combination is planted here instead of hoped for.
+    state = game.state
+    for owner in range(players):
+        state.vertex_building[owner] = Building.CITY
+        state.vertex_owner[owner] = owner
+        state.vertex_building[players + owner] = Building.SETTLEMENT
+        state.vertex_owner[players + owner] = owner
+        state.edge_owner[owner] = owner
+    _check_blocks(game, players)
+
+
+@pytest.mark.parametrize("players", [2, 3, 4])
+def test_building_points_agree_with_the_rules(players):
+    rng = random.Random(21 + players)
+    game = start(random_base_board(rng), players, rng)
+    scored = 0
+
+    while not is_over(game) and game.turns < 40:
+        step_randomly(game, rng)
+        state = game.state
+        for perspective in range(players):
+            obs = encode(game, perspective=perspective)
+            points = _building_points(obs.vertices, players)
+            # Seat-relative: index i is the seat i places after the perspective.
+            for i in range(players):
+                seat = (perspective + i) % players
+                assert points[i] == building_points(state, seat)
+                scored += points[i] > 0
+
+    assert scored > 0

@@ -10,6 +10,7 @@ from catan.board.terrain import Resource
 from catan.bots import RandomBot, SearchBot, greedy, own, paranoid, relative
 from catan.evaluate import Evaluator
 from catan.game import (
+    MAX_OFFERS_PER_TURN,
     ROLL_ODDS,
     Phase,
     imagine,
@@ -305,6 +306,35 @@ def test_a_proposer_that_does_not_choose_names_nobody():
     )
     plain = greedy(Evaluator(board), random.Random(0), stance="paranoid")
     assert plain._addressed(game, action, 0).ask == ()
+
+
+def _offers_per_turn(max_offers: int | None, actions: int = 1200) -> int:
+    """Most offers any one turn saw, with every seat sharing the same budget."""
+    game = a_game(seed=3)
+    bots = [
+        greedy(Evaluator(game.state.board), random.Random(seat), max_offers=max_offers)
+        for seat in range(4)
+    ]
+    peak = 0
+    for _ in range(actions):
+        if is_over(game):
+            break
+        apply(game, bots[to_move(game)].choose(game))
+        peak = max(peak, game.offers_made)
+    return peak
+
+
+def test_a_bot_can_hold_itself_below_the_engines_offer_cap():
+    """The cap has to be the bot's own, not the engine's.
+
+    An engine-wide limit lands on both entrants, and a duel cannot see a
+    capability everyone receives. So this pins that the budget is spent by the
+    bot while `MAX_OFFERS_PER_TURN` still permits more, which is the only
+    arrangement that can measure what the extra offers are worth.
+    """
+    assert MAX_OFFERS_PER_TURN > 2
+    assert _offers_per_turn(2) == 2
+    assert _offers_per_turn(None) > 2
 
 
 def test_the_same_seed_plays_the_same_game():

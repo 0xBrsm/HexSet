@@ -210,3 +210,51 @@ def test_a_policy_that_answers_the_wrong_number_of_requests_is_rejected():
     collector = Collector(Short(), lanes=2, seed=0)
     with pytest.raises(ValueError, match="answered 1 of 2"):
         collector.tick()
+
+
+def test_the_offer_budget_clears_proposals_from_the_mask():
+    """A budget the policy cannot even see the slots for.
+
+    Filtering has to happen before the mask is built. If a forbidden action
+    stayed set, the policy could be trained to want something the engine will
+    then refuse, and the shorter horizon the budget was adopted for would not
+    materialise either.
+    """
+    budget = 2
+    collector = Collector(
+        RandomPolicy(random.Random(12)), lanes=2, seed=6, max_offers=budget
+    )
+    space = collector.space
+    proposals = [
+        index
+        for action, index in ((a, space.index(a)) for a in _every_proposal(collector))
+    ]
+    assert proposals, "expected the space to contain proposal slots"
+
+    spent = 0
+    for episode in collector.collect(2):
+        for game, transition in replay(episode):
+            assert game.offers_made <= budget
+            if game.offers_made >= budget:
+                spent += 1
+                assert not transition.mask[proposals].any()
+    assert spent > 0, "no turn ever reached the budget, so nothing was tested"
+
+
+def _every_proposal(collector: Collector) -> list:
+    from catan.actions import Action, ActionType
+    from catan.board.terrain import NUM_RESOURCES
+
+    out = []
+    for given in range(NUM_RESOURCES):
+        for wanted in range(NUM_RESOURCES):
+            if given == wanted:
+                continue
+            out.append(
+                Action(
+                    ActionType.PROPOSE_TRADE,
+                    give=tuple(1 if r == given else 0 for r in range(NUM_RESOURCES)),
+                    want=tuple(1 if r == wanted else 0 for r in range(NUM_RESOURCES)),
+                )
+            )
+    return out

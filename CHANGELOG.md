@@ -95,8 +95,29 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Generates data at half the rate. Selectable through the `greedy-tiered` and
   `search2-tiered` presets.
 
+- `catan.selfplay` — a vectorised rollout collector. Holds N games in flight and steps
+  them in lockstep so one batch of observations per tick serves every lane, which the
+  network's ~1.5 ms fixed dispatch toll makes mandatory rather than preferable. The
+  policy sits behind a `BatchPolicy` protocol — the batched analogue of `catan.bots.Bot`
+  — so the collector imports no torch and is tested against a random policy on the
+  development machine. Trajectories come out demultiplexed by seat, since a seat's next
+  state is the next position that seat was asked about rather than the one following its
+  action, and the decision-maker is `to_move` rather than `current_player`. Finished
+  lanes are refilled on the spot so a long game never stalls the batch, and the action
+  cap truncates a game that will not end. Reward is deliberately absent: an `Outcome`
+  reports the winner, every seat's terminal points, turns and truncation, and the
+  scalarisation is the caller's.
+- `benchmarks.rollout` — ticks/sec and actions/sec for the collector under a trivial
+  policy, so the cost of the plumbing is known separately from the cost of a network.
+  Sweeping the lane count shows actions/sec roughly flat while ticks/sec falls with the
+  lane count: lanes buy batch size, not throughput.
+
 ### Changed
 
+- `catan.encoding._template` is cached 64 boards deep rather than 8. A collector holds
+  one board per lane, so at sixteen lanes it missed on every call and rebuilt the
+  board-static block the cache exists to avoid — 7.5k actions/sec against 8.5k, 1.13x,
+  over three alternating runs.
 - `catan.actions.Action` carries an `ask` order on `PROPOSE_TRADE`, naming who the
   proposer would rather have take the offer. An offer stops at the first player to
   accept, so the order is worth something, and choosing it is a tactic rather than a

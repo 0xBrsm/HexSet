@@ -144,6 +144,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   untrained network so "did it learn" has a baseline, and duels fix their cohort of
   games in advance rather than taking the first to finish, which would select for short
   games.
+- `benchmarks.value_head` — what the value head explains, split by stage of the game.
+  A run's `explained_variance` is a ratio whose denominator moves: the target is
+  terminal relative points, and four strong seats finish closer together than four weak
+  ones, so the figure can fall while the head's error falls too. This reports the
+  numerator and the denominator separately, off the predictions the collector already
+  recorded rather than a second forward.
 - `catan.netbot` — a trained checkpoint as a `catan.bots.Bot`, which is what lets a
   network enter the arena and be scored against the handcrafted baselines rather than
   only against uniform random. The adapter goes this way round because `catan.arena`
@@ -172,7 +178,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a picklable description, so a lineup with a network in it still goes into a manifest
   verbatim and still crosses a process. `arena.pooled` groups standings by base name,
   since a duel is two seats a side and the side's share of the games is the number worth
-  quoting; `benchmarks.baselines` prints it under the per-seat standings.
+  quoting; `benchmarks.baselines` prints it under the per-seat standings. Setting
+  `evaluator="network"` instead swaps the checkpoint in as the *leaf evaluation* of the
+  ordinary search, which needs no new bot kind: `netsearch:<path>` is `search2` with
+  learned leaves and `netgreedy:<path>` is one ply of the same. `search2-offers3` is the
+  handcrafted search on the training horizon, so that comparison differs in the leaf
+  evaluation and nothing else.
 - `catan.selfplay.Choice` and `Transition` carry an `aux` field, passed through
   untouched, and `Collector` takes `first_game` with `games_started()` to read it back.
   The first is where the torch policy stores the offer mask PPO must reuse, which

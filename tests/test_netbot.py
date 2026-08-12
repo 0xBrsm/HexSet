@@ -150,3 +150,74 @@ def test_scoring_is_greedy_so_a_position_answers_the_same_way_twice(checkpoint):
         step_randomly(game, rng)
     assert to_move(game) is not None
     assert bot.choose(game) == bot.choose(game)
+
+
+def test_the_search_reads_the_value_head_in_board_seat_order(checkpoint):
+    """The encoder rotates the mover to slot 0; `SearchBot` indexes by board
+    seat. Getting this backwards would search fine and play nonsense."""
+    from catan.encoding import encode
+    from catan.netbot import network_evaluator
+
+    path, board = checkpoint
+    evaluator = network_evaluator(path, board)
+    game = start(board, 4, random.Random(2))
+    for _ in range(30):
+        step_randomly(game, random.Random(2))
+
+    for seat in range(4):
+        rotated = evaluator.policy.values([encode(game, seat)])[0]
+        vector = evaluator.evaluate_game(game, seat)
+        assert vector[seat] == pytest.approx(rotated[0])
+        for i, score in enumerate(rotated.tolist()):
+            assert vector[(seat + i) % 4] == pytest.approx(score)
+
+
+def test_a_search_over_learned_leaves_plays_the_whole_game(checkpoint):
+    from catan.arena import Entrant, compete
+
+    path, _ = checkpoint
+    lineup = [
+        Entrant("netsearch", kind="search", depth=2, width=6,
+                evaluator="network", weights=path),
+        Entrant("random0", kind="random"),
+        Entrant("random1", kind="random"),
+        Entrant("random2", kind="random"),
+    ]
+    result = compete(lineup, 4, seed=3, action_cap=3000)
+    assert result.games == 4
+    # Not "every game finishes": these are the weights a fresh network is born
+    # with, and a search over a meaningless evaluation can stall on the action
+    # cap. What is being tested is that the leaves are read at all.
+    assert len(result.decided()) >= 1
+
+
+def test_learned_leaves_inherit_the_checkpoints_offer_budget(checkpoint):
+    from catan.arena import Entrant, spawn
+
+    path, board = checkpoint
+    bot = spawn(
+        Entrant("netsearch", kind="search", evaluator="network", weights=path),
+        board,
+        random.Random(0),
+    )
+    assert bot.max_offers == 3
+    stated = spawn(
+        Entrant(
+            "netsearch8", kind="search", evaluator="network", weights=path, max_offers=8
+        ),
+        board,
+        random.Random(0),
+    )
+    assert stated.max_offers == 8
+
+
+def test_a_handcrafted_evaluation_is_still_asked_for_the_state_alone(checkpoint):
+    """The `evaluate_game` hook must not cost the baselines anything."""
+    from catan.arena import PRESETS, spawn
+    from catan.board.board import random_base_board
+
+    board = random_base_board(random.Random(0))
+    bot = spawn(PRESETS["search2"], board, random.Random(0))
+    assert not hasattr(bot.evaluator, "evaluate_game")
+    game = start(board, 4, random.Random(0))
+    assert len(bot._leaf(game, 0)) == 4

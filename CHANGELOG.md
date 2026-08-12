@@ -184,6 +184,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   learned leaves and `netgreedy:<path>` is one ply of the same. `search2-offers3` is the
   handcrafted search on the training horizon, so that comparison differs in the leaf
   evaluation and nothing else.
+- `catan.mcts` — PUCT over a learned policy and value, with leaves gathered into waves
+  and evaluated together. Batching is the whole point: a forward costs a ~1.5 ms fixed
+  dispatch toll plus ~25 us per position, so one leaf per call spends all of its time in
+  dispatch, and virtual loss is what stops every simulation in a wave picking the same
+  path. Four departures from the Go setting, each measured on this codebase rather than
+  imported: a node backs up a per-seat vector read through `catan.bots.STANCES` instead
+  of a scalar and a sign flip; chance nodes are sampled rather than expanded eleven ways,
+  because under a fixed budget the frequencies approximate the same distribution; nodes
+  store their positions, since replay costs ~19 us of engine per ply against ~25 us to
+  evaluate; and terminal nodes take `catan.rewards.relative_points` directly, which is
+  the same scale the value head is trained on. `simulations` counts descents that cross
+  an edge, so root visit counts always sum to it and `visit_policy` means the same thing
+  at any wave size. This does not replace `netsearch:<path>` on quality — that is a
+  separate problem, and an unaddressed one — only on throughput.
 - `catan.selfplay.Collector` takes `deal`, bounding how many games are ever started,
   with `running` and `drain()` to play the bounded cohort out. Left unset the collector
   refills a freed lane immediately and runs forever, which is what training wants. An

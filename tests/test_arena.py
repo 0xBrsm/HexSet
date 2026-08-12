@@ -13,9 +13,11 @@ from catan.arena import (
     Standing,
     Tournament,
     compete,
+    entrant_from_name,
     lineup_from_names,
     mean_interval,
     play,
+    pooled,
     seat_of,
     spawn,
     wilson,
@@ -107,6 +109,44 @@ def test_repeated_bots_are_numbered_and_unknown_ones_rejected():
     assert named == ["greedy#0", "random", "greedy#1"]
     with pytest.raises(ValueError, match="unknown bots: mcts"):
         lineup_from_names(["mcts", "random"])
+
+
+def test_a_checkpoint_path_names_an_entrant_wherever_a_preset_would():
+    lineup = lineup_from_names(
+        ["network:/tmp/latest.pt", "network:/tmp/latest.pt", "greedy", "greedy"]
+    )
+    assert [e.name for e in lineup] == [
+        "network#0",
+        "network#1",
+        "greedy#0",
+        "greedy#1",
+    ]
+    assert lineup[0].kind == "network"
+    assert lineup[0].weights == "/tmp/latest.pt"
+    # The whole reason entrants are descriptions: this has to reach a worker.
+    assert pickle.loads(pickle.dumps(lineup)) == lineup
+
+
+def test_a_network_entrant_leaves_its_offer_budget_to_the_checkpoint():
+    """`None` here means what it trained under, not the engine's eight.
+
+    Scoring a policy on a horizon it never played is the mistake this default
+    exists to make hard, so it is pinned here rather than left to `netbot`.
+    """
+    assert entrant_from_name("network:/tmp/latest.pt").max_offers is None
+
+
+def test_pooling_adds_up_the_seats_a_side_took():
+    standings = (
+        Standing("network#0", 30, 100),
+        Standing("network#1", 25, 100),
+        Standing("greedy#0", 22, 100),
+        Standing("greedy#1", 23, 100),
+    )
+    assert pooled(standings, 100) == [
+        Standing("network", 55, 100),
+        Standing("greedy", 45, 100),
+    ]
 
 
 def test_every_preset_can_be_built():

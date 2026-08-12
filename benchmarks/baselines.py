@@ -13,7 +13,7 @@ import sys
 from dataclasses import asdict
 
 from benchmarks.throughput import default_workers, environment
-from catan.arena import Z_95, compete, lineup_from_names, mean_interval
+from catan.arena import Z_95, compete, lineup_from_names, mean_interval, pooled
 
 DEFAULT_LINEUP = ("greedy", "greedy", "random", "random")
 
@@ -25,7 +25,10 @@ def main(argv: list[str] | None = None) -> int:
         nargs="+",
         default=list(DEFAULT_LINEUP),
         metavar="BOT",
-        help="one bot per seat: random, greedy, search2, search3",
+        help=(
+            "one bot per seat: a preset name (random, greedy, search2, ...) or "
+            "network:<checkpoint> for a trained network"
+        ),
     )
     parser.add_argument(
         "--games",
@@ -70,6 +73,17 @@ def main(argv: list[str] | None = None) -> int:
             }
             for standing in result.standings
         ],
+        # Two seats a side is the usual duel, so the side's share of the games
+        # is the number to quote and each seat's quarter is not.
+        "pooled": [
+            {
+                "name": standing.name,
+                "wins": standing.wins,
+                "win_rate": round(standing.win_rate, 4),
+                "interval_95": [round(bound, 4) for bound in standing.interval(Z_95)],
+            }
+            for standing in pooled(result.standings, result.games)
+        ],
     }
 
     if args.against is not None:
@@ -97,6 +111,14 @@ def main(argv: list[str] | None = None) -> int:
             f"  {standing.name:<10} {standing.wins:>4}/{result.games}"
             f"  {standing.win_rate:6.1%}  95% CI [{low:.1%}, {high:.1%}]"
         )
+    if len(payload["pooled"]) < len(payload["standings"]):
+        print("  pooled by side:")
+        for row in payload["pooled"]:
+            low, high = row["interval_95"]
+            print(
+                f"    {row['name']:<10} {row['wins']:>4}/{result.games}"
+                f"  {row['win_rate']:6.1%}  95% CI [{low:.1%}, {high:.1%}]"
+            )
     for row in payload.get("paired_points", []):
         print(
             f"  {row['name']:<10} {row['mean']:+6.3f} points vs seat {args.against}"

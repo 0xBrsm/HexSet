@@ -144,6 +144,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   untrained network so "did it learn" has a baseline, and duels fix their cohort of
   games in advance rather than taking the first to finish, which would select for short
   games.
+- `catan.netbot` — a trained checkpoint as a `catan.bots.Bot`, which is what lets a
+  network enter the arena and be scored against the handcrafted baselines rather than
+  only against uniform random. The adapter goes this way round because `catan.arena`
+  already has seat rotation, Wilson intervals, a process pool and the offer budget.
+  The checkpoint is loaded once per process and keyed on the topology as well as the
+  path, since `arena.spawn` runs per game per worker and a `torch.load` there would be
+  most of what a duel measured; `torch.set_num_threads(1)`, because thirty workers each
+  taking a core's worth of intraop threads measures the thrash. Evaluation is greedy,
+  and the offer budget defaults to the one the checkpoint recorded training under —
+  scoring a three-offer policy at the engine's eight would measure it on a horizon it
+  never saw.
 
 ### Changed
 
@@ -156,6 +167,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   lanes (1.25x), 118.5 → 101.1 at 512 (1.17x), 126.9 → 115.8 at 1024 (1.10x). The cost
   still climbs with lane count after the fix, so most of that rise is working set and
   raising the cache again will buy nothing.
+- `catan.arena` takes a `kind="network"` entrant whose `weights` is a checkpoint path,
+  named on a command line as `network:<path>` wherever a preset name is taken. It stays
+  a picklable description, so a lineup with a network in it still goes into a manifest
+  verbatim and still crosses a process. `arena.pooled` groups standings by base name,
+  since a duel is two seats a side and the side's share of the games is the number worth
+  quoting; `benchmarks.baselines` prints it under the per-seat standings.
 - `catan.selfplay.Choice` and `Transition` carry an `aux` field, passed through
   untouched, and `Collector` takes `first_game` with `games_started()` to read it back.
   The first is where the torch policy stores the offer mask PPO must reuse, which

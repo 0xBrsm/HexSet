@@ -111,13 +111,57 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   policy, so the cost of the plumbing is known separately from the cost of a network.
   Sweeping the lane count shows actions/sec roughly flat while ticks/sec falls with the
   lane count: lanes buy batch size, not throughput.
+- `catan.rewards` — the scalarisation `catan.selfplay` deliberately left open, now
+  settled: terminal victory points read against the mean of the other seats and scaled
+  by the ten points a game is won on. Points rather than win/loss because a losing seat
+  still says how close it came and the two are near-perfectly ranked on this engine;
+  relative rather than absolute because Catan is a race, which is the argument that
+  already decided the search's stance. Zero-sum by construction, which is what rules
+  out a discount factor: about half of these rewards are negative, so a gamma below 1
+  makes a late loss cheaper than an early one and pays a losing policy to stall. A
+  truncated game is scored where it stopped, so stalling banks the deficit rather than
+  escaping it.
+- `catan.policy` — the torch `BatchPolicy`. One forward, one packed host-to-device
+  copy and one concatenated read-back per tick. `PROPOSE_TRADE` is a single flat slot
+  carrying ten numbers, so picking it means the policy has chosen to propose without
+  yet saying what; it names the offer from the model's `give` and `want` heads, masked
+  to the offers that were legal. The recorded `log_prob` is the joint over slot and
+  offer, because PPO's ratio has to be taken against the distribution that generated
+  the data — recording only the slot's is wrong by the offer's log-prob and wrong most
+  where the policy is most confident. `evaluate` mirrors `act` and a test pins them
+  together.
+- `catan.ppo` — GAE over per-seat trajectories, the clipped surrogate, value loss and
+  entropy bonus. `GAMMA` is a module constant rather than a config field and a test
+  pins the absence of a `--gamma` flag. The value head is trained on terminal outcomes
+  and never bootstrapped: with gamma 1 and a reward that is zero until the end, the
+  Monte Carlo return is the terminal reward exactly. All of the head's per-seat outputs
+  are trained from every position, which is what makes it backable-up by max^n later.
+- `catan.train` — the runnable, resumable loop. Checkpoints are written to a temporary
+  file and renamed, so a crash during the save cannot destroy the last good one, and
+  the game counter is saved with the weights because a game is a pure function of the
+  seed and its index — a resumed run that restarts it replays its own training set.
+  Collect and update time are reported separately. `--eval-at-start` duels the
+  untrained network so "did it learn" has a baseline, and duels fix their cohort of
+  games in advance rather than taking the first to finish, which would select for short
+  games.
 
 ### Changed
 
-- `catan.encoding._template` is cached 64 boards deep rather than 8. A collector holds
-  one board per lane, so at sixteen lanes it missed on every call and rebuilt the
-  board-static block the cache exists to avoid — 7.5k actions/sec against 8.5k, 1.13x,
-  over three alternating runs.
+- `catan.encoding._template` is cached 4096 boards deep, twice raised. At 8 a
+  sixteen-lane rollout missed on every call and rebuilt the board-static block the
+  cache exists to avoid — 7.5k actions/sec against 8.5k, 1.13x, over three alternating
+  runs. 64 was the same mistake one size up: PPO wants the largest batch the dispatch
+  toll amortises over, measured at 512 lanes, and 512 boards miss a 64-entry cache
+  every time. A/B'd in one process, alternating: 84.2 → 67.6 µs per position at 128
+  lanes (1.25x), 118.5 → 101.1 at 512 (1.17x), 126.9 → 115.8 at 1024 (1.10x). The cost
+  still climbs with lane count after the fix, so most of that rise is working set and
+  raising the cache again will buy nothing.
+- `catan.selfplay.Choice` and `Transition` carry an `aux` field, passed through
+  untouched, and `Collector` takes `first_game` with `games_started()` to read it back.
+  The first is where the torch policy stores the offer mask PPO must reuse, which
+  depends on what opponents could cover and so is absent from the observation by
+  design; the second is what makes a resumed run continue rather than repeat. Both
+  default to the previous behaviour.
 - `catan.actions.Action` carries an `ask` order on `PROPOSE_TRADE`, naming who the
   proposer would rather have take the offer. An offer stops at the first player to
   accept, so the order is worth something, and choosing it is a tactic rather than a

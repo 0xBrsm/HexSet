@@ -184,6 +184,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   learned leaves and `netgreedy:<path>` is one ply of the same. `search2-offers3` is the
   handcrafted search on the training horizon, so that comparison differs in the leaf
   evaluation and nothing else.
+- `catan.selfplay.Collector` takes `deal`, bounding how many games are ever started,
+  with `running` and `drain()` to play the bounded cohort out. Left unset the collector
+  refills a freed lane immediately and runs forever, which is what training wants. An
+  evaluation wants a fixed set of game indices, and the only way to get one before this
+  was to keep dealing replacements and discard them — after playing each in full, which
+  is where a 400-game duel went to spend over ten minutes. `catan.train.duel` and
+  `benchmarks.value_head` now bound instead of filtering.
+- `catan.train --keep-every` writes numbered checkpoints beside the `latest.pt` that
+  gets overwritten, defaulting to every 25 iterations. The first run kept only `latest`,
+  so "when did the policy stop improving" had no way to be asked afterwards.
 - `catan.selfplay.Choice` and `Transition` carry an `aux` field, passed through
   untouched, and `Collector` takes `first_game` with `games_started()` to read it back.
   The first is where the torch policy stores the offer mask PPO must reuse, which

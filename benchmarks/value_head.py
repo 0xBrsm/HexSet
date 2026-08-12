@@ -104,10 +104,9 @@ def main(argv: list[str] | None = None) -> int:
         seed=args.seed + 1,
         action_cap=args.action_cap,
         max_offers=loaded.max_offers,
+        deal=args.games,
     )
-    episodes: list[Episode] = []
-    while len(episodes) < args.games:
-        episodes.extend(e for e in collector.tick() if e.index < args.games)
+    episodes: list[Episode] = collector.drain()
     elapsed = time.perf_counter() - started
 
     predicted, actual, progress = rows(episodes)

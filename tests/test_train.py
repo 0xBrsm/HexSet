@@ -51,6 +51,29 @@ def test_a_run_writes_a_checkpoint_carrying_the_weights_and_the_game_counter(tmp
     assert any(v.numel() for v in state["net"].values())
 
 
+def test_numbered_checkpoints_are_kept_alongside_the_one_that_gets_overwritten(
+    tmp_path,
+):
+    assert run(tmp_path, 4, ["--checkpoint-every", "1", "--keep-every", "2"]) == 0
+
+    kept = sorted(p.name for p in tmp_path.glob("iter-*.pt"))
+    assert kept == ["iter-00002.pt", "iter-00004.pt"]
+    assert (tmp_path / "latest.pt").exists()
+    # The point of keeping them is that they differ; identical copies of the
+    # final weights would answer nothing about when training stopped helping.
+    early = torch.load(tmp_path / "iter-00002.pt", weights_only=False)
+    late = torch.load(tmp_path / "iter-00004.pt", weights_only=False)
+    assert early["iteration"] == 2 and late["iteration"] == 4
+    assert any(
+        not torch.equal(early["net"][k], late["net"][k]) for k in early["net"]
+    )
+
+
+def test_keeping_can_be_switched_off(tmp_path):
+    assert run(tmp_path, 2, ["--checkpoint-every", "1", "--keep-every", "0"]) == 0
+    assert list(tmp_path.glob("iter-*.pt")) == []
+
+
 def test_a_resumed_run_carries_on_from_the_iteration_it_reached(tmp_path):
     run(tmp_path, 1, ["--checkpoint-every", "1"])
     first = torch.load(tmp_path / "latest.pt", weights_only=False)

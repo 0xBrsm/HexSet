@@ -202,6 +202,68 @@ def test_the_same_seed_collects_the_same_games():
     assert once() == once()
 
 
+def test_a_bounded_collector_deals_exactly_the_cohort_and_stops():
+    """The point is the count, not the filter.
+
+    An evaluation wants a fixed set of game indices; the naive way to get one is
+    to let the collector refill freed lanes and discard the replacements, which
+    plays every one of them in full first. `deal` stops them being started.
+    """
+    collector = Collector(RandomPolicy(random.Random(3)), lanes=4, seed=5, deal=6)
+    episodes = collector.drain()
+
+    assert sorted(e.index for e in episodes) == [0, 1, 2, 3, 4, 5]
+    assert collector.games_started() == 6
+    assert not collector.running
+    assert collector.tick() == []
+
+
+def test_asking_a_bounded_collector_for_more_than_it_has_fails_loudly():
+    """Otherwise `collect` spins on empty ticks instead of blocking on a game."""
+    collector = Collector(RandomPolicy(random.Random(3)), lanes=2, seed=5, deal=3)
+    with pytest.raises(ValueError, match="4 games wanted, 3 left"):
+        collector.collect(4)
+
+
+def test_an_unbounded_collector_refuses_to_drain():
+    collector = Collector(RandomPolicy(random.Random(3)), lanes=2, seed=5)
+    with pytest.raises(ValueError, match="never drains"):
+        collector.drain()
+
+
+def test_a_cohort_smaller_than_the_lane_count_leaves_lanes_empty():
+    collector = Collector(RandomPolicy(random.Random(3)), lanes=8, seed=5, deal=2)
+    assert len(list(collector.in_flight())) == 2
+    assert len(collector.drain()) == 2
+
+
+def test_a_bound_does_not_change_the_games_themselves():
+    """Bounding the collector must not perturb the cohort it does play.
+
+    Under a *stateless* policy a game is a pure function of the seed and its
+    index, so the bounded and unbounded runs have to agree game for game. They
+    do not agree under `RandomPolicy`, which draws every lane from one shared
+    stream — the discarded replacement games consume draws and shift everything
+    after them. That is a property of the policy, not of the bound, but it is
+    the reason an eval must fix its cohort by index rather than by arrival.
+    """
+
+    class First:
+        def act(self, requests):
+            return [Choice(action=r.options[0]) for r in requests]
+
+    def cohort(deal: int | None) -> list[tuple]:
+        collector = Collector(First(), lanes=2, seed=19, deal=deal, action_cap=300)
+        played = collector.drain() if deal else collector.collect(4)
+        return sorted(
+            (e.index, e.outcome, tuple(t.index for t in e.stream())) for e in played
+        )
+
+    bounded = cohort(4)
+    assert [i for i, _, _ in bounded] == [0, 1, 2, 3]
+    assert bounded == [e for e in cohort(None) if e[0] < 4]
+
+
 def test_a_policy_that_answers_the_wrong_number_of_requests_is_rejected():
     class Short:
         def act(self, requests):

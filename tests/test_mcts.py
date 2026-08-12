@@ -8,7 +8,8 @@ import pytest
 from catan.actions import legal_actions
 from catan.board.board import random_base_board
 from catan.game import Phase, imagine, start
-from catan.mcts import Leaf, Node, Search, visit_policy
+from catan.bots import STANCES
+from catan.mcts import STANCE_ROWS, Leaf, Node, Search, visit_policy
 
 
 def a_game(seed: int = 0, players: int = 4):
@@ -219,3 +220,25 @@ def test_temperature_sharpens_towards_the_most_visited():
 def test_an_unvisited_root_is_a_uniform_target_rather_than_a_division_by_zero():
     assert visit_policy(np.zeros(4)).tolist() == [0.25] * 4
     assert visit_policy(np.zeros(0)).size == 0
+
+
+@pytest.mark.parametrize("stance", sorted(STANCE_ROWS))
+def test_the_row_stances_agree_with_the_canonical_scalar_ones(stance):
+    # `_select` reads a whole `totals` matrix rather than looping the scalar
+    # stance over its rows. `relative` reassociates to get there, so this is a
+    # tolerance and not an equality — see the note beside `STANCE_ROWS`.
+    rng = np.random.default_rng(4)
+    for seats in (2, 3, 4, 6):
+        vectors = rng.normal(size=(9, seats)) * 3.0
+        for seat in range(seats):
+            fast = STANCE_ROWS[stance](vectors, seat)
+            slow = [STANCES[stance](row, seat) for row in vectors]
+            assert fast == pytest.approx(slow)
+
+
+def test_a_row_stance_leaves_the_matrix_it_was_handed_alone():
+    vectors = np.arange(12.0).reshape(4, 3)
+    before = vectors.copy()
+    for rows in STANCE_ROWS.values():
+        rows(vectors, 1)
+    assert (vectors == before).all()

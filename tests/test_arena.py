@@ -158,7 +158,7 @@ def test_every_preset_can_be_built():
 def test_an_unknown_bot_kind_is_refused():
     board = random_base_board(random.Random(0))
     with pytest.raises(ValueError, match="unknown bot kind"):
-        spawn(Entrant("bogus", kind="mcts"), board, random.Random(0))
+        spawn(Entrant("bogus", kind="oracle"), board, random.Random(0))
 
 
 def test_entrants_are_picklable_so_they_can_cross_a_process():

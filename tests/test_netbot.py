@@ -221,3 +221,71 @@ def test_a_handcrafted_evaluation_is_still_asked_for_the_state_alone(checkpoint)
     assert not hasattr(bot.evaluator, "evaluate_game")
     game = start(board, 4, random.Random(0))
     assert len(bot._leaf(game, 0)) == 4
+
+
+def test_the_leaf_evaluator_hands_a_whole_wave_to_one_forward(checkpoint):
+    from catan.actions import legal_actions
+    from catan.mcts import Leaf
+    from catan.netbot import searcher
+
+    path, board = checkpoint
+    search = searcher(path, board, simulations=8, wave=8, rng=random.Random(0))
+    game = start(board, 4, random.Random(5))
+    leaves = [Leaf(game, to_move(game), tuple(legal_actions(game)))] * 3
+    scored = search.evaluator.evaluate(leaves)
+    assert len(scored) == 3
+    for prior, value in scored:
+        assert prior.shape == (len(leaves[0].options),)
+        assert prior.sum() == pytest.approx(1.0)
+        assert len(value) == 4
+
+
+def test_the_prior_covers_every_offer_rather_than_one_arbitrary_one(checkpoint):
+    """`PROPOSE_TRADE` is one slot and many options. If the slot's mass were not
+    split by the offer heads, one offer would carry the policy's whole appetite
+    for trading and the rest would be unreachable."""
+    from catan.actions import ActionType
+    from catan.mcts import Leaf
+    from catan.netbot import searcher
+
+    path, board = checkpoint
+    search = searcher(path, board, rng=random.Random(0))
+    rng = random.Random(11)
+    game = start(board, 4, rng)
+    for _ in range(400):
+        options = within_offer_budget(game, legal_actions(game), 3)
+        offers = [o for o in options if o.type is ActionType.PROPOSE_TRADE]
+        if len(offers) > 1:
+            break
+        step_randomly(game, rng)
+    else:
+        pytest.skip("no position offering more than one trade turned up")
+
+    seat = to_move(game)
+    (prior, _), = search.evaluator.evaluate([Leaf(game, seat, tuple(options))])
+    weights = [prior[options.index(offer)] for offer in offers]
+    assert all(w > 0 for w in weights)
+    assert len(set(weights)) > 1
+
+
+def test_a_search_over_a_learned_prior_plays_a_legal_action(checkpoint):
+    from catan.netbot import searcher
+
+    path, board = checkpoint
+    search = searcher(path, board, simulations=16, wave=4, rng=random.Random(0))
+    game = start(board, 4, random.Random(2))
+    for _ in range(20):
+        action = search.choose(game)
+        assert action in set(legal_actions(game))
+        from catan.actions import apply
+
+        apply(game, action)
+
+
+def test_a_simulation_budget_rides_on_the_entrant_name():
+    from catan.arena import entrant_from_name
+
+    plain = entrant_from_name("mcts:/tmp/x.pt")
+    assert (plain.kind, plain.weights, plain.simulations) == ("mcts", "/tmp/x.pt", 128)
+    sized = entrant_from_name("mcts:/tmp/x.pt@32")
+    assert (sized.name, sized.simulations) == ("mcts32", 32)

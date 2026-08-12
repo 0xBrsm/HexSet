@@ -198,6 +198,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   an edge, so root visit counts always sum to it and `visit_policy` means the same thing
   at any wave size. This does not replace `netsearch:<path>` on quality — that is a
   separate problem, and an unaddressed one — only on throughput.
+- `catan.expert` — `SearchPolicy`, a `catan.selfplay.BatchPolicy` that runs one tree per
+  decision, so expert-iteration games come out of the existing `Collector` rather than a
+  second game loop: the lane bookkeeping, seat demultiplexing, action cap and seed/index
+  replay contract are already there and none of them care what decided the action. The
+  visit counts ride to the transition on `Choice.aux` as a `Target`, which keeps the
+  options beside them because `PROPOSE_TRADE` is one slot standing for many offers and
+  the split is not recoverable from the index. Counts are kept raw so a distillation step
+  picks its own temperature. The recorded value is the root's backed-up mean rather than
+  the network's own estimate of the root, which is the thing being improved on. Actions
+  are sampled, not argmaxed: four identical greedy searches replay one game.
+- `catan.selfplay.Request` carries the lane's `Game`. A searching policy needs positions
+  to step and an observation is a lossy encoding of one; a policy that reads only the
+  encoding can ignore it. Handed out rather than copied, because `catan.mcts` copies at
+  its own root.
 - `catan.selfplay.Collector` takes `deal`, bounding how many games are ever started,
   with `running` and `drain()` to play the bounded cohort out. Left unset the collector
   refills a freed lane immediately and runs forever, which is what training wants. An

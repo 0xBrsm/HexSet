@@ -289,3 +289,46 @@ def test_a_simulation_budget_rides_on_the_entrant_name():
     assert (plain.kind, plain.weights, plain.simulations) == ("mcts", "/tmp/x.pt", 128)
     sized = entrant_from_name("mcts:/tmp/x.pt@32")
     assert (sized.name, sized.simulations) == ("mcts32", 32)
+
+
+def test_a_scored_run_records_the_networks_value_beside_someone_elses_play():
+    """`benchmarks.value_head --behaviour` measures the head off-policy.
+
+    The whole point is that the action and the prediction come from different
+    places, so the two things worth pinning are that the recorded value is the
+    network's and that row order survives — a transposed batch would produce a
+    plausible, wrong headline number rather than an error.
+    """
+    import numpy as np
+
+    from benchmarks.value_head import Scored
+    from catan.selfplay import Request
+
+    class Values:
+        def values(self, observations):
+            return np.arange(len(observations) * 4, dtype=np.float64).reshape(-1, 4)
+
+    class Always:
+        def __init__(self, index):
+            self.index = index
+
+        def choose(self, game):
+            return legal_actions(game)[self.index]
+
+    rng = random.Random(0)
+    game = start(random_base_board(rng), 4, rng)
+    options = tuple(legal_actions(game))
+    requests = [
+        Request(lane=i, seat=0, observation=object(), mask=np.zeros(1, dtype=bool),
+                options=options, game=game)
+        for i in range(3)
+    ]
+
+    choices = Scored(Always(2), Values()).act(requests)
+    assert [c.value for c in choices] == [
+        (0.0, 1.0, 2.0, 3.0),
+        (4.0, 5.0, 6.0, 7.0),
+        (8.0, 9.0, 10.0, 11.0),
+    ]
+    assert all(c.action == options[2] for c in choices)
+    assert Scored(Always(0), Values()).act([]) == []

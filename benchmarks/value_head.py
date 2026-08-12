@@ -29,6 +29,7 @@ import json
 import random
 import sys
 import time
+from dataclasses import replace
 
 import numpy as np
 import torch
@@ -38,8 +39,38 @@ from catan.netbot import load
 from catan.policy import NetworkPolicy
 from catan.ppo import rotate
 from catan.rewards import reward
-from catan.selfplay import Collector, Episode
+from catan.arena import entrant_from_name, spawn
+from catan.selfplay import Choice, Collector, Episode
 from catan.board.board import random_base_board
+
+
+class Scored:
+    """Somebody else's decisions, with the network's value recorded beside them.
+
+    Everything the on-policy figure measures, it measures where the head was
+    trained. A search asks it about positions its own policy would never reach,
+    and no amount of on-policy measurement sees that — which is why the failure
+    had to be inferred from win rates (`netsearch` losing 20:1 to `network`)
+    rather than read off directly. Here the behaviour policy decides the action
+    and the network only predicts, so the gap between the two runs is the
+    off-policy penalty stated as a number.
+
+    The value is written to `Choice.value` exactly as `NetworkPolicy` would, so
+    `rows` below reads both runs without knowing which it has.
+    """
+
+    def __init__(self, bot, policy: NetworkPolicy) -> None:
+        self.bot = bot
+        self.policy = policy
+
+    def act(self, requests):
+        if not requests:
+            return []
+        values = self.policy.values([request.observation for request in requests])
+        return [
+            Choice(action=self.bot.choose(request.game), value=tuple(values[row]))
+            for row, request in enumerate(requests)
+        ]
 
 
 def explained(predicted: np.ndarray, actual: np.ndarray) -> float:
@@ -79,6 +110,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--action-cap", type=int, default=4000)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--bins", type=int, default=5)
+    parser.add_argument(
+        "--behaviour",
+        default=None,
+        help=(
+            "an arena entrant name to play the games instead of the checkpoint "
+            "— greedy, search2, greedy-offers3 — measuring the head somewhere "
+            "it was never trained. Default is the checkpoint's own policy."
+        ),
+    )
+    parser.add_argument(
+        "--fixed-board",
+        action="store_true",
+        help=(
+            "play every game on one board. Implied by --behaviour, because a "
+            "handcrafted evaluator caches per-vertex pips for the board it was "
+            "built on and would misscore any other. Pass it on the on-policy "
+            "run too, or the two are not comparable."
+        ),
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
@@ -95,16 +145,26 @@ def main(argv: list[str] | None = None) -> int:
         greedy=False,
         generator=generator,
     )
+    behaviour = policy
+    if args.behaviour:
+        entrant = entrant_from_name(args.behaviour)
+        if entrant.max_offers is None:
+            entrant = replace(entrant, max_offers=loaded.max_offers)
+        behaviour = Scored(
+            spawn(entrant, board, random.Random(args.seed + 2)), policy
+        )
 
     started = time.perf_counter()
+    fixed = args.fixed_board or bool(args.behaviour)
     collector = Collector(
-        policy,
+        behaviour,
         lanes=args.lanes,
         players=args.players,
         seed=args.seed + 1,
         action_cap=args.action_cap,
         max_offers=loaded.max_offers,
         deal=args.games,
+        board=board if fixed else None,
     )
     episodes: list[Episode] = collector.drain()
     elapsed = time.perf_counter() - started
@@ -133,6 +193,8 @@ def main(argv: list[str] | None = None) -> int:
         "environment": environment(),
         "checkpoint": args.checkpoint,
         "iteration": loaded.iteration,
+        "behaviour": args.behaviour or "policy",
+        "board": "fixed" if fixed else "random",
         "games": len(episodes),
         "positions": int(predicted.size),
         "seconds": round(elapsed, 1),
@@ -153,7 +215,11 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload, indent=2))
         return 0
 
-    print(f"{payload['games']} games, {payload['positions']} positions, {payload['seconds']}s")
+    print(
+        f"played by {payload['behaviour']}, {payload['board']} board  |  "
+        f"{payload['games']} games, {payload['positions']} positions, "
+        f"{payload['seconds']}s"
+    )
     print(
         f"  target var {payload['target_variance']:.4f}"
         f"  residual var {payload['residual_variance']:.4f}"

@@ -81,6 +81,14 @@ def test_the_checkpoint_is_loaded_once_per_process_not_once_per_game(checkpoint)
     assert load.cache_info().hits == 1
 
 
+def test_loading_places_the_network_on_the_requested_device(checkpoint):
+    path, board = checkpoint
+    loaded = load(path, board.topology, "cpu")
+    assert {parameter.device.type for parameter in loaded.policy.net.parameters()} == {
+        "cpu"
+    }
+
+
 def test_the_offer_budget_comes_from_the_checkpoint_unless_overridden(checkpoint):
     path, board = checkpoint
     assert network_bot(path, board).max_offers == 3

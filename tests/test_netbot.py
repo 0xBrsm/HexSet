@@ -282,15 +282,6 @@ def test_a_search_over_a_learned_prior_plays_a_legal_action(checkpoint):
         apply(game, action)
 
 
-def test_a_simulation_budget_rides_on_the_entrant_name():
-    from catan.arena import entrant_from_name
-
-    plain = entrant_from_name("mcts:/tmp/x.pt")
-    assert (plain.kind, plain.weights, plain.simulations) == ("mcts", "/tmp/x.pt", 128)
-    sized = entrant_from_name("mcts:/tmp/x.pt@32")
-    assert (sized.name, sized.simulations) == ("mcts32", 32)
-
-
 def test_a_scored_run_records_the_networks_value_beside_someone_elses_play():
     """`benchmarks.value_head --behaviour` measures the head off-policy.
 

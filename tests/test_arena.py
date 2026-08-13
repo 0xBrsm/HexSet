@@ -136,6 +136,26 @@ def test_a_network_entrant_leaves_its_offer_budget_to_the_checkpoint():
     assert entrant_from_name("network:/tmp/latest.pt").max_offers is None
 
 
+def test_an_mcts_entrant_names_its_simulation_and_wave_budgets():
+    plain = entrant_from_name("mcts:/tmp/x.pt")
+    assert (plain.kind, plain.weights, plain.simulations, plain.wave) == (
+        "mcts",
+        "/tmp/x.pt",
+        128,
+        16,
+    )
+
+    sized = entrant_from_name("mcts:/tmp/x.pt@32")
+    assert (sized.name, sized.simulations, sized.wave) == ("mcts32", 32, 16)
+
+    batched = entrant_from_name("mcts:/tmp/x.pt@256w64")
+    assert (batched.name, batched.simulations, batched.wave) == (
+        "mcts256w64",
+        256,
+        64,
+    )
+
+
 def test_pooling_adds_up_the_seats_a_side_took():
     standings = (
         Standing("network#0", 30, 100),

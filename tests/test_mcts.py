@@ -187,15 +187,36 @@ def test_a_mover_reads_the_value_vector_with_its_own_stance():
     game = a_game()
     search = Search(Stub(), rng=random.Random(1))
     node = search._node(imagine(game, search.rng))
-    node.prior = np.full(len(node.options), 1.0 / len(node.options))
+    node.prior = np.zeros(len(node.options))
     node.value = (0.0, 0.0, 0.0, 0.0)
-    node.visits[:2] = 1.0
-    node.totals[0] = [1.0, -1.0, 0.0, 0.0]
-    node.totals[1] = [-1.0, 1.0, 0.0, 0.0]
     node.mover = 0
+    node.virtual[:2] = 1.0
+    search._backup([(node, 0)], [1.0, -1.0, 0.0, 0.0])
+    search._backup([(node, 1)], [-1.0, 1.0, 0.0, 0.0])
     assert search._select(node) == 0
+
+    node.visits[:2] = 0.0
+    node.totals[:2] = 0.0
+    node.ranked[:2] = 0.0
     node.mover = 1
+    node.virtual[:2] = 1.0
+    search._backup([(node, 0)], [1.0, -1.0, 0.0, 0.0])
+    search._backup([(node, 1)], [-1.0, 1.0, 0.0, 0.0])
     assert search._select(node) == 1
+
+
+@pytest.mark.parametrize("stance", ["own", "relative"])
+def test_cached_linear_edge_scores_match_the_canonical_stance(stance):
+    game = a_game()
+    search = Search(Stub(), stance=stance, rng=random.Random(1))
+    node = search._node(imagine(game, search.rng))
+    values = ([0.4, -0.2, 0.1, -0.3], [-0.1, 0.3, -0.4, 0.2])
+    for value in values:
+        node.virtual[0] += 1
+        search._backup([(node, 0)], value)
+
+    expected = sum(STANCES[stance](value, node.mover) for value in values)
+    assert node.ranked[0] == pytest.approx(expected)
 
 
 def test_a_prior_of_the_wrong_width_is_refused():

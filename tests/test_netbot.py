@@ -89,6 +89,20 @@ def test_loading_places_the_network_on_the_requested_device(checkpoint):
     }
 
 
+def test_loading_can_compile_the_network(checkpoint, monkeypatch):
+    path, board = checkpoint
+    calls = []
+
+    def compile_(net, *, mode):
+        calls.append((net, mode))
+        return net
+
+    monkeypatch.setattr(torch, "compile", compile_)
+    loaded = load(path, board.topology, "cpu", "default")
+
+    assert calls == [(loaded.policy.net, "default")]
+
+
 def test_the_offer_budget_comes_from_the_checkpoint_unless_overridden(checkpoint):
     path, board = checkpoint
     assert network_bot(path, board).max_offers == 3

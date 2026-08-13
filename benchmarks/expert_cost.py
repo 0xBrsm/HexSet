@@ -59,6 +59,7 @@ class Point:
     simulations: int
     wave: int
     lanes: int
+    compile_mode: str
     moves: int
     seconds: float
     ms_per_move: float
@@ -80,6 +81,7 @@ def measure(
     players: int,
     seed: int,
     device: str,
+    compile_mode: str,
     max_offers: int | None,
     actions_per_game: int,
 ) -> Point:
@@ -92,6 +94,7 @@ def measure(
         wave=wave,
         max_offers=max_offers,
         device=device,
+        compile_mode=compile_mode,
         rng=random.Random(seed),
     )
     timed = Timed(search.evaluator)
@@ -121,6 +124,7 @@ def measure(
         simulations=simulations,
         wave=wave,
         lanes=lanes,
+        compile_mode=compile_mode,
         moves=decisions,
         seconds=round(seconds, 3),
         ms_per_move=round(per_move * 1e3, 3),
@@ -143,6 +147,13 @@ def main() -> int:
     parser.add_argument("--players", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cpu", help="cpu or cuda")
+    parser.add_argument(
+        "--compile",
+        dest="compile_mode",
+        default="none",
+        choices=["none", "default", "reduce-overhead", "max-autotune"],
+        help="torch.compile mode for checkpoint inference",
+    )
     parser.add_argument(
         "--max-offers",
         type=int,
@@ -168,6 +179,7 @@ def main() -> int:
             players=args.players,
             seed=args.seed,
             device=args.device,
+            compile_mode=args.compile_mode,
             max_offers=args.max_offers,
             actions_per_game=args.actions_per_game,
         )
@@ -189,7 +201,8 @@ def main() -> int:
     print(f"commit {env['commit']}  dirty {env['dirty']}  {env['machine']}")
     print(
         f"{args.checkpoint} on {args.device}, wave {args.wave}, "
-        f"{args.lanes} lanes, {args.moves * args.lanes} moves"
+        f"{args.lanes} lanes, compile {args.compile_mode}, "
+        f"{args.moves * args.lanes} moves"
     )
     print(f"games/hour extrapolated through {args.actions_per_game} actions a game")
     print(

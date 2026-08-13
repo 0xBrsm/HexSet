@@ -8,7 +8,7 @@ import pytest
 torch = pytest.importorskip("torch", reason="PyTorch runs on the training box only")
 
 from catan import train  # noqa: E402
-from catan.selfplay import Collector, RandomPolicy, Request  # noqa: E402
+from catan.selfplay import Collector, RandomPolicy  # noqa: E402
 
 
 TINY = [
@@ -106,8 +106,6 @@ def test_a_resumed_run_plays_new_games_rather_than_the_ones_it_learned_from(tmp_
         first_game=reached,
     )
     played = {e.index for e in resumed.collect(2)}
-    seen = {lane.index for lane in first._lanes} | set(range(reached))
-
     assert played, "the resumed collector finished nothing"
     assert not (played & set(range(reached))), f"replayed {played & set(range(reached))}"
     assert min(played) >= reached

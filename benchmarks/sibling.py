@@ -207,8 +207,6 @@ def main(argv: list[str] | None = None) -> int:
         LeafEvaluator(
             policy=policy,
             space=loaded.space,
-            players=loaded.players,
-            max_offers=loaded.max_offers,
         ),
         max_offers=loaded.max_offers,
         rate=args.probe,

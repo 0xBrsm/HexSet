@@ -113,6 +113,13 @@ def test_imagining_hides_the_deck_it_copies():
     assert copy.state.deck != game.state.deck
 
 
+def test_hidden_deck_randomization_can_be_deferred():
+    game = a_game()
+    copy = imagine(game, random.Random(4), randomize_deck=False)
+    assert copy.state.deck == game.state.deck
+    assert copy.state.deck is not game.state.deck
+
+
 def test_to_move_is_the_discarding_player_not_the_roller():
     game = a_game()
     while game.phase is not Phase.ROLL:

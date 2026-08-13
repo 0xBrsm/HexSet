@@ -5,7 +5,7 @@ import random
 import numpy as np
 import pytest
 
-from catan.actions import legal_actions
+from catan.actions import Action, ActionType, legal_actions
 from catan.board.board import random_base_board
 from catan.game import Phase, imagine, start
 from catan.bots import STANCES
@@ -74,6 +74,34 @@ def test_independent_roots_share_evaluator_calls_not_tree_statistics():
     assert len(results) == 3
     assert all(visits.sum() == 24 for _, _, visits in results)
     assert len({id(root) for root, _, _ in results}) == 3
+
+
+def test_search_randomizes_the_hidden_deck_only_when_buying_a_card():
+    class CountingRandom(random.Random):
+        def __init__(self):
+            super().__init__(1)
+            self.shuffles = 0
+
+        def shuffle(self, values):
+            self.shuffles += 1
+            super().shuffle(values)
+
+    rng = CountingRandom()
+    search = Search(Stub(), simulations=4, wave=2, rng=rng)
+    game = a_game()
+    search.run(game)
+    assert rng.shuffles == 0
+
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    game.state.hands[0] = [3] * len(game.state.hands[0])
+    node = search._node(imagine(game, random.Random(2), randomize_deck=False))
+    node.options = (Action(ActionType.BUY_DEV_CARD),)
+    before = len(node.game.state.deck)
+    child = search._step(node, 0, None)
+
+    assert rng.shuffles == 1
+    assert len(child.game.state.deck) == before - 1
 
 
 def test_a_wave_is_never_larger_than_the_budget_left():

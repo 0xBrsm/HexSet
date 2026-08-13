@@ -23,7 +23,9 @@ printed alongside so the extrapolation can be checked rather than trusted.
 from __future__ import annotations
 
 import argparse
+import cProfile
 import json
+import pstats
 import random
 import sys
 import time
@@ -86,6 +88,7 @@ def measure(
     inference_batch: int | None,
     max_offers: int | None,
     actions_per_game: int,
+    profile: bool = False,
 ) -> Point:
     rng = random.Random(seed)
     board = random_base_board(rng)
@@ -116,9 +119,17 @@ def measure(
     collector.tick()
     timed.seconds = timed.leaves = timed.waves = 0
 
+    profiler = cProfile.Profile() if profile else None
+    if profiler is not None:
+        profiler.enable()
     start = time.perf_counter()
     collector.run(moves)
     seconds = time.perf_counter() - start
+    if profiler is not None:
+        profiler.disable()
+        pstats.Stats(profiler, stream=sys.stderr).strip_dirs().sort_stats(
+            "tottime"
+        ).print_stats(30)
 
     engine = seconds - timed.seconds
     decisions = moves * lanes
@@ -177,6 +188,11 @@ def main() -> int:
         help="what games_per_hour extrapolates through; 950 at an offer budget of 3",
     )
     parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="print the measured region's top self-time entries to stderr",
+    )
     args = parser.parse_args()
 
     points = [
@@ -193,6 +209,7 @@ def main() -> int:
             inference_batch=args.inference_batch,
             max_offers=args.max_offers,
             actions_per_game=args.actions_per_game,
+            profile=args.profile,
         )
         for n in args.simulations
     ]

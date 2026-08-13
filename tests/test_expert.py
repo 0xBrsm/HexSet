@@ -41,6 +41,14 @@ def test_a_search_policy_answers_one_choice_per_request():
     assert collector.steps == 1
 
 
+def test_searches_from_several_lanes_share_one_root_evaluation():
+    stub = Stub()
+    collector = Collector(a_policy(stub), lanes=4, seed=7, players=4)
+    collector.tick()
+    assert collector.steps == 4
+    assert len(stub.waves[0]) == 4
+
+
 def test_the_visit_counts_ride_along_on_the_transition():
     stub = Stub()
     collector = a_collector(a_policy(stub, simulations=24))

@@ -64,6 +64,18 @@ def test_every_simulation_lands_in_the_root_visit_counts():
     assert visits.sum() == 32
 
 
+def test_independent_roots_share_evaluator_calls_not_tree_statistics():
+    stub = Stub()
+    search = Search(stub, simulations=24, wave=4, rng=random.Random(1))
+    results = search.run_many([a_game(seed) for seed in range(3)])
+
+    # All roots are the first network batch; serial `run` would make three.
+    assert len(stub.waves[0]) == 3
+    assert len(results) == 3
+    assert all(visits.sum() == 24 for _, _, visits in results)
+    assert len({id(root) for root, _, _ in results}) == 3
+
+
 def test_a_wave_is_never_larger_than_the_budget_left():
     stub = Stub()
     search = Search(stub, simulations=20, wave=8, rng=random.Random(1))

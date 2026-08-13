@@ -58,6 +58,7 @@ class Timed:
 class Point:
     simulations: int
     wave: int
+    lanes: int
     moves: int
     seconds: float
     ms_per_move: float
@@ -74,6 +75,7 @@ def measure(
     *,
     simulations: int,
     wave: int,
+    lanes: int,
     moves: int,
     players: int,
     seed: int,
@@ -97,7 +99,7 @@ def measure(
     policy = SearchPolicy(search, rng=random.Random(seed))
     collector = Collector(
         policy,
-        lanes=1,
+        lanes=lanes,
         seed=seed,
         players=players,
         board=board,
@@ -113,18 +115,20 @@ def measure(
     seconds = time.perf_counter() - start
 
     engine = seconds - timed.seconds
-    per_move = seconds / moves
+    decisions = moves * lanes
+    per_move = seconds / decisions
     return Point(
         simulations=simulations,
         wave=wave,
-        moves=moves,
+        lanes=lanes,
+        moves=decisions,
         seconds=round(seconds, 3),
         ms_per_move=round(per_move * 1e3, 3),
         network_share=round(timed.seconds / seconds, 4),
         us_per_leaf_network=round(timed.seconds / max(timed.leaves, 1) * 1e6, 1),
         us_per_leaf_engine=round(engine / max(timed.leaves, 1) * 1e6, 1),
-        leaves_per_move=round(timed.leaves / moves, 2),
-        waves_per_move=round(timed.waves / moves, 2),
+        leaves_per_move=round(timed.leaves / decisions, 2),
+        waves_per_move=round(timed.waves / decisions, 2),
         games_per_hour=round(3600.0 / (per_move * actions_per_game), 2),
     )
 
@@ -134,6 +138,7 @@ def main() -> int:
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--simulations", type=int, nargs="+", default=[16, 64, 256])
     parser.add_argument("--wave", type=int, default=16)
+    parser.add_argument("--lanes", type=int, default=1)
     parser.add_argument("--moves", type=int, default=200)
     parser.add_argument("--players", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)
@@ -158,6 +163,7 @@ def main() -> int:
             args.checkpoint,
             simulations=n,
             wave=args.wave,
+            lanes=args.lanes,
             moves=args.moves,
             players=args.players,
             seed=args.seed,
@@ -181,7 +187,10 @@ def main() -> int:
 
     env = payload["environment"]
     print(f"commit {env['commit']}  dirty {env['dirty']}  {env['machine']}")
-    print(f"{args.checkpoint} on {args.device}, wave {args.wave}, {args.moves} moves")
+    print(
+        f"{args.checkpoint} on {args.device}, wave {args.wave}, "
+        f"{args.lanes} lanes, {args.moves * args.lanes} moves"
+    )
     print(f"games/hour extrapolated through {args.actions_per_game} actions a game")
     print(
         f"{'sims':>5} {'ms/move':>9} {'net %':>7} {'net us/leaf':>12} "

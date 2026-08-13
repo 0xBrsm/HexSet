@@ -60,6 +60,7 @@ class Point:
     wave: int
     lanes: int
     compile_mode: str
+    inference_batch: int | None
     moves: int
     seconds: float
     ms_per_move: float
@@ -82,6 +83,7 @@ def measure(
     seed: int,
     device: str,
     compile_mode: str,
+    inference_batch: int | None,
     max_offers: int | None,
     actions_per_game: int,
 ) -> Point:
@@ -95,6 +97,7 @@ def measure(
         max_offers=max_offers,
         device=device,
         compile_mode=compile_mode,
+        inference_batch=inference_batch,
         rng=random.Random(seed),
     )
     timed = Timed(search.evaluator)
@@ -125,6 +128,7 @@ def measure(
         wave=wave,
         lanes=lanes,
         compile_mode=compile_mode,
+        inference_batch=inference_batch,
         moves=decisions,
         seconds=round(seconds, 3),
         ms_per_move=round(per_move * 1e3, 3),
@@ -155,6 +159,12 @@ def main() -> int:
         help="torch.compile mode for checkpoint inference",
     )
     parser.add_argument(
+        "--inference-batch",
+        type=int,
+        default=None,
+        help="pad leaf evaluations to this fixed batch size",
+    )
+    parser.add_argument(
         "--max-offers",
         type=int,
         default=None,
@@ -180,6 +190,7 @@ def main() -> int:
             seed=args.seed,
             device=args.device,
             compile_mode=args.compile_mode,
+            inference_batch=args.inference_batch,
             max_offers=args.max_offers,
             actions_per_game=args.actions_per_game,
         )
@@ -202,6 +213,7 @@ def main() -> int:
     print(
         f"{args.checkpoint} on {args.device}, wave {args.wave}, "
         f"{args.lanes} lanes, compile {args.compile_mode}, "
+        f"inference batch {args.inference_batch or 'dynamic'}, "
         f"{args.moves * args.lanes} moves"
     )
     print(f"games/hour extrapolated through {args.actions_per_game} actions a game")

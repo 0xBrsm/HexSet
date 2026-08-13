@@ -262,6 +262,30 @@ def test_the_leaf_evaluator_hands_a_whole_wave_to_one_forward(checkpoint):
         assert len(value) == 4
 
 
+def test_leaf_evaluation_can_pad_to_one_compiled_shape(checkpoint):
+    from catan.actions import legal_actions
+    from catan.mcts import Leaf
+    from catan.netbot import searcher
+
+    path, board = checkpoint
+    search = searcher(path, board, inference_batch=8, rng=random.Random(0))
+    game = start(board, 4, random.Random(5))
+    leaves = [Leaf(game, to_move(game), tuple(legal_actions(game)))] * 3
+    policy = search.evaluator.policy
+    score = policy.score
+    seen = []
+
+    def recording_score(observations, masks, pairs):
+        seen.append(len(observations))
+        return score(observations, masks, pairs)
+
+    policy.score = recording_score
+    scored = search.evaluator.evaluate(leaves)
+
+    assert seen == [8]
+    assert len(scored) == 3
+
+
 def test_the_prior_covers_every_offer_rather_than_one_arbitrary_one(checkpoint):
     """`PROPOSE_TRADE` is one slot and many options. If the slot's mass were not
     split by the offer heads, one offer would carry the policy's whole appetite

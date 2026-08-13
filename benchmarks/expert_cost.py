@@ -89,6 +89,7 @@ def measure(
     max_offers: int | None,
     actions_per_game: int,
     profile: bool = False,
+    barrier=None,
 ) -> Point:
     rng = random.Random(seed)
     board = random_base_board(rng)
@@ -118,6 +119,8 @@ def measure(
     # One move first, so a compiled forward's warm-up is not billed to the run.
     collector.tick()
     timed.seconds = timed.leaves = timed.waves = 0
+    if barrier is not None:
+        barrier.wait()
 
     profiler = cProfile.Profile() if profile else None
     if profiler is not None:

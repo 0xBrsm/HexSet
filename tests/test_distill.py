@@ -224,9 +224,54 @@ def test_distilling_a_fixed_batch_moves_the_policy_toward_the_search():
     assert last.agreement > first.agreement
 
 
+def test_a_bootstrapped_target_reads_the_estimate_that_many_decisions_later():
+    policy, space, layout = a_setup()
+    episodes = searched_episodes(policy, space, games=2)
+    horizon = 3
+    batch = assemble(
+        episodes, space, layout, DistillConfig(value_horizon=horizon)
+    )
+
+    row = 0
+    bootstrapped = 0
+    for episode in episodes:
+        payoffs = reward(episode.outcome)
+        for seat, trajectory in enumerate(episode.trajectories):
+            if not trajectory:
+                continue
+            terminal = torch.tensor(rotate(payoffs, seat), dtype=torch.float32)
+            for index in range(len(trajectory)):
+                ahead = index + horizon
+                estimate = (
+                    trajectory[ahead].value if ahead < len(trajectory) else ()
+                )
+                if estimate:
+                    # Rotated, because the search stores board order and the
+                    # target is in the seat's own frame.
+                    expected = torch.tensor(
+                        rotate(estimate, seat), dtype=torch.float32
+                    )
+                    bootstrapped += 1
+                else:
+                    expected = terminal
+                assert torch.allclose(batch.value_target[row], expected)
+                row += 1
+    assert row == len(batch)
+    assert bootstrapped > 0, "no transition actually bootstrapped"
+
+
+def test_a_bootstrapped_target_is_not_the_terminal_one():
+    """Otherwise the test above would pass on a horizon that did nothing."""
+    policy, space, layout = a_setup()
+    episodes = searched_episodes(policy, space, games=2)
+    terminal = assemble(episodes, space, layout, DistillConfig())
+    near = assemble(episodes, space, layout, DistillConfig(value_horizon=3))
+    assert not torch.allclose(terminal.value_target, near.value_target)
+
+
 def test_the_value_head_is_trained_on_the_terminal_outcome():
-    # Not on the search's backed-up root value. Deliberate, and argued in the
-    # module docstring: bootstrapping is a separate experiment.
+    # The default, and what AlphaZero does. `--value-horizon` bootstraps
+    # instead; `benchmarks.floor` is the argument for doing so here.
     policy, space, layout = a_setup()
     episodes = searched_episodes(policy, space, games=2)
     batch = assemble(episodes, space, layout, DistillConfig())

@@ -42,10 +42,44 @@ perfectly and which teaches it nothing. That degeneracy and a genuine variance
 reduction look identical in a training curve — both show falling value loss and
 rising explained variance — and they are told apart precisely here.
 
-`mean_gap` is the second guard: the average of `E[V(s')|s] - E[terminal|s]`
+`mean_gap` is a weak second guard: the average of `E[V(s')|s] - E[terminal|s]`
 across positions. The tower property says it should be near zero, so a large
 value means the head's bias is being fed back into its own target rather than
-cancelled by it.
+cancelled by it. It averages *signed* gaps, so it detects overall bias and
+nothing else — it was originally the only guard here and it was not enough.
+
+## The statistic that actually decides it
+
+`teacher_ratio`, and it is the number to read before `variance_ratio`.
+
+Training toward a label only teaches the head something if the label is closer
+to the truth than what the head already says. So compare, per position, two
+errors against the same target `E[terminal | s]`:
+
+    rms_head_error   how far the head's own prediction V(s) is from the truth
+    rms_label_error  how far the bootstrapped label E[V(s')|s] is from the truth
+
+`teacher_ratio` is the second over the first. **Below 1 the label is a better
+teacher than the head's current opinion, and there is something to learn. At or
+above 1 the horizon is decoration**: the head is being trained toward a
+restatement of what it already believes, which is the degenerate case
+`variance_ratio` cannot see. A horizon of 0 would score a ratio of exactly 1
+with a variance ratio of 0 — maximally "clean" and maximally useless.
+
+`signal_correlation` is the same idea in correlation form, kept because it is
+scale-free and so survives a head whose values are systematically compressed.
+
+**The two means are computed from disjoint halves of the rollouts.** The label
+and the terminal return of the *same* rollout share that rollout's dice, so
+averaging both over one set of games correlates their errors and flatters the
+label. Even-indexed rollouts estimate the label, odd-indexed estimate the
+truth, which costs a factor of sqrt(2) in the precision of each and buys an
+honest comparison.
+
+What remains, and is not corrected for: `E[terminal | s]` is itself estimated
+from finitely many rollouts, so both errors are inflated by the same estimation
+noise and the ratio is pulled toward 1. `teacher_ratio` is therefore a
+conservative reading — a value below 1 is more meaningful than a value near it.
 
 ## Two substitutions, both deliberate
 
@@ -111,6 +145,35 @@ def labels(episode, seat: int, horizon: int) -> tuple[float, float, bool]:
         if estimate:
             return float(estimate[0]), terminal, True
     return terminal, terminal, False
+
+
+def teacher(rows: list[dict]) -> dict:
+    """Is the label closer to the truth than the head's own prediction?
+
+    The condition under which bootstrapping teaches anything, reduced to one
+    ratio. See the module docstring for why this and not `variance_ratio`.
+    """
+    head = np.asarray([r["head"] for r in rows])
+    label = np.asarray([r["label_mean"] for r in rows])
+    truth = np.asarray([r["truth_mean"] for r in rows])
+
+    head_error = float(np.sqrt(np.mean((head - truth) ** 2)))
+    label_error = float(np.sqrt(np.mean((label - truth) ** 2)))
+    return {
+        "rms_head_error": round(head_error, 5),
+        "rms_label_error": round(label_error, 5),
+        "teacher_ratio": round(label_error / max(head_error, 1e-12), 4),
+        "signal_correlation": round(_correlate(label, truth), 4),
+        "head_correlation": round(_correlate(head, truth), 4),
+        "echo_correlation": round(_correlate(label, head), 4),
+    }
+
+
+def _correlate(a: np.ndarray, b: np.ndarray) -> float:
+    """Pearson, returning 0 when either side is constant rather than nan."""
+    if a.std() < 1e-12 or b.std() < 1e-12:
+        return 0.0
+    return float(np.corrcoef(a, b)[0, 1])
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -189,6 +252,12 @@ def main(argv: list[str] | None = None) -> int:
                 "terminal_variance": float(finals.var()),
                 "bootstrap_variance": float(booted.var()),
                 "gap": float(booted.mean() - finals.mean()),
+                "head": float(snapshot.prediction),
+                # Disjoint halves: the label and the terminal return of one
+                # rollout share that rollout's dice, so averaging both over the
+                # same games would correlate their errors and flatter the label.
+                "label_mean": float(booted[0::2].mean()),
+                "truth_mean": float(finals[1::2].mean()),
             }
         )
     elapsed = time.perf_counter() - started
@@ -214,6 +283,7 @@ def main(argv: list[str] | None = None) -> int:
         "sigma_ratio": round(float(np.sqrt(ratio)), 4),
         "sample_factor": round(1.0 / max(ratio, 1e-12), 2),
         "mean_gap": round(float(gaps.mean()), 4),
+        **teacher(rows),
     }
 
     if args.json:
@@ -231,6 +301,15 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  sigma ratio           {payload['sigma_ratio']:.4f}")
     print(f"  data requirement      {payload['sample_factor']:.2f}x lower")
     print(f"  mean gap              {payload['mean_gap']:+.4f}")
+    print(f"  rms error, head       {payload['rms_head_error']:.5f}")
+    print(f"  rms error, label      {payload['rms_label_error']:.5f}")
+    print(
+        f"  teacher ratio         {payload['teacher_ratio']:.4f}"
+        f"  ({'teaches' if payload['teacher_ratio'] < 1 else 'decoration'})"
+    )
+    print(f"  corr label/truth      {payload['signal_correlation']:+.4f}")
+    print(f"  corr head/truth       {payload['head_correlation']:+.4f}")
+    print(f"  corr label/head       {payload['echo_correlation']:+.4f}")
     return 0
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from benchmarks.horizon import labels
+from benchmarks.horizon import labels, teacher
 from catan.rewards import reward
 from catan.selfplay import Outcome
 
@@ -58,6 +58,49 @@ def test_a_forced_move_at_the_horizon_carries_no_estimate_and_falls_back():
     boot, terminal, reached = labels(an_episode(trajectory), seat=1, horizon=8)
     assert not reached
     assert boot == terminal
+
+
+def a_row(head, label_mean, truth_mean):
+    return {"head": head, "label_mean": label_mean, "truth_mean": truth_mean}
+
+
+def test_a_label_that_only_echoes_the_head_is_decoration():
+    """The degeneracy `variance_ratio` cannot see, which is why this exists.
+
+    The label equals the head's own prediction at every position, so training
+    toward it is a fixed point. The ratio must be exactly 1 however small the
+    label's variance is.
+    """
+    rows = [a_row(h, h, t) for h, t in [(0.1, 0.4), (-0.2, 0.0), (0.5, 0.3)]]
+    out = teacher(rows)
+    assert out["teacher_ratio"] == pytest.approx(1.0)
+    assert out["echo_correlation"] == pytest.approx(1.0)
+
+
+def test_a_label_closer_to_the_truth_than_the_head_scores_below_one():
+    rows = [
+        a_row(head=0.0, label_mean=0.35, truth_mean=0.4),
+        a_row(head=0.0, label_mean=-0.05, truth_mean=0.0),
+        a_row(head=0.0, label_mean=0.25, truth_mean=0.3),
+    ]
+    out = teacher(rows)
+    assert out["teacher_ratio"] < 1.0
+    assert out["rms_label_error"] < out["rms_head_error"]
+
+
+def test_a_label_further_from_the_truth_scores_above_one():
+    rows = [
+        a_row(head=0.4, label_mean=-0.9, truth_mean=0.4),
+        a_row(head=0.0, label_mean=0.9, truth_mean=0.0),
+    ]
+    assert teacher(rows)["teacher_ratio"] > 1.0
+
+
+def test_a_constant_column_correlates_to_zero_rather_than_nan():
+    # A horizon short enough to make every label identical would otherwise put
+    # a nan in the report, which reads as a crash rather than as the finding.
+    rows = [a_row(0.2, 0.5, 0.1), a_row(0.3, 0.5, 0.4)]
+    assert teacher(rows)["signal_correlation"] == 0.0
 
 
 def test_a_horizon_of_zero_reads_the_position_itself():

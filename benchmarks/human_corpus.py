@@ -56,6 +56,8 @@ def summarise(raw: dict[str, Any]) -> dict[str, Any] | None:
     think_by_turn: list[tuple[int, float]] = []
     trajectory: list[list[int]] = []
     last_recorded = -1
+    # Per turn: decisions, seconds spent, decisions touching a trade.
+    profile: dict[int, list[float]] = defaultdict(lambda: [0.0, 0.0, 0.0])
 
     for event in history.get("events") or ():
         change = event.get("stateChange") or {}
@@ -63,10 +65,16 @@ def summarise(raw: dict[str, Any]) -> dict[str, Any] | None:
         if "completedTurns" in current:
             turn = current["completedTurns"]
 
+        slot = profile[min(turn, 120)]
+        slot[0] += 1
+        if "tradeState" in change:
+            slot[2] += 1
+
         delta = (event.get("input") or {}).get("deltaS")
         if isinstance(delta, (int, float)) and delta >= 0:
             think.append(float(delta))
             think_by_turn.append((turn, float(delta)))
+            slot[1] += float(delta)
 
         touched = False
         for pid, state in (change.get("playerStates") or {}).items():
@@ -101,6 +109,10 @@ def summarise(raw: dict[str, Any]) -> dict[str, Any] | None:
         "observed_vp": {pid: vp_total(vp.get(pid, {})) for pid in seats},
         "rank": {pid: players[pid].get("rank") for pid in seats},
         "trajectory": trajectory,
+        "profile": [
+            [turn, int(slot[0]), round(slot[1], 1), int(slot[2])]
+            for turn, slot in sorted(profile.items())
+        ],
         "think": {
             "n": len(think),
             "sum": round(sum(think), 1),

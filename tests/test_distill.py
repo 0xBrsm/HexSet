@@ -72,7 +72,8 @@ def test_offers_sharing_the_trade_slot_sum_into_it_and_split_within_it():
     # the whole reason `Target` keeps its options.
     policy, space, layout = a_setup()
     episodes = searched_episodes(policy, space, games=3)
-    seen = False
+    trade_slot = space.offsets[ActionType.PROPOSE_TRADE]
+    exercised = 0
     for episode in episodes:
         for trajectory in episode.trajectories:
             for transition in trajectory:
@@ -84,19 +85,22 @@ def test_offers_sharing_the_trade_slot_sum_into_it_and_split_within_it():
                 ]
                 if len(proposals) < 2:
                     continue
-                seen = True
                 slots, offers, mass = project(target, space, 1.0)
-                assert slots[space.offsets[ActionType.PROPOSE_TRADE]] == pytest.approx(
-                    mass, abs=1e-6
-                )
+                assert slots[trade_slot] == pytest.approx(mass, abs=1e-6)
+
+                if mass == 0:
+                    # Proposals were legal and the search visited none of them.
+                    # The offer row stays empty and the mass gates it off, which
+                    # is the documented reading rather than a uniform fallback.
+                    assert not offers.any()
+                    continue
+
+                exercised += 1
                 assert offers.sum() == pytest.approx(1.0, abs=1e-6)
-                # Only the ones the search actually visited. An unvisited option
-                # carries no weight, and under a small simulation budget most
-                # proposals are unvisited.
                 for option, visit in proposals:
                     if visit > 0:
                         assert offers[pair_index(option.give, option.want)] > 0
-    assert seen, "no position offered two proposals; the case went untested"
+    assert exercised, "no position split visits across two proposals; untested"
 
 
 def test_a_position_that_cannot_propose_carries_no_offer_mass():
@@ -161,6 +165,7 @@ def test_the_factored_loss_equals_the_cross_entropy_over_options():
     slots, offers, _ = policy.distributions(batch.buffer, batch.mask, batch.pair)
     slot_loss, offer_loss = losses(slots, offers, batch, rows)
     factored = float((slot_loss + offer_loss).detach())
+    slots, offers = slots.detach(), offers.detach()
 
     trade_slot = space.offsets[ActionType.PROPOSE_TRADE]
     direct = 0.0

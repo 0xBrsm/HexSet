@@ -20,6 +20,7 @@ from catan.expert import SearchPolicy  # noqa: E402
 from catan.game import start  # noqa: E402
 from catan.mcts import Search, visit_policy  # noqa: E402
 from catan.model import CatanNet, ModelConfig, packing  # noqa: E402
+from catan.netbot import LeafEvaluator  # noqa: E402
 from catan.policy import NetworkPolicy, pair_index  # noqa: E402
 from catan.ppo import rotate  # noqa: E402
 from catan.rewards import reward  # noqa: E402
@@ -32,21 +33,26 @@ def a_setup(players: int = 4, seed: int = 0):
     game = start(board, players, rng)
     graph = static_graph(board.topology)
     space = space_for(game)
+    layout = packing(graph, players)
     torch.manual_seed(seed)
     net = CatanNet(space, graph, players, ModelConfig(width=16, rounds=1))
-    policy = NetworkPolicy(net, space, packing(graph, players))
-    return policy, space, packing(graph, players)
+    return NetworkPolicy(net, space, layout), space, layout
 
 
-def searched_episodes(policy, games: int = 2, seed: int = 0):
+def searched_episodes(policy, space, games: int = 2, seed: int = 0):
     """Games played by a search over the network, so every transition has a target."""
-    search = Search(policy, simulations=8, wave=4, rng=random.Random(seed))
+    search = Search(
+        LeafEvaluator(policy=policy, space=space),
+        simulations=8,
+        wave=4,
+        rng=random.Random(seed),
+    )
     expert = SearchPolicy(search, rng=random.Random(seed))
     return Collector(expert, lanes=2, seed=seed, action_cap=3000).collect(games)
 
 
 def a_batch(policy, space, layout, config=None, games: int = 2):
-    episodes = searched_episodes(policy, games=games)
+    episodes = searched_episodes(policy, space, games=games)
     return assemble(episodes, space, layout, config or DistillConfig())
 
 
@@ -65,7 +71,7 @@ def test_offers_sharing_the_trade_slot_sum_into_it_and_split_within_it():
     # carry both their visits and the offer row must carry their ratio. This is
     # the whole reason `Target` keeps its options.
     policy, space, layout = a_setup()
-    episodes = searched_episodes(policy, games=3)
+    episodes = searched_episodes(policy, space, games=3)
     seen = False
     for episode in episodes:
         for trajectory in episode.trajectories:
@@ -121,7 +127,7 @@ def test_the_factored_loss_equals_the_cross_entropy_over_options():
     cross-entropies must equal the plain cross-entropy over concrete options.
     """
     policy, space, layout = a_setup()
-    episodes = searched_episodes(policy, games=3)
+    episodes = searched_episodes(policy, space, games=3)
     config = DistillConfig()
     batch = assemble(episodes, space, layout, config)
 
@@ -198,7 +204,7 @@ def test_the_value_head_is_trained_on_the_terminal_outcome():
     # Not on the search's backed-up root value. Deliberate, and argued in the
     # module docstring: bootstrapping is a separate experiment.
     policy, space, layout = a_setup()
-    episodes = searched_episodes(policy, games=2)
+    episodes = searched_episodes(policy, space, games=2)
     batch = assemble(episodes, space, layout, DistillConfig())
 
     row = 0

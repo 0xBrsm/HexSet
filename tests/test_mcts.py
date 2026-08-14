@@ -173,6 +173,35 @@ def test_the_prior_decides_what_gets_tried_first():
     assert int(np.argmax(visits)) == wanted % len(options)
 
 
+def test_root_noise_is_off_unless_asked_for():
+    game = a_game()
+    stub = Stub(favour=0)
+    search = Search(stub, simulations=8, wave=4, rng=random.Random(1))
+    root, _, _ = search.run(game)
+    assert root.prior is not None
+    assert root.prior.max() == pytest.approx(0.99)
+
+
+def test_root_noise_moves_mass_off_the_priors_favourite():
+    game = a_game()
+    stub = Stub(favour=0)
+    search = Search(
+        stub,
+        simulations=8,
+        wave=4,
+        root_noise=0.3,
+        noise_fraction=0.25,
+        rng=random.Random(1),
+    )
+    root, _, _ = search.run(game)
+    assert root.prior is not None
+    assert root.prior.sum() == pytest.approx(1.0)
+    assert root.prior[0] < 0.99
+    # Only the root is perturbed; a child expanded mid-search keeps its prior.
+    child = next(c for c in root.children if isinstance(c, Node) and c.expanded)
+    assert child.prior.max() == pytest.approx(0.99)
+
+
 def test_virtual_loss_spreads_one_wave_over_several_edges():
     game = a_game()
     stub = Stub()

@@ -58,12 +58,19 @@ def summarise(raw: dict[str, Any]) -> dict[str, Any] | None:
     last_recorded = -1
     # Per turn: decisions, seconds spent, decisions touching a trade.
     profile: dict[int, list[float]] = defaultdict(lambda: [0.0, 0.0, 0.0])
+    # Corners claimed by a settlement, in order; the first two per seat are setup.
+    claims: list[list[int]] = []
 
     for event in history.get("events") or ():
         change = event.get("stateChange") or {}
         current = change.get("currentState") or {}
         if "completedTurns" in current:
             turn = current["completedTurns"]
+
+        corners = (change.get("mapState") or {}).get("tileCornerStates") or {}
+        for corner, built in corners.items():
+            if built.get("buildingType") == 1 and "owner" in built:
+                claims.append([built["owner"], int(corner)])
 
         slot = profile[min(turn, 120)]
         slot[0] += 1
@@ -90,6 +97,9 @@ def summarise(raw: dict[str, Any]) -> dict[str, Any] | None:
 
     activity = end.get("activityStats") or {}
     resources = end.get("resourceStats") or {}
+    board = initial.get("mapState") or {}
+    hexes = board.get("tileHexStates") or {}
+    corners = board.get("tileCornerStates") or {}
 
     return {
         "seats": seats,
@@ -108,6 +118,16 @@ def summarise(raw: dict[str, Any]) -> dict[str, Any] | None:
         "final_vp": {pid: vp_total(players[pid].get("victoryPoints") or {}) for pid in seats},
         "observed_vp": {pid: vp_total(vp.get(pid, {})) for pid in seats},
         "rank": {pid: players[pid].get("rank") for pid in seats},
+        "play_order": root.get("playOrder"),
+        "setup": claims[: 2 * len(seats)],
+        "hexes": [
+            [h.get("x"), h.get("y"), h.get("type"), h.get("diceNumber")]
+            for _, h in sorted(hexes.items(), key=lambda kv: int(kv[0]))
+        ],
+        "corners": [
+            [c.get("x"), c.get("y"), c.get("z")]
+            for _, c in sorted(corners.items(), key=lambda kv: int(kv[0]))
+        ],
         "trajectory": trajectory,
         "profile": [
             [turn, int(slot[0]), round(slot[1], 1), int(slot[2])]

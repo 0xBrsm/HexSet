@@ -90,8 +90,12 @@ def test_offers_sharing_the_trade_slot_sum_into_it_and_split_within_it():
                     mass, abs=1e-6
                 )
                 assert offers.sum() == pytest.approx(1.0, abs=1e-6)
-                for option, _ in proposals:
-                    assert offers[pair_index(option.give, option.want)] > 0
+                # Only the ones the search actually visited. An unvisited option
+                # carries no weight, and under a small simulation budget most
+                # proposals are unvisited.
+                for option, visit in proposals:
+                    if visit > 0:
+                        assert offers[pair_index(option.give, option.want)] > 0
     assert seen, "no position offered two proposals; the case went untested"
 
 
@@ -105,14 +109,29 @@ def test_a_position_that_cannot_propose_carries_no_offer_mass():
     assert torch.all(batch.offer_target[quiet] == 0)
 
 
-def test_temperature_sharpens_the_projection_rather_than_reshaping_it():
-    # Temperature acts over options, before they are aggregated onto slots, so
-    # a colder target must concentrate on the same slot the warm one favoured.
+def test_cooling_drains_the_trade_slot_because_its_mass_is_a_sum():
+    """Temperature acts on options, so aggregate slots lose out as it falls.
+
+    This is the consequence of the ordering the module argues for, and it is
+    not a wart. The trade slot's mass is a sum over dozens of individually
+    unpopular offers, while a settlement slot is one option. Sharpening before
+    aggregation therefore drains the slot that was only ever winning on
+    aggregate — which is the honest reading of what the search preferred, and
+    the opposite of what sharpening the slot row afterwards would have said.
+    """
     policy, space, layout = a_setup()
     warm = a_batch(policy, space, layout, DistillConfig(temperature=1.0))
     cold = a_batch(policy, space, layout, DistillConfig(temperature=0.25))
-    assert torch.equal(warm.slot_target.argmax(-1), cold.slot_target.argmax(-1))
+    trade_slot = space.offsets[ActionType.PROPOSE_TRADE]
+
     assert cold.slot_target.max(-1).values.mean() > warm.slot_target.max(-1).values.mean()
+
+    spread = warm.slot_target[:, trade_slot] > 0
+    assert spread.any()
+    assert (
+        cold.slot_target[spread, trade_slot].mean()
+        < warm.slot_target[spread, trade_slot].mean()
+    )
 
 
 # --- the loss -------------------------------------------------------------
@@ -141,7 +160,7 @@ def test_the_factored_loss_equals_the_cross_entropy_over_options():
     rows = torch.arange(len(batch))
     slots, offers, _ = policy.distributions(batch.buffer, batch.mask, batch.pair)
     slot_loss, offer_loss = losses(slots, offers, batch, rows)
-    factored = float(slot_loss + offer_loss)
+    factored = float((slot_loss + offer_loss).detach())
 
     trade_slot = space.offsets[ActionType.PROPOSE_TRADE]
     direct = 0.0

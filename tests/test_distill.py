@@ -195,8 +195,8 @@ def test_the_offer_term_is_weighted_by_the_mass_on_the_trade_slot():
     batch.trade_mass = torch.zeros_like(silenced)
     _, muted = losses(slots, offers, batch, rows)
 
-    assert float(muted) == pytest.approx(0.0, abs=1e-9)
-    assert float(offer_loss) > 0
+    assert float(muted.detach()) == pytest.approx(0.0, abs=1e-9)
+    assert float(offer_loss.detach()) > 0
 
 
 # --- the update -----------------------------------------------------------

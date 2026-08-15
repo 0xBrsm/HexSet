@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import statistics
 import sys
 import tarfile
@@ -356,12 +357,145 @@ def report(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+# The six (dx, dy, z) offsets from a hex to its corners, fitted exhaustively
+# against one board and verified: they are the only six that land every hex on a
+# recorded corner, and they cover all 54 with 114 incidences (24 corners on three
+# hexes, 12 on two, 18 on one).
+CORNER_OFFSETS = ((-1, 1, 0), (0, -1, 1), (0, 0, 0), (0, 0, 1), (0, 1, 0), (1, -1, 1))
+# The two resources with three hexes rather than four, so brick and ore.
+SCARCE = frozenset({2, 5})
+
+
+def pips(number: int | None) -> int:
+    return 0 if not number or number == 7 else 6 - abs(7 - number)
+
+
+def opening(row: dict[str, Any]) -> list[dict[str, int]] | None:
+    """Pip count and resource mix of each seat's two setup settlements."""
+    order, winner = row.get("play_order"), row.get("winner")
+    hexes, corners, setup = row.get("hexes"), row.get("corners"), row.get("setup")
+    if not order or winner is None or len(order) != 4:
+        return None
+    if not hexes or not corners or len(hexes) != 19 or len(corners) != 54 or len(setup or ()) != 8:
+        return None
+
+    index = {(c[0], c[1], c[2]): i for i, c in enumerate(corners)}
+    touching: dict[int, list[int]] = defaultdict(list)
+    for position, (hx, hy, _, _) in enumerate(hexes):
+        for dx, dy, z in CORNER_OFFSETS:
+            corner = index.get((hx + dx, hy + dy, z))
+            if corner is not None:
+                touching[corner].append(position)
+    if len(touching) != 54:
+        return None
+
+    claimed: dict[int, list[int]] = defaultdict(list)
+    for owner, corner in setup:
+        claimed[owner].append(corner)
+    if len(claimed) != 4 or any(len(v) != 2 for v in claimed.values()):
+        return None
+
+    seats = []
+    for owner, cs in claimed.items():
+        adjacent = [h for c in cs for h in touching[c]]
+        kinds = {hexes[h][2] for h in adjacent if hexes[h][2] != 0}
+        seats.append(
+            {
+                "pips": sum(pips(hexes[h][3]) for h in adjacent),
+                "resources": len(kinds),
+                "scarce": len(kinds & SCARCE),
+                "pick": order.index(owner) if owner in order else -1,
+                "win": 1 if int(winner) == owner else 0,
+            }
+        )
+    return seats
+
+
+def rate(seats: list[dict[str, int]]) -> dict[str, Any]:
+    n = len(seats)
+    p = sum(s["win"] for s in seats) / n
+    half = 1.96 * math.sqrt(p * (1 - p) / n)
+    return {"n": n, "win": round(p, 4), "lo": round(p - half, 4), "hi": round(p + half, 4)}
+
+
+def placement(path: str) -> dict[str, Any]:
+    """What separates a good opening from a bad one, over every recorded seat.
+
+    Observational, and the confound is the obvious one: stronger players choose
+    better corners *and* play better afterwards, so every figure here is an
+    upper bound on what the corner itself is worth.  The within-game ranks are
+    the partial control, since all four seats share a board.
+    """
+    seats: list[dict[str, int]] = []
+    ranks: dict[str, dict[int, list[dict[str, int]]]] = {
+        "pips": defaultdict(list),
+        "resources": defaultdict(list),
+    }
+    games = 0
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            row = json.loads(line)
+            if len(row["seats"]) != 4 or row["vp_to_win"] != 10:
+                continue
+            if row["scenario"] != 0 or row["map"] != 0:
+                continue
+            found = opening(row)
+            if not found:
+                continue
+            games += 1
+            seats.extend(found)
+            for key, bucket in ranks.items():
+                for position, seat in enumerate(sorted(found, key=lambda s: -s[key])):
+                    bucket[position].append(seat)
+
+    def bands(field: str, edges: list[tuple[int, int]], within: list[dict[str, int]] | None = None):
+        source = seats if within is None else within
+        out = []
+        for lo, hi in edges:
+            chosen = [s for s in source if lo <= s[field] < hi]
+            if len(chosen) >= 300:
+                out.append({"band": f"{lo}-{hi - 1}", **rate(chosen)})
+        return out
+
+    fixed_pips = [s for s in seats if 20 <= s["pips"] < 22]
+    fixed_res = [s for s in seats if s["resources"] == 4]
+    return {
+        "games": games,
+        "seat_observations": len(seats),
+        "by_pips": bands("pips", [(lo, lo + 2) for lo in range(12, 30, 2)]),
+        "by_resources": bands("resources", [(k, k + 1) for k in range(1, 6)]),
+        "by_scarce": bands("scarce", [(k, k + 1) for k in range(0, 3)]),
+        "rank_by_pips": [
+            {"rank": p + 1, **rate(v)} for p, v in sorted(ranks["pips"].items())
+        ],
+        "rank_by_resources": [
+            {"rank": p + 1, **rate(v)} for p, v in sorted(ranks["resources"].items())
+        ],
+        "diversity_at_fixed_pips": bands("resources", [(k, k + 1) for k in range(3, 6)], fixed_pips),
+        "pips_at_fixed_diversity": bands("pips", [(lo, lo + 2) for lo in range(16, 26, 2)], fixed_res),
+        "pick_position": [
+            {
+                "pick": k + 1,
+                "mean_pips": round(
+                    statistics.fmean([s["pips"] for s in seats if s["pick"] == k]), 2
+                ),
+                "mean_resources": round(
+                    statistics.fmean([s["resources"] for s in seats if s["pick"] == k]), 2
+                ),
+                **rate([s for s in seats if s["pick"] == k]),
+            }
+            for k in range(4)
+        ],
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--archive", help="path to the .tar.gz of game logs")
     parser.add_argument("--rows", help="JSONL of per-game rows to write or read")
     parser.add_argument("--report", help="path to write the aggregate JSON")
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--placement", help="path to write the opening analysis")
     parser.add_argument("--progress", type=int, default=1000)
     args = parser.parse_args(argv)
 
@@ -377,6 +511,15 @@ def main(argv: list[str] | None = None) -> int:
                     sys.stderr.write(f"{count}\n")
                     sys.stderr.flush()
         sys.stderr.write(f"extracted {count}\n")
+
+    if args.placement:
+        if not args.rows:
+            parser.error("--placement needs --rows")
+        summary = placement(args.rows)
+        with open(args.placement, "w", encoding="utf-8") as out:
+            json.dump(summary, out, indent=2)
+        json.dump(summary, sys.stdout, indent=2)
+        sys.stdout.write("\n")
 
     if args.report:
         if not args.rows:

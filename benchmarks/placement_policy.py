@@ -1,21 +1,25 @@
-"""Does a trained policy already know how to open?
+"""Does a bot already know how to open?
 
-`Collector._ask` makes no distinction by phase, so a setup settlement is offered
-to the training policy exactly like any other action: the network has always
-chosen its own openings.  Whether it has *learned* anything about them is a
-separate question, and this answers it by walking a checkpoint through the eight
-setup picks and comparing each choice against the fitted prior in
-`catan.placement` and against the legal field it was choosing from.
+Any arena entrant can be asked.  For a checkpoint the question is whether the
+network learned to open: `Collector._ask` makes no distinction by phase, so a
+setup settlement is offered to the training policy exactly like any other action
+and the network has always chosen its own openings.  For the handcrafted bots it
+is whether the fitted evaluation weights already amount to a placement prior —
+`Weights.production` scores pips and `Weights.diversity` scores distinct
+resources, which is the shape of `catan.placement` with different exchange rates
+and no scarcity term.
 
-Three numbers matter, and they separate the possibilities cleanly.  If the
-policy's picks carry about as many pips as the average legal vertex, it never
-learned to open at all and the prior is free win rate.  If they match the prior,
-placement is solved and a learned model has nothing to add.  If they diverge from
-the prior while still beating the field, the prior is missing something the
-corpus could not see — which is the only outcome that argues for more ML here.
+Either way this walks the entrant through the eight setup picks and compares each
+choice against the prior's ranking of the same legal field.  Three numbers
+separate the possibilities cleanly.  If the picks carry about as many pips as the
+average legal vertex, the bot never learned to open at all and the prior is free
+win rate.  If they match the prior, placement is solved and neither the wrapper
+nor a learned model has anything to add.  If they diverge from the prior while
+still beating the field, the prior is missing something the corpus could not
+see — which is the only outcome that argues for more ML here.
 
-CPU only and deliberately small: this loads a checkpoint and ranks vertices, so
-it is seconds of work, not a training run.
+CPU only and deliberately small: this ranks vertices during setup and never
+plays a game out, so it is seconds of work, not a training run.
 """
 
 from __future__ import annotations
@@ -27,6 +31,7 @@ import statistics
 from typing import Any
 
 from catan.actions import ActionType, apply, legal_actions
+from catan.arena import entrant_from_name, spawn
 from catan.board.board import Board, pips, random_base_board
 from catan.game import Phase, start, to_move
 from catan.placement import rank, scarce_resources, score
@@ -36,14 +41,13 @@ def vertex_pips(board: Board, vertex: int) -> int:
     return sum(pips(board.tokens[h]) for h in board.topology.vertex_hexes[vertex])
 
 
-def walk_setup(checkpoint: str, board: Board, seed: int) -> list[dict[str, Any]]:
-    """Play the setup phase with the checkpoint and score every pick it makes."""
-    # Imported here rather than at module scope because it pulls in torch, which
-    # cannot be installed on the development phone at all.
-    from catan.netbot import network_bot
-
-    game = start(board, 4, rng=random.Random(seed))
-    bot = network_bot(checkpoint, board)
+def walk_setup(name: str, board: Board, seed: int) -> list[dict[str, Any]]:
+    """Play the setup phase with an arena entrant and score every pick it makes."""
+    rng = random.Random(seed)
+    game = start(board, 4, rng=rng)
+    # Resolved through the arena so a checkpoint and a handcrafted bot are named
+    # the same way here as anywhere else, and so the torch import stays deferred.
+    bot = spawn(entrant_from_name(name), board, rng)
     scarce = scarce_resources(board)
     picks: list[dict[str, Any]] = []
 
@@ -127,19 +131,19 @@ def summarise(picks: list[dict[str, Any]]) -> dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--checkpoint", action="append", required=True)
+    parser.add_argument("--bot", action="append", required=True)
     parser.add_argument("--games", type=int, default=200)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out", default=None)
     args = parser.parse_args()
 
-    report: dict[str, Any] = {"games": args.games, "seed": args.seed, "checkpoints": {}}
-    for checkpoint in args.checkpoint:
+    report: dict[str, Any] = {"games": args.games, "seed": args.seed, "bots": {}}
+    for name in args.bot:
         picks: list[dict[str, Any]] = []
         for index in range(args.games):
             board = random_base_board(random.Random(f"{args.seed}:{index}:board"))
-            picks.extend(walk_setup(checkpoint, board, seed=args.seed * 100003 + index))
-        report["checkpoints"][checkpoint] = summarise(picks)
+            picks.extend(walk_setup(name, board, seed=args.seed * 100003 + index))
+        report["bots"][name] = summarise(picks)
 
     text = json.dumps(report, indent=2)
     if args.out:

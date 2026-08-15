@@ -85,28 +85,35 @@ def test_the_prior_scores_the_opening_it_would_complete_not_the_vertex_alone():
         break
 
 
-def test_a_random_opener_recovers_none_of_the_prior_gap(monkeypatch):
+def test_a_random_opener_recovers_none_of_the_prior_gap():
     """Calibrates the metric: choosing at random must score near zero, not near one."""
-    import sys
-    import types
-
     import benchmarks.placement_policy as pp
-    from catan.bots import RandomBot
-
-    fake = types.ModuleType("catan.netbot")
-    fake.network_bot = lambda path, board, **kw: RandomBot(random.Random(0))
-    monkeypatch.setitem(sys.modules, "catan.netbot", fake)
 
     picks = []
     for index in range(12):
         board = random_base_board(random.Random(f"0:{index}:board"))
-        picks.extend(pp.walk_setup("unused", board, seed=index))
+        picks.extend(pp.walk_setup("random", board, seed=index))
 
     summary = pp.summarise(picks)
     assert summary["picks"] == 12 * 8
     assert abs(summary["recovered"]) < 0.2
     assert 0.35 < summary["percentile"] < 0.65
     assert summary["pips"]["prior"] > summary["pips"]["field"]
+
+
+def test_the_prior_itself_recovers_all_of_the_prior_gap():
+    """Pins the other end of the scale, so a score near one means what it says."""
+    import benchmarks.placement_policy as pp
+
+    picks = []
+    for index in range(12):
+        board = random_base_board(random.Random(f"0:{index}:board"))
+        picks.extend(pp.walk_setup("random-placement", board, seed=index))
+
+    summary = pp.summarise(picks)
+    assert summary["agreement"] == 1.0
+    assert summary["percentile"] == 0.0
+    assert summary["recovered"] == 1.0
 
 
 def test_the_wrapper_only_intercepts_setup_settlements():

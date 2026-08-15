@@ -397,13 +397,30 @@ def opening(row: dict[str, Any]) -> list[dict[str, int]] | None:
 
     seats = []
     for owner, cs in claimed.items():
+        # Duplicates are kept: two setup settlements can share a hex, and that
+        # hex then pays twice on its number.
         adjacent = [h for c in cs for h in touching[c]]
         kinds = {hexes[h][2] for h in adjacent if hexes[h][2] != 0}
+
+        # Cards per roll is k[n] when n comes up, so the mean is fixed by pips
+        # and the spare dimension is how concentrated k is across numbers.
+        cards: dict[int, int] = defaultdict(int)
+        for h in adjacent:
+            number = hexes[h][3]
+            if number and number != 7:
+                cards[number] += 1
+        mean = sum(k * pips(n) / 36 for n, k in cards.items())
+        second = sum(k * k * pips(n) / 36 for n, k in cards.items())
+        live = sum(pips(n) / 36 for n in cards)
+
         seats.append(
             {
                 "pips": sum(pips(hexes[h][3]) for h in adjacent),
                 "resources": len(kinds),
                 "scarce": len(kinds & SCARCE),
+                "numbers": len(cards),
+                "dead": round(1.0 - live, 4),
+                "variance": round(second - mean * mean, 4),
                 "pick": order.index(owner) if owner in order else -1,
                 "win": 1 if int(winner) == owner else 0,
             }
@@ -470,6 +487,18 @@ def placement(path: str) -> dict[str, Any]:
         ],
         "rank_by_resources": [
             {"rank": p + 1, **rate(v)} for p, v in sorted(ranks["resources"].items())
+        ],
+        "by_numbers": bands("numbers", [(k, k + 1) for k in range(2, 8)]),
+        "numbers_at_fixed_pips": bands("numbers", [(k, k + 1) for k in range(3, 8)], fixed_pips),
+        "dead_at_fixed_pips": [
+            {"band": f"{lo:.2f}-{lo + 0.05:.2f}", **rate(chosen)}
+            for lo in [x / 100 for x in range(30, 75, 5)]
+            if len(chosen := [s for s in fixed_pips if lo <= s["dead"] < lo + 0.05]) >= 300
+        ],
+        "variance_at_fixed_pips": [
+            {"band": f"{lo:.2f}-{lo + 0.1:.2f}", **rate(chosen)}
+            for lo in [x / 10 for x in range(2, 16)]
+            if len(chosen := [s for s in fixed_pips if lo <= s["variance"] < lo + 0.1]) >= 300
         ],
         "diversity_at_fixed_pips": bands("resources", [(k, k + 1) for k in range(3, 6)], fixed_pips),
         "pips_at_fixed_diversity": bands("pips", [(lo, lo + 2) for lo in range(16, 26, 2)], fixed_res),

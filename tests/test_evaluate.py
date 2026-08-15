@@ -184,6 +184,35 @@ def test_for_game_reads_the_board_off_the_game():
     assert len(scores) == 4
 
 
+def test_scarcity_counts_only_the_short_resources_the_seat_reaches():
+    """A resource with fewer hexes than the commonest counts; a plentiful one does not."""
+    assert Evaluator(random_base_board(random.Random(0))).scarce == {
+        Resource.BRICK,
+        Resource.ORE,
+    }
+
+    topology = build_topology(MINI_LAYOUT)
+    n = topology.num_hexes
+    # The desert is first so the robber starts there rather than on the one hex
+    # this test needs to be producing.
+    terrain = (Terrain.DESERT, Terrain.HILLS) + (Terrain.FOREST,) * (n - 2)
+    board = make_board(topology, terrain, (0,) + (6,) * (n - 1))
+    evaluator = Evaluator(board)
+    assert evaluator.scarce == {Resource.BRICK}
+
+    touching = next(v for v, hs in enumerate(topology.vertex_hexes) if 1 in hs)
+    away = next(v for v, hs in enumerate(topology.vertex_hexes) if 1 not in hs)
+    for vertex, expected in ((touching, 1), (away, 0)):
+        state = new_game(board, 2)
+        place_settlement(state, 0, vertex, connected=False)
+        assert evaluator.survey(state, 0).scarce == expected
+
+
+def test_scarcity_is_off_by_default_so_recorded_results_still_describe_the_bot():
+    """The term ships at zero: every duel on record was run without it."""
+    assert Weights().scarce == 0.0
+
+
 def test_the_survey_agrees_with_the_rules():
     """The fast walk must equal the canonical functions it replaced.
 

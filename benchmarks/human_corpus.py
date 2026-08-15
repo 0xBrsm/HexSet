@@ -101,6 +101,7 @@ def summarise(raw: dict[str, Any]) -> dict[str, Any] | None:
     board = initial.get("mapState") or {}
     hexes = board.get("tileHexStates") or {}
     corners = board.get("tileCornerStates") or {}
+    ports = board.get("portEdgeStates") or {}
 
     return {
         "seats": seats,
@@ -128,6 +129,10 @@ def summarise(raw: dict[str, Any]) -> dict[str, Any] | None:
         "corners": [
             [c.get("x"), c.get("y"), c.get("z")]
             for _, c in sorted(corners.items(), key=lambda kv: int(kv[0]))
+        ],
+        "ports": [
+            [p.get("x"), p.get("y"), p.get("z"), p.get("type")]
+            for _, p in sorted(ports.items(), key=lambda kv: int(kv[0]))
         ],
         "trajectory": trajectory,
         "profile": [
@@ -362,12 +367,74 @@ def report(rows: list[dict[str, Any]]) -> dict[str, Any]:
 # recorded corner, and they cover all 54 with 114 incidences (24 corners on three
 # hexes, 12 on two, 18 on one).
 CORNER_OFFSETS = ((-1, 1, 0), (0, -1, 1), (0, 0, 0), (0, 0, 1), (0, 1, 0), (1, -1, 1))
+# The six (dx, dy, z) offsets from a hex to its edges, fitted the same way: the
+# only six that land every hex on a recorded edge, covering all 72 (42 shared by
+# two hexes, 30 on the rim).
+EDGE_OFFSETS = ((0, 0, 0), (0, 0, 1), (0, 0, 2), (0, 1, 0), (1, -1, 2), (1, 0, 1))
+# The two corners of an edge, keyed by the edge's own z.  Also fitted
+# exhaustively and unique: together they cover all 54 corners with 144
+# incidences, 36 corners on three edges and 18 rim corners on two.
+EDGE_CORNERS = {
+    0: ((0, -1, 1), (0, 0, 0)),
+    1: ((-1, 1, 0), (0, -1, 1)),
+    2: ((-1, 1, 0), (0, 0, 1)),
+}
 # The two resources with three hexes rather than four, so brick and ore.
 SCARCE = frozenset({2, 5})
+# Port type 1 is the generic three-for-one, four per board.  Types 2..6 are the
+# five two-for-one ports, one each, for hex types 1..5.
+GENERIC_PORT = 1
 
 
 def pips(number: int | None) -> int:
     return 0 if not number or number == 7 else 6 - abs(7 - number)
+
+
+def denial(
+    hexes: list[list[int]],
+    index: dict[tuple[int, int, int], int],
+    touching: dict[int, list[int]],
+    setup: list[list[int]],
+    order: list[int],
+) -> tuple[dict[int, int] | None, dict[int, int]]:
+    """Replay the eight setup picks and score how much each seat blocked.
+
+    `blocked` is the drop in the best corner still available, caused by a seat's
+    pick.  That conflates greed with denial, since taking the best corner blocks
+    it by definition, so `excess` subtracts what the pure-pip pick would have
+    blocked from the same position — the part of the block that was a deliberate
+    choice rather than a side effect.
+    """
+    if [claim[0] for claim in setup] != list(order) + list(reversed(order)):
+        return None, {}
+
+    worth = {corner: sum(pips(hexes[h][3]) for h in hs) for corner, hs in touching.items()}
+    neighbours: dict[int, set[int]] = defaultdict(set)
+    for hx, hy, _, _ in hexes:
+        for dx, dy, z in EDGE_OFFSETS:
+            ends = [index.get((hx + dx + cdx, hy + dy + cdy, cz)) for cdx, cdy, cz in EDGE_CORNERS[z]]
+            if ends[0] is not None and ends[1] is not None:
+                neighbours[ends[0]].add(ends[1])
+                neighbours[ends[1]].add(ends[0])
+
+    free = set(worth)
+    blocked: dict[int, int] = defaultdict(int)
+    excess: dict[int, int] = defaultdict(int)
+    for owner, corner in setup:
+        if corner not in free:
+            return None, {}
+        before = max(worth[c] for c in free)
+
+        def drop(pick: int, before: int = before, free: set[int] = free) -> int:
+            rest = free - {pick} - neighbours[pick]
+            return before - max((worth[c] for c in rest), default=0)
+
+        greedy = max(free, key=lambda c: worth[c])
+        blocked[owner] += drop(corner)
+        excess[owner] += drop(corner) - drop(greedy)
+        free.discard(corner)
+        free -= neighbours[corner]
+    return blocked, excess
 
 
 def opening(row: dict[str, Any]) -> list[dict[str, int]] | None:
@@ -395,12 +462,35 @@ def opening(row: dict[str, Any]) -> list[dict[str, int]] | None:
     if len(claimed) != 4 or any(len(v) != 2 for v in claimed.values()):
         return None
 
+    blocked, excess = denial(hexes, index, touching, setup, order)
+    if blocked is None:
+        return None
+
+    # Which port, if any, sits on each corner.  A port is an edge, so it serves
+    # the two corners of that edge.
+    at_port: dict[int, list[int]] = defaultdict(list)
+    for px, py, pz, kind in row.get("ports") or ():
+        for dx, dy, z in EDGE_CORNERS[pz]:
+            corner = index.get((px + dx, py + dy, z))
+            if corner is not None:
+                at_port[corner].append(kind)
+
     seats = []
     for owner, cs in claimed.items():
         # Duplicates are kept: two setup settlements can share a hex, and that
         # hex then pays twice on its number.
         adjacent = [h for c in cs for h in touching[c]]
         kinds = {hexes[h][2] for h in adjacent if hexes[h][2] != 0}
+
+        # A two-for-one port is only worth anything if you produce its resource,
+        # so count the matched ones separately from the bare count.
+        held = [k for c in cs for k in at_port[c]]
+        specific = [k for k in held if k != GENERIC_PORT]
+
+        # The two settlements separately, to ask whether the second covered what
+        # the first missed.  cs is in claim order, so cs[0] is the first round.
+        halves = [{hexes[h][2] for h in touching[c] if hexes[h][2] != 0} for c in cs]
+        weights = [sum(pips(hexes[h][3]) for h in touching[c]) for c in cs]
 
         # Cards per roll is k[n] when n comes up, so the mean is fixed by pips
         # and the spare dimension is how concentrated k is across numbers.
@@ -421,6 +511,13 @@ def opening(row: dict[str, Any]) -> list[dict[str, int]] | None:
                 "numbers": len(cards),
                 "dead": round(1.0 - live, 4),
                 "variance": round(second - mean * mean, 4),
+                "ports": len(held),
+                "ports_2to1": len(specific),
+                "ports_matched": sum(1 for k in specific if k - 1 in kinds),
+                "overlap": len(halves[0] & halves[1]),
+                "balance": round(min(weights) / max(1, sum(weights)), 4),
+                "blocked": blocked[owner],
+                "excess": excess[owner],
                 "pick": order.index(owner) if owner in order else -1,
                 "win": 1 if int(winner) == owner else 0,
             }
@@ -499,6 +596,28 @@ def placement(path: str) -> dict[str, Any]:
             {"band": f"{lo:.2f}-{lo + 0.1:.2f}", **rate(chosen)}
             for lo in [x / 10 for x in range(2, 16)]
             if len(chosen := [s for s in fixed_pips if lo <= s["variance"] < lo + 0.1]) >= 300
+        ],
+        "by_ports": bands("ports", [(k, k + 1) for k in range(0, 4)]),
+        "ports_at_fixed_pips": bands("ports", [(k, k + 1) for k in range(0, 4)], fixed_pips),
+        "ports_2to1_at_fixed_pips": bands("ports_2to1", [(k, k + 1) for k in range(0, 3)], fixed_pips),
+        "ports_matched_at_fixed_pips": bands(
+            "ports_matched", [(k, k + 1) for k in range(0, 3)], fixed_pips
+        ),
+        "overlap_at_fixed_pips": bands("overlap", [(k, k + 1) for k in range(0, 5)], fixed_pips),
+        "overlap_at_fixed_pips_and_diversity": {
+            str(k): bands(
+                "overlap",
+                [(o, o + 1) for o in range(0, 4)],
+                [s for s in fixed_pips if s["resources"] == k],
+            )
+            for k in (3, 4, 5)
+        },
+        "blocked_at_fixed_pips": bands("blocked", [(lo, lo + 2) for lo in range(0, 12, 2)], fixed_pips),
+        "excess_at_fixed_pips": bands("excess", [(lo, lo + 2) for lo in range(-8, 4, 2)], fixed_pips),
+        "balance_at_fixed_pips": [
+            {"band": f"{lo:.2f}-{lo + 0.05:.2f}", **rate(chosen)}
+            for lo in [x / 100 for x in range(25, 55, 5)]
+            if len(chosen := [s for s in fixed_pips if lo <= s["balance"] < lo + 0.05]) >= 300
         ],
         "diversity_at_fixed_pips": bands("resources", [(k, k + 1) for k in range(3, 6)], fixed_pips),
         "pips_at_fixed_diversity": bands("pips", [(lo, lo + 2) for lo in range(16, 26, 2)], fixed_res),

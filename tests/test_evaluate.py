@@ -9,7 +9,7 @@ from catan.board.maps import MINI_LAYOUT
 from catan.board.terrain import TERRAIN_RESOURCE, Resource, Terrain
 from catan.board.topology import build as build_topology
 from catan.cards import DevCard
-from catan.evaluate import ROLLS, WIN_SCORE, Evaluator, Weights
+from catan.evaluate import CORPUS_SCARCE, ROLLS, WIN_SCORE, Evaluator, Weights
 from catan.game import start
 from catan.state import new_game, place_settlement, upgrade_to_city
 from catan.victory import WINNING_POINTS, victory_points
@@ -167,6 +167,7 @@ def test_weights_are_what_the_score_is_built_from():
         victory_point=0.0,
         production=0.0,
         diversity=0.0,
+        scarce=0.0,
         progress=0.0,
         road=0.0,
         knight=0.0,
@@ -208,9 +209,9 @@ def test_scarcity_counts_only_the_short_resources_the_seat_reaches():
         assert evaluator.survey(state, 0).scarce == expected
 
 
-def test_scarcity_is_off_by_default_so_recorded_results_still_describe_the_bot():
-    """The term ships at zero: every duel on record was run without it."""
-    assert Weights().scarce == 0.0
+def test_the_scarcity_default_is_the_corpus_value_and_cannot_drift_from_it():
+    """The one weight taken from human games rather than fitted against the engine."""
+    assert Weights().scarce == pytest.approx(CORPUS_SCARCE, abs=1e-4)
 
 
 def test_the_survey_agrees_with_the_rules():

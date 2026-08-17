@@ -298,3 +298,20 @@ def test_the_ladder_reports_both_rungs_against_a_parent(tmp_path):
     for rung in ladder.values():
         assert rung["games"] == 2
         assert rung["paired_vp_low"] <= rung["paired_vp"] <= rung["paired_vp_high"]
+
+
+def test_a_run_with_collect_workers_trains_and_checkpoints(tmp_path):
+    assert (
+        run(
+            tmp_path,
+            1,
+            ["--checkpoint-every", "1", "--collect-workers", "2", "--mix", "greedy=0.5"],
+        )
+        == 0
+    )
+
+    state = torch.load(tmp_path / "latest.pt", weights_only=False)
+    assert state["iteration"] == 1
+    assert state["games_started"] > 0
+    lines = [json.loads(l) for l in (tmp_path / "log.jsonl").read_text().splitlines()]
+    assert lines[-1]["positions"] > 0

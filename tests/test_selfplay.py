@@ -432,3 +432,21 @@ def test_a_bot_policy_over_capacity_respawns_rather_than_growing():
     assert len(policy._bots) == 1
     assert len({id(board) for board in spawned}) == 2
     assert len(spawned) > 2
+
+
+def test_a_strided_collector_deals_every_kth_index():
+    collector = Collector(
+        RandomPolicy(random.Random(1)),
+        lanes=2,
+        seed=7,
+        action_cap=500,
+        first_game=3,
+        stride=4,
+        deal=4,
+    )
+    episodes = collector.drain()
+
+    # Worker w of K takes first_game = base + w, stride = K: the indices are
+    # base + w mod K, so two workers' sets are disjoint by construction.
+    assert sorted(e.index for e in episodes) == [3, 7, 11, 15]
+    assert collector.games_started() == 3 + 4 * 4

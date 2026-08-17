@@ -201,3 +201,100 @@ def test_a_mixed_policy_still_answers_when_one_side_has_no_lanes():
     choices = mixed.act(requests)
     assert all(c.log_prob == 1.0 for c in choices)
     assert other.batches == []
+
+
+def test_alternating_swaps_the_pairs_by_game_parity():
+    caster = train.alternating(4)
+    assert caster(0) == (0, 1, 0, 1)
+    assert caster(1) == (1, 0, 1, 0)
+    assert caster(2) == (0, 1, 0, 1)
+
+
+def test_the_mix_caster_is_pure_and_respects_its_fractions():
+    caster = train.mixed_caster([0.5], players=4, seed=3)
+    casts = [caster(index) for index in range(400)]
+
+    # Pure in the index: a resumed run must cast the same games the same way.
+    assert casts == [caster(index) for index in range(400)]
+
+    mixed = [cast for cast in casts if any(cast)]
+    assert 140 <= len(mixed) <= 260, f"{len(mixed)} of 400 at a nominal 200"
+    for cast in mixed:
+        seats = tuple(seat for seat, pid in enumerate(cast) if pid == 1)
+        assert seats in ((1, 3), (0, 2))
+
+
+def test_parse_mix_rejects_overcommitted_or_empty_shares():
+    assert train.parse_mix("") == []
+    assert train.parse_mix("greedy=0.25,parent=0.25") == [
+        ("greedy", 0.25),
+        ("parent", 0.25),
+    ]
+    with pytest.raises(ValueError):
+        train.parse_mix("greedy=0.7,parent=0.7")
+    with pytest.raises(ValueError):
+        train.parse_mix("greedy=0")
+
+
+def test_versus_scores_the_learner_across_rotating_seats():
+    result = train.versus(
+        RandomPolicy(random.Random(0)),
+        RandomPolicy(random.Random(1)),
+        games=4,
+        lanes=4,
+        players=4,
+        seed=21,
+        max_offers=3,
+    )
+    assert result["games"] == 4
+    assert 0 <= result["wins"] <= 4
+    assert result["wilson_low"] <= result["win_rate"] <= result["wilson_high"]
+    assert result["paired_vp_low"] <= result["paired_vp"] <= result["paired_vp_high"]
+
+
+def test_a_run_with_a_greedy_mix_trains_and_logs_the_canary(tmp_path):
+    assert run(tmp_path, 1, ["--checkpoint-every", "1", "--mix", "greedy=1.0"]) == 0
+
+    lines = [json.loads(l) for l in (tmp_path / "log.jsonl").read_text().splitlines()]
+    record = lines[-1]
+    # The canary is in the log, counted over learner seats only.
+    assert "accepts_per_seat_game" in record
+    assert "proposes_per_seat_game" in record
+    assert record["accepts_per_seat_game"] >= 0.0
+    # The update really consumed learner transitions from cast games.
+    assert record["positions"] > 0
+
+
+def test_the_ladder_reports_both_rungs_against_a_parent(tmp_path):
+    run(tmp_path / "first", 1, ["--checkpoint-every", "1"])
+    parent = tmp_path / "first" / "latest.pt"
+
+    assert (
+        run(
+            tmp_path / "second",
+            1,
+            [
+                "--checkpoint-every",
+                "1",
+                "--parent",
+                str(parent),
+                "--mix",
+                "parent=0.5",
+                "--eval-every",
+                "1",
+                "--eval-games",
+                "2",
+            ],
+        )
+        == 0
+    )
+
+    lines = [
+        json.loads(l)
+        for l in (tmp_path / "second" / "log.jsonl").read_text().splitlines()
+    ]
+    ladder = lines[-1]["ladder"]
+    assert set(ladder) == {"parent", "greedy"}
+    for rung in ladder.values():
+        assert rung["games"] == 2
+        assert rung["paired_vp_low"] <= rung["paired_vp"] <= rung["paired_vp_high"]

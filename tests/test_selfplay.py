@@ -320,3 +320,115 @@ def _every_proposal(collector: Collector) -> list:
                 )
             )
     return out
+
+
+def test_a_cast_lane_routes_each_seat_and_records_only_the_learner():
+    learner = Counting(RandomPolicy(random.Random(0)))
+    opponent = Counting(RandomPolicy(random.Random(1)))
+    collector = Collector(
+        learner,
+        lanes=2,
+        seed=5,
+        action_cap=900,
+        opponents=[opponent],
+        caster=lambda index: (0, 1, 0, 1),
+    )
+    episode = collector.collect(1)[0]
+
+    assert episode.cast == (0, 1, 0, 1)
+    # The learner's seats have trajectories; the opponent's are empty, which is
+    # what keeps its decisions out of `catan.ppo.assemble` without a filter.
+    assert all(episode.trajectories[seat] for seat in (0, 2))
+    assert all(not episode.trajectories[seat] for seat in (1, 3))
+    # The game itself still ran through every seat.
+    assert len(episode) < episode.outcome.actions
+    # Each policy was asked at most once per tick — the batching survived.
+    assert len(learner.batches) <= collector.ticks
+    assert len(opponent.batches) <= collector.ticks
+    assert opponent.batches, "the opponent was never consulted"
+
+
+def test_the_cast_is_taken_from_the_game_index_not_the_lane():
+    def swaps(index: int) -> tuple[int, ...]:
+        return (0, 1, 0, 1) if index % 2 == 0 else (1, 0, 1, 0)
+
+    collector = Collector(
+        RandomPolicy(random.Random(2)),
+        lanes=3,
+        seed=9,
+        action_cap=700,
+        opponents=[RandomPolicy(random.Random(3))],
+        caster=swaps,
+    )
+    episodes = collector.collect(4)
+    assert {e.index % 2 for e in episodes} == {0, 1}, "both parities must appear"
+    for episode in episodes:
+        assert episode.cast == swaps(episode.index)
+        for seat, pid in enumerate(episode.cast):
+            assert bool(episode.trajectories[seat]) == (pid == 0)
+
+
+def test_a_caster_without_opponents_is_rejected():
+    with pytest.raises(ValueError):
+        Collector(RandomPolicy(), lanes=1, caster=lambda index: (0, 0, 0, 0))
+
+
+def test_a_cast_reaching_past_the_opponents_fails_loudly():
+    with pytest.raises(ValueError):
+        Collector(
+            RandomPolicy(),
+            lanes=1,
+            opponents=[RandomPolicy()],
+            caster=lambda index: (0, 2, 0, 2),
+        )
+
+
+def test_a_bot_policy_spawns_one_bot_per_board_and_reuses_it():
+    from catan.bots import RandomBot
+    from catan.selfplay import BotPolicy
+
+    spawned = []
+
+    def spawn(board):
+        spawned.append(board)
+        return RandomBot(random.Random(4))
+
+    collector = Collector(
+        RandomPolicy(random.Random(5)),
+        lanes=2,
+        seed=13,
+        opponents=[BotPolicy(spawn)],
+        caster=lambda index: (0, 1, 0, 1),
+    )
+    collector.run(40)
+
+    # Two lanes, two boards, two bots — and no respawn on any later request.
+    assert len(spawned) == 2
+    assert len({id(board) for board in spawned}) == 2
+
+
+def test_a_bot_policy_over_capacity_respawns_rather_than_growing():
+    from catan.bots import RandomBot
+    from catan.selfplay import BotPolicy
+
+    spawned = []
+
+    def spawn(board):
+        spawned.append(board)
+        return RandomBot(random.Random(6))
+
+    policy = BotPolicy(spawn, capacity=1)
+    collector = Collector(
+        RandomPolicy(random.Random(7)),
+        lanes=2,
+        seed=17,
+        opponents=[policy],
+        caster=lambda index: (0, 1, 0, 1),
+    )
+    collector.run(60)
+
+    # Room for one bot serving two live boards: the cache must not grow past
+    # its capacity, and the cost shows up as respawns rather than wrong bots.
+    assert len(policy._bots) == 1
+    assert len({id(board) for board in spawned}) == 2
+    assert len(spawned) > 2

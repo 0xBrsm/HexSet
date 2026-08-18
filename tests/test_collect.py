@@ -46,6 +46,26 @@ def test_workers_deal_disjoint_strided_indices_and_ship_valid_episodes():
         collector.close()
 
 
+def test_collection_can_be_started_then_finished_around_other_work():
+    collector = ParallelCollector([spec(0, 2), spec(1, 2)])
+    try:
+        collector.start_collect(4)
+        with pytest.raises(RuntimeError, match="already in flight"):
+            collector.start_collect(2)
+
+        # Production uses this window for the preceding batch's GPU update.
+        assert collector.games == 0
+        episodes = collector.finish_collect()
+
+        assert len(episodes) == 4
+        assert collector.games == 4
+        assert collector.last_collect_seconds > 0.0
+        with pytest.raises(RuntimeError, match="nothing in flight"):
+            collector.finish_collect()
+    finally:
+        collector.close()
+
+
 def test_a_parallel_resume_never_redeals_a_seen_index():
     first = ParallelCollector([spec(0, 2), spec(1, 2)])
     try:

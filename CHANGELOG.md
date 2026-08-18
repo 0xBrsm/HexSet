@@ -23,6 +23,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   24-lane cProfile; after the change it drops out of the profile. Six alternating
   same-process A/B pairs at the production 24-lane shape measured a median 160.65 to
   117.55 us/action (1.367x).
+- `catan.train --async-collect` optionally prefetches the next fixed game cohort in
+  collector processes while the GPU updates the current cohort. It is off by default
+  and names its one-iteration policy staleness in `--help`; synchronous training is
+  unchanged. Split-phase collection is guarded against double dispatch, sync and
+  counter reads while work is in flight, and the trainer never launches an unused
+  final cohort. The recorded 10.5 s collection and 41 s update phases bound steady
+  state at `max(10.5, 41) = 41` rather than 51.5 s (projected 1.256x); the checked-in
+  production-shape GPU harness is queued for uncontended measurement.
 - `catan.encoding._template` is cached 4096 boards deep, twice raised. At 8 a
   sixteen-lane rollout missed on every call and rebuilt the board-static block the
   cache exists to avoid — 7.5k actions/sec against 8.5k, 1.13x, over three alternating

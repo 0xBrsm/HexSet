@@ -315,3 +315,36 @@ def test_a_run_with_collect_workers_trains_and_checkpoints(tmp_path):
     assert state["games_started"] > 0
     lines = [json.loads(l) for l in (tmp_path / "log.jsonl").read_text().splitlines()]
     assert lines[-1]["positions"] > 0
+
+
+def test_async_collection_requires_parallel_workers(tmp_path):
+    with pytest.raises(SystemExit):
+        run(tmp_path, 0, ["--async-collect"])
+
+
+def test_async_collection_prefetches_each_batch_once(tmp_path):
+    assert (
+        run(
+            tmp_path,
+            2,
+            [
+                "--checkpoint-every",
+                "1",
+                "--collect-workers",
+                "2",
+                "--async-collect",
+            ],
+        )
+        == 0
+    )
+
+    state = torch.load(tmp_path / "latest.pt", weights_only=False)
+    assert state["iteration"] == 2
+    lines = [
+        json.loads(line)
+        for line in (tmp_path / "log.jsonl").read_text().splitlines()
+    ]
+    assert [line["iteration"] for line in lines] == [0, 1]
+    # One game per iteration, with no unused final prefetch.
+    assert lines[-1]["games"] == 2
+    assert all(line["positions"] > 0 for line in lines)

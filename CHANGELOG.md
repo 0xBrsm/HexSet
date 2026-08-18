@@ -6,51 +6,40 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-
-### Changed
-
-- `catan.selfplay.Collector` encodes a worker tick as one vectorized NumPy batch
-  instead of issuing the same small array operations once per lane. The batch is
-  already laid out as the model's packed input, so CPU inference reuses it without
-  restacking four feature blocks; serialization deliberately drops that shared parent
-  so one returned transition never carries the other lanes over a worker pipe. The
-  canonical encoder remains the byte-identity oracle. Alternating same-process A/B at
-  the production 24-lane, three-offer shape measured 114.65 to 99.96 us/action
-  (1.147x); the packed handoff separately removes 44.5 us per worker tick.
-- Repeated board-template lookups now hit an identity cache before Python recursively
-  hashes an unchanged frozen board, and a batched encode resolves its shared topology
-  graph once rather than once per lane. Recursive hashing was 0.759 s in an 8.196 s
-  24-lane cProfile; after the change it drops out of the profile. Six alternating
-  same-process A/B pairs at the production 24-lane shape measured a median 160.65 to
-  117.55 us/action (1.367x).
-- `catan.train --async-collect` optionally prefetches the next fixed game cohort in
-  collector processes while the GPU updates the current cohort. It is off by default
-  and names its one-iteration policy staleness in `--help`; synchronous training is
-  unchanged. Split-phase collection is guarded against double dispatch, sync and
-  counter reads while work is in flight, and the trainer never launches an unused
-  final cohort. The recorded 10.5 s collection and 41 s update phases bound steady
-  state at `max(10.5, 41) = 41` rather than 51.5 s (projected 1.256x); the checked-in
-  production-shape GPU harness is queued for uncontended measurement.
-- `catan.encoding._template` is cached 4096 boards deep, twice raised. At 8 a
-  sixteen-lane rollout missed on every call and rebuilt the board-static block the
-  cache exists to avoid — 7.5k actions/sec against 8.5k, 1.13x, over three alternating
-  runs. 64 was the same mistake one size up: PPO wants the largest batch the dispatch
-  toll amortises over, measured at 512 lanes, and 512 boards miss a 64-entry cache
-  every time. A/B'd in one process, alternating: 84.2 → 67.6 µs per position at 128
-  lanes (1.25x), 118.5 → 101.1 at 512 (1.17x), 126.9 → 115.8 at 1024 (1.10x). The cost
-  still climbs with lane count after the fix, so most of that rise is working set and
-  raising the cache again will buy nothing.
-- `catan.arena` takes a `kind="network"` entrant whose `weights` is a checkpoint path,
-  named on a command line as `network:<path>` wherever a preset name is taken. It stays
-  a picklable description, so a lineup with a network in it still goes into a manifest
-  verbatim and still crosses a process. `arena.pooled` groups standings by base name,
-  since a duel is two seats a side and the side's share of the games is the number worth
-  quoting; `benchmarks.baselines` prints it under the per-seat standings. Setting
-  `evaluator="network"` instead swaps the checkpoint in as the *leaf evaluation* of the
-  ordinary search, which needs no new bot kind: `netsearch:<path>` is `search2` with
-  learned leaves and `netgreedy:<path>` is one ply of the same. `search2-offers3` is the
-  handcrafted search on the training horizon, so that comparison differs in the leaf
-  evaluation and nothing else.
+- The devcontainer installs Python. It previously had codex, GitHub CLI and Docker
+  features but no Python at all, so it could not run this project's tests.
+- `catan.encoding` — the heterogeneous graph the model reads. Seats are rotated so
+  the player to move is always seat 0, and only information the perspective player
+  may legally know is encoded: own hand and cards exactly, opponents as counts.
+  Board adjacency is cached per board, since it never changes during a game.
+- `catan.selfplay.Collector.cohort` — deal a block of games, play every one of them
+  to completion, end with empty lanes. What a PPO iteration wants, and what
+  `collect` is not: `collect` refills a lane the moment its game ends, so a short
+  replacement dealt late enters the batch while a longer game dealt early is still
+  in flight, and the unfinished lanes carry across the learner's weight sync. The
+  batch was therefore both biased toward short games and stitched from several
+  policy generations. Measured on one iteration at the campaign's shape: streaming
+  returned 128 games averaging 655 actions where the cohort's 128 averaged 910, and
+  `approx_kl_first_minibatch` — the divergence before any gradient step, necessarily
+  zero on an on-policy batch — went from 0.003 and climbing to float-noise zero.
+  Lanes stay independent of the cohort size: they are the concurrency, refilling
+  until the cohort is dealt out, so the per-tick inference batch can be chosen for
+  throughput without deciding how many positions an update trains on.
+- `catan.train --collect-mode` — `cohort` (the default) or `stream`, the previous
+  behaviour. `--async-collect` requires `stream`, since prefetching buys exactly the
+  staleness a cohort removes, and `--lanes` above `--games-per-iteration` is refused
+  rather than leaving lanes permanently empty. `collect_mode` is a column in
+  `log.jsonl`.
+- `benchmarks.noise_scale` — the gradient noise scale after McCandlish et al. (2018),
+  estimated from one collected batch with no training run, and decomposed over the
+  objective's terms through partial backwards. On `ppo4-585` the policy term measures
+  order 10^5 positions against a `--minibatch` of 4096 (~14% of the gradient's length
+  is signal) while the value term measures ~580 (~94% signal), so the policy term
+  contributes 99% of the gradient variance and a third of the signal.
+- `catan.ppo.Terms` carries `policy_term`, `value_term` and `entropy_term`, the
+  summands of `loss` still attached to the graph, so a caller can differentiate one
+  term at a time. Asking which head dominates the shared trunk is not answerable from
+  the loss magnitudes, since `policy_loss` is ~0 at ratio 1 by construction.
 
 ## [0.3.0] - 2026-08-22
 
@@ -356,47 +345,3 @@ here are what diagnose why.
   closure, replacing `FACTORIES` with `PRESETS` and `spawn`. Closures cannot be pickled,
   so this is what lets `compete` fan out over a process pool — and it means a lineup can
   go into a run manifest verbatim. Results are identical at any worker count.
-
-- `catan.encoding._template` is cached 4096 boards deep, twice raised. At 8 a
-  sixteen-lane rollout missed on every call and rebuilt the board-static block the
-  cache exists to avoid — 7.5k actions/sec against 8.5k, 1.13x, over three alternating
-  runs. 64 was the same mistake one size up: PPO wants the largest batch the dispatch
-  toll amortises over, measured at 512 lanes, and 512 boards miss a 64-entry cache
-  every time. A/B'd in one process, alternating: 84.2 → 67.6 µs per position at 128
-  lanes (1.25x), 118.5 → 101.1 at 512 (1.17x), 126.9 → 115.8 at 1024 (1.10x). The cost
-  still climbs with lane count after the fix, so most of that rise is working set and
-  raising the cache again will buy nothing.
-- `catan.arena` takes a `kind="network"` entrant whose `weights` is a checkpoint path,
-  named on a command line as `network:<path>` wherever a preset name is taken. It stays
-  a picklable description, so a lineup with a network in it still goes into a manifest
-  verbatim and still crosses a process. `arena.pooled` groups standings by base name,
-  since a duel is two seats a side and the side's share of the games is the number worth
-  quoting; `benchmarks.baselines` prints it under the per-seat standings. Setting
-  `evaluator="network"` instead swaps the checkpoint in as the *leaf evaluation* of the
-  ordinary search, which needs no new bot kind: `netsearch:<path>` is `search2` with
-  learned leaves and `netgreedy:<path>` is one ply of the same. `search2-offers3` is the
-  handcrafted search on the training horizon, so that comparison differs in the leaf
-  evaluation and nothing else.
-- `catan.selfplay.Request` carries the lane's `Game`. A searching policy needs positions
-  to step and an observation is a lossy encoding of one; a policy that reads only the
-  encoding can ignore it. Handed out rather than copied, because `catan.mcts` copies at
-  its own root.
-- `catan.selfplay.Collector` takes `deal`, bounding how many games are ever started,
-  with `running` and `drain()` to play the bounded cohort out. Left unset the collector
-  refills a freed lane immediately and runs forever, which is what training wants. An
-  evaluation wants a fixed set of game indices, and the only way to get one before this
-  was to keep dealing replacements and discard them — after playing each in full, which
-  is where a 400-game duel went to spend over ten minutes. `catan.train.duel` and
-  `benchmarks.value_head` now bound instead of filtering.
-- `catan.train --keep-every` writes numbered checkpoints beside the `latest.pt` that
-  gets overwritten, defaulting to every 25 iterations. The first run kept only `latest`,
-  so "when did the policy stop improving" had no way to be asked afterwards.
-- `catan.selfplay.Choice` and `Transition` carry an `aux` field, passed through
-  untouched, and `Collector` takes `first_game` with `games_started()` to read it back.
-  The first is where the torch policy stores the offer mask PPO must reuse, which
-  depends on what opponents could cover and so is absent from the observation by
-  design; the second is what makes a resumed run continue rather than repeat. Both
-  default to the previous behaviour.
-- The package declares `numpy>=1.26` as a dependency. The rules engine still has none;
-  the encoder is what needs it. Torch is not declared, because the engine, the arena and
-  the collector are all tested without it and only the learning layer imports it.

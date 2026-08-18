@@ -75,6 +75,30 @@ def _flat_gradient(net: torch.nn.Module) -> torch.Tensor:
 TERMS = ("full", "policy", "value")
 
 
+def estimate(mean_small: float, mean_big: float, small: int, big: int) -> dict:
+    """Separate signal from noise given `E|G_B|^2` measured at two batch sizes.
+
+    Both `|G|^2` and `tr(S)` are unbiased here; their *ratio* is not, which is
+    why the caller averages each side over many draws and calls this once
+    rather than averaging the B_simple of each draw.
+    """
+    signal = (big * mean_big - small * mean_small) / (big - small)
+    noise = (mean_small - mean_big) / (1.0 / small - 1.0 / big)
+    return {
+        "grad_sq_small": mean_small,
+        "grad_sq_big": mean_big,
+        "signal_g_squared": signal,
+        "noise_trace_sigma": noise,
+        # No number rather than a nonsense one. `signal <= 0` means the true
+        # gradient is not resolved at either size; `noise < 0` means the larger
+        # draw measured *more* variance than the smaller, which is sampling
+        # error in the estimate itself.
+        "b_simple": noise / signal if signal > 0 and noise >= 0 else None,
+        # What fraction of a B_big gradient's length is the true gradient.
+        "signal_share_at_b_big": (signal / mean_big) ** 0.5 if mean_big else None,
+    }
+
+
 def _gradients(policy, batch, rows, advantage, config) -> dict[str, torch.Tensor]:
     """One forward, three partial backwards, each a flat gradient over `rows`.
 
@@ -207,21 +231,14 @@ def main(argv: list[str] | None = None) -> int:
 
     measured = {}
     for name in TERMS:
-        mean_small = sum(small_sq[name]) / len(small_sq[name])
-        mean_big = sum(big_sq[name]) / len(big_sq[name])
-        # Average the two sides over every draw and divide once: the paper's
+        # Average each side over every draw and estimate once: the paper's
         # estimator is a ratio of means, and a mean of ratios is not the same.
-        signal = (big * mean_big - small * mean_small) / (big - small)
-        noise = (mean_small - mean_big) / (1.0 / small - 1.0 / big)
-        measured[name] = {
-            "grad_sq_small": mean_small,
-            "grad_sq_big": mean_big,
-            "signal_g_squared": signal,
-            "noise_trace_sigma": noise,
-            "b_simple": noise / signal if signal > 0 else None,
-            # What fraction of a B_big gradient's length is the true gradient.
-            "signal_share_at_b_big": (signal / mean_big) ** 0.5 if mean_big else None,
-        }
+        measured[name] = estimate(
+            sum(small_sq[name]) / len(small_sq[name]),
+            sum(big_sq[name]) / len(big_sq[name]),
+            small,
+            big,
+        )
 
     result = {
         "environment": environment(),

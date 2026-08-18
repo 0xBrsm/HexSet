@@ -116,19 +116,36 @@ def test_the_budget_is_honoured_exactly_as_the_search_bot_honours_it(checkpoint)
     rng = random.Random(11)
     game = start(board, 4, rng)
 
-    spent = 0
+    from catan.actions import apply
+
     for _ in range(600):
         if game.won_by is not None:
             break
         allowed = within_offer_budget(game, legal_actions(game), 3)
         action = bot.choose(game)
         assert action in allowed
-        spent += game.offers_made >= 3
-        from catan.actions import apply
-
         apply(game, action)
-    # Vacuous unless the budget actually bound somewhere in the game.
-    assert spent > 0
+
+    # The guard this once used — `game.offers_made >= 3` somewhere in the game —
+    # is unreachable rather than merely unlucky. `choose` is argmax, and a fresh
+    # checkpoint's policy heads are initialised at gain 0.01, so its logits are
+    # near-equal and the argmax simply never lands on the trade slot: measured,
+    # this bot proposes 0 times in 600 steps and `offers_made` never leaves 0.
+    # A budget of zero binds at every trading-legal position instead, so the
+    # binding case is exercised by construction and counted rather than hoped for.
+    strict = network_bot(path, board, max_offers=0)
+    game = start(board, 4, random.Random(11))
+    bound = 0
+    for _ in range(600):
+        if game.won_by is not None:
+            break
+        actions = legal_actions(game)
+        allowed = within_offer_budget(game, actions, 0)
+        bound += len(allowed) != len(actions)
+        action = strict.choose(game)
+        assert action in allowed
+        apply(game, action)
+    assert bound > 0, "the budget never removed an action, so nothing was tested"
 
 
 def test_a_network_entrant_can_play_a_whole_tournament(checkpoint):

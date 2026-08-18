@@ -90,6 +90,76 @@ def test_a_resumed_run_carries_on_from_the_iteration_it_reached(tmp_path):
     assert [record["iteration"] for record in lines] == [0, 1, 2]
 
 
+def test_a_resumed_run_steps_at_the_learning_rate_it_was_given(tmp_path):
+    """The bug that silently voided a whole 150-iteration block.
+
+    `Optimizer.load_state_dict` rebuilds `param_groups` from the *saved* groups,
+    keeping only `params` from the live ones, so every hyperparameter comes back
+    from the checkpoint and the command line is discarded. ppo4 launched with
+    `--learning-rate 6e-4`, wrote 6e-4 into both its `args` and `config` blobs,
+    and stepped Adam at the 3e-4 baked into the checkpoint it resumed from. Every
+    gauge matched the previous run to within noise, because the configuration
+    *was* the previous run's. Nothing in `log.jsonl` could show it, which is why
+    `lr` is asserted here too.
+    """
+    assert run(tmp_path, 1, ["--checkpoint-every", "1", "--learning-rate", "3e-4"]) == 0
+    first = torch.load(tmp_path / "latest.pt", weights_only=False)
+    assert first["optimiser"]["param_groups"][0]["lr"] == pytest.approx(3e-4)
+
+    assert (
+        run(
+            tmp_path,
+            2,
+            ["--checkpoint-every", "1", "--resume", "--learning-rate", "6e-4"],
+        )
+        == 0
+    )
+    resumed = torch.load(tmp_path / "latest.pt", weights_only=False)
+    assert resumed["optimiser"]["param_groups"][0]["lr"] == pytest.approx(6e-4)
+
+    # And the rate the update actually used is in the log, not just the args.
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "log.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    assert rows[-1]["lr"] == pytest.approx(6e-4)
+
+
+def test_the_adaptive_schedule_raises_the_rate_when_the_kl_runs_cold(tmp_path):
+    """A cold gauge must move the knob, and the knob must reach the log.
+
+    At `--target-kl 10` no realistic update can fill the band, so the controller
+    is obliged to multiply the rate every iteration. That direction is the one
+    that matters here: the whole campaign ran a third of the way into the
+    conventional KL band and never moved the rate at all.
+    """
+    assert (
+        run(
+            tmp_path,
+            2,
+            [
+                "--checkpoint-every",
+                "1",
+                "--learning-rate",
+                "3e-4",
+                "--lr-schedule",
+                "adaptive",
+                "--target-kl",
+                "10",
+            ],
+        )
+        == 0
+    )
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "log.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    assert rows[0]["lr"] == pytest.approx(3e-4)
+    assert rows[1]["lr"] > rows[0]["lr"], "a cold KL left the rate where it was"
+
+
 def test_a_resumed_run_plays_new_games_rather_than_the_ones_it_learned_from(tmp_path):
     # A game is a pure function of the seed and its index, so restarting the
     # counter would replay the training set — and it would look like it worked.

@@ -201,3 +201,29 @@ def test_learning_from_no_episodes_at_all_is_an_error_rather_than_a_silent_pass(
     policy = a_policy(seed=7)
     with pytest.raises(ValueError):
         assemble([], policy.layout, PPOConfig())
+
+
+def test_minibatches_partition_the_batch_and_never_yield_a_single_row():
+    """A one-row trailing minibatch is a nan bomb, so it must not be emitted.
+
+    `advantage.std()` on one row divides by `n - 1 == 0` and returns nan, which
+    the caller's `+ 1e-8` cannot rescue; the loss goes nan, `clip_grad_norm_`
+    propagates it and `optimiser.step()` writes nan into every parameter while
+    the run keeps logging happily. `positions` varies per iteration, so this was
+    a ~1-in-`minibatch` chance every iteration — around 40% over a 500-iteration
+    run. The smallest remainder in the 592 logged iterations under `runs/` is 3,
+    so it never fired. That was luck.
+    """
+    for size in range(2, 40):
+        for minibatch in range(2, 12):
+            chunks = list(
+                ppo._minibatches(size, minibatch, torch.Generator().manual_seed(0))
+            )
+            assert chunks, f"no minibatches for size={size} minibatch={minibatch}"
+            for chunk in chunks:
+                assert len(chunk) >= 2, (
+                    f"size={size} minibatch={minibatch} yielded {len(chunk)} row(s)"
+                )
+                assert len(chunk) <= minibatch + 1, "a fold may add one row, not more"
+            # Still an exact partition of every row, each appearing once.
+            assert sorted(torch.cat(chunks).tolist()) == list(range(size))

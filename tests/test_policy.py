@@ -179,7 +179,8 @@ def test_a_trade_records_the_offer_in_its_log_prob_and_a_plain_action_does_not()
             ).gather(1, chosen.unsqueeze(1)).squeeze(1)
         for row, choice in enumerate(choices):
             if choice.action.type is ActionType.PROPOSE_TRADE:
-                trades.append((choice.log_prob, float(slot_only[row])))
+                legal_pairs = int(pair_mask(requests[row].options).sum())
+                trades.append((choice.log_prob, float(slot_only[row]), legal_pairs))
             else:
                 plains.append((choice.log_prob, float(slot_only[row])))
         collector.tick()
@@ -190,9 +191,21 @@ def test_a_trade_records_the_offer_in_its_log_prob_and_a_plain_action_does_not()
     # A plain action's joint log-prob is exactly its slot's.
     for joint, slot in plains:
         assert joint == pytest.approx(slot, abs=1e-4)
-    # A trade's is strictly smaller, because naming the offer costs probability.
-    for joint, slot in trades:
-        assert joint < slot - 1e-6
+
+    # A trade's is smaller by exactly the cost of naming the offer — which is
+    # zero when the position offered no choice to make. The strict inequality
+    # this once asserted held only by accident of which positions the old
+    # default-initialised policy happened to propose from: with one legal
+    # give/want pair the masked softmax puts probability 1 on it, so the offer
+    # term is exactly 0.0 and the joint equals the slot. Measured on this seed,
+    # 4 of 321 proposals are single-pair positions. Assert the mechanism instead
+    # of the accident, and assert the interesting branch is actually covered.
+    for joint, slot, legal_pairs in trades:
+        if legal_pairs == 1:
+            assert joint == pytest.approx(slot, abs=1e-6)
+        else:
+            assert joint < slot - 1e-6
+    assert any(pairs > 1 for _, _, pairs in trades), "no offer was ever a real choice"
 
 
 def _unpacked(policy, buffer):

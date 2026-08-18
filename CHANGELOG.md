@@ -7,6 +7,37 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- `catan.selfplay.Collector` encodes a worker tick as one vectorized NumPy batch
+  instead of issuing the same small array operations once per lane. The batch is
+  already laid out as the model's packed input, so CPU inference reuses it without
+  restacking four feature blocks; serialization deliberately drops that shared parent
+  so one returned transition never carries the other lanes over a worker pipe. The
+  canonical encoder remains the byte-identity oracle. Alternating same-process A/B at
+  the production 24-lane, three-offer shape measured 114.65 to 99.96 us/action
+  (1.147x); the packed handoff separately removes 44.5 us per worker tick.
+- `catan.encoding._template` is cached 4096 boards deep, twice raised. At 8 a
+  sixteen-lane rollout missed on every call and rebuilt the board-static block the
+  cache exists to avoid — 7.5k actions/sec against 8.5k, 1.13x, over three alternating
+  runs. 64 was the same mistake one size up: PPO wants the largest batch the dispatch
+  toll amortises over, measured at 512 lanes, and 512 boards miss a 64-entry cache
+  every time. A/B'd in one process, alternating: 84.2 → 67.6 µs per position at 128
+  lanes (1.25x), 118.5 → 101.1 at 512 (1.17x), 126.9 → 115.8 at 1024 (1.10x). The cost
+  still climbs with lane count after the fix, so most of that rise is working set and
+  raising the cache again will buy nothing.
+- `catan.arena` takes a `kind="network"` entrant whose `weights` is a checkpoint path,
+  named on a command line as `network:<path>` wherever a preset name is taken. It stays
+  a picklable description, so a lineup with a network in it still goes into a manifest
+  verbatim and still crosses a process. `arena.pooled` groups standings by base name,
+  since a duel is two seats a side and the side's share of the games is the number worth
+  quoting; `benchmarks.baselines` prints it under the per-seat standings. Setting
+  `evaluator="network"` instead swaps the checkpoint in as the *leaf evaluation* of the
+  ordinary search, which needs no new bot kind: `netsearch:<path>` is `search2` with
+  learned leaves and `netgreedy:<path>` is one ply of the same. `search2-offers3` is the
+  handcrafted search on the training horizon, so that comparison differs in the leaf
+  evaluation and nothing else.
+
 ## [0.3.0] - 2026-08-22
 
 An opening-placement prior, fitted by conditional logit over 40,803 recorded

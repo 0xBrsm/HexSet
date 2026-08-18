@@ -9,7 +9,7 @@ torch = pytest.importorskip("torch", reason="PyTorch runs on the training box on
 
 from catan.actions import space_for  # noqa: E402
 from catan.board.board import random_base_board  # noqa: E402
-from catan.encoding import encode, static_graph  # noqa: E402
+from catan.encoding import encode, encode_batch, static_graph  # noqa: E402
 from catan.game import start  # noqa: E402
 from catan.model import (  # noqa: E402
     CatanNet,
@@ -71,6 +71,23 @@ def test_packing_round_trips_to_the_same_batch_as_collate(players):
 
     assert packed.shape == (3, layout.width)
     for got, want in zip(unpack(layout, packed), collate(obs), strict=True):
+        assert torch.equal(got, want)
+
+
+def test_pack_reuses_the_batch_encoders_contiguous_buffer():
+    games = [a_game(seed=seed, steps=60 + seed) for seed in range(8)]
+    observations = encode_batch(games, [game.current_player for game in games])
+    layout = packing(static_graph(games[0].state.board.topology), players=4)
+
+    packed = pack(layout, observations)
+
+    assert observations[0]._packed is not None
+    assert packed.data_ptr() == observations[0]._packed.ctypes.data
+    canonical = [
+        encode(game, game.current_player)
+        for game in games
+    ]
+    for got, want in zip(unpack(layout, packed), collate(canonical), strict=True):
         assert torch.equal(got, want)
 
 

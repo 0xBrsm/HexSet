@@ -111,6 +111,27 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def sides(lineup: list, label_a: str, label_b: str) -> list:
+    """Rename a `[a, a, b, b]` lineup so the two sides are distinguishable.
+
+    Every `network:` spec is named "network" whatever checkpoint it carries, so
+    a checkpoint-against-checkpoint duel arrives as four entrants of one name:
+    `pooled` puts all four on one side and the paired-VP split has nobody to
+    subtract from. Naming the sides after their labels is exact for any pair of
+    entrants rather than only for the ones whose names happen to differ, and
+    `spawn` reads `kind` and `weights`, never `name`.
+    """
+    side_a, side_b = label_a, label_b
+    if side_a == side_b:
+        side_a, side_b = f"{label_a}-a", f"{label_b}-b"
+    return [
+        lineup[0].renamed(f"{side_a}#0"),
+        lineup[1].renamed(f"{side_a}#1"),
+        lineup[2].renamed(f"{side_b}#0"),
+        lineup[3].renamed(f"{side_b}#1"),
+    ]
+
+
 def _via_arena(args, label_a: str, label_b: str) -> dict:
     """Two a side through `arena.compete`, sharded across `--workers`.
 
@@ -119,11 +140,10 @@ def _via_arena(args, label_a: str, label_b: str) -> dict:
     terminal points per game in entrant order, so the within-game difference the
     single-process path reports can be rebuilt exactly.
     """
-    from catan.arena import base_name, compete, lineup_from_names, pooled, wilson
+    from catan.arena import compete, lineup_from_names, pooled, wilson
 
-    lineup = lineup_from_names([args.a, args.a, args.b, args.b])
-    mine = [i for i, e in enumerate(lineup) if base_name(e.name) == base_name(lineup[0].name)]
-    theirs = [i for i in range(len(lineup)) if i not in mine]
+    lineup = sides(lineup_from_names([args.a, args.a, args.b, args.b]), label_a, label_b)
+    mine, theirs = [0, 1], [2, 3]
 
     started = time.monotonic()
     tournament = compete(

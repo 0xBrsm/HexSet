@@ -151,8 +151,8 @@ def _via_arena(args, label_a: str, label_b: str) -> dict:
     )
     seconds = time.monotonic() - started
 
-    sides = pooled(tournament.standings, tournament.games)
-    wins = sides[0].wins
+    grouped = pooled(tournament.standings, tournament.games)
+    wins = grouped[0].wins
     low, high = wilson(wins, tournament.games)
     paired = [
         sum(points[i] for i in mine) / len(mine)

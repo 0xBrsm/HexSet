@@ -72,3 +72,33 @@ def test_a_checkpoint_duelled_against_itself_still_has_two_sides():
         "ppo4-585-b",
         "ppo4-585-b",
     ]
+
+
+def test_the_arena_path_can_be_called_at_all():
+    """A regression guard for the call site, not the helper.
+
+    `sides` was extracted while `_via_arena` still bound a local of the same
+    name further down, which makes the name local for the whole function and
+    raises `UnboundLocalError` on the first line that uses it. The unit tests
+    above all passed while the duel could not run.
+    """
+    import ast
+    from pathlib import Path
+
+    import benchmarks.duel as module
+
+    tree = ast.parse(Path(module.__file__).read_text())
+    functions = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        assigned = {
+            target.id
+            for inner in ast.walk(node)
+            if isinstance(inner, ast.Assign)
+            for target in inner.targets
+            if isinstance(target, ast.Name)
+        }
+        assert not assigned & functions, (
+            f"{node.name} assigns a local shadowing {sorted(assigned & functions)}"
+        )

@@ -370,6 +370,61 @@ def test_the_ladder_reports_both_rungs_against_a_parent(tmp_path):
         assert rung["paired_vp_low"] <= rung["paired_vp"] <= rung["paired_vp_high"]
 
 
+def test_a_named_entrant_can_be_added_to_the_ladder_as_a_rung(tmp_path):
+    """`--search-rung` was specified in the run-2 design and never wired in.
+
+    `outstanding.md` called for rungs against `greedy-offers3`, `search2-offers3`
+    and the run-1 checkpoint; `train.py` only ever built `parent` and `greedy`, so
+    every ladder reading in ppo2, ppo3 and ppo4 is missing the search rung. The
+    entrant here is a cheap one — what is under test is the wiring, not the bot,
+    and `search2-offers3` costs a 2-ply search per move which a unit test should
+    not pay. That it resolves at all is pinned separately below.
+
+    The existing two rungs must keep their names, because the campaign's trend is
+    only comparable across runs if `parent` and `greedy` keep reading the same
+    thing.
+    """
+    assert (
+        run(
+            tmp_path,
+            1,
+            [
+                "--checkpoint-every",
+                "1",
+                "--eval-every",
+                "1",
+                "--eval-games",
+                "2",
+                "--search-rung",
+                "greedy-offers3",
+            ],
+        )
+        == 0
+    )
+    lines = [
+        json.loads(l) for l in (tmp_path / "log.jsonl").read_text().splitlines()
+    ]
+    ladder = lines[-1]["ladder"]
+    assert set(ladder) == {"greedy", "greedy-offers3"}
+    assert ladder["greedy-offers3"]["games"] == 2
+
+
+def test_the_search_rung_resolves_and_a_mistyped_one_fails_with_a_sentence():
+    """The entrant the eval target actually wants, and the typo path.
+
+    `search2-offers3` is measured at parity with catanatron's `AB:2`, lives in
+    this repo, and plays the trading game catanatron does not model at all — so it
+    can read the dimension the external benchmark is blind to. Constructed here
+    but never played: `BotPolicy` builds its bots per board on demand, so this
+    stays cheap.
+    """
+    from catan.collect import named_opponent
+
+    assert named_opponent("search2-offers3", seed=0, lanes=4) is not None
+    with pytest.raises(SystemExit):
+        named_opponent("search2-offer3", seed=0, lanes=4)
+
+
 def test_a_run_with_collect_workers_trains_and_checkpoints(tmp_path):
     assert (
         run(

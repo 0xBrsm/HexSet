@@ -21,14 +21,30 @@ import time
 from pathlib import Path
 
 from catan.board.board import random_base_board
-from catan.collect import frozen
+from catan.collect import frozen, named_opponent
 from catan.train import versus
+
+
+def side(spec: str, device: str, board, players: int, lanes: int, seed: int):
+    """A checkpoint path or an arena entrant name, whichever `spec` names.
+
+    Naming an entrant is how a checkpoint gets scored against `search2-offers3`,
+    which is measured at parity with catanatron's `AB:2`, lives here, and plays
+    the trading game catanatron does not model. A path that exists is a
+    checkpoint; anything else is handed to the arena's entrant table, which
+    raises on a name it does not know.
+    """
+    if Path(spec).exists():
+        return frozen(spec, device, board, players)
+    return named_opponent(spec, seed, lanes)
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("a", help="checkpoint under test")
-    p.add_argument("b", help="reference checkpoint")
+    p.add_argument("a", help="checkpoint path, or an arena entrant name")
+    p.add_argument(
+        "b", help="checkpoint path, or an arena entrant name, e.g. search2-offers3"
+    )
     p.add_argument("--label-a", default=None)
     p.add_argument("--label-b", default=None)
     p.add_argument("--games", type=int, default=400)
@@ -50,8 +66,8 @@ def main(argv: list[str] | None = None) -> int:
     label_b = args.label_b or Path(args.b).stem
 
     board = random_base_board(random.Random(args.board_seed))
-    a = frozen(args.a, args.device, board, args.players)
-    b = frozen(args.b, args.device, board, args.players)
+    a = side(args.a, args.device, board, args.players, args.lanes, args.duel_seed + 1)
+    b = side(args.b, args.device, board, args.players, args.lanes, args.duel_seed + 2)
 
     started = time.monotonic()
     result = versus(

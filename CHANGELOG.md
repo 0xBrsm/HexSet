@@ -17,6 +17,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   canonical encoder remains the byte-identity oracle. Alternating same-process A/B at
   the production 24-lane, three-offer shape measured 114.65 to 99.96 us/action
   (1.147x); the packed handoff separately removes 44.5 us per worker tick.
+- Repeated board-template lookups now hit an identity cache before Python recursively
+  hashes an unchanged frozen board, and a batched encode resolves its shared topology
+  graph once rather than once per lane. Recursive hashing was 0.759 s in an 8.196 s
+  24-lane cProfile; after the change it drops out of the profile. Six alternating
+  same-process A/B pairs at the production 24-lane shape measured a median 160.65 to
+  117.55 us/action (1.367x).
 - `catan.encoding._template` is cached 4096 boards deep, twice raised. At 8 a
   sixteen-lane rollout missed on every call and rebuilt the board-static block the
   cache exists to avoid — 7.5k actions/sec against 8.5k, 1.13x, over three alternating

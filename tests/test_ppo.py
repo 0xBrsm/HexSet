@@ -227,3 +227,33 @@ def test_minibatches_partition_the_batch_and_never_yield_a_single_row():
                 assert len(chunk) <= minibatch + 1, "a fold may add one row, not more"
             # Still an exact partition of every row, each appearing once.
             assert sorted(torch.cat(chunks).tolist()) == list(range(size))
+
+
+def test_the_kl_gauge_cannot_report_a_negative_divergence():
+    """`(r - 1) - log r` is non-negative in exact arithmetic and was not in
+    float32: `exp(x)` rounds to 1.0 below the ~1.2e-7 epsilon, so the estimator
+    collapsed to `-log_ratio`. On-policy batches sit exactly there — cohort
+    collection leaves log-ratios around 1e-9 from reduction order alone — and
+    the gauge reported -5.8e-10 for a divergence that is really ~1.7e-19.
+    """
+    # A batch the current weights actually played: the log-ratios are not zero,
+    # they are reduction-order noise around zero with a tiny drift. Symmetric
+    # values would let the naive form's errors cancel and hide this.
+    log_ratio = torch.tensor([1e-9, 2e-9, 5e-10, 3e-9, 1e-9], dtype=torch.float32)
+
+    naive = ((log_ratio.exp() - 1) - log_ratio).mean()
+    stable = (torch.expm1(log_ratio) - log_ratio).mean()
+
+    assert naive < 0, "the defect this guards no longer reproduces"
+    assert stable >= 0
+
+
+def test_the_kl_gauge_is_unchanged_where_it_was_already_right():
+    """Every reading on record sits above a log-ratio of ~1e-3, where the two
+    forms agree — so no recorded figure is affected by the fix."""
+    log_ratio = torch.tensor([0.01, -0.02, 0.05, 0.2], dtype=torch.float32)
+
+    naive = ((log_ratio.exp() - 1) - log_ratio).mean()
+    stable = (torch.expm1(log_ratio) - log_ratio).mean()
+
+    assert stable == pytest.approx(float(naive), rel=1e-3)

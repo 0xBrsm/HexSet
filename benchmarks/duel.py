@@ -72,8 +72,23 @@ def main(argv: list[str] | None = None) -> int:
         "minutes, where the recorded arena run did 4000 in 607 s. Use workers for "
         "anything with a handcrafted bot on either side",
     )
+    p.add_argument(
+        "--threads",
+        type=int,
+        default=0,
+        help="torch intra-op threads; 0 leaves the default. Set it whenever the "
+        "container is capped with --cpus: torch sizes its pool from the host's "
+        "core count, not the cgroup's, so a 6-CPU cap still spawns ~32 threads "
+        "that then fight over 6 cores. Costs nothing when the box is idle and a "
+        "great deal when it is not",
+    )
     p.add_argument("--json", default=None, help="append the result to this file")
     args = p.parse_args(argv)
+
+    if args.threads:
+        import torch
+
+        torch.set_num_threads(args.threads)
 
     label_a = args.label_a or Path(args.a).stem
     label_b = args.label_b or Path(args.b).stem

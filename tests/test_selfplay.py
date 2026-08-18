@@ -450,3 +450,66 @@ def test_a_strided_collector_deals_every_kth_index():
     # base + w mod K, so two workers' sets are disjoint by construction.
     assert sorted(e.index for e in episodes) == [3, 7, 11, 15]
     assert collector.games_started() == 3 + 4 * 4
+
+
+def test_a_cohort_returns_the_block_it_dealt_and_ends_with_empty_lanes():
+    """The on-policy guarantee, which `collect` does not give.
+
+    A PPO iteration wants every position in its batch played under one set of
+    weights. That holds exactly when the collector starts empty, deals a known
+    block, and leaves nothing behind for the next iteration to inherit.
+    """
+    collector = Collector(
+        RandomPolicy(random.Random(1)), lanes=8, fill=False, seed=0, max_offers=3
+    )
+
+    first = collector.cohort(16)
+    assert {episode.index for episode in first} == set(range(16))
+    assert list(collector.in_flight()) == []
+
+    second = collector.cohort(16)
+    assert {episode.index for episode in second} == set(range(16, 32))
+    assert list(collector.in_flight()) == []
+
+
+def test_a_cohort_larger_than_the_lane_count_refills_until_it_is_dealt_out():
+    """Lanes are the concurrency, not the cohort.
+
+    Keeping them independent is what lets the inference batch be chosen for
+    throughput without deciding how many positions an update trains on.
+    """
+    collector = Collector(
+        RandomPolicy(random.Random(4)), lanes=4, fill=False, seed=0, max_offers=3
+    )
+    assert {episode.index for episode in collector.cohort(12)} == set(range(12))
+    assert list(collector.in_flight()) == []
+
+
+def test_streaming_collection_returns_replacements_while_older_games_run_on():
+    """The defect `cohort` removes, pinned so `stream` cannot quietly become it.
+
+    `collect` refills a lane the moment its game ends, so a replacement dealt
+    late can finish and enter the batch while a longer game dealt earlier is
+    still being played. The PPO batch inherited both consequences for five
+    runs: it selects for short games, and the unfinished lanes carry across the
+    learner's weight sync into the next iteration's data.
+    """
+    collector = Collector(RandomPolicy(random.Random(1)), lanes=8, seed=0, max_offers=3)
+
+    returned = {episode.index for episode in collector.collect(16)}
+
+    assert len(returned) == 16
+    assert returned != set(range(16)), "no replacement outran an older game"
+    assert len(list(collector.in_flight())) == 8
+
+
+def test_a_cohort_collector_must_start_empty():
+    collector = Collector(RandomPolicy(random.Random(1)), lanes=4, seed=0)
+    with pytest.raises(RuntimeError, match="still hold games"):
+        collector.cohort(4)
+
+
+def test_a_collector_bounded_at_build_time_refuses_a_second_cohort():
+    collector = Collector(RandomPolicy(random.Random(1)), lanes=2, seed=0, deal=2)
+    with pytest.raises(ValueError, match="one cohort at build time"):
+        collector.cohort(2)

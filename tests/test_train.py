@@ -18,8 +18,10 @@ TINY = [
     "8",
     "--rounds",
     "1",
+    # One lane, one game: `--collect-mode cohort` plays its whole cohort out,
+    # so lanes above the cohort size would only sit empty.
     "--lanes",
-    "4",
+    "1",
     "--games-per-iteration",
     "1",
     "--action-cap",
@@ -475,6 +477,9 @@ def test_async_collection_prefetches_each_batch_once(tmp_path):
                 # capped lanes ending on the same tick.
                 "--lanes",
                 "2",
+                # Prefetching *is* the off-policy path, so it has to say so.
+                "--collect-mode",
+                "stream",
                 "--async-collect",
             ],
         )
@@ -491,3 +496,69 @@ def test_async_collection_prefetches_each_batch_once(tmp_path):
     # One game per iteration, with no unused final prefetch.
     assert lines[-1]["games"] == 2
     assert all(line["positions"] > 0 for line in lines)
+
+
+def _rows(directory):
+    return [
+        json.loads(line)
+        for line in (directory / "log.jsonl").read_text().splitlines()
+    ]
+
+
+def test_a_cohort_run_trains_on_policy(tmp_path):
+    """The number this whole change exists to move.
+
+    `approx_kl_first_minibatch` is the divergence between the policy that
+    played the batch and the policy about to learn from it, read *before* any
+    gradient step — so on a batch the current weights actually played it is
+    zero by construction. It must stay zero on every iteration, not merely the
+    first: iteration 1 read zero in production too, because the collector had
+    just been built, and the campaign's four generations of staleness only
+    appeared once lanes started carrying games across the weight sync.
+    """
+    assert run(tmp_path, 3) == 0
+
+    rows = [row for row in _rows(tmp_path) if "approx_kl_first_minibatch" in row]
+    assert len(rows) == 3
+    assert all(row["collect_mode"] == "cohort" for row in rows)
+    assert all(row["positions"] > 0 for row in rows), "vacuously on-policy"
+    assert all(abs(row["approx_kl_first_minibatch"]) < 1e-6 for row in rows), [
+        row["approx_kl_first_minibatch"] for row in rows
+    ]
+
+
+def test_streaming_collection_ignores_the_batch_size_it_was_asked_for(tmp_path):
+    """The contrast, which is what makes the test above worth having.
+
+    `--games-per-iteration` reads like a batch size and under `stream` it is
+    not one: `collect` stops on the tick that finishes the *first* game, and
+    every other lane that ended on the same tick comes along. Asking for one
+    game on four lanes trains on four. A cohort delivers what it was asked for.
+
+    The staleness half of the same defect is pinned in `test_selfplay`, where
+    games vary in length. It cannot be shown here: `TINY` caps every game at
+    600 actions, so the lanes start together, truncate together, and never
+    desynchronise enough to leave one mid-play across a weight sync.
+    """
+    assert run(tmp_path, 2, ["--collect-mode", "stream", "--lanes", "4"]) == 0
+    streamed = [row for row in _rows(tmp_path) if "positions" in row]
+    assert all(row["collect_mode"] == "stream" for row in streamed)
+    assert all(row["games"] % 4 == 0 for row in streamed), "one game was asked for"
+
+    fresh = tmp_path / "cohort"
+    assert run(fresh, 2, ["--lanes", "1"]) == 0
+    cohort = [row for row in _rows(fresh) if "positions" in row]
+    assert [row["games"] for row in cohort] == [1, 2]
+    assert all(
+        row["positions"] < other["positions"] for row, other in zip(cohort, streamed)
+    ), "the cohort trained on no less data than the four-lane stream"
+
+
+def test_a_cohort_cannot_be_asked_for_more_lanes_than_it_deals(tmp_path):
+    with pytest.raises(SystemExit):
+        run(tmp_path, 1, ["--lanes", "8", "--games-per-iteration", "4"])
+
+
+def test_prefetching_has_to_opt_out_of_the_on_policy_guarantee(tmp_path):
+    with pytest.raises(SystemExit):
+        run(tmp_path, 1, ["--collect-workers", "2", "--async-collect"])

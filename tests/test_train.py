@@ -332,6 +332,11 @@ def test_async_collection_prefetches_each_batch_once(tmp_path):
                 "1",
                 "--collect-workers",
                 "2",
+                # One lane per worker: a tick then finishes at most one game,
+                # so the exact cohort counts below cannot be blurred by two
+                # capped lanes ending on the same tick.
+                "--lanes",
+                "2",
                 "--async-collect",
             ],
         )

@@ -90,6 +90,19 @@ def test_a_resumed_run_carries_on_from_the_iteration_it_reached(tmp_path):
     assert [record["iteration"] for record in lines] == [0, 1, 2]
 
 
+def test_resuming_with_nothing_to_resume_is_an_error_rather_than_a_fresh_start(tmp_path):
+    """It used to fall through and silently begin at iteration 0.
+
+    On a 150-iteration GPU block that is hours spent discarding the campaign,
+    with a log that starts at 0 and looks perfectly healthy. A typo'd
+    `--checkpoint-dir` or an unseeded directory is all it takes. Same shape as
+    the learning rate `--resume` used to throw away: a flag that quietly does
+    nothing.
+    """
+    with pytest.raises(SystemExit):
+        run(tmp_path / "empty", 1, ["--checkpoint-every", "1", "--resume"])
+
+
 def test_a_resumed_run_steps_at_the_learning_rate_it_was_given(tmp_path):
     """The bug that silently voided a whole 150-iteration block.
 

@@ -261,3 +261,24 @@ def test_too_few_point_samples_say_nothing_either_way():
     assert empty.samples == 0
     assert empty.lower == float("-inf")
     assert empty.upper == float("inf")
+
+
+def test_a_network_spec_can_self_impose_an_offer_budget():
+    """`network:<path>@<offers>`, mirroring `mcts:<path>@<simulations>`.
+
+    The budget exists so a duel can price the policy's proposing behaviour
+    against itself; without a suffix a network entrant keeps `max_offers=None`,
+    which means the budget its checkpoint trained under rather than the engine's
+    whole cap.
+    """
+    from catan.arena import entrant_from_name
+
+    plain = entrant_from_name("network:/tmp/x.pt")
+    assert plain.max_offers is None
+    assert plain.name == "network"
+    assert plain.weights == "/tmp/x.pt"
+
+    capped = entrant_from_name("network:/tmp/x.pt@1")
+    assert capped.max_offers == 1
+    assert capped.name == "network-offers1"
+    assert capped.weights == "/tmp/x.pt"

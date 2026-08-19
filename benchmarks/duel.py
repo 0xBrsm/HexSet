@@ -20,6 +20,7 @@ import sys
 import time
 from pathlib import Path
 
+from catan.arena import NETWORK
 from catan.board.board import random_base_board
 from catan.collect import frozen, named_opponent
 from catan.train import versus
@@ -37,6 +38,25 @@ def side(spec: str, device: str, board, players: int, lanes: int, seed: int):
     if Path(spec).exists():
         return frozen(spec, device, board, players)
     return named_opponent(spec, seed, lanes)
+
+
+def _is_bare_network(spec: str) -> bool:
+    """A checkpoint played as a plain network -- the one entrant that batches.
+
+    Either a raw path (what `side` and `train.versus` take) or the arena's
+    `network:<path>` spelling of the same thing. Anything else -- a preset name
+    or a `netsearch:`/`netgreedy:`/`mcts:` spec -- wraps the network in a search
+    that cannot batch across lanes and gets one core in-process.
+    """
+    return Path(spec).exists() or spec.startswith(NETWORK)
+
+
+def _default_workers(a: str, b: str) -> int:
+    """1 for network-vs-network, which `--workers`' own help text prices at 400
+    games in 134 s single-process; 26 for anything else, which the same help
+    text prices at 200 games unfinished in 11 minutes at workers=1.
+    """
+    return 1 if _is_bare_network(a) and _is_bare_network(b) else 26
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -62,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--workers",
         type=int,
-        default=1,
+        default=None,
         help="above 1, run through `arena.compete`, which shards games across "
         "processes and is the path every recorded duel in status.md used. "
         "`train.versus` (workers=1) batches network inference across lanes in ONE "
@@ -70,7 +90,9 @@ def main(argv: list[str] | None = None) -> int:
         "catastrophic against a scripted bot, whose search cannot batch and gets "
         "one core: 200 games against search2-offers3 had not finished in 11 "
         "minutes, where the recorded arena run did 4000 in 607 s. Use workers for "
-        "anything with a handcrafted bot on either side",
+        "anything with a handcrafted bot on either side. Default: 1 when both "
+        "entrants are bare network checkpoints, 26 otherwise -- see "
+        "`_default_workers`",
     )
     p.add_argument(
         "--threads",
@@ -89,6 +111,15 @@ def main(argv: list[str] | None = None) -> int:
         import torch
 
         torch.set_num_threads(args.threads)
+
+    # Resolved rather than defaulted silently: 1 is right for network-vs-network
+    # and catastrophic against anything that searches, so which one a run got
+    # has to be visible in the run's own output, not inferred after the fact.
+    if args.workers is None:
+        args.workers = _default_workers(args.a, args.b)
+        print(f"--workers not given; defaulting to {args.workers}", file=sys.stderr)
+    else:
+        print(f"--workers {args.workers}", file=sys.stderr)
 
     label_a = args.label_a or Path(args.a).stem
     label_b = args.label_b or Path(args.b).stem
@@ -199,6 +230,7 @@ def _via_versus(args, label_a: str, label_b: str) -> dict:
         "b_path": args.b,
         "games": args.games,
         "duel_seed": args.duel_seed,
+        "workers": args.workers,
         "seconds": time.monotonic() - started,
         "via": "train.versus",
         **result,

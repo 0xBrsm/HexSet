@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from benchmarks.duel import sides
+from benchmarks.duel import _default_workers, sides
 from catan.arena import base_name, lineup_from_names, pooled
 from catan.arena import Standing
 
@@ -102,3 +102,33 @@ def test_the_arena_path_can_be_called_at_all():
         assert not assigned & functions, (
             f"{node.name} assigns a local shadowing {sorted(assigned & functions)}"
         )
+
+
+def test_default_workers_is_one_for_two_bare_checkpoint_paths(tmp_path):
+    a = tmp_path / "a.pt"
+    b = tmp_path / "b.pt"
+    a.touch()
+    b.touch()
+    assert _default_workers(str(a), str(b)) == 1
+
+
+def test_default_workers_is_one_for_two_network_prefixed_checkpoints():
+    assert _default_workers("network:/runs/a.pt", "network:/runs/b.pt") == 1
+
+
+def test_default_workers_is_26_against_a_preset_bot(tmp_path):
+    """A scripted opponent cannot batch, and workers=1 left it unfinished."""
+    a = tmp_path / "a.pt"
+    a.touch()
+    assert _default_workers(str(a), "search2-offers3") == 26
+
+
+def test_default_workers_is_26_for_a_search_wrapped_checkpoint(tmp_path):
+    """`netsearch:`/`netgreedy:`/`mcts:` still run a per-lane search."""
+    a = tmp_path / "a.pt"
+    a.touch()
+    assert _default_workers(str(a), "netsearch:/runs/a.pt") == 26
+
+
+def test_default_workers_is_26_when_neither_side_is_a_bare_network():
+    assert _default_workers("search2-offers3", "random") == 26

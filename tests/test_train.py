@@ -41,6 +41,35 @@ def run(directory, iterations, extra=()):
     )
 
 
+def test_crippled_flags_cpu_device_regardless_of_core_count():
+    assert train._crippled("cpu", collect_workers=8, cores=32) is True
+
+
+def test_crippled_flags_a_lone_collector_on_a_many_core_box():
+    assert train._crippled("cuda", collect_workers=0, cores=32) is True
+
+
+def test_crippled_is_false_off_cpu_with_workers_or_too_few_cores_to_shard():
+    assert train._crippled("cuda", collect_workers=4, cores=32) is False
+    assert train._crippled("cuda", collect_workers=0, cores=4) is False
+
+
+def test_a_run_prints_the_effective_device_and_worker_counts(tmp_path, capsys):
+    """Loud rather than a changed default -- see the module docstring's rule."""
+    assert run(tmp_path, 1) == 0
+
+    err = capsys.readouterr().err
+    assert "device=cpu" in err
+    assert "collect-workers=0" in err
+    assert "update-workers=0" in err
+
+
+def test_the_default_configuration_warns_that_it_is_crippled(tmp_path, capsys):
+    assert run(tmp_path, 1) == 0
+
+    assert "WARNING" in capsys.readouterr().err
+
+
 def test_a_run_writes_a_checkpoint_carrying_the_weights_and_the_game_counter(tmp_path):
     assert run(tmp_path, 1, ["--checkpoint-every", "1"]) == 0
 

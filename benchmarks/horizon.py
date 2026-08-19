@@ -147,6 +147,49 @@ def labels(episode, seat: int, horizon: int) -> tuple[float, float, bool]:
     return terminal, terminal, False
 
 
+def lambda_label(episode, seat: int, lam: float) -> float:
+    """One rollout's TD(lambda) label: every horizon at once, geometrically weighted.
+
+    With gamma 1 and a reward that is zero until the game ends, the n-step
+    return *is* the head's own estimate n of the seat's decisions later, and the
+    full-length return is the terminal outcome. So the lambda-mixture is
+
+        G = (1 - lam) * sum_{n=1}^{T-1} lam^(n-1) V(s_n)  +  lam^(T-1) * terminal
+
+    which is `V(s_1)` at lam=0 and the terminal return at lam=1 — the two rows
+    the horizon sweep already measured, as the ends of one dial.
+
+    This is the object the sweep pointed at. Every fixed horizon was
+    monotonically a better teacher than the one below it and monotonically
+    noisier, with no turning point, so no single `n` is right; a mixture takes
+    the quiet short labels and the informative long ones together instead of
+    choosing. It is what TD-Gammon used, in the same dice-driven setting, for
+    the same reason.
+
+    Estimates missing from a trajectory (a forced move records none) are dropped
+    and the weights renormalised over what is left, rather than the position
+    being skipped.
+    """
+    terminal = float(reward(episode.outcome)[seat])
+    trajectory = episode.trajectories[seat]
+    if lam >= 1.0 or len(trajectory) < 2:
+        return terminal
+    weights, values = [], []
+    for n in range(1, len(trajectory)):
+        estimate = trajectory[n].value
+        if not estimate:
+            continue
+        weights.append((1.0 - lam) * lam ** (n - 1))
+        values.append(float(estimate[0]))
+    tail = lam ** (len(trajectory) - 1)
+    weights.append(tail)
+    values.append(terminal)
+    total = sum(weights)
+    if total <= 0:
+        return terminal
+    return float(np.dot(weights, values) / total)
+
+
 def teacher(rows: list[dict]) -> dict:
     """Is the label closer to the truth than the head's own prediction?
 
@@ -180,6 +223,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--horizon", type=int, default=8)
+    parser.add_argument("--lambdas", default="",
+                        help="comma-separated TD(lambda) mixtures to score off "
+                             "the same rollouts, e.g. 0,0.5,0.9,0.95,0.99,1.0")
     parser.add_argument("--seed-games", type=int, default=24)
     parser.add_argument("--positions", type=int, default=64)
     parser.add_argument("--rollouts", type=int, default=64)
@@ -194,6 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     from catan.netbot import load
     from catan.policy import NetworkPolicy
 
+    lambdas = [float(x) for x in args.lambdas.split(",") if x.strip()]
     board = random_base_board(random.Random(args.seed))
     loaded = load(args.checkpoint, board.topology)
     generator = torch.Generator().manual_seed(args.seed)
@@ -240,7 +287,15 @@ def main(argv: list[str] | None = None) -> int:
             deal=args.rollouts,
             board=board,
         )
-        pairs = [labels(e, snapshot.seat, args.horizon) for e in branch.drain()]
+        episodes = branch.drain()
+        pairs = [labels(e, snapshot.seat, args.horizon) for e in episodes]
+        mixtures = {
+            lam: np.asarray(
+                [lambda_label(e, snapshot.seat, lam) for e in episodes],
+                dtype=np.float64,
+            )
+            for lam in lambdas
+        }
         booted = np.asarray([p[0] for p in pairs], dtype=np.float64)
         finals = np.asarray([p[1] for p in pairs], dtype=np.float64)
         reached = float(np.mean([p[2] for p in pairs]))
@@ -258,6 +313,15 @@ def main(argv: list[str] | None = None) -> int:
                 # same games would correlate their errors and flatter the label.
                 "label_mean": float(booted[0::2].mean()),
                 "truth_mean": float(finals[1::2].mean()),
+                # Same disjoint halves for every mixture: a label and a terminal
+                # return off one rollout share that rollout's dice.
+                "mixtures": {
+                    str(lam): {
+                        "label_mean": float(values[0::2].mean()),
+                        "variance": float(values.var()),
+                    }
+                    for lam, values in mixtures.items()
+                },
             }
         )
     elapsed = time.perf_counter() - started
@@ -285,6 +349,26 @@ def main(argv: list[str] | None = None) -> int:
         "mean_gap": round(float(gaps.mean()), 4),
         **teacher(rows),
     }
+    if lambdas:
+        payload["lambdas"] = [
+            {
+                "lam": lam,
+                "variance": round(
+                    float(np.mean([r["mixtures"][str(lam)]["variance"] for r in rows])), 5
+                ),
+                **teacher(
+                    [
+                        {
+                            "head": r["head"],
+                            "truth_mean": r["truth_mean"],
+                            "label_mean": r["mixtures"][str(lam)]["label_mean"],
+                        }
+                        for r in rows
+                    ]
+                ),
+            }
+            for lam in lambdas
+        ]
 
     if args.json:
         print(json.dumps(payload, indent=2))
@@ -298,6 +382,15 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  Var(terminal | s)     {payload['terminal_variance']:.5f}")
     print(f"  Var(V(s') | s)        {payload['bootstrap_variance']:.5f}")
     print(f"  variance ratio        {payload['variance_ratio']:.4f}")
+    if lambdas:
+        print("\n  TD(lambda) mixtures, off the same rollouts. `teacher` below 1")
+        print("  means the label knows something the head does not; `echo` near 1")
+        print("  means it is the head's own opinion handed back.")
+        print(f"    {'lam':>5} {'sigma':>8} {'teacher':>9} {'echo':>7} {'signal':>8}")
+        for block in payload["lambdas"]:
+            print(f"    {block['lam']:>5.2f} {np.sqrt(block['variance']):>8.4f} "
+                  f"{block['teacher_ratio']:>9.4f} {block['echo_correlation']:>7.3f} "
+                  f"{block['signal_correlation']:>8.3f}")
     print(f"  sigma ratio           {payload['sigma_ratio']:.4f}")
     print(f"  data requirement      {payload['sample_factor']:.2f}x lower")
     print(f"  mean gap              {payload['mean_gap']:+.4f}")

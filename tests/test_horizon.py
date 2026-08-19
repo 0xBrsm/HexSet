@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from benchmarks.horizon import labels, teacher
+from benchmarks.horizon import labels, lambda_label, teacher
 from catan.rewards import reward
 from catan.selfplay import Outcome
 
@@ -114,3 +114,62 @@ def test_a_horizon_of_zero_reads_the_position_itself():
     boot, _, reached = labels(an_episode(trajectory), seat=1, horizon=0)
     assert reached
     assert boot == pytest.approx(0.3)
+
+
+def a_mixture_episode(values=(0.0, 0.4, 0.6, 0.8)):
+    return an_episode([Transition((v, 0.0, 0.0, 0.0)) for v in values])
+
+
+def terminal_of(episode, seat=1):
+    return reward(episode.outcome)[seat]
+
+
+def test_lambda_zero_is_the_one_step_bootstrap():
+    # V(s_1) alone -- the shortest horizon, the end the sweep found was 98%
+    # an echo of the head's own opinion.
+    episode = a_mixture_episode()
+    assert lambda_label(episode, 1, 0.0) == pytest.approx(0.4)
+
+
+def test_lambda_one_is_the_terminal_return():
+    episode = a_mixture_episode()
+    assert lambda_label(episode, 1, 1.0) == pytest.approx(terminal_of(episode))
+
+
+def test_the_weights_are_geometric_and_sum_to_one():
+    # lam=0.5 over V=[0.4, 0.6, 0.8]: weights 0.5, 0.25, 0.125, then a tail of
+    # 0.125 on the terminal return.
+    episode = a_mixture_episode()
+    expected = 0.5 * 0.4 + 0.25 * 0.6 + 0.125 * 0.8 + 0.125 * terminal_of(episode)
+    assert lambda_label(episode, 1, 0.5) == pytest.approx(expected)
+
+
+def test_a_mixture_lies_inside_the_hull_of_everything_it_mixes():
+    # Not between its two ends: the label is a convex combination of *every*
+    # horizon, so the intermediate estimates can carry it outside the interval
+    # spanned by the one-step bootstrap and the terminal return.
+    episode = a_mixture_episode()
+    values = [0.4, 0.6, 0.8, terminal_of(episode)]
+    assert min(values) <= lambda_label(episode, 1, 0.5) <= max(values)
+
+
+def test_raising_lambda_pulls_the_label_toward_the_outcome():
+    episode = a_mixture_episode()
+    by_lam = [lambda_label(episode, 1, lam) for lam in (0.0, 0.3, 0.6, 0.9, 1.0)]
+    assert by_lam[0] == pytest.approx(0.4)
+    assert by_lam[-1] == pytest.approx(terminal_of(episode))
+    # The terminal sits below every intermediate estimate in this fixture, so
+    # the tail of the sweep must descend toward it.
+    assert by_lam[-1] < by_lam[-2] < by_lam[-3]
+
+
+def test_a_trajectory_with_nowhere_to_bootstrap_falls_back_to_the_outcome():
+    episode = a_mixture_episode(values=(0.0,))
+    assert lambda_label(episode, 1, 0.5) == pytest.approx(terminal_of(episode))
+
+
+def test_a_missing_estimate_is_dropped_and_the_weights_renormalise():
+    episode = a_mixture_episode()
+    episode.trajectories[1][2].value = ()
+    kept = 0.5 * 0.4 + 0.125 * 0.8 + 0.125 * terminal_of(episode)
+    assert lambda_label(episode, 1, 0.5) == pytest.approx(kept / 0.75)

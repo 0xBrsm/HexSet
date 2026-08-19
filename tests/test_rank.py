@@ -10,7 +10,17 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from benchmarks.rank import assess, correlation, ranks, resolution, summarise
+from benchmarks.rank import (
+    assess,
+    backed_up,
+    correlation,
+    ranks,
+    pooled,
+    resolution,
+    standardised,
+    summarise,
+)
+from catan.mcts import Node
 
 TRUE = np.array([0.9, 0.5, 0.1])
 
@@ -146,3 +156,57 @@ def test_pooled_reports_zero_reliability_rather_than_dividing_by_it():
 
     assert got["reliability"] == 0.0
     assert got["pearson_corrected"] != got["pearson_corrected"]   # nan, not inf
+
+
+def searched(visits, totals) -> Node:
+    """A root as `Search.run_many` leaves it, with the game it played omitted."""
+    node = Node(game=None, mover=0, options=("a", "b"))
+    node.visits = np.asarray(visits, dtype=np.float64)
+    node.totals = np.asarray(totals, dtype=np.float64)
+    return node
+
+
+def test_the_backed_up_value_is_the_visit_weighted_mean_of_what_came_back():
+    # Edge a returned 0.3 for seat 0 on each of three visits, edge b -0.4 once.
+    root = searched([3.0, 1.0], [[0.9, -0.3], [-0.4, 0.4]])
+    assert backed_up(root, 0) == pytest.approx((3 * 0.3 + 1 * -0.4) / 4)
+    assert backed_up(root, 1) == pytest.approx(0.1 / 4)
+
+
+def test_a_finished_or_forced_child_has_no_backed_up_value_to_give():
+    assert backed_up(Node(game=None, mover=0, options=()), 0) is None
+    assert backed_up(Node(game=None, mover=0, options=("a",)), 0) is None
+
+
+def test_a_tree_that_never_ran_reports_nothing_rather_than_a_confident_zero():
+    # Zero is an ordinary value on this scale, so the empty case has to be
+    # distinguishable from it or it pools into the correlation unnoticed.
+    assert backed_up(searched([0.0, 0.0], np.zeros((2, 4))), 0) is None
+
+
+def widest_row_disagrees():
+    """Nine tight rows the head orders correctly, and one wide row it inverts.
+
+    The wide row is one position of ten and should read as one position. Under
+    `pooled` it is not: Pearson weights by variance, so a row whose spread is
+    ten times larger carries a hundred times the leverage.
+    """
+    heads = [[0.0, 0.01, 0.02]] * 9 + [[0.2, 0.1, 0.0]]
+    trues = [[0.0, 0.01, 0.02]] * 9 + [[0.0, 0.1, 0.2]]
+    ses = [[1e-6] * 3] * 10
+    return heads, trues, ses
+
+
+def test_one_wide_row_can_outvote_nine_tight_ones_when_rows_are_not_scaled():
+    heads, trues, ses = widest_row_disagrees()
+    assert pooled(heads, trues, ses)["pearson_observed"] < 0.0
+
+
+def test_scaling_each_row_first_lets_the_nine_outvote_the_one():
+    heads, trues, ses = widest_row_disagrees()
+    assert standardised(heads, trues, ses)["pearson_observed"] > 0.5
+
+
+def test_a_row_with_one_child_carries_no_ordering_and_is_dropped():
+    out = standardised([[0.1], [0.0, 0.1]], [[0.2], [0.0, 0.1]], [[0.0], [0.0, 0.0]])
+    assert out["positions"] == 1

@@ -21,6 +21,20 @@ ranks siblings well makes low lambda viable and cuts the policy gradient's
 variance at its source; a head that does not means the residual is its own
 noise, and credit has to come from the outcome instead.
 
+## Scoring the row with a tree, not just the head
+
+`--simulations N` adds a second column. Every child is scored again by the
+*backed-up value* of a PUCT search rooted at it, against the same truth on the
+same positions, which asks the label question directly: the value head is
+trained on terminal returns whose variance is mostly dice twenty turns out, and
+the standing proposal is to bootstrap off the search's own estimate instead.
+That is only worth doing if the tree's estimate is the better one, and two
+columns over one row of truth is the paired way to find out.
+
+The search draws from its own generator, so the truth column of a
+`--simulations N` run is what a `--simulations 0` run at the same seed produces.
+The comparison is paired by construction rather than by re-running.
+
 ## Common random numbers, because the differences are what is small
 
 The true gap between the best two children averages 0.017 while a single
@@ -156,6 +170,28 @@ def correlation(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.corrcoef(a, b)[0, 1])
 
 
+def backed_up(root, seat: int) -> float | None:
+    """The root's visit-weighted mean over its edges, in board-order seats.
+
+    `Search._backup` adds the whole per-seat vector into every edge on a path,
+    so a column's sum over the visits is what the search believes about the
+    position once its budget is spent — the tree's answer to the question one
+    forward pass of the value head answers alone.
+
+    `None` where there was nothing to search: a finished child, or one whose
+    single legal action `run_many` short-circuits without backing anything up,
+    or a root that never ran. The caller falls back to the head there. `None`
+    rather than 0.0 on purpose — zero is an ordinary value on this scale and
+    would pass silently into the correlation.
+    """
+    if root.terminal or len(root.options) < 2:
+        return None
+    visits = float(np.asarray(root.visits).sum())
+    if visits <= 0:
+        return None
+    return float(np.asarray(root.totals)[:, seat].sum() / visits)
+
+
 def assess(head: np.ndarray, true: np.ndarray) -> dict:
     """One position's row, scored the four ways that matter.
 
@@ -254,6 +290,53 @@ def pooled(head_rows, true_rows, se_rows) -> dict:
     }
 
 
+def standardised(head_rows, true_rows, se_rows) -> dict:
+    """`pooled`, with every row scaled to unit variance before it is pooled.
+
+    `pooled` centres a row but does not scale it, and Pearson weights by
+    variance — so a position whose children differ ten times more than typical
+    carries a hundred times the leverage. Measured over 240 positions: five of
+    them held 47% of the total influence, and dropping a single position moved
+    the pooled head-versus-tree difference by 0.083. That is why its interval
+    stops tightening as positions are added.
+
+    Report both, because they answer different questions. Spread-weighted is the
+    right weighting for a *regression target*, whose loss is in absolute units
+    and where a position with more at stake genuinely matters more.
+    Row-standardised is the right one for a *decision rule*, which chooses once
+    per position however much is at stake. A conclusion that holds under one and
+    not the other is a statement about which positions carry it, and should be
+    written up that way rather than as a single number.
+    """
+    xs, ys, reliabilities = [], [], []
+    for head, true, ses in zip(head_rows, true_rows, se_rows):
+        n = len(head)
+        if n < 2:
+            continue
+        x = np.asarray(head, dtype=np.float64)
+        y = np.asarray(true, dtype=np.float64)
+        spread = float(y.var())
+        noise = float((np.asarray(ses, dtype=np.float64) ** 2 * (n - 1) / n).mean())
+        if spread <= 0 or x.std() < 1e-12:
+            continue
+        xs.append((x - x.mean()) / x.std())
+        ys.append((y - y.mean()) / y.std())
+        reliabilities.append(max(0.0, (spread - noise) / spread))
+    if not xs:
+        return {"positions": 0}
+    observed = correlation(np.concatenate(xs), np.concatenate(ys))
+    reliability = float(np.mean(reliabilities))
+    corrected = observed / np.sqrt(reliability) if reliability > 1e-6 else float("nan")
+    return {
+        "positions": len(xs),
+        "pearson_observed": observed,
+        "reliability": reliability,
+        "pearson_corrected": float(min(1.0, corrected))
+        if corrected == corrected
+        else float("nan"),
+    }
+
+
 def summarise(rows: list[dict]) -> dict:
     """The aggregate, with top-1 read against its own chance rate."""
     spearman = np.asarray([r["spearman"] for r in rows])
@@ -326,6 +409,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--action-cap", type=int, default=4000)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--fork-rate", type=float, default=0.02)
+    parser.add_argument("--simulations", type=int, default=0,
+                        help="also score every child by the backed-up value of a "
+                             "PUCT search rooted at it; 0 scores the head alone")
+    parser.add_argument("--wave", type=int, default=16)
+    parser.add_argument("--exploration", type=float, default=1.25)
     # `netbot.load` pins torch to one thread, which is right for the 30-process
     # CPU sharding it was built for and crippling for this single process. The
     # rollouts batch every lane per tick, which is what the iGPU is for.
@@ -336,7 +424,7 @@ def main(argv: list[str] | None = None) -> int:
 
     import torch
 
-    from catan.mcts import Leaf
+    from catan.mcts import Leaf, Search
     from catan.netbot import LeafEvaluator, load
     from catan.policy import NetworkPolicy
 
@@ -355,6 +443,20 @@ def main(argv: list[str] | None = None) -> int:
         device=args.device,
     )
     evaluator = LeafEvaluator(policy=policy, space=loaded.space)
+    # Its own generator, so the rollouts below draw what they draw at
+    # `--simulations 0` and both columns are scored against one truth.
+    search = (
+        Search(
+            evaluator,
+            simulations=args.simulations,
+            wave=args.wave,
+            exploration=args.exploration,
+            max_offers=loaded.max_offers,
+            rng=random.Random(args.seed + 9001),
+        )
+        if args.simulations
+        else None
+    )
 
     started = time.perf_counter()
     rng = random.Random(args.seed + 2)
@@ -411,6 +513,15 @@ def main(argv: list[str] | None = None) -> int:
         for slot, (_, value) in zip(slots, evaluator.evaluate(leaves)):
             head[slot] = value[fork.seat]
 
+        # The same row, searched. `run_many` batches every child's leaves into
+        # shared forwards, so a whole row costs one search rather than n.
+        tree = list(head)
+        if search is not None:
+            for slot, (root, _, _) in enumerate(search.run_many(games)):
+                value = backed_up(root, fork.seat)
+                if value is not None:
+                    tree[slot] = value
+
         # The truth, by rollout. Every child gets its own collector seeded
         # identically, so lane k across the row shares deck and sampling stream.
         returns = []
@@ -457,6 +568,9 @@ def main(argv: list[str] | None = None) -> int:
         row["head_values"] = [float(v) for v in head]
         row["true_values"] = [float(v) for v in true]
         row["standard_errors"] = [float(v) for v in ses]
+        if search is not None:
+            row["tree_values"] = [float(v) for v in tree]
+            row["tree"] = assess(np.asarray(tree, dtype=np.float64), true)
         rows.append(row)
         print(
             f"[{len(rows)}/{len(chosen)}] children {row['children']:>2d} "
@@ -464,7 +578,8 @@ def main(argv: list[str] | None = None) -> int:
             f"regret {row['regret']:+.4f} gap {row['true_gap']:.4f} "
             f"paired-se {row['paired_se']:.4f} "
             f"({row['pairing_gain']:.1f}x) "
-            f"{'RESOLVED' if row['resolved'] else 'unresolved'}",
+            + (f"tree {row['tree']['spearman']:+.3f} " if "tree" in row else "")
+            + f"{'RESOLVED' if row['resolved'] else 'unresolved'}",
             flush=True,
         )
 
@@ -476,6 +591,7 @@ def main(argv: list[str] | None = None) -> int:
     payload = {
         "environment": environment(),
         "checkpoint": args.checkpoint,
+        "args": vars(args),
         "iteration": loaded.iteration,
         "rollouts_each": args.rollouts,
         "seed_seconds": round(seeded, 1),
@@ -486,8 +602,26 @@ def main(argv: list[str] | None = None) -> int:
             [r["true_values"] for r in rows],
             [r["standard_errors"] for r in rows],
         ),
+        "standardised": standardised(
+            [r["head_values"] for r in rows],
+            [r["true_values"] for r in rows],
+            [r["standard_errors"] for r in rows],
+        ),
         "rows": rows,
     }
+    if search is not None:
+        payload["simulations"] = args.simulations
+        payload["exploration"] = args.exploration
+        payload["pooled_tree"] = pooled(
+            [r["tree_values"] for r in rows],
+            [r["true_values"] for r in rows],
+            [r["standard_errors"] for r in rows],
+        )
+        payload["standardised_tree"] = standardised(
+            [r["tree_values"] for r in rows],
+            [r["true_values"] for r in rows],
+            [r["standard_errors"] for r in rows],
+        )
     if args.json:
         from pathlib import Path
 
@@ -514,6 +648,31 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  pearson, as observed             {q['pearson_observed']:+.3f}")
     print(f"  pearson, corrected for that      {q['pearson_corrected']:+.3f}"
           f"{'   <- the number' if q['reliability'] > 0.2 else '   (reliability too low to trust)'}")
+    z = payload["standardised"]
+    print(f"\nthe same rows, each scaled to unit variance so one position counts "
+          f"once ({z['positions']}):")
+    print(f"  pearson, corrected               {z['pearson_corrected']:+.3f}"
+          "   <- a typical position, not the widest few")
+    if "pooled_tree" in payload:
+        t = payload["pooled_tree"]
+        hits = float(np.mean([1.0 if r["tree"]["top1"] else 0.0 for r in rows]))
+        regret = float(np.mean([r["tree"]["regret"] for r in rows]))
+        print(f"\nthe same children scored by a {args.simulations}-simulation "
+              f"tree over the same head:")
+        print(f"  pearson, as observed             {t['pearson_observed']:+.3f}")
+        print(f"  pearson, corrected for that      {t['pearson_corrected']:+.3f}")
+        print(f"  tree minus head, corrected       "
+              f"{t['pearson_corrected'] - q['pearson_corrected']:+.3f}"
+              "   <- positive means the search's value is the better label")
+        print(f"  top-1 hit rate                   {hits:.0%} against "
+              f"{payload['summary']['top1_rate']:.0%} for the head")
+        print(f"  regret of trusting the tree      {regret:.4f} "
+              f"({regret * 10.0:.2f} victory points) against "
+              f"{payload['summary']['regret_mean_victory_points']:.2f} for the head")
+        zt = payload["standardised_tree"]
+        print(f"  row-standardised, tree           {zt['pearson_corrected']:+.3f} "
+              f"against {z['pearson_corrected']:+.3f} for the head "
+              f"({zt['pearson_corrected'] - z['pearson_corrected']:+.3f})")
     return 0
 
 

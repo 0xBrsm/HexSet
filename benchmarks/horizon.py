@@ -348,6 +348,10 @@ def main(argv: list[str] | None = None) -> int:
         "sample_factor": round(1.0 / max(ratio, 1e-12), 2),
         "mean_gap": round(float(gaps.mean()), 4),
         **teacher(rows),
+        # Per-position, so a sharded run pools rows directly instead of
+        # combining shards' aggregate RMS values, which is exact for `teacher`
+        # but throws away the per-position mixture detail.
+        "rows": rows,
     }
     if lambdas:
         payload["lambdas"] = [

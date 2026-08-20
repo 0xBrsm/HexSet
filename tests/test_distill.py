@@ -382,3 +382,88 @@ def test_filtering_zeroes_the_policy_weight_where_the_search_agreed():
     # and the batch must keep its length -- the value head still sees them all.
     assert len(filtered) == len(plain)
     assert filtered.policy_weight.sum() < plain.policy_weight.sum()
+
+
+# --- the anchor -----------------------------------------------------------
+#
+# `contested_only` filters the policy loss but cannot filter its effect: the
+# trunk is shared, the value loss is unweighted, and a network has no
+# per-position parameters. `runs/filtered` measured the drift that follows --
+# agreement with the search fell 0.941 to 0.788 over ten iterations, and the
+# checkpoint lost to its own parent by 0.555 VP. These pin the restoring force.
+
+
+def test_the_anchor_weight_is_the_complement_of_the_policy_weight():
+    policy, space, layout = a_setup()
+    episodes = searched_episodes(policy, space, games=3)
+    filtered = assemble(episodes, space, layout, DistillConfig(contested_only=True))
+    # Only where a prior was recorded. A forced position has none, and both
+    # weights are zero there -- it is neither trained nor anchored.
+    anchorable = filtered.anchor_slots.sum(-1) > 0
+    assert bool(anchorable.any())
+    assert torch.allclose(
+        filtered.anchor_weight[anchorable],
+        1.0 - filtered.policy_weight[anchorable],
+    )
+
+
+def test_a_row_without_a_recorded_prior_cannot_be_anchored():
+    # The alternative -- a uniform target -- would pull the policy toward
+    # uniform on exactly the rows it knows least about.
+    policy, space, layout = a_setup()
+    episodes = searched_episodes(policy, space, games=2)
+    batch = assemble(episodes, space, layout, DistillConfig(contested_only=True))
+    unanchorable = batch.anchor_slots.sum(-1) == 0
+    assert torch.all(batch.anchor_weight[unanchorable] == 0.0)
+
+
+def test_the_anchor_target_is_a_distribution_over_the_same_slots():
+    policy, space, layout = a_setup()
+    batch = a_batch(policy, space, layout, DistillConfig(contested_only=True))
+    anchored = batch.anchor_weight > 0
+    assert bool(anchored.any())
+    totals = batch.anchor_slots[anchored].sum(-1)
+    assert torch.allclose(totals, torch.ones_like(totals), atol=1e-5)
+
+
+def test_the_anchor_is_off_by_default_so_recorded_runs_are_untouched():
+    policy, space, layout = a_setup()
+    batch = a_batch(policy, space, layout, DistillConfig(contested_only=True))
+    assert DistillConfig().anchor == 0.0
+    stats = update(
+        policy,
+        torch.optim.Adam(policy.net.parameters(), lr=1e-3),
+        batch,
+        DistillConfig(contested_only=True, epochs=1),
+        generator=torch.Generator().manual_seed(0),
+    )
+    assert stats.anchor_loss == 0.0
+
+
+def test_the_anchor_holds_the_settled_rows_the_filter_let_go():
+    """The whole point: rows the policy loss zeroed must not drift freely."""
+    import copy
+
+    policy, space, layout = a_setup(seed=3)
+    batch = a_batch(policy, space, layout, DistillConfig(contested_only=True), games=4)
+    settled = batch.anchor_weight > 0
+    assert bool(settled.any())
+
+    def drift(anchor: float) -> float:
+        student = NetworkPolicy(copy.deepcopy(policy.net), space, layout)
+        config = DistillConfig(contested_only=True, anchor=anchor, epochs=2)
+        update(
+            student,
+            torch.optim.Adam(student.net.parameters(), lr=3e-3),
+            batch,
+            config,
+            generator=torch.Generator().manual_seed(0),
+        )
+        with torch.no_grad():
+            slots, _, _ = student.distributions(batch.buffer, batch.mask, batch.pair)
+            # How far the settled rows ended up from the prior they were
+            # collected under, which is exactly what the anchor penalises.
+            per_row = -(batch.anchor_slots * slots).sum(-1)
+            return float(per_row[settled].mean())
+
+    assert drift(anchor=1.0) < drift(anchor=0.0)

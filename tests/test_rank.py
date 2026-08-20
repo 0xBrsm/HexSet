@@ -19,6 +19,7 @@ from benchmarks.rank import (
     resolution,
     standardised,
     summarise,
+    teacher_row,
 )
 from catan.mcts import Node
 
@@ -210,3 +211,46 @@ def test_scaling_each_row_first_lets_the_nine_outvote_the_one():
 def test_a_row_with_one_child_carries_no_ordering_and_is_dropped():
     out = standardised([[0.1], [0.0, 0.1]], [[0.2], [0.0, 0.1]], [[0.0], [0.0, 0.0]])
     assert out["positions"] == 1
+
+
+TRUTH = np.array([0.30, 0.10, 0.00])  # child 0 is genuinely best
+
+
+def test_a_search_that_finds_the_best_child_the_prior_missed_counts_as_improved():
+    cell = teacher_row(
+        prior=np.array([0.2, 0.7, 0.1]),
+        visits=np.array([60.0, 30.0, 10.0]),
+        true=TRUTH,
+    )
+    assert cell["moved"] and cell["improved"] and not cell["damaged"]
+    assert cell["visits_top1"] and not cell["prior_top1"]
+
+
+def test_a_search_that_walks_away_from_a_correct_prior_counts_as_damaged():
+    cell = teacher_row(
+        prior=np.array([0.7, 0.2, 0.1]),
+        visits=np.array([20.0, 70.0, 10.0]),
+        true=TRUTH,
+    )
+    assert cell["moved"] and cell["damaged"] and not cell["improved"]
+
+
+def test_a_search_that_agrees_with_the_prior_is_neither():
+    # The case expert iteration cannot learn from: whatever the tree spent, the
+    # target it hands back is the argmax the policy already had.
+    cell = teacher_row(
+        prior=np.array([0.7, 0.2, 0.1]),
+        visits=np.array([70.0, 20.0, 10.0]),
+        true=TRUTH,
+    )
+    assert not cell["moved"] and not cell["improved"] and not cell["damaged"]
+
+
+def test_regret_is_zero_for_whichever_side_picked_the_best_child():
+    cell = teacher_row(
+        prior=np.array([0.1, 0.8, 0.1]),
+        visits=np.array([80.0, 10.0, 10.0]),
+        true=TRUTH,
+    )
+    assert cell["visits_regret"] == pytest.approx(0.0)
+    assert cell["prior_regret"] == pytest.approx(0.20)

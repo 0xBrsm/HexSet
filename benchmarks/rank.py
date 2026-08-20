@@ -37,6 +37,21 @@ network. The prior is read from the same forward the search's root expansion
 uses, over the same option tuple, so the two columns differ in nothing but the
 search.
 
+`--contested-only` is how to ask that question affordably, and the first run of
+it did not. Truth costs 384 games a child; a search costs ~60 ms and the argmax
+comparison is free once it exists. Buying truth for every position and spending
+it only on the disagreements cost **~56,000 rollouts per informative row**. With
+this flag a position is searched first, skipped outright when the prior and the
+visits agree, and rolled out only when they differ — and then only for the **two
+contested children**, since no other child can enter the comparison. About 70x
+the informative rows per unit of compute.
+
+One semantic change comes with it, and it is the more relevant question anyway.
+Without the flag, `improved` means the visits found the globally best child.
+With it, the row has only the two contested children in it, so `improved` means
+**the search moved to the better of the two** — which is exactly what
+distillation would be learning from.
+
 `--child-trees` is the separate, more expensive pass: score every child by a
 search rooted at *it*, which asks whether the backed-up value is a better label
 than the head's read. That measurement is recorded and closed; the flag stays
@@ -458,6 +473,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--simulations", type=int, default=0,
                         help="also score every child by the backed-up value of a "
                              "PUCT search rooted at it; 0 scores the head alone")
+    parser.add_argument("--contested-only", action="store_true",
+                        help="search first and roll out only positions where the "
+                             "visits and the prior disagree, and only their two "
+                             "contested children; the cheap way to buy McNemar "
+                             "rows, see the module docstring")
     parser.add_argument("--child-trees", action="store_true",
                         help="also score each child by a search rooted at it; "
                              "costs a search per child rather than one per "
@@ -532,6 +552,7 @@ def main(argv: list[str] | None = None) -> int:
     seeded = time.perf_counter() - started
 
     rows = []
+    agreed = 0
     for index, fork in enumerate(chosen):
         children = probeable(fork.game, loaded.max_offers)
         if len(children) < 2:
@@ -590,6 +611,21 @@ def main(argv: list[str] | None = None) -> int:
                     continue
                 visits[slot] = float(root_visits[at])
                 prior[slot] = float(prior_row[at])
+
+        if args.contested_only:
+            prior_pick, visit_pick = int(prior.argmax()), int(visits.argmax())
+            if prior_pick == visit_pick:
+                agreed += 1
+                continue
+            # Only the two children the search actually chose between: no other
+            # child can appear in the comparison, so no other child's truth is
+            # worth 384 games.
+            keep = [prior_pick, visit_pick]
+            children = tuple(children[i] for i in keep)
+            games = [games[i] for i in keep]
+            head = [head[i] for i in keep]
+            tree = [tree[i] for i in keep]
+            prior, visits = prior[keep], visits[keep]
 
         # The truth, by rollout. Every child gets its own collector seeded
         # identically, so lane k across the row shares deck and sampling stream.
@@ -657,6 +693,11 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     if not rows:
+        if args.contested_only and agreed:
+            # Not a failure: every screened position agreed, which is the
+            # measurement rather than the absence of one.
+            print(f"screened {agreed} positions, none contested", file=sys.stderr)
+            return 0
         print("no position produced a row; raise --seed-games", file=sys.stderr)
         return 1
 
@@ -668,6 +709,7 @@ def main(argv: list[str] | None = None) -> int:
         "iteration": loaded.iteration,
         "rollouts_each": args.rollouts,
         "seed_seconds": round(seeded, 1),
+        "agreed_skipped": agreed,
         "seconds": round(elapsed, 1),
         "summary": summarise(rows),
         "pooled": pooled(
@@ -731,6 +773,9 @@ def main(argv: list[str] | None = None) -> int:
           "   <- a typical position, not the widest few")
     if rows and "teacher" in rows[0]:
         cells = [r["teacher"] for r in rows]
+        if args.contested_only:
+            print(f"\nscreened {agreed + len(rows)} positions; {agreed} agreed and "
+                  f"were skipped before any rollout, {len(rows)} were contested")
         share = lambda key: float(np.mean([1.0 if c[key] else 0.0 for c in cells]))
         print(f"\nthe teacher: one search at the parent, {args.simulations} "
               f"simulations, against what the prior already said")

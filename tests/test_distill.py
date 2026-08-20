@@ -11,6 +11,7 @@ from catan.board.board import random_base_board  # noqa: E402
 from catan.distill import (  # noqa: E402
     DistillConfig,
     assemble,
+    contested,
     losses,
     project,
     update,
@@ -295,3 +296,89 @@ def test_the_value_head_is_trained_on_the_terminal_outcome():
                 assert torch.allclose(batch.value_target[row], expected)
                 row += 1
     assert row == len(batch)
+
+
+def a_target(visits, prior=None):
+    """A `Target` whose options are placeholders: `contested` reads only their
+    count, so a real action space is not needed to pin the filter."""
+    import numpy as np
+
+    from catan.expert import Target
+
+    return Target(
+        options=tuple(range(len(visits))),
+        visits=np.asarray(visits, dtype=np.float64),
+        prior=None if prior is None else np.asarray(prior, dtype=np.float64),
+    )
+
+
+def test_a_search_that_agrees_with_the_prior_is_not_contested():
+    assert not contested(a_target([70.0, 20.0, 10.0], [0.7, 0.2, 0.1]))
+
+
+def test_a_search_that_overrules_the_prior_is_contested():
+    assert contested(a_target([20.0, 70.0, 10.0], [0.7, 0.2, 0.1]))
+
+
+def test_a_row_the_search_never_expanded_is_not_contested():
+    # 24 of 72 rows in the first screen were exactly this: all-zero visits,
+    # where `argmax` on ties invents a disagreement out of index order.
+    assert not contested(a_target([0.0, 0.0, 0.0], [0.1, 0.7, 0.2]))
+
+
+def test_a_corpus_without_recorded_priors_is_never_contested():
+    # Keeps an old corpus readable: the filter is a no-op rather than an
+    # empty batch.
+    assert not contested(a_target([20.0, 70.0, 10.0], prior=None))
+
+
+def test_the_hard_target_puts_all_of_a_row_on_one_option():
+    policy, space, layout = a_setup()
+    batch = a_batch(policy, space, layout, config=DistillConfig(hard_target=True))
+    totals = batch.slot_target.sum(-1)
+    assert torch.allclose(totals, torch.ones_like(totals), atol=1e-5)
+    # A one-hot over *options*, so the only way a slot holds less than 1 is the
+    # trade slot standing for an offer the row split across -- which cannot
+    # happen here, because one option took the whole weight.
+    assert torch.allclose(
+        batch.slot_target.max(-1).values,
+        torch.ones_like(totals),
+        atol=1e-5,
+    )
+
+
+def test_the_searched_corpus_records_a_prior_beside_its_visits():
+    # Without this the filter has nothing to compare against, and it cannot be
+    # recovered later: by training time the policy has moved.
+    policy, space, layout = a_setup()
+    episodes = searched_episodes(policy, space, games=2)
+    targets = [
+        t.aux
+        for e in episodes
+        for traj in e.trajectories
+        for t in traj
+        if t.aux is not None
+    ]
+    assert targets
+    # A forced position is never expanded, so it has no prior -- and it cannot
+    # be contested either, which is why `contested` treats a missing prior as
+    # agreement rather than as an error.
+    searched = [t for t in targets if len(t.options) > 1]
+    assert searched
+    assert all(t.prior is not None for t in searched)
+    assert all(len(t.prior) == len(t.options) for t in searched)
+    assert all(t.prior is None for t in targets if len(t.options) == 1)
+
+
+def test_filtering_zeroes_the_policy_weight_where_the_search_agreed():
+    policy, space, layout = a_setup()
+    episodes = searched_episodes(policy, space, games=3)
+    plain = assemble(episodes, space, layout, DistillConfig())
+    filtered = assemble(
+        episodes, space, layout, DistillConfig(contested_only=True)
+    )
+    assert torch.all(plain.policy_weight == 1.0)
+    # The measured disagreement rate is ~5%, so most rows must be switched off
+    # and the batch must keep its length -- the value head still sees them all.
+    assert len(filtered) == len(plain)
+    assert filtered.policy_weight.sum() < plain.policy_weight.sum()

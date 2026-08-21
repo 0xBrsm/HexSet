@@ -582,8 +582,11 @@ def test_streaming_collection_ignores_the_batch_size_it_was_asked_for(tmp_path):
     assert run(fresh, 2, ["--lanes", "1"]) == 0
     cohort = [row for row in _rows(fresh) if "positions" in row]
     assert [row["games"] for row in cohort] == [1, 2]
-    assert all(
-        row["positions"] < other["positions"] for row, other in zip(cohort, streamed)
+    # Totalled over the run, not paired per iteration: one lane finishing a
+    # short game can put a single streamed iteration below a truncated cohort
+    # one without the claim being wrong.
+    assert sum(row["positions"] for row in cohort) < sum(
+        row["positions"] for row in streamed
     ), "the cohort trained on no less data than the four-lane stream"
 
 

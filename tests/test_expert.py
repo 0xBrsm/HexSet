@@ -93,6 +93,19 @@ def test_the_recorded_value_is_what_the_search_concluded_not_what_it_started_fro
     assert choice.value == pytest.approx((0.0, 0.0, 0.0, 0.0))
 
 
+def test_every_option_carries_the_mean_the_search_ranked_it_on():
+    policy = a_policy(Stub(value=(0.4, -0.1, -0.1, -0.2)), simulations=32)
+    game = a_game()
+    root, options, visits = policy.search.run(game)
+    target = policy._choice(a_request(policy, game, options), (root, options, visits)).aux
+    assert target.values is not None
+    # The arithmetic `_select` does: an unvisited edge scores 0, a visited one
+    # its stance-ranked total over its count.
+    expected = np.where(visits > 0, root.ranked / np.maximum(visits, 1.0), 0.0)
+    assert np.allclose(target.values, expected)
+    assert target.values[int(np.argmax(visits))] != 0.0
+
+
 def test_a_forced_move_reports_no_value_estimate():
     class OneWay(Search):
         def _options(self, game):

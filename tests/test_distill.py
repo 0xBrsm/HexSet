@@ -14,6 +14,7 @@ from catan.distill import (  # noqa: E402
     contested,
     losses,
     project,
+    stake,
     update,
 )
 from catan.encoding import static_graph  # noqa: E402
@@ -298,7 +299,7 @@ def test_the_value_head_is_trained_on_the_terminal_outcome():
     assert row == len(batch)
 
 
-def a_target(visits, prior=None):
+def a_target(visits, prior=None, values=None):
     """A `Target` whose options are placeholders: `contested` reads only their
     count, so a real action space is not needed to pin the filter."""
     import numpy as np
@@ -309,6 +310,7 @@ def a_target(visits, prior=None):
         options=tuple(range(len(visits))),
         visits=np.asarray(visits, dtype=np.float64),
         prior=None if prior is None else np.asarray(prior, dtype=np.float64),
+        values=None if values is None else np.asarray(values, dtype=np.float64),
     )
 
 
@@ -330,6 +332,45 @@ def test_a_corpus_without_recorded_priors_is_never_contested():
     # Keeps an old corpus readable: the filter is a no-op rather than an
     # empty batch.
     assert not contested(a_target([20.0, 70.0, 10.0], prior=None))
+
+
+def test_the_stake_is_the_gap_between_what_the_search_picked_and_what_it_overruled():
+    target = a_target([20.0, 70.0, 10.0], [0.7, 0.2, 0.1], [0.10, 0.16, -0.30])
+    assert stake(target) == pytest.approx(0.06)
+
+
+def test_a_search_whose_own_value_prefers_the_option_it_overruled_stakes_nothing():
+    # The exploration bonus can carry visits somewhere the means never followed.
+    # The counts call this contested; the gap says the correction is worth less
+    # than nothing, and weighting by it is what drops the row.
+    target = a_target([20.0, 70.0, 10.0], [0.7, 0.2, 0.1], [0.16, 0.10, -0.30])
+    assert stake(target) < 0.0
+
+
+def test_a_corpus_collected_before_values_were_recorded_stakes_nothing():
+    assert stake(a_target([20.0, 70.0, 10.0], [0.7, 0.2, 0.1])) == 0.0
+
+
+def test_the_stake_scale_weights_a_contested_row_by_what_it_is_worth():
+    policy, space, layout = a_setup()
+    episodes = searched_episodes(policy, space, games=3)
+    filtered = assemble(
+        episodes, space, layout, DistillConfig(contested_only=True)
+    )
+    staked = assemble(
+        episodes,
+        space,
+        layout,
+        DistillConfig(contested_only=True, stake_scale=0.05),
+    )
+    assert (staked.policy_weight <= filtered.policy_weight + 1e-6).all()
+    assert (staked.policy_weight >= 0.0).all()
+    # The anchor holds whatever the policy term let go, and a part-staked row is
+    # part-held: the two weights have to keep summing to one where a prior was
+    # recorded, or the row is trained on less than all of itself.
+    both = staked.policy_weight + staked.anchor_weight
+    recorded = filtered.anchor_weight + filtered.policy_weight > 0.0
+    assert torch.allclose(both[recorded], torch.ones_like(both[recorded]), atol=1e-6)
 
 
 def test_the_hard_target_puts_all_of_a_row_on_one_option():

@@ -78,4 +78,6 @@ def test_a_seat_sees_its_own_payoff_first_at_every_one_of_its_decisions():
             assert tuple(targets[seat * 2 + step]) == pytest.approx(wanted)
     # Seat 0 won, so its own component leads and the row is still zero-sum.
     assert targets[0][0] == pytest.approx(payoff[0])
-    assert float(targets[0].sum()) == pytest.approx(0.0)
+    # abs= because the targets are float32: the four components cancel to ~3e-8,
+    # not to zero, and approx's default tolerance against 0.0 is 1e-12.
+    assert float(targets[0].sum()) == pytest.approx(0.0, abs=1e-6)

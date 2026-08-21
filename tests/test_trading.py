@@ -222,6 +222,74 @@ def test_the_allowance_resets_with_the_turn():
     assert game.offers_made == 1
 
 
+def offers(game):
+    return {
+        (action.give, action.want)
+        for action in legal_actions(game)
+        if action.type is ActionType.PROPOSE_TRADE
+    }
+
+
+def test_a_bundle_already_declined_is_not_offered_again_this_turn():
+    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1), (1, Resource.BRICK, 1))
+    repeat = (bundle(wood=1), bundle(ore=1))
+    assert repeat in offers(game)
+
+    propose_trade(game, *repeat)
+    decline_trade(game)
+
+    assert repeat not in offers(game)
+    # Only that bundle goes. The rest of the sample is untouched.
+    assert (bundle(wood=1), bundle(brick=1)) in offers(game)
+    assert game.offered == {repeat}
+
+
+def test_repeating_an_offer_stays_legal_even_though_it_is_not_enumerated():
+    """The sample narrows; the rules do not.
+
+    `_offer_actions` is documented as a sample rather than the whole legal set,
+    and this is what keeps that true. A stronger policy that wants to ask twice
+    still can, which is also why `--max-offers` remains the thing that bounds a
+    turn.
+    """
+    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1))
+    propose_trade(game, bundle(wood=1), bundle(ore=1))
+    decline_trade(game)
+
+    propose_trade(game, bundle(wood=1), bundle(ore=1))
+    assert game.offers_made == 2
+
+
+def test_the_offer_record_resets_with_the_turn():
+    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1))
+    propose_trade(game, bundle(wood=1), bundle(ore=1))
+    decline_trade(game)
+    end_turn(game)
+
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    assert game.offered == set()
+    assert (bundle(wood=1), bundle(ore=1)) in offers(game)
+
+
+def test_an_imagined_game_carries_what_has_been_offered():
+    """Without this a search reads every repeat as a fresh option.
+
+    `imagine` is the search's only view of the position, so a field the engine
+    keeps and the copy drops is worse than one that never existed.
+    """
+    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1))
+    propose_trade(game, bundle(wood=1), bundle(ore=1))
+    decline_trade(game)
+
+    copy = imagine(game, random.Random(1))
+    assert copy.offered == game.offered
+    assert (bundle(wood=1), bundle(ore=1)) not in offers(copy)
+
+    propose_trade(copy, bundle(wood=1), bundle(ore=2))
+    assert game.offered == {(bundle(wood=1), bundle(ore=1))}
+
+
 def test_responding_is_in_the_action_space():
     game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1))
     propose_trade(game, bundle(wood=2), bundle(ore=1))

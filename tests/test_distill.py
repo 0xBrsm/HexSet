@@ -467,3 +467,208 @@ def test_the_anchor_holds_the_settled_rows_the_filter_let_go():
             return float(per_row[settled].mean())
 
     assert drift(anchor=1.0) < drift(anchor=0.0)
+
+
+# --- the buffer and the packing -------------------------------------------
+#
+# Collection is 92% of wall clock -- 707 s against 66 s of update on the live
+# run -- and with `--contested-only` about 3% of what it buys carries policy
+# gradient. Both of these attack that: reuse the corpus, and spend the policy
+# term's steps on rows that are actually in it.
+
+
+def test_concatenating_batches_keeps_every_row():
+    policy, space, layout = a_setup()
+    from catan.distill import Batch
+
+    first = a_batch(policy, space, layout, games=2)
+    second = a_batch(policy, space, layout, games=2)
+    joined = Batch.concat([first, second])
+    assert len(joined) == len(first) + len(second)
+    for name in Batch.FIELDS:
+        assert torch.equal(
+            getattr(joined, name)[: len(first)], getattr(first, name)
+        )
+        assert torch.equal(
+            getattr(joined, name)[len(first) :], getattr(second, name)
+        )
+
+
+def test_concatenating_one_batch_is_that_batch():
+    policy, space, layout = a_setup()
+    from catan.distill import Batch
+
+    only = a_batch(policy, space, layout, games=2)
+    assert Batch.concat([only]) is only
+
+
+def test_refreshing_against_the_collecting_policy_reproduces_the_filter():
+    """The recorded prior came from this policy, so the two must agree.
+
+    Asserted on the rows where the two definitions provably coincide, which
+    takes two restrictions rather than one.
+
+    Where the search put no mass on the trade slot, no aggregation can separate
+    an option-space argmax from a slot-space one, and `--max-offers` cannot have
+    truncated the option tuple in a way that matters. A slot-space comparison
+    scored 0.659 on the whole batch, which is what motivated `_best_option` --
+    the trade slot is a sum over every offer on the row, so a search that spread
+    its visits can top that slot while its argmax option is not a trade at all.
+
+    And where the max is *strict*. Tied options have no argmax, only a
+    tie-break, and the two sides break ties in unrelated orders: `contested`
+    takes `np.argmax` over the option tuple, `_best_option` takes `Tensor.max`
+    over slots. Swept against the fixture's simulation count the mismatch is the
+    tie rate and nothing else -- 33.0% of rows tied gives 1.54% of plain rows
+    disagreeing, 14.2% gives 0.27%, 3.3% gives 0.02%, and at 512 simulations
+    0.66% tie and none disagree. The invariant is real; asserting past the ties
+    would only assert that two arbitrary orderings coincide on one seed.
+    """
+    from catan.distill import refresh
+
+    policy, space, layout = a_setup(seed=5)
+    config = DistillConfig(contested_only=True)
+    batch = a_batch(policy, space, layout, config, games=3)
+    refreshed = refresh(policy, batch, config)
+
+    plain = batch.trade_mass == 0.0
+    # On a plain row the option -> slot map is injective, so a tie among the
+    # target's top options shows up as a tie among the top slots.
+    top = batch.slot_target.max(-1, keepdim=True).values
+    decided = plain & ((batch.slot_target >= top).sum(-1) == 1)
+
+    assert int(plain.sum()) > 0
+    assert int(decided.sum()) > 0
+    assert torch.equal(batch.policy_weight[decided], refreshed.policy_weight[decided])
+
+
+def test_refreshing_tracks_the_policy_rather_than_the_recorded_prior():
+    """The whole point of a buffer: the filter must not age with the corpus."""
+    import copy
+
+    from catan.distill import refresh
+
+    policy, space, layout = a_setup(seed=7)
+    config = DistillConfig(contested_only=True, hard_target=True)
+    batch = a_batch(policy, space, layout, config, games=3)
+
+    moved = NetworkPolicy(copy.deepcopy(policy.net), space, layout)
+    # Train it hard on the search's own targets, so it now agrees with the
+    # search where it used to be overruled.
+    update(
+        moved,
+        torch.optim.Adam(moved.net.parameters(), lr=1e-2),
+        batch,
+        DistillConfig(contested_only=True, hard_target=True, epochs=6),
+        generator=torch.Generator().manual_seed(0),
+    )
+    before = float(batch.policy_weight.sum())
+    after = float(refresh(moved, batch, config).policy_weight.sum())
+    assert before > 0
+    assert after != before
+
+
+def test_refreshing_never_contests_a_row_the_search_did_not_expand():
+    # The projected target of an all-zero row is a one-hot on whichever option
+    # `argmax` reached first, so slot space cannot see what `contested` reads
+    # off the raw visits. `searched` carries it.
+    from catan.distill import refresh
+
+    policy, space, layout = a_setup()
+    config = DistillConfig(contested_only=True)
+    batch = a_batch(policy, space, layout, config, games=2)
+    refreshed = refresh(policy, batch, config)
+    unexpanded = batch.searched == 0.0
+    assert torch.all(refreshed.policy_weight[unexpanded] == 0.0)
+
+
+def test_the_refreshed_anchor_is_the_live_policys_own_distribution():
+    from catan.distill import refresh
+
+    policy, space, layout = a_setup()
+    config = DistillConfig(contested_only=True)
+    batch = a_batch(policy, space, layout, config, games=2)
+    refreshed = refresh(policy, batch, config)
+    with torch.no_grad():
+        slots, _, _ = policy.distributions(batch.buffer, batch.mask, batch.pair)
+    assert torch.allclose(refreshed.anchor_slots, slots.exp(), atol=1e-5)
+    totals = refreshed.anchor_slots.sum(-1)
+    assert torch.allclose(totals, torch.ones_like(totals), atol=1e-4)
+
+
+def test_packing_is_off_by_default():
+    assert DistillConfig().pack_contested is False
+    assert DistillConfig().refresh_prior is False
+    assert DistillConfig().buffer_iterations == 1
+
+
+def test_the_reported_density_matches_the_filter():
+    policy, space, layout = a_setup()
+    config = DistillConfig(contested_only=True, epochs=1)
+    batch = a_batch(policy, space, layout, config, games=3)
+    stats = update(
+        policy,
+        torch.optim.Adam(policy.net.parameters(), lr=1e-4),
+        batch,
+        config,
+        generator=torch.Generator().manual_seed(0),
+    )
+    assert stats.contested_positions == int(batch.policy_weight.sum())
+
+
+def test_packing_reports_the_policy_loss_over_contested_rows_only():
+    """Unpacked, a minibatch holding no contested row reports a zero loss.
+
+    Those zeros are averaged into `policy_loss`, so the reported number is
+    diluted by the filter's selectivity rather than describing the rows the
+    loss actually trained on. Packed, every reported step has contested rows in
+    it.
+    """
+    import copy
+
+    policy, space, layout = a_setup(seed=11)
+    batch = a_batch(
+        policy, space, layout, DistillConfig(contested_only=True), games=3
+    )
+    assert float(batch.policy_weight.sum()) > 0
+
+    def run(pack: bool) -> float:
+        student = NetworkPolicy(copy.deepcopy(policy.net), space, layout)
+        stats = update(
+            student,
+            torch.optim.Adam(student.net.parameters(), lr=1e-4),
+            batch,
+            DistillConfig(
+                contested_only=True, hard_target=True, epochs=1, pack_contested=pack
+            ),
+            generator=torch.Generator().manual_seed(0),
+        )
+        return stats.policy_loss
+
+    assert run(pack=True) > run(pack=False)
+
+
+def test_packing_with_nothing_contested_still_runs():
+    # `contested_only` on a corpus with no recorded priors switches every row
+    # off, so the policy pass has no rows at all.
+    policy, space, layout = a_setup()
+    batch = a_batch(policy, space, layout, DistillConfig(), games=2)
+    batch = batch.__class__(
+        **{
+            name: (
+                torch.zeros_like(batch.policy_weight)
+                if name == "policy_weight"
+                else getattr(batch, name)
+            )
+            for name in batch.FIELDS
+        }
+    )
+    stats = update(
+        policy,
+        torch.optim.Adam(policy.net.parameters(), lr=1e-4),
+        batch,
+        DistillConfig(contested_only=True, epochs=1, pack_contested=True),
+        generator=torch.Generator().manual_seed(0),
+    )
+    assert stats.contested_positions == 0
+    assert stats.policy_loss == 0.0

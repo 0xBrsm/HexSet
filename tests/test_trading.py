@@ -236,7 +236,7 @@ def test_a_bundle_already_declined_is_not_offered_again_this_turn():
     assert repeat in offers(game)
 
     propose_trade(game, *repeat)
-    decline_trade(game)
+    decline_trade(game, 1)
 
     assert repeat not in offers(game)
     # Only that bundle goes. The rest of the sample is untouched.
@@ -254,7 +254,7 @@ def test_repeating_an_offer_stays_legal_even_though_it_is_not_enumerated():
     """
     game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1))
     propose_trade(game, bundle(wood=1), bundle(ore=1))
-    decline_trade(game)
+    decline_trade(game, 1)
 
     propose_trade(game, bundle(wood=1), bundle(ore=1))
     assert game.offers_made == 2
@@ -263,7 +263,7 @@ def test_repeating_an_offer_stays_legal_even_though_it_is_not_enumerated():
 def test_the_offer_record_resets_with_the_turn():
     game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1))
     propose_trade(game, bundle(wood=1), bundle(ore=1))
-    decline_trade(game)
+    decline_trade(game, 1)
     end_turn(game)
 
     game.phase = Phase.MAIN
@@ -280,13 +280,14 @@ def test_an_imagined_game_carries_what_has_been_offered():
     """
     game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1))
     propose_trade(game, bundle(wood=1), bundle(ore=1))
-    decline_trade(game)
+    decline_trade(game, 1)
 
     copy = imagine(game, random.Random(1))
     assert copy.offered == game.offered
     assert (bundle(wood=1), bundle(ore=1)) not in offers(copy)
 
-    propose_trade(copy, bundle(wood=1), bundle(ore=2))
+    # And the copy's own record does not leak back into the real game.
+    propose_trade(copy, bundle(wood=2), bundle(ore=1))
     assert game.offered == {(bundle(wood=1), bundle(ore=1))}
 
 

@@ -9,22 +9,34 @@ torch = pytest.importorskip("torch", reason="PyTorch runs on the training box on
 from catan.actions import legal_actions, space_for, within_offer_budget  # noqa: E402
 from catan.arena import Entrant, compete, spawn  # noqa: E402
 from catan.board.board import random_base_board  # noqa: E402
-from catan.encoding import static_graph  # noqa: E402
+from catan.encoding import encode, static_graph  # noqa: E402
 from catan.game import start, to_move  # noqa: E402
 from catan.model import CatanNet, ModelConfig  # noqa: E402
 from catan.netbot import load, network_bot  # noqa: E402
 from catan.play import step_randomly  # noqa: E402
 
 
-def a_checkpoint(path, *, players: int = 4, max_offers: int | None = 3, seed: int = 0):
-    """A checkpoint in the shape `catan.train.save` writes, tiny enough to load."""
+def a_checkpoint(
+    path,
+    *,
+    players: int = 4,
+    max_offers: int | None = 3,
+    seed: int = 0,
+    shape: dict | None = None,
+):
+    """A checkpoint in the shape `catan.train.save` writes, tiny enough to load.
+
+    `shape` is omitted by default, which is the case that matters: it is what a
+    checkpoint written before the head-shape flags existed looks like, and the
+    loader has to keep rebuilding those as `"linear"` on both.
+    """
     rng = random.Random(seed)
     board = random_base_board(rng)
     game = start(board, players, rng)
     graph = static_graph(board.topology)
     torch.manual_seed(seed)
     net = CatanNet(
-        space_for(game), graph, players, ModelConfig(width=16, rounds=1)
+        space_for(game), graph, players, ModelConfig(width=16, rounds=1, **(shape or {}))
     )
     torch.save(
         {
@@ -35,6 +47,7 @@ def a_checkpoint(path, *, players: int = 4, max_offers: int | None = 3, seed: in
                 "width": 16,
                 "rounds": 1,
                 "max_offers": max_offers,
+                **(shape or {}),
             },
         },
         path,
@@ -79,6 +92,52 @@ def test_the_checkpoint_is_loaded_once_per_process_not_once_per_game(checkpoint)
     assert first is not second
     assert first.policy is second.policy
     assert load.cache_info().hits == 1
+
+
+def test_a_checkpoint_that_predates_the_head_flags_still_loads_as_the_old_shape(
+    checkpoint,
+):
+    """Every checkpoint under `runs/` has no head shape in its `args`.
+
+    The default the loader reads has to be the shape those runs trained with, or
+    `load_state_dict` fails on the keys — which is a working checkpoint made
+    unloadable by a flag nobody passed.
+    """
+    path, board = checkpoint
+    config = load(path, board.topology, "cpu").policy.net.config
+
+    assert (config.value_head, config.policy_head) == ("linear", "linear")
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [
+        {"value_head": "mlp"},
+        {"value_head": "pooled"},
+        {"value_head": "attn"},
+        {"policy_head": "mlp"},
+        {"value_head": "mlp_pooled", "policy_head": "mlp"},
+    ],
+)
+def test_a_head_shape_round_trips_through_the_checkpoints_args_dict(tmp_path, shape):
+    """A run's shape lives in its `args`, so a duel rebuilds what it scored.
+
+    Without this the shape is known only to the launching command line, and a
+    checkpoint from a shaped run would be rebuilt as `"linear"` and fail to
+    load — with a key error a week after the run, not at the point of the bug.
+    """
+    path = tmp_path / "shaped.pt"
+    board = a_checkpoint(path, shape=shape)
+    load.cache_clear()
+
+    loaded = load(str(path), board.topology, "cpu")
+
+    config = loaded.policy.net.config
+    for field, value in shape.items():
+        assert getattr(config, field) == value
+    position = encode(start(board, 4, random.Random(5)), 0)
+    assert loaded.policy.values([position])[0].shape == (4,)
+    load.cache_clear()
 
 
 def test_loading_places_the_network_on_the_requested_device(checkpoint):

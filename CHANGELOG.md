@@ -6,6 +6,64 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- `ModelConfig.value_head` and `.policy_head` make the readout shapes ablatable:
+  `linear`, `mlp`, `pooled` (max-pools of every node type concatenated onto `g`),
+  `mlp_pooled`, and `attn` (one query off `g` pooling the 54 vertex embeddings) for the
+  value; `linear` and `mlp` for the per-node-type policy. Exposed as `--value-head` and
+  `--policy-head` on both trainers and recorded in the checkpoint's `args`, so
+  `netbot.load`, the collector workers and the update workers all rebuild the shape a
+  run was trained with. Both default to `linear`, which builds the identical modules
+  under the identical names as before the fields existed — a pinned `state_dict` key
+  set is what keeps every checkpoint already on disk loadable. Motivated by the head
+  being globally calibrated (EV +0.474) and a weak sibling ranker (r=+0.574, 42.5%
+  top-1 against 28.5% chance) while reading a single 64-vector built from three means.
+  That the shape is the *cause* is the hypothesis these exist to test; nothing is
+  measured yet.
+
+### Changed
+
+- `catan.selfplay.Collector` encodes a worker tick as one vectorized NumPy batch
+  instead of issuing the same small array operations once per lane. The batch is
+  already laid out as the model's packed input, so CPU inference reuses it without
+  restacking four feature blocks; serialization deliberately drops that shared parent
+  so one returned transition never carries the other lanes over a worker pipe. The
+  canonical encoder remains the byte-identity oracle. Alternating same-process A/B at
+  the production 24-lane, three-offer shape measured 114.65 to 99.96 us/action
+  (1.147x); the packed handoff separately removes 44.5 us per worker tick.
+- Repeated board-template lookups now hit an identity cache before Python recursively
+  hashes an unchanged frozen board, and a batched encode resolves its shared topology
+  graph once rather than once per lane. Recursive hashing was 0.759 s in an 8.196 s
+  24-lane cProfile; after the change it drops out of the profile. Six alternating
+  same-process A/B pairs at the production 24-lane shape measured a median 160.65 to
+  117.55 us/action (1.367x).
+- `catan.train --async-collect` optionally prefetches the next fixed game cohort in
+  collector processes while the GPU updates the current cohort. It is off by default
+  and names its one-iteration policy staleness in `--help`; synchronous training is
+  unchanged. Split-phase collection is guarded against double dispatch, sync and
+  counter reads while work is in flight, and the trainer never launches an unused
+  final cohort. The recorded 10.5 s collection and 41 s update phases bound steady
+  state at `max(10.5, 41) = 41` rather than 51.5 s (projected 1.256x); the checked-in
+  production-shape GPU harness is queued for uncontended measurement.
+- `catan.encoding._template` is cached 4096 boards deep, twice raised. At 8 a
+  sixteen-lane rollout missed on every call and rebuilt the board-static block the
+  cache exists to avoid — 7.5k actions/sec against 8.5k, 1.13x, over three alternating
+  runs. 64 was the same mistake one size up: PPO wants the largest batch the dispatch
+  toll amortises over, measured at 512 lanes, and 512 boards miss a 64-entry cache
+  every time. A/B'd in one process, alternating: 84.2 → 67.6 µs per position at 128
+  lanes (1.25x), 118.5 → 101.1 at 512 (1.17x), 126.9 → 115.8 at 1024 (1.10x). The cost
+  still climbs with lane count after the fix, so most of that rise is working set and
+  raising the cache again will buy nothing.
+- `catan.arena` takes a `kind="network"` entrant whose `weights` is a checkpoint path,
+  named on a command line as `network:<path>` wherever a preset name is taken. It stays
+  a picklable description, so a lineup with a network in it still goes into a manifest
+  verbatim and still crosses a process. `arena.pooled` groups standings by base name,
+  since a duel is two seats a side and the side's share of the games is the number worth
+  quoting; `benchmarks.baselines` prints it under the per-seat standings. Setting
+  `evaluator="network"` instead swaps the checkpoint in as the *leaf evaluation* of the
+  ordinary search, which needs no new bot kind: `netsearch:<path>` is `search2` with
+  learned leaves and `netgreedy:<path>` is one ply of the same. `search2-offers3` is the
+  handcrafted search on the training horizon, so that comparison differs in the leaf
+  evaluation and nothing else.
 
 ## [0.4.0] - 2026-08-22
 

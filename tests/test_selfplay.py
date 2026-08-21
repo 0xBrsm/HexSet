@@ -493,14 +493,26 @@ def test_streaming_collection_returns_replacements_while_older_games_run_on():
     still being played. The PPO batch inherited both consequences for five
     runs: it selects for short games, and the unfinished lanes carry across the
     learner's weight sync into the next iteration's data.
+
+    Asserted over several policy seeds rather than one, because whether a
+    replacement *happens* to overtake depends on the spread of game lengths and
+    not on the defect. Seed 1 alone carried it until repeated offers stopped
+    being enumerated, which shortened every game and made that seed stop -- a
+    red test that said nothing about `collect`.
     """
-    collector = Collector(RandomPolicy(random.Random(1)), lanes=8, seed=0, max_offers=3)
+    overtaken = False
+    for policy_seed in range(4):
+        collector = Collector(
+            RandomPolicy(random.Random(policy_seed)), lanes=8, seed=0, max_offers=3
+        )
 
-    returned = {episode.index for episode in collector.collect(16)}
+        returned = {episode.index for episode in collector.collect(16)}
 
-    assert len(returned) == 16
-    assert returned != set(range(16)), "no replacement outran an older game"
-    assert len(list(collector.in_flight())) == 8
+        assert len(returned) == 16
+        assert len(list(collector.in_flight())) == 8
+        overtaken |= returned != set(range(16))
+
+    assert overtaken, "no replacement outran an older game at any seed"
 
 
 def test_a_cohort_collector_must_start_empty():

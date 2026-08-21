@@ -565,14 +565,18 @@ def test_streaming_collection_ignores_the_batch_size_it_was_asked_for(tmp_path):
     game on four lanes trains on four. A cohort delivers what it was asked for.
 
     The staleness half of the same defect is pinned in `test_selfplay`, where
-    games vary in length. It cannot be shown here: `TINY` caps every game at
-    600 actions, so the lanes start together, truncate together, and never
-    desynchronise enough to leave one mid-play across a weight sync.
+    the spread of game lengths is the point.
+
+    The assertion is "more than the one asked for", not a multiple of the lane
+    count. It was the multiple until repeated offers stopped being enumerated:
+    every game used to run past `TINY`'s 600-action cap and so all four lanes
+    truncated on the same tick, and now some finish on their own and the lanes
+    desynchronise. Four-at-a-time was an artefact of the cap, never the claim.
     """
     assert run(tmp_path, 2, ["--collect-mode", "stream", "--lanes", "4"]) == 0
     streamed = [row for row in _rows(tmp_path) if "positions" in row]
     assert all(row["collect_mode"] == "stream" for row in streamed)
-    assert all(row["games"] % 4 == 0 for row in streamed), "one game was asked for"
+    assert all(row["games"] > 1 for row in streamed), "one game was asked for"
 
     fresh = tmp_path / "cohort"
     assert run(fresh, 2, ["--lanes", "1"]) == 0

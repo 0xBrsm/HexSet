@@ -206,7 +206,27 @@ def head_of(net) -> tuple[str, object]:
     )
 
 
-def freeze(net, prefix: str) -> list:
+def owned_by_head(net) -> tuple[str, ...]:
+    """Every parameter-name prefix the value readout owns, `"name."` each.
+
+    Not just the module `head_of` finds: the `attn` shape adds `value_query`,
+    which pools the vertex embeddings the head then reads. That is part of the
+    readout, so it has to be fitted with it — and, more sharply, it exists in no
+    checkpoint written before the shape did. Counting it as trunk makes the
+    parent's state dict look incomplete and aborts the run, which is exactly
+    how the first sweep lost `attn`.
+    """
+    import torch
+
+    name, _ = head_of(net)
+    names = [name]
+    for extra in ("value_query",):
+        if isinstance(getattr(net, extra, None), torch.nn.Module):
+            names.append(extra)
+    return tuple(f"{one}." for one in names)
+
+
+def freeze(net, prefix: tuple[str, ...]) -> list:
     """Turn off grad everywhere but the head, and refuse to continue if it stuck.
 
     The assertion is the point of the function. Freezing that half-worked is
@@ -215,7 +235,7 @@ def freeze(net, prefix: str) -> list:
     """
     head = []
     for name, parameter in net.named_parameters():
-        trainable = name.startswith(prefix + ".")
+        trainable = name.startswith(prefix)
         parameter.requires_grad_(trainable)
         if trainable:
             head.append(parameter)
@@ -224,7 +244,7 @@ def freeze(net, prefix: str) -> list:
 
     grad = sorted(name for name, p in net.named_parameters() if p.requires_grad)
     wanted = sorted(
-        name for name, _ in net.named_parameters() if name.startswith(prefix + ".")
+        name for name, _ in net.named_parameters() if name.startswith(prefix)
     )
     if grad != wanted:
         raise AssertionError(
@@ -233,16 +253,16 @@ def freeze(net, prefix: str) -> list:
     return head
 
 
-def fingerprint(net, prefix: str) -> dict:
+def fingerprint(net, prefix: tuple[str, ...]) -> dict:
     """A clone of every trunk tensor, buffers included, to compare against later."""
     return {
         name: tensor.detach().clone()
         for name, tensor in net.state_dict().items()
-        if not name.startswith(prefix + ".")
+        if not name.startswith(prefix)
     }
 
 
-def assert_unchanged(net, prefix: str, before: dict) -> None:
+def assert_unchanged(net, prefix: tuple[str, ...], before: dict) -> None:
     import torch
 
     after = net.state_dict()
@@ -409,7 +429,7 @@ def main(argv: list[str] | None = None) -> int:
 
     torch.manual_seed(args.seed)
     net = CatanNet(space, graph, players, configure(width, rounds, args.shape))
-    prefix, _ = head_of(net)
+    prefix = owned_by_head(net)
 
     # The head's trained weights are deliberately dropped rather than loaded:
     # every shape starts from a fresh initialisation, including the one that
@@ -418,10 +438,10 @@ def main(argv: list[str] | None = None) -> int:
     trunk_state = {
         name: tensor
         for name, tensor in trained.items()
-        if not name.startswith(prefix + ".")
+        if not name.startswith(prefix)
     }
     missing, unexpected = net.load_state_dict(trunk_state, strict=False)
-    stray = [name for name in missing if not name.startswith(prefix + ".")]
+    stray = [name for name in missing if not name.startswith(prefix)]
     if stray or unexpected:
         print(
             "the checkpoint's trunk does not match this model: "
@@ -496,7 +516,7 @@ def main(argv: list[str] | None = None) -> int:
     trunk_parameters = sum(
         p.numel()
         for name, p in net.named_parameters()
-        if not name.startswith(prefix + ".")
+        if not name.startswith(prefix)
     )
 
     out_args = dict(source)

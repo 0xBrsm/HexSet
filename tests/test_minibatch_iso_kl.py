@@ -15,7 +15,7 @@ pytest.importorskip("torch", reason="PyTorch runs on the training box only")
 
 from benchmarks.minibatch_iso_kl import _grid, iso_kl_rate  # noqa: E402
 
-# lr -> finished-update KL, measured on one fixed batch off ppo3-500 (status.md).
+# lr -> finished-update KL, measured on one fixed batch off ppo3-500.
 # Linear to ~1.2e-3, superlinear past it.
 RESPONSE = [
     {"lr": 3.0e-4, "end_to_end_kl": 0.0051, "entropy": 0.60, "steps": 95},

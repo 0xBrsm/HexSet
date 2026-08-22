@@ -417,8 +417,8 @@ def test_the_ladder_reports_both_rungs_against_a_parent(tmp_path):
 def test_a_named_entrant_can_be_added_to_the_ladder_as_a_rung(tmp_path):
     """`--search-rung` was specified in the run-2 design and never wired in.
 
-    `outstanding.md` called for rungs against `greedy-offers3`, `search2-offers3`
-    and the run-1 checkpoint; `train.py` only ever built `parent` and `greedy`, so
+    The design called for rungs against `greedy-offers3`, `search2-offers3` and
+    the run-1 checkpoint; `train.py` only ever built `parent` and `greedy`, so
     every ladder reading in ppo2, ppo3 and ppo4 is missing the search rung. The
     entrant here is a cheap one — what is under test is the wiring, not the bot,
     and `search2-offers3` costs a 2-ply search per move which a unit test should

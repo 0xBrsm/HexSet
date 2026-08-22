@@ -1,11 +1,11 @@
 """Two checkpoints, head to head on identical boards, in paired terminal VP.
 
-The in-loop ladder's 200-game rungs cannot resolve a slope (see status.md, the
-ppo4 amendment): their scatter is the binomial floor of the eval size, so a
-150-iteration block's slope carries a 95% half-width of ~9 points. This runs
-the instrument that *did* resolve ppo3's selection — `train.versus` at 400
-games — between any two checkpoints, so a block's gain is measured as one
-high-resolution difference rather than fitted through noise.
+The in-loop ladder's 200-game rungs cannot resolve a slope: their scatter is the
+binomial floor of the eval size, so a 150-iteration block's slope carries a 95%
+half-width of ~9 points. This runs the instrument that *did* resolve ppo3's
+selection — `train.versus` at 400 games — between any two checkpoints, so a
+block's gain is measured as one high-resolution difference rather than fitted
+through noise.
 
     python -m benchmarks.duel /w/runs/ppo5/latest.pt /w/runs/ppo4/latest.pt \
         --games 400 --label-a ppo5 --label-b ppo4
@@ -84,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=None,
         help="above 1, run through `arena.compete`, which shards games across "
-        "processes and is the path every recorded duel in status.md used. "
+        "processes and is the path every recorded duel took. "
         "`train.versus` (workers=1) batches network inference across lanes in ONE "
         "process, which is ideal for network-vs-network — 400 games in 134 s — and "
         "catastrophic against a scripted bot, whose search cannot batch and gets "

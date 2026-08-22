@@ -7,6 +7,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-22
+
 ### Added
 
 - `catan.board.coords` — cube hex coordinates, neighbours, distance, and hexagonal
@@ -83,7 +85,6 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   plausible range, no significant sign conflicts). An evaluation can depend critically
   on a term at zero while being flat over every value an optimiser would ever try, and
   no search rule can recover a coefficient in that landscape.
-
 - `catan.evaluate_tiered` — a second evaluation, reimplemented from the design
   catanatron's value function uses (described, not ported; it is GPLv3). Weights are
   magnitude tiers encoding a priority order rather than blended coefficients, own
@@ -95,6 +96,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Generates data at half the rate. Selectable through the `greedy-tiered` and
   `search2-tiered` presets.
 
+- `catan.encoding` — the heterogeneous graph the model reads. Seats are rotated so
+  the player to move is always seat 0, and only information the perspective player
+  may legally know is encoded: own hand and cards exactly, opponents as counts.
+  Board adjacency is cached per board, since it never changes during a game.
 - `catan.selfplay` — a vectorised rollout collector. Holds N games in flight and steps
   them in lockstep so one batch of observations per tick serves every lane, which the
   network's ~1.5 ms fixed dispatch toll makes mandatory rather than preferable. The
@@ -161,29 +166,6 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and the offer budget defaults to the one the checkpoint recorded training under —
   scoring a three-offer policy at the engine's eight would measure it on a horizon it
   never saw.
-
-### Changed
-
-- `catan.encoding._template` is cached 4096 boards deep, twice raised. At 8 a
-  sixteen-lane rollout missed on every call and rebuilt the board-static block the
-  cache exists to avoid — 7.5k actions/sec against 8.5k, 1.13x, over three alternating
-  runs. 64 was the same mistake one size up: PPO wants the largest batch the dispatch
-  toll amortises over, measured at 512 lanes, and 512 boards miss a 64-entry cache
-  every time. A/B'd in one process, alternating: 84.2 → 67.6 µs per position at 128
-  lanes (1.25x), 118.5 → 101.1 at 512 (1.17x), 126.9 → 115.8 at 1024 (1.10x). The cost
-  still climbs with lane count after the fix, so most of that rise is working set and
-  raising the cache again will buy nothing.
-- `catan.arena` takes a `kind="network"` entrant whose `weights` is a checkpoint path,
-  named on a command line as `network:<path>` wherever a preset name is taken. It stays
-  a picklable description, so a lineup with a network in it still goes into a manifest
-  verbatim and still crosses a process. `arena.pooled` groups standings by base name,
-  since a duel is two seats a side and the side's share of the games is the number worth
-  quoting; `benchmarks.baselines` prints it under the per-seat standings. Setting
-  `evaluator="network"` instead swaps the checkpoint in as the *leaf evaluation* of the
-  ordinary search, which needs no new bot kind: `netsearch:<path>` is `search2` with
-  learned leaves and `netgreedy:<path>` is one ply of the same. `search2-offers3` is the
-  handcrafted search on the training horizon, so that comparison differs in the leaf
-  evaluation and nothing else.
 - `catan.mcts` — PUCT over a learned policy and value, with leaves gathered into waves
   and evaluated together. Batching is the whole point: a forward costs a ~1.5 ms fixed
   dispatch toll plus ~25 us per position, so one leaf per call spends all of its time in
@@ -208,26 +190,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   picks its own temperature. The recorded value is the root's backed-up mean rather than
   the network's own estimate of the root, which is the thing being improved on. Actions
   are sampled, not argmaxed: four identical greedy searches replay one game.
-- `catan.selfplay.Request` carries the lane's `Game`. A searching policy needs positions
-  to step and an observation is a lossy encoding of one; a policy that reads only the
-  encoding can ignore it. Handed out rather than copied, because `catan.mcts` copies at
-  its own root.
-- `catan.selfplay.Collector` takes `deal`, bounding how many games are ever started,
-  with `running` and `drain()` to play the bounded cohort out. Left unset the collector
-  refills a freed lane immediately and runs forever, which is what training wants. An
-  evaluation wants a fixed set of game indices, and the only way to get one before this
-  was to keep dealing replacements and discard them — after playing each in full, which
-  is where a 400-game duel went to spend over ten minutes. `catan.train.duel` and
-  `benchmarks.value_head` now bound instead of filtering.
-- `catan.train --keep-every` writes numbered checkpoints beside the `latest.pt` that
-  gets overwritten, defaulting to every 25 iterations. The first run kept only `latest`,
-  so "when did the policy stop improving" had no way to be asked afterwards.
-- `catan.selfplay.Choice` and `Transition` carry an `aux` field, passed through
-  untouched, and `Collector` takes `first_game` with `games_started()` to read it back.
-  The first is where the torch policy stores the offer mask PPO must reuse, which
-  depends on what opponents could cover and so is absent from the observation by
-  design; the second is what makes a resumed run continue rather than repeat. Both
-  default to the previous behaviour.
+
+### Changed
+
 - `catan.actions.Action` carries an `ask` order on `PROPOSE_TRADE`, naming who the
   proposer would rather have take the offer. An offer stops at the first player to
   accept, so the order is worth something, and choosing it is a tactic rather than a
@@ -279,9 +244,47 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   closure, replacing `FACTORIES` with `PRESETS` and `spawn`. Closures cannot be pickled,
   so this is what lets `compete` fan out over a process pool — and it means a lineup can
   go into a run manifest verbatim. Results are identical at any worker count.
-- The devcontainer installs Python. It previously had codex, GitHub CLI and Docker
-  features but no Python at all, so it could not run this project's tests.
-- `catan.encoding` — the heterogeneous graph the model reads. Seats are rotated so
-  the player to move is always seat 0, and only information the perspective player
-  may legally know is encoded: own hand and cards exactly, opponents as counts.
-  Board adjacency is cached per board, since it never changes during a game.
+
+- `catan.encoding._template` is cached 4096 boards deep, twice raised. At 8 a
+  sixteen-lane rollout missed on every call and rebuilt the board-static block the
+  cache exists to avoid — 7.5k actions/sec against 8.5k, 1.13x, over three alternating
+  runs. 64 was the same mistake one size up: PPO wants the largest batch the dispatch
+  toll amortises over, measured at 512 lanes, and 512 boards miss a 64-entry cache
+  every time. A/B'd in one process, alternating: 84.2 → 67.6 µs per position at 128
+  lanes (1.25x), 118.5 → 101.1 at 512 (1.17x), 126.9 → 115.8 at 1024 (1.10x). The cost
+  still climbs with lane count after the fix, so most of that rise is working set and
+  raising the cache again will buy nothing.
+- `catan.arena` takes a `kind="network"` entrant whose `weights` is a checkpoint path,
+  named on a command line as `network:<path>` wherever a preset name is taken. It stays
+  a picklable description, so a lineup with a network in it still goes into a manifest
+  verbatim and still crosses a process. `arena.pooled` groups standings by base name,
+  since a duel is two seats a side and the side's share of the games is the number worth
+  quoting; `benchmarks.baselines` prints it under the per-seat standings. Setting
+  `evaluator="network"` instead swaps the checkpoint in as the *leaf evaluation* of the
+  ordinary search, which needs no new bot kind: `netsearch:<path>` is `search2` with
+  learned leaves and `netgreedy:<path>` is one ply of the same. `search2-offers3` is the
+  handcrafted search on the training horizon, so that comparison differs in the leaf
+  evaluation and nothing else.
+- `catan.selfplay.Request` carries the lane's `Game`. A searching policy needs positions
+  to step and an observation is a lossy encoding of one; a policy that reads only the
+  encoding can ignore it. Handed out rather than copied, because `catan.mcts` copies at
+  its own root.
+- `catan.selfplay.Collector` takes `deal`, bounding how many games are ever started,
+  with `running` and `drain()` to play the bounded cohort out. Left unset the collector
+  refills a freed lane immediately and runs forever, which is what training wants. An
+  evaluation wants a fixed set of game indices, and the only way to get one before this
+  was to keep dealing replacements and discard them — after playing each in full, which
+  is where a 400-game duel went to spend over ten minutes. `catan.train.duel` and
+  `benchmarks.value_head` now bound instead of filtering.
+- `catan.train --keep-every` writes numbered checkpoints beside the `latest.pt` that
+  gets overwritten, defaulting to every 25 iterations. The first run kept only `latest`,
+  so "when did the policy stop improving" had no way to be asked afterwards.
+- `catan.selfplay.Choice` and `Transition` carry an `aux` field, passed through
+  untouched, and `Collector` takes `first_game` with `games_started()` to read it back.
+  The first is where the torch policy stores the offer mask PPO must reuse, which
+  depends on what opponents could cover and so is absent from the observation by
+  design; the second is what makes a resumed run continue rather than repeat. Both
+  default to the previous behaviour.
+- The package declares `numpy>=1.26` as a dependency. The rules engine still has none;
+  the encoder is what needs it. Torch is not declared, because the engine, the arena and
+  the collector are all tested without it and only the learning layer imports it.

@@ -201,3 +201,64 @@ def test_a_worker_with_no_simulations_is_the_plain_policy_path():
     auxes = [t.aux for e in episodes for traj in e.trajectories for t in traj]
     assert auxes
     assert not any(isinstance(a, Target) for a in auxes)
+
+
+def test_the_flat_wire_format_rebuilds_byte_identical_episodes():
+    """`Flattened` is a container change, not a data change.
+
+    The same cohort, shipped flat and rebuilt, must assemble to a Batch equal
+    tensor-for-tensor to the one the original objects assemble to — that is
+    the acceptance test the perf review set. The rebuilt observations must
+    also share one packed buffer, because restoring `pack`'s gather path is
+    half the point.
+    """
+    import pickle
+
+    from catan.actions import space_for
+    from catan.board.board import random_base_board
+    from catan.collect import Flattened
+    from catan.encoding import static_graph
+    from catan.game import start
+    from catan.model import CatanNet, ModelConfig, packing
+    from catan.policy import NetworkPolicy
+    from catan.ppo import PPOConfig, assemble
+    from catan.selfplay import Collector
+
+    rng = random.Random(0)
+    board = random_base_board(rng)
+    game = start(board, 4, rng)
+    graph = static_graph(board.topology)
+    torch.manual_seed(0)
+    net = CatanNet(space_for(game), graph, 4, ModelConfig(width=16, rounds=1))
+    policy = NetworkPolicy(net, space_for(game), packing(graph, 4))
+    episodes = Collector(policy, lanes=4, seed=3, action_cap=3000).collect(3)
+
+    flat = pickle.loads(pickle.dumps(Flattened(episodes, policy.layout)))
+    rebuilt = flat.episodes()
+
+    assert [e.index for e in rebuilt] == [e.index for e in episodes]
+    assert [e.outcome for e in rebuilt] == [e.outcome for e in episodes]
+    assert [len(e) for e in rebuilt] == [len(e) for e in episodes]
+
+    config = PPOConfig()
+    original = assemble(episodes, policy.layout, config)
+    again = assemble(rebuilt, policy.layout, config)
+    for field in (
+        "buffer",
+        "mask",
+        "pair",
+        "chosen",
+        "offer",
+        "log_prob",
+        "advantage",
+        "value_target",
+    ):
+        assert torch.equal(getattr(original, field), getattr(again, field)), field
+
+    shared = {
+        id(t.observation._packed)
+        for e in rebuilt
+        for seat in e.trajectories
+        for t in seat
+    }
+    assert shared == {id(flat.buffer)}

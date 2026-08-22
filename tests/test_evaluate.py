@@ -9,7 +9,7 @@ from catan.board.maps import MINI_LAYOUT
 from catan.board.terrain import TERRAIN_RESOURCE, Resource, Terrain
 from catan.board.topology import build as build_topology
 from catan.cards import DevCard
-from catan.evaluate import CORPUS_SCARCE, ROLLS, WIN_SCORE, Evaluator, Weights
+from catan.evaluate import FITTED_SCARCE, ROLLS, WIN_SCORE, Evaluator, Weights
 from catan.game import start
 from catan.state import new_game, place_settlement, upgrade_to_city
 from catan.victory import WINNING_POINTS, victory_points
@@ -209,9 +209,9 @@ def test_scarcity_counts_only_the_short_resources_the_seat_reaches():
         assert evaluator.survey(state, 0).scarce == expected
 
 
-def test_the_scarcity_default_is_the_corpus_value_and_cannot_drift_from_it():
-    """The one weight taken from human games rather than fitted against the engine."""
-    assert Weights().scarce == pytest.approx(CORPUS_SCARCE, abs=1e-4)
+def test_the_scarcity_default_is_the_fitted_value_and_cannot_drift_from_it():
+    """The one weight taken from the opening fit rather than fitted against the engine."""
+    assert Weights().scarce == pytest.approx(FITTED_SCARCE, abs=1e-4)
 
 
 def test_the_survey_agrees_with_the_rules():

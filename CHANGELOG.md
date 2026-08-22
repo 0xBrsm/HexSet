@@ -7,6 +7,95 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-22
+
+Distillation, made to work on the 5% of decisions where the search actually
+overrules the policy — and a value-head shape study that says the head's
+blindness to siblings is not a readout shape.
+
+### The finding that reorganises the loss
+
+The search moves the policy's argmax on ~4.8% of decisions, and the signed value
+of those moves is +0.040 VP each, which over ~10-15 contested decisions a
+seat-game reproduces the duel's +0.536 VP. The teacher's whole content is in
+that 5%. The other 95% is the policy's own answer handed back — and handing back
+the visit *distribution* is worse than handing back nothing, because its entropy
+is set by the search's exploration settings rather than by the position. Every
+distillation arm on record converged to the tree's stationary entropy
+(~0.43-0.46 against the parent's 0.339) whatever else changed. Play reads the
+argmax; training read the distribution.
+
+### Added
+
+- `DistillConfig.contested_only` and `.hard_target` — train the policy on the
+  rows where the search overruled it, toward its argmax rather than its counts.
+- `DistillConfig.anchor` — a cross-entropy toward the *recorded prior* on the
+  rows `contested_only` zeroed. Filtering the policy loss cannot filter its
+  effect: the trunk is shared, the value loss is an unweighted mean over every
+  row, and a network has no per-position parameters. Unanchored, top-1 agreement
+  with the search fell 0.941 to 0.788 while trade acceptance went 3.3% to 23.7%.
+  Anchoring on the *visits* is what flattened the earlier arms; the prior's
+  entropy is the policy's own, so it carries no flattening pressure. It is PPO's
+  trust region spelled as a cross-entropy.
+- `DistillConfig.stake_scale` — weight a contested row by what the correction is
+  worth, `min(gap / stake_scale, 1)` over the search's own Q-gap, dropping rows
+  whose gap is negative. 11% of contested rows are ones the search's own value
+  disagrees with.
+- `DistillConfig.buffer_iterations` and `.refresh_prior` — train on several
+  iterations of collected rows, recomputing the filter and anchor against the
+  live policy. Safe here where it is not safe for PPO: distillation is a
+  supervised cross-entropy against a fixed label, with no ratio to correct, and
+  a visit count is local to its position. The search costs ~700 s a corpus while
+  the prior it is compared against is one forward pass, so refreshing turns the
+  97% carrying no policy gradient from waste into not-yet-contested.
+- `DistillConfig.pack_contested` — the policy term gets its own dense
+  minibatches. At ~3% contested density a 1024-row minibatch carries ~31
+  contested rows, so the policy loss was a 31-sample estimate taken ~419 times an
+  iteration; packed it is ~3 steps of 1024 an epoch at a sixteenth of the
+  per-step variance. Same shape PPG uses, for the same reason. The anchor rides
+  the value pass deliberately, since that is the pass that moves the trunk.
+- `ModelConfig.value_head` and `.policy_head` make the readout shapes ablatable:
+  `linear`, `mlp`, `pooled`, `mlp_pooled` and `attn` for the value; `linear` and
+  `mlp` for the policy. Exposed as `--value-head` / `--policy-head` on both
+  trainers and recorded in the checkpoint's `args`, so `netbot.load`, the
+  collector workers and the update workers all rebuild the shape a run trained
+  with. Both default to `linear` and build identical modules under identical
+  names, so every checkpoint already on disk stays loadable.
+- `benchmarks.head_shape` — sweeps those shapes by refitting a head on a frozen
+  trunk, which is minutes rather than the days a fresh PPO run per shape costs,
+  and is explicit about what that cannot show.
+- `catan.distill_train --collect-workers` — the searched collector sharded across
+  processes, with the teacher synced every iteration. Collection is ~92% of an
+  arm, so the searched games are now collected once and replayed.
+- Distillation statistics split agreement by contested and settled rows, and
+  report entropy, anchor loss and contested-row counts.
+
+### Changed
+
+- `catan.ppo` and `catan.train` can cut the value loss off the trunk, so the
+  critic's two wires became one flag with a measured ceiling on epochs.
+- `benchmarks.rank` gained a head learning-rate sweep. The sibling ratio orders
+  exactly inversely to how well the head fits, which reverses within a single
+  head — so the ratio measures underfit, not architecture.
+
+### Fixed
+
+- **`legal_actions` re-enumerated a trade the table had already declined this
+  turn.** `offers_made` was a bare counter, so a seat could spend its whole offer
+  budget asking one question three times; training logs showed 45-51 proposals
+  per seat-game. `Game.offered` now records the bundles put to the table this
+  turn and the sample skips them, and `imagine` copies the set so a search does
+  not read every repeat as fresh. The rules do not move — `propose_trade` still
+  performs a repeat and `MAX_OFFERS_PER_TURN` is still the cap. **This is
+  unrelated to the distillation work and changes the action space every earlier
+  run was measured on.**
+- `--learning-rate` is honoured on resume in the distillation trainer.
+- The attention head's pooling query is built off the head, not the trunk.
+- The from-scratch benchmark arms deal 128 lanes rather than inheriting 512.
+- The zero-sum check tolerates float32.
+- Valued corpora are collected from the parent rather than from the trained
+  control.
+
 ## [0.4.0] - 2026-08-22
 
 The PPO campaign: the trained policy beats catanatron's own bot 33.8% over 2000

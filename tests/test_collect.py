@@ -124,3 +124,80 @@ def test_sync_ships_weights_the_workers_actually_load():
         assert episodes and len(episodes[0]) > 0
     finally:
         collector.close()
+
+
+def test_a_searched_worker_returns_episodes_whose_transitions_carry_targets():
+    """The whole point of sharding the searched path: the corpus must still be
+    distillable, which means every transition needs its `Target` to survive the
+    pipe as well as the search."""
+    from catan.collect import ParallelCollector, WorkerSpec
+    from catan.expert import Target
+
+    collector = ParallelCollector(
+        [
+            WorkerSpec(
+                seed=5,
+                players=4,
+                lanes=2,
+                action_cap=600,
+                max_offers=3,
+                first_game=0,
+                stride=1,
+                width=16,
+                rounds=1,
+                torch_seed=5,
+                simulations=8,
+                wave=4,
+            )
+        ]
+    )
+    try:
+        episodes = collector.collect(1)
+    finally:
+        collector.close()
+    assert episodes
+    targets = [
+        t.aux
+        for e in episodes
+        for traj in e.trajectories
+        for t in traj
+        if t.aux is not None
+    ]
+    assert targets
+    assert all(isinstance(t, Target) for t in targets)
+    # The prior rides along too, or `contested_only` has nothing to filter on.
+    searched = [t for t in targets if len(t.options) > 1]
+    assert searched and all(t.prior is not None for t in searched)
+
+
+def test_a_worker_with_no_simulations_is_the_plain_policy_path():
+    from catan.collect import ParallelCollector, WorkerSpec
+
+    collector = ParallelCollector(
+        [
+            WorkerSpec(
+                seed=6,
+                players=4,
+                lanes=2,
+                action_cap=600,
+                max_offers=3,
+                first_game=0,
+                stride=1,
+                width=16,
+                rounds=1,
+                torch_seed=6,
+            )
+        ]
+    )
+    try:
+        episodes = collector.collect(1)
+    finally:
+        collector.close()
+    assert episodes
+    # The invariant is that no search target appears -- `aux` is a general
+    # pocket and the plain path is free to use it for other things.
+    from catan.expert import Target
+
+    auxes = [t.aux for e in episodes for traj in e.trajectories for t in traj]
+    assert auxes
+    assert not any(isinstance(a, Target) for a in auxes)

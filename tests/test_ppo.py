@@ -334,3 +334,107 @@ def test_a_bootstrapped_target_moves_off_the_outcome_and_stays_zero_sum():
     mixed = assemble(episodes[:1], policy.layout, PPOConfig(value_lam=0.97))
     assert not torch.allclose(plain.value_target, mixed.value_target)
     assert mixed.value_target.sum(dim=1).abs().max() < 1e-4
+
+
+def test_critic_none_credits_every_decision_with_the_terminal_return():
+    # REINFORCE: the advantage of every step of a seat's trajectory is that
+    # seat's terminal return, whole — not lam**(T-t) times it, which is what
+    # running GAE over a zeroed head would silently produce.
+    from catan.rewards import reward
+
+    policy = a_policy(seed=3)
+    episodes = some_episodes(policy, games=2, seed=3)
+    batch = assemble(episodes[:1], policy.layout, PPOConfig(critic="none"))
+
+    episode = episodes[0]
+    rows = 0
+    for seat, trajectory in enumerate(episode.trajectories):
+        own = rotate(reward(episode.outcome), seat)[0]
+        for _ in trajectory:
+            assert float(batch.advantage[rows]) == pytest.approx(own, abs=1e-6)
+            rows += 1
+    assert rows == len(batch)
+
+
+def test_critic_none_never_touches_the_value_head():
+    # Both wires cut: no value term in the loss means no gradient reaches the
+    # head, so its parameters are bit-identical after an update that visibly
+    # moved the rest of the network.
+    policy = a_policy(seed=7)
+    episodes = some_episodes(policy, games=3, seed=7)
+    config = PPOConfig(critic="none", epochs=2, minibatch=64)
+    batch = assemble(episodes, policy.layout, config)
+    optimiser = torch.optim.Adam(policy.net.parameters(), lr=1e-2)
+
+    head = {
+        name: p.detach().clone()
+        for name, p in policy.net.named_parameters()
+        if name.startswith("value")
+    }
+    rest = {
+        name: p.detach().clone()
+        for name, p in policy.net.named_parameters()
+        if not name.startswith("value")
+    }
+    assert head, "the head module is built in every mode; only its wires differ"
+
+    update(policy, optimiser, batch, config)
+
+    for name, p in policy.net.named_parameters():
+        if name.startswith("value"):
+            assert torch.equal(p, head[name]), name
+    assert any(
+        not torch.equal(p, rest[name])
+        for name, p in policy.net.named_parameters()
+        if not name.startswith("value")
+    )
+
+
+def test_critic_aux_trains_the_head_the_policy_never_reads():
+    # "aux" keeps the trunk-shaping wire and cuts the pricing one: advantages
+    # are identical to critic="none", and the head still moves.
+    policy = a_policy(seed=8)
+    episodes = some_episodes(policy, games=2, seed=8)
+    config = PPOConfig(critic="aux", epochs=1, minibatch=128)
+    batch = assemble(episodes, policy.layout, config)
+
+    plain = assemble(episodes, policy.layout, PPOConfig(critic="none"))
+    assert torch.equal(batch.advantage, plain.advantage)
+
+    head = {
+        name: p.detach().clone()
+        for name, p in policy.net.named_parameters()
+        if name.startswith("value")
+    }
+    optimiser = torch.optim.Adam(policy.net.parameters(), lr=1e-2)
+    update(policy, optimiser, batch, config)
+    assert any(
+        not torch.equal(p, head[name])
+        for name, p in policy.net.named_parameters()
+        if name.startswith("value")
+    )
+
+
+def test_the_kl_break_is_a_ceiling_that_stops_further_epochs():
+    policy = a_policy(seed=9)
+    episodes = some_episodes(policy, games=2, seed=9)
+    batch = assemble(episodes, policy.layout, PPOConfig())
+    optimiser = torch.optim.Adam(policy.net.parameters(), lr=1e-2)
+
+    # A threshold below any real post-step divergence stops the update after
+    # the first finished epoch; the default of 0 takes every epoch, which is
+    # every run on record.
+    tripped = update(
+        policy, optimiser, batch, PPOConfig(epochs=4, minibatch=64, kl_break=1e-9)
+    )
+    assert tripped.epochs_taken == 1
+
+    untripped = update(policy, optimiser, batch, PPOConfig(epochs=2, minibatch=64))
+    assert untripped.epochs_taken == 2
+
+
+def test_one_critic_flag_is_one_wire():
+    with pytest.raises(ValueError):
+        PPOConfig(critic="none", value_lam=0.9)
+    with pytest.raises(ValueError):
+        PPOConfig(critic="bogus")

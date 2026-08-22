@@ -21,6 +21,42 @@ ranks siblings well makes low lambda viable and cuts the policy gradient's
 variance at its source; a head that does not means the residual is its own
 noise, and credit has to come from the outcome instead.
 
+## The teacher: what expert iteration would actually distil
+
+`--simulations N` runs **one search rooted at the parent** and reads its visit
+counts over the same children the truth is known for. That is the object
+distillation trains the policy toward, and it has never been measured against
+anything. The question is one line: **do visits pick the true best child more
+often than the policy's own prior does?**
+
+If they do, the teacher is real at the level that matters and the recorded
+distillation failure is in the training step. If they do not, the visit
+distribution is the prior with noise on it, expert iteration cannot work at these
+search settings, and the lever is the search's configuration rather than the
+network. The prior is read from the same forward the search's root expansion
+uses, over the same option tuple, so the two columns differ in nothing but the
+search.
+
+`--contested-only` is how to ask that question affordably, and the first run of
+it did not. Truth costs 384 games a child; a search costs ~60 ms and the argmax
+comparison is free once it exists. Buying truth for every position and spending
+it only on the disagreements cost **~56,000 rollouts per informative row**. With
+this flag a position is searched first, skipped outright when the prior and the
+visits agree, and rolled out only when they differ — and then only for the **two
+contested children**, since no other child can enter the comparison. About 70x
+the informative rows per unit of compute.
+
+One semantic change comes with it, and it is the more relevant question anyway.
+Without the flag, `improved` means the visits found the globally best child.
+With it, the row has only the two contested children in it, so `improved` means
+**the search moved to the better of the two** — which is exactly what
+distillation would be learning from.
+
+`--child-trees` is the separate, more expensive pass: score every child by a
+search rooted at *it*, which asks whether the backed-up value is a better label
+than the head's read. That measurement is recorded and closed; the flag stays
+because the harness is the same.
+
 ## Scoring the row with a tree, not just the head
 
 `--simulations N` adds a second column. Every child is scored again by the
@@ -337,6 +373,31 @@ def standardised(head_rows, true_rows, se_rows) -> dict:
     }
 
 
+def teacher_row(prior: np.ndarray, visits: np.ndarray, true: np.ndarray) -> dict:
+    """Does searching move the prior toward the truth, or just around?
+
+    `improved` is the decision-relevant cell: the search changed its mind about
+    the best child *and* was right to. `damaged` is the same move in the wrong
+    direction. Expert iteration needs the first to outnumber the second; a
+    teacher that moves the argmax at random has nothing to teach however often
+    it moves it.
+    """
+    best = int(true.argmax())
+    prior_pick = int(prior.argmax())
+    visit_pick = int(visits.argmax())
+    return {
+        "prior_top1": prior_pick == best,
+        "visits_top1": visit_pick == best,
+        "moved": prior_pick != visit_pick,
+        "improved": prior_pick != best and visit_pick == best,
+        "damaged": prior_pick == best and visit_pick != best,
+        "prior_spearman": correlation(ranks(prior), ranks(true)),
+        "visits_spearman": correlation(ranks(visits), ranks(true)),
+        "prior_regret": float(true[best] - true[prior_pick]),
+        "visits_regret": float(true[best] - true[visit_pick]),
+    }
+
+
 def summarise(rows: list[dict]) -> dict:
     """The aggregate, with top-1 read against its own chance rate."""
     spearman = np.asarray([r["spearman"] for r in rows])
@@ -412,6 +473,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--simulations", type=int, default=0,
                         help="also score every child by the backed-up value of a "
                              "PUCT search rooted at it; 0 scores the head alone")
+    parser.add_argument("--contested-only", action="store_true",
+                        help="search first and roll out only positions where the "
+                             "visits and the prior disagree, and only their two "
+                             "contested children; the cheap way to buy McNemar "
+                             "rows, see the module docstring")
+    parser.add_argument("--child-trees", action="store_true",
+                        help="also score each child by a search rooted at it; "
+                             "costs a search per child rather than one per "
+                             "position, and answers the label question rather "
+                             "than the teacher one")
     parser.add_argument("--wave", type=int, default=16)
     parser.add_argument("--exploration", type=float, default=1.25)
     # `netbot.load` pins torch to one thread, which is right for the 30-process
@@ -481,6 +552,7 @@ def main(argv: list[str] | None = None) -> int:
     seeded = time.perf_counter() - started
 
     rows = []
+    agreed = 0
     for index, fork in enumerate(chosen):
         children = probeable(fork.game, loaded.max_offers)
         if len(children) < 2:
@@ -516,11 +588,44 @@ def main(argv: list[str] | None = None) -> int:
         # The same row, searched. `run_many` batches every child's leaves into
         # shared forwards, so a whole row costs one search rather than n.
         tree = list(head)
-        if search is not None:
+        if search is not None and args.child_trees:
             for slot, (root, _, _) in enumerate(search.run_many(games)):
                 value = backed_up(root, fork.seat)
                 if value is not None:
                     tree[slot] = value
+
+        # One search at the *parent*: the teacher, and the prior it perturbs.
+        # `Search._options` is the same filter `options` applies here and
+        # `Action` is a NamedTuple, so the two tuples align by equality.
+        prior = np.zeros(len(children), dtype=np.float64)
+        visits = np.zeros(len(children), dtype=np.float64)
+        if search is not None:
+            _, root_options, root_visits = search.run(fork.game)
+            where = {action: i for i, action in enumerate(root_options)}
+            (prior_row, _), = evaluator.evaluate(
+                [Leaf(fork.game, fork.seat, root_options)]
+            )
+            for slot, action in enumerate(children):
+                at = where.get(action)
+                if at is None:
+                    continue
+                visits[slot] = float(root_visits[at])
+                prior[slot] = float(prior_row[at])
+
+        if args.contested_only:
+            prior_pick, visit_pick = int(prior.argmax()), int(visits.argmax())
+            if prior_pick == visit_pick:
+                agreed += 1
+                continue
+            # Only the two children the search actually chose between: no other
+            # child can appear in the comparison, so no other child's truth is
+            # worth 384 games.
+            keep = [prior_pick, visit_pick]
+            children = tuple(children[i] for i in keep)
+            games = [games[i] for i in keep]
+            head = [head[i] for i in keep]
+            tree = [tree[i] for i in keep]
+            prior, visits = prior[keep], visits[keep]
 
         # The truth, by rollout. Every child gets its own collector seeded
         # identically, so lane k across the row shares deck and sampling stream.
@@ -569,8 +674,12 @@ def main(argv: list[str] | None = None) -> int:
         row["true_values"] = [float(v) for v in true]
         row["standard_errors"] = [float(v) for v in ses]
         if search is not None:
-            row["tree_values"] = [float(v) for v in tree]
-            row["tree"] = assess(np.asarray(tree, dtype=np.float64), true)
+            if args.child_trees:
+                row["tree_values"] = [float(v) for v in tree]
+                row["tree"] = assess(np.asarray(tree, dtype=np.float64), true)
+            row["prior_values"] = [float(v) for v in prior]
+            row["visit_values"] = [float(v) for v in visits]
+            row["teacher"] = teacher_row(prior, visits, true)
         rows.append(row)
         print(
             f"[{len(rows)}/{len(chosen)}] children {row['children']:>2d} "
@@ -584,6 +693,11 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     if not rows:
+        if args.contested_only and agreed:
+            # Not a failure: every screened position agreed, which is the
+            # measurement rather than the absence of one.
+            print(f"screened {agreed} positions, none contested", file=sys.stderr)
+            return 0
         print("no position produced a row; raise --seed-games", file=sys.stderr)
         return 1
 
@@ -595,6 +709,7 @@ def main(argv: list[str] | None = None) -> int:
         "iteration": loaded.iteration,
         "rollouts_each": args.rollouts,
         "seed_seconds": round(seeded, 1),
+        "agreed_skipped": agreed,
         "seconds": round(elapsed, 1),
         "summary": summarise(rows),
         "pooled": pooled(
@@ -612,6 +727,9 @@ def main(argv: list[str] | None = None) -> int:
     if search is not None:
         payload["simulations"] = args.simulations
         payload["exploration"] = args.exploration
+    # Only `--child-trees` produces a tree column to pool; `--simulations`
+    # alone measures the teacher at the parent and leaves this untouched.
+    if search is not None and args.child_trees:
         payload["pooled_tree"] = pooled(
             [r["tree_values"] for r in rows],
             [r["true_values"] for r in rows],
@@ -653,6 +771,25 @@ def main(argv: list[str] | None = None) -> int:
           f"once ({z['positions']}):")
     print(f"  pearson, corrected               {z['pearson_corrected']:+.3f}"
           "   <- a typical position, not the widest few")
+    if rows and "teacher" in rows[0]:
+        cells = [r["teacher"] for r in rows]
+        if args.contested_only:
+            print(f"\nscreened {agreed + len(rows)} positions; {agreed} agreed and "
+                  f"were skipped before any rollout, {len(rows)} were contested")
+        share = lambda key: float(np.mean([1.0 if c[key] else 0.0 for c in cells]))
+        print(f"\nthe teacher: one search at the parent, {args.simulations} "
+              f"simulations, against what the prior already said")
+        print(f"  top-1 against the truth          prior {share('prior_top1'):.0%}"
+              f"   visits {share('visits_top1'):.0%}"
+              f"   (chance {payload['summary']['top1_chance']:.0%})")
+        print(f"  spearman against the truth       prior "
+              f"{np.mean([c['prior_spearman'] for c in cells]):+.3f}"
+              f"   visits {np.mean([c['visits_spearman'] for c in cells]):+.3f}")
+        print(f"  regret, victory points           prior "
+              f"{np.mean([c['prior_regret'] for c in cells]) * 10:.3f}"
+              f"   visits {np.mean([c['visits_regret'] for c in cells]) * 10:.3f}")
+        print(f"  search moved the argmax          {share('moved'):.0%} of rows: "
+              f"**{share('improved'):.0%} improved, {share('damaged'):.0%} damaged**")
     if "pooled_tree" in payload:
         t = payload["pooled_tree"]
         hits = float(np.mean([1.0 if r["tree"]["top1"] else 0.0 for r in rows]))

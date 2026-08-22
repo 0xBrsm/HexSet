@@ -10,11 +10,20 @@ from catan.board.board import (
     BASE_TOKENS,
     RED_TOKENS,
     make_board,
+    pips,
     random_base_board,
 )
 from catan.board.terrain import Terrain
 from catan.board.topology import build as build_topology
 from catan.board.maps import MINI_LAYOUT
+
+
+@pytest.mark.parametrize(
+    ("token", "expected"),
+    [(0, 0), (2, 1), (3, 2), (6, 5), (8, 5), (11, 2), (12, 1)],
+)
+def test_pips_follow_the_dice(token, expected):
+    assert pips(token) == expected
 
 
 def test_official_bags():

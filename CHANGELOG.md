@@ -95,8 +95,139 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Generates data at half the rate. Selectable through the `greedy-tiered` and
   `search2-tiered` presets.
 
+- `catan.selfplay` — a vectorised rollout collector. Holds N games in flight and steps
+  them in lockstep so one batch of observations per tick serves every lane, which the
+  network's ~1.5 ms fixed dispatch toll makes mandatory rather than preferable. The
+  policy sits behind a `BatchPolicy` protocol — the batched analogue of `catan.bots.Bot`
+  — so the collector imports no torch and is tested against a random policy on the
+  development machine. Trajectories come out demultiplexed by seat, since a seat's next
+  state is the next position that seat was asked about rather than the one following its
+  action, and the decision-maker is `to_move` rather than `current_player`. Finished
+  lanes are refilled on the spot so a long game never stalls the batch, and the action
+  cap truncates a game that will not end. Reward is deliberately absent: an `Outcome`
+  reports the winner, every seat's terminal points, turns and truncation, and the
+  scalarisation is the caller's.
+- `benchmarks.rollout` — ticks/sec and actions/sec for the collector under a trivial
+  policy, so the cost of the plumbing is known separately from the cost of a network.
+  Sweeping the lane count shows actions/sec roughly flat while ticks/sec falls with the
+  lane count: lanes buy batch size, not throughput.
+- `catan.rewards` — the scalarisation `catan.selfplay` deliberately left open, now
+  settled: terminal victory points read against the mean of the other seats and scaled
+  by the ten points a game is won on. Points rather than win/loss because a losing seat
+  still says how close it came and the two are near-perfectly ranked on this engine;
+  relative rather than absolute because Catan is a race, which is the argument that
+  already decided the search's stance. Zero-sum by construction, which is what rules
+  out a discount factor: about half of these rewards are negative, so a gamma below 1
+  makes a late loss cheaper than an early one and pays a losing policy to stall. A
+  truncated game is scored where it stopped, so stalling banks the deficit rather than
+  escaping it.
+- `catan.policy` — the torch `BatchPolicy`. One forward, one packed host-to-device
+  copy and one concatenated read-back per tick. `PROPOSE_TRADE` is a single flat slot
+  carrying ten numbers, so picking it means the policy has chosen to propose without
+  yet saying what; it names the offer from the model's `give` and `want` heads, masked
+  to the offers that were legal. The recorded `log_prob` is the joint over slot and
+  offer, because PPO's ratio has to be taken against the distribution that generated
+  the data — recording only the slot's is wrong by the offer's log-prob and wrong most
+  where the policy is most confident. `evaluate` mirrors `act` and a test pins them
+  together.
+- `catan.ppo` — GAE over per-seat trajectories, the clipped surrogate, value loss and
+  entropy bonus. `GAMMA` is a module constant rather than a config field and a test
+  pins the absence of a `--gamma` flag. The value head is trained on terminal outcomes
+  and never bootstrapped: with gamma 1 and a reward that is zero until the end, the
+  Monte Carlo return is the terminal reward exactly. All of the head's per-seat outputs
+  are trained from every position, which is what makes it backable-up by max^n later.
+- `catan.train` — the runnable, resumable loop. Checkpoints are written to a temporary
+  file and renamed, so a crash during the save cannot destroy the last good one, and
+  the game counter is saved with the weights because a game is a pure function of the
+  seed and its index — a resumed run that restarts it replays its own training set.
+  Collect and update time are reported separately. `--eval-at-start` duels the
+  untrained network so "did it learn" has a baseline, and duels fix their cohort of
+  games in advance rather than taking the first to finish, which would select for short
+  games.
+- `benchmarks.value_head` — what the value head explains, split by stage of the game.
+  A run's `explained_variance` is a ratio whose denominator moves: the target is
+  terminal relative points, and four strong seats finish closer together than four weak
+  ones, so the figure can fall while the head's error falls too. This reports the
+  numerator and the denominator separately, off the predictions the collector already
+  recorded rather than a second forward.
+- `catan.netbot` — a trained checkpoint as a `catan.bots.Bot`, which is what lets a
+  network enter the arena and be scored against the handcrafted baselines rather than
+  only against uniform random. The adapter goes this way round because `catan.arena`
+  already has seat rotation, Wilson intervals, a process pool and the offer budget.
+  The checkpoint is loaded once per process and keyed on the topology as well as the
+  path, since `arena.spawn` runs per game per worker and a `torch.load` there would be
+  most of what a duel measured; `torch.set_num_threads(1)`, because thirty workers each
+  taking a core's worth of intraop threads measures the thrash. Evaluation is greedy,
+  and the offer budget defaults to the one the checkpoint recorded training under —
+  scoring a three-offer policy at the engine's eight would measure it on a horizon it
+  never saw.
+
 ### Changed
 
+- `catan.encoding._template` is cached 4096 boards deep, twice raised. At 8 a
+  sixteen-lane rollout missed on every call and rebuilt the board-static block the
+  cache exists to avoid — 7.5k actions/sec against 8.5k, 1.13x, over three alternating
+  runs. 64 was the same mistake one size up: PPO wants the largest batch the dispatch
+  toll amortises over, measured at 512 lanes, and 512 boards miss a 64-entry cache
+  every time. A/B'd in one process, alternating: 84.2 → 67.6 µs per position at 128
+  lanes (1.25x), 118.5 → 101.1 at 512 (1.17x), 126.9 → 115.8 at 1024 (1.10x). The cost
+  still climbs with lane count after the fix, so most of that rise is working set and
+  raising the cache again will buy nothing.
+- `catan.arena` takes a `kind="network"` entrant whose `weights` is a checkpoint path,
+  named on a command line as `network:<path>` wherever a preset name is taken. It stays
+  a picklable description, so a lineup with a network in it still goes into a manifest
+  verbatim and still crosses a process. `arena.pooled` groups standings by base name,
+  since a duel is two seats a side and the side's share of the games is the number worth
+  quoting; `benchmarks.baselines` prints it under the per-seat standings. Setting
+  `evaluator="network"` instead swaps the checkpoint in as the *leaf evaluation* of the
+  ordinary search, which needs no new bot kind: `netsearch:<path>` is `search2` with
+  learned leaves and `netgreedy:<path>` is one ply of the same. `search2-offers3` is the
+  handcrafted search on the training horizon, so that comparison differs in the leaf
+  evaluation and nothing else.
+- `catan.mcts` — PUCT over a learned policy and value, with leaves gathered into waves
+  and evaluated together. Batching is the whole point: a forward costs a ~1.5 ms fixed
+  dispatch toll plus ~25 us per position, so one leaf per call spends all of its time in
+  dispatch, and virtual loss is what stops every simulation in a wave picking the same
+  path. Four departures from the Go setting, each measured on this codebase rather than
+  imported: a node backs up a per-seat vector read through `catan.bots.STANCES` instead
+  of a scalar and a sign flip; chance nodes are sampled rather than expanded eleven ways,
+  because under a fixed budget the frequencies approximate the same distribution; nodes
+  store their positions, since replay costs ~19 us of engine per ply against ~25 us to
+  evaluate; and terminal nodes take `catan.rewards.relative_points` directly, which is
+  the same scale the value head is trained on. `simulations` counts descents that cross
+  an edge, so root visit counts always sum to it and `visit_policy` means the same thing
+  at any wave size. This does not replace `netsearch:<path>` on quality — that is a
+  separate problem, and an unaddressed one — only on throughput.
+- `catan.expert` — `SearchPolicy`, a `catan.selfplay.BatchPolicy` that runs one tree per
+  decision, so expert-iteration games come out of the existing `Collector` rather than a
+  second game loop: the lane bookkeeping, seat demultiplexing, action cap and seed/index
+  replay contract are already there and none of them care what decided the action. The
+  visit counts ride to the transition on `Choice.aux` as a `Target`, which keeps the
+  options beside them because `PROPOSE_TRADE` is one slot standing for many offers and
+  the split is not recoverable from the index. Counts are kept raw so a distillation step
+  picks its own temperature. The recorded value is the root's backed-up mean rather than
+  the network's own estimate of the root, which is the thing being improved on. Actions
+  are sampled, not argmaxed: four identical greedy searches replay one game.
+- `catan.selfplay.Request` carries the lane's `Game`. A searching policy needs positions
+  to step and an observation is a lossy encoding of one; a policy that reads only the
+  encoding can ignore it. Handed out rather than copied, because `catan.mcts` copies at
+  its own root.
+- `catan.selfplay.Collector` takes `deal`, bounding how many games are ever started,
+  with `running` and `drain()` to play the bounded cohort out. Left unset the collector
+  refills a freed lane immediately and runs forever, which is what training wants. An
+  evaluation wants a fixed set of game indices, and the only way to get one before this
+  was to keep dealing replacements and discard them — after playing each in full, which
+  is where a 400-game duel went to spend over ten minutes. `catan.train.duel` and
+  `benchmarks.value_head` now bound instead of filtering.
+- `catan.train --keep-every` writes numbered checkpoints beside the `latest.pt` that
+  gets overwritten, defaulting to every 25 iterations. The first run kept only `latest`,
+  so "when did the policy stop improving" had no way to be asked afterwards.
+- `catan.selfplay.Choice` and `Transition` carry an `aux` field, passed through
+  untouched, and `Collector` takes `first_game` with `games_started()` to read it back.
+  The first is where the torch policy stores the offer mask PPO must reuse, which
+  depends on what opponents could cover and so is absent from the observation by
+  design; the second is what makes a resumed run continue rather than repeat. Both
+  default to the previous behaviour.
 - `catan.actions.Action` carries an `ask` order on `PROPOSE_TRADE`, naming who the
   proposer would rather have take the offer. An offer stops at the first player to
   accept, so the order is worth something, and choosing it is a tactic rather than a
@@ -150,3 +281,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   go into a run manifest verbatim. Results are identical at any worker count.
 - The devcontainer installs Python. It previously had codex, GitHub CLI and Docker
   features but no Python at all, so it could not run this project's tests.
+- `catan.encoding` — the heterogeneous graph the model reads. Seats are rotated so
+  the player to move is always seat 0, and only information the perspective player
+  may legally know is encoded: own hand and cards exactly, opponents as counts.
+  Board adjacency is cached per board, since it never changes during a game.

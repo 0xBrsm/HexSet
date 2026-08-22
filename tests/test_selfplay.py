@@ -320,3 +320,196 @@ def _every_proposal(collector: Collector) -> list:
                 )
             )
     return out
+
+
+def test_a_cast_lane_routes_each_seat_and_records_only_the_learner():
+    learner = Counting(RandomPolicy(random.Random(0)))
+    opponent = Counting(RandomPolicy(random.Random(1)))
+    collector = Collector(
+        learner,
+        lanes=2,
+        seed=5,
+        action_cap=900,
+        opponents=[opponent],
+        caster=lambda index: (0, 1, 0, 1),
+    )
+    episode = collector.collect(1)[0]
+
+    assert episode.cast == (0, 1, 0, 1)
+    # The learner's seats have trajectories; the opponent's are empty, which is
+    # what keeps its decisions out of `catan.ppo.assemble` without a filter.
+    assert all(episode.trajectories[seat] for seat in (0, 2))
+    assert all(not episode.trajectories[seat] for seat in (1, 3))
+    # The game itself still ran through every seat.
+    assert len(episode) < episode.outcome.actions
+    # Each policy was asked at most once per tick — the batching survived.
+    assert len(learner.batches) <= collector.ticks
+    assert len(opponent.batches) <= collector.ticks
+    assert opponent.batches, "the opponent was never consulted"
+
+
+def test_the_cast_is_taken_from_the_game_index_not_the_lane():
+    def swaps(index: int) -> tuple[int, ...]:
+        return (0, 1, 0, 1) if index % 2 == 0 else (1, 0, 1, 0)
+
+    collector = Collector(
+        RandomPolicy(random.Random(2)),
+        lanes=3,
+        seed=9,
+        action_cap=700,
+        opponents=[RandomPolicy(random.Random(3))],
+        caster=swaps,
+    )
+    episodes = collector.collect(4)
+    assert {e.index % 2 for e in episodes} == {0, 1}, "both parities must appear"
+    for episode in episodes:
+        assert episode.cast == swaps(episode.index)
+        for seat, pid in enumerate(episode.cast):
+            assert bool(episode.trajectories[seat]) == (pid == 0)
+
+
+def test_a_caster_without_opponents_is_rejected():
+    with pytest.raises(ValueError):
+        Collector(RandomPolicy(), lanes=1, caster=lambda index: (0, 0, 0, 0))
+
+
+def test_a_cast_reaching_past_the_opponents_fails_loudly():
+    with pytest.raises(ValueError):
+        Collector(
+            RandomPolicy(),
+            lanes=1,
+            opponents=[RandomPolicy()],
+            caster=lambda index: (0, 2, 0, 2),
+        )
+
+
+def test_a_bot_policy_spawns_one_bot_per_board_and_reuses_it():
+    from catan.bots import RandomBot
+    from catan.selfplay import BotPolicy
+
+    spawned = []
+
+    def spawn(board):
+        spawned.append(board)
+        return RandomBot(random.Random(4))
+
+    collector = Collector(
+        RandomPolicy(random.Random(5)),
+        lanes=2,
+        seed=13,
+        opponents=[BotPolicy(spawn)],
+        caster=lambda index: (0, 1, 0, 1),
+    )
+    collector.run(40)
+
+    # Two lanes, two boards, two bots — and no respawn on any later request.
+    assert len(spawned) == 2
+    assert len({id(board) for board in spawned}) == 2
+
+
+def test_a_bot_policy_over_capacity_respawns_rather_than_growing():
+    from catan.bots import RandomBot
+    from catan.selfplay import BotPolicy
+
+    spawned = []
+
+    def spawn(board):
+        spawned.append(board)
+        return RandomBot(random.Random(6))
+
+    policy = BotPolicy(spawn, capacity=1)
+    collector = Collector(
+        RandomPolicy(random.Random(7)),
+        lanes=2,
+        seed=17,
+        opponents=[policy],
+        caster=lambda index: (0, 1, 0, 1),
+    )
+    collector.run(60)
+
+    # Room for one bot serving two live boards: the cache must not grow past
+    # its capacity, and the cost shows up as respawns rather than wrong bots.
+    assert len(policy._bots) == 1
+    assert len({id(board) for board in spawned}) == 2
+    assert len(spawned) > 2
+
+
+def test_a_strided_collector_deals_every_kth_index():
+    collector = Collector(
+        RandomPolicy(random.Random(1)),
+        lanes=2,
+        seed=7,
+        action_cap=500,
+        first_game=3,
+        stride=4,
+        deal=4,
+    )
+    episodes = collector.drain()
+
+    # Worker w of K takes first_game = base + w, stride = K: the indices are
+    # base + w mod K, so two workers' sets are disjoint by construction.
+    assert sorted(e.index for e in episodes) == [3, 7, 11, 15]
+    assert collector.games_started() == 3 + 4 * 4
+
+
+def test_a_cohort_returns_the_block_it_dealt_and_ends_with_empty_lanes():
+    """The on-policy guarantee, which `collect` does not give.
+
+    A PPO iteration wants every position in its batch played under one set of
+    weights. That holds exactly when the collector starts empty, deals a known
+    block, and leaves nothing behind for the next iteration to inherit.
+    """
+    collector = Collector(
+        RandomPolicy(random.Random(1)), lanes=8, fill=False, seed=0, max_offers=3
+    )
+
+    first = collector.cohort(16)
+    assert {episode.index for episode in first} == set(range(16))
+    assert list(collector.in_flight()) == []
+
+    second = collector.cohort(16)
+    assert {episode.index for episode in second} == set(range(16, 32))
+    assert list(collector.in_flight()) == []
+
+
+def test_a_cohort_larger_than_the_lane_count_refills_until_it_is_dealt_out():
+    """Lanes are the concurrency, not the cohort.
+
+    Keeping them independent is what lets the inference batch be chosen for
+    throughput without deciding how many positions an update trains on.
+    """
+    collector = Collector(
+        RandomPolicy(random.Random(4)), lanes=4, fill=False, seed=0, max_offers=3
+    )
+    assert {episode.index for episode in collector.cohort(12)} == set(range(12))
+    assert list(collector.in_flight()) == []
+
+
+def test_streaming_collection_returns_replacements_while_older_games_run_on():
+    """The defect `cohort` removes, pinned so `stream` cannot quietly become it.
+
+    `collect` refills a lane the moment its game ends, so a replacement dealt
+    late can finish and enter the batch while a longer game dealt earlier is
+    still being played. The PPO batch inherited both consequences for five
+    runs: it selects for short games, and the unfinished lanes carry across the
+    learner's weight sync into the next iteration's data.
+    """
+    collector = Collector(RandomPolicy(random.Random(1)), lanes=8, seed=0, max_offers=3)
+
+    returned = {episode.index for episode in collector.collect(16)}
+
+    assert len(returned) == 16
+    assert returned != set(range(16)), "no replacement outran an older game"
+    assert len(list(collector.in_flight())) == 8
+
+
+def test_a_cohort_collector_must_start_empty():
+    collector = Collector(RandomPolicy(random.Random(1)), lanes=4, seed=0)
+    with pytest.raises(RuntimeError, match="still hold games"):
+        collector.cohort(4)
+
+
+def test_a_collector_bounded_at_build_time_refuses_a_second_cohort():
+    collector = Collector(RandomPolicy(random.Random(1)), lanes=2, seed=0, deal=2)
+    with pytest.raises(ValueError, match="one cohort at build time"):
+        collector.cohort(2)

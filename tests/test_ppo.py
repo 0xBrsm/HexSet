@@ -15,7 +15,14 @@ from catan.encoding import _seat, static_graph  # noqa: E402
 from catan.game import start  # noqa: E402
 from catan.model import CatanNet, ModelConfig, packing  # noqa: E402
 from catan.policy import NetworkPolicy  # noqa: E402
-from catan.ppo import PPOConfig, advantages, assemble, rotate, update  # noqa: E402
+from catan.ppo import (  # noqa: E402
+    PPOConfig,
+    advantages,
+    assemble,
+    lambda_returns,
+    rotate,
+    update,
+)
 from catan.selfplay import Collector  # noqa: E402
 
 
@@ -201,3 +208,129 @@ def test_learning_from_no_episodes_at_all_is_an_error_rather_than_a_silent_pass(
     policy = a_policy(seed=7)
     with pytest.raises(ValueError):
         assemble([], policy.layout, PPOConfig())
+
+
+def test_minibatches_partition_the_batch_and_never_yield_a_single_row():
+    """A one-row trailing minibatch is a nan bomb, so it must not be emitted.
+
+    `advantage.std()` on one row divides by `n - 1 == 0` and returns nan, which
+    the caller's `+ 1e-8` cannot rescue; the loss goes nan, `clip_grad_norm_`
+    propagates it and `optimiser.step()` writes nan into every parameter while
+    the run keeps logging happily. `positions` varies per iteration, so this was
+    a ~1-in-`minibatch` chance every iteration — around 40% over a 500-iteration
+    run. The smallest remainder in the 592 logged iterations under `runs/` is 3,
+    so it never fired. That was luck.
+    """
+    for size in range(2, 40):
+        for minibatch in range(2, 12):
+            chunks = list(
+                ppo._minibatches(size, minibatch, torch.Generator().manual_seed(0))
+            )
+            assert chunks, f"no minibatches for size={size} minibatch={minibatch}"
+            for chunk in chunks:
+                assert len(chunk) >= 2, (
+                    f"size={size} minibatch={minibatch} yielded {len(chunk)} row(s)"
+                )
+                assert len(chunk) <= minibatch + 1, "a fold may add one row, not more"
+            # Still an exact partition of every row, each appearing once.
+            assert sorted(torch.cat(chunks).tolist()) == list(range(size))
+
+
+def test_the_kl_gauge_cannot_report_a_negative_divergence():
+    """`(r - 1) - log r` is non-negative in exact arithmetic and was not in
+    float32: `exp(x)` rounds to 1.0 below the ~1.2e-7 epsilon, so the estimator
+    collapsed to `-log_ratio`. On-policy batches sit exactly there — cohort
+    collection leaves log-ratios around 1e-9 from reduction order alone — and
+    the gauge reported -5.8e-10 for a divergence that is really ~1.7e-19.
+    """
+    # A batch the current weights actually played: the log-ratios are not zero,
+    # they are reduction-order noise around zero with a tiny drift. Symmetric
+    # values would let the naive form's errors cancel and hide this.
+    log_ratio = torch.tensor([1e-9, 2e-9, 5e-10, 3e-9, 1e-9], dtype=torch.float32)
+
+    naive = ((log_ratio.exp() - 1) - log_ratio).mean()
+    stable = (torch.expm1(log_ratio) - log_ratio).mean()
+
+    assert naive < 0, "the defect this guards no longer reproduces"
+    assert stable >= 0
+
+
+def test_the_kl_gauge_is_unchanged_where_it_was_already_right():
+    """Every reading on record sits above a log-ratio of ~1e-3, where the two
+    forms agree — so no recorded figure is affected by the fix."""
+    log_ratio = torch.tensor([0.01, -0.02, 0.05, 0.2], dtype=torch.float32)
+
+    naive = ((log_ratio.exp() - 1) - log_ratio).mean()
+    stable = (torch.expm1(log_ratio) - log_ratio).mean()
+
+    assert stable == pytest.approx(float(naive), rel=1e-3)
+
+
+def a_trajectory_of_estimates():
+    """Four decisions, four seats, values that already sum to zero per row."""
+    return np.array(
+        [
+            [0.10, -0.05, -0.03, -0.02],
+            [0.30, -0.10, -0.10, -0.10],
+            [0.50, -0.20, -0.20, -0.10],
+            [0.70, -0.30, -0.20, -0.20],
+        ],
+        dtype=np.float32,
+    )
+
+
+TERMINAL = np.array([1.0, -0.4, -0.3, -0.3], dtype=np.float32)
+
+
+def test_lambda_one_is_the_terminal_vector_at_every_step():
+    # The control arm's target, recovered through the general path -- which is
+    # why lam=1 keeps the old code path rather than routing through here.
+    out = lambda_returns(a_trajectory_of_estimates(), TERMINAL, 1.0)
+    for row in out:
+        assert row == pytest.approx(TERMINAL, abs=1e-5)
+
+
+def test_lambda_zero_is_the_next_estimate_and_the_outcome_at_the_end():
+    values = a_trajectory_of_estimates()
+    out = lambda_returns(values, TERMINAL, 0.0)
+    for step in range(len(values) - 1):
+        assert out[step] == pytest.approx(values[step + 1], abs=1e-5)
+    assert out[-1] == pytest.approx(TERMINAL, abs=1e-5)
+
+
+def test_the_mover_s_column_agrees_with_gae_plus_its_own_estimate():
+    # `G^lam = A^lam + V` is the identity the vector form is built on, so the
+    # scalar GAE already in this module has to reproduce column 0 exactly.
+    values = a_trajectory_of_estimates()
+    out = lambda_returns(values, TERMINAL, 0.9)
+    expected = advantages(values[:, 0], np.float32(TERMINAL[0]), 0.9) + values[:, 0]
+    assert out[:, 0] == pytest.approx(expected, abs=1e-5)
+
+
+def test_a_mixture_of_zero_sum_vectors_still_sums_to_zero():
+    # `catan.mcts`'s `relative` stance reads the sum across the vector, so a
+    # target that stopped summing to zero would quietly change what it means.
+    out = lambda_returns(a_trajectory_of_estimates(), TERMINAL, 0.97)
+    assert np.abs(out.sum(axis=1)).max() < 1e-5
+
+
+def test_a_target_built_from_a_head_that_is_not_zero_sum_is_projected_back():
+    # Nothing constrains the head's four outputs to sum to zero, and a
+    # bootstrapped target is built out of them. Measured at 0.89 off on an
+    # untrained head before the projection was added.
+    skewed = a_trajectory_of_estimates() + np.float32(0.25)
+    out = lambda_returns(skewed, TERMINAL, 0.9)
+    assert np.abs(out.sum(axis=1)).max() < 1e-5
+
+
+def test_the_default_config_still_trains_on_terminal_outcomes():
+    assert PPOConfig().value_lam == 1.0
+
+
+def test_a_bootstrapped_target_moves_off_the_outcome_and_stays_zero_sum():
+    policy = a_policy(seed=11)
+    episodes = some_episodes(policy, games=2, seed=11)
+    plain = assemble(episodes[:1], policy.layout, PPOConfig())
+    mixed = assemble(episodes[:1], policy.layout, PPOConfig(value_lam=0.97))
+    assert not torch.allclose(plain.value_target, mixed.value_target)
+    assert mixed.value_target.sum(dim=1).abs().max() < 1e-4

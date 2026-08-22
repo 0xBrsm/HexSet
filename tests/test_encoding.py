@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pickle
 import random
 
 import numpy as np
@@ -16,6 +17,7 @@ from catan.encoding import (
     _seat,
     edge_features,
     encode,
+    encode_batch,
     global_features,
     static_graph,
     vertex_features,
@@ -36,6 +38,51 @@ def a_game(players: int = 4, seed: int = 0, steps: int = 120):
 
 def arrays(obs):
     return (obs.hexes, obs.vertices, obs.edges, obs.globals)
+
+
+def test_batched_encoding_is_byte_identical_to_the_canonical_path():
+    """The collector fast path must remain only a different way to write bytes."""
+    rng = random.Random(31)
+    games = [start(random_base_board(rng), 4, rng) for _ in range(24)]
+
+    checked = 0
+    for _ in range(80):
+        for game in games:
+            if not is_over(game):
+                step_randomly(game, rng)
+
+        live = [game for game in games if not is_over(game)]
+        perspectives = [rng.randrange(game.state.num_players) for game in live]
+        fast = encode_batch(live, perspectives)
+        canonical = [
+            encode(game, perspective)
+            for game, perspective in zip(live, perspectives, strict=True)
+        ]
+
+        for got, want in zip(fast, canonical, strict=True):
+            for got_array, want_array in zip(arrays(got), arrays(want), strict=True):
+                assert np.array_equal(got_array, want_array)
+                assert got_array.dtype == want_array.dtype == np.float32
+            assert got.graph is want.graph
+            checked += 1
+
+    assert checked > 1000
+
+
+def test_serializing_one_batched_observation_does_not_carry_the_whole_tick():
+    games = [a_game(seed=seed, steps=60 + seed) for seed in range(8)]
+    observations = encode_batch(games, [game.current_player for game in games])
+
+    restored = pickle.loads(pickle.dumps(observations[3]))
+
+    assert restored._packed is None
+    canonical = encode(games[3], games[3].current_player)
+    for got, want in zip(arrays(restored), arrays(canonical), strict=True):
+        assert np.array_equal(got, want)
+    # The restored arrays are independent, so mutating one transition cannot
+    # corrupt any sibling transition after it crosses a collector pipe.
+    restored.hexes.fill(7.0)
+    assert not np.array_equal(restored.hexes, observations[3].hexes)
 
 
 @pytest.mark.parametrize("players", [2, 3, 4])

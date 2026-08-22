@@ -135,6 +135,23 @@ def split(returns: np.ndarray, prediction: float) -> tuple[float, float]:
     return floor, bias * bias
 
 
+def pool(rows: list[dict]) -> dict:
+    """Aggregate floor/bias/mse over positions -- shared by `main` and a shard merge.
+
+    Weights by row, not by shard: concatenating N shards' rows and pooling once
+    is what makes the sharded total equal the single-process total it replaces.
+    """
+    floors = np.asarray([r["floor"] for r in rows])
+    biases = np.asarray([r["bias_squared"] for r in rows])
+    mses = floors + biases
+    return {
+        "mean_floor": round(float(floors.mean()), 5),
+        "mean_bias_squared": round(float(biases.mean()), 5),
+        "mean_squared_error": round(float(mses.mean()), 5),
+        "irreducible_share": round(float(floors.mean() / max(mses.mean(), 1e-12)), 4),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", required=True)
@@ -216,24 +233,22 @@ def main(argv: list[str] | None = None) -> int:
         )
     elapsed = time.perf_counter() - started
 
-    floors = np.asarray([r["floor"] for r in rows])
-    biases = np.asarray([r["bias_squared"] for r in rows])
-    mses = floors + biases
     stages = _stages(rows, args.bins)
 
     payload = {
         "environment": environment(),
         "checkpoint": args.checkpoint,
+        # So N shards, each its own `--seed`, can be pooled by concatenating
+        # `rows` rather than re-deriving what one process was asked to do.
+        "args": vars(args),
         "iteration": loaded.iteration,
         "positions": len(rows),
         "rollouts_each": args.rollouts,
         "seed_seconds": round(seeded, 1),
         "seconds": round(elapsed, 1),
-        "mean_floor": round(float(floors.mean()), 5),
-        "mean_bias_squared": round(float(biases.mean()), 5),
-        "mean_squared_error": round(float(mses.mean()), 5),
-        "irreducible_share": round(float(floors.mean() / max(mses.mean(), 1e-12)), 4),
+        **pool(rows),
         "stages": stages,
+        "rows": rows,
     }
 
     if args.json:

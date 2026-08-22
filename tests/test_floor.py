@@ -5,7 +5,7 @@ import random
 import numpy as np
 import pytest
 
-from benchmarks.floor import Branching, Sampling, Snapshot, collect, split
+from benchmarks.floor import Branching, Sampling, Snapshot, collect, pool, split
 from catan.actions import apply
 from catan.selfplay import Choice
 
@@ -47,6 +47,31 @@ def test_a_prediction_at_the_mean_leaves_only_the_floor():
     floor, bias = split(returns, float(returns.mean()))
     assert bias == pytest.approx(0.0)
     assert floor == pytest.approx(float(returns.var()))
+
+
+def test_pool_recovers_the_mean_and_the_share_over_all_rows():
+    rows = [
+        {"floor": 0.1, "bias_squared": 0.01},
+        {"floor": 0.2, "bias_squared": 0.02},
+    ]
+    got = pool(rows)
+    assert got["mean_floor"] == pytest.approx(0.15)
+    assert got["mean_bias_squared"] == pytest.approx(0.015)
+    assert got["mean_squared_error"] == pytest.approx(0.165)
+    assert got["irreducible_share"] == pytest.approx(0.15 / 0.165, abs=1e-4)
+
+
+def test_pool_weights_by_row_not_by_shard():
+    """What a merge across shards of different sizes relies on.
+
+    Concatenating a 1-row shard and a 3-row shard and pooling once must weight
+    3:1 by position; averaging the two shards' own means first would give 0.5
+    instead of the 0.75 the union actually has.
+    """
+    small_shard = [{"floor": 0.0, "bias_squared": 0.0}]
+    big_shard = [{"floor": 1.0, "bias_squared": 0.0}] * 3
+    got = pool(small_shard + big_shard)
+    assert got["mean_floor"] == pytest.approx(0.75)
 
 
 def test_a_sampled_decision_keeps_a_copy_and_not_the_live_position():

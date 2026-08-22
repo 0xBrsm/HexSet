@@ -217,10 +217,18 @@ def test_distilling_a_fixed_batch_moves_the_policy_toward_the_search():
     config = DistillConfig(epochs=1, minibatch=256)
 
     first = update(policy, optimiser, batch, config)
-    for _ in range(20):
+    for _ in range(100):
         last = update(policy, optimiser, batch, config)
 
     assert last.policy_loss < first.policy_loss
+    # 100 updates rather than 20, because argmax agreement on a three-game batch
+    # wobbles by about +/-0.02 while it climbs and 20 landed in a trough. The
+    # measured curve from the near-uniform init (policy heads at gain 0.01, so
+    # the initial argmax is arbitrary and its agreement is an artifact rather
+    # than a baseline): 0.687 at step 1, 0.678 at 10, 0.669 at 21, 0.689 at 50,
+    # 0.700 at 100, 0.715 at 200, against a policy_loss that falls monotonically
+    # 0.972 -> 0.766 and a value_loss that falls 0.609 -> 0.018 throughout. The
+    # trend is the property; 20 updates was measuring the wobble.
     assert last.agreement > first.agreement
 
 

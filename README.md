@@ -75,7 +75,7 @@ search with `netsearch:<path>` / `netgreedy:<path>`, or as a tree with `mcts:<pa
 | `catan/roads.py`, `robber.py`, `devcards.py`, `cards.py`, `victory.py`, `trading.py` | Longest road as a longest trail, the robber and discards, the development deck, victory conditions, player-to-player offers |
 | `catan/evaluate.py`, `evaluate_tiered.py` | Two handcrafted per-seat evaluations — nine fitted blended terms, and a tiered priority-order reimplementation kept as a comparison baseline |
 | `catan/bots.py`, `arena.py` | The `Bot` protocol, random / greedy / max^n search with stances; seat-rotated head-to-head play with confidence intervals |
-| `catan/tuning.py`, `fitting.py`, `behaviour.py` | Fitting evaluation weights by hill climbing and by logistic regression, and reporting what the bot actually does in the shape human aggregates use |
+| `catan/tuning.py`, `fitting.py`, `behaviour.py` | Fitting evaluation weights by hill climbing and by logistic regression, and reporting what the bot actually does in the shape published aggregates are quoted in |
 | `catan/encoding.py`, `model.py`, `readout.py` | The seat-relative, information-set-correct graph observation; message passing over it; and the index map from heads to flat action slots |
 | `catan/selfplay.py`, `policy.py`, `rewards.py` | Vectorised lockstep rollout collection behind a `BatchPolicy` protocol, the torch policy, and the per-seat terminal scalarisation |
 | `catan/ppo.py`, `train.py` | GAE, clipped surrogate and value loss; the runnable, resumable training loop |

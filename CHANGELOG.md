@@ -7,6 +7,40 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-22
+
+An opening-placement prior, fitted by conditional logit over 40,803 recorded
+four-player games, and the one evaluation term that fit produced.
+
+### Added
+
+- `catan.placement` — a heuristic opening prior over three terms: pip count,
+  distinct resources reached, and whether a scarce resource is reached. Weights
+  are expressed in pips and come from a conditional logit over the four seats of
+  a game, which cancels the board because exactly one seat wins. Number
+  diversity, port access, complementarity between the two settlements, pip
+  balance and denial of a rival's best corner were all offered to the fit and
+  were all null at fixed pips.
+- `benchmarks.placement_policy` — walks any arena entrant through the eight
+  setup picks and compares each choice against the prior's ranking of the same
+  legal field. Three numbers separate "never learned to open", "matches the
+  prior", and "diverges but still beats the field". A trained checkpoint already
+  opens like the prior.
+- `Weights.scarce` — how many scarce resources a seat reaches, the only weight
+  not fitted against the engine. It comes from the opening fit at 0.91 pips,
+  converted at `production / ROLLS` VP per pip by `evaluate.FITTED_SCARCE`, with
+  a test pinning the default to it. Adopted untuned and it won anyway: 51.62%
+  [50.75, 52.48] over 12,800 games against the same evaluation without it.
+- `board.scarce_resources` — the resources with fewer hexes than the commonest,
+  so brick and ore on the base map.
+
+### Changed
+
+- Arena entrants can be constructed by name, so a benchmark can ask any of them
+  the same question.
+- **Every arena number recorded before 2026-08-15 was measured with `scarce` at
+  zero**, so this release moves the baseline for all of them.
+
 ## [0.2.0] - 2026-08-22
 
 Search throughput and the first expert-iteration loop. Distillation closes

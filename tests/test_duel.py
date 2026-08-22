@@ -1,10 +1,14 @@
-"""The duel's side split, which decides every verdict in `status.md`."""
+"""The duel's side split, which decides every verdict it reports."""
 
 from __future__ import annotations
 
-from benchmarks.duel import _default_workers, sides
-from catan.arena import base_name, lineup_from_names, pooled
-from catan.arena import Standing
+import pytest
+
+pytest.importorskip("torch", reason="PyTorch runs on the training box only")
+
+from benchmarks.duel import _default_workers, sides  # noqa: E402
+from catan.arena import base_name, lineup_from_names, pooled  # noqa: E402
+from catan.arena import Standing  # noqa: E402
 
 
 def test_two_checkpoints_arrive_sharing_one_name():

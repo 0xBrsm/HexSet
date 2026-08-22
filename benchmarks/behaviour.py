@@ -1,8 +1,10 @@
 """Report what our bot does, in the shape the published human aggregates use.
 
-The right-hand column is a third-party summary of Colonist.io games that cannot
-be verified — no corpus was ever published with it. Treat divergence as a
-question worth asking, not as an error to correct.
+The right-hand column is a third-party summary of Colonist.io games, quoted from
+FINDINGS_SUMMARY.md in github.com/OrgadYron/catan_43k_games_dataset. It states
+no licence, discloses no methodology, and the upstream it cites for the games
+themselves is gone, so none of it can be checked. Treat divergence as a question
+worth asking, not as an error to correct.
 """
 
 from __future__ import annotations
@@ -22,8 +24,9 @@ from catan.behaviour import (
 )
 from catan.record import read
 
-# Quoted from the dataset repo's FINDINGS_SUMMARY.md, over ~41k Colonist games.
-# Unverified: kept for comparison only.
+# Quoted from that summary, over its stated 41,310 games. Unverified: kept for
+# comparison only. The 4-knight entry is the summary's "35-37%" band at its
+# midpoint — 0.36 appears nowhere in the source, so do not go looking for it.
 HUMAN_KNIGHT_WIN_RATE = {0: 0.182, 1: 0.188, 2: 0.167, 3: 0.423, 4: 0.36}
 HUMAN_SEAT_WIN_RATE = [0.2491, 0.2495, 0.2518, 0.2495]
 

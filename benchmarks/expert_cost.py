@@ -23,7 +23,9 @@ printed alongside so the extrapolation can be checked rather than trusted.
 from __future__ import annotations
 
 import argparse
+import cProfile
 import json
+import pstats
 import random
 import sys
 import time
@@ -58,6 +60,9 @@ class Timed:
 class Point:
     simulations: int
     wave: int
+    lanes: int
+    compile_mode: str
+    inference_batch: int | None
     moves: int
     seconds: float
     ms_per_move: float
@@ -74,12 +79,17 @@ def measure(
     *,
     simulations: int,
     wave: int,
+    lanes: int,
     moves: int,
     players: int,
     seed: int,
     device: str,
+    compile_mode: str,
+    inference_batch: int | None,
     max_offers: int | None,
     actions_per_game: int,
+    profile: bool = False,
+    barrier=None,
 ) -> Point:
     rng = random.Random(seed)
     board = random_base_board(rng)
@@ -90,6 +100,8 @@ def measure(
         wave=wave,
         max_offers=max_offers,
         device=device,
+        compile_mode=compile_mode,
+        inference_batch=inference_batch,
         rng=random.Random(seed),
     )
     timed = Timed(search.evaluator)
@@ -97,7 +109,7 @@ def measure(
     policy = SearchPolicy(search, rng=random.Random(seed))
     collector = Collector(
         policy,
-        lanes=1,
+        lanes=lanes,
         seed=seed,
         players=players,
         board=board,
@@ -107,24 +119,38 @@ def measure(
     # One move first, so a compiled forward's warm-up is not billed to the run.
     collector.tick()
     timed.seconds = timed.leaves = timed.waves = 0
+    if barrier is not None:
+        barrier.wait()
 
+    profiler = cProfile.Profile() if profile else None
+    if profiler is not None:
+        profiler.enable()
     start = time.perf_counter()
     collector.run(moves)
     seconds = time.perf_counter() - start
+    if profiler is not None:
+        profiler.disable()
+        pstats.Stats(profiler, stream=sys.stderr).strip_dirs().sort_stats(
+            "tottime"
+        ).print_stats(30)
 
     engine = seconds - timed.seconds
-    per_move = seconds / moves
+    decisions = moves * lanes
+    per_move = seconds / decisions
     return Point(
         simulations=simulations,
         wave=wave,
-        moves=moves,
+        lanes=lanes,
+        compile_mode=compile_mode,
+        inference_batch=inference_batch,
+        moves=decisions,
         seconds=round(seconds, 3),
         ms_per_move=round(per_move * 1e3, 3),
         network_share=round(timed.seconds / seconds, 4),
         us_per_leaf_network=round(timed.seconds / max(timed.leaves, 1) * 1e6, 1),
         us_per_leaf_engine=round(engine / max(timed.leaves, 1) * 1e6, 1),
-        leaves_per_move=round(timed.leaves / moves, 2),
-        waves_per_move=round(timed.waves / moves, 2),
+        leaves_per_move=round(timed.leaves / decisions, 2),
+        waves_per_move=round(timed.waves / decisions, 2),
         games_per_hour=round(3600.0 / (per_move * actions_per_game), 2),
     )
 
@@ -134,10 +160,24 @@ def main() -> int:
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--simulations", type=int, nargs="+", default=[16, 64, 256])
     parser.add_argument("--wave", type=int, default=16)
+    parser.add_argument("--lanes", type=int, default=1)
     parser.add_argument("--moves", type=int, default=200)
     parser.add_argument("--players", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cpu", help="cpu or cuda")
+    parser.add_argument(
+        "--compile",
+        dest="compile_mode",
+        default="none",
+        choices=["none", "default", "reduce-overhead", "max-autotune"],
+        help="torch.compile mode for checkpoint inference",
+    )
+    parser.add_argument(
+        "--inference-batch",
+        type=int,
+        default=None,
+        help="pad leaf evaluations to this fixed batch size",
+    )
     parser.add_argument(
         "--max-offers",
         type=int,
@@ -151,6 +191,11 @@ def main() -> int:
         help="what games_per_hour extrapolates through; 950 at an offer budget of 3",
     )
     parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="print the measured region's top self-time entries to stderr",
+    )
     args = parser.parse_args()
 
     points = [
@@ -158,12 +203,16 @@ def main() -> int:
             args.checkpoint,
             simulations=n,
             wave=args.wave,
+            lanes=args.lanes,
             moves=args.moves,
             players=args.players,
             seed=args.seed,
             device=args.device,
+            compile_mode=args.compile_mode,
+            inference_batch=args.inference_batch,
             max_offers=args.max_offers,
             actions_per_game=args.actions_per_game,
+            profile=args.profile,
         )
         for n in args.simulations
     ]
@@ -181,7 +230,12 @@ def main() -> int:
 
     env = payload["environment"]
     print(f"commit {env['commit']}  dirty {env['dirty']}  {env['machine']}")
-    print(f"{args.checkpoint} on {args.device}, wave {args.wave}, {args.moves} moves")
+    print(
+        f"{args.checkpoint} on {args.device}, wave {args.wave}, "
+        f"{args.lanes} lanes, compile {args.compile_mode}, "
+        f"inference batch {args.inference_batch or 'dynamic'}, "
+        f"{args.moves * args.lanes} moves"
+    )
     print(f"games/hour extrapolated through {args.actions_per_game} actions a game")
     print(
         f"{'sims':>5} {'ms/move':>9} {'net %':>7} {'net us/leaf':>12} "

@@ -7,6 +7,39 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-22
+
+Search throughput and the first expert-iteration loop. Distillation closes
+negative: it degraded the policy rather than improving it, and the benchmarks
+here are what diagnose why.
+
+### Added
+
+- `catan.distill` — distils the search's visit counts into the policy, with
+  Dirichlet root noise at the root to stop convention collapse and a
+  bootstrapped value target.
+- `catan.distill_train` — the expert-iteration training loop.
+- `benchmarks.expert_scale` — how synchronized expert collection scales.
+- `benchmarks.horizon` — what shortening the value horizon removes, including
+  the statistic that separates a real target from a self-referential one.
+- `LeafEvaluator` supports fixed-shape leaf inference, and the compiled search
+  inference path is exposed.
+
+### Changed
+
+- Search leaves are batched across games rather than evaluated one at a time.
+- Hidden deck shuffles are deferred until a draw actually needs them.
+- Linear PUCT edge scores are cached, and the responder scan is no longer
+  repeated per offer.
+- The MCTS wave size is a named quantity rather than an inline constant.
+
+### Fixed
+
+- A loaded network is placed on the device it was asked for, instead of
+  whichever one it was saved from.
+- Dirichlet root noise defaults back off, so it is opt-in rather than silently
+  applied to ordinary search.
+
 ## [0.1.0] - 2026-08-22
 
 ### Added

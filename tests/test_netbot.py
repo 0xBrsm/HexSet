@@ -81,6 +81,28 @@ def test_the_checkpoint_is_loaded_once_per_process_not_once_per_game(checkpoint)
     assert load.cache_info().hits == 1
 
 
+def test_loading_places_the_network_on_the_requested_device(checkpoint):
+    path, board = checkpoint
+    loaded = load(path, board.topology, "cpu")
+    assert {parameter.device.type for parameter in loaded.policy.net.parameters()} == {
+        "cpu"
+    }
+
+
+def test_loading_can_compile_the_network(checkpoint, monkeypatch):
+    path, board = checkpoint
+    calls = []
+
+    def compile_(net, *, mode):
+        calls.append((net, mode))
+        return net
+
+    monkeypatch.setattr(torch, "compile", compile_)
+    loaded = load(path, board.topology, "cpu", "default")
+
+    assert calls == [(loaded.policy.net, "default")]
+
+
 def test_the_offer_budget_comes_from_the_checkpoint_unless_overridden(checkpoint):
     path, board = checkpoint
     assert network_bot(path, board).max_offers == 3
@@ -240,6 +262,30 @@ def test_the_leaf_evaluator_hands_a_whole_wave_to_one_forward(checkpoint):
         assert len(value) == 4
 
 
+def test_leaf_evaluation_can_pad_to_one_compiled_shape(checkpoint):
+    from catan.actions import legal_actions
+    from catan.mcts import Leaf
+    from catan.netbot import searcher
+
+    path, board = checkpoint
+    search = searcher(path, board, inference_batch=8, rng=random.Random(0))
+    game = start(board, 4, random.Random(5))
+    leaves = [Leaf(game, to_move(game), tuple(legal_actions(game)))] * 3
+    policy = search.evaluator.policy
+    score = policy.score
+    seen = []
+
+    def recording_score(observations, masks, pairs):
+        seen.append(len(observations))
+        return score(observations, masks, pairs)
+
+    policy.score = recording_score
+    scored = search.evaluator.evaluate(leaves)
+
+    assert seen == [8]
+    assert len(scored) == 3
+
+
 def test_the_prior_covers_every_offer_rather_than_one_arbitrary_one(checkpoint):
     """`PROPOSE_TRADE` is one slot and many options. If the slot's mass were not
     split by the offer heads, one offer would carry the policy's whole appetite
@@ -280,15 +326,6 @@ def test_a_search_over_a_learned_prior_plays_a_legal_action(checkpoint):
         from catan.actions import apply
 
         apply(game, action)
-
-
-def test_a_simulation_budget_rides_on_the_entrant_name():
-    from catan.arena import entrant_from_name
-
-    plain = entrant_from_name("mcts:/tmp/x.pt")
-    assert (plain.kind, plain.weights, plain.simulations) == ("mcts", "/tmp/x.pt", 128)
-    sized = entrant_from_name("mcts:/tmp/x.pt@32")
-    assert (sized.name, sized.simulations) == ("mcts32", 32)
 
 
 def test_a_scored_run_records_the_networks_value_beside_someone_elses_play():

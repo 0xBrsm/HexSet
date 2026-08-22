@@ -13,11 +13,13 @@ from catan.actions import (
     legal_actions,
     legal_mask,
     space_for,
+    _offer_actions,
 )
 from catan.board.board import random_base_board
 from catan.economy import expected_total, total_in_play
 from catan.game import Phase, is_over, start
 from catan.play import play_random_game, step_randomly
+from catan.trading import Offer, responders
 from catan.victory import WINNING_POINTS, victory_points
 
 
@@ -143,6 +145,38 @@ def test_a_live_game_always_offers_something():
     while not is_over(game):
         assert legal_actions(game), f"stuck in {game.phase.name}"
         step_randomly(game, rng)
+
+
+def test_fast_offer_enumeration_matches_responder_rules():
+    rng = random.Random(19)
+    game = a_game(players=4, seed=19)
+    game.phase = Phase.MAIN
+
+    for _ in range(100):
+        game.current_player = rng.randrange(game.state.num_players)
+        game.offers_made = rng.randrange(10)
+        game.state.hands = [
+            [rng.randrange(4) for _ in range(5)]
+            for _ in range(game.state.num_players)
+        ]
+
+        expected = []
+        player = game.current_player
+        if game.offers_made < 8:
+            for given in range(5):
+                if not game.state.hands[player][given]:
+                    continue
+                for wanted in range(5):
+                    if wanted == given:
+                        continue
+                    give = tuple(int(r == given) for r in range(5))
+                    want = tuple(int(r == wanted) for r in range(5))
+                    if responders(game.state, Offer(player, give, want)):
+                        expected.append(
+                            Action(ActionType.PROPOSE_TRADE, give=give, want=want)
+                        )
+
+        assert _offer_actions(game) == expected
 
 
 def test_free_roads_are_placed_before_the_turn_can_end():

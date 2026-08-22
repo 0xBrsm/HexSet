@@ -5,7 +5,7 @@ import random
 import numpy as np
 import pytest
 
-from catan.actions import legal_actions
+from catan.actions import Action, ActionType, legal_actions
 from catan.board.board import random_base_board
 from catan.game import Phase, imagine, start
 from catan.bots import STANCES
@@ -62,6 +62,46 @@ def test_every_simulation_lands_in_the_root_visit_counts():
     _, options, visits = search.run(a_game())
     assert len(options) == len(visits)
     assert visits.sum() == 32
+
+
+def test_independent_roots_share_evaluator_calls_not_tree_statistics():
+    stub = Stub()
+    search = Search(stub, simulations=24, wave=4, rng=random.Random(1))
+    results = search.run_many([a_game(seed) for seed in range(3)])
+
+    # All roots are the first network batch; serial `run` would make three.
+    assert len(stub.waves[0]) == 3
+    assert len(results) == 3
+    assert all(visits.sum() == 24 for _, _, visits in results)
+    assert len({id(root) for root, _, _ in results}) == 3
+
+
+def test_search_randomizes_the_hidden_deck_only_when_buying_a_card():
+    class CountingRandom(random.Random):
+        def __init__(self):
+            super().__init__(1)
+            self.shuffles = 0
+
+        def shuffle(self, values):
+            self.shuffles += 1
+            super().shuffle(values)
+
+    rng = CountingRandom()
+    search = Search(Stub(), simulations=4, wave=2, rng=rng)
+    game = a_game()
+    search.run(game)
+    assert rng.shuffles == 0
+
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    game.state.hands[0] = [3] * len(game.state.hands[0])
+    node = search._node(imagine(game, random.Random(2), randomize_deck=False))
+    node.options = (Action(ActionType.BUY_DEV_CARD),)
+    before = len(node.game.state.deck)
+    child = search._step(node, 0, None)
+
+    assert rng.shuffles == 1
+    assert len(child.game.state.deck) == before - 1
 
 
 def test_a_wave_is_never_larger_than_the_budget_left():
@@ -133,6 +173,35 @@ def test_the_prior_decides_what_gets_tried_first():
     assert int(np.argmax(visits)) == wanted % len(options)
 
 
+def test_root_noise_is_off_unless_asked_for():
+    game = a_game()
+    stub = Stub(favour=0)
+    search = Search(stub, simulations=8, wave=4, rng=random.Random(1))
+    root, _, _ = search.run(game)
+    assert root.prior is not None
+    assert root.prior.max() == pytest.approx(0.99)
+
+
+def test_root_noise_moves_mass_off_the_priors_favourite():
+    game = a_game()
+    stub = Stub(favour=0)
+    search = Search(
+        stub,
+        simulations=8,
+        wave=4,
+        root_noise=0.3,
+        noise_fraction=0.25,
+        rng=random.Random(1),
+    )
+    root, _, _ = search.run(game)
+    assert root.prior is not None
+    assert root.prior.sum() == pytest.approx(1.0)
+    assert root.prior[0] < 0.99
+    # Only the root is perturbed; a child expanded mid-search keeps its prior.
+    child = next(c for c in root.children if isinstance(c, Node) and c.expanded)
+    assert child.prior.max() == pytest.approx(0.99)
+
+
 def test_virtual_loss_spreads_one_wave_over_several_edges():
     game = a_game()
     stub = Stub()
@@ -147,15 +216,36 @@ def test_a_mover_reads_the_value_vector_with_its_own_stance():
     game = a_game()
     search = Search(Stub(), rng=random.Random(1))
     node = search._node(imagine(game, search.rng))
-    node.prior = np.full(len(node.options), 1.0 / len(node.options))
+    node.prior = np.zeros(len(node.options))
     node.value = (0.0, 0.0, 0.0, 0.0)
-    node.visits[:2] = 1.0
-    node.totals[0] = [1.0, -1.0, 0.0, 0.0]
-    node.totals[1] = [-1.0, 1.0, 0.0, 0.0]
     node.mover = 0
+    node.virtual[:2] = 1.0
+    search._backup([(node, 0)], [1.0, -1.0, 0.0, 0.0])
+    search._backup([(node, 1)], [-1.0, 1.0, 0.0, 0.0])
     assert search._select(node) == 0
+
+    node.visits[:2] = 0.0
+    node.totals[:2] = 0.0
+    node.ranked[:2] = 0.0
     node.mover = 1
+    node.virtual[:2] = 1.0
+    search._backup([(node, 0)], [1.0, -1.0, 0.0, 0.0])
+    search._backup([(node, 1)], [-1.0, 1.0, 0.0, 0.0])
     assert search._select(node) == 1
+
+
+@pytest.mark.parametrize("stance", ["own", "relative"])
+def test_cached_linear_edge_scores_match_the_canonical_stance(stance):
+    game = a_game()
+    search = Search(Stub(), stance=stance, rng=random.Random(1))
+    node = search._node(imagine(game, search.rng))
+    values = ([0.4, -0.2, 0.1, -0.3], [-0.1, 0.3, -0.4, 0.2])
+    for value in values:
+        node.virtual[0] += 1
+        search._backup([(node, 0)], value)
+
+    expected = sum(STANCES[stance](value, node.mover) for value in values)
+    assert node.ranked[0] == pytest.approx(expected)
 
 
 def test_a_prior_of_the_wrong_width_is_refused():

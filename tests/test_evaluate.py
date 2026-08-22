@@ -9,7 +9,7 @@ from catan.board.maps import MINI_LAYOUT
 from catan.board.terrain import TERRAIN_RESOURCE, Resource, Terrain
 from catan.board.topology import build as build_topology
 from catan.cards import DevCard
-from catan.evaluate import ROLLS, WIN_SCORE, Evaluator, Weights
+from catan.evaluate import FITTED_SCARCE, ROLLS, WIN_SCORE, Evaluator, Weights
 from catan.game import start
 from catan.state import new_game, place_settlement, upgrade_to_city
 from catan.victory import WINNING_POINTS, victory_points
@@ -167,6 +167,7 @@ def test_weights_are_what_the_score_is_built_from():
         victory_point=0.0,
         production=0.0,
         diversity=0.0,
+        scarce=0.0,
         progress=0.0,
         road=0.0,
         knight=0.0,
@@ -182,6 +183,35 @@ def test_for_game_reads_the_board_off_the_game():
     game = start(random_base_board(rng), 4, rng)
     scores = Evaluator.for_game(game).evaluate(game.state)
     assert len(scores) == 4
+
+
+def test_scarcity_counts_only_the_short_resources_the_seat_reaches():
+    """A resource with fewer hexes than the commonest counts; a plentiful one does not."""
+    assert Evaluator(random_base_board(random.Random(0))).scarce == {
+        Resource.BRICK,
+        Resource.ORE,
+    }
+
+    topology = build_topology(MINI_LAYOUT)
+    n = topology.num_hexes
+    # The desert is first so the robber starts there rather than on the one hex
+    # this test needs to be producing.
+    terrain = (Terrain.DESERT, Terrain.HILLS) + (Terrain.FOREST,) * (n - 2)
+    board = make_board(topology, terrain, (0,) + (6,) * (n - 1))
+    evaluator = Evaluator(board)
+    assert evaluator.scarce == {Resource.BRICK}
+
+    touching = next(v for v, hs in enumerate(topology.vertex_hexes) if 1 in hs)
+    away = next(v for v, hs in enumerate(topology.vertex_hexes) if 1 not in hs)
+    for vertex, expected in ((touching, 1), (away, 0)):
+        state = new_game(board, 2)
+        place_settlement(state, 0, vertex, connected=False)
+        assert evaluator.survey(state, 0).scarce == expected
+
+
+def test_the_scarcity_default_is_the_fitted_value_and_cannot_drift_from_it():
+    """The one weight taken from the opening fit rather than fitted against the engine."""
+    assert Weights().scarce == pytest.approx(FITTED_SCARCE, abs=1e-4)
 
 
 def test_the_survey_agrees_with_the_rules():

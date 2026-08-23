@@ -627,3 +627,34 @@ def test_the_rival_rung_is_matched_iteration_or_nothing(tmp_path):
     hit = rival_rung(str(tmp_path), 25, "cpu", board, 4)
     assert hit is not None and hit.greedy
     assert rival_rung(str(tmp_path), 20, "cpu", board, 4) is None
+
+
+def test_the_recent_ring_keeps_exactly_the_newest_n(tmp_path):
+    from catan.train import prune_recent
+
+    for i in (5, 10, 15, 20, 25, 30):
+        (tmp_path / f"recent-{i:05d}.pt").touch()
+    (tmp_path / "iter-00025.pt").touch()
+    prune_recent(tmp_path, 3)
+    left = sorted(p.name for p in tmp_path.glob("recent-*.pt"))
+    assert left == ["recent-00020.pt", "recent-00025.pt", "recent-00030.pt"]
+    assert (tmp_path / "iter-00025.pt").exists(), "the ring never touches keeps"
+
+
+def test_a_blowout_preserves_the_pre_update_weights_and_the_batch(tmp_path):
+    from catan.train import preserve_blowout
+
+    net = {"w": torch.ones(3)}
+    opt = {"state": {}, "param_groups": [{"lr": 3e-4}]}
+    batch = {"advantage": torch.zeros(5)}
+    preserve_blowout(tmp_path, 572, net, opt, batch, dump_batch=True)
+
+    pre = torch.load(tmp_path / "blowout-00572-pre.pt", weights_only=False)
+    assert pre["iteration"] == 571, "the pre file resumes BEFORE the bad update"
+    assert torch.equal(pre["net"]["w"], torch.ones(3))
+    dumped = torch.load(tmp_path / "blowout-00572-batch.pt", weights_only=False)
+    assert torch.equal(dumped["batch"]["advantage"], torch.zeros(5))
+
+    preserve_blowout(tmp_path, 573, net, opt, batch, dump_batch=False)
+    assert not (tmp_path / "blowout-00573-batch.pt").exists()
+    assert (tmp_path / "blowout-00573-pre.pt").exists()

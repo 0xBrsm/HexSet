@@ -262,3 +262,32 @@ def test_the_flat_wire_format_rebuilds_byte_identical_episodes():
         for t in seat
     }
     assert shared == {id(flat.buffer)}
+
+
+def test_a_league_worker_records_every_seat_and_loads_a_weight_list():
+    """Stage 2's worker contract: two learner nets share the table, every seat
+    records under its caster's id, and sync ships one dict per learner."""
+    collector = ParallelCollector([spec(w, 2, learners=2) for w in range(2)])
+    try:
+        from catan.collect import _build  # the same construction the worker runs
+
+        policies, _ = _build(spec(0, 2, learners=2))
+        assert len(policies) == 2
+        collector.sync_many([policies[0].net, policies[1].net])
+
+        episodes = collector.collect(4)
+        assert len(episodes) == 4
+        for episode in episodes:
+            assert set(episode.cast) == {0, 1}
+            for seat, trajectory in enumerate(episode.trajectories):
+                assert trajectory, "both ids are learners; every seat records"
+                assert all(t.seat == seat for t in trajectory)
+    finally:
+        collector.close()
+
+
+def test_a_league_spec_refuses_a_mix():
+    from catan.collect import _build
+
+    with pytest.raises(ValueError):
+        _build(spec(0, 1, learners=2, mix=(("greedy", 0.15),)))

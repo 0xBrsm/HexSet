@@ -7,6 +7,52 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-23
+
+The critic decomposed, the pipeline made ~2.5x cheaper per experiment, and the
+evaluation protocol rebuilt around matched opponents after the common-opponent
+instrument deceived four separate readouts.
+
+### The finding that reorganises training
+
+The value head's ~2.5 VP contribution is the complete loop or nothing. Cutting
+both of its wires (REINFORCE on the zero-sum return), only the pricing wire
+(an auxiliary value loss nothing reads), or only the shaping wire (GAE over a
+trunk-detached head) all land 2.3-2.9 VP below the control at matched
+iterations — the wires are complements, not substitutes. Around it: reuse is
+dead in both directions (2 << 4 ~= 8 epochs, measured), one iteration of
+collection staleness costs 0.7-0.9 VP early, and the greedy lane opponent is
+convicted of the accept-rate drift — its removal coincided with closing two
+thirds of the gap to the previous campaign's ceiling, with the 100-extra-
+iterations confound stated in the record rather than argued away.
+
+### Added
+
+- `--critic {gae,none,aux}` — the value head's two routes into training as one
+  flag, with the head module built in every mode so checkpoints stay loadable.
+- `--kl-break` — a one-sided ceiling on a finished epoch's mean KL, with
+  `epochs_taken` telemetry; the damage band (0.018, 0.045) is measured, and its
+  first live firing bounded a record blowout to two epochs.
+- `--fused` — the trunk's gather/scatter means as dense row-normalised
+  adjacency GEMMs with blockwise round MLPs; -18% on the GPU update, kept off
+  the CPU path where it measured slower. Equivalence pinned across head shapes.
+- A flat wire format for worker episodes: cohorts cross the pipes as a few
+  large arrays and rebuild byte-identical, collect 15 -> 9 s and assemble
+  3.1 -> 1.2 s an iteration, with `pack`'s gather path restored.
+- `--rival` — every eval also duels a rival run's checkpoint at the *matched*
+  iteration, so recipe-vs-recipe signal arrives in-run; matched or recorded as
+  a miss, never nearest-neighbour.
+- `--detach-value` on `catan.train`, plumbing the distillation trainer's
+  existing gradient cut.
+- `benchmarks.generate --bot network:<path>` records a trained checkpoint's
+  self-play for `benchmarks.behaviour`.
+
+### Changed
+
+- Evaluation protocol: gates decide on the matched-rival duel; greedy is
+  demoted to a mix-exploitation canary; external anchors calibrate. The greedy
+  ladder's four deceptions are documented in `agents/status.md`.
+
 ## [0.5.0] - 2026-08-22
 
 Distillation, made to work on the 5% of decisions where the search actually

@@ -384,3 +384,40 @@ def test_collate_stacks_in_order():
     assert np.array_equal(vertices[1].numpy(), obs[1].vertices)
     assert np.array_equal(globals_[2].numpy(), obs[2].globals)
     assert edges.dtype == torch.float32
+
+
+@pytest.mark.parametrize("shape", ["linear", "attn", "mlp_pooled"])
+def test_the_fused_forward_matches_the_reference_path(shape):
+    """Fused is a kernel change, not a math change.
+
+    Same parameters, same inputs, outputs equal to float tolerance — the only
+    licensed difference is summation order. And no new state_dict keys: the
+    adjacency buffers are derived from the graph, so a checkpoint from before
+    they existed must still load strictly.
+    """
+    _, _, net = a_net(value_head=shape)
+    assert not net.fused, "reference is the default; fused is the GPU opt-in"
+    batch = collate(observations(3))
+
+    net.fused = True
+    fused = net(*batch)
+    net.fused = False
+    reference = net(*batch)
+
+    for name in ("logits", "give", "want", "value"):
+        assert torch.allclose(
+            getattr(fused, name), getattr(reference, name), rtol=1e-4, atol=1e-5
+        ), (shape, name)
+    assert not any(key.startswith("A_") for key in net.state_dict())
+
+
+def test_the_fused_forward_trains_the_same_parameters():
+    """Weight views must not orphan any parameter from the backward pass."""
+    _, _, net = a_net()
+    net.fused = True
+    out = net(*collate(observations(2)))
+    (out.logits.sum() + out.value.sum() + out.give.sum() + out.want.sum()).backward()
+    unused = [
+        name for name, p in net.named_parameters() if p.grad is None or not p.grad.any()
+    ]
+    assert unused == []

@@ -1,6 +1,6 @@
 [project]
 name = "catan"
-version = "0.5.0"
+version = "0.6.0"
 description = "Graph-native Settlers of Catan engine and self-play agent"
 requires-python = ">=3.11"
 dependencies = ["numpy>=1.26"]

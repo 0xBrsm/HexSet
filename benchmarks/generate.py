@@ -16,7 +16,7 @@ import time
 from multiprocessing import Pool
 
 from benchmarks.throughput import default_workers, environment
-from catan.arena import PRESETS, spawn
+from catan.arena import CHECKPOINT_KINDS, PRESETS, entrant_from_name, spawn
 from catan.board.board import random_base_board
 from catan.record import Record, record_game, write
 
@@ -26,7 +26,7 @@ BOARD_SEED_OFFSET = 1_000_000
 def _record_one(job: tuple[int, str, int]) -> Record:
     seed, bot, players = job
     board = random_base_board(random.Random(BOARD_SEED_OFFSET + seed))
-    entrant = PRESETS[bot]
+    entrant = entrant_from_name(bot)
     bots = [
         spawn(entrant, board, random.Random(seed * 16 + seat))
         for seat in range(players)
@@ -38,7 +38,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", required=True, help="JSON lines file, appended to")
     parser.add_argument("--games", type=int, default=100)
-    parser.add_argument("--bot", default="greedy", choices=sorted(PRESETS))
+    # A preset name, or any checkpoint-prefixed entrant the arena resolves —
+    # `network:<path>` records a trained policy's self-play, which is what
+    # `benchmarks.behaviour` needs to profile a checkpoint's style.
+    parser.add_argument("--bot", default="greedy")
     parser.add_argument("--players", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--workers", type=int, default=default_workers())

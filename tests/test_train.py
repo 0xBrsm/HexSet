@@ -598,3 +598,32 @@ def test_a_cohort_cannot_be_asked_for_more_lanes_than_it_deals(tmp_path):
 def test_prefetching_has_to_opt_out_of_the_on_policy_guarantee(tmp_path):
     with pytest.raises(SystemExit):
         run(tmp_path, 1, ["--collect-workers", "2", "--async-collect"])
+
+
+def test_the_rival_rung_is_matched_iteration_or_nothing(tmp_path):
+    """A rival checkpoint loads only at the exact iteration; a miss is None.
+
+    Nearest-checkpoint matching would quietly turn the rival column into an
+    unmatched comparison, so absence has to come back as absence.
+    """
+    from catan.actions import space_for
+    from catan.board.board import random_base_board
+    from catan.encoding import static_graph
+    from catan.game import start
+    from catan.model import CatanNet, ModelConfig
+    from catan.train import rival_rung
+
+    rng = random.Random(0)
+    board = random_base_board(rng)
+    game = start(board, 4, rng)
+    net = CatanNet(
+        space_for(game), static_graph(board.topology), 4, ModelConfig(width=16, rounds=1)
+    )
+    torch.save(
+        {"net": net.state_dict(), "args": {"width": 16, "rounds": 1}},
+        tmp_path / "iter-00025.pt",
+    )
+
+    hit = rival_rung(str(tmp_path), 25, "cpu", board, 4)
+    assert hit is not None and hit.greedy
+    assert rival_rung(str(tmp_path), 20, "cpu", board, 4) is None

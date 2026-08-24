@@ -31,6 +31,7 @@ constructs an `Action` from parts, it only ever repeats one the server offered.
 from __future__ import annotations
 
 import math
+import random
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -39,6 +40,7 @@ from .actions import (
     Action,
     ActionType,
     apply,
+    is_legal,
     legal_actions,
 )
 from .board.board import Board
@@ -432,9 +434,30 @@ class GameSession:
             raise ValueError("it is not your turn to act")
         action = wire_to_action(wire)
         options = legal_actions(self.game)
-        if action not in options:
+        if not is_legal(action, options):
             raise ValueError(f"{action} is not a legal action right now")
+        if action.type is ActionType.PROPOSE_TRADE and not action.ask:
+            action = action._replace(ask=self._default_ask_order(self.human_seat))
         self._apply(self.human_seat, action)
+
+    def _default_ask_order(self, proposer: int) -> tuple[int, ...]:
+        """Who the board asks first when nothing more specific was chosen:
+        lowest victory points, tied broken by fewest development cards, then
+        random — trading with whoever's behind rather than the engine's own
+        neutral default (`ask=()`, clockwise seat order — see
+        `catan.game.propose_trade`'s docstring).
+
+        Victory points are `public_victory_points`, not the true count: a
+        hidden victory-point development card is exactly the information the
+        real board wouldn't hand the proposer either, so this shouldn't see
+        it. Dev card *count* has no such issue — that stack is visible
+        whatever's in it.
+        """
+        state = self.game.state
+        others = [p for p in range(state.num_players) if p != proposer]
+        random.Random().shuffle(others)  # only breaks byte-for-byte ties below
+        others.sort(key=lambda p: (public_victory_points(state, p), sum(holdings(state, p))))
+        return tuple(others)
 
     def advance_bots(self) -> None:
         steps = 0
@@ -446,7 +469,7 @@ class GameSession:
             seat = to_move(self.game)
             options = legal_actions(self.game)
             action = self.bot.choose(self.game)
-            if action not in options:
+            if not is_legal(action, options):
                 raise RuntimeError(f"bot chose an action legal_actions did not offer: {action}")
             self._apply(seat, action)
             steps += 1

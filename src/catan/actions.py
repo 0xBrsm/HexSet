@@ -308,6 +308,24 @@ def _offer_actions(game: Game) -> list[Action]:
     return out
 
 
+def is_legal(action: Action, options: Sequence[Action]) -> bool:
+    """Whether `action` is one of `options` (normally `legal_actions(game)`),
+    ignoring a `PROPOSE_TRADE` action's own `ask`.
+
+    `legal_actions` only ever enumerates one `PROPOSE_TRADE` per (give, want)
+    pair, with `ask=()` — `ask` is the proposer's preference for who gets
+    asked first, not something that changes what's offerable (see
+    `catan.game.propose_trade`'s docstring: "it cannot add a player who
+    could not cover the offer"). A plain `action in options` check, comparing
+    every field, would reject an otherwise-legal offer for the sole reason
+    that a preference was named — which is exactly backwards, since naming
+    one is always legal to do.
+    """
+    if action.type is ActionType.PROPOSE_TRADE and action.ask:
+        action = action._replace(ask=())
+    return action in options
+
+
 def legal_actions(game: Game) -> list[Action]:
     state = game.state
     player = game.current_player

@@ -182,6 +182,65 @@ def test_session_rejects_when_it_is_not_the_humans_turn():
         session.apply_human_action(legal_for_mover)
 
 
+def test_a_human_trade_with_no_ask_defaults_to_lowest_vp_first():
+    """GameSession's own addition on top of catan.game.propose_trade's
+    neutral ask=() default (clockwise seat order) — favours whoever's
+    behind rather than strict seat order. See GameSession._default_ask_order.
+    """
+    from catan.board.terrain import Resource
+    from catan.state import Building
+
+    game = a_game(seed=7)
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    state = game.state
+
+    # Seat 0 (the proposer) can give wood; seats 1, 2, 3 can all cover the
+    # ore ask, so all three are eligible and the ordering is what's under
+    # test, not who can respond at all.
+    state.bank[Resource.WOOD] -= 1
+    state.hands[0][Resource.WOOD] += 1
+    for seat in (1, 2, 3):
+        state.bank[Resource.ORE] -= 1
+        state.hands[seat][Resource.ORE] += 1
+
+    # Seat 1: a city (2 VP). Seat 3: a settlement (1 VP). Seat 2: nothing (0
+    # VP) — expect lowest first: [2, 3, 1].
+    state.vertex_owner[0] = 1
+    state.vertex_building[0] = Building.CITY
+    state.vertex_owner[1] = 3
+    state.vertex_building[1] = Building.SETTLEMENT
+
+    session = GameSession(game=game, human_seat=0, bot=RandomBot())
+    offer = Action(ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1))
+    session.apply_human_action(action_to_wire(offer))
+
+    assert game.pending_responders == [2, 3, 1]
+
+
+def test_a_human_trade_honours_an_explicit_ask_instead_of_the_default():
+    from catan.board.terrain import Resource
+
+    game = a_game(seed=8)
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    state = game.state
+
+    state.bank[Resource.WOOD] -= 1
+    state.hands[0][Resource.WOOD] += 1
+    for seat in (1, 2, 3):
+        state.bank[Resource.ORE] -= 1
+        state.hands[seat][Resource.ORE] += 1
+
+    session = GameSession(game=game, human_seat=0, bot=RandomBot())
+    offer = Action(
+        ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1), ask=(3, 2, 1)
+    )
+    session.apply_human_action(action_to_wire(offer))
+
+    assert game.pending_responders == [3, 2, 1]
+
+
 def test_advance_bots_always_stops_at_the_human_seat_or_game_over():
     game = a_game(seed=5)
     human_seat = 1

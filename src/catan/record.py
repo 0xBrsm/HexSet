@@ -22,7 +22,7 @@ import random
 from dataclasses import asdict, dataclass
 from typing import Iterable, Iterator, Sequence
 
-from .actions import Action, ActionType, apply, legal_actions
+from .actions import Action, ActionType, apply, is_legal, legal_actions
 from .arena import MAX_ACTIONS
 from .board.board import Board, make_board
 from .board.coords import Hex
@@ -158,7 +158,7 @@ def replay(record: Record) -> Game:
     """Re-play a record, checking it still describes the game it claims to."""
     game = start(board_of(record), record.num_players, random.Random(record.seed))
     for step, action in enumerate(actions_of(record)):
-        if action not in legal_actions(game):
+        if not is_legal(action, legal_actions(game)):
             raise ReplayError(
                 f"step {step}: {action} is not legal in {game.phase.name}"
             )

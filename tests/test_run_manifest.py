@@ -126,3 +126,37 @@ def test_the_parameter_set_comes_from_the_parser_not_a_copy(tmp_path):
     assert run.parameters("league") == {
         action.dest for action in build_parser()._actions if action.dest != "help"
     }
+
+
+@pytest.mark.parametrize("mode", ["train", "league", "distill"])
+def test_every_mode_can_build_its_parser_twice(mode):
+    """The check that was missing, and the bug it would have caught.
+
+    `catan.distill_train` declared `--detach-value` itself while also calling
+    `train.add_head_flags`, which declares it too. argparse raises on the
+    duplicate, so *every* invocation of that module failed -- including
+    `--help` -- from 2026-08-22 until 2026-08-24. Nothing noticed because
+    nothing built the parser except the module's own `main`, and no test ran it.
+
+    Building twice rather than once is deliberate: a parser that mutates shared
+    module state passes the first call and fails the second, which is exactly
+    the shape of the bug.
+    """
+    first = run.parameters(mode)
+    second = run.parameters(mode)
+
+    assert first == second
+    assert len(first) > 10, f"{mode} resolved suspiciously few parameters"
+
+
+def test_the_modes_map_to_modules_that_exist():
+    """`distill` launches from `catan.distill_train`, not `catan.distill`.
+
+    The error messages interpolate this map, so a wrong entry would send a
+    reader to a module that does not exist.
+    """
+    import importlib
+
+    for mode, module in run.manifest.MODULES.items():
+        assert mode in ("train", "league", "distill")
+        assert importlib.import_module(module) is not None

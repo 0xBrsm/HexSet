@@ -6,12 +6,15 @@ This is a standalone split of the web demo from [dev-catan](https://github.com/0
 
 ## Running it
 
+Locally:
 ```
 pip install -e .
 python -m catan.webserver
 ```
 
-Then open the printed URL. Opponents come from `model_options()` in `src/catan/webserver.py`: `search2` (a handcrafted bot, no checkpoint needed) plus one entry per `*.onnx` file found in the models directory.
+Or via `docker compose up -d --build`. The image only carries `numpy`/`onnxruntime` — `src/` and `models/` are bind-mounted (see `compose.yaml`), so a code change is a `git pull` + `docker compose restart`, not a rebuild; only a dependency bump touches the image.
+
+Then open the printed URL (or the mapped port, `8770` by default under compose). Opponents come from `model_options()` in `src/catan/webserver.py`: `search2` (a handcrafted bot, no checkpoint needed) plus one entry per `*.onnx` file found in the models directory.
 
 ## Adding an opponent
 
@@ -31,4 +34,5 @@ Copy the resulting file into this repo's `models/` directory.
 - `src/catan/` — the game engine (torch-free, copied from dev-catan) plus `webserver.py`/`webplay.py` (the HTTP server and session logic) and `onnxbot.py` (ONNX Runtime inference, this repo's own).
 - `src/catan/web/index.html` — the entire frontend: inline CSS, inline SVG icons, vanilla JS. No build step.
 - `models/` — drop `.onnx` files here.
-- `docker/` — a small CPU-only image for deploying this without a GPU.
+- `docker/Dockerfile` — a small CPU-only image (deps only) for deploying this without a GPU.
+- `compose.yaml` — bind-mounts `src/` and `models/` into that image rather than baking them in.

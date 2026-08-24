@@ -280,6 +280,18 @@
   .trade-bank-btn { margin-top: 0.4rem; }
   .trade-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.3rem 0 0.7rem; }
   .trade-note { font-size: 0.85rem; color: var(--muted); margin-top: 0.4rem; }
+  /* The "offered card ⇄ requested card" summary — one side's cards, an
+     arrow, the other side's cards, each side captioned with who owes what
+     (the "attribution") instead of a full sentence. Used both for reading
+     an incoming offer and for previewing a proposal as it's built. */
+  .trade-exchange {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+    gap: 0.6rem; margin: 0.2rem 0 0.9rem;
+  }
+  .trade-side { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; }
+  .trade-side .trade-row { margin: 0; justify-content: center; }
+  .trade-side-label { font-size: 0.78rem; color: var(--muted); }
+  .trade-arrow { flex: none; font-size: 1.3rem; line-height: 1; color: var(--muted); }
   /* Reuses .card's own size/shape (see the hand section) so a trade tile
      looks exactly like the card it represents — just selectable/dimmable
      on top of that. */
@@ -1254,6 +1266,32 @@ function tradeCardRow(bundle) {
   return row;
 }
 
+// A one-hot bundle (see tradeCardRow) for a single picked resource — lets
+// the "propose" preview reuse the same exchange-row renderer the "respond"
+// modal uses for a real multi-resource offer.
+function singleBundle(resourceIdx) {
+  return board.resources.map((_, i) => (i === resourceIdx ? 1 : 0));
+}
+
+// The shared "offered card(s) ⇄ requested card(s)" layout: one side's
+// cards, a divider, the other side's, each captioned with a short label
+// (the "attribution") instead of the old stacked "You give:"/"You want:"
+// sentence blocks. Used for both reading an incoming offer and previewing
+// one as it's built.
+function tradeExchangeRow(giveBundle, giveLabel, wantBundle, wantLabel) {
+  const row = html("div", {class: "trade-exchange"});
+  const giveSide = html("div", {class: "trade-side"});
+  giveSide.appendChild(html("div", {class: "trade-side-label"}, giveLabel));
+  giveSide.appendChild(tradeCardRow(giveBundle));
+  const wantSide = html("div", {class: "trade-side"});
+  wantSide.appendChild(html("div", {class: "trade-side-label"}, wantLabel));
+  wantSide.appendChild(tradeCardRow(wantBundle));
+  row.appendChild(giveSide);
+  row.appendChild(html("div", {class: "trade-arrow"}, "\u21c4"));
+  row.appendChild(wantSide);
+  return row;
+}
+
 // One row of all 5 resources, pickable — the "propose" modal's give/want
 // rows. "give" disables anything the human doesn't hold; "want" disables
 // whatever's currently picked as "give" (can't trade a resource for itself).
@@ -1321,13 +1359,10 @@ function renderTradeModal() {
 
   if (tradeMode === "respond") {
     const offer = state.offer;
-    // Who it's from goes in the title so the give/want rows below can stay
-    // short and literal about what accepting would actually do.
+    // Who it's from goes in the title so the exchange row below can stay
+    // just the cards themselves plus a one-word attribution each.
     title.textContent = `Trade offer from ${seatLabel(offer.proposer)}`;
-    body.appendChild(html("div", {class: "trade-note"}, "You give:"));
-    body.appendChild(tradeCardRow(offer.want));
-    body.appendChild(html("div", {class: "trade-note"}, "You get:"));
-    body.appendChild(tradeCardRow(offer.give));
+    body.appendChild(tradeExchangeRow(offer.give, "You get", offer.want, "You give"));
 
     const g = groupActions(state.legal_actions);
     if (g.simple.ACCEPT_TRADE) {
@@ -1345,9 +1380,15 @@ function renderTradeModal() {
 
   title.textContent = "Propose a trade";
   const p = state.players.find((pl) => pl.seat === state.human_seat);
-  body.appendChild(html("div", {class: "trade-note"}, "You give:"));
+  // A live "offered ⇄ requested" preview once both sides are picked, so the
+  // pickers below are for adjusting the choice, not the only place it's
+  // visible.
+  if (tradeGive !== null && tradeWant !== null) {
+    body.appendChild(tradeExchangeRow(singleBundle(tradeGive), "You give", singleBundle(tradeWant), "You want"));
+  }
+  body.appendChild(html("div", {class: "trade-note"}, "Give:"));
   body.appendChild(tradePickerRow("give", p));
-  body.appendChild(html("div", {class: "trade-note"}, "You want:"));
+  body.appendChild(html("div", {class: "trade-note"}, "Want:"));
   body.appendChild(tradePickerRow("want", p));
 
   let bank = null, offer = null;

@@ -54,7 +54,7 @@ from catan.board.board import random_base_board
 from catan.collect import ParallelCollector, WorkerSpec, parse_mix
 from catan.encoding import static_graph
 from catan.game import start
-from catan.model import CatanNet, ModelConfig, packing
+from catan.model import CatanNet, ModelConfig, config_from_args, packing
 from catan.policy import NetworkPolicy
 from catan.ppo import PPOConfig, _minibatches, assemble, minibatch_terms
 
@@ -107,6 +107,33 @@ def iso_kl_rate(target: float, arms: list[dict]) -> dict | None:
     }
 
 
+def worker_specs(
+    args: argparse.Namespace,
+    model: ModelConfig,
+    mix: list[tuple[str, float]] | tuple[tuple[str, float], ...],
+    parent: str,
+) -> list[WorkerSpec]:
+    """One spec per collect worker, carrying the checkpoint's *shape*.
+
+    A worker builds its own net and then has the learner's parameters pushed
+    into it, so head shapes left at the default here fail at the first sync
+    rather than at construction -- a failure two processes away from its cause.
+    """
+    shard = max(1, -(-args.lanes // args.collect_workers))
+    return [
+        WorkerSpec(
+            seed=args.seed, players=args.players, lanes=shard,
+            action_cap=args.action_cap, max_offers=args.max_offers,
+            first_game=worker, stride=args.collect_workers,
+            width=model.width, rounds=model.rounds,
+            value_head=model.value_head, policy_head=model.policy_head,
+            torch_seed=args.seed + 100_000 + worker,
+            mix=tuple(mix), parent=parent, cohort=True,
+        )
+        for worker in range(args.collect_workers)
+    ]
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--checkpoint", default="/w/runs/ppo6/latest.pt")
@@ -138,8 +165,10 @@ def main(argv: list[str] | None = None) -> int:
     torch.set_num_threads(args.threads)
     state = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     stored = state.get("args", {})
-    width = int(stored.get("width", 64))
-    rounds = int(stored.get("rounds", 2))
+    # Shape as well as size. Reading only width and rounds here is what stopped
+    # this probe loading the first `--policy-head mlp` lineage at all, and the
+    # whole point of the probe is to calibrate the lineage that will run.
+    model = config_from_args(stored)
     parent = args.parent or stored.get("parent", "")
 
     # The launch configuration of the run being calibrated against, so the block
@@ -157,24 +186,16 @@ def main(argv: list[str] | None = None) -> int:
     graph = static_graph(board.topology)
 
     torch.manual_seed(args.seed)
-    net = CatanNet(space, graph, args.players, ModelConfig(width=width, rounds=rounds))
+    net = CatanNet(space, graph, args.players, model)
     net.load_state_dict(state["net"])
     net = net.to(args.device)
+    # Gradient wiring, mirroring `catan.train`: the probe reproduces the run's
+    # own update, and a detached value loss is a different update.
+    net.detach_value = bool(stored.get("detach_value", False))
     policy = NetworkPolicy(net, space, packing(graph, args.players), device=args.device)
 
     mix = parse_mix(args.mix)
-    shard = max(1, -(-args.lanes // args.collect_workers))
-    collector = ParallelCollector([
-        WorkerSpec(
-            seed=args.seed, players=args.players, lanes=shard,
-            action_cap=args.action_cap, max_offers=args.max_offers,
-            first_game=worker, stride=args.collect_workers,
-            width=width, rounds=rounds,
-            torch_seed=args.seed + 100_000 + worker,
-            mix=tuple(mix), parent=parent, cohort=True,
-        )
-        for worker in range(args.collect_workers)
-    ])
+    collector = ParallelCollector(worker_specs(args, model, mix, parent))
 
     print(f"collecting a {args.games}-game cohort on {args.collect_workers} "
           f"workers (mix {args.mix or 'none'})...", flush=True)

@@ -55,7 +55,7 @@ from catan.actions import space_for
 from catan.board.board import random_base_board
 from catan.encoding import static_graph
 from catan.game import start
-from catan.model import CatanNet, ModelConfig, packing
+from catan.model import CatanNet, config_from_args, packing
 from catan.policy import NetworkPolicy
 from catan.ppo import PPOConfig, assemble, minibatch_terms
 from catan.selfplay import Collector
@@ -169,8 +169,10 @@ def main(argv: list[str] | None = None) -> int:
     torch.set_num_threads(args.threads)
     state = torch.load(args.checkpoint, map_location=args.device, weights_only=False)
     stored = state.get("args", {})
-    width = int(stored.get("width", 64))
-    rounds = int(stored.get("rounds", 2))
+    # Shape as well as size: see `catan.model.config_from_args`. This estimator
+    # is the mechanism behind the minibatch block, so it has to be runnable on
+    # whichever lineage the block calibrates against.
+    model = config_from_args(stored)
 
     rng = random.Random(args.seed)
     board = random_base_board(rng)
@@ -178,9 +180,10 @@ def main(argv: list[str] | None = None) -> int:
     graph = static_graph(board.topology)
 
     torch.manual_seed(args.seed)
-    net = CatanNet(space, graph, args.players, ModelConfig(width=width, rounds=rounds))
+    net = CatanNet(space, graph, args.players, model)
     net.load_state_dict(state["net"])
     net = net.to(args.device)
+    net.detach_value = bool(stored.get("detach_value", False))
     policy = NetworkPolicy(net, space, packing(graph, args.players), device=args.device)
     config = PPOConfig(
         entropy_coefficient=args.entropy, value_coefficient=args.value_coefficient

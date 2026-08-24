@@ -363,10 +363,15 @@ def test_a_trade_that_gets_accepted_summarizes_into_one_line():
     assert session._trade_buffer is None
 
 
-def test_a_trade_nobody_can_cover_logs_immediately_as_one_line():
+def test_a_trade_nobody_can_cover_is_still_legal_and_reads_as_declined():
     """propose_trade() concludes an uncoverable offer on the spot — no
     DECLINE_TRADE/ACCEPT_TRADE is ever coming to flush a held-back buffer,
-    so this must not wait for one."""
+    so this must not wait for one. And it must be reachable through
+    apply_human_action itself, not just a direct _apply: legal_actions()
+    only *samples* coverable (give, want) pairs (see its PROPOSE_TRADE
+    enumerator's own docstring), but a proposal nobody can cover is still a
+    legal move — see is_legal's docstring for why it's checked against
+    can_propose instead of sample membership."""
     from catan.board.terrain import Resource
 
     game = a_game(seed=14)
@@ -379,14 +384,11 @@ def test_a_trade_nobody_can_cover_logs_immediately_as_one_line():
 
     session = GameSession(game=game, human_seat=0, bot=RandomBot())
     offer = Action(ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1))
-    # legal_actions() only offers coverable (give, want) pairs (see its
-    # PROPOSE_TRADE enumerator), so an uncoverable offer can't reach here
-    # through apply_human_action's legality gate — go straight to _apply,
-    # same as the DECLINE_TRADE/ACCEPT_TRADE calls above.
-    session._apply(0, offer)
+    session.apply_human_action(action_to_wire(offer))
 
     assert len(session.log) == 1
     assert "offered" in session.log[0]
+    assert "declined" in session.log[0]
     assert session._trade_buffer is None
 
 
@@ -416,6 +418,35 @@ def test_a_trade_everyone_declines_summarizes_into_one_line():
     assert len(session.log) == 1
     assert session.log[0].count("declined") == 2
     assert session._trade_buffer is None
+
+
+def test_ending_a_turn_writes_no_log_line():
+    """Every turn ends eventually and the next line already implies it — a
+    dedicated line for each one was pure noise, not information."""
+    game = a_game(seed=16)
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    session = GameSession(game=game, human_seat=0, bot=RandomBot())
+
+    session._apply(0, Action(ActionType.END_TURN))
+
+    assert session.log == []
+
+
+def test_ending_a_turn_closes_an_open_build_streak():
+    game = a_game(seed=17)
+    human_seat = to_move(game)
+    session = GameSession(game=game, human_seat=human_seat, bot=RandomBot())
+
+    settlement = next(a for a in legal_actions(game) if a.type is ActionType.SETUP_SETTLEMENT)
+    session.apply_human_action(action_to_wire(settlement))
+    assert session._build_streak is not None
+
+    session.game.phase = Phase.MAIN
+    session.game.current_player = human_seat
+    session._apply(human_seat, Action(ActionType.END_TURN))
+
+    assert session._build_streak is None
 
 
 def test_advance_bots_always_stops_at_the_human_seat_or_game_over():

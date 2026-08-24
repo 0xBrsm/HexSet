@@ -37,6 +37,7 @@ from .game import (
 )
 from .robber import victims
 from .state import can_place_road, can_place_settlement, can_upgrade_to_city
+from .trading import Offer, can_propose
 
 
 YEAR_OF_PLENTY_PAIRS: tuple[tuple[int, int], ...] = tuple(
@@ -308,21 +309,22 @@ def _offer_actions(game: Game) -> list[Action]:
     return out
 
 
-def is_legal(action: Action, options: Sequence[Action]) -> bool:
+def is_legal(game: Game, action: Action, options: Sequence[Action]) -> bool:
     """Whether `action` is one of `options` (normally `legal_actions(game)`),
-    ignoring a `PROPOSE_TRADE` action's own `ask`.
+    except for `PROPOSE_TRADE`, checked against `can_propose` instead.
 
-    `legal_actions` only ever enumerates one `PROPOSE_TRADE` per (give, want)
-    pair, with `ask=()` — `ask` is the proposer's preference for who gets
-    asked first, not something that changes what's offerable (see
-    `catan.game.propose_trade`'s docstring: "it cannot add a player who
-    could not cover the offer"). A plain `action in options` check, comparing
-    every field, would reject an otherwise-legal offer for the sole reason
-    that a preference was named — which is exactly backwards, since naming
-    one is always legal to do.
+    `legal_actions` only *samples* coverable (give, want) pairs, to keep
+    enumeration small — but a proposal nobody can currently cover is still a
+    legal move (`propose_trade` has a defensive path for exactly that,
+    concluding the offer with no takers rather than raising), so gating it
+    on sample membership would reject a legal offer for a reason that was
+    never a real rule. Checking `can_propose` directly also sidesteps `ask`
+    entirely: it only reorders who gets asked, never who's eligible, so it
+    was never part of what made an offer legal in the first place.
     """
-    if action.type is ActionType.PROPOSE_TRADE and action.ask:
-        action = action._replace(ask=())
+    if action.type is ActionType.PROPOSE_TRADE:
+        offer = Offer(proposer=game.current_player, give=action.give, want=action.want)
+        return can_propose(game.state, offer)
     return action in options
 
 

@@ -158,7 +158,7 @@ def replay(record: Record) -> Game:
     """Re-play a record, checking it still describes the game it claims to."""
     game = start(board_of(record), record.num_players, random.Random(record.seed))
     for step, action in enumerate(actions_of(record)):
-        if not is_legal(action, legal_actions(game)):
+        if not is_legal(game, action, legal_actions(game)):
             raise ReplayError(
                 f"step {step}: {action} is not legal in {game.phase.name}"
             )

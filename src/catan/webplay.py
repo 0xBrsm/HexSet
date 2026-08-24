@@ -296,9 +296,6 @@ def _describe(
         ]
         return " ".join([line, *gains])
 
-    if kind is ActionType.END_TURN:
-        return f"{who} ended the turn."
-
     if kind is ActionType.SETUP_SETTLEMENT:
         line = f"{who} placed a settlement."
         gains = _hand_gains(before.hands[actor], state.hands[actor])
@@ -464,7 +461,7 @@ class GameSession:
             raise ValueError("it is not your turn to act")
         action = wire_to_action(wire)
         options = legal_actions(self.game)
-        if not is_legal(action, options):
+        if not is_legal(self.game, action, options):
             raise ValueError(f"{action} is not a legal action right now")
         self._apply(self.human_seat, action)
 
@@ -502,7 +499,7 @@ class GameSession:
             seat = to_move(self.game)
             options = legal_actions(self.game)
             action = self.bot.choose(self.game)
-            if not is_legal(action, options):
+            if not is_legal(self.game, action, options):
                 raise RuntimeError(f"bot chose an action legal_actions did not offer: {action}")
             self._apply(seat, action)
             steps += 1
@@ -578,13 +575,22 @@ class GameSession:
 
         self._build_streak = None  # any non-build action ends an open streak
 
+        if kind is ActionType.END_TURN:
+            # Whatever line comes next (the following seat's roll, build,
+            # ...) already implies the previous turn ended — a dedicated
+            # "X ended the turn." line for every single turn was pure noise,
+            # not information.
+            return
+
         if kind is ActionType.PROPOSE_TRADE:
             line = _describe(self.game, actor, action, before, self.human_seat, self.bot_names)
             if self.game.offer is None:
-                # propose_trade() found nobody eligible and concluded the
-                # offer immediately — no DECLINE_TRADE/ACCEPT_TRADE is ever
-                # coming to flush a buffer, so there's nothing to hold back.
-                self.log.append(f"{round_num}\t{line}")
+                # propose_trade() found nobody eligible (nobody holds what's
+                # wanted) and concluded the offer immediately — no
+                # DECLINE_TRADE is ever coming to say so, so this says it
+                # instead: it reads as declined, not as a proposal that
+                # silently went nowhere.
+                self.log.append(f"{round_num}\t{line} Nobody could cover it — declined.")
             else:
                 self._trade_buffer = [line]
             return

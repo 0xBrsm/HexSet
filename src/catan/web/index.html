@@ -183,6 +183,13 @@
     border-radius: 8px; background: var(--panel); border: 1px solid rgba(255,255,255,0.3);
     font-size: 0.64rem; font-weight: 700; line-height: 13px; text-align: center; color: var(--ink);
   }
+  /* A hand resource card doubling as the trade entry point: clicking one
+     opens the trade modal with that resource pre-selected as "give" — see
+     renderHand(). Only tagged with this class while trading is actually
+     legal (canTrade), so it's never clickable-looking when it wouldn't do
+     anything. */
+  .hand-card-tradeable { cursor: pointer; border-color: rgba(255,255,255,0.5); }
+  .hand-card-tradeable:hover { border-color: var(--accent); }
   /* White, not black: the board (#board-pane/var(--water)) is dark now too,
      so a light faint dot/line is what shows against it. */
   .vertex-dot { fill: #ffffff33; pointer-events: none; }
@@ -213,10 +220,10 @@
     align-items: center; justify-content: center; font-size: 1rem; color: var(--muted);
   }
   #overlay-blocker.show { display: flex; }
-  /* Shared look for all three board-corner buttons (dice, trade, end-turn) —
-     only top-vs-bottom differs per id, set below. */
+  /* Shared look for both board-corner buttons (dice, end-turn) — they share
+     one corner (see below), never two. */
   .board-fab {
-    position: absolute; right: 16px; width: 52px; height: 52px;
+    position: absolute; right: 16px; bottom: 16px; width: 52px; height: 52px;
     border-radius: 12px; border: 1px solid var(--border); background: var(--panel);
     cursor: pointer; padding: 10px; display: none;
     box-shadow: 0 2px 10px rgba(0,0,0,0.45);
@@ -225,11 +232,10 @@
   .board-fab:hover { background: #2e3444; }
   .board-fab:active { transform: scale(0.94); }
   .board-fab svg { width: 100%; height: 100%; fill: #ffffff; }
-  /* Same corner, not mirrored: ROLL and a trade action are never legal at
-     the same time (Phase.ROLL only ever offers ROLL/PLAY_KNIGHT — see
-     actions.py), so the two buttons never need to coexist and can share it. */
-  #roll-dice, #trade-open { bottom: 16px; }
-  #end-turn { top: 16px; }
+  /* Same corner, not mirrored: ROLL is only legal in Phase.ROLL and
+     END_TURN only once past it (see actions.py), so the two are never legal
+     at the same time and can share the spot. Trade now opens from clicking
+     a resource card in hand, not a floating button — see renderHand(). */
   #log-sheet {
     position: fixed; inset: 0; z-index: 50; background: var(--bg);
     display: none; flex-direction: column;
@@ -346,10 +352,6 @@
        (Apache 2.0). The trade modal's "Offer to players" icon; icon-close
        does double duty as both "Cancel" (propose) and "Decline" (respond). -->
   <symbol id="icon-send" viewBox="0 0 512 512"><path d="M42.9,448.0 L490.7,256.0 L42.9,64.0 L42.7,213.3 L362.7,256.0 L42.7,298.7 Z"/></symbol>
-  <!-- Two opposing arrows — redrawn solid from Tabler Icons' "arrows-exchange"
-       (MIT) in place of the original hand-drawn balance scales, which read
-       as "measurement" more than "trade" at icon size. -->
-  <symbol id="icon-trade" viewBox="0 0 512 512"><path d="M96,176 L372,176 L372,216 L96,216 Z M372,146 L452,196 L372,246 Z M416,296 L140,296 L140,336 L416,336 Z M140,266 L60,316 L140,366 Z"/></symbol>
   <!-- Two right-pointing triangles — redrawn solid from Tabler Icons'
        "player-track-next" (MIT), the standard "skip forward" glyph, doing
        duty here as "advance/end turn". -->
@@ -393,8 +395,9 @@
   <div id="log-full"></div>
 </div>
 <!-- One modal, two modes (see openTradeModal/renderTradeModal): "propose",
-     opened by #trade-open, lets the human build a give/want pair from the
-     board's own resource glyphs; "respond" opens itself whenever an
+     opened by clicking a resource card in the hand (see renderHand()), lets
+     the human build a give/want pair from the board's own resource glyphs,
+     the clicked card pre-selected as "give"; "respond" opens itself whenever an
      incoming offer is waiting on the human (syncTradeModal, called from
      render()). Same layout either way: give/want rows on the left, two
      icon-only buttons docked in a column on the right — accept/decline
@@ -414,16 +417,11 @@
   <div id="board-pane">
     <svg id="board-svg" xmlns="http://www.w3.org/2000/svg"></svg>
     <div id="overlay-blocker">Waiting for the table...</div>
-    <!-- Visibility and the click handler are both wired in renderActions(). -->
+    <!-- Visibility and the click handler are both wired in renderActions().
+         Shares its corner with #end-turn — see the CSS comment on
+         .board-fab. -->
     <button id="roll-dice" class="board-fab" title="Roll dice" aria-label="Roll dice">
       <svg viewBox="0 0 512 512"><use href="#icon-dice"></use></svg>
-    </button>
-    <!-- Opens the trade modal in "propose" mode; the same modal also opens
-         itself, in "respond" mode, for incoming offers — see
-         syncTradeModal(). Shares roll-dice's corner (see the CSS comment
-         on .board-fab). -->
-    <button id="trade-open" class="board-fab" title="Trade" aria-label="Propose a trade">
-      <svg viewBox="0 0 512 512"><use href="#icon-trade"></use></svg>
     </button>
     <button id="end-turn" class="board-fab" title="End turn" aria-label="End turn">
       <svg viewBox="0 0 512 512"><use href="#icon-end-turn"></use></svg>
@@ -753,7 +751,10 @@ function drawBoard() {
     staticLayer.appendChild(el("use", {
       href: "#icon-ship", x: pos.x - 11, y: pos.y - 16, width: 22, height: 22, fill: ink, class: "port-ship",
     }));
-    staticLayer.appendChild(el("text", {x: pos.x, y: pos.y + 12, class: "port-label", text: ratio, fill: ink}));
+    // The ratio text alone, nudged 20% of the way from the marker toward the
+    // board centroid — marker and ship icon stay put, only the text moves.
+    const labelPos = {x: pos.x + (centroid().x - pos.x) * 0.2, y: pos.y + (centroid().y - pos.y) * 0.2};
+    staticLayer.appendChild(el("text", {x: labelPos.x, y: labelPos.y + 12, class: "port-label", text: ratio, fill: ink}));
   }
 
   // Dynamic layers, repopulated by render()
@@ -940,6 +941,13 @@ function renderHand() {
   const p = state.players.find((p) => p.seat === state.human_seat);
   if (!p || p.hand === undefined) return;
 
+  // Whether clicking a card should open the trade modal: the same
+  // condition the old floating trade button used to gate its own
+  // visibility on (a bank trade or a player offer is actually proposable
+  // right now).
+  const canTrade = !state.game_over && state.to_move === state.human_seat
+    && state.legal_actions.some((a) => a.type === "BANK_TRADE" || a.type === "PROPOSE_TRADE");
+
   // Two columns, side by side, both always present — the header and the
   // row's height hold their place even at zero cards, so buying a first dev
   // card doesn't shove the resources column around.
@@ -951,6 +959,12 @@ function renderHand() {
     if (!n) continue;
     const card = resourceCardTile(r, {title: `${r}: ${n}`});
     card.appendChild(html("div", {class: "count"}, String(n)));
+    if (canTrade) {
+      card.classList.add("hand-card-tradeable");
+      card.addEventListener("click", () => {
+        openTradeModal("propose", {give: board.resources.indexOf(r)});
+      });
+    }
     resHand.appendChild(card);
   }
   resCol.appendChild(resHand);
@@ -1077,13 +1091,6 @@ function renderActions() {
     : null;
   document.getElementById("roll-dice").classList.toggle("show", rollAction !== null);
 
-  // Same idea for the board's scales button: shown whenever there's a bank
-  // trade or a player offer available to propose, computed ahead of the
-  // early returns below for the same reason rollAction is.
-  const canTrade = !state.game_over && state.to_move === state.human_seat
-    && state.legal_actions.some((a) => a.type === "BANK_TRADE" || a.type === "PROPOSE_TRADE");
-  document.getElementById("trade-open").classList.toggle("show", canTrade);
-
   // Same idea for the board's end-turn button.
   endTurnAction = (!state.game_over && state.to_move === state.human_seat)
     ? state.legal_actions.find((a) => a.type === "END_TURN") || null
@@ -1163,9 +1170,8 @@ function renderActions() {
     }
   }
 
-  // Trading (bank and player offers both) moved to the modal behind the
-  // board's scales button — see the trade-open visibility toggle above and
-  // openTradeModal/renderTradeModal below.
+  // Trading (bank and player offers both) opens from clicking a card in
+  // the hand — see renderHand() and openTradeModal/renderTradeModal below.
 }
 
 // --- Trade modal -----------------------------------------------------------
@@ -1235,10 +1241,13 @@ function tradePickerRow(which, p) {
   return row;
 }
 
-function openTradeModal(mode) {
+function openTradeModal(mode, {give = null} = {}) {
   tradeMode = mode;
   if (mode === "propose") {
-    tradeGive = null;
+    // `give` pre-selects the resource clicked in the hand (see renderHand());
+    // "want" always starts fresh regardless, since that choice hasn't been
+    // made yet either way.
+    tradeGive = give;
     tradeWant = null;
   }
   document.getElementById("trade-modal").classList.add("show");
@@ -1363,7 +1372,6 @@ document.getElementById("new-game").addEventListener("click", newGame);
 document.getElementById("roll-dice").addEventListener("click", () => {
   if (rollAction) sendAction(rollAction);
 });
-document.getElementById("trade-open").addEventListener("click", () => openTradeModal("propose"));
 document.getElementById("end-turn").addEventListener("click", () => {
   if (endTurnAction) sendAction(endTurnAction);
 });

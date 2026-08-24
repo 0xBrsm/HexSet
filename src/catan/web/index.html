@@ -755,9 +755,11 @@ function drawBoard() {
     staticLayer.appendChild(el("text", {x: pos.x, y: pos.y + 10, class: "port-label", text: ratio, fill: ink}));
   }
 
-  // Dynamic layers, repopulated by render()
-  svg.appendChild(el("g", {id: "buildings-layer"}));
+  // Dynamic layers, repopulated by render(). SVG paints in document order,
+  // so later groups sit on top — roads before buildings so a settlement/city
+  // at a road's endpoint isn't partly covered by it.
   svg.appendChild(el("g", {id: "roads-layer"}));
+  svg.appendChild(el("g", {id: "buildings-layer"}));
   svg.appendChild(el("g", {id: "robber-layer"}));
   svg.appendChild(el("g", {id: "clickable-layer"}));
 }

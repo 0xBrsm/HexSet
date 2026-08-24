@@ -13,7 +13,8 @@ import pytest
 
 pytest.importorskip("torch", reason="PyTorch runs on the training box only")
 
-from benchmarks.minibatch_iso_kl import _grid, iso_kl_rate  # noqa: E402
+from benchmarks.minibatch_iso_kl import _grid, iso_kl_rate, worker_specs  # noqa: E402
+from catan.model import ModelConfig  # noqa: E402
 
 # lr -> finished-update KL, measured on one fixed batch off ppo3-500.
 # Linear to ~1.2e-3, superlinear past it.
@@ -74,3 +75,34 @@ def test_the_grid_reads_sizes_and_the_full_batch_sentinel():
         16384,
         -1,
     ]
+
+
+def _args(**over):
+    import argparse
+
+    base = dict(
+        lanes=128, collect_workers=24, seed=0, players=4, action_cap=4000, max_offers=3
+    )
+    return argparse.Namespace(**{**base, **over})
+
+
+def test_the_collect_workers_are_handed_the_checkpoint_s_head_shapes():
+    """A worker builds its own net and has the learner's parameters pushed into
+    it, so a default shape here fails at the first sync, two processes from its
+    cause. This probe shipped without it and could not load an mlp lineage."""
+    model = ModelConfig(width=64, rounds=2, value_head="attn", policy_head="mlp")
+
+    specs = worker_specs(_args(), model, (), parent="")
+
+    assert len(specs) == 24
+    assert {(s.value_head, s.policy_head) for s in specs} == {("attn", "mlp")}
+    assert {(s.width, s.rounds) for s in specs} == {(64, 2)}
+
+
+def test_the_lanes_are_sharded_across_the_workers_without_losing_any():
+    specs = worker_specs(_args(lanes=100, collect_workers=24), ModelConfig(), (), "")
+
+    assert [s.lanes for s in specs] == [5] * 24  # ceil(100/24), never 0
+    assert [s.first_game for s in specs] == list(range(24))
+    assert {s.stride for s in specs} == {24}
+    assert all(s.cohort for s in specs)

@@ -17,6 +17,7 @@ from catan.model import (  # noqa: E402
     CatanNet,
     ModelConfig,
     collate,
+    config_from_args,
     pack,
     packing,
     unpack,
@@ -353,6 +354,43 @@ def test_the_output_layer_of_a_deep_head_is_the_one_that_gets_the_small_gain():
 
     # The value head predicts at its target's scale, so its output stays at 1.0.
     assert net.value[2].weight.std().item() > net.value[0].weight.std().item() / 10
+
+
+def test_stored_args_rebuild_the_shape_they_were_trained_with():
+    """The bug this pins cost a launched probe.
+
+    `benchmarks.minibatch_iso_kl` and `benchmarks.noise_scale` both rebuilt the
+    net from width and rounds alone, so the first `--policy-head mlp` lineage
+    would not load at all: `heads.hexes.weight` against `heads.hexes.0.weight`.
+    One reader now, and this is its contract.
+    """
+    stored = {"width": 64, "rounds": 2, "value_head": "attn", "policy_head": "mlp"}
+
+    assert config_from_args(stored) == ModelConfig(
+        width=64, rounds=2, value_head="attn", policy_head="mlp"
+    )
+
+
+def test_a_namespace_that_predates_a_knob_means_the_default_shape():
+    """Every checkpoint on disk from before the fields existed, and `{}` is the
+    honest test of that: a run recorded nothing about a shape it did not have."""
+    assert config_from_args({}) == ModelConfig()
+    assert config_from_args({"width": 96}) == ModelConfig(width=96)
+
+
+def test_the_stored_shape_is_read_back_from_a_real_state_dict():
+    """End to end, because the two halves were each individually plausible: the
+    keys a shaped net writes have to be the keys its stored args rebuild."""
+    _, space, shaped = a_net(value_head="mlp_pooled", policy_head="mlp")
+    stored = {"width": 64, "rounds": 2, "value_head": "mlp_pooled", "policy_head": "mlp"}
+
+    _, _, rebuilt = a_net(
+        value_head=config_from_args(stored).value_head,
+        policy_head=config_from_args(stored).policy_head,
+    )
+    rebuilt.load_state_dict(shaped.state_dict())
+
+    assert set(rebuilt.state_dict()) == set(shaped.state_dict())
 
 
 @pytest.mark.parametrize(

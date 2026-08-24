@@ -402,6 +402,16 @@ class GameSession:
     )
     _recorded: bool = field(default=False, repr=False)
 
+    @property
+    def round(self) -> int:
+        """One full lap of the table, 1-indexed — what a human watching the
+        log means by "turn", distinct from `game.turns`, which counts
+        per-seat and stays that way (it's a trained policy input feature and
+        a replay-verified Record field; see catan.encoding's TURN_SCALE and
+        catan.record). Every seat's actions within a lap share one round
+        number, unlike `game.turns` where each gets its own."""
+        return self.game.turns // self.game.state.num_players + 1
+
     def legal_wire_actions(self) -> list[dict]:
         if is_over(self.game) or to_move(self.game) != self.human_seat:
             return []
@@ -435,20 +445,20 @@ class GameSession:
 
     def _apply(self, actor: int, action: Action) -> None:
         # Captured before apply(), not after: end_turn() increments
-        # game.turns, so the line for the END_TURN action itself would
-        # otherwise be prefixed with the *next* turn's number instead of the
-        # one that just ended.
-        turn = self.game.turns
+        # game.turns (and so self.round, derived from it), so the line for
+        # the END_TURN action itself would otherwise be prefixed with the
+        # *next* round's number instead of the one that just ended.
+        round_num = self.round
         before = _snapshot(self.game)
         apply(self.game, action)
         if action.type is ActionType.ROLL:
             self.last_roll_by_seat[actor] = self.game.last_roll
         line = _describe(self.game, actor, action, before, self.human_seat, self.bot_names)
-        # Tab-separated rather than "Turn N: " — the client splits on the
+        # Tab-separated rather than "Round N: " — the client splits on the
         # first tab and puts the number in its own fixed-width column so
         # every line's text lines up regardless of digit count, which a
-        # baked-in "Turn N: " prefix of varying length couldn't do.
-        self.log.append(f"{turn}\t{line}")
+        # baked-in "Round N: " prefix of varying length couldn't do.
+        self.log.append(f"{round_num}\t{line}")
 
         append_step(self._actions, self._offers, action)
 
@@ -506,7 +516,11 @@ class GameSession:
             "human_seat": self.human_seat,
             "winner": game.won_by,
             "game_over": over,
-            "turns": game.turns,
+            # "round" — one lap of the table — not game.turns' per-seat count
+            # (see the `round` property docstring). The only client reader
+            # is the sidebar log's current-round filter, which now needs
+            # this to match the log lines' own round-number tags.
+            "round": self.round,
             "last_roll": game.last_roll,
             "robber": state.robber,
             "vertex_owner": state.vertex_owner,

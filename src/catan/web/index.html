@@ -1346,14 +1346,15 @@ function renderLog() {
     const logEl = document.getElementById(id);
     const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
     logEl.innerHTML = "";
-    // The inline sidebar log ("log") only ever shows the current turn's
-    // lines — full history is one tap away via the hamburger's full-screen
-    // sheet ("log-full"), which keeps everything.
+    // The inline sidebar log ("log") only ever shows the current round's
+    // lines (every seat's actions within one lap of the table, not just
+    // one seat's) — full history is one tap away via the hamburger's
+    // full-screen sheet ("log-full"), which keeps everything.
     const entries = id === "log"
-      ? state.log.filter((entry) => entry.slice(0, entry.indexOf("\t")) === String(state.turns))
+      ? state.log.filter((entry) => entry.slice(0, entry.indexOf("\t")) === String(state.round))
       : state.log;
     for (const entry of entries) {
-      // "turn\ttext" from the server — split once so the number gets its
+      // "round\ttext" from the server — split once so the number gets its
       // own fixed-width column (.log-turn) and every line's text lines up
       // regardless of digit count.
       const tab = entry.indexOf("\t");

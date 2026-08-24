@@ -55,13 +55,13 @@ def test_a_freeze_records_every_parameter_not_only_the_ones_passed(tmp_path):
 
 
 def test_a_frozen_config_round_trips_through_load(tmp_path):
-    written = freeze(tmp_path, parent="runs/x/iter-00450.pt", plan="agents/plan.md")
+    written = freeze(tmp_path, parent="runs/x/iter-00450.pt", plan="plans/heat.md")
     read = run.load(tmp_path / "unit")
 
     assert read.config == written.config
     assert read.mode == "league"
     assert read.parent == "runs/x/iter-00450.pt"
-    assert read.meta["plan"] == "agents/plan.md"
+    assert read.meta["plan"] == "plans/heat.md"
     assert vars(read.namespace()) == written.config
 
 

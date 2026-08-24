@@ -151,10 +151,10 @@ def main(argv: list[str] | None = None) -> int:
         "--verdicts",
         default="runs/eval",
         help="where a result lands when --json is not given. A duel that "
-        "writes nowhere is the failure this default removes: the 400-game "
-        "mcts-against-its-own-policy result lived only as prose in status.md, "
-        "so `rank_checkpoints.py` could not see it and placed that entrant "
-        "half a VP wrong off a single unrelated duel",
+        "writes nowhere is the failure this default removes: a 400-game "
+        "mcts-against-its-own-policy result was written up in prose and "
+        "nowhere a tool could read it, so the ratings fit never saw it and "
+        "placed that entrant half a VP wrong off a single unrelated duel",
     )
     p.add_argument(
         "--no-json",

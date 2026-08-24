@@ -80,8 +80,8 @@ iterations confound stated in the record rather than argued away.
 ### Changed
 
 - Evaluation protocol: gates decide on the matched-rival duel; greedy is
-  demoted to a mix-exploitation canary; external anchors calibrate. The greedy
-  ladder's four deceptions are documented in `agents/status.md`.
+  demoted to a mix-exploitation canary; external anchors calibrate. A common
+  opponent read four separate improvements that matched duels did not confirm.
 
 ## [0.5.0] - 2026-08-22
 

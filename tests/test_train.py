@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import pathlib
 import random
 
 import pytest
@@ -34,11 +35,29 @@ TINY = [
 
 
 def run(directory, iterations, extra=()):
-    return train.main(
+    """Freeze a run, then launch it -- `train.main` takes nothing else.
+
+    Going through `catan.run.freeze` rather than calling the parser directly is
+    deliberate: it means every test below exercises the manifest path the real
+    trainer uses, so a config that cannot round-trip through a freeze fails
+    here rather than on the box.
+    """
+    from catan.run import freeze
+
+    argv = (
         TINY
         + ["--iterations", str(iterations), "--checkpoint-dir", str(directory)]
         + list(extra)
     )
+    freeze(
+        "train",
+        directory.name,
+        pathlib.Path(directory),
+        argv,
+        repo=pathlib.Path(directory),
+        description="test run",
+    )
+    return train.main([str(directory)])
 
 
 def test_crippled_flags_cpu_device_regardless_of_core_count():

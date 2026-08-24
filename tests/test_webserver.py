@@ -91,7 +91,7 @@ def test_state_endpoint_reflects_the_live_session(live_server):
     data = _get(base, "/api/state")
     assert data["human_seat"] == server.session.human_seat
     assert data["phase"] == "SETUP_SETTLEMENT"
-    assert data["round"] == 1
+    assert data["round"] == 0
 
 
 def test_a_legal_action_is_accepted_and_advances_the_game(live_server):
@@ -118,7 +118,7 @@ def test_an_action_absent_from_legal_actions_is_rejected_over_http(live_server):
     assert "error" in data
     # The game must not have moved on.
     assert data["phase"] == "SETUP_SETTLEMENT"
-    assert data["round"] == 1
+    assert data["round"] == 0
 
 
 def test_malformed_json_body_is_rejected(live_server):
@@ -138,7 +138,7 @@ def test_new_game_replaces_the_session_and_its_cached_board(live_server):
     old_session = server.session
     status, data = _post(base, "/api/new", {})
     assert status == 200
-    assert data["round"] == 1
+    assert data["round"] == 0
     assert data["phase"] == "SETUP_SETTLEMENT"
     # A genuinely new session object, not the same one mutated in place.
     assert server.session is not old_session

@@ -632,10 +632,16 @@ function centroid() {
   return {x: sx / board.hexes.length, y: sy / board.hexes.length};
 }
 
+// Returns both the marker position and the coastal edge midpoint it was
+// raised from — the latter is what the ratio label nudges back toward (see
+// the ports loop below), a port-local reference a few dozen units away
+// rather than the board centroid, which could be hundreds of units off and
+// made the label drift away from its own marker entirely.
 function portLabelPos(port) {
   const [v0, v1] = port.vertices;
   const p0 = vertexById[v0], p1 = vertexById[v1];
   const mx = (p0.x + p1.x) / 2, my = (p0.y + p1.y) / 2;
+  const edgeMid = {x: mx, y: my};
   // The marker sits at the apex of a true equilateral triangle on the port's
   // hex edge — marker-to-v0 and marker-to-v1 both equal v0-to-v1 — rather
   // than at some fixed distance out from the midpoint. Rotate the edge
@@ -653,7 +659,7 @@ function portLabelPos(port) {
   const a2 = {x: mx - nx * height, y: my - ny * height};
   const d1 = (a1.x - c.x) ** 2 + (a1.y - c.y) ** 2;
   const d2 = (a2.x - c.x) ** 2 + (a2.y - c.y) ** 2;
-  return d1 > d2 ? a1 : a2;
+  return {marker: d1 > d2 ? a1 : a2, edgeMid};
 }
 
 function drawBoard() {
@@ -735,7 +741,7 @@ function drawBoard() {
   // of the two vertices it serves — position near the coast was not enough
   // to tell which corners could actually use it.
   for (const p of board.ports) {
-    const pos = portLabelPos(p);
+    const {marker: pos, edgeMid} = portLabelPos(p);
     const terrain = p.resource ? RESOURCE_TERRAIN[p.resource] : null;
     const fill = terrain ? TERRAIN_COLORS[terrain] : "#ffffff";
     const ink = terrain ? (TERRAIN_ICON_INK[terrain] || "#ffffff") : "#2b2118";
@@ -751,9 +757,13 @@ function drawBoard() {
     staticLayer.appendChild(el("use", {
       href: "#icon-ship", x: pos.x - 11, y: pos.y - 16, width: 22, height: 22, fill: ink, class: "port-ship",
     }));
-    // The ratio text alone, nudged 20% of the way from the marker toward the
-    // board centroid — marker and ship icon stay put, only the text moves.
-    const labelPos = {x: pos.x + (centroid().x - pos.x) * 0.2, y: pos.y + (centroid().y - pos.y) * 0.2};
+    // The ratio text alone, nudged 20% of the way from the marker back
+    // toward its own coastal edge midpoint — marker and ship icon stay put,
+    // only the text moves. A port-local reference (edgeMid is ~52 units
+    // from the marker, the same push-out distance portLabelPos raised the
+    // marker by), not the board centroid: that could be hundreds of units
+    // away depending on the port, moving the label well past its marker.
+    const labelPos = {x: pos.x + (edgeMid.x - pos.x) * 0.2, y: pos.y + (edgeMid.y - pos.y) * 0.2};
     staticLayer.appendChild(el("text", {x: labelPos.x, y: labelPos.y + 12, class: "port-label", text: ratio, fill: ink}));
   }
 
@@ -806,35 +816,71 @@ function groupActions(actions) {
 
 // --- Sending actions --------------------------------------------------
 
+// Not a live progress feed — webserver.py's _handle_action/_handle_new block
+// server-side through the *entire* bot cascade in one call (advance_bots()
+// loops until it's the human's turn again) and return once, so by the time
+// this runs the whole thing already happened. This replays it after the
+// fact: pull the ordered, deduplicated list of bots who acted out of the
+// newly-arrived log lines (each line leads with "Player N (name)"; "human"
+// is filtered since that actor is always the request's own sender, never
+// worth announcing), and step the overlay text through them before the
+// resolved state is revealed — so it reads as "linear805 is thinking...,
+// mlp550 is thinking..." instead of one static message the whole time.
+async function animateBotTurns(previousLogLength, newLog) {
+  const overlay = document.getElementById("overlay-blocker");
+  const names = [];
+  for (const entry of newLog.slice(previousLogLength)) {
+    const text = entry.slice(entry.indexOf("\t") + 1);
+    const actor = text.match(/^Player \d+ \(([^)]+)\)/);
+    if (actor && actor[1] !== "human" && names[names.length - 1] !== actor[1]) {
+      names.push(actor[1]);
+    }
+  }
+  for (const name of names) {
+    overlay.textContent = `${name} is thinking...`;
+    await new Promise((resolve) => setTimeout(resolve, 350));
+  }
+}
+
 async function sendAction(action) {
   if (inFlight) return;
   inFlight = true;
-  document.getElementById("overlay-blocker").classList.add("show");
+  const overlay = document.getElementById("overlay-blocker");
+  overlay.textContent = "Waiting for the table...";
+  overlay.classList.add("show");
   pendingRobberHex = null;
+  const previousLogLength = state.log.length;
   try {
     const {ok, data} = await postJSON("/api/action", action);
+    if (ok) await animateBotTurns(previousLogLength, data.log);
     state = data;
     showNotice(ok ? "" : (data.error || "That was not legal."));
     render();
   } finally {
     inFlight = false;
-    document.getElementById("overlay-blocker").classList.remove("show");
+    overlay.classList.remove("show");
   }
 }
 
 async function newGame() {
   if (inFlight) return;
   inFlight = true;
-  document.getElementById("overlay-blocker").classList.add("show");
+  const overlay = document.getElementById("overlay-blocker");
+  overlay.textContent = "Waiting for the table...";
+  overlay.classList.add("show");
   try {
     const {data} = await postJSON("/api/new", {bot_models: currentBotModels});
+    // Bots may have already moved before the human's first setup turn (see
+    // _build_session's advance_bots() call) — the whole log is "new" here,
+    // there's no previous game's log to subtract.
+    await animateBotTurns(0, data.log);
     state = data;
     await loadBoard();
     showNotice("");
     render();
   } finally {
     inFlight = false;
-    document.getElementById("overlay-blocker").classList.remove("show");
+    overlay.classList.remove("show");
   }
 }
 

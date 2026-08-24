@@ -48,7 +48,7 @@ from .board.topology import Topology
 from .cards import NUM_DEV_CARDS, DevCard
 from .devcards import holdings
 from .economy import trade_ratios
-from .game import Game, is_over, to_move
+from .game import Game, Phase, is_over, to_move
 from .record import Record, append_step, board_fields, write as write_records
 from .victory import public_victory_points, victory_points
 
@@ -409,7 +409,15 @@ class GameSession:
         per-seat and stays that way (it's a trained policy input feature and
         a replay-verified Record field; see catan.encoding's TURN_SCALE and
         catan.record). Every seat's actions within a lap share one round
-        number, unlike `game.turns` where each gets its own."""
+        number, unlike `game.turns` where each gets its own.
+
+        0 during setup: the placement snake isn't a lap of the table in the
+        normal sense (order is 1,2,3,4,4,3,2,1, not 1,2,3,4 repeating), and
+        `game.turns` doesn't move at all until end_turn() first runs, which
+        `Phase.MAIN` requires — setup can't reach it.
+        """
+        if self.game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
+            return 0
         return self.game.turns // self.game.state.num_players + 1
 
     def legal_wire_actions(self) -> list[dict]:

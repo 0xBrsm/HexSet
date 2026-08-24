@@ -280,6 +280,144 @@ def test_a_bot_trade_also_defaults_to_asking_the_lowest_vp_player_first():
     assert game.pending_responders == [0, 3, 2]
 
 
+# --- Log summarizing: builds and trades collapse into one entry -----------
+
+
+def test_setup_settlement_and_road_collapse_into_one_log_line():
+    """Successive builds by the same actor merge into one entry, not one
+    each — see GameSession._log_action's _BUILD_KIND streak."""
+    game = a_game(seed=10)
+    human_seat = to_move(game)
+    session = GameSession(game=game, human_seat=human_seat, bot=RandomBot())
+
+    settlement = next(a for a in legal_actions(game) if a.type is ActionType.SETUP_SETTLEMENT)
+    session.apply_human_action(action_to_wire(settlement))
+    assert len(session.log) == 1
+
+    road = next(a for a in legal_actions(game) if a.type is ActionType.SETUP_ROAD)
+    session.apply_human_action(action_to_wire(road))
+
+    assert len(session.log) == 1  # rewritten, not appended to
+    text = session.log[0]
+    assert "settlement" in text and "road" in text
+    assert text.count("placed") == 1  # one merged sentence, not two
+
+
+def test_a_build_streak_breaks_on_a_different_actor():
+    game = a_game(seed=11)
+    human_seat = to_move(game)
+    session = GameSession(game=game, human_seat=human_seat, bot=RandomBot())
+
+    settlement = next(a for a in legal_actions(game) if a.type is ActionType.SETUP_SETTLEMENT)
+    session.apply_human_action(action_to_wire(settlement))
+    road = next(a for a in legal_actions(game) if a.type is ActionType.SETUP_ROAD)
+    session.apply_human_action(action_to_wire(road))
+    assert len(session.log) == 1  # human's merged settlement+road
+
+    session.advance_bots()  # the next seat(s) in the snake place too
+
+    assert len(session.log) >= 2  # human's line, plus at least the next seat's
+    assert session._build_streak["actor"] != human_seat  # the streak moved on
+
+
+def test_list_with_counts_pluralises_repeats_but_not_singles():
+    from catan.webplay import _list_with_counts
+
+    assert _list_with_counts(["settlement", "road"]) == "a settlement and a road"
+    assert _list_with_counts(["road", "road"]) == "2 roads"
+    assert _list_with_counts(["road", "road", "city"]) == "2 roads and a city"
+    assert _list_with_counts(["road"]) == "a road"
+
+
+def test_a_trade_that_gets_accepted_summarizes_into_one_line():
+    """The proposal and every response fold into one entry, only reaching
+    `log` once the offer concludes — see GameSession._log_action."""
+    from catan.board.terrain import Resource
+
+    game = a_game(seed=13)
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    state = game.state
+
+    state.bank[Resource.WOOD] -= 1
+    state.hands[0][Resource.WOOD] += 1
+    for seat in (1, 2):
+        state.bank[Resource.ORE] -= 1
+        state.hands[seat][Resource.ORE] += 1
+
+    session = GameSession(game=game, human_seat=0, bot=RandomBot())
+    offer = Action(
+        ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1), ask=(1, 2)
+    )
+    session.apply_human_action(action_to_wire(offer))
+    assert session.log == []  # held back until the offer concludes
+
+    session._apply(1, Action(ActionType.DECLINE_TRADE))
+    assert session.log == []  # still pending — seat 2 hasn't answered yet
+
+    session._apply(2, Action(ActionType.ACCEPT_TRADE))
+
+    assert len(session.log) == 1
+    text = session.log[0]
+    assert "offered" in text and "declined" in text and "accepted" in text
+    assert session._trade_buffer is None
+
+
+def test_a_trade_nobody_can_cover_logs_immediately_as_one_line():
+    """propose_trade() concludes an uncoverable offer on the spot — no
+    DECLINE_TRADE/ACCEPT_TRADE is ever coming to flush a held-back buffer,
+    so this must not wait for one."""
+    from catan.board.terrain import Resource
+
+    game = a_game(seed=14)
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    state = game.state
+    state.bank[Resource.WOOD] -= 1
+    state.hands[0][Resource.WOOD] += 1
+    # Nobody else holds any ore, so nobody is eligible to respond.
+
+    session = GameSession(game=game, human_seat=0, bot=RandomBot())
+    offer = Action(ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1))
+    # legal_actions() only offers coverable (give, want) pairs (see its
+    # PROPOSE_TRADE enumerator), so an uncoverable offer can't reach here
+    # through apply_human_action's legality gate — go straight to _apply,
+    # same as the DECLINE_TRADE/ACCEPT_TRADE calls above.
+    session._apply(0, offer)
+
+    assert len(session.log) == 1
+    assert "offered" in session.log[0]
+    assert session._trade_buffer is None
+
+
+def test_a_trade_everyone_declines_summarizes_into_one_line():
+    from catan.board.terrain import Resource
+
+    game = a_game(seed=15)
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    state = game.state
+    state.bank[Resource.WOOD] -= 1
+    state.hands[0][Resource.WOOD] += 1
+    for seat in (1, 2):
+        state.bank[Resource.ORE] -= 1
+        state.hands[seat][Resource.ORE] += 1
+
+    session = GameSession(game=game, human_seat=0, bot=RandomBot())
+    offer = Action(
+        ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1), ask=(1, 2)
+    )
+    session.apply_human_action(action_to_wire(offer))
+    session._apply(1, Action(ActionType.DECLINE_TRADE))
+    assert session.log == []
+
+    session._apply(2, Action(ActionType.DECLINE_TRADE))
+
+    assert len(session.log) == 1
+    assert session.log[0].count("declined") == 2
+    assert session._trade_buffer is None
+
+
 def test_advance_bots_always_stops_at_the_human_seat_or_game_over():
     game = a_game(seed=5)
     human_seat = 1

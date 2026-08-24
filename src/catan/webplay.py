@@ -223,6 +223,28 @@ def _hand_gains(before: list[int], after: list[int]) -> str | None:
     return ", ".join(parts) if parts else None
 
 
+# (verb, noun) for every action GameSession._log_action folds into one
+# "placed/built ..." streak per actor instead of a line each — see there.
+_BUILD_KIND = {
+    ActionType.SETUP_SETTLEMENT: ("placed", "settlement"),
+    ActionType.SETUP_ROAD: ("placed", "road"),
+    ActionType.BUILD_ROAD: ("built", "road"),
+    ActionType.BUILD_SETTLEMENT: ("built", "settlement"),
+    ActionType.BUILD_CITY: ("built", "city"),
+}
+
+
+def _list_with_counts(items: list[str]) -> str:
+    """`['settlement', 'road']` -> `'a settlement and a road'`;
+    `['road', 'road']` -> `'2 roads'` — one count per distinct item, in the
+    order first seen, not one entry per occurrence."""
+    order = list(dict.fromkeys(items))
+    parts = [f"a {item}" if items.count(item) == 1 else f"{items.count(item)} {item}s" for item in order]
+    if len(parts) == 1:
+        return parts[0]
+    return ", ".join(parts[:-1]) + f" and {parts[-1]}"
+
+
 @dataclass
 class _Snapshot:
     hands: list[list[int]]
@@ -403,6 +425,14 @@ class GameSession:
         default_factory=list, repr=False
     )
     _recorded: bool = field(default=False, repr=False)
+    # A run of build actions by the same actor in the same round, folded
+    # into one log line instead of one each — see _log_action. Cleared by
+    # any other action from any seat.
+    _build_streak: dict | None = field(default=None, repr=False)
+    # A trade's proposal plus every response so far, held back from `log`
+    # until the offer concludes (accepted, or every eligible seat declined)
+    # — see _log_action. `None` whenever no trade is in flight.
+    _trade_buffer: list[str] | None = field(default=None, repr=False)
 
     @property
     def round(self) -> int:
@@ -492,12 +522,7 @@ class GameSession:
         apply(self.game, action)
         if action.type is ActionType.ROLL:
             self.last_roll_by_seat[actor] = self.game.last_roll
-        line = _describe(self.game, actor, action, before, self.human_seat, self.bot_names)
-        # Tab-separated rather than "Round N: " — the client splits on the
-        # first tab and puts the number in its own fixed-width column so
-        # every line's text lines up regardless of digit count, which a
-        # baked-in "Round N: " prefix of varying length couldn't do.
-        self.log.append(f"{round_num}\t{line}")
+        self._log_action(round_num, actor, action, before)
 
         append_step(self._actions, self._offers, action)
 
@@ -513,6 +538,67 @@ class GameSession:
                 **board_fields(self.game.state.board),
             )
             write_records(self.record_path, [record])
+
+    def _log_action(self, round_num: int, actor: int, action: Action, before: _Snapshot) -> None:
+        """Appends this action's line to `self.log` — except a build that
+        continues the same actor's still-open streak, which rewrites the
+        streak's one existing line instead of adding another, and a trade
+        response, which is held in `_trade_buffer` and only reaches `log`
+        once the whole offer concludes, as one line covering the proposal
+        and every response it got. Tab-separated, matching every other
+        line: the client splits on the first tab for the round-number
+        column (see the format note this replaced).
+        """
+        kind = action.type
+
+        if kind in _BUILD_KIND:
+            verb, item = _BUILD_KIND[kind]
+            streak = self._build_streak
+            continuing = (
+                streak is not None and streak["actor"] == actor and streak["round"] == round_num
+            )
+            if continuing:
+                streak["items"].append(item)
+            else:
+                streak = self._build_streak = {
+                    "actor": actor, "round": round_num, "verb": verb, "items": [item], "extra": [],
+                }
+            if kind is ActionType.SETUP_SETTLEMENT:
+                gains = _hand_gains(before.hands[actor], self.game.state.hands[actor])
+                if gains:
+                    who = _who(actor, self.human_seat, self.bot_names)
+                    streak["extra"].append(f"{who} collects {gains}.")
+            who = _who(actor, self.human_seat, self.bot_names)
+            line = f"{who} {streak['verb']} {_list_with_counts(streak['items'])}."
+            line = " ".join([line, *streak["extra"]])
+            if continuing:
+                self.log.pop()
+            self.log.append(f"{round_num}\t{line}")
+            return
+
+        self._build_streak = None  # any non-build action ends an open streak
+
+        if kind is ActionType.PROPOSE_TRADE:
+            line = _describe(self.game, actor, action, before, self.human_seat, self.bot_names)
+            if self.game.offer is None:
+                # propose_trade() found nobody eligible and concluded the
+                # offer immediately — no DECLINE_TRADE/ACCEPT_TRADE is ever
+                # coming to flush a buffer, so there's nothing to hold back.
+                self.log.append(f"{round_num}\t{line}")
+            else:
+                self._trade_buffer = [line]
+            return
+
+        if kind in (ActionType.ACCEPT_TRADE, ActionType.DECLINE_TRADE) and self._trade_buffer is not None:
+            line = _describe(self.game, actor, action, before, self.human_seat, self.bot_names)
+            self._trade_buffer.append(line)
+            if self.game.offer is None:
+                self.log.append(f"{round_num}\t{' '.join(self._trade_buffer)}")
+                self._trade_buffer = None
+            return
+
+        line = _describe(self.game, actor, action, before, self.human_seat, self.bot_names)
+        self.log.append(f"{round_num}\t{line}")
 
     def state_view(self) -> dict:
         game = self.game

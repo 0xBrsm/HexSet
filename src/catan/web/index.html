@@ -810,26 +810,27 @@ function groupActions(actions) {
 // server-side through the *entire* bot cascade in one call (advance_bots()
 // loops until it's the human's turn again) and return once, so by the time
 // this runs the whole thing already happened. This replays it after the
-// fact: pull the ordered, deduplicated list of bots who acted out of the
+// fact: pull the ordered, deduplicated list of seats who acted out of the
 // newly-arrived log lines (each line leads with "Player N (name)"; "human"
 // is filtered since that actor is always the request's own sender, never
 // worth announcing), and step the overlay text through them before the
-// resolved state is revealed — one name per whole turn (every line an actor
-// produced collapses to their one entry), not a blow-by-blow of what they
-// did — so it reads as "linear805's turn, mlp550's turn" instead of one
-// static message the whole time.
+// resolved state is revealed — one "Player N" per whole turn (every line a
+// seat produced collapses to their one entry, shown for that turn's full
+// span), not a blow-by-blow of what they did or which model they're
+// playing — so it reads as "Player 2's turn, Player 4's turn" instead of
+// one static message the whole time.
 async function animateBotTurns(previousLogLength, newLog) {
   const overlay = document.getElementById("overlay-blocker");
-  const names = [];
+  const seats = [];
   for (const entry of newLog.slice(previousLogLength)) {
     const text = entry.slice(entry.indexOf("\t") + 1);
-    const actor = text.match(/^Player \d+ \(([^)]+)\)/);
-    if (actor && actor[1] !== "human" && names[names.length - 1] !== actor[1]) {
-      names.push(actor[1]);
+    const actor = text.match(/^(Player \d+) \(([^)]+)\)/);
+    if (actor && actor[2] !== "human" && seats[seats.length - 1] !== actor[1]) {
+      seats.push(actor[1]);
     }
   }
-  for (const name of names) {
-    overlay.textContent = `${name}'s turn`;
+  for (const seat of seats) {
+    overlay.textContent = `${seat}'s turn`;
     await new Promise((resolve) => setTimeout(resolve, 350));
   }
 }

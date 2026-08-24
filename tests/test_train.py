@@ -627,3 +627,65 @@ def test_the_rival_rung_is_matched_iteration_or_nothing(tmp_path):
     hit = rival_rung(str(tmp_path), 25, "cpu", board, 4)
     assert hit is not None and hit.greedy
     assert rival_rung(str(tmp_path), 20, "cpu", board, 4) is None
+
+
+class Streamless:
+    """A policy with no random stream, so a self-duel has an exact answer.
+
+    `RandomPolicy` cannot serve here: `_antithetic` reuses one policy object
+    across both cohorts, so a mutable stream carries its position from the first
+    into the second and the two halves stop playing the same game -- which is
+    the one thing the pairing needs. A checkpoint played at argmax has this
+    property for real; this stub has it without torch.
+    """
+
+    def act(self, requests):
+        from catan.selfplay import Choice
+
+        return [Choice(action=request.options[0]) for request in requests]
+
+
+def test_an_antithetic_self_duel_is_exactly_zero():
+    """The test that caught the dice-keying trap, kept.
+
+    One agent on both sides has no edge, so a duel of a checkpoint against
+    itself must read exactly 0.00 paired VP. Before the pairing it read -0.771
+    over 48 games and -0.081 over 800, intervals excluding zero, with identical
+    weights and no RNG in the path: `alternating` keys the cast to the game
+    index and `new_game` keys the board to the index too, so a cohort sampled
+    each side on one seat-pair per board and never the other. The seat term was
+    55% of a single-order duel's variance and was reported as ordinary noise.
+    """
+    stub = Streamless()
+    result = train.versus(
+        stub, stub, games=8, lanes=4, players=4, seed=21, max_offers=3
+    )
+
+    assert result["antithetic"] and result["boards"] == 4 and result["games"] == 8
+    # Exact, not approximate: every board's two readings are one game's margin
+    # and its negation, so the average is 0.0 in floating point too.
+    assert result["paired_vp"] == 0.0
+    assert result["paired_vp_low"] == result["paired_vp_high"] == 0.0
+
+
+def test_the_same_self_duel_reads_off_zero_without_the_pairing():
+    """The control, so the guarantee above cannot pass for a trivial reason."""
+    stub = Streamless()
+    result = train.versus(
+        stub, stub, games=8, lanes=4, players=4, seed=21, max_offers=3,
+        antithetic=False,
+    )
+
+    # The plain path does not stamp the key, which is also how an old
+    # reading is told apart from a new one in a recorded verdict.
+    assert "antithetic" not in result
+    assert result["games"] == 8
+    assert result["paired_vp"] != 0.0
+
+
+def test_an_antithetic_duel_needs_two_games():
+    with pytest.raises(ValueError, match="at least two games"):
+        train.versus(
+            Streamless(), Streamless(), games=1, lanes=1, players=4, seed=0,
+            max_offers=3,
+        )

@@ -36,6 +36,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   change that introduced the verdict default.
 - `arena.wilson` returned an upper bound of 0.9999999999999999 at `p = 1`, an
   interval excluding its own point estimate.
+- A net is rebuilt from the head shapes its checkpoint records, in one reader
+  (`catan.model.config_from_args`). `benchmarks.minibatch_iso_kl` and
+  `benchmarks.noise_scale` read only `width` and `rounds`, so neither could load
+  a `--policy-head mlp` checkpoint at all — `heads.hexes.weight` against
+  `heads.hexes.0.weight` — which is every checkpoint of the current lineage.
+  `catan.netbot` was already correct and now shares the reader. The probe also
+  hands those shapes to its collect workers, which build their own nets and
+  would otherwise fail at the first weight sync, and both benchmarks mirror
+  `catan.train`'s `detach_value` wiring so they reproduce the update they price.
 
 ## [0.6.0] - 2026-08-23
 

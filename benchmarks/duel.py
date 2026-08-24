@@ -14,6 +14,7 @@ through noise.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import random
 import sys
@@ -24,6 +25,43 @@ from catan.arena import NETWORK
 from catan.board.board import random_base_board
 from catan.collect import frozen, named_opponent
 from catan.train import versus
+
+
+def entrant_seed(base: int, spec: str, slot: int, other: str) -> int:
+    """A stochastic entrant's stream, keyed to the entrant and not to its slot.
+
+    `side` used to take `duel_seed + 1` for argument A and `+ 2` for B, which
+    means swapping the arguments swapped which random stream each agent got.
+    That is invisible for a bare checkpoint -- `collect.frozen` takes no seed --
+    but every named entrant is spawned with `random.Random(seed)`, and `mcts:`
+    samples its rollouts from it while the handcrafted bots break ties with it.
+    So a swapped duel involving a named entrant was not measuring the same two
+    agents twice.
+
+    **This is not the cause of the order asymmetry measured on 2026-08-24.** All
+    six audited pairs were passed as bare paths, so they resolved through
+    `frozen` and never consumed a seed at all -- including the two largest
+    asymmetries, 0.159 VP on base450/lr15h4 and 0.146 on facAB/facnone. Whatever
+    drives those is still unidentified. This fix removes a real positional
+    dependence that would have contaminated any future duel naming a searcher or
+    a bot; it does not explain what was already seen, and the arena path
+    (`workers > 1`) has the same defect in `arena._play_one`, which seeds by
+    lineup index and is left alone here because changing it would break the exact
+    reproducibility of 76,460 games of recorded arena results.
+
+    Hashing the spec fixes the versus path: an entrant plays the same wherever it
+    sits, and a swapped duel measures the swap rather than the reseeding.
+
+    The one case a hash cannot separate is a self-duel, where both specs are
+    identical and there is no property to distinguish them by. There the slot is
+    the only tiebreak available, and it is used deliberately -- giving both
+    sides one stream would have them search in lockstep, which is a worse
+    artefact than the one being removed.
+    """
+    if spec == other:
+        return base + 1 + slot
+    digest = hashlib.blake2s(spec.encode(), digest_size=4).digest()
+    return base + 1 + int.from_bytes(digest, "big") % 1_000_003
 
 
 def side(spec: str, device: str, board, players: int, lanes: int, seed: int):
@@ -163,9 +201,10 @@ def main(argv: list[str] | None = None) -> int:
         f"over {result['games']} games, paired VP {result['paired_vp']:+.2f}",
         file=sys.stderr,
     )
-    if args.json:
-        with open(args.json, "a") as fh:
-            fh.write(json.dumps(result) + "\n")
+    # The write happens once, above, whether the destination came from --json or
+    # from the verdict default. A second append used to live here and survived
+    # the change that introduced the default, so every duel passing --json
+    # recorded itself twice.
     return 0
 
 
@@ -256,8 +295,14 @@ def _via_arena(args, label_a: str, label_b: str) -> dict:
 
 def _via_versus(args, label_a: str, label_b: str) -> dict:
     board = random_base_board(random.Random(args.board_seed))
-    a = side(args.a, args.device, board, args.players, args.lanes, args.duel_seed + 1)
-    b = side(args.b, args.device, board, args.players, args.lanes, args.duel_seed + 2)
+    a = side(
+        args.a, args.device, board, args.players, args.lanes,
+        entrant_seed(args.duel_seed, args.a, 0, args.b),
+    )
+    b = side(
+        args.b, args.device, board, args.players, args.lanes,
+        entrant_seed(args.duel_seed, args.b, 1, args.a),
+    )
 
     started = time.monotonic()
     result = versus(

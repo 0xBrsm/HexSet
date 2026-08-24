@@ -751,8 +751,8 @@ function drawBoard() {
     staticLayer.appendChild(el("use", {
       href: "#icon-ship", x: pos.x - 11, y: pos.y - 16, width: 22, height: 22, fill: ink, class: "port-ship",
     }));
-    // Ratio text, raised a few pixels off the marker's own centre (was +12).
-    staticLayer.appendChild(el("text", {x: pos.x, y: pos.y + 8, class: "port-label", text: ratio, fill: ink}));
+    // Ratio text, raised 2px off the marker's own centre (was +12).
+    staticLayer.appendChild(el("text", {x: pos.x, y: pos.y + 10, class: "port-label", text: ratio, fill: ink}));
   }
 
   // Dynamic layers, repopulated by render()

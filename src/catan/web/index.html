@@ -814,8 +814,10 @@ function groupActions(actions) {
 // newly-arrived log lines (each line leads with "Player N (name)"; "human"
 // is filtered since that actor is always the request's own sender, never
 // worth announcing), and step the overlay text through them before the
-// resolved state is revealed — so it reads as "linear805 is thinking...,
-// mlp550 is thinking..." instead of one static message the whole time.
+// resolved state is revealed — one name per whole turn (every line an actor
+// produced collapses to their one entry), not a blow-by-blow of what they
+// did — so it reads as "linear805's turn, mlp550's turn" instead of one
+// static message the whole time.
 async function animateBotTurns(previousLogLength, newLog) {
   const overlay = document.getElementById("overlay-blocker");
   const names = [];
@@ -827,7 +829,7 @@ async function animateBotTurns(previousLogLength, newLog) {
     }
   }
   for (const name of names) {
-    overlay.textContent = `${name} is thinking...`;
+    overlay.textContent = `${name}'s turn`;
     await new Promise((resolve) => setTimeout(resolve, 350));
   }
 }

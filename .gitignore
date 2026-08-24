@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+*.log
+.env
+
+# Drop-in opponents: binary artifacts produced by dev-catan's
+# catan.export_onnx, not source. See models/.gitkeep for why the directory
+# itself stays tracked.
+/models/*.onnx

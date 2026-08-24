@@ -1,0 +1,21 @@
+[project]
+name = "catan-web"
+version = "0.1.0"
+description = "Human-vs-bot Catan web demo — ONNX Runtime inference"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "onnxruntime>=1.18",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["catan*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

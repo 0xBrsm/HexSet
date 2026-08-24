@@ -436,16 +436,19 @@ class GameSession:
         options = legal_actions(self.game)
         if not is_legal(action, options):
             raise ValueError(f"{action} is not a legal action right now")
-        if action.type is ActionType.PROPOSE_TRADE and not action.ask:
-            action = action._replace(ask=self._default_ask_order(self.human_seat))
         self._apply(self.human_seat, action)
 
     def _default_ask_order(self, proposer: int) -> tuple[int, ...]:
-        """Who the board asks first when nothing more specific was chosen:
-        lowest victory points, tied broken by fewest development cards, then
-        random — trading with whoever's behind rather than the engine's own
-        neutral default (`ask=()`, clockwise seat order — see
-        `catan.game.propose_trade`'s docstring).
+        """Who to ask first when a proposer didn't say: lowest victory
+        points, tied broken by fewest development cards, then random —
+        trading with whoever's behind rather than the engine's own neutral
+        default (`ask=()`, clockwise seat order — see
+        `catan.game.propose_trade`'s docstring). Applied to every seat's
+        proposals in `_apply`, not just the human's: no bot sets `ask`
+        itself today (a training-side gap, not something to paper over
+        here), so leaving this human-only would have meant every bot kept
+        the engine's neutral default while only the human got the better
+        one.
 
         Victory points are `public_victory_points`, not the true count: a
         hidden victory-point development card is exactly the information the
@@ -475,6 +478,11 @@ class GameSession:
             steps += 1
 
     def _apply(self, actor: int, action: Action) -> None:
+        # Every seat's proposal gets the same treatment — human or bot,
+        # whichever `actor` is — since this is the one choke point both
+        # apply_human_action and advance_bots funnel every action through.
+        if action.type is ActionType.PROPOSE_TRADE and not action.ask:
+            action = action._replace(ask=self._default_ask_order(actor))
         # Captured before apply(), not after: end_turn() increments
         # game.turns (and so self.round, derived from it), so the line for
         # the END_TURN action itself would otherwise be prefixed with the

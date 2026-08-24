@@ -241,6 +241,45 @@ def test_a_human_trade_honours_an_explicit_ask_instead_of_the_default():
     assert game.pending_responders == [3, 2, 1]
 
 
+def test_a_bot_trade_also_defaults_to_asking_the_lowest_vp_player_first():
+    """_apply's ask-defaulting isn't human-only — every seat's proposal goes
+    through the same choke point, bot or human (see _apply's own comment)."""
+    from catan.board.terrain import Resource
+    from catan.state import Building
+
+    class _AlwaysProposes:
+        def __init__(self, give, want):
+            self._action = Action(ActionType.PROPOSE_TRADE, give=give, want=want)
+
+        def choose(self, game):
+            return self._action
+
+    game = a_game(seed=9)
+    game.phase = Phase.MAIN
+    game.current_player = 1  # the bot seat proposing; seat 0 is the human
+    state = game.state
+
+    state.bank[Resource.WOOD] -= 1
+    state.hands[1][Resource.WOOD] += 1
+    for seat in (0, 2, 3):
+        state.bank[Resource.ORE] -= 1
+        state.hands[seat][Resource.ORE] += 1
+
+    # Seat 0 (the human) has the lowest VP of the three eligible responders,
+    # so it lands first in the queue and advance_bots() stops right there —
+    # no need to also script a TRADE_RESPOND answer for this bot.
+    state.vertex_owner[0] = 2
+    state.vertex_building[0] = Building.CITY
+    state.vertex_owner[1] = 3
+    state.vertex_building[1] = Building.SETTLEMENT
+
+    bot = _AlwaysProposes(give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1))
+    session = GameSession(game=game, human_seat=0, bot=bot)
+    session.advance_bots()
+
+    assert game.pending_responders == [0, 3, 2]
+
+
 def test_advance_bots_always_stops_at_the_human_seat_or_game_over():
     game = a_game(seed=5)
     human_seat = 1

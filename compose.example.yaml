@@ -1,0 +1,58 @@
+# Copy this to compose.yaml and edit it to taste:
+#
+#     cp compose.example.yaml compose.yaml
+#     docker compose up -d --build
+#
+# then open http://localhost:8770. compose.yaml is gitignored, so your copy is
+# yours — change anything in it and `git pull` will never collide with it.
+#
+# Everything below is a working default with a reason next to it, not a house
+# style. The lines most people touch are the published port and whether src/
+# stays bind-mounted.
+services:
+  catan-web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: catan-web:local
+    # A convenience, so `docker logs catan-web` works without looking the
+    # name up. Drop it if you want to run more than one copy at a time.
+    container_name: catan-web
+    restart: unless-stopped
+    ports:
+      # Host side on the left. The container always listens on 8770 (the
+      # Dockerfile's CMD); change the left half to publish it elsewhere.
+      - "8770:8770"
+    volumes:
+      # Bind-mounted rather than baked into the image (see docker/Dockerfile),
+      # so editing the code is `docker compose restart` and not a rebuild —
+      # and index.html does not even need that much, since it is read fresh
+      # per request. Read-only because nothing here writes to its own source.
+      - ./src:/app/src:ro
+      # Drop-in opponents: any *.onnx in here shows up in the in-game picker,
+      # named after the file. Read-only because the app only globs and loads
+      # them, never writes one.
+      - ./models:/app/models:ro
+    # The image already runs unprivileged as its own uid (see the Dockerfile).
+    # Set this only if your host needs a particular one — to match ownership
+    # on a writable mount you have added, say.
+    # user: "1000:1000"
+    #
+    # The app serves a game and reads two directories. It has no reason to
+    # write to its own filesystem, to gain privileges, or to hold any Linux
+    # capability, so it is given none of the three. /tmp is a tmpfs because
+    # numpy and onnxruntime may want scratch space, and because HOME points
+    # there (see the Dockerfile) now that everything else is read-only.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # Uncapped json-file logs grow until the disk does not.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

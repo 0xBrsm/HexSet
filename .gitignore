@@ -9,6 +9,10 @@ build/
 *.log
 .env
 
+# Your own compose file, so a `git pull` on a deployment never collides
+# with it. Start from the tracked compose.example.yaml.
+compose.yaml
+
 # Drop-in opponents: binary artifacts produced by dev-catan's
 # catan.export_onnx, not source. See models/.gitkeep for why the directory
 # itself stays tracked.

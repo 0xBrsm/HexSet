@@ -12,9 +12,16 @@ pip install -e .
 python -m catan.webserver
 ```
 
-Or via `docker compose up -d --build`. The image only carries `numpy`/`onnxruntime` — `src/` and `models/` are bind-mounted (see `compose.yaml`), so a code change is a `git pull` + `docker compose restart`, not a rebuild; only a dependency bump touches the image.
+Or via Docker:
+```
+cp compose.example.yaml compose.yaml
+docker compose up -d --build
+```
+`compose.yaml` is gitignored, so that copy is yours to edit and a `git pull` on a deployment will never collide with it. The image only carries `numpy`/`onnxruntime` — `src/` and `models/` are bind-mounted read-only, so a code change is a `git pull` + `docker compose restart`, not a rebuild; only a dependency bump touches the image. It runs unprivileged on a read-only filesystem with no Linux capabilities, with a reason next to each line.
 
 Then open the printed URL (or the mapped port, `8770` by default under compose). Opponents come from `model_options()` in `src/catan/webserver.py`: `search2` (a handcrafted bot, no checkpoint needed) plus one entry per `*.onnx` file found in the models directory.
+
+Tests are `pip install -e ".[test]" && pytest`. Most of them play the engine; `tests/test_packaging.py` is the odd one out, building a real wheel from a clean copy of the tree to check that an installed copy still has a frontend in it — every other entry point here reads `src/` directly and would not notice a wheel that did not.
 
 ## Adding an opponent
 
@@ -35,4 +42,4 @@ Copy the resulting file into this repo's `models/` directory.
 - `src/catan/web/index.html` — the entire frontend: inline CSS, inline SVG icons, vanilla JS. No build step.
 - `models/` — drop `.onnx` files here.
 - `docker/Dockerfile` — a small CPU-only image (deps only) for deploying this without a GPU.
-- `compose.yaml` — bind-mounts `src/` and `models/` into that image rather than baking them in.
+- `compose.example.yaml` — copy to `compose.yaml` (gitignored) and edit. Bind-mounts `src/` and `models/` into the image rather than baking them in.

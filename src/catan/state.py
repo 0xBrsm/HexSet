@@ -11,6 +11,11 @@ from .cards import NUM_DEV_CARDS, make_deck
 NO_OWNER = -1
 BANK_PER_RESOURCE = 19
 
+# Standard Catan piece supply, per player.
+MAX_ROADS = 15
+MAX_SETTLEMENTS = 5
+MAX_CITIES = 4
+
 
 class Building(IntEnum):
     NONE = 0
@@ -85,11 +90,33 @@ def copy_state(state: GameState) -> GameState:
     )
 
 
+def settlement_count(state: GameState, player: int) -> int:
+    return sum(
+        1
+        for v, owner in enumerate(state.vertex_owner)
+        if owner == player and state.vertex_building[v] == Building.SETTLEMENT
+    )
+
+
+def city_count(state: GameState, player: int) -> int:
+    return sum(
+        1
+        for v, owner in enumerate(state.vertex_owner)
+        if owner == player and state.vertex_building[v] == Building.CITY
+    )
+
+
+def road_count(state: GameState, player: int) -> int:
+    return sum(1 for owner in state.edge_owner if owner == player)
+
+
 def can_place_settlement(
     state: GameState, player: int, vertex: int, *, connected: bool = True
 ) -> bool:
     """`connected` is False during initial placement, when roads are not required."""
     if state.vertex_building[vertex] != Building.NONE:
+        return False
+    if settlement_count(state, player) >= MAX_SETTLEMENTS:
         return False
     topology = state.board.topology
     if any(
@@ -115,6 +142,7 @@ def can_upgrade_to_city(state: GameState, player: int, vertex: int) -> bool:
     return (
         state.vertex_owner[vertex] == player
         and state.vertex_building[vertex] == Building.SETTLEMENT
+        and city_count(state, player) < MAX_CITIES
     )
 
 
@@ -126,6 +154,8 @@ def upgrade_to_city(state: GameState, player: int, vertex: int) -> None:
 
 def can_place_road(state: GameState, player: int, edge: int) -> bool:
     if state.edge_owner[edge] != NO_OWNER:
+        return False
+    if road_count(state, player) >= MAX_ROADS:
         return False
     topology = state.board.topology
     for v in topology.edges[edge]:

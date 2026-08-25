@@ -123,11 +123,12 @@
   }
   .stat { display: inline-flex; align-items: center; gap: 0.2rem; }
   .stat-icon { width: 13px; height: 13px; flex: none; fill: currentColor; }
-  /* Longest road / largest army carry no number — the icon's presence at
-     all *is* the badge — tinted so they read as achievements, not just
-     another count. Matches the old badge backgrounds' hues. */
-  .stat.road { color: #8fc4e8; }
-  .stat.army { color: #e08f8f; }
+  /* Longest road / largest army sit in every row, always, so a seat's route
+     length or Knight count is comparable turn to turn — muted grey like any
+     other stat chip until this seat actually holds the title, at which
+     point it tints to the same hues the old holder-only badges used. */
+  .stat.road.held { color: #8fc4e8; }
+  .stat.army.held { color: #e08f8f; }
   /* The extra margin (beyond .player-stats' own gap, already applied
      between this and the dice chip before it) is what visually separates
      the achievement badges as their own cluster rather than just more
@@ -175,7 +176,7 @@
     border: 1px solid rgba(255,255,255,0.25); display: flex; align-items: center; justify-content: center;
   }
   .card svg { width: 22px; height: 22px; opacity: 0.9; }
-  .card .count {
+  .card .count, .supply-tile .count {
     position: absolute; right: -3px; bottom: -4px; min-width: 15px; height: 15px;
     border-radius: 8px; background: var(--panel); border: 1px solid rgba(255,255,255,0.3);
     font-size: 0.64rem; font-weight: 700; line-height: 13px; text-align: center; color: var(--ink);
@@ -280,6 +281,19 @@
   }
   .board-card-face svg { width: 30px; height: 30px; fill: var(--ink); display: block; }
   #buy-dev-card:hover .board-card-face { border-color: var(--accent); }
+  /* Bottom left, the last free board corner (dice/end-turn share bottom
+     right, buy-dev-card/cancel-robber share top right) — how many of each
+     piece the human has left to place, drawn as the same house/city marks
+     the board itself uses, just small and stacked in the human's own seat
+     colour, with the hand's own .count badge for the number. */
+  #piece-supply { position: absolute; left: 16px; bottom: 16px; display: flex; gap: 6px; }
+  .supply-tile {
+    position: relative; width: 34px; height: 34px; border-radius: 8px;
+    background: var(--panel); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.45);
+  }
+  .supply-tile svg { width: 20px; height: 20px; }
   #log-sheet {
     position: fixed; inset: 0; z-index: 50; background: var(--bg);
     display: none; flex-direction: column;
@@ -538,6 +552,7 @@
       <svg viewBox="0 0 512 512"><use href="#icon-close"></use></svg>
       <span class="board-btn-label">CANCEL</span>
     </button>
+    <div id="piece-supply"></div>
   </div>
   <div id="sidebar">
     <div id="play-area">
@@ -554,7 +569,7 @@
 const SEAT_COLORS = [
   {fill: "#d62828", stroke: "#7a0d0d"},
   {fill: "#1d3557", stroke: "#0b1a2b"},
-  {fill: "#f1faee", stroke: "#333333"},
+  {fill: "#f4d35e", stroke: "#8a6d0d"},
   {fill: "#e07a3e", stroke: "#8a4111"},
 ];
 
@@ -640,6 +655,26 @@ function iconSvg(iconId, {fill, cls} = {}) {
   if (fill) attrs.fill = fill;
   if (cls) attrs.class = cls;
   return el("svg", attrs, el("use", {href: `#icon-${iconId}`}));
+}
+
+// The piece-supply HUD's glyphs, drawn as the same shapes renderBoardDynamic
+// puts on the board itself (circle/diamond/line) rather than separate icon
+// art, so "what's left" reads as a small version of what's already on screen.
+function pieceGlyph(kind, color) {
+  if (kind === "road") {
+    return el("svg", {viewBox: "0 0 24 24"}, el("line", {
+      x1: 4, y1: 20, x2: 20, y2: 4, stroke: color.fill, "stroke-width": 4, "stroke-linecap": "round",
+    }));
+  }
+  if (kind === "city") {
+    return el("svg", {viewBox: "0 0 24 24"}, el("rect", {
+      x: 6, y: 6, width: 12, height: 12, fill: color.fill, stroke: color.stroke, "stroke-width": 1.5,
+      transform: "rotate(45 12 12)",
+    }));
+  }
+  return el("svg", {viewBox: "0 0 24 24"}, el("circle", {
+    cx: 12, cy: 12, r: 8, fill: color.fill, stroke: color.stroke, "stroke-width": 1.5,
+  }));
 }
 
 // A resource .card tile: background tinted to the resource's terrain, icon
@@ -1037,6 +1072,7 @@ function render() {
   renderPlayers();
   renderHand();
   renderBoardDynamic();
+  renderPieceSupply();
   renderBoardButtons();
   renderLog();
   syncModal();
@@ -1118,17 +1154,19 @@ function renderPlayers() {
     // who's been running hot or cold rather than only ever seeing whoever
     // rolled most recently.
     if (p.last_roll) metaEl.appendChild(statChip("dice", p.last_roll, "roll", "Last roll"));
-    // The two board-wide achievements sit past the dice, set off with their
-    // own bit of breathing room (.player-achievements) rather than mixed
-    // into the per-turn counts — they're a different kind of fact (who
-    // holds them, not this seat's own numbers) and read clearer as their
-    // own little cluster at the end of the row.
-    if (p.longest_road || p.largest_army) {
-      const achievements = html("span", {class: "player-achievements"});
-      if (p.longest_road) achievements.appendChild(statChip("road", undefined, "road", "Longest road"));
-      if (p.largest_army) achievements.appendChild(statChip("knight", undefined, "army", "Largest army"));
-      metaEl.appendChild(achievements);
-    }
+    // Route length and Knights played sit in every row, past the dice, set
+    // off with their own bit of breathing room (.player-achievements) —
+    // always present so they're comparable seat to seat, tinted only for
+    // whoever actually holds the title right now (see statChip's "held"
+    // class, gated in CSS on .stat.road.held/.stat.army.held).
+    const achievements = html("span", {class: "player-achievements"});
+    achievements.appendChild(
+      statChip("road", p.road_length, `road${p.longest_road ? " held" : ""}`, "Longest road")
+    );
+    achievements.appendChild(
+      statChip("knight", p.knights_played, `army${p.largest_army ? " held" : ""}`, "Largest army")
+    );
+    metaEl.appendChild(achievements);
     row.appendChild(metaEl);
     container.appendChild(row);
   }
@@ -1238,6 +1276,36 @@ function renderHand() {
   }
   devCol.appendChild(devHand);
   container.appendChild(devCol);
+}
+
+// How many of each piece the human still has to place — supply caps come
+// from the engine (board.piece_supply, see board_layout in webplay.py) so
+// this can't drift from what can_place_settlement/_road/_city actually
+// enforce; built counts are just what's already on the board in this seat's
+// colour.
+function renderPieceSupply() {
+  const container = document.getElementById("piece-supply");
+  container.innerHTML = "";
+  const seat = state.human_seat;
+  const color = SEAT_COLORS[seat];
+  const roadsBuilt = state.edge_owner.filter((o) => o === seat).length;
+  const settlementsBuilt = state.vertex_owner.filter(
+    (o, v) => o === seat && state.vertex_building[v] === 1
+  ).length;
+  const citiesBuilt = state.vertex_owner.filter(
+    (o, v) => o === seat && state.vertex_building[v] === 2
+  ).length;
+  const remaining = {
+    settlement: board.piece_supply.settlement - settlementsBuilt,
+    city: board.piece_supply.city - citiesBuilt,
+    road: board.piece_supply.road - roadsBuilt,
+  };
+  for (const kind of ["settlement", "city", "road"]) {
+    const tile = html("div", {class: "supply-tile", title: `${kind}s left: ${remaining[kind]}`});
+    tile.appendChild(pieceGlyph(kind, color));
+    tile.appendChild(html("div", {class: "count"}, String(remaining[kind])));
+    container.appendChild(tile);
+  }
 }
 
 function renderBoardDynamic() {

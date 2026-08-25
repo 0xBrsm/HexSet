@@ -53,6 +53,8 @@ from .devcards import holdings
 from .economy import trade_ratios
 from .game import MAX_OFFERS_PER_TURN, Game, Phase, is_over, to_move
 from .record import Record, append_step, board_fields, write as write_records
+from .roads import road_lengths
+from .state import MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS
 from .victory import public_victory_points, victory_points
 
 RESOURCE_NAMES: tuple[str, ...] = tuple(r.name.title() for r in Resource)
@@ -161,6 +163,14 @@ def board_layout(board: Board, size: float = 60.0) -> dict:
         "year_of_plenty_pairs": [
             [RESOURCE_NAMES[a], RESOURCE_NAMES[b]] for a, b in YEAR_OF_PLENTY_PAIRS
         ],
+        # The engine's own supply caps (`catan.state`), so the frontend's
+        # remaining-piece HUD can't drift from what `can_place_*` actually
+        # enforces.
+        "piece_supply": {
+            "road": MAX_ROADS,
+            "settlement": MAX_SETTLEMENTS,
+            "city": MAX_CITIES,
+        },
     }
 
 
@@ -707,6 +717,9 @@ class GameSession:
         state = game.state
         over = is_over(game)
         players = []
+        # Both are public — a route's length and a played Knight count are
+        # visible on the board/in front of everyone, unlike hand contents.
+        lengths = road_lengths(state)
         for p in range(state.num_players):
             reveal = over or p == self.human_seat
             entry = {
@@ -717,6 +730,7 @@ class GameSession:
                 if reveal
                 else public_victory_points(state, p),
                 "knights_played": state.knights_played[p],
+                "road_length": lengths[p],
                 "longest_road": state.longest_road_holder == p,
                 "largest_army": state.largest_army_holder == p,
                 "hand_size": sum(state.hands[p]),

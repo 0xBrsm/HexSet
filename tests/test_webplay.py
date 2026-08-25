@@ -15,6 +15,7 @@ from catan.game import Phase, is_over, start, to_move
 from catan.record import read as read_records
 from catan.record import replay as replay_record
 from catan.webplay import (
+    RESOURCE_NAMES,
     SQRT3,
     GameSession,
     action_to_wire,
@@ -349,7 +350,7 @@ def test_a_build_streak_breaks_on_a_different_actor():
     session.advance_bots()  # the next seat(s) in the snake place too
 
     assert len(session.log) >= 2  # human's line, plus at least the next seat's
-    assert session._build_streak["actor"] != human_seat  # the streak moved on
+    assert session._run["key"][0] != human_seat  # the run moved on
 
 
 def test_list_with_counts_pluralises_repeats_but_not_singles():
@@ -472,6 +473,135 @@ def test_a_trade_everyone_declines_summarizes_into_one_line():
     assert session._trade_buffer is None
 
 
+def _discard_all(session: GameSession, seat: int) -> None:
+    """Run every DISCARD the engine asks `seat` for, one at a time."""
+    while (
+        session.game.phase is Phase.DISCARD
+        and to_move(session.game) == seat
+    ):
+        action = next(a for a in legal_actions(session.game) if a.type is ActionType.DISCARD)
+        session._apply(seat, action)
+
+
+def _owing_game(seed: int, seat: int, hand: list[int]) -> GameSession:
+    """A game parked in Phase.DISCARD with `seat` owing half of `hand`."""
+    game = a_game(seed=seed)
+    game.phase = Phase.DISCARD
+    game.current_player = seat
+    game.state.hands[seat] = list(hand)
+    game.discard_quota = [0] * game.state.num_players
+    game.discard_quota[seat] = sum(hand) // 2
+    return game
+
+
+def test_a_discard_collapses_into_one_line_however_many_cards():
+    """The engine takes discards one card at a time (legal_actions under
+    Phase.DISCARD keeps the action space linear in resources rather than
+    combinatorial in hand size), so a seven can cost one seat half a dozen
+    steps in a row. The log is one line."""
+    game = _owing_game(seed=20, seat=0, hand=[4, 4, 0, 0, 0])
+    session = GameSession(game=game, human_seat=0, bot=RandomBot())
+
+    _discard_all(session, 0)
+
+    assert game.discard_quota[0] == 0  # four cards actually went
+    assert len(session.log) == 1
+    assert session.log[0].count("discarded") == 1
+
+
+def test_a_humans_discard_line_names_the_resources_with_counts():
+    game = _owing_game(seed=21, seat=0, hand=[4, 4, 0, 0, 0])
+    session = GameSession(game=game, human_seat=0, bot=RandomBot())
+
+    _discard_all(session, 0)
+
+    text = session.log[0]
+    # Counted, not repeated — and never pluralised (see _resource_counts).
+    assert "4 Wood." in text or "4 Brick." in text or "2 Wood, 2 Brick" in text
+    assert "Woods" not in text and "Bricks" not in text
+
+
+def test_a_bots_discard_line_is_a_bare_count_never_the_resources():
+    """A collapsed line is exactly where a whole hidden hand would leak at
+    once — the same rule _describe applied to a single bot discard."""
+    game = _owing_game(seed=22, seat=1, hand=[4, 4, 0, 0, 0])
+    session = GameSession(game=game, human_seat=0, bot=RandomBot())
+
+    _discard_all(session, 1)
+
+    text = session.log[0]
+    assert "discarded 4 cards" in text
+    assert not any(r in text for r in RESOURCE_NAMES)
+
+
+def test_two_seats_discarding_get_a_line_each():
+    game = _owing_game(seed=23, seat=0, hand=[4, 4, 0, 0, 0])
+    game.state.hands[1] = [4, 4, 0, 0, 0]
+    game.discard_quota[1] = 4
+    session = GameSession(game=game, human_seat=0, bot=RandomBot())
+
+    _discard_all(session, 0)
+    _discard_all(session, 1)
+
+    assert len(session.log) == 2  # not merged across actors
+
+
+def test_consecutive_bank_trades_of_the_same_pair_sum_into_one_line():
+    game = a_game(seed=24)
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    game.state.hands[0] = [8, 0, 0, 0, 0]
+    session = GameSession(game=game, human_seat=0, bot=RandomBot())
+
+    trade = next(
+        a for a in legal_actions(game)
+        if a.type is ActionType.BANK_TRADE and a.a == 0 and a.b == 4
+    )
+    session._apply(0, trade)
+    session._apply(0, trade)
+
+    assert len(session.log) == 1
+    assert "8 Wood" in session.log[0] and "2 Ore" in session.log[0]
+
+
+def test_a_different_bank_pair_starts_its_own_line():
+    game = a_game(seed=25)
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    game.state.hands[0] = [4, 4, 0, 0, 0]
+    session = GameSession(game=game, human_seat=0, bot=RandomBot())
+
+    for give, want in ((0, 4), (1, 4)):
+        action = next(
+            a for a in legal_actions(session.game)
+            if a.type is ActionType.BANK_TRADE and a.a == give and a.b == want
+        )
+        session._apply(0, action)
+
+    assert len(session.log) == 2
+
+
+def test_a_roll_between_two_discards_keeps_them_apart():
+    """Only one run is ever open, so nothing can reach back across an
+    intervening line to join something older."""
+    game = _owing_game(seed=26, seat=0, hand=[4, 4, 0, 0, 0])
+    session = GameSession(game=game, human_seat=0, bot=RandomBot())
+    _discard_all(session, 0)
+    assert len(session.log) == 1
+
+    session.game.phase = Phase.ROLL
+    session.game.current_player = 0
+    session._apply(0, Action(ActionType.ROLL))
+    assert len(session.log) == 2
+
+    session.game.phase = Phase.DISCARD
+    session.game.state.hands[0] = [2, 0, 0, 0, 0]
+    session.game.discard_quota = [1, 0, 0, 0]
+    _discard_all(session, 0)
+
+    assert len(session.log) == 3  # a fresh discard line, not a swollen one
+
+
 def test_ending_a_turn_writes_no_log_line():
     """Every turn ends eventually and the next line already implies it — a
     dedicated line for each one was pure noise, not information."""
@@ -485,20 +615,20 @@ def test_ending_a_turn_writes_no_log_line():
     assert session.log == []
 
 
-def test_ending_a_turn_closes_an_open_build_streak():
+def test_ending_a_turn_closes_an_open_run():
     game = a_game(seed=17)
     human_seat = to_move(game)
     session = GameSession(game=game, human_seat=human_seat, bot=RandomBot())
 
     settlement = next(a for a in legal_actions(game) if a.type is ActionType.SETUP_SETTLEMENT)
     session.apply_human_action(action_to_wire(settlement))
-    assert session._build_streak is not None
+    assert session._run is not None
 
     session.game.phase = Phase.MAIN
     session.game.current_player = human_seat
     session._apply(human_seat, Action(ActionType.END_TURN))
 
-    assert session._build_streak is None
+    assert session._run is None
 
 
 def test_advance_bots_always_stops_at_the_human_seat_or_game_over():

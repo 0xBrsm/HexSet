@@ -247,17 +247,22 @@ def _hex_label(board: Board, hex_id: int) -> str:
     return f"{board.tokens[hex_id]} {RESOURCE_NAMES[resource]}"
 
 
+def _resource_counts(counts: list[int]) -> str:
+    """`[2, 1, 0, 0, 0]` -> `"2 Wood, 1 Brick"`; `[]`-equivalent -> `""`.
+
+    Deliberately not `_list_with_counts`: that one pluralises, which is right
+    for the countable things it lists ("2 roads") and wrong for every
+    resource name in the game — "2 Sheep" and "2 Wood", never "2 Sheeps".
+    """
+    return ", ".join(f"{n} {RESOURCE_NAMES[r]}" for r, n in enumerate(counts) if n)
+
+
 def _hand_gains(before: list[int], after: list[int]) -> str | None:
-    parts = [
-        f"{after[r] - before[r]} {RESOURCE_NAMES[r]}"
-        for r in range(NUM_RESOURCES)
-        if after[r] != before[r]
-    ]
-    return ", ".join(parts) if parts else None
+    return _resource_counts([after[r] - before[r] for r in range(NUM_RESOURCES)]) or None
 
 
-# (verb, noun) for every action GameSession._log_action folds into one
-# "placed/built ..." streak per actor instead of a line each — see there.
+# (verb, noun) for every action that folds into one "placed/built ..." run
+# per actor instead of a line each — see GameSession._log_action.
 _BUILD_KIND = {
     ActionType.SETUP_SETTLEMENT: ("placed", "settlement"),
     ActionType.SETUP_ROAD: ("placed", "road"),
@@ -382,18 +387,6 @@ def _describe(
         r0, r1 = YEAR_OF_PLENTY_PAIRS[action.a]
         return f"{who} played Year of Plenty for {RESOURCE_NAMES[r0]} and {RESOURCE_NAMES[r1]}."
 
-    if kind is ActionType.BANK_TRADE:
-        given = before.hands[actor][action.a] - state.hands[actor][action.a]
-        return (
-            f"{who} traded {given} {RESOURCE_NAMES[action.a]} "
-            f"for 1 {RESOURCE_NAMES[action.b]} with the bank."
-        )
-
-    if kind is ActionType.DISCARD:
-        if actor == human_seat:
-            return f"{who} discarded 1 {RESOURCE_NAMES[action.a]}."
-        return f"{who} discarded a card."
-
     if kind is ActionType.PROPOSE_TRADE:
         return f"{who} offered {_bundle_text(action.give)} for {_bundle_text(action.want)}."
 
@@ -443,7 +436,7 @@ class GameSession:
     # A run of build actions by the same actor in the same round, folded
     # into one log line instead of one each — see _log_action. Cleared by
     # any other action from any seat.
-    _build_streak: dict | None = field(default=None, repr=False)
+    _run: dict | None = field(default=None, repr=False)
     # A trade's proposal line, held back from `log` until the offer
     # concludes — see _log_action. `None` whenever no trade is in flight.
     # Deliberately just the proposal, not a running list of responses:
@@ -558,46 +551,114 @@ class GameSession:
             )
             write_records(self.record_path, [record])
 
+    def _run_for(self, kind: str, key: tuple, fresh: dict) -> tuple[dict, bool]:
+        """The open run for `key`, or a new one seeded from `fresh`.
+
+        Returns `(run, continuing)`. When continuing, the last line in the
+        log is this run's own and the caller's rewritten line replaces it
+        rather than following it — which is the whole trick: a run is always
+        exactly one line, rewritten in place as it grows.
+
+        Only ever one run open at a time. Anything that doesn't continue the
+        current one replaces or clears it (see `_log_action`), so a run can
+        never reach back across an intervening line to join something older
+        — a second seven in the same round starts a fresh discard line
+        rather than swelling the first.
+        """
+        run = self._run
+        if run is not None and run["kind"] == kind and run["key"] == key:
+            return run, True
+        self._run = {"kind": kind, "key": key, **fresh}
+        return self._run, False
+
+    def _log_run(self, round_num: int, line: str, continuing: bool) -> None:
+        if continuing:
+            self.log.pop()
+        self.log.append(f"{round_num}\t{line}")
+
     def _log_action(self, round_num: int, actor: int, action: Action, before: _Snapshot) -> None:
-        """Appends this action's line to `self.log` — except a build that
-        continues the same actor's still-open streak, which rewrites the
-        streak's one existing line instead of adding another, and a
-        PROPOSE_TRADE, which is held in `_trade_buffer` and only reaches
-        `log` once the whole offer concludes: as "accepted" naming who took
-        it, or as a uniform "Everyone declined." that never says who was
-        actually asked or how many — see the PROPOSE_TRADE/ACCEPT_TRADE/
-        DECLINE_TRADE branches below for why. Tab-separated, matching every
-        other line: the client splits on the first tab for the round-number
-        column (see the format note this replaced).
+        """Appends this action's line to `self.log`.
+
+        Three kinds of action arrive as a burst of engine steps that a reader
+        would only ever want as one sentence, and each collapses into a run
+        (see `_run_for`) rewritten in place as it grows:
+
+          builds     one "placed/built ..." per actor per round
+          discards   one line per actor per discard, however many cards
+          bank       consecutive trades of the same pair, summed
+
+        PROPOSE_TRADE is held back differently — buffered in `_trade_buffer`
+        and only written once the whole offer concludes, as "accepted" naming
+        who took it or as a uniform "Everyone declined." that never says who
+        was asked or how many (see those branches for why). END_TURN writes
+        nothing at all.
+
+        Tab-separated, matching every other line: the client splits on the
+        first tab for the round-number column.
         """
         kind = action.type
+        who = _who(actor, self.human_seat, self.bot_names)
 
         if kind in _BUILD_KIND:
             verb, item = _BUILD_KIND[kind]
-            streak = self._build_streak
-            continuing = (
-                streak is not None and streak["actor"] == actor and streak["round"] == round_num
+            run, continuing = self._run_for(
+                "build", (actor, round_num), {"verb": verb, "items": [], "extra": []}
             )
-            if continuing:
-                streak["items"].append(item)
-            else:
-                streak = self._build_streak = {
-                    "actor": actor, "round": round_num, "verb": verb, "items": [item], "extra": [],
-                }
+            run["items"].append(item)
             if kind is ActionType.SETUP_SETTLEMENT:
                 gains = _hand_gains(before.hands[actor], self.game.state.hands[actor])
                 if gains:
-                    who = _who(actor, self.human_seat, self.bot_names)
-                    streak["extra"].append(f"{who} collects {gains}.")
-            who = _who(actor, self.human_seat, self.bot_names)
-            line = f"{who} {streak['verb']} {_list_with_counts(streak['items'])}."
-            line = " ".join([line, *streak["extra"]])
-            if continuing:
-                self.log.pop()
-            self.log.append(f"{round_num}\t{line}")
+                    run["extra"].append(f"{who} collects {gains}.")
+            line = f"{who} {run['verb']} {_list_with_counts(run['items'])}."
+            self._log_run(round_num, " ".join([line, *run["extra"]]), continuing)
             return
 
-        self._build_streak = None  # any non-build action ends an open streak
+        if kind is ActionType.DISCARD:
+            # The engine takes discards one card at a time (see
+            # `legal_actions` under Phase.DISCARD, which deliberately keeps
+            # the action space linear in resources rather than combinatorial
+            # in hand size), so one seven can cost a full hand half a dozen
+            # steps in a row — and for a bot every one of them said the same
+            # six words. They collapse to a single line.
+            #
+            # Which resources went is the human's own line only. `_describe`
+            # drew that line for a single discard and it matters more here,
+            # not less: a collapsed line is exactly where a whole hand would
+            # leak at once.
+            run, continuing = self._run_for(
+                "discard", (actor, round_num), {"counts": [0] * NUM_RESOURCES}
+            )
+            run["counts"][action.a] += 1
+            total = sum(run["counts"])
+            if actor == self.human_seat:
+                # Same wording as the "collects" half of a roll line, since
+                # it's the same fact pointed the other way.
+                line = f"{who} discarded {_resource_counts(run['counts'])}."
+            else:
+                line = f"{who} discarded {total} card{'' if total == 1 else 's'}."
+            self._log_run(round_num, line, continuing)
+            return
+
+        if kind is ActionType.BANK_TRADE:
+            # Ports make this the one action people repeat back to back —
+            # four wood for a wheat, then four more for another — and each
+            # step was its own line. Same pair in a row sums into one; a
+            # different pair is a different trade and starts its own (the
+            # pair is part of the run's key).
+            given = before.hands[actor][action.a] - self.game.state.hands[actor][action.a]
+            run, continuing = self._run_for(
+                "bank", (actor, round_num, action.a, action.b), {"given": 0, "got": 0}
+            )
+            run["given"] += given
+            run["got"] += 1
+            line = (
+                f"{who} traded {run['given']} {RESOURCE_NAMES[action.a]} "
+                f"for {run['got']} {RESOURCE_NAMES[action.b]} with the bank."
+            )
+            self._log_run(round_num, line, continuing)
+            return
+
+        self._run = None  # anything else ends whatever run was open
 
         if kind is ActionType.END_TURN:
             # Whatever line comes next (the following seat's roll, build,
@@ -619,7 +680,6 @@ class GameSession:
             return
 
         if kind is ActionType.ACCEPT_TRADE and self._trade_buffer is not None:
-            who = _who(actor, self.human_seat, self.bot_names)
             self.log.append(f"{round_num}\t{self._trade_buffer} {who} accepted.")
             self._trade_buffer = None
             return

@@ -262,9 +262,18 @@
     max-width: 420px; width: 100%; max-height: 85vh;
     display: flex; overflow: hidden;
   }
-  #trade-modal-main { flex: 1 1 auto; min-width: 0; padding: 1rem; overflow-y: auto; }
+  #trade-modal-main {
+    flex: 1 1 auto; min-width: 0; padding: 1rem; overflow-y: auto;
+    display: flex; flex-direction: column;
+  }
   #trade-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
   #trade-modal-head h3 { margin: 0; font-size: 1.05rem; }
+  /* Vertically centers whatever's below the title (the exchange row, or the
+     pickers) in the space left over after it — without this, short content
+     (an incoming offer's just-one-row body) sits pinned to the top of the
+     box while #trade-modal-actions' own buttons, centered on their own axis
+     the whole time, visibly aren't: the two columns read as misaligned. */
+  #trade-modal-body { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; }
   #trade-modal-actions {
     flex: none; width: 96px; padding: 1rem 0.7rem; display: flex;
     flex-direction: column; justify-content: center; align-items: center; gap: 0.6rem;
@@ -287,6 +296,11 @@
   .trade-exchange {
     display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
     gap: 0.6rem; margin: 0.2rem 0 0.9rem;
+    /* Nudges the centered pair left of dead-center: unverified without a
+       screenshot (see the commit this landed in), a direct response to
+       "too far right", not a recalculation — revert this one declaration
+       if it's wrong instead of re-deriving the geometry. */
+    padding-right: 2.5rem;
   }
   .trade-side { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; }
   .trade-side .trade-row { margin: 0; justify-content: center; }

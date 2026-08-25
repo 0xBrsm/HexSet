@@ -10,6 +10,20 @@ onnxruntime-free and importable on its own; the network policy is imported
 here, inside `main`, so anything that only needs the session can be tested
 without onnxruntime installed — the same split `catan.onnxbot` already draws.
 
+## One game per browser, not one game for the whole server
+
+Every request carries (or, on its first visit, gets handed) an opaque
+`catan_id` cookie — a random token identifying the browser, nothing more, no
+accounts. `CatanServer` keys its games off that: `GET /api/state` from one
+cookie never sees, and can never affect, another cookie's game. This was
+deliberately a cookie and not the request's source IP, which would collide
+two people on the same wifi/NAT into one game and lose the session the moment
+either of them changed networks mid-play.
+
+Idle games (nobody's polled `/api/state` in a while) are dropped after
+`SESSION_TTL_SECONDS`, since nothing else ever will be — there's no login to
+log out of and no "leave game" button, just a tab someone closed or forgot.
+
 Run it with (from `src/`)::
 
     python -m catan.webserver
@@ -28,10 +42,13 @@ import itertools
 import json
 import os
 import random
+import secrets
 import sys
 import threading
+import time
 import webbrowser
 from dataclasses import dataclass
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable
@@ -45,6 +62,18 @@ STATIC_DIR = Path(__file__).resolve().parent / "web"
 INDEX_HTML = STATIC_DIR / "index.html"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 NUM_PLAYERS = 4
+
+COOKIE_NAME = "catan_id"
+# 30 days: long enough that closing and reopening the tab tomorrow still
+# finds the same game. Not tied to how long a game is actually kept alive
+# server-side (see SESSION_TTL_SECONDS below) — an idle game is dropped long
+# before its cookie would expire on its own either way.
+COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
+# How long a game survives with nobody polling it. An active tab calls
+# GET /api/state far more often than this; a closed or forgotten one doesn't
+# call it at all. 6 hours comfortably outlasts a real, paused-mid-game
+# session without holding onto abandoned ones indefinitely.
+SESSION_TTL_SECONDS = 6 * 60 * 60
 
 MODELS_DIR = Path(os.environ.get("CATAN_WEB_MODELS_DIR", REPO_ROOT / "models"))
 
@@ -70,13 +99,30 @@ def model_options() -> dict[str, str]:
     return options
 
 
-class CatanServer(ThreadingHTTPServer):
-    """Holds the one game session this process serves.
+@dataclass
+class _Entry:
+    """One identity's live game: the session itself, its board layout (cached
+    alongside it — see `/api/board` — rather than recomputed per request,
+    same as when there was only ever one of these), and when it was last
+    touched, for `CatanServer._evict_stale` to act on."""
 
-    A single mutable `session` plus a lock is all the state this needs: the
-    server is meant for one human at a time, on one machine, and the lock only
-    guards against a browser firing two requests at once (a retried POST, a
-    double click) rather than real concurrent play.
+    session: GameSession
+    layout: dict
+    last_seen: float
+
+
+class CatanServer(ThreadingHTTPServer):
+    """Holds one game session per browser identity (see the module docstring)
+    instead of one for the whole process.
+
+    Two lock granularities, not one: `_registry_lock` guards the `sessions`/
+    `_locks` dicts themselves (fast — a handful of dict operations), while
+    each identity gets its own `threading.Lock` (see `lock_for`) around the
+    actual game mutation, which can be slow (a cascade of bot moves, each an
+    ONNX forward pass). One shared lock for everything would mean one
+    player's turn stalls every *other* player's request for its duration —
+    fine when this served one human total, wrong now that the whole point is
+    serving several at once.
     """
 
     daemon_threads = True
@@ -84,31 +130,126 @@ class CatanServer(ThreadingHTTPServer):
     def __init__(
         self,
         address: tuple[str, int],
-        session: GameSession,
-        layout: dict,
         new_session: Callable[[list[tuple[str, str]] | None], GameSession],
         device: str = "cpu",
         max_offers: int | None = None,
     ) -> None:
         super().__init__(address, Handler)
-        self.session = session
-        self.layout = layout
+        self.sessions: dict[str, _Entry] = {}
         self.new_session = new_session
         # Carried so a live seat-bot swap (`/api/bot`) can build a bot the same
         # way `_build_session` did, without threading them through every call.
         self.device = device
         self.max_offers = max_offers
-        self.lock = threading.Lock()
+        self._locks: dict[str, threading.Lock] = {}
+        self._registry_lock = threading.Lock()
+
+    def lock_for(self, identity: str) -> threading.Lock:
+        """The lock to hold around any mutation of `identity`'s game."""
+        with self._registry_lock:
+            lock = self._locks.get(identity)
+            if lock is None:
+                lock = self._locks[identity] = threading.Lock()
+            return lock
+
+    def entry(self, identity: str, bots: list[tuple[str, str]] | None = None) -> _Entry:
+        """`identity`'s game, dealing a fresh one on first contact. Caller is
+        responsible for holding `lock_for(identity)` first if this might run
+        concurrently with a mutation of that same identity's game — this only
+        protects the registry (the dict of *all* identities' entries), not
+        the one game it hands back.
+        """
+        with self._registry_lock:
+            now = time.monotonic()
+            self._evict_stale(now)
+            found = self.sessions.get(identity)
+            if found is not None:
+                found.last_seen = now
+                return found
+
+        # Building a session can be slow (constructing an mcts: searcher, a
+        # cold NetworkBot) — done outside _registry_lock so one identity's
+        # first-ever request doesn't stall every other identity's dict
+        # lookups for however long that takes.
+        session = self.new_session(bots)
+        built = _Entry(session, board_layout(session.game.state.board), time.monotonic())
+        with self._registry_lock:
+            # Another request for this same brand-new identity could have
+            # built and registered its own entry while the above ran —
+            # first one in wins, so anyone already handed that entry (or
+            # already mutating its game under lock_for) isn't left holding
+            # a reference this call silently discarded.
+            found = self.sessions.get(identity)
+            if found is not None:
+                found.last_seen = time.monotonic()
+                return found
+            self.sessions[identity] = built
+            return built
+
+    def replace(self, identity: str, bots: list[tuple[str, str]] | None) -> _Entry:
+        """Unconditionally deals `identity` a new game, replacing whatever it
+        had — what `POST /api/new` does. Caller holds `lock_for(identity)`,
+        which rules out the same first-one-wins race `entry` guards against:
+        nothing else can be creating this identity's entry at the same time.
+        """
+        session = self.new_session(bots)  # see entry()'s own note on why this is outside the lock
+        entry = _Entry(session, board_layout(session.game.state.board), time.monotonic())
+        with self._registry_lock:
+            self.sessions[identity] = entry
+            return entry
+
+    def _evict_stale(self, now: float) -> None:
+        """Must be called with `_registry_lock` held. Drops any identity's
+        game (and its lock) untouched for longer than `SESSION_TTL_SECONDS`
+        — an abandoned tab, not an active one (see module docstring).
+
+        Not guarded against evicting an identity whose own request is what's
+        currently running: `entry`, the only caller, is always invoked while
+        the caller already holds `lock_for(identity)` for that very
+        identity, so "is this identity's lock held" can never distinguish
+        "another concurrent request is using it" from "I am, right now,
+        resolving it" — the two cases this sweep actually needs to tell
+        apart. Evicting the second one is exactly the intended behavior
+        anyway (`entry` immediately rebuilds whatever it just deleted), so
+        there is nothing to guard there. What's left unguarded is a single
+        request that runs longer than `SESSION_TTL_SECONDS` itself — hours —
+        which would need to be evicted by some *other* identity's traffic
+        arriving mid-request; accepted as a known gap rather than one worth
+        the complexity of closing.
+        """
+        stale = [i for i, e in self.sessions.items() if now - e.last_seen > SESSION_TTL_SECONDS]
+        for identity in stale:
+            del self.sessions[identity]
+            self._locks.pop(identity, None)
 
 
 class Handler(BaseHTTPRequestHandler):
     server: CatanServer  # narrows the inherited attribute's type for readability
+
+    def _read_identity(self) -> None:
+        """Reads this request's `catan_id` cookie, or mints one — cached on
+        `self` (a fresh `Handler` per request) so every handler downstream,
+        plus `_json`/`_file`, share the one value: the latter need it to know
+        whether to actually set the cookie this response, which only a
+        brand-new identity's first response must do.
+        """
+        identity = None
+        header = self.headers.get("Cookie")
+        if header:
+            cookies = SimpleCookie()
+            cookies.load(header)
+            morsel = cookies.get(COOKIE_NAME)
+            if morsel is not None:
+                identity = morsel.value
+        self._new_identity = identity is None
+        self.identity = identity or secrets.token_urlsafe(18)
 
     def _json(self, payload: dict, status: int = 200) -> None:
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self._set_identity_cookie_if_new()
         self.end_headers()
         self.wfile.write(body)
 
@@ -122,17 +263,34 @@ class Handler(BaseHTTPRequestHandler):
         # falls back to a stale copy rather than refetching — indistinguishable
         # from "the fix didn't work" without this.
         self.send_header("Cache-Control", "no-store")
+        self._set_identity_cookie_if_new()
         self.end_headers()
         self.wfile.write(body)
 
+    def _set_identity_cookie_if_new(self) -> None:
+        if self._new_identity:
+            self.send_header(
+                "Set-Cookie",
+                f"{COOKIE_NAME}={self.identity}; Path=/; Max-Age={COOKIE_MAX_AGE_SECONDS}; SameSite=Lax",
+            )
+
     def do_GET(self) -> None:  # noqa: N802 (http.server's naming convention)
+        self._read_identity()
         if self.path in ("/", "/index.html"):
             self._file(INDEX_HTML, "text/html; charset=utf-8")
         elif self.path == "/api/board":
-            self._json(self.server.layout)
+            # Reading entry.layout/session.state_view() stays inside the
+            # lock, same as every mutating handler below — otherwise this
+            # GET can race a concurrent POST for the same identity (e.g. the
+            # client's own periodic /api/state poll landing mid-action) and
+            # read a GameSession mid-mutation.
+            with self.server.lock_for(self.identity):
+                entry = self.server.entry(self.identity)
+                self._json(entry.layout)
         elif self.path == "/api/state":
-            with self.server.lock:
-                self._json(self.server.session.state_view())
+            with self.server.lock_for(self.identity):
+                entry = self.server.entry(self.identity)
+                self._json(entry.session.state_view())
         elif self.path == "/api/models":
             # Names only, never paths: the picker builds its 3 dropdowns from
             # this list and sends names back, same as it received them.
@@ -141,6 +299,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self) -> None:  # noqa: N802
+        self._read_identity()
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length) if length else b""
         try:
@@ -167,14 +326,9 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 self._json({"error": str(exc)}, status=400)
                 return
-        with self.server.lock:
-            self.server.session = self.server.new_session(bots)
-            # A new game deals a new board (different terrain, tokens and
-            # ports, even though the topology is the same 19-hex layout),
-            # so the cached layout `/api/board` serves has to be rebuilt too,
-            # not just the session's live state.
-            self.server.layout = board_layout(self.server.session.game.state.board)
-        self._json(self.server.session.state_view())
+        with self.server.lock_for(self.identity):
+            entry = self.server.replace(self.identity, bots)
+        self._json(entry.session.state_view())
 
     def _handle_swap_bot(self, payload: dict) -> None:
         """Re-seat one non-human seat's bot mid-game — models can be swapped
@@ -189,8 +343,8 @@ class Handler(BaseHTTPRequestHandler):
         except (KeyError, TypeError, ValueError):
             self._json({"error": "expected {seat: int, model: str}"}, status=400)
             return
-        with self.server.lock:
-            session = self.server.session
+        with self.server.lock_for(self.identity):
+            session = self.server.entry(self.identity).session
             if seat == session.human_seat or seat not in session.bot.bots_by_seat:
                 self._json({"error": f"seat {seat} has no bot to swap"}, status=400)
                 return
@@ -207,8 +361,8 @@ class Handler(BaseHTTPRequestHandler):
         self._json(session.state_view())
 
     def _handle_action(self, payload: dict) -> None:
-        with self.server.lock:
-            session = self.server.session
+        with self.server.lock_for(self.identity):
+            session = self.server.entry(self.identity).session
             try:
                 session.apply_human_action(payload)
                 session.advance_bots()
@@ -412,15 +566,14 @@ def main(argv: list[str] | None = None) -> None:
             bots or default_bots, args.human_seat, args.seed, args.device, args.max_offers, args.record
         )
 
-    session = new_session()
-    layout = board_layout(session.game.state.board)
-    server = CatanServer(
-        (args.host, args.port), session, layout, new_session, args.device, args.max_offers
-    )
+    # No session is built here anymore — each browser deals its own on first
+    # contact (see CatanServer.entry), so there's no single "the" game to
+    # build before the server can even start.
+    server = CatanServer((args.host, args.port), new_session, args.device, args.max_offers)
 
     url = f"http://{args.host}:{args.port}/"
     names = [name for name, _ in default_bots]
-    print(f"Catan web board: {url}  (bots={names}, human seat={session.human_seat})")
+    print(f"Catan web board: {url}  (bots={names})")
     if args.record:
         print(f"Finished games will be appended to {args.record}")
     if not args.no_browser:

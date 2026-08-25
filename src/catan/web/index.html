@@ -28,11 +28,6 @@
        (#2c3038, matching --border/--panel's own grey) — a subtler, stormier
        water than the saturated version, still unmistakably blue. */
     --water: #225e8c;
-    --seat0: #d62828;
-    --seat1: #1d3557;
-    --seat2: #f1faee;
-    --seat2-stroke: #333;
-    --seat3: #e07a3e;
   }
   * { box-sizing: border-box; }
   html { height: 100%; }
@@ -134,13 +129,6 @@
      the achievement badges as their own cluster rather than just more
      items in the same list. */
   .player-achievements { display: inline-flex; align-items: center; gap: 0.5rem; margin-left: 0.6rem; }
-  #actions {
-    padding: 0.7rem 0.8rem; border-bottom: 1px solid var(--border); flex: none;
-  }
-  #actions h3 { margin: 0.4rem 0 0.3rem; font-size: 0.8rem; text-transform: uppercase; color: var(--muted); }
-  #actions h3:first-child { margin-top: 0; }
-  .action-row { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.3rem; }
-  .action-row button { font-size: 0.85rem; }
   #notice {
     margin: 0 0.8rem; padding: 0.35rem 0.6rem; border-radius: 6px; font-size: 0.85rem;
     background: #3a1616; border: 1px solid #7a3a3a; color: #ffb3b3; display: none;
@@ -161,6 +149,12 @@
     flex: none; width: 3ch; text-align: left; color: var(--muted);
     font-variant-numeric: tabular-nums;
   }
+  /* Everything that landed while the table was away from you — your own last
+     move, then whatever the bots did before handing the turn back. A tint
+     rather than a fade, and it stays until you act again: the point is to be
+     readable when you get round to looking, not to be caught in the moment.
+     Background only, so nothing shifts by a pixel when a line gains it. */
+  .log-line.fresh { background: rgba(109,92,232,0.13); }
   .hex-token {
     font-size: 17px; font-weight: 700; text-anchor: middle; dominant-baseline: central;
     /* Plain black — the chroma-208 blue this used while the colour-inverting
@@ -188,13 +182,20 @@
     border-radius: 8px; background: var(--panel); border: 1px solid rgba(255,255,255,0.3);
     font-size: 0.64rem; font-weight: 700; line-height: 13px; text-align: center; color: var(--ink);
   }
-  /* A hand resource card doubling as the trade entry point: clicking one
-     opens the trade modal with that resource pre-selected as "give" — see
-     renderHand(). Only tagged with this class while trading is actually
-     legal (canTrade), so it's never clickable-looking when it wouldn't do
-     anything. */
-  .hand-card-tradeable { cursor: pointer; border-color: rgba(255,255,255,0.5); }
-  .hand-card-tradeable:hover { border-color: var(--accent); }
+  /* A hand card that does something when clicked, which is how everything a
+     card can do is now started: a resource card opens the trade modal with
+     itself pre-selected as "give", and a dev card plays itself (see
+     devCardPlay — straight through, into a modal, or onto the board,
+     depending on what the card still needs to know). Only tagged with this
+     class while that click is actually legal, so a card is never
+     clickable-looking when clicking it wouldn't do anything. */
+  .hand-card-clickable { cursor: pointer; border-color: rgba(255,255,255,0.5); }
+  .hand-card-clickable:hover { border-color: var(--accent); }
+  /* The Knight card for as long as it's armed and the board is waiting for a
+     hex: the lit card is what says the highlighted hexes belong to it, and
+     clicking it again is one of the four ways back out (see
+     cancelRobberMove). */
+  .hand-card-armed { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
   /* White, not black: the board (#board-pane/var(--water)) is dark now too,
      so a light faint dot/line is what shows against it. */
   .vertex-dot { fill: #ffffff33; pointer-events: none; }
@@ -237,10 +238,30 @@
   .board-fab:hover { background: #2e3444; }
   .board-fab:active { transform: scale(0.94); }
   .board-fab svg { width: 100%; height: 100%; fill: #ffffff; }
-  /* Same corner, not mirrored: ROLL is only legal in Phase.ROLL and
-     END_TURN only once past it (see actions.py), so the two are never legal
-     at the same time and can share the spot. Trade now opens from clicking
-     a resource card in hand, not a floating button — see renderHand(). */
+  /* Bottom right is shared, not mirrored: ROLL is only legal in Phase.ROLL
+     and END_TURN only once past it (see actions.py), so the two are never
+     legal at the same time and can have the one spot. Trade opens from
+     clicking a resource card in hand, not a floating button — see
+     renderHand(). */
+  /* The other two corners. A glyph alone carries the dice and the end-turn
+     arrows; "buy" and "cancel" are not evident from a picture, so these two
+     put the word under it and grow to fit — same 52px minimum, so all four
+     still read as one family. */
+  .board-fab.labeled {
+    width: auto; min-width: 52px; height: auto; padding: 8px 8px 6px;
+    flex-direction: column; align-items: center; gap: 3px;
+  }
+  .board-fab.labeled.show { display: flex; }
+  .board-fab.labeled svg { width: 26px; height: 26px; }
+  .board-fab-label { font-size: 0.6rem; font-weight: 700; letter-spacing: 0.05em; line-height: 1; }
+  /* Top right is the second shared corner, on the same terms as the first:
+     the two never apply at once, so the spot just carries whichever does.
+     Buying a development card is the one purchase with nothing on the board
+     to click for it — every other build and buy is already a highlight on
+     the map — and an armed Knight suppresses buying along with everything
+     else (see renderBoardButtons), leaving its own way out as the only
+     thing this corner can be showing. */
+  #buy-dev-card, #cancel-robber { top: 16px; bottom: auto; }
   #log-sheet {
     position: fixed; inset: 0; z-index: 50; background: var(--bg);
     display: none; flex-direction: column;
@@ -253,47 +274,62 @@
   }
   #log-full .log-line { padding: 0.3rem 0; }
 
-  #trade-modal {
+  /* One modal for every decision that needs more than a click on the board:
+     trading either direction, discarding to a seven, the robber's victim, and
+     the two dev cards that pick a resource rather than a place. Modes, and
+     what each one is, are listed above openModal(). */
+  #modal {
     position: fixed; inset: 0; z-index: 55; background: rgba(0,0,0,0.55);
     display: none; align-items: center; justify-content: center; padding: 1rem;
   }
-  #trade-modal.show { display: flex; }
-  /* Row of two, no seam between them: scrollable give/want content on the
-     left, a docked column of icon-only action buttons on the right — the
-     same two spots in both modes (see renderTradeModal): accept/decline
-     responding to someone else's offer, send/cancel proposing your own. */
-  #trade-modal-inner {
+  #modal.show { display: flex; }
+  /* Row of two, no seam between them: scrollable content on the left, a
+     docked column of icon-only action buttons on the right. What lands in
+     that column is the mode's business — accept/decline for an incoming
+     offer, cancel plus send-or-ship for one being built, a lone cancel for
+     the dismissible card modes, and nothing at all for a forced discard,
+     where the column hides itself rather than sit empty. */
+  #modal-inner {
     background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
     max-width: 420px; width: 100%; max-height: 85vh;
     display: flex; overflow: hidden;
   }
-  #trade-modal-main {
+  #modal-main {
     flex: 1 1 auto; min-width: 0; padding: 1rem; overflow-y: auto;
     display: flex; flex-direction: column;
   }
-  #trade-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
-  #trade-modal-head h3 { margin: 0; font-size: 1.05rem; }
+  #modal-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+  #modal-head h3 { margin: 0; font-size: 1.05rem; }
   /* Vertically centers whatever's below the title (the exchange row, or the
      pickers) in the space left over after it — without this, short content
      (an incoming offer's just-one-row body) sits pinned to the top of the
-     box while #trade-modal-actions' own buttons, centered on their own axis
+     box while #modal-actions' own buttons, centered on their own axis
      the whole time, visibly aren't: the two columns read as misaligned. */
-  #trade-modal-body { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; }
-  #trade-modal-actions {
+  #modal-body { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; }
+  #modal-actions {
     flex: none; width: 96px; padding: 1rem 0.7rem; display: flex;
     flex-direction: column; justify-content: center; align-items: center; gap: 0.6rem;
   }
-  #trade-modal-actions button {
+  #modal-actions button {
     width: 56px; height: 56px; padding: 0; border-radius: 12px;
     display: flex; align-items: center; justify-content: center;
   }
-  #trade-modal-actions button svg { width: 26px; height: 26px; fill: currentColor; }
-  /* The one non-icon action: a bank trade is instant and one-sided, not a
-     proposal to another player, so it doesn't fit the send/cancel pair —
-     it sits inline in the body instead, near the picker it applies to. */
-  .trade-bank-btn { margin-top: 0.4rem; }
-  .trade-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.3rem 0 0.7rem; }
-  .trade-note { font-size: 0.85rem; color: var(--muted); margin-top: 0.4rem; }
+  #modal-actions button svg { width: 26px; height: 26px; fill: currentColor; }
+  .pick-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.3rem 0 0.7rem; }
+  .modal-note { font-size: 0.85rem; color: var(--muted); margin-top: 0.4rem; }
+  /* Year of Plenty picks two cards at once, so its options are pairs rather
+     than single tiles: the two cards inside are inert scenery (clicks land on
+     the pair), which is why the hit target and its border live out here. */
+  .pick-pair {
+    display: inline-flex; gap: 0.2rem; padding: 0.25rem; border-radius: 6px;
+    border: 2px solid transparent; cursor: pointer;
+  }
+  .pick-pair:hover { border-color: var(--accent); background: rgba(109,92,232,0.12); }
+  /* The robber's victims are seats, not resources, so they get plain buttons
+     with the same colour swatch the player list uses rather than card tiles —
+     stacked, because a seat's name is far too wide to sit five to a row. */
+  .steal-row { display: flex; flex-direction: column; gap: 0.35rem; margin: 0.3rem 0 0.2rem; }
+  .steal-option { display: flex; align-items: center; gap: 0.5rem; text-align: left; }
   /* The "offered card ⇄ requested card" summary — one side's cards, an
      arrow, the other side's cards, each side captioned with who owes what
      (the "attribution") instead of a full sentence. Used both for reading
@@ -308,15 +344,16 @@
     padding-right: 2.5rem;
   }
   .trade-side { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; }
-  .trade-side .trade-row { margin: 0; justify-content: center; }
+  .trade-side .pick-row { margin: 0; justify-content: center; }
   .trade-side-label { font-size: 0.78rem; color: var(--muted); }
   .trade-arrow { flex: none; font-size: 1.3rem; line-height: 1; color: var(--muted); }
-  /* Reuses .card's own size/shape (see the hand section) so a trade tile
-     looks exactly like the card it represents — just selectable/dimmable
-     on top of that. */
-  .trade-card { cursor: pointer; border: 2px solid transparent; }
-  .trade-card.selected { border-color: var(--accent); }
-  .trade-card.disabled { opacity: 0.28; cursor: default; pointer-events: none; }
+  /* Reuses .card's own size/shape (see the hand section) so a tile in the
+     modal looks exactly like the card it represents — just selectable and
+     dimmable on top of that. Every mode that picks a resource uses these:
+     trade give/want, discard, Monopoly, Year of Plenty. */
+  .pick-card { cursor: pointer; border: 2px solid transparent; }
+  .pick-card.selected { border-color: var(--accent); }
+  .pick-card.disabled { opacity: 0.28; cursor: default; pointer-events: none; }
 
   /* Touch has no hover to fall back on, and the targets are only a few screen
      pixels wide once the board scales down to a phone. */
@@ -432,37 +469,43 @@
   </header>
   <div id="log-full"></div>
 </div>
-<!-- One modal, two modes (see openTradeModal/renderTradeModal): "propose",
-     opened by clicking a resource card in the hand (see renderHand()), lets
-     the human build a give/want pair from the board's own resource glyphs,
-     the clicked card pre-selected as "give"; "respond" opens itself whenever an
-     incoming offer is waiting on the human (syncTradeModal, called from
-     render()). Same layout either way: give/want rows on the left, two
-     icon-only buttons docked in a column on the right — accept/decline
-     responding to an offer, send/cancel proposing one (renderTradeModal). -->
-<div id="trade-modal">
-  <div id="trade-modal-inner">
-    <div id="trade-modal-main">
-      <div id="trade-modal-head">
-        <h3 id="trade-modal-title"></h3>
+<!-- The one modal every choice that isn't a place on the board goes
+     through — six modes, listed with what opens each above openModal().
+     Layout is the same for all of them: the mode's own body on the left,
+     a docked column of icon-only buttons on the right (renderModal). -->
+<div id="modal">
+  <div id="modal-inner">
+    <div id="modal-main">
+      <div id="modal-head">
+        <h3 id="modal-title"></h3>
       </div>
-      <div id="trade-modal-body"></div>
+      <div id="modal-body"></div>
     </div>
-    <div id="trade-modal-actions"></div>
+    <div id="modal-actions"></div>
   </div>
 </div>
 <div id="layout">
   <div id="board-pane">
     <svg id="board-svg" xmlns="http://www.w3.org/2000/svg"></svg>
     <div id="overlay-blocker">Waiting for the table...</div>
-    <!-- Visibility and the click handler are both wired in renderActions().
-         Shares its corner with #end-turn — see the CSS comment on
-         .board-fab. -->
+    <!-- Visibility is set in renderBoardButtons(); the click handler is
+         wired at the bottom of the script. Shares its corner with #end-turn —
+         see the CSS comment on .board-fab. -->
     <button id="roll-dice" class="board-fab" title="Roll dice" aria-label="Roll dice">
       <svg viewBox="0 0 512 512"><use href="#icon-dice"></use></svg>
     </button>
     <button id="end-turn" class="board-fab" title="End turn" aria-label="End turn">
       <svg viewBox="0 0 512 512"><use href="#icon-end-turn"></use></svg>
+    </button>
+    <button id="buy-dev-card" class="board-fab labeled" title="Buy development card"
+            aria-label="Buy development card">
+      <svg viewBox="0 0 512 512"><use href="#icon-dev-card"></use></svg>
+      <span class="board-fab-label">BUY</span>
+    </button>
+    <button id="cancel-robber" class="board-fab labeled" title="Cancel playing the Knight"
+            aria-label="Cancel playing the Knight">
+      <svg viewBox="0 0 512 512"><use href="#icon-close"></use></svg>
+      <span class="board-fab-label">CANCEL</span>
     </button>
   </div>
   <div id="sidebar">
@@ -470,7 +513,6 @@
       <div id="players"></div>
       <div id="hand"></div>
       <div id="notice"></div>
-      <div id="actions"></div>
     </div>
     <div id="log"></div>
   </div>
@@ -532,10 +574,11 @@ let state = null;          // latest state_view()
 let vertexById = {};
 let hexById = {};
 let pendingRobberHex = null;  // when a hex has more than one victim option
+let knightArmed = false;   // Knight card clicked: the board is offering its robber targets — see renderHand
 let inFlight = false;
-let rollAction = null;     // the current ROLL legal_action, if any — see renderActions
-let endTurnAction = null;  // the current END_TURN legal_action, if any — see renderActions
-let tradeMode = null;      // "propose" | "respond" | null — see openTradeModal
+let logSheetOpen = false;  // the full-history sheet is only drawn while it's up — see renderLog
+let freshLogFrom = 0;      // index of the first log line that landed since the human last acted
+let modalMode = null;      // which decision the modal is showing, if any — see openModal
 let tradeGive = null;      // selected resource index, "propose" mode only
 let tradeWant = null;
 let modelNames = [];       // GET /api/models, in MODEL_OPTIONS order
@@ -572,7 +615,7 @@ function iconSvg(iconId, {fill, cls} = {}) {
 
 // A resource .card tile: background tinted to the resource's terrain, icon
 // inked for contrast against it — the shared look behind the hand and every
-// trade-modal card row/picker (see tradeCard, below).
+// modal card row/picker (see pickCard, below).
 function resourceCardTile(name, {extraClasses = [], title} = {}) {
   const card = html("div", {class: ["card", ...extraClasses].join(" "), title: title ?? name});
   card.style.background = TERRAIN_COLORS[RESOURCE_TERRAIN[name]];
@@ -820,18 +863,22 @@ const PHASE_LABELS = {
 
 const VERTEX_TYPES = new Set(["SETUP_SETTLEMENT", "BUILD_SETTLEMENT", "BUILD_CITY"]);
 const EDGE_TYPES = new Set(["SETUP_ROAD", "BUILD_ROAD"]);
-const ROBBER_TYPES = new Set(["MOVE_ROBBER", "PLAY_KNIGHT"]);
+// MOVE_ROBBER and PLAY_KNIGHT are the same move — put the robber somewhere
+// new, then rob one of that hex's neighbours — reached two different ways.
+// They get separate buckets here only so robberMove() below can tell which
+// way you came, because that is the sole thing the rest of the page needs.
 const SIMPLE_TYPES = new Set(["ROLL", "END_TURN", "BUY_DEV_CARD", "PLAY_ROAD_BUILDING", "ACCEPT_TRADE", "DECLINE_TRADE"]);
 
 function groupActions(actions) {
   const g = {
-    vertex: {}, edge: {}, robberByHex: {}, simple: {},
+    vertex: {}, edge: {}, robberByHex: {}, knightByHex: {}, simple: {},
     monopoly: [], yearOfPlenty: [], bankTrade: [], proposeTrade: [], discard: [],
   };
   for (const a of actions) {
     if (VERTEX_TYPES.has(a.type)) (g.vertex[a.a] = g.vertex[a.a] || []).push(a);
     else if (EDGE_TYPES.has(a.type)) (g.edge[a.a] = g.edge[a.a] || []).push(a);
-    else if (ROBBER_TYPES.has(a.type)) (g.robberByHex[a.a] = g.robberByHex[a.a] || []).push(a);
+    else if (a.type === "MOVE_ROBBER") (g.robberByHex[a.a] = g.robberByHex[a.a] || []).push(a);
+    else if (a.type === "PLAY_KNIGHT") (g.knightByHex[a.a] = g.knightByHex[a.a] || []).push(a);
     else if (SIMPLE_TYPES.has(a.type)) g.simple[a.type] = a;
     else if (a.type === "PLAY_MONOPOLY") g.monopoly.push(a);
     else if (a.type === "PLAY_YEAR_OF_PLENTY") g.yearOfPlenty.push(a);
@@ -842,77 +889,112 @@ function groupActions(actions) {
   return g;
 }
 
-// --- Sending actions --------------------------------------------------
-
-// Not a live progress feed — webserver.py's _handle_action/_handle_new block
-// server-side through the *entire* bot cascade in one call (advance_bots()
-// loops until it's the human's turn again) and return once, so by the time
-// this runs the whole thing already happened. This replays it after the
-// fact: pull the ordered, deduplicated list of seats who acted out of the
-// newly-arrived log lines (each line leads with "Player N (name)"; "human"
-// is filtered since that actor is always the request's own sender, never
-// worth announcing), and step the overlay text through them before the
-// resolved state is revealed — one "Player N" per whole turn (every line a
-// seat produced collapses to their one entry, shown for that turn's full
-// span), not a blow-by-blow of what they did or which model they're
-// playing — so it reads as "Player 2's turn, Player 4's turn" instead of
-// one static message the whole time.
-async function animateBotTurns(previousLogLength, newLog) {
-  const overlay = document.getElementById("overlay-blocker");
-  const seats = [];
-  for (const entry of newLog.slice(previousLogLength)) {
-    const text = entry.slice(entry.indexOf("\t") + 1);
-    const actor = text.match(/^(Player \d+) \(([^)]+)\)/);
-    if (actor && actor[2] !== "human" && seats[seats.length - 1] !== actor[1]) {
-      seats.push(actor[1]);
-    }
+// The robber move, or null if none is pending — and the one place on this
+// page that knows there are two ways into it. Everything downstream (the
+// highlighted hexes, the exclusivity, the victim modal, the header, the
+// CANCEL corner) reads this rather than the two action types, because past
+// this function they are the same interaction:
+//
+//   forced  a seven was rolled, so the robber has to go somewhere
+//           (Phase.ROBBER). The targets are on the board the moment the
+//           state arrives, and only answering clears them. The engine offers
+//           no other action in that phase, so "a robber move owns the board"
+//           is already true here without the client enforcing anything.
+//   knight  the Knight card was clicked (Phase.ROLL or MAIN). The identical
+//           question, volunteered rather than imposed — so it can be taken
+//           back, and since the engine is still offering everything else
+//           meanwhile, the client is what has to hold the rest of the page
+//           down while it's open.
+//
+// Never both: MOVE_ROBBER belongs to Phase.ROBBER, PLAY_KNIGHT to ROLL and
+// MAIN, and render() disarms a Knight the moment playing one stops being
+// legal. Forced is checked first regardless, so a stale flag can't win.
+function robberMove(g) {
+  if (Object.keys(g.robberByHex).length) {
+    return {targets: g.robberByHex, source: "forced", cancellable: false};
   }
-  for (const seat of seats) {
-    overlay.textContent = `${seat}'s turn`;
-    await new Promise((resolve) => setTimeout(resolve, 350));
+  if (knightArmed && Object.keys(g.knightByHex).length) {
+    return {targets: g.knightByHex, source: "knight", cancellable: true};
   }
+  return null;
 }
 
-async function sendAction(action) {
+// Takes back a robber move that was volunteered rather than imposed — which
+// means a Knight, since a seven leaves nothing to take back. Puts the board,
+// the hand and the corner buttons back the way they were before the card was
+// clicked.
+//
+// Reachable four ways — the card itself, the CANCEL corner, a click on the
+// bare water, and Escape — because this is the only pending choice with no
+// modal standing in front of it, and the header is the one other thing
+// saying you're in it.
+function cancelRobberMove() {
+  knightArmed = false;
+  pendingRobberHex = null;
+  render();
+}
+
+// --- Sending actions --------------------------------------------------
+
+// webserver.py's _handle_action/_handle_new block server-side through the
+// *entire* bot cascade in one call (advance_bots() loops until it's the
+// human's turn again) and return once, so a whole lap of the table arrives in
+// a single frame. What used to sit here narrated that lap back — "Player 2's
+// turn", "Player 4's turn", 350ms each — reconstructed after the fact by
+// regexing seat numbers out of the log's prose.
+//
+// It told you a seat had acted, never what it did, and it said so while the
+// board was still showing the old state, so the announcement and the change
+// it referred to never appeared together. The log already carries the real
+// answer in words ("Player 2 built a settlement"), so the emphasis moved
+// there: freshLogFrom marks everything that landed while the table was away
+// and the log tints it, at no cost in latency.
+
+// Both of the calls that hand the table over to the bots have the same shape:
+// refuse to overlap with one already running, cover the board while it's out,
+// and uncover it whatever happens. Only what goes in the middle differs.
+async function blocking(body) {
   if (inFlight) return;
   inFlight = true;
   const overlay = document.getElementById("overlay-blocker");
   overlay.textContent = "Waiting for the table...";
   overlay.classList.add("show");
-  pendingRobberHex = null;
-  const previousLogLength = state.log.length;
   try {
-    const {ok, data} = await postJSON("/api/action", action);
-    if (ok) await animateBotTurns(previousLogLength, data.log);
-    state = data;
-    showNotice(ok ? "" : (data.error || "That was not legal."));
-    render();
+    await body();
   } finally {
     inFlight = false;
     overlay.classList.remove("show");
   }
 }
 
-async function newGame() {
-  if (inFlight) return;
-  inFlight = true;
-  const overlay = document.getElementById("overlay-blocker");
-  overlay.textContent = "Waiting for the table...";
-  overlay.classList.add("show");
-  try {
-    const {data} = await postJSON("/api/new", {bot_models: currentBotModels});
+function sendAction(action) {
+  return blocking(async () => {
+    // Any half-made client-side choice is spent the moment an action goes
+    // out: the state coming back is the one that decides what's open now.
+    pendingRobberHex = null;
+    knightArmed = false;
+    // Everything from here on in the new log is this exchange: the human's
+    // own move, then whatever the table did before handing the turn back.
+    freshLogFrom = state.log.length;
+    const {ok, data} = await postJSON("/api/action", action);
+    state = data;
+    showNotice(ok ? "" : (data.error || "That was not legal."));
+    render();
+  });
+}
+
+function newGame() {
+  return blocking(async () => {
     // Bots may have already moved before the human's first setup turn (see
     // _build_session's advance_bots() call) — the whole log is "new" here,
     // there's no previous game's log to subtract.
-    await animateBotTurns(0, data.log);
+    freshLogFrom = 0;
+    const {data} = await postJSON("/api/new", {bot_models: currentBotModels});
     state = data;
     await loadBoard();
     showNotice("");
     render();
-  } finally {
-    inFlight = false;
-    overlay.classList.remove("show");
-  }
+  });
 }
 
 function showNotice(text) {
@@ -925,13 +1007,21 @@ function showNotice(text) {
 
 function render() {
   if (!state || !board) return;
+  // Arming a Knight is purely client-side, so nothing else clears it: a new
+  // state where playing one is no longer legal (it was played, the turn moved
+  // on, the game ended) has to. legal_actions is empty whenever it isn't the
+  // human's decision, so this covers the turn case too.
+  if (knightArmed && !state.legal_actions.some((a) => a.type === "PLAY_KNIGHT")) {
+    knightArmed = false;
+    pendingRobberHex = null;
+  }
   renderStatus();
   renderPlayers();
   renderHand();
   renderBoardDynamic();
-  renderActions();
+  renderBoardButtons();
   renderLog();
-  syncTradeModal();
+  syncModal();
 }
 
 function renderStatus() {
@@ -942,7 +1032,14 @@ function renderStatus() {
       : `${seatLabel(state.winner).toUpperCase()} WINS`;
     return;
   }
-  phaseEl.textContent = PHASE_LABELS[state.phase] || state.phase;
+  // The same move either way, so the same words either way — PHASE_LABELS
+  // already reads "PLACE ROBBER" for the forced one. A Knight is a phase the
+  // server knows nothing about, so it gets the prefix instead of a label of
+  // its own: it says a card is being spent and can still be taken back, which
+  // is the only part that differs.
+  phaseEl.textContent = knightArmed
+    ? `KNIGHT — ${PHASE_LABELS.ROBBER}`
+    : PHASE_LABELS[state.phase] || state.phase;
 }
 
 // One icon + (optional) number, for the player list's stat row — glyphs
@@ -1019,6 +1116,46 @@ function renderPlayers() {
   }
 }
 
+// What clicking a dev card in hand does, or null if that card can't be
+// played right now (it isn't legal, or it's a Victory Point, which is never
+// "played" at all — it just counts). Playing a dev card is only ever done
+// this way now; nothing in the actions list plays one.
+//
+// Three shapes, by what the card still needs to know:
+//   - nothing (Road Building) — send it and let the board take the two roads
+//   - a resource (Monopoly, Year of Plenty) — open the modal that picks one
+//   - a hex (Knight) — arm the board, since a modal can't point at a tile
+// The first two are cancelled by closing the modal; the Knight, having none,
+// keeps its own four ways out (see cancelRobberMove).
+function devCardPlay(name, g) {
+  // While a Knight is armed it is the only card that answers a click: the
+  // rest stand down with the board and the corner buttons (see
+  // renderBoardButtons), so a half-made choice can't be walked away from by
+  // quietly starting another one.
+  if (robberMove(g) && name !== "Knight") return null;
+  if (name === "Knight" && Object.keys(g.knightByHex).length) {
+    return {
+      title: knightArmed ? "Cancel Knight" : "Play Knight",
+      run: () => {
+        if (knightArmed) { cancelRobberMove(); return; }
+        knightArmed = true;
+        pendingRobberHex = null;
+        render();
+      },
+    };
+  }
+  if (name === "Road Building" && g.simple.PLAY_ROAD_BUILDING) {
+    return {title: "Play Road Building", run: () => sendAction(g.simple.PLAY_ROAD_BUILDING)};
+  }
+  if (name === "Monopoly" && g.monopoly.length) {
+    return {title: "Play Monopoly", run: () => openModal("monopoly")};
+  }
+  if (name === "Year Of Plenty" && g.yearOfPlenty.length) {
+    return {title: "Play Year of Plenty", run: () => openModal("year-of-plenty")};
+  }
+  return null;
+}
+
 // The human's own cards, kept in a fixed spot below the seat list (in actual
 // seat order) rather than tied to wherever their seat happens to fall.
 function renderHand() {
@@ -1027,12 +1164,18 @@ function renderHand() {
   const p = state.players.find((p) => p.seat === state.human_seat);
   if (!p || p.hand === undefined) return;
 
-  // Whether clicking a card should open the trade modal: the same
-  // condition the old floating trade button used to gate its own
-  // visibility on (a bank trade or a player offer is actually proposable
-  // right now).
-  const canTrade = !state.game_over && state.to_move === state.human_seat
-    && state.legal_actions.some((a) => a.type === "BANK_TRADE" || a.type === "PROPOSE_TRADE");
+  // What a click on a card does is decided by what's actually legal, which
+  // is to say by the phase — and in most phases it does nothing at all.
+  // legal_actions arrives empty unless the human is the one to move (see
+  // GameSession.legal_wire_actions), so reading it is the whole test; there's
+  // no separate game_over/to_move check to keep in sync with it.
+  const g = groupActions(state.legal_actions);
+  // The same condition the old floating trade button gated its own
+  // visibility on: a bank trade or a player offer is proposable right now.
+  // Discarding is the other thing a resource card can do, but it happens in
+  // the modal that DISCARD opens over the whole page (see syncModal), not
+  // here — these cards aren't reachable while that's up.
+  const canTrade = !robberMove(g) && (g.bankTrade.length > 0 || g.proposeTrade.length > 0);
 
   // Two columns, side by side, both always present — the header and the
   // row's height hold their place even at zero cards, so buying a first dev
@@ -1043,13 +1186,12 @@ function renderHand() {
   for (const r of board.resources) {
     const n = p.hand[r];
     if (!n) continue;
+    const idx = board.resources.indexOf(r);
     const card = resourceCardTile(r, {title: `${r}: ${n}`});
     card.appendChild(html("div", {class: "count"}, String(n)));
     if (canTrade) {
-      card.classList.add("hand-card-tradeable");
-      card.addEventListener("click", () => {
-        openTradeModal("propose", {give: board.resources.indexOf(r)});
-      });
+      card.classList.add("hand-card-clickable");
+      card.addEventListener("click", () => openModal("propose", {give: idx}));
     }
     resHand.appendChild(card);
   }
@@ -1062,10 +1204,18 @@ function renderHand() {
   for (const c of board.dev_cards) {
     const n = p.dev_cards[c];
     if (!n) continue;
-    const card = html("div", {class: "card", title: `${c}: ${n}`});
+    const play = devCardPlay(c, g);
+    const classes = ["card"];
+    if (play) classes.push("hand-card-clickable");
+    // Only the Knight can be lit: it's the only card whose choice is made on
+    // the board rather than in a modal, so it's the only one with a state to
+    // show while the choice is still open.
+    if (c === "Knight" && knightArmed) classes.push("hand-card-armed");
+    const card = html("div", {class: classes.join(" "), title: play ? play.title : `${c}: ${n}`});
     card.style.background = DEV_CARD_BG;
     card.appendChild(iconSvg(DEV_CARD_ICONS[c], {fill: DEV_CARD_INK}));
     card.appendChild(html("div", {class: "count"}, String(n)));
+    if (play) card.addEventListener("click", play.run);
     devHand.appendChild(card);
   }
   devCol.appendChild(devHand);
@@ -1131,17 +1281,25 @@ function renderBoardDynamic() {
   // underneath in DOM order or it steals clicks meant for a road on its rim
   // (later siblings paint on top in SVG). Vertices are the smallest, most
   // precise targets and go last so nothing else can shadow them either.
-  for (const [hid, actions] of Object.entries(g.robberByHex)) {
+  const move = robberMove(g);
+  for (const [hid, actions] of Object.entries(move ? move.targets : {})) {
     const h = hexById[hid];
     const points = h.vertex_ids.map((v) => `${vertexById[v].x},${vertexById[v].y}`).join(" ");
     const poly = el("polygon", {points, class: "clickable-hex"});
     poly.addEventListener("click", () => {
       if (actions.length === 1) { sendAction(actions[0]); return; }
+      // syncModal picks this up on the way through and opens "steal" over it.
       pendingRobberHex = Number(hid);
-      renderActions();
+      render();
     });
     clickLayer.appendChild(poly);
   }
+  // A pending robber move owns the board until it's answered or taken back,
+  // so the build targets come down with everything else (renderBoardButtons)
+  // and its hexes above are all that answers a click. Free for the forced
+  // one — the engine offers nothing else in Phase.ROBBER — but the rule is
+  // the same either way, so it's written once.
+  if (move) return;
   for (const [eid, actions] of Object.entries(g.edge)) {
     const e = board.edges[eid];
     const p0 = vertexById[e.v0], p1 = vertexById[e.v1];
@@ -1157,115 +1315,63 @@ function renderBoardDynamic() {
   }
 }
 
-function actionSection(title) {
-  const container = document.getElementById("actions");
-  container.appendChild(html("h3", {}, title));
-  const row = html("div", {class: "action-row"});
-  container.appendChild(row);
-  return row;
+// The board's four corner buttons, shown exactly when what they do is on
+// offer. There is no sidebar list of actions any more: rolling, ending a turn
+// and buying a development card are these buttons; building and the robber
+// are highlights on the board itself; a development card is played by
+// clicking it in hand (devCardPlay); and every choice shaped like a menu —
+// trading, discarding, the robber's victim, Monopoly's resource, Year of
+// Plenty's pair — is a mode of the one modal.
+function renderBoardButtons() {
+  const myTurn = !state.game_over && state.to_move === state.human_seat;
+  // A robber move is the one choice the game asks for on the board rather
+  // than in the modal, and it behaves like a modal mode all the same: nothing
+  // behind it is reachable until it's answered. When it came from a Knight,
+  // rolling and ending a turn are both still legal server-side and both would
+  // silently throw the choice away, so they come down with the rest.
+  const move = robberMove(groupActions(state.legal_actions));
+  const offered = (type) => myTurn && !move && legalAction(type) !== null;
+  showFab("roll-dice", offered("ROLL"));
+  showFab("end-turn", offered("END_TURN"));
+  showFab("buy-dev-card", offered("BUY_DEV_CARD"));
+  // Not an action at all, this one: it's the way back out of a robber move
+  // that was volunteered, which is the only kind there is a way back out of.
+  // It takes over the same corner BUY just gave up — see the CSS on the pair.
+  showFab("cancel-robber", Boolean(move && move.cancellable));
 }
 
-function renderActions() {
-  const container = document.getElementById("actions");
-  container.innerHTML = "";
-
-  // Drives the board's own roll button (see boot wiring below) — computed
-  // up front so it stays right through the early returns below (robber
-  // choice, discard) rather than only in the "Turn" section at the bottom.
-  rollAction = (!state.game_over && state.to_move === state.human_seat)
-    ? state.legal_actions.find((a) => a.type === "ROLL") || null
-    : null;
-  document.getElementById("roll-dice").classList.toggle("show", rollAction !== null);
-
-  // Same idea for the board's end-turn button.
-  endTurnAction = (!state.game_over && state.to_move === state.human_seat)
-    ? state.legal_actions.find((a) => a.type === "END_TURN") || null
-    : null;
-  document.getElementById("end-turn").classList.toggle("show", endTurnAction !== null);
-
-  if (state.game_over) {
-    container.appendChild(html("div", {}, "The game has ended."));
-    return;
-  }
-  if (state.to_move !== state.human_seat) {
-    container.appendChild(html("div", {}, "Waiting on the other players..."));
-    return;
-  }
-
-  const g = groupActions(state.legal_actions);
-
-  if (pendingRobberHex !== null && g.robberByHex[pendingRobberHex]) {
-    const row = actionSection(`Hex ${pendingRobberHex}: steal from`);
-    for (const a of g.robberByHex[pendingRobberHex]) {
-      const label = a.b < state.players.length ? seatLabel(a.b) : "Nobody";
-      const btn = html("button", {}, label);
-      btn.addEventListener("click", () => sendAction(a));
-      row.appendChild(btn);
-    }
-    return;
-  }
-
-  // Incoming offers are handled entirely by the trade modal now (see
-  // syncTradeModal, called from render()) rather than a row here.
-
-  if (g.discard.length) {
-    const owed = state.discard_quota[state.human_seat];
-    const row = actionSection(`Discard ${owed} more card(s)`);
-    for (const a of g.discard) {
-      const btn = html("button", {}, board.resources[a.a]);
-      btn.addEventListener("click", () => sendAction(a));
-      row.appendChild(btn);
-    }
-    return; // nothing else is legal during a discard
-  }
-
-  // ROLL and END_TURN render as the board's floating dice/end-turn buttons
-  // (top of this function + boot wiring below), not as rows here.
-  if (g.simple.PLAY_ROAD_BUILDING) {
-    const row = actionSection("Turn");
-    const btn = html("button", {}, "Play Road Building");
-    btn.addEventListener("click", () => sendAction(g.simple.PLAY_ROAD_BUILDING));
-    row.appendChild(btn);
-  }
-
-  // Robber, build and knight targets are all highlighted on the board itself,
-  // so they get no prose here.
-  if (g.simple.BUY_DEV_CARD) {
-    const row = actionSection("Development cards");
-    const btn = html("button", {}, "Buy development card");
-    btn.addEventListener("click", () => sendAction(g.simple.BUY_DEV_CARD));
-    row.appendChild(btn);
-  }
-
-  if (g.monopoly.length) {
-    const row = actionSection("Play Monopoly");
-    for (const a of g.monopoly) {
-      const btn = html("button", {}, board.resources[a.a]);
-      btn.addEventListener("click", () => sendAction(a));
-      row.appendChild(btn);
-    }
-  }
-
-  if (g.yearOfPlenty.length) {
-    const row = actionSection("Play Year of Plenty");
-    for (const a of g.yearOfPlenty) {
-      const [r0, r1] = board.year_of_plenty_pairs[a.a];
-      const btn = html("button", {}, `${r0} + ${r1}`);
-      btn.addEventListener("click", () => sendAction(a));
-      row.appendChild(btn);
-    }
-  }
-
-  // Trading (bank and player offers both) opens from clicking a card in
-  // the hand — see renderHand() and openTradeModal/renderTradeModal below.
+function showFab(id, on) {
+  document.getElementById(id).classList.toggle("show", on);
 }
 
-// --- Trade modal -----------------------------------------------------------
+// The wire action of a given type, or null. Read twice for each corner
+// button — once to decide whether to show it, once when it's clicked — which
+// is cheaper and harder to get wrong than parking three of them in module
+// variables and keeping those in step with what's on screen.
+function legalAction(type) {
+  return state.legal_actions.find((a) => a.type === type) || null;
+}
 
-// A right-column icon-only button — the same two spots in both trade modes
-// (see renderTradeModal): accept/decline responding to an offer, send/cancel
-// proposing one. `label` is the tooltip/screen-reader text, not shown.
-function tradeActionButton(icon, label, {primary = true} = {}) {
+// --- The modal ---------------------------------------------------------------
+//
+// One modal, six modes — every decision in the game that isn't a place on the
+// board. Three are click-driven and three open themselves; see openModal and
+// syncModal below for which is which.
+
+// Modes syncModal owns: each one appears the moment its condition does and
+// goes away the moment it stops, so nothing else has to remember to open or
+// close it. The other three are opened by a click and only ever closed by one.
+const MODAL_AUTO = new Set(["respond", "discard", "steal"]);
+
+// Modes Escape and a backdrop click may close. The two left out are the two
+// the game is actually waiting on: an offer has to be answered, and cards owed
+// to the bank after a seven have to be handed over. "steal" is here because
+// closing it only backs out to the hex list, not out of the move.
+const MODAL_DISMISSIBLE = new Set(["propose", "monopoly", "year-of-plenty", "steal"]);
+
+// A right-column icon-only button. `label` is the tooltip/screen-reader text,
+// not shown — the whole column is glyphs.
+function modalActionButton(icon, label, {primary = true} = {}) {
   const attrs = {title: label, "aria-label": label};
   if (primary) attrs.class = "primary";
   const btn = html("button", attrs);
@@ -1274,38 +1380,39 @@ function tradeActionButton(icon, label, {primary = true} = {}) {
 }
 
 // One card tile — the same visual .card the hand section uses (via
-// resourceCardTile), just selectable/dimmable on top of that (see
-// .trade-card in the stylesheet).
-function tradeCard(resourceIdx, {selected, disabled, onClick} = {}) {
+// resourceCardTile), just selectable/dimmable on top of that (see .pick-card
+// in the stylesheet). Every mode that picks a resource is built out of these.
+function pickCard(resourceIdx, {selected, disabled, count, title, onClick} = {}) {
   const name = board.resources[resourceIdx];
-  const classes = ["trade-card"];
+  const classes = ["pick-card"];
   if (selected) classes.push("selected");
   if (disabled) classes.push("disabled");
-  const card = resourceCardTile(name, {extraClasses: classes});
+  const card = resourceCardTile(name, {extraClasses: classes, title});
+  if (count !== undefined && count > 1) {
+    card.appendChild(html("div", {class: "count"}, String(count)));
+  }
   if (onClick && !disabled) card.addEventListener("click", onClick);
   return card;
 }
 
 // A bundle (as the wire format carries it: one count per resource index),
-// display-only — the "respond" modal's read of what's being offered.
+// display-only — the "respond" mode's read of what's being offered.
 // bundle.length must match board.resources.length (both are NUM_RESOURCES);
 // the server and tradePickerRow below share that assumption too.
 function tradeCardRow(bundle) {
-  const row = html("div", {class: "trade-row"});
+  const row = html("div", {class: "pick-row"});
   for (let r = 0; r < bundle.length; r++) {
     if (!bundle[r]) continue;
-    const card = tradeCard(r, {});
-    if (bundle[r] > 1) card.appendChild(html("div", {class: "count"}, String(bundle[r])));
-    row.appendChild(card);
+    row.appendChild(pickCard(r, {count: bundle[r]}));
   }
   return row;
 }
 
 // A one-hot bundle (see tradeCardRow) for a single picked resource — lets
 // the "propose" preview reuse the same exchange-row renderer the "respond"
-// modal uses for a real multi-resource offer.
-function singleBundle(resourceIdx) {
-  return board.resources.map((_, i) => (i === resourceIdx ? 1 : 0));
+// mode uses for a real multi-resource offer.
+function singleBundle(resourceIdx, count = 1) {
+  return board.resources.map((_, i) => (i === resourceIdx ? count : 0));
 }
 
 // The shared "offered card(s) ⇄ requested card(s)" layout: one side's
@@ -1322,22 +1429,22 @@ function tradeExchangeRow(giveBundle, giveLabel, wantBundle, wantLabel) {
   wantSide.appendChild(html("div", {class: "trade-side-label"}, wantLabel));
   wantSide.appendChild(tradeCardRow(wantBundle));
   row.appendChild(giveSide);
-  row.appendChild(html("div", {class: "trade-arrow"}, "\u21c4"));
+  row.appendChild(html("div", {class: "trade-arrow"}, "⇄"));
   row.appendChild(wantSide);
   return row;
 }
 
-// One row of all 5 resources, pickable — the "propose" modal's give/want
+// One row of all 5 resources, pickable — the "propose" mode's give/want
 // rows. "give" disables anything the human doesn't hold; "want" disables
 // whatever's currently picked as "give" (can't trade a resource for itself).
 function tradePickerRow(which, p) {
-  const row = html("div", {class: "trade-row"});
+  const row = html("div", {class: "pick-row"});
   for (let r = 0; r < board.resources.length; r++) {
     const held = p.hand ? p.hand[board.resources[r]] : 0;
     const isGive = which === "give";
     const disabled = isGive ? !held : r === tradeGive;
     const selected = isGive ? tradeGive === r : tradeWant === r;
-    row.appendChild(tradeCard(r, {
+    row.appendChild(pickCard(r, {
       selected, disabled,
       onClick: () => {
         if (isGive) {
@@ -1346,15 +1453,22 @@ function tradePickerRow(which, p) {
         } else {
           tradeWant = r;
         }
-        renderTradeModal();
+        renderModal();
       },
     }));
   }
   return row;
 }
 
-function openTradeModal(mode, {give = null} = {}) {
-  tradeMode = mode;
+// The six modes, and what puts each one up:
+//   "propose"        clicking a resource card in hand (renderHand)
+//   "monopoly"       clicking the Monopoly card in hand (devCardPlay)
+//   "year-of-plenty" clicking the Year of Plenty card in hand (devCardPlay)
+//   "respond"        an incoming offer waiting on the human (syncModal)
+//   "discard"        cards owed to the bank after a seven (syncModal)
+//   "steal"          a robber hex with more than one victim (syncModal)
+function openModal(mode, {give = null} = {}) {
+  modalMode = mode;
   if (mode === "propose") {
     // `give` pre-selects the resource clicked in the hand (see renderHand());
     // "want" always starts fresh regardless, since that choice hasn't been
@@ -1362,70 +1476,177 @@ function openTradeModal(mode, {give = null} = {}) {
     tradeGive = give;
     tradeWant = null;
   }
-  document.getElementById("trade-modal").classList.add("show");
-  renderTradeModal();
+  document.getElementById("modal").classList.add("show");
+  renderModal();
 }
 
-function closeTradeModal() {
-  tradeMode = null;
-  document.getElementById("trade-modal").classList.remove("show");
+function closeModal() {
+  // Closing the victim list is backing out to the hex list, not out of the
+  // move: the board's highlights were never cleared to get here, so dropping
+  // the pending hex is the whole undo — and it's also what stops syncModal
+  // from putting the same list straight back up on the next render.
+  if (modalMode === "steal") pendingRobberHex = null;
+  modalMode = null;
+  document.getElementById("modal").classList.remove("show");
 }
 
-// Called every render(): opens the modal in "respond" mode by itself
-// whenever an offer is waiting on the human, closes it again once that
-// stops being true (accepted, declined, or it's no longer their turn to
-// answer) — the only one of the two modes that isn't purely click-driven.
-function syncTradeModal() {
-  const shouldRespond = Boolean(state.offer) && state.to_move === state.human_seat && !state.game_over;
-  if (shouldRespond) {
-    if (tradeMode !== "respond") openTradeModal("respond");
-    else renderTradeModal();
-  } else if (tradeMode === "respond") {
-    closeTradeModal();
+// Called every render(). The three MODAL_AUTO modes are conditions rather
+// than clicks — an offer is waiting, cards are owed, a hex with more than one
+// neighbour has been picked — so this is the single place that decides which
+// of them (if any) should be up, and closes whichever no longer should be.
+// The click-driven three are left alone entirely.
+function syncModal() {
+  const g = groupActions(state.legal_actions);
+  const live = state.offer && state.to_move === state.human_seat && !state.game_over ? "respond"
+    : g.discard.length ? "discard"
+    : pendingRobberHex !== null ? "steal"
+    : null;
+  if (live) {
+    if (modalMode !== live) openModal(live);
+    else renderModal();
+  } else if (MODAL_AUTO.has(modalMode)) {
+    closeModal();
   }
 }
 
-function renderTradeModal() {
-  const title = document.getElementById("trade-modal-title");
-  const body = document.getElementById("trade-modal-body");
-  const actions = document.getElementById("trade-modal-actions");
+function renderModal() {
+  const title = document.getElementById("modal-title");
+  const body = document.getElementById("modal-body");
+  const actions = document.getElementById("modal-actions");
   body.innerHTML = "";
   actions.innerHTML = "";
+  const g = groupActions(state.legal_actions);
 
-  if (tradeMode === "respond") {
-    const offer = state.offer;
-    // Who it's from goes in the title so the exchange row below can stay
-    // just the cards themselves plus a one-word attribution each.
-    title.textContent = `Trade offer from ${seatLabel(offer.proposer)}`;
-    body.appendChild(tradeExchangeRow(offer.give, "You get", offer.want, "You give"));
+  if (modalMode === "respond") renderRespondMode(g, title, body, actions);
+  else if (modalMode === "discard") renderDiscardMode(g, title, body);
+  else if (modalMode === "steal") renderStealMode(g, title, body, actions);
+  else if (modalMode === "monopoly") renderMonopolyMode(g, title, body, actions);
+  else if (modalMode === "year-of-plenty") renderYearOfPlentyMode(g, title, body, actions);
+  else renderProposeMode(title, body, actions);
 
-    const g = groupActions(state.legal_actions);
-    if (g.simple.ACCEPT_TRADE) {
-      const btn = tradeActionButton("check", "Accept trade");
-      btn.addEventListener("click", () => { closeTradeModal(); sendAction(g.simple.ACCEPT_TRADE); });
-      actions.appendChild(btn);
-    }
-    if (g.simple.DECLINE_TRADE) {
-      const btn = tradeActionButton("close", "Decline trade", {primary: false});
-      btn.addEventListener("click", () => { closeTradeModal(); sendAction(g.simple.DECLINE_TRADE); });
-      actions.appendChild(btn);
-    }
-    return;
+  // A forced discard has nothing to put in the button column, and an empty
+  // 96px gutter reads as a button that failed to render rather than as no
+  // button at all.
+  actions.style.display = actions.children.length ? "" : "none";
+}
+
+function renderRespondMode(g, title, body, actions) {
+  const offer = state.offer;
+  // Who it's from goes in the title so the exchange row below can stay
+  // just the cards themselves plus a one-word attribution each.
+  title.textContent = `Trade offer from ${seatLabel(offer.proposer)}`;
+  body.appendChild(tradeExchangeRow(offer.give, "You get", offer.want, "You give"));
+
+  if (g.simple.ACCEPT_TRADE) {
+    const btn = modalActionButton("check", "Accept trade");
+    btn.addEventListener("click", () => { closeModal(); sendAction(g.simple.ACCEPT_TRADE); });
+    actions.appendChild(btn);
   }
+  if (g.simple.DECLINE_TRADE) {
+    const btn = modalActionButton("close", "Decline trade", {primary: false});
+    btn.addEventListener("click", () => { closeModal(); sendAction(g.simple.DECLINE_TRADE); });
+    actions.appendChild(btn);
+  }
+}
 
+// One card at a time, which is how the engine models it too (see
+// `legal_actions` under Phase.DISCARD): this comes straight back up with one
+// fewer owed until the quota is met, so there's nothing to confirm and no
+// button column at all.
+function renderDiscardMode(g, title, body) {
+  const owed = state.discard_quota[state.human_seat];
+  title.textContent = `Discard ${owed} card${owed === 1 ? "" : "s"}`;
+  body.appendChild(html("div", {class: "modal-note"}, "Half your hand, rounded down — pick one."));
+  const p = state.players.find((pl) => pl.seat === state.human_seat);
+  const byResource = {};
+  for (const a of g.discard) byResource[a.a] = a;
+  const row = html("div", {class: "pick-row"});
+  for (let r = 0; r < board.resources.length; r++) {
+    const name = board.resources[r];
+    const a = byResource[r];
+    // All five, with the ones the human doesn't hold dimmed rather than
+    // dropped: the row keeps the same shape from one discard to the next
+    // instead of reflowing under the cursor between clicks.
+    row.appendChild(pickCard(r, {
+      count: p.hand[name], disabled: !a,
+      title: a ? `Discard ${name}` : name,
+      onClick: () => sendAction(a),
+    }));
+  }
+  body.appendChild(row);
+}
+
+// The second half of a robber move: the hex is already picked (it's the one
+// still highlighted behind this), and this is who to rob on it. Seats, not
+// resources, so plain buttons with the player list's own colour swatch.
+function renderStealMode(g, title, body, actions) {
+  const move = robberMove(g);
+  const options = (move && move.targets[pendingRobberHex]) || [];
+  title.textContent = "Steal from";
+  const row = html("div", {class: "steal-row"});
+  for (const a of options) {
+    const btn = html("button", {class: "steal-option"});
+    if (a.b < state.players.length) {
+      const swatch = html("div", {class: "swatch"});
+      swatch.style.background = SEAT_COLORS[a.b].fill;
+      swatch.style.borderColor = SEAT_COLORS[a.b].stroke;
+      btn.appendChild(swatch);
+      btn.appendChild(document.createTextNode(seatLabel(a.b)));
+    } else {
+      btn.appendChild(document.createTextNode("Nobody"));
+    }
+    btn.addEventListener("click", () => { closeModal(); sendAction(a); });
+    row.appendChild(btn);
+  }
+  body.appendChild(row);
+
+  const cancel = modalActionButton("close", "Back to the hexes", {primary: false});
+  cancel.addEventListener("click", closeModal);
+  actions.appendChild(cancel);
+}
+
+function renderMonopolyMode(g, title, body, actions) {
+  title.textContent = "Play Monopoly";
+  body.appendChild(html("div", {class: "modal-note"},
+    "Take every card of one resource from every other player."));
+  const row = html("div", {class: "pick-row"});
+  for (const a of g.monopoly) {
+    row.appendChild(pickCard(a.a, {
+      title: `Take every ${board.resources[a.a]}`,
+      onClick: () => { closeModal(); sendAction(a); },
+    }));
+  }
+  body.appendChild(row);
+  actions.appendChild(modalCancelButton());
+}
+
+// Fifteen pairs at most (every combination of two resources, repeats
+// included), and fewer when the bank can't cover one — so they're laid out as
+// whole pairs to click rather than as two sequential picks, which would need
+// its own half-made state and a way to back out of it.
+function renderYearOfPlentyMode(g, title, body, actions) {
+  title.textContent = "Play Year of Plenty";
+  body.appendChild(html("div", {class: "modal-note"}, "Take two cards from the bank."));
+  const row = html("div", {class: "pick-row"});
+  for (const a of g.yearOfPlenty) {
+    const [r0, r1] = board.year_of_plenty_pairs[a.a];
+    const pair = html("div", {class: "pick-pair", title: `${r0} + ${r1}`});
+    pair.appendChild(pickCard(board.resources.indexOf(r0), {}));
+    pair.appendChild(pickCard(board.resources.indexOf(r1), {}));
+    pair.addEventListener("click", () => { closeModal(); sendAction(a); });
+    row.appendChild(pair);
+  }
+  body.appendChild(row);
+  actions.appendChild(modalCancelButton());
+}
+
+function renderProposeMode(title, body, actions) {
   title.textContent = "Propose a trade";
   const p = state.players.find((pl) => pl.seat === state.human_seat);
-  // A live "offered ⇄ requested" preview once both sides are picked, so the
-  // pickers below are for adjusting the choice, not the only place it's
-  // visible.
-  if (tradeGive !== null && tradeWant !== null) {
-    body.appendChild(tradeExchangeRow(singleBundle(tradeGive), "You give", singleBundle(tradeWant), "You want"));
-  }
-  body.appendChild(html("div", {class: "trade-note"}, "Give:"));
-  body.appendChild(tradePickerRow("give", p));
-  body.appendChild(html("div", {class: "trade-note"}, "Want:"));
-  body.appendChild(tradePickerRow("want", p));
 
+  // Resolved before the body is built, not after: which of the two the picked
+  // pair lands on decides both what the preview's give side costs and which
+  // glyph the primary button carries (see the end of this function).
   let bank = null, offer = null;
   if (tradeGive !== null && tradeWant !== null) {
     bank = state.legal_actions.find(
@@ -1444,79 +1665,132 @@ function renderTradeModal() {
     offer = state.legal_actions.find(
       (a) => a.type === "PROPOSE_TRADE" && a.give[tradeGive] === 1 && a.want[tradeWant] === 1
     );
-    // Instant and one-sided, not a proposal to another player — doesn't fit
-    // the send/cancel pair, so it's an inline button next to what it acts on.
-    if (bank) {
-      const ratio = state.trade_ratios[board.resources[tradeGive]];
-      const btn = html("button", {class: "trade-bank-btn"}, `Trade with bank (give ${ratio})`);
-      btn.addEventListener("click", () => { closeTradeModal(); sendAction(bank); });
-      body.appendChild(btn);
-    }
   }
 
-  if (offer) {
-    const btn = tradeActionButton("send", "Offer to players");
-    btn.addEventListener("click", () => { closeTradeModal(); sendAction(offer); });
+  // A live "offered ⇄ requested" preview once both sides are picked, so the
+  // pickers below are for adjusting the choice, not the only place it's
+  // visible. A bank/port trade is the one that isn't one-for-one, so its give
+  // side carries that port's real ratio — the same count the ship button
+  // below is about to spend.
+  if (tradeGive !== null && tradeWant !== null) {
+    const giveCount = bank ? state.trade_ratios[board.resources[tradeGive]] : 1;
+    body.appendChild(tradeExchangeRow(
+      singleBundle(tradeGive, giveCount), "You give", singleBundle(tradeWant), "You want"
+    ));
+  }
+  body.appendChild(html("div", {class: "modal-note"}, "Give:"));
+  body.appendChild(tradePickerRow("give", p));
+  body.appendChild(html("div", {class: "modal-note"}, "Want:"));
+  body.appendChild(tradePickerRow("want", p));
+
+  // The primary slot goes to the bank whenever the bank or a port covers the
+  // picked pair — the same spot send would have taken, carrying the ship the
+  // board's own port markers use, and firing the trade outright instead of
+  // putting it to the table. The pair only goes to the other players when no
+  // bank rate applies to it.
+  if (bank) {
+    const ratio = state.trade_ratios[board.resources[tradeGive]];
+    const btn = modalActionButton("ship", `Trade with bank (give ${ratio})`);
+    btn.addEventListener("click", () => { closeModal(); sendAction(bank); });
+    actions.appendChild(btn);
+  } else if (offer) {
+    const btn = modalActionButton("send", "Offer to players");
+    btn.addEventListener("click", () => { closeModal(); sendAction(offer); });
     actions.appendChild(btn);
   }
-  const cancelBtn = tradeActionButton("close", "Cancel", {primary: false});
-  cancelBtn.addEventListener("click", closeTradeModal);
-  actions.appendChild(cancelBtn);
+  actions.appendChild(modalCancelButton());
 }
 
+// The shared way out of every dismissible mode — the same thing Escape and a
+// backdrop click do (see the boot wiring), just as a button you can see.
+function modalCancelButton() {
+  const btn = modalActionButton("close", "Cancel", {primary: false});
+  btn.addEventListener("click", closeModal);
+  return btn;
+}
+
+// The inline sidebar log only ever shows the current round's lines (every
+// seat's actions within one lap of the table, not just one seat's). The full
+// history is one tap away via the hamburger's full-screen sheet, which keeps
+// everything — and is drawn only while it's actually up (see setLogOpen),
+// since by the late game that's hundreds of rows to rebuild for something
+// nobody is looking at.
 function renderLog() {
-  for (const id of ["log", "log-full"]) {
-    const logEl = document.getElementById(id);
-    const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
-    logEl.innerHTML = "";
-    // The inline sidebar log ("log") only ever shows the current round's
-    // lines (every seat's actions within one lap of the table, not just
-    // one seat's) — full history is one tap away via the hamburger's
-    // full-screen sheet ("log-full"), which keeps everything.
-    const entries = id === "log"
-      ? state.log.filter((entry) => entry.slice(0, entry.indexOf("\t")) === String(state.round))
-      : state.log;
-    for (const entry of entries) {
-      // "round\ttext" from the server — split once so the number gets its
-      // own fixed-width column (.log-turn) and every line's text lines up
-      // regardless of digit count.
-      const tab = entry.indexOf("\t");
-      const row = html("div", {class: "log-line"});
-      row.appendChild(html("span", {class: "log-turn"}, tab === -1 ? "" : entry.slice(0, tab)));
-      row.appendChild(html("span", {}, tab === -1 ? entry : entry.slice(tab + 1)));
-      logEl.appendChild(row);
-    }
-    if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+  // Paired with their absolute index throughout, so the sidebar's
+  // current-round slice can still tell which of its lines are fresh.
+  const rows = [...state.log.entries()];
+  const currentRound = ([, entry]) => entry.slice(0, entry.indexOf("\t")) === String(state.round);
+  drawLog("log", rows.filter(currentRound));
+  if (logSheetOpen) drawLog("log-full", rows);
+}
+
+function drawLog(id, rows) {
+  const logEl = document.getElementById(id);
+  const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
+  logEl.innerHTML = "";
+  for (const [i, entry] of rows) {
+    // "round\ttext" from the server — split once so the number gets its own
+    // fixed-width column (.log-turn) and every line's text lines up
+    // regardless of digit count.
+    const tab = entry.indexOf("\t");
+    const row = html("div", {class: i >= freshLogFrom ? "log-line fresh" : "log-line"});
+    row.appendChild(html("span", {class: "log-turn"}, tab === -1 ? "" : entry.slice(0, tab)));
+    row.appendChild(html("span", {}, tab === -1 ? entry : entry.slice(tab + 1)));
+    logEl.appendChild(row);
   }
+  if (atBottom) logEl.scrollTop = logEl.scrollHeight;
 }
 
 // --- Boot -----------------------------------------------------------------
 
 document.getElementById("new-game").addEventListener("click", newGame);
-document.getElementById("roll-dice").addEventListener("click", () => {
-  if (rollAction) sendAction(rollAction);
+// A corner button is only on screen when its action is on offer (see
+// renderBoardButtons), so re-reading it here always finds the same one that
+// put the button up.
+for (const [id, type] of [["roll-dice", "ROLL"], ["end-turn", "END_TURN"],
+                          ["buy-dev-card", "BUY_DEV_CARD"]]) {
+  document.getElementById(id).addEventListener("click", () => {
+    const action = legalAction(type);
+    if (action) sendAction(action);
+  });
+}
+document.getElementById("cancel-robber").addEventListener("click", cancelRobberMove);
+// Clicking the water backs out of an armed Knight, the same way clicking a
+// modal's backdrop backs out of it. Only the bare <svg> reports itself as the
+// target — every hex, road and vertex is a filled child that would be the
+// target instead — so this fires on the empty sea and nothing else.
+document.getElementById("board-svg").addEventListener("click", (e) => {
+  if (e.target.id === "board-svg" && knightArmed) cancelRobberMove();
 });
-document.getElementById("end-turn").addEventListener("click", () => {
-  if (endTurnAction) sendAction(endTurnAction);
-});
-// Backdrop click only ever cancels a proposal in progress — an incoming
-// offer must be answered through the Accept/Decline buttons (it reopens
-// itself via syncTradeModal on the next render if left unanswered).
-document.getElementById("trade-modal").addEventListener("click", (e) => {
-  if (e.target.id === "trade-modal" && tradeMode === "propose") closeTradeModal();
+// Backdrop click closes the modes that are safe to walk away from — see
+// MODAL_DISMISSIBLE. The two it leaves alone are the two the game is waiting
+// on, and they'd reopen themselves via syncModal on the next render anyway.
+document.getElementById("modal").addEventListener("click", (e) => {
+  if (e.target.id === "modal" && MODAL_DISMISSIBLE.has(modalMode)) closeModal();
 });
 
 const logSheet = document.getElementById("log-sheet");
 function setLogOpen(open) {
+  logSheetOpen = open;
   logSheet.classList.toggle("show", open);
-  if (open) {
-    const full = document.getElementById("log-full");
-    full.scrollTop = full.scrollHeight;
-  }
+  if (!open) return;
+  // Drawn on the way up rather than on every render — renderLog skips it
+  // while it's closed.
+  drawLog("log-full", [...state.log.entries()]);
+  const full = document.getElementById("log-full");
+  full.scrollTop = full.scrollHeight;
 }
 document.getElementById("open-log").addEventListener("click", () => setLogOpen(true));
 document.getElementById("close-log").addEventListener("click", () => setLogOpen(false));
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") setLogOpen(false); });
+// Escape unwinds the innermost thing first: whichever modal mode can be
+// walked away from, then an armed Knight (the one open choice with no modal
+// to close, since its answer is a tile on the board), then the log sheet.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (MODAL_DISMISSIBLE.has(modalMode)) { closeModal(); return; }
+  if (knightArmed) { cancelRobberMove(); return; }
+  setLogOpen(false);
+});
 
 (async function init() {
   await Promise.all([loadBoard(), loadModels()]);

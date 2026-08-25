@@ -71,9 +71,9 @@ COOKIE_NAME = "catan_id"
 COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 # How long a game survives with nobody polling it. An active tab calls
 # GET /api/state far more often than this; a closed or forgotten one doesn't
-# call it at all. 6 hours comfortably outlasts a real, paused-mid-game
+# call it at all. 24 hours comfortably outlasts a real, paused-mid-game
 # session without holding onto abandoned ones indefinitely.
-SESSION_TTL_SECONDS = 6 * 60 * 60
+SESSION_TTL_SECONDS = 24 * 60 * 60
 
 MODELS_DIR = Path(os.environ.get("CATAN_WEB_MODELS_DIR", REPO_ROOT / "models"))
 

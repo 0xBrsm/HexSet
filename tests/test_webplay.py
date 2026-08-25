@@ -182,6 +182,38 @@ def test_session_rejects_when_it_is_not_the_humans_turn():
         session.apply_human_action(legal_for_mover)
 
 
+def test_legal_wire_actions_offers_every_held_resource_regardless_of_who_could_cover_it():
+    """Catan hands are private: the human must not be able to learn what an
+    opponent holds by noticing that proposing to trade for it is or isn't
+    offered. `catan.actions.legal_actions`'s own PROPOSE_TRADE sample
+    filters to pairs some opponent could currently cover — correct for a
+    bot with full-state access, but exactly the leak a human-facing wire
+    payload must not repeat. See GameSession._proposable_options."""
+    from catan.board.terrain import Resource
+
+    game = a_game(seed=19)
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    state = game.state
+    state.bank[Resource.WOOD] -= 1
+    state.hands[0][Resource.WOOD] += 1
+    # No opponent holds anything at all: under the omniscient sample this
+    # give would offer zero PROPOSE_TRADE wants. The public-info version
+    # must still offer all four regardless.
+    for seat in range(1, state.num_players):
+        for r in range(len(state.hands[seat])):
+            state.hands[seat][r] = 0
+
+    session = GameSession(game=game, human_seat=0, bot=RandomBot())
+    proposals = [a for a in session.legal_wire_actions() if a["type"] == "PROPOSE_TRADE"]
+    wanted_for_wood = {
+        r for a in proposals if a["give"][Resource.WOOD] == 1
+        for r, n in enumerate(a["want"]) if n
+    }
+
+    assert wanted_for_wood == {r for r in range(len(state.hands[0])) if r != Resource.WOOD}
+
+
 def test_a_human_trade_with_no_ask_defaults_to_lowest_vp_first():
     """GameSession's own addition on top of catan.game.propose_trade's
     neutral ask=() default (clockwise seat order) — favours whoever's
@@ -384,11 +416,18 @@ def test_a_trade_nobody_can_cover_is_still_legal_and_reads_as_declined():
 
     session = GameSession(game=game, human_seat=0, bot=RandomBot())
     offer = Action(ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1))
+    # The server must actually have offered this — see the module docstring's
+    # "never build an action the engine did not offer" rule the frontend
+    # leans on — not merely tolerate it when submitted directly.
+    assert action_to_wire(offer) in session.legal_wire_actions()
     session.apply_human_action(action_to_wire(offer))
 
     assert len(session.log) == 1
     assert "offered" in session.log[0]
     assert "declined" in session.log[0]
+    # Deliberately not "nobody could cover it": that would state opponent
+    # hand contents as fact. Catan hands are private.
+    assert "cover" not in session.log[0].lower()
     assert session._trade_buffer is None
 
 

@@ -1396,14 +1396,19 @@ function renderTradeModal() {
     bank = state.legal_actions.find(
       (a) => a.type === "BANK_TRADE" && a.a === tradeGive && a.b === tradeWant
     );
-    // legal_actions() only *samples* PROPOSE_TRADE offers someone can
-    // currently cover (see its own docstring) — proposing to nobody is
-    // still a legal move, the engine just concludes it on the spot with no
-    // takers (see GameSession._log_action's handling of that case). So the
-    // action is built directly rather than requiring it to appear in that
-    // sample — there is never a reason to tell the player a trade "isn't
-    // available".
-    offer = {type: "PROPOSE_TRADE", a: 0, b: 0, give: singleBundle(tradeGive), want: singleBundle(tradeWant), ask: []};
+    // Found, never built: the server's own `legal_wire_actions` always
+    // includes every (give held, want different) pair as a PROPOSE_TRADE
+    // option — see GameSession._proposable_options — regardless of whether
+    // anyone else could currently cover it. Hands are private in Catan, so
+    // that's deliberate: whether a trade is "available" depends on hidden
+    // opponent hands, which nothing here may act on, and this find() always
+    // succeeds as a result. Building the action from parts instead would
+    // break the one hard rule this whole page follows (see the module
+    // docstring): the client only ever echoes back a wire object the server
+    // itself offered.
+    offer = state.legal_actions.find(
+      (a) => a.type === "PROPOSE_TRADE" && a.give[tradeGive] === 1 && a.want[tradeWant] === 1
+    );
     // Instant and one-sided, not a proposal to another player — doesn't fit
     // the send/cancel pair, so it's an inline button next to what it acts on.
     if (bank) {

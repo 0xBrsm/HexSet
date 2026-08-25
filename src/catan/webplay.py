@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from .actions import (
+    ONE_RESOURCE,
     YEAR_OF_PLENTY_PAIRS,
     Action,
     ActionType,
@@ -50,7 +51,7 @@ from .board.topology import Topology
 from .cards import NUM_DEV_CARDS, DevCard
 from .devcards import holdings
 from .economy import trade_ratios
-from .game import Game, Phase, is_over, to_move
+from .game import MAX_OFFERS_PER_TURN, Game, Phase, is_over, to_move
 from .record import Record, append_step, board_fields, write as write_records
 from .victory import public_victory_points, victory_points
 
@@ -193,6 +194,38 @@ def wire_to_action(data: dict) -> Action:
         )
     except (TypeError, ValueError) as exc:
         raise ValueError(f"malformed action payload: {data!r}") from exc
+
+
+def _proposable_options(game: Game) -> list[Action]:
+    """Every one-for-one (give, want) pair the current player could open a
+    trade proposal for — from public information alone: their own hand and
+    the turn's offer count.
+
+    Deliberately not `catan.actions.legal_actions`'s own `PROPOSE_TRADE`
+    sample, which also skips any pair no opponent could currently cover.
+    That's a fair thing for a bot to lean on when picking a search target —
+    the engine already sees every hand, it's one shared `GameState` — but
+    Catan hands are private at a real table, and this list is what tells a
+    *human* what they may propose. Reflecting that omniscient filter here,
+    whether by omission or by an "isn't available" message, would hand them
+    the one thing the actual board never does: proof of what's in a
+    specific opponent's hand. `propose_trade` doesn't require coverage
+    either — a proposal nobody can cover is still legal, it just gets no
+    takers (see its own `if not willing: return`) — so this is the accurate
+    rule for what a human may attempt, not a laxer one.
+    """
+    state = game.state
+    player = game.current_player
+    if game.offers_made >= MAX_OFFERS_PER_TURN:
+        return []
+    hand = state.hands[player]
+    return [
+        Action(ActionType.PROPOSE_TRADE, give=ONE_RESOURCE[given], want=ONE_RESOURCE[wanted])
+        for given in range(NUM_RESOURCES)
+        if hand[given]
+        for wanted in range(NUM_RESOURCES)
+        if wanted != given
+    ]
 
 
 # --- Human-readable log -------------------------------------------------------
@@ -452,7 +485,9 @@ class GameSession:
     def legal_wire_actions(self) -> list[dict]:
         if is_over(self.game) or to_move(self.game) != self.human_seat:
             return []
-        return [action_to_wire(a) for a in legal_actions(self.game)]
+        options = [a for a in legal_actions(self.game) if a.type is not ActionType.PROPOSE_TRADE]
+        options += _proposable_options(self.game)
+        return [action_to_wire(a) for a in options]
 
     def apply_human_action(self, wire: dict) -> None:
         if is_over(self.game):
@@ -585,12 +620,18 @@ class GameSession:
         if kind is ActionType.PROPOSE_TRADE:
             line = _describe(self.game, actor, action, before, self.human_seat, self.bot_names)
             if self.game.offer is None:
-                # propose_trade() found nobody eligible (nobody holds what's
-                # wanted) and concluded the offer immediately — no
-                # DECLINE_TRADE is ever coming to say so, so this says it
-                # instead: it reads as declined, not as a proposal that
-                # silently went nowhere.
-                self.log.append(f"{round_num}\t{line} Nobody could cover it — declined.")
+                # propose_trade() found nobody eligible and concluded the
+                # offer immediately — no DECLINE_TRADE is ever coming to say
+                # so, so this says it instead: it reads as declined, not as
+                # a proposal that silently went nowhere. Deliberately NOT
+                # "nobody could cover it": that would state as fact that no
+                # opponent holds the wanted resource, which is exactly the
+                # hidden hand information the real board never hands a
+                # player. This must read identically whether the offer was
+                # actually asked around and refused, or never eligible for
+                # anyone to take in the first place — the human isn't
+                # allowed to tell those two apart.
+                self.log.append(f"{round_num}\t{line} Everyone declined.")
             else:
                 self._trade_buffer = [line]
             return

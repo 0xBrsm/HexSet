@@ -282,7 +282,6 @@ def _list_with_counts(items: list[str]) -> str:
 class _Snapshot:
     hands: list[list[int]]
     held: list[list[int]]
-    offer: object
 
 
 def _snapshot(game: Game) -> _Snapshot:
@@ -290,7 +289,6 @@ def _snapshot(game: Game) -> _Snapshot:
     return _Snapshot(
         hands=[hand[:] for hand in state.hands],
         held=[holdings(state, p)[:] for p in range(state.num_players)],
-        offer=game.offer,
     )
 
 
@@ -399,19 +397,6 @@ def _describe(
     if kind is ActionType.PROPOSE_TRADE:
         return f"{who} offered {_bundle_text(action.give)} for {_bundle_text(action.want)}."
 
-    if kind is ActionType.ACCEPT_TRADE:
-        offer = before.offer
-        if offer is None:
-            return f"{who} accepted a trade."
-        proposer = _who(offer.proposer, human_seat, bot_names)
-        return (
-            f"{who} accepted {proposer}'s trade: "
-            f"{proposer} gives {_bundle_text(offer.give)} and gets {_bundle_text(offer.want)}."
-        )
-
-    if kind is ActionType.DECLINE_TRADE:
-        return f"{who} declined the trade."
-
     return f"{who} played {kind.name}."
 
 
@@ -459,10 +444,12 @@ class GameSession:
     # into one log line instead of one each — see _log_action. Cleared by
     # any other action from any seat.
     _build_streak: dict | None = field(default=None, repr=False)
-    # A trade's proposal plus every response so far, held back from `log`
-    # until the offer concludes (accepted, or every eligible seat declined)
-    # — see _log_action. `None` whenever no trade is in flight.
-    _trade_buffer: list[str] | None = field(default=None, repr=False)
+    # A trade's proposal line, held back from `log` until the offer
+    # concludes — see _log_action. `None` whenever no trade is in flight.
+    # Deliberately just the proposal, not a running list of responses:
+    # who was actually asked (and how many) is exactly the hidden-hand
+    # information a human must not be able to read off the log.
+    _trade_buffer: str | None = field(default=None, repr=False)
 
     @property
     def round(self) -> int:
@@ -574,11 +561,13 @@ class GameSession:
     def _log_action(self, round_num: int, actor: int, action: Action, before: _Snapshot) -> None:
         """Appends this action's line to `self.log` — except a build that
         continues the same actor's still-open streak, which rewrites the
-        streak's one existing line instead of adding another, and a trade
-        response, which is held in `_trade_buffer` and only reaches `log`
-        once the whole offer concludes, as one line covering the proposal
-        and every response it got. Tab-separated, matching every other
-        line: the client splits on the first tab for the round-number
+        streak's one existing line instead of adding another, and a
+        PROPOSE_TRADE, which is held in `_trade_buffer` and only reaches
+        `log` once the whole offer concludes: as "accepted" naming who took
+        it, or as a uniform "Everyone declined." that never says who was
+        actually asked or how many — see the PROPOSE_TRADE/ACCEPT_TRADE/
+        DECLINE_TRADE branches below for why. Tab-separated, matching every
+        other line: the client splits on the first tab for the round-number
         column (see the format note this replaced).
         """
         kind = action.type
@@ -621,26 +610,32 @@ class GameSession:
             line = _describe(self.game, actor, action, before, self.human_seat, self.bot_names)
             if self.game.offer is None:
                 # propose_trade() found nobody eligible and concluded the
-                # offer immediately — no DECLINE_TRADE is ever coming to say
-                # so, so this says it instead: it reads as declined, not as
-                # a proposal that silently went nowhere. Deliberately NOT
-                # "nobody could cover it": that would state as fact that no
-                # opponent holds the wanted resource, which is exactly the
-                # hidden hand information the real board never hands a
-                # player. This must read identically whether the offer was
-                # actually asked around and refused, or never eligible for
-                # anyone to take in the first place — the human isn't
-                # allowed to tell those two apart.
+                # offer immediately, with no ACCEPT_TRADE/DECLINE_TRADE ever
+                # coming — logged the same as the "everyone who was asked
+                # said no" case below, for the same reason: see there.
                 self.log.append(f"{round_num}\t{line} Everyone declined.")
             else:
-                self._trade_buffer = [line]
+                self._trade_buffer = line
             return
 
-        if kind in (ActionType.ACCEPT_TRADE, ActionType.DECLINE_TRADE) and self._trade_buffer is not None:
-            line = _describe(self.game, actor, action, before, self.human_seat, self.bot_names)
-            self._trade_buffer.append(line)
+        if kind is ActionType.ACCEPT_TRADE and self._trade_buffer is not None:
+            who = _who(actor, self.human_seat, self.bot_names)
+            self.log.append(f"{round_num}\t{self._trade_buffer} {who} accepted.")
+            self._trade_buffer = None
+            return
+
+        if kind is ActionType.DECLINE_TRADE and self._trade_buffer is not None:
             if self.game.offer is None:
-                self.log.append(f"{round_num}\t{' '.join(self._trade_buffer)}")
+                # Only who's *eligible* to cover an offer is ever asked
+                # (`catan.game.propose_trade`'s own `responders`/`willing`),
+                # in ask order, one at a time, stopping at the first accept
+                # — so naming each individual decliner, or even just their
+                # count, would tell a human exactly how many opponents held
+                # what was wanted before the queue ran out. Catan hands are
+                # private, so every "nobody took it" offer reads identically
+                # regardless of how many were actually asked, or whether any
+                # were: "Everyone declined." every time, full stop.
+                self.log.append(f"{round_num}\t{self._trade_buffer} Everyone declined.")
                 self._trade_buffer = None
             return
 
@@ -678,7 +673,12 @@ class GameSession:
                 "proposer": game.offer.proposer,
                 "give": list(game.offer.give),
                 "want": list(game.offer.want),
-                "responders": list(game.pending_responders),
+                # Deliberately no `responders`: `game.pending_responders` is
+                # exactly who's eligible to cover the offer, in ask order —
+                # sending it live, before anyone has actually responded,
+                # would leak the same hidden hand information the log fix
+                # (see _log_action) exists to hide, just earlier and over a
+                # different channel. Nothing on the client reads it either.
             }
 
         return {

@@ -362,8 +362,12 @@ def test_list_with_counts_pluralises_repeats_but_not_singles():
 
 
 def test_a_trade_that_gets_accepted_summarizes_into_one_line():
-    """The proposal and every response fold into one entry, only reaching
-    `log` once the offer concludes — see GameSession._log_action."""
+    """The proposal and the eventual outcome fold into one entry, only
+    reaching `log` once the offer concludes — see GameSession._log_action.
+    A decline along the way (seat 1, below) must NOT be individually named:
+    only who's eligible to cover an offer is ever asked, so naming a
+    decliner would tell a human they hold the wanted resource — hidden
+    information a real board never gives up."""
     from catan.board.terrain import Resource
 
     game = a_game(seed=13)
@@ -391,7 +395,11 @@ def test_a_trade_that_gets_accepted_summarizes_into_one_line():
 
     assert len(session.log) == 1
     text = session.log[0]
-    assert "offered" in text and "declined" in text and "accepted" in text
+    assert "offered" in text and "accepted" in text
+    assert "Player 3" in text  # seat 2, who actually accepted
+    # Not "declined": seat 1's decline never gets named — see the docstring.
+    assert "declined" not in text
+    assert "Player 2" not in text  # the decliner isn't named at all
     assert session._trade_buffer is None
 
 
@@ -432,6 +440,10 @@ def test_a_trade_nobody_can_cover_is_still_legal_and_reads_as_declined():
 
 
 def test_a_trade_everyone_declines_summarizes_into_one_line():
+    """Reads as a single generic 'Everyone declined.' — not one line per
+    decliner and not a count — regardless of how many opponents were
+    actually asked, so it can't be distinguished from an offer nobody was
+    eligible to take at all (see test_a_trade_nobody_can_cover...)."""
     from catan.board.terrain import Resource
 
     game = a_game(seed=15)
@@ -455,7 +467,8 @@ def test_a_trade_everyone_declines_summarizes_into_one_line():
     session._apply(2, Action(ActionType.DECLINE_TRADE))
 
     assert len(session.log) == 1
-    assert session.log[0].count("declined") == 2
+    assert session.log[0].count("declined") == 1  # "Everyone declined.", not one per seat
+    assert "Player 2" not in session.log[0] and "Player 3" not in session.log[0]
     assert session._trade_buffer is None
 
 
@@ -533,6 +546,33 @@ def test_state_view_reveals_every_hand_once_the_game_is_over():
     view = session.state_view()
     assert all("hand" in p for p in view["players"])
     assert view["legal_actions"] == []
+
+
+def test_state_view_does_not_expose_who_is_eligible_to_respond_to_an_offer():
+    """`game.pending_responders` is exactly who's eligible to cover the open
+    offer, in ask order — sending it to the client before anyone has
+    actually responded would leak the same hidden hand information the log
+    (see _log_action's "Everyone declined." handling) is built to hide,
+    just earlier and over a different channel."""
+    from catan.board.terrain import Resource
+
+    game = a_game(seed=18)
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    state = game.state
+    state.bank[Resource.WOOD] -= 1
+    state.hands[0][Resource.WOOD] += 1
+    for seat in (1, 2):
+        state.bank[Resource.ORE] -= 1
+        state.hands[seat][Resource.ORE] += 1
+
+    session = GameSession(game=game, human_seat=0, bot=RandomBot())
+    offer = Action(ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1))
+    session.apply_human_action(action_to_wire(offer))
+    assert game.pending_responders  # the offer really is pending on someone
+
+    view = session.state_view()
+    assert "responders" not in view["offer"]
 
 
 # --- Recording -------------------------------------------------------------

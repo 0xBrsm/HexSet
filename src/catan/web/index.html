@@ -24,6 +24,10 @@
     --muted: #8b93a5;
     --border: #2c3140;
     --accent: #6d5ce8;
+    /* The face every development card wears — the hand's tiles and the
+       board's buy button both. Not a terrain colour: a dev card isn't tied
+       to a tile the way a resource card is. */
+    --dev-card-bg: #252a35;
     /* 60% of the vivid ocean blue (#1c7cc4) mixed with 40% dark slate
        (#2c3038, matching --border/--panel's own grey) — a subtler, stormier
        water than the saturated version, still unmistakably blue. */
@@ -149,12 +153,6 @@
     flex: none; width: 3ch; text-align: left; color: var(--muted);
     font-variant-numeric: tabular-nums;
   }
-  /* Everything that landed while the table was away from you — your own last
-     move, then whatever the bots did before handing the turn back. A tint
-     rather than a fade, and it stays until you act again: the point is to be
-     readable when you get round to looking, not to be caught in the moment.
-     Background only, so nothing shifts by a pixel when a line gains it. */
-  .log-line.fresh { background: rgba(109,92,232,0.13); }
   .hex-token {
     font-size: 17px; font-weight: 700; text-anchor: middle; dominant-baseline: central;
     /* Plain black — the chroma-208 blue this used while the colour-inverting
@@ -243,25 +241,45 @@
      legal at the same time and can have the one spot. Trade opens from
      clicking a resource card in hand, not a floating button — see
      renderHand(). */
-  /* The other two corners. A glyph alone carries the dice and the end-turn
-     arrows; "buy" and "cancel" are not evident from a picture, so these two
-     put the word under it and grow to fit — same 52px minimum, so all four
-     still read as one family. */
+  /* Cancel grows to fit its word: an X alone doesn't say what it abandons,
+     and the other fabs' glyphs do say what they do. Same 52px minimum, so it
+     still reads as one of the family. */
   .board-fab.labeled {
     width: auto; min-width: 52px; height: auto; padding: 8px 8px 6px;
     flex-direction: column; align-items: center; gap: 3px;
   }
   .board-fab.labeled.show { display: flex; }
   .board-fab.labeled svg { width: 26px; height: 26px; }
-  .board-fab-label { font-size: 0.6rem; font-weight: 700; letter-spacing: 0.05em; line-height: 1; }
+  /* Shared by the two corner buttons that carry a word: CANCEL, and BUY
+     under its card. */
+  .board-btn-label { font-size: 0.6rem; font-weight: 700; letter-spacing: 0.05em; line-height: 1; }
   /* Top right is the second shared corner, on the same terms as the first:
      the two never apply at once, so the spot just carries whichever does.
-     Buying a development card is the one purchase with nothing on the board
-     to click for it — every other build and buy is already a highlight on
-     the map — and an armed Knight suppresses buying along with everything
-     else (see renderBoardButtons), leaving its own way out as the only
-     thing this corner can be showing. */
-  #buy-dev-card, #cancel-robber { top: 16px; bottom: auto; }
+     An armed Knight suppresses buying along with everything else (see
+     renderBoardButtons), leaving its own way out as the only thing this
+     corner can be showing. */
+  #cancel-robber { top: 16px; bottom: auto; }
+  /* Buying a development card is the one purchase with nothing on the board
+     to click for it, so the button *is* the thing being bought: the same
+     face the hand's dev cards wear (see .card and --dev-card-bg), scaled up
+     to a board-sized target, with no panel chrome around it. It reads as a
+     card sitting on the water waiting to be taken, which is what the deck
+     is. */
+  #buy-dev-card {
+    position: absolute; top: 16px; right: 16px;
+    display: none; flex-direction: column; align-items: center; gap: 4px;
+    background: none; border: none; padding: 0; cursor: pointer;
+  }
+  #buy-dev-card.show { display: flex; }
+  #buy-dev-card:active { transform: scale(0.94); }
+  .board-card-face {
+    width: 48px; height: 64px; border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.28); background: var(--dev-card-bg);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.45);
+  }
+  .board-card-face svg { width: 30px; height: 30px; fill: var(--ink); display: block; }
+  #buy-dev-card:hover .board-card-face { border-color: var(--accent); }
   #log-sheet {
     position: fixed; inset: 0; z-index: 50; background: var(--bg);
     display: none; flex-direction: column;
@@ -314,7 +332,14 @@
     width: 56px; height: 56px; padding: 0; border-radius: 12px;
     display: flex; align-items: center; justify-content: center;
   }
+  #modal-actions button {
+    flex-direction: column; gap: 2px;
+  }
   #modal-actions button svg { width: 26px; height: 26px; fill: currentColor; }
+  /* The rate under the bank/port glyph. Shown rather than left to a tooltip
+     because touch has no hover, and what a bank trade costs is the whole
+     reason you'd pick it over offering the pair to the table. */
+  .modal-btn-rate { font-size: 0.58rem; font-weight: 700; line-height: 1; letter-spacing: 0.02em; }
   .pick-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.3rem 0 0.7rem; }
   .modal-note { font-size: 0.85rem; color: var(--muted); margin-top: 0.4rem; }
   /* Year of Plenty picks two cards at once, so its options are pairs rather
@@ -412,6 +437,10 @@
        plain circle. Same union-of-two-shapes construction as the ship
        (hull+mast+sail); authored for this file. -->
   <symbol id="icon-robber" viewBox="0 0 512 512"><path d="M351,170 A95,95 0 1,0 161,170 A95,95 0 1,0 351,170 Z M176,200 L336,200 L400,430 L112,430 Z"/></symbol>
+  <!-- A classical bank front: pediment, architrave, four columns, plinth.
+       Paired with icon-ship in the trade modal, where which of the two shows
+       is how you tell a port rate from the bank's own. -->
+  <symbol id="icon-bank" viewBox="0 0 512 512"><path d="M256,58 L470,178 L42,178 Z M66,198 L446,198 L446,234 L66,234 Z M108,250 L152,250 L152,396 L108,396 Z M192,250 L236,250 L236,396 L192,396 Z M276,250 L320,250 L320,396 L276,396 Z M360,250 L404,250 L404,396 L360,396 Z M42,414 L470,414 L470,458 L42,458 Z"/></symbol>
   <symbol id="icon-close" viewBox="0 0 512 512"><path d="M141.4,101.9 L410.1,370.6 L370.6,410.1 L101.9,141.4 Z M101.9,370.6 L370.6,101.9 L410.1,141.4 L141.4,410.1 Z"/></symbol>
   <!-- Checkmark tick — scaled from Material Symbols' "check" glyph (Apache
        2.0). The trade modal's "Accept" icon. -->
@@ -497,15 +526,17 @@
     <button id="end-turn" class="board-fab" title="End turn" aria-label="End turn">
       <svg viewBox="0 0 512 512"><use href="#icon-end-turn"></use></svg>
     </button>
-    <button id="buy-dev-card" class="board-fab labeled" title="Buy development card"
+    <button id="buy-dev-card" title="Buy development card"
             aria-label="Buy development card">
-      <svg viewBox="0 0 512 512"><use href="#icon-dev-card"></use></svg>
-      <span class="board-fab-label">BUY</span>
+      <span class="board-card-face">
+        <svg viewBox="0 0 512 512"><use href="#icon-dev-card"></use></svg>
+      </span>
+      <span class="board-btn-label">BUY</span>
     </button>
     <button id="cancel-robber" class="board-fab labeled" title="Cancel playing the Knight"
             aria-label="Cancel playing the Knight">
       <svg viewBox="0 0 512 512"><use href="#icon-close"></use></svg>
-      <span class="board-fab-label">CANCEL</span>
+      <span class="board-btn-label">CANCEL</span>
     </button>
   </div>
   <div id="sidebar">
@@ -542,9 +573,8 @@ const DEV_CARD_ICONS = {
   Knight: "knight", "Road Building": "road-building", Monopoly: "monopoly",
   "Year Of Plenty": "year-of-plenty", "Victory Point": "victory-point",
 };
-// Not a terrain colour: dev cards aren't tied to a resource tile, so they get
-// a neutral card face instead of one of TERRAIN_COLORS.
-const DEV_CARD_BG = "#252a35";
+// The face is --dev-card-bg, set in the stylesheet so the board's buy button
+// (which is a card too, see #buy-dev-card) can wear exactly the same one.
 const DEV_CARD_INK = "#e8eaf0";
 // A white glyph lands at 1.7:1 on pasture and 2.1:1 on fields, so the light
 // tiles take a dark one instead.
@@ -577,7 +607,6 @@ let pendingRobberHex = null;  // when a hex has more than one victim option
 let knightArmed = false;   // Knight card clicked: the board is offering its robber targets — see renderHand
 let inFlight = false;
 let logSheetOpen = false;  // the full-history sheet is only drawn while it's up — see renderLog
-let freshLogFrom = 0;      // index of the first log line that landed since the human last acted
 let modalMode = null;      // which decision the modal is showing, if any — see openModal
 let tradeGive = null;      // selected resource index, "propose" mode only
 let tradeWant = null;
@@ -939,16 +968,12 @@ function cancelRobberMove() {
 // webserver.py's _handle_action/_handle_new block server-side through the
 // *entire* bot cascade in one call (advance_bots() loops until it's the
 // human's turn again) and return once, so a whole lap of the table arrives in
-// a single frame. What used to sit here narrated that lap back — "Player 2's
-// turn", "Player 4's turn", 350ms each — reconstructed after the fact by
-// regexing seat numbers out of the log's prose.
-//
-// It told you a seat had acted, never what it did, and it said so while the
-// board was still showing the old state, so the announcement and the change
-// it referred to never appeared together. The log already carries the real
-// answer in words ("Player 2 built a settlement"), so the emphasis moved
-// there: freshLogFrom marks everything that landed while the table was away
-// and the log tints it, at no cost in latency.
+// a single frame. Two attempts at dressing that up have been removed: a
+// 350ms-a-seat narration in the overlay, which announced who had acted while
+// the board still showed the state before they did, and a tint on the log
+// lines that arrived with it, which nobody could tell the purpose of. The
+// log says what happened in words and the round filter keeps it recent;
+// that turns out to be the whole of what's wanted here.
 
 // Both of the calls that hand the table over to the bots have the same shape:
 // refuse to overlap with one already running, cover the board while it's out,
@@ -973,9 +998,6 @@ function sendAction(action) {
     // out: the state coming back is the one that decides what's open now.
     pendingRobberHex = null;
     knightArmed = false;
-    // Everything from here on in the new log is this exchange: the human's
-    // own move, then whatever the table did before handing the turn back.
-    freshLogFrom = state.log.length;
     const {ok, data} = await postJSON("/api/action", action);
     state = data;
     showNotice(ok ? "" : (data.error || "That was not legal."));
@@ -985,10 +1007,6 @@ function sendAction(action) {
 
 function newGame() {
   return blocking(async () => {
-    // Bots may have already moved before the human's first setup turn (see
-    // _build_session's advance_bots() call) — the whole log is "new" here,
-    // there's no previous game's log to subtract.
-    freshLogFrom = 0;
     const {data} = await postJSON("/api/new", {bot_models: currentBotModels});
     state = data;
     await loadBoard();
@@ -1212,7 +1230,7 @@ function renderHand() {
     // show while the choice is still open.
     if (c === "Knight" && knightArmed) classes.push("hand-card-armed");
     const card = html("div", {class: classes.join(" "), title: play ? play.title : `${c}: ${n}`});
-    card.style.background = DEV_CARD_BG;
+    card.style.background = "var(--dev-card-bg)";
     card.appendChild(iconSvg(DEV_CARD_ICONS[c], {fill: DEV_CARD_INK}));
     card.appendChild(html("div", {class: "count"}, String(n)));
     if (play) card.addEventListener("click", play.run);
@@ -1411,8 +1429,8 @@ function tradeCardRow(bundle) {
 // A one-hot bundle (see tradeCardRow) for a single picked resource — lets
 // the "propose" preview reuse the same exchange-row renderer the "respond"
 // mode uses for a real multi-resource offer.
-function singleBundle(resourceIdx, count = 1) {
-  return board.resources.map((_, i) => (i === resourceIdx ? count : 0));
+function singleBundle(resourceIdx) {
+  return board.resources.map((_, i) => (i === resourceIdx ? 1 : 0));
 }
 
 // The shared "offered card(s) ⇄ requested card(s)" layout: one side's
@@ -1669,13 +1687,12 @@ function renderProposeMode(title, body, actions) {
 
   // A live "offered ⇄ requested" preview once both sides are picked, so the
   // pickers below are for adjusting the choice, not the only place it's
-  // visible. A bank/port trade is the one that isn't one-for-one, so its give
-  // side carries that port's real ratio — the same count the ship button
-  // below is about to spend.
+  // visible. One-for-one, which is the shape of the offer to the table; what
+  // the bank would charge instead is on its own button (the rate under the
+  // glyph), since the two are alternatives and the preview can only draw one.
   if (tradeGive !== null && tradeWant !== null) {
-    const giveCount = bank ? state.trade_ratios[board.resources[tradeGive]] : 1;
     body.appendChild(tradeExchangeRow(
-      singleBundle(tradeGive, giveCount), "You give", singleBundle(tradeWant), "You want"
+      singleBundle(tradeGive), "You give", singleBundle(tradeWant), "You want"
     ));
   }
   body.appendChild(html("div", {class: "modal-note"}, "Give:"));
@@ -1683,22 +1700,41 @@ function renderProposeMode(title, body, actions) {
   body.appendChild(html("div", {class: "modal-note"}, "Want:"));
   body.appendChild(tradePickerRow("want", p));
 
-  // The primary slot goes to the bank whenever the bank or a port covers the
-  // picked pair — the same spot send would have taken, carrying the ship the
-  // board's own port markers use, and firing the trade outright instead of
-  // putting it to the table. The pair only goes to the other players when no
-  // bank rate applies to it.
-  if (bank) {
-    const ratio = state.trade_ratios[board.resources[tradeGive]];
-    const btn = modalActionButton("ship", `Trade with bank (give ${ratio})`);
-    btn.addEventListener("click", () => { closeModal(); sendAction(bank); });
-    actions.appendChild(btn);
-  } else if (offer) {
-    const btn = modalActionButton("send", "Offer to players");
+  // Both routes, whenever both are open: the bank or a port takes the cards
+  // now at its own rate, the table might take them one-for-one or might not.
+  // Neither is the default — they are different trades, not two ways of
+  // making the same one — so both sit in the primary slot and the human
+  // picks.
+  if (bank) actions.appendChild(bankTradeButton(bank));
+  if (offer) {
+    const btn = modalActionButton("send", "Offer to the other players");
     btn.addEventListener("click", () => { closeModal(); sendAction(offer); });
     actions.appendChild(btn);
   }
   actions.appendChild(modalCancelButton());
+}
+
+// The bank's own rate, which is the worst one available; anything cheaper is
+// a port the human has a building on — 3:1 generic or 2:1 for this one
+// resource. See catan.board.ports (BASE_TRADE_RATIO / GENERIC_RATIO /
+// SPECIFIC_RATIO) and catan.economy.trade_ratios, which returns the cheapest
+// rate per resource without saying where it came from; the number is the only
+// thing that distinguishes them, so it's what this reads.
+const BANK_RATE = 4;
+
+// Give-N-for-1 to the bank, or to a port if the human has settled one that
+// covers this resource. The glyph says which — a ship for a port, matching
+// the markers on the board's own coast, and a bank front otherwise — and the
+// rate goes under it, so "give 2" and "give 4" don't look like the same
+// button.
+function bankTradeButton(action) {
+  const ratio = state.trade_ratios[board.resources[tradeGive]];
+  const viaPort = ratio < BANK_RATE;
+  const where = viaPort ? `your ${ratio}:1 port` : "the bank";
+  const btn = modalActionButton(viaPort ? "ship" : "bank", `Trade ${ratio} for 1 with ${where}`);
+  btn.appendChild(html("span", {class: "modal-btn-rate"}, `${ratio}:1`));
+  btn.addEventListener("click", () => { closeModal(); sendAction(action); });
+  return btn;
 }
 
 // The shared way out of every dismissible mode — the same thing Escape and a
@@ -1716,24 +1752,21 @@ function modalCancelButton() {
 // since by the late game that's hundreds of rows to rebuild for something
 // nobody is looking at.
 function renderLog() {
-  // Paired with their absolute index throughout, so the sidebar's
-  // current-round slice can still tell which of its lines are fresh.
-  const rows = [...state.log.entries()];
-  const currentRound = ([, entry]) => entry.slice(0, entry.indexOf("\t")) === String(state.round);
-  drawLog("log", rows.filter(currentRound));
-  if (logSheetOpen) drawLog("log-full", rows);
+  const currentRound = (entry) => entry.slice(0, entry.indexOf("\t")) === String(state.round);
+  drawLog("log", state.log.filter(currentRound));
+  if (logSheetOpen) drawLog("log-full", state.log);
 }
 
-function drawLog(id, rows) {
+function drawLog(id, entries) {
   const logEl = document.getElementById(id);
   const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
   logEl.innerHTML = "";
-  for (const [i, entry] of rows) {
+  for (const entry of entries) {
     // "round\ttext" from the server — split once so the number gets its own
     // fixed-width column (.log-turn) and every line's text lines up
     // regardless of digit count.
     const tab = entry.indexOf("\t");
-    const row = html("div", {class: i >= freshLogFrom ? "log-line fresh" : "log-line"});
+    const row = html("div", {class: "log-line"});
     row.appendChild(html("span", {class: "log-turn"}, tab === -1 ? "" : entry.slice(0, tab)));
     row.appendChild(html("span", {}, tab === -1 ? entry : entry.slice(tab + 1)));
     logEl.appendChild(row);
@@ -1776,7 +1809,7 @@ function setLogOpen(open) {
   if (!open) return;
   // Drawn on the way up rather than on every render — renderLog skips it
   // while it's closed.
-  drawLog("log-full", [...state.log.entries()]);
+  drawLog("log-full", state.log);
   const full = document.getElementById("log-full");
   full.scrollTop = full.scrollHeight;
 }

@@ -129,11 +129,20 @@
      point it tints to the same hues the old holder-only badges used. */
   .stat.road.held { color: #8fc4e8; }
   .stat.army.held { color: #e08f8f; }
+  /* Cards get the same extra margin the achievements cluster uses below, so
+     VP reads as its own fact rather than "4 things in a row" — the eye
+     lands on victory points first, then the resource/dev-card counts as
+     their own group. */
+  .player-cards { display: inline-flex; align-items: center; gap: 0.5rem; margin-left: 0.6rem; }
   /* The extra margin (beyond .player-stats' own gap, already applied
-     between this and the dice chip before it) is what visually separates
+     between this and the cards before it) is what visually separates
      the achievement badges as their own cluster rather than just more
      items in the same list. */
   .player-achievements { display: inline-flex; align-items: center; gap: 0.5rem; margin-left: 0.6rem; }
+  /* Last roll is the one stat that's about *now*, not a running total —
+     pinned to the row's far right edge, past everything else, rather than
+     sitting wherever it happens to fall in the middle. */
+  .stat.roll { margin-left: auto; }
   #notice {
     margin: 0 0.8rem; padding: 0.35rem 0.6rem; border-radius: 6px; font-size: 0.85rem;
     background: #3a1616; border: 1px solid #7a3a3a; color: #ffb3b3; display: none;
@@ -1148,17 +1157,15 @@ function renderPlayers() {
       : p.hand_size;
     const metaEl = html("div", {class: "player-stats"});
     metaEl.appendChild(statChip("victory-point", p.victory_points, "", "Victory points"));
-    metaEl.appendChild(statChip("card", cards, "", "Resource cards"));
-    metaEl.appendChild(statChip("dev-card", p.dev_card_count, "", "Development cards"));
-    // Each seat's own last roll, not one global value — lets you compare
-    // who's been running hot or cold rather than only ever seeing whoever
-    // rolled most recently.
-    if (p.last_roll) metaEl.appendChild(statChip("dice", p.last_roll, "roll", "Last roll"));
-    // Route length and Knights played sit in every row, past the dice, set
-    // off with their own bit of breathing room (.player-achievements) —
-    // always present so they're comparable seat to seat, tinted only for
-    // whoever actually holds the title right now (see statChip's "held"
-    // class, gated in CSS on .stat.road.held/.stat.army.held).
+    const cardsEl = html("span", {class: "player-cards"});
+    cardsEl.appendChild(statChip("card", cards, "", "Resource cards"));
+    cardsEl.appendChild(statChip("dev-card", p.dev_card_count, "", "Development cards"));
+    metaEl.appendChild(cardsEl);
+    // Route length and Knights played sit in every row, set off with their
+    // own bit of breathing room (.player-achievements) — always present so
+    // they're comparable seat to seat, tinted only for whoever actually
+    // holds the title right now (see statChip's "held" class, gated in CSS
+    // on .stat.road.held/.stat.army.held).
     const achievements = html("span", {class: "player-achievements"});
     achievements.appendChild(
       statChip("road", p.road_length, `road${p.longest_road ? " held" : ""}`, "Longest road")
@@ -1167,6 +1174,11 @@ function renderPlayers() {
       statChip("knight", p.knights_played, `army${p.largest_army ? " held" : ""}`, "Largest army")
     );
     metaEl.appendChild(achievements);
+    // Each seat's own last roll, not one global value — lets you compare
+    // who's been running hot or cold rather than only ever seeing whoever
+    // rolled most recently. Pinned to the far right (.stat.roll) rather
+    // than sitting between cards and achievements.
+    if (p.last_roll) metaEl.appendChild(statChip("dice", p.last_roll, "roll", "Last roll"));
     row.appendChild(metaEl);
     container.appendChild(row);
   }

@@ -314,6 +314,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_new(payload)
         elif self.path == "/api/bot":
             self._handle_swap_bot(payload)
+        elif self.path == "/api/undo":
+            self._handle_undo(payload)
         else:
             self.send_error(404)
 
@@ -371,6 +373,18 @@ class Handler(BaseHTTPRequestHandler):
                 return
             except RuntimeError as exc:
                 self._json({"error": str(exc), **session.state_view()}, status=500)
+                return
+            self._json(session.state_view())
+
+    def _handle_undo(self, payload: dict) -> None:
+        # No body expected — `payload` just keeps this the same shape as
+        # every other _handle_* the do_POST dispatch calls.
+        with self.server.lock_for(self.identity):
+            session = self.server.entry(self.identity).session
+            try:
+                session.undo_last_build()
+            except ValueError as exc:
+                self._json({"error": str(exc), **session.state_view()}, status=400)
                 return
             self._json(session.state_view())
 

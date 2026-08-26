@@ -30,6 +30,7 @@ constructs an `Action` from parts, it only ever repeats one the server offered.
 
 from __future__ import annotations
 
+import copy
 import math
 import random
 from dataclasses import dataclass, field
@@ -54,7 +55,7 @@ from .economy import trade_ratios
 from .game import MAX_OFFERS_PER_TURN, Game, Phase, is_over, to_move
 from .record import Record, append_step, board_fields, write as write_records
 from .roads import road_lengths
-from .state import MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS
+from .state import MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS, GameState, copy_state
 from .victory import public_victory_points, victory_points
 
 RESOURCE_NAMES: tuple[str, ...] = tuple(r.name.title() for r in Resource)
@@ -299,6 +300,31 @@ class _Snapshot:
     held: list[list[int]]
 
 
+# The three build actions the human can take back — never a bot's (an
+# opponent's misclick isn't the human's to undo), never SETUP_SETTLEMENT
+# /SETUP_ROAD (those are free and order-dependent in a way a paid Main-phase
+# build isn't), and never Road Building's free roads specially either: they
+# still arrive as ordinary BUILD_ROAD actions (see game.build_road), so
+# restoring game.free_roads alongside the board is enough to cover them too.
+_UNDOABLE_BUILDS: frozenset[ActionType] = frozenset(
+    {ActionType.BUILD_ROAD, ActionType.BUILD_SETTLEMENT, ActionType.BUILD_CITY}
+)
+
+
+@dataclass
+class _UndoPoint:
+    """Everything one BUILD_* action could have touched, from just before it
+    ran — restoring these four fields is restoring the whole session to that
+    instant, without having to compute any action's reverse by hand (refund
+    which resources, recompute longest road, etc.)."""
+
+    state: GameState
+    free_roads: int
+    log: list[str]
+    run: dict | None
+    actions_count: int
+
+
 def _snapshot(game: Game) -> _Snapshot:
     state = game.state
     return _Snapshot(
@@ -453,6 +479,9 @@ class GameSession:
     # who was actually asked (and how many) is exactly the hidden-hand
     # information a human must not be able to read off the log.
     _trade_buffer: str | None = field(default=None, repr=False)
+    # Set only right after a human BUILD_ROAD/BUILD_SETTLEMENT/BUILD_CITY,
+    # cleared by literally anything else — see _apply and undo_last_build.
+    _undo: _UndoPoint | None = field(default=None, repr=False)
 
     @property
     def round(self) -> int:
@@ -541,6 +570,28 @@ class GameSession:
         # *next* round's number instead of the one that just ended.
         round_num = self.round
         before = _snapshot(self.game)
+        undoable = actor == self.human_seat and action.type in _UNDOABLE_BUILDS
+        # Taken before apply() runs, alongside `before` above, for the same
+        # reason: it has to be the instant *before* this action, and nothing
+        # between here and apply() touches state/log/_run/_actions.
+        # self._run is whatever run was open *before* this action — a build
+        # run from earlier this same round, a bank-trade or discard run left
+        # over from something else entirely, or None — not necessarily a
+        # build-shaped dict, since _run_for only replaces it once _log_action
+        # runs for *this* action, further down. copy.deepcopy rather than
+        # reaching into it by name is what makes this correct regardless of
+        # which kind it happens to be.
+        undo_point = (
+            _UndoPoint(
+                state=copy_state(self.game.state),
+                free_roads=self.game.free_roads,
+                log=list(self.log),
+                run=copy.deepcopy(self._run),
+                actions_count=len(self._actions),
+            )
+            if undoable
+            else None
+        )
         apply(self.game, action)
         if action.type is ActionType.ROLL:
             self.last_roll_by_seat[actor] = self.game.last_roll
@@ -560,6 +611,29 @@ class GameSession:
                 **board_fields(self.game.state.board),
             )
             write_records(self.record_path, [record])
+
+        # Every action decides this fresh: a qualifying build that didn't win
+        # the game becomes the new (and only) undo point, anything else — a
+        # second build included — clears whatever was there. A win is
+        # excluded because the record above may already be on disk by now.
+        self._undo = undo_point if (undo_point is not None and not is_over(self.game)) else None
+
+    def undo_last_build(self) -> None:
+        """Reverts the human's most recent build back to exactly how the
+        session stood the instant before it: piece removed, resources
+        refunded, longest road/largest army recomputed from the restored
+        board, log line shortened or dropped, replay bookkeeping truncated.
+        Only ever available immediately after such a build — see _apply.
+        """
+        if self._undo is None:
+            raise ValueError("nothing to undo")
+        point = self._undo
+        self.game.state = point.state
+        self.game.free_roads = point.free_roads
+        self.log = point.log
+        self._run = point.run
+        del self._actions[point.actions_count :]
+        self._undo = None
 
     def _run_for(self, kind: str, key: tuple, fresh: dict) -> tuple[dict, bool]:
         """The open run for `key`, or a new one seeded from `fresh`.
@@ -762,6 +836,10 @@ class GameSession:
             "human_seat": self.human_seat,
             "winner": game.won_by,
             "game_over": over,
+            # Whether POST /api/undo would succeed right now — see
+            # undo_last_build. A session convenience, not a rule, so it isn't
+            # in legal_actions alongside everything catan.actions offers.
+            "can_undo": self._undo is not None,
             # "round" — one lap of the table — not game.turns' per-seat count
             # (see the `round` property docstring). The only client reader
             # is the sidebar log's current-round filter, which now needs

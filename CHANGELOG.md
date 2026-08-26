@@ -7,6 +7,42 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-26
+
+### Added
+
+- `catan.league` — **the table league: N learners share every game.** One
+  directory holds several learners that play each other rather than a frozen
+  opponent, each with its own `PPOConfig` overrides parsed from a per-seat spec,
+  and `standings` reads the order out of play instead of out of a separate
+  evaluation. A league run is rated by its `learner0`, the control arm, not by
+  its best arm — four learners share one directory, so one number cannot stand
+  for the run.
+- `catan.run` — **a run is a directory with a frozen manifest, and the manifest
+  is the input.** `freeze` records the parameters, the resolved config and the
+  repository provenance (`run.json`) before a run starts; `load` reconstructs
+  the invocation from it. A run's configuration used to exist only in a script
+  under gitignored `tmp/`, which is why results could not be regenerated from
+  the repository.
+- `catan.export_onnx` — `.pt` to `.onnx` conversion, with `onnx`/`onnxruntime`
+  behind a new `export` optional dependency. `torch` stays unlisted as a hard
+  dependency, so the torch-free engine remains installable without it.
+- A **rolling checkpoint ring** (`prune_recent`) that keeps the newest N
+  `recent-*.pt` and never touches a kept `iter-*.pt`, and **blowout
+  preservation** (`preserve_blowout`), which writes the pre-update weights and
+  the offending batch when the brake fires — the evidence used to be discarded
+  by the recovery it triggered.
+- Per-seat PPO overrides: `adam_eps`, and a `gain` on the entropy controller
+  (`nudged`), so a league seat can vary one knob against its own control.
+- `selfplay.owned` and a `learners` gate on `Collector`, so several learners can
+  record from one game. `learners=(0,)` is the pre-league behaviour: one
+  learner, opponents as scenery.
+
+### Fixed
+
+- `catan.distill_train` had been unbuildable for two days: the manifest
+  parameters it read no longer matched the parser it read them with.
+
 ## [0.6.1] - 2026-08-26
 
 ### Changed

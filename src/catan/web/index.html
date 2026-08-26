@@ -610,18 +610,18 @@
 "use strict";
 
 // Chosen against the terrain palette (TERRAIN_COLORS below), not in the
-// abstract: a hue absent from every hex — purple, vivid blue — survives a
-// piece sitting on any tile, where a hue that's merely a different shade of
-// a terrain color (the old yellow vs Fields/Gold, the old green vs Pasture)
+// abstract: a hue absent from every hex — purple, cyan — survives a piece
+// sitting on any tile, where a hue that's merely a different shade of a
+// terrain color (the old yellow vs Fields/Gold, the old green vs Pasture)
 // doesn't. Red is the one hue no terrain tile uses at all, so it's
-// untouched. Strokes lean much darker than their fill for the same reason
-// roads/settlements/cities need a crisp edge on every tile, not just ones
-// their own hue contrasts with.
+// untouched. Strokes lean near-black rather than a darker version of the
+// fill's own hue — a green stroke that's merely dark still reads as
+// "Forest-colored" next to Forest itself; near-black doesn't, on any tile.
 const SEAT_COLORS = [
   {fill: "#d62828", stroke: "#7a0d0d"},
-  {fill: "#10b981", stroke: "#064e3b"}, // emerald — cooler/darker than Pasture's yellow-green
+  {fill: "#00e676", stroke: "#04241a"}, // vivid green, near-black stroke — Forest/Pasture-proof
   {fill: "#a855f7", stroke: "#581c87"}, // purple — no terrain tile is purple
-  {fill: "#2563eb", stroke: "#172554"}, // vivid blue — saturated enough to read against Sea/Mountains' muted blues
+  {fill: "#06b6d4", stroke: "#083344"}, // cyan — saturated enough to read against Sea/Mountains' muted blues
 ];
 
 // Hues are kept a full step apart because the two pairs that share one read as

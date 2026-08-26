@@ -300,26 +300,42 @@ class _Snapshot:
     held: list[list[int]]
 
 
-# The three build actions the human can take back — never a bot's (an
-# opponent's misclick isn't the human's to undo), never SETUP_SETTLEMENT
-# /SETUP_ROAD (those are free and order-dependent in a way a paid Main-phase
-# build isn't), and never Road Building's free roads specially either: they
-# still arrive as ordinary BUILD_ROAD actions (see game.build_road), so
-# restoring game.free_roads alongside the board is enough to cover them too.
+# The five placement actions the human can take back — never a bot's (an
+# opponent's misclick isn't the human's to undo). Road Building's free roads
+# need no special case: they still arrive as ordinary BUILD_ROAD actions (see
+# game.build_road), so restoring game.free_roads alongside the board covers
+# them too.
 _UNDOABLE_BUILDS: frozenset[ActionType] = frozenset(
-    {ActionType.BUILD_ROAD, ActionType.BUILD_SETTLEMENT, ActionType.BUILD_CITY}
+    {
+        ActionType.SETUP_SETTLEMENT,
+        ActionType.SETUP_ROAD,
+        ActionType.BUILD_ROAD,
+        ActionType.BUILD_SETTLEMENT,
+        ActionType.BUILD_CITY,
+    }
 )
 
 
 @dataclass
 class _UndoPoint:
-    """Everything one BUILD_* action could have touched, from just before it
-    ran — restoring these four fields is restoring the whole session to that
+    """Everything one placement action could have touched, from just before
+    it ran — restoring these fields is restoring the whole session to that
     instant, without having to compute any action's reverse by hand (refund
-    which resources, recompute longest road, etc.)."""
+    which resources, recompute longest road, work out whose turn a setup
+    placement handed off to, ...).
+
+    state/free_roads cover a paid Main-phase build. phase/current_player/
+    setup_step/last_settlement only ever move during setup (see
+    game.place_initial_settlement/place_initial_road) and are otherwise
+    exactly what they were, so restoring them unconditionally is correct
+    either way rather than needing two separate cases."""
 
     state: GameState
     free_roads: int
+    phase: Phase
+    current_player: int
+    setup_step: int
+    last_settlement: int
     log: list[str]
     run: dict | None
     actions_count: int
@@ -585,6 +601,10 @@ class GameSession:
             _UndoPoint(
                 state=copy_state(self.game.state),
                 free_roads=self.game.free_roads,
+                phase=self.game.phase,
+                current_player=self.game.current_player,
+                setup_step=self.game.setup_step,
+                last_settlement=self.game.last_settlement,
                 log=list(self.log),
                 run=copy.deepcopy(self._run),
                 actions_count=len(self._actions),
@@ -612,24 +632,40 @@ class GameSession:
             )
             write_records(self.record_path, [record])
 
-        # Every action decides this fresh: a qualifying build that didn't win
-        # the game becomes the new (and only) undo point, anything else — a
-        # second build included — clears whatever was there. A win is
+        # Only the human's own actions decide this — a bot's never do, so an
+        # automatic cascade (advance_bots, right below a setup placement that
+        # just handed the snake order on to another seat) can't clear an
+        # undo point the human hasn't had a chance to use yet. Within the
+        # human's own actions: a qualifying placement that didn't win the
+        # game becomes the new (and only) undo point; anything else —
+        # including a second placement — clears whatever was there. A win is
         # excluded because the record above may already be on disk by now.
-        self._undo = undo_point if (undo_point is not None and not is_over(self.game)) else None
+        if actor == self.human_seat:
+            self._undo = undo_point if (undo_point is not None and not is_over(self.game)) else None
 
     def undo_last_build(self) -> None:
-        """Reverts the human's most recent build back to exactly how the
+        """Reverts the human's most recent placement back to exactly how the
         session stood the instant before it: piece removed, resources
-        refunded, longest road/largest army recomputed from the restored
-        board, log line shortened or dropped, replay bookkeeping truncated.
-        Only ever available immediately after such a build — see _apply.
+        refunded (including a second setup settlement's grant), longest
+        road/largest army recomputed from the restored board, whose turn it
+        is un-advanced if the placement hands off to someone else, log line
+        shortened or dropped, replay bookkeeping truncated.
+
+        Untouched by any bot placements in between (see _apply) — undoing a
+        setup road that already handed off to a bot, who then placed too,
+        rolls the bot's placement back as well, since it happened as a
+        direct consequence of the move being undone. Only ever available
+        since the human's own last placement, whatever ran in between.
         """
         if self._undo is None:
             raise ValueError("nothing to undo")
         point = self._undo
         self.game.state = point.state
         self.game.free_roads = point.free_roads
+        self.game.phase = point.phase
+        self.game.current_player = point.current_player
+        self.game.setup_step = point.setup_step
+        self.game.last_settlement = point.last_settlement
         self.log = point.log
         self._run = point.run
         del self._actions[point.actions_count :]

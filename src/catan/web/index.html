@@ -559,10 +559,11 @@
          wired at the bottom of the script. Shares its corner with #end-turn —
          see the CSS comment on .board-fab. -->
     <!-- Own corner, no sharing — see the CSS comment on #undo-build. Only
-         ever offered right after the human's own build (see
+         ever offered right after the human's own last road/settlement/city,
+         whether that was a setup placement or a paid Main-phase build (see
          GameSession.undo_last_build); anything else in between, including a
-         second build, takes it away again. -->
-    <button id="undo-build" class="board-fab" title="Undo last build" aria-label="Undo last build">
+         second placement, takes it away again. -->
+    <button id="undo-build" class="board-fab" title="Undo last placement" aria-label="Undo last placement">
       <svg viewBox="0 0 24 24"><use href="#icon-undo"></use></svg>
     </button>
     <button id="roll-dice" class="board-fab" title="Roll dice" aria-label="Roll dice">

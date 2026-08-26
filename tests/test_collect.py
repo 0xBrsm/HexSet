@@ -262,3 +262,79 @@ def test_the_flat_wire_format_rebuilds_byte_identical_episodes():
         for t in seat
     }
     assert shared == {id(flat.buffer)}
+
+
+def test_a_league_worker_records_every_seat_and_loads_a_weight_list():
+    """Stage 2's worker contract: two learner nets share the table, every seat
+    records under its caster's id, and sync ships one dict per learner."""
+    collector = ParallelCollector([spec(w, 2, learners=2) for w in range(2)])
+    try:
+        from catan.collect import _build  # the same construction the worker runs
+
+        policies, _ = _build(spec(0, 2, learners=2))
+        assert len(policies) == 2
+        collector.sync_many([policies[0].net, policies[1].net])
+
+        episodes = collector.collect(4)
+        assert len(episodes) == 4
+        for episode in episodes:
+            assert set(episode.cast) == {0, 1}
+            for seat, trajectory in enumerate(episode.trajectories):
+                assert trajectory, "both ids are learners; every seat records"
+                assert all(t.seat == seat for t in trajectory)
+    finally:
+        collector.close()
+
+
+def test_a_league_spec_refuses_a_mix():
+    from catan.collect import _build
+
+    with pytest.raises(ValueError):
+        _build(spec(0, 1, learners=2, mix=(("greedy", 0.15),)))
+
+
+def test_the_league_caster_balances_seats_and_fixes_adjacency():
+    """The property that made a permutation option necessary.
+
+    Rotation alone balances every learner over every board seat -- which is why
+    board position was excluded as the cause of the noise heats' two tight pairs
+    -- but it leaves the cyclic order round the table invariant, so learner 0's
+    turn-order successor is learner 1 in every game ever played.
+    """
+    from catan.collect import league_caster
+
+    caster = league_caster(4, 4)
+    casts = [caster(i) for i in range(4)]
+    for learner in range(4):
+        seats = [cast.index(learner) for cast in casts]
+        assert sorted(seats) == [0, 1, 2, 3], "each learner takes each seat once"
+    for cast in casts:
+        # Successor of learner k round the table is always k+1 (mod 4).
+        for seat, learner in enumerate(cast):
+            assert cast[(seat + 1) % 4] == (learner + 1) % 4
+
+
+def test_a_permuted_learner_order_reseats_the_cycle_without_unbalancing_seats():
+    from catan.collect import league_caster
+
+    caster = league_caster(4, 4, order=(0, 2, 1, 3))
+    casts = [caster(i) for i in range(4)]
+    for learner in range(4):
+        seats = [cast.index(learner) for cast in casts]
+        assert sorted(seats) == [0, 1, 2, 3], "the share stays balanced"
+    successor = {}
+    for cast in casts:
+        for seat, learner in enumerate(cast):
+            successor.setdefault(learner, cast[(seat + 1) % 4])
+            assert successor[learner] == cast[(seat + 1) % 4], "adjacency is fixed"
+    # 0 now sits before 2 rather than before 1, which is the whole point.
+    assert successor[0] == 2 and successor[2] == 1
+
+
+def test_a_learner_order_that_is_not_a_permutation_is_refused():
+    import pytest
+
+    from catan.collect import league_caster
+
+    with pytest.raises(ValueError, match="permutation"):
+        league_caster(4, 4, order=(0, 1, 1, 3))

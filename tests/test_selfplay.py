@@ -525,3 +525,59 @@ def test_a_collector_bounded_at_build_time_refuses_a_second_cohort():
     collector = Collector(RandomPolicy(random.Random(1)), lanes=2, seed=0, deal=2)
     with pytest.raises(ValueError, match="one cohort at build time"):
         collector.cohort(2)
+
+
+def test_two_learners_share_a_table_and_each_records_only_its_seats():
+    """The table league's stage-1 contract, torch-free.
+
+    Two learners seated by parity, both recording: every seat records, every
+    trajectory belongs to the seat its caster assigned, and `owned` partitions
+    the table with no overlap and no loss.
+    """
+    from catan.selfplay import owned
+
+    collector = Collector(
+        RandomPolicy(random.Random(0)),
+        lanes=4,
+        seed=11,
+        action_cap=3000,
+        opponents=(RandomPolicy(random.Random(99)),),
+        caster=lambda index: (0, 1, 0, 1) if index % 2 == 0 else (1, 0, 1, 0),
+        learners=(0, 1),
+    )
+    episodes = collector.collect(4)
+
+    for episode in episodes:
+        assert episode.cast, "a casting collector stamps the cast"
+        for seat, trajectory in enumerate(episode.trajectories):
+            assert trajectory, "both ids are learners, so every seat records"
+            assert all(t.seat == seat for t in trajectory)
+
+    def count(eps):
+        return sum(len(t) for e in eps for t in e.trajectories)
+
+    zero, one = owned(episodes, 0), owned(episodes, 1)
+    for share, learner in ((zero, 0), (one, 1)):
+        for episode, original in zip(share, episodes):
+            for seat, trajectory in enumerate(episode.trajectories):
+                if original.cast[seat] == learner:
+                    assert trajectory == original.trajectories[seat]
+                else:
+                    assert trajectory == ()
+    assert count(zero) + count(one) == count(episodes)
+    assert count(zero) and count(one)
+
+
+def test_owned_treats_an_empty_cast_as_learner_zero():
+    from catan.selfplay import owned
+
+    episodes = Collector(
+        RandomPolicy(random.Random(3)), lanes=2, seed=3, action_cap=3000
+    ).collect(2)
+    assert owned(episodes, 0)[0].trajectories == episodes[0].trajectories
+    assert all(t == () for t in owned(episodes, 1)[0].trajectories)
+
+
+def test_a_learner_id_with_no_seated_policy_is_an_error():
+    with pytest.raises(ValueError):
+        Collector(RandomPolicy(random.Random(4)), lanes=2, seed=4, learners=(0, 1))

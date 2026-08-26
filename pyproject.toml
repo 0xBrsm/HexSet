@@ -1,9 +1,17 @@
 [project]
 name = "catan"
-version = "0.6.1"
+version = "0.7.2"
 description = "Graph-native Settlers of Catan engine and self-play agent"
 requires-python = ">=3.11"
 dependencies = ["numpy>=1.26"]
+
+# torch itself isn't listed here — see catan.netbot's docstring: it's
+# provisioned separately (the training/GPU image), not a hard dependency of
+# the base package, so anything that only needs the torch-free engine stays
+# installable without it. `export` is the one thing that needs torch *and*
+# these two, for catan.export_onnx's .pt -> .onnx conversion.
+[project.optional-dependencies]
+export = ["onnx>=1.16", "onnxruntime>=1.18"]
 
 [build-system]
 requires = ["setuptools>=68"]

@@ -7,6 +7,67 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-08-26
+
+### Fixed
+
+- `run.manifest.freeze` read git provenance *after* creating the run directory,
+  so `git_dirty` was true for every frozen run: the directory is untracked at
+  the moment it is created and `git status --porcelain` counts untracked paths.
+  Harmless while `.gitignore` carried a blanket `/runs/` rule and the new
+  directory was ignored; a constant once run records became tracked. Provenance
+  is now read before anything is written, so the field can once again mean
+  "this result cannot be cited".
+
+## [0.7.1] - 2026-08-26
+
+### Added
+
+- `collect.league_caster` takes an optional `order`, a permutation of learner
+  ids applied before its rotation, exposed as `catan.league --learner-order`.
+  Rotation balances every learner over every board seat but leaves the cyclic
+  order round the table invariant, so learner *k*'s turn-order successor is
+  learner *k+1* in every game played -- a fixed structure the league applies
+  without recording it. Permuting the order varies table adjacency while
+  leaving seat shares balanced, which is what makes the two-tight-pairs
+  structure in the noise heats testable.
+
+## [0.7.0] - 2026-08-26
+
+### Added
+
+- `catan.league` — **the table league: N learners share every game.** One
+  directory holds several learners that play each other rather than a frozen
+  opponent, each with its own `PPOConfig` overrides parsed from a per-seat spec,
+  and `standings` reads the order out of play instead of out of a separate
+  evaluation. A league run is rated by its `learner0`, the control arm, not by
+  its best arm — four learners share one directory, so one number cannot stand
+  for the run.
+- `catan.run` — **a run is a directory with a frozen manifest, and the manifest
+  is the input.** `freeze` records the parameters, the resolved config and the
+  repository provenance (`run.json`) before a run starts; `load` reconstructs
+  the invocation from it. A run's configuration used to exist only in a script
+  under gitignored `tmp/`, which is why results could not be regenerated from
+  the repository.
+- `catan.export_onnx` — `.pt` to `.onnx` conversion, with `onnx`/`onnxruntime`
+  behind a new `export` optional dependency. `torch` stays unlisted as a hard
+  dependency, so the torch-free engine remains installable without it.
+- A **rolling checkpoint ring** (`prune_recent`) that keeps the newest N
+  `recent-*.pt` and never touches a kept `iter-*.pt`, and **blowout
+  preservation** (`preserve_blowout`), which writes the pre-update weights and
+  the offending batch when the brake fires — the evidence used to be discarded
+  by the recovery it triggered.
+- Per-seat PPO overrides: `adam_eps`, and a `gain` on the entropy controller
+  (`nudged`), so a league seat can vary one knob against its own control.
+- `selfplay.owned` and a `learners` gate on `Collector`, so several learners can
+  record from one game. `learners=(0,)` is the pre-league behaviour: one
+  learner, opponents as scenery.
+
+### Fixed
+
+- `catan.distill_train` had been unbuildable for two days: the manifest
+  parameters it read no longer matched the parser it read them with.
+
 ## [0.6.1] - 2026-08-26
 
 ### Changed
@@ -95,8 +156,8 @@ iterations confound stated in the record rather than argued away.
 ### Changed
 
 - Evaluation protocol: gates decide on the matched-rival duel; greedy is
-  demoted to a mix-exploitation canary; external anchors calibrate. Four
-  distinct ways the greedy ladder can deceive a gate are what demoted it.
+  demoted to a mix-exploitation canary; external anchors calibrate. A common
+  opponent read four separate improvements that matched duels did not confirm.
 
 ## [0.5.0] - 2026-08-22
 

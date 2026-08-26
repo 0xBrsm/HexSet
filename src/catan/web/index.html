@@ -609,11 +609,19 @@
 <script>
 "use strict";
 
+// Chosen against the terrain palette (TERRAIN_COLORS below), not in the
+// abstract: a hue absent from every hex — purple, vivid blue — survives a
+// piece sitting on any tile, where a hue that's merely a different shade of
+// a terrain color (the old yellow vs Fields/Gold, the old green vs Pasture)
+// doesn't. Red is the one hue no terrain tile uses at all, so it's
+// untouched. Strokes lean much darker than their fill for the same reason
+// roads/settlements/cities need a crisp edge on every tile, not just ones
+// their own hue contrasts with.
 const SEAT_COLORS = [
   {fill: "#d62828", stroke: "#7a0d0d"},
-  {fill: "#4cbb17", stroke: "#2f6b0f"}, // Kelly green
-  {fill: "#f4d35e", stroke: "#8a6d0d"},
-  {fill: "#e07a3e", stroke: "#8a4111"},
+  {fill: "#10b981", stroke: "#064e3b"}, // emerald — cooler/darker than Pasture's yellow-green
+  {fill: "#a855f7", stroke: "#581c87"}, // purple — no terrain tile is purple
+  {fill: "#2563eb", stroke: "#172554"}, // vivid blue — saturated enough to read against Sea/Mountains' muted blues
 ];
 
 // Hues are kept a full step apart because the two pairs that share one read as

@@ -316,6 +316,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_swap_bot(payload)
         elif self.path == "/api/undo":
             self._handle_undo(payload)
+        elif self.path == "/api/confirm":
+            self._handle_confirm(payload)
         else:
             self.send_error(404)
 
@@ -367,7 +369,13 @@ class Handler(BaseHTTPRequestHandler):
             session = self.server.entry(self.identity).session
             try:
                 session.apply_human_action(payload)
-                session.advance_bots()
+                # A setup road may have just handed the turn to someone else
+                # with the human's own confirm still pending (see
+                # GameSession.apply_human_action/awaiting_confirm) — in that
+                # case advance_bots() waits for POST /api/confirm instead of
+                # running in this same request.
+                if not session.awaiting_confirm:
+                    session.advance_bots()
             except ValueError as exc:
                 self._json({"error": str(exc), **session.state_view()}, status=400)
                 return
@@ -385,6 +393,17 @@ class Handler(BaseHTTPRequestHandler):
                 session.undo_last_build()
             except ValueError as exc:
                 self._json({"error": str(exc), **session.state_view()}, status=400)
+                return
+            self._json(session.state_view())
+
+    def _handle_confirm(self, payload: dict) -> None:
+        # No body expected, same as _handle_undo.
+        with self.server.lock_for(self.identity):
+            session = self.server.entry(self.identity).session
+            try:
+                session.confirm_setup_turn()
+            except RuntimeError as exc:
+                self._json({"error": str(exc), **session.state_view()}, status=500)
                 return
             self._json(session.state_view())
 

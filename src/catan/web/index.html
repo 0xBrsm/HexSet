@@ -1091,6 +1091,19 @@ function undoBuild() {
   });
 }
 
+// Lets the bots' turn(s) actually run after a setup road handed off to one
+// — see state.awaiting_confirm and GameSession.confirm_setup_turn. Shares
+// the #end-turn button/corner with sendAction(END_TURN) itself; which one a
+// click means is decided where that's wired, at the bottom of the script.
+function confirmSetupTurn() {
+  return blocking(async () => {
+    const {ok, data} = await postJSON("/api/confirm", {});
+    state = data;
+    showNotice(ok ? "" : (data.error || "Could not continue."));
+    render();
+  });
+}
+
 function showNotice(text) {
   const notice = document.getElementById("notice");
   notice.textContent = text;
@@ -1479,7 +1492,12 @@ function renderBoardDynamic() {
 // trading, discarding, the robber's victim, Monopoly's resource, Year of
 // Plenty's pair — is a mode of the one modal.
 function renderBoardButtons() {
-  const myTurn = !state.game_over && state.to_move === state.human_seat;
+  // awaiting_confirm counts as "my turn" too: to_move has already moved on
+  // to whoever's next (see GameSession.apply_human_action), but the human
+  // still has the one decision left — confirm — before that's real. Nothing
+  // else legal_actions-based reads this differently, since the server
+  // empties legal_actions the moment to_move isn't the human regardless.
+  const myTurn = !state.game_over && (state.to_move === state.human_seat || state.awaiting_confirm);
   // A robber move is the one choice the game asks for on the board rather
   // than in the modal, and it behaves like a modal mode all the same: nothing
   // behind it is reachable until it's answered. When it came from a Knight,
@@ -1491,7 +1509,10 @@ function renderBoardButtons() {
   // rule — so it reads the server's own can_undo flag instead of offered().
   showFab("undo-build", myTurn && !move && Boolean(state.can_undo));
   showFab("roll-dice", offered("ROLL"));
-  showFab("end-turn", offered("END_TURN"));
+  // The same button doubles as the setup-road confirm — see the click
+  // handler wired at the bottom of the script, which is what tells the two
+  // apart (offered("END_TURN") vs awaiting_confirm) rather than this line.
+  showFab("end-turn", offered("END_TURN") || (myTurn && !move && Boolean(state.awaiting_confirm)));
   showFab("buy-dev-card", offered("BUY_DEV_CARD"));
   // Not an action at all, this one: it's the way back out of a robber move
   // that was volunteered, which is the only kind there is a way back out of.
@@ -1921,13 +1942,21 @@ document.getElementById("new-game").addEventListener("click", newGame);
 // A corner button is only on screen when its action is on offer (see
 // renderBoardButtons), so re-reading it here always finds the same one that
 // put the button up.
-for (const [id, type] of [["roll-dice", "ROLL"], ["end-turn", "END_TURN"],
-                          ["buy-dev-card", "BUY_DEV_CARD"]]) {
+for (const [id, type] of [["roll-dice", "ROLL"], ["buy-dev-card", "BUY_DEV_CARD"]]) {
   document.getElementById(id).addEventListener("click", () => {
     const action = legalAction(type);
     if (action) sendAction(action);
   });
 }
+// #end-turn doubles as the setup-road confirm (see confirmSetupTurn) — an
+// actual END_TURN if one's on offer, the confirm otherwise, since the two
+// are never both true at once (legal_actions is empty whenever
+// awaiting_confirm is, per GameSession.apply_human_action).
+document.getElementById("end-turn").addEventListener("click", () => {
+  const action = legalAction("END_TURN");
+  if (action) sendAction(action);
+  else if (state.awaiting_confirm) confirmSetupTurn();
+});
 document.getElementById("cancel-robber").addEventListener("click", cancelRobberMove);
 document.getElementById("undo-build").addEventListener("click", undoBuild);
 // Clicking the water backs out of an armed Knight, the same way clicking a

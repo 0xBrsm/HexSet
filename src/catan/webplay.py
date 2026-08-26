@@ -498,6 +498,13 @@ class GameSession:
     # Set only right after a human BUILD_ROAD/BUILD_SETTLEMENT/BUILD_CITY,
     # cleared by literally anything else — see _apply and undo_last_build.
     _undo: _UndoPoint | None = field(default=None, repr=False)
+    # True only in the instant right after the human's own setup road handed
+    # the turn to someone else — the one handoff in the game with no
+    # explicit "I'm done" the way END_TURN is everywhere else. Public (no
+    # underscore) since the webserver reads it directly to decide whether to
+    # run advance_bots() itself or wait for POST /api/confirm — see
+    # apply_human_action/confirm_setup_turn.
+    awaiting_confirm: bool = field(default=False)
 
     @property
     def round(self) -> int:
@@ -534,6 +541,27 @@ class GameSession:
         if not is_legal(self.game, action, options):
             raise ValueError(f"{action} is not a legal action right now")
         self._apply(self.human_seat, action)
+        # place_initial_road hands current_player straight to the next seat
+        # in the snake with no separate step of its own — unlike Main phase,
+        # where that handoff only ever happens on the human's own explicit
+        # END_TURN. The caller (webserver._handle_action) reads this to
+        # decide whether to run advance_bots() itself or leave it for
+        # POST /api/confirm, so the human gets the same one-button pause
+        # before it as everywhere else, not a same-request cascade they
+        # never got to see, let alone react to.
+        self.awaiting_confirm = (
+            action.type is ActionType.SETUP_ROAD
+            and not is_over(self.game)
+            and to_move(self.game) != self.human_seat
+        )
+
+    def confirm_setup_turn(self) -> None:
+        """Lets the cascade `apply_human_action` held back actually run.
+        A harmless no-op, not an error, if nothing is actually pending —
+        there's nothing to protect by rejecting a stale or doubled-up
+        confirm the way undo_last_build rejects a stale undo."""
+        self.awaiting_confirm = False
+        self.advance_bots()
 
     def _default_ask_order(self, proposer: int) -> tuple[int, ...]:
         """Who to ask first when a proposer didn't say: lowest victory
@@ -632,30 +660,25 @@ class GameSession:
             )
             write_records(self.record_path, [record])
 
-        # Only the human's own actions decide this — a bot's never do, so an
-        # automatic cascade (advance_bots, right below a setup placement that
-        # just handed the snake order on to another seat) can't clear an
-        # undo point the human hasn't had a chance to use yet. Within the
-        # human's own actions: a qualifying placement that didn't win the
-        # game becomes the new (and only) undo point; anything else —
-        # including a second placement — clears whatever was there. A win is
-        # excluded because the record above may already be on disk by now.
-        if actor == self.human_seat:
-            self._undo = undo_point if (undo_point is not None and not is_over(self.game)) else None
+        # Every action decides this fresh: a qualifying human placement that
+        # didn't win the game becomes the new (and only) undo point, anything
+        # else — a bot's move, a second placement — clears whatever was
+        # there. A win is excluded because the record above may already be
+        # on disk by now. Correct even for a setup road handing off to a
+        # bot: apply_human_action holds that handoff's advance_bots() back
+        # until confirm_setup_turn (see awaiting_confirm), so no bot action
+        # ever actually runs between the human's placement and their chance
+        # to undo it.
+        self._undo = undo_point if (undo_point is not None and not is_over(self.game)) else None
 
     def undo_last_build(self) -> None:
         """Reverts the human's most recent placement back to exactly how the
         session stood the instant before it: piece removed, resources
         refunded (including a second setup settlement's grant), longest
         road/largest army recomputed from the restored board, whose turn it
-        is un-advanced if the placement hands off to someone else, log line
-        shortened or dropped, replay bookkeeping truncated.
-
-        Untouched by any bot placements in between (see _apply) — undoing a
-        setup road that already handed off to a bot, who then placed too,
-        rolls the bot's placement back as well, since it happened as a
-        direct consequence of the move being undone. Only ever available
-        since the human's own last placement, whatever ran in between.
+        is un-advanced if the placement handed off to someone else, log line
+        shortened or dropped, replay bookkeeping truncated. Only ever
+        available since the human's own last placement — see _apply.
         """
         if self._undo is None:
             raise ValueError("nothing to undo")
@@ -670,6 +693,12 @@ class GameSession:
         self._run = point.run
         del self._actions[point.actions_count :]
         self._undo = None
+        # A setup road is the only action that ever sets this, and only
+        # after it runs — so whatever's being undone, it was false going
+        # in. Left alone, undoing a road would leave it stuck true: to_move
+        # is back to the human (the whole point), but the client would
+        # still show the confirm button over the real board instead.
+        self.awaiting_confirm = False
 
     def _run_for(self, kind: str, key: tuple, fresh: dict) -> tuple[dict, bool]:
         """The open run for `key`, or a new one seeded from `fresh`.
@@ -876,6 +905,11 @@ class GameSession:
             # undo_last_build. A session convenience, not a rule, so it isn't
             # in legal_actions alongside everything catan.actions offers.
             "can_undo": self._undo is not None,
+            # True while a setup road's handoff is waiting on POST
+            # /api/confirm — see apply_human_action. `to_move` already moved
+            # on to whoever's next by this point, so the client reads this
+            # (not to_move) to know the human still has a decision to make.
+            "awaiting_confirm": self.awaiting_confirm,
             # "round" — one lap of the table — not game.turns' per-seat count
             # (see the `round` property docstring). The only client reader
             # is the sidebar log's current-round filter, which now needs

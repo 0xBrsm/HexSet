@@ -96,8 +96,13 @@
      in a way a narrower "2" on the row above it didn't. Name is the one
      flexible track (minmax(0, 1fr)): it shrinks under pressure instead of
      the row wrapping, which never happens now — nothing here wraps.  */
+  /* Each .stat stretches to fill its column by default (grid items stretch
+     unless told otherwise) and left-aligns its icon+number inside that —
+     so a column wider than the content leaves dead space *inside* it, not
+     just in the explicit gap next to it. 1.9rem is close to what an icon
+     plus a 2-digit number actually needs. */
   .player-row {
-    display: grid; grid-template-columns: auto minmax(0, 1fr) repeat(6, 2.6rem);
+    display: grid; grid-template-columns: auto minmax(0, 1fr) repeat(6, 1.9rem);
     align-items: center; column-gap: 0.25rem; padding: 0.3rem 0.2rem; border-radius: 6px;
   }
   .player-row.active { background: #2a2545; }

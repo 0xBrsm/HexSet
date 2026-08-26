@@ -7,6 +7,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-26
+
 ### Changed
 
 - Duels are **antithetically paired by default**, in `train.versus` and in
@@ -32,6 +34,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it sits and a swapped duel measures the swap. Self-duels keep the positional
   tiebreak deliberately, since one stream for both sides would search in
   lockstep.
+- `benchmarks.duel` **writes a verdict by default** rather than only on
+  request. A 400-game mcts-against-its-own-policy result had been written up in
+  prose and nowhere a tool could read it, so the ratings fit never saw it and
+  placed that entrant half a VP wrong off a single unrelated duel.
 - `benchmarks.duel --json` wrote the result twice: a second append survived the
   change that introduced the verdict default.
 - `arena.wilson` returned an upper bound of 0.9999999999999999 at `p = 1`, an

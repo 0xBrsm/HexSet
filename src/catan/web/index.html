@@ -638,16 +638,23 @@
 "use strict";
 
 // Chosen against the terrain palette (TERRAIN_COLORS below), not in the
-// abstract: a hue absent from every hex — purple, cyan — survives a piece
-// sitting on any tile, where a hue that's merely a different shade of a
-// terrain color (the old yellow vs Fields/Gold, the old green vs Pasture)
-// doesn't. Red is the one hue no terrain tile uses at all, so it's
-// untouched. Strokes lean near-black rather than a darker version of the
-// fill's own hue — a green stroke that's merely dark still reads as
+// abstract — but the thing that actually carries a piece is how *dark* it is,
+// not how exotic its hue is. Five of the eight tiles are light (Hills on up
+// to Gold), so the board reads as a dark piece on a light tile, and every
+// seat colour that works is a dark, saturated fill: relative luminance .16
+// (red) to .38 (cyan). A light fill dissolves into the light half of the
+// board however unusual its hue, which is what the old #00e676 green did on
+// Pasture — identical luminance to the tile, 1.01:1.
+//
+// Hue only has to separate the seats from each other and soften the two
+// same-family cases, and it doesn't have to do that alone: cyan sits on Sea
+// at 2.84:1 and is perfectly legible, which is the bar the green is set to
+// against Forest. Strokes lean near-black rather than a darker version of
+// the fill's own hue — a green stroke that's merely dark still reads as
 // "Forest-colored" next to Forest itself; near-black doesn't, on any tile.
 const SEAT_COLORS = [
   {fill: "#d62828", stroke: "#7a0d0d"},
-  {fill: "#00e676", stroke: "#04241a"}, // vivid green, near-black stroke — Forest/Pasture-proof
+  {fill: "#16a34a", stroke: "#04241a"}, // deep green — dark like the other three, 2.76:1 on Forest, 55° of hue off Pasture
   {fill: "#a855f7", stroke: "#581c87"}, // purple — no terrain tile is purple
   {fill: "#06b6d4", stroke: "#083344"}, // cyan — saturated enough to read against Sea/Mountains' muted blues
 ];

@@ -88,15 +88,25 @@
   .hand-col { flex: 1; min-width: 0; }
   #hand .player-meta { margin-bottom: 0.1rem; }
   .hand-col-header { display: flex; align-items: center; gap: 0.3rem; }
+  /* A real grid, not a flex row: every stat gets its own fixed-width track
+     (see the repeat(6, ...) below), so VP/cards/dev-cards/road/army/roll
+     line up in the same x position on every player row regardless of how
+     wide any one row's values happen to be — a flex row sizes each chip to
+     its own row's content, which is what let a wide "10" push things around
+     in a way a narrower "2" on the row above it didn't. Name is the one
+     flexible track (minmax(0, 1fr)): it shrinks under pressure instead of
+     the row wrapping, which never happens now — nothing here wraps.  */
   .player-row {
-    display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.2rem; border-radius: 6px;
+    display: grid; grid-template-columns: auto minmax(0, 1fr) repeat(6, 2.6rem);
+    align-items: center; column-gap: 0.5rem; padding: 0.3rem 0.2rem; border-radius: 6px;
   }
   .player-row.active { background: #2a2545; }
-  .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.35); flex: none; }
-  /* A fixed width, not just a minimum: every row's name/selector occupies the
-     same column regardless of content, so .player-meta lines up after it on
-     every row — a select renders differently from plain text otherwise. */
-  .player-name { font-weight: 600; width: 6.4rem; flex: none; }
+  .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.35); }
+  /* No fixed width any more — the name column itself (minmax(0, 1fr) above)
+     is what sizes this, and shrinks first when the row's tight. Overflow is
+     clipped with an ellipsis rather than pushing the stat columns after it
+     out of their tracks. */
+  .player-name { font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   /* "Human" has no border/padding of its own the way the <select> below
      does, so its text sat left of the dropdown's — inset it by the same
      1px border + 0.25rem left padding so both start at the same x. */
@@ -106,6 +116,7 @@
   .player-name select {
     font: inherit; font-weight: 600; width: 100%; padding: 0.1rem 0.25rem; border-radius: 5px;
     border: 1px solid var(--border); background: #232733; color: var(--ink);
+    overflow: hidden; text-overflow: ellipsis;
     /* The real reason "human" never quite lined up: a native <select> carries
        its own OS-controlled internal inset on top of whatever padding is
        declared here, which no fixed padding-left on the plain-text case can
@@ -114,14 +125,7 @@
     appearance: none; -webkit-appearance: none;
   }
   .player-meta { color: var(--muted); font-size: 0.82rem; flex: 1; }
-  /* The player row's stat line: icon+number chips (VP, cards, dev cards,
-     last roll) instead of "3 VP · 4 cards" text, so it fits without
-     wrapping unpredictably from row to row. */
-  .player-stats {
-    color: var(--muted); font-size: 0.82rem; flex: 1;
-    display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
-  }
-  .stat { display: inline-flex; align-items: center; gap: 0.2rem; }
+  .stat { display: inline-flex; align-items: center; gap: 0.2rem; color: var(--muted); font-size: 0.82rem; }
   .stat-icon { width: 13px; height: 13px; flex: none; fill: currentColor; }
   /* Longest road / largest army sit in every row, always, so a seat's route
      length or Knight count is comparable turn to turn — muted grey like any
@@ -129,20 +133,13 @@
      point it tints to the same hues the old holder-only badges used. */
   .stat.road.held { color: #8fc4e8; }
   .stat.army.held { color: #e08f8f; }
-  /* Cards get the same extra margin the achievements cluster uses below, so
-     VP reads as its own fact rather than "4 things in a row" — the eye
-     lands on victory points first, then the resource/dev-card counts as
-     their own group. */
-  .player-cards { display: inline-flex; align-items: center; gap: 0.5rem; margin-left: 0.6rem; }
-  /* The extra margin (beyond .player-stats' own gap, already applied
-     between this and the cards before it) is what visually separates
-     the achievement badges as their own cluster rather than just more
-     items in the same list. */
-  .player-achievements { display: inline-flex; align-items: center; gap: 0.5rem; margin-left: 0.6rem; }
-  /* Last roll is the one stat that's about *now*, not a running total —
-     pinned to the row's far right edge, past everything else, rather than
-     sitting wherever it happens to fall in the middle. */
-  .stat.roll { margin-left: auto; }
+  /* Grouping into "3 facts" (VP, cards, honors) plus the roll pinned at the
+     end reads as clusters, not 6 evenly-spaced chips — done by column
+     position, not a class, since the columns before these never move (roll,
+     the only ever-absent chip, is always last). Cards is column 4 (after
+     swatch/name/VP); road is column 6 (after cards/dev-cards). */
+  .player-row > .stat:nth-child(4) { margin-left: 0.6rem; }
+  .player-row > .stat:nth-child(6) { margin-left: 0.6rem; }
   #notice {
     margin: 0 0.8rem; padding: 0.35rem 0.6rem; border-radius: 6px; font-size: 0.85rem;
     background: #3a1616; border: 1px solid #7a3a3a; color: #ffb3b3; display: none;
@@ -1155,31 +1152,29 @@ function renderPlayers() {
     const cards = p.hand !== undefined
       ? board.resources.map((r) => p.hand[r]).reduce((a, b) => a + b, 0)
       : p.hand_size;
-    const metaEl = html("div", {class: "player-stats"});
-    metaEl.appendChild(statChip("victory-point", p.victory_points, "", "Victory points"));
-    const cardsEl = html("span", {class: "player-cards"});
-    cardsEl.appendChild(statChip("card", cards, "", "Resource cards"));
-    cardsEl.appendChild(statChip("dev-card", p.dev_card_count, "", "Development cards"));
-    metaEl.appendChild(cardsEl);
-    // Route length and Knights played sit in every row, set off with their
-    // own bit of breathing room (.player-achievements) — always present so
-    // they're comparable seat to seat, tinted only for whoever actually
-    // holds the title right now (see statChip's "held" class, gated in CSS
-    // on .stat.road.held/.stat.army.held).
-    const achievements = html("span", {class: "player-achievements"});
-    achievements.appendChild(
+    // Each chip is its own grid cell now (see .player-row's
+    // grid-template-columns), appended straight onto the row rather than
+    // into a wrapping div — that's what lets every row share the same
+    // column tracks instead of each row sizing its own flex children.
+    row.appendChild(statChip("victory-point", p.victory_points, "", "Victory points"));
+    row.appendChild(statChip("card", cards, "", "Resource cards"));
+    row.appendChild(statChip("dev-card", p.dev_card_count, "", "Development cards"));
+    // Route length and Knights played sit in every row, always — comparable
+    // seat to seat, tinted only for whoever actually holds the title right
+    // now (see statChip's "held" class, gated in CSS on
+    // .stat.road.held/.stat.army.held).
+    row.appendChild(
       statChip("road", p.road_length, `road${p.longest_road ? " held" : ""}`, "Longest road")
     );
-    achievements.appendChild(
+    row.appendChild(
       statChip("knight", p.knights_played, `army${p.largest_army ? " held" : ""}`, "Largest army")
     );
-    metaEl.appendChild(achievements);
     // Each seat's own last roll, not one global value — lets you compare
     // who's been running hot or cold rather than only ever seeing whoever
-    // rolled most recently. Pinned to the far right (.stat.roll) rather
-    // than sitting between cards and achievements.
-    if (p.last_roll) metaEl.appendChild(statChip("dice", p.last_roll, "roll", "Last roll"));
-    row.appendChild(metaEl);
+    // rolled most recently. It's the row's last (and only ever-absent)
+    // column, so leaving it out when a seat hasn't rolled yet still leaves
+    // every other row's columns aligned.
+    if (p.last_roll) row.appendChild(statChip("dice", p.last_roll, "roll", "Last roll"));
     container.appendChild(row);
   }
 }

@@ -7,6 +7,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-08-26
+
+### Added
+
+- `collect.league_caster` takes an optional `order`, a permutation of learner
+  ids applied before its rotation, exposed as `catan.league --learner-order`.
+  Rotation balances every learner over every board seat but leaves the cyclic
+  order round the table invariant, so learner *k*'s turn-order successor is
+  learner *k+1* in every game played -- a fixed structure the league applies
+  without recording it. Permuting the order varies table adjacency while
+  leaving seat shares balanced, which is what makes the two-tight-pairs
+  structure in the noise heats testable.
+
 ## [0.7.0] - 2026-08-26
 
 ### Added

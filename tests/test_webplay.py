@@ -749,6 +749,16 @@ def test_a_finished_game_is_recorded_and_replays_clean(tmp_path):
     assert replayed.won_by == session.game.won_by
     assert replayed.turns == session.game.turns
 
+    # The transcript beside it: the sidebar's own lines, ending in a result
+    # that names the winning seat the way every other line names one.
+    transcript = (tmp_path / "games.log").read_text().splitlines()
+    assert transcript[0].startswith("=== game finished ")
+    assert transcript[1:-1] == session.log
+    winner = session.game.won_by
+    label = "human" if winner == human_seat else session.bot_names.get(winner, "bot")
+    assert session.log[-1].endswith(" points.")
+    assert f"Player {winner + 1} ({label}) wins" in session.log[-1]
+
 
 def test_recording_is_off_by_default():
     game = a_game(seed=13)

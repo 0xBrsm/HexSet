@@ -34,6 +34,8 @@ import copy
 import math
 import random
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Protocol
 
 from .actions import (
@@ -363,6 +365,30 @@ def _who(seat: int, human_seat: int, bot_names: dict[int, str]) -> str:
     return f"Player {seat + 1} ({label})"
 
 
+def log_path_for(record_path: str) -> str:
+    """The transcript that sits next to a record file — same name, `.log`."""
+    return str(Path(record_path).with_suffix(".log"))
+
+
+def write_log(path: str, lines: list[str]) -> None:
+    """Appends one finished game's log to `path`, exactly as the sidebar shows
+    it: the same "round<TAB>text" entries, in order, nothing reformatted.
+
+    A record replays into all of this and more, but only for as long as the
+    engine that wrote it is untouched; the text survives anything. Games are
+    separated by a UTC datestamp so an append-only file stays readable — and
+    since the last line of each is now the result (see `_log_result`),
+    counting wins is a grep over this file rather than a replay of the
+    records beside it.
+    """
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(f"=== game finished {stamp} ===\n")
+        for line in lines:
+            handle.write(line + "\n")
+        handle.write("\n")
+
+
 def _describe(
     game: Game,
     actor: int,
@@ -484,7 +510,10 @@ class GameSession:
     _offers: list[tuple[int, tuple[int, ...], tuple[int, ...], tuple[int, ...]]] = field(
         default_factory=list, repr=False
     )
-    _recorded: bool = field(default=False, repr=False)
+    # Set the first time the game is seen to be over, so the closing log line
+    # is written (and the game filed away) exactly once however many more
+    # times _apply runs afterwards.
+    _ended: bool = field(default=False, repr=False)
     # A run of build actions by the same actor in the same round, folded
     # into one log line instead of one each — see _log_action. Cleared by
     # any other action from any seat.
@@ -647,18 +676,21 @@ class GameSession:
 
         append_step(self._actions, self._offers, action)
 
-        if is_over(self.game) and self.record_path and not self._recorded:
-            self._recorded = True
-            record = Record(
-                num_players=self.game.state.num_players,
-                seed=self.seed,
-                actions=tuple(self._actions),
-                offers=tuple(self._offers),
-                winner=self.game.won_by,
-                turns=self.game.turns,
-                **board_fields(self.game.state.board),
-            )
-            write_records(self.record_path, [record])
+        if is_over(self.game) and not self._ended:
+            self._ended = True
+            self._log_result(round_num)
+            if self.record_path:
+                record = Record(
+                    num_players=self.game.state.num_players,
+                    seed=self.seed,
+                    actions=tuple(self._actions),
+                    offers=tuple(self._offers),
+                    winner=self.game.won_by,
+                    turns=self.game.turns,
+                    **board_fields(self.game.state.board),
+                )
+                write_records(self.record_path, [record])
+                write_log(log_path_for(self.record_path), self.log)
 
         # Every action decides this fresh: a qualifying human placement that
         # didn't win the game becomes the new (and only) undo point, anything
@@ -724,6 +756,24 @@ class GameSession:
         if continuing:
             self.log.pop()
         self.log.append(f"{round_num}\t{line}")
+
+    def _log_result(self, round_num: int) -> None:
+        """The closing line, written once the game is over.
+
+        The board itself already says who won — the client draws it across the
+        phase banner — but the log is the only part of a game that outlives it
+        on disk, and a transcript that stops mid-turn without saying how it
+        ended is no use for counting anything afterwards. Names the winner the
+        same way every other line names a seat, so "(human)" is what a reader
+        (or a grep) matches on.
+        """
+        winner = self.game.won_by
+        if winner is None:
+            self.log.append(f"{round_num}\tGame over. Nobody won.")
+            return
+        who = _who(winner, self.human_seat, self.bot_names)
+        points = victory_points(self.game.state, winner)
+        self.log.append(f"{round_num}\t{who} wins with {points} points.")
 
     def _log_action(self, round_num: int, actor: int, action: Action, before: _Snapshot) -> None:
         """Appends this action's line to `self.log`.

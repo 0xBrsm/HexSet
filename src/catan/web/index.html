@@ -414,28 +414,37 @@
        if it's wrong instead of re-deriving the geometry. */
     padding-right: 2.5rem;
   }
-  .trade-side { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; position: relative; }
+  .trade-side { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; }
   .trade-side .pick-row { margin: 0; justify-content: center; }
   .trade-side-label { font-size: 0.78rem; color: var(--muted); }
   .trade-arrow { flex: none; font-size: 1.3rem; line-height: 1; color: var(--muted); }
-  /* "propose" mode's own give/want cards, each clickable to open the
-     selector right below it (.trade-popover) instead of a separate row of
-     five always-visible options underneath the whole exchange. */
+  /* "propose" mode's give/want cards. Tapping one aims the picker row below
+     (.trade-picker) at that side rather than opening anything: the one that's
+     currently being chosen wears the accent, so the exchange doubles as the
+     picker's own "which side am I editing" indicator. */
   .trade-slot { cursor: pointer; border-radius: 4px; }
   .trade-slot:hover .card, .trade-slot:hover .trade-slot-empty { border-color: var(--accent); }
+  .trade-slot.active .card, .trade-slot.active .trade-slot-empty {
+    border-color: var(--accent); border-style: solid;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
   .trade-slot-empty {
     width: 34px; height: 46px; border-radius: 4px; display: flex;
     align-items: center; justify-content: center;
     border: 1px dashed var(--muted); color: var(--muted); font-size: 0.9rem;
   }
-  .trade-popover {
-    position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
-    margin-top: 0.35rem; z-index: 5; display: flex; flex-wrap: wrap;
-    justify-content: center; gap: 0.25rem; padding: 0.35rem;
-    max-width: 190px; border-radius: 8px;
-    background: var(--panel); border: 1px solid var(--border);
-    box-shadow: 0 6px 16px rgba(0,0,0,0.4);
+  /* The one picker row, aimed at whichever side is active. All five every
+     time, illegal ones dimmed rather than dropped, so the row never reflows
+     under a finger that's about to tap it. */
+  .trade-picker {
+    display: flex; flex-direction: column; align-items: center; gap: 0.3rem;
+    padding-top: 0.7rem; border-top: 1px solid var(--border);
+    /* Same nudge, same reason, as .trade-exchange above — without it the five
+       here and the pair up there are centered on two different axes. */
+    padding-right: 2.5rem;
   }
+  .trade-picker .pick-row { margin: 0; justify-content: center; }
+  .trade-picker-label { font-size: 0.78rem; color: var(--muted); }
   /* Reuses .card's own size/shape (see the hand section) so a tile in the
      modal looks exactly like the card it represents — just selectable and
      dimmable on top of that. Every mode that picks a resource uses these:
@@ -694,7 +703,7 @@ let logSheetOpen = false;  // the full-history sheet is only drawn while it's up
 let modalMode = null;      // which decision the modal is showing, if any — see openModal
 let tradeGive = null;      // selected resource index, "propose" mode only
 let tradeWant = null;
-let tradePickerOpen = null; // "give" | "want" | null — which side's own card is currently open as a selector, "propose" mode only
+let tradeSide = "give";    // "give" | "want" — which side the picker row is currently choosing for, "propose" mode only
 let modelNames = [];       // GET /api/models, in MODEL_OPTIONS order
 let currentBotModels = []; // this game's (or the next one's) 3 non-human-seat picks, ascending seat order
 
@@ -1623,7 +1632,7 @@ function pickCard(resourceIdx, {selected, disabled, count, title, onClick} = {})
 // A bundle (as the wire format carries it: one count per resource index),
 // display-only — the "respond" mode's read of what's being offered.
 // bundle.length must match board.resources.length (both are NUM_RESOURCES);
-// the server and tradePopover below share that assumption too.
+// the server and tradePicker below share that assumption too.
 function tradeCardRow(bundle) {
   const row = html("div", {class: "pick-row"});
   for (let r = 0; r < bundle.length; r++) {
@@ -1652,60 +1661,66 @@ function tradeExchangeRow(giveBundle, giveLabel, wantBundle, wantLabel) {
   return row;
 }
 
-// The "propose" mode's give/want row: the exchange shape itself is the
-// picker. Each side shows its own current card (or an empty slot before
-// anything's chosen); tapping either one opens a small selector of the
-// legal alternatives right there, in place of the old pair of always-visible
-// five-wide rows underneath the preview.
-function tradeProposeRow(p) {
+// The "propose" mode's give/want row: the shape of the trade being built,
+// and the target of the picker below it. Each side shows its own current
+// card (or an empty slot before anything's chosen) and tapping either aims
+// the picker at that side.
+function tradeProposeRow() {
   const row = html("div", {class: "trade-exchange"});
-  row.appendChild(tradeProposeSide("give", "You give", p));
+  row.appendChild(tradeProposeSide("give", "You give"));
   row.appendChild(html("div", {class: "trade-arrow"}, "⇄"));
-  row.appendChild(tradeProposeSide("want", "You want", p));
+  row.appendChild(tradeProposeSide("want", "You want"));
   return row;
 }
 
-function tradeProposeSide(which, label, p) {
+function tradeProposeSide(which, label) {
   const picked = which === "give" ? tradeGive : tradeWant;
   const side = html("div", {class: "trade-side"});
   side.appendChild(html("div", {class: "trade-side-label"}, label));
-  const slot = html("div", {class: "trade-slot"});
+  const slot = html("div", {class: "trade-slot" + (tradeSide === which ? " active" : "")});
   slot.appendChild(picked !== null
     ? pickCard(picked, {})
     : html("div", {class: "trade-slot-empty"}, "?"));
-  slot.addEventListener("click", () => {
-    tradePickerOpen = tradePickerOpen === which ? null : which;
-    renderModal();
-  });
+  slot.addEventListener("click", () => { tradeSide = which; renderModal(); });
   side.appendChild(slot);
-  if (tradePickerOpen === which) side.appendChild(tradePopover(which, p));
   return side;
 }
 
-// The selector that opens under a tapped side: only resources actually
-// choosable there (held, for "give"; anything but the current "give", for
-// "want") rather than the full five dimmed — it's a short-lived overlay, not
-// a shape that needs to hold steady between clicks the way the old rows did.
-function tradePopover(which, p) {
-  const isGive = which === "give";
-  const pop = html("div", {class: "trade-popover"});
+// One picker row for both sides, aimed at whichever is active. All five
+// resources every time — held counts on the give side, the dimmed ones being
+// what can't be picked there (nothing held, for "give"; whatever "give" is
+// already, for "want") — so the row holds its shape between taps instead of
+// reflowing the way a per-side list of just the legal options would.
+//
+// Choosing a give auto-advances to want, but only while want is still empty:
+// once there's a whole trade on the table, coming back to change one side
+// shouldn't move the picker off the side just changed.
+function tradePicker(p) {
+  const isGive = tradeSide === "give";
+  const wrap = html("div", {class: "trade-picker"});
+  wrap.appendChild(html("div", {class: "trade-picker-label"},
+    isGive ? "Pick what you'll give" : "Pick what you want"));
+  const row = html("div", {class: "pick-row"});
   for (let r = 0; r < board.resources.length; r++) {
     const held = p.hand ? p.hand[board.resources[r]] : 0;
-    if (isGive ? !held : r === tradeGive) continue;
-    pop.appendChild(pickCard(r, {
+    row.appendChild(pickCard(r, {
+      selected: r === (isGive ? tradeGive : tradeWant),
+      disabled: isGive ? !held : r === tradeGive,
+      count: isGive ? held : undefined,
       onClick: () => {
         if (isGive) {
           tradeGive = r;
           if (tradeWant === r) tradeWant = null;
+          if (tradeWant === null) tradeSide = "want";
         } else {
           tradeWant = r;
         }
-        tradePickerOpen = null;
         renderModal();
       },
     }));
   }
-  return pop;
+  wrap.appendChild(row);
+  return wrap;
 }
 
 // The six modes, and what puts each one up:
@@ -1723,7 +1738,9 @@ function openModal(mode, {give = null} = {}) {
     // made yet either way.
     tradeGive = give;
     tradeWant = null;
-    tradePickerOpen = null;
+    // Straight to the half that's still open: coming in from a card in hand
+    // has already answered "give".
+    tradeSide = give === null ? "give" : "want";
   }
   document.getElementById("modal").classList.add("show");
   renderModal();
@@ -1916,25 +1933,30 @@ function renderProposeMode(title, body, actions) {
     );
   }
 
-  // The exchange row is the picker itself — tapping either side's card opens
-  // a selector right there (see tradeProposeSide/tradePopover) — so there's
-  // nothing else to build here regardless of how much of the trade is picked
-  // yet. One-for-one, which is the shape of the offer to the table; what the
-  // bank would charge instead is on its own button (the rate under the
-  // glyph), since the two are alternatives and the row can only show one.
-  body.appendChild(tradeProposeRow(p));
+  // The trade as it stands on top, the one picker row aimed at whichever
+  // half is being chosen underneath. Both are drawn whatever's been picked
+  // so far, so nothing in here changes height between taps. One-for-one,
+  // which is the shape of the offer to the table; what the bank would charge
+  // instead is on its own button (the rate under the glyph), since the two
+  // are alternatives and the row can only show one.
+  body.appendChild(tradeProposeRow());
+  body.appendChild(tradePicker(p));
 
   // Both routes, whenever both are open: the bank or a port takes the cards
   // now at its own rate, the table might take them one-for-one or might not.
   // Neither is the default — they are different trades, not two ways of
   // making the same one — so both sit in the primary slot and the human
   // picks.
-  if (bank) actions.appendChild(bankTradeButton(bank));
-  if (offer) {
-    const btn = modalActionButton("send", "Offer to the other players");
-    btn.addEventListener("click", () => { closeModal(); sendAction(offer); });
-    actions.appendChild(btn);
-  }
+  //
+  // Always all three, disabled until the trade they'd send actually exists:
+  // this column is centered on its own axis, so a button appearing as the
+  // second half of the pair lands would shove the others off the position
+  // the finger was already heading for.
+  actions.appendChild(bankTradeButton(bank));
+  const send = modalActionButton("send", "Offer to the other players");
+  if (offer) send.addEventListener("click", () => { closeModal(); sendAction(offer); });
+  else send.disabled = true;
+  actions.appendChild(send);
   actions.appendChild(modalCancelButton());
 }
 
@@ -1951,13 +1973,23 @@ const BANK_RATE = 4;
 // the markers on the board's own coast, and a bank front otherwise — and the
 // rate goes under it, so "give 2" and "give 4" don't look like the same
 // button.
+//
+// `action` is null while there's no such trade to make yet (a half-picked
+// pair, or a rate the hand can't cover): the button stays put and disabled,
+// and once a give is picked it still carries that resource's rate, which is
+// the reason it's out of reach when it is.
 function bankTradeButton(action) {
-  const ratio = state.trade_ratios[board.resources[tradeGive]];
-  const viaPort = ratio < BANK_RATE;
-  const where = viaPort ? `your ${ratio}:1 port` : "the bank";
-  const btn = modalActionButton(viaPort ? "ship" : "bank", `Trade ${ratio} for 1 with ${where}`);
-  btn.appendChild(html("span", {class: "modal-btn-rate"}, `${ratio}:1`));
-  btn.addEventListener("click", () => { closeModal(); sendAction(action); });
+  const ratio = tradeGive === null ? null : state.trade_ratios[board.resources[tradeGive]];
+  const viaPort = ratio !== null && ratio < BANK_RATE;
+  const label = ratio === null
+    ? "Trade with the bank"
+    : `Trade ${ratio} for 1 with ${viaPort ? `your ${ratio}:1 port` : "the bank"}`;
+  const btn = modalActionButton(viaPort ? "ship" : "bank", label);
+  // Non-breaking space, not "": the rate line has to keep its height or the
+  // glyph above it shifts when the first give is picked.
+  btn.appendChild(html("span", {class: "modal-btn-rate"}, ratio === null ? "\u00a0" : `${ratio}:1`));
+  if (action) btn.addEventListener("click", () => { closeModal(); sendAction(action); });
+  else btn.disabled = true;
   return btn;
 }
 

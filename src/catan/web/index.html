@@ -414,10 +414,28 @@
        if it's wrong instead of re-deriving the geometry. */
     padding-right: 2.5rem;
   }
-  .trade-side { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; }
+  .trade-side { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; position: relative; }
   .trade-side .pick-row { margin: 0; justify-content: center; }
   .trade-side-label { font-size: 0.78rem; color: var(--muted); }
   .trade-arrow { flex: none; font-size: 1.3rem; line-height: 1; color: var(--muted); }
+  /* "propose" mode's own give/want cards, each clickable to open the
+     selector right below it (.trade-popover) instead of a separate row of
+     five always-visible options underneath the whole exchange. */
+  .trade-slot { cursor: pointer; border-radius: 4px; }
+  .trade-slot:hover .card, .trade-slot:hover .trade-slot-empty { border-color: var(--accent); }
+  .trade-slot-empty {
+    width: 34px; height: 46px; border-radius: 4px; display: flex;
+    align-items: center; justify-content: center;
+    border: 1px dashed var(--muted); color: var(--muted); font-size: 0.9rem;
+  }
+  .trade-popover {
+    position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+    margin-top: 0.35rem; z-index: 5; display: flex; flex-wrap: wrap;
+    justify-content: center; gap: 0.25rem; padding: 0.35rem;
+    max-width: 190px; border-radius: 8px;
+    background: var(--panel); border: 1px solid var(--border);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.4);
+  }
   /* Reuses .card's own size/shape (see the hand section) so a tile in the
      modal looks exactly like the card it represents — just selectable and
      dimmable on top of that. Every mode that picks a resource uses these:
@@ -676,6 +694,7 @@ let logSheetOpen = false;  // the full-history sheet is only drawn while it's up
 let modalMode = null;      // which decision the modal is showing, if any — see openModal
 let tradeGive = null;      // selected resource index, "propose" mode only
 let tradeWant = null;
+let tradePickerOpen = null; // "give" | "want" | null — which side's own card is currently open as a selector, "propose" mode only
 let modelNames = [];       // GET /api/models, in MODEL_OPTIONS order
 let currentBotModels = []; // this game's (or the next one's) 3 non-human-seat picks, ascending seat order
 
@@ -1604,7 +1623,7 @@ function pickCard(resourceIdx, {selected, disabled, count, title, onClick} = {})
 // A bundle (as the wire format carries it: one count per resource index),
 // display-only — the "respond" mode's read of what's being offered.
 // bundle.length must match board.resources.length (both are NUM_RESOURCES);
-// the server and tradePickerRow below share that assumption too.
+// the server and tradePopover below share that assumption too.
 function tradeCardRow(bundle) {
   const row = html("div", {class: "pick-row"});
   for (let r = 0; r < bundle.length; r++) {
@@ -1612,13 +1631,6 @@ function tradeCardRow(bundle) {
     row.appendChild(pickCard(r, {count: bundle[r]}));
   }
   return row;
-}
-
-// A one-hot bundle (see tradeCardRow) for a single picked resource — lets
-// the "propose" preview reuse the same exchange-row renderer the "respond"
-// mode uses for a real multi-resource offer.
-function singleBundle(resourceIdx) {
-  return board.resources.map((_, i) => (i === resourceIdx ? 1 : 0));
 }
 
 // The shared "offered card(s) ⇄ requested card(s)" layout: one side's
@@ -1640,18 +1652,47 @@ function tradeExchangeRow(giveBundle, giveLabel, wantBundle, wantLabel) {
   return row;
 }
 
-// One row of all 5 resources, pickable — the "propose" mode's give/want
-// rows. "give" disables anything the human doesn't hold; "want" disables
-// whatever's currently picked as "give" (can't trade a resource for itself).
-function tradePickerRow(which, p) {
-  const row = html("div", {class: "pick-row"});
+// The "propose" mode's give/want row: the exchange shape itself is the
+// picker. Each side shows its own current card (or an empty slot before
+// anything's chosen); tapping either one opens a small selector of the
+// legal alternatives right there, in place of the old pair of always-visible
+// five-wide rows underneath the preview.
+function tradeProposeRow(p) {
+  const row = html("div", {class: "trade-exchange"});
+  row.appendChild(tradeProposeSide("give", "You give", p));
+  row.appendChild(html("div", {class: "trade-arrow"}, "⇄"));
+  row.appendChild(tradeProposeSide("want", "You want", p));
+  return row;
+}
+
+function tradeProposeSide(which, label, p) {
+  const picked = which === "give" ? tradeGive : tradeWant;
+  const side = html("div", {class: "trade-side"});
+  side.appendChild(html("div", {class: "trade-side-label"}, label));
+  const slot = html("div", {class: "trade-slot"});
+  slot.appendChild(picked !== null
+    ? pickCard(picked, {})
+    : html("div", {class: "trade-slot-empty"}, "?"));
+  slot.addEventListener("click", () => {
+    tradePickerOpen = tradePickerOpen === which ? null : which;
+    renderModal();
+  });
+  side.appendChild(slot);
+  if (tradePickerOpen === which) side.appendChild(tradePopover(which, p));
+  return side;
+}
+
+// The selector that opens under a tapped side: only resources actually
+// choosable there (held, for "give"; anything but the current "give", for
+// "want") rather than the full five dimmed — it's a short-lived overlay, not
+// a shape that needs to hold steady between clicks the way the old rows did.
+function tradePopover(which, p) {
+  const isGive = which === "give";
+  const pop = html("div", {class: "trade-popover"});
   for (let r = 0; r < board.resources.length; r++) {
     const held = p.hand ? p.hand[board.resources[r]] : 0;
-    const isGive = which === "give";
-    const disabled = isGive ? !held : r === tradeGive;
-    const selected = isGive ? tradeGive === r : tradeWant === r;
-    row.appendChild(pickCard(r, {
-      selected, disabled,
+    if (isGive ? !held : r === tradeGive) continue;
+    pop.appendChild(pickCard(r, {
       onClick: () => {
         if (isGive) {
           tradeGive = r;
@@ -1659,11 +1700,12 @@ function tradePickerRow(which, p) {
         } else {
           tradeWant = r;
         }
+        tradePickerOpen = null;
         renderModal();
       },
     }));
   }
-  return row;
+  return pop;
 }
 
 // The six modes, and what puts each one up:
@@ -1681,6 +1723,7 @@ function openModal(mode, {give = null} = {}) {
     // made yet either way.
     tradeGive = give;
     tradeWant = null;
+    tradePickerOpen = null;
   }
   document.getElementById("modal").classList.add("show");
   renderModal();
@@ -1873,20 +1916,13 @@ function renderProposeMode(title, body, actions) {
     );
   }
 
-  // A live "offered ⇄ requested" preview once both sides are picked, so the
-  // pickers below are for adjusting the choice, not the only place it's
-  // visible. One-for-one, which is the shape of the offer to the table; what
-  // the bank would charge instead is on its own button (the rate under the
-  // glyph), since the two are alternatives and the preview can only draw one.
-  if (tradeGive !== null && tradeWant !== null) {
-    body.appendChild(tradeExchangeRow(
-      singleBundle(tradeGive), "You give", singleBundle(tradeWant), "You want"
-    ));
-  }
-  body.appendChild(html("div", {class: "modal-note"}, "Give:"));
-  body.appendChild(tradePickerRow("give", p));
-  body.appendChild(html("div", {class: "modal-note"}, "Want:"));
-  body.appendChild(tradePickerRow("want", p));
+  // The exchange row is the picker itself — tapping either side's card opens
+  // a selector right there (see tradeProposeSide/tradePopover) — so there's
+  // nothing else to build here regardless of how much of the trade is picked
+  // yet. One-for-one, which is the shape of the offer to the table; what the
+  // bank would charge instead is on its own button (the rate under the
+  // glyph), since the two are alternatives and the row can only show one.
+  body.appendChild(tradeProposeRow(p));
 
   // Both routes, whenever both are open: the bank or a port takes the cards
   // now at its own rate, the table might take them one-for-one or might not.

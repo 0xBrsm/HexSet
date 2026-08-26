@@ -105,7 +105,7 @@
     display: grid; grid-template-columns: auto minmax(0, 1fr) repeat(6, 1.9rem);
     align-items: center; column-gap: 0.25rem; padding: 0.3rem 0.2rem; border-radius: 6px;
   }
-  .player-row.active { background: #2a2545; }
+  .player-row.active { background: color-mix(in srgb, var(--accent) 15%, var(--panel)); }
   .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.35); }
   /* No fixed width any more — the name column itself (minmax(0, 1fr) above)
      is what sizes this, and shrinks first when the row's tight. Overflow is
@@ -229,12 +229,23 @@
     font-size: 10px; text-anchor: middle; dominant-baseline: central;
     pointer-events: none; font-weight: 700;
   }
-  .clickable-vertex { cursor: pointer; fill: #e4e0ff; stroke: var(--accent); stroke-width: 2; opacity: 0.85; }
-  .clickable-vertex:hover { fill: #cfc4ff; }
+  /* Tints of --accent (the human's own seat colour, set per render — see
+     render()) rather than fixed shades of one purple, so every highlight on
+     the board follows whichever colour that seat actually is. color-mix
+     with transparent reproduces what an rgba(accent, alpha) literal used to
+     do; color-mix with white/black is the same trick for a tint/shade. */
+  .clickable-vertex {
+    cursor: pointer; fill: color-mix(in srgb, var(--accent) 20%, white);
+    stroke: var(--accent); stroke-width: 2; opacity: 0.85;
+  }
+  .clickable-vertex:hover { fill: color-mix(in srgb, var(--accent) 35%, white); }
   .clickable-edge { cursor: pointer; stroke: var(--accent); stroke-width: 12; stroke-linecap: round; opacity: 0.55; }
   .clickable-edge:hover { opacity: 0.85; }
-  .clickable-hex { cursor: pointer; fill: rgba(109,92,232,0.18); stroke: var(--accent); stroke-width: 3; stroke-dasharray: 6 4; }
-  .clickable-hex:hover { fill: rgba(109,92,232,0.32); }
+  .clickable-hex {
+    cursor: pointer; fill: color-mix(in srgb, var(--accent) 18%, transparent);
+    stroke: var(--accent); stroke-width: 3; stroke-dasharray: 6 4;
+  }
+  .clickable-hex:hover { fill: color-mix(in srgb, var(--accent) 32%, transparent); }
   .robber { fill: #000000; stroke: #ffffff; stroke-width: 1.5; pointer-events: none; }
   #overlay-blocker {
     position: absolute; inset: 0; background: rgba(0,0,0,0.5); display: none;
@@ -384,7 +395,7 @@
     display: inline-flex; gap: 0.2rem; padding: 0.25rem; border-radius: 6px;
     border: 2px solid transparent; cursor: pointer;
   }
-  .pick-pair:hover { border-color: var(--accent); background: rgba(109,92,232,0.12); }
+  .pick-pair:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
   /* The robber's victims are seats, not resources, so they get plain buttons
      with the same colour swatch the player list uses rather than card tiles —
      stacked, because a seat's name is far too wide to sit five to a row. */
@@ -417,9 +428,9 @@
 
   /* Touch has no hover to fall back on, and the targets are only a few screen
      pixels wide once the board scales down to a phone. */
-  .clickable-vertex:active { fill: #b8a6ff; }
+  .clickable-vertex:active { fill: color-mix(in srgb, var(--accent) 50%, white); }
   .clickable-edge:active { opacity: 1; }
-  .clickable-hex:active { fill: rgba(109,92,232,0.45); }
+  .clickable-hex:active { fill: color-mix(in srgb, var(--accent) 45%, transparent); }
   @media (pointer: coarse) {
     /* Vertices sit ~63 board units apart and a vertex circle eats into the two
        roads it caps, so r is capped well short of tangency to leave the middle
@@ -600,7 +611,7 @@
 
 const SEAT_COLORS = [
   {fill: "#d62828", stroke: "#7a0d0d"},
-  {fill: "#1d3557", stroke: "#0b1a2b"},
+  {fill: "#4cbb17", stroke: "#2f6b0f"}, // Kelly green
   {fill: "#f4d35e", stroke: "#8a6d0d"},
   {fill: "#e07a3e", stroke: "#8a4111"},
 ];
@@ -1114,6 +1125,13 @@ function showNotice(text) {
 
 function render() {
   if (!state || !board) return;
+  // The highlight colour throughout the page (build targets, selection
+  // borders, the active player row, ...) is the human's own seat colour
+  // rather than one fixed purple — every CSS rule that used to hardcode a
+  // shade of #6d5ce8 now derives it from this custom property instead (see
+  // the color-mix() rules on .clickable-vertex etc.). Set on every render
+  // rather than once, since a new game can seat the human differently.
+  document.documentElement.style.setProperty("--accent", SEAT_COLORS[state.human_seat].fill);
   // Arming a Knight is purely client-side, so nothing else clears it: a new
   // state where playing one is no longer legal (it was played, the turn moved
   // on, the game ended) has to. legal_actions is empty whenever it isn't the

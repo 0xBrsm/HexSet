@@ -5,6 +5,7 @@ import random
 
 import pytest
 
+from catan import arena
 from catan.arena import (
     MAX_ACTIONS,
     PRESETS,
@@ -23,7 +24,7 @@ from catan.arena import (
     wilson,
 )
 from catan.board.board import random_base_board
-from catan.bots import RandomBot
+from catan.bots import RandomBot, options_for
 from catan.game import is_over
 
 
@@ -282,3 +283,78 @@ def test_a_network_spec_can_self_impose_an_offer_budget():
     assert capped.max_offers == 1
     assert capped.name == "network-offers1"
     assert capped.weights == "/tmp/x.pt"
+
+
+class Streamless:
+    """A bot that plays the first legal action and holds no random stream.
+
+    The antithetic pairing's exact answer only exists for two sides that play
+    the *same* game, and every scripted bot here samples hidden information
+    through an rng keyed to its lineup slot -- so two identical `greedy` sides
+    diverge on the first determinization that differs, and their split is paired
+    but not exact (48 games of `greedy` at seed 7 read 23/25, not 24/24). The
+    case the guarantee was measured on is a checkpoint played straight:
+    `network:` argmax touches no rng at all, and a self-duel of one came out
+    24/24 against 25/23 unpaired. Torch cannot be installed where this file
+    runs, so the determinism comes from a stub rather than from a checkpoint.
+    """
+
+    def choose(self, game):
+        return options_for(game)[0]
+
+
+def test_a_pair_is_one_game_played_twice_with_the_seat_pairs_exchanged(monkeypatch):
+    """The property the dice-keying trap broke, stated so it cannot come back.
+
+    The first attempt at this keyed the board to the pair and left the dice
+    keyed to the raw game index, so a pair's two halves played the same board
+    with *different dice* -- two unrelated games, and nothing cancelled. It read
+    20/28 where the design guarantees 24/24, and only a known exact answer
+    caught it.
+    """
+    monkeypatch.setattr(arena, "spawn", lambda entrant, board, rng: Streamless())
+    lineup = tuple(lineup_from_names(["random"] * 4))
+
+    first = arena._play_one((lineup, 0, 20000, MAX_ACTIONS, True))
+    second = arena._play_one((lineup, 1, 20000, MAX_ACTIONS, True))
+
+    # One game, relabelled: the same board, the same dice, the same play. Only
+    # which entrant sat where differs, and it differs by the `seats // 2` shift.
+    assert second[3] == first[3][2:] + first[3][:2]
+    assert second[1] == first[1]  # the winning *seat* is the same seat
+    # And the win lands on the other side of an [a, a, b, b] lineup.
+    assert second[0] == (first[0] + 2) % 4
+
+
+def test_antithetic_pairing_splits_an_identical_pair_exactly(monkeypatch):
+    monkeypatch.setattr(arena, "spawn", lambda entrant, board, rng: Streamless())
+    lineup = lineup_from_names(["random"] * 4)
+
+    paired = compete(lineup, 48, seed=20000)
+    wins = [standing.wins for standing in paired.standings]
+    # Every decided game is decided twice, once for each side, so the split is
+    # exact rather than close. Counted over decided games because a stub that
+    # always takes the first legal action does not always reach ten points, and
+    # an unfinished pair is unfinished in both halves.
+    decided = paired.games - paired.unfinished
+    assert wins[0] + wins[1] == wins[2] + wins[3] == decided // 2
+
+    # The control: the same 48 boards without the pairing. The rotation already
+    # gives every entrant every seat, so the *mean* seat effect is gone -- what
+    # is left is the parity-correlated residual, and it does not average out.
+    plain = compete(lineup, 48, seed=20000, antithetic=False)
+    loose = [standing.wins for standing in plain.standings]
+    assert loose[0] + loose[1] != loose[2] + loose[3]
+
+
+def test_a_sweep_gets_an_interval_containing_its_own_estimate():
+    """`wilson(4, 4)` used to return an upper bound of 0.9999999999999999.
+
+    Analytically the bound at `p = 1` is exactly 1; in floating point the
+    algebraic form lands an ulp short, so a clean sweep reported an interval
+    excluding its own point estimate and `wilson_low <= win_rate <=
+    wilson_high` failed in `test_train`.
+    """
+    for wins, games in ((4, 4), (0, 4), (400, 400), (0, 800), (1, 2)):
+        low, high = wilson(wins, games)
+        assert 0.0 <= low <= wins / games <= high <= 1.0

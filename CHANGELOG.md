@@ -7,6 +7,51 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-26
+
+### Changed
+
+- Duels are **antithetically paired by default**, in `train.versus` and in
+  `arena.compete`. Every board is played under both seat assignments -- same
+  board, same dice, same per-entrant stream, differing in who sits where and
+  nothing else -- and the two readings are averaged per board. `alternating`
+  keys the cast to the game index and the board is keyed to the index too, so a
+  single cohort sampled each side on one seat-pair per board and never the
+  other: the mean seat effect cancelled, the parity-correlated residual did not,
+  and it was **55% of a single-order duel's variance** while being reported as
+  ordinary noise. It is also why swapping a duel's arguments did not negate its
+  result. A checkpoint duelled against itself read -0.771 VP over 48 games
+  before, and exactly 0.000 after. Pass `antithetic=False` to reproduce an
+  earlier reading; readings taken before this are valid measurements whose
+  intervals were too narrow.
+- Duels want a **different seed per pair**. Six comparisons sharing one
+  `--duel-seed` share one draw of the seat residual, not six independent tests.
+
+### Fixed
+
+- `benchmarks.duel` seeds a stochastic entrant from a hash of its **spec**
+  rather than from its argument position, so an entrant plays the same wherever
+  it sits and a swapped duel measures the swap. Self-duels keep the positional
+  tiebreak deliberately, since one stream for both sides would search in
+  lockstep.
+- `benchmarks.duel` **writes a verdict by default** rather than only on
+  request. A 400-game mcts-against-its-own-policy result had been written up in
+  prose and nowhere a tool could read it, so the ratings fit never saw it and
+  placed that entrant half a VP wrong off a single unrelated duel.
+- `benchmarks.duel --json` wrote the result twice: a second append survived the
+  change that introduced the verdict default.
+- `arena.wilson` returned an upper bound of 0.9999999999999999 at `p = 1`, an
+  interval excluding its own point estimate.
+- A net is rebuilt from the head shapes its checkpoint records, in one reader
+  (`catan.model.config_from_args`). `benchmarks.minibatch_iso_kl` and
+  `benchmarks.noise_scale` read only `width` and `rounds`, so neither could load
+  a `--policy-head mlp` checkpoint at all — `heads.hexes.weight` against
+  `heads.hexes.0.weight` — which is every checkpoint of the current lineage.
+  `catan.netbot` was already correct and now shares the reader. The probe also
+  hands those shapes to its collect workers, which build their own nets and
+  would otherwise fail at the first weight sync, and both benchmarks mirror
+  `catan.train`'s `detach_value` wiring so they reproduce the update they price.
+
 ## [0.6.0] - 2026-08-23
 
 The critic decomposed, the pipeline made ~2.5x cheaper per experiment, and the
@@ -50,8 +95,8 @@ iterations confound stated in the record rather than argued away.
 ### Changed
 
 - Evaluation protocol: gates decide on the matched-rival duel; greedy is
-  demoted to a mix-exploitation canary; external anchors calibrate. The greedy
-  ladder's four deceptions are documented in `agents/status.md`.
+  demoted to a mix-exploitation canary; external anchors calibrate. Four
+  distinct ways the greedy ladder can deceive a gate are what demoted it.
 
 ## [0.5.0] - 2026-08-22
 

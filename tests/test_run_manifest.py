@@ -160,3 +160,29 @@ def test_the_modes_map_to_modules_that_exist():
     for mode, module in run.manifest.MODULES.items():
         assert mode in ("train", "league", "distill")
         assert importlib.import_module(module) is not None
+
+
+def test_freeze_reads_provenance_before_it_writes_the_run_directory(tmp_path, monkeypatch):
+    """The run directory must not dirty the tree it is recording.
+
+    `provenance` reads `git status --porcelain`, which counts untracked paths, so
+    capturing it after `mkdir` made `git_dirty` true for every run once run
+    records became tracked. A constant cannot carry the "cannot be cited" signal.
+    """
+    from catan.run import manifest as m
+
+    seen = {}
+
+    def fake_provenance(repo):
+        seen["existed"] = (tmp_path / "run-under-test").exists()
+        return {"git_commit": "deadbeef", "git_dirty": False, "git_branch": "main"}
+
+    monkeypatch.setattr(m, "provenance", fake_provenance)
+    out = m.freeze(
+        "league", "run-under-test", tmp_path / "run-under-test",
+        ["--base", "/w/x.pt", "--learner", "", "--iterations", "1",
+         "--checkpoint-dir", "/w/runs/run-under-test"],
+        repo=tmp_path,
+    )
+    assert seen["existed"] is False, "provenance ran after the directory appeared"
+    assert out.meta["git_dirty"] is False

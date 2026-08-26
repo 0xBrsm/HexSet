@@ -98,7 +98,7 @@
      the row wrapping, which never happens now — nothing here wraps.  */
   .player-row {
     display: grid; grid-template-columns: auto minmax(0, 1fr) repeat(6, 2.6rem);
-    align-items: center; column-gap: 0.5rem; padding: 0.3rem 0.2rem; border-radius: 6px;
+    align-items: center; column-gap: 0.25rem; padding: 0.3rem 0.2rem; border-radius: 6px;
   }
   .player-row.active { background: #2a2545; }
   .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.35); }
@@ -125,7 +125,7 @@
     appearance: none; -webkit-appearance: none;
   }
   .player-meta { color: var(--muted); font-size: 0.82rem; flex: 1; }
-  .stat { display: inline-flex; align-items: center; gap: 0.2rem; color: var(--muted); font-size: 0.82rem; }
+  .stat { display: inline-flex; align-items: center; gap: 0.12rem; color: var(--muted); font-size: 0.82rem; }
   .stat-icon { width: 13px; height: 13px; flex: none; fill: currentColor; }
   /* Longest road / largest army sit in every row, always, so a seat's route
      length or Knight count is comparable turn to turn — muted grey like any
@@ -138,8 +138,8 @@
      position, not a class, since the columns before these never move (roll,
      the only ever-absent chip, is always last). Cards is column 4 (after
      swatch/name/VP); road is column 6 (after cards/dev-cards). */
-  .player-row > .stat:nth-child(4) { margin-left: 0.6rem; }
-  .player-row > .stat:nth-child(6) { margin-left: 0.6rem; }
+  .player-row > .stat:nth-child(4) { margin-left: 0.35rem; }
+  .player-row > .stat:nth-child(6) { margin-left: 0.35rem; }
   #notice {
     margin: 0 0.8rem; padding: 0.35rem 0.6rem; border-radius: 6px; font-size: 0.85rem;
     background: #3a1616; border: 1px solid #7a3a3a; color: #ffb3b3; display: none;

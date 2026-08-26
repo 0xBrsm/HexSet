@@ -401,10 +401,11 @@
      stacked, because a seat's name is far too wide to sit five to a row. */
   .steal-row { display: flex; flex-direction: column; gap: 0.35rem; margin: 0.3rem 0 0.2rem; }
   .steal-option { display: flex; align-items: center; gap: 0.5rem; text-align: left; }
-  /* The "offered card ⇄ requested card" summary — one side's cards, an
-     arrow, the other side's cards, each side captioned with who owes what
-     (the "attribution") instead of a full sentence. Used both for reading
-     an incoming offer and for previewing a proposal as it's built. */
+  /* The "Give → Get" summary — one side's cards, an arrow, the other side's,
+     each captioned with a single word rather than a full sentence. Used both
+     for reading an incoming offer and for building one, and always the same
+     way round: what leaves the human's hand on the left, what arrives on the
+     right, whoever started the trade (see GIVE_LABEL/GET_LABEL). */
   .trade-exchange {
     display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
     gap: 0.6rem; margin: 0.2rem 0 0.9rem;
@@ -1642,22 +1643,30 @@ function tradeCardRow(bundle) {
   return row;
 }
 
-// The shared "offered card(s) ⇄ requested card(s)" layout: one side's
-// cards, a divider, the other side's, each captioned with a short label
-// (the "attribution") instead of the old stacked "You give:"/"You want:"
-// sentence blocks. Used for both reading an incoming offer and previewing
-// one as it's built.
-function tradeExchangeRow(giveBundle, giveLabel, wantBundle, wantLabel) {
+// Every trade the human sees reads the same way round and in the same words,
+// whichever modal it's in and whoever started it: what leaves their hand on
+// the left, what arrives on the right. Both sides are their own hand, which
+// is why neither label says whose — the title says who the other party is
+// ("Trade offer from Red"), and the exchange is always the human's own view
+// of it.
+const GIVE_LABEL = "Give";
+const GET_LABEL = "Get";
+
+// The read-only version of that row, for an offer someone else has made.
+// Bundles are the wire format's own (one count per resource index), and
+// they arrive from the *proposer's* point of view — see renderRespondMode,
+// which flips them, since a bundle they called "give" is one the human gets.
+function tradeExchangeRow(giveBundle, getBundle) {
   const row = html("div", {class: "trade-exchange"});
   const giveSide = html("div", {class: "trade-side"});
-  giveSide.appendChild(html("div", {class: "trade-side-label"}, giveLabel));
+  giveSide.appendChild(html("div", {class: "trade-side-label"}, GIVE_LABEL));
   giveSide.appendChild(tradeCardRow(giveBundle));
-  const wantSide = html("div", {class: "trade-side"});
-  wantSide.appendChild(html("div", {class: "trade-side-label"}, wantLabel));
-  wantSide.appendChild(tradeCardRow(wantBundle));
+  const getSide = html("div", {class: "trade-side"});
+  getSide.appendChild(html("div", {class: "trade-side-label"}, GET_LABEL));
+  getSide.appendChild(tradeCardRow(getBundle));
   row.appendChild(giveSide);
-  row.appendChild(html("div", {class: "trade-arrow"}, "⇄"));
-  row.appendChild(wantSide);
+  row.appendChild(html("div", {class: "trade-arrow"}, "→"));
+  row.appendChild(getSide);
   return row;
 }
 
@@ -1667,12 +1676,14 @@ function tradeExchangeRow(giveBundle, giveLabel, wantBundle, wantLabel) {
 // the picker at that side.
 function tradeProposeRow() {
   const row = html("div", {class: "trade-exchange"});
-  row.appendChild(tradeProposeSide("give", "You give"));
-  row.appendChild(html("div", {class: "trade-arrow"}, "⇄"));
-  row.appendChild(tradeProposeSide("want", "You want"));
+  row.appendChild(tradeProposeSide("give", GIVE_LABEL));
+  row.appendChild(html("div", {class: "trade-arrow"}, "→"));
+  row.appendChild(tradeProposeSide("want", GET_LABEL));
   return row;
 }
 
+// `which` is the wire format's own word for the side ("want" is what the
+// human gets), so it stays as-is; the label above it is what's read.
 function tradeProposeSide(which, label) {
   const picked = which === "give" ? tradeGive : tradeWant;
   const side = html("div", {class: "trade-side"});
@@ -1699,7 +1710,7 @@ function tradePicker(p) {
   const isGive = tradeSide === "give";
   const wrap = html("div", {class: "trade-picker"});
   wrap.appendChild(html("div", {class: "trade-picker-label"},
-    isGive ? "Pick what you'll give" : "Pick what you want"));
+    isGive ? "Pick what you'll give" : "Pick what you'll get"));
   const row = html("div", {class: "pick-row"});
   for (let r = 0; r < board.resources.length; r++) {
     const held = p.hand ? p.hand[board.resources[r]] : 0;
@@ -1801,7 +1812,12 @@ function renderRespondMode(g, title, body, actions) {
   // Who it's from goes in the title so the exchange row below can stay
   // just the cards themselves plus a one-word attribution each.
   title.textContent = `Trade offer from ${seatLabel(offer.proposer)}`;
-  body.appendChild(tradeExchangeRow(offer.give, "You get", offer.want, "You give"));
+  // Flipped into the human's own point of view: what the proposer `want`s is
+  // what leaves this hand, so it's the left/"Give" side here, and what they
+  // offered to `give` is what arrives. Same direction as the propose modal,
+  // which is the whole point — an offer shouldn't read backwards just
+  // because someone else started it.
+  body.appendChild(tradeExchangeRow(offer.want, offer.give));
 
   if (g.simple.ACCEPT_TRADE) {
     const btn = modalActionButton("check", "Accept trade");

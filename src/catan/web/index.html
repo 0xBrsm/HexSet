@@ -638,23 +638,23 @@
 "use strict";
 
 // Chosen against the terrain palette (TERRAIN_COLORS below), not in the
-// abstract — but the thing that actually carries a piece is how *dark* it is,
-// not how exotic its hue is. Five of the eight tiles are light (Hills on up
-// to Gold), so the board reads as a dark piece on a light tile, and every
-// seat colour that works is a dark, saturated fill: relative luminance .16
-// (red) to .38 (cyan). A light fill dissolves into the light half of the
-// board however unusual its hue, which is what the old #00e676 green did on
-// Pasture — identical luminance to the tile, 1.01:1.
-//
-// Hue only has to separate the seats from each other and soften the two
-// same-family cases, and it doesn't have to do that alone: cyan sits on Sea
-// at 2.84:1 and is perfectly legible, which is the bar the green is set to
-// against Forest. Strokes lean near-black rather than a darker version of
-// the fill's own hue — a green stroke that's merely dark still reads as
+// abstract: a hue absent from every hex — purple, cyan — survives a piece
+// sitting on any tile, where a hue that's merely a different shade of a
+// terrain color (the old yellow vs Fields/Gold, the old green vs Pasture)
+// doesn't. Red is the one hue no terrain tile uses at all, so it's
+// untouched. Strokes lean near-black rather than a darker version of the
+// fill's own hue — a green stroke that's merely dark still reads as
 // "Forest-colored" next to Forest itself; near-black doesn't, on any tile.
+//
+// The stroke is what carries a piece, not the fill's own contrast with the
+// tile under it: several of these fills sit at near-identical luminance to
+// some tile (this green against Pasture is 1.01:1) and read fine anyway,
+// because the near-black outline separates the shape from the tile before
+// the fill has to. Which is why every piece needs one — see the casing under
+// the roads in renderBoardDynamic, the one piece that was drawn without.
 const SEAT_COLORS = [
   {fill: "#d62828", stroke: "#7a0d0d"},
-  {fill: "#16a34a", stroke: "#04241a"}, // deep green — dark like the other three, 2.76:1 on Forest, 55° of hue off Pasture
+  {fill: "#00e676", stroke: "#04241a"}, // vivid green, near-black stroke — Forest/Pasture-proof
   {fill: "#a855f7", stroke: "#581c87"}, // purple — no terrain tile is purple
   {fill: "#06b6d4", stroke: "#083344"}, // cyan — saturated enough to read against Sea/Mountains' muted blues
 ];
@@ -1432,6 +1432,16 @@ function renderPieceSupply() {
   }
 }
 
+// One of the two lines a road is made of — the casing or the colour, which
+// differ only in stroke and width. Round caps on both, so the casing follows
+// the colour's own rounded ends instead of squaring them off.
+function roadLine(r, stroke, width) {
+  return el("line", {
+    x1: r.v0.x, y1: r.v0.y, x2: r.v1.x, y2: r.v1.y,
+    stroke, "stroke-width": width, "stroke-linecap": "round",
+  });
+}
+
 function renderBoardDynamic() {
   const buildingsLayer = document.getElementById("buildings-layer");
   const roadsLayer = document.getElementById("roads-layer");
@@ -1442,17 +1452,24 @@ function renderBoardDynamic() {
   robberLayer.innerHTML = "";
   clickLayer.innerHTML = "";
 
-  // Roads
+  // Roads, each one drawn twice: the seat's near-black stroke a little wider
+  // underneath, then the colour on top of it. A line has no outline of its
+  // own the way the buildings below have theirs, so a road was the one piece
+  // whose fill had to survive the tile unaided — which a light fill on a
+  // light tile doesn't. The casing is 1 unit proud on each side, the same
+  // margin a building's stroke-width 2 leaves around its own shape.
+  //
+  // Every casing goes down before any of the colour so that where two seats'
+  // roads meet at a vertex nobody has built on yet, the second road's casing
+  // lands under the first one's colour rather than across it.
+  const roads = [];
   for (const e of board.edges) {
     const owner = state.edge_owner[e.id];
     if (owner < 0) continue;
-    const p0 = vertexById[e.v0], p1 = vertexById[e.v1];
-    const color = SEAT_COLORS[owner];
-    roadsLayer.appendChild(el("line", {
-      x1: p0.x, y1: p0.y, x2: p1.x, y2: p1.y,
-      stroke: color.fill, "stroke-width": 6, "stroke-linecap": "round",
-    }));
+    roads.push({v0: vertexById[e.v0], v1: vertexById[e.v1], color: SEAT_COLORS[owner]});
   }
+  for (const r of roads) roadsLayer.appendChild(roadLine(r, r.color.stroke, 8));
+  for (const r of roads) roadsLayer.appendChild(roadLine(r, r.color.fill, 6));
 
   // Settlements & cities
   for (const v of board.vertices) {

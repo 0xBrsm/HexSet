@@ -7,6 +7,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-08-26
+
+### Fixed
+
+- `run.manifest.freeze` read git provenance *after* creating the run directory,
+  so `git_dirty` was true for every frozen run: the directory is untracked at
+  the moment it is created and `git status --porcelain` counts untracked paths.
+  Harmless while `.gitignore` carried a blanket `/runs/` rule and the new
+  directory was ignored; a constant once run records became tracked. Provenance
+  is now read before anything is written, so the field can once again mean
+  "this result cannot be cited".
+
 ## [0.7.1] - 2026-08-26
 
 ### Added

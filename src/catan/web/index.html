@@ -131,6 +131,11 @@
   }
   .player-meta { color: var(--muted); font-size: 0.82rem; flex: 1; }
   .stat { display: inline-flex; align-items: center; gap: 0.12rem; color: var(--muted); font-size: 0.82rem; }
+  /* Double digits (see statChip) take up the icon-to-number gap instead of
+     growing the chip further right — the glyph doesn't move, only the gap
+     next to it shrinks, so a "10" doesn't shove into the following column
+     the way it would if the gap stayed the same width as a "1". */
+  .stat.wide { gap: 0.02rem; }
   .stat-icon { width: 13px; height: 13px; flex: none; fill: currentColor; }
   /* Longest road / largest army sit in every row, always, so a seat's route
      length or Knight count is comparable turn to turn — muted grey like any
@@ -1110,7 +1115,14 @@ function renderStatus() {
 // One icon + (optional) number, for the player list's stat row — glyphs
 // throughout rather than "3 VP", "Longest road" as English text.
 function statChip(iconId, value, extraClass, title) {
-  const chip = html("span", {class: extraClass ? `stat ${extraClass}` : "stat", title});
+  // A double-digit value is wide enough, inside the player row's fixed-width
+  // stat columns (see .player-row's grid-template-columns), to crowd right
+  // into the next column's glyph if the icon-to-number gap stays put — .wide
+  // shrinks that gap instead, so the extra digit eats padding that was
+  // never doing much rather than eating the next stat's breathing room.
+  const wide = value !== undefined && String(value).length > 1 ? " wide" : "";
+  const classes = `stat${extraClass ? ` ${extraClass}` : ""}${wide}`;
+  const chip = html("span", {class: classes, title});
   chip.appendChild(iconSvg(iconId, {cls: "stat-icon"}));
   if (value !== undefined) chip.appendChild(document.createTextNode(String(value)));
   return chip;

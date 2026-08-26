@@ -316,9 +316,23 @@
   /* Bottom left, the last free board corner (dice/end-turn share bottom
      right, buy-dev-card/cancel-robber share top right) — how many of each
      piece the human has left to place, drawn as the same house/city marks
-     the board itself uses, just small and stacked in the human's own seat
-     colour, with the hand's own .count badge for the number. */
-  #piece-supply { position: absolute; left: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 6px; }
+     the board itself uses, just small and in the human's own seat colour,
+     with the hand's own .count badge for the number.
+
+     An L into the corner rather than a stack: roads take the corner itself,
+     settlements sit above them and cities out to the right, so the group
+     hugs the two board edges instead of running a column up the left one.
+     Placed by name, so this holds whatever order renderPieceSupply happens
+     to build the three tiles in. */
+  #piece-supply {
+    position: absolute; left: 16px; bottom: 16px; display: grid; gap: 6px;
+    grid-template-columns: repeat(2, 34px);
+    grid-template-areas: "settlement ."
+                         "road       city";
+  }
+  .supply-settlement { grid-area: settlement; }
+  .supply-road { grid-area: road; }
+  .supply-city { grid-area: city; }
   .supply-tile {
     position: relative; width: 34px; height: 34px; border-radius: 8px;
     background: var(--panel); border: 1px solid var(--border);
@@ -1425,7 +1439,9 @@ function renderPieceSupply() {
     road: board.piece_supply.road - roadsBuilt,
   };
   for (const kind of ["settlement", "city", "road"]) {
-    const tile = html("div", {class: "supply-tile", title: `${kind}s left: ${remaining[kind]}`});
+    const tile = html("div", {
+      class: `supply-tile supply-${kind}`, title: `${kind}s left: ${remaining[kind]}`,
+    });
     tile.appendChild(pieceGlyph(kind, color));
     tile.appendChild(html("div", {class: "count"}, String(remaining[kind])));
     container.appendChild(tile);

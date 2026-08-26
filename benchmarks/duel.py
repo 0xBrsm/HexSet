@@ -142,7 +142,25 @@ def main(argv: list[str] | None = None) -> int:
         "that then fight over 6 cores. Costs nothing when the box is idle and a "
         "great deal when it is not",
     )
-    p.add_argument("--json", default=None, help="append the result to this file")
+    p.add_argument(
+        "--json",
+        default=None,
+        help="append the result here instead of the default verdict path",
+    )
+    p.add_argument(
+        "--verdicts",
+        default="runs/eval",
+        help="where a result lands when --json is not given. A duel that "
+        "writes nowhere is the failure this default removes: a 400-game "
+        "mcts-against-its-own-policy result was written up in prose and "
+        "nowhere a tool could read it, so the ratings fit never saw it and "
+        "placed that entrant half a VP wrong off a single unrelated duel",
+    )
+    p.add_argument(
+        "--no-json",
+        action="store_true",
+        help="really write nothing, for a throwaway probe",
+    )
     args = p.parse_args(argv)
 
     if args.threads:
@@ -167,7 +185,16 @@ def main(argv: list[str] | None = None) -> int:
     else:
         result = _via_versus(args, label_a, label_b)
 
+    destination = None
+    if not args.no_json:
+        destination = Path(args.json) if args.json else _verdict_path(args, label_a, label_b)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with destination.open("a") as handle:
+            handle.write(json.dumps(result) + "\n")
+
     print(json.dumps(result, indent=1))
+    if destination is not None:
+        print(f"\nappended to {destination}", file=sys.stderr)
     print(
         f"\n{label_a} vs {label_b}: {result['win_rate']*100:.1f}% "
         f"[{result['wilson_low']*100:.1f}, {result['wilson_high']*100:.1f}] "
@@ -200,6 +227,25 @@ def sides(lineup: list, label_a: str, label_b: str) -> list:
         lineup[2].renamed(f"{side_b}#0"),
         lineup[3].renamed(f"{side_b}#1"),
     ]
+
+
+def _verdict_path(args, label_a: str, label_b: str) -> Path:
+    """Where a duel lands when the caller does not say.
+
+    Named after the pairing rather than the caller, so the same comparison
+    re-run later appends beside its predecessor instead of landing in whatever
+    scratch file that session happened to use. Slashes in an entrant spec
+    become dashes; a checkpoint path collapses to `<run>-<checkpoint>`.
+    """
+
+    def token(label: str, spec: str) -> str:
+        if label:
+            return label.replace("/", "-")
+        parts = Path(spec).parts
+        return "-".join(parts[-2:]).replace(".pt", "") if len(parts) > 1 else spec
+
+    pair = f"{token(label_a, args.a)}__vs__{token(label_b, args.b)}"
+    return Path(args.verdicts) / f"{pair}.json"
 
 
 def _via_arena(args, label_a: str, label_b: str) -> dict:

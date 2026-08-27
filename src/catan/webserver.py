@@ -55,9 +55,9 @@ from typing import Callable
 
 from . import journal
 from .actions import Action
-from .board.board import random_base_board
+from .board.board import Board, random_base_board
 from .game import Game, start, to_move
-from .webplay import Bot, GameSession, board_layout
+from .webplay import Bot, GameSession, ResumeError, board_layout
 
 STATIC_DIR = Path(__file__).resolve().parent / "web"
 INDEX_HTML = STATIC_DIR / "index.html"
@@ -131,13 +131,15 @@ class CatanServer(ThreadingHTTPServer):
     def __init__(
         self,
         address: tuple[str, int],
-        new_session: Callable[[list[tuple[str, str]] | None], GameSession],
+        new_session: Callable[[list[tuple[str, str]] | None, str], GameSession],
+        resume_session: Callable[[str], GameSession | None] = lambda identity: None,
         device: str = "cpu",
         max_offers: int | None = None,
     ) -> None:
         super().__init__(address, Handler)
         self.sessions: dict[str, _Entry] = {}
         self.new_session = new_session
+        self.resume_session = resume_session
         # Carried so a live seat-bot swap (`/api/bot`) can build a bot the same
         # way `_build_session` did, without threading them through every call.
         self.device = device
@@ -169,10 +171,18 @@ class CatanServer(ThreadingHTTPServer):
                 return found
 
         # Building a session can be slow (constructing an mcts: searcher, a
-        # cold NetworkBot) — done outside _registry_lock so one identity's
-        # first-ever request doesn't stall every other identity's dict
-        # lookups for however long that takes.
-        session = self.new_session(bots)
+        # cold NetworkBot, replaying a journal a few hundred actions long) —
+        # done outside _registry_lock so one identity's first-ever request
+        # doesn't stall every other identity's dict lookups for however long
+        # that takes.
+        #
+        # Not in memory does not mean not in progress: this identity may have
+        # a game the last process was serving, or one evicted for going quiet
+        # (see _evict_stale), and either way it is still theirs until they
+        # finish it or start another. `bots` is a fresh game's lineup and has
+        # nothing to say about a resumed one, whose opponents come off its own
+        # file.
+        session = self.resume_session(identity) or self.new_session(bots, identity)
         built = _Entry(session, board_layout(session.game.state.board), time.monotonic())
         with self._registry_lock:
             # Another request for this same brand-new identity could have
@@ -193,7 +203,14 @@ class CatanServer(ThreadingHTTPServer):
         which rules out the same first-one-wins race `entry` guards against:
         nothing else can be creating this identity's entry at the same time.
         """
-        session = self.new_session(bots)  # see entry()'s own note on why this is outside the lock
+        # Pressing New Game is the one way to say a game is over without
+        # finishing it. Said out loud in the outgoing journal, or `entry`
+        # would hand this game straight back on the next cache miss — the
+        # file has no closing line of its own, since nobody won it.
+        previous = self.sessions.get(identity)
+        if previous is not None and previous.session.journal is not None:
+            previous.session.journal.abandoned()
+        session = self.new_session(bots, identity)  # outside the lock — see entry()
         entry = _Entry(session, board_layout(session.game.state.board), time.monotonic())
         with self._registry_lock:
             self.sessions[identity] = entry
@@ -363,6 +380,9 @@ class Handler(BaseHTTPRequestHandler):
             )
             session.bot.bots_by_seat[seat] = new_bot
             session.bot_names[seat] = name
+            session.bot_specs[seat] = spec
+            if session.journal is not None:
+                session.journal.seated(seat=seat, name=name, spec=spec)
         self._json(session.state_view())
 
     def _handle_action(self, payload: dict) -> None:
@@ -491,6 +511,7 @@ def _build_session(
     device: str,
     max_offers: int | None,
     games_dir: str | None = None,
+    identity: str | None = None,
 ) -> GameSession:
     if len(bots) != NUM_PLAYERS - 1:
         raise ValueError(f"expected {NUM_PLAYERS - 1} bots, got {len(bots)}")
@@ -521,22 +542,95 @@ def _build_session(
     # sharing one stream, so an `mcts:` bot's search sampling on one seat
     # cannot perturb another's.
     non_human_seats = [s for s in range(NUM_PLAYERS) if s != human_seat]
-    bots_by_seat = {}
-    names_by_seat = {}
-    for seat, (name, spec) in zip(non_human_seats, bots):
-        bots_by_seat[seat] = _spawn_bot(spec, board, random.Random(seed * 4 + seat), device, max_offers)
-        names_by_seat[seat] = name
-    bot = SeatBot(bots_by_seat)
+    lineup = dict(zip(non_human_seats, bots))
     game = start(board, NUM_PLAYERS, random.Random(seed))
     session = GameSession(
         game=game,
         human_seat=human_seat,
-        bot=bot,
+        bot=_seat_bots(lineup, board, seed, device, max_offers),
         seed=seed,
         journal=journal.open_journal(seed, games_dir),
-        bot_names=names_by_seat,
+        bot_names={seat: name for seat, (name, _) in lineup.items()},
+        bot_specs={seat: spec for seat, (_, spec) in lineup.items()},
+        identity=identity,
     )
     session.advance_bots()  # in case the human is not first in the setup snake
+    return session
+
+
+def _seat_bots(
+    lineup: dict[int, tuple[str, str]],
+    board: Board,
+    seed: int,
+    device: str,
+    max_offers: int | None,
+) -> SeatBot:
+    """One bot per non-human seat, each with its own rng seeded off the game
+    seed and its seat rather than sharing one stream, so an `mcts:` bot's
+    search sampling on one seat cannot perturb another's."""
+    return SeatBot(
+        {
+            seat: _spawn_bot(spec, board, random.Random(seed * 4 + seat), device, max_offers)
+            for seat, (_, spec) in lineup.items()
+        }
+    )
+
+
+def _resume_session(
+    identity: str,
+    device: str,
+    max_offers: int | None,
+    games_dir: str | None = None,
+) -> GameSession | None:
+    """The game this browser left unfinished, played back to where it stopped
+    — or `None` if there isn't one, in which case the caller deals.
+
+    A session lives in memory, so it used to be lost to anything that ended
+    the process: a deploy, a crash, or simply going quiet long enough to be
+    evicted. The journal is the whole game though (see `catan.journal`), and
+    it replays exactly, so the loss was never necessary.
+
+    Bots are the one thing that does not come back: they are re-seated from
+    the same specs, but each gets a fresh rng, so a resumed game's opponents
+    play on from here rather than replaying the moves they would have made.
+    Their past moves are read off the file, not asked for again, so nothing
+    already played can change under the human.
+    """
+    where = games_dir if games_dir is not None else journal.configured_dir()
+    path = journal.resumable(where, identity)
+    if path is None:
+        return None
+
+    events = journal.read(path)
+    header = events[0]
+    seed, human_seat = header["seed"], header["human_seat"]
+    board = random_base_board(random.Random(seed))
+    lineup = journal.seating(events)
+    session = GameSession(
+        game=start(board, header["num_players"], random.Random(seed)),
+        human_seat=human_seat,
+        bot=_seat_bots(lineup, board, seed, device, max_offers),
+        seed=seed,
+        bot_names={seat: name for seat, (name, _) in lineup.items()},
+        bot_specs={seat: spec for seat, (_, spec) in lineup.items()},
+        identity=identity,
+    )
+    try:
+        session.restore(
+            journal.replayable(events),
+            journal.Journal(directory=str(path.parent), game_id=path.stem),
+        )
+    except (ResumeError, ValueError, KeyError) as error:
+        # Kept rather than deleted: a journal that will not replay is the one
+        # copy of a game that did happen, and is worth more as evidence of
+        # whatever broke than the disk space is. Closed, though, so the next
+        # request tries to resume it once and then deals instead of failing
+        # this way forever.
+        print(f"could not resume {path.name}: {error}")
+        journal.Journal(directory=str(path.parent), game_id=path.stem).abandoned()
+        return None
+
+    session.advance_bots()  # the file may end mid-cascade, on a bot's turn
     return session
 
 
@@ -596,15 +690,26 @@ def main(argv: list[str] | None = None) -> None:
         else list(itertools.islice(itertools.cycle(model_options().items()), NUM_PLAYERS - 1))
     )
 
-    def new_session(bots: list[tuple[str, str]] | None = None) -> GameSession:
+    def new_session(bots: list[tuple[str, str]] | None, identity: str) -> GameSession:
         return _build_session(
-            bots or default_bots, args.human_seat, args.seed, args.device, args.max_offers, args.games_dir
+            bots or default_bots,
+            args.human_seat,
+            args.seed,
+            args.device,
+            args.max_offers,
+            args.games_dir,
+            identity,
         )
+
+    def resume_session(identity: str) -> GameSession | None:
+        return _resume_session(identity, args.device, args.max_offers, args.games_dir)
 
     # No session is built here anymore — each browser deals its own on first
     # contact (see CatanServer.entry), so there's no single "the" game to
     # build before the server can even start.
-    server = CatanServer((args.host, args.port), new_session, args.device, args.max_offers)
+    server = CatanServer(
+        (args.host, args.port), new_session, resume_session, args.device, args.max_offers
+    )
 
     url = f"http://{args.host}:{args.port}/"
     names = [name for name, _ in default_bots]

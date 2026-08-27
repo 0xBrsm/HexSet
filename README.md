@@ -42,5 +42,7 @@ Copy the resulting file into this repo's `models/` directory.
 - `src/catan/web/index.html` — the entire frontend: inline CSS, inline SVG icons, vanilla JS. No build step.
 - `models/` — drop `.onnx` files here.
 - `games/` — where every game is journalled: one JSON lines file per game, written as it is played, with nothing hidden (the dice, the deck order, every card drawn or stolen, every seat's hand after every action — see `src/catan/journal.py`). On by default; `CATAN_WEB_GAMES_DIR` moves it, and setting that empty turns it off.
+
+  These files are also what a game is resumed from. Sessions live in memory, so a restart or a long enough silence used to lose whatever was in flight; now a browser returning to a game it never finished has it replayed from its own journal instead of being dealt a new one. Pressing New Game is what ends a game short of winning it — that writes a closing line, and a closed game is never handed back. Turning journalling off turns resuming off with it.
 - `docker/Dockerfile` — a small CPU-only image (deps only) for deploying this without a GPU.
 - `compose.example.yaml` — copy to `compose.yaml` (gitignored) and edit. Bind-mounts `src/` and `models/` into the image rather than baking them in.

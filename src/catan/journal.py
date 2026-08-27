@@ -161,6 +161,8 @@ class Journal:
         seed: int,
         human_seat: int,
         bot_names: dict[int, str],
+        bot_specs: dict[int, str],
+        identity: str | None = None,
     ) -> None:
         """The header: everything true before the first action.
 
@@ -169,6 +171,11 @@ class Journal:
         with the shuffle written down, every later purchase is checkable
         against it, and the whole game's development cards are known without
         the engine's random stream being involved at all.
+
+        `identity` is the browser's `catan_id` cookie and `spec` the string
+        that built each bot, neither of which the game itself needs: they are
+        here so `resume` can put this exact session back together for the
+        person whose it was.
         """
         state = game.state
         self._emit(
@@ -177,9 +184,13 @@ class Journal:
                 "id": self.game_id,
                 "at": _now(),
                 "seed": seed,
+                "identity": identity,
                 "num_players": state.num_players,
                 "human_seat": human_seat,
-                "bots": {str(seat): name for seat, name in sorted(bot_names.items())},
+                "bots": {
+                    str(seat): {"name": name, "spec": bot_specs.get(seat, name)}
+                    for seat, name in sorted(bot_names.items())
+                },
                 # Bottom of the deck first: `devcards.buy` pops off the end.
                 "deck": [DEV_CARD_NAMES[c] for c in state.deck],
                 "robber": state.robber,
@@ -243,6 +254,31 @@ class Journal:
             }
         )
 
+    def seated(self, *, seat: int, name: str, spec: str) -> None:
+        """A different bot took `seat` mid-game (see the web server's
+        `_handle_swap_bot`). The header names who sat down at the deal; a game
+        put back together later has to seat whoever is there now, or resuming
+        would quietly hand the human back a different set of opponents."""
+        self._emit({"kind": "seated", "at": _now(), "seat": seat, "name": name, "spec": spec})
+
+    def reopened(self, *, at_step: int) -> None:
+        """This game was put back together from the lines above — a server
+        restart, or a session evicted for going quiet (see `webplay.resume`).
+
+        Written so the join shows. Without it the file reads as uninterrupted
+        play, and the bots' own random streams do not survive a resume, so a
+        reader comparing two halves of one file needs to know where the seam
+        is.
+        """
+        self._emit({"kind": "reopened", "at": _now(), "at_step": at_step})
+
+    def abandoned(self) -> None:
+        """The human pressed New Game, which ends this one as surely as
+        winning does. `resumable` hands back any game whose file has no
+        closing line, so without this the game they chose to walk away from
+        would be waiting for them on their next visit."""
+        self._emit({"kind": "abandoned", "at": _now()})
+
     def finish(self, game: Game) -> None:
         """The closing line. A journal without one is a game that was abandoned
         rather than played out, which is the distinction anything counting
@@ -267,6 +303,131 @@ def open_journal(seed: int, directory: str | None = None) -> Journal | None:
     if not where:
         return None
     return Journal(directory=where, game_id=new_game_id(seed))
+
+
+# --- Reading one back ---------------------------------------------------------
+
+
+# The lines that mean this game is over and is not to be handed back: played
+# out, or walked away from. Anything else leaves the file open.
+CLOSING_KINDS = frozenset({"result", "abandoned"})
+
+
+def read(path: Path | str) -> list[dict]:
+    """Every event in a journal, in the order it was written.
+
+    Stops at the first line that will not parse instead of raising. Lines are
+    appended one at a time, so the only line that can be torn is the last one
+    — a server killed mid-write — and everything before it is a complete
+    account that should still be readable.
+    """
+    events: list[dict] = []
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    events.append(json.loads(line))
+                except json.JSONDecodeError:
+                    break
+    except OSError:
+        return []
+    return events
+
+
+def header_of(path: Path | str) -> dict | None:
+    """A journal's opening line alone, without reading the rest of it.
+
+    `resumable` looks at every file in the directory to find one browser's
+    game, and these run to tens of thousands of lines; only the one that
+    matches is worth reading in full.
+    """
+    try:
+        with open(path, encoding="utf-8") as handle:
+            first = handle.readline()
+    except OSError:
+        return None
+    try:
+        event = json.loads(first)
+    except json.JSONDecodeError:
+        return None
+    return event if event.get("kind") == "game" else None
+
+
+def is_closed(events: list[dict]) -> bool:
+    return any(event.get("kind") in CLOSING_KINDS for event in events)
+
+
+def action_of(event: dict) -> Action:
+    """The `Action` an action line describes. The recorded effects — the dice,
+    the card drawn, the card stolen — are deliberately not used: they are the
+    engine's to decide again from the same seed, and reading them back would
+    turn a check that the replay agrees into a way of papering over that it
+    does not."""
+    offer = {}
+    if "give" in event:
+        offer = {
+            "give": tuple(event["give"]),
+            "want": tuple(event["want"]),
+            "ask": tuple(event.get("ask", ())),
+        }
+    return Action(ActionType[event["type"]], event["a"], event["b"], **offer)
+
+
+def replayable(events: list[dict]) -> list[tuple[int, Action]]:
+    """Every (actor, action) to re-apply, in order.
+
+    Undo lines are honoured by dropping what they took back. The file is
+    append-only — an undone placement is still written down, by design (see
+    `Journal.undo`) — so replaying the lines as they come would build the
+    board the human explicitly rejected.
+    """
+    steps: list[tuple[int, Action]] = []
+    for event in events:
+        kind = event.get("kind")
+        if kind == "action":
+            steps.append((event["actor"], action_of(event)))
+        elif kind == "undo":
+            del steps[event["back_to"] :]
+    return steps
+
+
+def seating(events: list[dict]) -> dict[int, tuple[str, str]]:
+    """Seat -> the (name, spec) of the bot on it: the lineup the game was
+    dealt with, with every later swap applied in the order they happened."""
+    header = events[0] if events else {}
+    seats = {
+        int(seat): (bot["name"], bot["spec"])
+        for seat, bot in header.get("bots", {}).items()
+    }
+    for event in events:
+        if event.get("kind") == "seated":
+            seats[event["seat"]] = (event["name"], event["spec"])
+    return seats
+
+
+def resumable(directory: str | None, identity: str) -> Path | None:
+    """The game `identity` left unfinished, or `None` to deal them a fresh one.
+
+    Only their most recent game is ever a candidate. An older unfinished file
+    is a game they already walked away from once — handing it back because a
+    newer one happens to have ended would be reaching further into the past
+    than the player ever asked for.
+    """
+    if not directory:
+        return None
+    try:
+        paths = sorted(Path(directory).glob("*.jsonl"), reverse=True)
+    except OSError:
+        return None
+    for path in paths:
+        header = header_of(path)
+        if header is None or header.get("identity") != identity:
+            continue
+        return None if is_closed(read(path)) else path
+    return None
 
 
 def _now() -> str:

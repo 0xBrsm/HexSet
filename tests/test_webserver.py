@@ -22,12 +22,13 @@ import urllib.request
 
 import pytest
 
+from catan import journal
 from catan.actions import Action, ActionType, legal_actions
 from catan.board.board import random_base_board
 from catan.bots import RandomBot
-from catan.game import start, to_move
+from catan.game import is_over, start, to_move
 from catan.webplay import GameSession, action_to_wire, board_layout
-from catan.webserver import COOKIE_NAME, CatanServer
+from catan.webserver import COOKIE_NAME, CatanServer, _build_session, _resume_session
 
 
 def _new_session(seed: int) -> GameSession:
@@ -43,7 +44,9 @@ def live_server():
     # callable — unlike the single eager session `main()` used to build
     # before the server even started, there is no longer one "the" session
     # to hand the fixture up front (see CatanServer.entry).
-    server = CatanServer(("127.0.0.1", 0), lambda bots=None: _new_session(1))
+    # No resume_session is passed: these tests are about the HTTP surface,
+    # and the default (never resume) keeps every first request a fresh deal.
+    server = CatanServer(("127.0.0.1", 0), lambda bots, identity: _new_session(1))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     port = server.server_address[1]
@@ -250,3 +253,112 @@ def test_an_idle_identity_is_evicted_and_gets_a_fresh_game(live_server):
     client.get("/api/state")
 
     assert server.sessions[client.identity] is not entry
+
+
+# --- Resuming a game a restart or an eviction interrupted ----------------------
+
+
+def _drive(session, moves: int, rng: random.Random) -> None:
+    """Play `moves` human turns against the bots, leaving it the human's move."""
+    for _ in range(moves):
+        if is_over(session.game):
+            break
+        session.apply_human_action(action_to_wire(rng.choice(legal_actions(session.game))))
+        if session.awaiting_confirm:
+            session.confirm_setup_turn()
+        else:
+            session.advance_bots()
+
+
+def test_an_unfinished_game_comes_back_where_it_was_left(tmp_path):
+    """The whole point of journalling every action: a session lives in memory,
+    so a deploy or a crash used to take every game in flight with it."""
+    bots = [("search2", "search2")] * 3
+    session = _build_session(bots, 0, 99, "cpu", 1, str(tmp_path), "cookie-abc")
+    _drive(session, 12, random.Random(4))
+    assert not is_over(session.game)
+
+    resumed = _resume_session("cookie-abc", "cpu", 1, str(tmp_path))
+
+    assert resumed is not None
+    assert resumed.game.phase is session.game.phase
+    assert resumed.game.state.hands == session.game.state.hands
+    assert resumed.game.state.vertex_owner == session.game.state.vertex_owner
+    assert resumed.game.state.edge_owner == session.game.state.edge_owner
+    assert resumed.game.state.deck == session.game.state.deck
+    assert resumed.game.state.robber == session.game.state.robber
+    assert resumed.game.turns == session.game.turns
+    # Rebuilt by replaying, not stored: same actions in, same account out.
+    assert resumed.log == session.log
+    assert (resumed.seed, resumed.human_seat) == (session.seed, session.human_seat)
+    assert resumed.bot_names == session.bot_names
+
+
+def test_resuming_appends_to_the_same_file_rather_than_starting_another(tmp_path):
+    bots = [("search2", "search2")] * 3
+    session = _build_session(bots, 0, 99, "cpu", 1, str(tmp_path), "cookie-abc")
+    _drive(session, 8, random.Random(4))
+    before = session.journal.path
+
+    resumed = _resume_session("cookie-abc", "cpu", 1, str(tmp_path))
+
+    assert [p.name for p in tmp_path.glob("*.jsonl")] == [before.name]
+    assert resumed.journal.path == before
+    events = journal.read(before)
+    # The seam is written down, and the steps carry on from where they stopped
+    # rather than restarting at zero and colliding with the lines above.
+    seam = [e for e in events if e["kind"] == "reopened"]
+    assert len(seam) == 1
+    assert seam[0]["at_step"] == len(journal.replayable(events))
+
+
+def test_a_game_played_out_is_not_handed_back(tmp_path):
+    """Only a game still in progress is waiting for anyone. A finished one is
+    a result, and the next visit is a new game."""
+    bots = [("search2", "search2")] * 3
+    session = _build_session(bots, 0, 99, "cpu", 1, str(tmp_path), "cookie-abc")
+    _drive(session, 6, random.Random(4))
+    session.journal.finish(session.game)
+
+    assert _resume_session("cookie-abc", "cpu", 1, str(tmp_path)) is None
+
+
+def test_pressing_new_game_ends_the_old_one_for_good(tmp_path):
+    """Otherwise the game they walked away from has no closing line of its
+    own, and the next cache miss would hand it straight back."""
+    bots = [("search2", "search2")] * 3
+    session = _build_session(bots, 0, 99, "cpu", 1, str(tmp_path), "cookie-abc")
+    _drive(session, 6, random.Random(4))
+    assert journal.resumable(str(tmp_path), "cookie-abc") == session.journal.path
+
+    session.journal.abandoned()  # what CatanServer.replace does
+
+    assert journal.resumable(str(tmp_path), "cookie-abc") is None
+
+
+def test_one_browsers_game_is_never_handed_to_another(tmp_path):
+    bots = [("search2", "search2")] * 3
+    mine = _build_session(bots, 0, 99, "cpu", 1, str(tmp_path), "cookie-abc")
+    _drive(mine, 6, random.Random(4))
+
+    assert _resume_session("cookie-xyz", "cpu", 1, str(tmp_path)) is None
+
+
+def test_an_undone_placement_is_not_replayed_back_onto_the_board(tmp_path):
+    """Undone actions stay in the file by design (see Journal.undo), so a
+    resume that read the lines straight through would rebuild the board the
+    human explicitly rejected."""
+    bots = [("search2", "search2")] * 3
+    session = _build_session(bots, 0, 99, "cpu", 1, str(tmp_path), "cookie-abc")
+    rng = random.Random(4)
+    for _ in range(400):
+        _drive(session, 1, rng)
+        if session._undo is not None or is_over(session.game):
+            break
+    assert session._undo is not None, "no undoable build came up to test with"
+    session.undo_last_build()
+
+    resumed = _resume_session("cookie-abc", "cpu", 1, str(tmp_path))
+
+    assert resumed.game.state.vertex_owner == session.game.state.vertex_owner
+    assert resumed.game.state.edge_owner == session.game.state.edge_owner

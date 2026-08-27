@@ -69,6 +69,14 @@ DEV_CARD_NAMES: tuple[str, ...] = tuple(c.name.title().replace("_", " ") for c i
 MAX_CASCADE_STEPS = 2000
 
 
+class ResumeError(Exception):
+    """A journalled game would not replay — its actions no longer describe a
+    legal game under this engine. Recoverable, and by design: the caller deals
+    a fresh game rather than failing the request (see `webserver.resume`), so
+    an engine change that invalidates old journals costs the games in flight
+    at the time and nothing else."""
+
+
 class Bot(Protocol):
     def choose(self, game: Game) -> Action: ...
 
@@ -480,6 +488,14 @@ class GameSession:
     # echo back so the client can label seats by bot rather than by number.
     # Empty for the human seat and for any caller that never set it.
     bot_names: dict[int, str] = field(default_factory=dict)
+    # Seat -> the entrant spec that built the bot on it, which the display
+    # name above does not always give back (an .onnx entry is named after its
+    # file, not its path). Journalled so a resumed game can put the same
+    # opponents back, and unused by play itself.
+    bot_specs: dict[int, str] = field(default_factory=dict)
+    # The browser this game belongs to (`catan_id` — see webserver), carried
+    # only so the journal can record whose game it was.
+    identity: str | None = None
     # Seat -> the dice total that seat rolled on its own most recent turn.
     # `game.last_roll` is one global value, whoever rolled it last; this is
     # what lets the player list show each seat's own roll instead of just
@@ -527,6 +543,8 @@ class GameSession:
                 seed=self.seed,
                 human_seat=self.human_seat,
                 bot_names=self.bot_names,
+                bot_specs=self.bot_specs,
+                identity=self.identity,
             )
 
     @property
@@ -546,6 +564,31 @@ class GameSession:
         if self.game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
             return 0
         return self.game.turns // self.game.state.num_players + 1
+
+    def restore(self, steps: list[tuple[int, Action]], journal: Journal | None = None) -> None:
+        """Re-apply a journalled game's actions, bringing this session up to
+        where it left off (see `catan.journal.replayable`).
+
+        Every step goes through `_apply` like any other, so the sidebar log,
+        the per-seat rolls and the round numbering are rebuilt as a
+        consequence of replaying rather than being stored and restored — there
+        is one way this session reaches a state, and this is still it.
+
+        `journal` is attached only once the replay is done: it is the file
+        these steps were just read out of, and a session journalling as it
+        restores would write the whole game into it a second time.
+        """
+        if self.journal is not None:
+            raise ValueError("restore would rewrite the journal it is reading")
+        for actor, action in steps:
+            if not is_legal(self.game, action, legal_actions(self.game)):
+                raise ResumeError(
+                    f"step {self._steps}: {action} is not legal in {self.game.phase.name}"
+                )
+            self._apply(actor, action)
+        self.journal = journal
+        if journal is not None:
+            journal.reopened(at_step=self._steps)
 
     def legal_wire_actions(self) -> list[dict]:
         if is_over(self.game) or to_move(self.game) != self.human_seat:

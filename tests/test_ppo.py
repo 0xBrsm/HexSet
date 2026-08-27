@@ -438,3 +438,130 @@ def test_one_critic_flag_is_one_wire():
         PPOConfig(critic="none", value_lam=0.9)
     with pytest.raises(ValueError):
         PPOConfig(critic="bogus")
+
+
+def paired_episodes(policy, games: int, seed: int = 0):
+    """A bounded pair-dealt cohort, played out in full — what `pair_baseline`
+    is owed by collection."""
+    return Collector(
+        policy, lanes=games, seed=seed, action_cap=3000, deal=games, pair_boards=True
+    ).drain()
+
+
+def episodes_with_outcomes(policy, points_by_index, seed: int = 21):
+    """Real transitions, hand-chosen outcomes.
+
+    The collector donates valid observations and actions; the test owns the
+    payoff arithmetic, which is what lets the pair-baseline identities be
+    asserted exactly rather than to a tolerance.
+    """
+    donor = some_episodes(policy, games=1, seed=seed)[0]
+    return [
+        dataclasses.replace(
+            donor,
+            index=index,
+            outcome=dataclasses.replace(donor.outcome, winner=None, points=points),
+        )
+        for index, points in points_by_index.items()
+    ]
+
+
+def test_the_pair_baseline_never_touches_the_value_targets():
+    # The baseline is a policy-gradient control variate: it changes what the
+    # policy is paid, never what the head is trained toward. Bit-identical,
+    # not approximately equal — the head's target is off-path here.
+    policy = a_policy(seed=12)
+    episodes = paired_episodes(policy, games=4, seed=12)
+
+    plain = assemble(episodes, policy.layout, PPOConfig())
+    paired = assemble(episodes, policy.layout, PPOConfig(pair_baseline=True))
+
+    assert torch.equal(plain.value_target, paired.value_target)
+    assert not torch.equal(plain.advantage, paired.advantage)
+
+
+def test_the_gae_terminal_is_the_pair_adjusted_payoff():
+    from catan.rewards import reward
+
+    policy = a_policy(seed=13)
+    episodes = paired_episodes(policy, games=2, seed=13)
+    config = PPOConfig(pair_baseline=True)
+    batch = assemble(episodes, policy.layout, config)
+
+    payoffs = {e.index: reward(e.outcome) for e in episodes}
+    rows = 0
+    for episode in episodes:
+        own_pay = payoffs[episode.index]
+        mate_pay = payoffs[episode.index ^ 1]
+        for seat, trajectory in enumerate(episode.trajectories):
+            if not trajectory:
+                continue
+            estimates = np.array([t.value[0] for t in trajectory], dtype=np.float32)
+            adjusted = np.float32((own_pay[seat] - mate_pay[seat]) / 2)
+            expected = advantages(estimates, adjusted, config.lam)
+            got = batch.advantage[rows : rows + len(trajectory)].numpy()
+            assert np.array_equal(got, expected)
+            rows += len(trajectory)
+    assert rows == len(batch)
+
+
+def test_pair_adjusted_payoffs_are_zero_sum_negated_and_zero_on_a_draw():
+    policy = a_policy(seed=21)
+    episodes = episodes_with_outcomes(
+        policy,
+        {
+            0: (10, 4, 4, 4),
+            1: (4, 10, 4, 4),
+            2: (8, 8, 2, 2),
+            3: (8, 8, 2, 2),
+        },
+    )
+    # critic="none" credits every decision with the terminal payoff whole, so
+    # each seat's rows read the adjusted payoff directly.
+    config = PPOConfig(critic="none", pair_baseline=True)
+    batch = assemble(episodes, policy.layout, config)
+
+    adjusted: dict[tuple[int, int], float] = {}
+    row = 0
+    for episode in episodes:
+        for seat, trajectory in enumerate(episode.trajectories):
+            if not trajectory:
+                continue
+            block = batch.advantage[row : row + len(trajectory)]
+            assert float(block.min()) == float(block.max())
+            adjusted[(episode.index, seat)] = float(block[0])
+            row += len(trajectory)
+    assert row == len(batch)
+
+    # Exactly zero-sum per game: both halves' raw vectors are, and halving a
+    # difference cannot leave the plane.
+    assert sum(adjusted[(0, seat)] for seat in range(4)) == 0.0
+    assert sum(adjusted[(1, seat)] for seat in range(4)) == 0.0
+    # The two halves are exact negatives of each other, bitwise.
+    for seat in range(4):
+        assert adjusted[(0, seat)] == -adjusted[(1, seat)]
+    # A pair whose halves ended identically pays exactly nothing: whatever the
+    # two games shared — geometry, seat order, everything — cancels whole.
+    for index in (2, 3):
+        for seat in range(4):
+            assert adjusted[(index, seat)] == 0.0
+    # Anti-vacuity: the non-draw pair moved somebody.
+    assert any(adjusted[(0, seat)] != 0.0 for seat in range(4))
+
+
+def test_a_missing_mate_or_an_odd_cohort_refuses_to_baseline():
+    policy = a_policy(seed=14)
+    episodes = paired_episodes(policy, games=3, seed=14)
+    config = PPOConfig(pair_baseline=True)
+
+    # Game 2's mate was never dealt: an odd cohort cannot be complete pairs.
+    with pytest.raises(ValueError, match="even cohort"):
+        assemble(episodes, policy.layout, config)
+    # One half alone is the same defect at any cohort size.
+    solo = [episode for episode in episodes if episode.index == 0]
+    with pytest.raises(ValueError, match="mate"):
+        assemble(solo, policy.layout, config)
+
+
+def test_the_pair_baseline_defaults_off():
+    assert PPOConfig().pair_baseline is False

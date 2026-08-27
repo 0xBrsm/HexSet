@@ -7,6 +7,33 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-27
+
+### Added
+
+- **Board-paired advantage baselines** (the variance screen's candidate 1),
+  one flag because the registration treats it as one treatment.
+  `Collector(pair_boards=True)` deals games `2k` and `2k+1` on the board keyed
+  `f"{seed}:{2k}:board"` while each keeps its own game rng — same geometry,
+  independent dice and play — and refuses a fixed `board=` alongside it.
+  `collect.paired_caster` repeats each cast for both halves, so within a pair
+  the same policy holds the same seat; seat shares then balance over any
+  `2*learners`-game window instead of `learners`. `PPOConfig(pair_baseline=
+  True)` makes each seat's policy-gradient terminal `r - (r + r')/2`, `r'` the
+  same seat's reward in the mate game `index ^ 1` — a valid control variate
+  given (board, seat, policy), leaving the gradient unbiased and the value
+  target on the raw terminal. Adjusted per-game vectors stay exactly zero-sum,
+  the two halves are bit-exact negatives, and a pair with identical outcomes
+  pays exactly zero; a batch missing a mate refuses rather than baselining
+  against nothing. `catan.league --pair-boards` turns on all three wires.
+  With pairing off, dealing, casting, advantages and value targets are
+  bit-identical to 0.7.2.
+- `benchmarks.noise_scale --paired` — Gate A of the screen: one board-paired
+  cohort, the estimator run twice on the same batch (raw vs pair-adjusted
+  advantage stream, same positions, weights and shuffles) in one JSON, plus
+  the pair correlations `rho = corr(r, r')` and `rho_v` on the head-residuals
+  at each seat's last decision, per seat and pooled.
+
 ## [0.7.2] - 2026-08-26
 
 ### Fixed

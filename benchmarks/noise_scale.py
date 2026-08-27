@@ -47,8 +47,10 @@ import argparse
 import json
 import random
 import sys
+from dataclasses import replace
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from catan.actions import space_for
@@ -58,6 +60,7 @@ from catan.game import start
 from catan.model import CatanNet, config_from_args, packing
 from catan.policy import NetworkPolicy
 from catan.ppo import PPOConfig, assemble, minibatch_terms
+from catan.rewards import reward
 from catan.selfplay import Collector
 
 from .throughput import environment
@@ -136,6 +139,97 @@ def _gradients(policy, batch, rows, advantage, config) -> dict[str, torch.Tensor
     return out
 
 
+def _measure(policy, batch, advantage, config, small: int, big: int, repeats: int, seed: int) -> dict:
+    """The two-batch-size sweep for one advantage stream.
+
+    Factored out of `main` so the paired probe can run it twice on the same
+    positions and weights with the same shuffles — every draw then compares
+    the two streams on identical rows, which is what makes the *difference*
+    in B_simple a paired reading exempt from the estimator's own 2x
+    cross-scale softness. `advantage` arrives already normalised over the
+    whole batch, each stream by its own moments, matching what an update
+    would actually feed the optimiser under either terminal.
+    """
+    positions = len(batch)
+    small_sq: dict[str, list[float]] = {name: [] for name in TERMS}
+    big_sq: dict[str, list[float]] = {name: [] for name in TERMS}
+    generator = torch.Generator().manual_seed(seed)
+    for repeat in range(repeats):
+        order = torch.randperm(positions, generator=generator)
+        for start_row in range(0, positions - big + 1, big):
+            chunk = order[start_row : start_row + big]
+            draws = [
+                _gradients(policy, batch, chunk[i : i + small], advantage, config)
+                for i in range(0, big, small)
+            ]
+            for name in TERMS:
+                stacked = torch.stack([draw[name] for draw in draws])
+                small_sq[name].append(float(stacked.pow(2).sum(dim=1).mean()))
+                big_sq[name].append(float(stacked.mean(dim=0).pow(2).sum()))
+        done = len(small_sq["full"])
+        print(f"  repeat {repeat + 1}/{repeats}: {done} pairs", flush=True)
+
+    return {
+        "pairs": len(small_sq["full"]),
+        "terms": {
+            # Average each side over every draw and estimate once: the paper's
+            # estimator is a ratio of means, and a mean of ratios is not the same.
+            name: estimate(
+                sum(small_sq[name]) / len(small_sq[name]),
+                sum(big_sq[name]) / len(big_sq[name]),
+                small,
+                big,
+            )
+            for name in TERMS
+        },
+    }
+
+
+def _pair_correlations(episodes, players: int) -> dict:
+    """The mechanism numbers behind the pair baseline, per seat then pooled.
+
+    `rho = corr(r, r')` over the board pairs says how much of the terminal
+    reward the shared (board, seat) geometry carries at all. `rho_v` runs the
+    same correlation on `r - V(s_T)` — the head's own-payoff estimate at the
+    seat's *last decision*, `value[0]` of the final transition, which is
+    exactly the estimate `advantages()` bootstraps against at its final step
+    (reused from the recorded trajectory rather than re-running the net). It
+    is the share the head has NOT already priced, and the register's
+    prediction is that this number, not rho, decides the gate: pairing with
+    independent dice streams cannot cancel dice, only unpriced geometry.
+    """
+    by_index = {episode.index: episode for episode in episodes}
+    r = [[] for _ in range(players)]
+    r_mate = [[] for _ in range(players)]
+    residual = [[] for _ in range(players)]
+    residual_mate = [[] for _ in range(players)]
+    for index in sorted(by_index):
+        if index % 2:
+            continue
+        even, odd = by_index[index], by_index[index ^ 1]
+        even_pay, odd_pay = reward(even.outcome), reward(odd.outcome)
+        for seat in range(players):
+            r[seat].append(even_pay[seat])
+            r_mate[seat].append(odd_pay[seat])
+            residual[seat].append(
+                even_pay[seat] - even.trajectories[seat][-1].value[0]
+            )
+            residual_mate[seat].append(
+                odd_pay[seat] - odd.trajectories[seat][-1].value[0]
+            )
+
+    def corr(a, b) -> float:
+        return float(np.corrcoef(np.asarray(a), np.asarray(b))[0, 1])
+
+    def rows(a, b) -> dict:
+        return {
+            "per_seat": [corr(a[seat], b[seat]) for seat in range(players)],
+            "pooled": corr(np.concatenate(a), np.concatenate(b)),
+        }
+
+    return {"rho": rows(r, r_mate), "rho_v": rows(residual, residual_mate)}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", default="/w/runs/ppo4/latest.pt")
@@ -163,8 +257,21 @@ def main(argv: list[str] | None = None) -> int:
         help="reshuffles of the batch; each contributes one pair of estimates "
         "per group, and the two sides are averaged before dividing",
     )
+    parser.add_argument(
+        "--paired",
+        action="store_true",
+        default=False,
+        help="Gate A of the variance screen's candidate 1: collect one "
+        "board-paired cohort (--games must be even), run the estimator twice "
+        "on the same batch — advantage stream from raw vs pair-adjusted "
+        "terminals, same positions, same weights, same shuffles — and report "
+        "the pair correlations rho and rho_v alongside",
+    )
     parser.add_argument("--json", default=None)
     args = parser.parse_args(argv)
+
+    if args.paired and args.games % 2:
+        raise SystemExit("--paired deals boards in pairs; --games must be even")
 
     torch.set_num_threads(args.threads)
     state = torch.load(args.checkpoint, map_location=args.device, weights_only=False)
@@ -198,14 +305,24 @@ def main(argv: list[str] | None = None) -> int:
         action_cap=4000,
         max_offers=args.max_offers,
         deal=args.games,
+        pair_boards=args.paired,
     )
-    batch = assemble(collector.drain(), policy.layout, config).to(args.device)
+    episodes = collector.drain()
+    batch = assemble(episodes, policy.layout, config).to(args.device)
     positions = len(batch)
     print(f"batch: {positions} positions", flush=True)
 
-    # Once, over the whole batch — see the module docstring.
-    advantage = batch.advantage
-    advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
+    # The comparison is the batch: same positions, same weights, same shuffle
+    # seed, the streams differing only in the terminal fed to the advantage
+    # recursion. `assemble` with `pair_baseline` is the exact production wire,
+    # so the probe measures the gradient a paired run would take rather than a
+    # re-derivation of it.
+    streams = {"raw": batch.advantage}
+    if args.paired:
+        streams["pair_adjusted"] = (
+            assemble(episodes, policy.layout, replace(config, pair_baseline=True))
+            .advantage.to(args.device)
+        )
 
     small, big = args.micro, args.micro * args.group
     if positions < big:
@@ -214,34 +331,17 @@ def main(argv: list[str] | None = None) -> int:
             "collect more games or lower --group"
         )
 
-    small_sq: dict[str, list[float]] = {name: [] for name in TERMS}
-    big_sq: dict[str, list[float]] = {name: [] for name in TERMS}
-    generator = torch.Generator().manual_seed(args.seed + 1)
-    for repeat in range(args.repeats):
-        order = torch.randperm(positions, generator=generator)
-        for start_row in range(0, positions - big + 1, big):
-            chunk = order[start_row : start_row + big]
-            draws = [
-                _gradients(policy, batch, chunk[i : i + small], advantage, config)
-                for i in range(0, big, small)
-            ]
-            for name in TERMS:
-                stacked = torch.stack([draw[name] for draw in draws])
-                small_sq[name].append(float(stacked.pow(2).sum(dim=1).mean()))
-                big_sq[name].append(float(stacked.mean(dim=0).pow(2).sum()))
-        done = len(small_sq["full"])
-        print(f"  repeat {repeat + 1}/{args.repeats}: {done} pairs", flush=True)
-
-    measured = {}
-    for name in TERMS:
-        # Average each side over every draw and estimate once: the paper's
-        # estimator is a ratio of means, and a mean of ratios is not the same.
-        measured[name] = estimate(
-            sum(small_sq[name]) / len(small_sq[name]),
-            sum(big_sq[name]) / len(big_sq[name]),
-            small,
-            big,
+    measured_streams = {}
+    for stream_name, advantage in streams.items():
+        if args.paired:
+            print(f"stream: {stream_name}", flush=True)
+        # Once, over the whole batch — see the module docstring. Each stream by
+        # its own moments, which is what an update under that terminal would do.
+        advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
+        measured_streams[stream_name] = _measure(
+            policy, batch, advantage, config, small, big, args.repeats, args.seed + 1
         )
+    measured = measured_streams["raw"]["terms"]
 
     result = {
         "environment": environment(),
@@ -250,17 +350,40 @@ def main(argv: list[str] | None = None) -> int:
         "games": args.games,
         "b_small": small,
         "b_big": big,
-        "pairs": len(small_sq["full"]),
+        "pairs": measured_streams["raw"]["pairs"],
         "terms": measured,
     }
+    if args.paired:
+        result["paired"] = {
+            "terms": measured_streams["pair_adjusted"]["terms"],
+            **_pair_correlations(episodes, args.players),
+        }
     print(json.dumps(result, indent=2))
 
-    print(f"\n{'term':<8} {'B_simple':>12} {'signal share at ' + str(big):>22}")
-    for name in TERMS:
-        b = measured[name]["b_simple"]
-        share = measured[name]["signal_share_at_b_big"]
-        shown = f"{b:,.0f}" if b else "above the range probed"
-        print(f"{name:<8} {shown:>12} {share:>21.1%}" if b else f"{name:<8} {shown:>12}")
+    for stream_name, sweep in measured_streams.items():
+        if args.paired:
+            print(f"\nstream: {stream_name}")
+        print(f"\n{'term':<8} {'B_simple':>12} {'signal share at ' + str(big):>22}")
+        for name in TERMS:
+            b = sweep["terms"][name]["b_simple"]
+            share = sweep["terms"][name]["signal_share_at_b_big"]
+            shown = f"{b:,.0f}" if b else "above the range probed"
+            print(f"{name:<8} {shown:>12} {share:>21.1%}" if b else f"{name:<8} {shown:>12}")
+    if args.paired:
+        raw_b = measured["policy"]["b_simple"]
+        adjusted_b = result["paired"]["terms"]["policy"]["b_simple"]
+        if raw_b and adjusted_b is not None:
+            print(
+                f"\npolicy-term B_simple: raw {raw_b:,.0f} -> pair-adjusted "
+                f"{adjusted_b:,.0f} (fall {1 - adjusted_b / raw_b:+.1%}; the "
+                "gate wants >= +15% at both probe scales)"
+            )
+        print(
+            f"rho pooled {result['paired']['rho']['pooled']:+.3f}, "
+            f"rho_v pooled {result['paired']['rho_v']['pooled']:+.3f} "
+            "(rho_v near zero means the residual is unrolled dice, which "
+            "pairing cannot cancel)"
+        )
     print(
         "\nB_simple is where sampling noise stops dominating. Read it against "
         "--minibatch, which is the batch each optimiser step actually sees."

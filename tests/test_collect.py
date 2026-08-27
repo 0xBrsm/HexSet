@@ -338,3 +338,39 @@ def test_a_learner_order_that_is_not_a_permutation_is_refused():
 
     with pytest.raises(ValueError, match="permutation"):
         league_caster(4, 4, order=(0, 1, 1, 3))
+
+
+def test_a_paired_caster_casts_both_halves_of_a_pair_identically():
+    from catan.collect import league_caster, paired_caster
+
+    plain = league_caster(4, 4)
+    caster = paired_caster(plain)
+    for k in range(12):
+        assert caster(2 * k) == caster(2 * k + 1) == plain(k)
+
+
+def test_a_paired_league_balances_every_seat_over_a_doubled_window():
+    from collections import Counter
+
+    from catan.collect import league_caster, paired_caster
+
+    learners, players = 4, 4
+    caster = paired_caster(league_caster(learners, players))
+    # The documented cost of pairing: the exact balance `league_caster` gives
+    # over any `learners`-game window now takes `2 * learners` games — and it
+    # holds at every offset, not just on pair boundaries.
+    for offset in range(2 * learners):
+        window = [caster(offset + i) for i in range(2 * learners)]
+        for seat in range(players):
+            share = Counter(cast[seat] for cast in window)
+            assert share == {k: 2 for k in range(learners)}
+
+
+def test_a_paired_worker_wraps_its_caster_and_deals_paired_boards():
+    from catan.collect import _build, league_caster
+
+    _, collector = _build(spec(0, 1, learners=2, pair_boards=True))
+    assert collector.pair_boards
+    plain = league_caster(2, 4)
+    for k in range(6):
+        assert collector.caster(2 * k) == collector.caster(2 * k + 1) == plain(k)

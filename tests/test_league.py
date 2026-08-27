@@ -78,3 +78,10 @@ def test_standings_count_wins_and_vp_by_cast():
 def test_every_override_key_names_a_real_config_field():
     fields = set(PPOConfig().__dataclass_fields__)
     assert all(name in fields for name, _ in OVERRIDES.values())
+
+
+def test_pair_boards_defaults_off_so_recorded_heats_replay():
+    from catan.league import build_parser
+
+    args = build_parser().parse_args(["--learner", "", "--checkpoint-dir", "x"])
+    assert args.pair_boards is False

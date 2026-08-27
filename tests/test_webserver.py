@@ -17,6 +17,7 @@ import http.cookiejar
 import json
 import random
 import threading
+import time
 import urllib.error
 import urllib.request
 
@@ -28,7 +29,13 @@ from catan.board.board import random_base_board
 from catan.bots import RandomBot
 from catan.game import is_over, start, to_move
 from catan.webplay import GameSession, action_to_wire, board_layout
-from catan.webserver import COOKIE_NAME, CatanServer, _build_session, _resume_session
+from catan.webserver import (
+    COOKIE_NAME,
+    CatanServer,
+    _build_session,
+    _Entry,
+    _resume_session,
+)
 
 
 def _new_session(seed: int) -> GameSession:
@@ -270,6 +277,20 @@ def _drive(session, moves: int, rng: random.Random) -> None:
             session.advance_bots()
 
 
+def _press_new_game(session, identity: str) -> None:
+    """Drive the real `CatanServer.replace` over an existing session — what
+    `POST /api/new` reaches. Called rather than `journal.abandoned()` directly
+    because the decision under test, whether that line gets written at all,
+    lives in `replace` and not in the journal."""
+    server = CatanServer(("127.0.0.1", 0), lambda bots, identity: _new_session(1))
+    try:
+        layout = board_layout(session.game.state.board)
+        server.sessions[identity] = _Entry(session, layout, time.monotonic())
+        server.replace(identity, None)
+    finally:
+        server.server_close()
+
+
 def test_an_unfinished_game_comes_back_where_it_was_left(tmp_path):
     """The whole point of journalling every action: a session lives in memory,
     so a deploy or a crash used to take every game in flight with it."""
@@ -331,9 +352,28 @@ def test_pressing_new_game_ends_the_old_one_for_good(tmp_path):
     _drive(session, 6, random.Random(4))
     assert journal.resumable(str(tmp_path), "cookie-abc") == session.journal.path
 
-    session.journal.abandoned()  # what CatanServer.replace does
+    _press_new_game(session, "cookie-abc")
 
     assert journal.resumable(str(tmp_path), "cookie-abc") is None
+
+
+def test_a_game_that_was_won_is_not_also_filed_as_abandoned(tmp_path):
+    """A won game already closed itself with `result`. Adding `abandoned`
+    after it on the way out files a game the human played to the end as one
+    they walked away from, and played-out-or-not is the single distinction
+    anything counting these files exists to make."""
+    bots = [("search2", "search2")] * 3
+    session = _build_session(bots, 0, 99, "cpu", 1, str(tmp_path), "cookie-abc")
+    rng = random.Random(4)
+    while not is_over(session.game):
+        _drive(session, 1, rng)
+    path = session.journal.path
+
+    _press_new_game(session, "cookie-abc")
+
+    kinds = [e["kind"] for e in journal.read(path)]
+    assert kinds.count("result") == 1
+    assert "abandoned" not in kinds
 
 
 def test_one_browsers_game_is_never_handed_to_another(tmp_path):

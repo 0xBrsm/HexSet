@@ -56,7 +56,7 @@ from typing import Callable
 from . import journal
 from .actions import Action
 from .board.board import Board, random_base_board
-from .game import Game, start, to_move
+from .game import Game, is_over, start, to_move
 from .webplay import Bot, GameSession, ResumeError, board_layout
 
 STATIC_DIR = Path(__file__).resolve().parent / "web"
@@ -207,8 +207,17 @@ class CatanServer(ThreadingHTTPServer):
         # finishing it. Said out loud in the outgoing journal, or `entry`
         # would hand this game straight back on the next cache miss — the
         # file has no closing line of its own, since nobody won it.
+        #
+        # A game that was won already wrote `result` and needs nothing more:
+        # adding "abandoned" after it files a game the human played out as one
+        # they walked away from, which is the single distinction anything
+        # counting these files exists to make.
         previous = self.sessions.get(identity)
-        if previous is not None and previous.session.journal is not None:
+        if (
+            previous is not None
+            and previous.session.journal is not None
+            and not is_over(previous.session.game)
+        ):
             previous.session.journal.abandoned()
         session = self.new_session(bots, identity)  # outside the lock — see entry()
         entry = _Entry(session, board_layout(session.game.state.board), time.monotonic())

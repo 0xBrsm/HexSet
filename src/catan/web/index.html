@@ -246,6 +246,9 @@
     stroke: var(--accent); stroke-width: 3; stroke-dasharray: 6 4;
   }
   .clickable-hex:hover { fill: color-mix(in srgb, var(--accent) 32%, transparent); }
+  /* Roads and buildings are painted over the robber's target hexes and would
+     otherwise punch click-holes in them. Nothing listens to a piece. */
+  .pieces-layer { pointer-events: none; }
   .robber { fill: #000000; stroke: #ffffff; stroke-width: 1.5; pointer-events: none; }
   #overlay-blocker {
     position: absolute; inset: 0; background: rgba(0,0,0,0.5); display: none;
@@ -1004,8 +1007,16 @@ function drawBoard() {
   // Dynamic layers, repopulated by render(). SVG paints in document order,
   // so later groups sit on top — roads before buildings so a settlement/city
   // at a road's endpoint isn't partly covered by it.
-  svg.appendChild(el("g", {id: "roads-layer"}));
-  svg.appendChild(el("g", {id: "buildings-layer"}));
+  //
+  // The robber's target hexes go under all of them. They wash a whole tile
+  // in accent colour, and every seat's pieces standing on that tile were
+  // being tinted through it — two seats whose colours are already close stop
+  // being tellable apart at exactly the moment you have to pick one to rob.
+  // Only the targets take clicks, so the pieces above are pointer-transparent
+  // (.pieces-layer) and a click anywhere on the tile still reaches the hex.
+  svg.appendChild(el("g", {id: "hex-target-layer"}));
+  svg.appendChild(el("g", {id: "roads-layer", class: "pieces-layer"}));
+  svg.appendChild(el("g", {id: "buildings-layer", class: "pieces-layer"}));
   svg.appendChild(el("g", {id: "robber-layer"}));
   svg.appendChild(el("g", {id: "clickable-layer"}));
 }
@@ -1463,10 +1474,12 @@ function renderBoardDynamic() {
   const roadsLayer = document.getElementById("roads-layer");
   const robberLayer = document.getElementById("robber-layer");
   const clickLayer = document.getElementById("clickable-layer");
+  const hexTargetLayer = document.getElementById("hex-target-layer");
   buildingsLayer.innerHTML = "";
   roadsLayer.innerHTML = "";
   robberLayer.innerHTML = "";
   clickLayer.innerHTML = "";
+  hexTargetLayer.innerHTML = "";
 
   // Roads, each one drawn twice: the seat's near-black stroke a little wider
   // underneath, then the colour on top of it. A line has no outline of its
@@ -1519,11 +1532,12 @@ function renderBoardDynamic() {
   if (state.to_move !== state.human_seat || state.game_over) return;
   const g = groupActions(state.legal_actions);
 
-  // Hexes first, then edges, then vertices: a hex overlay's boundary coincides
-  // exactly with the edges around it, so the broadest target has to sit
-  // underneath in DOM order or it steals clicks meant for a road on its rim
-  // (later siblings paint on top in SVG). Vertices are the smallest, most
-  // precise targets and go last so nothing else can shadow them either.
+  // Hexes into their own layer below the pieces, then edges, then vertices
+  // here: a hex overlay's boundary coincides exactly with the edges around
+  // it, so the broadest target has to sit underneath or it steals clicks
+  // meant for a road on its rim (later siblings paint on top in SVG).
+  // Vertices are the smallest, most precise targets and go last so nothing
+  // else can shadow them either.
   const move = robberMove(g);
   for (const [hid, actions] of Object.entries(move ? move.targets : {})) {
     const h = hexById[hid];
@@ -1535,7 +1549,7 @@ function renderBoardDynamic() {
       pendingRobberHex = Number(hid);
       render();
     });
-    clickLayer.appendChild(poly);
+    hexTargetLayer.appendChild(poly);
   }
   // A pending robber move owns the board until it's answered or taken back,
   // so the build targets come down with everything else (renderBoardButtons)

@@ -202,6 +202,38 @@ def load_dump(path: str) -> dict:
         return json.load(handle)
 
 
+# Terminal victory points are integers and `relative_points` divides by the ten
+# that win, so a seat's return lives on a lattice of 1/30 reward units -- a third
+# of a victory point. A lattice distribution has a positive W1 to *any*
+# continuous law, and a finite sample has one even without the lattice, so a raw
+# W1 cannot distinguish "the shape is non-Gaussian" from "the instrument reads
+# positive on Gaussian data". This is the matched null that separates them.
+LATTICE = 1.0 / 30.0
+
+
+def gaussian_null(returns: np.ndarray, reps: int, rng, lattice: float = LATTICE) -> dict:
+    """W1 this instrument reads on data that *is* Gaussian, matched to this row.
+
+    Draws `reps` samples of the same size from the position's own fitted
+    Gaussian and scores each the same way, once continuous and once rounded onto
+    the return lattice. The gap between `observed` and `quantised` is the only
+    part of a W1 reading that evidences non-Gaussian *shape*; everything below
+    `quantised` is finite-sample bias plus discreteness, both of which a
+    perfectly Gaussian target would also produce.
+    """
+    arr = np.asarray(returns, dtype=np.float64)
+    mean, sigma = float(arr.mean()), float(arr.std())
+    if sigma == 0.0:
+        return {"continuous": 0.0, "quantised": 0.0}
+    draws = rng.normal(mean, sigma, size=(reps, arr.size))
+    return {
+        "continuous": float(np.mean([wasserstein1_vp(d) for d in draws])),
+        "quantised": float(
+            np.mean([wasserstein1_vp(np.round(d / lattice) * lattice) for d in draws])
+        ),
+    }
+
+
 def analyse(payload: dict, bins: int = 5) -> dict:
     """Per-position shape, pooled and by stage.
 
@@ -262,10 +294,36 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dump", required=True, help="path written by floor.py --dump-returns")
     parser.add_argument("--bins", type=int, default=5)
     parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--null",
+        type=int,
+        default=0,
+        help="parametric-bootstrap reps per position for the matched Gaussian "
+        "null. Above 0 the report adds what this instrument reads on genuinely "
+        "Gaussian data of the same size on the same lattice, which is the only "
+        "baseline a W1 reading can honestly be judged against",
+    )
+    parser.add_argument("--null-seed", type=int, default=11)
     args = parser.parse_args(argv)
 
     payload = load_dump(args.dump)
     result = analyse(payload, bins=args.bins)
+
+    if args.null > 0:
+        rng = np.random.default_rng(args.null_seed)
+        for row, source in zip(result["positions"], payload["positions"]):
+            row["null"] = gaussian_null(source["returns"], args.null, rng)
+        excess = [r["wasserstein1_vp"] - r["null"]["quantised"] for r in result["positions"]]
+        result["pooled"]["null_continuous"] = round(
+            float(np.mean([r["null"]["continuous"] for r in result["positions"]])), 4
+        )
+        result["pooled"]["null_quantised"] = round(
+            float(np.mean([r["null"]["quantised"] for r in result["positions"]])), 4
+        )
+        result["pooled"]["w1_excess_over_null"] = round(float(np.mean(excess)), 4)
+        result["pooled"]["w1_excess_se"] = round(
+            float(np.std(excess, ddof=1) / np.sqrt(len(excess))), 4
+        )
 
     output = {
         "dump": args.dump,
@@ -292,6 +350,15 @@ def main(argv: list[str] | None = None) -> int:
         f"  pooled Wasserstein-1 mismatch   {pooled['wasserstein1_vp']:.4f} VP"
         "  (registered pass line: 0.10 VP)"
     )
+    if "null_quantised" in pooled:
+        print(
+            f"  matched Gaussian null           {pooled['null_quantised']:.4f} VP"
+            f"  ({pooled['null_continuous']:.4f} before the 1/30 lattice)"
+        )
+        print(
+            f"  excess over null                {pooled['w1_excess_over_null']:+.4f} VP"
+            f"  +/- {pooled['w1_excess_se']:.4f} SE  <- the evidence of shape"
+        )
     print("  by stage of the game:")
     for stage in output["stages"]:
         print(

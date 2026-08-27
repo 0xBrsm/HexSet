@@ -53,6 +53,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable
 
+from . import journal
 from .actions import Action
 from .board.board import random_base_board
 from .game import Game, start, to_move
@@ -489,15 +490,15 @@ def _build_session(
     seed: int | None,
     device: str,
     max_offers: int | None,
-    record_path: str | None = None,
+    games_dir: str | None = None,
 ) -> GameSession:
     if len(bots) != NUM_PLAYERS - 1:
         raise ValueError(f"expected {NUM_PLAYERS - 1} bots, got {len(bots)}")
 
     # Always resolved to a concrete int, even when the caller left it to chance,
-    # so a finished game can be written out as a catan.record.Record and later
-    # replayed from that same seed — `random.Random()` alone has no int to hand
-    # back for that.
+    # so a game can be written out as a catan.record.Record and later replayed
+    # from that same seed — `random.Random()` alone has no int to hand back for
+    # that.
     if seed is None:
         seed = random.SystemRandom().randrange(2**31)
     # Left to chance the same way: a fixed --human-seat is for testing one
@@ -532,7 +533,7 @@ def _build_session(
         human_seat=human_seat,
         bot=bot,
         seed=seed,
-        record_path=record_path,
+        journal=journal.open_journal(seed, games_dir),
         bot_names=names_by_seat,
     )
     session.advance_bots()  # in case the human is not first in the setup snake
@@ -574,11 +575,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--device", default="cpu", help="Inference device (default: cpu).")
     parser.add_argument("--no-browser", action="store_true", help="Do not auto-open a browser tab.")
     parser.add_argument(
-        "--record",
+        "--games-dir",
         default=None,
         help=(
-            "Append each finished game to this path as a catan.record.Record "
-            "(JSON lines). Off by default."
+            "Where to journal every game in full, hidden cards and all "
+            f"(default: ${journal.ENV_DIR}, itself defaulting to "
+            f"'{journal.DEFAULT_DIR}'). Pass an empty string to journal nothing."
         ),
     )
     args = parser.parse_args(argv)
@@ -596,7 +598,7 @@ def main(argv: list[str] | None = None) -> None:
 
     def new_session(bots: list[tuple[str, str]] | None = None) -> GameSession:
         return _build_session(
-            bots or default_bots, args.human_seat, args.seed, args.device, args.max_offers, args.record
+            bots or default_bots, args.human_seat, args.seed, args.device, args.max_offers, args.games_dir
         )
 
     # No session is built here anymore — each browser deals its own on first
@@ -607,8 +609,11 @@ def main(argv: list[str] | None = None) -> None:
     url = f"http://{args.host}:{args.port}/"
     names = [name for name, _ in default_bots]
     print(f"Catan web board: {url}  (bots={names})")
-    if args.record:
-        print(f"Finished games will be appended to {args.record}")
+    games_dir = args.games_dir if args.games_dir is not None else journal.configured_dir()
+    if games_dir:
+        print(f"Every game will be journalled in full under {games_dir}/")
+    else:
+        print("Games will not be journalled.")
     if not args.no_browser:
         try:
             webbrowser.open(url)

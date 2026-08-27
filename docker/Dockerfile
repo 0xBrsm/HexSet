@@ -20,11 +20,18 @@ LABEL org.opencontainers.image.source="https://github.com/0xBrsm/catan-web"
 RUN pip install --no-cache-dir "numpy>=1.26" "onnxruntime>=1.18"
 
 # Runs unprivileged. The uid is arbitrary and deliberately high enough not to
-# collide with a host account: it only has to *read* the bind-mounted source
-# and models, both of which are mounted read-only. If your host needs a
-# particular uid:gid — because you added a writable mount, say — set `user:`
-# in your compose file rather than editing this.
+# collide with a host account: it reads the bind-mounted source and models,
+# both mounted read-only, and writes only to the games directory below. That
+# one has to be writable *by this uid* on the host — `chown 10001` it, or set
+# `user:` in your compose file to something your host already allows.
 RUN useradd --system --no-create-home --uid 10001 catan
+
+# Created before the drop to an unprivileged user so it exists (and is owned)
+# even when nothing is mounted over it: with the root filesystem read-only,
+# the app could not otherwise make it itself, and every game would go
+# unjournalled on a fresh `docker run` with no compose file.
+RUN mkdir -p /app/games && chown catan /app/games
+
 USER catan
 
 # HOME points at what will be a tmpfs (see compose.example.yaml) because the
@@ -37,6 +44,13 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # happens to flush.
 ENV PYTHONUNBUFFERED=1
 ENV CATAN_WEB_MODELS_DIR=/app/models
+# The one directory the app writes to: a full journal of every game, hidden
+# cards and all, one file per game (see src/catan/journal.py). Named here
+# rather than left to the code's default so it cannot land relative to
+# whatever WORKDIR happens to be. Set it empty to journal nothing; a directory
+# that turns out not to be writable disables the journal with a line in
+# `docker logs` rather than interrupting anyone's game.
+ENV CATAN_WEB_GAMES_DIR=/app/games
 
 WORKDIR /app
 EXPOSE 8770

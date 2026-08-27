@@ -13,6 +13,11 @@ build/
 # with it. Start from the tracked compose.example.yaml.
 compose.yaml
 
+# Journalled games. CATAN_WEB_GAMES_DIR defaults here, so anyone running the
+# server straight out of a checkout writes into the working tree: this is a
+# deployment's own history, not source.
+/games/
+
 # Drop-in opponents: binary artifacts produced by dev-catan's
 # catan.export_onnx, not source. See models/.gitkeep for why the directory
 # itself stays tracked.

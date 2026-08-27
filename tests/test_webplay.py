@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import math
 import random
+from pathlib import Path
 
 import pytest
 
@@ -12,8 +14,11 @@ from catan.board.maps import BASE_LAYOUT, MINI_LAYOUT
 from catan.board.topology import build as build_topology
 from catan.bots import RandomBot
 from catan.game import Phase, is_over, start, to_move
-from catan.record import read as read_records
+from catan.journal import DEFAULT_DIR, ENV_DIR, configured_dir, open_journal
+from catan.journal import RESOURCE_NAMES as JOURNAL_RESOURCE_NAMES
+from catan.record import Record
 from catan.record import replay as replay_record
+from catan.victory import victory_points
 from catan.webplay import (
     RESOURCE_NAMES,
     SQRT3,
@@ -705,27 +710,32 @@ def test_state_view_does_not_expose_who_is_eligible_to_respond_to_an_offer():
     assert "responders" not in view["offer"]
 
 
-# --- Recording -------------------------------------------------------------
+# --- Recording and journalling ----------------------------------------------
+
+SEED = 42
 
 
-def test_a_finished_game_is_recorded_and_replays_clean(tmp_path):
-    """`GameSession` writes catan.record's own format, not a new one, and what
-    it writes has to satisfy that format's own replay check."""
-    seed = 42
-    # Two independent random.Random(seed) instances, matching catan.record's own
+@pytest.fixture(scope="module")
+def played(tmp_path_factory):
+    """One game played out in full, journalled to its own directory.
+
+    Module-scoped because playing a whole game is by far the slowest thing in
+    this file: every test below reads the same finished game rather than
+    dealing another one of its own.
+    """
+    directory = tmp_path_factory.mktemp("games")
+    # Two independent random.Random(SEED) instances, matching catan.record's own
     # convention: replay() rebuilds the board from stored data (no randomness
     # spent) and hands `start` a *fresh* random.Random(seed), so the game's own
     # rng must start from the same untouched state here too.
-    board = random_base_board(random.Random(seed))
-    game = start(board, 4, random.Random(seed))
-    human_seat = to_move(game)
-    record_path = tmp_path / "games.jsonl"
+    board = random_base_board(random.Random(SEED))
+    game = start(board, 4, random.Random(SEED))
     session = GameSession(
         game=game,
-        human_seat=human_seat,
+        human_seat=to_move(game),
         bot=RandomBot(rng=random.Random(1)),
-        seed=seed,
-        record_path=str(record_path),
+        seed=SEED,
+        journal=open_journal(SEED, str(directory)),
     )
 
     human_rng = random.Random(2)
@@ -737,11 +747,53 @@ def test_a_finished_game_is_recorded_and_replays_clean(tmp_path):
         session.advance_bots()
         steps += 1
     assert is_over(session.game)
+    return session, directory
 
-    records = list(read_records(str(record_path)))
-    assert len(records) == 1
-    record = records[0]
-    assert record.seed == seed
+
+def journal_events(directory) -> list[dict]:
+    """The one per-game journal in `directory`, parsed."""
+    files = list(Path(directory).glob("*.jsonl"))
+    assert len(files) == 1, f"expected one game journal, found {files}"
+    return [json.loads(line) for line in files[0].read_text().splitlines()]
+
+
+def record_from(events: list[dict]) -> Record:
+    """A `catan.record.Record` assembled out of a journal.
+
+    Lives in the tests rather than in `catan.journal` because nothing this
+    server does needs one: it exists here to hand the test below something
+    `replay()` will accept, since a journal that replays clean is a journal
+    whose actions are a legal, complete game and not plausible-looking noise.
+    That every field it wants is already on these lines is the point — a
+    records file beside the journal would only have been this, copied.
+    """
+    header = events[0]
+    result = events[-1]
+    actions = [e for e in events if e["kind"] == "action"]
+    return Record(
+        layout=tuple(tuple(h) for h in header["layout"]),
+        terrain=tuple(header["terrain"]),
+        tokens=tuple(header["tokens"]),
+        ports=tuple(tuple(p) for p in header["ports"]),
+        num_players=header["num_players"],
+        seed=header["seed"],
+        actions=tuple((ActionType[e["type"]], e["a"], e["b"]) for e in actions),
+        offers=tuple(
+            (step, tuple(e["give"]), tuple(e["want"]), tuple(e["ask"]))
+            for step, e in enumerate(actions)
+            if "give" in e
+        ),
+        winner=result["winner"],
+        turns=result["turns"],
+    )
+
+
+def test_a_journalled_game_replays_clean(played):
+    """The strongest check there is on the journal: fed back through the
+    engine, its actions have to be legal in order and end the same game."""
+    session, directory = played
+    record = record_from(journal_events(directory))
+    assert record.seed == SEED
     assert record.winner == session.game.won_by
     assert record.turns == session.game.turns
 
@@ -749,19 +801,130 @@ def test_a_finished_game_is_recorded_and_replays_clean(tmp_path):
     assert replayed.won_by == session.game.won_by
     assert replayed.turns == session.game.turns
 
-    # The transcript beside it: the sidebar's own lines, ending in a result
-    # that names the winning seat the way every other line names one.
-    transcript = (tmp_path / "games.log").read_text().splitlines()
-    assert transcript[0].startswith("=== game finished ")
-    assert transcript[1:-1] == session.log
-    winner = session.game.won_by
-    label = "human" if winner == human_seat else session.bot_names.get(winner, "bot")
-    assert session.log[-1].endswith(" points.")
-    assert f"Player {winner + 1} ({label}) wins" in session.log[-1]
+
+def test_the_journal_holds_one_line_per_action_in_order(played):
+    session, directory = played
+    events = journal_events(directory)
+    assert events[0]["kind"] == "game"
+    assert events[-1]["kind"] == "result"
+
+    actions = [e for e in events if e["kind"] == "action"]
+    assert [e["step"] for e in actions] == list(range(len(actions)))
+    assert len(actions) == session._steps
 
 
-def test_recording_is_off_by_default():
+def test_the_journal_states_the_dice_and_the_hands_they_paid(played):
+    session, directory = played
+    events = journal_events(directory)
+    rolls = [e for e in events if e["kind"] == "action" and e["type"] == "ROLL"]
+    assert rolls, "a game this long rolled dice"
+    assert all(2 <= e["roll"] <= 12 for e in rolls)
+    # Hands are absolute and cover every seat, so production is readable off
+    # the line itself rather than inferred from the board.
+    assert all(len(e["hands"]) == 4 for e in rolls)
+
+    actions = [e for e in events if e["kind"] == "action"]
+    assert actions[-1]["hands"] == [list(h) for h in session.game.state.hands]
+
+
+def test_the_journal_names_every_development_card_in_deck_order(played):
+    """The header's deck is the whole point: every card bought later has to be
+    the one the shuffle put there, so the game's hidden cards are known from
+    the file alone without re-running the engine."""
+    _, directory = played
+    events = journal_events(directory)
+    deck = events[0]["deck"]
+    assert len(deck) == 25  # the standard development deck
+
+    drawn = [e["drew"] for e in events if e["kind"] == "action" and e["type"] == "BUY_DEV_CARD"]
+    assert drawn, "a game this long bought development cards"
+    # `devcards.buy` pops off the end, so purchases run backwards through the
+    # deck as written.
+    assert drawn == deck[::-1][: len(drawn)]
+
+
+def test_the_journal_names_the_card_every_steal_took(played):
+    """The sidebar hides this when neither side is the human (see `_describe`);
+    the journal never does."""
+    _, directory = played
+    events = journal_events(directory)
+    steals = [e["stole"] for e in events if e.get("stole")]
+    assert steals, "a game this long moved the robber onto someone"
+    for steal in steals:
+        assert steal["from"] in range(4)
+        # None only where the victim's hand was empty and nothing moved.
+        assert steal["resource"] in (None, *JOURNAL_RESOURCE_NAMES)
+
+
+def test_the_journal_ends_with_the_result(played):
+    session, directory = played
+    result = journal_events(directory)[-1]
+    assert result == {
+        "kind": "result",
+        "at": result["at"],
+        "winner": session.game.won_by,
+        "turns": session.game.turns,
+        "points": [
+            victory_points(session.game.state, p)
+            for p in range(session.game.state.num_players)
+        ],
+    }
+
+
+def test_journalling_is_on_unless_it_is_switched_off(monkeypatch):
+    """On by default, so a server started with no arguments still keeps an
+    account of every game it deals."""
+    monkeypatch.delenv(ENV_DIR, raising=False)
+    assert configured_dir() == DEFAULT_DIR
+    monkeypatch.setenv(ENV_DIR, "/somewhere/else")
+    assert configured_dir() == "/somewhere/else"
+    monkeypatch.setenv(ENV_DIR, "")
+    assert configured_dir() is None
+    assert open_journal(seed=1) is None
+
+
+def test_a_session_without_a_journal_still_plays():
     game = a_game(seed=13)
     session = GameSession(game=game, human_seat=to_move(game), bot=RandomBot())
     session._apply(session.human_seat, legal_actions(game)[0])
-    assert session.record_path is None  # nothing to have written to
+    assert session.journal is None  # nothing to have written to
+
+
+def test_an_unwritable_directory_costs_the_journal_and_not_the_game(tmp_path):
+    """A player mid-turn should not lose a game to a full disk or a mount that
+    came up read-only."""
+    blocked = tmp_path / "not-a-directory"
+    blocked.write_text("")  # mkdir under a regular file cannot succeed
+    game = a_game(seed=7)
+    session = GameSession(
+        game=game,
+        human_seat=to_move(game),
+        bot=RandomBot(rng=random.Random(3)),
+        journal=open_journal(1, str(blocked / "games")),
+    )
+    session._apply(session.human_seat, legal_actions(game)[0])
+    assert session.journal._off
+
+
+def test_an_undone_placement_is_written_down_not_erased(tmp_path):
+    """The journal is append-only and read forwards, so a step number that
+    quietly came round twice would leave a reader unable to say which of the
+    two actions counted."""
+    game = a_game(seed=5)
+    human_seat = to_move(game)
+    session = GameSession(
+        game=game,
+        human_seat=human_seat,
+        bot=RandomBot(rng=random.Random(4)),
+        journal=open_journal(5, str(tmp_path)),
+    )
+    settlement = next(
+        a for a in legal_actions(game) if a.type is ActionType.SETUP_SETTLEMENT
+    )
+    session.apply_human_action(action_to_wire(settlement))
+    session.undo_last_build()
+
+    events = journal_events(tmp_path)
+    assert [e["kind"] for e in events] == ["game", "action", "undo"]
+    assert events[1]["type"] == "SETUP_SETTLEMENT"
+    assert events[2]["back_to"] == 0  # everything from step 0 did not happen

@@ -33,16 +33,31 @@ services:
       # named after the file. Read-only because the app only globs and loads
       # them, never writes one.
       - ./models:/app/models:ro
+      # The one writable mount. Every game is journalled here in full as it is
+      # played: one JSON lines file per game, every action, hidden cards and
+      # all (see src/catan/journal.py). Bound to the host so a rebuild or a
+      # `docker compose down` does not take the history with it.
+      #
+      # The container writes as uid 10001 (see docker/Dockerfile), so the host
+      # directory has to allow that:
+      #
+      #     mkdir -p games && sudo chown 10001 games
+      #
+      # before the first `up`, or set `user:` below to a uid that already owns
+      # it. Getting it wrong costs the journal, not the game: the reason is
+      # printed once to `docker logs` and play carries on.
+      - ./games:/app/games
     # The image already runs unprivileged as its own uid (see the Dockerfile).
     # Set this only if your host needs a particular one — to match ownership
-    # on a writable mount you have added, say.
+    # on the games mount above, say.
     # user: "1000:1000"
     #
-    # The app serves a game and reads two directories. It has no reason to
-    # write to its own filesystem, to gain privileges, or to hold any Linux
-    # capability, so it is given none of the three. /tmp is a tmpfs because
-    # numpy and onnxruntime may want scratch space, and because HOME points
-    # there (see the Dockerfile) now that everything else is read-only.
+    # The app serves a game, reads two directories and writes one (the bind
+    # mount above, which read_only does not cover). It has no reason to write
+    # anywhere else on its own filesystem, to gain privileges, or to hold any
+    # Linux capability, so it is given none of the three. /tmp is a tmpfs
+    # because numpy and onnxruntime may want scratch space, and because HOME
+    # points there (see the Dockerfile) now that everything else is read-only.
     read_only: true
     tmpfs:
       - /tmp

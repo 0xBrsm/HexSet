@@ -34,8 +34,6 @@ import copy
 import math
 import random
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import Protocol
 
 from .actions import (
@@ -55,7 +53,7 @@ from .cards import NUM_DEV_CARDS, DevCard
 from .devcards import holdings
 from .economy import trade_ratios
 from .game import MAX_OFFERS_PER_TURN, Game, Phase, is_over, to_move
-from .record import Record, append_step, board_fields, write as write_records
+from .journal import Journal
 from .roads import road_lengths
 from .state import MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS, GameState, copy_state
 from .victory import public_victory_points, victory_points
@@ -340,7 +338,7 @@ class _UndoPoint:
     last_settlement: int
     log: list[str]
     run: dict | None
-    actions_count: int
+    steps: int
 
 
 def _snapshot(game: Game) -> _Snapshot:
@@ -363,30 +361,6 @@ def _who(seat: int, human_seat: int, bot_names: dict[int, str]) -> str:
     """
     label = "human" if seat == human_seat else bot_names.get(seat, "bot")
     return f"Player {seat + 1} ({label})"
-
-
-def log_path_for(record_path: str) -> str:
-    """The transcript that sits next to a record file — same name, `.log`."""
-    return str(Path(record_path).with_suffix(".log"))
-
-
-def write_log(path: str, lines: list[str]) -> None:
-    """Appends one finished game's log to `path`, exactly as the sidebar shows
-    it: the same "round<TAB>text" entries, in order, nothing reformatted.
-
-    A record replays into all of this and more, but only for as long as the
-    engine that wrote it is untouched; the text survives anything. Games are
-    separated by a UTC datestamp so an append-only file stays readable — and
-    since the last line of each is now the result (see `_log_result`),
-    counting wins is a grep over this file rather than a replay of the
-    records beside it.
-    """
-    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    with open(path, "a", encoding="utf-8") as handle:
-        handle.write(f"=== game finished {stamp} ===\n")
-        for line in lines:
-            handle.write(line + "\n")
-        handle.write("\n")
 
 
 def _describe(
@@ -484,18 +458,18 @@ class GameSession:
     a fresh `legal_actions(game)` — the one enforcement point the hard
     constraint asks for.
 
-    `seed` is the integer that seeded `game.rng`, and `record_path` is where to
-    append a `catan.record.Record` once the game ends — the format the project
-    already has for a played-out game, rather than a second one invented here.
-    Recording is opt-in (`record_path` defaults to `None`) so nothing is written
-    unless a caller asks for it.
+    `seed` is the integer that seeded `game.rng`, and `journal` is where every
+    action is written down as it happens, hidden cards and all (see
+    `catan.journal`). A session built without one plays exactly the same and
+    keeps no account of itself, which is what the tests that only care about
+    the rules want.
     """
 
     game: Game
     human_seat: int
     bot: Bot
     seed: int = 0
-    record_path: str | None = None
+    journal: Journal | None = None
     # Seat -> the model-picker display name playing it, for `state_view` to
     # echo back so the client can label seats by bot rather than by number.
     # Empty for the human seat and for any caller that never set it.
@@ -506,10 +480,11 @@ class GameSession:
     # whoever moved most recently.
     last_roll_by_seat: dict[int, int] = field(default_factory=dict)
     log: list[str] = field(default_factory=list)
-    _actions: list[tuple[int, int, int]] = field(default_factory=list, repr=False)
-    _offers: list[tuple[int, tuple[int, ...], tuple[int, ...], tuple[int, ...]]] = field(
-        default_factory=list, repr=False
-    )
+    # How many actions have been applied, which is the step number the next
+    # one is journalled under. A count rather than the actions themselves:
+    # the journal on disk is the only thing that needs them, and it already
+    # has every one it was handed.
+    _steps: int = field(default=0, repr=False)
     # Set the first time the game is seen to be over, so the closing log line
     # is written (and the game filed away) exactly once however many more
     # times _apply runs afterwards.
@@ -534,6 +509,19 @@ class GameSession:
     # run advance_bots() itself or wait for POST /api/confirm — see
     # apply_human_action/confirm_setup_turn.
     awaiting_confirm: bool = field(default=False)
+
+    def __post_init__(self) -> None:
+        # Written here rather than on the first action because the header's
+        # whole point is the deal — the shuffled development deck in
+        # particular, which `start` has already made and the first
+        # BUY_DEV_CARD will already have taken a card off.
+        if self.journal is not None:
+            self.journal.start(
+                self.game,
+                seed=self.seed,
+                human_seat=self.human_seat,
+                bot_names=self.bot_names,
+            )
 
     @property
     def round(self) -> int:
@@ -646,7 +634,7 @@ class GameSession:
         undoable = actor == self.human_seat and action.type in _UNDOABLE_BUILDS
         # Taken before apply() runs, alongside `before` above, for the same
         # reason: it has to be the instant *before* this action, and nothing
-        # between here and apply() touches state/log/_run/_actions.
+        # between here and apply() touches state/log/_run/_steps.
         # self._run is whatever run was open *before* this action — a build
         # run from earlier this same round, a bank-trade or discard run left
         # over from something else entirely, or None — not necessarily a
@@ -664,7 +652,7 @@ class GameSession:
                 last_settlement=self.game.last_settlement,
                 log=list(self.log),
                 run=copy.deepcopy(self._run),
-                actions_count=len(self._actions),
+                steps=self._steps,
             )
             if undoable
             else None
@@ -674,23 +662,23 @@ class GameSession:
             self.last_roll_by_seat[actor] = self.game.last_roll
         self._log_action(round_num, actor, action, before)
 
-        append_step(self._actions, self._offers, action)
+        if self.journal is not None:
+            self.journal.action(
+                self.game,
+                step=self._steps,
+                round_num=round_num,
+                actor=actor,
+                action=action,
+                before_hands=before.hands,
+                before_held=before.held,
+            )
+        self._steps += 1
 
         if is_over(self.game) and not self._ended:
             self._ended = True
             self._log_result(round_num)
-            if self.record_path:
-                record = Record(
-                    num_players=self.game.state.num_players,
-                    seed=self.seed,
-                    actions=tuple(self._actions),
-                    offers=tuple(self._offers),
-                    winner=self.game.won_by,
-                    turns=self.game.turns,
-                    **board_fields(self.game.state.board),
-                )
-                write_records(self.record_path, [record])
-                write_log(log_path_for(self.record_path), self.log)
+            if self.journal is not None:
+                self.journal.finish(self.game)
 
         # Every action decides this fresh: a qualifying human placement that
         # didn't win the game becomes the new (and only) undo point, anything
@@ -709,8 +697,11 @@ class GameSession:
         refunded (including a second setup settlement's grant), longest
         road/largest army recomputed from the restored board, whose turn it
         is un-advanced if the placement handed off to someone else, log line
-        shortened or dropped, replay bookkeeping truncated. Only ever
-        available since the human's own last placement — see _apply.
+        shortened or dropped, step count wound back. Only ever available since
+        the human's own last placement — see _apply.
+
+        The journal is the one thing not reverted: it is append-only, so the
+        undo goes into it as its own entry (see `journal.Journal.undo`).
         """
         if self._undo is None:
             raise ValueError("nothing to undo")
@@ -723,7 +714,9 @@ class GameSession:
         self.game.last_settlement = point.last_settlement
         self.log = point.log
         self._run = point.run
-        del self._actions[point.actions_count :]
+        self._steps = point.steps
+        if self.journal is not None:
+            self.journal.undo(self.game, back_to=point.steps)
         self._undo = None
         # A setup road is the only action that ever sets this, and only
         # after it runs — so whatever's being undone, it was false going

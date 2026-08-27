@@ -41,5 +41,6 @@ Copy the resulting file into this repo's `models/` directory.
 - `src/catan/` — the game engine (torch-free, copied from dev-catan) plus `webserver.py`/`webplay.py` (the HTTP server and session logic) and `onnxbot.py` (ONNX Runtime inference, this repo's own).
 - `src/catan/web/index.html` — the entire frontend: inline CSS, inline SVG icons, vanilla JS. No build step.
 - `models/` — drop `.onnx` files here.
+- `games/` — where every game is journalled: one JSON lines file per game, written as it is played, with nothing hidden (the dice, the deck order, every card drawn or stolen, every seat's hand after every action — see `src/catan/journal.py`). On by default; `CATAN_WEB_GAMES_DIR` moves it, and setting that empty turns it off.
 - `docker/Dockerfile` — a small CPU-only image (deps only) for deploying this without a GPU.
 - `compose.example.yaml` — copy to `compose.yaml` (gitignored) and edit. Bind-mounts `src/` and `models/` into the image rather than baking them in.

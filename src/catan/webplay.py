@@ -227,6 +227,12 @@ def _proposable_options(game: Game) -> list[Action]:
     """
     state = game.state
     player = game.current_player
+    # Trading is a Main-phase act, same as `propose_trade`'s own check. Left
+    # off, this offered pairs before the roll, which lit the hand up as
+    # clickable and opened the trade modal on a turn where the bank half of
+    # it could not be there — BANK_TRADE only exists in Main.
+    if game.phase is not Phase.MAIN:
+        return []
     if game.offers_made >= MAX_OFFERS_PER_TURN:
         return []
     hand = state.hands[player]

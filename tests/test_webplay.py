@@ -220,6 +220,26 @@ def test_legal_wire_actions_offers_every_held_resource_regardless_of_who_could_c
     assert wanted_for_wood == {r for r in range(len(state.hands[0])) if r != Resource.WOOD}
 
 
+def test_nothing_is_proposable_before_the_roll():
+    """Trading is a Main-phase act. Offering pairs in Roll made the hand
+    clickable and opened the trade modal on a turn where the bank half of it
+    could not be there — BANK_TRADE only exists in Main — so a port the human
+    could plainly afford showed up dimmed."""
+    from catan.board.terrain import Resource
+
+    game = a_game(seed=19)
+    game.phase = Phase.ROLL
+    game.current_player = 0
+    game.state.hands[0][Resource.WHEAT] += 6
+
+    session = GameSession(game=game, human_seat=0, bot=RandomBot())
+    kinds = {a["type"] for a in session.legal_wire_actions()}
+
+    assert "PROPOSE_TRADE" not in kinds
+    assert "BANK_TRADE" not in kinds
+    assert "ROLL" in kinds
+
+
 def test_a_human_trade_with_no_ask_defaults_to_lowest_vp_first():
     """GameSession's own addition on top of catan.game.propose_trade's
     neutral ask=() default (clockwise seat order) — favours whoever's

@@ -34,6 +34,14 @@ floor.
 
     python -m benchmarks.floor --checkpoint runs/ppo-overnight/latest.pt \\
         --positions 64 --rollouts 64
+
+`--dump-returns PATH` additionally writes every position's raw rollout returns
+to disk. This module keeps only the two scalars `split` produces because that
+is all a floor/bias readout needs; the dump exists for `benchmarks.return_shape`,
+which asks a different question of the same samples -- the *shape* of each
+position's conditional return distribution, not just its variance -- and needs
+the samples themselves to do it. Absent the flag, nothing is written and every
+other line of output is unaffected.
 """
 
 from __future__ import annotations
@@ -163,6 +171,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--bins", type=int, default=4)
     parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--dump-returns",
+        default=None,
+        help=(
+            "path to write every position's raw rollout returns as JSON, for "
+            "benchmarks.return_shape. Absent, nothing is written and nothing "
+            "else changes."
+        ),
+    )
     args = parser.parse_args(argv)
 
     import torch
@@ -204,6 +221,7 @@ def main(argv: list[str] | None = None) -> int:
     seeded = time.perf_counter() - started
 
     rows = []
+    dumped = []
     for snapshot, progress in chosen:
         branch = Branching(
             policy,
@@ -231,16 +249,43 @@ def main(argv: list[str] | None = None) -> int:
                 "mse": floor + bias,
             }
         )
+        if args.dump_returns:
+            dumped.append(
+                {
+                    "progress": round(progress, 3),
+                    "seat": snapshot.seat,
+                    "prediction": snapshot.prediction,
+                    "returns": returns.tolist(),
+                }
+            )
     elapsed = time.perf_counter() - started
+
+    if args.dump_returns:
+        with open(args.dump_returns, "w") as handle:
+            json.dump(
+                {
+                    "checkpoint": args.checkpoint,
+                    "iteration": loaded.iteration,
+                    "seed": args.seed,
+                    "positions": dumped,
+                },
+                handle,
+            )
 
     stages = _stages(rows, args.bins)
 
+    # `dump_returns` is excluded rather than left in: it names a filesystem
+    # path with no bearing on what the run measured, and this dict is what
+    # bit-identical-off-path is checked against, so a CLI flag that defaults
+    # off must not be visible here at all -- present or absent -- or every
+    # recorded floor.py output would stop matching a fresh run bit for bit.
+    recorded_args = {k: v for k, v in vars(args).items() if k != "dump_returns"}
     payload = {
         "environment": environment(),
         "checkpoint": args.checkpoint,
         # So N shards, each its own `--seed`, can be pooled by concatenating
         # `rows` rather than re-deriving what one process was asked to do.
-        "args": vars(args),
+        "args": recorded_args,
         "iteration": loaded.iteration,
         "positions": len(rows),
         "rollouts_each": args.rollouts,

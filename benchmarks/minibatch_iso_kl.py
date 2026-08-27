@@ -127,6 +127,7 @@ def worker_specs(
             first_game=worker, stride=args.collect_workers,
             width=model.width, rounds=model.rounds,
             value_head=model.value_head, policy_head=model.policy_head,
+            quantiles=model.quantiles,
             torch_seed=args.seed + 100_000 + worker,
             mix=tuple(mix), parent=parent, cohort=True,
         )

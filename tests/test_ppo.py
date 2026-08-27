@@ -13,7 +13,7 @@ from catan.actions import ActionType, space_for  # noqa: E402
 from catan.board.board import random_base_board  # noqa: E402
 from catan.encoding import _seat, static_graph  # noqa: E402
 from catan.game import start  # noqa: E402
-from catan.model import CatanNet, ModelConfig, packing  # noqa: E402
+from catan.model import CatanNet, ModelConfig, packing, unpack  # noqa: E402
 from catan.policy import NetworkPolicy  # noqa: E402
 from catan.ppo import (  # noqa: E402
     PPOConfig,
@@ -565,3 +565,230 @@ def test_a_missing_mate_or_an_odd_cohort_refuses_to_baseline():
 
 def test_the_pair_baseline_defaults_off():
     assert PPOConfig().pair_baseline is False
+
+
+# ---------------------------------------------------------------------------
+# The quantile value loss (variance screen, candidate 3, Gate B).
+# ---------------------------------------------------------------------------
+
+
+def a_quantile_policy(players: int = 4, seed: int = 0, quantiles: int = 8):
+    """`a_policy`'s net with the value head widened, and nothing else moved."""
+    rng = random.Random(seed)
+    board = random_base_board(rng)
+    game = start(board, players, rng)
+    graph = static_graph(board.topology)
+    torch.manual_seed(seed)
+    net = CatanNet(
+        space_for(game),
+        graph,
+        players,
+        ModelConfig(width=16, rounds=1, value_head="quantile", quantiles=quantiles),
+    )
+    return NetworkPolicy(net, space_for(game), packing(graph, players))
+
+
+def _terms(policy, batch, config, rows=None):
+    """One minibatch's terms over the whole batch, advantages normalised as
+    `update` normalises them."""
+    rows = torch.arange(len(batch)) if rows is None else rows
+    advantage = batch.advantage[rows]
+    advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
+    return ppo.minibatch_terms(
+        policy,
+        batch.buffer[rows],
+        batch.mask[rows],
+        batch.pair[rows],
+        batch.chosen[rows],
+        batch.offer[rows],
+        batch.log_prob[rows],
+        advantage,
+        batch.value_target[rows],
+        config,
+    ), advantage
+
+
+def test_a_linear_head_s_loss_is_bit_identical_to_the_pre_quantile_arithmetic():
+    """The discipline of `cf45ccf`: prove the off-path is unchanged, don't
+    assert it in a comment.
+
+    Every difference the quantile head could make to a `"linear"` run has to
+    pass through `minibatch_terms`, so the whole claim reduces to one equality:
+    the loss this builds is the loss the pre-change expression builds, on the
+    same graph. `torch.equal`, not `approx` — a reassociated sum would be a
+    different run.
+    """
+    policy = a_policy(seed=31)
+    episodes = some_episodes(policy, games=3, seed=31)
+    batch = assemble(episodes, policy.layout, PPOConfig())
+    config = PPOConfig()
+
+    terms, advantage = _terms(policy, batch, config)
+
+    # The arithmetic as it stood before the value head could have a shape.
+    evaluation = policy.evaluate(
+        batch.buffer, batch.mask, batch.pair, batch.chosen, batch.offer
+    )
+    assert evaluation.quantiles is None
+    ratio = (evaluation.log_prob - batch.log_prob).exp()
+    policy_loss = -torch.min(
+        ratio * advantage,
+        ratio.clamp(1 - config.clip, 1 + config.clip) * advantage,
+    ).mean()
+    value_loss = (evaluation.value - batch.value_target).pow(2).mean()
+    entropy = evaluation.entropy.mean()
+    expected = (
+        policy_loss
+        + config.value_coefficient * value_loss
+        - config.entropy_coefficient * entropy
+    )
+
+    assert torch.equal(terms.loss, expected)
+    assert torch.equal(terms.value_term, config.value_coefficient * value_loss)
+    # The new column is the same number under a scalar head, so a curve read
+    # across the two arms of a heat is reading one scale.
+    assert terms.value_mse == terms.value_loss
+
+    # And the gradient, which is what actually moves the weights.
+    got = torch.autograd.grad(terms.loss, list(policy.net.parameters()))
+    want = torch.autograd.grad(expected, list(policy.net.parameters()))
+    assert all(torch.equal(a, b) for a, b in zip(got, want))
+
+
+def test_the_value_head_shape_never_reaches_the_assembled_batch():
+    """`assemble` reads the estimates the collector recorded, so the value
+    target, the GAE advantages and the zero-sum projection are the same tensors
+    whatever shape produced those estimates. Bit-identical, off-path."""
+    policy = a_policy(seed=32)
+    episodes = some_episodes(policy, games=3, seed=32)
+
+    plain = assemble(episodes, policy.layout, PPOConfig())
+    again = assemble(episodes, a_quantile_policy(seed=32).layout, PPOConfig())
+
+    assert torch.equal(plain.advantage, again.advantage)
+    assert torch.equal(plain.value_target, again.value_target)
+    assert torch.equal(plain.buffer, again.buffer)
+
+
+def test_a_warm_started_quantile_head_prices_the_same_decisions():
+    """The advantage path is untouched: same features, same mean, same GAE.
+
+    The warm start makes the two heads' `V` the same number to one float32
+    rounding of a 32-term mean, so the estimates GAE consumes — and therefore
+    the advantages — are the same to that same rounding, four orders below the
+    1/30 lattice the label lives on.
+    """
+    from catan.model import quantile_warm_start
+
+    policy = a_policy(seed=33)
+    quantile = a_quantile_policy(seed=34, quantiles=32)
+    quantile.net.load_state_dict(
+        quantile_warm_start(policy.net.state_dict(), 4, 32)
+    )
+    episodes = some_episodes(policy, games=2, seed=33)
+    batch = assemble(episodes, policy.layout, PPOConfig())
+
+    with torch.no_grad():
+        scalar_value = policy.net(*unpack(policy.layout, batch.buffer)).value
+        widened = quantile.net(*unpack(quantile.layout, batch.buffer)).value
+
+    assert torch.allclose(scalar_value, widened, rtol=0, atol=1e-6)
+    # Anti-vacuity: a head that predicted nothing would satisfy the line above.
+    assert scalar_value.abs().max() > 1e-3
+
+    scalar_gae = advantages(scalar_value[:, 0].numpy(), 0.4, 0.95)
+    widened_gae = advantages(widened[:, 0].numpy(), 0.4, 0.95)
+    assert np.allclose(scalar_gae, widened_gae, rtol=0, atol=1e-5)
+    assert np.abs(scalar_gae).max() > 1e-3
+
+
+def test_the_quantile_value_term_is_the_pinball_loss_on_the_same_target():
+    """The one thing that changes, and the one thing that must not.
+
+    The value term becomes `quantile_huber_loss` against the identical
+    `value_target` vector `lambda_returns` and the zero-sum projection already
+    built; the policy term and the entropy term are untouched.
+    """
+    from catan.model import QUANTILE_HUBER_KAPPA, quantile_huber_loss
+
+    policy = a_quantile_policy(seed=35)
+    episodes = some_episodes(policy, games=3, seed=35)
+    batch = assemble(episodes, policy.layout, PPOConfig())
+    config = PPOConfig()
+
+    terms, advantage = _terms(policy, batch, config)
+
+    evaluation = policy.evaluate(
+        batch.buffer, batch.mask, batch.pair, batch.chosen, batch.offer
+    )
+    assert evaluation.quantiles is not None
+    expected = quantile_huber_loss(
+        evaluation.quantiles,
+        batch.value_target,
+        policy.net.value.levels,
+        QUANTILE_HUBER_KAPPA,
+    )
+    assert terms.value_loss == pytest.approx(float(expected.detach()), rel=1e-6)
+    # Not the squared error, which is the other column — and the two are on
+    # different scales, which is exactly why both are logged.
+    assert terms.value_mse != terms.value_loss
+    assert terms.value_mse == pytest.approx(
+        float((evaluation.value - batch.value_target).pow(2).mean().detach()),
+        rel=1e-6,
+    )
+
+
+def test_the_quantile_loss_reaches_the_shared_trunk():
+    """The mechanism Gate B tests, as a property.
+
+    Gate A2 froze the trunk and measured the mean flat, so the only surviving
+    claim is the value loss shaping the features the policy reads. If the value
+    term's gradient stopped at the head, the heat would be measuring nothing.
+    """
+    policy = a_quantile_policy(seed=36)
+    episodes = some_episodes(policy, games=2, seed=36)
+    batch = assemble(episodes, policy.layout, PPOConfig())
+
+    terms, _ = _terms(policy, batch, PPOConfig())
+    trunk = [
+        p for name, p in policy.net.named_parameters() if not name.startswith("value")
+    ]
+    grads = torch.autograd.grad(terms.value_term, trunk, allow_unused=True)
+
+    assert any(g is not None and g.any() for g in grads)
+
+
+def test_an_update_moves_a_quantile_head_towards_the_outcome_it_was_shown():
+    """The same claim `test_an_update_moves_the_value_head_towards_the_outcome`
+    makes for the scalar head, read on the column the two arms share."""
+    policy = a_quantile_policy(seed=37)
+    episodes = some_episodes(policy, games=3, seed=37)
+    batch = assemble(episodes, policy.layout, PPOConfig())
+    config = PPOConfig(epochs=1, minibatch=len(batch), entropy_coefficient=0.0)
+    optimiser = torch.optim.Adam(policy.net.parameters(), lr=1e-2)
+
+    first = update(policy, optimiser, batch, config)
+    for _ in range(20):
+        last = update(policy, optimiser, batch, config)
+
+    assert last.value_loss < first.value_loss
+    assert last.value_mse < first.value_mse
+    assert first.value_mse > 1e-4
+    # The head spreads out: it opens on orthogonal noise and ends up ordered
+    # enough that the levels no longer coincide.
+    with torch.no_grad():
+        spread = policy.net(*unpack(policy.layout, batch.buffer)).quantiles
+    assert spread.std(-1).mean() > 0
+
+
+def test_the_logged_value_mse_is_the_mean_s_squared_error_under_a_scalar_head():
+    """Equal, not merely close: it is the same expression on the same tensor,
+    so a heat's two arms are read on one scale with no conversion."""
+    policy = a_policy(seed=38)
+    episodes = some_episodes(policy, games=2, seed=38)
+    batch = assemble(episodes, policy.layout, PPOConfig())
+    optimiser = torch.optim.Adam(policy.net.parameters(), lr=0.0)
+
+    stats = update(policy, optimiser, batch, PPOConfig(epochs=1, minibatch=len(batch)))
+
+    assert stats.value_mse == stats.value_loss

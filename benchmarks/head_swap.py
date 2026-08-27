@@ -138,7 +138,19 @@ from catan.encoding import encode
 # initialisation cannot silently leave this comparison measuring a head the run
 # does not have. `_head` is what builds `self.value`; `_DEEP` is which shapes
 # get a hidden layer; `_output` is the layer whose gain sets the output scale.
-from catan.model import _DEEP, _head, _output, pack, unpack
+# `quantile_levels` and `quantile_huber_loss` were written here for Gate A2 and
+# moved to `catan.model` when the production `"quantile"` value head was built
+# on them. Imported, not copied: the heat's loss and the gate's loss have to be
+# the same arithmetic or the two results are not about the same head.
+from catan.model import (
+    _DEEP,
+    _head,
+    _output,
+    pack,
+    quantile_huber_loss,
+    quantile_levels,
+    unpack,
+)
 from catan.netbot import load
 from catan.policy import NetworkPolicy
 from catan.selfplay import Collector
@@ -154,71 +166,6 @@ COHORT_SEED_OFFSET = 8191
 # not retyped at the call site.
 FLOOR_SAMPLE_RATE = 0.02
 FLOOR_SEED_LANES = 16
-
-
-def quantile_levels(count: int) -> Tensor:
-    """The midpoint levels `(i + 0.5) / Q`, as the register specifies.
-
-    Midpoints rather than `i / (Q - 1)` because the pinball loss at level 0 or 1
-    is one-sided: it is minimised by the sample minimum or maximum, which no
-    finite sample estimates stably, and those two atoms would then drag the
-    mean-of-quantiles the gate reads. Midpoints also make the levels symmetric
-    about 0.5, which is what makes the mean of the quantiles equal the mean of a
-    symmetric distribution exactly rather than approximately.
-    """
-    if count < 1:
-        raise ValueError(f"a quantile head needs at least one level, got {count}")
-    return (torch.arange(count, dtype=torch.float32) + 0.5) / count
-
-
-def quantile_huber_loss(
-    predicted: Tensor, target: Tensor, levels: Tensor, kappa: float
-) -> Tensor:
-    """Pinball loss at `levels`, Huberised below `kappa`, meaned over everything.
-
-    `predicted` is `(B, players, Q)`, `target` is `(B, players)`: one sampled
-    return per seat per position, which is the same one-sample-per-transition
-    setting QR-DQN trains in. The quantile levels are not constrained to come
-    out sorted and are not sorted here -- the gate reads their mean, which no
-    reordering changes.
-
-    **`kappa` is small on purpose and this is the one number that had to be
-    chosen rather than inherited.** Huberising the pinball loss replaces it,
-    within `kappa` of the target, with a quadratic -- and a quadratic weighted
-    by `|tau - 1{u<0}|` is minimised at the *expectile*, not the quantile. QR-
-    DQN's kappa=1 is small against Atari returns in the hundreds; against this
-    project's returns, which `catan.rewards.relative_points` divides by ten into
-    a range of about +-1 with a standard deviation near 0.2, kappa=1 would make
-    the loss quadratic everywhere and quietly turn the head into an expectile
-    head. The default is one lattice step of the return (1/30 of a reward unit,
-    a third of a victory point, the resolution the label actually has), so the
-    minimiser is displaced from the true quantile by at most one quantum of a
-    label that has no finer resolution than that. `kappa=0` is the exact
-    pinball loss.
-
-    Meaned over Q rather than summed, so the loss sits at the same magnitude as
-    the MSE arm's and one learning rate serves both. Summing would multiply the
-    quantile arm's gradient by Q and make the two arms differ in effective step
-    size as well as in loss, which is precisely the confound this experiment is
-    built to avoid.
-    """
-    if kappa < 0.0:
-        raise ValueError(f"a Huber width cannot be negative, got {kappa}")
-    difference = target.unsqueeze(-1) - predicted
-    magnitude = difference.abs()
-    if kappa > 0.0:
-        element = torch.where(
-            magnitude <= kappa,
-            0.5 * difference * difference,
-            kappa * (magnitude - 0.5 * kappa),
-        ) / kappa
-    else:
-        element = magnitude
-    # The indicator is piecewise constant in `predicted`, so it carries no
-    # gradient; taken off the detached difference to say so rather than to rely
-    # on a bool cast happening not to build one.
-    below = difference.detach().lt(0.0).to(element.dtype)
-    return ((levels - below).abs() * element).mean()
 
 
 def initialise_head(head: nn.Module) -> None:

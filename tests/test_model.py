@@ -459,3 +459,215 @@ def test_the_fused_forward_trains_the_same_parameters():
         name for name, p in net.named_parameters() if p.grad is None or not p.grad.any()
     ]
     assert unused == []
+
+
+# ---------------------------------------------------------------------------
+# The quantile value head (variance screen, candidate 3).
+# ---------------------------------------------------------------------------
+
+
+def test_the_quantile_head_s_forward_is_exactly_the_mean_of_its_quantiles():
+    """`V` is the mean-of-quantiles and nothing downstream sees the spread.
+
+    Exact equality, not `allclose`: GAE, `lambda_returns`, the search and every
+    `benchmarks.*` reader consume `Prediction.value`, so if the head's forward
+    were the mean of anything other than the tensor the loss trains, the loss
+    and the wire would be optimising two different numbers.
+    """
+    _, _, net = a_net(value_head="quantile")
+
+    out = net(*collate(observations(3)))
+
+    assert out.quantiles.shape == (3, 4, 32)
+    assert torch.equal(out.value, out.quantiles.mean(-1))
+
+
+def test_only_the_quantile_head_carries_a_spread():
+    """The new field is inert for every shape that predates it."""
+    for shape in VALUE_HEADS:
+        _, _, net = a_net(value_head=shape)
+        out = net(*collate(observations(2)))
+        assert (out.quantiles is None) == (shape != "quantile"), shape
+        assert out.value.shape == (2, 4)
+
+
+def test_the_quantile_head_is_the_linear_head_widened_and_nothing_else():
+    """A shape change may not disturb the trunk, or the heat is confounded.
+
+    `"quantile"` is in neither `_POOLED` nor `_DEEP`, so it reads `g` alone
+    through one `nn.Linear` exactly as `"linear"` does — the only difference
+    between the two arms of Gate B is the width of that layer's output and the
+    loss taken on it.
+    """
+    _, _, plain = a_net()
+    _, _, head = a_net(value_head="quantile", quantiles=8)
+
+    trunk = {name for name in DEFAULT_KEYS if not name.startswith("value")}
+    keys = set(head.state_dict())
+    assert trunk <= keys
+    assert head.value.module.weight.shape == (4 * 8, 64)
+    assert plain.value.weight.shape == (4, 64)
+    # No query, no pooling: the head's input is the global token alone.
+    assert "value_query.weight" not in keys
+
+
+def test_the_quantile_width_round_trips_through_the_stored_args():
+    stored = {"width": 64, "rounds": 2, "value_head": "quantile", "quantiles": 8}
+
+    assert config_from_args(stored) == ModelConfig(
+        width=64, rounds=2, value_head="quantile", quantiles=8
+    )
+    # A checkpoint that predates the field means the default width, the same
+    # way one that predates `value_head` means the default shape.
+    assert config_from_args({}).quantiles == 32
+
+
+def test_a_quantile_checkpoint_reloads_and_reproduces_its_own_predictions(tmp_path):
+    """End to end: the keys a quantile net writes are the keys its stored args
+    rebuild, and the rebuilt net predicts the same numbers bit for bit."""
+    _, space, net = a_net(value_head="quantile", quantiles=8)
+    batch = collate(observations(3))
+    with torch.no_grad():
+        before = net(*batch)
+
+    stored = {"width": 64, "rounds": 2, "value_head": "quantile", "quantiles": 8}
+    path = tmp_path / "quantile.pt"
+    torch.save({"net": net.state_dict(), "args": stored}, path)
+
+    state = torch.load(path, map_location="cpu", weights_only=False)
+    _, _, rebuilt = a_net(**{
+        field: getattr(config_from_args(state["args"]), field)
+        for field in ("width", "rounds", "value_head", "policy_head", "quantiles")
+    })
+    rebuilt.load_state_dict(state["net"])
+    with torch.no_grad():
+        after = rebuilt(*batch)
+
+    assert torch.equal(before.value, after.value)
+    assert torch.equal(before.quantiles, after.quantiles)
+    assert torch.equal(before.logits, after.logits)
+
+
+def test_a_quantile_width_below_one_is_refused():
+    with pytest.raises(ValueError):
+        ModelConfig(value_head="quantile", quantiles=0)
+
+
+def test_the_midpoint_levels_are_the_registered_ones_and_pair_about_a_half():
+    """`(i + 0.5) / Q`, symmetric about 0.5 — which is what makes the mean of
+    the quantiles the mean of a symmetric law rather than an approximation."""
+    from catan.model import quantile_levels
+
+    levels = quantile_levels(4)
+
+    assert torch.allclose(levels, torch.tensor([0.125, 0.375, 0.625, 0.875]))
+    assert torch.allclose(levels + levels.flip(0), torch.ones(4))
+    with pytest.raises(ValueError):
+        quantile_levels(0)
+
+
+def test_the_pinball_loss_is_minimised_exactly_at_the_true_quantiles():
+    """The property the whole head rests on, checked where it is exact.
+
+    With `kappa=0` the loss is the exact pinball loss, whose minimiser over a
+    finite sample is the sample quantile. On nine sorted samples and levels
+    that land between order statistics, the minimiser is the corresponding
+    order statistic exactly — so a grid search over the samples themselves must
+    pick it, and perturbing away from it must cost.
+    """
+    from catan.model import quantile_huber_loss, quantile_levels
+
+    sample = torch.tensor([-1.0, -0.6, -0.3, -0.1, 0.0, 0.2, 0.45, 0.7, 1.3])
+    target = sample.view(-1, 1)  # nine rows, one seat
+    levels = quantile_levels(3)  # 1/6, 1/2, 5/6
+
+    def loss_at(values):
+        predicted = torch.tensor(values).view(1, 1, -1).expand(9, 1, 3)
+        return quantile_huber_loss(predicted, target, levels, 0.0).item()
+
+    best = None
+    for a in sample:
+        for b in sample:
+            for c in sample:
+                score = loss_at([a, b, c])
+                if best is None or score < best[0]:
+                    best = (score, [a.item(), b.item(), c.item()])
+
+    # Levels 1/6, 1/2, 5/6 of nine samples: order statistics 2, 5 and 8.
+    assert best[1] == pytest.approx([-0.6, 0.0, 0.7])
+    for nudge in (-0.05, 0.05):
+        assert loss_at([-0.6 + nudge, 0.0, 0.7]) > best[0]
+        assert loss_at([-0.6, 0.0 + nudge, 0.7]) > best[0]
+        assert loss_at([-0.6, 0.0, 0.7 + nudge]) > best[0]
+
+
+def test_the_huber_width_is_one_lattice_step_and_not_a_knob():
+    """kappa=1 would fit expectiles at this project's return scale, so the
+    register fixed it at one step of the 1/30 reward lattice. A constant, not a
+    flag: a heat whose arms differ in two things measures neither."""
+    from catan.model import QUANTILE_HUBER_KAPPA
+
+    assert QUANTILE_HUBER_KAPPA == pytest.approx(1.0 / 30.0)
+    _, _, net = a_net(value_head="quantile")
+    assert net.value.kappa == QUANTILE_HUBER_KAPPA
+
+
+def test_a_warm_started_quantile_head_predicts_what_the_scalar_head_predicted():
+    """The heat's treatment arm opens on its control's critic, not on noise.
+
+    Every level starts at the scalar head's own output, so `V` is unchanged to
+    one float32 rounding of a 32-term mean — four orders of magnitude below the
+    1/30 lattice the label itself lives on.
+    """
+    from catan.model import quantile_warm_start
+
+    _, _, scalar = a_net(seed=3)
+    _, _, quantile = a_net(seed=4, value_head="quantile")
+    batch = collate(observations(4))
+
+    quantile.load_state_dict(quantile_warm_start(scalar.state_dict(), 4, 32))
+    with torch.no_grad():
+        before = scalar(*batch)
+        after = quantile(*batch)
+
+    assert torch.allclose(before.value, after.value, rtol=0, atol=1e-6)
+    # Anti-vacuity: the head it started from was a different net entirely.
+    assert not torch.equal(before.value, torch.zeros_like(before.value))
+    # Every level is the same number, so the spread opens at exactly zero.
+    assert torch.equal(after.quantiles.std(-1), torch.zeros(4, 4))
+    # The trunk is copied through untouched.
+    assert torch.equal(before.logits, after.logits)
+
+
+def test_a_warm_start_off_a_head_that_is_not_per_seat_is_refused():
+    from catan.model import quantile_warm_start
+
+    _, _, deep = a_net(value_head="mlp")
+    # `value.0.*` is the hidden layer and `value.2.*` emits the seats; a head
+    # whose emitting layer is not per-seat is not a scalar value head.
+    weights = dict(deep.state_dict())
+    weights["value.2.weight"] = torch.zeros(7, 64)
+    with pytest.raises(ValueError):
+        quantile_warm_start(weights, 4, 8)
+
+
+@pytest.mark.parametrize("shape", VALUE_HEADS)
+def test_the_value_read_is_the_last_thing_the_forward_builds(shape):
+    """Op order in `_emit` is load-bearing, and this is the anchor for it.
+
+    `g` feeds four heads, so its gradient is a sum of four terms and autograd
+    accumulates them in the order the forward created the nodes. Hoisting the
+    value read above `trade_give`/`trade_want` — which is the obvious way to
+    write `_emit` once the value read returns two things — reassociates that
+    sum. The loss stays bit-identical and the *gradient* moves in the last
+    couple of bits, which was measured to be enough to make a default-config
+    update diverge from the pre-quantile build after a single optimiser step.
+    A loss-equality test does not catch it; the creation order does.
+    """
+    _, _, net = a_net(value_head=shape)
+
+    out = net(*collate(observations(2)))
+
+    order = [out.logits, out.give, out.want, out.value]
+    sequence = [tensor.grad_fn._sequence_nr() for tensor in order]
+    assert sequence == sorted(sequence), sequence

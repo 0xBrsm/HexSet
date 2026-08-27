@@ -7,6 +7,67 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-27
+
+### Added
+
+- **A `quantile` value head** (the variance screen's candidate 3, Gate B).
+  `ModelConfig(value_head="quantile")` is `"linear"`'s head widened to
+  `players x quantiles` outputs — the same input (`g` alone), the same depth,
+  the same initialisation. **Its forward returns the `players`-vector mean of
+  its quantiles, so `V` keeps its shape and its meaning everywhere**: GAE,
+  `lambda_returns`, the zero-sum projection, `catan.mcts`, `catan.bots` and
+  every `benchmarks.*` reader are untouched. The full `(B, players, Q)` tensor
+  is exposed separately, through `Prediction.quantiles` and
+  `Evaluation.quantiles`, and has exactly one consumer: the value loss.
+  `ModelConfig.quantiles` (default 32) reaches a rebuild through the
+  checkpoint's `args`, the way `value_head` already does; the levels are
+  derived from it and are not state_dict keys.
+- **The quantile value loss in `catan.ppo.minibatch_terms`.** Under the
+  quantile head the differentiated value term is the per-seat quantile Huber
+  loss against the *same* `value_target` vector, at midpoint levels
+  `(i + 0.5) / Q` and Huber width `QUANTILE_HUBER_KAPPA = 1/30` — one lattice
+  step of the return, because at this project's ~0.2 residual scale QR-DQN's
+  kappa=1 would fit expectiles rather than quantiles. `quantile_levels` and
+  `quantile_huber_loss` moved from `benchmarks.head_swap` into `catan.model`
+  and are imported back, so Gate A2's arithmetic and the heat's are one
+  implementation. The advantage path is untouched — GAE reads the mean, exactly
+  as before — and `value_target` construction is unchanged.
+- `Stats.value_mse` / `Terms.value_mse`: the plain squared error of the mean,
+  logged beside `value_loss` and never differentiated. The two arms of a heat
+  differentiate losses on different scales, so a curve comparison needs one
+  column both compute identically; under every scalar head it is `value_loss`
+  by the same expression. `catan.league` now logs both per learner.
+- `catan.league --value-head` and `--quantiles`. Empty (the default) keeps the
+  base checkpoint's own shape, so every heat on record replays unchanged.
+  Asking for `quantile` off a scalar base warm-starts it through
+  `catan.model.quantile_warm_start`: every level begins at the scalar head's
+  own output, so the treatment arm of a heat opens on the same policy *and* the
+  same critic as its control (equal to one float32 rounding of a Q-term mean,
+  measured under 2.4e-7 — four orders below the label's 1/30 lattice). The
+  shape the seats carry, not the base's, is what the heat's checkpoints record.
+- `catan.train --quantiles`, alongside the existing `--value-head`, so the
+  shape reaches a checkpoint's `args` from every trainer that writes one.
+
+### Fixed
+
+- `CatanNet._emit` now builds `logits`, `give`, `want` and the value read in
+  that order explicitly. `g` feeds four heads, so its gradient is a sum of four
+  terms accumulated in forward-creation order; hoisting the value read above
+  the two trade heads reassociates that sum, leaving the loss bit-identical
+  while moving the gradient in its last bits — enough to make a default-config
+  update diverge from the previous build after one optimiser step. Caught by a
+  full-stack A/B, and pinned by a test on `grad_fn` creation order rather than
+  on loss equality, which does not see it.
+
+### Unchanged
+
+- With `value_head` anything but `"quantile"`, a full update is **bit-identical
+  to 0.8.0**: verified by an A/B against `6150836` over the whole cross product
+  of the five value shapes, both policy shapes, `detach_value` on and off, all
+  three `critic` modes and `value_lam` 1.0/0.9 — same assembled batch, same
+  post-update weights, same logged losses, to the byte.
+
 ## [0.8.0] - 2026-08-27
 
 ### Added

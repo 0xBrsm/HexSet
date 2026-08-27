@@ -1,11 +1,11 @@
 """Game session and wire protocol for the local human-vs-policy web board.
 
-Deliberately torch-free: `catan.webserver` imports the network bot lazily, so
+Deliberately torch-free: `hexset_ui.webserver` imports the network bot lazily, so
 this module — the board layout math, the wire-format mapping and the session
 that drives a game — can be imported and tested without PyTorch, the same way
-`catan.actions` and `catan.game` can. `catan.bots.Bot` (anything with a
+`hexset_ui.actions` and `hexset_ui.game` can. `hexset_ui.bots.Bot` (anything with a
 `choose(game) -> Action` method) is all a session needs of its opponent; a
-`NetworkBot` from `catan.netbot` satisfies that, and so does `catan.bots.RandomBot`,
+`NetworkBot` from `hexset_ui.netbot` satisfies that, and so does `hexset_ui.bots.RandomBot`,
 which is what the tests use.
 
 ## The wire format
@@ -22,7 +22,7 @@ played-out game rather than a handful of hand-picked shapes.
 `GameSession.apply_human_action` decodes the wire action and checks it against
 a *fresh* call to `legal_actions`, not merely against what was on offer at some
 earlier poll. A UI bug, a stale page, or a tampered request all fail the same
-way: the action is rejected before it reaches `catan.actions.apply`. That is
+way: the action is rejected before it reaches `hexset_ui.actions.apply`. That is
 also why every clickable thing in the frontend is one of the literal wire
 objects `state_view()` already sent, echoed back unchanged — the client never
 constructs an `Action` from parts, it only ever repeats one the server offered.
@@ -64,7 +64,7 @@ DEV_CARD_NAMES: tuple[str, ...] = tuple(c.name.title().replace("_", " ") for c i
 # A cascade of bot moves between two human decisions is bounded so a runaway
 # bot (or an engine bug that never hands the turn back) surfaces as an error
 # rather than a request that never returns. Arena duels cap a whole game's
-# actions at 20000 (`catan.arena.MAX_ACTIONS`); one cascade is at most a few
+# actions at 20000 (`hexset_ui.arena.MAX_ACTIONS`); one cascade is at most a few
 # players' worth of a turn, so a far smaller number is already generous.
 MAX_CASCADE_STEPS = 2000
 
@@ -87,7 +87,7 @@ class Bot(Protocol):
 # sit at angles 60*i - 30 degrees around its center, and `Topology.hex_vertices`
 # already lists a hex's vertices in that same i = 0..5 order (corner i is shared
 # with the neighbours in directions i and i+1, and the direction vectors in
-# `catan.board.coords` place direction i at angle 60*(i-1) under this same
+# `hexset_ui.board.coords` place direction i at angle 60*(i-1) under this same
 # center formula — corner i sits at the midpoint of that, 60*i - 30). One
 # consequence worth relying on in tests: a regular hexagon's edge length equals
 # its circumradius, so every board edge should measure exactly `size` between
@@ -172,7 +172,7 @@ def board_layout(board: Board, size: float = 60.0) -> dict:
         "year_of_plenty_pairs": [
             [RESOURCE_NAMES[a], RESOURCE_NAMES[b]] for a, b in YEAR_OF_PLENTY_PAIRS
         ],
-        # The engine's own supply caps (`catan.state`), so the frontend's
+        # The engine's own supply caps (`hexset_ui.state`), so the frontend's
         # remaining-piece HUD can't drift from what `can_place_*` actually
         # enforces.
         "piece_supply": {
@@ -220,11 +220,11 @@ def _proposable_options(game: Game) -> list[Action]:
     trade proposal for — from public information alone: their own hand and
     the turn's offer count.
 
-    Deliberately not `catan.actions.legal_actions`'s own `PROPOSE_TRADE`
+    Deliberately not `hexset_ui.actions.legal_actions`'s own `PROPOSE_TRADE`
     sample, which also skips any pair no opponent could currently cover.
     That's a fair thing for a bot to lean on when picking a search target —
     the engine already sees every hand, it's one shared `GameState` — but
-    Catan hands are private at a real table, and this list is what tells a
+    HexSet hands are private at a real table, and this list is what tells a
     *human* what they may propose. Reflecting that omniscient filter here,
     whether by omission or by an "isn't available" message, would hand them
     the one thing the actual board never does: proof of what's in a
@@ -468,13 +468,13 @@ class GameSession:
     playing every other seat.
 
     All mutation goes through `apply_human_action` and `advance_bots`, and both
-    route every action through `catan.actions.apply` after checking it against
+    route every action through `hexset_ui.actions.apply` after checking it against
     a fresh `legal_actions(game)` — the one enforcement point the hard
     constraint asks for.
 
     `seed` is the integer that seeded `game.rng`, and `journal` is where every
     action is written down as it happens, hidden cards and all (see
-    `catan.journal`). A session built without one plays exactly the same and
+    `hexset_ui.journal`). A session built without one plays exactly the same and
     keeps no account of itself, which is what the tests that only care about
     the rules want.
     """
@@ -493,7 +493,7 @@ class GameSession:
     # file, not its path). Journalled so a resumed game can put the same
     # opponents back, and unused by play itself.
     bot_specs: dict[int, str] = field(default_factory=dict)
-    # The browser this game belongs to (`catan_id` — see webserver), carried
+    # The browser this game belongs to (`hexset_id` — see webserver), carried
     # only so the journal can record whose game it was.
     identity: str | None = None
     # Seat -> the dice total that seat rolled on its own most recent turn.
@@ -552,8 +552,8 @@ class GameSession:
         """One full lap of the table, 1-indexed — what a human watching the
         log means by "turn", distinct from `game.turns`, which counts
         per-seat and stays that way (it's a trained policy input feature and
-        a replay-verified Record field; see catan.encoding's TURN_SCALE and
-        catan.record). Every seat's actions within a lap share one round
+        a replay-verified Record field; see hexset_ui.encoding's TURN_SCALE and
+        hexset_ui.record). Every seat's actions within a lap share one round
         number, unlike `game.turns` where each gets its own.
 
         0 during setup: the placement snake isn't a lap of the table in the
@@ -567,7 +567,7 @@ class GameSession:
 
     def restore(self, steps: list[tuple[int, Action]], journal: Journal | None = None) -> None:
         """Re-apply a journalled game's actions, bringing this session up to
-        where it left off (see `catan.journal.replayable`).
+        where it left off (see `hexset_ui.journal.replayable`).
 
         Every step goes through `_apply` like any other, so the sidebar log,
         the per-seat rolls and the round numbering are rebuilt as a
@@ -634,7 +634,7 @@ class GameSession:
         points, tied broken by fewest development cards, then random —
         trading with whoever's behind rather than the engine's own neutral
         default (`ask=()`, clockwise seat order — see
-        `catan.game.propose_trade`'s docstring). Applied to every seat's
+        `hexset_ui.game.propose_trade`'s docstring). Applied to every seat's
         proposals in `_apply`, not just the human's: no bot sets `ask`
         itself today (a training-side gap, not something to paper over
         here), so leaving this human-only would have meant every bot kept
@@ -928,11 +928,11 @@ class GameSession:
         if kind is ActionType.DECLINE_TRADE and self._trade_buffer is not None:
             if self.game.offer is None:
                 # Only who's *eligible* to cover an offer is ever asked
-                # (`catan.game.propose_trade`'s own `responders`/`willing`),
+                # (`hexset_ui.game.propose_trade`'s own `responders`/`willing`),
                 # in ask order, one at a time, stopping at the first accept
                 # — so naming each individual decliner, or even just their
                 # count, would tell a human exactly how many opponents held
-                # what was wanted before the queue ran out. Catan hands are
+                # what was wanted before the queue ran out. HexSet hands are
                 # private, so every "nobody took it" offer reads identically
                 # regardless of how many were actually asked, or whether any
                 # were: "Everyone declined." every time, full stop.
@@ -995,7 +995,7 @@ class GameSession:
             "game_over": over,
             # Whether POST /api/undo would succeed right now — see
             # undo_last_build. A session convenience, not a rule, so it isn't
-            # in legal_actions alongside everything catan.actions offers.
+            # in legal_actions alongside everything hexset_ui.actions offers.
             "can_undo": self._undo is not None,
             # True while a setup road's handoff is waiting on POST
             # /api/confirm — see apply_human_action. `to_move` already moved

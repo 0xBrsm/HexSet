@@ -25,7 +25,7 @@ def own(vector: Sequence[float], seat: int) -> float:
 def relative(vector: Sequence[float], seat: int) -> float:
     """Own score less the average of everyone else's.
 
-    A constant-sum reading of the vector. Catan has exactly one winner, so a
+    A constant-sum reading of the vector. HexSet has exactly one winner, so a
     position is only worth what it is worth *compared to* the table, and an
     action that lifts everyone equally has achieved nothing.
     """
@@ -63,7 +63,7 @@ class RandomBot:
 class SearchBot:
     """Max^n search over the handcrafted evaluation.
 
-    `depth` counts decisions, not turns. A Catan turn contains many actions, so
+    `depth` counts decisions, not turns. A HexSet turn contains many actions, so
     depth two plans a pair of the mover's own actions rather than reaching an
     opponent; passing the turn is itself one of the actions searched.
 

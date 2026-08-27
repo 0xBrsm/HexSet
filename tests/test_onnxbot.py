@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("onnxruntime", reason="catan.onnxbot needs onnxruntime installed")
+pytest.importorskip("onnxruntime", reason="hexset_ui.onnxbot needs onnxruntime installed")
 
-from catan.actions import legal_actions, within_offer_budget  # noqa: E402
-from catan.arena import Entrant, compete, spawn  # noqa: E402
-from catan.board.board import random_base_board  # noqa: E402
-from catan.game import start, to_move  # noqa: E402
-from catan.onnxbot import load, network_bot  # noqa: E402
-from catan.play import step_randomly  # noqa: E402
+from hexset_ui.actions import legal_actions, within_offer_budget  # noqa: E402
+from hexset_ui.arena import Entrant, compete, spawn  # noqa: E402
+from hexset_ui.board.board import random_base_board  # noqa: E402
+from hexset_ui.game import start, to_move  # noqa: E402
+from hexset_ui.onnxbot import load, network_bot  # noqa: E402
+from hexset_ui.play import step_randomly  # noqa: E402
 
 FIXTURE = Path(__file__).parent / "fixtures" / "tiny.onnx"
 
@@ -20,14 +20,14 @@ FIXTURE = Path(__file__).parent / "fixtures" / "tiny.onnx"
 @pytest.fixture
 def checkpoint():
     """`tiny.onnx`: a width=16/rounds=1 network for a 4-player base board,
-    built and exported once by dev-catan's catan.export_onnx (see the
+    built and exported once by the upstream training repo's export_onnx (see the
     commit that added this fixture) so this suite stays torch-free. Matches
     `test_netbot.py::checkpoint`'s role, minus building the checkpoint here
     — this repo has no torch to build one with.
     """
     board = random_base_board(random.Random(0))
     yield str(FIXTURE), board
-    from catan.onnxbot import _load_cached
+    from hexset_ui.onnxbot import _load_cached
 
     _load_cached.cache_clear()
 
@@ -45,7 +45,7 @@ def test_a_checkpoint_plays_a_legal_action_from_every_phase(checkpoint):
         action = bot.choose(game)
         assert action in legal_actions(game)
         seen.add(game.phase)
-        from catan.actions import apply
+        from hexset_ui.actions import apply
 
         apply(game, action)
     assert len(seen) > 3
@@ -62,9 +62,10 @@ def test_the_checkpoint_is_loaded_once_per_process_not_once_per_game(checkpoint)
 def test_a_checkpoint_dropped_in_with_the_same_name_is_not_served_stale(
     checkpoint, tmp_path
 ):
-    """The whole point of catan-web's models/ directory: replacing a file by
+    """The whole point of hexset-ui's models/ directory: replacing a file by
     name must not keep serving the old in-memory session — unlike
-    dev-catan's immutable runs/*.pt, this repo's checkpoints are expected to
+    the training repo's immutable runs/*.pt, this repo's checkpoints are
+    expected to
     change underneath a running server."""
     path, board = checkpoint
     live = tmp_path / "live.onnx"
@@ -88,7 +89,7 @@ def test_the_budget_is_honoured_exactly_as_the_search_bot_honours_it(checkpoint)
     rng = random.Random(11)
     game = start(board, 4, rng)
 
-    from catan.actions import apply
+    from hexset_ui.actions import apply
 
     for _ in range(600):
         if game.won_by is not None:
@@ -131,8 +132,8 @@ def test_scoring_is_greedy_so_a_position_answers_the_same_way_twice(checkpoint):
 
 
 def test_the_search_reads_the_value_head_in_board_seat_order(checkpoint):
-    from catan.encoding import encode
-    from catan.onnxbot import network_evaluator
+    from hexset_ui.encoding import encode
+    from hexset_ui.onnxbot import network_evaluator
 
     path, board = checkpoint
     evaluator = network_evaluator(path, board)
@@ -149,7 +150,7 @@ def test_the_search_reads_the_value_head_in_board_seat_order(checkpoint):
 
 
 def test_a_search_over_a_learned_prior_plays_a_legal_action(checkpoint):
-    from catan.onnxbot import searcher
+    from hexset_ui.onnxbot import searcher
 
     path, board = checkpoint
     search = searcher(path, board, simulations=16, wave=4, rng=random.Random(0))
@@ -157,15 +158,15 @@ def test_a_search_over_a_learned_prior_plays_a_legal_action(checkpoint):
     for _ in range(20):
         action = search.choose(game)
         assert action in set(legal_actions(game))
-        from catan.actions import apply
+        from hexset_ui.actions import apply
 
         apply(game, action)
 
 
 def test_the_prior_covers_every_offer_rather_than_one_arbitrary_one(checkpoint):
-    from catan.actions import ActionType
-    from catan.mcts import Leaf
-    from catan.onnxbot import searcher
+    from hexset_ui.actions import ActionType
+    from hexset_ui.mcts import Leaf
+    from hexset_ui.onnxbot import searcher
 
     path, board = checkpoint
     search = searcher(path, board, rng=random.Random(0))

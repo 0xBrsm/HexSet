@@ -1,22 +1,23 @@
-"""A dropped-in ONNX checkpoint as a `catan.bots.Bot`, so the web demo (and
-`catan.arena`) can seat it the same way `catan.netbot` seats a PyTorch one —
-this is the whole reason catan-web doesn't need PyTorch installed at all.
+"""A dropped-in ONNX checkpoint as a `hexset_ui.bots.Bot`, so the web demo (and
+`hexset_ui.arena`) can seat it the same way `hexset_ui.netbot` seats a PyTorch one —
+this is the whole reason hexset-ui doesn't need PyTorch installed at all.
 
-Mirrors `catan.netbot`'s shape closely on purpose: `NetworkBot`,
+Mirrors `hexset_ui.netbot`'s shape closely on purpose: `NetworkBot`,
 `NetworkEvaluator`, and `LeafEvaluator` are the same adapters (a policy's
-`.act`/`.values`/`.score`/`.trade_slot` turned into a `catan.bots.Bot` or a
-`catan.mcts.Search` leaf evaluator) — they only ever call methods on
+`.act`/`.values`/`.score`/`.trade_slot` turned into a `hexset_ui.bots.Bot` or a
+`hexset_ui.mcts.Search` leaf evaluator) — they only ever call methods on
 `self.policy`, never construct or inspect a network directly, so porting
 them here is a type-hint change, not a logic change. What's actually new is
 `OnnxPolicy`: an onnxruntime `InferenceSession` behind the same four-member
-interface `catan.policy.NetworkPolicy` exposes there, with the masking and
+interface `hexset_ui.policy.NetworkPolicy` exposes there, with the masking and
 sampling math (masked log-softmax, argmax, the give/want pair distribution)
 reimplemented in numpy — mechanical, since none of it has learned
 parameters; only the network's forward pass itself needs a device to run
 on, and onnxruntime is that device now.
 
 The ONNX graph itself is intentionally "observation in, raw logits/give/
-want/value out" — see dev-catan's `catan.export_onnx`, which produces it.
+want/value out" — see the upstream training repo's `export_onnx`, which
+produces it.
 No masking, no sampling, no legal-action awareness is baked into the graph:
 a request's mask changes every position and has nothing to do with the
 network, so it stays out here in Python, same as it always has.
@@ -43,14 +44,14 @@ from .selfplay import Choice, Request, action_mask
 # The off-diagonal (give, want) pairs, flattened as `give * NUM_RESOURCES +
 # want`. The diagonal is never legal — `legal_actions` skips `wanted ==
 # given` — so it is masked out once here rather than checked per offer.
-# Same constant `catan.policy` defines; redefined rather than imported
-# because `catan.policy` itself imports torch, which this module must not.
+# Same constant `hexset_ui.policy` defines; redefined rather than imported
+# because `hexset_ui.policy` itself imports torch, which this module must not.
 NUM_PAIRS = NUM_RESOURCES * NUM_RESOURCES
 _OFF_DIAGONAL = ~np.eye(NUM_RESOURCES, dtype=bool).reshape(NUM_PAIRS)
 
 # Large and finite rather than -inf, so a row whose mask is entirely False
 # produces a diagnosable uniform distribution instead of NaN — same
-# reasoning as `catan.policy`'s own NEG.
+# reasoning as `hexset_ui.policy`'s own NEG.
 NEG = -1e9
 
 
@@ -113,7 +114,7 @@ def _providers_for(device: str) -> list[str]:
 
 
 class OnnxPolicy:
-    """An onnxruntime `InferenceSession` behind `catan.policy.NetworkPolicy`'s
+    """An onnxruntime `InferenceSession` behind `hexset_ui.policy.NetworkPolicy`'s
     four-member interface (`.act`, `.values`, `.score`, `.trade_slot`).
 
     Always greedy: every checkpoint the web demo has ever served plays
@@ -234,7 +235,7 @@ def _load_cached(path: str, topology: Topology, device: str, mtime_ns: int) -> L
     meta = session.get_modelmeta().custom_metadata_map
 
     players = int(meta["players"])
-    # The topology fingerprint `catan.export_onnx` embeds: a graph traced
+    # The topology fingerprint `hexset_ui.export_onnx` embeds: a graph traced
     # for one board shape fails silently if fed another (wrong-shaped
     # inputs, or worse, right-shaped-but-meaningless ones) rather than
     # loudly the way `net.load_state_dict` fails on a shape mismatch today
@@ -267,9 +268,10 @@ def _load_cached(path: str, topology: Topology, device: str, mtime_ns: int) -> L
 def load(path: str, topology: Topology, device: str = "cpu") -> Loaded:
     """The checkpoint at `path`, ready to act on boards of this topology.
 
-    Cache key folds in the file's mtime, unlike `netbot.load`'s: dev-catan's
+    Cache key folds in the file's mtime, unlike `netbot.load`'s: the training
+    repo's
     `.pt` checkpoints under `runs/` are effectively immutable per-run
-    artifacts, but catan-web's whole pitch is replacing a file in `models/`
+    artifacts, but hexset-ui's whole pitch is replacing a file in `models/`
     by name — without the mtime, a same-named replacement would silently
     keep serving the old in-memory session.
     """
@@ -301,7 +303,7 @@ class NetworkBot:
 
 @dataclass
 class NetworkEvaluator:
-    """The value head as `catan.bots.SearchBot`'s leaf evaluation."""
+    """The value head as `hexset_ui.bots.SearchBot`'s leaf evaluation."""
 
     policy: OnnxPolicy
     players: int
@@ -315,7 +317,7 @@ class NetworkEvaluator:
 
 @dataclass
 class LeafEvaluator:
-    """A whole wave of `catan.mcts` leaves in one forward."""
+    """A whole wave of `hexset_ui.mcts` leaves in one forward."""
 
     policy: OnnxPolicy
     space: ActionSpace

@@ -11,7 +11,7 @@ from .cards import NUM_DEV_CARDS, make_deck
 NO_OWNER = -1
 BANK_PER_RESOURCE = 19
 
-# Standard Catan piece supply, per player.
+# Standard HexSet piece supply, per player.
 MAX_ROADS = 15
 MAX_SETTLEMENTS = 5
 MAX_CITIES = 4

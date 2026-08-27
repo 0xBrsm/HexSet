@@ -1,20 +1,20 @@
-"""A local, dependency-free HTTP server so a human can play base Catan against
+"""A local, dependency-free HTTP server so a human can play base HexSet against
 a dropped-in ONNX checkpoint.
 
 Standard library only: `http.server` for the transport, `json` for the wire
 format. The frontend is one static HTML file (`web/index.html`) with inline SVG
 and vanilla JS, served as-is.
 
-`catan.webplay` (the session, the board layout math, the wire format) is
+`hexset_ui.webplay` (the session, the board layout math, the wire format) is
 onnxruntime-free and importable on its own; the network policy is imported
 here, inside `main`, so anything that only needs the session can be tested
-without onnxruntime installed — the same split `catan.onnxbot` already draws.
+without onnxruntime installed — the same split `hexset_ui.onnxbot` already draws.
 
 ## One game per browser, not one game for the whole server
 
 Every request carries (or, on its first visit, gets handed) an opaque
-`catan_id` cookie — a random token identifying the browser, nothing more, no
-accounts. `CatanServer` keys its games off that: `GET /api/state` from one
+`hexset_id` cookie — a random token identifying the browser, nothing more, no
+accounts. `HexSetServer` keys its games off that: `GET /api/state` from one
 cookie never sees, and can never affect, another cookie's game. This was
 deliberately a cookie and not the request's source IP, which would collide
 two people on the same wifi/NAT into one game and lose the session the moment
@@ -26,11 +26,11 @@ log out of and no "leave game" button, just a tab someone closed or forgot.
 
 Run it with (from `src/`)::
 
-    python -m catan.webserver
+    python -m hexset_ui.webserver
 
 then open the printed URL. Opponents come from `model_options()`: `search2`
 (handcrafted, no checkpoint needed) plus one entry per `*.onnx` file found in
-`CATAN_WEB_MODELS_DIR` (default: `<repo root>/models`) — drop a file in, it
+`HEXSET_UI_MODELS_DIR` (default: `<repo root>/models`) — drop a file in, it
 shows up in the picker, no restart, no code change. Pass `--checkpoint <spec>`
 to seat 3 copies of one entrant instead of the per-seat default lineup.
 """
@@ -64,7 +64,7 @@ INDEX_HTML = STATIC_DIR / "index.html"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 NUM_PLAYERS = 4
 
-COOKIE_NAME = "catan_id"
+COOKIE_NAME = "hexset_id"
 # 30 days: long enough that closing and reopening the tab tomorrow still
 # finds the same game. Not tied to how long a game is actually kept alive
 # server-side (see SESSION_TTL_SECONDS below) — an idle game is dropped long
@@ -76,7 +76,7 @@ COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 # session without holding onto abandoned ones indefinitely.
 SESSION_TTL_SECONDS = 24 * 60 * 60
 
-MODELS_DIR = Path(os.environ.get("CATAN_WEB_MODELS_DIR", REPO_ROOT / "models"))
+MODELS_DIR = Path(os.environ.get("HEXSET_UI_MODELS_DIR", REPO_ROOT / "models"))
 
 
 def model_options() -> dict[str, str]:
@@ -105,14 +105,14 @@ class _Entry:
     """One identity's live game: the session itself, its board layout (cached
     alongside it — see `/api/board` — rather than recomputed per request,
     same as when there was only ever one of these), and when it was last
-    touched, for `CatanServer._evict_stale` to act on."""
+    touched, for `HexSetServer._evict_stale` to act on."""
 
     session: GameSession
     layout: dict
     last_seen: float
 
 
-class CatanServer(ThreadingHTTPServer):
+class HexSetServer(ThreadingHTTPServer):
     """Holds one game session per browser identity (see the module docstring)
     instead of one for the whole process.
 
@@ -251,10 +251,10 @@ class CatanServer(ThreadingHTTPServer):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server: CatanServer  # narrows the inherited attribute's type for readability
+    server: HexSetServer  # narrows the inherited attribute's type for readability
 
     def _read_identity(self) -> None:
-        """Reads this request's `catan_id` cookie, or mints one — cached on
+        """Reads this request's `hexset_id` cookie, or mints one — cached on
         `self` (a fresh `Handler` per request) so every handler downstream,
         plus `_json`/`_file`, share the one value: the latter need it to know
         whether to actually set the cookie this response, which only a
@@ -477,7 +477,7 @@ def _spawn_bot(
     """One entrant spec (see `model_options()`) as a live bot on `board`.
 
     Routes `network:`/`mcts:` checkpoints through here rather than through
-    `catan.arena.spawn` so `--device` reaches them — `arena.spawn` always
+    `hexset_ui.arena.spawn` so `--device` reaches them — `arena.spawn` always
     loads a checkpoint onto its default provider, which is fine for a
     benchmark process pool and wrong for one interactive run wanting a GPU
     execution provider if one's available. Everything else (`search2`,
@@ -526,7 +526,7 @@ def _build_session(
         raise ValueError(f"expected {NUM_PLAYERS - 1} bots, got {len(bots)}")
 
     # Always resolved to a concrete int, even when the caller left it to chance,
-    # so a game can be written out as a catan.record.Record and later replayed
+    # so a game can be written out as a hexset_ui.record.Record and later replayed
     # from that same seed — `random.Random()` alone has no int to hand back for
     # that.
     if seed is None:
@@ -537,7 +537,7 @@ def _build_session(
     if human_seat is None:
         human_seat = random.SystemRandom().randrange(NUM_PLAYERS)
     # Two separate Random instances from the same seed, not one shared stream —
-    # matching catan.record's own convention (see record_game / test_record.py):
+    # matching hexset_ui.record's own convention (see record_game / test_record.py):
     # replay() rebuilds the board from stored data (consuming no randomness) and
     # then seeds a *fresh* random.Random(seed) for the game itself. Consuming
     # this seed's stream here to build the board first, then handing the same
@@ -596,7 +596,7 @@ def _resume_session(
 
     A session lives in memory, so it used to be lost to anything that ended
     the process: a deploy, a crash, or simply going quiet long enough to be
-    evicted. The journal is the whole game though (see `catan.journal`), and
+    evicted. The journal is the whole game though (see `hexset_ui.journal`), and
     it replays exactly, so the loss was never necessary.
 
     Bots are the one thing that does not come back: they are re-seated from
@@ -714,15 +714,15 @@ def main(argv: list[str] | None = None) -> None:
         return _resume_session(identity, args.device, args.max_offers, args.games_dir)
 
     # No session is built here anymore — each browser deals its own on first
-    # contact (see CatanServer.entry), so there's no single "the" game to
+    # contact (see HexSetServer.entry), so there's no single "the" game to
     # build before the server can even start.
-    server = CatanServer(
+    server = HexSetServer(
         (args.host, args.port), new_session, resume_session, args.device, args.max_offers
     )
 
     url = f"http://{args.host}:{args.port}/"
     names = [name for name, _ in default_bots]
-    print(f"Catan web board: {url}  (bots={names})")
+    print(f"HexSet board: {url}  (bots={names})")
     games_dir = args.games_dir if args.games_dir is not None else journal.configured_dir()
     if games_dir:
         print(f"Every game will be journalled in full under {games_dir}/")

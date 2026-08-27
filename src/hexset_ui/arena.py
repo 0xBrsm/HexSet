@@ -1,6 +1,6 @@
 """Play bots against each other and report win rates worth quoting.
 
-Two things here exist because the published Catan work tends to skip them.
+Two things here exist because the published work on this game tends to skip them.
 Seat position matters, so a lineup is rotated through every seat and each
 entrant plays each seat the same number of times. And win rates carry a Wilson
 interval, because at the few hundred games prior work reports the answer is
@@ -65,7 +65,7 @@ class Entrant:
     # since the two evaluations do not share a term set — that is the point of
     # keeping both.
     evaluator: str = "default"
-    # How the per-seat vector is read: see `catan.bots.STANCES`. Defaults to
+    # How the per-seat vector is read: see `hexset_ui.bots.STANCES`. Defaults to
     # the stance that wins; `greedy-own` reproduces the plain max^n baseline.
     stance: str = "relative"
     # Whether the proposer names who it would rather have take an offer.

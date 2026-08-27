@@ -14,7 +14,7 @@
      their natural colours (plain black, tile-matched) now that nothing is
      rewriting them. -->
 <meta name="color-scheme" content="only dark">
-<title>Catan vs. the policy</title>
+<title>HexSet</title>
 <style>
   :root {
     color-scheme: only dark;
@@ -511,7 +511,7 @@
 </style>
 </head>
 <body>
-<!-- Resource glyphs from game-icons.net, CC BY 3.0. wood: pine-tree by Lorc; brick: brick-pile by Delapouite (literally tagged "catan" on the site — swapped in for brick-wall, which was a tiling wall texture rather than an object like the other four and needed its own oversized/clipped special case); sheep: sheep by Delapouite; wheat: wheat by Lorc; ore: stone-pile by Delapouite. Dev-card glyphs, same source: knight: horned-helm by Lorc; road building: crossroad by Delapouite; monopoly: grab by Lorc; year of plenty: cornucopia by Delapouite; victory point: laurel-crown by Lorc. The ship (port markers) is not from that set — a plain hull/mast/sail silhouette authored for this file, so it carries no separate attribution. -->
+<!-- Resource glyphs from game-icons.net, CC BY 3.0. wood: pine-tree by Lorc; brick: brick-pile by Delapouite (literally tagged "hexset_ui" on the site — swapped in for brick-wall, which was a tiling wall texture rather than an object like the other four and needed its own oversized/clipped special case); sheep: sheep by Delapouite; wheat: wheat by Lorc; ore: stone-pile by Delapouite. Dev-card glyphs, same source: knight: horned-helm by Lorc; road building: crossroad by Delapouite; monopoly: grab by Lorc; year of plenty: cornucopia by Delapouite; victory point: laurel-crown by Lorc. The ship (port markers) is not from that set — a plain hull/mast/sail silhouette authored for this file, so it carries no separate attribution. -->
 <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true"><defs>
   <symbol id="icon-ship" viewBox="0 0 512 512"><path d="M56,350 L456,350 L392,432 L256,452 L120,432 Z M246,90 L266,90 L266,350 L246,350 Z M266,110 L266,330 L410,330 Z"/></symbol>
   <!-- A single-colour die: the square is one subpath and each pip is a
@@ -1021,7 +1021,7 @@ function drawBoard() {
   svg.appendChild(el("g", {id: "clickable-layer"}));
 }
 
-// The engine's own Phase names (catan.game.Phase) — plain English instead of
+// The engine's own Phase names (hexset_ui.game.Phase) — plain English instead of
 // the enum spelling for the status line; anything missing falls back to the
 // raw name rather than disappearing.
 const PHASE_LABELS = {
@@ -1991,7 +1991,7 @@ function renderProposeMode(title, body, actions) {
     // Found, never built: the server's own `legal_wire_actions` always
     // includes every (give held, want different) pair as a PROPOSE_TRADE
     // option — see GameSession._proposable_options — regardless of whether
-    // anyone else could currently cover it. Hands are private in Catan, so
+    // anyone else could currently cover it. Hands are private in HexSet, so
     // that's deliberate: whether a trade is "available" depends on hidden
     // opponent hands, which nothing here may act on, and this find() always
     // succeeds as a result. Building the action from parts instead would
@@ -2032,8 +2032,8 @@ function renderProposeMode(title, body, actions) {
 
 // The bank's own rate, which is the worst one available; anything cheaper is
 // a port the human has a building on — 3:1 generic or 2:1 for this one
-// resource. See catan.board.ports (BASE_TRADE_RATIO / GENERIC_RATIO /
-// SPECIFIC_RATIO) and catan.economy.trade_ratios, which returns the cheapest
+// resource. See hexset_ui.board.ports (BASE_TRADE_RATIO / GENERIC_RATIO /
+// SPECIFIC_RATIO) and hexset_ui.economy.trade_ratios, which returns the cheapest
 // rate per resource without saying where it came from; the number is the only
 // thing that distinguishes them, so it's what this reads.
 const BANK_RATE = 4;

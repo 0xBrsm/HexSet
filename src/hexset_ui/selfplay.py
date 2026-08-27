@@ -8,7 +8,7 @@ and gather one batch of decisions per tick so a single forward serves every
 lane. Exactly one seat acts at a time in a given game, so a lane contributes
 exactly one position per tick and a tick is one batch of size `lanes`.
 
-The policy is behind `BatchPolicy` — a batched `catan.bots.Bot` — which is what
+The policy is behind `BatchPolicy` — a batched `hexset_ui.bots.Bot` — which is what
 keeps this file numpy-only. PyTorch cannot be installed on the development
 phone, so the plumbing is tested and timed here against a trivial policy and
 only the torch-backed policy is deferred to the training box.
@@ -18,7 +18,7 @@ the terminal `Outcome`; turning that into returns is the caller's to decide,
 because the choice between terminal win/loss and terminal victory points is
 still open. Nothing in this module assumes either.
 
-Trajectories come out demultiplexed by seat. A Catan game interleaves four
+Trajectories come out demultiplexed by seat. A HexSet game interleaves four
 seats' decisions into one action stream, and a seat's next state is not the one
 that immediately follows its action — it is the next position that seat was
 asked about. Keeping one list per seat is what makes a transition mean anything
@@ -69,7 +69,7 @@ class Request:
     `game` is the live lane state, and it rides along for a policy that searches:
     a tree needs positions to step, and an observation is a lossy encoding of
     one. A policy that only reads the encoding can ignore it. Handed out rather
-    than copied because `catan.mcts` copies at its own root; a policy that
+    than copied because `hexset_ui.mcts` copies at its own root; a policy that
     mutates this corrupts the lane.
     """
 
@@ -105,7 +105,7 @@ class Choice:
 
 
 class BatchPolicy(Protocol):
-    """The batched analogue of `catan.bots.Bot`.
+    """The batched analogue of `hexset_ui.bots.Bot`.
 
     One call per tick, so a torch implementation collates, moves and runs the
     network once for the whole batch. Must return one `Choice` per `Request`,
@@ -145,7 +145,7 @@ class RandomPolicy:
 
 
 class BotPolicy:
-    """A `catan.bots.Bot` behind `BatchPolicy`, one bot per board.
+    """A `hexset_ui.bots.Bot` behind `BatchPolicy`, one bot per board.
 
     A scripted bot answers one position at a time and pays no dispatch toll, so
     batching buys it nothing — but the handcrafted evaluators cache per-vertex
@@ -261,7 +261,7 @@ class Episode:
 def new_game(seed: int, index: int, players: int, board: Board | None = None) -> Game:
     """The `index`-th game of a run, reproducible from the seed alone.
 
-    Same derivation as `catan.arena._play_one`, so a game plays identically
+    Same derivation as `hexset_ui.arena._play_one`, so a game plays identically
     however many lanes are in flight and whichever lane happens to draw it.
     """
     if board is None:
@@ -292,7 +292,7 @@ class Collector:
     run casts the same games the same way. Each tick still makes one `act` call
     per policy, so the learner's batch stays batched. **Opponent decisions are
     never recorded**: their seats' trajectories stay empty, which is exactly
-    what `catan.ppo.assemble` skips, so opponent play shapes the games the
+    what `hexset_ui.ppo.assemble` skips, so opponent play shapes the games the
     learner sees without ever entering an update.
     """
 

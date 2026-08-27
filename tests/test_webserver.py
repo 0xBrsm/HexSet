@@ -1,11 +1,11 @@
-"""HTTP-layer tests for `catan.webserver`.
+"""HTTP-layer tests for `hexset_ui.webserver`.
 
-Torch-free on purpose: the opponent here is `catan.bots.RandomBot`, not a
+Torch-free on purpose: the opponent here is `hexset_ui.bots.RandomBot`, not a
 loaded checkpoint, so this suite runs anywhere the rest of the engine's tests
 do. What it is pinning is the transport — status codes, JSON shape, that an
 action `legal_actions` did not offer is refused over HTTP the same way
 `GameSession.apply_human_action` refuses it in-process (`test_webplay.py`
-covers that half directly), and — since `CatanServer` now keys games off an
+covers that half directly), and — since `HexSetServer` now keys games off an
 identity cookie rather than holding one shared session — that two "browsers"
 (two separate cookie jars, via `_client`) really do get two independent
 games while one browser's own requests keep landing on the same one.
@@ -23,15 +23,15 @@ import urllib.request
 
 import pytest
 
-from catan import journal
-from catan.actions import Action, ActionType, legal_actions
-from catan.board.board import random_base_board
-from catan.bots import RandomBot
-from catan.game import is_over, start, to_move
-from catan.webplay import GameSession, action_to_wire, board_layout
-from catan.webserver import (
+from hexset_ui import journal
+from hexset_ui.actions import Action, ActionType, legal_actions
+from hexset_ui.board.board import random_base_board
+from hexset_ui.bots import RandomBot
+from hexset_ui.game import is_over, start, to_move
+from hexset_ui.webplay import GameSession, action_to_wire, board_layout
+from hexset_ui.webserver import (
     COOKIE_NAME,
-    CatanServer,
+    HexSetServer,
     _build_session,
     _Entry,
     _resume_session,
@@ -50,10 +50,10 @@ def live_server():
     # Every identity's first request deals it a session via this same
     # callable — unlike the single eager session `main()` used to build
     # before the server even started, there is no longer one "the" session
-    # to hand the fixture up front (see CatanServer.entry).
+    # to hand the fixture up front (see HexSetServer.entry).
     # No resume_session is passed: these tests are about the HTTP surface,
     # and the default (never resume) keeps every first request a fresh deal.
-    server = CatanServer(("127.0.0.1", 0), lambda bots, identity: _new_session(1))
+    server = HexSetServer(("127.0.0.1", 0), lambda bots, identity: _new_session(1))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     port = server.server_address[1]
@@ -66,7 +66,7 @@ def live_server():
 
 
 class _Client:
-    """One simulated browser: a private cookie jar, so its `catan_id` (once
+    """One simulated browser: a private cookie jar, so its `hexset_id` (once
     the server hands it one) is remembered across calls the same way a real
     browser remembers it, and never leaks to another `_Client` instance.
     """
@@ -118,7 +118,7 @@ def test_the_first_response_hands_out_an_identity_cookie(live_server):
 
 
 def test_a_returning_cookie_is_not_reissued(live_server):
-    """A request that already carries `catan_id` gets the exact same value
+    """A request that already carries `hexset_id` gets the exact same value
     back, not a fresh one — otherwise every poll would silently start a new
     game."""
     _, base = live_server
@@ -278,11 +278,11 @@ def _drive(session, moves: int, rng: random.Random) -> None:
 
 
 def _press_new_game(session, identity: str) -> None:
-    """Drive the real `CatanServer.replace` over an existing session — what
+    """Drive the real `HexSetServer.replace` over an existing session — what
     `POST /api/new` reaches. Called rather than `journal.abandoned()` directly
     because the decision under test, whether that line gets written at all,
     lives in `replace` and not in the journal."""
-    server = CatanServer(("127.0.0.1", 0), lambda bots, identity: _new_session(1))
+    server = HexSetServer(("127.0.0.1", 0), lambda bots, identity: _new_session(1))
     try:
         layout = board_layout(session.game.state.board)
         server.sessions[identity] = _Entry(session, layout, time.monotonic())

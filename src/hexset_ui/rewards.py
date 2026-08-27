@@ -1,6 +1,6 @@
 """Turning a finished game into a number per seat.
 
-Deliberately not in `catan.selfplay`: the collector emits an `Outcome` and
+Deliberately not in `hexset_ui.selfplay`: the collector emits an `Outcome` and
 scalarises nothing, so what a run rewards is a choice made here and recorded,
 not a default buried in the plumbing.
 
@@ -31,7 +31,7 @@ def relative_points(points: tuple[int, ...]) -> tuple[float, ...]:
     Exactly zero-sum: the per-seat values sum to zero for any input, since
     subtracting the mean of the others is an affine transform whose total
     cancels. That is the property worth having — it says in the reward what the
-    game already says, that Catan has one winner and a position is only worth
+    game already says, that HexSet has one winner and a position is only worth
     what it is worth compared to the table. An action that lifts every seat
     equally earns nothing, which is the whole reason for reading points this
     way rather than absolutely.

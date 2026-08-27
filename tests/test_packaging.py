@@ -26,7 +26,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-PACKAGE_SRC = REPO_ROOT / "src" / "catan"
+PACKAGE_SRC = REPO_ROOT / "src" / "hexset_ui"
 
 # Everything a fresh clone would not have. `.egg-info` is the one that
 # matters and the reason this test builds from a copy at all: setuptools
@@ -80,7 +80,7 @@ def test_the_frontend_ships_with_the_package():
     """`web/index.html` is the entire frontend and the one file setuptools
     will not include on its own — it is a static asset inside a package
     directory, so it lives or dies by `[tool.setuptools.package-data]`."""
-    assert "catan/web/index.html" in packaged_names()
+    assert "hexset_ui/web/index.html" in packaged_names()
 
 
 def test_every_module_in_the_source_tree_ships():
@@ -88,16 +88,16 @@ def test_every_module_in_the_source_tree_ships():
     installed it and nothing at all for anyone running from source, so
     compare the two directly rather than trusting `packages.find`."""
     expected = {
-        f"catan/{path.relative_to(PACKAGE_SRC).as_posix()}"
+        f"hexset_ui/{path.relative_to(PACKAGE_SRC).as_posix()}"
         for path in PACKAGE_SRC.rglob("*.py")
         if "__pycache__" not in path.parts
     }
     missing = sorted(expected - set(packaged_names()))
-    assert not missing, f"in src/catan but not in the wheel: {missing}"
+    assert not missing, f"in src/hexset_ui but not in the wheel: {missing}"
 
 
 def test_the_wheel_carries_nothing_from_outside_the_package():
-    """`packages.find` is scoped to `catan*`; tests/, models/ and docker/ have
+    """`packages.find` is scoped to `hexset_ui*`; tests/, models/ and docker/ have
     no business in an installed copy."""
-    strays = sorted(n for n in packaged_names() if not n.startswith("catan/"))
+    strays = sorted(n for n in packaged_names() if not n.startswith("hexset_ui/"))
     assert not strays, f"unexpected files in the wheel: {strays}"

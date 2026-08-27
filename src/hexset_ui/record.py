@@ -101,7 +101,7 @@ def append_step(
 ) -> None:
     """Append one action's Record-format bookkeeping to `actions`, plus its
     trade offer to `offers` if it has one. Shared by record_game (bot-only
-    games) and catan.webplay (human games), so both produce identically
+    games) and hexset_ui.webplay (human games), so both produce identically
     shaped Records."""
     actions.append((int(action.type), action.a, action.b))
     if action.give or action.want:

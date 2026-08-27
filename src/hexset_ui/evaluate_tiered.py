@@ -1,4 +1,4 @@
-"""A second evaluation, kept for comparison. `catan.evaluate` is the default.
+"""A second evaluation, kept for comparison. `hexset_ui.evaluate` is the default.
 
 The term set is reimplemented from the design used by catanatron's value
 function, described rather than copied — it is GPLv3 and this project needs to
@@ -63,7 +63,7 @@ class Weights:
     below it can outweigh one unit of it: a victory point beats any production
     advantage, production beats any amount of reachable production, and so on.
     Hand-designed rather than fitted, because a search cannot discover a
-    hierarchy — it can only tune within one, which is what `catan.tuning` is
+    hierarchy — it can only tune within one, which is what `hexset_ui.tuning` is
     for once these are in place.
     """
 

@@ -1,6 +1,6 @@
 """The server's own account of a game, written as the game happens.
 
-`catan.record` stores a game as a seed plus an action sequence: compact, and
+`hexset_ui.record` stores a game as a seed plus an action sequence: compact, and
 enough to reproduce a game exactly — but only by re-running the engine that
 wrote it. Dice, steals and the development deck's order are deliberately not in
 it (see that module's docstring), so a record can only say what was drawn or
@@ -13,7 +13,7 @@ the header, the dice on every roll, the card drawn on every purchase, the
 resource taken on every steal, and every seat's full hand and development cards
 afterwards. Nothing here needs the engine to interpret it and nothing is held
 back — unlike the sidebar transcript, which hides exactly what a player at the
-table could not see (see `catan.webplay._describe`).
+table could not see (see `hexset_ui.webplay._describe`).
 
 It is the only thing written. Every field a `Record` carries is in here already
 — board, seed, actions, offers, winner, turns — so a second file holding a
@@ -26,10 +26,10 @@ web server deals a session per browser), and lines from three games in flight
 would have to be de-interleaved before any one of them could be read. Every line
 is written and closed as it happens, so a game abandoned mid-turn — or a server
 killed outright — leaves a complete account up to that point instead of nothing,
-which is the case `catan.record` cannot cover: it only ever holds a game that
+which is the case `hexset_ui.record` cannot cover: it only ever holds a game that
 reached an ending.
 
-Writing is on by default and switched off by setting `CATAN_WEB_GAMES_DIR`
+Writing is on by default and switched off by setting `HEXSET_UI_GAMES_DIR`
 empty. A directory that cannot be written to disables this journal and lets the
 game carry on: a game nobody can log is still a game, and a player mid-turn
 should not lose it to a full disk.
@@ -52,7 +52,7 @@ from .game import Game
 from .record import board_fields
 from .victory import victory_points
 
-ENV_DIR = "CATAN_WEB_GAMES_DIR"
+ENV_DIR = "HEXSET_UI_GAMES_DIR"
 DEFAULT_DIR = "games"
 
 RESOURCE_NAMES: tuple[str, ...] = tuple(r.name for r in Resource)
@@ -172,7 +172,7 @@ class Journal:
         against it, and the whole game's development cards are known without
         the engine's random stream being involved at all.
 
-        `identity` is the browser's `catan_id` cookie and `spec` the string
+        `identity` is the browser's `hexset_id` cookie and `spec` the string
         that built each bot, neither of which the game itself needs: they are
         here so `resume` can put this exact session back together for the
         person whose it was.

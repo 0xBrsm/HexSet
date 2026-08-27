@@ -10,14 +10,14 @@
 # style. The lines most people touch are the published port and whether src/
 # stays bind-mounted.
 services:
-  catan-web:
+  hexset-ui:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    image: catan-web:local
-    # A convenience, so `docker logs catan-web` works without looking the
+    image: hexset-ui:local
+    # A convenience, so `docker logs hexset-ui` works without looking the
     # name up. Drop it if you want to run more than one copy at a time.
-    container_name: catan-web
+    container_name: hexset-ui
     restart: unless-stopped
     ports:
       # Host side on the left. The container always listens on 8770 (the
@@ -35,7 +35,7 @@ services:
       - ./models:/app/models:ro
       # The one writable mount. Every game is journalled here in full as it is
       # played: one JSON lines file per game, every action, hidden cards and
-      # all (see src/catan/journal.py). Bound to the host so a rebuild or a
+      # all (see src/hexset_ui/journal.py). Bound to the host so a rebuild or a
       # `docker compose down` does not take the history with it.
       #
       # The container writes as uid 10001 (see docker/Dockerfile), so the host

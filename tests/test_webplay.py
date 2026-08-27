@@ -7,19 +7,19 @@ from pathlib import Path
 
 import pytest
 
-from catan.actions import Action, ActionType, apply, legal_actions
-from catan.board.board import random_base_board
-from catan.board.coords import Hex, hexagon
-from catan.board.maps import BASE_LAYOUT, MINI_LAYOUT
-from catan.board.topology import build as build_topology
-from catan.bots import RandomBot
-from catan.game import Phase, is_over, start, to_move
-from catan.journal import DEFAULT_DIR, ENV_DIR, configured_dir, open_journal
-from catan.journal import RESOURCE_NAMES as JOURNAL_RESOURCE_NAMES
-from catan.record import Record
-from catan.record import replay as replay_record
-from catan.victory import victory_points
-from catan.webplay import (
+from hexset_ui.actions import Action, ActionType, apply, legal_actions
+from hexset_ui.board.board import random_base_board
+from hexset_ui.board.coords import Hex, hexagon
+from hexset_ui.board.maps import BASE_LAYOUT, MINI_LAYOUT
+from hexset_ui.board.topology import build as build_topology
+from hexset_ui.bots import RandomBot
+from hexset_ui.game import Phase, is_over, start, to_move
+from hexset_ui.journal import DEFAULT_DIR, ENV_DIR, configured_dir, open_journal
+from hexset_ui.journal import RESOURCE_NAMES as JOURNAL_RESOURCE_NAMES
+from hexset_ui.record import Record
+from hexset_ui.record import replay as replay_record
+from hexset_ui.victory import victory_points
+from hexset_ui.webplay import (
     RESOURCE_NAMES,
     SQRT3,
     GameSession,
@@ -189,13 +189,13 @@ def test_session_rejects_when_it_is_not_the_humans_turn():
 
 
 def test_legal_wire_actions_offers_every_held_resource_regardless_of_who_could_cover_it():
-    """Catan hands are private: the human must not be able to learn what an
+    """HexSet hands are private: the human must not be able to learn what an
     opponent holds by noticing that proposing to trade for it is or isn't
-    offered. `catan.actions.legal_actions`'s own PROPOSE_TRADE sample
+    offered. `hexset_ui.actions.legal_actions`'s own PROPOSE_TRADE sample
     filters to pairs some opponent could currently cover — correct for a
     bot with full-state access, but exactly the leak a human-facing wire
     payload must not repeat. See GameSession._proposable_options."""
-    from catan.board.terrain import Resource
+    from hexset_ui.board.terrain import Resource
 
     game = a_game(seed=19)
     game.phase = Phase.MAIN
@@ -225,7 +225,7 @@ def test_nothing_is_proposable_before_the_roll():
     clickable and opened the trade modal on a turn where the bank half of it
     could not be there — BANK_TRADE only exists in Main — so a port the human
     could plainly afford showed up dimmed."""
-    from catan.board.terrain import Resource
+    from hexset_ui.board.terrain import Resource
 
     game = a_game(seed=19)
     game.phase = Phase.ROLL
@@ -241,12 +241,12 @@ def test_nothing_is_proposable_before_the_roll():
 
 
 def test_a_human_trade_with_no_ask_defaults_to_lowest_vp_first():
-    """GameSession's own addition on top of catan.game.propose_trade's
+    """GameSession's own addition on top of hexset_ui.game.propose_trade's
     neutral ask=() default (clockwise seat order) — favours whoever's
     behind rather than strict seat order. See GameSession._default_ask_order.
     """
-    from catan.board.terrain import Resource
-    from catan.state import Building
+    from hexset_ui.board.terrain import Resource
+    from hexset_ui.state import Building
 
     game = a_game(seed=7)
     game.phase = Phase.MAIN
@@ -277,7 +277,7 @@ def test_a_human_trade_with_no_ask_defaults_to_lowest_vp_first():
 
 
 def test_a_human_trade_honours_an_explicit_ask_instead_of_the_default():
-    from catan.board.terrain import Resource
+    from hexset_ui.board.terrain import Resource
 
     game = a_game(seed=8)
     game.phase = Phase.MAIN
@@ -302,8 +302,8 @@ def test_a_human_trade_honours_an_explicit_ask_instead_of_the_default():
 def test_a_bot_trade_also_defaults_to_asking_the_lowest_vp_player_first():
     """_apply's ask-defaulting isn't human-only — every seat's proposal goes
     through the same choke point, bot or human (see _apply's own comment)."""
-    from catan.board.terrain import Resource
-    from catan.state import Building
+    from hexset_ui.board.terrain import Resource
+    from hexset_ui.state import Building
 
     class _AlwaysProposes:
         def __init__(self, give, want):
@@ -379,7 +379,7 @@ def test_a_build_streak_breaks_on_a_different_actor():
 
 
 def test_list_with_counts_pluralises_repeats_but_not_singles():
-    from catan.webplay import _list_with_counts
+    from hexset_ui.webplay import _list_with_counts
 
     assert _list_with_counts(["settlement", "road"]) == "a settlement and a road"
     assert _list_with_counts(["road", "road"]) == "2 roads"
@@ -394,7 +394,7 @@ def test_a_trade_that_gets_accepted_summarizes_into_one_line():
     only who's eligible to cover an offer is ever asked, so naming a
     decliner would tell a human they hold the wanted resource — hidden
     information a real board never gives up."""
-    from catan.board.terrain import Resource
+    from hexset_ui.board.terrain import Resource
 
     game = a_game(seed=13)
     game.phase = Phase.MAIN
@@ -438,7 +438,7 @@ def test_a_trade_nobody_can_cover_is_still_legal_and_reads_as_declined():
     enumerator's own docstring), but a proposal nobody can cover is still a
     legal move — see is_legal's docstring for why it's checked against
     can_propose instead of sample membership."""
-    from catan.board.terrain import Resource
+    from hexset_ui.board.terrain import Resource
 
     game = a_game(seed=14)
     game.phase = Phase.MAIN
@@ -460,7 +460,7 @@ def test_a_trade_nobody_can_cover_is_still_legal_and_reads_as_declined():
     assert "offered" in session.log[0]
     assert "declined" in session.log[0]
     # Deliberately not "nobody could cover it": that would state opponent
-    # hand contents as fact. Catan hands are private.
+    # hand contents as fact. HexSet hands are private.
     assert "cover" not in session.log[0].lower()
     assert session._trade_buffer is None
 
@@ -470,7 +470,7 @@ def test_a_trade_everyone_declines_summarizes_into_one_line():
     decliner and not a count — regardless of how many opponents were
     actually asked, so it can't be distinguished from an offer nobody was
     eligible to take at all (see test_a_trade_nobody_can_cover...)."""
-    from catan.board.terrain import Resource
+    from hexset_ui.board.terrain import Resource
 
     game = a_game(seed=15)
     game.phase = Phase.MAIN
@@ -709,7 +709,7 @@ def test_state_view_does_not_expose_who_is_eligible_to_respond_to_an_offer():
     actually responded would leak the same hidden hand information the log
     (see _log_action's "Everyone declined." handling) is built to hide,
     just earlier and over a different channel."""
-    from catan.board.terrain import Resource
+    from hexset_ui.board.terrain import Resource
 
     game = a_game(seed=18)
     game.phase = Phase.MAIN
@@ -744,7 +744,7 @@ def played(tmp_path_factory):
     dealing another one of its own.
     """
     directory = tmp_path_factory.mktemp("games")
-    # Two independent random.Random(SEED) instances, matching catan.record's own
+    # Two independent random.Random(SEED) instances, matching hexset_ui.record's own
     # convention: replay() rebuilds the board from stored data (no randomness
     # spent) and hands `start` a *fresh* random.Random(seed), so the game's own
     # rng must start from the same untouched state here too.
@@ -778,9 +778,9 @@ def journal_events(directory) -> list[dict]:
 
 
 def record_from(events: list[dict]) -> Record:
-    """A `catan.record.Record` assembled out of a journal.
+    """A `hexset_ui.record.Record` assembled out of a journal.
 
-    Lives in the tests rather than in `catan.journal` because nothing this
+    Lives in the tests rather than in `hexset_ui.journal` because nothing this
     server does needs one: it exists here to hand the test below something
     `replay()` will accept, since a journal that replays clean is a journal
     whose actions are a legal, complete game and not plausible-looking noise.

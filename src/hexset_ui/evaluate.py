@@ -35,7 +35,7 @@ class Survey(NamedTuple):
 class Weights:
     """Scoring weights in units of victory points.
 
-    Fitted by `catan.tuning`, not guessed, and refitted once trading existed:
+    Fitted by `hexset_ui.tuning`, not guessed, and refitted once trading existed:
     60 hill-climb rounds at 400 games a duel, confirmed over 2000 games at
     56.2% (95% CI 54.1-58.4%) against the pre-trading values. Fitted for the
     one-ply bot; the deeper search has not been refitted.
@@ -94,7 +94,7 @@ class Weights:
 TERM_NAMES: tuple[str, ...] = tuple(f.name for f in fields(Weights))
 
 # The corpus's scarcity weight in this evaluation's units: 0.91 pips, as fitted
-# in `catan.placement`, at `production / ROLLS` victory points per pip. Derived
+# in `hexset_ui.placement`, at `production / ROLLS` victory points per pip. Derived
 # rather than typed so it follows a refit of `production` instead of silently
 # meaning something else afterwards.
 CORPUS_SCARCE: float = 0.91 * Weights.production / ROLLS

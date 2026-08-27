@@ -31,7 +31,7 @@ def _ordered(a: int, b: int) -> tuple[int, int]:
 class Topology:
     """Board connectivity, derived from a bare set of hex coordinates.
 
-    Terrain-agnostic on purpose: base Catan, Seafarers scenarios and arbitrary
+    Terrain-agnostic on purpose: the base game, seafaring scenarios and arbitrary
     multi-island layouts all produce a Topology the same way, so map variety
     costs no new code here and no new parameters in a graph model.
 

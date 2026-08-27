@@ -10,7 +10,7 @@ encoded identically however the table is numbered.
 *Information-set correct.* Only what the perspective player may legally know is
 encoded. Own hand and own development cards are exact; opponents contribute
 counts alone. Nothing downstream can accidentally read a hidden card, which is
-the gap the published Catan agents leave open.
+the gap the published agents for this game leave open.
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 """PUCT over a learned policy and value, with the leaves evaluated in batches.
 
 The shape of this module is decided by one measurement, the same one that
-decided `catan.selfplay`: a forward costs a ~1.5 ms fixed dispatch toll plus
+decided `hexset_ui.selfplay`: a forward costs a ~1.5 ms fixed dispatch toll plus
 ~25 µs per position, so a search that evaluated one leaf per call would spend
 essentially all of its time in dispatch. A hundred leaves evaluated singly cost
 1.25 seconds; batched they cost about fifteen milliseconds. **Leaves are
@@ -9,7 +9,7 @@ therefore gathered into waves and handed to the evaluator together**, which is
 what virtual loss is for — without it every simulation in a wave picks the same
 path and the wave is worth one simulation.
 
-This is deliberately not `catan.bots.SearchBot` with a network evaluator. That
+This is deliberately not `hexset_ui.bots.SearchBot` with a network evaluator. That
 combination exists (`netsearch:<path>`) and it is the thing this replaces: it
 evaluates one leaf at a time, and it lost to the handcrafted `search2` 13.3% to
 86.7%. Two separate problems are tangled there — batching and the value head's
@@ -21,7 +21,7 @@ measured in this project rather than imported from a paper:
 **Per-seat vectors and a stance, not a scalar and a sign flip.** Four seats with
 non-opposed fortunes need max^n, so a node backs up the whole vector and each
 node maximises its own mover's reading of it. How a seat reads the vector is
-`catan.bots.STANCES`, unchanged: `relative` — own less the mean of the others —
+`hexset_ui.bots.STANCES`, unchanged: `relative` — own less the mean of the others —
 beat plain max^n 53.6% over 2000 games on this engine. The literature's
 alternative here is CatAnalysis's κ=0.8 damping at another seat's node; it is
 not used, because the stance was measured on this codebase and κ was not.
@@ -38,7 +38,7 @@ engine per ply against ~25 µs for a batched network evaluation, so a path of an
 depth would cost more to walk than to evaluate.
 
 **Terminal nodes are not evaluated.** A finished game has a known value, and it
-is `catan.rewards.relative_points` — the same quantity the value head is trained
+is `hexset_ui.rewards.relative_points` — the same quantity the value head is trained
 to predict, so the two are on one scale and a backup can mix them.
 """
 
@@ -135,7 +135,7 @@ def _paranoid_rows(vectors: np.ndarray, seat: int) -> np.ndarray:
     return vectors[:, seat] - np.delete(vectors, seat, axis=1).max(axis=1)
 
 
-# `catan.bots.STANCES` read one vector at a time, which `_select` needs to do for
+# `hexset_ui.bots.STANCES` read one vector at a time, which `_select` needs to do for
 # every child of every node it passes through — 300k scalar calls in a 400-move
 # game at 64 simulations, and 12% of the whole search. These read the whole
 # `totals` matrix at once and are pinned to the canonical scalar forms by test.

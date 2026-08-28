@@ -603,10 +603,12 @@ def main(argv: list[str] | None = None) -> int:
     # Not head_shape's 8. See the module docstring: at 8 the MSE arm is still
     # descending, the quantile arm is not, and the gate reads the difference.
     parser.add_argument("--epochs", type=int, default=60)
+    # 10 is the window the recorded A2 verdict was taken with; a default
+    # invocation must compute the same statistic as the one on record.
     parser.add_argument(
         "--plateau-window",
         type=int,
-        default=5,
+        default=10,
         help="epochs of training loss the reported plateau statistic looks back over",
     )
     parser.add_argument("--minibatch", type=int, default=1024)

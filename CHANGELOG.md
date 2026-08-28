@@ -7,6 +7,31 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `benchmarks.duel` records the seat geometry of every verdict. A 2v2 can seat
+  each copy beside its twin (`[a, a, b, b]`, **blocked**) or between two
+  opponents (`[a, b, a, b]`, **interleaved**), and until now the worker count
+  chose silently: `--workers 1` plays through `collect.alternating`, which is
+  interleaved, and `--workers >1` hardcoded the blocked lineup. On identical
+  boards and dice the seating alone moves `lam095-805` vs `ppo4-585` from
+  +0.08 to +0.43 VP, replicated at two seeds. Every verdict now carries a
+  `geometry` field, and the resolved geometry is printed beside the resolved
+  worker count.
+- `--geometry {blocked,interleaved}` on the arena path. The default is
+  `blocked`, so a default invocation reproduces every recorded arena verdict
+  bit for bit; `interleaved` seats `[a, b, a, b]` with side A on slots
+  `[0, 2]`, the lineup the seat-geometry probe used. `sides()` labels the two
+  sides by slot rather than by position, so either lineup pools correctly. The
+  versus path can only seat interleaved and refuses `--geometry blocked`
+  rather than playing one seating under the other's name.
+
+### Changed
+
+- `benchmarks.duel` imports `catan.collect` and `catan.train` where they are
+  used, so the module -- and its lineup and arena-path tests -- load on a box
+  without torch.
+
 ## [0.12.0] - 2026-08-28
 
 ### Added

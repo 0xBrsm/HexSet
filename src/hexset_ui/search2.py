@@ -1,15 +1,33 @@
+"""The handcrafted opponent, whole: a position evaluation and the max^n search
+that reads it.
+
+This is the one bot that needs no checkpoint, which is why it exists — a fresh
+clone with an empty `models/` still has something to play against. It learns
+nothing and loads nothing; every number in it was fitted once and written down
+here.
+
+Self-contained on purpose. A learned opponent lives entirely behind
+`hexset_ui.onnxbot`, and the two share only the engine and the small bot
+primitives in `hexset_ui.bots`, so neither can quietly acquire a dependency on
+how the other works.
+"""
+
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+import random
+from dataclasses import dataclass, field, fields
 from typing import NamedTuple
 
+from .actions import Action, ActionType, apply, legal_actions, within_offer_budget
 from .board.board import Board, pips, scarce_resources
 from .board.ports import BASE_TRADE_RATIO
 from .board.terrain import NUM_RESOURCES, TERRAIN_RESOURCE
+from .bots import STANCES, options_for
 from .economy import COSTS, Purchase
-from .game import Game
+from .game import ROLL_ODDS, Game, imagine, is_over, roll_dice, to_move
 from .robber import DISCARD_THRESHOLD
 from .state import GameState
+from .trading import Offer, execute as execute_trade, responders
 from .victory import WINNING_POINTS, award_points, card_points
 
 ROLLS = 36
@@ -80,7 +98,7 @@ class Weights:
     # exchange rate, and it won anyway: 51.62% [50.75, 52.48] over 12,800 games
     # against the same evaluation without it.
     #
-    # Every arena number recorded before 2026-08-15 was measured with this at
+    # Every duel result recorded before 2026-08-15 was measured with this at
     # zero, so it moved the baseline for all of them.
     scarce: float = 0.1786
     progress: float = 0.01843
@@ -94,7 +112,7 @@ class Weights:
 TERM_NAMES: tuple[str, ...] = tuple(f.name for f in fields(Weights))
 
 # The corpus's scarcity weight in this evaluation's units: 0.91 pips, as fitted
-# in `hexset_ui.placement`, at `production / ROLLS` victory points per pip. Derived
+# against the human opening corpus, at `production / ROLLS` victory points per pip. Derived
 # rather than typed so it follows a refit of `production` instead of silently
 # meaning something else afterwards.
 CORPUS_SCARCE: float = 0.91 * Weights.production / ROLLS
@@ -259,3 +277,183 @@ class Evaluator:
         return [
             self.score(state, p, knower=knower) for p in range(state.num_players)
         ]
+
+
+@dataclass
+class SearchBot:
+    """Max^n search over the handcrafted evaluation.
+
+    `depth` counts decisions, not turns. A HexSet turn contains many actions, so
+    depth two plans a pair of the mover's own actions rather than reaching an
+    opponent; passing the turn is itself one of the actions searched.
+
+    Each seat maximises its own component of the evaluation vector, which is
+    max^n rather than minimax — with more than two players there is no single
+    opponent to minimise, and assuming everyone ganged up on the mover would
+    model the table badly.
+
+    A roll is a chance node expanded over all eleven outcomes and weighted by
+    probability rather than sampled, so the value is not noisy. `width` beams
+    the branching, since the main phase can offer sixty-odd actions.
+
+    `stance` is how a seat reads the per-seat vector — see `STANCES`. Every
+    seat in the tree reads it the same way, so a relative stance models a table
+    that all thinks relatively, not one bot that has noticed something. It
+    defaults to `relative`, which beat plain max^n 53.6% over 2000 games: the
+    baseline exists to be beaten, so it should be the best one available.
+    """
+
+    evaluator: Evaluator
+    depth: int = 2
+    width: int | None = 6
+    rng: random.Random = field(default_factory=random.Random)
+    stance: str = "relative"
+    partner_choice: bool = False
+    # How many offers this bot will propose in a turn, below whatever the engine
+    # allows. `None` spends the engine's whole budget. Kept here rather than in
+    # the engine because a cap every seat receives cannot be duelled against
+    # itself: only a bot that declines an action its opponent still has can say
+    # what the action was worth.
+    max_offers: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.stance not in STANCES:
+            raise ValueError(f"unknown stance: {self.stance}")
+        self._rank = STANCES[self.stance]
+        # A leaf evaluation that wants the whole `Game` rather than the state
+        # says so by offering `evaluate_game`. The learned one does, because the
+        # encoder reads the phase, the turn count and the free-road counter, and
+        # none of those are on `GameState`. The handcrafted evaluations need
+        # only the state and keep the cheaper call — this is resolved once here
+        # rather than tested at every leaf.
+        self._leaf = getattr(self.evaluator, "evaluate_game", None) or self._from_state
+
+    def _from_state(self, game: Game, seat: int) -> list[float]:
+        return self.evaluator.evaluate(game.state, seat)
+
+    def choose(self, game: Game) -> Action:
+        options = within_offer_budget(game, options_for(game), self.max_offers)
+        if len(options) == 1:
+            return self._addressed(game, options[0], to_move(game))
+        # Only the seat to move may count its own hidden cards, and it stays the
+        # perspective for the whole search: deeper nodes are still this seat's
+        # reasoning about the game, not somebody else's.
+        seat = to_move(game)
+        candidates = self._beam(game, options, seat, seat)
+        best = max(
+            candidates,
+            key=lambda a: self._rank(self._after(game, a, self.depth, seat), seat),
+        )
+        return self._addressed(game, best, seat)
+
+    def _addressed(self, game: Game, action: Action, seat: int) -> Action:
+        """Name who the proposer would rather have take the offer, best first.
+
+        Only worth computing when more than one player could cover it. The
+        search valued the offer under the engine's neutral order, so ordering it
+        afterwards can only improve on what was searched, never contradict it.
+        """
+        if not self.partner_choice or action.type is not ActionType.PROPOSE_TRADE:
+            return action
+        offer = Offer(proposer=seat, give=action.give, want=action.want)
+        willing = responders(game.state, offer)
+        if len(willing) < 2:
+            return action
+
+        def value(responder: int) -> float:
+            child = imagine(game, self.rng)
+            execute_trade(child.state, offer, responder)
+            return self._rank(self._leaf(child, seat), seat)
+
+        return action._replace(ask=tuple(sorted(willing, key=value, reverse=True)))
+
+    def _beam(
+        self, game: Game, options: list[Action], mover: int, knower: int
+    ) -> list[Action]:
+        if self.width is None or len(options) <= self.width:
+            return options
+        ranked = sorted(
+            options,
+            key=lambda a: -self._rank(self._after(game, a, 1, knower), mover),
+        )
+        return ranked[: self.width]
+
+    def _after(self, game: Game, action: Action, depth: int, knower: int) -> list[float]:
+        """Value of the position `action` leads to, with `depth - 1` plies left."""
+        if action.type is ActionType.ROLL:
+            return self._over_dice(game, depth, knower)
+        child = imagine(game, self.rng)
+        apply(child, action)
+        return self._value(child, depth - 1, knower)
+
+    def _over_dice(self, game: Game, depth: int, knower: int) -> list[float]:
+        total = [0.0] * game.state.num_players
+        for roll, weight in ROLL_ODDS:
+            child = imagine(game, self.rng)
+            roll_dice(child, roll)
+            for p, value in enumerate(self._value(child, depth - 1, knower)):
+                total[p] += weight * value
+        return total
+
+    def _value(self, game: Game, depth: int, knower: int) -> list[float]:
+        if depth <= 0 or is_over(game):
+            return self._leaf(game, knower)
+        options = legal_actions(game)
+        if not options:
+            return self._leaf(game, knower)
+
+        mover = to_move(game)
+        best: list[float] | None = None
+        best_rank = 0.0
+        for action in self._beam(game, options, mover, knower):
+            vector = self._after(game, action, depth, knower)
+            rank = self._rank(vector, mover)
+            if best is None or rank > best_rank:
+                best, best_rank = vector, rank
+        assert best is not None
+        return best
+
+
+def greedy(
+    evaluator: Evaluator,
+    rng: random.Random | None = None,
+    stance: str = "relative",
+    partner_choice: bool = False,
+    max_offers: int | None = None,
+) -> SearchBot:
+    """One ply: take the action with the best position after it.
+
+    Cheap enough to run tens of thousands of games, and the reference the deeper
+    search has to beat before depth is worth paying for.
+    """
+    return SearchBot(
+        evaluator,
+        depth=1,
+        width=None,
+        rng=rng or random.Random(),
+        stance=stance,
+        partner_choice=partner_choice,
+        max_offers=max_offers,
+    )
+
+
+def search2(
+    board: Board,
+    rng: random.Random | None = None,
+    *,
+    max_offers: int | None = None,
+) -> SearchBot:
+    """The handcrafted opponent the picker offers by name.
+
+    Depth two over the fitted evaluation, read relatively. These were the
+    settings that won, and they are fixed here rather than exposed: this is
+    meant to be one known opponent, not a family of them.
+    """
+    return SearchBot(
+        Evaluator(board),
+        depth=2,
+        width=6,
+        rng=rng or random.Random(),
+        stance="relative",
+        max_offers=max_offers,
+    )

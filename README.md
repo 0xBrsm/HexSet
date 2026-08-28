@@ -6,6 +6,8 @@ The rules implemented here are those of the classic hex-tile trading game publis
 
 This repo is the UI half. It carries a one-time copy of the torch-free engine modules it needs to run a game and serve the board, taken from the separate training repo that remains the repo of record for the engine, the training pipeline and everything else; it does not track that repo's ongoing engine changes automatically.
 
+What it deliberately does *not* carry is the training pipeline — no self-play collector, no tournament harness, no reward shaping. The game rules live here because you cannot play without them. Everything that knows a neural network exists lives behind `src/hexset_ui/onnxbot.py`, and the rest of the package talks to a bot through one method: `choose(game) -> Action`.
+
 ## Running it
 
 Locally:
@@ -38,9 +40,29 @@ python -m export_onnx --checkpoint runs/some-run/latest.pt --out latest.onnx
 
 Copy the resulting file into this repo's `models/` directory.
 
+### A checkpoint configures itself
+
+How an opponent plays is declared in the `.onnx` file, not here. `export_onnx` writes ONNX `metadata_props`, and `src/hexset_ui/modelmeta.py` reads them:
+
+| key | meaning | default |
+| --- | --- | --- |
+| `players` | table size the graph was traced for | required |
+| `num_hexes` / `num_vertices` / `num_edges` | board-shape fingerprint, so a mismatched board fails loudly | required |
+| `max_offers` | trade-offer budget the run trained under | engine's cap |
+| `search` | `mcts` to search over the model's own priors; anything else plays one forward pass | none |
+| `simulations` | descents per decision, when `search=mcts` | 128 |
+| `wave` | leaves batched per expansion, when `search=mcts` | 16 |
+
+So a checkpoint exported with `search=mcts` and `simulations=256` is just `mcts256.onnx` in `models/` — there is no spec grammar and no flag. `simulations` and `wave` are clamped on read (`models/` is a drop directory and a bot is built inside a request, so a file asking for ten million simulations would hang the seat rather than play it).
+
+Inference device is **not** read from metadata — it's a property of the host, not the checkpoint, so it stays on `--device`.
+
 ## Layout
 
-- `src/hexset_ui/` — the game engine (torch-free, copied from the training repo) plus `webserver.py`/`webplay.py` (the HTTP server and session logic) and `onnxbot.py` (ONNX Runtime inference, this repo's own).
+- `src/hexset_ui/` — the game engine (torch-free, copied from the training repo) plus `webserver.py`/`webplay.py` (the HTTP server and session logic).
+- `src/hexset_ui/onnxbot.py` — the entire model boundary: encoding, action-space indexing, masking, sampling, and search all live behind it, and `spawn(path, board)` is the only entry point anything else uses. `mcts.py`, `encoding.py` and `modelmeta.py` are imported by this module and nothing else.
+- `src/hexset_ui/search2.py` — the handcrafted opponent, whole: its fitted evaluation and the max^n search that reads it. Needs no checkpoint, which is why an empty `models/` still gives you something to play.
+- `src/hexset_ui/bots.py` — the ~60 lines the two have in common: what a `Bot` is, how to ask the engine for legal options, and how a seat reads a per-seat vector.
 - `src/hexset_ui/web/index.html` — the entire frontend: inline CSS, inline SVG icons, vanilla JS. No build step.
 - `models/` — drop `.onnx` files here.
 - `games/` — where every game is journalled: one JSON lines file per game, written as it is played, with nothing hidden (the dice, the deck order, every card drawn or stolen, every seat's hand after every action — see `src/hexset_ui/journal.py`). On by default; `HEXSET_UI_GAMES_DIR` moves it, and setting that empty turns it off.

@@ -23,7 +23,6 @@ from dataclasses import asdict, dataclass
 from typing import Iterable, Iterator, Sequence
 
 from .actions import Action, ActionType, apply, is_legal, legal_actions
-from .arena import MAX_ACTIONS
 from .board.board import Board, make_board
 from .board.coords import Hex
 from .board.ports import Port
@@ -31,6 +30,7 @@ from .board.terrain import Resource, Terrain
 from .board.topology import build as build_topology
 from .bots import Bot
 from .game import Game, is_over, start, to_move
+from .play import MAX_ACTIONS
 
 
 class ReplayError(RuntimeError):

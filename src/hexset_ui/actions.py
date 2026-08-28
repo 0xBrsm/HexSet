@@ -403,9 +403,9 @@ def within_offer_budget(
     everyone receives. Three offers a turn cost about 0.1 victory points and cut
     a game from 2225 actions to 950, which is why a training run wants one.
 
-    Shared by `bots.SearchBot` and `selfplay.Collector` because the two must
-    agree. If a policy trained under one budget were evaluated under another,
-    the horizon the training assumed would be quietly wrong.
+    Shared by every bot because they must agree. If a policy trained under one
+    budget were played under another, the horizon the training assumed would be
+    quietly wrong — which is why a checkpoint carries its own budget.
     """
     if budget is None or game.offers_made < budget:
         return list(options)

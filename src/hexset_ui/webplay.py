@@ -63,9 +63,9 @@ DEV_CARD_NAMES: tuple[str, ...] = tuple(c.name.title().replace("_", " ") for c i
 
 # A cascade of bot moves between two human decisions is bounded so a runaway
 # bot (or an engine bug that never hands the turn back) surfaces as an error
-# rather than a request that never returns. Arena duels cap a whole game's
-# actions at 20000 (`hexset_ui.arena.MAX_ACTIONS`); one cascade is at most a few
-# players' worth of a turn, so a far smaller number is already generous.
+# rather than a request that never returns. A whole game's actions cap at 20000
+# (`hexset_ui.play.MAX_ACTIONS`); one cascade is at most a few players' worth of
+# a turn, so a far smaller number is already generous.
 MAX_CASCADE_STEPS = 2000
 
 

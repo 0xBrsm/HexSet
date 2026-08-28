@@ -11,6 +11,16 @@ class Stuck(RuntimeError):
     """Raised when a live game offers no legal action, which is always a bug."""
 
 
+# The engine caps turns, but nothing caps actions within a turn, so a policy
+# that liked trading in circles would never reach the turn cap. A game that
+# trips this is a bug worth seeing, not a result worth counting.
+#
+# Raised once trading landed: negotiating costs an action per offer and one per
+# response, so a random four-player game went from about 1400 actions to 3400,
+# and 5000 had stopped being a guard and started being a limit.
+MAX_ACTIONS = 20000
+
+
 def step_randomly(game: Game, rng: random.Random) -> Action:
     options = legal_actions(game)
     if not options:

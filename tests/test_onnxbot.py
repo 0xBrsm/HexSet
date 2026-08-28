@@ -8,7 +8,6 @@ import pytest
 pytest.importorskip("onnxruntime", reason="hexset_ui.onnxbot needs onnxruntime installed")
 
 from hexset_ui.actions import legal_actions, within_offer_budget  # noqa: E402
-from hexset_ui.arena import Entrant, compete, spawn  # noqa: E402
 from hexset_ui.board.board import random_base_board  # noqa: E402
 from hexset_ui.game import start, to_move  # noqa: E402
 from hexset_ui.onnxbot import load, network_bot  # noqa: E402
@@ -100,19 +99,6 @@ def test_the_budget_is_honoured_exactly_as_the_search_bot_honours_it(checkpoint)
         apply(game, action)
 
 
-def test_a_network_entrant_can_play_a_whole_tournament(checkpoint):
-    path, board = checkpoint
-    lineup = [
-        Entrant("network", kind="network", weights=path),
-        Entrant("network2", kind="network", weights=path),
-        Entrant("random", kind="random"),
-        Entrant("random2", kind="random"),
-    ]
-    result = compete(lineup, 4, seed=1, action_cap=2000)
-    assert result.games == 4
-    assert sum(s.wins for s in result.standings) + result.unfinished == 4
-
-
 def test_a_checkpoint_refuses_a_table_it_was_not_trained_for(checkpoint):
     path, _ = checkpoint
     board3 = random_base_board(random.Random(0))
@@ -187,7 +173,11 @@ def test_the_prior_covers_every_offer_rather_than_one_arbitrary_one(checkpoint):
     assert all(w > 0 for w in weights)
 
 
-def test_a_network_entrant_needs_a_path_rather_than_weights():
-    board = random_base_board(random.Random(0))
-    with pytest.raises(ValueError, match="checkpoint path"):
-        spawn(Entrant("bogus", kind="network", weights=[1.0]), board, random.Random(0))
+def test_a_plain_checkpoint_spawns_a_single_forward_bot(checkpoint):
+    """`spawn` is the only entry point the rest of the package uses, and what
+    it hands back is the checkpoint's own business — here, no search, because
+    `tiny.onnx` asks for none."""
+    from hexset_ui.onnxbot import NetworkBot, spawn
+
+    path, board = checkpoint
+    assert isinstance(spawn(path, board, rng=random.Random(0)), NetworkBot)

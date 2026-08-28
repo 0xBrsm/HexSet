@@ -31,8 +31,12 @@ Run it with (from `src/`)::
 then open the printed URL. Opponents come from `model_options()`: `search2`
 (handcrafted, no checkpoint needed) plus one entry per `*.onnx` file found in
 `HEXSET_UI_MODELS_DIR` (default: `<repo root>/models`) — drop a file in, it
-shows up in the picker, no restart, no code change. Pass `--checkpoint <spec>`
-to seat 3 copies of one entrant instead of the per-seat default lineup.
+shows up in the picker, no restart, no code change. Pass `--checkpoint <name>`
+to seat 3 copies of one opponent instead of the per-seat default lineup.
+
+How a checkpoint plays — a single forward pass or a search over its own
+priors, and with what budget — is declared in the file's own metadata and read
+by `hexset_ui.onnxbot`. Nothing here knows the difference.
 """
 
 from __future__ import annotations
@@ -57,7 +61,12 @@ from . import journal
 from .actions import Action
 from .board.board import Board, random_base_board
 from .game import Game, is_over, start, to_move
+from .search2 import search2
 from .webplay import Bot, GameSession, ResumeError, board_layout
+
+# The one opponent that is not a file. Everything else in the picker is a path
+# to a checkpoint, and what it does is the checkpoint's business.
+HANDCRAFTED = "search2"
 
 STATIC_DIR = Path(__file__).resolve().parent / "web"
 INDEX_HTML = STATIC_DIR / "index.html"
@@ -94,9 +103,9 @@ def model_options() -> dict[str, str]:
     function existing (over the static dict it replaced) is that dropping a
     file in shows up without a restart.
     """
-    options = {"search2": "search2"}
+    options = {HANDCRAFTED: HANDCRAFTED}
     for path in sorted(MODELS_DIR.glob("*.onnx")):
-        options[path.stem] = f"network:{path}"
+        options[path.stem] = str(path)
     return options
 
 
@@ -474,43 +483,20 @@ def _resolve_bot_models(names: list[str]) -> list[tuple[str, str]]:
 def _spawn_bot(
     spec: str, board, rng: random.Random, device: str, max_offers: int | None
 ) -> Bot:
-    """One entrant spec (see `model_options()`) as a live bot on `board`.
+    """One spec (see `model_options()`) as a live bot on `board`.
 
-    Routes `network:`/`mcts:` checkpoints through here rather than through
-    `hexset_ui.arena.spawn` so `--device` reaches them — `arena.spawn` always
-    loads a checkpoint onto its default provider, which is fine for a
-    benchmark process pool and wrong for one interactive run wanting a GPU
-    execution provider if one's available. Everything else (`search2`,
-    `greedy`, ...) is handcrafted and device-free, so it goes through
-    `arena.spawn` unchanged.
+    Two cases, and no third: `search2` is the handcrafted opponent, and
+    anything else is a path to a checkpoint. How a checkpoint wants to be
+    played — a single forward pass, or a search over its own priors, and with
+    what budget — is read out of the file itself by `onnxbot.spawn`, so this
+    function never learns what a simulation is.
     """
-    from dataclasses import replace
+    if spec == HANDCRAFTED:
+        return search2(board, rng, max_offers=max_offers)
 
-    from .arena import entrant_from_name, spawn
+    from .onnxbot import spawn  # onnxruntime-free import boundary
 
-    entrant = entrant_from_name(spec)
-    if max_offers is not None:
-        entrant = replace(entrant, max_offers=max_offers)
-
-    if entrant.kind == "network":
-        from .onnxbot import network_bot  # onnxruntime-free import boundary
-
-        assert isinstance(entrant.weights, str)
-        return network_bot(entrant.weights, board, max_offers=entrant.max_offers, device=device)
-    if entrant.kind == "mcts":
-        from .onnxbot import searcher  # onnxruntime-free import boundary
-
-        assert isinstance(entrant.weights, str)
-        return searcher(
-            entrant.weights,
-            board,
-            simulations=entrant.simulations,
-            wave=entrant.wave,
-            max_offers=entrant.max_offers,
-            device=device,
-            rng=rng,
-        )
-    return spawn(entrant, board, rng)
+    return spawn(spec, board, rng=rng, device=device, max_offers=max_offers)
 
 
 def _build_session(
@@ -649,11 +635,11 @@ def main(argv: list[str] | None = None) -> None:
         "--checkpoint",
         default=None,
         help=(
-            "An entrant spec (see model_options() — a .onnx path, "
-            "'search2', or 'mcts:<path>@<sims>'), used for all 3 bot seats "
-            "until the web picker (GET /api/models, POST /api/new) overrides "
-            "it. Defaults to search2 plus one of each .onnx file found in "
-            "the models directory, rather than 3 copies of one bot."
+            "An opponent (see model_options() — 'search2' or a .onnx path), "
+            "used for all 3 bot seats until the web picker (GET /api/models, "
+            "POST /api/new) overrides it. Defaults to search2 plus one of each "
+            ".onnx file found in the models directory, rather than 3 copies of "
+            "one bot."
         ),
     )
     parser.add_argument("--host", default="127.0.0.1")

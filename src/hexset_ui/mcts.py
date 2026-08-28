@@ -1,19 +1,19 @@
 """PUCT over a learned policy and value, with the leaves evaluated in batches.
 
-The shape of this module is decided by one measurement, the same one that
-decided `hexset_ui.selfplay`: a forward costs a ~1.5 ms fixed dispatch toll plus
-~25 µs per position, so a search that evaluated one leaf per call would spend
+The shape of this module is decided by one measurement: a forward costs a
+~1.5 ms fixed dispatch toll plus ~25 µs per position, so a search that
+evaluated one leaf per call would spend
 essentially all of its time in dispatch. A hundred leaves evaluated singly cost
 1.25 seconds; batched they cost about fifteen milliseconds. **Leaves are
 therefore gathered into waves and handed to the evaluator together**, which is
 what virtual loss is for — without it every simulation in a wave picks the same
 path and the wave is worth one simulation.
 
-This is deliberately not `hexset_ui.bots.SearchBot` with a network evaluator. That
-combination exists (`netsearch:<path>`) and it is the thing this replaces: it
-evaluates one leaf at a time, and it lost to the handcrafted `search2` 13.3% to
-86.7%. Two separate problems are tangled there — batching and the value head's
-accuracy off-policy — and only the first is addressed here.
+This is deliberately not `hexset_ui.search2`'s `SearchBot` with a network
+evaluator. That combination is the thing this replaces: it evaluates one leaf
+at a time, and it lost to the handcrafted `search2` 13.3% to 86.7%. Two
+separate problems are tangled there — batching and the value head's accuracy
+off-policy — and only the first is addressed here.
 
 Four places this departs from the Go setting, each for a reason already
 measured in this project rather than imported from a paper:
@@ -38,8 +38,8 @@ engine per ply against ~25 µs for a batched network evaluation, so a path of an
 depth would cost more to walk than to evaluate.
 
 **Terminal nodes are not evaluated.** A finished game has a known value, and it
-is `hexset_ui.rewards.relative_points` — the same quantity the value head is trained
-to predict, so the two are on one scale and a backup can mix them.
+is `relative_points` below — the same quantity the value head is trained to
+predict, so the two are on one scale and a backup can mix them.
 """
 
 from __future__ import annotations
@@ -54,8 +54,7 @@ import numpy as np
 from .actions import Action, ActionType, apply, legal_actions, within_offer_budget
 from .bots import STANCES
 from .game import ROLL_ODDS, Game, imagine, is_over, roll_dice, to_move
-from .rewards import relative_points
-from .victory import victory_points
+from .victory import WINNING_POINTS, victory_points
 
 
 @dataclass(frozen=True)
@@ -151,6 +150,27 @@ STANCE_ROWS = {
     "relative": _relative_rows,
     "paranoid": _paranoid_rows,
 }
+
+
+def relative_points(points: tuple[int, ...]) -> tuple[float, ...]:
+    """Each seat's terminal points less the mean of the others, over 10.
+
+    Exactly zero-sum: the per-seat values sum to zero for any input, since
+    subtracting the mean of the others is an affine transform whose total
+    cancels. That says in the value what the game already says — HexSet has one
+    winner, so a position is only worth what it is worth compared to the table,
+    and a move that lifts every seat equally earns nothing.
+
+    Scaled by the 10 points that win a game, so a seat lands in about [-1, +1]
+    and the value head does not have to learn the units.
+    """
+    seats = len(points)
+    if seats < 2:
+        raise ValueError("a relative reward needs at least two seats")
+    total = sum(points)
+    return tuple(
+        (own - (total - own) / (seats - 1)) / WINNING_POINTS for own in points
+    )
 
 
 def _relative(game: Game) -> tuple[float, ...]:

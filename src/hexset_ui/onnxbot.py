@@ -1,33 +1,31 @@
-"""A dropped-in ONNX checkpoint as a `hexset_ui.bots.Bot`, so the web demo (and
-`hexset_ui.arena`) can seat it the same way `hexset_ui.netbot` seats a PyTorch one —
-this is the whole reason hexset-ui doesn't need PyTorch installed at all.
+"""A dropped-in ONNX checkpoint as a `hexset_ui.bots.Bot`.
 
-Mirrors `hexset_ui.netbot`'s shape closely on purpose: `NetworkBot`,
-`NetworkEvaluator`, and `LeafEvaluator` are the same adapters (a policy's
-`.act`/`.values`/`.score`/`.trade_slot` turned into a `hexset_ui.bots.Bot` or a
-`hexset_ui.mcts.Search` leaf evaluator) — they only ever call methods on
-`self.policy`, never construct or inspect a network directly, so porting
-them here is a type-hint change, not a logic change. What's actually new is
-`OnnxPolicy`: an onnxruntime `InferenceSession` behind the same four-member
-interface `hexset_ui.policy.NetworkPolicy` exposes there, with the masking and
-sampling math (masked log-softmax, argmax, the give/want pair distribution)
-reimplemented in numpy — mechanical, since none of it has learned
-parameters; only the network's forward pass itself needs a device to run
-on, and onnxruntime is that device now.
+This module is the whole boundary between the game and a model. Everything
+that knows a network exists — the observation encoding, the flat action
+space, masking, sampling, the give/want pair distribution, and how a
+checkpoint wants to be played — lives behind here. The rest of the package
+hands over a `Game` and gets an `Action` back, and `spawn` below is the only
+entry point it needs.
 
-The ONNX graph itself is intentionally "observation in, raw logits/give/
-want/value out" — see the upstream training repo's `export_onnx`, which
-produces it.
-No masking, no sampling, no legal-action awareness is baked into the graph:
-a request's mask changes every position and has nothing to do with the
-network, so it stays out here in Python, same as it always has.
+`NetworkBot`, `NetworkEvaluator` and `LeafEvaluator` are thin adapters over
+`OnnxPolicy`; they only ever call methods on `self.policy` and never inspect
+a network directly. `OnnxPolicy` is an onnxruntime `InferenceSession` with
+the masking and sampling math in numpy — mechanical, since none of it has
+learned parameters.
+
+The ONNX graph is currently "observation in, raw logits/give/want/value out"
+— see the training repo's `export_onnx`, which produces it. Masking stays in
+Python because a position's legal moves are a fact about the rules, not
+about the network, and only the engine can compute them.
 """
 
 from __future__ import annotations
 
 import os
+import random
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import Sequence
 
 import numpy as np
 import onnxruntime as ort
@@ -36,10 +34,10 @@ from .actions import Action, ActionSpace, ActionType, build_space, within_offer_
 from .board.terrain import NUM_RESOURCES
 from .board.topology import Topology
 from .bots import options_for
-from .encoding import encode
+from .encoding import Observation, encode
 from .game import Game, to_move
 from .mcts import Search
-from .selfplay import Choice, Request, action_mask
+from .modelmeta import SearchConfig, search_config
 
 # The off-diagonal (give, want) pairs, flattened as `give * NUM_RESOURCES +
 # want`. The diagonal is never legal — `legal_actions` skips `wanted ==
@@ -53,6 +51,34 @@ _OFF_DIAGONAL = ~np.eye(NUM_RESOURCES, dtype=bool).reshape(NUM_PAIRS)
 # produces a diagnosable uniform distribution instead of NaN — same
 # reasoning as `hexset_ui.policy`'s own NEG.
 NEG = -1e9
+
+
+@dataclass(frozen=True)
+class Request:
+    """One position put to the network.
+
+    `options` rides along with `mask` because the two are not interchangeable:
+    an offer is ten numbers, so `PROPOSE_TRADE` occupies one slot in the flat
+    space and its bundles cannot be recovered from an index. Choosing that slot
+    still leaves the offer itself to name.
+
+    `seat` is `to_move`, which is not always `current_player` — discarding on a
+    seven and answering an offer belong to somebody else — and it is the
+    perspective `observation` was encoded from.
+    """
+
+    seat: int
+    observation: Observation
+    mask: np.ndarray
+    options: tuple[Action, ...]
+
+
+def action_mask(space: ActionSpace, options: Sequence[Action]) -> np.ndarray:
+    """Mark already-enumerated actions without enumerating them again."""
+    mask = np.zeros(space.size, dtype=bool)
+    for action in options:
+        mask[space.index(action)] = True
+    return mask
 
 
 def _check_players(game: Game, players: int) -> None:
@@ -169,7 +195,8 @@ class OnnxPolicy:
         )
         return slots, offers
 
-    def act(self, requests) -> list[Choice]:
+    def act(self, requests: Sequence[Request]) -> list[Action]:
+        """One action per request, in order."""
         if not requests:
             return []
 
@@ -183,25 +210,17 @@ class OnnxPolicy:
         out = []
         for row in range(len(requests)):
             index = int(chosen[row])
-            action = self.space.decode(index)
-            log_prob = float(slot_log_probs[row, index])
-            aux = pairs[row]
             if index == self.trade_slot:
                 slot = int(offer[row])
-                log_prob += float(offer_log_probs[row, slot])
-                action = Action(
-                    ActionType.PROPOSE_TRADE,
-                    give=_one_hot(slot // NUM_RESOURCES),
-                    want=_one_hot(slot % NUM_RESOURCES),
+                out.append(
+                    Action(
+                        ActionType.PROPOSE_TRADE,
+                        give=_one_hot(slot // NUM_RESOURCES),
+                        want=_one_hot(slot % NUM_RESOURCES),
+                    )
                 )
-            out.append(
-                Choice(
-                    action=action,
-                    log_prob=log_prob,
-                    value=tuple(prediction["value"][row].tolist()),
-                    aux=aux,
-                )
-            )
+            else:
+                out.append(self.space.decode(index))
         return out
 
     def values(self, observations) -> np.ndarray:
@@ -227,6 +246,7 @@ class Loaded:
     players: int
     max_offers: int | None
     iteration: int
+    search: SearchConfig = SearchConfig()
 
 
 @lru_cache(maxsize=4)
@@ -262,6 +282,7 @@ def _load_cached(path: str, topology: Topology, device: str, mtime_ns: int) -> L
         players=players,
         max_offers=int(max_offers) if max_offers is not None else None,
         iteration=int(meta.get("iteration", 0)),
+        search=search_config(meta),
     )
 
 
@@ -292,13 +313,12 @@ class NetworkBot:
         seat = to_move(game)
         options = within_offer_budget(game, options_for(game), self.max_offers)
         request = Request(
-            lane=0,
             seat=seat,
             observation=encode(game, seat),
             mask=action_mask(self.space, options),
             options=tuple(options),
         )
-        return self.policy.act([request])[0].action
+        return self.policy.act([request])[0]
 
 
 @dataclass
@@ -409,4 +429,37 @@ def network_bot(
         space=loaded.space,
         players=loaded.players,
         max_offers=loaded.max_offers if max_offers is None else max_offers,
+    )
+
+
+def spawn(
+    path: str,
+    board,
+    *,
+    rng: random.Random | None = None,
+    device: str = "cpu",
+    max_offers: int | None = None,
+):
+    """The checkpoint at `path` as something with `.choose(game) -> Action`.
+
+    The only entry point the rest of the package needs. Whether the file plays
+    a single forward pass or a search over its own priors is the file's own
+    business, declared in its metadata and read here — a caller passes a path
+    and gets a bot, and never learns which it got.
+
+    `device` is deliberately not read from metadata: it is a fact about the
+    machine serving the game, not about the checkpoint, and a model file has no
+    business demanding an accelerator its host may not have.
+    """
+    loaded = load(path, board.topology, device)
+    if not loaded.search.searches:
+        return network_bot(path, board, max_offers=max_offers, device=device)
+    return searcher(
+        path,
+        board,
+        simulations=loaded.search.simulations,
+        wave=loaded.search.wave,
+        max_offers=max_offers,
+        device=device,
+        rng=rng,
     )

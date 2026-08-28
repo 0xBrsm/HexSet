@@ -7,6 +7,34 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-28
+
+### Added
+
+- `benchmarks.human_agreement`: our policy scored against *recorded* decisions,
+  one decision at a time, rather than against an opponent one game at a time.
+  Takes `catan.record.Record`s from any source and reports **top-1 agreement**
+  and **log-loss** at every decision point, each against **its matched null** --
+  uniform over the legal option set *at that position*, so the baseline is
+  `mean(1/n)` and `mean(log n)` and never a global constant derived from the
+  mean option count. The distribution scored is the one a search acts on:
+  `netbot.LeafEvaluator.evaluate` on a `mcts.Leaf`, which is what keeps the
+  trade slot's mass split across the legal offers by the pair distribution
+  instead of being credited whole to one arbitrary offer.
+- Decisions with a single legal action are excluded -- agreement there is 1.0 by
+  construction -- and the excluded count is reported, along with actions the
+  enumerated option set does not contain. `actions._offer_actions` is a sample
+  and not the whole legal set, so a recorded multi-for-one offer, or one the
+  offer budget forbids, is counted per `ActionType` rather than silently scored.
+- Everything is broken down per `ActionType`, per `Phase` and by game progress,
+  because `PROPOSE_TRADE`-family rows dominate an unstratified mean. Each
+  breakdown partitions the decisions and pools back to the aggregate exactly;
+  `summarise` rounds nothing so that identity is exact.
+- Intervals are clustered on the game, not taken over positions. Consecutive
+  decisions in one game differ by a single build, which is the same reason
+  `dataset.split_by_game` exists; the position-level Wilson interval is still
+  reported, labelled as the understatement it is.
+
 ## [0.10.0] - 2026-08-28
 
 ### Added

@@ -5,8 +5,8 @@ this module — the board layout math, the wire-format mapping and the session
 that drives a game — can be imported and tested without PyTorch, the same way
 `hexset_ui.actions` and `hexset_ui.game` can. `hexset_ui.bots.Bot` (anything with a
 `choose(game) -> Action` method) is all a session needs of its opponent; a
-`NetworkBot` from `hexset_ui.netbot` satisfies that, and so does `hexset_ui.bots.RandomBot`,
-which is what the tests use.
+`NetworkBot` from `hexset_ui.onnxbot` satisfies that, and so does
+`hexset_ui.bots.RandomBot`, which is what the tests use.
 
 ## The wire format
 
@@ -63,9 +63,8 @@ DEV_CARD_NAMES: tuple[str, ...] = tuple(c.name.title().replace("_", " ") for c i
 
 # A cascade of bot moves between two human decisions is bounded so a runaway
 # bot (or an engine bug that never hands the turn back) surfaces as an error
-# rather than a request that never returns. A whole game's actions cap at 20000
-# (`hexset_ui.play.MAX_ACTIONS`); one cascade is at most a few players' worth of
-# a turn, so a far smaller number is already generous.
+# rather than a request that never returns. One cascade is at most a few
+# players' worth of a turn, so this is already generous.
 MAX_CASCADE_STEPS = 2000
 
 

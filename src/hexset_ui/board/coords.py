@@ -45,7 +45,3 @@ def hexagon(radius: int) -> list[Hex]:
         for r in range(lo, hi + 1):
             out.append(Hex(q, r, -q - r))
     return sorted(out)
-
-
-def translate(hexes: list[Hex], offset: Hex) -> list[Hex]:
-    return [Hex(h.q + offset.q, h.r + offset.r, h.s + offset.s) for h in hexes]

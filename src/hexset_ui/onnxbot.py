@@ -42,14 +42,14 @@ from .modelmeta import SearchConfig, search_config
 # The off-diagonal (give, want) pairs, flattened as `give * NUM_RESOURCES +
 # want`. The diagonal is never legal — `legal_actions` skips `wanted ==
 # given` — so it is masked out once here rather than checked per offer.
-# Same constant `hexset_ui.policy` defines; redefined rather than imported
-# because `hexset_ui.policy` itself imports torch, which this module must not.
+# Same constant the training repo's policy module defines; redefined rather
+# than shared because that module imports torch, which this one must not.
 NUM_PAIRS = NUM_RESOURCES * NUM_RESOURCES
 _OFF_DIAGONAL = ~np.eye(NUM_RESOURCES, dtype=bool).reshape(NUM_PAIRS)
 
 # Large and finite rather than -inf, so a row whose mask is entirely False
 # produces a diagnosable uniform distribution instead of NaN — same
-# reasoning as `hexset_ui.policy`'s own NEG.
+# reasoning as the training repo's own NEG.
 NEG = -1e9
 
 
@@ -140,14 +140,13 @@ def _providers_for(device: str) -> list[str]:
 
 
 class OnnxPolicy:
-    """An onnxruntime `InferenceSession` behind `hexset_ui.policy.NetworkPolicy`'s
-    four-member interface (`.act`, `.values`, `.score`, `.trade_slot`).
+    """An onnxruntime `InferenceSession` behind the four-member interface the
+    training repo's policy class presents (`.act`, `.values`, `.score`,
+    `.trade_slot`).
 
-    Always greedy: every checkpoint the web demo has ever served plays
-    argmax (`netbot.load` hardcodes `NetworkPolicy(..., greedy=True)`), so
-    there is no behaviour distribution here that anything actually reads.
-    The stochastic path exists anyway, as the honest port of what the
-    interface supports, but it is not the one that runs in practice.
+    Always greedy in practice: every checkpoint served here plays argmax, so
+    there is no behaviour distribution anything actually reads. The stochastic
+    path exists anyway, as the honest port of what the interface supports.
     """
 
     def __init__(
@@ -289,8 +288,7 @@ def _load_cached(path: str, topology: Topology, device: str, mtime_ns: int) -> L
 def load(path: str, topology: Topology, device: str = "cpu") -> Loaded:
     """The checkpoint at `path`, ready to act on boards of this topology.
 
-    Cache key folds in the file's mtime, unlike `netbot.load`'s: the training
-    repo's
+    Cache key folds in the file's mtime, unlike the training repo's loader: its
     `.pt` checkpoints under `runs/` are effectively immutable per-run
     artifacts, but hexset-ui's whole pitch is replacing a file in `models/`
     by name — without the mtime, a same-named replacement would silently

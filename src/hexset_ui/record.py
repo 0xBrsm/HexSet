@@ -1,26 +1,26 @@
-"""Record played games as data that outlives the code that produced them.
+"""A played game as a board plus a sequence of actions, and the replay that
+checks the two still agree.
 
-A record stores the board in full and the actions taken, not encoded features.
-Feature layouts change every time the encoder is touched, and a dataset frozen
-in one of them is worth nothing afterwards; a replayable action sequence can be
-re-encoded however the model wants, as many times as it wants.
+`hexset_ui.journal` is what actually writes games to disk here; this module is
+the shape a journal's contents are checked against. A record stores the board in
+full and the actions taken, never encoded features, so a change to the encoder
+cannot invalidate it.
 
-The board is written out rather than stored as the seed that generated it, for
-the same reason: a seed only reproduces a board for as long as the board
-generator is untouched. Hex coordinates go in too, so a Seafarers layout records
-exactly like the base board.
+The board is written out rather than stored as the seed that generated it: a
+seed only reproduces a board for as long as the board generator is untouched.
+Hex coordinates go in too, so a Seafarers layout records exactly like the base
+board.
 
 Dice and steals are the one thing not stored. They come back from the seeded
 random stream, which means a change to how the engine draws randomness shows up
-as a replay mismatch rather than as quietly wrong training data.
+as a replay mismatch rather than as a game that quietly replays wrong.
 """
 
 from __future__ import annotations
 
-import json
 import random
-from dataclasses import asdict, dataclass
-from typing import Iterable, Iterator, Sequence
+from dataclasses import dataclass
+from typing import Iterator
 
 from .actions import Action, ActionType, apply, is_legal, legal_actions
 from .board.board import Board, make_board
@@ -28,9 +28,7 @@ from .board.coords import Hex
 from .board.ports import Port
 from .board.terrain import Resource, Terrain
 from .board.topology import build as build_topology
-from .bots import Bot
-from .game import Game, is_over, start, to_move
-from .play import MAX_ACTIONS
+from .game import Game, start
 
 
 class ReplayError(RuntimeError):
@@ -94,51 +92,6 @@ def board_of(record: Record) -> Board:
     )
 
 
-def append_step(
-    actions: list[tuple[int, int, int]],
-    offers: list[tuple[int, tuple[int, ...], tuple[int, ...], tuple[int, ...]]],
-    action: Action,
-) -> None:
-    """Append one action's Record-format bookkeeping to `actions`, plus its
-    trade offer to `offers` if it has one. Shared by record_game (bot-only
-    games) and hexset_ui.webplay (human games), so both produce identically
-    shaped Records."""
-    actions.append((int(action.type), action.a, action.b))
-    if action.give or action.want:
-        offers.append(
-            (len(actions) - 1, tuple(action.give), tuple(action.want), tuple(action.ask))
-        )
-
-
-def record_game(
-    bots: Sequence[Bot],
-    board: Board,
-    seed: int,
-    *,
-    action_cap: int = MAX_ACTIONS,
-) -> Record:
-    """Play one game and record it. Each bot is seated at its own index."""
-    game = start(board, len(bots), random.Random(seed))
-    actions: list[tuple[int, int, int]] = []
-    offers: list[
-        tuple[int, tuple[int, ...], tuple[int, ...], tuple[int, ...]]
-    ] = []
-    while not is_over(game) and len(actions) < action_cap:
-        action = bots[to_move(game)].choose(game)
-        apply(game, action)
-        append_step(actions, offers, action)
-
-    return Record(
-        num_players=len(bots),
-        seed=seed,
-        actions=tuple(actions),
-        offers=tuple(offers),
-        winner=game.won_by,
-        turns=game.turns,
-        **board_fields(board),
-    )
-
-
 def actions_of(record: Record) -> Iterator[Action]:
     """The recorded actions, with trade offers put back on the ones that had them.
 
@@ -170,43 +123,3 @@ def replay(record: Record) -> Game:
             f"record says {record.winner} after {record.turns}"
         )
     return game
-
-
-def to_json(record: Record) -> str:
-    return json.dumps(asdict(record), separators=(",", ":"))
-
-
-def from_json(line: str) -> Record:
-    raw = json.loads(line)
-    return Record(
-        layout=tuple(tuple(h) for h in raw["layout"]),
-        terrain=tuple(raw["terrain"]),
-        tokens=tuple(raw["tokens"]),
-        ports=tuple(tuple(p) for p in raw["ports"]),
-        num_players=raw["num_players"],
-        seed=raw["seed"],
-        actions=tuple(tuple(a) for a in raw["actions"]),
-        offers=tuple(
-            (step, tuple(give), tuple(want), tuple(ask))
-            for step, give, want, ask in raw.get("offers", ())
-        ),
-        winner=raw["winner"],
-        turns=raw["turns"],
-    )
-
-
-def write(path: str, records: Iterable[Record]) -> int:
-    """Append records as JSON lines. Returns how many were written."""
-    written = 0
-    with open(path, "a", encoding="utf-8") as handle:
-        for record in records:
-            handle.write(to_json(record) + "\n")
-            written += 1
-    return written
-
-
-def read(path: str) -> Iterator[Record]:
-    with open(path, encoding="utf-8") as handle:
-        for line in handle:
-            if line.strip():
-                yield from_json(line)

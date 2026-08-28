@@ -523,7 +523,7 @@ def _build_session(
     if human_seat is None:
         human_seat = random.SystemRandom().randrange(NUM_PLAYERS)
     # Two separate Random instances from the same seed, not one shared stream —
-    # matching hexset_ui.record's own convention (see record_game / test_record.py):
+    # matching hexset_ui.record's own convention:
     # replay() rebuilds the board from stored data (consuming no randomness) and
     # then seeds a *fresh* random.Random(seed) for the game itself. Consuming
     # this seed's stream here to build the board first, then handing the same

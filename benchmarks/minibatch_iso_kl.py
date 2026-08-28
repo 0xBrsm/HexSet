@@ -51,7 +51,7 @@ import torch
 
 from catan.actions import space_for
 from catan.board.board import random_base_board
-from catan.collect import ParallelCollector, WorkerSpec, parse_mix
+from catan.collect import ParallelCollector, WorkerSpec, check_mix, parse_mix
 from catan.encoding import static_graph
 from catan.game import start
 from catan.model import CatanNet, ModelConfig, config_from_args, packing
@@ -196,6 +196,9 @@ def main(argv: list[str] | None = None) -> int:
     policy = NetworkPolicy(net, space, packing(graph, args.players), device=args.device)
 
     mix = parse_mix(args.mix)
+    # Same pre-flight the trainers run: a mistyped entrant should not become a
+    # worker traceback after the cohort has been dispatched.
+    check_mix(mix, have_parent=bool(parent))
     collector = ParallelCollector(worker_specs(args, model, mix, parent))
 
     print(f"collecting a {args.games}-game cohort on {args.collect_workers} "

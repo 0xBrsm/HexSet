@@ -3,6 +3,7 @@ name = "hexset-ui"
 version = "0.1.0"
 description = "HexSet — a human-vs-bot hex-tile strategy board game in the browser, ONNX Runtime inference"
 requires-python = ">=3.11"
+license = { file = "LICENSE" }
 dependencies = [
     "numpy>=1.26",
     "onnxruntime>=1.18",

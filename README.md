@@ -49,6 +49,10 @@ Copy the resulting file into this repo's `models/` directory.
 - `docker/Dockerfile` — a small CPU-only image (deps only) for deploying this without a GPU.
 - `compose.example.yaml` — copy to `compose.yaml` (gitignored) and edit. Bind-mounts `src/` and `models/` into the image rather than baking them in.
 
+## License
+
+MIT — see [LICENSE](LICENSE).
+
 ## Trademarks
 
 CATAN and SETTLERS OF CATAN are trademarks of Catan GmbH and Catan Studio. This project is not affiliated with, endorsed by, or sponsored by either, and it ships no Catan artwork, text, or other content. Those names appear here only to identify which game's rules this implements — nominative use, not a claim on the marks. HexSet is the name of this software.

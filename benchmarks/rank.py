@@ -89,6 +89,45 @@ Their ratio is what the pairing bought. **Read `resolved` before any conclusion*
 children apart at all, and a low value means the answer is "more rollouts", not
 "the head is fine".
 
+## Averaging a chance child, and what changed on 2026-08-28
+
+Four transitions in this engine hide a draw. `ROLL` is excluded at the parent by
+`probeable`, but the other three are not: `BUY_DEV_CARD`, `PLAY_KNIGHT` and a
+`Phase.ROBBER` row's `MOVE_ROBBER` all resolve hidden information *inside*
+`apply`. Building a child with `imagine` then `apply` therefore froze **one
+sampled outcome per child** into the row, so head-versus-truth across siblings
+was partly a comparison of dice and decks rather than of decisions. Measured on
+this engine, that reaches **7-9% of probeable rows and 3.5-5.0% of children**;
+every `Phase.ROBBER` row is affected.
+
+**The fix averages, because averaging is what the search experiences.** After
+`3e9d03a` the tree resamples a chance edge on every visit and keys the outcome,
+so the edge's `Q` converges on the mean over outcomes and PUCT orders *actions*,
+not realised children. That is precisely the quantity this metric exists to
+predict, so `--chance-draws N` scores such a child as the mean over N
+independent draws. The tree's *keying* is not borrowed — see
+`catan.mcts.sampled_children` for why a harness that rolls its children out for
+hundreds of plies cannot discard a repeated outcome's fresh copy the way a tree
+can. Keying is the tree's implementation of the average; only the meaning
+transfers.
+
+**Both columns are averaged, or the comparison would break rather than mend.**
+Under one draw, head and truth at a chance child were at least *consistent* —
+both conditioned on the same realised outcome, which quietly inflated their
+agreement there by a shock they shared. Averaging only the head would leave the
+truth conditioned on one draw and measure a mismatch instead of an ordering. So
+the `--rollouts` budget is **partitioned across the N draws rather than
+multiplied**: total games rolled out is unchanged, and the lane-to-stream map is
+unchanged too, so draw `d` lane `k` of one child still shares its deck and its
+sampling stream with draw `d` lane `k` of every sibling. `--chance-draws 1`
+restores the old path exactly, and every number this module produced before
+2026-08-28 was taken under it.
+
+**Cost.** Only chance children multiply, and they are 5% of children, so the head
+column costs 1.35x at N=8 and the rollout column — 99% of the wall clock — costs
+nothing. `--simulations` at the parent is untouched: the tree has handled its own
+chance since `3e9d03a`.
+
     python -m benchmarks.rank --checkpoint runs/ppo4/iter-00585.pt \\
         --positions 24 --rollouts 96
 """
@@ -105,12 +144,16 @@ from dataclasses import dataclass, replace
 import numpy as np
 
 from benchmarks.throughput import environment
-from catan.actions import ActionType, apply, legal_actions, within_offer_budget
+from catan.actions import ActionType, legal_actions, within_offer_budget
 from catan.board.board import random_base_board
 from catan.game import imagine, is_over, to_move
+from catan.mcts import Leaf, draws_hidden, sampled_children
 from catan.rewards import relative_points, reward
 from catan.selfplay import Collector, Episode
 from catan.victory import victory_points
+
+DRAWS = 8
+"""Draws per chance child. See "Averaging a chance child" in the docstring."""
 
 # Torch is imported inside `main`, so everything below with arithmetic worth
 # getting wrong stays importable and testable on a machine without it.
@@ -185,6 +228,114 @@ def kept(episodes: list[Episode]) -> list[Fork]:
         for transition in trajectory
         if isinstance(transition.aux, Fork)
     ]
+
+
+def share(total: int, parts: int) -> list[int]:
+    """`total` split over `parts` as evenly as it goes, summing to `total`.
+
+    How a chance child's rollout budget is spread across its draws. It has to
+    sum exactly: the budget is what makes every child's lane count equal, and
+    `resolution` pairs the top two children lane by lane. Front-loading the
+    remainder rather than dropping it keeps every child's total at `total`
+    whatever its draw count, so a row that mixes chance children with
+    deterministic ones stays paired across both.
+
+    A draw with nothing left gets zero and is skipped, which is what happens
+    when a probe is run with fewer rollouts than draws — a smoke setting, not a
+    measurement one.
+    """
+    if parts < 1:
+        raise ValueError("a budget needs at least one part")
+    base, extra = divmod(max(total, 0), parts)
+    return [base + (1 if i < extra else 0) for i in range(parts)]
+
+
+def lane_plan(rollouts: int, draws: int) -> list[tuple[int, int]]:
+    """`(lanes, stream offset)` per draw, for one child's rollout budget.
+
+    The offsets run consecutively, so a child's lanes cover stream seeds
+    `stream_seed + 0 .. + rollouts - 1` in order however many draws it has.
+    Every sibling therefore uses the same stream set in the same order, which is
+    what `resolution` needs to pair the top two children lane by lane, and what
+    makes a one-draw child's plan `[(rollouts, 0)]` — exactly the single
+    collector the harness built before the chance fix.
+
+    Draws with no budget left are dropped rather than run empty.
+    """
+    plan, offset = [], 0
+    for lanes in share(rollouts, draws):
+        if lanes:
+            plan.append((lanes, offset))
+        offset += lanes
+    return plan
+
+
+@dataclass(frozen=True)
+class Row:
+    """One position's children as the head reads them, before any rollout.
+
+    `games[i]` is child `i`'s draw *list* — length one wherever the action drew
+    nothing — and `drawn[i]` the head's value for each of those draws.
+    `head[i]` is their mean, which is the expectimax value a chance edge's `Q`
+    converges on in the tree and therefore the number the search's ordering is
+    actually made of.
+    """
+
+    head: list[float]
+    drawn: list[list[float]]
+    games: list[list[object]]
+    hot: list[bool]
+
+
+def head_row(
+    game, children, seat: int, *, evaluator, max_offers, draws: int, rng, extra
+) -> Row:
+    """Score every child of one position, averaging over each one's draws.
+
+    Extracted from `main` because this is where the chance defect lived: the row
+    is the object the whole metric is computed from, and it was built inline in a
+    two-hundred-line function where nothing could reach it. Every child is
+    encoded from the choosing seat's frame, so the only thing varying across the
+    row is the position.
+
+    `extra` is a *factory*, called once per child, so each child's draws two and
+    up come off a stream in the same state — common random numbers on the chance
+    dimension, matching what this module already does for the rollouts. Draw one
+    comes off the shared `rng`, which is what keeps a chance-free row
+    bit-identical to the single-draw path.
+    """
+    hot = [draws_hidden(game, action) for action in children]
+    drawn: list[list[float]] = []
+    games: list[list[object]] = []
+    leaves, slots = [], []
+    for action in children:
+        outcomes = sampled_children(
+            game, action, draws=draws, rng=rng, extra=extra()
+        )
+        games.append(outcomes)
+        row: list[float] = []
+        for child in outcomes:
+            if is_over(child):
+                # A finished child has a known value on the same scale, which is
+                # what the tree would back up.
+                points = tuple(
+                    victory_points(child.state, s)
+                    for s in range(child.state.num_players)
+                )
+                row.append(relative_points(points)[seat])
+            else:
+                slots.append((len(drawn), len(row)))
+                row.append(0.0)
+                leaves.append(Leaf(child, seat, options(child, max_offers)))
+        drawn.append(row)
+    for (child_at, draw_at), (_, value) in zip(slots, evaluator.evaluate(leaves)):
+        drawn[child_at][draw_at] = value[seat]
+    return Row(
+        head=[float(np.mean(v)) for v in drawn],
+        drawn=drawn,
+        games=games,
+        hot=hot,
+    )
 
 
 def ranks(values: np.ndarray) -> np.ndarray:
@@ -398,6 +549,33 @@ def teacher_row(prior: np.ndarray, visits: np.ndarray, true: np.ndarray) -> dict
     }
 
 
+def chance(rows: list[dict], draws: int) -> dict:
+    """How much of this run was contaminated, and how much noise is left.
+
+    `spread` is the mean standard deviation of the head's read of one chance
+    child across that child's draws — the noise a single-draw probe left in the
+    row, measured on the run rather than assumed by the power calculation.
+    `residual` is what averaging leaves of it, `spread / sqrt(draws)`, which is
+    the figure to read against `true_gap_mean`: the argmax has to resolve that
+    gap, so the residual has to sit well inside it.
+
+    `None` for both where nothing was drawn — either a run with no chance row in
+    it, or `--chance-draws 1`, which measures no spread because it takes no
+    second draw. That is the honest reading and not a zero.
+    """
+    within = [s for row in rows for s in row.get("chance_spread", ())]
+    hot = [1.0 if row.get("chance_children", 0) else 0.0 for row in rows]
+    spread = float(np.mean(within)) if within else None
+    return {
+        "draws": draws,
+        "rows": int(sum(hot)),
+        "row_share": float(np.mean(hot)) if hot else 0.0,
+        "children": int(sum(row.get("chance_children", 0) for row in rows)),
+        "spread": spread,
+        "residual": spread / np.sqrt(draws) if spread is not None else None,
+    }
+
+
 def summarise(rows: list[dict]) -> dict:
     """The aggregate, with top-1 read against its own chance rate."""
     spearman = np.asarray([r["spearman"] for r in rows])
@@ -470,6 +648,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--action-cap", type=int, default=4000)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--fork-rate", type=float, default=0.02)
+    parser.add_argument(
+        "--chance-draws",
+        type=int,
+        default=DRAWS,
+        help="draws to average a chance child over, head and truth alike; the "
+             "rollout budget is partitioned across them, not multiplied. 1 "
+             "restores the single-draw path every number before 2026-08-28 was "
+             "taken under",
+    )
     parser.add_argument("--simulations", type=int, default=0,
                         help="also score every child by the backed-up value of a "
                              "PUCT search rooted at it; 0 scores the head alone")
@@ -495,7 +682,7 @@ def main(argv: list[str] | None = None) -> int:
 
     import torch
 
-    from catan.mcts import Leaf, Search
+    from catan.mcts import Search
     from catan.netbot import LeafEvaluator, load
     from catan.policy import NetworkPolicy
 
@@ -564,35 +751,44 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
 
-        # The head's opinion of the row, every child encoded from the choosing
-        # seat's frame so the only thing varying is the position.
-        head, leaves, slots = [], [], []
-        games = []
-        for action in children:
-            child = imagine(fork.game, rng)
-            apply(child, action)
-            games.append(child)
-            if is_over(child):
-                points = tuple(
-                    victory_points(child.state, s)
-                    for s in range(child.state.num_players)
-                )
-                head.append(relative_points(points)[fork.seat])
-            else:
-                slots.append(len(head))
-                head.append(0.0)
-                leaves.append(Leaf(child, fork.seat, options(child, loaded.max_offers)))
-        for slot, (_, value) in zip(slots, evaluator.evaluate(leaves)):
-            head[slot] = value[fork.seat]
+        # The head's opinion of the row. A chance child is averaged over
+        # `--chance-draws` draws; every other child is drawn once off the shared
+        # stream exactly as before.
+        scored = head_row(
+            fork.game,
+            children,
+            fork.seat,
+            evaluator=evaluator,
+            max_offers=loaded.max_offers,
+            draws=args.chance_draws,
+            rng=rng,
+            # A fresh generator on the same seed per child, so draw `d` of one
+            # child comes off the same stream state as draw `d` of its siblings.
+            extra=lambda: random.Random(args.seed + 13 + index),
+        )
+        head, drawn, games, hot = scored.head, scored.drawn, scored.games, scored.hot
 
         # The same row, searched. `run_many` batches every child's leaves into
-        # shared forwards, so a whole row costs one search rather than n.
+        # shared forwards, so a whole row costs one search rather than n — and
+        # one search rather than n*draws, since every draw of every child goes
+        # into the same flat wave. A chance child's tree value is the mean over
+        # whichever of its draws produced a searchable root, which is the same
+        # average the head column takes; a draw that produced none falls back to
+        # the head for that draw, as it always did.
         tree = list(head)
         if search is not None and args.child_trees:
-            for slot, (root, _, _) in enumerate(search.run_many(games)):
-                value = backed_up(root, fork.seat)
-                if value is not None:
-                    tree[slot] = value
+            flat = [child for outcomes in games for child in outcomes]
+            searched = [
+                backed_up(root, fork.seat) for root, _, _ in search.run_many(flat)
+            ]
+            at = 0
+            for slot, outcomes in enumerate(games):
+                values = [
+                    searched[at + d] if searched[at + d] is not None else drawn[slot][d]
+                    for d in range(len(outcomes))
+                ]
+                at += len(outcomes)
+                tree[slot] = float(np.mean(values))
 
         # One search at the *parent*: the teacher, and the prior it perturbs.
         # `Search._options` is the same filter `options` applies here and
@@ -625,40 +821,53 @@ def main(argv: list[str] | None = None) -> int:
             games = [games[i] for i in keep]
             head = [head[i] for i in keep]
             tree = [tree[i] for i in keep]
+            drawn = [drawn[i] for i in keep]
+            hot = [hot[i] for i in keep]
             prior, visits = prior[keep], visits[keep]
 
         # The truth, by rollout. Every child gets its own collector seeded
         # identically, so lane k across the row shares deck and sampling stream.
+        #
+        # A chance child spends the same `--rollouts` budget spread over its
+        # draws rather than N times the budget on one of them, so the whole
+        # measurement costs what it always did. `lane_plan` gives each draw its
+        # lane count and its `stream_seed` offset, consecutively, so a child's
+        # lanes still cover streams `stream_seed + 0 .. + rollouts - 1` in the
+        # same order as every sibling's however many draws it has. That is what
+        # keeps the pairing in `resolution` intact and what makes a single-draw
+        # row bit-identical.
         returns = []
-        for child in games:
-            if is_over(child):
-                points = tuple(
-                    victory_points(child.state, s)
-                    for s in range(child.state.num_players)
+        for outcomes in games:
+            plan = lane_plan(args.rollouts, len(outcomes))
+            got = []
+            for child, (lanes, offset) in zip(outcomes, plan):
+                if is_over(child):
+                    points = tuple(
+                        victory_points(child.state, s)
+                        for s in range(child.state.num_players)
+                    )
+                    got.append(np.full(lanes, relative_points(points)[fork.seat]))
+                    continue
+                generator.manual_seed(args.seed + 7)
+                branch = PairedBranching(
+                    policy,
+                    child,
+                    stream_seed=args.seed + 5000 + offset,
+                    lanes=lanes,
+                    players=args.players,
+                    seed=args.seed + 3,
+                    action_cap=args.action_cap,
+                    max_offers=loaded.max_offers,
+                    deal=lanes,
+                    board=board,
                 )
-                returns.append(
-                    np.full(args.rollouts, relative_points(points)[fork.seat])
+                got.append(
+                    np.asarray(
+                        [reward(e.outcome)[fork.seat] for e in branch.drain()],
+                        dtype=np.float64,
+                    )
                 )
-                continue
-            generator.manual_seed(args.seed + 7)
-            branch = PairedBranching(
-                policy,
-                child,
-                stream_seed=args.seed + 5000,
-                lanes=args.rollouts,
-                players=args.players,
-                seed=args.seed + 3,
-                action_cap=args.action_cap,
-                max_offers=loaded.max_offers,
-                deal=args.rollouts,
-                board=board,
-            )
-            returns.append(
-                np.asarray(
-                    [reward(e.outcome)[fork.seat] for e in branch.drain()],
-                    dtype=np.float64,
-                )
-            )
+            returns.append(np.concatenate(got))
 
         true = np.asarray([r.mean() for r in returns], dtype=np.float64)
         ses = np.asarray(
@@ -673,6 +882,12 @@ def main(argv: list[str] | None = None) -> int:
         row["head_values"] = [float(v) for v in head]
         row["true_values"] = [float(v) for v in true]
         row["standard_errors"] = [float(v) for v in ses]
+        # The chance columns: how many of this row's children hid a draw, and
+        # how far the head's own read of such a child moved across its draws.
+        # `chance_spread` is the noise a single-draw probe was leaving in the
+        # row, and the number the recommended `DRAWS` has to be read against.
+        row["chance_children"] = int(sum(hot))
+        row["chance_spread"] = [float(np.std(v)) for v in drawn if len(v) > 1]
         if search is not None:
             if args.child_trees:
                 row["tree_values"] = [float(v) for v in tree]
@@ -708,6 +923,7 @@ def main(argv: list[str] | None = None) -> int:
         "args": vars(args),
         "iteration": loaded.iteration,
         "rollouts_each": args.rollouts,
+        "chance": chance(rows, args.chance_draws),
         "seed_seconds": round(seeded, 1),
         "agreed_skipped": agreed,
         "seconds": round(elapsed, 1),
@@ -759,6 +975,16 @@ def main(argv: list[str] | None = None) -> int:
           f"({s['regret_mean_victory_points']:.2f} victory points)")
     print(f"  head spread {s['head_spread_mean']:.4f} against true "
           f"{s['true_spread_mean']:.4f}")
+    c = payload["chance"]
+    print(f"  chance rows {c['rows']} ({c['row_share']:.0%}), {c['children']} "
+          f"chance children, {c['draws']} draws each")
+    if c["spread"] is not None:
+        print(f"  spread within a chance child    {c['spread']:.4f}, so "
+              f"{c['residual']:.4f} left after averaging, against a top-two gap "
+              f"of {s['true_gap_mean']:.4f}"
+              + ("   <- residual inside the gap"
+                 if c["residual"] < s["true_gap_mean"] / 2
+                 else "   <- RAISE --chance-draws"))
     q = payload["pooled"]
     print(f"\npooled over {q['children']} children, each position centred:")
     print(f"  reliability of the truth         {q['reliability']:.3f} "

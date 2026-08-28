@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import random
+import zlib
 
 import numpy as np
 import pytest
 
 from benchmarks.sibling import Probing, Spread, rows
 from catan.actions import ActionType
-from catan.selfplay import Choice, Collector, Request
+from catan.board.board import random_base_board
+from catan.bots import greedy
+from catan.evaluate import Evaluator
+from catan.mcts import draws_hidden
+from catan.selfplay import BotPolicy, Choice, Collector, Request
 
-from test_mcts import a_game
+from test_mcts import a_game, a_purchase, a_steal
 
 
 class Ranked:
@@ -142,3 +147,168 @@ def test_rows_pairs_an_error_with_every_probe_and_ignores_the_rest():
     assert errors.shape == (1,)
     # Seat 0 finished 10 against a mean of 3.33 for the others, over 10 points.
     assert errors[0] == pytest.approx((10 - 10 / 3) / 10 - 0.25)
+
+
+# ---------------------------------------------------------------------------
+# Averaging a chance child. The module already skips roll positions, because the
+# spread across dice outcomes is chance and not a decision. Until 2026-08-28 the
+# same argument was missed one level down: `imagine` then `apply` froze one
+# stolen or bought card into each child, so the spread across siblings was
+# partly a spread across decks.
+
+
+class Hashing:
+    """A value that is a deterministic function of the child's own holdings.
+
+    A real head reads the same fields — `encoding.py` extends per-resource hand
+    counts and per-type development-card counts for the perspective seat — so a
+    stub that reads them is what makes a frozen draw visible. A stub returning a
+    constant would hide the defect exactly as the harness did.
+    """
+
+    def __init__(self, players: int = 4) -> None:
+        self.players = players
+        self.calls = 0
+
+    def evaluate(self, leaves):
+        out = []
+        for leaf in leaves:
+            self.calls += 1
+            state = leaf.game.state
+            key = (
+                tuple(tuple(hand) for hand in state.hands),
+                tuple(tuple(cards) for cards in state.new_dev_cards),
+                tuple(tuple(cards) for cards in state.dev_cards),
+            )
+            digest = zlib.crc32(repr(key).encode()) / 2**32
+            value = [0.0] * self.players
+            value[leaf.seat] = 0.03 * (digest - 0.5)
+            out.append((np.full(max(len(leaf.options), 1), 0.5), tuple(value)))
+        return out
+
+
+def a_hashing_probing(*, draws, seed=0, chance_seed=99):
+    return Probing(
+        First(),
+        Hashing(),
+        max_offers=3,
+        rate=1.0,
+        rng=random.Random(seed),
+        chance_draws=draws,
+        chance_seed=chance_seed,
+    )
+
+
+def test_a_chance_free_probe_is_bit_identical_however_many_draws_are_asked():
+    """Exact equality, not `approx`. The opening placement row resolves no
+    hidden information, so asking for eight draws must produce the same three
+    statistics and the same number of forward passes as asking for one."""
+    one, many = a_hashing_probing(draws=1), a_hashing_probing(draws=8)
+    game = a_game()
+    assert not any(draws_hidden(game, a) for a in one._options(game))
+
+    before, after = one._probe(a_game()), many._probe(a_game())
+
+    assert before == after
+    assert before.chance_children == 0
+    assert one.evaluator.calls == many.evaluator.calls
+
+
+def test_a_chance_probe_averages_its_draws_and_says_how_far_they_moved():
+    game, _ = a_steal()
+    one = a_hashing_probing(draws=1)._probe(game)
+    many = a_hashing_probing(draws=8)._probe(game)
+
+    assert one.chance_children > 0
+    assert one.chance_children == many.chance_children
+    # A single draw measures no spread because it takes no second draw, and
+    # reporting 0.0 there would read as "no contamination".
+    assert one.chance_spread == 0.0
+    assert many.chance_spread > 0.0
+    # Averaging shrinks the row's own spread toward the pre-draw one, because
+    # the per-child chance shocks it was carrying are gone.
+    assert one.spread != many.spread
+
+
+def test_a_bought_card_is_averaged_beside_deterministic_siblings():
+    game, _ = a_purchase()
+    probe = a_hashing_probing(draws=8)
+    spread = probe._probe(game)
+
+    assert spread.chance_children == 1
+    assert spread.options > spread.chance_children
+
+
+class Sweeping:
+    """Probes every decision of real games and keeps every row, with a flag for
+    whether the position held a chance child."""
+
+    def __init__(self, draws, seed, max_offers=3):
+        self.probing = Probing(
+            BotPolicy(
+                lambda b: greedy(
+                    Evaluator(b), random.Random(seed), max_offers=max_offers
+                )
+            ),
+            Hashing(),
+            max_offers=max_offers,
+            rate=1.0,
+            rng=random.Random(seed + 2),
+            chance_draws=draws,
+            chance_seed=seed + 4,
+        )
+        self.rows: list[tuple[bool, Spread]] = []
+
+    def act(self, requests):
+        for request in requests:
+            hot = any(
+                draws_hidden(request.game, a)
+                for a in self.probing._options(request.game)
+            )
+            spread = self.probing._probe(request.game)
+            if spread is not None:
+                self.rows.append((hot, spread))
+        return self.probing.policy.act(requests)
+
+
+def sweep(draws, games=2, seed=0, max_offers=3):
+    board = random_base_board(random.Random(seed))
+    sweeping = Sweeping(draws, seed, max_offers)
+    Collector(
+        policy=sweeping,
+        lanes=8,
+        players=4,
+        seed=seed + 1,
+        max_offers=max_offers,
+        deal=games,
+        board=board,
+    ).drain()
+    # The post-sweep draw off the shared stream, the check `3e9d03a` used: a
+    # stream shift that has not yet reached a row is invisible in the rows.
+    return sweeping.rows, sweeping.probing.rng.random()
+
+
+def test_the_fix_is_off_path_over_a_thousand_chance_free_rows():
+    """The anchor, proven at scale rather than on one fixture.
+
+    Two full games of `greedy` self-play, every decision probed, both arms at
+    one seed. Every chance-free row must be bit-identical and the shared stream
+    must end in the same state — so a chance row cannot move a chance-free row
+    that comes after it. And the chance rows must actually move, or the fix
+    would be doing nothing anywhere.
+    """
+    one, tail_one = sweep(1)
+    many, tail_many = sweep(8)
+
+    assert len(one) == len(many) > 1000
+    assert [hot for hot, _ in one] == [hot for hot, _ in many]
+
+    clean = [(a, b) for (hot, a), (_, b) in zip(one, many) if not hot]
+    hot = [(a, b) for (hot, a), (_, b) in zip(one, many) if hot]
+
+    assert len(clean) > 1000
+    assert [a for a, _ in clean] == [b for _, b in clean]
+    assert tail_one == tail_many
+
+    assert len(hot) > 20
+    assert sum(a != b for a, b in hot) > 0.9 * len(hot)

@@ -10,18 +10,29 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+import random
+import zlib
+
 from benchmarks.rank import (
     assess,
     backed_up,
+    chance,
     correlation,
+    head_row,
+    lane_plan,
+    probeable,
     ranks,
     pooled,
     resolution,
+    share,
     standardised,
     summarise,
     teacher_row,
 )
-from catan.mcts import Node
+from catan.actions import legal_actions
+from catan.mcts import Node, draws_hidden
+
+from test_mcts import a_game, a_purchase, a_steal
 
 TRUE = np.array([0.9, 0.5, 0.1])
 
@@ -254,3 +265,223 @@ def test_regret_is_zero_for_whichever_side_picked_the_best_child():
     )
     assert cell["visits_regret"] == pytest.approx(0.0)
     assert cell["prior_regret"] == pytest.approx(0.20)
+
+
+# ---------------------------------------------------------------------------
+# Averaging a chance child. Until 2026-08-28 a `BUY_DEV_CARD`, `PLAY_KNIGHT` or
+# `Phase.ROBBER` child was built with `imagine` then `apply`, which froze one
+# sampled outcome into the row, so head-versus-truth across siblings compared
+# draws as well as decisions. These are the tests that would have caught it.
+
+
+class Hashing:
+    """A value that is a deterministic function of the child's own holdings.
+
+    Torch-free, and the right stand-in for the question at hand: `encoding.py`
+    extends per-resource hand counts and per-type development-card counts for
+    the perspective seat, so a stolen card or a bought card *is* visible to a
+    real head. A stub that reads the same fields is what makes a frozen draw
+    show up at all; a stub returning a constant would hide the defect exactly
+    the way the harness did.
+    """
+
+    def __init__(self, players: int = 4) -> None:
+        self.players = players
+        self.calls = 0
+
+    def evaluate(self, leaves):
+        out = []
+        for leaf in leaves:
+            self.calls += 1
+            state = leaf.game.state
+            key = (
+                tuple(tuple(hand) for hand in state.hands),
+                tuple(tuple(cards) for cards in state.new_dev_cards),
+                tuple(tuple(cards) for cards in state.dev_cards),
+            )
+            # Stable across processes — `hash` of a tuple of ints is, but saying
+            # so in the arithmetic is cheaper than relying on it. Scaled to the
+            # 0.0155 the real head's sibling spread was measured at.
+            digest = zlib.crc32(repr(key).encode()) / 2**32
+            value = [0.0] * self.players
+            value[leaf.seat] = 0.03 * (digest - 0.5)
+            out.append((np.full(max(len(leaf.options), 1), 0.5), tuple(value)))
+        return out
+
+
+MAX_OFFERS = 3
+
+
+def scored(game, *, draws, seed=0, chance_seed=99, evaluator=None):
+    """One position's row, the way `main` builds it."""
+    children = probeable(game, MAX_OFFERS)
+    assert len(children) >= 2
+    return children, head_row(
+        game,
+        children,
+        game.current_player,
+        evaluator=evaluator or Hashing(),
+        max_offers=MAX_OFFERS,
+        draws=draws,
+        rng=random.Random(seed),
+        extra=lambda: random.Random(chance_seed),
+    )
+
+
+def test_a_budget_is_split_exactly_however_it_divides():
+    assert share(384, 8) == [48] * 8
+    assert sum(share(384, 7)) == 384
+    assert share(10, 4) == [3, 3, 2, 2]
+    # Fewer rollouts than draws is a smoke setting, and it still sums.
+    assert sum(share(3, 8)) == 3
+
+
+def test_one_draw_plans_exactly_the_single_collector_the_harness_had_before():
+    """The byte-identity claim for the truth column, stated as arithmetic: one
+    draw must ask for every lane at offset zero, which is the one
+    `PairedBranching` the row built before the chance fix."""
+    assert lane_plan(384, 1) == [(384, 0)]
+
+
+def test_every_child_covers_the_same_lane_streams_however_many_draws_it_has():
+    """`resolution` pairs the top two children lane by lane, so a chance child
+    spread over eight draws and a deterministic sibling on one must walk the
+    same stream offsets in the same order or the pairing silently dissolves."""
+    for draws in (1, 2, 3, 8, 16):
+        plan = lane_plan(384, draws)
+        assert sum(lanes for lanes, _ in plan) == 384
+        walked = [
+            offset + lane
+            for lanes, offset in plan
+            for lane in range(lanes)
+        ]
+        assert walked == list(range(384))
+
+
+def test_a_chance_free_row_is_bit_identical_however_many_draws_are_asked():
+    """The off-path anchor. Exact equality, not `approx`: the opening placement
+    row resolves no hidden information, so asking for eight draws must produce
+    the same floats and the same number of forward passes as asking for one.
+    """
+    one_eval, many_eval = Hashing(), Hashing()
+    _, one = scored(a_game(), draws=1, evaluator=one_eval)
+    _, many = scored(a_game(), draws=8, evaluator=many_eval)
+
+    assert not any(one.hot)
+    assert one.head == many.head
+    assert one.drawn == many.drawn
+    assert [len(g) for g in many.games] == [1] * len(many.games)
+    assert one_eval.calls == many_eval.calls
+
+
+def test_a_chance_free_row_never_touches_the_chance_stream():
+    """A stream this row does not draw from cannot shift the rows after it —
+    the same post-run-draw check `3e9d03a` used to prove its own off-path."""
+    stream = random.Random(99)
+    children = probeable(a_game(), MAX_OFFERS)
+    head_row(
+        a_game(),
+        children,
+        0,
+        evaluator=Hashing(),
+        max_offers=MAX_OFFERS,
+        draws=8,
+        rng=random.Random(0),
+        extra=lambda: stream,
+    )
+    assert stream.random() == random.Random(99).random()
+
+
+def test_a_chance_row_moves_when_the_frozen_draw_stops_being_frozen():
+    """The on-path half. A `Phase.ROBBER` row is all chance children, so the
+    fix has to change it — a fix that changed nothing anywhere would be the
+    other failure mode."""
+    game, _ = a_steal()
+    _, one = scored(game, draws=1)
+    _, many = scored(game, draws=8)
+
+    assert any(one.hot)
+    assert one.head != many.head
+
+
+def test_a_chance_child_is_scored_as_the_mean_of_its_draws():
+    game, _ = a_steal()
+    children, row = scored(game, draws=8)
+
+    for index, action in enumerate(children):
+        assert len(row.drawn[index]) == (8 if draws_hidden(game, action) else 1)
+        assert row.head[index] == pytest.approx(float(np.mean(row.drawn[index])))
+
+
+def test_a_bought_card_is_averaged_the_same_way_a_steal_is():
+    """The other draw. `BUY_DEV_CARD` resolves inside `apply` off the deck, and
+    it sits in an ordinary `Phase.MAIN` row beside deterministic siblings — so
+    this also pins that a mixed row averages only the child that drew."""
+    game, index = a_purchase()
+    children, row = scored(game, draws=8)
+    purchase = legal_actions(game)[index]
+    at = children.index(purchase)
+
+    assert row.hot[at]
+    assert len(row.drawn[at]) == 8
+    assert sum(row.hot) < len(children)
+    for other, action in enumerate(children):
+        if not draws_hidden(game, action):
+            assert len(row.drawn[other]) == 1
+
+
+def test_averaging_shrinks_what_the_draw_can_do_to_a_chance_child():
+    """The measurement the power calculation rests on.
+
+    Re-running the probe at a different seed re-draws the hidden card. Under one
+    draw the child's score moves by the full spread of the head across outcomes;
+    under N it moves by that over root N, because the score is now a mean of N
+    of them. This is the noise the metric was carrying and the reason the
+    recommended draw count is what it is.
+
+    Measured as the standard deviation of one chance child's score across 96
+    seeds. Theory says the ratio is sqrt(8) = 2.83; the assertion is loose
+    enough to survive a two-outcome victim's discreteness.
+    """
+    game, _ = a_steal()
+    children = probeable(game, MAX_OFFERS)
+    at = next(i for i, a in enumerate(children) if draws_hidden(game, a))
+    cold = next(i for i, a in enumerate(children) if not draws_hidden(game, a))
+
+    def spread(draws):
+        values, others = [], []
+        for trial in range(96):
+            _, row = scored(game, draws=draws, seed=trial, chance_seed=5000 + trial)
+            values.append(row.head[at])
+            others.append(row.head[cold])
+        # A child that draws nothing does not move at all, whatever the seeds do
+        # — the control that says the shrinkage below is about the draw.
+        assert len(set(others)) == 1
+        return float(np.std(values))
+
+    one, many = spread(1), spread(8)
+    assert one > 0.0
+    assert one / many > 2.0
+
+
+def test_the_chance_block_reports_no_spread_rather_than_a_reassuring_zero():
+    """At one draw there is no second draw to measure a spread against, and
+    zero is an ordinary value on this scale that would read as "no
+    contamination" — the exact misreading the old path invited."""
+    rows = [{"chance_children": 2, "chance_spread": []}]
+    got = chance(rows, 1)
+
+    assert got["spread"] is None and got["residual"] is None
+    assert got["rows"] == 1 and got["children"] == 2 and got["row_share"] == 1.0
+
+
+def test_the_chance_block_reports_the_residual_that_averaging_leaves():
+    rows = [
+        {"chance_children": 1, "chance_spread": [0.02]},
+        {"chance_children": 0, "chance_spread": []},
+    ]
+    got = chance(rows, 16)
+
+    assert got["spread"] == pytest.approx(0.02)
+    assert got["residual"] == pytest.approx(0.02 / 4.0)
+    assert got["row_share"] == pytest.approx(0.5)

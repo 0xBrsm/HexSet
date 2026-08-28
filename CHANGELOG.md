@@ -7,6 +7,80 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-08-28
+
+### Fixed
+
+- **The sibling-ranking probes no longer freeze one chance outcome per child.**
+  `benchmarks.rank` and `benchmarks.sibling` both built each sibling with
+  `imagine` then `apply`, so a `BUY_DEV_CARD`, a `PLAY_KNIGHT` or any
+  `Phase.ROBBER` row's `MOVE_ROBBER` embedded **one sampled outcome per child**
+  and the head-versus-truth comparison across siblings was partly a comparison
+  of decks rather than of decisions. This is `0.9.1`'s own listed exception and
+  the second half of the afterstate audit; the tree half was `0.9.1`.
+
+  **A chance child is now scored as the mean over `--chance-draws` independent
+  draws, default 8.** Averaging is chosen over borrowing the tree's keying
+  because averaging is what the search *experiences*: after `0.9.1` a chance
+  edge resamples on every visit, so its `Q` converges on the mean over outcomes
+  and PUCT orders actions rather than realised children. That is the quantity
+  this metric exists to predict. The tree's keying is its *implementation* of
+  the same average and does not transfer — a tree may reuse a repeated
+  outcome's held child because the deck order beneath the top card is
+  unobservable to it, while a probe rolls its children out for hundreds of plies
+  where that order decides real draws.
+
+  **Both columns are averaged, and the rollout budget is partitioned rather than
+  multiplied.** Under one draw the head and the truth at a chance child were at
+  least consistent — both conditioned on the same realised outcome, a shock they
+  shared, which quietly inflated their agreement there. Averaging only the head
+  would have measured a mismatch instead of an ordering. `--rollouts` is
+  therefore split across a child's draws by `share`, and `lane_plan` walks the
+  same consecutive stream offsets whatever the draw count, so total games rolled
+  out is unchanged and draw `d` lane `k` still shares its deck and its sampling
+  stream with draw `d` lane `k` of every sibling. Cost is 1.35x on the head
+  column, which is under 1% of a probe's wall clock, and nothing on the rollout
+  column.
+
+  **Incidence, measured on this engine rather than assumed:** 7-9% of probeable
+  rows hold at least one chance child and 3.5-5.0% of children are chance
+  children, over 12 games of both `RandomPolicy` and `greedy` self-play. Every
+  `Phase.ROBBER` row is affected.
+
+  **Off-path behaviour is unchanged, proven rather than asserted.** Draw one of
+  every child comes off the shared stream and a deterministic action takes only
+  that draw, so a row resolving no hidden information is bit-identical and the
+  shared stream ends in the same state — a chance row cannot move a chance-free
+  row after it. Anchored over 1,269 chance-free rows from two games of `greedy`
+  self-play, exact float equality on all three statistics plus an exact
+  post-sweep rng draw, with all 187 chance rows in the same sweep moving.
+
+  **Every number either probe produced before 2026-08-28 was taken under the
+  single-draw path.** `--chance-draws 1` restores it exactly.
+
+### Added
+
+- `catan.mcts.draws_hidden` and `catan.mcts.sampled_children`, public because
+  the probes need the tree's chance semantics without building a tree.
+  `Search._draws_hidden` now delegates to the first, so the predicate deciding
+  which edges are chance edges and the predicate deciding which children get
+  averaged cannot drift apart — pinned by a test over every action of a robber
+  position.
+- `benchmarks.rank.head_row` and `benchmarks.rank.Row`, the row construction
+  lifted out of `main`. It was inline in a two-hundred-line function, which is
+  where the defect survived being read: nothing could reach the object the whole
+  metric is computed from. Now torch-free testable.
+- `benchmarks.rank.share` and `benchmarks.rank.lane_plan`, the rollout-budget
+  partition and its stream offsets.
+- `benchmarks.rank.chance`, a payload block reporting how many rows and children
+  drew, the measured spread of the head's read *within* a chance child, and the
+  residual `spread / sqrt(draws)` that averaging leaves. Reported so the draw
+  count can be checked against the run rather than against an assumption; it
+  reads `None` rather than `0.0` at one draw, since a single draw measures no
+  spread and zero would read as "no contamination".
+- `benchmarks.sibling.Spread.chance_children` and `.chance_spread`, the same two
+  quantities per probed row.
+
 ## [0.9.1] - 2026-08-28
 
 ### Fixed

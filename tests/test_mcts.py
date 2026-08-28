@@ -21,6 +21,8 @@ from catan.mcts import (
     Search,
     _Chance,
     _drawn,
+    draws_hidden,
+    sampled_children,
     visit_policy,
 )
 
@@ -536,3 +538,102 @@ def test_a_row_stance_leaves_the_matrix_it_was_handed_alone():
     for rows in STANCE_ROWS.values():
         rows(vectors, 1)
     assert (vectors == before).all()
+
+
+# `draws_hidden` and `sampled_children` are public for the ranking probes, which
+# need the tree's chance semantics without building a tree. The tree's own use of
+# the predicate is covered above; these pin what the probes rely on.
+
+
+def test_the_probes_and_the_tree_ask_one_question_about_a_hidden_draw():
+    """One predicate, or the probe and the tree drift apart silently.
+
+    `benchmarks.rank` decides which children to average over their draws and
+    `Search` decides which edges get a chance slot. If those two answers ever
+    disagree the metric stops measuring what the search experiences, which is
+    the only reason the metric is worth taking.
+    """
+    game, _ = a_steal()
+    search = Search(Stub(), simulations=1, rng=random.Random(0))
+    for action in legal_actions(game):
+        assert search._draws_hidden(game, action) == draws_hidden(game, action)
+
+
+def test_a_deterministic_action_is_drawn_once_however_many_draws_are_asked():
+    """The basis of the probes' byte-identity claim: an action that resolves no
+    hidden information has one outcome, so asking for eight must not build eight
+    positions and must not touch the extra stream."""
+    game = a_game()
+    action = legal_actions(game)[0]
+    assert not draws_hidden(game, action)
+
+    extra = random.Random(11)
+    children = sampled_children(
+        game, action, draws=8, rng=random.Random(5), extra=extra
+    )
+
+    assert len(children) == 1
+    assert extra.random() == random.Random(11).random()
+
+
+def test_a_chance_action_is_drawn_as_many_times_as_it_was_asked():
+    game, index = a_steal()
+    action = legal_actions(game)[index]
+    assert draws_hidden(game, action)
+
+    children = sampled_children(
+        game, action, draws=8, rng=random.Random(5), extra=random.Random(11)
+    )
+
+    assert len(children) == 8
+    # The victim holds two kinds of card, so the draws are not all one outcome —
+    # otherwise the average this exists to take would have nothing to average.
+    assert len({_drawn(game, child, action) for child in children}) > 1
+
+
+def test_the_first_draw_of_a_chance_action_comes_off_the_shared_stream():
+    """Draw one is the single-draw path's own child, which is what lets a row
+    mixing chance children with deterministic ones keep the deterministic ones
+    bit-identical."""
+    game, index = a_steal()
+    action = legal_actions(game)[index]
+
+    (alone,) = sampled_children(
+        game, action, draws=1, rng=random.Random(5), extra=random.Random(11)
+    )
+    many = sampled_children(
+        game, action, draws=8, rng=random.Random(5), extra=random.Random(11)
+    )
+
+    assert _drawn(game, alone, action) == _drawn(game, many[0], action)
+
+
+def test_a_purchase_draws_and_a_victimless_robber_move_does_not():
+    game, index = a_purchase()
+    action = legal_actions(game)[index]
+    assert draws_hidden(game, action)
+    assert len(
+        sampled_children(
+            game, action, draws=4, rng=random.Random(1), extra=random.Random(2)
+        )
+    ) == 4
+
+    robber, _ = a_steal()
+    victimless = next(
+        action
+        for action in legal_actions(robber)
+        if action.type is ActionType.MOVE_ROBBER and victim_of(robber, action.b) is None
+    )
+    assert not draws_hidden(robber, victimless)
+
+
+def test_a_draw_count_below_one_is_refused_rather_than_returning_nothing():
+    game = a_game()
+    with pytest.raises(ValueError):
+        sampled_children(
+            game,
+            legal_actions(game)[0],
+            draws=0,
+            rng=random.Random(0),
+            extra=random.Random(0),
+        )

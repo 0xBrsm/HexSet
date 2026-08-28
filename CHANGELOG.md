@@ -7,6 +7,35 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-08-28
+
+### Added
+
+- `benchmarks.aivat`: AIVAT's chance-correction term (Burch, Schmid, Moravčík,
+  Morrill & Bowling, AAAI 2018), measured on duels this project has already
+  recorded. Subtracts `V(observed outcome) - E_p[V(outcome)]` at every chance
+  event, which has conditional expectation zero given the history before the
+  draw, so the estimator is unbiased for **any** value function -- the argument
+  is a martingale difference on the chance filtration and never mentions the
+  player count, the payoff's zero-sumness, or `V`'s accuracy.
+- All four chance transitions are enumerated exactly: 2d6 from
+  `game.ROLL_ODDS`, the dev-card draw as the remaining deck's multiset, and the
+  robber steal as the victim's hand normalised. The dice and the steal are drawn
+  at the event, so their law is exact under the full history; the deck is
+  shuffled once at `new_game`, so the estimator must forget the unrevealed order
+  -- which is sound only because neither `catan.encoding` nor any bot can read
+  it, and `game.imagine(..., randomize_deck=True)` exists to keep that true.
+- `instrumented` is a twin of `arena._play_one` that enumerates outcomes on
+  `imagine` copies fed a separate generator, so an instrumented replay of a
+  recorded cell is bit-identical to it. `--check` asserts that against the
+  recorded verdict, and it holds on four 800-game cells to the digit.
+- Reports the reduction AIVAT's unit coefficient actually delivers *and* the
+  ceiling over every coefficient, `1 - sqrt(1 - rho^2)`. The second is the
+  number that settles the question, because no tuning beats it. Measured here:
+  the unit coefficient **raises** the paired-VP SD by 11-17% and the ceiling is
+  2.2-5.7%, against the paper's 68% in HUNL. Full account in
+  `agents/status-draft-aivat.md`.
+
 ## [0.11.0] - 2026-08-28
 
 ### Added

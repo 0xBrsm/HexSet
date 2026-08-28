@@ -44,8 +44,8 @@ aggregate.
 **Trivial decisions are excluded and counted.** Where one action is legal,
 agreement is 1.0 by construction and carries no information; a policy could be
 scored at 60% on a corpus that is mostly forced rolls. The excluded count is
-reported, and `nontrivial_per_game` is the number that says how many human games
-the measurement actually needs.
+reported, and `nontrivial_per_game` is the number that says how many recorded
+games the measurement actually needs.
 
 **The distribution scored is the one the search sees**, via
 `catan.netbot.LeafEvaluator.evaluate` on a `catan.mcts.Leaf` -- not a

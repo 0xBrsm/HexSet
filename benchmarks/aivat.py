@@ -11,8 +11,7 @@ before its own draw, so `E[X_aivat] = E[margin(z)]` for **any** value function
 argument on the chance filtration alone: it never mentions the number of
 players, zero-sum payoffs, or whether `V` is any good. Accuracy of `V` buys
 variance reduction; it cannot buy or lose unbiasedness. Burch, Schmid,
-Moravčík, Morrill & Bowling, AAAI 2018 (arXiv:1612.06915); the survey entry is
-`agents/reference/related-work.md`.
+Moravčík, Morrill & Bowling, AAAI 2018 (arXiv:1612.06915).
 
 **This is the chance term only.** No action-correction terms and no imaginary
 observations: those need the acting players' strategies and an information
@@ -77,7 +76,7 @@ TERMS = ("roll", "deck", "steal")
 # Below this a correction is float noise from `V(o) - sum p.V`, not a signal.
 _NEGLIGIBLE = 1e-12
 
-# The four transitions that embed a draw, from `agents/reference/afterstate-audit.md`.
+# The four transitions that embed a draw; see `catan.mcts.draws_hidden`.
 CHANCE_ACTIONS = frozenset(
     {
         ActionType.ROLL,

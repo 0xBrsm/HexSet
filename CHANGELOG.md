@@ -33,8 +33,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ceiling over every coefficient, `1 - sqrt(1 - rho^2)`. The second is the
   number that settles the question, because no tuning beats it. Measured here:
   the unit coefficient **raises** the paired-VP SD by 11-17% and the ceiling is
-  2.2-5.7%, against the paper's 68% in HUNL. Full account in
-  `agents/status-draft-aivat.md`.
+  2.2-5.7%, against the paper's 68% for full AIVAT in HUNL (and 33.8% for its
+  chance-only term on Leduc).
 
 ## [0.11.0] - 2026-08-28
 

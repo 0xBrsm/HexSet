@@ -5,11 +5,24 @@ import random
 import numpy as np
 import pytest
 
-from catan.actions import Action, ActionType, legal_actions
+from helpers import clear_hand, give
+
+from catan.actions import Action, ActionType, apply, legal_actions, victim_of
 from catan.board.board import random_base_board
+from catan.board.terrain import Resource
+from catan.cards import DevCard
 from catan.game import Phase, imagine, start
 from catan.bots import STANCES
-from catan.mcts import STANCE_ROWS, Leaf, Node, Search, visit_policy
+from catan.mcts import (
+    HIDDEN_DRAW,
+    STANCE_ROWS,
+    Leaf,
+    Node,
+    Search,
+    _Chance,
+    _drawn,
+    visit_policy,
+)
 
 
 def a_game(seed: int = 0, players: int = 4):
@@ -102,6 +115,197 @@ def test_search_randomizes_the_hidden_deck_only_when_buying_a_card():
 
     assert rng.shuffles == 1
     assert len(child.game.state.deck) == before - 1
+
+
+def after_setup(seed: int = 0):
+    """The opening placements played out, so hexes have occupants and a robber
+    move has somebody to steal from."""
+    game = a_game(seed)
+    while game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
+        apply(game, legal_actions(game)[0])
+    return game
+
+
+def a_steal(seed: int = 0):
+    """A robber decision and the edge index of one that names a victim.
+
+    The victim holds two kinds of card and not one, because the defect being
+    pinned is an edge frozen on the first card it drew: a victim holding a
+    single resource draws the same card every time and cannot show it.
+    """
+    game = after_setup(seed)
+    game.phase = Phase.ROBBER
+    game.current_player = 0
+    for player in range(game.state.num_players):
+        clear_hand(game.state, player)
+    give(game.state, 1, Resource.WOOD, 6)
+    give(game.state, 1, Resource.WHEAT, 6)
+    index = next(
+        i
+        for i, action in enumerate(legal_actions(game))
+        if action.type is ActionType.MOVE_ROBBER and victim_of(game, action.b) == 1
+    )
+    return game, index
+
+
+def a_purchase(seed: int = 0):
+    """A main-phase decision that can afford a development card, and its edge."""
+    game = after_setup(seed)
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    clear_hand(game.state, 0)
+    for resource in (Resource.SHEEP, Resource.WHEAT, Resource.ORE):
+        give(game.state, 0, resource, 3)
+    index = next(
+        i
+        for i, action in enumerate(legal_actions(game))
+        if action.type is ActionType.BUY_DEV_CARD
+    )
+    return game, index
+
+
+def test_a_steal_edge_averages_over_the_cards_it_draws():
+    """One frozen steal for the life of the tree was the defect. The edge now
+    keeps one child per card actually stolen, the way a roll edge already kept
+    one child per outcome actually rolled."""
+    game, index = a_steal()
+    search = Search(Stub(favour=index), simulations=96, wave=4, rng=random.Random(3))
+    root, _, visits = search.run(game)
+
+    slot = root.children[index]
+    assert visits[index] == 96
+    assert isinstance(slot, _Chance)
+    assert sorted(slot.outcomes) == [Resource.WOOD, Resource.WHEAT]
+    # Two children holding two different hands, which is what "an expectation
+    # over the steal" means concretely.
+    hands = {tuple(child.game.state.hands[0]) for child in slot.outcomes.values()}
+    assert len(hands) == 2
+
+
+def test_a_bought_card_edge_averages_over_the_deck():
+    """Same defect on the other draw: the card off the deck. Ninety-six visits
+    of a twenty-five card deck reach every kind in it."""
+    game, index = a_purchase()
+    search = Search(Stub(favour=index), simulations=96, wave=4, rng=random.Random(3))
+    root, _, visits = search.run(game)
+
+    slot = root.children[index]
+    assert visits[index] == 96
+    assert isinstance(slot, _Chance)
+    assert sorted(slot.outcomes) == sorted(DevCard)
+
+
+def test_a_robber_move_that_names_nobody_keeps_a_single_child():
+    """An edge that draws nothing is not a chance edge and must not become one:
+    it has one outcome, so a slot would rebuild an identical position on every
+    visit and buy nothing for the engine time."""
+    game, _ = a_steal()
+    index = next(
+        i
+        for i, action in enumerate(legal_actions(game))
+        if action.type is ActionType.MOVE_ROBBER and victim_of(game, action.b) is None
+    )
+    search = Search(Stub(favour=index), simulations=64, wave=4, rng=random.Random(3))
+    root, _, visits = search.run(game)
+
+    assert visits[index] == 64
+    assert isinstance(root.children[index], Node)
+
+
+def test_the_drawn_card_names_the_slot_it_is_cached_under():
+    """`apply` returns nothing, so the outcome is read back off the state. A key
+    that did not identify the draw would give every visit its own child, which
+    is the frozen edge again with extra steps."""
+    game, index = a_steal()
+    search = Search(Stub(), simulations=4, wave=2, rng=random.Random(3))
+    root = search._node(imagine(game, search.rng, randomize_deck=False))
+    child = search._advance(root, index, None)
+    stolen = _drawn(root.game, child, root.options[index])
+    assert stolen in (Resource.WOOD, Resource.WHEAT)
+    assert child.state.hands[0][stolen] == 1
+
+    game, index = a_purchase()
+    root = search._node(imagine(game, search.rng, randomize_deck=False))
+    child = search._advance(root, index, None)
+    bought = _drawn(root.game, child, root.options[index])
+    assert bought in set(DevCard)
+    assert child.state.new_dev_cards[0][bought] == 1
+
+
+def test_two_visits_that_steal_the_same_card_share_one_child():
+    """Keying on the outcome is what makes the edge an average: repeats land in
+    the same subtree and accumulate, rather than each visit getting a private
+    tree whose statistics nothing ever pools."""
+    game, index = a_steal()
+    search = Search(Stub(), simulations=4, wave=2, rng=random.Random(3))
+    root = search._node(imagine(game, search.rng, randomize_deck=False))
+    slot = _Chance()
+
+    drawn = [search._sample(root, index, slot) for _ in range(40)]
+
+    assert sorted(slot.outcomes) == [Resource.WOOD, Resource.WHEAT]
+    assert {id(node) for node in drawn} == {id(node) for node in slot.outcomes.values()}
+
+
+class Anchor:
+    """A prior with a favourite and a value that varies with the position.
+
+    The uniform `Stub` backs every edge up with the same number and leaves the
+    visit counts flat, which would pin nothing. This one discriminates, so the
+    counts below are a real fingerprint of the descent.
+    """
+
+    def evaluate(self, leaves):
+        out = []
+        for leaf in leaves:
+            n = len(leaf.options)
+            prior = np.full(n, 0.4 / max(n - 1, 1))
+            prior[leaf.seat % n] = 0.6
+            prior = prior / prior.sum()
+            own = ((leaf.game.turns * 7 + n * 3) % 11) / 10.0 - 0.5
+            value = tuple(own if s == leaf.seat else -own / 3.0 for s in range(4))
+            out.append((prior, value))
+        return out
+
+
+class NoHiddenDraw(Search):
+    """Every edge but the three that resolve a hidden card."""
+
+    def _options(self, game):
+        return tuple(a for a in super()._options(game) if a.type not in HIDDEN_DRAW)
+
+
+def test_a_tree_that_draws_no_hidden_card_searches_exactly_as_it_did_before():
+    """The off-path anchor, pinned to `33c6032` — the commit before chance slots
+    reached the steal and the purchase.
+
+    Rolls still resolve through `_Chance` here, so this covers the mechanism that
+    was already correct alongside the deterministic edges. Both halves are
+    pinned: the visit counts, and where the rng stream ended up, because a change
+    that consumed a draw in a different order could reproduce one and not the
+    other.
+    """
+    game = after_setup()
+    while game.phase is not Phase.MAIN:
+        apply(game, legal_actions(game)[0])
+
+    rng = random.Random(5)
+    _, _, visits = NoHiddenDraw(Anchor(), simulations=96, wave=8, rng=rng).run(game)
+
+    assert [int(v) for v in visits] == [39, 3, 3, 2, 3, 3, 5, 9, 29]
+    assert rng.random() == 0.2094563824951179
+
+
+def test_a_setup_tree_searches_exactly_as_it_did_before():
+    """The same anchor on the production `Search` itself rather than a subclass:
+    the opening position's whole tree is deterministic placement, so `33c6032`'s
+    counts stand unchanged and no rng is consumed at all."""
+    rng = random.Random(5)
+    _, _, visits = Search(Anchor(), simulations=96, wave=8, rng=rng).run(a_game())
+
+    assert [int(v) for v in visits[:12]] == [67, 2, 2, 4, 3, 4, 1, 3, 1, 3, 3, 3]
+    assert not visits[12:].any()
+    assert rng.random() == 0.6229016948897019
 
 
 def test_a_wave_is_never_larger_than_the_budget_left():

@@ -673,6 +673,23 @@ def test_packing_reports_the_policy_loss_over_contested_rows_only():
     )
     assert float(batch.policy_weight.sum()) > 0
 
+    # The dilution needs a minibatch with nothing contested in it, and this
+    # corpus does not supply one: `losses` divides by the weight rather than by
+    # the row count, so a minibatch holding any contested row already reports
+    # the mean over those rows, and at this batch's natural density every one of
+    # its seven minibatches holds hundreds. Thinned to three contested rows, six
+    # of the seven report the zero this test is about — and the assertion stops
+    # being a comparison of two numbers that agree to a tenth of a percent.
+    keep = torch.nonzero(batch.policy_weight > 0.0).squeeze(-1)[:3]
+    thinned = torch.zeros_like(batch.policy_weight)
+    thinned[keep] = batch.policy_weight[keep]
+    batch = batch.__class__(
+        **{
+            name: thinned if name == "policy_weight" else getattr(batch, name)
+            for name in batch.FIELDS
+        }
+    )
+
     def run(pack: bool) -> float:
         student = NetworkPolicy(copy.deepcopy(policy.net), space, layout)
         stats = update(

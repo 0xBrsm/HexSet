@@ -7,6 +7,72 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-08-28
+
+### Fixed
+
+- **`catan.mcts` no longer freezes the three chance edges it does not roll.**
+  `MOVE_ROBBER`, `PLAY_KNIGHT` and `BUY_DEV_CARD` children were created once and
+  cached for the life of the tree, so each such edge's `Q` was one frozen steal
+  or one frozen card draw rather than an expectation over them, and the first
+  visit decided the edge for every later one. They now use the `_Chance` slot
+  that `ROLL` already used, keyed by the outcome: `_drawn` reads the card back
+  off the child that produced it — `apply` returns nothing — and a repeat of an
+  outcome the slot already holds reuses that child, so repeated visits
+  accumulate in one subtree and the edge's `Q` becomes an average. Found by the
+  afterstate audit (`agents/reference/afterstate-audit.md`), which called it the
+  only unambiguous chance-handling defect in the tree.
+
+  Discarding the duplicate child is exact rather than approximate: a steal's
+  child is `imagine`d without reshuffling, so two steals of one resource give
+  identical positions, and two purchases of one card differ only in the deck
+  order beneath the top card, which the encoder cannot see and a later
+  `BUY_DEV_CARD` reshuffles before it draws.
+
+  **Off-path behaviour is unchanged, and the search stays a pure function of
+  its seed.** Every draw comes from the search's own `rng` in descent order. An
+  edge that resolves nothing — a robber or knight naming no victim — keeps the
+  plain cached child rather than a slot, so it is bit-identical as well as
+  cheaper. A full-stack A/B over 408 searches from real positions off
+  `lam095/latest.pt` reproduced all 182 chance-free searches byte-for-byte,
+  visit counts *and* the position of the rng stream afterwards; the 226 that
+  touched a chance edge moved on 86% of them. Both halves of that are pinned by
+  tests: exact visit counts and an exact post-run rng draw, anchored to
+  `33c6032`.
+
+### Added
+
+- `catan.actions.victim_of`, which was `_victim`. The rule it holds — a slot at
+  or past `num_players` means nobody — decides whether a robber or knight edge
+  draws a hidden card at all, so `catan.mcts` needs it and a second copy would
+  drift.
+- `catan.mcts.HIDDEN_DRAW`, the three action types whose `apply` resolves a
+  hidden card.
+
+### Changed
+
+- `test_packing_reports_the_policy_loss_over_contested_rows_only` now thins the
+  batch to three contested rows before comparing. It asserts that packing raises
+  the reported policy loss because unpacked minibatches holding nothing
+  contested report zero — but `losses` divides by the weight, so any minibatch
+  with a contested row in it already reports the mean over those rows, and at
+  the fixture's natural 33% density all seven of them did. The assertion was
+  therefore comparing two numbers that agreed to a tenth of a percent, and it
+  changed sign when the search fix perturbed the batch. Thinned, the six empty
+  minibatches the docstring describes actually occur, and the test passes
+  against `33c6032`'s search as well as this one.
+
+### Unchanged
+
+- `ROLL` edges, whose sampled expectimax over `ROLL_ODDS` was already correct
+  and is untouched. Chance is still sampled rather than expanded over all
+  outcomes, for the budget reason in the module docstring.
+- `benchmarks.rank`'s head-vs-truth column, by construction: at `--simulations
+  0` it never builds a `Search`, and above zero the search draws from its own
+  generator. Its own `imagine`-then-`apply` sibling construction still embeds
+  one sampled outcome per chance child, which is the audit's second finding and
+  is not addressed here.
+
 ## [0.9.0] - 2026-08-27
 
 ### Added

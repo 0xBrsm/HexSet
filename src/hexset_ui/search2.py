@@ -158,10 +158,6 @@ class Evaluator:
             for vertex in range(topology.num_vertices)
         )
 
-    @classmethod
-    def for_game(cls, game: Game, weights: Weights | None = None) -> Evaluator:
-        return cls(game.state.board, weights)
-
     def survey(self, state: GameState, player: int) -> Survey:
         """Everything the player's own vertices are worth, in one walk.
 

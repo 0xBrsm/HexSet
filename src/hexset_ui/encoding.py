@@ -15,7 +15,7 @@ the gap the published agents for this game leave open.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import lru_cache
 
 import numpy as np
@@ -79,15 +79,6 @@ class Observation:
     edges: np.ndarray
     globals: np.ndarray
     graph: StaticGraph
-    _packed: np.ndarray | None = field(default=None, repr=False, compare=False)
-    _row: int = field(default=-1, repr=False, compare=False)
-
-    def __reduce__(self):
-        """Serialize only this position, never the other rows from its tick."""
-        return (
-            Observation,
-            (self.hexes, self.vertices, self.edges, self.globals, self.graph),
-        )
 
     @property
     def shapes(self) -> dict[str, tuple[int, ...]]:

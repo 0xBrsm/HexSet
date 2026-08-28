@@ -512,9 +512,8 @@ def _build_session(
         raise ValueError(f"expected {NUM_PLAYERS - 1} bots, got {len(bots)}")
 
     # Always resolved to a concrete int, even when the caller left it to chance,
-    # so a game can be written out as a hexset_ui.record.Record and later replayed
-    # from that same seed — `random.Random()` alone has no int to hand back for
-    # that.
+    # so the journal can name the seed a resumed game rebuilds its board from —
+    # `random.Random()` alone has no int to hand back for that.
     if seed is None:
         seed = random.SystemRandom().randrange(2**31)
     # Left to chance the same way: a fixed --human-seat is for testing one
@@ -522,13 +521,11 @@ def _build_session(
     # human seat 0 (and, with it, the first move of every setup snake).
     if human_seat is None:
         human_seat = random.SystemRandom().randrange(NUM_PLAYERS)
-    # Two separate Random instances from the same seed, not one shared stream —
-    # matching hexset_ui.record's own convention:
-    # replay() rebuilds the board from stored data (consuming no randomness) and
-    # then seeds a *fresh* random.Random(seed) for the game itself. Consuming
-    # this seed's stream here to build the board first, then handing the same
-    # object on to `start`, would leave `start`'s rng at a different position
-    # than replay() reconstructs, and a recorded game would fail its own replay.
+    # Two separate Random instances from the same seed, not one shared stream.
+    # `_resume_session` below rebuilds a game exactly this way, so the two must
+    # agree: consuming this seed's stream to build the board and then handing
+    # the same object on to `start` would leave `start`'s rng at a position
+    # resuming cannot reconstruct, and a journalled game would fail to resume.
     board = random_base_board(random.Random(seed))
     # Bots are assigned to non-human seats in ascending seat order — the
     # picker's 3 dropdowns don't know which seats they'll land on, since

@@ -4,7 +4,7 @@ import random
 from collections import Counter
 from dataclasses import dataclass
 
-from .maps import BASE_LAYOUT
+from .coords import BASE_LAYOUT
 from .ports import Port, base_port_bag, place_ports
 from .terrain import BEARS_TOKEN, TERRAIN_RESOURCE, Resource, Terrain
 from .topology import Topology

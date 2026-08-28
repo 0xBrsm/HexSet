@@ -11,7 +11,7 @@ from hexset_ui.actions import legal_actions, within_offer_budget  # noqa: E402
 from hexset_ui.board.board import random_base_board  # noqa: E402
 from hexset_ui.game import start, to_move  # noqa: E402
 from hexset_ui.onnxbot import load, network_bot  # noqa: E402
-from hexset_ui.play import step_randomly  # noqa: E402
+from hexset_ui.bots import step_randomly  # noqa: E402
 
 FIXTURE = Path(__file__).parent / "fixtures" / "tiny.onnx"
 

@@ -1,33 +1,23 @@
 """The server's own account of a game, written as the game happens.
 
-`hexset_ui.record` stores a game as a seed plus an action sequence: compact, and
-enough to reproduce a game exactly — but only by re-running the engine that
-wrote it. Dice, steals and the development deck's order are deliberately not in
-it (see that module's docstring), so a record can only say what was drawn or
-stolen by replaying, and a change to how the engine draws randomness turns every
-older record into a `ReplayError` rather than into an answer.
+One line per action, written the instant it is applied, with the hidden
+information spelled out. The shuffled deck goes in the header, the dice on every
+roll, the card drawn on every purchase, the resource taken on every steal, and
+every seat's full hand and development cards afterwards. Nothing here needs the
+engine to interpret it and nothing is held back — unlike the sidebar transcript,
+which hides exactly what a player at the table could not see (see
+`hexset_ui.webplay._describe`).
 
-This is the whole account instead: one line per action, written the instant it
-is applied, with the hidden information spelled out. The shuffled deck goes in
-the header, the dice on every roll, the card drawn on every purchase, the
-resource taken on every steal, and every seat's full hand and development cards
-afterwards. Nothing here needs the engine to interpret it and nothing is held
-back — unlike the sidebar transcript, which hides exactly what a player at the
-table could not see (see `hexset_ui.webplay._describe`).
-
-It is the only thing written. Every field a `Record` carries is in here already
-— board, seed, actions, offers, winner, turns — so a second file holding a
-subset of this one would be a copy that could only ever disagree with it. A
-consumer that wants records builds them from these lines (`test_webplay.py`
-does exactly that to check a journalled game still replays clean).
+It is the only thing written, and it is also what a game is resumed from:
+`replayable` reads these lines back into actions and `GameSession.restore`
+re-applies them. A second, more compact file beside this one would be a subset
+that could only ever disagree with it.
 
 One file per game, not one shared file appended to: sessions are concurrent (the
 web server deals a session per browser), and lines from three games in flight
 would have to be de-interleaved before any one of them could be read. Every line
 is written and closed as it happens, so a game abandoned mid-turn — or a server
-killed outright — leaves a complete account up to that point instead of nothing,
-which is the case `hexset_ui.record` cannot cover: it only ever holds a game that
-reached an ending.
+killed outright — leaves a complete account up to that point instead of nothing.
 
 Writing is on by default and switched off by setting `HEXSET_UI_GAMES_DIR`
 empty. A directory that cannot be written to disables this journal and lets the
@@ -45,11 +35,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .actions import Action, ActionType
+from .board.board import Board
 from .board.terrain import NUM_RESOURCES, Resource
 from .cards import NUM_DEV_CARDS, DevCard
 from .devcards import holdings
 from .game import Game
-from .record import board_fields
 from .victory import victory_points
 
 ENV_DIR = "HEXSET_UI_GAMES_DIR"
@@ -57,6 +47,25 @@ DEFAULT_DIR = "games"
 
 RESOURCE_NAMES: tuple[str, ...] = tuple(r.name for r in Resource)
 DEV_CARD_NAMES: tuple[str, ...] = tuple(c.name for c in DevCard)
+
+
+def board_fields(board: Board) -> dict[str, tuple]:
+    """The board, spelled out for the header.
+
+    Resuming rebuilds the board from the seed and never reads these back; they
+    are here so the file can be understood without re-running the generator
+    that made it, which is what this journal is for. Port vertices are left
+    out — they follow from the edge for anyone rebuilding the topology.
+    """
+    return {
+        "layout": tuple(tuple(h) for h in board.topology.hexes),
+        "terrain": tuple(int(t) for t in board.terrain),
+        "tokens": tuple(board.tokens),
+        "ports": tuple(
+            (p.edge, p.ratio, None if p.resource is None else int(p.resource))
+            for p in board.ports
+        ),
+    }
 
 
 def configured_dir() -> str | None:

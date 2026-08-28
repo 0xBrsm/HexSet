@@ -550,10 +550,9 @@ class GameSession:
     def round(self) -> int:
         """One full lap of the table, 1-indexed — what a human watching the
         log means by "turn", distinct from `game.turns`, which counts
-        per-seat and stays that way (it's a trained policy input feature and
-        a replay-verified Record field; see hexset_ui.encoding's TURN_SCALE and
-        hexset_ui.record). Every seat's actions within a lap share one round
-        number, unlike `game.turns` where each gets its own.
+        per-seat and stays that way (it's a trained policy input feature; see
+        hexset_ui.encoding's TURN_SCALE). Every seat's actions within a lap
+        share one round number, unlike `game.turns` where each gets its own.
 
         0 during setup: the placement snake isn't a lap of the table in the
         normal sense (order is 1,2,3,4,4,3,2,1, not 1,2,3,4 repeating), and

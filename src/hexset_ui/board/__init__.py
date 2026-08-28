@@ -1,5 +1,15 @@
-from .coords import DIRECTIONS, ORIGIN, Hex, distance, hexagon, neighbor, neighbors
-from .maps import BASE_LAYOUT, MINI_LAYOUT
+from .coords import (
+    BASE_LAYOUT,
+    DIRECTIONS,
+    MINI_LAYOUT,
+    ORIGIN,
+    Hex,
+    distance,
+    hexagon,
+    neighbor,
+    neighbors,
+)
+
 from .topology import Topology, build
 
 __all__ = [

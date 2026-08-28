@@ -45,3 +45,9 @@ def hexagon(radius: int) -> list[Hex]:
         for r in range(lo, hi + 1):
             out.append(Hex(q, r, -q - r))
     return sorted(out)
+
+
+# The two board shapes: the 19-hex standard board, and a 7-hex one the tests
+# use to exercise the topology on something small enough to check by hand.
+BASE_LAYOUT: tuple[Hex, ...] = tuple(hexagon(2))
+MINI_LAYOUT: tuple[Hex, ...] = tuple(hexagon(1))

@@ -4,6 +4,9 @@ Deliberately thin. `hexset_ui.search2` (handcrafted) and `hexset_ui.onnxbot`
 (learned) both depend on this and neither depends on the other, so this module
 is the whole of what they have in common: what a bot is, how to ask the engine
 for its options, and how a seat reads a per-seat vector.
+
+`RandomBot` and `step_randomly` are here too — not opponents anyone plays, but
+the cheapest thing that drives a game forward, which is what the tests need.
 """
 
 from __future__ import annotations
@@ -12,9 +15,12 @@ import random
 from dataclasses import dataclass, field
 from typing import Protocol, Sequence
 
-from .actions import Action, legal_actions
+from .actions import Action, apply, legal_actions
 from .game import Game, to_move
-from .play import Stuck
+
+
+class Stuck(RuntimeError):
+    """Raised when a live game offers no legal action, which is always a bug."""
 
 
 class Bot(Protocol):
@@ -67,3 +73,10 @@ class RandomBot:
 
     def choose(self, game: Game) -> Action:
         return self.rng.choice(options_for(game))
+
+
+def step_randomly(game: Game, rng: random.Random) -> Action:
+    """Pick a legal action at random and apply it, returning what was played."""
+    action = rng.choice(options_for(game))
+    apply(game, action)
+    return action

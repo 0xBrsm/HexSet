@@ -7,6 +7,40 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-08-28
+
+### Added
+
+- `--mix` accepts **any arena entrant spec**, not the two hardcoded names. A
+  training lane opponent can now be `search2-offers3`, `mcts:<ckpt>@64`,
+  `network:<ckpt>`, or any preset, resolved through `collect.named_opponent` and
+  therefore through `catan.arena.spawn` -- so a run trains against *literally*
+  the entrant the arena scores it on. `collect.mix_opponents` is the one place
+  that turns names into lane opponents, shared by the sharded and in-process
+  collectors; `collect.check_mix` is the pre-flight, and it refuses a mistyped
+  entrant or a missing checkpoint before the manifest is frozen rather than as a
+  traceback out of a worker subprocess.
+- `collect.RESERVED_MIX` names what may not be routed. `greedy` and `parent`
+  keep resolving to exactly the bots they resolved to before: `--mix greedy`
+  takes the run's own `--max-offers`, so what 34 recorded runs played is
+  `greedy-offers3`, and the arena's `greedy` preset -- `max_offers=None`, the
+  engine's whole eight-offer budget -- is a different bot at a different
+  strength. `test_collect` pins the equivalence twice, once field-for-field
+  including the tie-break rng state, and once by playing two cohorts and
+  requiring identical action streams.
+- `benchmarks.mix_cost`: what a mix costs a PPO iteration, per decision and per
+  shard, with a stopwatch on the learner and on every opponent. Interpolates
+  rather than models -- `mixed_caster` draws per game and cost is additive over
+  games, so `S(f) = (1-f) S(0) + f S(1)` is exact and only the endpoints need
+  measuring.
+
+### Fixed
+
+- The in-process collector's `--mix` construction fell through to the parent
+  checkpoint for any name that was not `greedy`, which only the two-name
+  validation kept unreachable. Both collectors now build their opponents through
+  the same function.
+
 ## [0.9.1] - 2026-08-28
 
 ### Fixed

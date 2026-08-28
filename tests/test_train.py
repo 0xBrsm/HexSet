@@ -739,3 +739,69 @@ def test_an_antithetic_duel_needs_two_games():
             Streamless(), Streamless(), games=1, lanes=1, players=4, seed=0,
             max_offers=3,
         )
+
+
+def test_the_mix_caster_gives_one_game_at_most_one_opponent():
+    """The limit of the caster, so a diverse mix is read for what it is.
+
+    Three opponents at a fifth each is three kinds of *game*; a cast game still
+    seats one opponent id on 2 of the 4 seats. A heterogeneous table -- learner,
+    greedy and search2 all at once -- needs a different caster, and reading the
+    current one as if it delivered that would misread the result.
+    """
+    caster = train.mixed_caster([0.2, 0.2, 0.2], players=4, seed=7)
+    casts = [caster(index) for index in range(600)]
+    assert casts == [caster(index) for index in range(600)]
+
+    seen: set[int] = set()
+    for cast in casts:
+        ids = {pid for pid in cast if pid}
+        assert len(ids) <= 1, f"two opponents in one game: {cast}"
+        seen |= ids
+        if ids:
+            seats = tuple(seat for seat, pid in enumerate(cast) if pid)
+            assert seats in ((1, 3), (0, 2))
+    assert seen == {1, 2, 3}
+    share = sum(1 for cast in casts if any(cast)) / len(casts)
+    assert 0.5 < share < 0.7, f"{share} of 600 at a nominal 0.6"
+
+
+def test_check_mix_admits_any_entrant_and_refuses_a_typo_or_a_missing_file(tmp_path):
+    """The pre-flight. Every failure here would otherwise land as a traceback out
+    of a collector subprocess, after the manifest was frozen and the box was
+    committed to the run."""
+    from catan.collect import check_mix
+
+    check_mix(
+        [("greedy", 0.15), ("search2-offers3", 0.1), ("random", 0.05)],
+        have_parent=False,
+    )
+    check_mix([("parent", 0.1)], have_parent=True)
+
+    with pytest.raises(SystemExit, match="unknown mix opponent"):
+        check_mix([("search2-offer3", 0.1)], have_parent=False)
+    with pytest.raises(SystemExit, match="needs --parent"):
+        check_mix([("parent", 0.1)], have_parent=False)
+    with pytest.raises(SystemExit, match="not there"):
+        check_mix([(f"mcts:{tmp_path / 'nowhere.pt'}@64", 0.1)], have_parent=False)
+
+
+def test_a_run_can_collect_against_a_held_out_entrant(tmp_path):
+    """The whole point of the change: an opponent the ladder could only *score*
+    can now be collected against, through the trainer's own manifest path."""
+    assert run(tmp_path, 1, ["--checkpoint-every", "1", "--mix", "random=1.0"]) == 0
+
+    lines = [json.loads(l) for l in (tmp_path / "log.jsonl").read_text().splitlines()]
+    # The update really consumed learner transitions from games an entrant played.
+    assert lines[-1]["positions"] > 0
+
+
+def test_a_sharded_run_can_collect_against_a_held_out_entrant(tmp_path):
+    assert (
+        run(
+            tmp_path,
+            1,
+            ["--checkpoint-every", "1", "--collect-workers", "2", "--mix", "random=1.0"],
+        )
+        == 0
+    )

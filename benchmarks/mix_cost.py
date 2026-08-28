@@ -3,7 +3,9 @@
 `--mix` used to accept two names. Once it accepts any arena entrant spec, the
 question that decides whether the feature is usable is arithmetic: a
 `search2-offers3` or `mcts:<ckpt>@64` lane opponent is far more expensive per
-decision than `greedy`, and collection is already the whole of the wall clock.
+decision than `greedy`. Collection is about a quarter of a PPO iteration's
+wall clock (the "92%" on record is the searched, expert-iteration collector's
+number), so the question is how far a lane opponent can stretch that quarter.
 
 The measurement is a **shard**, not a game and not a whole run: one PPO worker's
 share of a production iteration, which at `--lanes 128 --games-per-iteration 128

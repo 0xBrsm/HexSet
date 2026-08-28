@@ -92,6 +92,7 @@ def test_mix_cost_interpolates_between_the_endpoints_it_measures():
     """The claim the table rests on: `S(f) = (1-f) S(0) + f S(1)` needs only the
     endpoints, because the cast is drawn per game and cost is additive over
     games. Checked on the cast *share*, which is the same draw and is free."""
+    pytest.importorskip("torch", reason="catan.collect imports torch at module load")
     from catan.collect import mixed_caster
 
     caster = mixed_caster([0.25], players=4, seed=11)

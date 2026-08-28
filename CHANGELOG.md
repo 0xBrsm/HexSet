@@ -128,8 +128,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   off the child that produced it — `apply` returns nothing — and a repeat of an
   outcome the slot already holds reuses that child, so repeated visits
   accumulate in one subtree and the edge's `Q` becomes an average. Found by the
-  afterstate audit (`agents/reference/afterstate-audit.md`), which called it the
-  only unambiguous chance-handling defect in the tree.
+  afterstate audit, which called it the only unambiguous chance-handling
+  defect in the tree.
 
   Discarding the duplicate child is exact rather than approximate: a steal's
   child is `imagine`d without reshuffling, so two steals of one resource give

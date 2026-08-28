@@ -1,7 +1,7 @@
 """Gate A2 of the variance screen: does a quantile head give a *better mean*?
 
-Registered in `agents/reference/variance-screen.md` under candidate 3. Gate A1
-closed PASS -- the seat-conditional terminal return is measurably non-Gaussian
+Registered under the variance screen's candidate 3. Gate A1 closed PASS -- the
+seat-conditional terminal return is measurably non-Gaussian
 (+0.2215 VP of Wasserstein-1 over the instrument's own matched null) -- so a
 per-seat quantile head has a premise. This asks the only question that decides
 whether the *critic wire* improves: GAE reads `V`, one scalar per seat, and

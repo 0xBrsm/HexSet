@@ -1,7 +1,7 @@
 """Is a Catan seat's conditional terminal return actually Gaussian?
 
-Registered as Gate A1 for candidate 3 (`agents/reference/variance-screen.md`):
-the case for a distributional value head rests entirely on the target being
+Registered as Gate A1 for the variance screen's candidate 3: the case for a
+distributional value head rests entirely on the target being
 non-Gaussian, and nothing on this project has ever measured that -- it was
 inherited motivation, and week 1 withdrew the borrowed sentence it rested on.
 `benchmarks.floor` already produces the thing this needs. It snapshots a

@@ -5,13 +5,12 @@ import random
 from .board.terrain import NUM_RESOURCES, Resource
 from .cards import (
     PLAYABLE,
-    ROAD_BUILDING_ROADS,
     YEAR_OF_PLENTY_RESOURCES,
     DevCard,
 )
 from .economy import Purchase, can_afford, pay
 from .robber import move_robber, steal
-from .state import GameState, can_place_road, place_road
+from .state import GameState
 
 
 def can_buy(state: GameState, player: int) -> bool:
@@ -67,23 +66,6 @@ def play_knight(
     if victim is None:
         return None
     return steal(state, player, victim, rng or random.Random())
-
-
-def play_road_building(state: GameState, player: int, edges: list[int]) -> None:
-    """Build up to two roads for free.
-
-    Fewer than two is legal when the player has nowhere left to build, which is
-    why this takes a list rather than exactly two edges.
-    """
-    if len(edges) > ROAD_BUILDING_ROADS:
-        raise ValueError(f"at most {ROAD_BUILDING_ROADS} roads")
-    if len(set(edges)) != len(edges):
-        raise ValueError("cannot build the same road twice")
-    spend_card(state, player, DevCard.ROAD_BUILDING)
-    for edge in edges:
-        if not can_place_road(state, player, edge):
-            raise ValueError(f"player {player} cannot build road on edge {edge}")
-        place_road(state, player, edge)
 
 
 def play_year_of_plenty(state: GameState, player: int, resources: list[Resource]) -> None:

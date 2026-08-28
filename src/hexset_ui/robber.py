@@ -77,10 +77,3 @@ def discard(
         state.bank[resource] += count
 
 
-def random_discard(state: GameState, player: int, rng: random.Random) -> list[int]:
-    cards = [0] * len(state.hands[player])
-    for _ in range(discard_count(state, player)):
-        pool = [r for r, n in enumerate(state.hands[player]) if n > cards[r]]
-        cards[rng.choice(pool)] += 1
-    discard(state, player, cards)
-    return cards

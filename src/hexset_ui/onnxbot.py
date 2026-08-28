@@ -1,4 +1,4 @@
-"""A dropped-in ONNX checkpoint as a `hexset_ui.bots.Bot`.
+"""A dropped-in ONNX checkpoint as an opponent.
 
 This module is the whole boundary between the game and a model. Everything
 that knows a network exists — the observation encoding, the flat action
@@ -30,10 +30,16 @@ from typing import Sequence
 import numpy as np
 import onnxruntime as ort
 
-from .actions import Action, ActionSpace, ActionType, build_space, within_offer_budget
+from .actions import (
+    Action,
+    ActionSpace,
+    ActionType,
+    build_space,
+    options_for,
+    within_offer_budget,
+)
 from .board.terrain import NUM_RESOURCES
 from .board.topology import Topology
-from .bots import options_for
 from .encoding import Observation, encode
 from .game import Game, to_move
 from .mcts import Search
@@ -321,7 +327,7 @@ class NetworkBot:
 
 @dataclass
 class NetworkEvaluator:
-    """The value head as `hexset_ui.bots.SearchBot`'s leaf evaluation."""
+    """The value head as `hexset_ui.search2.SearchBot`'s leaf evaluation."""
 
     policy: OnnxPolicy
     players: int

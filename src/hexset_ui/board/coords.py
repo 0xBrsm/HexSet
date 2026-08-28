@@ -20,16 +20,10 @@ DIRECTIONS: tuple[Hex, ...] = (
     Hex(0, -1, 1),
 )
 
-ORIGIN = Hex(0, 0, 0)
-
 
 def neighbor(h: Hex, direction: int) -> Hex:
     d = DIRECTIONS[direction % 6]
     return Hex(h.q + d.q, h.r + d.r, h.s + d.s)
-
-
-def neighbors(h: Hex) -> tuple[Hex, ...]:
-    return tuple(neighbor(h, i) for i in range(6))
 
 
 def distance(a: Hex, b: Hex) -> int:

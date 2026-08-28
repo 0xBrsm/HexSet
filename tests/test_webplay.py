@@ -12,7 +12,7 @@ from hexset_ui.board.board import random_base_board
 from hexset_ui.board.coords import BASE_LAYOUT, MINI_LAYOUT, Hex, hexagon
 
 from hexset_ui.board.topology import build as build_topology
-from hexset_ui.bots import RandomBot
+from conftest import RandomBot
 from hexset_ui.game import Phase, is_over, start, to_move
 from hexset_ui.journal import (
     DEFAULT_DIR,

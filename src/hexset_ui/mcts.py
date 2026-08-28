@@ -21,7 +21,7 @@ measured in this project rather than imported from a paper:
 **Per-seat vectors and a stance, not a scalar and a sign flip.** Four seats with
 non-opposed fortunes need max^n, so a node backs up the whole vector and each
 node maximises its own mover's reading of it. How a seat reads the vector is
-`hexset_ui.bots.STANCES`, unchanged: `relative` — own less the mean of the others —
+`STANCE_ROWS`: `relative` — own less the mean of the others —
 beat plain max^n 53.6% over 2000 games on this engine. The literature's
 alternative here is CatAnalysis's κ=0.8 damping at another seat's node; it is
 not used, because the stance was measured on this codebase and κ was not.
@@ -52,7 +52,6 @@ from typing import Protocol, Sequence
 import numpy as np
 
 from .actions import Action, ActionType, apply, legal_actions, within_offer_budget
-from .bots import STANCES
 from .game import ROLL_ODDS, Game, imagine, is_over, roll_dice, to_move
 from .victory import WINNING_POINTS, victory_points
 
@@ -134,17 +133,15 @@ def _paranoid_rows(vectors: np.ndarray, seat: int) -> np.ndarray:
     return vectors[:, seat] - np.delete(vectors, seat, axis=1).max(axis=1)
 
 
-# `hexset_ui.bots.STANCES` read one vector at a time, which `_select` needs to do for
+# These read the whole `totals` matrix at once. `_select` needs a reading for
 # every child of every node it passes through — 300k scalar calls in a 400-move
-# game at 64 simulations, and 12% of the whole search. These read the whole
-# `totals` matrix at once and are pinned to the canonical scalar forms by test.
+# game at 64 simulations, and 12% of the whole search when done one at a time.
 #
 # `_relative_rows` reassociates: `v[s] - sum(others)/(n-1)` becomes
 # `(v[s]*n - sum(all))/(n-1)`, which is the same number in exact arithmetic and
-# within a rounding step in floating point. That is deliberate and it is why the
-# pinning test compares within a tolerance rather than exactly. Nothing on record
-# is measured against a stance applied this way — the search has no published
-# result yet — so there is no baseline for a last-bit difference to disturb.
+# within a rounding step in floating point. That is deliberate: the search has
+# no published result measured against it, so there is no baseline for a
+# last-bit difference to disturb.
 STANCE_ROWS = {
     "own": _own_rows,
     "relative": _relative_rows,
@@ -200,7 +197,7 @@ class Search:
         noise_fraction: float = 0.25,
         rng: random.Random | None = None,
     ) -> None:
-        if stance not in STANCES:
+        if stance not in STANCE_ROWS:
             raise ValueError(f"unknown stance: {stance}")
         if simulations < 1 or wave < 1:
             raise ValueError("a search needs at least one simulation and one wave")
@@ -209,7 +206,6 @@ class Search:
         self.wave = wave
         self.exploration = exploration
         self.stance = stance
-        self.rank = STANCES[stance]
         self.rank_rows = STANCE_ROWS[stance]
         self.max_offers = max_offers
         self.root_noise = root_noise
@@ -454,20 +450,3 @@ class Search:
         return options[int(np.argmax(visits))]
 
 
-def visit_policy(visits: np.ndarray, temperature: float = 1.0) -> np.ndarray:
-    """The root's visit counts as a distribution — expert iteration's target.
-
-    `temperature` 1 is proportional to visit share, and 0 is argmax with ties
-    split evenly. Nothing here trains on it yet; it is the half of the interface
-    a distillation step needs, and it belongs beside the search that produces it.
-    """
-    if visits.size == 0:
-        return visits
-    if temperature <= 0:
-        best = visits == visits.max()
-        return best / best.sum()
-    weighted = visits ** (1.0 / temperature)
-    total = weighted.sum()
-    if total <= 0:
-        return np.full(visits.shape, 1.0 / visits.size)
-    return weighted / total

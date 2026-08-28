@@ -4,9 +4,7 @@ from enum import IntEnum
 
 from .board.ports import BASE_TRADE_RATIO
 from .board.terrain import NUM_RESOURCES, Resource
-from .state import BANK_PER_RESOURCE, GameState, production
-
-BANK_TRADE_RATIO = BASE_TRADE_RATIO
+from .state import GameState, production
 
 
 class Purchase(IntEnum):
@@ -111,9 +109,3 @@ def distribute(state: GameState, roll: int) -> list[list[int]]:
     return granted
 
 
-def total_in_play(state: GameState) -> int:
-    return sum(state.bank) + sum(sum(hand) for hand in state.hands)
-
-
-def expected_total() -> int:
-    return BANK_PER_RESOURCE * NUM_RESOURCES

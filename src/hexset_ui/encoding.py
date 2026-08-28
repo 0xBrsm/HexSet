@@ -17,14 +17,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Sequence
 
 import numpy as np
 
 from .board.board import Board, pips
 from .board.terrain import NUM_RESOURCES, Terrain
 from .board.topology import Topology
-from .cards import NUM_DEV_CARDS, DECK_SIZE
+from .cards import DECK_SIZE
 from .game import Game, Phase
 from .state import NO_OWNER, Building, GameState
 
@@ -109,21 +108,6 @@ def vertex_features(players: int) -> int:
 
 def edge_features(players: int) -> int:
     return players + 1
-
-
-def global_features(players: int) -> int:
-    return (
-        NUM_RESOURCES  # own hand
-        + (players - 1)  # opponent hand sizes
-        + NUM_RESOURCES  # bank
-        + NUM_DEV_CARDS  # own development cards
-        + (players - 1)  # opponent development card counts
-        + players  # knights played
-        + players  # public victory points
-        + 2 * (players + 1)  # longest road and largest army holders
-        + NUM_PHASES
-        + 3  # free roads, deck size, turn
-    )
 
 
 def _seat(seat: int, perspective: int, players: int) -> int:
@@ -250,22 +234,6 @@ def _edge_rows(players: int, perspective: int) -> np.ndarray:
     return rows
 
 
-@lru_cache(maxsize=8)
-def _vertex_rows_all(players: int) -> np.ndarray:
-    """The vertex lookup tables stacked for batched perspective indexing."""
-    rows = np.stack([_vertex_rows(players, seat) for seat in range(players)])
-    rows.flags.writeable = False
-    return rows
-
-
-@lru_cache(maxsize=8)
-def _edge_rows_all(players: int) -> np.ndarray:
-    """The edge lookup tables stacked for batched perspective indexing."""
-    rows = np.stack([_edge_rows(players, seat) for seat in range(players)])
-    rows.flags.writeable = False
-    return rows
-
-
 _BUILDING_VALUE = np.arange(NUM_BUILDINGS, dtype=np.float32)
 
 
@@ -357,165 +325,6 @@ def _encode_globals(
     parts.append(min(game.turns / TURN_SCALE, 1.0))
 
     return np.array(parts, dtype=np.float32)
-
-
-def _encode_globals_batch(
-    games: Sequence[Game], perspectives: np.ndarray, building_points: np.ndarray
-) -> np.ndarray:
-    """Write the small global blocks once per batch instead of once per game."""
-    batch = len(games)
-    players = games[0].state.num_players
-    rows = np.arange(batch)[:, None]
-    seats = (perspectives[:, None] + np.arange(players)) % players
-
-    hands = np.asarray([game.state.hands for game in games], dtype=np.int16)
-    banks = np.asarray([game.state.bank for game in games], dtype=np.int16)
-    cards = np.asarray([game.state.dev_cards for game in games], dtype=np.int16)
-    fresh = np.asarray(
-        [game.state.new_dev_cards for game in games], dtype=np.int16
-    )
-    knights = np.asarray(
-        [game.state.knights_played for game in games], dtype=np.int16
-    )
-
-    out = np.zeros((batch, global_features(players)), dtype=np.float32)
-    cursor = 0
-
-    def append(values: np.ndarray, scale: float) -> None:
-        nonlocal cursor
-        block = np.asarray(values, dtype=np.float64)
-        if block.ndim == 1:
-            block = block[:, None]
-        width = block.shape[1]
-        out[:, cursor : cursor + width] = block / scale
-        cursor += width
-
-    append(hands[np.arange(batch), perspectives], HAND_SCALE)
-    hand_sizes = hands.sum(axis=2)
-    append(hand_sizes[rows, seats[:, 1:]], HAND_SCALE)
-    append(banks, BANK_SCALE)
-
-    all_cards = cards + fresh
-    append(all_cards[np.arange(batch), perspectives], 5.0)
-    card_counts = all_cards.sum(axis=2)
-    append(card_counts[rows, seats[:, 1:]], 5.0)
-    append(knights[rows, seats], 5.0)
-
-    longest = np.asarray(
-        [game.state.longest_road_holder for game in games], dtype=np.intp
-    )
-    army = np.asarray(
-        [game.state.largest_army_holder for game in games], dtype=np.intp
-    )
-    awards = 2 * (longest[:, None] == seats) + 2 * (army[:, None] == seats)
-    append(building_points.astype(np.float64) + awards, 10.0)
-
-    batch_rows = np.arange(batch)
-    for holders in (longest, army):
-        slots = np.where(
-            holders == NO_OWNER,
-            players,
-            (holders - perspectives) % players,
-        )
-        out[batch_rows, cursor + slots] = 1.0
-        cursor += players + 1
-
-    phases = np.asarray([int(game.phase) for game in games], dtype=np.intp)
-    out[batch_rows, cursor + phases] = 1.0
-    cursor += NUM_PHASES
-
-    append(np.asarray([game.free_roads for game in games]), 2.0)
-    append(np.asarray([len(game.state.deck) for game in games]), DECK_SIZE)
-    turns = np.minimum(
-        np.asarray([game.turns for game in games], dtype=np.float64) / TURN_SCALE,
-        1.0,
-    )
-    append(turns, 1.0)
-
-    if cursor != out.shape[1]:
-        raise AssertionError(f"wrote {cursor} global features into {out.shape[1]}")
-    return out
-
-
-def encode_batch(
-    games: Sequence[Game], perspectives: Sequence[int]
-) -> list[Observation]:
-    """Encode a collector tick with one set of vector operations.
-
-    The canonical single-position path stays deliberately plain and is the
-    oracle for this fast path. Collection asks about a couple dozen independent
-    games at once; crossing all of their Python lists into NumPy together avoids
-    repeating dozens of tiny allocations and dispatches per position.
-    """
-    if len(games) != len(perspectives):
-        raise ValueError("one perspective is required per game")
-    if not games:
-        return []
-
-    states = [game.state for game in games]
-    players = states[0].num_players
-    if any(state.num_players != players for state in states):
-        raise ValueError("one batch cannot mix player counts")
-
-    perspective = np.asarray(perspectives, dtype=np.intp)
-    if np.any((perspective < 0) | (perspective >= players)):
-        raise ValueError("a perspective does not name a player")
-
-    batch = len(games)
-    rows = np.arange(batch)
-    templates = [_template(state.board, players) for state in states]
-
-    shapes = (
-        (states[0].board.num_hexes, HEX_FEATURES),
-        (states[0].board.topology.num_vertices, vertex_features(players)),
-        (states[0].board.topology.num_edges, edge_features(players)),
-        (global_features(players),),
-    )
-    packed = np.empty(
-        (batch, sum(int(np.prod(shape)) for shape in shapes)), dtype=np.float32
-    )
-    blocks = []
-    start = 0
-    for shape in shapes:
-        stop = start + int(np.prod(shape))
-        block = packed[:, start:stop].reshape(batch, *shape)
-        if block.base is None:
-            raise AssertionError("packed observation slice did not stay a view")
-        blocks.append(block)
-        start = stop
-    hexes, vertices, edges, globals_ = blocks
-
-    np.stack([template.hexes for template in templates], out=hexes)
-    robbers = np.asarray([state.robber for state in states], dtype=np.intp)
-    hexes[rows, robbers, NUM_TERRAIN + 2] = 1.0
-
-    buildings = np.asarray(
-        [state.vertex_building for state in states], dtype=np.intp
-    )
-    owners = np.asarray([state.vertex_owner for state in states], dtype=np.intp)
-    keys = buildings * (players + 1) + owners + 1
-    np.stack([template.vertices for template in templates], out=vertices)
-    dynamic = NUM_BUILDINGS + players + 1
-    vertices[:, :, :dynamic] = _vertex_rows_all(players)[
-        perspective[:, None], keys
-    ]
-
-    edge_owners = np.asarray([state.edge_owner for state in states], dtype=np.intp)
-    edges[:] = _edge_rows_all(players)[perspective[:, None], edge_owners]
-
-    building_value = vertices[:, :, :NUM_BUILDINGS] @ _BUILDING_VALUE
-    building_points = np.sum(
-        building_value[:, :, None]
-        * vertices[:, :, NUM_BUILDINGS : NUM_BUILDINGS + players],
-        axis=1,
-    )
-    globals_[:] = _encode_globals_batch(games, perspective, building_points)
-
-    graph = static_graph(states[0].board.topology)
-    return [
-        Observation(hexes[i], vertices[i], edges[i], globals_[i], graph, packed, i)
-        for i in range(batch)
-    ]
 
 
 def encode(game: Game, perspective: int | None = None) -> Observation:

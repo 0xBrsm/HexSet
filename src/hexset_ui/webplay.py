@@ -3,10 +3,10 @@
 Deliberately torch-free: `hexset_ui.webserver` imports the network bot lazily, so
 this module — the board layout math, the wire-format mapping and the session
 that drives a game — can be imported and tested without PyTorch, the same way
-`hexset_ui.actions` and `hexset_ui.game` can. `hexset_ui.bots.Bot` (anything with a
-`choose(game) -> Action` method) is all a session needs of its opponent; a
-`NetworkBot` from `hexset_ui.onnxbot` satisfies that, and so does
-`hexset_ui.bots.RandomBot`, which is what the tests use.
+`hexset_ui.actions` and `hexset_ui.game` can. Anything with a
+`choose(game) -> Action` method is all a session needs of its opponent:
+`NetworkBot` from `hexset_ui.onnxbot`, `SearchBot` from `hexset_ui.search2`,
+or the `RandomBot` the tests use.
 
 ## The wire format
 

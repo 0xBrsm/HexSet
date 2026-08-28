@@ -1,6 +1,6 @@
 """HTTP-layer tests for `hexset_ui.webserver`.
 
-Torch-free on purpose: the opponent here is `hexset_ui.bots.RandomBot`, not a
+Torch-free on purpose: the opponent here is `conftest.RandomBot`, not a
 loaded checkpoint, so this suite runs anywhere the rest of the engine's tests
 do. What it is pinning is the transport — status codes, JSON shape, that an
 action `legal_actions` did not offer is refused over HTTP the same way
@@ -26,7 +26,7 @@ import pytest
 from hexset_ui import journal
 from hexset_ui.actions import Action, ActionType, legal_actions
 from hexset_ui.board.board import random_base_board
-from hexset_ui.bots import RandomBot
+from conftest import RandomBot
 from hexset_ui.game import is_over, start, to_move
 from hexset_ui.webplay import GameSession, action_to_wire, board_layout
 from hexset_ui.webserver import (

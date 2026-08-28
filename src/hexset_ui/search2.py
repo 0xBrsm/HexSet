@@ -8,7 +8,7 @@ here.
 
 Self-contained on purpose. A learned opponent lives entirely behind
 `hexset_ui.onnxbot`, and the two share only the engine and the small bot
-primitives in `hexset_ui.bots`, so neither can quietly acquire a dependency on
+primitives in `hexset_ui.actions`, so neither can quietly acquire a dependency on
 how the other works.
 """
 
@@ -16,13 +16,19 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field, fields
-from typing import NamedTuple
+from typing import NamedTuple, Sequence
 
-from .actions import Action, ActionType, apply, legal_actions, within_offer_budget
+from .actions import (
+    Action,
+    ActionType,
+    apply,
+    legal_actions,
+    options_for,
+    within_offer_budget,
+)
 from .board.board import Board, pips, scarce_resources
 from .board.ports import BASE_TRADE_RATIO
 from .board.terrain import NUM_RESOURCES, TERRAIN_RESOURCE
-from .bots import STANCES, options_for
 from .economy import COSTS, Purchase
 from .game import ROLL_ODDS, Game, imagine, is_over, roll_dice, to_move
 from .robber import DISCARD_THRESHOLD
@@ -277,6 +283,33 @@ class Evaluator:
         return [
             self.score(state, p, knower=knower) for p in range(state.num_players)
         ]
+
+
+def _own(vector: Sequence[float], seat: int) -> float:
+    """Plain max^n: each seat wants its own score high and ignores the rest."""
+    return vector[seat]
+
+
+def _relative(vector: Sequence[float], seat: int) -> float:
+    """Own score less the average of everyone else's.
+
+    A constant-sum reading of the vector. HexSet has exactly one winner, so a
+    position is only worth what it is worth *compared to* the table, and an
+    action that lifts everyone equally has achieved nothing.
+    """
+    others = [v for p, v in enumerate(vector) if p != seat]
+    return vector[seat] - sum(others) / len(others)
+
+
+def _paranoid(vector: Sequence[float], seat: int) -> float:
+    """Own score less the best opponent's. The leader is the only rival."""
+    others = [v for p, v in enumerate(vector) if p != seat]
+    return vector[seat] - max(others)
+
+
+# How a seat turns the per-seat evaluation vector into the one number it
+# maximises. The evaluation is unchanged; only the reading of it differs.
+STANCES = {"own": _own, "relative": _relative, "paranoid": _paranoid}
 
 
 @dataclass

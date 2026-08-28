@@ -181,16 +181,6 @@ def build_space(num_vertices: int, num_edges: int, num_hexes: int, players: int)
     )
 
 
-def space_for(game: Game) -> ActionSpace:
-    topology = game.state.board.topology
-    return build_space(
-        topology.num_vertices,
-        topology.num_edges,
-        topology.num_hexes,
-        game.state.num_players,
-    )
-
-
 def _robber_targets(game: Game, kind: ActionType) -> list[Action]:
     state = game.state
     out = []
@@ -413,12 +403,21 @@ def within_offer_budget(
     return kept or list(options)
 
 
-def legal_mask(game: Game, space: ActionSpace | None = None) -> list[bool]:
-    space = space or space_for(game)
-    mask = [False] * space.size
-    for action in legal_actions(game):
-        mask[space.index(action)] = True
-    return mask
+class Stuck(RuntimeError):
+    """Raised when a live game offers no legal action, which is always a bug."""
+
+
+def options_for(game: Game) -> list[Action]:
+    """`legal_actions`, for a caller that has no answer for an empty list.
+
+    A bot on the move must be able to move. Every phase that can be reached
+    offers something, so an empty list is an engine bug, and a bot that
+    returned `None` here would only push the crash somewhere less obvious.
+    """
+    options = legal_actions(game)
+    if not options:
+        raise Stuck(f"no legal action in {game.phase.name} for player {game.current_player}")
+    return options
 
 
 def apply(game: Game, action: Action) -> None:

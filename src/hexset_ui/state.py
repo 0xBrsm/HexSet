@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 
 from .board.board import Board
-from .board.terrain import NUM_RESOURCES, TERRAIN_RESOURCE, Terrain
+from .board.terrain import NUM_RESOURCES, TERRAIN_RESOURCE
 from .cards import NUM_DEV_CARDS, make_deck
 
 NO_OWNER = -1
@@ -200,18 +200,3 @@ def production(state: GameState, roll: int) -> list[list[int]]:
     return gains
 
 
-def gold_claims(state: GameState, roll: int) -> list[int]:
-    """How many resources of their choice each player may claim from gold hexes."""
-    claims = [0] * state.num_players
-    board = state.board
-    topology = board.topology
-
-    for h in board.hexes_by_roll[roll]:
-        if h == state.robber or board.terrain[h] is not Terrain.GOLD:
-            continue
-        for v in topology.hex_vertices[h]:
-            owner = state.vertex_owner[v]
-            if owner != NO_OWNER:
-                claims[owner] += state.vertex_building[v]
-
-    return claims

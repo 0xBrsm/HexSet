@@ -16,7 +16,7 @@ from .devcards import (
     spend_card,
 )
 from .economy import Purchase, bank_trade, distribute, pay
-from .robber import discard, discard_count, move_robber, steal
+from .robber import discard_count, move_robber, steal
 from .trading import Offer, can_propose
 from .trading import execute as execute_trade
 from .trading import responders as offer_responders
@@ -226,15 +226,6 @@ def to_move(game: Game) -> int:
 def _finish_discards(game: Game) -> None:
     if not any(game.discard_quota):
         game.phase = Phase.ROBBER
-
-
-def submit_discard(game: Game, player: int, cards: list[int]) -> None:
-    _require(game, Phase.DISCARD)
-    if game.discard_quota[player] != sum(cards):
-        raise ValueError(f"player {player} must discard {game.discard_quota[player]}")
-    discard(game.state, player, cards, game.discard_quota[player])
-    game.discard_quota[player] = 0
-    _finish_discards(game)
 
 
 def discard_one(game: Game, player: int, resource: Resource) -> None:

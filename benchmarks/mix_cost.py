@@ -67,8 +67,8 @@ from catan.collect import (
     ParallelCollector,
     WorkerSpec,
     check_mix,
+    mix_caster,
     mix_opponents,
-    mixed_caster,
     parse_mix,
 )
 from catan.encoding import static_graph
@@ -224,9 +224,7 @@ def shard(
         action_cap=action_cap,
         max_offers=max_offers,
         opponents=opponents,
-        caster=(
-            mixed_caster([f for _, f in parsed], players, seed) if parsed else None
-        ),
+        caster=mix_caster(parsed, players, seed) if parsed else None,
     )
 
     start = time.perf_counter()

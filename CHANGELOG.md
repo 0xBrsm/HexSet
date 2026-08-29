@@ -9,6 +9,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `--mix` accepts a **table entry**, `table(a|b|c)=f`: in a share `f` of
+  games the learner takes one seat, drawn per index, and every other seat is an
+  independent draw from the pool `a|b|c` — with replacement, so three copies
+  of one bot and a fully heterogeneous table are both dealt. This is the
+  seating the deployment, the external bridge and every real game put the
+  network in, and no run had ever collected in it: a plain entry gives its
+  opponent 2 of 4 seats on alternating parity, so the learner always had a
+  twin at the table. `collect.mix_caster` handles both entry kinds and is
+  `mixed_caster` to the cast when no table entry is present (pinned by test
+  over 1000 indices); `collect.mix_names` is the one place mix names become
+  caster ids, shared by `mix_opponents`, `check_mix` and the caster. No new
+  flag, so every frozen config on disk still loads.
+
 - `benchmarks.duel` records the seat geometry of every verdict. A 2v2 can seat
   each copy beside its twin (`[a, a, b, b]`, **blocked**) or between two
   opponents (`[a, b, a, b]`, **interleaved**), and until now the worker count

@@ -591,3 +591,23 @@ def test_a_worker_seats_three_distinct_mix_opponents_by_id():
             assert bool(episode.trajectories[seat]) == (pid == 0)
     # Deterministic in the spec's seed, so this is a fixed fact and not a sample.
     assert seen == {1, 2, 3}
+
+
+def test_a_worker_casts_a_table_and_records_only_the_learner_seat():
+    """The seating-free geometry in the sharded collector: one learner seat,
+    the rest drawn from the pool by id, opponent seats never recorded."""
+    mix = (("table(random|greedy-offers1|random-placement)", 1.0),)
+    collector = ParallelCollector([spec(0, 1, lanes=4, mix=mix)])
+    try:
+        episodes = collector.collect(24)
+    finally:
+        collector.close()
+
+    seen: set[int] = set()
+    for episode in episodes:
+        assert episode.cast.count(0) == 1, episode.cast
+        assert set(episode.cast) <= {0, 1, 2, 3}
+        seen |= {pid for pid in episode.cast if pid}
+        for seat, pid in enumerate(episode.cast):
+            assert bool(episode.trajectories[seat]) == (pid == 0)
+    assert seen == {1, 2, 3}

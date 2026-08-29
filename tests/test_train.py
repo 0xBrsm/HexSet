@@ -805,3 +805,76 @@ def test_a_sharded_run_can_collect_against_a_held_out_entrant(tmp_path):
         )
         == 0
     )
+
+
+def test_a_table_entry_seats_the_learner_once_against_draws_from_its_pool():
+    """`table(a|b)=f` is the seating-free referent -- one learner seat, every
+    other seat an independent draw from the pool -- and it has to be pure in
+    the index like every caster before it."""
+    mix = train.parse_mix("greedy=0.2,table(greedy|parent|search2-offers3)=0.5")
+    assert train.mix_names(mix) == ["greedy", "parent", "search2-offers3"]
+    caster = train.mix_caster(mix, players=4, seed=11)
+    casts = [caster(index) for index in range(800)]
+    assert casts == [caster(index) for index in range(800)]
+
+    pairs = [c for c in casts if c.count(0) == 2]
+    tables = [c for c in casts if c.count(0) == 1]
+    pure = [c for c in casts if c.count(0) == 4]
+    assert len(pairs) + len(tables) + len(pure) == 800
+    assert 120 <= len(pairs) <= 200, f"{len(pairs)} pair games at a nominal 160"
+    assert 340 <= len(tables) <= 460, f"{len(tables)} table games at a nominal 400"
+    for cast in pairs:
+        assert set(cast) == {0, 1}
+    seats = [cast.index(0) for cast in tables]
+    assert all(40 <= seats.count(seat) for seat in range(4)), "a seat starved"
+    drawn = [pid for cast in tables for pid in cast if pid]
+    assert set(drawn) == {1, 2, 3}
+    # Three of one bot is a legal table: the bridge's own design.
+    assert any(len(set(cast) - {0}) == 1 for cast in tables)
+    assert any(len(set(cast) - {0}) == 3 for cast in tables)
+
+
+def test_a_mix_without_a_table_casts_exactly_as_the_recorded_runs_were_cast():
+    """34 recorded runs were cast by `mixed_caster`; a resume must deal the
+    games it would have dealt, so the general caster is that one on the
+    specs it accepted."""
+    for spec, seed in (("greedy=0.15", 0), ("greedy=0.15,parent=0.15", 4)):
+        mix = train.parse_mix(spec)
+        old = train.mixed_caster([f for _, f in mix], players=4, seed=seed)
+        new = train.mix_caster(mix, players=4, seed=seed)
+        assert [old(i) for i in range(1000)] == [new(i) for i in range(1000)]
+
+
+def test_parse_mix_reads_table_syntax_and_refuses_a_broken_one():
+    assert train.parse_mix("table(greedy|search2)=0.5") == [("table(greedy|search2)", 0.5)]
+    assert train.table_pool("table(a| b)") == ["a", "b"]
+    assert train.table_pool("greedy") is None
+    with pytest.raises(ValueError, match="unclosed"):
+        train.parse_mix("table(greedy|search2=0.5")
+    with pytest.raises(ValueError, match="at least one"):
+        train.parse_mix("table()=0.5")
+    with pytest.raises(ValueError, match="at least one"):
+        train.parse_mix("table(greedy|)=0.5")
+
+
+def test_check_mix_looks_inside_a_table_pool():
+    from catan.collect import check_mix
+
+    check_mix(train.parse_mix("table(greedy|random|search2-offers3)=0.5"), have_parent=False)
+    with pytest.raises(SystemExit, match="unknown mix opponent"):
+        check_mix(train.parse_mix("table(greedy|serch2)=0.5"), have_parent=False)
+    with pytest.raises(SystemExit, match="needs --parent"):
+        check_mix(train.parse_mix("table(greedy|parent)=0.5"), have_parent=False)
+
+
+def test_a_run_can_collect_at_a_table_through_the_manifest_path(tmp_path):
+    assert (
+        run(
+            tmp_path,
+            1,
+            ["--checkpoint-every", "1", "--mix", "table(random|greedy-offers1)=1.0"],
+        )
+        == 0
+    )
+    lines = [json.loads(l) for l in (tmp_path / "log.jsonl").read_text().splitlines()]
+    assert lines[-1]["positions"] > 0

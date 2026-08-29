@@ -7,6 +7,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **The piece supply is enforced: 15 roads, 5 settlements, 4 cities a
+  player.** `state.can_place_settlement`, `can_upgrade_to_city` and
+  `can_place_road` refuse a piece that is not in the box, so bought pieces,
+  the road-building card's free roads and initial placement all read one
+  rule and `legal_actions` stops offering what cannot be built. This engine
+  had no supply at all until now — every recorded run, duel and ladder was
+  played with unlimited pieces — while the deployment's engine (hexset-ui,
+  the rules reference) and catanatron both capped. Ported verbatim from
+  hexset-ui `state.py`. Measured before the fix, the cap would have bound in
+  3.1% of the frontier network's player-games (a sixth settlement; never a
+  fifth city or sixteenth road) and 10.4% of `greedy`'s (roads to 26). Every
+  internal number recorded before this entry is an uncapped number; the
+  bridge's were always capped.
+
 ### Added
 
 - `catan.widen`: a **function-preserving widening** of a trained checkpoint

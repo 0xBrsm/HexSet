@@ -44,6 +44,9 @@ from .encoding import Observation, encode
 from .game import Game, to_move
 from .mcts import Search
 from .modelmeta import SearchConfig, search_config
+from .record import action_mask
+from .record import pair_index as _pair_index
+from .record import pair_mask as _pair_mask
 
 # The off-diagonal (give, want) pairs, flattened as `give * NUM_RESOURCES +
 # want`. The diagonal is never legal — `legal_actions` skips `wanted ==
@@ -79,14 +82,6 @@ class Request:
     options: tuple[Action, ...]
 
 
-def action_mask(space: ActionSpace, options: Sequence[Action]) -> np.ndarray:
-    """Mark already-enumerated actions without enumerating them again."""
-    mask = np.zeros(space.size, dtype=bool)
-    for action in options:
-        mask[space.index(action)] = True
-    return mask
-
-
 def _check_players(game: Game, players: int) -> None:
     if game.state.num_players != players:
         raise ValueError(
@@ -101,20 +96,6 @@ def _board_order(value: np.ndarray, seat: int) -> tuple[float, ...]:
     return tuple(
         float(value[(board_seat - seat) % players]) for board_seat in range(players)
     )
-
-
-def _pair_index(give, want) -> int:
-    """The flat pair slot for a one-for-one offer's two one-hot bundles."""
-    return give.index(1) * NUM_RESOURCES + want.index(1)
-
-
-def _pair_mask(options) -> np.ndarray:
-    """Which one-for-one offers were legal, as a flat `(NUM_PAIRS,)` bool."""
-    mask = np.zeros(NUM_PAIRS, dtype=bool)
-    for option in options:
-        if option.type is ActionType.PROPOSE_TRADE:
-            mask[_pair_index(option.give, option.want)] = True
-    return mask
 
 
 def _one_hot(resource: int) -> tuple[int, ...]:

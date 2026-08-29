@@ -14,6 +14,80 @@ from hexset_ui.onnxbot import load, network_bot  # noqa: E402
 from conftest import step_randomly  # noqa: E402
 
 FIXTURE = Path(__file__).parent / "fixtures" / "tiny.onnx"
+FIXTURE_V2 = Path(__file__).parent / "fixtures" / "stub-v2.onnx"
+
+
+@pytest.fixture
+def checkpoint_v2():
+    """`stub-v2.onnx`: a contract-2 stub for the same 4-player base board as
+    `checkpoint` — uniform-over-legal prior, zero value, no learned weights
+    (see `tests/fixtures/build_stub_v2.py`). Exercises `V2Policy` through the
+    same public entry points `checkpoint` exercises for `OnnxPolicy`, so the
+    two contracts are held to the same behavioural bar rather than only the
+    one this repo happens to have a trained checkpoint for.
+    """
+    board = random_base_board(random.Random(0))
+    yield str(FIXTURE_V2), board
+    from hexset_ui.onnxbot import _load_cached
+
+    _load_cached.cache_clear()
+
+
+def test_a_v2_checkpoint_plays_a_legal_action_from_every_phase(checkpoint_v2):
+    from hexset_ui.actions import apply
+
+    path, board = checkpoint_v2
+    bot = network_bot(path, board)
+    rng = random.Random(3)
+    game = start(board, 4, rng)
+
+    seen = set()
+    for _ in range(400):
+        if game.won_by is not None:
+            break
+        action = bot.choose(game)
+        assert action in legal_actions(game)
+        seen.add(game.phase)
+        apply(game, action)
+    assert len(seen) > 3
+
+
+def test_a_v2_checkpoints_value_head_is_already_board_seat_order(checkpoint_v2):
+    from hexset_ui.onnxbot import network_evaluator
+
+    path, board = checkpoint_v2
+    evaluator = network_evaluator(path, board)
+    game = start(board, 4, random.Random(2))
+    for _ in range(30):
+        step_randomly(game, random.Random(2))
+
+    for seat in range(4):
+        vector = evaluator.evaluate_game(game, seat)
+        assert len(vector) == 4
+        assert vector == pytest.approx([0.0, 0.0, 0.0, 0.0])
+
+
+def test_a_v2_search_over_a_learned_prior_plays_a_legal_action(checkpoint_v2):
+    from hexset_ui.actions import apply
+    from hexset_ui.onnxbot import searcher
+
+    path, board = checkpoint_v2
+    search = searcher(path, board, simulations=16, wave=4, rng=random.Random(0))
+    game = start(board, 4, random.Random(2))
+    for _ in range(20):
+        action = search.choose(game)
+        assert action in set(legal_actions(game))
+        apply(game, action)
+
+
+def test_a_v2_stub_spawns_a_single_forward_bot(checkpoint_v2):
+    """`stub-v2.onnx`'s metadata asks for no search, same as `tiny.onnx`'s —
+    `spawn` must read that off contract 2's metadata exactly as it does off
+    contract 1's."""
+    from hexset_ui.onnxbot import NetworkBot, spawn
+
+    path, board = checkpoint_v2
+    assert isinstance(spawn(path, board, rng=random.Random(0)), NetworkBot)
 
 
 @pytest.fixture

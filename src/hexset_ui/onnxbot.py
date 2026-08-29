@@ -8,15 +8,19 @@ hands over a `Game` and gets an `Action` back, and `spawn` below is the only
 entry point it needs.
 
 `NetworkBot`, `NetworkEvaluator` and `LeafEvaluator` are thin adapters over
-`OnnxPolicy`; they only ever call methods on `self.policy` and never inspect
-a network directly. `OnnxPolicy` is an onnxruntime `InferenceSession` with
-the masking and sampling math in numpy — mechanical, since none of it has
-learned parameters.
+a policy; they only ever call methods on `self.policy` and never inspect a
+network directly. `OnnxPolicy` and `V2Policy` are each an onnxruntime
+`InferenceSession` with their own math in numpy — mechanical, since none of
+it has learned parameters.
 
-The ONNX graph is currently "observation in, raw logits/give/want/value out"
-— see the training repo's `export_onnx`, which produces it. Masking stays in
-Python because a position's legal moves are a fact about the rules, not
-about the network, and only the engine can compute them.
+A checkpoint's `contract` metadata picks which of two graph shapes it is.
+Contract 1 is "observation in, raw logits/give/want/value out", with masking,
+softmax and give/want decode done here in Python (`OnnxPolicy`). Contract 2
+is "record in, decision out" — the graph itself masks, normalises, argmaxes
+and un-rotates, and `V2Policy` just reads its outputs. `NetworkBot`,
+`NetworkEvaluator` and `LeafEvaluator` call `act_rows`/`value_rows`/
+`score_rows`, an interface both policies share, and never learn which
+contract they are holding.
 """
 
 from __future__ import annotations
@@ -44,7 +48,7 @@ from .encoding import Observation, encode
 from .game import Game, to_move
 from .mcts import Search
 from .modelmeta import SearchConfig, search_config
-from .record import action_mask
+from .record import action_mask, build_record
 from .record import pair_index as _pair_index
 from .record import pair_mask as _pair_mask
 
@@ -222,12 +226,147 @@ class OnnxPolicy:
         slots, offers = self._log_probs(prediction, masks, pairs)
         return slots, offers, prediction["value"]
 
+    def act_rows(self, rows: Sequence[tuple[Game, int, tuple[Action, ...]]]) -> list[Action]:
+        """`act`, addressed by `(game, seat, options)` rather than a caller-built
+        `Request` — the row shape `NetworkBot` and friends share with `V2Policy`."""
+        if not rows:
+            return []
+        requests = [
+            Request(
+                seat=seat,
+                observation=encode(game, seat),
+                mask=action_mask(self.space, options),
+                options=tuple(options),
+            )
+            for game, seat, options in rows
+        ]
+        return self.act(requests)
+
+    def value_rows(self, rows: Sequence[tuple[Game, int]]) -> list[tuple[float, ...]]:
+        """`values`, in board-seat order, addressed by `(game, seat)` rows."""
+        if not rows:
+            return []
+        values = self.values([encode(game, seat) for game, seat in rows])
+        return [_board_order(values[i], seat) for i, (_, seat) in enumerate(rows)]
+
+    def score_rows(
+        self, rows: Sequence[tuple[Game, int, tuple[Action, ...]]]
+    ) -> list[tuple[np.ndarray, tuple[float, ...]]]:
+        """`score`, combined into the `(prior, value)` per leaf that
+        `hexset_ui.mcts.Evaluator.evaluate` wants."""
+        if not rows:
+            return []
+        observations = [encode(game, seat) for game, seat, _ in rows]
+        masks = np.stack([action_mask(self.space, options) for _, _, options in rows])
+        pairs = np.stack([_pair_mask(options) for _, _, options in rows])
+        slots, offers, values = self.score(observations, masks, pairs)
+        return [
+            (
+                self._combine_prior(options, slots[i], offers[i]),
+                _board_order(values[i], seat),
+            )
+            for i, (_, seat, options) in enumerate(rows)
+        ]
+
+    def _combine_prior(self, options, slots: np.ndarray, offers: np.ndarray) -> np.ndarray:
+        """A leaf's options, scored from this row's masked slot and offer
+        log-probs — log-space addition, since `PROPOSE_TRADE`'s slot and its
+        offer are two separate heads whose probabilities multiply."""
+        trade = self.trade_slot
+        log_probs = np.empty(len(options))
+        for i, option in enumerate(options):
+            index = self.space.index(option)
+            log_probs[i] = slots[index]
+            if index == trade:
+                log_probs[i] += offers[_pair_index(option.give, option.want)]
+        prior = np.exp(log_probs)
+        total = prior.sum()
+        if total <= 0:
+            return np.full(len(options), 1.0 / len(options))
+        return prior / total
+
+
+class V2Policy:
+    """A contract-2 checkpoint: the graph itself masks, normalises, argmaxes
+    and un-rotates, so this class only states the position and reads the
+    graph's decision back. Same row-shaped interface as `OnnxPolicy`
+    (`act_rows`, `value_rows`, `score_rows`, `trade_slot`) — `NetworkBot` and
+    friends call one or the other without knowing which they hold.
+    """
+
+    def __init__(self, session: ort.InferenceSession, space: ActionSpace) -> None:
+        self.session = session
+        self.space = space
+        self.trade_slot = space.offsets[ActionType.PROPOSE_TRADE]
+
+    def _run(
+        self,
+        rows: Sequence[tuple[Game, int, tuple[Action, ...]]],
+        outputs: list[str],
+    ) -> list[np.ndarray]:
+        records = [build_record(game, seat, options, self.space) for game, seat, options in rows]
+        inputs = {key: np.stack([record[key] for record in records]) for key in records[0]}
+        return self.session.run(outputs, inputs)
+
+    def _decode(self, index: int, pair: int) -> Action:
+        if index == self.trade_slot:
+            return Action(
+                ActionType.PROPOSE_TRADE,
+                give=_one_hot(pair // NUM_RESOURCES),
+                want=_one_hot(pair % NUM_RESOURCES),
+            )
+        return self.space.decode(index)
+
+    def act_rows(self, rows: Sequence[tuple[Game, int, tuple[Action, ...]]]) -> list[Action]:
+        if not rows:
+            return []
+        action_index, pair_index_out = self._run(rows, ["action_index", "pair_index"])
+        return [self._decode(int(a), int(p)) for a, p in zip(action_index, pair_index_out)]
+
+    def value_rows(self, rows: Sequence[tuple[Game, int]]) -> list[tuple[float, ...]]:
+        """`value`, already in board-seat order — no `_board_order` un-rotation
+        needed for contract 2. `options_for` stands in for this row's options,
+        since a bare `(game, seat)` value query has none to offer, and an
+        empty mask would leave the graph nothing legal to normalise over."""
+        if not rows:
+            return []
+        (value,) = self._run([(game, seat, options_for(game)) for game, seat in rows], ["value"])
+        return [tuple(float(v) for v in row) for row in value]
+
+    def score_rows(
+        self, rows: Sequence[tuple[Game, int, tuple[Action, ...]]]
+    ) -> list[tuple[np.ndarray, tuple[float, ...]]]:
+        prior, pair_prior, value = self._run(rows, ["prior", "pair_prior", "value"])
+        return [
+            (
+                self._combine_prior(options, prior[i], pair_prior[i]),
+                tuple(float(v) for v in value[i]),
+            )
+            for i, (_, _, options) in enumerate(rows)
+        ]
+
+    def _combine_prior(self, options, prior: np.ndarray, pair_prior: np.ndarray) -> np.ndarray:
+        """A leaf's options, scored from this row's dense priors — plain
+        multiplication, since contract 2 hands back linear probabilities
+        rather than the log-probs contract 1's heads produce."""
+        trade = self.trade_slot
+        weights = np.empty(len(options))
+        for i, option in enumerate(options):
+            index = self.space.index(option)
+            weights[i] = prior[index]
+            if index == trade:
+                weights[i] *= pair_prior[_pair_index(option.give, option.want)]
+        total = weights.sum()
+        if total <= 0:
+            return np.full(len(options), 1.0 / len(options))
+        return weights / total
+
 
 @dataclass(frozen=True)
 class Loaded:
     """A checkpoint made playable, plus what the run it came from was doing."""
 
-    policy: OnnxPolicy
+    policy: OnnxPolicy | V2Policy
     space: ActionSpace
     players: int
     max_offers: int | None
@@ -261,9 +400,11 @@ def _load_cached(path: str, topology: Topology, device: str, mtime_ns: int) -> L
     space = build_space(
         topology.num_vertices, topology.num_edges, topology.num_hexes, players
     )
+    contract = meta.get("contract", "1")
+    policy = V2Policy(session, space) if contract == "2" else OnnxPolicy(session, space)
     max_offers = meta.get("max_offers") or None
     return Loaded(
-        policy=OnnxPolicy(session, space),
+        policy=policy,
         space=space,
         players=players,
         max_offers=int(max_offers) if max_offers is not None else None,
@@ -286,9 +427,9 @@ def load(path: str, topology: Topology, device: str = "cpu") -> Loaded:
 
 @dataclass
 class NetworkBot:
-    """`OnnxPolicy` answering one position at a time."""
+    """A policy answering one position at a time."""
 
-    policy: OnnxPolicy
+    policy: OnnxPolicy | V2Policy
     space: ActionSpace
     players: int
     max_offers: int | None = None
@@ -296,35 +437,28 @@ class NetworkBot:
     def choose(self, game: Game) -> Action:
         _check_players(game, self.players)
         seat = to_move(game)
-        options = within_offer_budget(game, options_for(game), self.max_offers)
-        request = Request(
-            seat=seat,
-            observation=encode(game, seat),
-            mask=action_mask(self.space, options),
-            options=tuple(options),
-        )
-        return self.policy.act([request])[0]
+        options = tuple(within_offer_budget(game, options_for(game), self.max_offers))
+        return self.policy.act_rows([(game, seat, options)])[0]
 
 
 @dataclass
 class NetworkEvaluator:
     """The value head as `hexset_ui.search2.SearchBot`'s leaf evaluation."""
 
-    policy: OnnxPolicy
+    policy: OnnxPolicy | V2Policy
     players: int
     max_offers: int | None = None
 
     def evaluate_game(self, game: Game, seat: int) -> list[float]:
         _check_players(game, self.players)
-        value = self.policy.values([encode(game, seat)])[0]
-        return list(_board_order(value, seat))
+        return list(self.policy.value_rows([(game, seat)])[0])
 
 
 @dataclass
 class LeafEvaluator:
     """A whole wave of `hexset_ui.mcts` leaves in one forward."""
 
-    policy: OnnxPolicy
+    policy: OnnxPolicy | V2Policy
     space: ActionSpace
     pad_to: int | None = None
 
@@ -339,34 +473,8 @@ class LeafEvaluator:
         padded = list(leaves)
         if self.pad_to is not None and count < self.pad_to:
             padded.extend([leaves[-1]] * (self.pad_to - count))
-        observations = [encode(leaf.game, leaf.seat) for leaf in padded]
-        masks = np.stack([action_mask(self.space, leaf.options) for leaf in padded])
-        pairs = np.stack([_pair_mask(leaf.options) for leaf in padded])
-        slots, offers, values = self.policy.score(observations, masks, pairs)
-        return [
-            (
-                self._prior(leaf.options, slots[row], offers[row]),
-                self._value(values[row], leaf.seat),
-            )
-            for row, leaf in enumerate(leaves)
-        ]
-
-    def _prior(self, options, slots: np.ndarray, offers: np.ndarray) -> np.ndarray:
-        trade = self.policy.trade_slot
-        log_probs = np.empty(len(options))
-        for i, option in enumerate(options):
-            index = self.space.index(option)
-            log_probs[i] = slots[index]
-            if index == trade:
-                log_probs[i] += offers[_pair_index(option.give, option.want)]
-        prior = np.exp(log_probs)
-        total = prior.sum()
-        if total <= 0:
-            return np.full(len(options), 1.0 / len(options))
-        return prior / total
-
-    def _value(self, value: np.ndarray, seat: int) -> tuple[float, ...]:
-        return _board_order(value, seat)
+        rows = [(leaf.game, leaf.seat, leaf.options) for leaf in padded]
+        return self.policy.score_rows(rows)[:count]
 
 
 def searcher(

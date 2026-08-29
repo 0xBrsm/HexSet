@@ -17,7 +17,7 @@ from .devcards import (
 )
 from .economy import Purchase, bank_trade, distribute, pay
 from .robber import discard_count, move_robber, steal
-from .trading import Offer, can_propose
+from .trading import Bundle, Offer, can_propose
 from .trading import execute as execute_trade
 from .trading import responders as offer_responders
 from .state import (
@@ -75,6 +75,14 @@ class Game:
     offer: Offer | None = None
     pending_responders: list[int] = field(default_factory=list)
     offers_made: int = 0
+    # Every (give, want) already put to the table this turn. Recorded by the
+    # engine, acted on only by `actions._offer_actions`, which drops them from
+    # the sample it enumerates: re-proposing a bundle the table has already
+    # turned down is legal, and `apply` will still carry one out, but nothing
+    # has changed since the decline and it is not worth an action. Mirrors the
+    # training engine (dev-catan `catan.game`), whose policies were trained
+    # against exactly this sample: the deployed mask has to be the trained one.
+    offered: set[tuple[Bundle, Bundle]] = field(default_factory=set)
 
 
 def start(
@@ -126,6 +134,7 @@ def imagine(
         offer=game.offer,
         pending_responders=game.pending_responders[:],
         offers_made=game.offers_made,
+        offered=set(game.offered),
     )
 
 
@@ -359,6 +368,7 @@ def propose_trade(
         raise ValueError(f"player {game.current_player} cannot make this offer")
 
     game.offers_made += 1
+    game.offered.add((tuple(give), tuple(want)))
     willing = offer_responders(game.state, offer)
     if not willing:
         # Nobody can cover it, so there is nothing to ask. The offer still
@@ -403,6 +413,7 @@ def end_turn(game: Game) -> None:
     mature(game.state, game.current_player)
     game.dev_card_played = False
     game.offers_made = 0
+    game.offered = set()
     game.offer = None
     game.pending_responders = []
     # Free roads with nowhere legal to go are simply lost.

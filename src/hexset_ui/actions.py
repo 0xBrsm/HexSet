@@ -265,6 +265,15 @@ def _offer_actions(game: Game) -> list[Action]:
     one-for-one trades, which are the overwhelming majority of what gets traded,
     and skips any offer nobody at the table could cover. `apply` will still
     carry out any well-formed offer a stronger policy comes up with.
+
+    It also skips whatever has already been proposed this turn. That is a
+    narrower *sample*, not a narrower rule -- re-proposing a declined bundle
+    stays legal, `is_legal` says so and `apply` still performs it -- the
+    engine grants no capability here, it only stops offering a wasted action
+    to whoever asks. Nothing has changed between the decline and the repeat,
+    so the second ask can only get the same answer, and the offer budget it
+    spends is the scarce thing. The training engine samples this way, so a
+    checkpoint's mask here is the mask it was trained under.
     """
     state = game.state
     player = game.current_player
@@ -288,6 +297,8 @@ def _offer_actions(game: Game) -> list[Action]:
             continue
         for wanted in range(NUM_RESOURCES):
             if wanted == given or not wanted_available[wanted]:
+                continue
+            if (ONE_RESOURCE[given], ONE_RESOURCE[wanted]) in game.offered:
                 continue
             out.append(
                 Action(

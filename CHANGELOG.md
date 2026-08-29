@@ -9,6 +9,21 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `catan.widen`: a **function-preserving widening** of a trained checkpoint
+  (Net2WiderNet). Every trunk unit at width `d` is copied to fill width `D`,
+  copies keep their source's incoming weights and every consumer divides its
+  weight on a copy by the copy count, so the wide net emits the narrow net's
+  logits and values to float precision — asserted on real observations, both
+  forward paths, before anything is written (max relative |Δ| 3e-7 on
+  `lam095-805`, 64 → 128). `--noise σ` adds σ × row-RMS Gaussian noise to the
+  copies' incoming weights, because identical copies get identical gradients
+  forever; the mean policy KL it costs is reported. The attention value head's
+  query is rescaled by √(D/d) over the copy count so its softmax is unchanged.
+  The output checkpoint keeps the parent's `iteration`, `games_started` and RNG
+  state, carries `args` with the new width (what every loader rebuilds the
+  shape from), a fresh Adam state, and a `widen` block naming the source by
+  sha256. `catan.train --resume` continues from it unchanged; no new flag.
+
 - `--mix` accepts a **table entry**, `table(a|b|c)=f`: in a share `f` of
   games the learner takes one seat, drawn per index, and every other seat is an
   independent draw from the pool `a|b|c` — with replacement, so three copies

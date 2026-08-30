@@ -615,11 +615,11 @@
          wired at the bottom of the script. Shares its corner with #end-turn —
          see the CSS comment on .board-fab. -->
     <!-- Own corner, no sharing — see the CSS comment on #undo-build. Only
-         ever offered right after the human's own last road/settlement/city,
-         whether that was a setup placement or a paid Main-phase build (see
-         GameSession.undo_last_build); anything else in between, including a
-         second placement, takes it away again. -->
-    <button id="undo-build" class="board-fab" title="Undo last placement" aria-label="Undo last placement">
+         ever offered right after the human's own last road/settlement/city
+         or bank/port trade, whether that was a setup placement or a paid
+         Main-phase build (see GameSession.undo_last_build); anything else in
+         between, including a second placement, takes it away again. -->
+    <button id="undo-build" class="board-fab" title="Undo last action" aria-label="Undo last action">
       <svg viewBox="0 0 24 24"><use href="#icon-undo"></use></svg>
     </button>
     <button id="roll-dice" class="board-fab" title="Roll dice" aria-label="Roll dice">
@@ -1224,7 +1224,7 @@ function renderStatus() {
   if (state.game_over) {
     phaseEl.textContent = state.winner === null
       ? "GAME OVER — NO WINNER"
-      : `${seatLabel(state.winner).toUpperCase()} WINS`;
+      : `PLAYER ${state.winner + 1} WINS`;
     return;
   }
   // The same move either way, so the same words either way — PHASE_LABELS

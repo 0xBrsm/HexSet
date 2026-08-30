@@ -313,11 +313,11 @@ class _Snapshot:
     held: list[list[int]]
 
 
-# The five placement actions the human can take back — never a bot's (an
-# opponent's misclick isn't the human's to undo). Road Building's free roads
-# need no special case: they still arrive as ordinary BUILD_ROAD actions (see
-# game.build_road), so restoring game.free_roads alongside the board covers
-# them too.
+# The placement and bank/port-trade actions the human can take back — never
+# a bot's (an opponent's misclick isn't the human's to undo). Road Building's
+# free roads need no special case: they still arrive as ordinary BUILD_ROAD
+# actions (see game.build_road), so restoring game.free_roads alongside the
+# board covers them too.
 _UNDOABLE_BUILDS: frozenset[ActionType] = frozenset(
     {
         ActionType.SETUP_SETTLEMENT,
@@ -325,6 +325,7 @@ _UNDOABLE_BUILDS: frozenset[ActionType] = frozenset(
         ActionType.BUILD_ROAD,
         ActionType.BUILD_SETTLEMENT,
         ActionType.BUILD_CITY,
+        ActionType.BANK_TRADE,
     }
 )
 
@@ -739,13 +740,14 @@ class GameSession:
         self._undo = undo_point if (undo_point is not None and not is_over(self.game)) else None
 
     def undo_last_build(self) -> None:
-        """Reverts the human's most recent placement back to exactly how the
-        session stood the instant before it: piece removed, resources
-        refunded (including a second setup settlement's grant), longest
+        """Reverts the human's most recent placement or bank/port trade back
+        to exactly how the session stood the instant before it: piece
+        removed and resources refunded (including a second setup
+        settlement's grant) or traded resources returned, longest
         road/largest army recomputed from the restored board, whose turn it
-        is un-advanced if the placement handed off to someone else, log line
-        shortened or dropped, step count wound back. Only ever available since
-        the human's own last placement — see _apply.
+        is un-advanced if the action handed off to someone else, log line
+        shortened or dropped, step count wound back. Only ever available
+        since the human's own last placement or trade — see _apply.
 
         The journal is the one thing not reverted: it is append-only, so the
         undo goes into it as its own entry (see `journal.Journal.undo`).

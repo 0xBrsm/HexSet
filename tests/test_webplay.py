@@ -556,6 +556,29 @@ def test_consecutive_bank_trades_of_the_same_pair_sum_into_one_line():
     assert len(session.log) == 1
     assert "8 Wood" in session.log[0] and "2 Ore" in session.log[0]
 
+def test_undoing_a_bank_trade_refunds_the_hand_and_drops_the_line():
+    game = a_game(seed=24)
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    game.state.hands[0] = [8, 0, 0, 0, 0]
+    session = GameSession(game=game, human_seat=0, bot=RandomBot())
+
+    trade = next(
+        a for a in legal_actions(game)
+        if a.type is ActionType.BANK_TRADE and a.a == 0 and a.b == 4
+    )
+    before_bank = list(session.game.state.bank)
+    session.apply_human_action(action_to_wire(trade))
+    assert session.game.state.hands[0] != [8, 0, 0, 0, 0]
+    assert session.log
+
+    session.undo_last_build()
+
+    assert session.game.state.hands[0] == [8, 0, 0, 0, 0]
+    assert session.game.state.bank == before_bank
+    assert session.log == []
+    assert session._undo is None
+
 def test_a_different_bank_pair_starts_its_own_line():
     game = a_game(seed=25)
     game.phase = Phase.MAIN

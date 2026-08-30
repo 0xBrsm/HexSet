@@ -252,9 +252,8 @@
   .robber { fill: #000000; stroke: #ffffff; stroke-width: 1.5; pointer-events: none; }
   #overlay-blocker {
     position: absolute; inset: 0; background: rgba(0,0,0,0.5); display: none;
-    align-items: center; justify-content: center; font-size: 1rem; color: var(--muted);
   }
-  #overlay-blocker.show { display: flex; }
+  #overlay-blocker.show { display: block; }
   /* Shared look for both board-corner buttons (dice, end-turn) — they share
      one corner (see below), never two. */
   .board-fab {
@@ -610,7 +609,7 @@
 <div id="layout">
   <div id="board-pane">
     <svg id="board-svg" xmlns="http://www.w3.org/2000/svg"></svg>
-    <div id="overlay-blocker">Waiting for the table...</div>
+    <div id="overlay-blocker"></div>
     <!-- Visibility is set in renderBoardButtons(); the click handler is
          wired at the bottom of the script. Shares its corner with #end-turn —
          see the CSS comment on .board-fab. -->
@@ -1112,24 +1111,38 @@ function cancelRobberMove() {
 
 // --- Sending actions --------------------------------------------------
 
-// webserver.py's _handle_action/_handle_new block server-side through the
-// *entire* bot cascade in one call (advance_bots() loops until it's the
-// human's turn again) and return once, so a whole lap of the table arrives in
-// a single frame. Two attempts at dressing that up have been removed: a
-// 350ms-a-seat narration in the overlay, which announced who had acted while
-// the board still showed the state before they did, and a tint on the log
-// lines that arrived with it, which nobody could tell the purpose of. The
-// log says what happened in words and the round filter keeps it recent;
-// that turns out to be the whole of what's wanted here.
+// Each POST here plays at most one seat's turn server-side (GameSession's
+// advance_one_seat, not the whole-cascade advance_bots) and returns that
+// seat's own already-applied state. A 350ms-a-seat *narration* was tried
+// here once and removed — it announced who had acted while the board still
+// showed the state before they did. This isn't that: settle() below drives
+// a real request per seat, so whatever renderStatus() shows (see its
+// "not the human's turn" branch) is the truth as of that response, not a
+// guess dressed up to look like progress.
 
-// Both of the calls that hand the table over to the bots have the same shape:
-// refuse to overlap with one already running, cover the board while it's out,
-// and uncover it whatever happens. Only what goes in the middle differs.
+// Every call that might hand the table to a bot funnels through settle()
+// afterward, which keeps requesting POST /api/advance — one seat, one
+// response, one render() — until it's the human's move again, the game
+// ends, or a setup road's handoff is waiting on the human's own confirm.
+async function settle() {
+  while (!state.game_over && !state.awaiting_confirm && state.to_move !== state.human_seat) {
+    const {ok, data} = await postJSON("/api/advance", {});
+    state = data;
+    render();
+    if (!ok) {
+      showNotice(data.error || "Something went wrong.");
+      break;
+    }
+  }
+}
+
+// Every action that touches the server has the same shape: refuse to
+// overlap with one already running, dim the board while it's out, and
+// undim it whatever happens. Only what goes in the middle differs.
 async function blocking(body) {
   if (inFlight) return;
   inFlight = true;
   const overlay = document.getElementById("overlay-blocker");
-  overlay.textContent = "Waiting for the table...";
   overlay.classList.add("show");
   try {
     await body();
@@ -1149,6 +1162,7 @@ function sendAction(action) {
     state = data;
     showNotice(ok ? "" : (data.error || "That was not legal."));
     render();
+    if (ok) await settle();
   });
 }
 
@@ -1181,6 +1195,7 @@ function confirmSetupTurn() {
     state = data;
     showNotice(ok ? "" : (data.error || "Could not continue."));
     render();
+    if (ok) await settle();
   });
 }
 
@@ -1225,6 +1240,18 @@ function renderStatus() {
     phaseEl.textContent = state.winner === null
       ? "GAME OVER — NO WINNER"
       : `PLAYER ${state.winner + 1} WINS`;
+    return;
+  }
+  // Whoever settle() just requested a seat's turn for (or is about to) — not
+  // the human's decision to make, so the phase underneath it is beside the
+  // point. Excludes awaiting_confirm: to_move has already moved on to
+  // whoever's next by then, but the human still has the confirm button to
+  // press first (see state.awaiting_confirm), so the phase label stays put
+  // until they do. True the instant this renders either way: every
+  // /api/advance response is that seat's own already-applied move, not a
+  // name announced ahead of the board (see the comment above settle()).
+  if (!state.awaiting_confirm && state.to_move !== state.human_seat) {
+    phaseEl.textContent = `PLAYER ${state.to_move + 1}'S TURN`;
     return;
   }
   // The same move either way, so the same words either way — PHASE_LABELS

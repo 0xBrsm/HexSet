@@ -166,6 +166,50 @@ def test_a_legal_action_is_accepted_and_advances_the_game(live_server):
     assert len(data["log"]) >= 1
 
 
+def test_advance_endpoint_plays_one_seat_at_a_time(live_server):
+    """POST /api/advance is the per-seat counterpart to what /api/action and
+    /api/confirm used to leave to a single server-side cascade — each call
+    should move the game by exactly one seat's turn, not the whole cascade
+    back to the human in one response."""
+    server, base = live_server
+    client = _Client(base)
+    client.get("/api/state")
+    session = server.sessions[client.identity].session
+    human_seat = session.human_seat
+
+    settlement = action_to_wire(next(
+        a for a in legal_actions(session.game) if a.type is ActionType.SETUP_SETTLEMENT
+    ))
+    status, data = client.post("/api/action", settlement)
+    assert status == 200
+    road = action_to_wire(next(
+        a for a in legal_actions(session.game) if a.type is ActionType.SETUP_ROAD
+    ))
+    status, data = client.post("/api/action", road)
+    assert status == 200
+    assert data["awaiting_confirm"]  # the human's setup road just handed off to a bot
+    assert data["to_move"] != human_seat
+
+    status, data = client.post("/api/confirm", {})
+    assert status == 200
+    assert not data["awaiting_confirm"]
+
+    seen_seats = []
+    steps = 0
+    while data["to_move"] != human_seat and steps < 20:
+        seen_seats.append(data["to_move"])
+        status, data = client.post("/api/advance", {})
+        assert status == 200
+        steps += 1
+    assert data["to_move"] == human_seat  # eventually comes all the way back
+    assert steps >= 1  # at least one bot seat actually moved
+    # Once it's the human's turn, another call is a harmless no-op, not an
+    # error — same tolerance /api/confirm already gives a stale call.
+    status, data = client.post("/api/advance", {})
+    assert status == 200
+    assert data["to_move"] == human_seat
+
+
 def test_an_action_absent_from_legal_actions_is_rejected_over_http(live_server):
     _, base = live_server
     client = _Client(base)
@@ -266,15 +310,19 @@ def test_an_idle_identity_is_evicted_and_gets_a_fresh_game(live_server):
 
 
 def _drive(session, moves: int, rng: random.Random) -> None:
-    """Play `moves` human turns against the bots, leaving it the human's move."""
+    """Play `moves` human turns against the bots, leaving it the human's move.
+
+    confirm_setup_turn() only plays the one seat a setup road just handed
+    off to now (see its docstring) — the same as a real client's own
+    follow-up POST /api/advance calls would — so this still finishes the
+    cascade itself with advance_bots() either way, same as before."""
     for _ in range(moves):
         if is_over(session.game):
             break
         session.apply_human_action(action_to_wire(rng.choice(legal_actions(session.game))))
         if session.awaiting_confirm:
             session.confirm_setup_turn()
-        else:
-            session.advance_bots()
+        session.advance_bots()
 
 
 def _press_new_game(session, identity: str) -> None:

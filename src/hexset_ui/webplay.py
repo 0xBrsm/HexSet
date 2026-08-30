@@ -61,10 +61,12 @@ from .victory import public_victory_points, victory_points
 RESOURCE_NAMES: tuple[str, ...] = tuple(r.name.title() for r in Resource)
 DEV_CARD_NAMES: tuple[str, ...] = tuple(c.name.title().replace("_", " ") for c in DevCard)
 
-# A cascade of bot moves between two human decisions is bounded so a runaway
-# bot (or an engine bug that never hands the turn back) surfaces as an error
-# rather than a request that never returns. One cascade is at most a few
-# players' worth of a turn, so this is already generous.
+# A runaway bot (or an engine bug that never hands the turn back) is bounded
+# so it surfaces as an error rather than a request that never returns — used
+# two ways: the actions within one seat's own turn (advance_one_seat), and
+# the seats within one full cascade (advance_bots). One turn or one cascade
+# is at most a few players' worth of moves, so this is already generous
+# either way.
 MAX_CASCADE_STEPS = 2000
 
 
@@ -609,11 +611,10 @@ class GameSession:
         # place_initial_road hands current_player straight to the next seat
         # in the snake with no separate step of its own — unlike Main phase,
         # where that handoff only ever happens on the human's own explicit
-        # END_TURN. The caller (webserver._handle_action) reads this to
-        # decide whether to run advance_bots() itself or leave it for
-        # POST /api/confirm, so the human gets the same one-button pause
-        # before it as everywhere else, not a same-request cascade they
-        # never got to see, let alone react to.
+        # END_TURN. advance_one_seat reads this flag directly (it's a no-op
+        # while set) so the human gets the same one-button pause before the
+        # next seat's turn as everywhere else, not a same-request cascade
+        # they never got to see, let alone react to.
         self.awaiting_confirm = (
             action.type is ActionType.SETUP_ROAD
             and not is_over(self.game)
@@ -621,12 +622,15 @@ class GameSession:
         )
 
     def confirm_setup_turn(self) -> None:
-        """Lets the cascade `apply_human_action` held back actually run.
-        A harmless no-op, not an error, if nothing is actually pending —
-        there's nothing to protect by rejecting a stale or doubled-up
-        confirm the way undo_last_build rejects a stale undo."""
+        """Lets the one seat `apply_human_action` held back actually take its
+        turn. A harmless no-op, not an error, if nothing is actually pending
+        — there's nothing to protect by rejecting a stale or doubled-up
+        confirm the way undo_last_build rejects a stale undo. Only that one
+        seat: if it hands off to another bot, the client's own follow-up
+        request (see `webserver.py`'s `POST /api/advance`) picks that up,
+        same as after any other action."""
         self.awaiting_confirm = False
-        self.advance_bots()
+        self.advance_one_seat()
 
     def _default_ask_order(self, proposer: int) -> tuple[int, ...]:
         """Who to ask first when a proposer didn't say: lowest victory
@@ -652,20 +656,55 @@ class GameSession:
         others.sort(key=lambda p: (public_victory_points(state, p), sum(holdings(state, p))))
         return tuple(others)
 
-    def advance_bots(self) -> None:
+    def advance_one_seat(self) -> bool:
+        """Plays exactly one seat's whole turn — however many individual
+        actions that takes (roll, trades, builds, buys, ..., END_TURN) — then
+        stops, even if the next seat is also a bot. Returns False, doing
+        nothing, once it's already the human's turn or the game is over — a
+        caller can loop on this return value without tracking whose turn it
+        is itself.
+
+        Says nothing about `awaiting_confirm`: like `advance_bots` before it,
+        that gate is the caller's to apply (see `webserver.py`'s
+        `_handle_action`/`_handle_advance`), not this method's — a setup
+        road's handoff should hold here exactly as long as it held the old
+        whole-cascade call, no longer and no shorter.
+
+        The per-seat counterpart to `advance_bots`: one call here is one
+        seat's turn, which is what a client driving the cascade one request
+        at a time wants (see `webserver.py`'s `POST /api/advance`) instead of
+        the whole cascade landing behind a single response.
+        """
+        if is_over(self.game) or to_move(self.game) == self.human_seat:
+            return False
+        seat = to_move(self.game)
         steps = 0
-        while not is_over(self.game) and to_move(self.game) != self.human_seat:
+        while not is_over(self.game) and to_move(self.game) == seat:
             if steps >= MAX_CASCADE_STEPS:
                 raise RuntimeError(
-                    f"bot cascade did not yield the turn within {MAX_CASCADE_STEPS} actions"
+                    f"seat {seat}'s turn did not yield within {MAX_CASCADE_STEPS} actions"
                 )
-            seat = to_move(self.game)
             options = legal_actions(self.game)
             action = self.bot.choose(self.game)
             if not is_legal(self.game, action, options):
                 raise RuntimeError(f"bot chose an action legal_actions did not offer: {action}")
             self._apply(seat, action)
             steps += 1
+        return True
+
+    def advance_bots(self) -> None:
+        """The whole cascade in one call — still used wherever a single
+        request already has to include it (dealing a fresh table whose setup
+        snake doesn't start with the human, resuming a session mid-cascade):
+        see the callers in `webserver.py`. Everywhere else drives
+        `advance_one_seat` directly, one seat and one response at a time."""
+        seats = 0
+        while self.advance_one_seat():
+            seats += 1
+            if seats >= MAX_CASCADE_STEPS:
+                raise RuntimeError(
+                    f"bot cascade did not yield the turn within {MAX_CASCADE_STEPS} seat turns"
+                )
 
     def _apply(self, actor: int, action: Action) -> None:
         # Every seat's proposal gets the same treatment — human or bot,

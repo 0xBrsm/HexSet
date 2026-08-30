@@ -354,6 +354,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_undo(payload)
         elif self.path == "/api/confirm":
             self._handle_confirm(payload)
+        elif self.path == "/api/advance":
+            self._handle_advance(payload)
         else:
             self.send_error(404)
 
@@ -408,16 +410,43 @@ class Handler(BaseHTTPRequestHandler):
             session = self.server.entry(self.identity).session
             try:
                 session.apply_human_action(payload)
-                # A setup road may have just handed the turn to someone else
-                # with the human's own confirm still pending (see
-                # GameSession.apply_human_action/awaiting_confirm) — in that
-                # case advance_bots() waits for POST /api/confirm instead of
-                # running in this same request.
+                # At most the one seat this action just handed off to — a
+                # no-op of its own accord if that's the human (see
+                # advance_one_seat). A setup road may have left the human's
+                # own confirm still pending instead (see
+                # GameSession.apply_human_action/awaiting_confirm); in that
+                # case this waits for POST /api/confirm rather than running
+                # in this same request. Any further bots beyond this one
+                # seat wait for the client's own follow-up POST
+                # /api/advance, same as after any other response that leaves
+                # a bot on move.
                 if not session.awaiting_confirm:
-                    session.advance_bots()
+                    session.advance_one_seat()
             except ValueError as exc:
                 self._json({"error": str(exc), **session.state_view()}, status=400)
                 return
+            except RuntimeError as exc:
+                self._json({"error": str(exc), **session.state_view()}, status=500)
+                return
+            self._json(session.state_view())
+
+    def _handle_advance(self, payload: dict) -> None:
+        # No body expected, same as _handle_undo/_handle_confirm. Harmless if
+        # it's already the human's turn or the game is over —
+        # advance_one_seat just returns False and nothing moves, the same
+        # tolerance confirm_setup_turn gives a stale or doubled-up call.
+        # Explicitly skipped while a setup road's handoff is still waiting
+        # on the human's own confirm, same guard _handle_action applies —
+        # this is the one other place that could otherwise run a bot ahead
+        # of that confirm. The client calls this in a loop (see index.html's
+        # settle()) to drive the bot cascade one seat and one response at a
+        # time, rather than the whole thing landing behind a single request
+        # the way /api/action and /api/confirm used to leave it.
+        with self.server.lock_for(self.identity):
+            session = self.server.entry(self.identity).session
+            try:
+                if not session.awaiting_confirm:
+                    session.advance_one_seat()
             except RuntimeError as exc:
                 self._json({"error": str(exc), **session.state_view()}, status=500)
                 return

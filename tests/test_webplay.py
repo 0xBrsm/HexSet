@@ -659,6 +659,32 @@ def test_advance_bots_always_stops_at_the_human_seat_or_game_over():
         steps += 1
         assert is_over(session.game) or to_move(session.game) == human_seat
 
+def test_advance_one_seat_stops_after_a_single_seat_even_with_more_bots_still_to_go():
+    """The per-seat counterpart to advance_bots: one call plays exactly one
+    seat's turn and stops, even when the seat after that is also a bot —
+    proving it doesn't fall back to the whole-cascade behaviour."""
+    game = a_game(seed=5)
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    human_seat = 0
+    session = GameSession(game=game, human_seat=human_seat, bot=RandomBot(rng=random.Random(2)))
+
+    session.apply_human_action(action_to_wire(Action(ActionType.END_TURN)))
+    assert to_move(session.game) == 1  # handed off to the next seat, a bot
+
+    moved = session.advance_one_seat()
+    assert moved
+    assert to_move(session.game) not in (human_seat, 1)  # seat 1 alone had its turn
+
+    # advance_bots() reaches the same destination it always did — it's just
+    # advance_one_seat() called back to back under the hood now.
+    session.advance_bots()
+    assert to_move(session.game) == human_seat
+
+    # A no-op, not an error, once it's already the human's turn.
+    assert session.advance_one_seat() is False
+    assert to_move(session.game) == human_seat
+
 def test_state_view_hides_opponent_hands_but_not_the_humans():
     game = a_game(seed=8)
     human_seat = to_move(game)

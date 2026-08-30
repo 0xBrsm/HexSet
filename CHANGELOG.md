@@ -9,6 +9,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **An offer is put to the table in a random order** when the proposer gives
+  no `ask`, drawn from the game's own RNG, instead of clockwise from the
+  proposer. An offer stops at the first taker, so whoever is asked first has
+  first refusal; clockwise handed that to the next seat in turn order, which
+  in a 2v2 duel is a copy of yourself half the time when the copies sit
+  together and never when they alternate — the entire "seat geometry" effect
+  (+0.08 vs +0.43 VP for the same pair) was this one line. Random order hands
+  the advantage to nobody in either seating. Still not the rulebook, where the
+  proposer chooses among the acceptors; that design is written down in
+  `agents/reference/trading-design.md` and deferred. `trading.responders`
+  keeps its clockwise order as the eligibility list. Every seeded game's RNG
+  sequence differs from before, so no duel reproduces bit-for-bit across this
+  change.
+
 - **The piece supply is enforced: 15 roads, 5 settlements, 4 cities a
   player.** `state.can_place_settlement`, `can_upgrade_to_city` and
   `can_place_road` refuse a piece that is not in the box, so bought pieces,

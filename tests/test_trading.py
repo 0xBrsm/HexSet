@@ -158,7 +158,7 @@ def test_holds_checks_every_resource():
 
 def test_proposing_hands_the_decision_to_the_players_being_asked():
     game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1), (2, Resource.ORE, 1))
-    propose_trade(game, bundle(wood=2), bundle(ore=1))
+    propose_trade(game, bundle(wood=2), bundle(ore=1), ask=(1, 2))  # fixed order: the protocol is under test, not the draw
 
     assert game.phase is Phase.TRADE_RESPOND
     assert game.pending_responders == [1, 2]
@@ -168,7 +168,7 @@ def test_proposing_hands_the_decision_to_the_players_being_asked():
 
 def test_declining_passes_the_offer_along_and_then_drops_it():
     game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1), (2, Resource.ORE, 1))
-    propose_trade(game, bundle(wood=2), bundle(ore=1))
+    propose_trade(game, bundle(wood=2), bundle(ore=1), ask=(1, 2))  # fixed order: the protocol is under test, not the draw
 
     decline_trade(game, 1)
     assert to_move(game) == 2
@@ -180,7 +180,7 @@ def test_declining_passes_the_offer_along_and_then_drops_it():
 
 def test_the_first_player_to_accept_takes_the_trade():
     game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1), (2, Resource.ORE, 1))
-    propose_trade(game, bundle(wood=2), bundle(ore=1))
+    propose_trade(game, bundle(wood=2), bundle(ore=1), ask=(1, 2))  # fixed order: the protocol is under test, not the draw
 
     accept_trade(game, 1)
     assert game.phase is Phase.MAIN
@@ -190,7 +190,7 @@ def test_the_first_player_to_accept_takes_the_trade():
 
 def test_only_the_player_being_asked_may_answer():
     game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1), (2, Resource.ORE, 1))
-    propose_trade(game, bundle(wood=2), bundle(ore=1))
+    propose_trade(game, bundle(wood=2), bundle(ore=1), ask=(1, 2))  # fixed order: the protocol is under test, not the draw
     with pytest.raises(ValueError, match="not the one being asked"):
         accept_trade(game, 2)
 
@@ -325,3 +325,42 @@ def test_an_imagined_game_carries_the_open_offer():
     apply(copy, Action(ActionType.ACCEPT_TRADE))
     assert copy.phase is Phase.MAIN
     assert game.phase is Phase.TRADE_RESPOND
+
+
+def test_the_table_is_asked_in_a_random_order_unless_the_proposer_says():
+    """First refusal goes to nobody in particular: the neutral order is a
+    permutation drawn from the game's RNG, not the next seat in turn order."""
+    from catan.game import Phase, propose_trade, start
+
+    def a_game(seed: int):
+        rng = random.Random(seed)
+        game = start(random_base_board(rng), 4, rng)
+        game.phase = Phase.MAIN
+        game.current_player = 0
+        for hand in game.state.hands:
+            for r in range(len(hand)):
+                hand[r] = 0
+        game.state.hands[0][Resource.WOOD] = 1
+        for p in (1, 2, 3):
+            game.state.hands[p][Resource.ORE] = 1
+        return game
+
+    orders = set()
+    for seed in range(40):
+        game = a_game(seed)
+        propose_trade(game, bundle(wood=1), bundle(ore=1))
+        assert sorted(game.pending_responders) == [1, 2, 3]
+        orders.add(tuple(game.pending_responders))
+    assert len(orders) > 1, "the order never varied"
+    assert (1, 2, 3) in orders or len(orders) >= 3
+
+    # The same seed asks in the same order: the draw comes from the game's RNG.
+    a, b = a_game(7), a_game(7)
+    propose_trade(a, bundle(wood=1), bundle(ore=1))
+    propose_trade(b, bundle(wood=1), bundle(ore=1))
+    assert a.pending_responders == b.pending_responders
+
+    # A proposer who says who to ask first is obeyed, whatever the RNG says.
+    game = a_game(3)
+    propose_trade(game, bundle(wood=1), bundle(ore=1), ask=(3, 1))
+    assert game.pending_responders == [3, 1, 2]

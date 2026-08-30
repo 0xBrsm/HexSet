@@ -286,6 +286,13 @@ def test_a_tree_that_draws_no_hidden_card_searches_exactly_as_it_did_before():
     pinned: the visit counts, and where the rng stream ended up, because a change
     that consumed a draw in a different order could reproduce one and not the
     other.
+
+    Re-pinned 2026-08-30 for a *rules* change, not a search change: an offer
+    is now put to the table in a random order drawn from the game's RNG
+    (`game.propose_trade`), so every imagined game in the tree consumes draws
+    it did not before. Values at `33c6032` were `[39, 3, 3, 2, 3, 3, 5, 9, 29]`
+    and `0.2094563824951179`. The search code between the two pins is
+    unchanged; anything that moves these numbers from here on is the search.
     """
     game = after_setup()
     while game.phase is not Phase.MAIN:
@@ -294,8 +301,8 @@ def test_a_tree_that_draws_no_hidden_card_searches_exactly_as_it_did_before():
     rng = random.Random(5)
     _, _, visits = NoHiddenDraw(Anchor(), simulations=96, wave=8, rng=rng).run(game)
 
-    assert [int(v) for v in visits] == [39, 3, 3, 2, 3, 3, 5, 9, 29]
-    assert rng.random() == 0.2094563824951179
+    assert [int(v) for v in visits] == [39, 3, 2, 2, 2, 2, 6, 9, 31]
+    assert rng.random() == 0.18477324009849416
 
 
 def test_a_setup_tree_searches_exactly_as_it_did_before():

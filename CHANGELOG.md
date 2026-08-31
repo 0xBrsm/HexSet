@@ -7,6 +7,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-31
+
 ### Changed
 
 - **An offer is put to the table in a random order** when the proposer gives

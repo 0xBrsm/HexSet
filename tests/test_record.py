@@ -1,15 +1,16 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
 
 import pytest
 
-from catan.actions import Action, ActionType
-from catan.board.board import random_base_board
-from catan.bots import RandomBot, greedy
-from catan.evaluate import Evaluator
-from catan.game import is_over
-from catan.record import (
+from hexset.actions import Action, ActionType
+from hexset.board.board import random_base_board
+from hexset.bots import RandomBot, greedy
+from hexset.evaluate import Evaluator
+from hexset.game import is_over
+from hexset.record import (
     Record,
     ReplayError,
     board_of,

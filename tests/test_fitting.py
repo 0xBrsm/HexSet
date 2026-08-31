@@ -1,21 +1,22 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
 
 import pytest
 
-from catan.dataset import Sample, base_rate, build, split_by_game
-from catan.evaluate import TERM_NAMES, Weights
-from catan.fitting import (
+from hexset.dataset import Sample, base_rate, build, split_by_game
+from hexset.evaluate import TERM_NAMES, Weights
+from hexset.fitting import (
     accuracy,
     fit,
     log_loss,
     scaling_of,
     to_weights,
 )
-from catan.record import record_game
-from catan.board.board import random_base_board
-from catan.arena import PRESETS, spawn
+from hexset.record import record_game
+from hexset.board.board import random_base_board
+from hexset.arena import PRESETS, spawn
 
 
 def some_records(count: int = 6, bot: str = "greedy"):

@@ -1,7 +1,8 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """What a search-played move costs, split into engine and network.
 
 `benchmarks.model_forward` measured a *self-play* move and found it dominated by
-the forward, which is what shaped `catan.selfplay` and `catan.mcts`. A move under
+the forward, which is what shaped `hexset.selfplay` and `hexset.mcts`. A move under
 a search is not that move. It enumerates, copies and steps a position for every
 leaf it expands, and a phone measurement of the engine alone put that at ~298 µs
 per leaf against ~25 µs to evaluate one — so the ratio is the other way round and
@@ -32,10 +33,10 @@ import time
 from dataclasses import asdict, dataclass
 
 from benchmarks.throughput import environment
-from catan.board.board import random_base_board
-from catan.expert import SearchPolicy
-from catan.netbot import searcher
-from catan.selfplay import Collector
+from hexset.board.board import random_base_board
+from hexset.expert import SearchPolicy
+from hexset.netbot import searcher
+from hexset.selfplay import Collector
 
 
 class Timed:

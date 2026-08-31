@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Measure how fast the engine can play random games.
 
 Self-play cost is dominated by simulator throughput when search is in the
@@ -20,10 +21,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from multiprocessing import Pool
 
-from catan.actions import legal_actions
-from catan.board.board import random_base_board
-from catan.game import is_over, start
-from catan.play import step_randomly
+from hexset.actions import legal_actions
+from hexset.board.board import random_base_board
+from hexset.game import is_over, start
+from hexset.play import step_randomly
 
 
 @dataclass

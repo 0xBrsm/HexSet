@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Measure whether the production weight is identifiable from self-play.
 
 The evaluation can depend critically on a term at zero while being flat over
@@ -24,9 +25,9 @@ from dataclasses import asdict, dataclass, replace
 from typing import Sequence
 
 from benchmarks.throughput import default_workers, environment
-from catan.arena import Z_95, compete, mean_interval, wilson
-from catan.evaluate import Weights
-from catan.tuning import entrant_for
+from hexset.arena import Z_95, compete, mean_interval, wilson
+from hexset.evaluate import Weights
+from hexset.tuning import entrant_for
 
 DEFAULT_LEVELS = (0.0, 1.0, 2.0, 3.0, 3.5, 5.0, Weights().production, 10.0, 14.0)
 

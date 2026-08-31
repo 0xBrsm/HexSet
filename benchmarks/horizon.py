@@ -1,8 +1,9 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """How much of the value target's noise a shorter horizon actually removes.
 
 `benchmarks.floor` established that ~80% of the head's squared error against
 terminal returns is the conditional variance of those returns — dice not yet
-rolled. `--value-horizon` in `catan.distill` responds by relabelling: a decision
+rolled. `--value-horizon` in `hexset.distill` responds by relabelling: a decision
 is trained toward the estimate recorded `horizon` of that seat's own decisions
 later, instead of the game's final score. This measures whether that relabelling
 does what it is supposed to, because so far it is an argument and not a number.
@@ -121,9 +122,9 @@ import numpy as np
 
 from benchmarks.floor import Branching, Sampling, collect
 from benchmarks.throughput import environment
-from catan.board.board import random_base_board
-from catan.rewards import reward
-from catan.selfplay import Collector
+from hexset.board.board import random_base_board
+from hexset.rewards import reward
+from hexset.selfplay import Collector
 
 # Torch is imported inside `main`, so the arithmetic below stays testable
 # without it — the same split `benchmarks.floor` makes.
@@ -237,8 +238,8 @@ def main(argv: list[str] | None = None) -> int:
 
     import torch
 
-    from catan.netbot import load
-    from catan.policy import NetworkPolicy
+    from hexset.netbot import load
+    from hexset.policy import NetworkPolicy
 
     lambdas = [float(x) for x in args.lambdas.split(",") if x.strip()]
     board = random_base_board(random.Random(args.seed))

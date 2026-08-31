@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
@@ -6,7 +7,7 @@ import pytest
 
 torch = pytest.importorskip("torch", reason="PyTorch runs on the training box only")
 
-from catan.collect import ParallelCollector, WorkerSpec  # noqa: E402
+from hexset.collect import ParallelCollector, WorkerSpec  # noqa: E402
 
 
 def spec(worker: int, workers: int, **overrides) -> WorkerSpec:
@@ -105,17 +106,17 @@ def test_workers_cast_mix_opponents_and_record_only_the_learner():
 
 
 def test_sync_ships_weights_the_workers_actually_load():
-    from catan.actions import build_space
-    from catan.board.board import random_base_board
-    from catan.encoding import static_graph
-    from catan.model import CatanNet, ModelConfig
+    from hexset.actions import build_space
+    from hexset.board.board import random_base_board
+    from hexset.encoding import static_graph
+    from hexset.model import HexNet, ModelConfig
 
     board = random_base_board(random.Random(5))
     topology = board.topology
     space = build_space(
         topology.num_vertices, topology.num_edges, topology.num_hexes, 4
     )
-    net = CatanNet(space, static_graph(topology), 4, ModelConfig(width=8, rounds=1))
+    net = HexNet(space, static_graph(topology), 4, ModelConfig(width=8, rounds=1))
 
     collector = ParallelCollector([spec(0, 1, lanes=2)])
     try:
@@ -130,8 +131,8 @@ def test_a_searched_worker_returns_episodes_whose_transitions_carry_targets():
     """The whole point of sharding the searched path: the corpus must still be
     distillable, which means every transition needs its `Target` to survive the
     pipe as well as the search."""
-    from catan.collect import ParallelCollector, WorkerSpec
-    from catan.expert import Target
+    from hexset.collect import ParallelCollector, WorkerSpec
+    from hexset.expert import Target
 
     collector = ParallelCollector(
         [
@@ -171,7 +172,7 @@ def test_a_searched_worker_returns_episodes_whose_transitions_carry_targets():
 
 
 def test_a_worker_with_no_simulations_is_the_plain_policy_path():
-    from catan.collect import ParallelCollector, WorkerSpec
+    from hexset.collect import ParallelCollector, WorkerSpec
 
     collector = ParallelCollector(
         [
@@ -196,7 +197,7 @@ def test_a_worker_with_no_simulations_is_the_plain_policy_path():
     assert episodes
     # The invariant is that no search target appears -- `aux` is a general
     # pocket and the plain path is free to use it for other things.
-    from catan.expert import Target
+    from hexset.expert import Target
 
     auxes = [t.aux for e in episodes for traj in e.trajectories for t in traj]
     assert auxes
@@ -214,22 +215,22 @@ def test_the_flat_wire_format_rebuilds_byte_identical_episodes():
     """
     import pickle
 
-    from catan.actions import space_for
-    from catan.board.board import random_base_board
-    from catan.collect import Flattened
-    from catan.encoding import static_graph
-    from catan.game import start
-    from catan.model import CatanNet, ModelConfig, packing
-    from catan.policy import NetworkPolicy
-    from catan.ppo import PPOConfig, assemble
-    from catan.selfplay import Collector
+    from hexset.actions import space_for
+    from hexset.board.board import random_base_board
+    from hexset.collect import Flattened
+    from hexset.encoding import static_graph
+    from hexset.game import start
+    from hexset.model import HexNet, ModelConfig, packing
+    from hexset.policy import NetworkPolicy
+    from hexset.ppo import PPOConfig, assemble
+    from hexset.selfplay import Collector
 
     rng = random.Random(0)
     board = random_base_board(rng)
     game = start(board, 4, rng)
     graph = static_graph(board.topology)
     torch.manual_seed(0)
-    net = CatanNet(space_for(game), graph, 4, ModelConfig(width=16, rounds=1))
+    net = HexNet(space_for(game), graph, 4, ModelConfig(width=16, rounds=1))
     policy = NetworkPolicy(net, space_for(game), packing(graph, 4))
     episodes = Collector(policy, lanes=4, seed=3, action_cap=3000).collect(3)
 
@@ -269,7 +270,7 @@ def test_a_league_worker_records_every_seat_and_loads_a_weight_list():
     records under its caster's id, and sync ships one dict per learner."""
     collector = ParallelCollector([spec(w, 2, learners=2) for w in range(2)])
     try:
-        from catan.collect import _build  # the same construction the worker runs
+        from hexset.collect import _build  # the same construction the worker runs
 
         policies, _ = _build(spec(0, 2, learners=2))
         assert len(policies) == 2
@@ -287,7 +288,7 @@ def test_a_league_worker_records_every_seat_and_loads_a_weight_list():
 
 
 def test_a_league_spec_refuses_a_mix():
-    from catan.collect import _build
+    from hexset.collect import _build
 
     with pytest.raises(ValueError):
         _build(spec(0, 1, learners=2, mix=(("greedy", 0.15),)))
@@ -301,7 +302,7 @@ def test_the_league_caster_balances_seats_and_fixes_adjacency():
     -- but it leaves the cyclic order round the table invariant, so learner 0's
     turn-order successor is learner 1 in every game ever played.
     """
-    from catan.collect import league_caster
+    from hexset.collect import league_caster
 
     caster = league_caster(4, 4)
     casts = [caster(i) for i in range(4)]
@@ -315,7 +316,7 @@ def test_the_league_caster_balances_seats_and_fixes_adjacency():
 
 
 def test_a_permuted_learner_order_reseats_the_cycle_without_unbalancing_seats():
-    from catan.collect import league_caster
+    from hexset.collect import league_caster
 
     caster = league_caster(4, 4, order=(0, 2, 1, 3))
     casts = [caster(i) for i in range(4)]
@@ -334,14 +335,14 @@ def test_a_permuted_learner_order_reseats_the_cycle_without_unbalancing_seats():
 def test_a_learner_order_that_is_not_a_permutation_is_refused():
     import pytest
 
-    from catan.collect import league_caster
+    from hexset.collect import league_caster
 
     with pytest.raises(ValueError, match="permutation"):
         league_caster(4, 4, order=(0, 1, 1, 3))
 
 
 def test_a_paired_caster_casts_both_halves_of_a_pair_identically():
-    from catan.collect import league_caster, paired_caster
+    from hexset.collect import league_caster, paired_caster
 
     plain = league_caster(4, 4)
     caster = paired_caster(plain)
@@ -352,7 +353,7 @@ def test_a_paired_caster_casts_both_halves_of_a_pair_identically():
 def test_a_paired_league_balances_every_seat_over_a_doubled_window():
     from collections import Counter
 
-    from catan.collect import league_caster, paired_caster
+    from hexset.collect import league_caster, paired_caster
 
     learners, players = 4, 4
     caster = paired_caster(league_caster(learners, players))
@@ -367,7 +368,7 @@ def test_a_paired_league_balances_every_seat_over_a_doubled_window():
 
 
 def test_a_paired_worker_wraps_its_caster_and_deals_paired_boards():
-    from catan.collect import _build, league_caster
+    from hexset.collect import _build, league_caster
 
     _, collector = _build(spec(0, 1, learners=2, pair_boards=True))
     assert collector.pair_boards
@@ -392,8 +393,8 @@ def _cast_cohort(opponents, *, seed=11, games=4, lanes=2):
     episodes is a difference in the *opponent* and nothing else. A network
     learner would put a torch generator between the claim and the evidence.
     """
-    from catan.collect import mixed_caster
-    from catan.selfplay import Collector, RandomPolicy
+    from hexset.collect import mixed_caster
+    from hexset.selfplay import Collector, RandomPolicy
 
     collector = Collector(
         RandomPolicy(random.Random(seed)),
@@ -418,7 +419,7 @@ def test_a_greedy_mix_plays_the_identical_games_it_played_before_the_routing():
     caster: if the routing changed the opponent by so much as a tie-break, the
     action streams diverge.
     """
-    from catan.collect import greedy_opponent, mix_opponents
+    from hexset.collect import greedy_opponent, mix_opponents
 
     was = _cast_cohort([greedy_opponent(11 + 77, 3, 2)])
     now = _cast_cohort(
@@ -438,8 +439,8 @@ def test_a_greedy_mix_plays_the_identical_games_it_played_before_the_routing():
 
 def test_the_greedy_mix_bot_is_field_for_field_the_one_it_always_was():
     """The same claim structurally, so a failure says *which* field moved."""
-    from catan.board.board import random_base_board
-    from catan.collect import greedy_opponent, mix_opponents
+    from hexset.board.board import random_base_board
+    from hexset.collect import greedy_opponent, mix_opponents
 
     board = random_base_board(random.Random(3))
     was = greedy_opponent(11 + 77, 3, 400)
@@ -472,8 +473,8 @@ def test_routing_greedy_through_the_arena_would_have_changed_the_bot():
     means `max_offers=None` -- the engine's whole eight-offer budget -- and greedy
     saturates that cap, so the two are different bots at different strengths.
     """
-    from catan.board.board import random_base_board
-    from catan.collect import RESERVED_MIX, mix_opponents, named_opponent
+    from hexset.board.board import random_base_board
+    from hexset.collect import RESERVED_MIX, mix_opponents, named_opponent
 
     assert RESERVED_MIX == ("greedy", "parent")
     board = random_base_board(random.Random(3))
@@ -495,8 +496,8 @@ def test_a_mix_resolves_an_entrant_spec_the_arena_scores():
     Constructed and spawned but never played -- the point is that the bot the
     arena's 400-game results describe is the bot the mix seats.
     """
-    from catan.board.board import random_base_board
-    from catan.collect import mix_opponents
+    from hexset.board.board import random_base_board
+    from hexset.collect import mix_opponents
 
     board = random_base_board(random.Random(3))
     bot = mix_opponents(
@@ -508,7 +509,7 @@ def test_a_mix_resolves_an_entrant_spec_the_arena_scores():
 def test_a_mix_without_a_parent_entry_never_builds_one():
     """`parent` arrives as a thunk so a worker pays no `torch.load` for a
     checkpoint nothing in its mix casts."""
-    from catan.collect import mix_opponents
+    from hexset.collect import mix_opponents
 
     def thunk():
         raise AssertionError("built a parent for a mix that never asks for one")
@@ -524,7 +525,7 @@ def test_a_mix_without_a_parent_entry_never_builds_one():
 
 
 def test_the_parent_mix_opponent_is_whatever_the_thunk_returned():
-    from catan.collect import mix_opponents
+    from hexset.collect import mix_opponents
 
     sentinel = object()
     opponents = mix_opponents(
@@ -541,7 +542,7 @@ def test_the_parent_mix_opponent_is_whatever_the_thunk_returned():
 
 
 def test_a_worker_casts_an_arena_entrant_and_still_records_only_the_learner():
-    from catan.selfplay import owned
+    from hexset.selfplay import owned
 
     collector = ParallelCollector(
         [

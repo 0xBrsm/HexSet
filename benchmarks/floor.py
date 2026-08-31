@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """How much of the value head's error no value head could remove.
 
 `benchmarks.value_head` found the head accurate to about 2.1 victory points and
@@ -27,7 +28,7 @@ fixing the search means changing the target — bootstrapping off the search's o
 backed-up value, or a shorter horizon. Well below 1 and the head is simply
 underfitted and better training is the answer.
 
-Rollouts branch with `catan.game.imagine`, which copies the position whole and
+Rollouts branch with `hexset.game.imagine`, which copies the position whole and
 reshuffles only the deck. That is right rather than convenient: deck order is
 not in the observation the head was given, so its uncertainty belongs in the
 floor.
@@ -56,10 +57,10 @@ from dataclasses import dataclass, replace
 import numpy as np
 
 from benchmarks.throughput import environment
-from catan.board.board import random_base_board
-from catan.game import imagine
-from catan.rewards import reward
-from catan.selfplay import Collector, Episode
+from hexset.board.board import random_base_board
+from hexset.game import imagine
+from hexset.rewards import reward
+from hexset.selfplay import Collector, Episode
 
 # Torch is imported inside `main`, so the sampling and branching machinery —
 # everything with arithmetic worth getting wrong — stays testable without it.
@@ -106,7 +107,7 @@ class Sampling:
 class Branching(Collector):
     """A collector whose every lane starts from one given position.
 
-    Subclassed rather than parameterised because `catan.selfplay` is on the path
+    Subclassed rather than parameterised because `hexset.selfplay` is on the path
     of every result this project has recorded, and a benchmark should not be
     the reason it grows an argument.
     """
@@ -184,8 +185,8 @@ def main(argv: list[str] | None = None) -> int:
 
     import torch
 
-    from catan.netbot import load
-    from catan.policy import NetworkPolicy
+    from hexset.netbot import load
+    from hexset.policy import NetworkPolicy
 
     board = random_base_board(random.Random(args.seed))
     loaded = load(args.checkpoint, board.topology)

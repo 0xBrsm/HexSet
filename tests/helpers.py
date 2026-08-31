@@ -1,9 +1,10 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
-from catan.board.board import Board, make_board
-from catan.board.maps import MINI_LAYOUT
-from catan.board.terrain import Terrain
-from catan.board.topology import build as build_topology
+from hexset.board.board import Board, make_board
+from hexset.board.maps import MINI_LAYOUT
+from hexset.board.terrain import Terrain
+from hexset.board.topology import build as build_topology
 
 ROLL = 4
 DESERT_HEX = 0

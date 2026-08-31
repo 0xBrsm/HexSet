@@ -1,9 +1,10 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """A frozen manifest either round-trips exactly or refuses to load.
 
 The refusals are the point of these tests, not the happy path. A manifest that
 loads with a parameter quietly supplied from today's defaults is worse than one
 that fails, because it changes what a recorded run meant without saying so —
-which is the failure mode `catan.run.manifest`'s docstring exists to describe.
+which is the failure mode `hexset.run.manifest`'s docstring exists to describe.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import pytest
 
 torch = pytest.importorskip("torch", reason="the parsers import torch")
 
-from catan import run  # noqa: E402
+from hexset import run  # noqa: E402
 
 LEAGUE = [
     "--base",
@@ -121,7 +122,7 @@ def test_provenance_reports_no_commit_outside_a_repository(tmp_path):
 
 def test_the_parameter_set_comes_from_the_parser_not_a_copy(tmp_path):
     """If a flag is added to the league, this set grows with no change here."""
-    from catan.league import build_parser
+    from hexset.league import build_parser
 
     assert run.parameters("league") == {
         action.dest for action in build_parser()._actions if action.dest != "help"
@@ -132,7 +133,7 @@ def test_the_parameter_set_comes_from_the_parser_not_a_copy(tmp_path):
 def test_every_mode_can_build_its_parser_twice(mode):
     """The check that was missing, and the bug it would have caught.
 
-    `catan.distill_train` declared `--detach-value` itself while also calling
+    `hexset.distill_train` declared `--detach-value` itself while also calling
     `train.add_head_flags`, which declares it too. argparse raises on the
     duplicate, so *every* invocation of that module failed -- including
     `--help` -- from 2026-08-22 until 2026-08-24. Nothing noticed because
@@ -150,7 +151,7 @@ def test_every_mode_can_build_its_parser_twice(mode):
 
 
 def test_the_modes_map_to_modules_that_exist():
-    """`distill` launches from `catan.distill_train`, not `catan.distill`.
+    """`distill` launches from `hexset.distill_train`, not `hexset.distill`.
 
     The error messages interpolate this map, so a wrong entry would send a
     reader to a module that does not exist.
@@ -169,7 +170,7 @@ def test_freeze_reads_provenance_before_it_writes_the_run_directory(tmp_path, mo
     capturing it after `mkdir` made `git_dirty` true for every run once run
     records became tracked. A constant cannot carry the "cannot be cited" signal.
     """
-    from catan.run import manifest as m
+    from hexset.run import manifest as m
 
     seen = {}
 

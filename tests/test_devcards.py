@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
@@ -6,9 +7,9 @@ from collections import Counter
 import pytest
 from helpers import give, mini_board
 
-from catan.board.terrain import Resource
-from catan.cards import DECK_SIZE, PLAYABLE, DevCard, make_deck
-from catan.devcards import (
+from hexset.board.terrain import Resource
+from hexset.cards import DECK_SIZE, PLAYABLE, DevCard, make_deck
+from hexset.devcards import (
     buy,
     can_buy,
     can_play,
@@ -19,8 +20,8 @@ from catan.devcards import (
     play_road_building,
     play_year_of_plenty,
 )
-from catan.economy import COSTS, Purchase, expected_total, total_in_play
-from catan.state import new_game, place_settlement
+from hexset.economy import COSTS, Purchase, expected_total, total_in_play
+from hexset.state import new_game, place_settlement
 
 
 def a_game(players: int = 2, seed: int = 0):

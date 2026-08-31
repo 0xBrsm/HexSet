@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Generate a dataset of recorded games.
 
 Writes JSON lines, appending, so a run can be resumed or several runs pooled
@@ -16,9 +17,9 @@ import time
 from multiprocessing import Pool
 
 from benchmarks.throughput import default_workers, environment
-from catan.arena import CHECKPOINT_KINDS, PRESETS, entrant_from_name, spawn
-from catan.board.board import random_base_board
-from catan.record import Record, record_game, write
+from hexset.arena import CHECKPOINT_KINDS, PRESETS, entrant_from_name, spawn
+from hexset.board.board import random_base_board
+from hexset.record import Record, record_game, write
 
 BOARD_SEED_OFFSET = 1_000_000
 

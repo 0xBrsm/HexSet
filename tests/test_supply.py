@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """The piece supply: 15 roads, 5 settlements, 4 cities a player, enforced in
 placement legality so every path that builds reads one rule."""
 
@@ -7,10 +8,10 @@ import random
 
 from helpers import independent_vertices, mini_board
 
-from catan.actions import ActionType, legal_actions
-from catan.board.board import random_base_board
-from catan.game import Phase, start
-from catan.state import (
+from hexset.actions import ActionType, legal_actions
+from hexset.board.board import random_base_board
+from hexset.game import Phase, start
+from hexset.state import (
     MAX_CITIES,
     MAX_ROADS,
     MAX_SETTLEMENTS,

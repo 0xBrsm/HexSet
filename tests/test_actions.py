@@ -1,10 +1,11 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
 
 import pytest
 
-from catan.actions import (
+from hexset.actions import (
     YEAR_OF_PLENTY_PAIRS,
     Action,
     ActionType,
@@ -15,12 +16,12 @@ from catan.actions import (
     space_for,
     _offer_actions,
 )
-from catan.board.board import random_base_board
-from catan.economy import expected_total, total_in_play
-from catan.game import Phase, is_over, start
-from catan.play import play_random_game, step_randomly
-from catan.trading import Offer, responders
-from catan.victory import WINNING_POINTS, victory_points
+from hexset.board.board import random_base_board
+from hexset.economy import expected_total, total_in_play
+from hexset.game import Phase, is_over, start
+from hexset.play import play_random_game, step_randomly
+from hexset.trading import Offer, responders
+from hexset.victory import WINNING_POINTS, victory_points
 
 
 def a_game(players: int = 4, seed: int = 0):

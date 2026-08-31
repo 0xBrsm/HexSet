@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """What one self-play move actually costs, now that there is a network.
 
 `benchmarks.throughput` measures the engine alone, which says little about a
@@ -30,12 +31,12 @@ from dataclasses import asdict, dataclass
 import torch
 
 from benchmarks.throughput import environment
-from catan.actions import legal_actions, space_for
-from catan.board.board import random_base_board
-from catan.encoding import encode, static_graph
-from catan.game import imagine, is_over, start
-from catan.model import CatanNet, ModelConfig, collate, pack, packing
-from catan.play import step_randomly
+from hexset.actions import legal_actions, space_for
+from hexset.board.board import random_base_board
+from hexset.encoding import encode, static_graph
+from hexset.game import imagine, is_over, start
+from hexset.model import HexNet, ModelConfig, collate, pack, packing
+from hexset.play import step_randomly
 
 
 @dataclass
@@ -141,7 +142,7 @@ def run(
     graph = static_graph(games[0].state.board.topology)
 
     torch.manual_seed(seed)
-    net = CatanNet(space, graph, players, config).to(device).eval()
+    net = HexNet(space, graph, players, config).to(device).eval()
     if compile_mode != "none":
         net = torch.compile(net, mode=compile_mode)
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """What an opponent mix costs a PPO iteration, per decision and per shard.
 
 `--mix` used to accept two names. Once it accepts any arena entrant spec, the
@@ -61,9 +62,9 @@ from dataclasses import asdict, dataclass
 import torch
 
 from benchmarks.throughput import environment
-from catan.actions import build_space
-from catan.board.board import random_base_board
-from catan.collect import (
+from hexset.actions import build_space
+from hexset.board.board import random_base_board
+from hexset.collect import (
     ParallelCollector,
     WorkerSpec,
     check_mix,
@@ -71,10 +72,10 @@ from catan.collect import (
     mix_opponents,
     parse_mix,
 )
-from catan.encoding import static_graph
-from catan.model import CatanNet, ModelConfig, packing
-from catan.policy import NetworkPolicy
-from catan.selfplay import Collector
+from hexset.encoding import static_graph
+from hexset.model import HexNet, ModelConfig, packing
+from hexset.policy import NetworkPolicy
+from hexset.selfplay import Collector
 
 
 class Timed:
@@ -120,7 +121,7 @@ class Point:
 
 
 def _frozen(path: str, board, players: int):
-    from catan.collect import frozen
+    from hexset.collect import frozen
 
     return frozen(path, "cpu", board, players)
 
@@ -134,7 +135,7 @@ def _learner(path: str, space, graph, players: int, seed: int) -> NetworkPolicy:
     """
     state = torch.load(path, map_location="cpu", weights_only=False)
     stored = state.get("args", {})
-    net = CatanNet(
+    net = HexNet(
         space,
         graph,
         players,
@@ -195,7 +196,7 @@ def shard(
     if learner:
         policy = Timed(_learner(learner, space, graph, players, seed))
     else:
-        net = CatanNet(space, graph, players, ModelConfig(width=width, rounds=rounds))
+        net = HexNet(space, graph, players, ModelConfig(width=width, rounds=rounds))
         policy = Timed(
             NetworkPolicy(
                 net,

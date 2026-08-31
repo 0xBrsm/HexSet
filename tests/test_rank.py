@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """The sibling-ranking scorer, against rows whose answer is known by construction.
 
 The measurement decides between two different campaigns — trust the value head
@@ -29,8 +30,8 @@ from benchmarks.rank import (
     summarise,
     teacher_row,
 )
-from catan.actions import legal_actions
-from catan.mcts import Node, draws_hidden
+from hexset.actions import legal_actions
+from hexset.mcts import Node, draws_hidden
 
 from test_mcts import a_game, a_purchase, a_steal
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Learn evaluation weights from recorded outcomes, then check them by playing.
 
 Two numbers matter and they are not the same number. Held-out log loss says the
@@ -15,12 +16,12 @@ import sys
 import time
 
 from benchmarks.throughput import default_workers, environment
-from catan.arena import Z_95, wilson
-from catan.dataset import base_rate, build, split_by_game
-from catan.evaluate import TERM_NAMES, Weights
-from catan.fitting import accuracy, fit, log_loss
-from catan.record import read
-from catan.tuning import as_source, duel
+from hexset.arena import Z_95, wilson
+from hexset.dataset import base_rate, build, split_by_game
+from hexset.evaluate import TERM_NAMES, Weights
+from hexset.fitting import accuracy, fit, log_loss
+from hexset.record import read
+from hexset.tuning import as_source, duel
 
 
 def report(name, samples, coefficients, intercept):

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Whether the value head's blindness to siblings is a readout shape.
 
 `benchmarks.value_head` says the head is globally calibrated — explained
@@ -60,7 +61,7 @@ the held-out rows in the training set — same game, same seat, same number —
 and reports a held-out loss that is a training loss. The split is over
 episodes.
 
-The targets themselves are `catan.rewards.reward` rotated by `catan.ppo.rotate`,
+The targets themselves are `hexset.rewards.reward` rotated by `hexset.ppo.rotate`,
 the same two calls PPO's `assemble` makes, reused rather than rewritten because
 the frame is a documented past bug: `rotate` puts the seat itself in slot 0 to
 match what the encoder fed the network, and getting it backwards trains
@@ -77,7 +78,7 @@ is exactly the situation being investigated. The measurement is:
     python -m benchmarks.sibling --checkpoint runs/heads/mlp.pt --games 64
 
 The checkpoint written carries `width`, `rounds`, `players` and `value_head` in
-its `args`, which is what `catan.netbot.load` rebuilds the config from, and the
+its `args`, which is what `hexset.netbot.load` rebuilds the config from, and the
 run ends by loading its own output through that path so a shape mismatch is
 caught here rather than in the benchmark that was supposed to answer the
 question.
@@ -102,7 +103,7 @@ from benchmarks.throughput import environment
 # `rows` are the parts with arithmetic worth getting wrong, and they stay
 # importable and testable on a machine with no torch.
 
-# The attribute `CatanNet` keeps its value readout on. A tuple rather than a
+# The attribute `HexNet` keeps its value readout on. A tuple rather than a
 # constant because the head is another agent's module and only the name it
 # emits through — `Prediction.value` — is contractual; a head that moved to
 # `value_head` would otherwise be silently treated as trunk and frozen, which
@@ -144,8 +145,8 @@ def rows(episodes: Sequence) -> tuple[list, np.ndarray]:
     search's max^n backup reads every column, so training column 0 alone would
     leave three of the four outputs unsupervised.
     """
-    from catan.ppo import rotate
-    from catan.rewards import reward
+    from hexset.ppo import rotate
+    from hexset.rewards import reward
 
     observations: list = []
     values: list[np.ndarray] = []
@@ -170,7 +171,7 @@ def load_corpus(path: str) -> list:
     first = episodes[0]
     if not hasattr(first, "trajectories") or not hasattr(first, "outcome"):
         raise ValueError(
-            f"{path} holds {type(first).__name__}, not catan.selfplay.Episode"
+            f"{path} holds {type(first).__name__}, not hexset.selfplay.Episode"
         )
     return episodes
 
@@ -179,11 +180,11 @@ def configure(width: int, rounds: int, shape: str):
     """`ModelConfig` for one head shape, or a legible failure if it predates it."""
     from dataclasses import fields
 
-    from catan.model import ModelConfig
+    from hexset.model import ModelConfig
 
     if "value_head" not in {field.name for field in fields(ModelConfig)}:
         raise SystemExit(
-            "catan.model.ModelConfig has no `value_head` field, so there is no "
+            "hexset.model.ModelConfig has no `value_head` field, so there is no "
             "head shape to select; this benchmark needs that interface."
         )
     return ModelConfig(width=width, rounds=rounds, value_head=shape)
@@ -202,7 +203,7 @@ def head_of(net) -> tuple[str, object]:
         if isinstance(module, torch.nn.Parameter):
             raise AssertionError(f"`{name}` is a bare Parameter, not a module")
     raise AssertionError(
-        f"no value head found on CatanNet under any of {HEAD_ATTRIBUTES}"
+        f"no value head found on HexNet under any of {HEAD_ATTRIBUTES}"
     )
 
 
@@ -282,7 +283,7 @@ def predict(net, layout, buffer, device, chunk: int) -> np.ndarray:
     """The head's `(N, players)` output over a whole split, in chunks."""
     import torch
 
-    from catan.model import unpack
+    from hexset.model import unpack
 
     out = []
     with torch.no_grad():
@@ -297,7 +298,7 @@ def report(predicted: np.ndarray, actual: np.ndarray) -> dict:
 
     Two different reductions on purpose. The loss is the quantity being
     minimised and is a mean over all `players` outputs, exactly as
-    `catan.ppo.update` computes it, so the numbers here are comparable with a
+    `hexset.ppo.update` computes it, so the numbers here are comparable with a
     training log's `value_loss`. Explained variance is reported on column 0
     alone because that is what `benchmarks.value_head` and the run log both
     mean by it, and a figure pooled over the other three seats would not be
@@ -333,7 +334,7 @@ def fit(
     """
     import torch
 
-    from catan.model import unpack
+    from hexset.model import unpack
 
     optimiser = torch.optim.Adam(parameters, lr=learning_rate)
     size = buffer.shape[0]
@@ -398,11 +399,11 @@ def main(argv: list[str] | None = None) -> int:
 
     import torch
 
-    from catan.actions import build_space
-    from catan.board.board import random_base_board
-    from catan.encoding import static_graph
-    from catan.model import CatanNet, pack, packing
-    from catan.train import save
+    from hexset.actions import build_space
+    from hexset.board.board import random_base_board
+    from hexset.encoding import static_graph
+    from hexset.model import HexNet, pack, packing
+    from hexset.train import save
 
     device = torch.device(args.device)
     state = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
@@ -428,7 +429,7 @@ def main(argv: list[str] | None = None) -> int:
     layout = packing(graph, players)
 
     torch.manual_seed(args.seed)
-    net = CatanNet(space, graph, players, configure(width, rounds, args.shape))
+    net = HexNet(space, graph, players, configure(width, rounds, args.shape))
     prefix = owned_by_head(net)
 
     # The head's trained weights are deliberately dropped rather than loaded:
@@ -452,7 +453,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # `eval`, not `train`: there is no dropout or batch norm in this model, so
     # this changes no arithmetic — it pins the trunk to the same mode
-    # `catan.netbot.load` will score the result under.
+    # `hexset.netbot.load` will score the result under.
     net.to(device).eval()
     parameters = freeze(net, prefix)
     before = fingerprint(net, prefix)
@@ -497,7 +498,7 @@ def main(argv: list[str] | None = None) -> int:
     # already done, so a checkpoint whose own head shape will not rebuild loses
     # its control figure rather than the run.
     try:
-        untouched = CatanNet(
+        untouched = HexNet(
             space,
             graph,
             players,
@@ -565,15 +566,15 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     # The output exists to be handed to `benchmarks.sibling`, which reaches it
-    # through `catan.netbot.load`. Loading it here turns a config that cannot be
+    # through `hexset.netbot.load`. Loading it here turns a config that cannot be
     # rebuilt from `args` into a failure of the run that wrote it.
-    from catan.netbot import load
+    from hexset.netbot import load
 
     try:
         load(str(Path(args.out)), topology, str(device))
     except Exception as error:  # noqa: BLE001 - the message is the whole point
         print(
-            f"wrote {args.out} but catan.netbot.load cannot read it back: {error}",
+            f"wrote {args.out} but hexset.netbot.load cannot read it back: {error}",
             file=sys.stderr,
         )
         return 1

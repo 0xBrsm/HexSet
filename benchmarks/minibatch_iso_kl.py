@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """What learning rate makes a bigger minibatch travel the same distance?
 
 The campaign's minibatch blocks (ppo7, ppo8) both moved `--minibatch` at a
@@ -49,14 +50,14 @@ from pathlib import Path
 
 import torch
 
-from catan.actions import space_for
-from catan.board.board import random_base_board
-from catan.collect import ParallelCollector, WorkerSpec, check_mix, parse_mix
-from catan.encoding import static_graph
-from catan.game import start
-from catan.model import CatanNet, ModelConfig, config_from_args, packing
-from catan.policy import NetworkPolicy
-from catan.ppo import PPOConfig, _minibatches, assemble, minibatch_terms
+from hexset.actions import space_for
+from hexset.board.board import random_base_board
+from hexset.collect import ParallelCollector, WorkerSpec, check_mix, parse_mix
+from hexset.encoding import static_graph
+from hexset.game import start
+from hexset.model import HexNet, ModelConfig, config_from_args, packing
+from hexset.policy import NetworkPolicy
+from hexset.ppo import PPOConfig, _minibatches, assemble, minibatch_terms
 
 
 # `torch.OutOfMemoryError` is only an alias from 2.5; fall back to the message.
@@ -187,10 +188,10 @@ def main(argv: list[str] | None = None) -> int:
     graph = static_graph(board.topology)
 
     torch.manual_seed(args.seed)
-    net = CatanNet(space, graph, args.players, model)
+    net = HexNet(space, graph, args.players, model)
     net.load_state_dict(state["net"])
     net = net.to(args.device)
-    # Gradient wiring, mirroring `catan.train`: the probe reproduces the run's
+    # Gradient wiring, mirroring `hexset.train`: the probe reproduces the run's
     # own update, and a detached value loss is a different update.
     net.detach_value = bool(stored.get("detach_value", False))
     policy = NetworkPolicy(net, space, packing(graph, args.players), device=args.device)

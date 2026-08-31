@@ -1,10 +1,11 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import pytest
 from helpers import ROLL, a_vertex_touching, give, independent_producers, mini_board
 
-from catan.board.terrain import NUM_RESOURCES, Resource
-from catan.economy import (
+from hexset.board.terrain import NUM_RESOURCES, Resource
+from hexset.economy import (
     BANK_TRADE_RATIO,
     COSTS,
     Purchase,
@@ -16,7 +17,7 @@ from catan.economy import (
     pay,
     total_in_play,
 )
-from catan.state import BANK_PER_RESOURCE, new_game, place_settlement
+from hexset.state import BANK_PER_RESOURCE, new_game, place_settlement
 
 
 def a_game(players: int = 2):

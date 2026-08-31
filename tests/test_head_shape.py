@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import pickle
@@ -58,16 +59,16 @@ def test_a_corpus_that_is_not_episodes_is_refused(tmp_path):
 
 
 def test_every_decision_becomes_one_row():
-    pytest.importorskip("torch", reason="`rows` rotates with `catan.ppo`")
+    pytest.importorskip("torch", reason="`rows` rotates with `hexset.ppo`")
     observations, targets = rows([Episode((3, 2, 1, 0)), Episode((1, 1, 1, 1))])
     assert len(observations) == 6 + 4
     assert targets.shape == (10, 4)
 
 
 def test_a_seat_sees_its_own_payoff_first_at_every_one_of_its_decisions():
-    pytest.importorskip("torch", reason="`rows` rotates with `catan.ppo`")
-    from catan.ppo import rotate
-    from catan.rewards import reward
+    pytest.importorskip("torch", reason="`rows` rotates with `hexset.ppo`")
+    from hexset.ppo import rotate
+    from hexset.rewards import reward
 
     episode = Episode((2, 2, 2, 2))
     _, targets = rows([episode])

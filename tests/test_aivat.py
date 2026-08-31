@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """The chance-correction estimator: it must reproduce the games, and be unbiased.
 
 Two tests carry the correctness argument and the rest support them.
@@ -32,12 +33,12 @@ from benchmarks.aivat import (
     replay,
     summarise,
 )
-from catan.actions import ActionType, apply, victim_of
-from catan.arena import _play_one, entrant_from_name
-from catan.board.board import random_base_board
-from catan.cards import NUM_DEV_CARDS
-from catan.game import ROLL_ODDS, Phase, is_over, to_move
-from catan.mcts import draws_hidden
+from hexset.actions import ActionType, apply, victim_of
+from hexset.arena import _play_one, entrant_from_name
+from hexset.board.board import random_base_board
+from hexset.cards import NUM_DEV_CARDS
+from hexset.game import ROLL_ODDS, Phase, is_over, to_move
+from hexset.mcts import draws_hidden
 
 # Two cheap entrants that are nonetheless different, so a paired margin is not
 # identically zero and the games stay fast enough for a test suite. Nothing here
@@ -56,8 +57,8 @@ def _positions(entrants, index, seed, wanted, limit=400):
     The game is played on copies of nothing: `wanted` is handed the live game
     *before* the action is applied, which is the state the enumeration needs.
     """
-    from catan.arena import seat_of, spawn
-    from catan.game import start
+    from hexset.arena import seat_of, spawn
+    from hexset.game import start
 
     seats = len(entrants)
     pair, half = divmod(index, 2)
@@ -234,7 +235,7 @@ def test_the_estimator_is_unbiased_over_real_games():
 
 
 def test_the_margin_scale_inverts_relative_points():
-    from catan.rewards import relative_points
+    from hexset.rewards import relative_points
 
     rng = random.Random(4)
     for _ in range(50):
@@ -249,7 +250,7 @@ def test_the_margin_scale_inverts_relative_points():
 
 def test_the_stub_value_function_is_deterministic_across_processes():
     """`replay` fans out over a pool, so a per-process value would desync."""
-    from catan.game import start
+    from hexset.game import start
 
     board = random_base_board(random.Random("x"))
     game = start(board, 4, random.Random("y"))

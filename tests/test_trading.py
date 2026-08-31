@@ -1,13 +1,14 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
 
 import pytest
 
-from catan.actions import Action, ActionType, apply, legal_actions
-from catan.board.board import random_base_board
-from catan.board.terrain import Resource
-from catan.game import (
+from hexset.actions import Action, ActionType, apply, legal_actions
+from hexset.board.board import random_base_board
+from hexset.board.terrain import Resource
+from hexset.game import (
     MAX_OFFERS_PER_TURN,
     Phase,
     accept_trade,
@@ -18,7 +19,7 @@ from catan.game import (
     start,
     to_move,
 )
-from catan.trading import (
+from hexset.trading import (
     Offer,
     bundle,
     can_accept,
@@ -330,7 +331,7 @@ def test_an_imagined_game_carries_the_open_offer():
 def test_the_table_is_asked_in_a_random_order_unless_the_proposer_says():
     """First refusal goes to nobody in particular: the neutral order is a
     permutation drawn from the game's RNG, not the next seat in turn order."""
-    from catan.game import Phase, propose_trade, start
+    from hexset.game import Phase, propose_trade, start
 
     def a_game(seed: int):
         rng = random.Random(seed)

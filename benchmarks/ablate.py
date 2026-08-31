@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Ablate each evaluation term against the full fitted weights.
 
 One term is zeroed at a time and the crippled evaluation plays the intact one.
@@ -19,8 +20,8 @@ import time
 from dataclasses import fields, replace
 
 from benchmarks.throughput import default_workers, environment
-from catan.arena import Z_95, wilson
-from catan.tuning import WEIGHTS, duel
+from hexset.arena import Z_95, wilson
+from hexset.tuning import WEIGHTS, duel
 
 
 def ablate(

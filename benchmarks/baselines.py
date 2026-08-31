@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Run a lineup of baseline bots against each other and report win rates.
 
 This is the measurement the network will eventually have to beat, so it records
@@ -13,7 +14,7 @@ import sys
 from dataclasses import asdict
 
 from benchmarks.throughput import default_workers, environment
-from catan.arena import Z_95, compete, lineup_from_names, mean_interval, pooled
+from hexset.arena import Z_95, compete, lineup_from_names, mean_interval, pooled
 
 DEFAULT_LINEUP = ("greedy", "greedy", "random", "random")
 

@@ -1,12 +1,13 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
 
 import pytest
 
-from catan.rewards import relative_points, reward, win_loss
-from catan.selfplay import Collector, Outcome, RandomPolicy
-from catan.victory import WINNING_POINTS
+from hexset.rewards import relative_points, reward, win_loss
+from hexset.selfplay import Collector, Outcome, RandomPolicy
+from hexset.victory import WINNING_POINTS
 
 
 def an_outcome(points, winner=None, truncated=False):

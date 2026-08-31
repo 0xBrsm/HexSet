@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Is a Catan seat's conditional terminal return actually Gaussian?
 
 Registered as Gate A1 for the variance screen's candidate 3: the case for a
@@ -5,7 +6,7 @@ distributional value head rests entirely on the target being
 non-Gaussian, and nothing on this project has ever measured that -- it was
 inherited motivation, and week 1 withdrew the borrowed sentence it rested on.
 `benchmarks.floor` already produces the thing this needs. It snapshots a
-position, replays it many times with `catan.game.imagine`, and keeps only two
+position, replays it many times with `hexset.game.imagine`, and keeps only two
 scalars from the resulting return sample: its variance (the floor) and the
 squared gap between its mean and the head's prediction (bias^2). Everything
 else about that sample -- its shape -- is thrown away. `--dump-returns` on
@@ -20,8 +21,8 @@ standardized moments (each moment divided by a matching power of the standard
 deviation), so they are pure numbers -- unaffected by whether the return is
 read in reward units or in VP. The **Wasserstein-1 distance is not**: it is a
 distance between two distributions of returns, so it carries the same units
-the returns do. `catan.rewards.relative_points` scales terminal points by
-`catan.victory.WINNING_POINTS` (=10) so a value head does not have to learn the
+the returns do. `hexset.rewards.relative_points` scales terminal points by
+`hexset.victory.WINNING_POINTS` (=10) so a value head does not have to learn the
 units -- which means a W1 computed directly on the dumped returns is in units
 of a *tenth of a victory point*, and quoting it as-is would understate the
 mismatch by 10x against the register's 0.10 VP pass line. `wasserstein1_vp`
@@ -91,7 +92,7 @@ from statistics import NormalDist
 
 import numpy as np
 
-from catan.victory import WINNING_POINTS
+from hexset.victory import WINNING_POINTS
 
 _STANDARD_NORMAL = NormalDist()
 

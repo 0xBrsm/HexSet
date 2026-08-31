@@ -1,14 +1,15 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
 
 from helpers import independent_vertices, mini_board
 
-from catan.board.topology import coastal_rings
-from catan.cards import DevCard
-from catan.roads import MIN_LONGEST_ROAD
-from catan.state import NO_OWNER, Building, new_game
-from catan.victory import (
+from hexset.board.topology import coastal_rings
+from hexset.cards import DevCard
+from hexset.roads import MIN_LONGEST_ROAD
+from hexset.state import NO_OWNER, Building, new_game
+from hexset.victory import (
     LARGEST_ARMY_VP,
     LONGEST_ROAD_VP,
     MIN_LARGEST_ARMY,

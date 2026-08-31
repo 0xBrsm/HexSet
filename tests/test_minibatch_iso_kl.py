@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """The iso-KL solve, pinned against a response whose answer is already known.
 
 The block this backs sets its treatment rate from `iso_kl_rate`, so the
@@ -14,7 +15,7 @@ import pytest
 pytest.importorskip("torch", reason="PyTorch runs on the training box only")
 
 from benchmarks.minibatch_iso_kl import _grid, iso_kl_rate, worker_specs  # noqa: E402
-from catan.model import ModelConfig  # noqa: E402
+from hexset.model import ModelConfig  # noqa: E402
 
 # lr -> finished-update KL, measured on one fixed batch off ppo3-500.
 # Linear to ~1.2e-3, superlinear past it.

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Our policy against recorded human decisions, one decision at a time.
 
 This project has no human strength referent, and a win rate against humans is
@@ -27,7 +28,7 @@ to sixty-odd, so the uniform baseline for top-1 is the mean of `1/n` over the
 positions actually scored and for log-loss the mean of `log n`. Quoting a single
 global figure -- 7.2 options at a non-trivial decision, hence 13.9% and 1.97
 nats -- would be a different number, and it is `mean(1/n)` against `1/mean(n)`
-that separates them. `catan.placement` is the precedent for the comparison
+that separates them. `hexset.placement` is the precedent for the comparison
 itself: held-out log-loss 1.3746 against 1.3863 for chance.
 
 Both differences are reported **paired**, per position, because the difference
@@ -48,7 +49,7 @@ reported, and `nontrivial_per_game` is the number that says how many recorded
 games the measurement actually needs.
 
 **The distribution scored is the one the search sees**, via
-`catan.netbot.LeafEvaluator.evaluate` on a `catan.mcts.Leaf` -- not a
+`hexset.netbot.LeafEvaluator.evaluate` on a `hexset.mcts.Leaf` -- not a
 separately-built softmax. That matters most at the trade slot, which is one slot
 in the flat categorical standing for "propose something" whose mass the
 evaluator splits across the legal offers by the pair distribution. A policy that
@@ -58,7 +59,7 @@ hand-rolled distribution instead would quietly measure a different agent, and
 scoring the flat slot alone would credit the policy for naming an offer it did
 not name.
 
-Records come from anywhere that produces a `catan.record.Record`. The motivating
+Records come from anywhere that produces a `hexset.record.Record`. The motivating
 source is a first-party human arena that journals every action with its hidden
 information and hands back this project's own action space, but nothing here
 depends on it: it takes `Record`s.
@@ -93,7 +94,7 @@ from typing import Collection, Iterable, Iterator, NamedTuple, Sequence
 import numpy as np
 
 from benchmarks.throughput import environment
-from catan.actions import (
+from hexset.actions import (
     Action,
     ActionSpace,
     ActionType,
@@ -101,10 +102,10 @@ from catan.actions import (
     legal_actions,
     within_offer_budget,
 )
-from catan.arena import Z_95, wilson
-from catan.game import imagine, is_over, start, to_move
-from catan.mcts import Leaf
-from catan.record import Record, actions_of, board_of, read as read_records
+from hexset.arena import Z_95, wilson
+from hexset.game import imagine, is_over, start, to_move
+from hexset.mcts import Leaf
+from hexset.record import Record, actions_of, board_of, read as read_records
 
 PROGRESS_BUCKETS = 5
 
@@ -218,10 +219,10 @@ def positions(
 ) -> Iterator[_Pending]:
     """Replay one record, yielding every non-trivial decision worth scoring.
 
-    The loop is `catan.dataset.samples_from`'s and `catan.behaviour.walk`'s:
+    The loop is `hexset.dataset.samples_from`'s and `hexset.behaviour.walk`'s:
     start from the board and seed the record carries, step `actions_of` in order,
     and read the live game before each action rather than after. Legality is not
-    rechecked -- `catan.record.replay` is what verifies a record -- but a taken
+    rechecked -- `hexset.record.replay` is what verifies a record -- but a taken
     action that is not in the enumerated option set is counted, because for
     proposals the enumeration is a *sample* and not the whole legal set.
 
@@ -284,7 +285,7 @@ def _check_space(record: Record, space: ActionSpace | None) -> None:
     A 3-player record scored by a 4-player checkpoint, or a Seafarers layout
     scored by a base-board one, does not fail loudly on its own: the encoder
     would build a differently shaped observation and the mismatch would surface
-    somewhere unrelated. `catan.netbot._check_players` makes the same argument
+    somewhere unrelated. `hexset.netbot._check_players` makes the same argument
     for the arena path.
     """
     if space is None:
@@ -314,8 +315,8 @@ def score(
 ) -> tuple[list[Decision], Tally]:
     """Every non-trivial decision in `records`, scored by `evaluator`.
 
-    `evaluator` is a `catan.mcts.Evaluator` -- in production
-    `catan.netbot.LeafEvaluator`, which is the same object a batched search
+    `evaluator` is a `hexset.mcts.Evaluator` -- in production
+    `hexset.netbot.LeafEvaluator`, which is the same object a batched search
     scores its leaves with, so the distribution measured here and the
     distribution the search acts on cannot drift apart.
 
@@ -379,7 +380,7 @@ def _clustered(values: Sequence[float], games: Sequence[int]) -> tuple[float, fl
     """Pooled mean, and a 95% half-width whose sample size is games not positions.
 
     Consecutive decisions in one game differ by a single build and are heavily
-    correlated -- `catan.dataset.split_by_game` exists for the same reason -- so
+    correlated -- `hexset.dataset.split_by_game` exists for the same reason -- so
     an interval taken over positions would report a precision the data does not
     have. The cluster statistic is the per-game mean and the spread across games
     is the standard error. `None` where one game cannot supply a spread.
@@ -520,7 +521,7 @@ def main(argv: list[str] | None = None) -> int:
         "--records",
         action="append",
         required=True,
-        help="JSON lines of `catan.record.Record`; repeatable",
+        help="JSON lines of `hexset.record.Record`; repeatable",
     )
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--label", default=None, help="names the verdict file")
@@ -561,7 +562,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-json", action="store_true")
     args = parser.parse_args(argv)
 
-    from catan.netbot import LeafEvaluator, load
+    from hexset.netbot import LeafEvaluator, load
 
     records: list[Record] = []
     for path in args.records:

@@ -1,14 +1,15 @@
-"""The LR controller, pinned without torch — see `catan.schedule` on why."""
+# SPDX-License-Identifier: GPL-3.0-only
+"""The LR controller, pinned without torch — see `hexset.schedule` on why."""
 
 from __future__ import annotations
 
 import pytest
 
-from catan.schedule import AdaptiveLR, current_lr, linear_anneal, set_lr
+from hexset.schedule import AdaptiveLR, current_lr, linear_anneal, set_lr
 
 
 class FakeOptimiser:
-    """`param_groups` is the whole surface `catan.schedule` touches."""
+    """`param_groups` is the whole surface `hexset.schedule` touches."""
 
     def __init__(self, *rates: float) -> None:
         self.param_groups = [{"lr": rate, "params": []} for rate in rates]

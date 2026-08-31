@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """What the value head explains, and what is left over.
 
 A training run's `explained_variance` is a ratio whose denominator moves. It is
@@ -10,7 +11,7 @@ too, and the run log alone cannot tell that apart from a head going bad.
 This splits the two. The collector already records the head's prediction on
 every position it acted at, so no second forward is needed: the numbers here are
 exactly the on-policy predictions the update would have seen, against exactly
-the targets `catan.ppo` would have built.
+the targets `hexset.ppo` would have built.
 
 Reported by stage of the game as well as pooled, because the pooled figure is a
 mixture. At the opening nothing has happened yet and the outcome is board and
@@ -35,13 +36,13 @@ import numpy as np
 import torch
 
 from benchmarks.throughput import environment
-from catan.netbot import load
-from catan.policy import NetworkPolicy
-from catan.ppo import rotate
-from catan.rewards import reward
-from catan.arena import entrant_from_name, spawn
-from catan.selfplay import Choice, Collector, Episode
-from catan.board.board import random_base_board
+from hexset.netbot import load
+from hexset.policy import NetworkPolicy
+from hexset.ppo import rotate
+from hexset.rewards import reward
+from hexset.arena import entrant_from_name, spawn
+from hexset.selfplay import Choice, Collector, Episode
+from hexset.board.board import random_base_board
 
 
 class Scored:

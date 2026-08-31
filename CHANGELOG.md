@@ -1,11 +1,23 @@
 # Changelog
 
-All notable changes to the `catan` package are recorded here.
+All notable changes to the `hexset` package are recorded here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Changed
+
+- **Package renamed `catan` → `hexset`**, in prep for release under GPL-3.0-only
+  as its own public repo. `import catan` → `import hexset` throughout; the only
+  renamed identifiers are the package itself, `CatanNet` → `HexNet`, and the
+  `CATAN_EXPORT_COMMIT` env var → `HEXSET_EXPORT_COMMIT`. Every source file
+  under `hexset/`, `benchmarks/` and `tests/` now carries an
+  `SPDX-License-Identifier: GPL-3.0-only` header, and a `LICENSE` file (GPL-3.0,
+  full text) is added at this directory's root. Entries above this one describe
+  the package as it was named at the time; see the repo's top-level README for
+  the trademark note this rename exists to satisfy.
 
 ## [0.13.0] - 2026-08-31
 

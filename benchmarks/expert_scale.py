@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Scale expert collection across independent CPU search workers.
 
 Each worker owns its network and collector, warms compilation independently,

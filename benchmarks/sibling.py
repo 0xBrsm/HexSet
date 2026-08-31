@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """How far apart the value head puts two positions one action apart.
 
 `benchmarks.value_head --behaviour` ruled out the explanation the search
@@ -59,13 +60,13 @@ from dataclasses import dataclass, replace
 import numpy as np
 
 from benchmarks.throughput import environment
-from catan.actions import ActionType, legal_actions, within_offer_budget
-from catan.board.board import random_base_board
-from catan.game import is_over, to_move
-from catan.mcts import Leaf, draws_hidden, sampled_children
-from catan.rewards import reward, relative_points
-from catan.selfplay import Collector, Episode
-from catan.victory import victory_points
+from hexset.actions import ActionType, legal_actions, within_offer_budget
+from hexset.board.board import random_base_board
+from hexset.game import is_over, to_move
+from hexset.mcts import Leaf, draws_hidden, sampled_children
+from hexset.rewards import reward, relative_points
+from hexset.selfplay import Collector, Episode
+from hexset.victory import victory_points
 
 # Torch is imported inside `main` rather than here, which keeps `Probing` and
 # `rows` — everything with arithmetic worth getting wrong — importable and
@@ -106,7 +107,7 @@ class Probing:
     everywhere.
 
     The measurement rides to the transition on `Choice.aux`, the pocket
-    `catan.selfplay` already carries for `catan.expert`, so the terminal target
+    `hexset.selfplay` already carries for `hexset.expert`, so the terminal target
     each probe should be judged against is recoverable after the fact without a
     second bookkeeping path.
     """
@@ -227,7 +228,7 @@ class Probing:
 
 def rows(episodes: list[Episode]) -> tuple[np.ndarray, list[Spread]]:
     """The head's error at each probed position, beside that position's spread."""
-    from catan.ppo import rotate
+    from hexset.ppo import rotate
 
     errors, spreads = [], []
     for episode in episodes:
@@ -268,8 +269,8 @@ def main(argv: list[str] | None = None) -> int:
 
     import torch
 
-    from catan.netbot import LeafEvaluator, load
-    from catan.policy import NetworkPolicy
+    from hexset.netbot import LeafEvaluator, load
+    from hexset.policy import NetworkPolicy
 
     board = random_base_board(random.Random(args.seed))
     loaded = load(args.checkpoint, board.topology)

@@ -1,24 +1,25 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
 
 import pytest
 
-from catan.board.board import make_board, random_base_board
-from catan.board.maps import MINI_LAYOUT
-from catan.board.terrain import Resource, Terrain
-from catan.board.topology import build as build_topology
-from catan.cards import DevCard
-from catan.evaluate_tiered import (
+from hexset.board.board import make_board, random_base_board
+from hexset.board.maps import MINI_LAYOUT
+from hexset.board.terrain import Resource, Terrain
+from hexset.board.topology import build as build_topology
+from hexset.cards import DevCard
+from hexset.evaluate_tiered import (
     ROLLS,
     TERM_NAMES,
     VARIETY_PIPS,
     Evaluator,
     Weights,
 )
-from catan.game import start
-from catan.state import new_game, place_road, place_settlement, upgrade_to_city
-from catan.victory import WINNING_POINTS, victory_points
+from hexset.game import start
+from hexset.state import new_game, place_road, place_settlement, upgrade_to_city
+from hexset.victory import WINNING_POINTS, victory_points
 from helpers import ROLL, a_vertex_touching, give, independent_vertices, mini_board
 
 MINI_PIPS = 3  # every mini-board producer bears the same token

@@ -1,6 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """What the self-play collector costs before any network is involved.
 
-`catan.selfplay` batches so the network's fixed dispatch toll is paid once per
+`hexset.selfplay` batches so the network's fixed dispatch toll is paid once per
 tick rather than once per position. That only pays if the plumbing around it —
 engine step, `encode`, legal actions, mask — is cheap relative to the forward,
 so this measures the plumbing on its own with a trivial policy. Torch-free, so
@@ -26,7 +27,7 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Sequence
 
-from catan.selfplay import Choice, Collector, RandomPolicy, Request
+from hexset.selfplay import Choice, Collector, RandomPolicy, Request
 
 from .throughput import environment
 

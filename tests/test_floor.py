@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import json
@@ -7,8 +8,8 @@ import numpy as np
 import pytest
 
 from benchmarks.floor import Branching, Sampling, Snapshot, collect, pool, split
-from catan.actions import apply
-from catan.selfplay import Choice
+from hexset.actions import apply
+from hexset.selfplay import Choice
 
 from test_mcts import a_game
 from test_sibling import a_request
@@ -148,7 +149,7 @@ def test_collect_finds_the_snapshots_and_dates_them():
 
 
 def _options(game):
-    from catan.actions import legal_actions
+    from hexset.actions import legal_actions
 
     return list(legal_actions(game))
 
@@ -164,7 +165,7 @@ def test_dump_returns_leaves_the_default_output_bit_identical(tmp_path, capsys):
     diff by eye would have caught a shift.
     """
     pytest.importorskip("torch", reason="PyTorch runs on the training box only")
-    from catan.netbot import load
+    from hexset.netbot import load
 
     from benchmarks.floor import main
     from test_netbot import a_checkpoint

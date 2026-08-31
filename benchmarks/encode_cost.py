@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Split the cost of `encode` across its four blocks.
 
 `benchmarks.model_forward` reports `encode` as one number, and needs torch to
@@ -18,8 +19,8 @@ import sys
 import time
 from dataclasses import asdict, dataclass
 
-from catan.board.board import random_base_board
-from catan.encoding import (
+from hexset.board.board import random_base_board
+from hexset.encoding import (
     _building_points,
     _encode_edges,
     _encode_globals,
@@ -28,8 +29,8 @@ from catan.encoding import (
     _template,
     encode,
 )
-from catan.game import imagine, is_over, start
-from catan.play import step_randomly
+from hexset.game import imagine, is_over, start
+from hexset.play import step_randomly
 
 from .throughput import environment
 

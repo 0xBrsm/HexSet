@@ -1,10 +1,11 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import pytest
 
 from benchmarks.horizon import labels, lambda_label, teacher
-from catan.rewards import reward
-from catan.selfplay import Outcome
+from hexset.rewards import reward
+from hexset.selfplay import Outcome
 
 
 class Transition:

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import math
@@ -17,14 +18,14 @@ from benchmarks.human_agreement import (
     score,
     summarise,
 )
-from catan.actions import Action, ActionType, apply, legal_actions
-from catan.arena import PRESETS, spawn
-from catan.board.board import random_base_board
-from catan.game import Phase, start, to_move
-from catan.record import Record, actions_of, board_fields, board_of, record_game
+from hexset.actions import Action, ActionType, apply, legal_actions
+from hexset.arena import PRESETS, spawn
+from hexset.board.board import random_base_board
+from hexset.game import Phase, start, to_move
+from hexset.record import Record, actions_of, board_fields, board_of, record_game
 
 # Torch is never imported here. `benchmarks.human_agreement` keeps it inside
-# `main`, and the scoring core is duck-typed on `catan.mcts.Evaluator`, so every
+# `main`, and the scoring core is duck-typed on `hexset.mcts.Evaluator`, so every
 # number in this file is arithmetic over a stub whose prior is known in advance.
 
 

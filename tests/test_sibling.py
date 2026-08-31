@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
@@ -7,12 +8,12 @@ import numpy as np
 import pytest
 
 from benchmarks.sibling import Probing, Spread, rows
-from catan.actions import ActionType
-from catan.board.board import random_base_board
-from catan.bots import greedy
-from catan.evaluate import Evaluator
-from catan.mcts import draws_hidden
-from catan.selfplay import BotPolicy, Choice, Collector, Request
+from hexset.actions import ActionType
+from hexset.board.board import random_base_board
+from hexset.bots import greedy
+from hexset.evaluate import Evaluator
+from hexset.mcts import draws_hidden
+from hexset.selfplay import BotPolicy, Choice, Collector, Request
 
 from test_mcts import a_game, a_purchase, a_steal
 
@@ -95,7 +96,7 @@ def test_a_roll_position_is_skipped_rather_than_scored():
     game = a_game()
     options = probing._options(game)
     while not any(a.type is ActionType.ROLL for a in options):
-        from catan.actions import apply
+        from hexset.actions import apply
 
         apply(game, options[0])
         options = probing._options(game)
@@ -121,7 +122,7 @@ def test_a_probed_decision_carries_its_measurement_on_the_choice():
 
 
 def test_rows_pairs_an_error_with_every_probe_and_ignores_the_rest():
-    pytest.importorskip("torch", reason="`rows` rotates with `catan.ppo`")
+    pytest.importorskip("torch", reason="`rows` rotates with `hexset.ppo`")
 
     class Episode:
         pass

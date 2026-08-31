@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import dataclasses
@@ -8,14 +9,14 @@ import pytest
 
 torch = pytest.importorskip("torch", reason="PyTorch runs on the training box only")
 
-from catan import ppo, train  # noqa: E402
-from catan.actions import ActionType, space_for  # noqa: E402
-from catan.board.board import random_base_board  # noqa: E402
-from catan.encoding import _seat, static_graph  # noqa: E402
-from catan.game import start  # noqa: E402
-from catan.model import CatanNet, ModelConfig, packing, unpack  # noqa: E402
-from catan.policy import NetworkPolicy  # noqa: E402
-from catan.ppo import (  # noqa: E402
+from hexset import ppo, train  # noqa: E402
+from hexset.actions import ActionType, space_for  # noqa: E402
+from hexset.board.board import random_base_board  # noqa: E402
+from hexset.encoding import _seat, static_graph  # noqa: E402
+from hexset.game import start  # noqa: E402
+from hexset.model import HexNet, ModelConfig, packing, unpack  # noqa: E402
+from hexset.policy import NetworkPolicy  # noqa: E402
+from hexset.ppo import (  # noqa: E402
     PPOConfig,
     advantages,
     assemble,
@@ -23,7 +24,7 @@ from catan.ppo import (  # noqa: E402
     rotate,
     update,
 )
-from catan.selfplay import Collector  # noqa: E402
+from hexset.selfplay import Collector  # noqa: E402
 
 
 def a_policy(players: int = 4, seed: int = 0):
@@ -32,7 +33,7 @@ def a_policy(players: int = 4, seed: int = 0):
     game = start(board, players, rng)
     graph = static_graph(board.topology)
     torch.manual_seed(seed)
-    net = CatanNet(space_for(game), graph, players, ModelConfig(width=16, rounds=1))
+    net = HexNet(space_for(game), graph, players, ModelConfig(width=16, rounds=1))
     return NetworkPolicy(net, space_for(game), packing(graph, players))
 
 
@@ -115,7 +116,7 @@ def test_every_position_in_a_game_carries_that_game_s_terminal_outcome():
     batch = assemble(episodes[:1], policy.layout, PPOConfig())
 
     episode = episodes[0]
-    from catan.rewards import reward
+    from hexset.rewards import reward
 
     expected = {
         seat: rotate(reward(episode.outcome), seat)
@@ -308,7 +309,7 @@ def test_the_mover_s_column_agrees_with_gae_plus_its_own_estimate():
 
 
 def test_a_mixture_of_zero_sum_vectors_still_sums_to_zero():
-    # `catan.mcts`'s `relative` stance reads the sum across the vector, so a
+    # `hexset.mcts`'s `relative` stance reads the sum across the vector, so a
     # target that stopped summing to zero would quietly change what it means.
     out = lambda_returns(a_trajectory_of_estimates(), TERMINAL, 0.97)
     assert np.abs(out.sum(axis=1)).max() < 1e-5
@@ -340,7 +341,7 @@ def test_critic_none_credits_every_decision_with_the_terminal_return():
     # REINFORCE: the advantage of every step of a seat's trajectory is that
     # seat's terminal return, whole — not lam**(T-t) times it, which is what
     # running GAE over a zeroed head would silently produce.
-    from catan.rewards import reward
+    from hexset.rewards import reward
 
     policy = a_policy(seed=3)
     episodes = some_episodes(policy, games=2, seed=3)
@@ -481,7 +482,7 @@ def test_the_pair_baseline_never_touches_the_value_targets():
 
 
 def test_the_gae_terminal_is_the_pair_adjusted_payoff():
-    from catan.rewards import reward
+    from hexset.rewards import reward
 
     policy = a_policy(seed=13)
     episodes = paired_episodes(policy, games=2, seed=13)
@@ -579,7 +580,7 @@ def a_quantile_policy(players: int = 4, seed: int = 0, quantiles: int = 8):
     game = start(board, players, rng)
     graph = static_graph(board.topology)
     torch.manual_seed(seed)
-    net = CatanNet(
+    net = HexNet(
         space_for(game),
         graph,
         players,
@@ -678,7 +679,7 @@ def test_a_warm_started_quantile_head_prices_the_same_decisions():
     the advantages — are the same to that same rounding, four orders below the
     1/30 lattice the label lives on.
     """
-    from catan.model import quantile_warm_start
+    from hexset.model import quantile_warm_start
 
     policy = a_policy(seed=33)
     quantile = a_quantile_policy(seed=34, quantiles=32)
@@ -709,7 +710,7 @@ def test_the_quantile_value_term_is_the_pinball_loss_on_the_same_target():
     `value_target` vector `lambda_returns` and the zero-sum projection already
     built; the policy term and the entropy term are untouched.
     """
-    from catan.model import QUANTILE_HUBER_KAPPA, quantile_huber_loss
+    from hexset.model import QUANTILE_HUBER_KAPPA, quantile_huber_loss
 
     policy = a_quantile_policy(seed=35)
     episodes = some_episodes(policy, games=3, seed=35)

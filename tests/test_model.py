@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
@@ -7,14 +8,14 @@ import pytest
 
 torch = pytest.importorskip("torch", reason="PyTorch runs on the training box only")
 
-from catan.actions import space_for  # noqa: E402
-from catan.board.board import random_base_board  # noqa: E402
-from catan.encoding import encode, encode_batch, static_graph  # noqa: E402
-from catan.game import start  # noqa: E402
-from catan.model import (  # noqa: E402
+from hexset.actions import space_for  # noqa: E402
+from hexset.board.board import random_base_board  # noqa: E402
+from hexset.encoding import encode, encode_batch, static_graph  # noqa: E402
+from hexset.game import start  # noqa: E402
+from hexset.model import (  # noqa: E402
     POLICY_HEADS,
     VALUE_HEADS,
-    CatanNet,
+    HexNet,
     ModelConfig,
     collate,
     config_from_args,
@@ -22,8 +23,8 @@ from catan.model import (  # noqa: E402
     packing,
     unpack,
 )
-from catan.play import step_randomly  # noqa: E402
-from catan.readout import scatter_logits  # noqa: E402
+from hexset.play import step_randomly  # noqa: E402
+from hexset.readout import scatter_logits  # noqa: E402
 
 
 def a_game(players: int = 4, seed: int = 0, steps: int = 120):
@@ -38,7 +39,7 @@ def a_net(players: int = 4, seed: int = 0, **kwargs):
     torch.manual_seed(seed)
     game = a_game(players=players)
     space = space_for(game)
-    net = CatanNet(space, static_graph(game.state.board.topology), players, ModelConfig(**kwargs))
+    net = HexNet(space, static_graph(game.state.board.topology), players, ModelConfig(**kwargs))
     return game, space, net
 
 
@@ -556,7 +557,7 @@ def test_a_quantile_width_below_one_is_refused():
 def test_the_midpoint_levels_are_the_registered_ones_and_pair_about_a_half():
     """`(i + 0.5) / Q`, symmetric about 0.5 — which is what makes the mean of
     the quantiles the mean of a symmetric law rather than an approximation."""
-    from catan.model import quantile_levels
+    from hexset.model import quantile_levels
 
     levels = quantile_levels(4)
 
@@ -575,7 +576,7 @@ def test_the_pinball_loss_is_minimised_exactly_at_the_true_quantiles():
     order statistic exactly — so a grid search over the samples themselves must
     pick it, and perturbing away from it must cost.
     """
-    from catan.model import quantile_huber_loss, quantile_levels
+    from hexset.model import quantile_huber_loss, quantile_levels
 
     sample = torch.tensor([-1.0, -0.6, -0.3, -0.1, 0.0, 0.2, 0.45, 0.7, 1.3])
     target = sample.view(-1, 1)  # nine rows, one seat
@@ -605,7 +606,7 @@ def test_the_huber_width_is_one_lattice_step_and_not_a_knob():
     """kappa=1 would fit expectiles at this project's return scale, so the
     register fixed it at one step of the 1/30 reward lattice. A constant, not a
     flag: a heat whose arms differ in two things measures neither."""
-    from catan.model import QUANTILE_HUBER_KAPPA
+    from hexset.model import QUANTILE_HUBER_KAPPA
 
     assert QUANTILE_HUBER_KAPPA == pytest.approx(1.0 / 30.0)
     _, _, net = a_net(value_head="quantile")
@@ -619,7 +620,7 @@ def test_a_warm_started_quantile_head_predicts_what_the_scalar_head_predicted():
     one float32 rounding of a 32-term mean — four orders of magnitude below the
     1/30 lattice the label itself lives on.
     """
-    from catan.model import quantile_warm_start
+    from hexset.model import quantile_warm_start
 
     _, _, scalar = a_net(seed=3)
     _, _, quantile = a_net(seed=4, value_head="quantile")
@@ -640,7 +641,7 @@ def test_a_warm_started_quantile_head_predicts_what_the_scalar_head_predicted():
 
 
 def test_a_warm_start_off_a_head_that_is_not_per_seat_is_refused():
-    from catan.model import quantile_warm_start
+    from hexset.model import quantile_warm_start
 
     _, _, deep = a_net(value_head="mlp")
     # `value.0.*` is the hidden layer and `value.2.*` emits the seats; a head

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
@@ -5,9 +6,9 @@ from dataclasses import fields
 
 import pytest
 
-from catan.evaluate import Weights
-from catan.evaluate_tiered import Weights as TieredWeights
-from catan.tuning import ANCHOR, as_source, climb, duel, perturb, tunable
+from hexset.evaluate import Weights
+from hexset.evaluate_tiered import Weights as TieredWeights
+from hexset.tuning import ANCHOR, as_source, climb, duel, perturb, tunable
 
 
 def changed_fields(before: Weights, after: Weights) -> set[str]:

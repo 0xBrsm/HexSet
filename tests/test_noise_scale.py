@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """The gradient noise scale estimator, against gradients whose answer is known.
 
 The measurement it backs is a claim about where this problem's training sits
@@ -78,7 +79,7 @@ def test_the_paired_probe_refuses_an_odd_cohort():
 
 def test_pair_correlations_pair_by_index_not_by_arrival_order():
     from benchmarks.noise_scale import _pair_correlations
-    from catan.selfplay import Episode, Outcome, Transition
+    from hexset.selfplay import Episode, Outcome, Transition
 
     def episode(index: int, points: tuple[int, ...]) -> Episode:
         # Only the fields the correlations read are meaningful: the outcome,

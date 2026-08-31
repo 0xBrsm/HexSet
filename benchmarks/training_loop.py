@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Production-shape sync/async PPO timing for an otherwise idle GPU box.
 
 The live training job owns both the GPU and most CPU cores, so this harness is
@@ -24,13 +25,13 @@ import tempfile
 import time
 from pathlib import Path
 
-from catan import train
+from hexset import train
 
 from .throughput import environment
 
 
 def _run(label: str, args, asynchronous: bool) -> dict[str, object]:
-    with tempfile.TemporaryDirectory(prefix=f"catan-{label}-") as raw:
+    with tempfile.TemporaryDirectory(prefix=f"hexset-{label}-") as raw:
         directory = Path(raw)
         command = [
             "--device",

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Two checkpoints, head to head on identical boards, in paired terminal VP.
 
 The in-loop ladder's 200-game rungs cannot resolve a slope: their scatter is the
@@ -24,8 +25,8 @@ import sys
 import time
 from pathlib import Path
 
-from catan.arena import NETWORK
-from catan.board.board import random_base_board
+from hexset.arena import NETWORK
+from hexset.board.board import random_base_board
 
 # The two ways four seats hold two sides, and which lineup slots each side owns.
 # `arena._play_one` seats entrant `e` at `(e + rotation) % 4`, so `[a, a, b, b]`
@@ -104,10 +105,10 @@ def side(spec: str, device: str, board, players: int, lanes: int, seed: int):
     checkpoint; anything else is handed to the arena's entrant table, which
     raises on a name it does not know.
     """
-    # Imported here rather than at module load: `catan.collect` pulls in torch,
+    # Imported here rather than at module load: `hexset.collect` pulls in torch,
     # which the arena path and the lineup helpers never need, and the box that
     # reads the record is not always the box that has it.
-    from catan.collect import frozen, named_opponent
+    from hexset.collect import frozen, named_opponent
 
     if Path(spec).exists():
         return frozen(spec, device, board, players)
@@ -338,7 +339,7 @@ def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY)
     terminal points per game in entrant order, so the within-game difference the
     single-process path reports can be rebuilt exactly.
     """
-    from catan.arena import compete, lineup_from_names, pooled, wilson
+    from hexset.arena import compete, lineup_from_names, pooled, wilson
 
     names, mine, theirs = arena_lineup(args.a, args.b, geometry)
     lineup = sides(lineup_from_names(names), label_a, label_b, mine)
@@ -377,7 +378,7 @@ def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY)
 
 
 def _via_versus(args, label_a: str, label_b: str) -> dict:
-    from catan.train import versus
+    from hexset.train import versus
 
     board = random_base_board(random.Random(args.board_seed))
     a = side(

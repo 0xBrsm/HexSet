@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """How large a batch this problem's gradient actually needs.
 
 The campaign collects ~118k positions an iteration and steps on minibatches of
@@ -53,15 +54,15 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from catan.actions import space_for
-from catan.board.board import random_base_board
-from catan.encoding import static_graph
-from catan.game import start
-from catan.model import CatanNet, config_from_args, packing
-from catan.policy import NetworkPolicy
-from catan.ppo import PPOConfig, assemble, minibatch_terms
-from catan.rewards import reward
-from catan.selfplay import Collector
+from hexset.actions import space_for
+from hexset.board.board import random_base_board
+from hexset.encoding import static_graph
+from hexset.game import start
+from hexset.model import HexNet, config_from_args, packing
+from hexset.policy import NetworkPolicy
+from hexset.ppo import PPOConfig, assemble, minibatch_terms
+from hexset.rewards import reward
+from hexset.selfplay import Collector
 
 from .throughput import environment
 
@@ -276,7 +277,7 @@ def main(argv: list[str] | None = None) -> int:
     torch.set_num_threads(args.threads)
     state = torch.load(args.checkpoint, map_location=args.device, weights_only=False)
     stored = state.get("args", {})
-    # Shape as well as size: see `catan.model.config_from_args`. This estimator
+    # Shape as well as size: see `hexset.model.config_from_args`. This estimator
     # is the mechanism behind the minibatch block, so it has to be runnable on
     # whichever lineage the block calibrates against.
     model = config_from_args(stored)
@@ -287,7 +288,7 @@ def main(argv: list[str] | None = None) -> int:
     graph = static_graph(board.topology)
 
     torch.manual_seed(args.seed)
-    net = CatanNet(space, graph, args.players, model)
+    net = HexNet(space, graph, args.players, model)
     net.load_state_dict(state["net"])
     net = net.to(args.device)
     net.detach_value = bool(stored.get("detach_value", False))

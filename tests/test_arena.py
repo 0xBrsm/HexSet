@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import pickle
@@ -5,8 +6,8 @@ import random
 
 import pytest
 
-from catan import arena
-from catan.arena import (
+from hexset import arena
+from hexset.arena import (
     MAX_ACTIONS,
     PRESETS,
     Entrant,
@@ -23,9 +24,9 @@ from catan.arena import (
     spawn,
     wilson,
 )
-from catan.board.board import random_base_board
-from catan.bots import RandomBot, options_for
-from catan.game import is_over
+from hexset.board.board import random_base_board
+from hexset.bots import RandomBot, options_for
+from hexset.game import is_over
 
 
 @pytest.mark.parametrize("seats", [2, 3, 4])
@@ -272,7 +273,7 @@ def test_a_network_spec_can_self_impose_an_offer_budget():
     which means the budget its checkpoint trained under rather than the engine's
     whole cap.
     """
-    from catan.arena import entrant_from_name
+    from hexset.arena import entrant_from_name
 
     plain = entrant_from_name("network:/tmp/x.pt")
     assert plain.max_offers is None

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import json
@@ -8,8 +9,8 @@ import pytest
 
 torch = pytest.importorskip("torch", reason="PyTorch runs on the training box only")
 
-from catan import train  # noqa: E402
-from catan.selfplay import Collector, RandomPolicy  # noqa: E402
+from hexset import train  # noqa: E402
+from hexset.selfplay import Collector, RandomPolicy  # noqa: E402
 
 
 TINY = [
@@ -37,12 +38,12 @@ TINY = [
 def run(directory, iterations, extra=()):
     """Freeze a run, then launch it -- `train.main` takes nothing else.
 
-    Going through `catan.run.freeze` rather than calling the parser directly is
+    Going through `hexset.run.freeze` rather than calling the parser directly is
     deliberate: it means every test below exercises the manifest path the real
     trainer uses, so a config that cannot round-trip through a freeze fails
     here rather than on the box.
     """
-    from catan.run import freeze
+    from hexset.run import freeze
 
     argv = (
         TINY
@@ -283,7 +284,7 @@ class Fixed:
         self.batches = []
 
     def act(self, requests):
-        from catan.selfplay import Choice
+        from hexset.selfplay import Choice
 
         self.batches.append([r.seat for r in requests])
         return [Choice(action=r.options[0], log_prob=float(self.marker)) for r in requests]
@@ -481,7 +482,7 @@ def test_the_search_rung_resolves_and_a_mistyped_one_fails_with_a_sentence():
     but never played: `BotPolicy` builds its bots per board on demand, so this
     stays cheap.
     """
-    from catan.collect import named_opponent
+    from hexset.collect import named_opponent
 
     assert named_opponent("search2-offers3", seed=0, lanes=4) is not None
     with pytest.raises(SystemExit):
@@ -625,17 +626,17 @@ def test_the_rival_rung_is_matched_iteration_or_nothing(tmp_path):
     Nearest-checkpoint matching would quietly turn the rival column into an
     unmatched comparison, so absence has to come back as absence.
     """
-    from catan.actions import space_for
-    from catan.board.board import random_base_board
-    from catan.encoding import static_graph
-    from catan.game import start
-    from catan.model import CatanNet, ModelConfig
-    from catan.train import rival_rung
+    from hexset.actions import space_for
+    from hexset.board.board import random_base_board
+    from hexset.encoding import static_graph
+    from hexset.game import start
+    from hexset.model import HexNet, ModelConfig
+    from hexset.train import rival_rung
 
     rng = random.Random(0)
     board = random_base_board(rng)
     game = start(board, 4, rng)
-    net = CatanNet(
+    net = HexNet(
         space_for(game), static_graph(board.topology), 4, ModelConfig(width=16, rounds=1)
     )
     torch.save(
@@ -649,7 +650,7 @@ def test_the_rival_rung_is_matched_iteration_or_nothing(tmp_path):
 
 
 def test_the_recent_ring_keeps_exactly_the_newest_n(tmp_path):
-    from catan.train import prune_recent
+    from hexset.train import prune_recent
 
     for i in (5, 10, 15, 20, 25, 30):
         (tmp_path / f"recent-{i:05d}.pt").touch()
@@ -661,7 +662,7 @@ def test_the_recent_ring_keeps_exactly_the_newest_n(tmp_path):
 
 
 def test_a_blowout_preserves_the_pre_update_weights_and_the_batch(tmp_path):
-    from catan.train import preserve_blowout
+    from hexset.train import preserve_blowout
 
     net = {"w": torch.ones(3)}
     opt = {"state": {}, "param_groups": [{"lr": 3e-4}]}
@@ -690,7 +691,7 @@ class Streamless:
     """
 
     def act(self, requests):
-        from catan.selfplay import Choice
+        from hexset.selfplay import Choice
 
         return [Choice(action=request.options[0]) for request in requests]
 
@@ -770,7 +771,7 @@ def test_check_mix_admits_any_entrant_and_refuses_a_typo_or_a_missing_file(tmp_p
     """The pre-flight. Every failure here would otherwise land as a traceback out
     of a collector subprocess, after the manifest was frozen and the box was
     committed to the run."""
-    from catan.collect import check_mix
+    from hexset.collect import check_mix
 
     check_mix(
         [("greedy", 0.15), ("search2-offers3", 0.1), ("random", 0.05)],
@@ -858,7 +859,7 @@ def test_parse_mix_reads_table_syntax_and_refuses_a_broken_one():
 
 
 def test_check_mix_looks_inside_a_table_pool():
-    from catan.collect import check_mix
+    from hexset.collect import check_mix
 
     check_mix(train.parse_mix("table(greedy|random|search2-offers3)=0.5"), have_parent=False)
     with pytest.raises(SystemExit, match="unknown mix opponent"):

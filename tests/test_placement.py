@@ -1,17 +1,18 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
 
 import pytest
 
-from catan.actions import Action, ActionType, apply, legal_actions
-from catan.board.board import make_board, random_base_board
-from catan.board.maps import MINI_LAYOUT
-from catan.board.terrain import Resource, Terrain
-from catan.board.topology import build as build_topology
-from catan.game import Phase, start
-from catan.placement import PlacementBot, best, rank, scarce_resources, score
-from catan.state import place_settlement
+from hexset.actions import Action, ActionType, apply, legal_actions
+from hexset.board.board import make_board, random_base_board
+from hexset.board.maps import MINI_LAYOUT
+from hexset.board.terrain import Resource, Terrain
+from hexset.board.topology import build as build_topology
+from hexset.game import Phase, start
+from hexset.placement import PlacementBot, best, rank, scarce_resources, score
+from hexset.state import place_settlement
 
 
 def test_scarcity_is_read_off_the_board_not_hardcoded():

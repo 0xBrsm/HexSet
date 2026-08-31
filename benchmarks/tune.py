@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Fit the evaluation weights, printing each duel as it resolves.
 
 Budget this before starting it. Each round plays `--games` games, and the
@@ -13,7 +14,7 @@ import sys
 import time
 
 from benchmarks.throughput import default_workers, environment
-from catan.tuning import ACCEPT_Z, Step, as_source, climb, confirm
+from hexset.tuning import ACCEPT_Z, Step, as_source, climb, confirm
 
 
 def main(argv: list[str] | None = None) -> int:

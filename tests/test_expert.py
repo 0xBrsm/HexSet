@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
@@ -5,9 +6,9 @@ import random
 import numpy as np
 import pytest
 
-from catan.expert import SearchPolicy, Target
-from catan.mcts import Search
-from catan.selfplay import Collector, Request
+from hexset.expert import SearchPolicy, Target
+from hexset.mcts import Search
+from hexset.selfplay import Collector, Request
 
 from test_mcts import Stub, a_game
 

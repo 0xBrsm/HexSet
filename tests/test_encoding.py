@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import pickle
@@ -6,11 +7,11 @@ import random
 import numpy as np
 import pytest
 
-from catan.board.board import random_base_board
-from catan.board.terrain import Resource
-from catan.board.topology import build as build_topology
-from catan.board.maps import BASE_LAYOUT, MINI_LAYOUT
-from catan.encoding import (
+from hexset.board.board import random_base_board
+from hexset.board.terrain import Resource
+from hexset.board.topology import build as build_topology
+from hexset.board.maps import BASE_LAYOUT, MINI_LAYOUT
+from hexset.encoding import (
     HEX_FEATURES,
     NUM_BUILDINGS,
     _building_points,
@@ -22,10 +23,10 @@ from catan.encoding import (
     static_graph,
     vertex_features,
 )
-from catan.game import is_over, start
-from catan.play import step_randomly
-from catan.state import NO_OWNER, Building
-from catan.victory import building_points
+from hexset.game import is_over, start
+from hexset.play import step_randomly
+from hexset.state import NO_OWNER, Building
+from hexset.victory import building_points
 
 
 def a_game(players: int = 4, seed: int = 0, steps: int = 120):
@@ -220,7 +221,7 @@ def test_opponent_hand_sizes_are_visible():
 
 
 def test_opponent_development_cards_show_only_as_a_count():
-    from catan.cards import DevCard
+    from hexset.cards import DevCard
 
     game = a_game(players=3)
     state = game.state

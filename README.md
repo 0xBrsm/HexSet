@@ -1,12 +1,13 @@
-# catan
+# hexset
 
-A full-rules four-player Settlers of Catan engine and a self-play agent that reads
-the board as a graph. Hexes, vertices (settlement sites) and edges (road sites) are
-nodes of a heterogeneous graph; a message-passing network runs over that graph and
-emits its policy as a per-node readout, so action legality is a node property and
-masking falls out of the board rather than being bolted on. Published Catan agents
-instead flatten the hex board onto a rectangular grid so an ordinary CNN can
-approximate hex adjacency — this works on the real adjacency.
+A full-rules four-player engine and a self-play agent that reads the board as a
+graph, implementing the classic ruleset published as *Settlers of Catan* — see
+[Trademarks](#trademarks) below. Hexes, vertices (settlement sites) and edges (road
+sites) are nodes of a heterogeneous graph; a message-passing network runs over that
+graph and emits its policy as a per-node readout, so action legality is a node
+property and masking falls out of the board rather than being bolted on. Published
+agents for this game instead flatten the hex board onto a rectangular grid so an
+ordinary CNN can approximate hex adjacency — this works on the real adjacency.
 
 The package ships the rules engine, handcrafted evaluations and search bots, a
 seat-balanced arena for measuring one against another, and the learning layer:
@@ -28,7 +29,7 @@ python -m benchmarks.throughput --games 200 --workers 4
 python -m benchmarks.baselines --lineup search2 search2 greedy greedy --games 400
 
 # PPO self-play, resumable
-python -m catan.train --lanes 128 --iterations 100 --checkpoint-dir runs/ppo
+python -m hexset.train --lanes 128 --iterations 100 --checkpoint-dir runs/ppo
 ```
 
 Requires Python 3.11+. The rules engine, the arena and the self-play collector need
@@ -52,9 +53,9 @@ nodes, a bigger board costs no extra parameters either.
 
 `bots.Bot` is the protocol a network also satisfies. `greedy` is one ply over a
 handcrafted per-seat evaluation; `SearchBot` is max^n over decisions with dice
-expanded across all eleven outcomes and weighted rather than sampled. Catan has four
-players and one winner, so every evaluation and the value head return one number per
-seat, and a *stance* says how a seat collapses that vector: `own` is plain max^n,
+expanded across all eleven outcomes and weighted rather than sampled. This game has
+four players and one winner, so every evaluation and the value head return one
+number per seat, and a *stance* says how a seat collapses that vector: `own` is plain max^n,
 `relative` subtracts the mean of the other seats, `paranoid` the largest. Player-to-
 player trading is implemented and on, which published agents generally disable.
 
@@ -69,18 +70,18 @@ search with `netsearch:<path>` / `netgreedy:<path>`, or as a tree with `mcts:<pa
 
 | Path | Purpose |
 |------|---------|
-| `catan/board/` | `coords` (cube hex), `topology` (vertices, edges, adjacency from any layout), `terrain`, `board` (tokens, setup bags), `ports` (coastlines), `maps` (base, mini, multi-island) |
-| `catan/state.py`, `economy.py` | Occupancy, hands, bank stock, placement legality as graph queries; costs, payment, production, port rates |
-| `catan/game.py`, `actions.py` | The turn and phase machine, and a flat action space sized from the board with legality masking |
-| `catan/roads.py`, `robber.py`, `devcards.py`, `cards.py`, `victory.py`, `trading.py` | Longest road as a longest trail, the robber and discards, the development deck, victory conditions, player-to-player offers |
-| `catan/evaluate.py`, `evaluate_tiered.py` | Two handcrafted per-seat evaluations — nine fitted blended terms, and a tiered priority-order reimplementation kept as a comparison baseline |
-| `catan/bots.py`, `arena.py` | The `Bot` protocol, random / greedy / max^n search with stances; seat-rotated head-to-head play with confidence intervals |
-| `catan/tuning.py`, `fitting.py`, `behaviour.py` | Fitting evaluation weights by hill climbing and by logistic regression, and reporting what the bot actually does in the shape published aggregates are quoted in |
-| `catan/encoding.py`, `model.py`, `readout.py` | The seat-relative, information-set-correct graph observation; message passing over it; and the index map from heads to flat action slots |
-| `catan/selfplay.py`, `policy.py`, `rewards.py` | Vectorised lockstep rollout collection behind a `BatchPolicy` protocol, the torch policy, and the per-seat terminal scalarisation |
-| `catan/ppo.py`, `train.py` | GAE, clipped surrogate and value loss; the runnable, resumable training loop |
-| `catan/mcts.py`, `expert.py` | PUCT with leaves gathered into waves, backing up a per-seat vector; and expert iteration through the existing collector |
-| `catan/netbot.py`, `record.py`, `dataset.py`, `play.py` | A checkpoint as an arena entrant, replayable game records, labelled positions from them, and a random player |
+| `hexset/board/` | `coords` (cube hex), `topology` (vertices, edges, adjacency from any layout), `terrain`, `board` (tokens, setup bags), `ports` (coastlines), `maps` (base, mini, multi-island) |
+| `hexset/state.py`, `economy.py` | Occupancy, hands, bank stock, placement legality as graph queries; costs, payment, production, port rates |
+| `hexset/game.py`, `actions.py` | The turn and phase machine, and a flat action space sized from the board with legality masking |
+| `hexset/roads.py`, `robber.py`, `devcards.py`, `cards.py`, `victory.py`, `trading.py` | Longest road as a longest trail, the robber and discards, the development deck, victory conditions, player-to-player offers |
+| `hexset/evaluate.py`, `evaluate_tiered.py` | Two handcrafted per-seat evaluations — nine fitted blended terms, and a tiered priority-order reimplementation kept as a comparison baseline |
+| `hexset/bots.py`, `arena.py` | The `Bot` protocol, random / greedy / max^n search with stances; seat-rotated head-to-head play with confidence intervals |
+| `hexset/tuning.py`, `fitting.py`, `behaviour.py` | Fitting evaluation weights by hill climbing and by logistic regression, and reporting what the bot actually does in the shape published aggregates are quoted in |
+| `hexset/encoding.py`, `model.py`, `readout.py` | The seat-relative, information-set-correct graph observation; message passing over it; and the index map from heads to flat action slots |
+| `hexset/selfplay.py`, `policy.py`, `rewards.py` | Vectorised lockstep rollout collection behind a `BatchPolicy` protocol, the torch policy, and the per-seat terminal scalarisation |
+| `hexset/ppo.py`, `train.py` | GAE, clipped surrogate and value loss; the runnable, resumable training loop |
+| `hexset/mcts.py`, `expert.py` | PUCT with leaves gathered into waves, backing up a per-seat vector; and expert iteration through the existing collector |
+| `hexset/netbot.py`, `record.py`, `dataset.py`, `play.py` | A checkpoint as an arena entrant, replayable game records, labelled positions from them, and a random player |
 | `benchmarks/` | Throughput, baselines, ablations, weight fitting, encoder and forward-pass cost, rollout cost, value-head diagnostics |
 | `tests/` | 439 tests across 34 files |
 | `docker/` | ROCm training image |
@@ -102,3 +103,11 @@ search with `netsearch:<path>` / `netgreedy:<path>`, or as a tree with `mcts:<pa
 - **Vector value, not scalar.** The value head emits one number per seat and every
   output is trained from every position, which is what lets the search back it up
   with max^n instead of a minimax sign flip.
+
+## Trademarks
+
+CATAN and SETTLERS OF CATAN are trademarks of Catan GmbH and Catan Studio. This
+project is not affiliated with, endorsed by, or sponsored by either, and it ships
+no Catan artwork, text, or other content. Those names appear here only to identify
+which game's rules this implements — nominative use, not a claim on the marks.
+hexset is the name of this software.

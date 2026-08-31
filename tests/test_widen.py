@@ -1,4 +1,5 @@
-"""`catan.widen`: a wider net that computes the same function, until asked not to."""
+# SPDX-License-Identifier: GPL-3.0-only
+"""`hexset.widen`: a wider net that computes the same function, until asked not to."""
 
 from __future__ import annotations
 
@@ -8,21 +9,21 @@ import pytest
 
 torch = pytest.importorskip("torch", reason="PyTorch runs on the training box only")
 
-from catan.actions import space_for  # noqa: E402
-from catan.board.board import random_base_board  # noqa: E402
-from catan.encoding import encode, static_graph  # noqa: E402
-from catan.game import is_over, start  # noqa: E402
-from catan.model import CatanNet, ModelConfig, collate  # noqa: E402
-from catan.play import step_randomly  # noqa: E402
-from catan.widen import compare, widen_checkpoint, widen_state_dict  # noqa: E402
+from hexset.actions import space_for  # noqa: E402
+from hexset.board.board import random_base_board  # noqa: E402
+from hexset.encoding import encode, static_graph  # noqa: E402
+from hexset.game import is_over, start  # noqa: E402
+from hexset.model import HexNet, ModelConfig, collate  # noqa: E402
+from hexset.play import step_randomly  # noqa: E402
+from hexset.widen import compare, widen_checkpoint, widen_state_dict  # noqa: E402
 
 
-def a_net(width: int, seed: int = 0, **kwargs) -> CatanNet:
+def a_net(width: int, seed: int = 0, **kwargs) -> HexNet:
     torch.manual_seed(seed)
     rng = random.Random(0)
     board = random_base_board(rng)
     game = start(board, 4, rng)
-    net = CatanNet(space_for(game), static_graph(board.topology), 4, ModelConfig(width=width, **kwargs))
+    net = HexNet(space_for(game), static_graph(board.topology), 4, ModelConfig(width=width, **kwargs))
     # Orthogonal init leaves the heads near zero; scale everything up so a
     # wiring mistake shows as a large delta rather than a small one.
     with torch.no_grad():
@@ -45,7 +46,7 @@ def observations(count: int = 12) -> list:
     return out
 
 
-def widen(narrow: CatanNet, width: int, **kwargs) -> CatanNet:
+def widen(narrow: HexNet, width: int, **kwargs) -> HexNet:
     wide = a_net(width, seed=99, **{k: v for k, v in kwargs.items() if k not in ("noise", "seed")})
     wide.load_state_dict(
         widen_state_dict(
@@ -147,7 +148,7 @@ def test_a_checkpoint_round_trips_with_the_resume_contract(tmp_path):
     assert out["widen"]["source_sha256"]
     assert report["parameters_after"] > report["parameters_before"]
     # The optimiser state is fresh and loads onto a width-32 net the way
-    # `catan.train --resume` loads it.
+    # `hexset.train --resume` loads it.
     wide = a_net(32)
     wide.load_state_dict(out["net"], strict=True)
     fresh = torch.optim.Adam(wide.parameters(), lr=1.0)

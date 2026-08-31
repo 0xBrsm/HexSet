@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Does a bot already know how to open?
 
 Any arena entrant can be asked.  For a checkpoint the question is whether the
@@ -6,7 +7,7 @@ setup settlement is offered to the training policy exactly like any other action
 and the network has always chosen its own openings.  For the handcrafted bots it
 is whether the fitted evaluation weights already amount to a placement prior —
 `Weights.production` scores pips and `Weights.diversity` scores distinct
-resources, which is the shape of `catan.placement` with different exchange rates
+resources, which is the shape of `hexset.placement` with different exchange rates
 and no scarcity term.
 
 Either way this walks the entrant through the eight setup picks and compares each
@@ -30,11 +31,11 @@ import random
 import statistics
 from typing import Any
 
-from catan.actions import ActionType, apply, legal_actions
-from catan.arena import entrant_from_name, spawn
-from catan.board.board import Board, pips, random_base_board
-from catan.game import Phase, start, to_move
-from catan.placement import rank, scarce_resources, score
+from hexset.actions import ActionType, apply, legal_actions
+from hexset.arena import entrant_from_name, spawn
+from hexset.board.board import Board, pips, random_base_board
+from hexset.game import Phase, start, to_move
+from hexset.placement import rank, scarce_resources, score
 
 
 def vertex_pips(board: Board, vertex: int) -> int:

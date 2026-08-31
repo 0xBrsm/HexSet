@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Does the value head order siblings the way the truth does?
 
 `benchmarks.sibling` measured the head's error against the spread it has to
@@ -106,7 +107,7 @@ so the edge's `Q` converges on the mean over outcomes and PUCT orders *actions*,
 not realised children. That is precisely the quantity this metric exists to
 predict, so `--chance-draws N` scores such a child as the mean over N
 independent draws. The tree's *keying* is not borrowed — see
-`catan.mcts.sampled_children` for why a harness that rolls its children out for
+`hexset.mcts.sampled_children` for why a harness that rolls its children out for
 hundreds of plies cannot discard a repeated outcome's fresh copy the way a tree
 can. Keying is the tree's implementation of the average; only the meaning
 transfers.
@@ -144,13 +145,13 @@ from dataclasses import dataclass, replace
 import numpy as np
 
 from benchmarks.throughput import environment
-from catan.actions import ActionType, legal_actions, within_offer_budget
-from catan.board.board import random_base_board
-from catan.game import imagine, is_over, to_move
-from catan.mcts import Leaf, draws_hidden, sampled_children
-from catan.rewards import relative_points, reward
-from catan.selfplay import Collector, Episode
-from catan.victory import victory_points
+from hexset.actions import ActionType, legal_actions, within_offer_budget
+from hexset.board.board import random_base_board
+from hexset.game import imagine, is_over, to_move
+from hexset.mcts import Leaf, draws_hidden, sampled_children
+from hexset.rewards import relative_points, reward
+from hexset.selfplay import Collector, Episode
+from hexset.victory import victory_points
 
 DRAWS = 8
 """Draws per chance child. See "Averaging a chance child" in the docstring."""
@@ -682,9 +683,9 @@ def main(argv: list[str] | None = None) -> int:
 
     import torch
 
-    from catan.mcts import Search
-    from catan.netbot import LeafEvaluator, load
-    from catan.policy import NetworkPolicy
+    from hexset.mcts import Search
+    from hexset.netbot import LeafEvaluator, load
+    from hexset.policy import NetworkPolicy
 
     board = random_base_board(random.Random(args.seed))
     loaded = load(args.checkpoint, board.topology, device=args.device)

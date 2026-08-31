@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
@@ -7,13 +8,13 @@ import pytest
 
 from helpers import clear_hand, give
 
-from catan.actions import Action, ActionType, apply, legal_actions, victim_of
-from catan.board.board import random_base_board
-from catan.board.terrain import Resource
-from catan.cards import DevCard
-from catan.game import Phase, imagine, start
-from catan.bots import STANCES
-from catan.mcts import (
+from hexset.actions import Action, ActionType, apply, legal_actions, victim_of
+from hexset.board.board import random_base_board
+from hexset.board.terrain import Resource
+from hexset.cards import DevCard
+from hexset.game import Phase, imagine, start
+from hexset.bots import STANCES
+from hexset.mcts import (
     HIDDEN_DRAW,
     STANCE_ROWS,
     Leaf,

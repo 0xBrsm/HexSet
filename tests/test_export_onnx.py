@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
@@ -6,23 +7,23 @@ import numpy as np
 import pytest
 
 torch = pytest.importorskip("torch", reason="PyTorch runs on the training box only")
-onnx = pytest.importorskip("onnx", reason="only needed to run catan.export_onnx")
+onnx = pytest.importorskip("onnx", reason="only needed to run hexset.export_onnx")
 ort = pytest.importorskip(
-    "onnxruntime", reason="only needed to run catan.export_onnx"
+    "onnxruntime", reason="only needed to run hexset.export_onnx"
 )
 
-from catan.actions import space_for  # noqa: E402
-from catan.board.board import random_base_board  # noqa: E402
-from catan.encoding import static_graph  # noqa: E402
-from catan.export_onnx import _INPUT_NAMES, _OUTPUT_NAMES, _sample_inputs, export  # noqa: E402
-from catan.game import start  # noqa: E402
-from catan.model import CatanNet, ModelConfig  # noqa: E402
-from catan.onnx_record import RECORD_FIELDS  # noqa: E402
-from catan.policy import NUM_PAIRS  # noqa: E402
+from hexset.actions import space_for  # noqa: E402
+from hexset.board.board import random_base_board  # noqa: E402
+from hexset.encoding import static_graph  # noqa: E402
+from hexset.export_onnx import _INPUT_NAMES, _OUTPUT_NAMES, _sample_inputs, export  # noqa: E402
+from hexset.game import start  # noqa: E402
+from hexset.model import HexNet, ModelConfig  # noqa: E402
+from hexset.onnx_record import RECORD_FIELDS  # noqa: E402
+from hexset.policy import NUM_PAIRS  # noqa: E402
 
 
 def a_checkpoint(path, *, players: int = 4, max_offers: int | None = 3, seed: int = 0):
-    """A checkpoint in the shape `catan.train.save` writes, tiny enough to
+    """A checkpoint in the shape `hexset.train.save` writes, tiny enough to
     export quickly. Mirrors `test_netbot.py::a_checkpoint` — kept as its own
     copy rather than a cross-file import, same as that file does for itself.
     """
@@ -31,7 +32,7 @@ def a_checkpoint(path, *, players: int = 4, max_offers: int | None = 3, seed: in
     game = start(board, players, rng)
     graph = static_graph(board.topology)
     torch.manual_seed(seed)
-    net = CatanNet(space_for(game), graph, players, ModelConfig(width=16, rounds=1))
+    net = HexNet(space_for(game), graph, players, ModelConfig(width=16, rounds=1))
     torch.save(
         {
             "iteration": 7,
@@ -54,7 +55,7 @@ def test_export_writes_a_parity_checked_onnx_file(tmp_path):
     out = tmp_path / "latest.onnx"
 
     # export() runs its own numerical-parity check internally (see
-    # catan.export_onnx._verify_parity) and raises if the eager and
+    # hexset.export_onnx._verify_parity) and raises if the eager and
     # onnxruntime paths disagree — a clean return is itself the load-bearing
     # assertion here.
     result = export(str(checkpoint), out, topology=board.topology)

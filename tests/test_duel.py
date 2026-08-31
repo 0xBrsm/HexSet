@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """The duel's side split and seat geometry, which decide every verdict it reports.
 
 Torch-free: `benchmarks.duel` imports its torch-bound modules where they are
@@ -25,7 +26,7 @@ from benchmarks.duel import (
     arena_lineup,
     sides,
 )
-from catan.arena import Standing, Tournament, base_name, lineup_from_names, pooled
+from hexset.arena import Standing, Tournament, base_name, lineup_from_names, pooled
 
 
 def test_two_checkpoints_arrive_sharing_one_name():
@@ -241,7 +242,7 @@ POINTS = (10, 2, 3, 4)
 
 def test_arena_verdict_defaults_to_blocked_and_records_it(monkeypatch):
     seen: dict = {}
-    monkeypatch.setattr("catan.arena.compete", _fake_compete(seen, POINTS))
+    monkeypatch.setattr("hexset.arena.compete", _fake_compete(seen, POINTS))
 
     verdict = _via_arena(_arena_args(), "a", "b")
 
@@ -253,7 +254,7 @@ def test_arena_verdict_defaults_to_blocked_and_records_it(monkeypatch):
 
 def test_arena_verdict_can_play_interleaved_and_says_so(monkeypatch):
     seen: dict = {}
-    monkeypatch.setattr("catan.arena.compete", _fake_compete(seen, POINTS))
+    monkeypatch.setattr("hexset.arena.compete", _fake_compete(seen, POINTS))
 
     verdict = _via_arena(_arena_args(), "a", "b", "interleaved")
 
@@ -264,7 +265,7 @@ def test_arena_verdict_can_play_interleaved_and_says_so(monkeypatch):
 
 
 def test_main_prints_the_geometry_beside_the_worker_count(monkeypatch, capsys):
-    monkeypatch.setattr("catan.arena.compete", _fake_compete({}, POINTS))
+    monkeypatch.setattr("hexset.arena.compete", _fake_compete({}, POINTS))
 
     assert duel.main([A, B, "--workers", "2", "--games", "4", "--no-json"]) == 0
     out, err = capsys.readouterr()
@@ -298,10 +299,10 @@ def test_the_versus_verdict_records_interleaved(monkeypatch):
         seen["sides"] = (a, b)
         return {"paired_vp": 0.0, "win_rate": 0.5, "wilson_low": 0.4, "wilson_high": 0.6}
 
-    monkeypatch.setitem(sys.modules, "catan.train", types.SimpleNamespace(versus=versus))
+    monkeypatch.setitem(sys.modules, "hexset.train", types.SimpleNamespace(versus=versus))
     monkeypatch.setitem(
         sys.modules,
-        "catan.collect",
+        "hexset.collect",
         types.SimpleNamespace(
             frozen=lambda *a: "frozen", named_opponent=lambda spec, seed, lanes: spec
         ),

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
@@ -6,11 +7,11 @@ from typing import Iterator, Sequence
 import numpy as np
 import pytest
 
-from catan.actions import apply, legal_mask, space_for
-from catan.encoding import HAND_SCALE, encode
-from catan.board.terrain import NUM_RESOURCES
-from catan.game import Game, to_move
-from catan.selfplay import (
+from hexset.actions import apply, legal_mask, space_for
+from hexset.encoding import HAND_SCALE, encode
+from hexset.board.terrain import NUM_RESOURCES
+from hexset.game import Game, to_move
+from hexset.selfplay import (
     Choice,
     Collector,
     Episode,
@@ -304,8 +305,8 @@ def test_the_offer_budget_clears_proposals_from_the_mask():
 
 
 def _every_proposal(collector: Collector) -> list:
-    from catan.actions import Action, ActionType
-    from catan.board.terrain import NUM_RESOURCES
+    from hexset.actions import Action, ActionType
+    from hexset.board.terrain import NUM_RESOURCES
 
     out = []
     for given in range(NUM_RESOURCES):
@@ -337,7 +338,7 @@ def test_a_cast_lane_routes_each_seat_and_records_only_the_learner():
 
     assert episode.cast == (0, 1, 0, 1)
     # The learner's seats have trajectories; the opponent's are empty, which is
-    # what keeps its decisions out of `catan.ppo.assemble` without a filter.
+    # what keeps its decisions out of `hexset.ppo.assemble` without a filter.
     assert all(episode.trajectories[seat] for seat in (0, 2))
     assert all(not episode.trajectories[seat] for seat in (1, 3))
     # The game itself still ran through every seat.
@@ -384,8 +385,8 @@ def test_a_cast_reaching_past_the_opponents_fails_loudly():
 
 
 def test_a_bot_policy_spawns_one_bot_per_board_and_reuses_it():
-    from catan.bots import RandomBot
-    from catan.selfplay import BotPolicy
+    from hexset.bots import RandomBot
+    from hexset.selfplay import BotPolicy
 
     spawned = []
 
@@ -408,8 +409,8 @@ def test_a_bot_policy_spawns_one_bot_per_board_and_reuses_it():
 
 
 def test_a_bot_policy_over_capacity_respawns_rather_than_growing():
-    from catan.bots import RandomBot
-    from catan.selfplay import BotPolicy
+    from hexset.bots import RandomBot
+    from hexset.selfplay import BotPolicy
 
     spawned = []
 
@@ -534,7 +535,7 @@ def test_two_learners_share_a_table_and_each_records_only_its_seats():
     trajectory belongs to the seat its caster assigned, and `owned` partitions
     the table with no overlap and no loss.
     """
-    from catan.selfplay import owned
+    from hexset.selfplay import owned
 
     collector = Collector(
         RandomPolicy(random.Random(0)),
@@ -569,7 +570,7 @@ def test_two_learners_share_a_table_and_each_records_only_its_seats():
 
 
 def test_owned_treats_an_empty_cast_as_learner_zero():
-    from catan.selfplay import owned
+    from hexset.selfplay import owned
 
     episodes = Collector(
         RandomPolicy(random.Random(3)), lanes=2, seed=3, action_cap=3000
@@ -584,7 +585,7 @@ def test_a_learner_id_with_no_seated_policy_is_an_error():
 
 
 def test_a_board_pair_shares_its_geometry_and_not_its_dice():
-    from catan.board.board import random_base_board
+    from hexset.board.board import random_base_board
 
     collector = Collector(
         RandomPolicy(random.Random(0)), lanes=4, seed=9, pair_boards=True, deal=4
@@ -607,7 +608,7 @@ def test_a_board_pair_shares_its_geometry_and_not_its_dice():
 
 
 def test_pairing_off_deals_the_board_keyed_by_the_index_itself():
-    from catan.board.board import random_base_board
+    from hexset.board.board import random_base_board
 
     # The off-path anchor: every recorded trajectory replays only if the
     # default keeps dealing exactly the boards it always dealt.
@@ -620,7 +621,7 @@ def test_pairing_off_deals_the_board_keyed_by_the_index_itself():
 
 
 def test_pair_boards_with_a_fixed_board_is_refused():
-    from catan.board.board import random_base_board
+    from hexset.board.board import random_base_board
 
     with pytest.raises(ValueError):
         Collector(

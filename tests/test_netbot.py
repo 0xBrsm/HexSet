@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
@@ -6,14 +7,14 @@ import pytest
 
 torch = pytest.importorskip("torch", reason="PyTorch runs on the training box only")
 
-from catan.actions import legal_actions, space_for, within_offer_budget  # noqa: E402
-from catan.arena import Entrant, compete, spawn  # noqa: E402
-from catan.board.board import random_base_board  # noqa: E402
-from catan.encoding import encode, static_graph  # noqa: E402
-from catan.game import start, to_move  # noqa: E402
-from catan.model import CatanNet, ModelConfig  # noqa: E402
-from catan.netbot import load, network_bot  # noqa: E402
-from catan.play import step_randomly  # noqa: E402
+from hexset.actions import legal_actions, space_for, within_offer_budget  # noqa: E402
+from hexset.arena import Entrant, compete, spawn  # noqa: E402
+from hexset.board.board import random_base_board  # noqa: E402
+from hexset.encoding import encode, static_graph  # noqa: E402
+from hexset.game import start, to_move  # noqa: E402
+from hexset.model import HexNet, ModelConfig  # noqa: E402
+from hexset.netbot import load, network_bot  # noqa: E402
+from hexset.play import step_randomly  # noqa: E402
 
 
 def a_checkpoint(
@@ -24,7 +25,7 @@ def a_checkpoint(
     seed: int = 0,
     shape: dict | None = None,
 ):
-    """A checkpoint in the shape `catan.train.save` writes, tiny enough to load.
+    """A checkpoint in the shape `hexset.train.save` writes, tiny enough to load.
 
     `shape` is omitted by default, which is the case that matters: it is what a
     checkpoint written before the head-shape flags existed looks like, and the
@@ -35,7 +36,7 @@ def a_checkpoint(
     game = start(board, players, rng)
     graph = static_graph(board.topology)
     torch.manual_seed(seed)
-    net = CatanNet(
+    net = HexNet(
         space_for(game), graph, players, ModelConfig(width=16, rounds=1, **(shape or {}))
     )
     torch.save(
@@ -77,7 +78,7 @@ def test_a_checkpoint_plays_a_legal_action_from_every_phase(checkpoint):
         action = bot.choose(game)
         assert action in legal_actions(game)
         seen.add(game.phase)
-        from catan.actions import apply
+        from hexset.actions import apply
 
         apply(game, action)
     assert len(seen) > 3
@@ -175,7 +176,7 @@ def test_the_budget_is_honoured_exactly_as_the_search_bot_honours_it(checkpoint)
     rng = random.Random(11)
     game = start(board, 4, rng)
 
-    from catan.actions import apply
+    from hexset.actions import apply
 
     for _ in range(600):
         if game.won_by is not None:
@@ -253,8 +254,8 @@ def test_scoring_is_greedy_so_a_position_answers_the_same_way_twice(checkpoint):
 def test_the_search_reads_the_value_head_in_board_seat_order(checkpoint):
     """The encoder rotates the mover to slot 0; `SearchBot` indexes by board
     seat. Getting this backwards would search fine and play nonsense."""
-    from catan.encoding import encode
-    from catan.netbot import network_evaluator
+    from hexset.encoding import encode
+    from hexset.netbot import network_evaluator
 
     path, board = checkpoint
     evaluator = network_evaluator(path, board)
@@ -271,7 +272,7 @@ def test_the_search_reads_the_value_head_in_board_seat_order(checkpoint):
 
 
 def test_a_search_over_learned_leaves_plays_the_whole_game(checkpoint):
-    from catan.arena import Entrant, compete
+    from hexset.arena import Entrant, compete
 
     path, _ = checkpoint
     lineup = [
@@ -290,7 +291,7 @@ def test_a_search_over_learned_leaves_plays_the_whole_game(checkpoint):
 
 
 def test_learned_leaves_inherit_the_checkpoints_offer_budget(checkpoint):
-    from catan.arena import Entrant, spawn
+    from hexset.arena import Entrant, spawn
 
     path, board = checkpoint
     bot = spawn(
@@ -311,8 +312,8 @@ def test_learned_leaves_inherit_the_checkpoints_offer_budget(checkpoint):
 
 def test_a_handcrafted_evaluation_is_still_asked_for_the_state_alone(checkpoint):
     """The `evaluate_game` hook must not cost the baselines anything."""
-    from catan.arena import PRESETS, spawn
-    from catan.board.board import random_base_board
+    from hexset.arena import PRESETS, spawn
+    from hexset.board.board import random_base_board
 
     board = random_base_board(random.Random(0))
     bot = spawn(PRESETS["search2"], board, random.Random(0))
@@ -322,9 +323,9 @@ def test_a_handcrafted_evaluation_is_still_asked_for_the_state_alone(checkpoint)
 
 
 def test_the_leaf_evaluator_hands_a_whole_wave_to_one_forward(checkpoint):
-    from catan.actions import legal_actions
-    from catan.mcts import Leaf
-    from catan.netbot import searcher
+    from hexset.actions import legal_actions
+    from hexset.mcts import Leaf
+    from hexset.netbot import searcher
 
     path, board = checkpoint
     search = searcher(path, board, simulations=8, wave=8, rng=random.Random(0))
@@ -339,9 +340,9 @@ def test_the_leaf_evaluator_hands_a_whole_wave_to_one_forward(checkpoint):
 
 
 def test_leaf_evaluation_can_pad_to_one_compiled_shape(checkpoint):
-    from catan.actions import legal_actions
-    from catan.mcts import Leaf
-    from catan.netbot import searcher
+    from hexset.actions import legal_actions
+    from hexset.mcts import Leaf
+    from hexset.netbot import searcher
 
     path, board = checkpoint
     search = searcher(path, board, inference_batch=8, rng=random.Random(0))
@@ -366,9 +367,9 @@ def test_the_prior_covers_every_offer_rather_than_one_arbitrary_one(checkpoint):
     """`PROPOSE_TRADE` is one slot and many options. If the slot's mass were not
     split by the offer heads, one offer would carry the policy's whole appetite
     for trading and the rest would be unreachable."""
-    from catan.actions import ActionType
-    from catan.mcts import Leaf
-    from catan.netbot import searcher
+    from hexset.actions import ActionType
+    from hexset.mcts import Leaf
+    from hexset.netbot import searcher
 
     path, board = checkpoint
     search = searcher(path, board, rng=random.Random(0))
@@ -391,7 +392,7 @@ def test_the_prior_covers_every_offer_rather_than_one_arbitrary_one(checkpoint):
 
 
 def test_a_search_over_a_learned_prior_plays_a_legal_action(checkpoint):
-    from catan.netbot import searcher
+    from hexset.netbot import searcher
 
     path, board = checkpoint
     search = searcher(path, board, simulations=16, wave=4, rng=random.Random(0))
@@ -399,7 +400,7 @@ def test_a_search_over_a_learned_prior_plays_a_legal_action(checkpoint):
     for _ in range(20):
         action = search.choose(game)
         assert action in set(legal_actions(game))
-        from catan.actions import apply
+        from hexset.actions import apply
 
         apply(game, action)
 
@@ -415,7 +416,7 @@ def test_a_scored_run_records_the_networks_value_beside_someone_elses_play():
     import numpy as np
 
     from benchmarks.value_head import Scored
-    from catan.selfplay import Request
+    from hexset.selfplay import Request
 
     class Values:
         def values(self, observations):

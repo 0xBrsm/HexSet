@@ -1,9 +1,10 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
 
-from catan.arena import PRESETS, spawn
-from catan.behaviour import (
+from hexset.arena import PRESETS, spawn
+from hexset.behaviour import (
     Play,
     Walk,
     by_count,
@@ -13,8 +14,8 @@ from catan.behaviour import (
     walk,
     walks,
 )
-from catan.board.board import random_base_board
-from catan.record import record_game
+from hexset.board.board import random_base_board
+from hexset.record import record_game
 
 
 def some_records(count: int = 6, bot: str = "greedy"):

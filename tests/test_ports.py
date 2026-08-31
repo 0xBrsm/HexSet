@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
@@ -6,14 +7,14 @@ from collections import Counter
 import pytest
 from helpers import give, mini_board
 
-from catan.board.board import make_board, random_base_board
-from catan.board.maps import BASE_LAYOUT, MINI_LAYOUT
-from catan.board.ports import GENERIC_RATIO, SPECIFIC_RATIO, place_ports
-from catan.board.terrain import Resource, Terrain
-from catan.board.topology import build as build_topology
-from catan.board.topology import coastal_edges, coastal_rings
-from catan.economy import BANK_TRADE_RATIO, bank_trade, trade_ratios
-from catan.state import new_game, place_settlement
+from hexset.board.board import make_board, random_base_board
+from hexset.board.maps import BASE_LAYOUT, MINI_LAYOUT
+from hexset.board.ports import GENERIC_RATIO, SPECIFIC_RATIO, place_ports
+from hexset.board.terrain import Resource, Terrain
+from hexset.board.topology import build as build_topology
+from hexset.board.topology import coastal_edges, coastal_rings
+from hexset.economy import BANK_TRADE_RATIO, bank_trade, trade_ratios
+from hexset.state import new_game, place_settlement
 
 
 def test_every_edge_borders_one_or_two_hexes():
@@ -39,8 +40,8 @@ def test_base_board_coastline_is_one_ring_of_thirty():
 
 
 def test_each_island_gets_its_own_ring():
-    from catan.board.coords import Hex
-    from catan.board.maps import islands
+    from hexset.board.coords import Hex
+    from hexset.board.maps import islands
 
     t = build_topology(islands(Hex(0, 0, 0), Hex(9, -9, 0), radius=1))
     rings = coastal_rings(t)

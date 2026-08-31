@@ -1,10 +1,11 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 from helpers import mini_board
 
-from catan.board.coords import Hex
-from catan.roads import longest_road, road_lengths
-from catan.state import Building, new_game
+from hexset.board.coords import Hex
+from hexset.roads import longest_road, road_lengths
+from hexset.state import Building, new_game
 
 
 def a_game(players: int = 2):

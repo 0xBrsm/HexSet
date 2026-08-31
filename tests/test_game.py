@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
@@ -5,11 +6,11 @@ import random
 import pytest
 from helpers import clear_hand, give
 
-from catan.board.board import random_base_board
-from catan.board.terrain import Resource
-from catan.cards import DevCard
-from catan.economy import COSTS, Purchase, expected_total, total_in_play
-from catan.game import (
+from hexset.board.board import random_base_board
+from hexset.board.terrain import Resource
+from hexset.cards import DevCard
+from hexset.economy import COSTS, Purchase, expected_total, total_in_play
+from hexset.game import (
     Phase,
     build_city,
     build_road,
@@ -25,7 +26,7 @@ from catan.game import (
     start,
     submit_discard,
 )
-from catan.state import NO_OWNER, can_place_settlement
+from hexset.state import NO_OWNER, can_place_settlement
 
 
 def a_game(players: int = 3, seed: int = 0):

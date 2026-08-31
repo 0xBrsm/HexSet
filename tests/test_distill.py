@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
@@ -6,9 +7,9 @@ import pytest
 
 torch = pytest.importorskip("torch", reason="PyTorch runs on the training box only")
 
-from catan.actions import ActionType, space_for  # noqa: E402
-from catan.board.board import random_base_board  # noqa: E402
-from catan.distill import (  # noqa: E402
+from hexset.actions import ActionType, space_for  # noqa: E402
+from hexset.board.board import random_base_board  # noqa: E402
+from hexset.distill import (  # noqa: E402
     DistillConfig,
     assemble,
     contested,
@@ -17,16 +18,16 @@ from catan.distill import (  # noqa: E402
     stake,
     update,
 )
-from catan.encoding import static_graph  # noqa: E402
-from catan.expert import SearchPolicy  # noqa: E402
-from catan.game import start  # noqa: E402
-from catan.mcts import Search, visit_policy  # noqa: E402
-from catan.model import CatanNet, ModelConfig, packing  # noqa: E402
-from catan.netbot import LeafEvaluator  # noqa: E402
-from catan.policy import NetworkPolicy, pair_index  # noqa: E402
-from catan.ppo import rotate  # noqa: E402
-from catan.rewards import reward  # noqa: E402
-from catan.selfplay import Collector  # noqa: E402
+from hexset.encoding import static_graph  # noqa: E402
+from hexset.expert import SearchPolicy  # noqa: E402
+from hexset.game import start  # noqa: E402
+from hexset.mcts import Search, visit_policy  # noqa: E402
+from hexset.model import HexNet, ModelConfig, packing  # noqa: E402
+from hexset.netbot import LeafEvaluator  # noqa: E402
+from hexset.policy import NetworkPolicy, pair_index  # noqa: E402
+from hexset.ppo import rotate  # noqa: E402
+from hexset.rewards import reward  # noqa: E402
+from hexset.selfplay import Collector  # noqa: E402
 
 
 def a_setup(players: int = 4, seed: int = 0):
@@ -37,7 +38,7 @@ def a_setup(players: int = 4, seed: int = 0):
     space = space_for(game)
     layout = packing(graph, players)
     torch.manual_seed(seed)
-    net = CatanNet(space, graph, players, ModelConfig(width=16, rounds=1))
+    net = HexNet(space, graph, players, ModelConfig(width=16, rounds=1))
     return NetworkPolicy(net, space, layout), space, layout
 
 
@@ -304,7 +305,7 @@ def a_target(visits, prior=None, values=None):
     count, so a real action space is not needed to pin the filter."""
     import numpy as np
 
-    from catan.expert import Target
+    from hexset.expert import Target
 
     return Target(
         options=tuple(range(len(visits))),
@@ -520,7 +521,7 @@ def test_the_anchor_holds_the_settled_rows_the_filter_let_go():
 
 def test_concatenating_batches_keeps_every_row():
     policy, space, layout = a_setup()
-    from catan.distill import Batch
+    from hexset.distill import Batch
 
     first = a_batch(policy, space, layout, games=2)
     second = a_batch(policy, space, layout, games=2)
@@ -537,7 +538,7 @@ def test_concatenating_batches_keeps_every_row():
 
 def test_concatenating_one_batch_is_that_batch():
     policy, space, layout = a_setup()
-    from catan.distill import Batch
+    from hexset.distill import Batch
 
     only = a_batch(policy, space, layout, games=2)
     assert Batch.concat([only]) is only
@@ -565,7 +566,7 @@ def test_refreshing_against_the_collecting_policy_reproduces_the_filter():
     0.66% tie and none disagree. The invariant is real; asserting past the ties
     would only assert that two arbitrary orderings coincide on one seed.
     """
-    from catan.distill import refresh
+    from hexset.distill import refresh
 
     policy, space, layout = a_setup(seed=5)
     config = DistillConfig(contested_only=True)
@@ -587,7 +588,7 @@ def test_refreshing_tracks_the_policy_rather_than_the_recorded_prior():
     """The whole point of a buffer: the filter must not age with the corpus."""
     import copy
 
-    from catan.distill import refresh
+    from hexset.distill import refresh
 
     policy, space, layout = a_setup(seed=7)
     config = DistillConfig(contested_only=True, hard_target=True)
@@ -613,7 +614,7 @@ def test_refreshing_never_contests_a_row_the_search_did_not_expand():
     # The projected target of an all-zero row is a one-hot on whichever option
     # `argmax` reached first, so slot space cannot see what `contested` reads
     # off the raw visits. `searched` carries it.
-    from catan.distill import refresh
+    from hexset.distill import refresh
 
     policy, space, layout = a_setup()
     config = DistillConfig(contested_only=True)
@@ -624,7 +625,7 @@ def test_refreshing_never_contests_a_row_the_search_did_not_expand():
 
 
 def test_the_refreshed_anchor_is_the_live_policys_own_distribution():
-    from catan.distill import refresh
+    from hexset.distill import refresh
 
     policy, space, layout = a_setup()
     config = DistillConfig(contested_only=True)

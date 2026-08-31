@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
@@ -5,13 +6,13 @@ import random
 import numpy as np
 import pytest
 
-from catan.actions import ActionType, build_space, legal_actions, space_for
-from catan.board.board import random_base_board
-from catan.board.maps import MINI_LAYOUT
-from catan.board.topology import build as build_topology
-from catan.game import start
-from catan.play import step_randomly
-from catan.readout import EDGES, GLOBALS, HEXES, VERTICES, _SOURCES, plan, scatter_logits
+from hexset.actions import ActionType, build_space, legal_actions, space_for
+from hexset.board.board import random_base_board
+from hexset.board.maps import MINI_LAYOUT
+from hexset.board.topology import build as build_topology
+from hexset.game import start
+from hexset.play import step_randomly
+from hexset.readout import EDGES, GLOBALS, HEXES, VERTICES, _SOURCES, plan, scatter_logits
 
 
 def a_game(players: int = 4, seed: int = 0, steps: int = 120):

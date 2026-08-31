@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
@@ -7,12 +8,12 @@ import pytest
 
 torch = pytest.importorskip("torch", reason="PyTorch runs on the training box only")
 
-from catan.actions import space_for  # noqa: E402
-from catan.board.board import random_base_board  # noqa: E402
-from catan.encoding import encode, encode_batch, static_graph  # noqa: E402
-from catan.game import is_over, start, to_move  # noqa: E402
-from catan.onnx_record import RECORD_FIELDS, RecordEncoder, record_batch, record_from_game  # noqa: E402
-from catan.play import step_randomly  # noqa: E402
+from hexset.actions import space_for  # noqa: E402
+from hexset.board.board import random_base_board  # noqa: E402
+from hexset.encoding import encode, encode_batch, static_graph  # noqa: E402
+from hexset.game import is_over, start, to_move  # noqa: E402
+from hexset.onnx_record import RECORD_FIELDS, RecordEncoder, record_batch, record_from_game  # noqa: E402
+from hexset.play import step_randomly  # noqa: E402
 
 
 def a_game(players: int = 4, seed: int = 0, steps: int = 120):

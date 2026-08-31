@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
@@ -7,20 +8,20 @@ import pytest
 
 torch = pytest.importorskip("torch", reason="PyTorch runs on the training box only")
 
-from catan.actions import ActionType, legal_actions, space_for  # noqa: E402
-from catan.board.board import random_base_board  # noqa: E402
-from catan.encoding import static_graph  # noqa: E402
-from catan.game import start  # noqa: E402
-from catan.model import CatanNet, ModelConfig, packing  # noqa: E402
-from catan.play import step_randomly  # noqa: E402
-from catan.policy import (  # noqa: E402
+from hexset.actions import ActionType, legal_actions, space_for  # noqa: E402
+from hexset.board.board import random_base_board  # noqa: E402
+from hexset.encoding import static_graph  # noqa: E402
+from hexset.game import start  # noqa: E402
+from hexset.model import HexNet, ModelConfig, packing  # noqa: E402
+from hexset.play import step_randomly  # noqa: E402
+from hexset.policy import (  # noqa: E402
     NUM_PAIRS,
     NetworkPolicy,
     masked_log_softmax,
     pair_index,
     pair_mask,
 )
-from catan.selfplay import Collector  # noqa: E402
+from hexset.selfplay import Collector  # noqa: E402
 
 
 def a_policy(players: int = 4, seed: int = 0, **kwargs):
@@ -30,7 +31,7 @@ def a_policy(players: int = 4, seed: int = 0, **kwargs):
     space = space_for(game)
     graph = static_graph(board.topology)
     torch.manual_seed(seed)
-    net = CatanNet(space, graph, players, ModelConfig(width=16, rounds=1))
+    net = HexNet(space, graph, players, ModelConfig(width=16, rounds=1))
     return NetworkPolicy(net, space, packing(graph, players), **kwargs)
 
 
@@ -209,13 +210,13 @@ def test_a_trade_records_the_offer_in_its_log_prob_and_a_plain_action_does_not()
 
 
 def _unpacked(policy, buffer):
-    from catan.model import unpack
+    from hexset.model import unpack
 
     return unpack(policy.layout, buffer)
 
 
 def _as_batch(policy, requests, choices):
-    from catan.model import pack
+    from hexset.model import pack
 
     buffer = pack(policy.layout, [r.observation for r in requests])
     mask = torch.from_numpy(np.stack([r.mask for r in requests]))
@@ -277,7 +278,7 @@ def test_the_offer_distribution_never_puts_mass_on_a_swap_for_itself():
     policy = a_policy(seed=9)
     logits = torch.zeros(3, 5)
     pair = torch.ones(3, NUM_PAIRS, dtype=torch.bool)
-    from catan.policy import pair_logits
+    from hexset.policy import pair_logits
 
     log_probs = masked_log_softmax(
         pair_logits(logits, logits), pair & policy._off_diagonal

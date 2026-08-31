@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Report what our bot does, in the shape the published human aggregates use.
 
 The right-hand column is a third-party summary of Colonist.io games, quoted from
@@ -14,15 +15,15 @@ import json
 import sys
 
 from benchmarks.throughput import environment
-from catan.arena import Z_95, wilson
-from catan.behaviour import (
+from hexset.arena import Z_95, wilson
+from hexset.behaviour import (
     by_count,
     by_timing,
     per_game,
     seat_win_rates,
     walks,
 )
-from catan.record import read
+from hexset.record import read
 
 # Quoted from that summary, over its stated 41,310 games. Unverified: kept for
 # comparison only. The 4-knight entry is the summary's "35-37%" band at its

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
@@ -5,7 +6,7 @@ from collections import Counter
 
 import pytest
 
-from catan.board.board import (
+from hexset.board.board import (
     BASE_TERRAIN,
     BASE_TOKENS,
     RED_TOKENS,
@@ -13,9 +14,9 @@ from catan.board.board import (
     pips,
     random_base_board,
 )
-from catan.board.terrain import Terrain
-from catan.board.topology import build as build_topology
-from catan.board.maps import MINI_LAYOUT
+from hexset.board.terrain import Terrain
+from hexset.board.topology import build as build_topology
+from hexset.board.maps import MINI_LAYOUT
 
 
 @pytest.mark.parametrize(

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import copy
@@ -7,10 +8,10 @@ import pytest
 
 torch = pytest.importorskip("torch", reason="PyTorch runs on the training box only")
 
-from catan.ddp import UpdateCrew, UpdateSpec  # noqa: E402
-from catan.ppo import PPOConfig, assemble, update  # noqa: E402
-from catan.selfplay import Collector  # noqa: E402
-from catan.train import build  # noqa: E402
+from hexset.ddp import UpdateCrew, UpdateSpec  # noqa: E402
+from hexset.ppo import PPOConfig, assemble, update  # noqa: E402
+from hexset.selfplay import Collector  # noqa: E402
+from hexset.train import build  # noqa: E402
 
 
 def _fixture():

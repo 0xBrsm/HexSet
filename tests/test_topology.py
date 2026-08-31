@@ -1,9 +1,10 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import pytest
 
-from catan.board import BASE_LAYOUT, MINI_LAYOUT, Hex, hexagon, islands
-from catan.board import topology as topo
+from hexset.board import BASE_LAYOUT, MINI_LAYOUT, Hex, hexagon, islands
+from hexset.board import topology as topo
 
 
 @pytest.mark.parametrize(

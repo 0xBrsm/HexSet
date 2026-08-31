@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Gate A2 of the variance screen: does a quantile head give a *better mean*?
 
 Registered under the variance screen's candidate 3. Gate A1 closed PASS -- the
@@ -51,7 +52,7 @@ that the positions are the same.
 
 ## The two traps this construction has been bitten by
 
-**Rotation.** `catan.ppo.rotate` puts a seat's own payoff in component 0, which
+**Rotation.** `hexset.ppo.rotate` puts a seat's own payoff in component 0, which
 is the frame the encoder fed the trunk and the frame the head emits in. The
 dump's `prediction` is `Choice.value[0]` and its `returns` are
 `reward(outcome)[seat]` -- both the acting seat's own payoff -- so both heads
@@ -131,18 +132,18 @@ from benchmarks.floor import Sampling, collect, pool, split as split_error, _sta
 from benchmarks.head_shape import rows, split as split_games
 from benchmarks.throughput import environment
 from benchmarks.value_head import explained
-from catan.board.board import random_base_board
-from catan.encoding import encode
-# `_head`, `_output` and `_DEEP` are `catan.model`'s own, and are imported
+from hexset.board.board import random_base_board
+from hexset.encoding import encode
+# `_head`, `_output` and `_DEEP` are `hexset.model`'s own, and are imported
 # rather than restated so that a change to the production head's shape or its
 # initialisation cannot silently leave this comparison measuring a head the run
 # does not have. `_head` is what builds `self.value`; `_DEEP` is which shapes
 # get a hidden layer; `_output` is the layer whose gain sets the output scale.
 # `quantile_levels` and `quantile_huber_loss` were written here for Gate A2 and
-# moved to `catan.model` when the production `"quantile"` value head was built
+# moved to `hexset.model` when the production `"quantile"` value head was built
 # on them. Imported, not copied: the heat's loss and the gate's loss have to be
 # the same arithmetic or the two results are not about the same head.
-from catan.model import (
+from hexset.model import (
     _DEEP,
     _head,
     _output,
@@ -151,9 +152,9 @@ from catan.model import (
     quantile_levels,
     unpack,
 )
-from catan.netbot import load
-from catan.policy import NetworkPolicy
-from catan.selfplay import Collector
+from hexset.netbot import load
+from hexset.policy import NetworkPolicy
+from hexset.selfplay import Collector
 
 # `benchmarks.floor` seeds the collector that produces the dump's positions at
 # `dump_seed + 1`. The training cohort is offset far away from that so the two
@@ -169,13 +170,13 @@ FLOOR_SEED_LANES = 16
 
 
 def initialise_head(head: nn.Module) -> None:
-    """`CatanNet._initialise`'s convention for a value head, on a bare head.
+    """`HexNet._initialise`'s convention for a value head, on a bare head.
 
     Orthogonal everywhere with zeroed biases, gain sqrt(2) on a hidden layer
     because it feeds a SiLU and is trunk by every property that matters, gain
     1.0 on the layer that emits the number because it predicts at its target's
     scale. Restating the rule here rather than reusing `_initialise` is
-    unavoidable -- that method walks a whole `CatanNet` -- so both heads are put
+    unavoidable -- that method walks a whole `HexNet` -- so both heads are put
     through this one function rather than through two lookalikes.
     """
     for module in head.modules():
@@ -188,7 +189,7 @@ def initialise_head(head: nn.Module) -> None:
 class MeanHead(nn.Module):
     """The production value head: `players` outputs, squared error.
 
-    Built by `catan.model._head` at the checkpoint's own width and depth, so
+    Built by `hexset.model._head` at the checkpoint's own width and depth, so
     this arm is the head the run already has, refit -- not a lookalike.
     """
 
@@ -246,7 +247,7 @@ class QuantileHead(nn.Module):
 class Dataset:
     """Cached trunk features, their targets, and which game each row came from.
 
-    `games` is `(N, 2)` of `(seed, index)` -- the identity `catan.ppo.assemble`
+    `games` is `(N, 2)` of `(seed, index)` -- the identity `hexset.ppo.assemble`
     already keys a game by -- so a split can be audited for the leak it exists
     to prevent instead of assumed clean.
     """
@@ -276,10 +277,10 @@ def labelled_rows(episodes: Sequence) -> tuple[list, np.ndarray, np.ndarray]:
 
 
 def trunk_features(net, layout, observations: Sequence, *, device, chunk: int) -> Tensor:
-    """Exactly the tensor `CatanNet.value` is applied to, for every observation.
+    """Exactly the tensor `HexNet.value` is applied to, for every observation.
 
     Captured with a forward pre-hook on `net.value` rather than reassembled
-    here. `CatanNet._read_value` concatenates a different set of trunk tensors
+    here. `HexNet._read_value` concatenates a different set of trunk tensors
     per `value_head` shape -- the global token alone for `linear`, plus three
     max-pools for `pooled`, plus an attention read for `attn` -- and a second
     copy of that dispatch in this file would be a way for the two heads to end
@@ -424,7 +425,7 @@ def recover(
 
     See the module docstring for why this is a replay and how it is proved to
     have landed on the same positions. Returns the held-out set and the
-    `catan.netbot.Loaded` checkpoint, so the caller does not load it twice.
+    `hexset.netbot.Loaded` checkpoint, so the caller does not load it twice.
     """
     seed = int(dump["seed"])
     board = random_base_board(random.Random(seed))
@@ -482,7 +483,7 @@ def recover(
     observations = tuple(encode(snapshot.game, snapshot.seat) for snapshot, _ in chosen)
     reference = np.asarray([row["prediction"] for row in wanted], dtype=np.float64)
     # The one thing the triple match cannot prove: that re-encoding the snapshot
-    # reproduces the observation the head was given. `catan.game.imagine`
+    # reproduces the observation the head was given. `hexset.game.imagine`
     # reshuffles the deck, which the encoder does not see, so this should hold
     # -- and if the encoding ever grows a field that it does see, this is where
     # it is caught rather than in a silently worse bias^2.
@@ -514,7 +515,7 @@ def score_held_out(held: HeldOut, own: Sequence[float], bins: int) -> dict:
     """One head's floor decomposition over the dump, pooled and by stage.
 
     `own` is the head's own-payoff prediction -- column 0, the component
-    `catan.ppo.rotate` puts the acting seat in and the component the dump's
+    `hexset.ppo.rotate` puts the acting seat in and the component the dump's
     returns are measured in. `floor.split` and `floor.pool` do the arithmetic
     unchanged, so this number and the A1 floor report's are the same quantity.
 

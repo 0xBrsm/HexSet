@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """The shape statistics against inputs whose right answer is known independently
 of the implementation -- see `benchmarks.return_shape` for the mechanism and
 the units each number is quoted in.
@@ -16,7 +17,7 @@ from benchmarks.return_shape import (
     wasserstein1,
     wasserstein1_vp,
 )
-from catan.victory import WINNING_POINTS
+from hexset.victory import WINNING_POINTS
 
 _STANDARD_NORMAL = NormalDist()
 
@@ -90,7 +91,7 @@ def test_excess_kurtosis_of_a_two_point_mixture_is_exactly_minus_two():
 
 
 def test_wasserstein1_vp_is_ten_times_the_reward_unit_figure():
-    """`catan.rewards.relative_points` divides by `WINNING_POINTS` (10) so a
+    """`hexset.rewards.relative_points` divides by `WINNING_POINTS` (10) so a
     value head trains in units of a tenth of a VP; reporting the gate number
     without undoing that scaling would understate a real mismatch by 10x
     against the registered 0.10 VP pass line."""

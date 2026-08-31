@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """AIVAT's chance-correction term, measured on games this project already ran.
 
 The estimator, in one line. For a game whose history contains chance events
@@ -58,13 +59,13 @@ from pathlib import Path
 
 import numpy as np
 
-from catan.actions import Action, ActionType, apply, victim_of
-from catan.arena import MAX_ACTIONS, entrant_from_name, seat_of, spawn
-from catan.board.board import Board, random_base_board
-from catan.encoding import encode
-from catan.game import ROLL_ODDS, Game, imagine, is_over, roll_dice, start, to_move
-from catan.mcts import draws_hidden
-from catan.victory import WINNING_POINTS, victory_points
+from hexset.actions import Action, ActionType, apply, victim_of
+from hexset.arena import MAX_ACTIONS, entrant_from_name, seat_of, spawn
+from hexset.board.board import Board, random_base_board
+from hexset.encoding import encode
+from hexset.game import ROLL_ODDS, Game, imagine, is_over, roll_dice, start, to_move
+from hexset.mcts import draws_hidden
+from hexset.victory import WINNING_POINTS, victory_points
 
 # Which chance families the correction covers. Separable because they are not
 # equally worth their compute: `roll` fires every turn and moves every seat's
@@ -76,7 +77,7 @@ TERMS = ("roll", "deck", "steal")
 # Below this a correction is float noise from `V(o) - sum p.V`, not a signal.
 _NEGLIGIBLE = 1e-12
 
-# The four transitions that embed a draw; see `catan.mcts.draws_hidden`.
+# The four transitions that embed a draw; see `hexset.mcts.draws_hidden`.
 CHANCE_ACTIONS = frozenset(
     {
         ActionType.ROLL,
@@ -209,7 +210,7 @@ class Valuer:
     """`V` as the terminal-VP margin between two seat groups, from one seat's view.
 
     The perspective matters for how much variance comes off, and not at all for
-    whether the estimate is unbiased. `catan.encoding` is information-set
+    whether the estimate is unbiased. `hexset.encoding` is information-set
     correct, so a value read from seat `s` cannot resolve a chance outcome that
     seat `s` may not see: an opponent's dev-card draw raises that opponent's card
     *count* whichever card it was, so all of its successors encode identically
@@ -228,7 +229,7 @@ class Valuer:
         theirs: list[int],
         players: int,
     ) -> None:
-        from catan.netbot import load
+        from hexset.netbot import load
 
         self.loaded = load(path, board.topology, "cpu")
         self.perspective = perspective

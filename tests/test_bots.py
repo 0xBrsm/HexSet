@@ -1,16 +1,17 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import random
 
 import pytest
 
-from catan.actions import Action, ActionType, apply, legal_actions
-from catan.board.board import pips, random_base_board
-from catan.board.terrain import Resource
-from catan.bots import RandomBot, SearchBot, greedy, own, paranoid, relative
-from catan.cards import DevCard
-from catan.evaluate import Evaluator
-from catan.game import (
+from hexset.actions import Action, ActionType, apply, legal_actions
+from hexset.board.board import pips, random_base_board
+from hexset.board.terrain import Resource
+from hexset.bots import RandomBot, SearchBot, greedy, own, paranoid, relative
+from hexset.cards import DevCard
+from hexset.evaluate import Evaluator
+from hexset.game import (
     MAX_OFFERS_PER_TURN,
     ROLL_ODDS,
     Phase,
@@ -21,9 +22,9 @@ from catan.game import (
     start,
     to_move,
 )
-from catan.state import place_settlement, upgrade_to_city
-from catan.trading import bundle
-from catan.victory import victory_points
+from hexset.state import place_settlement, upgrade_to_city
+from hexset.trading import bundle
+from hexset.victory import victory_points
 from helpers import clear_hand, give, independent_vertices, mini_board
 
 

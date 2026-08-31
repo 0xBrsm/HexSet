@@ -1,10 +1,11 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import pytest
 from helpers import ROLL, a_vertex_touching, mini_board
 
-from catan.board.terrain import Resource
-from catan.state import (
+from hexset.board.terrain import Resource
+from hexset.state import (
     NO_OWNER,
     Building,
     can_place_road,

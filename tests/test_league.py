@@ -1,12 +1,13 @@
+# SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
 import pytest
 
 torch = pytest.importorskip("torch", reason="PyTorch runs on the training box only")
 
-from catan.league import OVERRIDES, nudged, parse_learner, standings  # noqa: E402
-from catan.ppo import PPOConfig  # noqa: E402
-from catan.selfplay import Episode, Outcome  # noqa: E402
+from hexset.league import OVERRIDES, nudged, parse_learner, standings  # noqa: E402
+from hexset.ppo import PPOConfig  # noqa: E402
+from hexset.selfplay import Episode, Outcome  # noqa: E402
 
 
 def test_learner_overrides_apply_and_unknown_keys_refuse():
@@ -81,7 +82,7 @@ def test_every_override_key_names_a_real_config_field():
 
 
 def test_pair_boards_defaults_off_so_recorded_heats_replay():
-    from catan.league import build_parser
+    from hexset.league import build_parser
 
     args = build_parser().parse_args(["--learner", "", "--checkpoint-dir", "x"])
     assert args.pair_boards is False
@@ -95,7 +96,7 @@ def test_the_value_head_override_defaults_to_the_base_checkpoint_s_own_shape():
     default has to be the absence of an override rather than any particular
     shape — `"linear"` as a default would silently rebuild an `mlp` base.
     """
-    from catan.league import build_parser
+    from hexset.league import build_parser
 
     args = build_parser().parse_args(["--learner", "", "--checkpoint-dir", "x"])
 
@@ -104,7 +105,7 @@ def test_the_value_head_override_defaults_to_the_base_checkpoint_s_own_shape():
 
 
 def test_the_quantile_head_is_selectable_on_a_heat():
-    from catan.league import build_parser
+    from hexset.league import build_parser
 
     args = build_parser().parse_args(
         ["--learner", "", "--checkpoint-dir", "x", "--value-head", "quantile"]
@@ -114,8 +115,8 @@ def test_the_quantile_head_is_selectable_on_a_heat():
 
 
 def test_both_head_knobs_are_frozen_into_a_league_manifest():
-    """`catan.run.init` freezes whatever the parser defines, so a heat that
+    """`hexset.run.init` freezes whatever the parser defines, so a heat that
     ran the quantile head cannot be reconstructed as one that did not."""
-    from catan.run import parameters
+    from hexset.run import parameters
 
     assert {"value_head", "quantiles"} <= parameters("league")

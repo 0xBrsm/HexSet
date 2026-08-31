@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 """Gate A2's arithmetic against answers derived independently of the code.
 
 The gate is a paired comparison between two heads on one dataset, so the two
@@ -33,7 +34,7 @@ from benchmarks.head_swap import (  # noqa: E402
     score_held_out,
 )
 from benchmarks.head_shape import split as split_games  # noqa: E402
-from catan.rewards import reward  # noqa: E402
+from hexset.rewards import reward  # noqa: E402
 
 # Nine samples against four midpoint levels, chosen so that `tau * n` is never
 # an integer: on an integer the pinball loss is flat between two order
@@ -162,7 +163,7 @@ def test_a_negative_huber_width_is_refused():
 
 
 class _Outcome:
-    """The two fields `catan.rewards.reward` and `head_shape.rows` read."""
+    """The two fields `hexset.rewards.reward` and `head_shape.rows` read."""
 
     points = (10, 6, 4, 2)
     actions = 40
@@ -290,7 +291,7 @@ def _held_out(returns, reference) -> HeldOut:
 
 
 def test_the_held_out_score_is_the_floor_split_on_the_own_payoff_column():
-    """`catan.ppo.rotate` puts a seat's own payoff in component 0, and that is
+    """`hexset.ppo.rotate` puts a seat's own payoff in component 0, and that is
     the component the dump's returns are measured in -- so bias^2 here has to be
     `(mean(rollout returns) - prediction[:, 0])^2`, position by position."""
     returns = [[0.4, -0.2, 0.1, 0.7, -0.5], [0.2, 0.2, 0.2, 0.2, 0.2]]

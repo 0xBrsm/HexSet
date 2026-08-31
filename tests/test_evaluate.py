@@ -136,9 +136,14 @@ def test_progress_tells_a_city_hand_from_a_junk_hand():
 def test_a_winning_position_dominates_every_other_term():
     board = mini_board()
     state = a_state(board)
-    for vertex in independent_vertices(board, WINNING_POINTS // 2):
+    # Four cities and two settlements: ten points inside the piece supply.
+    # Upgrade as we go: the supply never lets a player hold six settlements.
+    spots = independent_vertices(board, 6)
+    for vertex in spots[:4]:
         place_settlement(state, 0, vertex, connected=False)
         upgrade_to_city(state, 0, vertex)
+    for vertex in spots[4:]:
+        place_settlement(state, 0, vertex, connected=False)
     assert victory_points(state, 0) >= WINNING_POINTS
 
     evaluator = Evaluator(board)

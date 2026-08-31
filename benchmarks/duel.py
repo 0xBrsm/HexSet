@@ -9,6 +9,9 @@ through noise.
 
     python -m benchmarks.duel /w/runs/ppo5/latest.pt /w/runs/ppo4/latest.pt \
         --games 400 --label-a ppo5 --label-b ppo4
+
+Every verdict names its seat geometry -- see `GEOMETRIES` -- because the two
+paths seat a 2v2 differently and the seating alone is worth ~0.35 VP.
 """
 
 from __future__ import annotations
@@ -23,8 +26,36 @@ from pathlib import Path
 
 from catan.arena import NETWORK
 from catan.board.board import random_base_board
-from catan.collect import frozen, named_opponent
-from catan.train import versus
+
+# The two ways four seats hold two sides, and which lineup slots each side owns.
+# `arena._play_one` seats entrant `e` at `(e + rotation) % 4`, so `[a, a, b, b]`
+# gives every copy one same-side neighbour -- blocked -- and `[a, b, a, b]` puts
+# the copies opposite each other, each flanked by two opponents -- interleaved.
+# `collect.alternating` seats the versus path on same-parity seats, so
+# `--workers 1` has always played interleaved; `--workers >1` has always played
+# blocked. On identical boards and dice the seating alone moves `lam095-805`
+# vs `ppo4-585` from +0.08 to +0.43 VP (the harness-path check, addenda 6-8;
+# `runs/eval/harness-seat-geometry.json`), so a verdict that does
+# not record its geometry cannot be compared with one that does.
+GEOMETRIES: dict[str, tuple[str, list[int], list[int]]] = {
+    "blocked": ("aabb", [0, 1], [2, 3]),
+    "interleaved": ("abab", [0, 2], [1, 3]),
+}
+# What every recorded arena verdict played, and the only seating `train.versus`
+# can play. The arena default stays blocked so a default invocation reproduces
+# the record bit for bit.
+ARENA_GEOMETRY = "blocked"
+VERSUS_GEOMETRY = "interleaved"
+
+
+def arena_lineup(a: str, b: str, geometry: str) -> tuple[list[str], list[int], list[int]]:
+    """(entrant specs in lineup order, side-A slots, side-B slots) for a seating.
+
+    Slot lists index `Tournament.points`, which is in entrant order, so the
+    paired split reads the right seats whichever order the lineup was built in.
+    """
+    order, mine, theirs = GEOMETRIES[geometry]
+    return [a if slot == "a" else b for slot in order], list(mine), list(theirs)
 
 
 def entrant_seed(base: int, spec: str, slot: int, other: str) -> int:
@@ -73,6 +104,11 @@ def side(spec: str, device: str, board, players: int, lanes: int, seed: int):
     checkpoint; anything else is handed to the arena's entrant table, which
     raises on a name it does not know.
     """
+    # Imported here rather than at module load: `catan.collect` pulls in torch,
+    # which the arena path and the lineup helpers never need, and the box that
+    # reads the record is not always the box that has it.
+    from catan.collect import frozen, named_opponent
+
     if Path(spec).exists():
         return frozen(spec, device, board, players)
     return named_opponent(spec, seed, lanes)
@@ -133,6 +169,19 @@ def main(argv: list[str] | None = None) -> int:
         "`_default_workers`",
     )
     p.add_argument(
+        "--geometry",
+        choices=sorted(GEOMETRIES),
+        default=None,
+        help="how the four seats hold the two sides on the arena path "
+        f"(workers > 1). Default {ARENA_GEOMETRY!r}, the lineup `[a, a, b, b]` "
+        "every recorded arena verdict played, so a default invocation "
+        "reproduces the record exactly. 'interleaved' is `[a, b, a, b]`, each "
+        "copy flanked by two opponents -- the seating `train.versus` plays and "
+        "the only one it can play, so at workers=1 this may only name "
+        f"{VERSUS_GEOMETRY!r}. Same boards and dice, the seating alone moves a "
+        "pair by ~0.35 VP, and the verdict records which one it was",
+    )
+    p.add_argument(
         "--threads",
         type=int,
         default=0,
@@ -177,11 +226,39 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"--workers {args.workers}", file=sys.stderr)
 
+    # The geometry is a factor of the same kind as `--workers`, and until it was
+    # recorded the worker count chose it silently. It is printed for the same
+    # reason the worker count is: which seating a verdict measured has to be
+    # visible in the run's own output. The versus path cannot seat blocked --
+    # `collect.alternating` is the interleaving -- so asking it to is an error,
+    # not something to note and play anyway.
+    if args.workers > 1:
+        geometry = args.geometry or ARENA_GEOMETRY
+        if args.geometry is None:
+            print(f"--geometry not given; defaulting to {geometry}", file=sys.stderr)
+        else:
+            print(f"--geometry {geometry}", file=sys.stderr)
+    else:
+        if args.geometry not in (None, VERSUS_GEOMETRY):
+            print(
+                f"--geometry {args.geometry} is not available at --workers 1: "
+                "`train.versus` seats the sides through `collect.alternating`, "
+                f"which is always {VERSUS_GEOMETRY}. Use --workers 2 or more for "
+                "the arena path, which can seat either way.",
+                file=sys.stderr,
+            )
+            return 2
+        geometry = VERSUS_GEOMETRY
+        print(
+            f"--geometry {geometry} (the only seating `train.versus` plays)",
+            file=sys.stderr,
+        )
+
     label_a = args.label_a or Path(args.a).stem
     label_b = args.label_b or Path(args.b).stem
 
     if args.workers > 1:
-        result = _via_arena(args, label_a, label_b)
+        result = _via_arena(args, label_a, label_b, geometry)
     else:
         result = _via_versus(args, label_a, label_b)
 
@@ -208,8 +285,8 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def sides(lineup: list, label_a: str, label_b: str) -> list:
-    """Rename a `[a, a, b, b]` lineup so the two sides are distinguishable.
+def sides(lineup: list, label_a: str, label_b: str, mine=(0, 1)) -> list:
+    """Rename a two-sided lineup so the two sides are distinguishable.
 
     Every `network:` spec is named "network" whatever checkpoint it carries, so
     a checkpoint-against-checkpoint duel arrives as four entrants of one name:
@@ -217,16 +294,21 @@ def sides(lineup: list, label_a: str, label_b: str) -> list:
     subtract from. Naming the sides after their labels is exact for any pair of
     entrants rather than only for the ones whose names happen to differ, and
     `spawn` reads `kind` and `weights`, never `name`.
+
+    `mine` is which slots side A holds -- `[0, 1]` blocked, `[0, 2]` interleaved
+    -- and every other slot is side B. Slot 0 is always side A, so `pooled`'s
+    first group is side A under either seating.
     """
     side_a, side_b = label_a, label_b
     if side_a == side_b:
         side_a, side_b = f"{label_a}-a", f"{label_b}-b"
-    return [
-        lineup[0].renamed(f"{side_a}#0"),
-        lineup[1].renamed(f"{side_a}#1"),
-        lineup[2].renamed(f"{side_b}#0"),
-        lineup[3].renamed(f"{side_b}#1"),
-    ]
+    seen = {side_a: 0, side_b: 0}
+    renamed = []
+    for slot, entrant in enumerate(lineup):
+        label = side_a if slot in mine else side_b
+        renamed.append(entrant.renamed(f"{label}#{seen[label]}"))
+        seen[label] += 1
+    return renamed
 
 
 def _verdict_path(args, label_a: str, label_b: str) -> Path:
@@ -248,7 +330,7 @@ def _verdict_path(args, label_a: str, label_b: str) -> Path:
     return Path(args.verdicts) / f"{pair}.json"
 
 
-def _via_arena(args, label_a: str, label_b: str) -> dict:
+def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY) -> dict:
     """Two a side through `arena.compete`, sharded across `--workers`.
 
     Paired VP is recovered from the tournament's own per-game record rather than
@@ -258,8 +340,8 @@ def _via_arena(args, label_a: str, label_b: str) -> dict:
     """
     from catan.arena import compete, lineup_from_names, pooled, wilson
 
-    lineup = sides(lineup_from_names([args.a, args.a, args.b, args.b]), label_a, label_b)
-    mine, theirs = [0, 1], [2, 3]
+    names, mine, theirs = arena_lineup(args.a, args.b, geometry)
+    lineup = sides(lineup_from_names(names), label_a, label_b, mine)
 
     started = time.monotonic()
     tournament = compete(
@@ -285,6 +367,7 @@ def _via_arena(args, label_a: str, label_b: str) -> dict:
         "a": label_a, "b": label_b, "a_path": args.a, "b_path": args.b,
         "games": tournament.games, "duel_seed": args.duel_seed,
         "workers": args.workers, "seconds": seconds, "via": "arena.compete",
+        "geometry": geometry,
         "unfinished": tournament.unfinished,
         "wins": wins, "win_rate": wins / tournament.games if tournament.games else 0.0,
         "wilson_low": low, "wilson_high": high,
@@ -294,6 +377,8 @@ def _via_arena(args, label_a: str, label_b: str) -> dict:
 
 
 def _via_versus(args, label_a: str, label_b: str) -> dict:
+    from catan.train import versus
+
     board = random_base_board(random.Random(args.board_seed))
     a = side(
         args.a, args.device, board, args.players, args.lanes,
@@ -324,6 +409,7 @@ def _via_versus(args, label_a: str, label_b: str) -> dict:
         "workers": args.workers,
         "seconds": time.monotonic() - started,
         "via": "train.versus",
+        "geometry": VERSUS_GEOMETRY,
         **result,
     }
 

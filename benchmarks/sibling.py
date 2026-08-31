@@ -32,6 +32,17 @@ about 12 ms and probing every decision would cost more than the answer is
 worth. Roll positions are skipped, because the spread across dice outcomes is
 chance and not something the head is being asked to rank.
 
+**A chance child is averaged over its draws, and was not before 2026-08-28.**
+The same argument that skips roll positions applies one level down and was
+missed there: `BUY_DEV_CARD`, `PLAY_KNIGHT` and a `Phase.ROBBER` row's
+`MOVE_ROBBER` all resolve hidden information inside `apply`, so building a child
+with `imagine` then `apply` froze **one sampled outcome per child** into the
+row. The spread across siblings was then partly a spread across decks, which is
+chance and not a decision. `--chance-draws N` scores such a child as the mean
+over N independent draws, matching what a tree gets for free by resampling a
+chance edge on every visit. `--chance-draws 1` restores the old path exactly,
+and every number this module produced before that date was taken under it.
+
     python -m benchmarks.sibling --checkpoint runs/ppo-overnight/latest.pt \\
         --games 64 --probe 0.05
 """
@@ -48,10 +59,10 @@ from dataclasses import dataclass, replace
 import numpy as np
 
 from benchmarks.throughput import environment
-from catan.actions import ActionType, apply, legal_actions, within_offer_budget
+from catan.actions import ActionType, legal_actions, within_offer_budget
 from catan.board.board import random_base_board
-from catan.game import imagine, is_over, to_move
-from catan.mcts import Leaf
+from catan.game import is_over, to_move
+from catan.mcts import Leaf, draws_hidden, sampled_children
 from catan.rewards import reward, relative_points
 from catan.selfplay import Collector, Episode
 from catan.victory import victory_points
@@ -61,15 +72,29 @@ from catan.victory import victory_points
 # testable on a machine with no torch. The evaluator is duck-typed anyway.
 
 
+DRAWS = 8
+"""Draws per chance child. See `benchmarks.rank` for the power calculation."""
+
+
 @dataclass(frozen=True)
 class Spread:
-    """One position's children, as the search would see them ranked."""
+    """One position's children, as the search would see them ranked.
+
+    `chance_children` counts the children whose action resolved hidden
+    information, and `chance_spread` is the mean standard deviation of the
+    head's own-seat value *within* such a child, across its draws. That second
+    number is the one the draw count was chosen against: it is the noise a
+    single-draw probe was silently adding to the row, and reporting it lets a
+    run confirm or refute the `DRAWS` the power calculation assumed.
+    """
 
     seat: int
     options: int
     spread: float
     span: float
     best_gap: float
+    chance_children: int = 0
+    chance_spread: float = 0.0
 
 
 class Probing:
@@ -86,12 +111,28 @@ class Probing:
     second bookkeeping path.
     """
 
-    def __init__(self, policy, evaluator, *, max_offers, rate, rng) -> None:
+    def __init__(
+        self,
+        policy,
+        evaluator,
+        *,
+        max_offers,
+        rate,
+        rng,
+        chance_draws: int = DRAWS,
+        chance_seed: int = 0,
+    ) -> None:
         self.policy = policy
         self.evaluator = evaluator
         self.max_offers = max_offers
         self.rate = rate
         self.rng = rng
+        self.chance_draws = chance_draws
+        # Its own seed rather than a split off `rng`, so a row that draws does
+        # not shift the shared stream and therefore cannot move the numbers of
+        # any chance-free row after it.
+        self.chance_seed = chance_seed
+        self.probes = 0
         self.probed = 0
         self.skipped = 0
 
@@ -123,26 +164,55 @@ class Probing:
         # varying across the row is the position. The tree encodes from each
         # child's own mover instead and rotates back, which adds frame changes
         # to the comparison; this is the version most favourable to the head.
-        values, leaves, slots = [], [], []
+        #
+        # A child whose action resolves hidden information is scored as the mean
+        # over `chance_draws` independent draws of that outcome, not as one
+        # frozen draw. Otherwise a `BUY_DEV_CARD`, `PLAY_KNIGHT` or `MOVE_ROBBER`
+        # child carries one sampled card into the row and the spread across
+        # siblings is partly a spread across decks. That is chance, which this
+        # module already says it is not measuring — it is why roll positions are
+        # skipped, and the same argument applies one level down.
+        #
+        # Every child's draws two and up come off a stream in the same state, so
+        # a shock two siblings share cancels in the spread rather than inflating
+        # it — common random numbers on the chance dimension, the same discipline
+        # `benchmarks.rank` applies to its rollouts. Draw one comes off the
+        # shared `rng`, which is what keeps a chance-free row bit-identical.
+        self.probes += 1
+        drawn, leaves, slots = [], [], []
+        hot = [draws_hidden(game, action) for action in options]
         for action in options:
-            child = imagine(game, self.rng)
-            apply(child, action)
-            if is_over(child):
-                # A finished child has a known value on the same scale, which is
-                # what the tree would back up; scoring it with the head instead
-                # would put a guess where an answer is.
-                players = child.state.num_players
-                points = tuple(victory_points(child.state, s) for s in range(players))
-                values.append(relative_points(points)[seat])
-            else:
-                slots.append(len(values))
-                values.append(0.0)
-                leaves.append(Leaf(child, seat, self._options(child)))
+            children = sampled_children(
+                game,
+                action,
+                draws=self.chance_draws,
+                rng=self.rng,
+                extra=random.Random(self.chance_seed + self.probes),
+            )
+            row = []
+            for child in children:
+                if is_over(child):
+                    # A finished child has a known value on the same scale,
+                    # which is what the tree would back up; scoring it with the
+                    # head instead would put a guess where an answer is.
+                    players = child.state.num_players
+                    points = tuple(
+                        victory_points(child.state, s) for s in range(players)
+                    )
+                    row.append(relative_points(points)[seat])
+                else:
+                    slots.append((len(drawn), len(row)))
+                    row.append(0.0)
+                    leaves.append(Leaf(child, seat, self._options(child)))
+            drawn.append(row)
 
-        for slot, (_, value) in zip(slots, self.evaluator.evaluate(leaves)):
-            values[slot] = value[seat]
+        for (child_at, draw_at), (_, value) in zip(
+            slots, self.evaluator.evaluate(leaves)
+        ):
+            drawn[child_at][draw_at] = value[seat]
 
-        row = np.asarray(values, dtype=np.float64)
+        row = np.asarray([float(np.mean(v)) for v in drawn], dtype=np.float64)
+        within = [float(np.std(v)) for v in drawn if len(v) > 1]
         ordered = np.sort(row)[::-1]
         return Spread(
             seat=seat,
@@ -150,6 +220,8 @@ class Probing:
             spread=float(row.std()),
             span=float(ordered[0] - ordered[-1]),
             best_gap=float(ordered[0] - ordered[1]),
+            chance_children=sum(hot),
+            chance_spread=float(np.mean(within)) if within else 0.0,
         )
 
 
@@ -184,6 +256,13 @@ def main(argv: list[str] | None = None) -> int:
         default=0.05,
         help="fraction of decisions to score every child of",
     )
+    parser.add_argument(
+        "--chance-draws",
+        type=int,
+        default=DRAWS,
+        help="draws to average a chance child's score over; 1 restores the "
+             "single-draw path every number before 2026-08-28 was taken under",
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
@@ -211,6 +290,8 @@ def main(argv: list[str] | None = None) -> int:
         max_offers=loaded.max_offers,
         rate=args.probe,
         rng=random.Random(args.seed + 2),
+        chance_draws=args.chance_draws,
+        chance_seed=args.seed + 4,
     )
 
     started = time.perf_counter()
@@ -238,10 +319,18 @@ def main(argv: list[str] | None = None) -> int:
     options = np.asarray([s.options for s in spreads])
     error = float(np.sqrt((errors**2).mean()))
 
+    chance_children = np.asarray([s.chance_children for s in spreads])
+    chance_spread = np.asarray([s.chance_spread for s in spreads])
+    within = chance_spread[chance_children > 0]
+
     payload = {
         "environment": environment(),
         "checkpoint": args.checkpoint,
         "iteration": loaded.iteration,
+        "chance_draws": args.chance_draws,
+        "chance_rows": int((chance_children > 0).sum()),
+        "chance_children": int(chance_children.sum()),
+        "mean_chance_spread": round(float(within.mean()), 4) if within.size else None,
         "games": len(episodes),
         "probes": len(spreads),
         "skipped": probing.skipped,
@@ -273,6 +362,20 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  spread across siblings, mean        {payload['mean_spread']:.4f}")
     print(f"  spread across siblings, median      {payload['median_spread']:.4f}")
     print(f"  best minus second best, mean        {payload['mean_best_gap']:.4f}")
+    if payload["mean_chance_spread"] is not None:
+        print(
+            f"  chance rows {payload['chance_rows']} "
+            f"({payload['chance_rows'] / len(spreads):.1%}), "
+            f"{payload['chance_children']} chance children, averaged over "
+            f"{args.chance_draws} draws"
+        )
+        print(
+            f"  spread within a chance child        "
+            f"{payload['mean_chance_spread']:.4f} "
+            f"(a single draw left {payload['mean_chance_spread']:.4f} of it in "
+            f"the row; {args.chance_draws} draws leave "
+            f"{payload['mean_chance_spread'] / np.sqrt(args.chance_draws):.4f})"
+        )
     print(
         f"  error is {payload['error_over_spread']}x the spread "
         f"and {payload['error_over_best_gap']}x the gap it has to call"

@@ -67,3 +67,62 @@ def test_a_larger_draw_measuring_more_variance_refuses_too():
 
     assert got["noise_trace_sigma"] < 0
     assert got["b_simple"] is None
+
+
+def test_the_paired_probe_refuses_an_odd_cohort():
+    from benchmarks.noise_scale import main
+
+    with pytest.raises(SystemExit, match="even"):
+        main(["--paired", "--games", "3"])
+
+
+def test_pair_correlations_pair_by_index_not_by_arrival_order():
+    from benchmarks.noise_scale import _pair_correlations
+    from catan.selfplay import Episode, Outcome, Transition
+
+    def episode(index: int, points: tuple[int, ...]) -> Episode:
+        # Only the fields the correlations read are meaningful: the outcome,
+        # the index, and the *last* transition's own-value estimate. A zero
+        # estimate makes the residual the reward itself, so rho_v must equal
+        # rho exactly on this fixture.
+        trajectories = tuple(
+            (
+                Transition(
+                    seat=seat,
+                    step=seat,
+                    observation=None,
+                    mask=None,
+                    action=None,
+                    index=0,
+                    log_prob=0.0,
+                    value=(0.0, 0.0, 0.0, 0.0),
+                ),
+            )
+            for seat in range(4)
+        )
+        return Episode(
+            index=index,
+            seed=0,
+            players=4,
+            trajectories=trajectories,
+            outcome=Outcome(
+                winner=None, points=points, turns=1, actions=4, truncated=False
+            ),
+        )
+
+    # Two pairs whose halves ended identically: whatever order they arrive in,
+    # pairing by `index ^ 1` correlates r with an identical r', so every
+    # correlation is exactly 1. Pairing by list position would correlate the
+    # two different pairs' outcomes instead and fall short of it.
+    shuffled = [
+        episode(3, (2, 8, 6, 4)),
+        episode(0, (10, 4, 4, 4)),
+        episode(2, (2, 8, 6, 4)),
+        episode(1, (10, 4, 4, 4)),
+    ]
+    got = _pair_correlations(shuffled, players=4)
+
+    for measure in ("rho", "rho_v"):
+        assert got[measure]["pooled"] == pytest.approx(1.0)
+        assert got[measure]["per_seat"] == pytest.approx([1.0] * 4)
+    assert got["rho"] == got["rho_v"], "a zero estimate leaves the residual as r"

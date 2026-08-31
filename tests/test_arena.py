@@ -339,12 +339,22 @@ def test_antithetic_pairing_splits_an_identical_pair_exactly(monkeypatch):
     decided = paired.games - paired.unfinished
     assert wins[0] + wins[1] == wins[2] + wins[3] == decided // 2
 
-    # The control: the same 48 boards without the pairing. The rotation already
+    # The control: the same boards without the pairing. The rotation already
     # gives every entrant every seat, so the *mean* seat effect is gone -- what
     # is left is the parity-correlated residual, and it does not average out.
-    plain = compete(lineup, 48, seed=20000, antithetic=False)
-    loose = [standing.wins for standing in plain.standings]
-    assert loose[0] + loose[1] != loose[2] + loose[3]
+    # Any one 48-game block can land on an even split by chance (it did, at
+    # seed 20000, the day the piece supply changed which games get played), so
+    # the claim is made over several blocks: the unpaired split is exact in at
+    # most a minority of them, where the paired split is exact in all.
+    uneven = 0
+    for seed in range(20000, 20005):
+        plain = compete(lineup, 48, seed=seed, antithetic=False)
+        loose = [standing.wins for standing in plain.standings]
+        uneven += loose[0] + loose[1] != loose[2] + loose[3]
+        again = compete(lineup, 48, seed=seed)
+        tight = [standing.wins for standing in again.standings]
+        assert tight[0] + tight[1] == tight[2] + tight[3]
+    assert uneven >= 3
 
 
 def test_a_sweep_gets_an_interval_containing_its_own_estimate():

@@ -160,6 +160,9 @@ def test_buildable_nodes_falls_as_the_board_fills():
     place_settlement(state, 0, vertex, connected=False)
     _, open_spots = evaluator.reachable(state, 0, evaluator.snapshot(state).sources[0])
 
+    # Spread the crowding over the three other players: the supply caps any one
+    # of them at five settlements, and the ring two steps out can hold more.
+    filled = 0
     for neighbour in board.topology.vertex_neighbors[vertex]:
         for beyond in board.topology.vertex_neighbors[neighbour]:
             if state.vertex_building[beyond] == 0 and beyond != vertex:
@@ -167,7 +170,8 @@ def test_buildable_nodes_falls_as_the_board_fills():
                     state.vertex_building[n]
                     for n in board.topology.vertex_neighbors[beyond]
                 ):
-                    place_settlement(state, 1, beyond, connected=False)
+                    place_settlement(state, 1 + filled % 3, beyond, connected=False)
+                    filled += 1
     _, crowded = evaluator.reachable(state, 0, evaluator.snapshot(state).sources[0])
     assert crowded < open_spots
 
@@ -267,9 +271,14 @@ def test_hidden_cards_count_only_for_the_seat_that_holds_them():
 def test_a_winning_position_outscores_every_other_seat():
     board = mini_board()
     state = a_state(board)
-    for vertex in independent_vertices(board, WINNING_POINTS // 2):
+    # Four cities and two settlements: ten points inside the piece supply.
+    # Upgrade as we go: the supply never lets a player hold six settlements.
+    spots = independent_vertices(board, 6)
+    for vertex in spots[:4]:
         place_settlement(state, 0, vertex, connected=False)
         upgrade_to_city(state, 0, vertex)
+    for vertex in spots[4:]:
+        place_settlement(state, 0, vertex, connected=False)
     assert victory_points(state, 0) >= WINNING_POINTS
 
     scores = Evaluator(board).evaluate(state)

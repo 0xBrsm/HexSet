@@ -78,3 +78,44 @@ def test_standings_count_wins_and_vp_by_cast():
 def test_every_override_key_names_a_real_config_field():
     fields = set(PPOConfig().__dataclass_fields__)
     assert all(name in fields for name, _ in OVERRIDES.values())
+
+
+def test_pair_boards_defaults_off_so_recorded_heats_replay():
+    from catan.league import build_parser
+
+    args = build_parser().parse_args(["--learner", "", "--checkpoint-dir", "x"])
+    assert args.pair_boards is False
+
+
+def test_the_value_head_override_defaults_to_the_base_checkpoint_s_own_shape():
+    """Empty means "keep the base's shape", so every heat on record replays.
+
+    A heat's model shape has always come from the base checkpoint's stored
+    args. `--value-head` is the first flag that can override it, and its
+    default has to be the absence of an override rather than any particular
+    shape — `"linear"` as a default would silently rebuild an `mlp` base.
+    """
+    from catan.league import build_parser
+
+    args = build_parser().parse_args(["--learner", "", "--checkpoint-dir", "x"])
+
+    assert args.value_head == ""
+    assert args.quantiles == 32
+
+
+def test_the_quantile_head_is_selectable_on_a_heat():
+    from catan.league import build_parser
+
+    args = build_parser().parse_args(
+        ["--learner", "", "--checkpoint-dir", "x", "--value-head", "quantile"]
+    )
+
+    assert args.value_head == "quantile"
+
+
+def test_both_head_knobs_are_frozen_into_a_league_manifest():
+    """`catan.run.init` freezes whatever the parser defines, so a heat that
+    ran the quantile head cannot be reconstructed as one that did not."""
+    from catan.run import parameters
+
+    assert {"value_head", "quantiles"} <= parameters("league")

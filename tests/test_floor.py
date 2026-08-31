@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import random
 
 import numpy as np
@@ -150,3 +151,65 @@ def _options(game):
     from catan.actions import legal_actions
 
     return list(legal_actions(game))
+
+
+def test_dump_returns_leaves_the_default_output_bit_identical(tmp_path, capsys):
+    """`--dump-returns` is a side channel, not a mode switch.
+
+    The flag defaults off, and every recorded floor run was made with it off,
+    so the only thing this change may do to an unflagged run is add a file --
+    stdout, and everything that fed it, must come out exactly as before. This
+    runs the real CLI twice, once with the flag and once without, on the same
+    seed, and diffs stdout byte for byte rather than trusting that reading the
+    diff by eye would have caught a shift.
+    """
+    pytest.importorskip("torch", reason="PyTorch runs on the training box only")
+    from catan.netbot import load
+
+    from benchmarks.floor import main
+    from test_netbot import a_checkpoint
+
+    checkpoint = tmp_path / "latest.pt"
+    a_checkpoint(checkpoint, max_offers=1, seed=0)
+    load.cache_clear()
+
+    argv = [
+        "--checkpoint",
+        str(checkpoint),
+        "--seed-games",
+        "6",
+        "--positions",
+        "2",
+        "--rollouts",
+        "3",
+        "--action-cap",
+        "200",
+        "--seed",
+        "0",
+        "--json",
+    ]
+
+    assert main(list(argv)) == 0
+    without_flag = _drop_timings(capsys.readouterr().out)
+
+    load.cache_clear()
+    dump_path = tmp_path / "dump.json"
+    assert main(argv + ["--dump-returns", str(dump_path)]) == 0
+    with_flag = _drop_timings(capsys.readouterr().out)
+
+    assert with_flag == without_flag
+    dumped = json.loads(dump_path.read_text())
+    assert len(dumped["positions"]) == without_flag["positions"]
+    for position in dumped["positions"]:
+        assert set(position) == {"progress", "seat", "prediction", "returns"}
+        assert len(position["returns"]) == without_flag["rollouts_each"]
+    load.cache_clear()
+
+
+def _drop_timings(payload_json: str) -> dict:
+    """Strip the two wall-clock fields, which vary run to run by construction
+    and are not part of what "bit-identical" means here."""
+    payload = json.loads(payload_json)
+    payload.pop("seconds", None)
+    payload.pop("seed_seconds", None)
+    return payload

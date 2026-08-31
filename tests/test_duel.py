@@ -1,14 +1,31 @@
-"""The duel's side split, which decides every verdict it reports."""
+"""The duel's side split and seat geometry, which decide every verdict it reports.
+
+Torch-free: `benchmarks.duel` imports its torch-bound modules where they are
+used, so the lineup, the seating and the arena path all test on a box without
+it. The arena is driven through a fake `compete` that hands back a fixed points
+table, so the paired split can be checked slot by slot.
+"""
 
 from __future__ import annotations
 
+import json
+import sys
+import types
+from types import SimpleNamespace
+
 import pytest
 
-pytest.importorskip("torch", reason="PyTorch runs on the training box only")
-
-from benchmarks.duel import _default_workers, sides  # noqa: E402
-from catan.arena import base_name, lineup_from_names, pooled  # noqa: E402
-from catan.arena import Standing  # noqa: E402
+from benchmarks import duel
+from benchmarks.duel import (
+    ARENA_GEOMETRY,
+    GEOMETRIES,
+    VERSUS_GEOMETRY,
+    _default_workers,
+    _via_arena,
+    arena_lineup,
+    sides,
+)
+from catan.arena import Standing, Tournament, base_name, lineup_from_names, pooled
 
 
 def test_two_checkpoints_arrive_sharing_one_name():
@@ -136,3 +153,178 @@ def test_default_workers_is_26_for_a_search_wrapped_checkpoint(tmp_path):
 
 def test_default_workers_is_26_when_neither_side_is_a_bare_network():
     assert _default_workers("search2-offers3", "random") == 26
+
+
+# --------------------------------------------------------------------------
+# seat geometry
+# --------------------------------------------------------------------------
+A, B = "network:/runs/a.pt", "network:/runs/b.pt"
+
+
+def test_the_default_arena_lineup_is_the_recorded_one():
+    """`[a, a, b, b]` with sides on `[0, 1]` / `[2, 3]` is what every recorded
+    arena verdict played; the default must keep reproducing it exactly."""
+    assert ARENA_GEOMETRY == "blocked"
+    assert arena_lineup(A, B, ARENA_GEOMETRY) == ([A, A, B, B], [0, 1], [2, 3])
+
+
+def test_the_interleaved_lineup_matches_the_seat_geometry_probe():
+    """The lineup and slots `tmp/seat_geometry.py` used for the archived rows."""
+    assert arena_lineup(A, B, "interleaved") == ([A, B, A, B], [0, 2], [1, 3])
+
+
+def test_each_geometry_partitions_the_four_slots_between_the_sides():
+    for order, mine, theirs in GEOMETRIES.values():
+        assert len(order) == 4
+        assert sorted(mine + theirs) == [0, 1, 2, 3]
+        assert [order[i] for i in mine] == ["a", "a"]
+        assert [order[i] for i in theirs] == ["b", "b"]
+
+
+def test_sides_labels_an_interleaved_lineup_by_slot_not_by_position():
+    names, mine, _ = arena_lineup(A, B, "interleaved")
+    lineup = sides(lineup_from_names(names), "lam095-805", "ppo4-585", mine)
+
+    assert [base_name(entrant.name) for entrant in lineup] == [
+        "lam095-805",
+        "ppo4-585",
+        "lam095-805",
+        "ppo4-585",
+    ]
+    assert [entrant.weights for entrant in lineup] == [
+        "/runs/a.pt",
+        "/runs/b.pt",
+        "/runs/a.pt",
+        "/runs/b.pt",
+    ]
+    # Repeat numbers still run 0, 1 within a side, and side A pools first.
+    assert [entrant.name for entrant in lineup] == [
+        "lam095-805#0",
+        "ppo4-585#0",
+        "lam095-805#1",
+        "ppo4-585#1",
+    ]
+    grouped = pooled([Standing(entrant.name, 1, 4) for entrant in lineup], 4)
+    assert [g.name for g in grouped] == ["lam095-805", "ppo4-585"]
+
+
+def _fake_compete(seen: dict, points):
+    """Stand in for `arena.compete`: records the lineup it was handed and
+    returns a tournament with one fixed points row per game, in entrant order."""
+
+    def compete(lineup, games, *, seed, workers):
+        seen["lineup"] = [entrant.weights for entrant in lineup]
+        seen["names"] = [entrant.name for entrant in lineup]
+        return Tournament(
+            standings=tuple(Standing(e.name, 1, games) for e in lineup),
+            games=games,
+            unfinished=0,
+            mean_turns=80.0,
+            seconds=0.0,
+            points=tuple(points for _ in range(games)),
+        )
+
+    return compete
+
+
+def _arena_args(**overrides):
+    base = dict(a=A, b=B, games=4, duel_seed=20_000, workers=2)
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
+# One points row in *entrant* order. Blocked reads slots [0,1] against [2,3]:
+# (10+2)/2 - (3+4)/2 = +2.5. Interleaved reads [0,2] against [1,3]:
+# (10+3)/2 - (2+4)/2 = +3.5. Same row, different verdict -- which is the point.
+POINTS = (10, 2, 3, 4)
+
+
+def test_arena_verdict_defaults_to_blocked_and_records_it(monkeypatch):
+    seen: dict = {}
+    monkeypatch.setattr("catan.arena.compete", _fake_compete(seen, POINTS))
+
+    verdict = _via_arena(_arena_args(), "a", "b")
+
+    assert seen["lineup"] == ["/runs/a.pt", "/runs/a.pt", "/runs/b.pt", "/runs/b.pt"]
+    assert verdict["geometry"] == "blocked"
+    assert verdict["via"] == "arena.compete"
+    assert verdict["paired_vp"] == pytest.approx(2.5)
+
+
+def test_arena_verdict_can_play_interleaved_and_says_so(monkeypatch):
+    seen: dict = {}
+    monkeypatch.setattr("catan.arena.compete", _fake_compete(seen, POINTS))
+
+    verdict = _via_arena(_arena_args(), "a", "b", "interleaved")
+
+    assert seen["lineup"] == ["/runs/a.pt", "/runs/b.pt", "/runs/a.pt", "/runs/b.pt"]
+    assert seen["names"] == ["a#0", "b#0", "a#1", "b#1"]
+    assert verdict["geometry"] == "interleaved"
+    assert verdict["paired_vp"] == pytest.approx(3.5)
+
+
+def test_main_prints_the_geometry_beside_the_worker_count(monkeypatch, capsys):
+    monkeypatch.setattr("catan.arena.compete", _fake_compete({}, POINTS))
+
+    assert duel.main([A, B, "--workers", "2", "--games", "4", "--no-json"]) == 0
+    out, err = capsys.readouterr()
+    assert "--workers 2" in err
+    assert "--geometry not given; defaulting to blocked" in err
+    # stdout carries the verdict alone; everything else goes to stderr.
+    assert json.loads(out)["geometry"] == "blocked"
+
+    assert duel.main(
+        [A, B, "--workers", "2", "--games", "4", "--no-json", "--geometry", "interleaved"]
+    ) == 0
+    _, err = capsys.readouterr()
+    assert "--geometry interleaved" in err
+
+
+def test_the_versus_path_refuses_a_blocked_geometry(capsys):
+    """`collect.alternating` is the interleaving; asking for anything else at
+    workers=1 must fail loudly rather than play interleaved under a wrong label."""
+    code = duel.main([A, B, "--workers", "1", "--geometry", "blocked", "--no-json"])
+    assert code == 2
+    _, err = capsys.readouterr()
+    assert "--geometry blocked is not available at --workers 1" in err
+    assert "--workers 2" in err
+
+
+def test_the_versus_verdict_records_interleaved(monkeypatch):
+    """`_via_versus` through fakes for its torch-bound imports."""
+    seen: dict = {}
+
+    def versus(a, b, **kwargs):
+        seen["sides"] = (a, b)
+        return {"paired_vp": 0.0, "win_rate": 0.5, "wilson_low": 0.4, "wilson_high": 0.6}
+
+    monkeypatch.setitem(sys.modules, "catan.train", types.SimpleNamespace(versus=versus))
+    monkeypatch.setitem(
+        sys.modules,
+        "catan.collect",
+        types.SimpleNamespace(
+            frozen=lambda *a: "frozen", named_opponent=lambda spec, seed, lanes: spec
+        ),
+    )
+    args = SimpleNamespace(
+        a="search2", b="greedy", board_seed=0, device="cpu", players=4, lanes=8,
+        duel_seed=20_000, games=4, max_offers=3, workers=1,
+    )
+
+    verdict = duel._via_versus(args, "search2", "greedy")
+
+    assert seen["sides"] == ("search2", "greedy")
+    assert verdict["geometry"] == VERSUS_GEOMETRY == "interleaved"
+    assert verdict["via"] == "train.versus"
+
+
+def test_the_versus_path_accepts_interleaved_by_name(capsys, monkeypatch):
+    """Naming the seating it plays anyway is allowed and is printed as such."""
+    monkeypatch.setattr(duel, "_via_versus", lambda args, la, lb: {
+        "a": la, "b": lb, "games": 0, "win_rate": 0.5, "wilson_low": 0.0,
+        "wilson_high": 1.0, "paired_vp": 0.0, "geometry": "interleaved",
+    })
+    code = duel.main([A, B, "--workers", "1", "--geometry", "interleaved", "--no-json"])
+    assert code == 0
+    _, err = capsys.readouterr()
+    assert "--geometry interleaved (the only seating `train.versus` plays)" in err

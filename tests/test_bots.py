@@ -8,6 +8,7 @@ from catan.actions import Action, ActionType, apply, legal_actions
 from catan.board.board import pips, random_base_board
 from catan.board.terrain import Resource
 from catan.bots import RandomBot, SearchBot, greedy, own, paranoid, relative
+from catan.cards import DevCard
 from catan.evaluate import Evaluator
 from catan.game import (
     MAX_OFFERS_PER_TURN,
@@ -66,16 +67,21 @@ def nine_points_and_a_city_to_come():
     game.phase = Phase.MAIN
     game.current_player = 0
 
-    spots = independent_vertices(board, 5)
-    for vertex in spots[:4]:
+    # Three cities, one settlement and two victory-point cards: nine points,
+    # and the one winning build is a *fourth* city on the one settlement -- the
+    # supply allows four, so the build the bot must find is a legal one, and
+    # there is exactly one of it to find.
+    spots = independent_vertices(board, 4)
+    for vertex in spots[:3]:
         place_settlement(game.state, 0, vertex, connected=False)
         upgrade_to_city(game.state, 0, vertex)
-    place_settlement(game.state, 0, spots[4], connected=False)
+    place_settlement(game.state, 0, spots[3], connected=False)
+    game.state.dev_cards[0][DevCard.VICTORY_POINT] += 2
     give(game.state, 0, Resource.WHEAT, 2)
     give(game.state, 0, Resource.ORE, 3)
 
     assert victory_points(game.state, 0) == 9
-    return game, spots[4]
+    return game, spots[3]
 
 
 def test_roll_odds_are_the_dice():
@@ -223,11 +229,12 @@ def a_trade_that_wins_the_game_for_the_proposer():
     game.phase = Phase.MAIN
     game.current_player = 0
 
-    spots = independent_vertices(board, 5)
-    for vertex in spots[:4]:
+    spots = independent_vertices(board, 4)
+    for vertex in spots[:3]:
         place_settlement(game.state, 0, vertex, connected=False)
         upgrade_to_city(game.state, 0, vertex)
-    place_settlement(game.state, 0, spots[4], connected=False)
+    place_settlement(game.state, 0, spots[3], connected=False)
+    game.state.dev_cards[0][DevCard.VICTORY_POINT] += 2
     assert victory_points(game.state, 0) == 9
 
     clear_hand(game.state, 0)

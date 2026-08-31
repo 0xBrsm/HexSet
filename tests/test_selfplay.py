@@ -581,3 +581,52 @@ def test_owned_treats_an_empty_cast_as_learner_zero():
 def test_a_learner_id_with_no_seated_policy_is_an_error():
     with pytest.raises(ValueError):
         Collector(RandomPolicy(random.Random(4)), lanes=2, seed=4, learners=(0, 1))
+
+
+def test_a_board_pair_shares_its_geometry_and_not_its_dice():
+    from catan.board.board import random_base_board
+
+    collector = Collector(
+        RandomPolicy(random.Random(0)), lanes=4, seed=9, pair_boards=True, deal=4
+    )
+    boards = [game.state.board for game in collector.in_flight()]
+
+    assert boards[0] == boards[1]
+    assert boards[2] == boards[3]
+    assert boards[0] != boards[2], "distinct pairs still draw distinct boards"
+    # The even half's board is the one unpaired dealing derives for the same
+    # index — pairing extends the (seed, index) law rather than amending it.
+    assert boards[0] == random_base_board(random.Random("9:0:board"))
+    assert boards[2] == random_base_board(random.Random("9:2:board"))
+
+    episodes = sorted(collector.drain(), key=lambda e: e.index)
+    even, odd = episodes[0], episodes[1]
+    # Same geometry, its own `{seed}:{index}:game` rng each: the halves must
+    # play different games, or the mate's reward is no baseline at all.
+    assert [t.action for t in even.stream()] != [t.action for t in odd.stream()]
+
+
+def test_pairing_off_deals_the_board_keyed_by_the_index_itself():
+    from catan.board.board import random_base_board
+
+    # The off-path anchor: every recorded trajectory replays only if the
+    # default keeps dealing exactly the boards it always dealt.
+    collector = Collector(RandomPolicy(random.Random(0)), lanes=3, seed=9)
+    boards = [game.state.board for game in collector.in_flight()]
+
+    for index, board in enumerate(boards):
+        assert board == random_base_board(random.Random(f"9:{index}:board"))
+    assert boards[0] != boards[1], "off the pairing path, adjacent games do not pair"
+
+
+def test_pair_boards_with_a_fixed_board_is_refused():
+    from catan.board.board import random_base_board
+
+    with pytest.raises(ValueError):
+        Collector(
+            RandomPolicy(random.Random(0)),
+            lanes=1,
+            seed=0,
+            board=random_base_board(random.Random(1)),
+            pair_boards=True,
+        )

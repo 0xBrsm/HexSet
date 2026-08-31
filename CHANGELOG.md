@@ -7,6 +7,410 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-31
+
+### Changed
+
+- **An offer is put to the table in a random order** when the proposer gives
+  no `ask`, drawn from the game's own RNG, instead of clockwise from the
+  proposer. An offer stops at the first taker, so whoever is asked first has
+  first refusal; clockwise handed that to the next seat in turn order, which
+  in a 2v2 duel is a copy of yourself half the time when the copies sit
+  together and never when they alternate — the entire "seat geometry" effect
+  (+0.08 vs +0.43 VP for the same pair) was this one line. Random order hands
+  the advantage to nobody in either seating. Still not the rulebook, where the
+  proposer chooses among the acceptors; that design is written down in the
+  trading design note and deferred. `trading.responders`
+  keeps its clockwise order as the eligibility list. Every seeded game's RNG
+  sequence differs from before, so no duel reproduces bit-for-bit across this
+  change.
+
+- **The piece supply is enforced: 15 roads, 5 settlements, 4 cities a
+  player.** `state.can_place_settlement`, `can_upgrade_to_city` and
+  `can_place_road` refuse a piece that is not in the box, so bought pieces,
+  the road-building card's free roads and initial placement all read one
+  rule and `legal_actions` stops offering what cannot be built. This engine
+  had no supply at all until now — every recorded run, duel and ladder was
+  played with unlimited pieces — while the deployment's engine (hexset-ui,
+  the rules reference) and catanatron both capped. Ported verbatim from
+  hexset-ui `state.py`. Measured before the fix, the cap would have bound in
+  3.1% of the frontier network's player-games (a sixth settlement; never a
+  fifth city or sixteenth road) and 10.4% of `greedy`'s (roads to 26). Every
+  internal number recorded before this entry is an uncapped number; the
+  bridge's were always capped.
+
+### Added
+
+- `catan.widen`: a **function-preserving widening** of a trained checkpoint
+  (Net2WiderNet). Every trunk unit at width `d` is copied to fill width `D`,
+  copies keep their source's incoming weights and every consumer divides its
+  weight on a copy by the copy count, so the wide net emits the narrow net's
+  logits and values to float precision — asserted on real observations, both
+  forward paths, before anything is written (max relative |Δ| 3e-7 on
+  `lam095-805`, 64 → 128). `--noise σ` adds σ × row-RMS Gaussian noise to the
+  copies' incoming weights, because identical copies get identical gradients
+  forever; the mean policy KL it costs is reported. The attention value head's
+  query is rescaled by √(D/d) over the copy count so its softmax is unchanged.
+  The output checkpoint keeps the parent's `iteration`, `games_started` and RNG
+  state, carries `args` with the new width (what every loader rebuilds the
+  shape from), a fresh Adam state, and a `widen` block naming the source by
+  sha256. `catan.train --resume` continues from it unchanged; no new flag.
+
+- `--mix` accepts a **table entry**, `table(a|b|c)=f`: in a share `f` of
+  games the learner takes one seat, drawn per index, and every other seat is an
+  independent draw from the pool `a|b|c` — with replacement, so three copies
+  of one bot and a fully heterogeneous table are both dealt. This is the
+  seating the deployment, the external bridge and every real game put the
+  network in, and no run had ever collected in it: a plain entry gives its
+  opponent 2 of 4 seats on alternating parity, so the learner always had a
+  twin at the table. `collect.mix_caster` handles both entry kinds and is
+  `mixed_caster` to the cast when no table entry is present (pinned by test
+  over 1000 indices); `collect.mix_names` is the one place mix names become
+  caster ids, shared by `mix_opponents`, `check_mix` and the caster. No new
+  flag, so every frozen config on disk still loads.
+
+- `benchmarks.duel` records the seat geometry of every verdict. A 2v2 can seat
+  each copy beside its twin (`[a, a, b, b]`, **blocked**) or between two
+  opponents (`[a, b, a, b]`, **interleaved**), and until now the worker count
+  chose silently: `--workers 1` plays through `collect.alternating`, which is
+  interleaved, and `--workers >1` hardcoded the blocked lineup. On identical
+  boards and dice the seating alone moves `lam095-805` vs `ppo4-585` from
+  +0.08 to +0.43 VP, replicated at two seeds. Every verdict now carries a
+  `geometry` field, and the resolved geometry is printed beside the resolved
+  worker count.
+- `--geometry {blocked,interleaved}` on the arena path. The default is
+  `blocked`, so a default invocation reproduces every recorded arena verdict
+  bit for bit; `interleaved` seats `[a, b, a, b]` with side A on slots
+  `[0, 2]`, the lineup the seat-geometry probe used. `sides()` labels the two
+  sides by slot rather than by position, so either lineup pools correctly. The
+  versus path can only seat interleaved and refuses `--geometry blocked`
+  rather than playing one seating under the other's name.
+
+### Changed
+
+- `benchmarks.duel` imports `catan.collect` and `catan.train` where they are
+  used, so the module -- and its lineup and arena-path tests -- load on a box
+  without torch.
+
+## [0.12.0] - 2026-08-28
+
+### Added
+
+- `benchmarks.aivat`: AIVAT's chance-correction term (Burch, Schmid, Moravčík,
+  Morrill & Bowling, AAAI 2018), measured on duels this project has already
+  recorded. Subtracts `V(observed outcome) - E_p[V(outcome)]` at every chance
+  event, which has conditional expectation zero given the history before the
+  draw, so the estimator is unbiased for **any** value function -- the argument
+  is a martingale difference on the chance filtration and never mentions the
+  player count, the payoff's zero-sumness, or `V`'s accuracy.
+- All four chance transitions are enumerated exactly: 2d6 from
+  `game.ROLL_ODDS`, the dev-card draw as the remaining deck's multiset, and the
+  robber steal as the victim's hand normalised. The dice and the steal are drawn
+  at the event, so their law is exact under the full history; the deck is
+  shuffled once at `new_game`, so the estimator must forget the unrevealed order
+  -- which is sound only because neither `catan.encoding` nor any bot can read
+  it, and `game.imagine(..., randomize_deck=True)` exists to keep that true.
+- `instrumented` is a twin of `arena._play_one` that enumerates outcomes on
+  `imagine` copies fed a separate generator, so an instrumented replay of a
+  recorded cell is bit-identical to it. `--check` asserts that against the
+  recorded verdict, and it holds on four 800-game cells to the digit.
+- Reports the reduction AIVAT's unit coefficient actually delivers *and* the
+  ceiling over every coefficient, `1 - sqrt(1 - rho^2)`. The second is the
+  number that settles the question, because no tuning beats it. Measured here:
+  the unit coefficient **raises** the paired-VP SD by 11-17% and the ceiling is
+  2.2-5.7%, against the paper's 68% for full AIVAT in HUNL (and 33.8% for its
+  chance-only term on Leduc).
+
+## [0.11.0] - 2026-08-28
+
+### Added
+
+- `benchmarks.human_agreement`: our policy scored against *recorded* decisions,
+  one decision at a time, rather than against an opponent one game at a time.
+  Takes `catan.record.Record`s from any source and reports **top-1 agreement**
+  and **log-loss** at every decision point, each against **its matched null** --
+  uniform over the legal option set *at that position*, so the baseline is
+  `mean(1/n)` and `mean(log n)` and never a global constant derived from the
+  mean option count. The distribution scored is the one a search acts on:
+  `netbot.LeafEvaluator.evaluate` on a `mcts.Leaf`, which is what keeps the
+  trade slot's mass split across the legal offers by the pair distribution
+  instead of being credited whole to one arbitrary offer.
+- Decisions with a single legal action are excluded -- agreement there is 1.0 by
+  construction -- and the excluded count is reported, along with actions the
+  enumerated option set does not contain. `actions._offer_actions` is a sample
+  and not the whole legal set, so a recorded multi-for-one offer, or one the
+  offer budget forbids, is counted per `ActionType` rather than silently scored.
+- Everything is broken down per `ActionType`, per `Phase` and by game progress,
+  because `PROPOSE_TRADE`-family rows dominate an unstratified mean. Each
+  breakdown partitions the decisions and pools back to the aggregate exactly;
+  `summarise` rounds nothing so that identity is exact.
+- Intervals are clustered on the game, not taken over positions. Consecutive
+  decisions in one game differ by a single build, which is the same reason
+  `dataset.split_by_game` exists; the position-level Wilson interval is still
+  reported, labelled as the understatement it is.
+
+## [0.10.0] - 2026-08-28
+
+### Added
+
+- `--mix` accepts **any arena entrant spec**, not the two hardcoded names. A
+  training lane opponent can now be `search2-offers3`, `mcts:<ckpt>@64`,
+  `network:<ckpt>`, or any preset, resolved through `collect.named_opponent` and
+  therefore through `catan.arena.spawn` -- so a run trains against *literally*
+  the entrant the arena scores it on. `collect.mix_opponents` is the one place
+  that turns names into lane opponents, shared by the sharded and in-process
+  collectors; `collect.check_mix` is the pre-flight, and it refuses a mistyped
+  entrant or a missing checkpoint before the manifest is frozen rather than as a
+  traceback out of a worker subprocess.
+- `collect.RESERVED_MIX` names what may not be routed. `greedy` and `parent`
+  keep resolving to exactly the bots they resolved to before: `--mix greedy`
+  takes the run's own `--max-offers`, so what 34 recorded runs played is
+  `greedy-offers3`, and the arena's `greedy` preset -- `max_offers=None`, the
+  engine's whole eight-offer budget -- is a different bot at a different
+  strength. `test_collect` pins the equivalence twice, once field-for-field
+  including the tie-break rng state, and once by playing two cohorts and
+  requiring identical action streams.
+- `benchmarks.mix_cost`: what a mix costs a PPO iteration, per decision and per
+  shard, with a stopwatch on the learner and on every opponent. Interpolates
+  rather than models -- `mixed_caster` draws per game and cost is additive over
+  games, so `S(f) = (1-f) S(0) + f S(1)` is exact and only the endpoints need
+  measuring.
+
+### Fixed
+
+- The in-process collector's `--mix` construction fell through to the parent
+  checkpoint for any name that was not `greedy`, which only the two-name
+  validation kept unreachable. Both collectors now build their opponents through
+  the same function.
+
+## [0.9.2] - 2026-08-28
+
+### Fixed
+
+- **The sibling-ranking probes no longer freeze one chance outcome per child.**
+  `benchmarks.rank` and `benchmarks.sibling` both built each sibling with
+  `imagine` then `apply`, so a `BUY_DEV_CARD`, a `PLAY_KNIGHT` or any
+  `Phase.ROBBER` row's `MOVE_ROBBER` embedded **one sampled outcome per child**
+  and the head-versus-truth comparison across siblings was partly a comparison
+  of decks rather than of decisions. This is `0.9.1`'s own listed exception and
+  the second half of the afterstate audit; the tree half was `0.9.1`.
+
+  **A chance child is now scored as the mean over `--chance-draws` independent
+  draws, default 8.** Averaging is chosen over borrowing the tree's keying
+  because averaging is what the search *experiences*: after `0.9.1` a chance
+  edge resamples on every visit, so its `Q` converges on the mean over outcomes
+  and PUCT orders actions rather than realised children. That is the quantity
+  this metric exists to predict. The tree's keying is its *implementation* of
+  the same average and does not transfer — a tree may reuse a repeated
+  outcome's held child because the deck order beneath the top card is
+  unobservable to it, while a probe rolls its children out for hundreds of plies
+  where that order decides real draws.
+
+  **Both columns are averaged, and the rollout budget is partitioned rather than
+  multiplied.** Under one draw the head and the truth at a chance child were at
+  least consistent — both conditioned on the same realised outcome, a shock they
+  shared, which quietly inflated their agreement there. Averaging only the head
+  would have measured a mismatch instead of an ordering. `--rollouts` is
+  therefore split across a child's draws by `share`, and `lane_plan` walks the
+  same consecutive stream offsets whatever the draw count, so total games rolled
+  out is unchanged and draw `d` lane `k` still shares its deck and its sampling
+  stream with draw `d` lane `k` of every sibling. Cost is 1.35x on the head
+  column, which is under 1% of a probe's wall clock, and nothing on the rollout
+  column.
+
+  **Incidence, measured on this engine rather than assumed:** 7-9% of probeable
+  rows hold at least one chance child and 3.5-5.0% of children are chance
+  children, over 12 games of both `RandomPolicy` and `greedy` self-play. Every
+  `Phase.ROBBER` row is affected.
+
+  **Off-path behaviour is unchanged, proven rather than asserted.** Draw one of
+  every child comes off the shared stream and a deterministic action takes only
+  that draw, so a row resolving no hidden information is bit-identical and the
+  shared stream ends in the same state — a chance row cannot move a chance-free
+  row after it. Anchored over 1,269 chance-free rows from two games of `greedy`
+  self-play, exact float equality on all three statistics plus an exact
+  post-sweep rng draw, with all 187 chance rows in the same sweep moving.
+
+  **Every number either probe produced before 2026-08-28 was taken under the
+  single-draw path.** `--chance-draws 1` restores it exactly.
+
+### Added
+
+- `catan.mcts.draws_hidden` and `catan.mcts.sampled_children`, public because
+  the probes need the tree's chance semantics without building a tree.
+  `Search._draws_hidden` now delegates to the first, so the predicate deciding
+  which edges are chance edges and the predicate deciding which children get
+  averaged cannot drift apart — pinned by a test over every action of a robber
+  position.
+- `benchmarks.rank.head_row` and `benchmarks.rank.Row`, the row construction
+  lifted out of `main`. It was inline in a two-hundred-line function, which is
+  where the defect survived being read: nothing could reach the object the whole
+  metric is computed from. Now torch-free testable.
+- `benchmarks.rank.share` and `benchmarks.rank.lane_plan`, the rollout-budget
+  partition and its stream offsets.
+- `benchmarks.rank.chance`, a payload block reporting how many rows and children
+  drew, the measured spread of the head's read *within* a chance child, and the
+  residual `spread / sqrt(draws)` that averaging leaves. Reported so the draw
+  count can be checked against the run rather than against an assumption; it
+  reads `None` rather than `0.0` at one draw, since a single draw measures no
+  spread and zero would read as "no contamination".
+- `benchmarks.sibling.Spread.chance_children` and `.chance_spread`, the same two
+  quantities per probed row.
+
+## [0.9.1] - 2026-08-28
+
+### Fixed
+
+- **`catan.mcts` no longer freezes the three chance edges it does not roll.**
+  `MOVE_ROBBER`, `PLAY_KNIGHT` and `BUY_DEV_CARD` children were created once and
+  cached for the life of the tree, so each such edge's `Q` was one frozen steal
+  or one frozen card draw rather than an expectation over them, and the first
+  visit decided the edge for every later one. They now use the `_Chance` slot
+  that `ROLL` already used, keyed by the outcome: `_drawn` reads the card back
+  off the child that produced it — `apply` returns nothing — and a repeat of an
+  outcome the slot already holds reuses that child, so repeated visits
+  accumulate in one subtree and the edge's `Q` becomes an average. Found by the
+  afterstate audit, which called it the only unambiguous chance-handling
+  defect in the tree.
+
+  Discarding the duplicate child is exact rather than approximate: a steal's
+  child is `imagine`d without reshuffling, so two steals of one resource give
+  identical positions, and two purchases of one card differ only in the deck
+  order beneath the top card, which the encoder cannot see and a later
+  `BUY_DEV_CARD` reshuffles before it draws.
+
+  **Off-path behaviour is unchanged, and the search stays a pure function of
+  its seed.** Every draw comes from the search's own `rng` in descent order. An
+  edge that resolves nothing — a robber or knight naming no victim — keeps the
+  plain cached child rather than a slot, so it is bit-identical as well as
+  cheaper. A full-stack A/B over 408 searches from real positions off
+  `lam095/latest.pt` reproduced all 182 chance-free searches byte-for-byte,
+  visit counts *and* the position of the rng stream afterwards; the 226 that
+  touched a chance edge moved on 86% of them. Both halves of that are pinned by
+  tests: exact visit counts and an exact post-run rng draw, anchored to
+  `33c6032`.
+
+### Added
+
+- `catan.actions.victim_of`, which was `_victim`. The rule it holds — a slot at
+  or past `num_players` means nobody — decides whether a robber or knight edge
+  draws a hidden card at all, so `catan.mcts` needs it and a second copy would
+  drift.
+- `catan.mcts.HIDDEN_DRAW`, the three action types whose `apply` resolves a
+  hidden card.
+
+### Changed
+
+- `test_packing_reports_the_policy_loss_over_contested_rows_only` now thins the
+  batch to three contested rows before comparing. It asserts that packing raises
+  the reported policy loss because unpacked minibatches holding nothing
+  contested report zero — but `losses` divides by the weight, so any minibatch
+  with a contested row in it already reports the mean over those rows, and at
+  the fixture's natural 33% density all seven of them did. The assertion was
+  therefore comparing two numbers that agreed to a tenth of a percent, and it
+  changed sign when the search fix perturbed the batch. Thinned, the six empty
+  minibatches the docstring describes actually occur, and the test passes
+  against `33c6032`'s search as well as this one.
+
+### Unchanged
+
+- `ROLL` edges, whose sampled expectimax over `ROLL_ODDS` was already correct
+  and is untouched. Chance is still sampled rather than expanded over all
+  outcomes, for the budget reason in the module docstring.
+- `benchmarks.rank`'s head-vs-truth column, by construction: at `--simulations
+  0` it never builds a `Search`, and above zero the search draws from its own
+  generator. Its own `imagine`-then-`apply` sibling construction still embeds
+  one sampled outcome per chance child, which is the audit's second finding and
+  is not addressed here.
+
+## [0.9.0] - 2026-08-27
+
+### Added
+
+- **A `quantile` value head** (the variance screen's candidate 3, Gate B).
+  `ModelConfig(value_head="quantile")` is `"linear"`'s head widened to
+  `players x quantiles` outputs — the same input (`g` alone), the same depth,
+  the same initialisation. **Its forward returns the `players`-vector mean of
+  its quantiles, so `V` keeps its shape and its meaning everywhere**: GAE,
+  `lambda_returns`, the zero-sum projection, `catan.mcts`, `catan.bots` and
+  every `benchmarks.*` reader are untouched. The full `(B, players, Q)` tensor
+  is exposed separately, through `Prediction.quantiles` and
+  `Evaluation.quantiles`, and has exactly one consumer: the value loss.
+  `ModelConfig.quantiles` (default 32) reaches a rebuild through the
+  checkpoint's `args`, the way `value_head` already does; the levels are
+  derived from it and are not state_dict keys.
+- **The quantile value loss in `catan.ppo.minibatch_terms`.** Under the
+  quantile head the differentiated value term is the per-seat quantile Huber
+  loss against the *same* `value_target` vector, at midpoint levels
+  `(i + 0.5) / Q` and Huber width `QUANTILE_HUBER_KAPPA = 1/30` — one lattice
+  step of the return, because at this project's ~0.2 residual scale QR-DQN's
+  kappa=1 would fit expectiles rather than quantiles. `quantile_levels` and
+  `quantile_huber_loss` moved from `benchmarks.head_swap` into `catan.model`
+  and are imported back, so Gate A2's arithmetic and the heat's are one
+  implementation. The advantage path is untouched — GAE reads the mean, exactly
+  as before — and `value_target` construction is unchanged.
+- `Stats.value_mse` / `Terms.value_mse`: the plain squared error of the mean,
+  logged beside `value_loss` and never differentiated. The two arms of a heat
+  differentiate losses on different scales, so a curve comparison needs one
+  column both compute identically; under every scalar head it is `value_loss`
+  by the same expression. `catan.league` now logs both per learner.
+- `catan.league --value-head` and `--quantiles`. Empty (the default) keeps the
+  base checkpoint's own shape, so every heat on record replays unchanged.
+  Asking for `quantile` off a scalar base warm-starts it through
+  `catan.model.quantile_warm_start`: every level begins at the scalar head's
+  own output, so the treatment arm of a heat opens on the same policy *and* the
+  same critic as its control (equal to one float32 rounding of a Q-term mean,
+  measured under 2.4e-7 — four orders below the label's 1/30 lattice). The
+  shape the seats carry, not the base's, is what the heat's checkpoints record.
+- `catan.train --quantiles`, alongside the existing `--value-head`, so the
+  shape reaches a checkpoint's `args` from every trainer that writes one.
+
+### Fixed
+
+- `CatanNet._emit` now builds `logits`, `give`, `want` and the value read in
+  that order explicitly. `g` feeds four heads, so its gradient is a sum of four
+  terms accumulated in forward-creation order; hoisting the value read above
+  the two trade heads reassociates that sum, leaving the loss bit-identical
+  while moving the gradient in its last bits — enough to make a default-config
+  update diverge from the previous build after one optimiser step. Caught by a
+  full-stack A/B, and pinned by a test on `grad_fn` creation order rather than
+  on loss equality, which does not see it.
+
+### Unchanged
+
+- With `value_head` anything but `"quantile"`, a full update is **bit-identical
+  to 0.8.0**: verified by an A/B against `6150836` over the whole cross product
+  of the five value shapes, both policy shapes, `detach_value` on and off, all
+  three `critic` modes and `value_lam` 1.0/0.9 — same assembled batch, same
+  post-update weights, same logged losses, to the byte.
+
+## [0.8.0] - 2026-08-27
+
+### Added
+
+- **Board-paired advantage baselines** (the variance screen's candidate 1),
+  one flag because the registration treats it as one treatment.
+  `Collector(pair_boards=True)` deals games `2k` and `2k+1` on the board keyed
+  `f"{seed}:{2k}:board"` while each keeps its own game rng — same geometry,
+  independent dice and play — and refuses a fixed `board=` alongside it.
+  `collect.paired_caster` repeats each cast for both halves, so within a pair
+  the same policy holds the same seat; seat shares then balance over any
+  `2*learners`-game window instead of `learners`. `PPOConfig(pair_baseline=
+  True)` makes each seat's policy-gradient terminal `r - (r + r')/2`, `r'` the
+  same seat's reward in the mate game `index ^ 1` — a valid control variate
+  given (board, seat, policy), leaving the gradient unbiased and the value
+  target on the raw terminal. Adjusted per-game vectors stay exactly zero-sum,
+  the two halves are bit-exact negatives, and a pair with identical outcomes
+  pays exactly zero; a batch missing a mate refuses rather than baselining
+  against nothing. `catan.league --pair-boards` turns on all three wires.
+  With pairing off, dealing, casting, advantages and value targets are
+  bit-identical to 0.7.2.
+- `benchmarks.noise_scale --paired` — Gate A of the screen: one board-paired
+  cohort, the estimator run twice on the same batch (raw vs pair-adjusted
+  advantage stream, same positions, weights and shuffles) in one JSON, plus
+  the pair correlations `rho = corr(r, r')` and `rho_v` on the head-residuals
+  at each seat's last decision, per seat and pooled.
+
 ## [0.7.2] - 2026-08-26
 
 ### Fixed

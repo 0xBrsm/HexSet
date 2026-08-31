@@ -739,3 +739,142 @@ def test_an_antithetic_duel_needs_two_games():
             Streamless(), Streamless(), games=1, lanes=1, players=4, seed=0,
             max_offers=3,
         )
+
+
+def test_the_mix_caster_gives_one_game_at_most_one_opponent():
+    """The limit of the caster, so a diverse mix is read for what it is.
+
+    Three opponents at a fifth each is three kinds of *game*; a cast game still
+    seats one opponent id on 2 of the 4 seats. A heterogeneous table -- learner,
+    greedy and search2 all at once -- needs a different caster, and reading the
+    current one as if it delivered that would misread the result.
+    """
+    caster = train.mixed_caster([0.2, 0.2, 0.2], players=4, seed=7)
+    casts = [caster(index) for index in range(600)]
+    assert casts == [caster(index) for index in range(600)]
+
+    seen: set[int] = set()
+    for cast in casts:
+        ids = {pid for pid in cast if pid}
+        assert len(ids) <= 1, f"two opponents in one game: {cast}"
+        seen |= ids
+        if ids:
+            seats = tuple(seat for seat, pid in enumerate(cast) if pid)
+            assert seats in ((1, 3), (0, 2))
+    assert seen == {1, 2, 3}
+    share = sum(1 for cast in casts if any(cast)) / len(casts)
+    assert 0.5 < share < 0.7, f"{share} of 600 at a nominal 0.6"
+
+
+def test_check_mix_admits_any_entrant_and_refuses_a_typo_or_a_missing_file(tmp_path):
+    """The pre-flight. Every failure here would otherwise land as a traceback out
+    of a collector subprocess, after the manifest was frozen and the box was
+    committed to the run."""
+    from catan.collect import check_mix
+
+    check_mix(
+        [("greedy", 0.15), ("search2-offers3", 0.1), ("random", 0.05)],
+        have_parent=False,
+    )
+    check_mix([("parent", 0.1)], have_parent=True)
+
+    with pytest.raises(SystemExit, match="unknown mix opponent"):
+        check_mix([("search2-offer3", 0.1)], have_parent=False)
+    with pytest.raises(SystemExit, match="needs --parent"):
+        check_mix([("parent", 0.1)], have_parent=False)
+    with pytest.raises(SystemExit, match="not there"):
+        check_mix([(f"mcts:{tmp_path / 'nowhere.pt'}@64", 0.1)], have_parent=False)
+
+
+def test_a_run_can_collect_against_a_held_out_entrant(tmp_path):
+    """The whole point of the change: an opponent the ladder could only *score*
+    can now be collected against, through the trainer's own manifest path."""
+    assert run(tmp_path, 1, ["--checkpoint-every", "1", "--mix", "random=1.0"]) == 0
+
+    lines = [json.loads(l) for l in (tmp_path / "log.jsonl").read_text().splitlines()]
+    # The update really consumed learner transitions from games an entrant played.
+    assert lines[-1]["positions"] > 0
+
+
+def test_a_sharded_run_can_collect_against_a_held_out_entrant(tmp_path):
+    assert (
+        run(
+            tmp_path,
+            1,
+            ["--checkpoint-every", "1", "--collect-workers", "2", "--mix", "random=1.0"],
+        )
+        == 0
+    )
+
+
+def test_a_table_entry_seats_the_learner_once_against_draws_from_its_pool():
+    """`table(a|b)=f` is the seating-free referent -- one learner seat, every
+    other seat an independent draw from the pool -- and it has to be pure in
+    the index like every caster before it."""
+    mix = train.parse_mix("greedy=0.2,table(greedy|parent|search2-offers3)=0.5")
+    assert train.mix_names(mix) == ["greedy", "parent", "search2-offers3"]
+    caster = train.mix_caster(mix, players=4, seed=11)
+    casts = [caster(index) for index in range(800)]
+    assert casts == [caster(index) for index in range(800)]
+
+    pairs = [c for c in casts if c.count(0) == 2]
+    tables = [c for c in casts if c.count(0) == 1]
+    pure = [c for c in casts if c.count(0) == 4]
+    assert len(pairs) + len(tables) + len(pure) == 800
+    assert 120 <= len(pairs) <= 200, f"{len(pairs)} pair games at a nominal 160"
+    assert 340 <= len(tables) <= 460, f"{len(tables)} table games at a nominal 400"
+    for cast in pairs:
+        assert set(cast) == {0, 1}
+    seats = [cast.index(0) for cast in tables]
+    assert all(40 <= seats.count(seat) for seat in range(4)), "a seat starved"
+    drawn = [pid for cast in tables for pid in cast if pid]
+    assert set(drawn) == {1, 2, 3}
+    # Three of one bot is a legal table: the bridge's own design.
+    assert any(len(set(cast) - {0}) == 1 for cast in tables)
+    assert any(len(set(cast) - {0}) == 3 for cast in tables)
+
+
+def test_a_mix_without_a_table_casts_exactly_as_the_recorded_runs_were_cast():
+    """34 recorded runs were cast by `mixed_caster`; a resume must deal the
+    games it would have dealt, so the general caster is that one on the
+    specs it accepted."""
+    for spec, seed in (("greedy=0.15", 0), ("greedy=0.15,parent=0.15", 4)):
+        mix = train.parse_mix(spec)
+        old = train.mixed_caster([f for _, f in mix], players=4, seed=seed)
+        new = train.mix_caster(mix, players=4, seed=seed)
+        assert [old(i) for i in range(1000)] == [new(i) for i in range(1000)]
+
+
+def test_parse_mix_reads_table_syntax_and_refuses_a_broken_one():
+    assert train.parse_mix("table(greedy|search2)=0.5") == [("table(greedy|search2)", 0.5)]
+    assert train.table_pool("table(a| b)") == ["a", "b"]
+    assert train.table_pool("greedy") is None
+    with pytest.raises(ValueError, match="unclosed"):
+        train.parse_mix("table(greedy|search2=0.5")
+    with pytest.raises(ValueError, match="at least one"):
+        train.parse_mix("table()=0.5")
+    with pytest.raises(ValueError, match="at least one"):
+        train.parse_mix("table(greedy|)=0.5")
+
+
+def test_check_mix_looks_inside_a_table_pool():
+    from catan.collect import check_mix
+
+    check_mix(train.parse_mix("table(greedy|random|search2-offers3)=0.5"), have_parent=False)
+    with pytest.raises(SystemExit, match="unknown mix opponent"):
+        check_mix(train.parse_mix("table(greedy|serch2)=0.5"), have_parent=False)
+    with pytest.raises(SystemExit, match="needs --parent"):
+        check_mix(train.parse_mix("table(greedy|parent)=0.5"), have_parent=False)
+
+
+def test_a_run_can_collect_at_a_table_through_the_manifest_path(tmp_path):
+    assert (
+        run(
+            tmp_path,
+            1,
+            ["--checkpoint-every", "1", "--mix", "table(random|greedy-offers1)=1.0"],
+        )
+        == 0
+    )
+    lines = [json.loads(l) for l in (tmp_path / "log.jsonl").read_text().splitlines()]
+    assert lines[-1]["positions"] > 0

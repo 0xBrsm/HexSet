@@ -17,8 +17,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   together and never when they alternate — the entire "seat geometry" effect
   (+0.08 vs +0.43 VP for the same pair) was this one line. Random order hands
   the advantage to nobody in either seating. Still not the rulebook, where the
-  proposer chooses among the acceptors; that design is written down in
-  `agents/reference/trading-design.md` and deferred. `trading.responders`
+  proposer chooses among the acceptors; that design is written down in the
+  trading design note and deferred. `trading.responders`
   keeps its clockwise order as the eligibility list. Every seeded game's RNG
   sequence differs from before, so no duel reproduces bit-for-bit across this
   change.

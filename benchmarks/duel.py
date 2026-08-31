@@ -34,8 +34,8 @@ from catan.board.board import random_base_board
 # `collect.alternating` seats the versus path on same-parity seats, so
 # `--workers 1` has always played interleaved; `--workers >1` has always played
 # blocked. On identical boards and dice the seating alone moves `lam095-805`
-# vs `ppo4-585` from +0.08 to +0.43 VP (`agents/reference/harness-path-check.md`,
-# addenda 6-8; `runs/eval/harness-seat-geometry.json`), so a verdict that does
+# vs `ppo4-585` from +0.08 to +0.43 VP (the harness-path check, addenda 6-8;
+# `runs/eval/harness-seat-geometry.json`), so a verdict that does
 # not record its geometry cannot be compared with one that does.
 GEOMETRIES: dict[str, tuple[str, list[int], list[int]]] = {
     "blocked": ("aabb", [0, 1], [2, 3]),

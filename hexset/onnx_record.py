@@ -61,6 +61,7 @@ from .encoding import (
 from .game import Game, to_move
 from .policy import pair_mask as _pair_mask_of
 from .state import NO_OWNER
+from .trading import responders as offer_responders
 from .victory import award_points
 
 # Every field name in the record, in the order the plan's table lists them
@@ -88,6 +89,10 @@ RECORD_FIELDS: tuple[str, ...] = (
     "hand_totals",
     "own_dev",
     "dev_totals",
+    "offer_give",
+    "offer_want",
+    "offer_proposer",
+    "offer_answered",
     "action_mask",
     "pair_mask",
 )
@@ -136,6 +141,26 @@ def record_from_game(
     )
     award = np.array([award_points(state, s) for s in range(players)], dtype=np.int64)
 
+    # The live trade offer, filtered exactly as `encoding._offer_parts` filters
+    # it: give/want and the proposer are public while an offer stands; who has
+    # answered is the proposer's information only (part 3 of the trading design
+    # approximates simultaneous responses, so a responder must not condition on
+    # earlier declines). Board-seat order here, like every other field — the
+    # rotation to seat-relative happens inside `RecordEncoder`.
+    offer = game.offer
+    offer_give = np.zeros(NUM_RESOURCES, dtype=np.int64)
+    offer_want = np.zeros(NUM_RESOURCES, dtype=np.int64)
+    offer_proposer = np.int64(NO_OWNER)
+    offer_answered = np.zeros(players, dtype=np.int64)
+    if offer is not None:
+        offer_give = np.asarray(offer.give, dtype=np.int64)
+        offer_want = np.asarray(offer.want, dtype=np.int64)
+        offer_proposer = np.int64(offer.proposer)
+        if perspective == offer.proposer:
+            declined = set(offer_responders(state, offer)) - set(game.pending_responders)
+            for seat in declined:
+                offer_answered[seat] = 1
+
     return {
         "terrain": np.asarray([int(t) for t in state.board.terrain], dtype=np.int64),
         "token": np.asarray(state.board.tokens, dtype=np.int64),
@@ -158,6 +183,10 @@ def record_from_game(
         "hand_totals": hand_totals,
         "own_dev": own_dev,
         "dev_totals": dev_totals,
+        "offer_give": offer_give,
+        "offer_want": offer_want,
+        "offer_proposer": offer_proposer,
+        "offer_answered": offer_answered,
         "action_mask": mask,
         "pair_mask": _pair_mask_of(options),
     }
@@ -257,6 +286,10 @@ class RecordEncoder(nn.Module):
         hand_totals: Tensor,
         own_dev: Tensor,
         dev_totals: Tensor,
+        offer_give: Tensor,
+        offer_want: Tensor,
+        offer_proposer: Tensor,
+        offer_answered: Tensor,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         players = self.players
 
@@ -344,6 +377,21 @@ class RecordEncoder(nn.Module):
         parts.append((free_roads.to(torch.float32) / 2.0).unsqueeze(-1))
         parts.append((deck_size.to(torch.float32) / DECK_SIZE).unsqueeze(-1))
         parts.append(torch.clamp(turns.to(torch.float32) / TURN_SCALE, max=1.0).unsqueeze(-1))
+
+        # --- live trade offer, in exactly `encoding._offer_parts`'s order:
+        # give, want, proposer one-hot, answered. `_rotate_slot` maps a
+        # NO_OWNER proposer (no offer standing) to slot `players`, which a
+        # `players`-wide one-hot renders as all zeros — the same all-zero
+        # block the numpy path writes.
+        parts.append(offer_give.to(torch.float32) / HAND_SCALE)
+        parts.append(offer_want.to(torch.float32) / HAND_SCALE)
+        parts.append(_onehot(_rotate_slot(offer_proposer, perspective, players), players))
+        parts.append(
+            torch.stack(
+                [gather_seat(offer_answered, seats[i]).to(torch.float32) for i in range(players)],
+                dim=1,
+            )
+        )
 
         globals_ = torch.cat(parts, dim=-1)
 

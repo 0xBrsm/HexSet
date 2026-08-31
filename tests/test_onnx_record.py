@@ -110,3 +110,52 @@ def test_record_rejects_an_out_of_range_perspective():
     space = space_for(game)
     with pytest.raises(ValueError):
         record_from_game(game, 99, space)
+
+
+def test_the_record_carries_the_offer_and_filters_answered_to_the_proposer():
+    """Board-seat order in the record; the answered block is the proposer's
+    information alone (`encoding._offer_parts`'s rule, applied record-side
+    where every other information-set filter lives)."""
+    import random
+
+    from hexset.actions import space_for
+    from hexset.board.board import random_base_board
+    from hexset.board.terrain import Resource
+    from hexset.game import Phase, decline_trade, propose_trade, start, to_move
+    from hexset.play import step_randomly
+    from hexset.state import NO_OWNER
+    from hexset.trading import bundle
+
+    rng = random.Random(9)
+    game = start(random_base_board(rng), 4, rng)
+    for _ in range(400):
+        if game.phase is Phase.MAIN:
+            break
+        step_randomly(game, rng)
+    assert game.phase is Phase.MAIN
+    space = space_for(game)
+
+    row = record_from_game(game, game.current_player, space)
+    assert int(row["offer_proposer"]) == NO_OWNER
+    assert not row["offer_give"].any()
+    assert not row["offer_want"].any()
+    assert not row["offer_answered"].any()
+
+    proposer = game.current_player
+    others = [s for s in range(4) if s != proposer]
+    game.state.hands[proposer][Resource.WOOD] = 2
+    for s in others:
+        game.state.hands[s][Resource.ORE] = 1
+    propose_trade(game, bundle(wood=2), bundle(ore=1), ask=tuple(others))
+    first = to_move(game)
+    decline_trade(game, first)
+
+    responder_row = record_from_game(game, to_move(game), space)
+    assert responder_row["offer_give"][Resource.WOOD] == 2
+    assert responder_row["offer_want"][Resource.ORE] == 1
+    assert int(responder_row["offer_proposer"]) == proposer
+    assert not responder_row["offer_answered"].any()
+
+    proposer_row = record_from_game(game, proposer, space)
+    assert proposer_row["offer_answered"][first] == 1
+    assert proposer_row["offer_answered"].sum() == 1

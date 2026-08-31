@@ -33,7 +33,7 @@ read `action_index`/`pair_index` straight off one forward pass and a search
 can read `prior`/`pair_prior`/`value` off the same one.
 
 * **Inputs**, a dynamic leading batch axis, named exactly
-  `hexset.onnx_record.RECORD_FIELDS` (23 names: board, position, information
+  `hexset.onnx_record.RECORD_FIELDS` (27 names: board, position, information
   set, legality — see that module's docstring and `onnx-contract-v2.md`'s
   table). All int64 except `action_mask`/`pair_mask`, which are bool. `B` is
   1 for a single decision and a whole wave of leaves for the UI's MCTS
@@ -123,11 +123,12 @@ _INT_OUTPUTS = frozenset({"action_index", "pair_index"})
 # a silent no-op rather than a setting.
 _SEARCHES = ("none", "mcts")
 
-# `contract=2` is what tells `hexset_ui.onnxbot.load` which of the two graph
-# shapes it is looking at (absent/`"1"` means the old feature-tensor-in,
-# raw-logits-out shape). Bump this again only if the record or the output
-# tuple changes shape.
-_CONTRACT_VERSION = "2"
+# `contract` tells `hexset_ui.onnxbot.load` which graph shape it is looking
+# at (absent/`"1"` means the old feature-tensor-in, raw-logits-out shape;
+# `"2"` the 23-input record). `"3"` is contract 2 plus the four live-offer
+# record fields (trading design part 1) — same outputs, four more inputs.
+# Bump this again only if the record or the output tuple changes shape.
+_CONTRACT_VERSION = "3"
 
 
 def _base_topology() -> Topology:
@@ -164,6 +165,10 @@ def _shapes(graph: StaticGraph, players: int, space: ActionSpace) -> dict[str, t
         "hand_totals": (players,),
         "own_dev": (NUM_DEV_CARDS,),
         "dev_totals": (players,),
+        "offer_give": (NUM_RESOURCES,),
+        "offer_want": (NUM_RESOURCES,),
+        "offer_proposer": (),
+        "offer_answered": (players,),
         "action_mask": (space.size,),
         "pair_mask": (NUM_PAIRS,),
         "action_index": (),
@@ -248,6 +253,10 @@ class _ExportWrapper(nn.Module):
         hand_totals: Tensor,
         own_dev: Tensor,
         dev_totals: Tensor,
+        offer_give: Tensor,
+        offer_want: Tensor,
+        offer_proposer: Tensor,
+        offer_answered: Tensor,
         action_mask: Tensor,
         pair_mask: Tensor,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
@@ -273,6 +282,10 @@ class _ExportWrapper(nn.Module):
             hand_totals,
             own_dev,
             dev_totals,
+            offer_give,
+            offer_want,
+            offer_proposer,
+            offer_answered,
         )
         pred = self.net(hexes, vertices, edges, globals_)
 

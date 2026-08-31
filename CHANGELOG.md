@@ -7,6 +7,26 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **The live trade offer is observed** (trading design part 1,
+  `agents/reference/trading-design.md` §3.1). `encoding.global_features`
+  gains 18 features at four players, appended at the tail of the globals
+  vector: the standing offer's give and want bundles (hand-scaled), the
+  proposer's seat (relative one-hot), and who has answered — the last
+  visible only from the proposer's perspective, approximating the
+  simultaneous responses part 3 introduces. A responder in `TRADE_RESPOND`
+  now sees the terms it is deciding on; every recorded checkpoint decided
+  blind. The information-set record grows the same four fields
+  (`offer_give`, `offer_want`, `offer_proposer`, `offer_answered`), so the
+  ONNX contract bumps to **v3** (27 inputs, unchanged outputs) and
+  hexset-ui must fill them before any v3 deployment.
+- **`hexset.migrate`**: function-preserving checkpoint migration onto the
+  wider observation — the new `embed_global` columns are zero, so a migrated
+  checkpoint plays exactly as its source until trained further (asserted on
+  real observations before anything is written, as `hexset.widen` does).
+  Checkpoints from before this change cannot be loaded without it.
+
 ### Changed
 
 - **Package renamed `catan` → `hexset`**, in prep for release under GPL-3.0-only

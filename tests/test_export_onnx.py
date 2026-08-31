@@ -115,7 +115,7 @@ def test_the_graph_is_shaped_the_way_hexset_ui_feeds_and_reads_it_v2(tmp_path):
             assert prior[row].sum() == pytest.approx(1.0, abs=1e-4)
 
 
-def test_the_exported_metadata_says_contract_2_and_matches_the_checkpoints_own_args(tmp_path):
+def test_the_exported_metadata_says_contract_3_and_matches_the_checkpoints_own_args(tmp_path):
     checkpoint = tmp_path / "latest.pt"
     board = a_checkpoint(checkpoint, players=3, max_offers=5)
     out = tmp_path / "latest.onnx"
@@ -124,7 +124,7 @@ def test_the_exported_metadata_says_contract_2_and_matches_the_checkpoints_own_a
 
     session = ort.InferenceSession(str(out), providers=["CPUExecutionProvider"])
     meta = session.get_modelmeta().custom_metadata_map
-    assert meta["contract"] == "2"
+    assert meta["contract"] == "3"
     assert meta["players"] == "3"
     assert meta["max_offers"] == "5"
     assert meta["iteration"] == "7"
@@ -165,7 +165,7 @@ def test_a_search_export_declares_itself_in_the_keys_hexset_ui_reads(tmp_path):
     meta = ort.InferenceSession(
         str(out), providers=["CPUExecutionProvider"]
     ).get_modelmeta().custom_metadata_map
-    assert meta["contract"] == "2"
+    assert meta["contract"] == "3"
     assert meta["search"] == "mcts"
     assert meta["simulations"] == "256"
     assert meta["wave"] == "32"

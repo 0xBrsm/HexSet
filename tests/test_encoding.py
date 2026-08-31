@@ -348,3 +348,116 @@ def test_building_points_agree_with_the_rules(players):
                 scored += points[i] > 0
 
     assert scored > 0
+
+
+# --- the live trade offer (trading design part 1) ---
+
+
+def _main_phase_game(seed: int = 5):
+    from hexset.game import Phase
+
+    rng = random.Random(seed)
+    game = start(random_base_board(rng), 4, rng)
+    for _ in range(400):
+        if game.phase is Phase.MAIN:
+            return game
+        step_randomly(game, rng)
+    raise AssertionError("no MAIN phase reached in 400 steps")
+
+
+def _offer_game(seed: int = 5):
+    """A standing offer: the mover gives 2 wood for 1 ore, everyone else
+    stocked to be eligible, asked in fixed seat order after the mover."""
+    from hexset.board.terrain import Resource
+    from hexset.game import propose_trade
+    from hexset.trading import bundle
+
+    game = _main_phase_game(seed)
+    proposer = game.current_player
+    others = [s for s in range(4) if s != proposer]
+    game.state.hands[proposer][Resource.WOOD] = 2
+    game.state.hands[proposer][Resource.ORE] = 0
+    for s in others:
+        game.state.hands[s][Resource.ORE] = 1
+    propose_trade(game, bundle(wood=2), bundle(ore=1), ask=tuple(others))
+    return game, proposer, others
+
+
+def _offer_tail(obs):
+    """give(5), want(5), proposer(4), answered(4) — the last 18 globals."""
+    tail = obs.globals[-18:]
+    return tail[:5], tail[5:10], tail[10:14], tail[14:18]
+
+
+def test_the_offer_block_is_zero_when_no_offer_stands():
+    game = _main_phase_game()
+    assert game.offer is None
+    for perspective in range(4):
+        for part in _offer_tail(encode(game, perspective)):
+            assert not part.any()
+
+
+def test_a_responder_sees_the_terms_and_the_proposer():
+    from hexset.board.terrain import Resource
+    from hexset.game import to_move
+
+    game, proposer, _ = _offer_game()
+    responder = to_move(game)
+    give, want, proposer_hot, answered = _offer_tail(encode(game, responder))
+
+    assert give[Resource.WOOD] == pytest.approx(2 / 10.0)
+    assert give.sum() == pytest.approx(2 / 10.0)
+    assert want[Resource.ORE] == pytest.approx(1 / 10.0)
+    assert want.sum() == pytest.approx(1 / 10.0)
+    assert proposer_hot[_seat(proposer, responder, 4)] == 1.0
+    assert proposer_hot.sum() == 1.0
+    assert not answered.any()
+
+
+def test_a_responder_does_not_see_earlier_declines():
+    from hexset.game import decline_trade, to_move
+
+    game, _, _ = _offer_game()
+    decline_trade(game, to_move(game))
+    _, _, _, answered = _offer_tail(encode(game, to_move(game)))
+    assert not answered.any()
+
+
+def test_the_proposer_sees_who_has_declined():
+    from hexset.game import decline_trade, to_move
+
+    game, proposer, _ = _offer_game()
+    first = to_move(game)
+    _, _, proposer_hot, answered = _offer_tail(encode(game, proposer))
+    assert proposer_hot[0] == 1.0  # the proposer is seat 0 to itself
+    assert not answered.any()
+
+    decline_trade(game, first)
+    _, _, _, answered = _offer_tail(encode(game, proposer))
+    assert answered[_seat(first, proposer, 4)] == 1.0
+    assert answered.sum() == 1.0
+
+
+def test_the_offer_block_clears_when_the_offer_resolves():
+    from hexset.game import accept_trade, to_move
+
+    game, _, _ = _offer_game()
+    accept_trade(game, to_move(game))
+    assert game.offer is None
+    for perspective in range(4):
+        for part in _offer_tail(encode(game, perspective)):
+            assert not part.any()
+
+
+def test_batched_offer_encoding_matches_the_canonical_path():
+    from hexset.game import decline_trade, to_move
+
+    game, proposer, _ = _offer_game()
+    decline_trade(game, to_move(game))
+    games = [game] * 4
+    perspectives = list(range(4))
+    fast = encode_batch(games, perspectives)
+    for got, perspective in zip(fast, perspectives, strict=True):
+        want = encode(game, perspective)
+        assert np.array_equal(got.globals, want.globals)
+        assert got.globals.dtype == np.float32

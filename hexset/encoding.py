@@ -28,6 +28,7 @@ from .board.topology import Topology
 from .cards import NUM_DEV_CARDS, DECK_SIZE
 from .game import Game, Phase
 from .state import NO_OWNER, Building, GameState
+from .trading import responders as offer_responders
 
 NUM_TERRAIN = len(Terrain)
 NUM_BUILDINGS = len(Building)
@@ -124,6 +125,8 @@ def global_features(players: int) -> int:
         + 2 * (players + 1)  # longest road and largest army holders
         + NUM_PHASES
         + 3  # free roads, deck size, turn
+        + 2 * NUM_RESOURCES  # live trade offer: give, want
+        + 2 * players  # live trade offer: proposer seat, who has answered
     )
 
 
@@ -312,6 +315,43 @@ def _encode_edges(state: GameState, perspective: int) -> np.ndarray:
     return _edge_rows(state.num_players, perspective)[owners]
 
 
+def _offer_parts(game: Game, perspective: int) -> list[float]:
+    """The live trade offer, as the perspective seat may legally see it.
+
+    While an offer stands (`Phase.TRADE_RESPOND`), its give/want bundles and
+    its proposer are public — everyone at the table heard it. Who has already
+    answered is deliberately *not* public here: the trading design (part 3)
+    moves to every-player-responds-then-the-proposer-chooses, approximating
+    simultaneous responses, so a responder must not condition on earlier
+    declines. Only the proposer's own perspective carries the answered block
+    (in today's engine an accept ends the offer at once, so "answered" means
+    "declined so far"). With no offer standing the whole block is zero, which
+    is also what every checkpoint migrated by `hexset.migrate` reads it as
+    until it trains further.
+
+    One list, four parts, in this order: give (scaled like hands), want,
+    proposer seat one-hot (seat-relative, no "none" slot — all zero when no
+    offer stands), answered-by-seat (seat-relative).
+    """
+    players = game.state.num_players
+    give = [0.0] * NUM_RESOURCES
+    want = [0.0] * NUM_RESOURCES
+    proposer = [0.0] * players
+    answered = [0.0] * players
+    offer = game.offer
+    if offer is not None:
+        give = [n / HAND_SCALE for n in offer.give]
+        want = [n / HAND_SCALE for n in offer.want]
+        proposer[_seat(offer.proposer, perspective, players)] = 1.0
+        if perspective == offer.proposer:
+            declined = set(offer_responders(game.state, offer)) - set(
+                game.pending_responders
+            )
+            for s in declined:
+                answered[_seat(s, perspective, players)] = 1.0
+    return give + want + proposer + answered
+
+
 def _encode_globals(
     game: Game, perspective: int, building_points: np.ndarray
 ) -> np.ndarray:
@@ -356,6 +396,8 @@ def _encode_globals(
     parts.append(game.free_roads / 2.0)
     parts.append(len(state.deck) / DECK_SIZE)
     parts.append(min(game.turns / TURN_SCALE, 1.0))
+
+    parts.extend(_offer_parts(game, perspective))
 
     return np.array(parts, dtype=np.float32)
 
@@ -432,6 +474,16 @@ def _encode_globals_batch(
         1.0,
     )
     append(turns, 1.0)
+
+    # The offer block is 18 floats a row and offers are one phase of many, so
+    # this stays on the canonical per-game path — `_offer_parts` is the single
+    # source of the block's semantics, and reusing it keeps the fast path
+    # byte-identical to the oracle by construction.
+    offer_block = np.asarray(
+        [_offer_parts(game, int(p)) for game, p in zip(games, perspectives)],
+        dtype=np.float64,
+    )
+    append(offer_block, 1.0)
 
     if cursor != out.shape[1]:
         raise AssertionError(f"wrote {cursor} global features into {out.shape[1]}")

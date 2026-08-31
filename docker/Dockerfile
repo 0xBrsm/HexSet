@@ -11,8 +11,8 @@
 # below and drop the matching volume from your compose file.
 FROM python:3.12-slim
 
-LABEL org.opencontainers.image.title="hexset-ui"
-LABEL org.opencontainers.image.source="https://github.com/0xBrsm/hexset-ui"
+LABEL org.opencontainers.image.title="HexSet-UI"
+LABEL org.opencontainers.image.source="https://github.com/0xBrsm/HexSet-UI"
 
 # Kept in step with pyproject.toml's [project].dependencies by hand. There
 # are two of them and they move rarely, but a version bump belongs in both

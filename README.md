@@ -1,4 +1,4 @@
-# hexset-ui
+# HexSet-UI
 
 HexSet is a human-vs-bot hex-tile trading and building game you play in a browser. A dependency-free `http.server` backend, a single-file vanilla-JS frontend, and ONNX Runtime for bot inference — no PyTorch, no GPU required.
 
@@ -42,7 +42,7 @@ Copy the resulting file into this repo's `models/` directory.
 
 ### A checkpoint configures itself
 
-How an opponent plays is declared in the `.onnx` file, not here. `export_onnx` writes ONNX `metadata_props`, and `src/hexset_ui/modelmeta.py` reads them:
+How an opponent plays is declared in the `.onnx` file, not here. `export_onnx` writes ONNX `metadata_props`, and `src/hexset_ui/modelmeta.py` reads them. See [`docs/bot-api.md`](docs/bot-api.md) for the complete interface — metadata plus the graph's own inputs/outputs — that any `.onnx` file, from any source, must satisfy to plug in; a checkpoint author never needs this repo's source, only that document.
 
 | key | meaning | default |
 | --- | --- | --- |
@@ -73,7 +73,10 @@ Inference device is **not** read from metadata — it's a property of the host, 
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+AGPL-3.0 — see [LICENSE](LICENSE). Running a modified copy of this
+project as a network service carries the same source-disclosure obligation
+as distributing it: your users are entitled to the corresponding source of
+what they're playing against.
 
 ## Trademarks
 

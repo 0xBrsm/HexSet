@@ -404,14 +404,6 @@
   .modal-btn-rate { font-size: 0.58rem; font-weight: 700; line-height: 1; letter-spacing: 0.02em; }
   .pick-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.3rem 0 0.7rem; }
   .modal-note { font-size: 0.85rem; color: var(--muted); margin-top: 0.4rem; }
-  /* Year of Plenty picks two cards at once, so its options are pairs rather
-     than single tiles: the two cards inside are inert scenery (clicks land on
-     the pair), which is why the hit target and its border live out here. */
-  .pick-pair {
-    display: inline-flex; gap: 0.2rem; padding: 0.25rem; border-radius: 6px;
-    border: 2px solid transparent; cursor: pointer;
-  }
-  .pick-pair:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
   /* The robber's victims are seats, not resources, so they get plain buttons
      with the same colour swatch the player list uses rather than card tiles —
      stacked, because a seat's name is far too wide to sit five to a row. */
@@ -728,6 +720,7 @@ let modalMode = null;      // which decision the modal is showing, if any — se
 let tradeGive = null;      // selected resource index, "propose" mode only
 let tradeWant = null;
 let tradeSide = "give";    // "give" | "want" — which side the picker row is currently choosing for, "propose" mode only
+let yopPicks = [];         // 0, 1, or 2 resource indices, "year-of-plenty" mode only
 let modelNames = [];       // GET /api/models, in MODEL_OPTIONS order
 let currentBotModels = []; // this game's (or the next one's) 3 non-human-seat picks, ascending seat order
 
@@ -832,6 +825,14 @@ function seatLabel(seat) {
   if (seat === state.human_seat) return "human";
   const p = state?.players.find((p) => p.seat === seat);
   return p && p.bot ? p.bot : `Player ${seat}`;
+}
+
+// Same label, but seat-number-first — "Player 2 (search2)" — for the spots
+// where the model name alone would misleadingly read as an opponent's own
+// identity (trade offers, robber-victim picks) rather than as one seat's
+// current bot. 1-indexed to match the backend log's `_who` (webplay.py).
+function seatFullLabel(seat) {
+  return `Player ${seat + 1} (${seatLabel(seat)})`;
 }
 
 // Re-seats one live seat's bot without restarting the game. `slot` is that
@@ -1833,6 +1834,8 @@ function openModal(mode, {give = null} = {}) {
     // Straight to the half that's still open: coming in from a card in hand
     // has already answered "give".
     tradeSide = give === null ? "give" : "want";
+  } else if (mode === "year-of-plenty") {
+    yopPicks = [];
   }
   document.getElementById("modal").classList.add("show");
   renderModal();
@@ -1892,7 +1895,7 @@ function renderRespondMode(g, title, body, actions) {
   const offer = state.offer;
   // Who it's from goes in the title so the exchange row below can stay
   // just the cards themselves plus a one-word attribution each.
-  title.textContent = `Trade offer from ${seatLabel(offer.proposer)}`;
+  title.textContent = `Trade offer from ${seatFullLabel(offer.proposer)}`;
   // Flipped into the human's own point of view: what the proposer `want`s is
   // what leaves this hand, so it's the left/"Give" side here, and what they
   // offered to `give` is what arrives. Same direction as the propose modal,
@@ -1954,7 +1957,7 @@ function renderStealMode(g, title, body, actions) {
       swatch.style.background = SEAT_COLORS[a.b].fill;
       swatch.style.borderColor = SEAT_COLORS[a.b].stroke;
       btn.appendChild(swatch);
-      btn.appendChild(document.createTextNode(seatLabel(a.b)));
+      btn.appendChild(document.createTextNode(seatFullLabel(a.b)));
     } else {
       btn.appendChild(document.createTextNode("Nobody"));
     }
@@ -1983,21 +1986,47 @@ function renderMonopolyMode(g, title, body, actions) {
   actions.appendChild(modalCancelButton());
 }
 
-// Fifteen pairs at most (every combination of two resources, repeats
-// included), and fewer when the bank can't cover one — so they're laid out as
-// whole pairs to click rather than as two sequential picks, which would need
-// its own half-made state and a way to back out of it.
+// The pair `g.yearOfPlenty` actually offers for two resource names, order
+// not mattering — combinations_with_replacement (see YEAR_OF_PLENTY_PAIRS)
+// never emits both orders, so one direction check would silently miss the
+// other.
+function yopAction(g, name0, name1) {
+  return g.yearOfPlenty.find((a) => {
+    const [n0, n1] = board.year_of_plenty_pairs[a.a];
+    return (n0 === name0 && n1 === name1) || (n0 === name1 && n1 === name0);
+  });
+}
+
+// Two taps, same card allowed twice — the bank-availability check already
+// baked into `g.yearOfPlenty` (see `_card_actions`) is what disables a
+// resource here, so a card greys out exactly when the bank can no longer
+// cover it, including a second copy of one already picked.
 function renderYearOfPlentyMode(g, title, body, actions) {
   title.textContent = "Play Year of Plenty";
-  body.appendChild(html("div", {class: "modal-note"}, "Take two cards from the bank."));
+  body.appendChild(html("div", {class: "modal-note"},
+    "Take two cards from the bank — click a card, then click it again for a second."));
   const row = html("div", {class: "pick-row"});
-  for (const a of g.yearOfPlenty) {
-    const [r0, r1] = board.year_of_plenty_pairs[a.a];
-    const pair = html("div", {class: "pick-pair", title: `${r0} + ${r1}`});
-    pair.appendChild(pickCard(board.resources.indexOf(r0), {}));
-    pair.appendChild(pickCard(board.resources.indexOf(r1), {}));
-    pair.addEventListener("click", () => { closeModal(); sendAction(a); });
-    row.appendChild(pair);
+  const first = yopPicks.length ? board.resources[yopPicks[0]] : null;
+  for (let r = 0; r < board.resources.length; r++) {
+    const name = board.resources[r];
+    const count = yopPicks.filter((p) => p === r).length;
+    const available = first === null
+      ? g.yearOfPlenty.some((a) => board.year_of_plenty_pairs[a.a].includes(name))
+      : !!yopAction(g, first, name);
+    row.appendChild(pickCard(r, {
+      selected: count > 0,
+      count,
+      disabled: yopPicks.length >= 2 || !available,
+      title: name,
+      onClick: () => {
+        yopPicks.push(r);
+        if (yopPicks.length < 2) { renderModal(); return; }
+        const a = yopAction(g, first, name);
+        yopPicks = [];
+        closeModal();
+        sendAction(a);
+      },
+    }));
   }
   body.appendChild(row);
   actions.appendChild(modalCancelButton());

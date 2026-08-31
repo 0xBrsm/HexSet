@@ -32,7 +32,7 @@ def as_tensors(record: dict[str, np.ndarray]) -> dict[str, torch.Tensor]:
 
 def run_encoder(encoder: RecordEncoder, record: dict[str, np.ndarray]):
     tensors = as_tensors(record)
-    args = [tensors[name] for name in RECORD_FIELDS[:21]]  # everything but the two masks
+    args = [tensors[name] for name in RECORD_FIELDS if name not in ("action_mask", "pair_mask")]
     with torch.no_grad():
         return encoder(*args)
 

@@ -53,6 +53,7 @@ from typing import Any
 from . import journal
 from .actions import build_space
 from .board.board import Board, random_base_board
+from .botclient import BotRunner, LocalSearchBrain, LocalTransport
 from .game import Phase, is_over, lock_seat, start, to_move
 from .record import build_record
 from .search2 import search2
@@ -220,9 +221,10 @@ class Table:
 
     `seat_grace`/`blocked_since` are `_settle_locks`'s own bookkeeping for the
     per-seat setup-lock window (see the module docstring); nothing else here
-    reads them. `runners` (bot-client threads embedded by `web.py` for a
-    locally-picked opponent) arrives in a later phase — this table's `close`
-    only has the journal to worry about for now.
+    reads them. `runners` is every embedded bot-client thread playing a seat
+    at this table (see `Tables._spawn_local_bots`) — `close` has to stop
+    those before the journal, or one could still be mid-decision when its
+    game is marked abandoned.
     """
 
     code: str
@@ -232,6 +234,7 @@ class Table:
     layout: dict
     seat_grace: float = SEAT_GRACE_SECONDS
     blocked_since: float | None = None
+    runners: list[tuple[BotRunner, threading.Thread]] = field(default_factory=list, repr=False)
     last_seen: float = field(default_factory=time.monotonic)
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
@@ -240,6 +243,18 @@ class Table:
             if seat.token is not None and secrets.compare_digest(seat.token, token):
                 return index
         raise ApiError("that token is not for a seat at this game", status=403)
+
+    def close(self) -> None:
+        """Stops every embedded bot runner at this table, then closes the
+        journal. Order matters: a runner still mid-decision when the journal
+        is marked abandoned could otherwise submit one more action into a
+        game already filed as over."""
+        for runner, _ in self.runners:
+            runner.stop.set()
+        for _, thread in self.runners:
+            thread.join(timeout=2.0)
+        if self.session.journal is not None:
+            self.session.journal.abandoned()
 
     def _settle_locks(self, now: float | None = None) -> None:
         """Must be called with `self.lock` held. Advances the per-seat grace
@@ -501,11 +516,40 @@ class Tables:
             seat_grace=self.config.seat_grace if seat_grace is None else float(seat_grace),
         )
 
+        # Registered *before* any bot runner thread starts: a runner's first
+        # move is to look itself up by token (`Tables.by_token`, scanning
+        # `_tables`), and starting it earlier would race that lookup against
+        # this very insert.
         with self._registry_lock:
             self._tables[code] = table
+        self._spawn_local_bots(table)
+
         token = seats[creator_seat].token
         assert token is not None
         return table, token
+
+    def _spawn_local_bots(self, table: Table) -> None:
+        """Starts one embedded `LocalSearchBrain` runner thread per bot seat
+        `table` already has, tokened and all — the in-process half of
+        `botclient.py`'s two brains (see its module docstring). `spawn_bot`
+        (unchanged) builds whatever the spec asks for — `search2`, a plain
+        checkpoint, or a search over one — and the runner drives it through
+        the same token-gated `/api/action` route an external client would
+        use, never a direct write to the session."""
+        board = table.session.game.state.board
+        transport = LocalTransport(self)
+        for index, seat in enumerate(table.seats):
+            if seat.kind is not SeatKind.BOT:
+                continue
+            assert seat.spec is not None and seat.token is not None
+            bot = spawn_bot(seat.spec, board, random.Random(), self.config)
+            brain = LocalSearchBrain(bot=bot, game=table.session.game)
+            runner = BotRunner(seat=index, token=seat.token, transport=transport, brain=brain)
+            thread = threading.Thread(
+                target=runner.run, name=f"bot-{table.code}-{index}", daemon=True
+            )
+            table.runners.append((runner, thread))
+            thread.start()
 
     def get(self, code: str) -> Table:
         code = code.upper()
@@ -513,8 +557,6 @@ class Tables:
             table = self._tables.get(code)
             if table is None:
                 table = self._reopen(code)
-                if table is not None:
-                    self._tables[code] = table
         if table is None:
             raise ApiError(f"no game with code {code}", status=404)
         table.last_seen = time.monotonic()
@@ -528,6 +570,10 @@ class Tables:
         just its spec, nothing a lost token was protecting) and a locked
         one (still locked) — see `resume_session`'s own docstring for why a
         human's old seat is not, and cannot be, specially recovered.
+
+        Registers the rebuilt table itself, before spawning any bot runner
+        (same ordering reason as `create`) — the lock is already held by the
+        caller either way, so there is no separate window to race.
         """
         where = self.config.games_dir if self.config.games_dir is not None else journal.configured_dir()
         path = journal.resumable(where, code)
@@ -540,7 +586,7 @@ class Tables:
         session = resume_session(code, seats, self.config)
         if session is None:
             return None
-        return Table(
+        table = Table(
             code=code,
             seats=seats,
             config=self.config,
@@ -548,6 +594,9 @@ class Tables:
             layout=board_layout(session.game.state.board),
             seat_grace=self.config.seat_grace,
         )
+        self._tables[code] = table
+        self._spawn_local_bots(table)
+        return table
 
     def by_token(self, token: str | None) -> tuple[Table, int]:
         """The game and seat a token names, or a 401/403.
@@ -578,9 +627,7 @@ class Tables:
         """
         stale = [c for c, t in self._tables.items() if now - t.last_seen > TABLE_TTL_SECONDS]
         for code in stale:
-            table = self._tables.pop(code)
-            if table.session.journal is not None:
-                table.session.journal.abandoned()
+            self._tables.pop(code).close()
 
     # --- play -------------------------------------------------------------
 
@@ -603,7 +650,11 @@ class Tables:
         """Re-seat one bot mid-game — models can be swapped at any point, not
         just between games. Rebuilding from `model_options()` (rather than
         accepting a spec) keeps this the same chokepoint: a request names a
-        bot, it never hands one a path."""
+        bot, it never hands one a path. Stops that seat's embedded runner
+        thread and starts a fresh one on the new spec — the old bot's own
+        in-flight decision, if any, still lands (it was already submitted
+        through `/api/action` like any other move), but nothing further
+        comes from it."""
         if not 0 <= seat < len(table.seats) or table.seats[seat].kind is not SeatKind.BOT:
             raise ApiError(f"seat {seat} has no bot to swap")
         try:
@@ -616,6 +667,25 @@ class Tables:
         table.session.bot_specs[seat] = spec
         if table.session.journal is not None:
             table.session.journal.seated(seat=seat, name=model, spec=spec)
+
+        for i, (runner, thread) in enumerate(table.runners):
+            if runner.seat == seat:
+                runner.stop.set()
+                thread.join(timeout=2.0)
+                del table.runners[i]
+                break
+        board = table.session.game.state.board
+        bot = spawn_bot(spec, board, random.Random(), self.config)
+        brain = LocalSearchBrain(bot=bot, game=table.session.game)
+        token = table.seats[seat].token
+        assert token is not None
+        new_runner = BotRunner(seat=seat, token=token, transport=LocalTransport(self), brain=brain)
+        new_thread = threading.Thread(
+            target=new_runner.run, name=f"bot-{table.code}-{seat}", daemon=True
+        )
+        table.runners.append((new_runner, new_thread))
+        new_thread.start()
+
         return table.view(seat)
 
     def record(self, table: Table, seat: int) -> dict:

@@ -17,6 +17,7 @@ from .devcards import (
     spend_card,
 )
 from .economy import Purchase, bank_trade, distribute, pay
+from .ledger import PublicLedger
 from .robber import discard, discard_count, move_robber, steal
 from .trading import Bundle, Offer, can_propose
 from .trading import execute as execute_trade
@@ -62,6 +63,7 @@ class Phase(IntEnum):
 class Game:
     state: GameState
     rng: random.Random
+    ledger: PublicLedger
     phase: Phase = Phase.SETUP_SETTLEMENT
     current_player: int = 0
     setup_queue: list[int] = field(default_factory=list)
@@ -95,6 +97,7 @@ def start(
     return Game(
         state=new_game(board, num_players, rng),
         rng=rng,
+        ledger=PublicLedger.new(num_players),
         setup_queue=queue,
         current_player=queue[0],
         discard_quota=[0] * num_players,
@@ -119,6 +122,7 @@ def imagine(
     return Game(
         state=state,
         rng=rng,
+        ledger=game.ledger.copy(),
         phase=game.phase,
         current_player=game.current_player,
         setup_queue=game.setup_queue[:],
@@ -146,6 +150,31 @@ def _in_second_setup_round(game: Game) -> bool:
     return game.setup_step >= game.state.num_players
 
 
+def _snapshot_hands(game: Game) -> list[list[int]]:
+    """A copy of every seat's hand, to diff against after a mutation whose
+    resource identities are public (see `ledger.PublicLedger.apply_hand_diff`
+    for which events these are and why a steal is never one of them)."""
+    return [hand[:] for hand in game.state.hands]
+
+
+def _record_steal(
+    game: Game, thief: int, victim: int, stolen: Resource | None
+) -> None:
+    """The one hand mutation `_snapshot_hands`/`apply_hand_diff` must never
+    see: a robber or knight steal moves one card whose identity is public to
+    nobody but the thief and the victim. `stolen` is `robber.steal`'s own
+    return value (`None` when the victim held nothing to take, in which case
+    nothing happened and there is nothing to record). The victim's loss is
+    resolved against the *true* resource — see `PublicLedger.spend`'s
+    docstring for why that is the only way to keep the ledger's invariant
+    true rather than merely usually true — and the thief's gain is credited
+    to `unknown` only, never to the resource itself."""
+    if stolen is None:
+        return
+    game.ledger.spend(victim, int(stolen), 1)
+    game.ledger.gain_unknown(thief, 1)
+
+
 def _grant_initial_resources(game: Game, vertex: int) -> None:
     state = game.state
     topology = state.board.topology
@@ -158,10 +187,12 @@ def _grant_initial_resources(game: Game, vertex: int) -> None:
 
 def place_initial_settlement(game: Game, vertex: int) -> None:
     _require(game, Phase.SETUP_SETTLEMENT)
+    before = _snapshot_hands(game)
     place_settlement(game.state, game.current_player, vertex, connected=False)
     game.last_settlement = vertex
     if _in_second_setup_round(game):
         _grant_initial_resources(game, vertex)
+    game.ledger.apply_hand_diff(before, game.state.hands)
     update_longest_road(game.state)
     game.phase = Phase.SETUP_ROAD
 
@@ -206,7 +237,9 @@ def roll_dice(game: Game, roll: int | None = None) -> int:
         ]
         game.phase = Phase.DISCARD if any(game.discard_quota) else Phase.ROBBER
     else:
+        before = _snapshot_hands(game)
         distribute(game.state, roll)
+        game.ledger.apply_hand_diff(before, game.state.hands)
         game.phase = Phase.MAIN
     return roll
 
@@ -240,7 +273,9 @@ def submit_discard(game: Game, player: int, cards: list[int]) -> None:
     _require(game, Phase.DISCARD)
     if game.discard_quota[player] != sum(cards):
         raise ValueError(f"player {player} must discard {game.discard_quota[player]}")
+    before = _snapshot_hands(game)
     discard(game.state, player, cards, game.discard_quota[player])
+    game.ledger.apply_hand_diff(before, game.state.hands)
     game.discard_quota[player] = 0
     _finish_discards(game)
 
@@ -253,6 +288,7 @@ def discard_one(game: Game, player: int, resource: Resource) -> None:
         raise ValueError(f"player {player} holds no {resource.name}")
     game.state.hands[player][resource] -= 1
     game.state.bank[resource] += 1
+    game.ledger.spend(player, int(resource), 1)
     game.discard_quota[player] -= 1
     _finish_discards(game)
 
@@ -261,7 +297,8 @@ def move_robber_to(game: Game, target: int, victim: int | None = None) -> None:
     _require(game, Phase.ROBBER)
     move_robber(game.state, target)
     if victim is not None:
-        steal(game.state, game.current_player, victim, game.rng)
+        stolen = steal(game.state, game.current_player, victim, game.rng)
+        _record_steal(game, game.current_player, victim, stolen)
     game.phase = Phase.MAIN
 
 
@@ -275,10 +312,12 @@ def _check_win(game: Game) -> None:
 def build_road(game: Game, edge: int) -> None:
     """Build a road, spending a free road from road building if one is owed."""
     _require(game, Phase.MAIN)
+    before = _snapshot_hands(game)
     if game.free_roads > 0:
         game.free_roads -= 1
     else:
         pay(game.state, game.current_player, Purchase.ROAD)
+    game.ledger.apply_hand_diff(before, game.state.hands)
     place_road(game.state, game.current_player, edge)
     update_longest_road(game.state)
     _check_win(game)
@@ -286,7 +325,9 @@ def build_road(game: Game, edge: int) -> None:
 
 def build_settlement(game: Game, vertex: int) -> None:
     _require(game, Phase.MAIN)
+    before = _snapshot_hands(game)
     pay(game.state, game.current_player, Purchase.SETTLEMENT)
+    game.ledger.apply_hand_diff(before, game.state.hands)
     place_settlement(game.state, game.current_player, vertex)
     # A new settlement can cut an opponent's route, so this is not only the
     # builder's own longest road that may change.
@@ -296,14 +337,18 @@ def build_settlement(game: Game, vertex: int) -> None:
 
 def build_city(game: Game, vertex: int) -> None:
     _require(game, Phase.MAIN)
+    before = _snapshot_hands(game)
     pay(game.state, game.current_player, Purchase.CITY)
+    game.ledger.apply_hand_diff(before, game.state.hands)
     upgrade_to_city(game.state, game.current_player, vertex)
     _check_win(game)
 
 
 def buy_development_card(game: Game) -> DevCard:
     _require(game, Phase.MAIN)
+    before = _snapshot_hands(game)
     card = buy_dev_card(game.state, game.current_player)
+    game.ledger.apply_hand_diff(before, game.state.hands)
     _check_win(game)
     return card
 
@@ -321,6 +366,8 @@ def play_knight_card(
         raise ValueError(f"cannot play a knight in {game.phase.name}")
     _spend_turn_card(game)
     stolen = play_knight(game.state, game.current_player, target, victim, game.rng)
+    if victim is not None:
+        _record_steal(game, game.current_player, victim, stolen)
     update_largest_army(game.state)
     _check_win(game)
     return stolen
@@ -341,18 +388,29 @@ def play_road_building_card(game: Game) -> None:
 def play_year_of_plenty_card(game: Game, resources: list[Resource]) -> None:
     _require(game, Phase.MAIN)
     _spend_turn_card(game)
+    before = _snapshot_hands(game)
     play_year_of_plenty(game.state, game.current_player, resources)
+    game.ledger.apply_hand_diff(before, game.state.hands)
 
 
 def play_monopoly_card(game: Game, resource: Resource) -> int:
     _require(game, Phase.MAIN)
     _spend_turn_card(game)
-    return play_monopoly(game.state, game.current_player, resource)
+    before = _snapshot_hands(game)
+    taken = play_monopoly(game.state, game.current_player, resource)
+    # Monopoly forces every other seat to publicly hand over every card of
+    # `resource`, so the transfer is fully public despite touching every
+    # seat at once -- the same `apply_hand_diff` every other public mutation
+    # uses, not the hidden-identity path a steal needs.
+    game.ledger.apply_hand_diff(before, game.state.hands)
+    return taken
 
 
 def trade_with_bank(game: Game, give: Resource, receive: Resource) -> None:
     _require(game, Phase.MAIN)
+    before = _snapshot_hands(game)
     bank_trade(game.state, game.current_player, give, receive)
+    game.ledger.apply_hand_diff(before, game.state.hands)
 
 
 def propose_trade(
@@ -421,7 +479,9 @@ def accept_trade(game: Game, responder: int) -> None:
     if not game.pending_responders or game.pending_responders[0] != responder:
         raise ValueError(f"player {responder} is not the one being asked")
     assert game.offer is not None
+    before = _snapshot_hands(game)
     execute_trade(game.state, game.offer, responder)
+    game.ledger.apply_hand_diff(before, game.state.hands)
     _finish_offer(game)
 
 

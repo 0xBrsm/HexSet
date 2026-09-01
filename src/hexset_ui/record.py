@@ -7,8 +7,11 @@ This module says what is true and visible; it never says how a network reads
 it, so it imports nothing model-shaped and knows no feature layout.
 
 Filtering here is load-bearing, not incidental: own hand and dev cards are
-exact, everyone else contributes a total alone. A caller that wants more than
-this record describes is asking the engine to leak a hidden card.
+exact; everyone else's resource composition is only ever as certain as the
+public log makes it (`ledger_known`/`ledger_unknown`, see `hexset_ui.ledger`
+— counting resources is not hidden information in this game, only a steal's
+identity is), and dev-card composition is a total alone. A caller that wants
+more than this record describes is asking the engine to leak a hidden card.
 """
 
 from __future__ import annotations
@@ -21,6 +24,8 @@ from .actions import Action, ActionSpace, ActionType
 from .board.terrain import NUM_RESOURCES
 from .devcards import holdings
 from .game import Game
+from .state import NO_OWNER
+from .trading import responders as offer_responders
 from .victory import award_points
 
 NUM_PAIRS = NUM_RESOURCES * NUM_RESOURCES
@@ -70,6 +75,40 @@ def build_record(
     players = state.num_players
 
     own_dev = holdings(state, seat)
+
+    # The live trade offer, filtered exactly as a viewer's own state_view is:
+    # give/want and the proposer are public while an offer stands, but who
+    # has answered it so far is the proposer's own information only -- a
+    # responder must not condition on an earlier decline (see `webplay.py`'s
+    # own comment on why `state_view` leaves `responders` out entirely).
+    offer = game.offer
+    offer_give = np.zeros(NUM_RESOURCES, dtype=np.int64)
+    offer_want = np.zeros(NUM_RESOURCES, dtype=np.int64)
+    offer_proposer = np.array(NO_OWNER, dtype=np.int64)
+    offer_answered = np.zeros(players, dtype=np.int64)
+    if offer is not None:
+        offer_give = np.array(offer.give, dtype=np.int64)
+        offer_want = np.array(offer.want, dtype=np.int64)
+        offer_proposer = np.array(offer.proposer, dtype=np.int64)
+        if seat == offer.proposer:
+            declined = set(offer_responders(state, offer)) - set(game.pending_responders)
+            for responder in declined:
+                offer_answered[responder] = 1
+
+    # The public-knowledge ledger (`hexset_ui.ledger`): each seat's own
+    # reconstruction from moves that were public by the rules, never from a
+    # steal's hidden identity. `own_hand`/`hand_totals` above already say
+    # the same thing at seat and total granularity; this is the per-resource
+    # floor a bystander's own reasoning could support, plus what it cannot
+    # yet type -- see `PublicLedger`'s own docstring for the proof that this
+    # is exactly (not merely approximately) common knowledge.
+    ledger_known = np.array(
+        [game.ledger.seats[p].known for p in range(players)], dtype=np.int64
+    )
+    ledger_unknown = np.array(
+        [game.ledger.seats[p].unknown for p in range(players)], dtype=np.int64
+    )
+
     return {
         # Board.
         "terrain": np.array(board.terrain, dtype=np.int64),
@@ -106,6 +145,14 @@ def build_record(
             ],
             dtype=np.int64,
         ),
+        # The live trade offer.
+        "offer_give": offer_give,
+        "offer_want": offer_want,
+        "offer_proposer": offer_proposer,
+        "offer_answered": offer_answered,
+        # The public-knowledge ledger.
+        "ledger_known": ledger_known,
+        "ledger_unknown": ledger_unknown,
         # Legality.
         "action_mask": action_mask(space, options),
         "pair_mask": pair_mask(options),

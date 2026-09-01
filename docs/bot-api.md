@@ -70,6 +70,12 @@ Leading batch axis `B` on every tensor.
 | `hand_totals` | `(B, players)` | int64 |
 | `own_dev` | `(B, NUM_DEV_CARDS)` | int64 |
 | `dev_totals` | `(B, players)` | int64 |
+| `offer_give` | `(B, NUM_RESOURCES)` | int64 |
+| `offer_want` | `(B, NUM_RESOURCES)` | int64 |
+| `offer_proposer` | `(B,)` | int64 |
+| `offer_answered` | `(B, players)` | int64 |
+| `ledger_known` | `(B, players, NUM_RESOURCES)` | int64 |
+| `ledger_unknown` | `(B, players)` | int64 |
 | `action_mask` | `(B, space.size)` | bool |
 | `pair_mask` | `(B, NUM_PAIRS)` | bool |
 
@@ -85,6 +91,16 @@ Leading batch axis `B` on every tensor.
 
 `NetworkBot` reads `action_index`/`pair_index`; searches read
 `prior`/`pair_prior`/`value`. One graph serves both.
+
+**Known remaining engine drift**, not fixed by the fields above: dev-hexset's
+`Game` also carries an `offered: set[(give, want)]` that prunes a turn's
+repeat trade proposals from the sample offered, and its `propose_trade`
+draws the neutral trade-responder order from the game's own RNG rather than
+clockwise from the proposer (`hexset_ui/trading.py`'s `responders` still
+uses clockwise). Both are behavioural, not tensor-shape, differences — a
+checkpoint fed hexset-ui's record sees the same *fields* dev-hexset produces,
+but the *play* they were trained against can still diverge until these two
+land here as well.
 
 ## 3. The graph — `contract=1` (legacy)
 

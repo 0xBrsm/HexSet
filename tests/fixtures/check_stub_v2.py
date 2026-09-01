@@ -70,6 +70,16 @@ def record(game, seat, options):
             [sum(d) + sum(n) for d, n in zip(st.dev_cards, st.new_dev_cards)],
             dtype=np.int64,
         ),
+        "offer_give": np.zeros(NUM_RESOURCES, dtype=np.int64),
+        "offer_want": np.zeros(NUM_RESOURCES, dtype=np.int64),
+        "offer_proposer": np.int64(-1),
+        "offer_answered": np.zeros(4, dtype=np.int64),
+        "ledger_known": np.array(
+            [game.ledger.seats[p].known for p in range(4)], dtype=np.int64
+        ),
+        "ledger_unknown": np.array(
+            [game.ledger.seats[p].unknown for p in range(4)], dtype=np.int64
+        ),
         "action_mask": mask,
         "pair_mask": pair,
     }

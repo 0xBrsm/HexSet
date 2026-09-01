@@ -40,6 +40,12 @@ INPUTS = [
     ("hand_totals", TP.INT64, [B, PLAYERS]),
     ("own_dev", TP.INT64, [B, DEV]),
     ("dev_totals", TP.INT64, [B, PLAYERS]),
+    ("offer_give", TP.INT64, [B, RESOURCES]),
+    ("offer_want", TP.INT64, [B, RESOURCES]),
+    ("offer_proposer", TP.INT64, [B]),
+    ("offer_answered", TP.INT64, [B, PLAYERS]),
+    ("ledger_known", TP.INT64, [B, PLAYERS, RESOURCES]),
+    ("ledger_unknown", TP.INT64, [B, PLAYERS]),
     ("action_mask", TP.BOOL, [B, SPACE]),
     ("pair_mask", TP.BOOL, [B, PAIRS]),
 ]

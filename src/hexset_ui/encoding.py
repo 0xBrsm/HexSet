@@ -11,6 +11,17 @@ encoded identically however the table is numbered.
 encoded. Own hand and own development cards are exact; opponents contribute
 counts alone. Nothing downstream can accidentally read a hidden card, which is
 the gap the published agents for this game leave open.
+
+**This module is frozen at its current (`contract=1`) feature layout, by
+design, and is not kept in sync with dev-hexset's own `encoding.py`.**
+dev-hexset has since widened its global feature block with a live-offer
+section and a per-seat public-ledger section (see `hexset_ui.record` and
+`docs/bot-api.md`'s `contract=2`, which does carry both). Every `contract=1`
+checkpoint under `models/` was trained against *this* narrower layout —
+widening it here would silently break every one of them, which is exactly
+what the `contract` metadata prop (`onnxbot.py`) exists to prevent by
+letting a v1 file keep its v1 features forever. New work, ledger included,
+goes through `record.py`'s `contract=2` path instead of here.
 """
 
 from __future__ import annotations

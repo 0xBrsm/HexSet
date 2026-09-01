@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Wheel graph: a hex ring of six nodes plus a hub, one line per edge,
+       traced from the photographed source icon (see commit message). -->
+  <g stroke="#1076a4" stroke-width="16" stroke-linecap="round">
+    <line x1="100" y1="100" x2="100"   y2="38"/>
+    <line x1="100" y1="100" x2="153.7" y2="69"/>
+    <line x1="100" y1="100" x2="153.7" y2="131"/>
+    <line x1="100" y1="100" x2="100"   y2="162"/>
+    <line x1="100" y1="100" x2="46.3"  y2="131"/>
+    <line x1="100" y1="100" x2="46.3"  y2="69"/>
+    <line x1="100"   y1="38"  x2="153.7" y2="69"/>
+    <line x1="153.7" y1="69"  x2="153.7" y2="131"/>
+    <line x1="153.7" y1="131" x2="100"   y2="162"/>
+    <line x1="100"   y1="162" x2="46.3"  y2="131"/>
+    <line x1="46.3"  y1="131" x2="46.3"  y2="69"/>
+    <line x1="46.3"  y1="69"  x2="100"   y2="38"/>
+  </g>
+  <g fill="#1076a4">
+    <circle cx="100"   cy="100" r="22"/>
+    <circle cx="100"   cy="38"  r="18"/>
+    <circle cx="153.7" cy="69"  r="18"/>
+    <circle cx="153.7" cy="131" r="18"/>
+    <circle cx="100"   cy="162" r="18"/>
+    <circle cx="46.3"  cy="131" r="18"/>
+    <circle cx="46.3"  cy="69"  r="18"/>
+  </g>
+</svg>

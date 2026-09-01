@@ -1,3 +1,5 @@
+<img src="docs/logo.svg" width="96" alt="HexSet logo">
+
 # HexSet-UI
 
 HexSet is a human-vs-bot hex-tile trading and building game you play in a browser. A dependency-free `http.server` backend, a single-file vanilla-JS frontend, and ONNX Runtime for bot inference — no PyTorch, no GPU required.

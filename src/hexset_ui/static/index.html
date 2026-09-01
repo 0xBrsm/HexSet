@@ -367,24 +367,6 @@
   #lobby.show { display: flex; }
   #lobby h1 { margin: 0; font-size: 1.4rem; }
   #lobby .hint { color: var(--muted); max-width: 30rem; line-height: 1.5; margin: 0; }
-  /* Monospaced and wide-tracked because this is the one string on the page
-     somebody reads out loud or types into another device. */
-  #lobby-code {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 2.6rem; font-weight: 700; letter-spacing: 0.35rem;
-    padding: 0.4rem 0 0.4rem 0.35rem; color: var(--accent);
-  }
-  #lobby-seats { display: flex; flex-direction: column; gap: 0.4rem; width: min(22rem, 100%); }
-  .lobby-seat {
-    display: flex; align-items: center; gap: 0.6rem; text-align: left;
-    padding: 0.5rem 0.7rem; border: 1px solid var(--border); border-radius: 8px;
-    background: var(--panel);
-  }
-  .lobby-seat .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
-  .lobby-seat .who { flex: 1; }
-  .lobby-seat .kind { color: var(--muted); font-size: 0.85rem; }
-  .lobby-seat.empty { border-style: dashed; opacity: 0.6; }
-  .lobby-seat.mine { border-color: var(--accent); }
   .lobby-row { display: flex; gap: 0.6rem; flex-wrap: wrap; justify-content: center; }
   #landing { display: flex; flex-direction: column; gap: 0.6rem; }
   #lobby input, #lobby select {
@@ -623,29 +605,26 @@
     <svg viewBox="0 0 512 512"><use href="#icon-restart"></use></svg>
   </button>
 </header>
-<!-- Shown from first paint until the game is dealt, and never again after:
-     starting is one-way (see api.Table.start). Everything on it is filled in
-     by renderLobby(). -->
+<!-- Shown from first paint until either a game is dealt/joined (the front
+     page) or, briefly, while /<code> is trying to join/observe one — there is
+     no separate roster-and-start screen any more, a game is dealt and live
+     the instant it exists (see api.py's module docstring). Once entered
+     (enterGame), this never comes back. -->
 <div id="lobby" class="show">
   <h1 id="lobby-title">HexSet</h1>
-  <div id="lobby-code"></div>
   <p class="hint" id="lobby-hint"></p>
-  <div id="lobby-seats"></div>
-  <div id="lobby-actions" class="lobby-row">
-    <input id="lobby-name" maxlength="40" placeholder="Your name" autocomplete="off">
-    <button id="lobby-start" class="primary">Start game</button>
-  </div>
-  <!-- The front page only: how many seats to leave for other people, and the
-       way in to somebody else's table. Hidden the moment we have a code. -->
+  <!-- The front page only: your name, how many local bots to seat, and the
+       way in to somebody else's game. Hidden the moment we have a code. -->
   <div id="landing">
+    <input id="lobby-name" maxlength="40" placeholder="Your name" autocomplete="off">
     <div class="lobby-row">
-      <select id="landing-open" title="Seats for other people">
-        <option value="0">Just me and the bots</option>
-        <option value="1">Leave 1 seat open</option>
-        <option value="2">Leave 2 seats open</option>
-        <option value="3">Leave 3 seats open</option>
+      <select id="landing-bots" title="Local bots to seat">
+        <option value="0" selected>No bots — open game</option>
+        <option value="1">1 bot</option>
+        <option value="2">2 bots</option>
+        <option value="3">3 bots</option>
       </select>
-      <button id="landing-deal" class="primary">Deal a table</button>
+      <button id="landing-deal" class="primary">Deal a game</button>
     </div>
     <div class="lobby-row">
       <input id="landing-code" maxlength="6" placeholder="Join a code" autocomplete="off">
@@ -936,6 +915,14 @@ async function loadModels() {
 // itself renders a bot seat as a <select>, not this — see renderPlayers.
 function seatLabel(seat) {
   if (seat === state.seat) return "you";
+  // Every game now deals all MAX_SEATS seats from the start, claimed or
+  // not (see api.py's module docstring) — state.players has an entry for
+  // an open one too, indistinguishable from a claimed-but-unnamed human by
+  // its fields alone, so this checks state.seats' own kind instead.
+  const seatInfo = state?.seats?.[seat];
+  if (seatInfo && seatInfo.kind === "empty") {
+    return state?.locked?.includes(seat) ? "locked seat" : "open seat";
+  }
   const p = state?.players.find((p) => p.seat === seat);
   return (p && p.name) || `Player ${seat + 1}`;
 }
@@ -1229,59 +1216,28 @@ function cancelRobberMove() {
 
 // --- Sending actions --------------------------------------------------
 
-// Each POST here plays at most one seat's turn server-side (GameSession's
-// advance_one_seat, not the whole-cascade advance_bots) and returns that
-// seat's own already-applied state. A 350ms-a-seat *narration* was tried
-// here once and removed — it announced who had acted while the board still
-// showed the state before they did. This isn't that: settle() below drives
-// a real request per seat, so whatever renderStatus() shows (see its
-// "not the human's turn" branch) is the truth as of that response, not a
-// guess dressed up to look like progress.
+// Nobody's turn is ever run on their behalf any more: a bot seat decides
+// and submits its own action from outside this page (an embedded runner
+// thread, or an external `python -m hexset_ui.botclient` process, both
+// through the same POST /api/action a browser uses — see botclient.py and
+// api.py's module docstrings). All this page does when it isn't our own
+// move is notice that something changed: poll, and render whatever the
+// game looks like now.
 
-// True while the seat on move is somebody's rather than a bot's — our own or
-// another person's at the same table. Nothing to advance either way: bots
-// settle, people are waited for (see settle and pollWhileWaiting).
-function personOnMove() {
-  return (state.human_seats || []).includes(state.to_move);
-}
-
-// Every call that might hand the table to a bot funnels through settle()
-// afterward, which keeps requesting POST /api/advance — one seat, one
-// response, one render() — until a person is on move again, the game ends, or
-// a setup road's handoff is waiting on our own confirm.
-async function settle() {
-  // advance_blocked, not awaiting_confirm: the latter is only ever true for
-  // the one seat actually holding the gate (see webplay.state_view), so
-  // another viewer watching a different seat's pending confirm would
-  // otherwise see neither flag set and keep hammering /api/advance with
-  // nothing changing on the other end.
-  while (!state.game_over && !state.advance_blocked && !personOnMove()) {
-    const {ok, data} = await postJSON("/api/advance", {});
-    if (!ok) {
-      showNotice(data.error || "Something went wrong.");
-      break;
-    }
-    state = data;
-    render();
-  }
-  pollWhileWaiting();
-}
-
-// While another person is thinking there is nothing to advance and no request
-// of ours that will come back different — so this is the one place the client
-// polls. Stops the moment the turn is ours again, and every entry point
-// clears the previous timer, so there is never more than one of these
-// running however many times settle() ends on somebody else's turn.
+// While it isn't our move there is nothing to submit and no request of
+// ours that will come back different — so this is the one place the client
+// polls. Stops the moment the turn is ours again (or the game ends), and
+// every entry point clears the previous timer, so there is never more than
+// one of these running.
 let waitTimer = null;
 function pollWhileWaiting() {
   clearTimeout(waitTimer);
-  if (state.game_over || state.to_move === state.seat || state.awaiting_confirm) return;
+  if (state.game_over || state.to_move === state.seat) return;
   waitTimer = setTimeout(async () => {
     if (inFlight) { pollWhileWaiting(); return; }
     state = await getJSON("/api/state");
     render();
-    if (!personOnMove() && !state.game_over) await settle();
-    else pollWhileWaiting();
+    pollWhileWaiting();
   }, 1500);
 }
 
@@ -1315,7 +1271,7 @@ function sendAction(action) {
     if (ok) state = data;
     showNotice(ok ? "" : (data.error || "That was not legal."));
     render();
-    if (ok) await settle();
+    if (ok) pollWhileWaiting();
   });
 }
 
@@ -1324,7 +1280,7 @@ function sendAction(action) {
 // silently become somebody else's.
 function newGame() {
   return blocking(async () => {
-    const {ok, data} = await postJSON("/api/tables", {bots: currentBotModels, name: playerName()});
+    const {ok, data} = await postJSON("/api/games", {bots: currentBotModels, name: playerName()});
     if (!ok) { showNotice(data.error || "Could not deal a new game."); return; }
     rememberToken(data.code, data.token);
     location.href = `/${data.code}`;
@@ -1337,20 +1293,6 @@ function undoBuild() {
     if (ok) state = data;
     showNotice(ok ? "" : (data.error || "Nothing to undo."));
     render();
-  });
-}
-
-// Lets the bots' turn(s) actually run after a setup road handed off to one
-// — see state.awaiting_confirm and GameSession.confirm_setup_turn. Shares
-// the #end-turn button/corner with sendAction(END_TURN) itself; which one a
-// click means is decided where that's wired, at the bottom of the script.
-function confirmSetupTurn() {
-  return blocking(async () => {
-    const {ok, data} = await postJSON("/api/confirm", {});
-    if (ok) state = data;
-    showNotice(ok ? "" : (data.error || "Could not continue."));
-    render();
-    if (ok) await settle();
   });
 }
 
@@ -1397,19 +1339,24 @@ function renderStatus() {
       : `PLAYER ${state.winner + 1} WINS`;
     return;
   }
-  // Whoever settle() just requested a seat's turn for (or is about to) — not
-  // the human's decision to make, so the phase underneath it is beside the
-  // point. Excludes awaiting_confirm: to_move has already moved on to
-  // whoever's next by then, but the human still has the confirm button to
-  // press first (see state.awaiting_confirm), so the phase label stays put
-  // until they do. True the instant this renders either way: every
-  // /api/advance response is that seat's own already-applied move, not a
-  // name announced ahead of the board (see the comment above settle()).
-  if (!state.awaiting_confirm && state.to_move !== state.seat) {
+  // An open seat the setup snake is currently waiting on, counting down to
+  // locking it out for good (see api.Table._settle_locks) — takes over the
+  // phase line while it lasts, since nothing else can happen at the table
+  // until it resolves one way or the other.
+  if (state.waiting_for) {
+    const seconds = Math.ceil(state.waiting_for.seconds_remaining);
+    phaseEl.textContent = `SEAT ${state.waiting_for.seat + 1} OPEN — LOCKS IN ${seconds}S`;
+    return;
+  }
+  // Somebody else's decision to make, so the phase underneath it is beside
+  // the point.
+  if (state.to_move !== state.seat) {
     // Named when the seat is a person's, because that is a wait with no end
-    // this client can see: a bot's turn resolves in the next response, but
-    // another player's takes as long as they take (see pollWhileWaiting).
-    phaseEl.textContent = personOnMove()
+    // this client can see: a bot's turn resolves whenever its own runner
+    // next polls, but another player's takes as long as they take (see
+    // pollWhileWaiting).
+    const mover = state.players[state.to_move];
+    phaseEl.textContent = mover && !mover.bot
       ? `WAITING FOR ${seatLabel(state.to_move).toUpperCase()}`
       : `PLAYER ${state.to_move + 1}'S TURN`;
     return;
@@ -1799,12 +1746,7 @@ function renderBoardDynamic() {
 // trading, discarding, the robber's victim, Monopoly's resource, Year of
 // Plenty's pair — is a mode of the one modal.
 function renderBoardButtons() {
-  // awaiting_confirm counts as "my turn" too: to_move has already moved on
-  // to whoever's next (see GameSession.apply_human_action), but the human
-  // still has the one decision left — confirm — before that's real. Nothing
-  // else legal_actions-based reads this differently, since the server
-  // empties legal_actions the moment to_move isn't the human regardless.
-  const myTurn = !state.game_over && (state.to_move === state.seat || state.awaiting_confirm);
+  const myTurn = !state.game_over && state.to_move === state.seat;
   // A robber move is the one choice the game asks for on the board rather
   // than in the modal, and it behaves like a modal mode all the same: nothing
   // behind it is reachable until it's answered. When it came from a Knight,
@@ -1816,10 +1758,7 @@ function renderBoardButtons() {
   // rule — so it reads the server's own can_undo flag instead of offered().
   showFab("undo-build", myTurn && !move && Boolean(state.can_undo));
   showFab("roll-dice", offered("ROLL"));
-  // The same button doubles as the setup-road confirm — see the click
-  // handler wired at the bottom of the script, which is what tells the two
-  // apart (offered("END_TURN") vs awaiting_confirm) rather than this line.
-  showFab("end-turn", offered("END_TURN") || (myTurn && !move && Boolean(state.awaiting_confirm)));
+  showFab("end-turn", offered("END_TURN"));
   showFab("buy-dev-card", offered("BUY_DEV_CARD"));
   // Not an action at all, this one: it's the way back out of a robber move
   // that was volunteered, which is the only kind there is a way back out of.
@@ -2363,14 +2302,9 @@ for (const [id, type] of [["roll-dice", "ROLL"], ["buy-dev-card", "BUY_DEV_CARD"
     if (action) sendAction(action);
   });
 }
-// #end-turn doubles as the setup-road confirm (see confirmSetupTurn) — an
-// actual END_TURN if one's on offer, the confirm otherwise, since the two
-// are never both true at once (legal_actions is empty whenever
-// awaiting_confirm is, per GameSession.apply_human_action).
 document.getElementById("end-turn").addEventListener("click", () => {
   const action = legalAction("END_TURN");
   if (action) sendAction(action);
-  else if (state.awaiting_confirm) confirmSetupTurn();
 });
 document.getElementById("cancel-robber").addEventListener("click", cancelRobberMove);
 document.getElementById("undo-build").addEventListener("click", undoBuild);
@@ -2459,143 +2393,99 @@ function lobbyError(text) {
   document.getElementById("lobby-error").textContent = text || "";
 }
 
-function renderLobby() {
-  document.getElementById("lobby-code").textContent = state.code || "";
-  const empty = state.seats.filter((s) => s.kind === "empty").length;
-  document.getElementById("lobby-hint").textContent = empty
-    ? `Share this code — ${empty} seat${empty === 1 ? "" : "s"} still open. ` +
-      "A seat nobody takes is left out of the game."
-    : "Every seat is taken. Start whenever you're ready.";
-
-  const list = document.getElementById("lobby-seats");
-  list.textContent = "";
-  for (const seat of state.seats) {
-    const row = html("div", {class: `lobby-seat ${seat.kind === "empty" ? "empty" : ""} ${seat.seat === state.seat ? "mine" : ""}`});
-    const dot = html("div", {class: "dot"});
-    dot.style.background = SEAT_COLORS[seat.seat].fill;
-    row.appendChild(dot);
-    // textContent, not html()'s innerHTML: a seat's name is whatever the
-    // person in it typed, and it is shown to everyone else at the table.
-    const who = html("div", {class: "who"});
-    who.textContent = seat.name || (seat.kind === "empty" ? "Open seat" : `Player ${seat.seat + 1}`);
-    row.appendChild(who);
-    const kind = html("div", {class: "kind"});
-    kind.textContent = seat.seat === state.seat ? "you" : seat.kind === "player" ? "player" : seat.kind;
-    row.appendChild(kind);
-    list.appendChild(row);
-  }
-  document.getElementById("lobby-start").disabled = !state.can_start;
-}
-
-// Polled rather than pushed: a second person joining is the only thing that
-// changes a lobby, and it is not worth a websocket to hear about it.
-let lobbyTimer = null;
-async function pollLobby() {
-  clearTimeout(lobbyTimer);
-  const next = await getJSON("/api/state");
-  if (next.error) { lobbyError(next.error); return; }
-  state = next;
-  if (state.started) { await enterGame(); return; }
-  renderLobby();
-  lobbyTimer = setTimeout(pollLobby, 2000);
-}
-
-async function startGame() {
-  document.getElementById("lobby-start").disabled = true;
-  const {ok, data} = await postJSON("/api/start", {});
-  if (!ok) { lobbyError(data.error || "Could not start."); renderLobby(); return; }
-  state = data;
-  await enterGame();
-}
-
 // The one-way door: the board needs a dealt game to lay out, so it is loaded
-// here rather than at boot, and the lobby never comes back.
+// here rather than at boot, and the lobby never comes back. Works the same
+// for a seated player or a token-free observer (state.seat is null for the
+// latter — nothing downstream needs telling apart the two explicitly, since
+// every "is it my turn"/"is this my seat" check already reads state.seat).
 async function enterGame() {
-  clearTimeout(lobbyTimer);
   await loadBoard();
   setLobbyOpen(false);
   render();
-  await settle();
+  pollWhileWaiting();
 }
-
-document.getElementById("lobby-start").addEventListener("click", startGame);
 
 // --- The front page -----------------------------------------------------
 
-async function dealTable() {
-  const open = Number(document.getElementById("landing-open").value);
-  const body = {open_seats: open};
+async function dealGame() {
+  const bots = Number(document.getElementById("landing-bots").value);
+  const body = {bots: currentBotModels.slice(0, bots)};
   if (playerName()) body.name = playerName();
-  const {ok, data} = await postJSON("/api/tables", body);
-  if (!ok) { lobbyError(data.error || "Could not deal a table."); return; }
+  const {ok, data} = await postJSON("/api/games", body);
+  if (!ok) { lobbyError(data.error || "Could not deal a game."); return; }
   rememberToken(data.code, data.token);
   location.href = `/${data.code}`;
 }
 
-// Nothing is checked here: a code either has a table behind it or it doesn't,
-// and that is the server's answer to give (see boot's join branch, which is
-// where this lands).
+// Nothing is checked here: a code either has a game behind it or it doesn't,
+// and that is the server's answer to give (see boot, where this lands).
 function joinByCode() {
   const code = document.getElementById("landing-code").value.trim().toUpperCase();
   if (code) location.href = `/${code}`;
 }
 
-document.getElementById("landing-deal").addEventListener("click", dealTable);
+document.getElementById("landing-deal").addEventListener("click", dealGame);
 document.getElementById("landing-join").addEventListener("click", joinByCode);
 document.getElementById("landing-code").addEventListener("keydown", (e) => {
   if (e.key === "Enter") joinByCode();
 });
-// Sent as it is typed rather than kept until the deal, so the other seats see
-// who they are waiting for.
-nameInput.addEventListener("change", () => {
-  if (playerName()) postJSON("/api/name", {name: playerName()}).then(pollLobby);
-});
 
 // --- Boot ---------------------------------------------------------------
 //
-// Three ways in, one end state: a token for this table. The front page deals
-// a table and moves to its address; a code we already hold a token for is
-// resumed; a code we don't is joined.
+// A game is live and dealt from the moment it exists — no lobby to wait
+// through. Three ways in, one end state: a seat, or (failing that) a
+// read-only look at the game. The front page deals a game and moves to its
+// address; a code we already hold a token for reads state directly; a code
+// we don't is joined, claiming a random open seat — and if there is none
+// left (or none ever existed), falls back to observing rather than a dead
+// end (enterObserving tells the two apart itself, by whether that request
+// also errors).
+
+async function enterObserving(code) {
+  const view = await getJSON(`/api/table/${code}`);
+  if (view.error) {
+    document.getElementById("lobby-title").textContent = "No such game";
+    document.getElementById("lobby-hint").textContent = view.error;
+    return;
+  }
+  state = view;
+  await enterGame();
+}
 
 (async function boot() {
   await loadModels();
   document.getElementById("landing").style.display = tableCode ? "none" : "";
-  document.getElementById("lobby-start").style.display = tableCode ? "" : "none";
   if (!tableCode) {
     document.getElementById("lobby-hint").textContent =
       "Play the bots on your own, or leave seats open and share the code you get.";
     return;
   }
 
-  if (!tokenFor(tableCode)) {
-    const {ok, data} = await postJSON("/api/join", {code: tableCode});
-    if (!ok) {
-      // The table is full, already playing, or long gone. Say which, and
-      // leave the way out visible — the header's New game button deals a
-      // fresh table rather than trying this one again.
-      document.getElementById("lobby-title").textContent = "Can't join this table";
-      document.getElementById("lobby-code").textContent = tableCode;
-      document.getElementById("lobby-hint").textContent = data.error || "";
-      document.getElementById("lobby-actions").style.display = "none";
+  if (tokenFor(tableCode)) {
+    const first = await getJSON("/api/state");
+    if (first.error) {
+      // A token this server has never heard of — an old game, evicted or
+      // restarted out from under us (a restart re-tokens bot seats fresh but
+      // opens every human one back up — see api.Tables._reopen; there is no
+      // lost token to recover). Dropping it turns the next load into a clean
+      // join attempt instead of the same error forever.
+      forgetToken(tableCode);
+      location.reload();
       return;
     }
-    rememberToken(tableCode, data.token);
-  }
-
-  const first = await getJSON("/api/state");
-  if (first.error) {
-    // A token this server has never heard of — an old table, evicted or
-    // restarted out from under us. Dropping it turns the next reload into a
-    // clean join attempt instead of the same error forever.
-    forgetToken(tableCode);
-    location.reload();
+    state = first;
+    await enterGame();
     return;
   }
-  state = first;
-  if (state.started) { await enterGame(); return; }
-  nameInput.value = (state.seats[state.seat] || {}).name || "";
-  renderLobby();
-  pollLobby();
+
+  const {ok, data} = await postJSON("/api/join", {code: tableCode, name: playerName()});
+  if (ok) {
+    rememberToken(tableCode, data.token);
+    state = data;
+    await enterGame();
+    return;
+  }
+  await enterObserving(tableCode);
 })();
 </script>
 </body>

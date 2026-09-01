@@ -1,15 +1,18 @@
-"""An MCP server so an LLM can take a seat at a HexSet table, over stdio.
+"""An MCP server so an LLM can take a seat in a HexSet game, over stdio.
 
 This is a thin client of the HTTP API `api.py` defines and `web.py` serves,
 not a second game engine binding: every tool below is a `urllib` call to a
 running `python -m hexset_ui.web` (see `HEXSET_UI_BASE_URL`). That server can
-be anywhere — this is how an LLM joins a table on a machine that actually has
-ONNX Runtime while running somewhere that does not.
+be anywhere — this is how an LLM joins a game on a machine that actually has
+ONNX Runtime while running somewhere that does not. A bot checkpoint reaches
+the same server the same way — see `botclient.py` — this module and that one
+are peers, not one built on the other.
 
 Identity is the seat token the API mints (see `api.py`), held in this process
-for its lifetime. One MCP connection is one seat at one table: `new_table`
-deals a fresh one, `join` takes an empty seat at somebody else's by its code,
-and either way the token that comes back is what every later tool acts with.
+for its lifetime. One MCP connection is one seat at one game: `new_game`
+deals a fresh one, dealt and playable immediately (there is no lobby to
+start), `join` takes an open seat at somebody else's by its code, and either
+way the token that comes back is what every later tool acts with.
 
 Standard library only, deliberately: the official `mcp` SDK pulls in
 `pydantic` (a compiled, Rust-built dependency `onnxruntime` and `numpy` don't
@@ -41,17 +44,10 @@ BASE_URL = os.environ.get("HEXSET_UI_BASE_URL", "http://127.0.0.1:8770").rstrip(
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_INFO = {"name": "hexset-ui", "version": "0.1.0"}
 
-# The seat this connection is playing, set by new_table/join and sent on every
+# The seat this connection is playing, set by new_game/join and sent on every
 # request after. A module global for the same reason the cookie jar it
 # replaced was one: the process is the client, and there is exactly one of it.
 _token: str | None = None
-
-# advance_one_seat, looped, is what settles a bot cascade after a human
-# action; a real game never has more seats left to settle than this, so a loop
-# still running past it means something is wedged rather than merely a long
-# turn, and continuing to spin at that point would starve the LLM of a
-# response with nothing to show for it.
-_MAX_CASCADE_STEPS = 64
 
 
 class ToolError(Exception):
@@ -90,36 +86,7 @@ def _request_ok(method: str, path: str, body: dict | None = None) -> dict:
 
 def _seated() -> None:
     if _token is None:
-        raise ToolError("not at a table yet — call new_table() or join(code) first")
-
-
-def _settle(state: dict) -> dict:
-    """Runs `state` forward through the bot seats on move.
-
-    Stops as soon as a person is on move, which is not the same as "our turn"
-    now that a table can seat several: another human's turn is nobody's to
-    play through, so the LLM is handed the state and polls `state()` until it
-    comes back around. The browser drives this same cascade one response at a
-    time for UI pacing an LLM has no use for.
-
-    Read off `to_move` and not `current_player`, which are the same seat only
-    most of the time: a bot's trade offer and a seven's discards both put
-    somebody else on move in the middle of that bot's turn, and asking the
-    wrong one there means advancing a seat that is waiting on a person, over
-    and over, until this loop gives up.
-    """
-    for _ in range(_MAX_CASCADE_STEPS):
-        if state.get("game_over") or state.get("to_move") in (state.get("human_seats") or []):
-            return state
-        # advance_blocked (unlike awaiting_confirm, which is only ever true
-        # for the one seat actually holding it) is set whenever *any* seat's
-        # pending confirm has the cascade gate closed — including one that
-        # isn't ours to clear, which nothing here can do anything about.
-        if state.get("advance_blocked") and not state.get("awaiting_confirm"):
-            return state
-        path = "/api/confirm" if state.get("awaiting_confirm") else "/api/advance"
-        state = _request_ok("POST", path)
-    raise ToolError("bot cascade did not settle — is a bot stuck?")
+        raise ToolError("not at a game yet — call new_game() or join(code) first")
 
 
 def _seat(result: dict) -> dict:
@@ -138,27 +105,22 @@ def _models() -> dict:
     return _request_ok("GET", "/api/models")
 
 
-def _new_table(opponents: list[str] | None = None, open_seats: int = 0, name: str | None = None) -> dict:
-    body: dict = {"open_seats": open_seats}
+def _new_game(opponents: list[str] | None = None, name: str | None = None) -> dict:
+    body: dict = {}
     if opponents:
         body["bots"] = opponents
     if name:
         body["name"] = str(name).strip()[:40]
-    return _seat(_request_ok("POST", "/api/tables", body))
+    return _seat(_request_ok("POST", "/api/games", body))
 
 
 def _join(code: str, name: str | None = None) -> dict:
     if not isinstance(code, str) or not code.strip():
-        raise ToolError("code must be a table's six-character join code")
+        raise ToolError("code must be a game's six-character code")
     body: dict = {"code": code.strip().upper()}
     if name:
         body["name"] = str(name).strip()[:40]
     return _seat(_request_ok("POST", "/api/join", body))
-
-
-def _start() -> dict:
-    _seated()
-    return _settle(_request_ok("POST", "/api/start"))
 
 
 def _board() -> dict:
@@ -181,7 +143,7 @@ def _act(index: int) -> dict:
             if options
             else "index out of range — state()'s legal_actions is empty; it is not your turn"
         )
-    return _settle(_request_ok("POST", "/api/action", {"action": options[index]}))
+    return _request_ok("POST", "/api/action", {"action": options[index]})
 
 
 def _undo() -> dict:
@@ -193,14 +155,15 @@ def _undo() -> dict:
 _TOOLS: dict[str, tuple] = {
     "models": (
         _models,
-        "List the opponent names new_table's `opponents` argument accepts.",
+        "List the opponent names new_game's `opponents` argument accepts.",
         {"type": "object", "properties": {}},
     ),
-    "new_table": (
-        _new_table,
-        "Deal a new table with you in the first seat, returning its join code. "
-        "Nothing is played until start() — leave open seats and share the code "
-        "if other people are joining.",
+    "new_game": (
+        _new_game,
+        "Deal a new game, playable immediately: you at one random seat, any "
+        "named opponents at others, everything else open for other people (or "
+        "other bots) to join by the code this returns. There is no separate "
+        "start — the board is live from the first response.",
         {
             "type": "object",
             "properties": {
@@ -208,15 +171,8 @@ _TOOLS: dict[str, tuple] = {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": (
-                        "Names from models(), one per bot seat. Omit for the server's "
-                        "own default lineup, which shrinks to fit `open_seats`."
-                    ),
-                },
-                "open_seats": {
-                    "type": "integer",
-                    "description": (
-                        "How many seats to leave empty for other people to join by "
-                        "code. A seat nobody takes is not dealt in at all."
+                        "Names from models(), one per bot seat to fill at the deal. "
+                        "Omit for no bots at all — every other seat stays open."
                     ),
                 },
                 "name": {"type": "string", "description": "Your display name, up to 40 characters."},
@@ -225,24 +181,18 @@ _TOOLS: dict[str, tuple] = {
     ),
     "join": (
         _join,
-        "Take an empty seat at an existing table by its six-character code. Fails "
-        "if the table has no empty seat or has already started — a game in "
-        "progress has only the seats it was dealt with.",
+        "Take a random open seat at an existing game by its six-character code. "
+        "Fails if every seat is taken or has locked out (see state()'s `locked` "
+        "and `waiting_for`) — an empty seat the game's setup has already played "
+        "past is retired for the rest of that game.",
         {
             "type": "object",
             "properties": {
-                "code": {"type": "string", "description": "The table's six-character join code."},
+                "code": {"type": "string", "description": "The game's six-character code."},
                 "name": {"type": "string", "description": "Your display name, up to 40 characters."},
             },
             "required": ["code"],
         },
-    ),
-    "start": (
-        _start,
-        "Deal the cards and begin play, dropping any seat still empty. Anyone at "
-        "the table may call it. Returns the state once every bot ahead of a person "
-        "in the opening turn order has played.",
-        {"type": "object", "properties": {}},
     ),
     "board": (
         _board,
@@ -253,17 +203,21 @@ _TOOLS: dict[str, tuple] = {
     ),
     "state": (
         _state,
-        "The full current game state: every seat's public info (and your own hand), "
-        "the board's dynamic contents (roads, settlements, cities, the robber), and "
-        "`legal_actions` — a 0-indexed list of the actions act() currently accepts, "
-        "empty when it is not your turn. Poll this while another person is thinking.",
+        "The full current game state: every seat's public info (hand size, and "
+        "your own hand; the public resource-count ledger for everyone else — "
+        "counting isn't hidden information here, only a steal's identity and "
+        "dev-card types are), the board's dynamic contents, and `legal_actions` "
+        "— a 0-indexed list of the actions act() currently accepts, empty when "
+        "it is not your turn. Poll this while another seat is thinking: nothing "
+        "plays a turn on your behalf, bot seats included.",
         {"type": "object", "properties": {}},
     ),
     "act": (
         _act,
         "Play legal_actions[index] from the most recent state() (call state() "
-        "first if unsure what's legal right now). Returns the state afterward, "
-        "every bot's reply already played out, stopping if a person is next.",
+        "first if unsure what's legal right now). Returns the state right after "
+        "that one action — ending your own turn is END_TURN, an action like any "
+        "other, not something act() infers.",
         {
             "type": "object",
             "properties": {"index": {"type": "integer", "description": "Index into legal_actions."}},

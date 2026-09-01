@@ -4,21 +4,23 @@ Standard library only: `http.server` for the transport, `json` for the wire
 format. The frontend is one static HTML file (`static/index.html`) with inline
 SVG and vanilla JS, served as-is.
 
-Nothing about a game lives here. Tables, seats, codes, tokens and every rule
+Nothing about a game lives here. Games, seats, codes, tokens and every rule
 about who may do what are `api.py`'s, and this module does three things around
 them: read a request, hand it to `Tables.handle`, and write the answer back.
 An `ApiError` carries its own status, so even the error mapping is a one-liner.
 
 ## Codes in the URL, tokens in the header
 
-`GET /` is the front page, where a table is created. `GET /<CODE>` is a table:
-the same HTML, which reads the code out of its own URL and joins. Both are just
-the file — the server does not resolve the code, because a code that does not
-exist should say so in the page rather than as a raw 404.
+`GET /` is the front page, where a game is dealt — immediately playable, no
+lobby to wait through. `GET /<CODE>` is that game: the same HTML, which reads
+the code out of its own URL and either claims an open seat or, if there isn't
+one, renders read-only as an observer. Both are just the file — the server
+does not resolve the code, because a code that does not exist (or a game that
+is full) should say so in the page rather than as a raw 404.
 
 Identity is the token `api.py` mints, sent back on `X-HexSet-Token` and kept in
 the browser's localStorage. It replaced a cookie, which could not survive the
-premise that one browser might hold seats at more than one table.
+premise that one browser might hold seats at more than one game.
 
 Run it with (from `src/`)::
 
@@ -39,14 +41,29 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import traceback
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from . import journal
-from .api import CODE_ALPHABET, CODE_LENGTH, MAX_SEATS, ApiError, Config, Tables, model_options
+from .api import (
+    CODE_ALPHABET,
+    CODE_LENGTH,
+    MAX_SEATS,
+    SEAT_GRACE_SECONDS,
+    ApiError,
+    Config,
+    Tables,
+    model_options,
+)
 from .constants import TOKEN_HEADER
+
+# The per-seat setup-lock grace window's env override — see `api.py`'s
+# `SEAT_GRACE_SECONDS` for what it gates and `Config.seat_grace` for the
+# default this falls back to absent either one.
+ENV_SEAT_GRACE = "HEXSET_UI_SEAT_GRACE"
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 INDEX_HTML = STATIC_DIR / "index.html"
@@ -155,9 +172,10 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         help=(
             "An opponent (see api.model_options() — 'search2' or a .onnx name), "
-            "used for every bot seat a new table is dealt with until the web "
-            "picker overrides it. Defaults to search2 plus one of each .onnx "
-            "file found in the models directory, rather than copies of one bot."
+            "seated at every bot seat a new game is dealt with when the "
+            "request creating it doesn't name its own lineup. There is no "
+            "automatic mixed default any more — omit this and a fresh game "
+            "seats only its creator, every other seat open."
         ),
     )
     parser.add_argument("--host", default="127.0.0.1")
@@ -183,10 +201,29 @@ def main(argv: list[str] | None = None) -> None:
             f"'{journal.DEFAULT_DIR}'). Pass an empty string to journal nothing."
         ),
     )
+    parser.add_argument(
+        "--seat-grace",
+        type=float,
+        default=None,
+        help=(
+            "Seconds an empty seat the setup snake is waiting on stays open "
+            f"before it locks out for good (default: ${ENV_SEAT_GRACE}, itself "
+            f"defaulting to {SEAT_GRACE_SECONDS:g}). A game can override this "
+            "per creation too (POST /api/games's `seat_grace`); 0 deals a "
+            "solo game immediately, useful for trying the board out alone."
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.checkpoint and args.checkpoint not in model_options():
         parser.error(f"unknown checkpoint: {args.checkpoint}")
+
+    if args.seat_grace is not None:
+        seat_grace = args.seat_grace
+    elif os.environ.get(ENV_SEAT_GRACE):
+        seat_grace = float(os.environ[ENV_SEAT_GRACE])
+    else:
+        seat_grace = SEAT_GRACE_SECONDS
 
     config = Config(
         device=args.device,
@@ -194,6 +231,7 @@ def main(argv: list[str] | None = None) -> None:
         games_dir=args.games_dir,
         seed=args.seed,
         default_bots=[args.checkpoint] * (MAX_SEATS - 1) if args.checkpoint else None,
+        seat_grace=seat_grace,
     )
     server = HexSetServer((args.host, args.port), Tables(config))
 

@@ -33,8 +33,11 @@ is what makes `perspective` meaningful as an input rather than baked in.
 
 *Information-set correct, by construction upstream of here.* `own_hand` and
 `own_dev` are exact only for the perspective seat; every other seat con-
-tributes a total alone (`hand_totals`, `dev_totals`). `RecordEncoder` never
-sees a hidden card -- there is nowhere in the record for one to be.
+tributes a total alone (`hand_totals`, `dev_totals`), plus `hexset.ledger`'s
+public-knowledge reconstruction of their composition (`ledger_known`,
+`ledger_unknown`) -- itself never sharper than what the public log could
+have derived, whichever seat is asking. `RecordEncoder` never sees a hidden
+card -- there is nowhere in the record for one to be.
 """
 
 from __future__ import annotations
@@ -93,6 +96,8 @@ RECORD_FIELDS: tuple[str, ...] = (
     "offer_want",
     "offer_proposer",
     "offer_answered",
+    "ledger_known",
+    "ledger_unknown",
     "action_mask",
     "pair_mask",
 )
@@ -161,6 +166,16 @@ def record_from_game(
             for seat in declined:
                 offer_answered[seat] = 1
 
+    # The public-knowledge ledger (`hexset.ledger`), board-seat order like
+    # every other field -- `RecordEncoder` rotates it and drops the
+    # perspective seat's own entry (already exact via `own_hand` above).
+    ledger_known = np.asarray(
+        [game.ledger.seats[s].known for s in range(players)], dtype=np.int64
+    )
+    ledger_unknown = np.asarray(
+        [game.ledger.seats[s].unknown for s in range(players)], dtype=np.int64
+    )
+
     return {
         "terrain": np.asarray([int(t) for t in state.board.terrain], dtype=np.int64),
         "token": np.asarray(state.board.tokens, dtype=np.int64),
@@ -187,6 +202,8 @@ def record_from_game(
         "offer_want": offer_want,
         "offer_proposer": offer_proposer,
         "offer_answered": offer_answered,
+        "ledger_known": ledger_known,
+        "ledger_unknown": ledger_unknown,
         "action_mask": mask,
         "pair_mask": _pair_mask_of(options),
     }
@@ -290,6 +307,8 @@ class RecordEncoder(nn.Module):
         offer_want: Tensor,
         offer_proposer: Tensor,
         offer_answered: Tensor,
+        ledger_known: Tensor,
+        ledger_unknown: Tensor,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         players = self.players
 
@@ -344,6 +363,13 @@ class RecordEncoder(nn.Module):
         def gather_seat(values: Tensor, seat: Tensor) -> Tensor:
             return values.gather(1, seat.unsqueeze(1)).squeeze(1)
 
+        def gather_seat_vec(values: Tensor, seat: Tensor) -> Tensor:
+            """`gather_seat` for a `(B, players, width)` tensor -- the
+            per-seat `width`-wide row instead of a scalar."""
+            width = values.shape[-1]
+            index = seat.view(-1, 1, 1).expand(-1, 1, width)
+            return values.gather(1, index).squeeze(1)
+
         parts: list[Tensor] = [own_hand.to(torch.float32) / HAND_SCALE]
         parts.append(
             torch.stack(
@@ -392,6 +418,15 @@ class RecordEncoder(nn.Module):
                 dim=1,
             )
         )
+
+        # --- the public-knowledge ledger, in exactly `encoding._ledger_parts`'s
+        # order: each opponent's known[5] then unknown, seat-relative, own
+        # seat excluded (own hand is already exact via `own_hand` above).
+        for i in range(1, players):
+            parts.append(gather_seat_vec(ledger_known, seats[i]).to(torch.float32) / HAND_SCALE)
+            parts.append(
+                (gather_seat(ledger_unknown, seats[i]).to(torch.float32) / HAND_SCALE).unsqueeze(-1)
+            )
 
         globals_ = torch.cat(parts, dim=-1)
 

@@ -33,7 +33,7 @@ read `action_index`/`pair_index` straight off one forward pass and a search
 can read `prior`/`pair_prior`/`value` off the same one.
 
 * **Inputs**, a dynamic leading batch axis, named exactly
-  `hexset.onnx_record.RECORD_FIELDS` (27 names: board, position, information
+  `hexset.onnx_record.RECORD_FIELDS` (29 names: board, position, information
   set, legality — see that module's docstring and `onnx-contract-v2.md`'s
   table). All int64 except `action_mask`/`pair_mask`, which are bool. `B` is
   1 for a single decision and a whole wave of leaves for the UI's MCTS
@@ -45,7 +45,7 @@ can read `prior`/`pair_prior`/`value` off the same one.
   already un-rotated). One forward serves both callers: `NetworkBot` reads
   the two indices, a search reads the three distributions.
 * **Metadata props** (`hexset_ui.modelmeta` and `onnxbot._load_cached`):
-  `contract` is `"2"`; `players` and the `num_hexes`/`num_vertices`/
+  `contract` is `"4"`; `players` and the `num_hexes`/`num_vertices`/
   `num_edges` fingerprint are required; `max_offers` (`""` for none) and
   `iteration` are read with defaults; and only when asked for on the command
   line, `search=mcts` with `simulations`/`wave`. Inference device is
@@ -126,9 +126,11 @@ _SEARCHES = ("none", "mcts")
 # `contract` tells `hexset_ui.onnxbot.load` which graph shape it is looking
 # at (absent/`"1"` means the old feature-tensor-in, raw-logits-out shape;
 # `"2"` the 23-input record). `"3"` is contract 2 plus the four live-offer
-# record fields (trading design part 1) — same outputs, four more inputs.
-# Bump this again only if the record or the output tuple changes shape.
-_CONTRACT_VERSION = "3"
+# record fields (trading design part 1); `"4"` is contract 3 plus the two
+# public-knowledge ledger fields (`agents/reference/trading-design.md`
+# §7.2) — same outputs, two more inputs. Bump this again only if the record
+# or the output tuple changes shape.
+_CONTRACT_VERSION = "4"
 
 
 def _base_topology() -> Topology:
@@ -169,6 +171,8 @@ def _shapes(graph: StaticGraph, players: int, space: ActionSpace) -> dict[str, t
         "offer_want": (NUM_RESOURCES,),
         "offer_proposer": (),
         "offer_answered": (players,),
+        "ledger_known": (players, NUM_RESOURCES),
+        "ledger_unknown": (players,),
         "action_mask": (space.size,),
         "pair_mask": (NUM_PAIRS,),
         "action_index": (),
@@ -257,6 +261,8 @@ class _ExportWrapper(nn.Module):
         offer_want: Tensor,
         offer_proposer: Tensor,
         offer_answered: Tensor,
+        ledger_known: Tensor,
+        ledger_unknown: Tensor,
         action_mask: Tensor,
         pair_mask: Tensor,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
@@ -286,6 +292,8 @@ class _ExportWrapper(nn.Module):
             offer_want,
             offer_proposer,
             offer_answered,
+            ledger_known,
+            ledger_unknown,
         )
         pred = self.net(hexes, vertices, edges, globals_)
 

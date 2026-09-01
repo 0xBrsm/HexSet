@@ -752,7 +752,7 @@ def played(tmp_path_factory):
     """
     directory = tmp_path_factory.mktemp("games")
     # Two independent random.Random(SEED) instances, matching what
-    # `webserver._new_session` and `_resume_session` both do: the board spends
+    # `web._new_session` and `_resume_session` both do: the board spends
     # one stream and `start` gets a fresh one, so the game's own rng must begin
     # from the same untouched state here too.
     board = random_base_board(random.Random(SEED))
@@ -787,7 +787,7 @@ def test_a_journalled_game_replays_clean(played):
     engine, its actions have to be legal in order and end the same game.
 
     Deliberately goes through `replayable` and `restore` — the same two calls
-    `webserver._resume_session` makes — rather than a replay written for the
+    `web._resume_session` makes — rather than a replay written for the
     test. A journal that replays clean here is one a returning player would
     actually get their game back from.
     """

@@ -2,7 +2,7 @@
 a dropped-in ONNX checkpoint.
 
 Standard library only: `http.server` for the transport, `json` for the wire
-format. The frontend is one static HTML file (`web/index.html`) with inline SVG
+format. The frontend is one static HTML file (`static/index.html`) with inline SVG
 and vanilla JS, served as-is.
 
 `hexset_ui.webplay` (the session, the board layout math, the wire format) is
@@ -26,7 +26,7 @@ log out of and no "leave game" button, just a tab someone closed or forgot.
 
 Run it with (from `src/`)::
 
-    python -m hexset_ui.webserver
+    python -m hexset_ui.web
 
 then open the printed URL. Opponents come from `model_options()`: `search2`
 (handcrafted, no checkpoint needed) plus one entry per `*.onnx` file found in
@@ -68,7 +68,7 @@ from .webplay import Bot, GameSession, ResumeError, board_layout
 # to a checkpoint, and what it does is the checkpoint's business.
 HANDCRAFTED = "search2"
 
-STATIC_DIR = Path(__file__).resolve().parent / "web"
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 INDEX_HTML = STATIC_DIR / "index.html"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 NUM_PLAYERS = 4
@@ -388,7 +388,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_register(self, payload: dict) -> None:
         """Names the human side of this browser's (or MCP client's — see
-        `mcpserver.py`) game, past or future — see `HexSetServer.register_name`.
+        `mcp.py`) game, past or future — see `HexSetServer.register_name`.
         Not folded into `POST /api/new`'s payload: a name is who's playing,
         which can be set before a game even exists (first thing an MCP client
         does) or changed mid-game, neither of which "deal a new game" means.

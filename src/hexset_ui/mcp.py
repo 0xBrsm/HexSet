@@ -1,11 +1,11 @@
 """An MCP server so an LLM can play HexSet as the human seat, over stdio.
 
-This is a thin client of `webserver.py`'s existing HTTP API, not a second
+This is a thin client of `web.py`'s existing HTTP API, not a second
 game engine binding: every tool below is a `urllib` call to a running
-`python -m hexset_ui.webserver` (see `HEXSET_UI_BASE_URL`), reusing the same
+`python -m hexset_ui.web` (see `HEXSET_UI_BASE_URL`), reusing the same
 `hexset_id` cookie a browser gets, held here in an `http.cookiejar` for the
 life of this process. One MCP connection is one identity, the same "one game
-per browser" shape `webserver.py`'s module docstring describes — just with
+per browser" shape `web.py`'s module docstring describes — just with
 an LLM holding the cookie instead of a tab.
 
 Standard library only, deliberately: the official `mcp` SDK pulls in
@@ -14,11 +14,11 @@ ask for anywhere else in this project), and the stdio wire format it would
 save writing here is a handful of JSON-RPC 2.0 methods — `initialize`,
 `tools/list`, `tools/call` — small enough to hand-roll directly against the
 MCP spec instead, matching the same "standard library only" choice
-`webserver.py`'s own docstring already made for the HTTP side.
+`web.py`'s own docstring already made for the HTTP side.
 
-Run it with (from `src/`, alongside an already-running webserver)::
+Run it with (from `src/`, alongside an already-running web)::
 
-    python -m hexset_ui.mcpserver
+    python -m hexset_ui.mcp
 
 stdin/stdout carry the protocol; nothing else may write to stdout, so every
 log line here goes to stderr instead.
@@ -42,7 +42,7 @@ SERVER_INFO = {"name": "hexset-ui", "version": "0.1.0"}
 _opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
 # advance_one_seat, looped, is what settles a bot cascade after a human
-# action (see webserver._handle_advance); a real game never has more seats
+# action (see web._handle_advance); a real game never has more seats
 # left to settle than this, so a loop still running past it means something
 # is wedged rather than merely a long turn, and continuing to spin at that
 # point would starve the LLM of a response with nothing to show for it.
@@ -63,7 +63,7 @@ def _request(method: str, path: str, body: dict | None = None) -> dict:
         with _opener.open(request, timeout=30) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as error:
-        # webserver's own error responses are still a JSON body (see
+        # web's own error responses are still a JSON body (see
         # Handler._json's status= callers) — read it rather than raising past
         # it, so a 400 ("it is not your turn to act") reaches the LLM as the
         # same message a browser's fetch() would have gotten.
@@ -71,7 +71,7 @@ def _request(method: str, path: str, body: dict | None = None) -> dict:
     except urllib.error.URLError as error:
         raise ToolError(
             f"could not reach the HexSet server at {BASE_URL} ({error.reason}) "
-            "— is `python -m hexset_ui.webserver` running?"
+            "— is `python -m hexset_ui.web` running?"
         ) from error
 
 
@@ -85,7 +85,7 @@ def _request_ok(method: str, path: str, body: dict | None = None) -> dict:
 def _settle(state: dict) -> dict:
     """Runs `state` forward through however many seats are on move that
     aren't the human's, the same cascade a browser's own polling settle()
-    loop (see webserver._handle_advance) drives one response at a time for
+    loop (see web._handle_advance) drives one response at a time for
     UI pacing an LLM has no use for — this collapses it into the one
     `act`/`new_game` call the LLM already made.
     """

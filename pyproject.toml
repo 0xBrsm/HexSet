@@ -22,13 +22,13 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 include = ["hexset_ui*"]
 
-# setuptools only auto-includes .py files under `packages.find` — web/
-# index.html (the entire frontend) is a static asset living inside the
+# setuptools only auto-includes .py files under `packages.find` —
+# static/index.html (the entire frontend) is a static asset living inside the
 # hexset_ui package directory and needs to be listed explicitly, or a real
 # `pip install .` silently omits it (found by actually building and running
 # the Docker image, not by reading the config: FileNotFoundError on GET /).
 [tool.setuptools.package-data]
-hexset_ui = ["web/*.html"]
+hexset_ui = ["static/*.html"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

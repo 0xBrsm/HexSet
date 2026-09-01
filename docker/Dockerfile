@@ -54,4 +54,4 @@ ENV HEXSET_UI_GAMES_DIR=/app/games
 
 WORKDIR /app
 EXPOSE 8770
-CMD ["python", "-m", "hexset_ui.webserver", "--host", "0.0.0.0", "--port", "8770", "--no-browser"]
+CMD ["python", "-m", "hexset_ui.web", "--host", "0.0.0.0", "--port", "8770", "--no-browser"]

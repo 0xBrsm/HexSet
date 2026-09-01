@@ -1,6 +1,6 @@
 """Game session and wire protocol for the local human-vs-policy web board.
 
-Deliberately torch-free: `hexset_ui.webserver` imports the network bot lazily, so
+Deliberately torch-free: `hexset_ui.web` imports the network bot lazily, so
 this module — the board layout math, the wire-format mapping and the session
 that drives a game — can be imported and tested without PyTorch, the same way
 `hexset_ui.actions` and `hexset_ui.game` can. Anything with a
@@ -73,7 +73,7 @@ MAX_CASCADE_STEPS = 2000
 class ResumeError(Exception):
     """A journalled game would not replay — its actions no longer describe a
     legal game under this engine. Recoverable, and by design: the caller deals
-    a fresh game rather than failing the request (see `webserver.resume`), so
+    a fresh game rather than failing the request (see `web._resume_session`), so
     an engine change that invalidates old journals costs the games in flight
     at the time and nothing else."""
 
@@ -500,7 +500,7 @@ class GameSession:
     # file, not its path). Journalled so a resumed game can put the same
     # opponents back, and unused by play itself.
     bot_specs: dict[int, str] = field(default_factory=dict)
-    # The browser this game belongs to (`hexset_id` — see webserver), carried
+    # The browser this game belongs to (`hexset_id` — see web.py), carried
     # only so the journal can record whose game it was.
     identity: str | None = None
     # Whatever the human side registered itself as — see `POST /api/register`
@@ -538,7 +538,7 @@ class GameSession:
     # True only in the instant right after the human's own setup road handed
     # the turn to someone else — the one handoff in the game with no
     # explicit "I'm done" the way END_TURN is everywhere else. Public (no
-    # underscore) since the webserver reads it directly to decide whether to
+    # underscore) since web.py reads it directly to decide whether to
     # run advance_bots() itself or wait for POST /api/confirm — see
     # apply_human_action/confirm_setup_turn.
     awaiting_confirm: bool = field(default=False)
@@ -637,7 +637,7 @@ class GameSession:
         — there's nothing to protect by rejecting a stale or doubled-up
         confirm the way undo_last_build rejects a stale undo. Only that one
         seat: if it hands off to another bot, the client's own follow-up
-        request (see `webserver.py`'s `POST /api/advance`) picks that up,
+        request (see `web.py`'s `POST /api/advance`) picks that up,
         same as after any other action."""
         self.awaiting_confirm = False
         self.advance_one_seat()
@@ -675,14 +675,14 @@ class GameSession:
         is itself.
 
         Says nothing about `awaiting_confirm`: like `advance_bots` before it,
-        that gate is the caller's to apply (see `webserver.py`'s
+        that gate is the caller's to apply (see `web.py`'s
         `_handle_action`/`_handle_advance`), not this method's — a setup
         road's handoff should hold here exactly as long as it held the old
         whole-cascade call, no longer and no shorter.
 
         The per-seat counterpart to `advance_bots`: one call here is one
         seat's turn, which is what a client driving the cascade one request
-        at a time wants (see `webserver.py`'s `POST /api/advance`) instead of
+        at a time wants (see `web.py`'s `POST /api/advance`) instead of
         the whole cascade landing behind a single response.
         """
         if is_over(self.game) or to_move(self.game) == self.human_seat:
@@ -706,7 +706,7 @@ class GameSession:
         """The whole cascade in one call — still used wherever a single
         request already has to include it (dealing a fresh table whose setup
         snake doesn't start with the human, resuming a session mid-cascade):
-        see the callers in `webserver.py`. Everywhere else drives
+        see the callers in `web.py`. Everywhere else drives
         `advance_one_seat` directly, one seat and one response at a time."""
         seats = 0
         while self.advance_one_seat():

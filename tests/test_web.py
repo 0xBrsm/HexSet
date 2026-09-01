@@ -1,4 +1,4 @@
-"""HTTP-layer tests for `hexset_ui.webserver`.
+"""HTTP-layer tests for `hexset_ui.web`.
 
 Torch-free on purpose: the opponent here is `conftest.RandomBot`, not a
 loaded checkpoint, so this suite runs anywhere the rest of the engine's tests
@@ -29,7 +29,7 @@ from hexset_ui.board.board import random_base_board
 from conftest import RandomBot
 from hexset_ui.game import is_over, start, to_move
 from hexset_ui.webplay import GameSession, action_to_wire, board_layout
-from hexset_ui.webserver import (
+from hexset_ui.web import (
     COOKIE_NAME,
     HexSetServer,
     _build_session,

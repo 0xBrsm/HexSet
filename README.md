@@ -15,7 +15,7 @@ What it deliberately does *not* carry is the training pipeline — no self-play 
 Locally:
 ```
 pip install -e .
-python -m hexset_ui.webserver
+python -m hexset_ui.web
 ```
 
 Or via Docker:
@@ -25,7 +25,7 @@ docker compose up -d --build
 ```
 `compose.yaml` is gitignored, so that copy is yours to edit and a `git pull` on a deployment will never collide with it. The image only carries `numpy`/`onnxruntime` — `src/` and `models/` are bind-mounted read-only, so a code change is a `git pull` + `docker compose restart`, not a rebuild; only a dependency bump touches the image. It runs unprivileged on a read-only filesystem with no Linux capabilities, with a reason next to each line.
 
-Then open the printed URL (or the mapped port, `8770` by default under compose). Opponents come from `model_options()` in `src/hexset_ui/webserver.py`: `search2` (a handcrafted bot, no checkpoint needed) plus one entry per `*.onnx` file found in the models directory.
+Then open the printed URL (or the mapped port, `8770` by default under compose). Opponents come from `model_options()` in `src/hexset_ui/web.py`: `search2` (a handcrafted bot, no checkpoint needed) plus one entry per `*.onnx` file found in the models directory.
 
 Tests are `pip install -e ".[test]" && pytest`. Most of them play the engine; `tests/test_packaging.py` is the odd one out, building a real wheel from a clean copy of the tree to check that an installed copy still has a frontend in it — every other entry point here reads `src/` directly and would not notice a wheel that did not.
 
@@ -63,16 +63,16 @@ Inference device is **not** read from metadata — it's a property of the host, 
 
 The human seat can also be driven by a script or an LLM, over either interface, as a peer to the browser rather than a replacement for it — both still go through the same `apply_human_action`/`legal_actions` path the browser does, so nothing sent this way skips validation.
 
-- **HTTP**: the same `/api/*` endpoints the frontend calls (`GET /api/state`, `POST /api/action`, etc. — see `webserver.py`). `POST /api/register {"name": "..."}` names the human side, in the journal header for a fresh game and immediately in `GET /api/state`'s `player_name` for one already in progress; optional, and works before a game is dealt or mid-game.
-- **MCP**: `python -m hexset_ui.mcpserver`, run alongside an already-running `webserver.py` (`HEXSET_UI_BASE_URL`, default `http://127.0.0.1:8770`). It's a thin stdio client of that same HTTP API — one MCP connection is one `hexset_id` identity, same as one browser tab — exposing `register`, `models`, `new_game`, `board`, `state`, `act`, and `undo` as tools. `act` takes an index into `state()`'s `legal_actions` and settles the whole bot cascade before returning, so one tool call is one full human turn, not one click. Hand-rolled against the MCP stdio wire format rather than built on the official SDK, which pulls in a compiled dependency (`pydantic`) this project otherwise has none of.
+- **HTTP**: the same `/api/*` endpoints the frontend calls (`GET /api/state`, `POST /api/action`, etc. — see `web.py`). `POST /api/register {"name": "..."}` names the human side, in the journal header for a fresh game and immediately in `GET /api/state`'s `player_name` for one already in progress; optional, and works before a game is dealt or mid-game.
+- **MCP**: `python -m hexset_ui.mcp`, run alongside an already-running `web.py` (`HEXSET_UI_BASE_URL`, default `http://127.0.0.1:8770`). It's a thin stdio client of that same HTTP API — one MCP connection is one `hexset_id` identity, same as one browser tab — exposing `register`, `models`, `new_game`, `board`, `state`, `act`, and `undo` as tools. `act` takes an index into `state()`'s `legal_actions` and settles the whole bot cascade before returning, so one tool call is one full human turn, not one click. Hand-rolled against the MCP stdio wire format rather than built on the official SDK, which pulls in a compiled dependency (`pydantic`) this project otherwise has none of.
 
 ## Layout
 
-- `src/hexset_ui/` — the game engine (torch-free, copied from the training repo) plus `webserver.py`/`webplay.py` (the HTTP server and session logic).
+- `src/hexset_ui/` — the game engine (torch-free, copied from the training repo) plus `web.py`/`webplay.py` (the HTTP server and session logic).
 - `src/hexset_ui/onnxbot.py` — the entire model boundary: encoding, action-space indexing, masking, sampling, and search all live behind it, and `spawn(path, board)` is the only entry point anything else uses. `mcts.py`, `encoding.py` and `modelmeta.py` are imported by this module and nothing else.
 - `src/hexset_ui/search2.py` — the handcrafted opponent, whole: its fitted evaluation and the max^n search that reads it. Needs no checkpoint, which is why an empty `models/` still gives you something to play.
 - `src/hexset_ui/bots.py` — the ~60 lines the two have in common: what a `Bot` is, how to ask the engine for legal options, and how a seat reads a per-seat vector.
-- `src/hexset_ui/web/index.html` — the entire frontend: inline CSS, inline SVG icons, vanilla JS. No build step.
+- `src/hexset_ui/static/index.html` — the entire frontend: inline CSS, inline SVG icons, vanilla JS. No build step.
 - `models/` — drop `.onnx` files here.
 - `games/` — where every game is journalled: one JSON lines file per game, written as it is played, with nothing hidden (the dice, the deck order, every card drawn or stolen, every seat's hand after every action — see `src/hexset_ui/journal.py`). On by default; `HEXSET_UI_GAMES_DIR` moves it, and setting that empty turns it off.
 

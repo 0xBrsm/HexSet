@@ -294,7 +294,11 @@
      An armed Knight suppresses buying along with everything else (see
      renderBoardButtons), leaving its own way out as the only thing this
      corner can be showing. */
-  #cancel-robber { top: 16px; bottom: auto; }
+  /* Above #modal's z-index:55 — reaching the hex list ends in the "Steal
+     from" modal, and this is the only way out of the Knight entirely rather
+     than one step back into that list (see renderStealMode), so it has to
+     stay clickable with the modal open, not just before/after it. */
+  #cancel-robber { top: 16px; bottom: auto; z-index: 60; }
   /* Stacked directly above the roll/end-turn spot, 8px clear of it — shown
      only in the instant right after the human's own build (see
      renderBoardButtons/state.can_undo), never alongside a robber move, so it
@@ -730,6 +734,7 @@ let tradeGive = null;      // selected resource index, "propose" mode only
 let tradeWant = null;
 let tradeSide = "give";    // "give" | "want" — which side the picker row is currently choosing for, "propose" mode only
 let yopPicks = [];         // 0, 1, or 2 resource indices, "year-of-plenty" mode only
+let monopolyPick = null;   // selected resource index, "monopoly" mode only
 let modelNames = [];       // GET /api/models, in MODEL_OPTIONS order
 let currentBotModels = []; // this game's (or the next one's) 3 non-human-seat picks, ascending seat order
 
@@ -1023,8 +1028,17 @@ function drawBoard() {
   // being tellable apart at exactly the moment you have to pick one to rob.
   // Only the targets take clicks, so the pieces above are pointer-transparent
   // (.pieces-layer) and a click anywhere on the tile still reaches the hex.
+  //
+  // The two kinds of build-target highlight split across buildings-layer
+  // rather than sitting together: a phantom road's fat round-capped stroke
+  // reaches past its own vertices, so it has to paint under buildings-layer
+  // or it washes out over any settlement sitting at one end. A city-upgrade
+  // target is the opposite — it's drawn exactly on top of the settlement
+  // being upgraded on purpose — so it has to stay above buildings-layer or
+  // the settlement's own circle would hide it completely.
   svg.appendChild(el("g", {id: "hex-target-layer"}));
   svg.appendChild(el("g", {id: "roads-layer", class: "pieces-layer"}));
+  svg.appendChild(el("g", {id: "clickable-edge-layer"}));
   svg.appendChild(el("g", {id: "buildings-layer", class: "pieces-layer"}));
   svg.appendChild(el("g", {id: "robber-layer"}));
   svg.appendChild(el("g", {id: "clickable-layer"}));
@@ -1511,11 +1525,13 @@ function renderBoardDynamic() {
   const roadsLayer = document.getElementById("roads-layer");
   const robberLayer = document.getElementById("robber-layer");
   const clickLayer = document.getElementById("clickable-layer");
+  const clickEdgeLayer = document.getElementById("clickable-edge-layer");
   const hexTargetLayer = document.getElementById("hex-target-layer");
   buildingsLayer.innerHTML = "";
   roadsLayer.innerHTML = "";
   robberLayer.innerHTML = "";
   clickLayer.innerHTML = "";
+  clickEdgeLayer.innerHTML = "";
   hexTargetLayer.innerHTML = "";
 
   // Roads, each one drawn twice: the seat's near-black stroke a little wider
@@ -1573,8 +1589,11 @@ function renderBoardDynamic() {
   // here: a hex overlay's boundary coincides exactly with the edges around
   // it, so the broadest target has to sit underneath or it steals clicks
   // meant for a road on its rim (later siblings paint on top in SVG).
-  // Vertices are the smallest, most precise targets and go last so nothing
-  // else can shadow them either.
+  // Vertices are the smallest, most precise targets and go last (clickable-
+  // layer, above buildings-layer) so nothing else can shadow them either —
+  // edges sit in their own layer under buildings-layer instead of straight
+  // after the hexes, purely for paint order: see the comment by
+  // clickable-edge-layer's creation.
   const move = robberMove(g);
   for (const [hid, actions] of Object.entries(move ? move.targets : {})) {
     const h = hexById[hid];
@@ -1599,7 +1618,7 @@ function renderBoardDynamic() {
     const p0 = vertexById[e.v0], p1 = vertexById[e.v1];
     const line = el("line", {x1: p0.x, y1: p0.y, x2: p1.x, y2: p1.y, class: "clickable-edge"});
     line.addEventListener("click", () => sendAction(actions[0]));
-    clickLayer.appendChild(line);
+    clickEdgeLayer.appendChild(line);
   }
   // A city target reads as a diamond (the same rotated-square mark
   // upgrading it will actually place, see renderBoardDynamic's buildings
@@ -1614,7 +1633,11 @@ function renderBoardDynamic() {
     const v = vertexById[vid];
     let target;
     if (actions[0].type === "BUILD_CITY") {
-      const side = coarsePointer ? 26 : 16;
+      // 22 to mirror the settlement circle's own target-vs-actual relationship
+      // (r=11 highlight around a rendered r=12 piece) — the actual city is
+      // 24x24 (see renderBoardDynamic's buildings loop); this was stuck at
+      // the pre-enlargement 16 until that piece grew and this didn't follow.
+      const side = coarsePointer ? 26 : 22;
       target = el("rect", {
         x: v.x - side / 2, y: v.y - side / 2, width: side, height: side,
         transform: `rotate(45 ${v.x} ${v.y})`, class: "clickable-vertex",
@@ -1708,13 +1731,17 @@ function modalActionButton(icon, label, {primary = true} = {}) {
 // One card tile — the same visual .card the hand section uses (via
 // resourceCardTile), just selectable/dimmable on top of that (see .pick-card
 // in the stylesheet). Every mode that picks a resource is built out of these.
-function pickCard(resourceIdx, {selected, disabled, count, title, onClick} = {}) {
+// `count` badges only above 1 by default — a bare card already reads as "one"
+// everywhere else in the app — but `forceCount` shows it starting at 1 too,
+// for the one mode (Year of Plenty) where two single picks of different
+// resources would otherwise look identically "just selected".
+function pickCard(resourceIdx, {selected, disabled, count, forceCount, title, onClick} = {}) {
   const name = board.resources[resourceIdx];
   const classes = ["pick-card"];
   if (selected) classes.push("selected");
   if (disabled) classes.push("disabled");
   const card = resourceCardTile(name, {extraClasses: classes, title});
-  if (count !== undefined && count > 1) {
+  if (count !== undefined && count > (forceCount ? 0 : 1)) {
     card.appendChild(html("div", {class: "count"}, String(count)));
   }
   if (onClick && !disabled) card.addEventListener("click", onClick);
@@ -1845,6 +1872,8 @@ function openModal(mode, {give = null} = {}) {
     tradeSide = give === null ? "give" : "want";
   } else if (mode === "year-of-plenty") {
     yopPicks = [];
+  } else if (mode === "monopoly") {
+    monopolyPick = null;
   }
   modalDrag = {x: 0, y: 0};
   document.getElementById("modal-inner").style.transform = "";
@@ -1982,18 +2011,29 @@ function renderStealMode(g, title, body, actions) {
   actions.appendChild(cancel);
 }
 
+// One tap picks, same as Monopoly's own single choice; a second, separate
+// tap on Confirm is what actually sends it — picking alone doesn't commit,
+// matching Year of Plenty (renderYearOfPlentyMode) so every dev card that
+// takes cards from other players gets a chance to back out first.
 function renderMonopolyMode(g, title, body, actions) {
   title.textContent = "Play Monopoly";
   body.appendChild(html("div", {class: "modal-note"},
-    "Take every card of one resource from every other player."));
+    "Take every card of one resource from every other player, then confirm."));
   const row = html("div", {class: "pick-row"});
   for (const a of g.monopoly) {
     row.appendChild(pickCard(a.a, {
+      selected: monopolyPick === a.a,
       title: `Take every ${board.resources[a.a]}`,
-      onClick: () => { closeModal(); sendAction(a); },
+      onClick: () => { monopolyPick = a.a; renderModal(); },
     }));
   }
   body.appendChild(row);
+  if (monopolyPick !== null) {
+    const a = g.monopoly.find((a) => a.a === monopolyPick);
+    const btn = modalActionButton("check", "Confirm");
+    btn.addEventListener("click", () => { monopolyPick = null; closeModal(); sendAction(a); });
+    actions.appendChild(btn);
+  }
   actions.appendChild(modalCancelButton());
 }
 
@@ -2011,11 +2051,14 @@ function yopAction(g, name0, name1) {
 // Two taps, same card allowed twice — the bank-availability check already
 // baked into `g.yearOfPlenty` (see `_card_actions`) is what disables a
 // resource here, so a card greys out exactly when the bank can no longer
-// cover it, including a second copy of one already picked.
+// cover it, including a second copy of one already picked. The pick itself
+// doesn't send anything — Confirm only shows up once both slots are filled,
+// so there's always a chance to look the pair over (or Cancel) before either
+// card leaves the bank.
 function renderYearOfPlentyMode(g, title, body, actions) {
   title.textContent = "Play Year of Plenty";
   body.appendChild(html("div", {class: "modal-note"},
-    "Take two cards from the bank — click a card, then click it again for a second."));
+    "Take two cards from the bank — click a card, then click it again for a second, then confirm."));
   const row = html("div", {class: "pick-row"});
   const first = yopPicks.length ? board.resources[yopPicks[0]] : null;
   for (let r = 0; r < board.resources.length; r++) {
@@ -2027,19 +2070,22 @@ function renderYearOfPlentyMode(g, title, body, actions) {
     row.appendChild(pickCard(r, {
       selected: count > 0,
       count,
+      forceCount: true,
       disabled: yopPicks.length >= 2 || !available,
       title: name,
       onClick: () => {
         yopPicks.push(r);
-        if (yopPicks.length < 2) { renderModal(); return; }
-        const a = yopAction(g, first, name);
-        yopPicks = [];
-        closeModal();
-        sendAction(a);
+        renderModal();
       },
     }));
   }
   body.appendChild(row);
+  if (yopPicks.length === 2) {
+    const a = yopAction(g, board.resources[yopPicks[0]], board.resources[yopPicks[1]]);
+    const btn = modalActionButton("check", "Confirm");
+    btn.addEventListener("click", () => { yopPicks = []; closeModal(); sendAction(a); });
+    actions.appendChild(btn);
+  }
   actions.appendChild(modalCancelButton());
 }
 

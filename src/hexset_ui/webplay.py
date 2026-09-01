@@ -319,7 +319,11 @@ class _Snapshot:
 # a bot's (an opponent's misclick isn't the human's to undo). Road Building's
 # free roads need no special case: they still arrive as ordinary BUILD_ROAD
 # actions (see game.build_road), so restoring game.free_roads alongside the
-# board covers them too.
+# board covers them too. PLAY_ROAD_BUILDING itself is in here too, for the
+# instant right after the card is played but before either free road has
+# landed — the only way to give the card back once it's already spent
+# server-side (unlike a Knight, which the client never sends until a victim
+# is chosen, so it never needs a matching undo point).
 _UNDOABLE_BUILDS: frozenset[ActionType] = frozenset(
     {
         ActionType.SETUP_SETTLEMENT,
@@ -328,6 +332,7 @@ _UNDOABLE_BUILDS: frozenset[ActionType] = frozenset(
         ActionType.BUILD_SETTLEMENT,
         ActionType.BUILD_CITY,
         ActionType.BANK_TRADE,
+        ActionType.PLAY_ROAD_BUILDING,
     }
 )
 
@@ -779,14 +784,15 @@ class GameSession:
         self._undo = undo_point if (undo_point is not None and not is_over(self.game)) else None
 
     def undo_last_build(self) -> None:
-        """Reverts the human's most recent placement or bank/port trade back
-        to exactly how the session stood the instant before it: piece
-        removed and resources refunded (including a second setup
-        settlement's grant) or traded resources returned, longest
-        road/largest army recomputed from the restored board, whose turn it
-        is un-advanced if the action handed off to someone else, log line
-        shortened or dropped, step count wound back. Only ever available
-        since the human's own last placement or trade — see _apply.
+        """Reverts the human's most recent placement, bank/port trade, or
+        Road Building play back to exactly how the session stood the instant
+        before it: piece removed and resources refunded (including a second
+        setup settlement's grant) or traded resources returned, or the card
+        handed back and free_roads zeroed, longest road/largest army
+        recomputed from the restored board, whose turn it is un-advanced if
+        the action handed off to someone else, log line shortened or
+        dropped, step count wound back. Only ever available since the
+        human's own last qualifying action — see _apply.
 
         The journal is the one thing not reverted: it is append-only, so the
         undo goes into it as its own entry (see `journal.Journal.undo`).

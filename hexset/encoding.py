@@ -10,8 +10,11 @@ encoded identically however the table is numbered.
 
 *Information-set correct.* Only what the perspective player may legally know is
 encoded. Own hand and own development cards are exact; opponents contribute
-counts alone. Nothing downstream can accidentally read a hidden card, which is
-the gap the published Catan agents leave open.
+counts alone, plus (`_ledger_parts`) the public-knowledge reconstruction of
+their composition that `hexset.ledger` tracks from public events — never
+anything only the perspective seat could not have derived from the log.
+Nothing downstream can accidentally read a hidden card, which is the gap the
+published Catan agents leave open.
 """
 
 from __future__ import annotations
@@ -127,6 +130,7 @@ def global_features(players: int) -> int:
         + 3  # free roads, deck size, turn
         + 2 * NUM_RESOURCES  # live trade offer: give, want
         + 2 * players  # live trade offer: proposer seat, who has answered
+        + (players - 1) * (NUM_RESOURCES + 1)  # ledger: known[5] + unknown per opponent
     )
 
 
@@ -352,6 +356,25 @@ def _offer_parts(game: Game, perspective: int) -> list[float]:
     return give + want + proposer + answered
 
 
+def _ledger_parts(game: Game, perspective: int) -> list[float]:
+    """Each opponent's reconstructed hand composition (`hexset.ledger`), in
+    seat-relative order, own seat excluded — own hand is already exact
+    (`_encode_globals`'s own-hand block above) and never needs a ledger
+    entry. Per opponent: `known[5]` (certified per-resource counts, scaled
+    like a hand) then `unknown` (cards the ledger cannot type), so this is
+    `(players - 1) * (NUM_RESOURCES + 1)` floats — `global_features`'s
+    ledger term.
+    """
+    players = game.state.num_players
+    parts: list[float] = []
+    for i in range(1, players):
+        seat = (perspective + i) % players
+        seat_ledger = game.ledger.seats[seat]
+        parts.extend(k / HAND_SCALE for k in seat_ledger.known)
+        parts.append(seat_ledger.unknown / HAND_SCALE)
+    return parts
+
+
 def _encode_globals(
     game: Game, perspective: int, building_points: np.ndarray
 ) -> np.ndarray:
@@ -398,6 +421,7 @@ def _encode_globals(
     parts.append(min(game.turns / TURN_SCALE, 1.0))
 
     parts.extend(_offer_parts(game, perspective))
+    parts.extend(_ledger_parts(game, perspective))
 
     return np.array(parts, dtype=np.float32)
 
@@ -484,6 +508,16 @@ def _encode_globals_batch(
         dtype=np.float64,
     )
     append(offer_block, 1.0)
+
+    # Same reasoning as the offer block just above: `_ledger_parts` is the
+    # single source of the ledger block's semantics, reused per game rather
+    # than re-derived, so this fast path stays byte-identical to the oracle
+    # by construction.
+    ledger_block = np.asarray(
+        [_ledger_parts(game, int(p)) for game, p in zip(games, perspectives)],
+        dtype=np.float64,
+    )
+    append(ledger_block, 1.0)
 
     if cursor != out.shape[1]:
         raise AssertionError(f"wrote {cursor} global features into {out.shape[1]}")

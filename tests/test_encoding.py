@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from hexset.board.board import random_base_board
-from hexset.board.terrain import Resource
+from hexset.board.terrain import NUM_RESOURCES, Resource
 from hexset.board.topology import build as build_topology
 from hexset.board.maps import BASE_LAYOUT, MINI_LAYOUT
 from hexset.encoding import (
@@ -365,6 +365,14 @@ def _main_phase_game(seed: int = 5):
     raise AssertionError("no MAIN phase reached in 400 steps")
 
 
+def _set_hand(game, player: int, resource, n: int) -> None:
+    """Fix a hand slot for a test fixture, keeping `game.ledger` in sync so
+    it reads as certain rather than as drift (`hexset.ledger.PublicLedger
+    .spend`'s invariant check) the next time this game's own play spends it."""
+    game.state.hands[player][resource] = n
+    game.ledger.seats[player].known[resource] = n
+
+
 def _offer_game(seed: int = 5):
     """A standing offer: the mover gives 2 wood for 1 ore, everyone else
     stocked to be eligible, asked in fixed seat order after the mover."""
@@ -375,17 +383,24 @@ def _offer_game(seed: int = 5):
     game = _main_phase_game(seed)
     proposer = game.current_player
     others = [s for s in range(4) if s != proposer]
-    game.state.hands[proposer][Resource.WOOD] = 2
-    game.state.hands[proposer][Resource.ORE] = 0
+    _set_hand(game, proposer, Resource.WOOD, 2)
+    _set_hand(game, proposer, Resource.ORE, 0)
     for s in others:
-        game.state.hands[s][Resource.ORE] = 1
+        _set_hand(game, s, Resource.ORE, 1)
     propose_trade(game, bundle(wood=2), bundle(ore=1), ask=tuple(others))
     return game, proposer, others
 
 
-def _offer_tail(obs):
-    """give(5), want(5), proposer(4), answered(4) — the last 18 globals."""
-    tail = obs.globals[-18:]
+def _ledger_width(players: int = 4) -> int:
+    return (players - 1) * (NUM_RESOURCES + 1)
+
+
+def _offer_tail(obs, players: int = 4):
+    """give(5), want(5), proposer(4), answered(4) — 18 globals, no longer the
+    very tail now that the ledger block (`_ledger_tail`) sits after it."""
+    width = 2 * NUM_RESOURCES + 2 * players
+    ledger_width = _ledger_width(players)
+    tail = obs.globals[-(width + ledger_width) : -ledger_width]
     return tail[:5], tail[5:10], tail[10:14], tail[14:18]
 
 
@@ -454,6 +469,109 @@ def test_batched_offer_encoding_matches_the_canonical_path():
 
     game, proposer, _ = _offer_game()
     decline_trade(game, to_move(game))
+    games = [game] * 4
+    perspectives = list(range(4))
+    fast = encode_batch(games, perspectives)
+    for got, perspective in zip(fast, perspectives, strict=True):
+        want = encode(game, perspective)
+        assert np.array_equal(got.globals, want.globals)
+        assert got.globals.dtype == np.float32
+
+
+# --- the public-knowledge ledger (trading-design §7.2) ---
+
+
+def _ledger_tail(obs, players: int = 4):
+    """Each opponent's known[5] + unknown, seat-relative, own seat excluded —
+    always the very last `(players - 1) * (NUM_RESOURCES + 1)` globals."""
+    tail = obs.globals[-_ledger_width(players):]
+    known = [tail[i * 6 : i * 6 + 5] for i in range(players - 1)]
+    unknown = [tail[i * 6 + 5] for i in range(players - 1)]
+    return known, unknown
+
+
+def test_global_features_widened_by_the_ledger():
+    assert global_features(4) == 86
+    assert global_features(3) == 60 + 2 * (5 + 1)
+
+
+def test_the_ledger_block_is_zero_at_game_start():
+    game = start(random_base_board(random.Random(1)), 4, random.Random(1))
+    for perspective in range(4):
+        known, unknown = _ledger_tail(encode(game, perspective))
+        for k in known:
+            assert not k.any()
+        assert all(u == 0.0 for u in unknown)
+
+
+def test_the_ledger_block_reads_each_opponent_seat_relative():
+    from hexset.ledger import SeatLedger
+
+    game = _main_phase_game()
+    perspective = 0
+    others = [s for s in range(4) if s != perspective]
+    game.ledger.seats[others[0]] = SeatLedger(known=[2, 0, 0, 0, 0], unknown=1)
+    game.ledger.seats[others[1]] = SeatLedger(known=[0, 1, 0, 3, 0], unknown=0)
+    game.ledger.seats[others[2]] = SeatLedger(known=[0, 0, 0, 0, 4], unknown=2)
+
+    known, unknown = _ledger_tail(encode(game, perspective))
+
+    for seat in others:
+        expected = game.ledger.seats[seat]
+        slot = _seat(seat, perspective, 4) - 1
+        assert known[slot] == pytest.approx(np.array(expected.known) / 10.0)
+        assert unknown[slot] == pytest.approx(expected.unknown / 10.0)
+
+
+def test_a_steal_shows_up_as_unknown_in_the_encoding():
+    """A bystander's view (neither thief nor victim) is what the ledger's
+    common-knowledge promise is actually about: the thief's block gains an
+    `unknown`, and a victim holding exactly one certified card of the
+    resource actually taken loses it from `known`, not `unknown` -- picking
+    a one-resource hand keeps the steal's outcome deterministic regardless
+    of `robber.steal`'s random draw."""
+    from hexset.game import Phase, move_robber_to
+    from hexset.ledger import SeatLedger
+
+    game = _main_phase_game()
+    game.phase = Phase.ROBBER
+    thief, victim, bystander = 0, 1, 2
+    game.current_player = thief
+    game.ledger.seats[thief] = SeatLedger()
+    game.ledger.seats[victim] = SeatLedger(known=[1, 0, 0, 0, 0], unknown=0)
+    game.state.hands[victim] = [1, 0, 0, 0, 0]
+
+    # A target hex occupied by the victim, however this board happens to be
+    # laid out -- the property under test is what the ledger does with a
+    # steal, not which hex triggers one.
+    topology = game.state.board.topology
+    target = next(
+        h
+        for h in range(game.state.board.num_hexes)
+        if h != game.state.robber
+        and any(game.state.vertex_owner[v] == victim for v in topology.hex_vertices[h])
+    )
+
+    move_robber_to(game, target, victim)
+
+    assert game.ledger.seats[thief].unknown == 1
+    assert game.ledger.seats[victim].known == [0, 0, 0, 0, 0]
+    assert game.ledger.seats[victim].unknown == 0
+
+    known, unknown = _ledger_tail(encode(game, bystander))
+    thief_slot = _seat(thief, bystander, 4) - 1
+    victim_slot = _seat(victim, bystander, 4) - 1
+    assert unknown[thief_slot] == pytest.approx(0.1)
+    assert not known[victim_slot].any()
+    assert unknown[victim_slot] == pytest.approx(0.0)
+
+
+def test_batched_ledger_encoding_matches_the_canonical_path():
+    from hexset.ledger import SeatLedger
+
+    game = _main_phase_game()
+    game.ledger.seats[1] = SeatLedger(known=[1, 0, 2, 0, 0], unknown=1)
+    game.ledger.seats[2] = SeatLedger(known=[0, 0, 0, 1, 1], unknown=0)
     games = [game] * 4
     perspectives = list(range(4))
     fast = encode_batch(games, perspectives)

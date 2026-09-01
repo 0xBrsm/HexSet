@@ -26,6 +26,34 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   checkpoint plays exactly as its source until trained further (asserted on
   real observations before anything is written, as `hexset.widen` does).
   Checkpoints from before this change cannot be loaded without it.
+- **The public-knowledge ledger** (`hexset.ledger`, trading-design §7.2
+  — D1 read flat because the observation carried opponents' hand *totals*
+  only, no composition, so ΔV could not price a partner even in principle).
+  A new `PublicLedger`, created with the `Game` and carried through
+  `imagine()`, tracks each seat's reconstructed hand composition —
+  `known[5]` (a certified per-resource lower bound) plus `unknown` (cards
+  whose type the public log cannot pin) — updated incrementally wherever
+  `hexset.game` mutates a hand: production, distribution, the second-round
+  settlement grant, builds, dev-card buys, bank and player trades, discards,
+  monopoly and year of plenty are all public and update `known` exactly; a
+  robber or knight steal moves one hidden card, so the thief's gain is
+  credited to `unknown` only and the victim's loss is resolved against the
+  true resource engine-side (see `ledger.PublicLedger.spend`'s docstring for
+  why that is the only convention that keeps `known[r] <= true[r]`
+  provable, not just usual). **v1 simplification, documented in the module:
+  this is the common-knowledge view** — the thief/victim's own sharper
+  knowledge of a steal is deliberately not modelled, conservative and
+  under-informed by construction rather than leaking. `encoding.global_features`
+  gains 18 features at four players, appended at the globals tail after the
+  live-offer block: each opponent's `known[5]`/`unknown` (hand-scaled),
+  seat-relative, own seat excluded (own hand is already exact) — 68 → 86.
+  The information-set record grows `ledger_known` `(players, 5)` and
+  `ledger_unknown` `(players,)`, board-seat order like every other field, so
+  the ONNX contract bumps to **v4** (29 inputs, unchanged outputs) and
+  hexset-ui must supply the ledger record fields before any v4 deployment.
+  `hexset.migrate` needs no logic change — it zero-pads any `embed_global`
+  tail growth, single- or double-widening alike. **Registration owed before
+  any run trains on this.**
 
 ### Changed
 

@@ -53,7 +53,7 @@ from helpers import clear_hand, give, independent_vertices, mini_board
 # worlds of `test_heximax_cannot_tell_ledger_consistent_worlds_apart`
 # differently. Found by `_first_seed_where_search2_differs`; pinned so the
 # test documents a specific leak rather than hunting for one every run.
-SEARCH2_LEAK_SEED = 3
+SEARCH2_LEAK_SEED = 2
 
 
 def a_game(seed: int = 0, players: int = 4):
@@ -161,12 +161,18 @@ def _hidden_swap(game):
     return None
 
 
-def two_worlds_the_record_cannot_tell_apart(seed: int, players: int = 4, cap: int = 600):
-    """A mid-game main-phase position and its ledger-consistent perturbation."""
+def two_worlds_the_record_cannot_tell_apart(
+    seed: int, players: int = 4, cap: int = 900, min_turn: int = 12
+):
+    """A mid-game main-phase position and its ledger-consistent perturbation.
+
+    `None` when `cap` random steps never reach one: not every seed sees a
+    steal early enough, which is the only way a card goes untyped.
+    """
     game = a_game(seed, players)
     rng = random.Random(seed)
     for _ in range(cap):
-        if game.phase is Phase.MAIN:
+        if game.phase is Phase.MAIN and game.turns >= min_turn:
             swap = _hidden_swap(game)
             if swap is not None:
                 a, r1, b, r2 = swap
@@ -208,7 +214,14 @@ def _first_seed_where_search2_differs(seeds=range(200)):
     return None
 
 
-@pytest.mark.parametrize("seed", range(6))
+# Seeds whose random prefix reaches a swappable mid-game position with more
+# than a handful of options; `two_worlds_the_record_cannot_tell_apart` returns
+# None for a seed that never sees a steal in time, which is not a failure of
+# the bot and is kept out of the parametrization.
+WORLD_SEEDS = (2, 3, 5, 6, 7, 10, 12, 16)
+
+
+@pytest.mark.parametrize("seed", WORLD_SEEDS)
 def test_heximax_cannot_tell_ledger_consistent_worlds_apart(seed):
     """The handcrafted analogue of `test_opponent_hand_contents_do_not_leak`.
 

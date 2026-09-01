@@ -1,38 +1,34 @@
-"""A local, dependency-free HTTP server so a human can play base HexSet against
-a dropped-in ONNX checkpoint.
+"""The HTTP transport in front of `hexset_ui.api`, and the CLI that starts it.
 
 Standard library only: `http.server` for the transport, `json` for the wire
-format. The frontend is one static HTML file (`static/index.html`) with inline SVG
-and vanilla JS, served as-is.
+format. The frontend is one static HTML file (`static/index.html`) with inline
+SVG and vanilla JS, served as-is.
 
-`hexset_ui.webplay` (the session, the board layout math, the wire format) is
-onnxruntime-free and importable on its own; the network policy is imported
-here, inside `main`, so anything that only needs the session can be tested
-without onnxruntime installed — the same split `hexset_ui.onnxbot` already draws.
+Nothing about a game lives here. Tables, seats, codes, tokens and every rule
+about who may do what are `api.py`'s, and this module does three things around
+them: read a request, hand it to `Tables.handle`, and write the answer back.
+An `ApiError` carries its own status, so even the error mapping is a one-liner.
 
-## One game per browser, not one game for the whole server
+## Codes in the URL, tokens in the header
 
-Every request carries (or, on its first visit, gets handed) an opaque
-`hexset_id` cookie — a random token identifying the browser, nothing more, no
-accounts. `HexSetServer` keys its games off that: `GET /api/state` from one
-cookie never sees, and can never affect, another cookie's game. This was
-deliberately a cookie and not the request's source IP, which would collide
-two people on the same wifi/NAT into one game and lose the session the moment
-either of them changed networks mid-play.
+`GET /` is the front page, where a table is created. `GET /<CODE>` is a table:
+the same HTML, which reads the code out of its own URL and joins. Both are just
+the file — the server does not resolve the code, because a code that does not
+exist should say so in the page rather than as a raw 404.
 
-Idle games (nobody's polled `/api/state` in a while) are dropped after
-`SESSION_TTL_SECONDS`, since nothing else ever will be — there's no login to
-log out of and no "leave game" button, just a tab someone closed or forgot.
+Identity is the token `api.py` mints, sent back on `X-HexSet-Token` and kept in
+the browser's localStorage. It replaced a cookie, which could not survive the
+premise that one browser might hold seats at more than one table.
 
 Run it with (from `src/`)::
 
     python -m hexset_ui.web
 
-then open the printed URL. Opponents come from `model_options()`: `search2`
+then open the printed URL. Opponents come from `api.model_options()`: `search2`
 (handcrafted, no checkpoint needed) plus one entry per `*.onnx` file found in
 `HEXSET_UI_MODELS_DIR` (default: `<repo root>/models`) — drop a file in, it
 shows up in the picker, no restart, no code change. Pass `--checkpoint <name>`
-to seat 3 copies of one opponent instead of the per-seat default lineup.
+to seat copies of one opponent instead of the per-seat default lineup.
 
 How a checkpoint plays — a single forward pass or a search over its own
 priors, and with what budget — is declared in the file's own metadata and read
@@ -42,275 +38,47 @@ by `hexset_ui.onnxbot`. Nothing here knows the difference.
 from __future__ import annotations
 
 import argparse
-import itertools
 import json
-import os
-import random
-import secrets
-import sys
-import threading
-import time
+import traceback
 import webbrowser
-from dataclasses import dataclass
-from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Callable
 
 from . import journal
-from .actions import Action
-from .board.board import Board, random_base_board
-from .game import Game, is_over, start, to_move
-from .search2 import search2
-from .webplay import Bot, GameSession, ResumeError, board_layout
-
-# The one opponent that is not a file. Everything else in the picker is a path
-# to a checkpoint, and what it does is the checkpoint's business.
-HANDCRAFTED = "search2"
+from .api import CODE_ALPHABET, CODE_LENGTH, ApiError, Config, Tables, model_options
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 INDEX_HTML = STATIC_DIR / "index.html"
-REPO_ROOT = Path(__file__).resolve().parents[2]
-NUM_PLAYERS = 4
 
-COOKIE_NAME = "hexset_id"
-# 30 days: long enough that closing and reopening the tab tomorrow still
-# finds the same game. Not tied to how long a game is actually kept alive
-# server-side (see SESSION_TTL_SECONDS below) — an idle game is dropped long
-# before its cookie would expire on its own either way.
-COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
-# How long a game survives with nobody polling it. An active tab calls
-# GET /api/state far more often than this; a closed or forgotten one doesn't
-# call it at all. 24 hours comfortably outlasts a real, paused-mid-game
-# session without holding onto abandoned ones indefinitely.
-SESSION_TTL_SECONDS = 24 * 60 * 60
-
-MODELS_DIR = Path(os.environ.get("HEXSET_UI_MODELS_DIR", REPO_ROOT / "models"))
+TOKEN_HEADER = "X-HexSet-Token"
 
 
-def model_options() -> dict[str, str]:
-    """Display name -> entrant spec, for the per-seat model picker.
+def is_code(path: str) -> bool:
+    """Whether a URL path is a table code and not a typo or a missing asset.
 
-    `search2` (handcrafted, no checkpoint) is always first; every `*.onnx`
-    file under `MODELS_DIR` follows, filename stem as the display name. The
-    client only ever sends a name back (see `_resolve_bot_models`); specs
-    never cross the wire, so a request can't point a bot at an arbitrary
-    file — this function is the one chokepoint that turns a name into a
-    loadable path, same as if it were still a static dict.
-
-    Scanned fresh on every call rather than cached: a directory listing of a
-    handful of files is sub-millisecond, and the entire point of this
-    function existing (over the static dict it replaced) is that dropping a
-    file in shows up without a restart.
+    Checked against the alphabet rather than just the length so that `/favicon`
+    and friends still 404 as themselves instead of being served the page.
     """
-    options = {HANDCRAFTED: HANDCRAFTED}
-    for path in sorted(MODELS_DIR.glob("*.onnx")):
-        options[path.stem] = str(path)
-    return options
-
-
-@dataclass
-class _Entry:
-    """One identity's live game: the session itself, its board layout (cached
-    alongside it — see `/api/board` — rather than recomputed per request,
-    same as when there was only ever one of these), and when it was last
-    touched, for `HexSetServer._evict_stale` to act on."""
-
-    session: GameSession
-    layout: dict
-    last_seen: float
+    code = path.lstrip("/")
+    return len(code) == CODE_LENGTH and all(c in CODE_ALPHABET for c in code.upper())
 
 
 class HexSetServer(ThreadingHTTPServer):
-    """Holds one game session per browser identity (see the module docstring)
-    instead of one for the whole process.
-
-    Two lock granularities, not one: `_registry_lock` guards the `sessions`/
-    `_locks` dicts themselves (fast — a handful of dict operations), while
-    each identity gets its own `threading.Lock` (see `lock_for`) around the
-    actual game mutation, which can be slow (a cascade of bot moves, each an
-    ONNX forward pass). One shared lock for everything would mean one
-    player's turn stalls every *other* player's request for its duration —
-    fine when this served one human total, wrong now that the whole point is
-    serving several at once.
-    """
-
     daemon_threads = True
 
-    def __init__(
-        self,
-        address: tuple[str, int],
-        new_session: Callable[[list[tuple[str, str]] | None, str, str | None], GameSession],
-        resume_session: Callable[[str, str | None], GameSession | None] = lambda identity, name: None,
-        device: str = "cpu",
-        max_offers: int | None = None,
-    ) -> None:
+    def __init__(self, address: tuple[str, int], tables: Tables) -> None:
         super().__init__(address, Handler)
-        self.sessions: dict[str, _Entry] = {}
-        self.new_session = new_session
-        self.resume_session = resume_session
-        # Carried so a live seat-bot swap (`/api/bot`) can build a bot the same
-        # way `_build_session` did, without threading them through every call.
-        self.device = device
-        self.max_offers = max_offers
-        self._locks: dict[str, threading.Lock] = {}
-        self._registry_lock = threading.Lock()
-        # identity -> whatever POST /api/register last set it to. Consulted
-        # by `entry`/`replace` every time a session is built or resumed, so a
-        # name registered before the first game exists still lands in that
-        # game's journal header (see `_build_session`), and one registered
-        # mid-game still reaches `state_view` (see `register_name`) even
-        # though the header it already wrote can't be rewritten.
-        self.player_names: dict[str, str] = {}
-
-    def lock_for(self, identity: str) -> threading.Lock:
-        """The lock to hold around any mutation of `identity`'s game."""
-        with self._registry_lock:
-            lock = self._locks.get(identity)
-            if lock is None:
-                lock = self._locks[identity] = threading.Lock()
-            return lock
-
-    def entry(self, identity: str, bots: list[tuple[str, str]] | None = None) -> _Entry:
-        """`identity`'s game, dealing a fresh one on first contact. Caller is
-        responsible for holding `lock_for(identity)` first if this might run
-        concurrently with a mutation of that same identity's game — this only
-        protects the registry (the dict of *all* identities' entries), not
-        the one game it hands back.
-        """
-        with self._registry_lock:
-            now = time.monotonic()
-            self._evict_stale(now)
-            found = self.sessions.get(identity)
-            if found is not None:
-                found.last_seen = now
-                return found
-
-        # Building a session can be slow (constructing an mcts: searcher, a
-        # cold NetworkBot, replaying a journal a few hundred actions long) —
-        # done outside _registry_lock so one identity's first-ever request
-        # doesn't stall every other identity's dict lookups for however long
-        # that takes.
-        #
-        # Not in memory does not mean not in progress: this identity may have
-        # a game the last process was serving, or one evicted for going quiet
-        # (see _evict_stale), and either way it is still theirs until they
-        # finish it or start another. `bots` is a fresh game's lineup and has
-        # nothing to say about a resumed one, whose opponents come off its own
-        # file.
-        name = self.player_names.get(identity)
-        session = self.resume_session(identity, name) or self.new_session(bots, identity, name)
-        built = _Entry(session, board_layout(session.game.state.board), time.monotonic())
-        with self._registry_lock:
-            # Another request for this same brand-new identity could have
-            # built and registered its own entry while the above ran —
-            # first one in wins, so anyone already handed that entry (or
-            # already mutating its game under lock_for) isn't left holding
-            # a reference this call silently discarded.
-            found = self.sessions.get(identity)
-            if found is not None:
-                found.last_seen = time.monotonic()
-                return found
-            self.sessions[identity] = built
-            return built
-
-    def replace(self, identity: str, bots: list[tuple[str, str]] | None) -> _Entry:
-        """Unconditionally deals `identity` a new game, replacing whatever it
-        had — what `POST /api/new` does. Caller holds `lock_for(identity)`,
-        which rules out the same first-one-wins race `entry` guards against:
-        nothing else can be creating this identity's entry at the same time.
-        """
-        # Pressing New Game is the one way to say a game is over without
-        # finishing it. Said out loud in the outgoing journal, or `entry`
-        # would hand this game straight back on the next cache miss — the
-        # file has no closing line of its own, since nobody won it.
-        #
-        # A game that was won already wrote `result` and needs nothing more:
-        # adding "abandoned" after it files a game the human played out as one
-        # they walked away from, which is the single distinction anything
-        # counting these files exists to make.
-        previous = self.sessions.get(identity)
-        if (
-            previous is not None
-            and previous.session.journal is not None
-            and not is_over(previous.session.game)
-        ):
-            previous.session.journal.abandoned()
-        # outside the lock — see entry()
-        session = self.new_session(bots, identity, self.player_names.get(identity))
-        entry = _Entry(session, board_layout(session.game.state.board), time.monotonic())
-        with self._registry_lock:
-            self.sessions[identity] = entry
-            return entry
-
-    def register_name(self, identity: str, name: str) -> None:
-        """Records `identity`'s chosen display name for every game it deals
-        or resumes from here on (see `entry`/`replace`). Also applied to
-        whatever game `identity` is already mid-way through, best-effort:
-        `state_view` picks it up immediately, but the journal header (see
-        `GameSession.__post_init__`) was already written at deal time and
-        isn't rewritten — a name is a display label, not a rule, so this is
-        allowed to leave the journal's memory of "who this was at the start"
-        alone rather than editing history for it.
-        """
-        with self._registry_lock:
-            self.player_names[identity] = name
-            entry = self.sessions.get(identity)
-        if entry is not None:
-            entry.session.player_name = name
-
-    def _evict_stale(self, now: float) -> None:
-        """Must be called with `_registry_lock` held. Drops any identity's
-        game (and its lock) untouched for longer than `SESSION_TTL_SECONDS`
-        — an abandoned tab, not an active one (see module docstring).
-
-        Not guarded against evicting an identity whose own request is what's
-        currently running: `entry`, the only caller, is always invoked while
-        the caller already holds `lock_for(identity)` for that very
-        identity, so "is this identity's lock held" can never distinguish
-        "another concurrent request is using it" from "I am, right now,
-        resolving it" — the two cases this sweep actually needs to tell
-        apart. Evicting the second one is exactly the intended behavior
-        anyway (`entry` immediately rebuilds whatever it just deleted), so
-        there is nothing to guard there. What's left unguarded is a single
-        request that runs longer than `SESSION_TTL_SECONDS` itself — hours —
-        which would need to be evicted by some *other* identity's traffic
-        arriving mid-request; accepted as a known gap rather than one worth
-        the complexity of closing.
-        """
-        stale = [i for i, e in self.sessions.items() if now - e.last_seen > SESSION_TTL_SECONDS]
-        for identity in stale:
-            del self.sessions[identity]
-            self._locks.pop(identity, None)
+        self.tables = tables
 
 
 class Handler(BaseHTTPRequestHandler):
     server: HexSetServer  # narrows the inherited attribute's type for readability
-
-    def _read_identity(self) -> None:
-        """Reads this request's `hexset_id` cookie, or mints one — cached on
-        `self` (a fresh `Handler` per request) so every handler downstream,
-        plus `_json`/`_file`, share the one value: the latter need it to know
-        whether to actually set the cookie this response, which only a
-        brand-new identity's first response must do.
-        """
-        identity = None
-        header = self.headers.get("Cookie")
-        if header:
-            cookies = SimpleCookie()
-            cookies.load(header)
-            morsel = cookies.get(COOKIE_NAME)
-            if morsel is not None:
-                identity = morsel.value
-        self._new_identity = identity is None
-        self.identity = identity or secrets.token_urlsafe(18)
 
     def _json(self, payload: dict, status: int = 200) -> None:
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
-        self._set_identity_cookie_if_new()
         self.end_headers()
         self.wfile.write(body)
 
@@ -324,43 +92,39 @@ class Handler(BaseHTTPRequestHandler):
         # falls back to a stale copy rather than refetching — indistinguishable
         # from "the fix didn't work" without this.
         self.send_header("Cache-Control", "no-store")
-        self._set_identity_cookie_if_new()
         self.end_headers()
         self.wfile.write(body)
 
-    def _set_identity_cookie_if_new(self) -> None:
-        if self._new_identity:
-            self.send_header(
-                "Set-Cookie",
-                f"{COOKIE_NAME}={self.identity}; Path=/; Max-Age={COOKIE_MAX_AGE_SECONDS}; SameSite=Lax",
+    def _serve(self, method: str, payload: dict) -> None:
+        try:
+            self._json(
+                self.server.tables.handle(
+                    method, self.path, payload, self.headers.get(TOKEN_HEADER)
+                )
             )
+        except ApiError as error:
+            self._json({"error": str(error)}, status=error.status)
+        except Exception as error:
+            # Anything the API did not expect — a checkpoint that will not
+            # load, a bug. Left in the log in full, but answered rather than
+            # dropped: http.server's default is to close the connection
+            # mid-response, which reaches the browser as a network failure and
+            # tells whoever is playing nothing at all.
+            traceback.print_exc()
+            self._json({"error": f"{type(error).__name__}: {error}"}, status=500)
 
     def do_GET(self) -> None:  # noqa: N802 (http.server's naming convention)
-        self._read_identity()
-        if self.path in ("/", "/index.html"):
+        if self.path in ("/", "/index.html") or is_code(self.path):
             self._file(INDEX_HTML, "text/html; charset=utf-8")
-        elif self.path == "/api/board":
-            # Reading entry.layout/session.state_view() stays inside the
-            # lock, same as every mutating handler below — otherwise this
-            # GET can race a concurrent POST for the same identity (e.g. the
-            # client's own periodic /api/state poll landing mid-action) and
-            # read a GameSession mid-mutation.
-            with self.server.lock_for(self.identity):
-                entry = self.server.entry(self.identity)
-                self._json(entry.layout)
-        elif self.path == "/api/state":
-            with self.server.lock_for(self.identity):
-                entry = self.server.entry(self.identity)
-                self._json(entry.session.state_view())
-        elif self.path == "/api/models":
-            # Names only, never paths: the picker builds its 3 dropdowns from
-            # this list and sends names back, same as it received them.
-            self._json({"models": list(model_options())})
+        elif self.path.startswith("/api/"):
+            self._serve("GET", {})
         else:
             self.send_error(404)
 
     def do_POST(self) -> None:  # noqa: N802
-        self._read_identity()
+        if not self.path.startswith("/api/"):
+            self.send_error(404)
+            return
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length) if length else b""
         try:
@@ -368,342 +132,10 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             self._json({"error": "invalid JSON body"}, status=400)
             return
-
-        if self.path == "/api/action":
-            self._handle_action(payload)
-        elif self.path == "/api/new":
-            self._handle_new(payload)
-        elif self.path == "/api/bot":
-            self._handle_swap_bot(payload)
-        elif self.path == "/api/undo":
-            self._handle_undo(payload)
-        elif self.path == "/api/confirm":
-            self._handle_confirm(payload)
-        elif self.path == "/api/advance":
-            self._handle_advance(payload)
-        elif self.path == "/api/register":
-            self._handle_register(payload)
-        else:
-            self.send_error(404)
-
-    def _handle_register(self, payload: dict) -> None:
-        """Names the human side of this browser's (or MCP client's — see
-        `mcp.py`) game, past or future — see `HexSetServer.register_name`.
-        Not folded into `POST /api/new`'s payload: a name is who's playing,
-        which can be set before a game even exists (first thing an MCP client
-        does) or changed mid-game, neither of which "deal a new game" means.
-        """
-        name = payload.get("name")
-        if not isinstance(name, str) or not name.strip():
-            self._json({"error": "expected {name: non-empty string}"}, status=400)
+        if not isinstance(payload, dict):
+            self._json({"error": "body must be a JSON object"}, status=400)
             return
-        name = name.strip()[:40]  # a display label, not a form field to validate hard
-        self.server.register_name(self.identity, name)
-        self._json({"player_name": name})
-
-    def _handle_new(self, payload: dict) -> None:
-        bot_models = payload.get("bot_models")
-        bots = None
-        if bot_models is not None:
-            try:
-                bots = _resolve_bot_models(bot_models)
-            except ValueError as exc:
-                self._json({"error": str(exc)}, status=400)
-                return
-        with self.server.lock_for(self.identity):
-            entry = self.server.replace(self.identity, bots)
-        self._json(entry.session.state_view())
-
-    def _handle_swap_bot(self, payload: dict) -> None:
-        """Re-seat one non-human seat's bot mid-game — models can be swapped
-        at any point, not just between games. Rebuilding the network from
-        `model_options()` (rather than accepting a spec) keeps this the same
-        chokepoint `_resolve_bot_models` already is: a request names a bot, it
-        never hands one a path.
-        """
-        try:
-            seat = int(payload["seat"])
-            name = str(payload["model"])
-        except (KeyError, TypeError, ValueError):
-            self._json({"error": "expected {seat: int, model: str}"}, status=400)
-            return
-        with self.server.lock_for(self.identity):
-            session = self.server.entry(self.identity).session
-            if seat == session.human_seat or seat not in session.bot.bots_by_seat:
-                self._json({"error": f"seat {seat} has no bot to swap"}, status=400)
-                return
-            try:
-                spec = model_options()[name]
-            except KeyError:
-                self._json({"error": f"unknown model: {name}"}, status=400)
-                return
-            new_bot = _spawn_bot(
-                spec, session.game.state.board, random.Random(), self.server.device, self.server.max_offers
-            )
-            session.bot.bots_by_seat[seat] = new_bot
-            session.bot_names[seat] = name
-            session.bot_specs[seat] = spec
-            if session.journal is not None:
-                session.journal.seated(seat=seat, name=name, spec=spec)
-        self._json(session.state_view())
-
-    def _handle_action(self, payload: dict) -> None:
-        with self.server.lock_for(self.identity):
-            session = self.server.entry(self.identity).session
-            try:
-                session.apply_human_action(payload)
-                # At most the one seat this action just handed off to — a
-                # no-op of its own accord if that's the human (see
-                # advance_one_seat). A setup road may have left the human's
-                # own confirm still pending instead (see
-                # GameSession.apply_human_action/awaiting_confirm); in that
-                # case this waits for POST /api/confirm rather than running
-                # in this same request. Any further bots beyond this one
-                # seat wait for the client's own follow-up POST
-                # /api/advance, same as after any other response that leaves
-                # a bot on move.
-                if not session.awaiting_confirm:
-                    session.advance_one_seat()
-            except ValueError as exc:
-                self._json({"error": str(exc), **session.state_view()}, status=400)
-                return
-            except RuntimeError as exc:
-                self._json({"error": str(exc), **session.state_view()}, status=500)
-                return
-            self._json(session.state_view())
-
-    def _handle_advance(self, payload: dict) -> None:
-        # No body expected, same as _handle_undo/_handle_confirm. Harmless if
-        # it's already the human's turn or the game is over —
-        # advance_one_seat just returns False and nothing moves, the same
-        # tolerance confirm_setup_turn gives a stale or doubled-up call.
-        # Explicitly skipped while a setup road's handoff is still waiting
-        # on the human's own confirm, same guard _handle_action applies —
-        # this is the one other place that could otherwise run a bot ahead
-        # of that confirm. The client calls this in a loop (see index.html's
-        # settle()) to drive the bot cascade one seat and one response at a
-        # time, rather than the whole thing landing behind a single request
-        # the way /api/action and /api/confirm used to leave it.
-        with self.server.lock_for(self.identity):
-            session = self.server.entry(self.identity).session
-            try:
-                if not session.awaiting_confirm:
-                    session.advance_one_seat()
-            except RuntimeError as exc:
-                self._json({"error": str(exc), **session.state_view()}, status=500)
-                return
-            self._json(session.state_view())
-
-    def _handle_undo(self, payload: dict) -> None:
-        # No body expected — `payload` just keeps this the same shape as
-        # every other _handle_* the do_POST dispatch calls.
-        with self.server.lock_for(self.identity):
-            session = self.server.entry(self.identity).session
-            try:
-                session.undo_last_build()
-            except ValueError as exc:
-                self._json({"error": str(exc), **session.state_view()}, status=400)
-                return
-            self._json(session.state_view())
-
-    def _handle_confirm(self, payload: dict) -> None:
-        # No body expected, same as _handle_undo.
-        with self.server.lock_for(self.identity):
-            session = self.server.entry(self.identity).session
-            try:
-                session.confirm_setup_turn()
-            except RuntimeError as exc:
-                self._json({"error": str(exc), **session.state_view()}, status=500)
-                return
-            self._json(session.state_view())
-
-    def log_message(self, fmt: str, *args) -> None:  # noqa: A003
-        sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
-
-
-@dataclass
-class SeatBot:
-    """Routes to a different bot per seat.
-
-    `GameSession` holds exactly one `Bot`; this is that one bot, fanning out
-    to whichever underlying `NetworkBot` actually owns the seat on move so
-    three independently-picked checkpoints can share a game.
-    """
-
-    bots_by_seat: dict[int, Bot]
-
-    def choose(self, game: Game) -> Action:
-        return self.bots_by_seat[to_move(game)].choose(game)
-
-
-def _resolve_bot_models(names: list[str]) -> list[tuple[str, str]]:
-    """`names` (client-supplied model-picker labels) -> (name, spec) pairs.
-
-    The only point where a request's model choice turns into something that
-    can load a file, and the only names it will accept are ones already in
-    `model_options()` — never a spec the client sent directly. The name rides
-    along so `_build_session` can label the seat with it, not just the spec.
-    """
-    try:
-        options = model_options()
-        return [(name, options[name]) for name in names]
-    except KeyError as exc:
-        raise ValueError(f"unknown model: {exc.args[0]}") from exc
-
-
-def _spawn_bot(
-    spec: str, board, rng: random.Random, device: str, max_offers: int | None
-) -> Bot:
-    """One spec (see `model_options()`) as a live bot on `board`.
-
-    Two cases, and no third: `search2` is the handcrafted opponent, and
-    anything else is a path to a checkpoint. How a checkpoint wants to be
-    played — a single forward pass, or a search over its own priors, and with
-    what budget — is read out of the file itself by `onnxbot.spawn`, so this
-    function never learns what a simulation is.
-    """
-    if spec == HANDCRAFTED:
-        return search2(board, rng, max_offers=max_offers)
-
-    from .onnxbot import spawn  # onnxruntime-free import boundary
-
-    return spawn(spec, board, rng=rng, device=device, max_offers=max_offers)
-
-
-def _build_session(
-    bots: list[tuple[str, str]],
-    human_seat: int | None,
-    seed: int | None,
-    device: str,
-    max_offers: int | None,
-    games_dir: str | None = None,
-    identity: str | None = None,
-    player_name: str | None = None,
-) -> GameSession:
-    if len(bots) != NUM_PLAYERS - 1:
-        raise ValueError(f"expected {NUM_PLAYERS - 1} bots, got {len(bots)}")
-
-    # Always resolved to a concrete int, even when the caller left it to chance,
-    # so the journal can name the seed a resumed game rebuilds its board from —
-    # `random.Random()` alone has no int to hand back for that.
-    if seed is None:
-        seed = random.SystemRandom().randrange(2**31)
-    # Left to chance the same way: a fixed --human-seat is for testing one
-    # spot on the table, but the default experience shouldn't always deal the
-    # human seat 0 (and, with it, the first move of every setup snake).
-    if human_seat is None:
-        human_seat = random.SystemRandom().randrange(NUM_PLAYERS)
-    # Two separate Random instances from the same seed, not one shared stream.
-    # `_resume_session` below rebuilds a game exactly this way, so the two must
-    # agree: consuming this seed's stream to build the board and then handing
-    # the same object on to `start` would leave `start`'s rng at a position
-    # resuming cannot reconstruct, and a journalled game would fail to resume.
-    board = random_base_board(random.Random(seed))
-    # Bots are assigned to non-human seats in ascending seat order — the
-    # picker's 3 dropdowns don't know which seats they'll land on, since
-    # human_seat is only resolved above, a moment before this runs. Each bot
-    # gets its own rng, seeded off the game seed and its seat rather than
-    # sharing one stream, so an `mcts:` bot's search sampling on one seat
-    # cannot perturb another's.
-    non_human_seats = [s for s in range(NUM_PLAYERS) if s != human_seat]
-    lineup = dict(zip(non_human_seats, bots))
-    game = start(board, NUM_PLAYERS, random.Random(seed))
-    session = GameSession(
-        game=game,
-        human_seat=human_seat,
-        bot=_seat_bots(lineup, board, seed, device, max_offers),
-        seed=seed,
-        journal=journal.open_journal(seed, games_dir),
-        bot_names={seat: name for seat, (name, _) in lineup.items()},
-        bot_specs={seat: spec for seat, (_, spec) in lineup.items()},
-        identity=identity,
-        player_name=player_name,
-    )
-    session.advance_bots()  # in case the human is not first in the setup snake
-    return session
-
-
-def _seat_bots(
-    lineup: dict[int, tuple[str, str]],
-    board: Board,
-    seed: int,
-    device: str,
-    max_offers: int | None,
-) -> SeatBot:
-    """One bot per non-human seat, each with its own rng seeded off the game
-    seed and its seat rather than sharing one stream, so an `mcts:` bot's
-    search sampling on one seat cannot perturb another's."""
-    return SeatBot(
-        {
-            seat: _spawn_bot(spec, board, random.Random(seed * 4 + seat), device, max_offers)
-            for seat, (_, spec) in lineup.items()
-        }
-    )
-
-
-def _resume_session(
-    identity: str,
-    device: str,
-    max_offers: int | None,
-    games_dir: str | None = None,
-    player_name: str | None = None,
-) -> GameSession | None:
-    """The game this browser left unfinished, played back to where it stopped
-    — or `None` if there isn't one, in which case the caller deals.
-
-    A session lives in memory, so it used to be lost to anything that ended
-    the process: a deploy, a crash, or simply going quiet long enough to be
-    evicted. The journal is the whole game though (see `hexset_ui.journal`), and
-    it replays exactly, so the loss was never necessary.
-
-    Bots are the one thing that does not come back: they are re-seated from
-    the same specs, but each gets a fresh rng, so a resumed game's opponents
-    play on from here rather than replaying the moves they would have made.
-    Their past moves are read off the file, not asked for again, so nothing
-    already played can change under the human.
-    """
-    where = games_dir if games_dir is not None else journal.configured_dir()
-    path = journal.resumable(where, identity)
-    if path is None:
-        return None
-
-    events = journal.read(path)
-    header = events[0]
-    seed, human_seat = header["seed"], header["human_seat"]
-    board = random_base_board(random.Random(seed))
-    lineup = journal.seating(events)
-    session = GameSession(
-        game=start(board, header["num_players"], random.Random(seed)),
-        human_seat=human_seat,
-        bot=_seat_bots(lineup, board, seed, device, max_offers),
-        seed=seed,
-        bot_names={seat: name for seat, (name, _) in lineup.items()},
-        bot_specs={seat: spec for seat, (_, spec) in lineup.items()},
-        identity=identity,
-        # Whatever's registered right now takes priority over the name (if
-        # any) the header remembers from deal time, so a rename before this
-        # game was even loaded off disk carries forward the same as it would
-        # into a fresh deal — falling back to the header's own only so a
-        # process restart with no fresh POST /api/register doesn't forget it.
-        player_name=player_name or header.get("player_name"),
-    )
-    try:
-        session.restore(
-            journal.replayable(events),
-            journal.Journal(directory=str(path.parent), game_id=path.stem),
-        )
-    except (ResumeError, ValueError, KeyError) as error:
-        # Kept rather than deleted: a journal that will not replay is the one
-        # copy of a game that did happen, and is worth more as evidence of
-        # whatever broke than the disk space is. Closed, though, so the next
-        # request tries to resume it once and then deals instead of failing
-        # this way forever.
-        print(f"could not resume {path.name}: {error}")
-        journal.Journal(directory=str(path.parent), game_id=path.stem).abandoned()
-        return None
-
-    session.advance_bots()  # the file may end mid-cascade, on a bot's turn
-    return session
+        self._serve("POST", payload)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -712,23 +144,15 @@ def main(argv: list[str] | None = None) -> None:
         "--checkpoint",
         default=None,
         help=(
-            "An opponent (see model_options() — 'search2' or a .onnx path), "
-            "used for all 3 bot seats until the web picker (GET /api/models, "
-            "POST /api/new) overrides it. Defaults to search2 plus one of each "
-            ".onnx file found in the models directory, rather than 3 copies of "
-            "one bot."
+            "An opponent (see api.model_options() — 'search2' or a .onnx name), "
+            "used for every bot seat a new table is dealt with until the web "
+            "picker overrides it. Defaults to search2 plus one of each .onnx "
+            "file found in the models directory, rather than copies of one bot."
         ),
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8770)
     parser.add_argument("--seed", type=int, default=None, help="Board/RNG seed.")
-    parser.add_argument(
-        "--human-seat",
-        type=int,
-        default=None,
-        choices=range(NUM_PLAYERS),
-        help="Which of the 4 seats the human plays (0-3). Random each game if omitted.",
-    )
     parser.add_argument(
         "--max-offers",
         type=int,
@@ -751,46 +175,20 @@ def main(argv: list[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
-    # model_options() can return any number of entries (zero .onnx files
-    # dropped in means just "search2"; a dozen means a dozen) — cycle rather
-    # than slice so there's always a valid 3-bot lineup regardless of how
-    # many models happen to be in MODELS_DIR right now, down to the empty
-    # case (3x search2).
-    default_bots = (
-        [(args.checkpoint, args.checkpoint)] * (NUM_PLAYERS - 1)
-        if args.checkpoint
-        else list(itertools.islice(itertools.cycle(model_options().items()), NUM_PLAYERS - 1))
+    if args.checkpoint and args.checkpoint not in model_options():
+        parser.error(f"unknown checkpoint: {args.checkpoint}")
+
+    config = Config(
+        device=args.device,
+        max_offers=args.max_offers,
+        games_dir=args.games_dir,
+        seed=args.seed,
+        default_bots=[args.checkpoint] * 3 if args.checkpoint else None,
     )
-
-    def new_session(
-        bots: list[tuple[str, str]] | None, identity: str, player_name: str | None
-    ) -> GameSession:
-        return _build_session(
-            bots or default_bots,
-            args.human_seat,
-            args.seed,
-            args.device,
-            args.max_offers,
-            args.games_dir,
-            identity,
-            player_name,
-        )
-
-    def resume_session(identity: str, player_name: str | None) -> GameSession | None:
-        return _resume_session(
-            identity, args.device, args.max_offers, args.games_dir, player_name
-        )
-
-    # No session is built here anymore — each browser deals its own on first
-    # contact (see HexSetServer.entry), so there's no single "the" game to
-    # build before the server can even start.
-    server = HexSetServer(
-        (args.host, args.port), new_session, resume_session, args.device, args.max_offers
-    )
+    server = HexSetServer((args.host, args.port), Tables(config))
 
     url = f"http://{args.host}:{args.port}/"
-    names = [name for name, _ in default_bots]
-    print(f"HexSet board: {url}  (bots={names})")
+    print(f"HexSet board: {url}  (models={list(model_options())})")
     games_dir = args.games_dir if args.games_dir is not None else journal.configured_dir()
     if games_dir:
         print(f"Every game will be journalled in full under {games_dir}/")

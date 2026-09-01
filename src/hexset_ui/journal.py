@@ -168,11 +168,11 @@ class Journal:
         game: Game,
         *,
         seed: int,
-        human_seat: int,
+        human_seats: list[int],
         bot_names: dict[int, str],
         bot_specs: dict[int, str],
-        identity: str | None = None,
-        player_name: str | None = None,
+        player_names: dict[int, str] | None = None,
+        code: str | None = None,
     ) -> None:
         """The header: everything true before the first action.
 
@@ -182,12 +182,15 @@ class Journal:
         against it, and the whole game's development cards are known without
         the engine's random stream being involved at all.
 
-        `identity` is the browser's `hexset_id` cookie and `spec` the string
-        that built each bot, neither of which the game itself needs: they are
-        here so `resume` can put this exact session back together for the
-        person whose it was. `player_name` is whatever the human side
-        registered itself as (see `POST /api/register` and the MCP `register`
-        tool) — `None` for the ordinary browser game that never called either.
+        `code` is the table's join code and `spec` the string that built each
+        bot, neither of which the game itself needs: they are here so a resume
+        can put this exact table back together after a restart. `human_seats`
+        are the seats people played and `player_names` whatever they
+        registered as — a seat missing from the latter is one nobody named.
+
+        Seats absent from both `human_seats` and `bots` did not exist: a table
+        dealt with empty seats deals a game with only the occupied ones (see
+        `api.py`), so the engine never carries a seat nobody is playing.
         """
         state = game.state
         self._emit(
@@ -196,10 +199,10 @@ class Journal:
                 "id": self.game_id,
                 "at": _now(),
                 "seed": seed,
-                "identity": identity,
-                "player_name": player_name,
+                "code": code,
                 "num_players": state.num_players,
-                "human_seat": human_seat,
+                "human_seats": list(human_seats),
+                "player_names": {str(s): n for s, n in sorted((player_names or {}).items())},
                 "bots": {
                     str(seat): {"name": name, "spec": bot_specs.get(seat, name)}
                     for seat, name in sorted(bot_names.items())
@@ -421,13 +424,13 @@ def seating(events: list[dict]) -> dict[int, tuple[str, str]]:
     return seats
 
 
-def resumable(directory: str | None, identity: str) -> Path | None:
-    """The game `identity` left unfinished, or `None` to deal them a fresh one.
+def resumable(directory: str | None, code: str) -> Path | None:
+    """The unfinished game filed under join code `code`, or `None`.
 
-    Only their most recent game is ever a candidate. An older unfinished file
-    is a game they already walked away from once — handing it back because a
-    newer one happens to have ended would be reaching further into the past
-    than the player ever asked for.
+    Only the most recent file bearing that code is ever a candidate. An older
+    unfinished one is a game the table already walked away from once — handing
+    it back because a newer one happens to have ended would be reaching
+    further into the past than anyone asked for.
     """
     if not directory:
         return None
@@ -437,7 +440,7 @@ def resumable(directory: str | None, identity: str) -> Path | None:
         return None
     for path in paths:
         header = header_of(path)
-        if header is None or header.get("identity") != identity:
+        if header is None or header.get("code") != code:
             continue
         return None if is_closed(read(path)) else path
     return None

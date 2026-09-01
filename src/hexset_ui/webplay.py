@@ -1168,11 +1168,13 @@ class GameSession:
             "players": players,
             "offer": offer,
             "legal_actions": self.legal_wire_actions(viewer),
-            "log": self._log_for(viewer, labels),
+            "log": self.log_for(viewer),
         }
 
-    def _log_for(self, viewer: int | None, labels: dict[int, str]) -> list[str]:
-        lines = render_log(self.events, self.game.state.board, labels, viewer)
+    def log_for(self, viewer: int | None) -> list[str]:
+        """The sidebar transcript as `viewer` should see it, `None` for a
+        spectator, who is owed the least of anyone (see `render_log`)."""
+        lines = render_log(self.events, self.game.state.board, self.seat_labels, viewer)
         if is_over(self.game):
             # The round the final action fell in, not self.round: a game that
             # ended on an END_TURN has already ticked over to the next one.

@@ -1,103 +1,89 @@
 """HTTP-layer tests for `hexset_ui.web`.
 
-Torch-free on purpose: the opponent here is `conftest.RandomBot`, not a
-loaded checkpoint, so this suite runs anywhere the rest of the engine's tests
-do. What it is pinning is the transport — status codes, JSON shape, that an
-action `legal_actions` did not offer is refused over HTTP the same way
-`GameSession.apply_human_action` refuses it in-process (`test_webplay.py`
-covers that half directly), and — since `HexSetServer` now keys games off an
-identity cookie rather than holding one shared session — that two "browsers"
-(two separate cookie jars, via `_client`) really do get two independent
-games while one browser's own requests keep landing on the same one.
+Only what the transport itself adds: status codes, the static file, the token
+header, and that a refusal `api.py` raises arrives as the status it carries
+rather than as a dropped connection. The rules those refusals come from are
+`test_api.py`'s, tested there without a socket.
+
+Torch-free on purpose: the opponents are named `search2` at every call, so this
+suite runs anywhere the rest of the engine's tests do.
 """
 
 from __future__ import annotations
 
-import http.cookiejar
 import json
-import random
 import threading
-import time
 import urllib.error
 import urllib.request
 
 import pytest
 
-from hexset_ui import journal
-from hexset_ui.actions import Action, ActionType, legal_actions
-from hexset_ui.board.board import random_base_board
-from conftest import RandomBot
-from hexset_ui.game import is_over, start, to_move
-from hexset_ui.webplay import GameSession, action_to_wire, board_layout
-from hexset_ui.web import (
-    COOKIE_NAME,
-    HexSetServer,
-    _build_session,
-    _Entry,
-    _resume_session,
-)
+from hexset_ui.actions import ActionType, legal_actions
+from hexset_ui.api import Config, Tables
+from hexset_ui.web import TOKEN_HEADER, HexSetServer, is_code
+from hexset_ui.webplay import action_to_wire
 
-
-def _new_session(seed: int) -> GameSession:
-    rng = random.Random(seed)
-    board = random_base_board(rng)
-    game = start(board, 4, rng)
-    return GameSession(game=game, human_seat=to_move(game), bot=RandomBot(rng=random.Random(seed)))
+SOLO = ["search2", "search2", "search2"]
 
 
 @pytest.fixture
 def live_server():
-    # Every identity's first request deals it a session via this same
-    # callable — unlike the single eager session `main()` used to build
-    # before the server even started, there is no longer one "the" session
-    # to hand the fixture up front (see HexSetServer.entry).
-    # No resume_session is passed: these tests are about the HTTP surface,
-    # and the default (never resume) keeps every first request a fresh deal.
-    server = HexSetServer(("127.0.0.1", 0), lambda bots, identity, player_name: _new_session(1))
+    server = HexSetServer(("127.0.0.1", 0), Tables(Config(games_dir="")))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    port = server.server_address[1]
     try:
-        yield server, f"http://127.0.0.1:{port}"
+        yield server, f"http://127.0.0.1:{server.server_address[1]}"
     finally:
         server.shutdown()
         thread.join(timeout=5)
         server.server_close()
 
 
-class _Client:
-    """One simulated browser: a private cookie jar, so its `hexset_id` (once
-    the server hands it one) is remembered across calls the same way a real
-    browser remembers it, and never leaks to another `_Client` instance.
-    """
+class Client:
+    """One seat's worth of HTTP: whatever token the server last minted, sent
+    on every request after, the same way a browser sends the one it kept in
+    localStorage."""
 
     def __init__(self, base: str) -> None:
         self.base = base
-        jar = http.cookiejar.CookieJar()
-        self._opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
-        self._jar = jar
+        self.token: str | None = None
 
-    @property
-    def identity(self) -> str | None:
-        for cookie in self._jar:
-            if cookie.name == COOKIE_NAME:
-                return cookie.value
-        return None
+    def _send(self, request: urllib.request.Request):
+        if self.token is not None:
+            request.add_header(TOKEN_HEADER, self.token)
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                return response.status, json.loads(response.read())
+        except urllib.error.HTTPError as error:
+            return error.code, json.loads(error.read())
 
-    def get(self, path: str) -> dict:
-        with self._opener.open(self.base + path, timeout=5) as response:
-            return json.loads(response.read())
+    def get(self, path: str):
+        return self._send(urllib.request.Request(self.base + path))
 
     def post(self, path: str, payload: dict):
-        body = json.dumps(payload).encode("utf-8")
-        request = urllib.request.Request(
-            self.base + path, data=body, headers={"Content-Type": "application/json"}, method="POST"
+        status, data = self._send(
+            urllib.request.Request(
+                self.base + path,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
         )
-        try:
-            with self._opener.open(request, timeout=5) as response:
-                return response.status, json.loads(response.read())
-        except urllib.error.HTTPError as exc:
-            return exc.code, json.loads(exc.read())
+        if isinstance(data, dict) and data.get("token"):
+            self.token = data["token"]
+        return status, data
+
+
+def seated(base: str, **kwargs) -> tuple[Client, dict]:
+    """A client holding a token for a freshly dealt table."""
+    client = Client(base)
+    kwargs.setdefault("bots", SOLO[: 3 - kwargs.get("open_seats", 0)])
+    status, data = client.post("/api/tables", kwargs)
+    assert status == 200, data
+    return client, data
+
+
+# --- Static files and code URLs -------------------------------------------------
 
 
 def test_index_serves_html(live_server):
@@ -109,344 +95,193 @@ def test_index_serves_html(live_server):
     assert b"<html" in body.lower()
 
 
-def test_the_first_response_hands_out_an_identity_cookie(live_server):
+def test_a_code_url_serves_the_same_page_the_front_door_does(live_server):
+    """The server does not resolve the code — a code that does not exist
+    should say so in the page rather than as a raw 404."""
     _, base = live_server
-    client = _Client(base)
-    assert client.identity is None
-    client.get("/api/state")
-    assert client.identity is not None
+    with urllib.request.urlopen(base + "/", timeout=5) as response:
+        front = response.read()
+    with urllib.request.urlopen(base + "/ZZZZZZ", timeout=5) as response:
+        assert response.status == 200
+        assert response.read() == front
 
 
-def test_a_returning_cookie_is_not_reissued(live_server):
-    """A request that already carries `hexset_id` gets the exact same value
-    back, not a fresh one — otherwise every poll would silently start a new
-    game."""
+def test_the_page_is_never_served_from_a_stale_cache(live_server):
+    """A phone browser reopening a background tab is exactly the case that
+    falls back to a stale copy, which is indistinguishable from a fix that
+    did not work."""
     _, base = live_server
-    client = _Client(base)
-    client.get("/api/state")
-    first = client.identity
-    client.get("/api/state")
-    assert client.identity == first
+    with urllib.request.urlopen(base + "/", timeout=5) as response:
+        assert response.headers.get("Cache-Control") == "no-store"
 
 
-def test_board_endpoint_matches_the_sessions_own_board(live_server):
+def test_only_something_shaped_like_a_code_is_treated_as_one():
+    """Checked against the alphabet rather than just the length, so a missing
+    asset still 404s as itself."""
+    assert is_code("/ABC234")
+    assert is_code("/abc234")
+    assert not is_code("/favicon")  # right length, wrong alphabet
+    assert not is_code("/ABC01I")  # 0, 1 and I are not in the alphabet at all
+    assert not is_code("/ABC23")
+    assert not is_code("/robots.txt")
+
+
+def test_an_asset_that_is_not_there_is_a_404(live_server):
+    _, base = live_server
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        urllib.request.urlopen(base + "/favicon", timeout=5)
+    assert caught.value.code == 404
+
+
+def test_a_post_outside_the_api_is_a_404(live_server):
+    """A code is a page to GET, not somewhere to post to."""
+    _, base = live_server
+    request = urllib.request.Request(base + "/ABC234", data=b"{}", method="POST")
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        urllib.request.urlopen(request, timeout=5)
+    assert caught.value.code == 404
+
+
+# --- Requests and refusals ------------------------------------------------------
+
+
+def test_a_table_is_dealt_and_then_played_over_http(live_server):
     server, base = live_server
-    client = _Client(base)
-    data = client.get("/api/board")
-    entry = server.sessions[client.identity]
-    assert data["hexes"] == entry.layout["hexes"]
-    assert len(data["vertices"]) == len(entry.layout["vertices"])
+    client, table = seated(base)
+    assert table["code"]
 
-
-def test_state_endpoint_reflects_the_live_session(live_server):
-    server, base = live_server
-    client = _Client(base)
-    data = client.get("/api/state")
-    entry = server.sessions[client.identity]
-    assert data["human_seat"] == entry.session.human_seat
-    assert data["phase"] == "SETUP_SETTLEMENT"
-    assert data["round"] == 0
-
-
-def test_a_legal_action_is_accepted_and_advances_the_game(live_server):
-    server, base = live_server
-    client = _Client(base)
-    client.get("/api/state")  # establishes the identity/session first
-    session = server.sessions[client.identity].session
-    human_seat = session.human_seat
-    options = legal_actions(session.game)
-    assert to_move(session.game) == human_seat  # a fresh session guarantees this
-    wire = action_to_wire(options[0])
-
-    status, data = client.post("/api/action", wire)
+    status, data = client.post("/api/start", {})
     assert status == 200
-    assert "error" not in data
-    # A setup settlement is immediately followed by that same player's road.
+    assert data["phase"] == "SETUP_SETTLEMENT"
+
+    session = server.tables.get(table["code"]).session
+    settlement = action_to_wire(
+        next(a for a in legal_actions(session.game) if a.type is ActionType.SETUP_SETTLEMENT)
+    )
+    status, data = client.post("/api/action", {"action": settlement})
+    assert status == 200
     assert data["phase"] == "SETUP_ROAD"
     assert len(data["log"]) >= 1
 
 
-def test_advance_endpoint_plays_one_seat_at_a_time(live_server):
-    """POST /api/advance is the per-seat counterpart to what /api/action and
-    /api/confirm used to leave to a single server-side cascade — each call
-    should move the game by exactly one seat's turn, not the whole cascade
-    back to the human in one response."""
+def test_advance_plays_one_seat_at_a_time(live_server):
+    """POST /api/advance moves the game by exactly one seat's turn, not the
+    whole cascade back to the human in a single response."""
     server, base = live_server
-    client = _Client(base)
-    client.get("/api/state")
-    session = server.sessions[client.identity].session
-    human_seat = session.human_seat
+    client, table = seated(base)
+    client.post("/api/start", {})
+    session = server.tables.get(table["code"]).session
 
-    settlement = action_to_wire(next(
-        a for a in legal_actions(session.game) if a.type is ActionType.SETUP_SETTLEMENT
-    ))
-    status, data = client.post("/api/action", settlement)
-    assert status == 200
-    road = action_to_wire(next(
-        a for a in legal_actions(session.game) if a.type is ActionType.SETUP_ROAD
-    ))
-    status, data = client.post("/api/action", road)
-    assert status == 200
-    assert data["awaiting_confirm"]  # the human's setup road just handed off to a bot
-    assert data["to_move"] != human_seat
+    for kind in (ActionType.SETUP_SETTLEMENT, ActionType.SETUP_ROAD):
+        wire = action_to_wire(next(a for a in legal_actions(session.game) if a.type is kind))
+        status, data = client.post("/api/action", {"action": wire})
+        assert status == 200
+
+    assert data["awaiting_confirm"]  # the setup road just handed off to a bot
+    assert data["to_move"] != 0
 
     status, data = client.post("/api/confirm", {})
     assert status == 200
     assert not data["awaiting_confirm"]
 
-    seen_seats = []
     steps = 0
-    while data["to_move"] != human_seat and steps < 20:
-        seen_seats.append(data["to_move"])
+    while data["to_move"] != 0 and steps < 20:
         status, data = client.post("/api/advance", {})
         assert status == 200
         steps += 1
-    assert data["to_move"] == human_seat  # eventually comes all the way back
+    assert data["to_move"] == 0  # eventually comes all the way back
     assert steps >= 1  # at least one bot seat actually moved
-    # Once it's the human's turn, another call is a harmless no-op, not an
-    # error — same tolerance /api/confirm already gives a stale call.
+
+    # A harmless no-op, not an error, once it is already this seat's turn.
     status, data = client.post("/api/advance", {})
     assert status == 200
-    assert data["to_move"] == human_seat
+    assert data["to_move"] == 0
 
 
-def test_an_action_absent_from_legal_actions_is_rejected_over_http(live_server):
+def test_an_api_refusal_arrives_as_its_own_status_and_not_a_dropped_connection(live_server):
+    """Every `ApiError` carries the status to answer with, so the browser gets
+    a message rather than a network failure."""
     _, base = live_server
-    client = _Client(base)
-    # ROLL is never legal during setup placement.
-    wire = action_to_wire(Action(ActionType.ROLL))
-    status, data = client.post("/api/action", wire)
+    client, _ = seated(base)
+
+    assert client.post("/api/join", {"code": "ZZZZZZ"})[0] == 404
+    assert client.post("/api/action", {"action": {"type": "ROLL"}})[0] == 409  # not started
+    assert Client(base).get("/api/state")[0] == 401  # no token at all
+
+    status, data = client.post("/api/tables", {"bots": ["nope"]})
     assert status == 400
     assert "error" in data
-    # The game must not have moved on.
-    assert data["phase"] == "SETUP_SETTLEMENT"
-    assert data["round"] == 0
+
+
+def test_an_unhandled_error_is_answered_rather_than_dropped(live_server):
+    """http.server's own default is to close the connection mid-response,
+    which reaches the browser as a network failure and says nothing at all."""
+    server, base = live_server
+    client, _ = seated(base)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("a checkpoint that will not load")
+
+    server.tables.handle = boom
+    status, data = client.get("/api/state")
+
+    assert status == 500
+    assert data["error"] == "RuntimeError: a checkpoint that will not load"
 
 
 def test_malformed_json_body_is_rejected(live_server):
     _, base = live_server
     request = urllib.request.Request(
-        base + "/api/action", data=b"{not json", headers={"Content-Type": "application/json"}, method="POST"
+        base + "/api/tables",
+        data=b"{not json",
+        headers={"Content-Type": "application/json"},
+        method="POST",
     )
-    try:
+    with pytest.raises(urllib.error.HTTPError) as caught:
         urllib.request.urlopen(request, timeout=5)
-        assert False, "expected an HTTPError"
-    except urllib.error.HTTPError as exc:
-        assert exc.code == 400
+    assert caught.value.code == 400
 
 
-def test_new_game_replaces_the_sessions_own_board(live_server):
-    server, base = live_server
-    client = _Client(base)
-    client.get("/api/state")
-    old_session = server.sessions[client.identity].session
-
-    status, data = client.post("/api/new", {})
-
-    assert status == 200
-    assert data["round"] == 0
-    assert data["phase"] == "SETUP_SETTLEMENT"
-    # A genuinely new session object, not the same one mutated in place.
-    new_session = server.sessions[client.identity].session
-    assert new_session is not old_session
-    # The cached /api/board layout was rebuilt from the new session's board,
-    # not left describing the board the old session started with.
-    assert client.get("/api/board") == board_layout(new_session.game.state.board)
-
-
-def test_unknown_paths_404(live_server):
+def test_a_body_that_is_not_an_object_is_rejected(live_server):
     _, base = live_server
-    try:
-        urllib.request.urlopen(base + "/api/nope", timeout=5)
-        assert False, "expected an HTTPError"
-    except urllib.error.HTTPError as exc:
-        assert exc.code == 404
+    request = urllib.request.Request(
+        base + "/api/tables",
+        data=b"[1, 2, 3]",
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        urllib.request.urlopen(request, timeout=5)
+    assert caught.value.code == 400
 
 
-def test_two_browsers_get_two_independent_games(live_server):
-    """The point of keying sessions off an identity cookie rather than one
-    shared server-wide session: two different "browsers" (two cookie jars)
-    must not see, or be able to affect, each other's game."""
-    server, base = live_server
-    alice = _Client(base)
-    bob = _Client(base)
-
-    alice.get("/api/state")
-    bob.get("/api/state")
-
-    assert alice.identity is not None
-    assert bob.identity is not None
-    assert alice.identity != bob.identity
-    assert len(server.sessions) == 2
-
-    alice_session = server.sessions[alice.identity].session
-    bob_session = server.sessions[bob.identity].session
-    assert alice_session is not bob_session
-
-    # Alice acting must not touch Bob's game at all.
-    options = legal_actions(alice_session.game)
-    alice.post("/api/action", action_to_wire(options[0]))
-    assert server.sessions[bob.identity].session is bob_session
-    assert bob_session.game.turns == 0
-    assert to_move(bob_session.game) == bob_session.human_seat
+# --- Two browsers ---------------------------------------------------------------
 
 
-def test_an_idle_identity_is_evicted_and_gets_a_fresh_game(live_server):
-    """`SESSION_TTL_SECONDS` is what actually gates this in production; the
-    fixture's callable doesn't know about wall-clock time, so this fakes
-    `last_seen` directly rather than sleeping for hours in a test."""
-    server, base = live_server
-    client = _Client(base)
-    client.get("/api/state")
-    entry = server.sessions[client.identity]
-    entry.last_seen -= 999_999  # far enough in the past to count as stale
+def test_two_browsers_at_one_table_play_the_same_game_from_two_seats(live_server):
+    _, base = live_server
+    ada, table = seated(base, bots=["search2"], open_seats=2)
+    bea = Client(base)
+    status, joined = bea.post("/api/join", {"code": table["code"], "name": "Bea"})
+    assert status == 200
+    assert joined["seat"] == 2
 
-    client.get("/api/state")
+    ada.post("/api/start", {})
 
-    assert server.sessions[client.identity] is not entry
-
-
-# --- Resuming a game a restart or an eviction interrupted ----------------------
-
-
-def _drive(session, moves: int, rng: random.Random) -> None:
-    """Play `moves` human turns against the bots, leaving it the human's move.
-
-    confirm_setup_turn() only plays the one seat a setup road just handed
-    off to now (see its docstring) — the same as a real client's own
-    follow-up POST /api/advance calls would — so this still finishes the
-    cascade itself with advance_bots() either way, same as before."""
-    for _ in range(moves):
-        if is_over(session.game):
-            break
-        session.apply_human_action(action_to_wire(rng.choice(legal_actions(session.game))))
-        if session.awaiting_confirm:
-            session.confirm_setup_turn()
-        session.advance_bots()
+    _, ada_state = ada.get("/api/state")
+    _, bea_state = bea.get("/api/state")
+    assert ada_state["code"] == bea_state["code"] == table["code"]
+    assert ada_state["seat"] == 0 and bea_state["seat"] == 2
+    assert ada_state["human_seats"] == [0, 2]
 
 
-def _press_new_game(session, identity: str) -> None:
-    """Drive the real `HexSetServer.replace` over an existing session — what
-    `POST /api/new` reaches. Called rather than `journal.abandoned()` directly
-    because the decision under test, whether that line gets written at all,
-    lives in `replace` and not in the journal."""
-    server = HexSetServer(("127.0.0.1", 0), lambda bots, identity, player_name: _new_session(1))
-    try:
-        layout = board_layout(session.game.state.board)
-        server.sessions[identity] = _Entry(session, layout, time.monotonic())
-        server.replace(identity, None)
-    finally:
-        server.server_close()
+def test_two_browsers_at_two_tables_never_see_each_others_game(live_server):
+    _, base = live_server
+    ada, ada_table = seated(base)
+    bea, bea_table = seated(base)
 
-
-def test_an_unfinished_game_comes_back_where_it_was_left(tmp_path):
-    """The whole point of journalling every action: a session lives in memory,
-    so a deploy or a crash used to take every game in flight with it."""
-    bots = [("search2", "search2")] * 3
-    session = _build_session(bots, 0, 99, "cpu", 1, str(tmp_path), "cookie-abc")
-    _drive(session, 12, random.Random(4))
-    assert not is_over(session.game)
-
-    resumed = _resume_session("cookie-abc", "cpu", 1, str(tmp_path))
-
-    assert resumed is not None
-    assert resumed.game.phase is session.game.phase
-    assert resumed.game.state.hands == session.game.state.hands
-    assert resumed.game.state.vertex_owner == session.game.state.vertex_owner
-    assert resumed.game.state.edge_owner == session.game.state.edge_owner
-    assert resumed.game.state.deck == session.game.state.deck
-    assert resumed.game.state.robber == session.game.state.robber
-    assert resumed.game.turns == session.game.turns
-    # Rebuilt by replaying, not stored: same actions in, same account out.
-    assert resumed.log == session.log
-    assert (resumed.seed, resumed.human_seat) == (session.seed, session.human_seat)
-    assert resumed.bot_names == session.bot_names
-
-
-def test_resuming_appends_to_the_same_file_rather_than_starting_another(tmp_path):
-    bots = [("search2", "search2")] * 3
-    session = _build_session(bots, 0, 99, "cpu", 1, str(tmp_path), "cookie-abc")
-    _drive(session, 8, random.Random(4))
-    before = session.journal.path
-
-    resumed = _resume_session("cookie-abc", "cpu", 1, str(tmp_path))
-
-    assert [p.name for p in tmp_path.glob("*.jsonl")] == [before.name]
-    assert resumed.journal.path == before
-    events = journal.read(before)
-    # The seam is written down, and the steps carry on from where they stopped
-    # rather than restarting at zero and colliding with the lines above.
-    seam = [e for e in events if e["kind"] == "reopened"]
-    assert len(seam) == 1
-    assert seam[0]["at_step"] == len(journal.replayable(events))
-
-
-def test_a_game_played_out_is_not_handed_back(tmp_path):
-    """Only a game still in progress is waiting for anyone. A finished one is
-    a result, and the next visit is a new game."""
-    bots = [("search2", "search2")] * 3
-    session = _build_session(bots, 0, 99, "cpu", 1, str(tmp_path), "cookie-abc")
-    _drive(session, 6, random.Random(4))
-    session.journal.finish(session.game)
-
-    assert _resume_session("cookie-abc", "cpu", 1, str(tmp_path)) is None
-
-
-def test_pressing_new_game_ends_the_old_one_for_good(tmp_path):
-    """Otherwise the game they walked away from has no closing line of its
-    own, and the next cache miss would hand it straight back."""
-    bots = [("search2", "search2")] * 3
-    session = _build_session(bots, 0, 99, "cpu", 1, str(tmp_path), "cookie-abc")
-    _drive(session, 6, random.Random(4))
-    assert journal.resumable(str(tmp_path), "cookie-abc") == session.journal.path
-
-    _press_new_game(session, "cookie-abc")
-
-    assert journal.resumable(str(tmp_path), "cookie-abc") is None
-
-
-def test_a_game_that_was_won_is_not_also_filed_as_abandoned(tmp_path):
-    """A won game already closed itself with `result`. Adding `abandoned`
-    after it on the way out files a game the human played to the end as one
-    they walked away from, and played-out-or-not is the single distinction
-    anything counting these files exists to make."""
-    bots = [("search2", "search2")] * 3
-    session = _build_session(bots, 0, 99, "cpu", 1, str(tmp_path), "cookie-abc")
-    rng = random.Random(4)
-    while not is_over(session.game):
-        _drive(session, 1, rng)
-    path = session.journal.path
-
-    _press_new_game(session, "cookie-abc")
-
-    kinds = [e["kind"] for e in journal.read(path)]
-    assert kinds.count("result") == 1
-    assert "abandoned" not in kinds
-
-
-def test_one_browsers_game_is_never_handed_to_another(tmp_path):
-    bots = [("search2", "search2")] * 3
-    mine = _build_session(bots, 0, 99, "cpu", 1, str(tmp_path), "cookie-abc")
-    _drive(mine, 6, random.Random(4))
-
-    assert _resume_session("cookie-xyz", "cpu", 1, str(tmp_path)) is None
-
-
-def test_an_undone_placement_is_not_replayed_back_onto_the_board(tmp_path):
-    """Undone actions stay in the file by design (see Journal.undo), so a
-    resume that read the lines straight through would rebuild the board the
-    human explicitly rejected."""
-    bots = [("search2", "search2")] * 3
-    session = _build_session(bots, 0, 99, "cpu", 1, str(tmp_path), "cookie-abc")
-    rng = random.Random(4)
-    for _ in range(400):
-        _drive(session, 1, rng)
-        if session._undo is not None or is_over(session.game):
-            break
-    assert session._undo is not None, "no undoable build came up to test with"
-    session.undo_last_build()
-
-    resumed = _resume_session("cookie-abc", "cpu", 1, str(tmp_path))
-
-    assert resumed.game.state.vertex_owner == session.game.state.vertex_owner
-    assert resumed.game.state.edge_owner == session.game.state.edge_owner
+    assert ada_table["code"] != bea_table["code"]
+    # A token names one seat at one table, so neither request has to say which
+    # game it means and neither can be answered about the other one.
+    assert ada.get("/api/state")[1]["code"] == ada_table["code"]
+    assert bea.get("/api/state")[1]["code"] == bea_table["code"]

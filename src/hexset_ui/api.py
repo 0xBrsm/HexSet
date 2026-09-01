@@ -576,11 +576,13 @@ class Tables:
             # answered as one here rather than reaching the transport as an
             # unhandled error.
             try:
-                return self._seated(table, seat, method, path, payload)
+                return self._seated(table, seat, method, path, payload, token)
             except ValueError as error:
                 raise ApiError(str(error)) from None
 
-    def _seated(self, table: Table, seat: int, method: str, path: str, payload: dict) -> dict:
+    def _seated(
+        self, table: Table, seat: int, method: str, path: str, payload: dict, token: str
+    ) -> dict:
         """The routes that act on one seat. Called with the table's lock held."""
         if method == "GET" and path == "/api/state":
             return table.view(seat)
@@ -590,7 +592,10 @@ class Tables:
             return table.layout
         if method == "POST" and path == "/api/start":
             table.start()
-            return table.view(seat)
+            # Read again rather than reusing `seat`: dealing drops the empty
+            # seats and renumbers what is left, so the number this request
+            # arrived with can name a different seat by the time it returns.
+            return table.view(table.seat_of(token))
         if method == "POST" and path == "/api/action":
             return self.act(table, seat, payload.get("action") or {})
         if method == "POST" and path == "/api/advance":

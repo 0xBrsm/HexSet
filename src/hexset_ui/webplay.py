@@ -72,7 +72,7 @@ MAX_CASCADE_STEPS = 2000
 class ResumeError(Exception):
     """A journalled game would not replay — its actions no longer describe a
     legal game under this engine. Recoverable, and by design: the caller deals
-    a fresh game rather than failing the request (see `web._resume_session`), so
+    a fresh game rather than failing the request (see `api.resume_session`), so
     an engine change that invalidates old journals costs the games in flight
     at the time and nothing else."""
 
@@ -903,15 +903,14 @@ class GameSession:
         it is itself.
 
         Says nothing about `awaiting_confirm`: like `advance_bots` before it,
-        that gate is the caller's to apply (see `web.py`'s
-        `_handle_action`/`_handle_advance`), not this method's — a setup
-        road's handoff should hold here exactly as long as it held the old
-        whole-cascade call, no longer and no shorter.
+        that gate is the caller's to apply (see `api.Tables.act`/`advance`),
+        not this method's — a setup road's handoff should hold here exactly as
+        long as it held the old whole-cascade call, no longer and no shorter.
 
         The per-seat counterpart to `advance_bots`: one call here is one
-        seat's turn, which is what a client driving the cascade one request
-        at a time wants (see `web.py`'s `POST /api/advance`) instead of
-        the whole cascade landing behind a single response.
+        seat's turn, which is what a client driving the cascade one request at
+        a time wants (see `POST /api/advance`) instead of the whole cascade
+        landing behind a single response.
         """
         if is_over(self.game) or to_move(self.game) in self.human_seats:
             return False

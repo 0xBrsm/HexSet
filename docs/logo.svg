@@ -1,27 +1,29 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
   <!-- Wheel graph: a hex ring of six nodes plus a hub, one line per edge,
-       traced from the photographed source icon (see commit message). -->
-  <g stroke="#1076a4" stroke-width="16" stroke-linecap="round">
-    <line x1="100" y1="100" x2="100"   y2="38"/>
-    <line x1="100" y1="100" x2="153.7" y2="69"/>
-    <line x1="100" y1="100" x2="153.7" y2="131"/>
-    <line x1="100" y1="100" x2="100"   y2="162"/>
-    <line x1="100" y1="100" x2="46.3"  y2="131"/>
-    <line x1="100" y1="100" x2="46.3"  y2="69"/>
-    <line x1="100"   y1="38"  x2="153.7" y2="69"/>
-    <line x1="153.7" y1="69"  x2="153.7" y2="131"/>
-    <line x1="153.7" y1="131" x2="100"   y2="162"/>
-    <line x1="100"   y1="162" x2="46.3"  y2="131"/>
-    <line x1="46.3"  y1="131" x2="46.3"  y2="69"/>
-    <line x1="46.3"  y1="69"  x2="100"   y2="38"/>
+       traced from the photographed source icon (see commit message).
+       Scaled 1.4x about the canvas center so the ring bleeds to (and
+       slightly past, top/bottom) the viewBox edges — no border margin. -->
+  <g stroke="#1076a4" stroke-width="22.4" stroke-linecap="round">
+    <line x1="100"   y1="100"   x2="100"   y2="13.2"/>
+    <line x1="100"   y1="100"   x2="175.2" y2="56.6"/>
+    <line x1="100"   y1="100"   x2="175.2" y2="143.4"/>
+    <line x1="100"   y1="100"   x2="100"   y2="186.8"/>
+    <line x1="100"   y1="100"   x2="24.8"  y2="143.4"/>
+    <line x1="100"   y1="100"   x2="24.8"  y2="56.6"/>
+    <line x1="100"   y1="13.2"  x2="175.2" y2="56.6"/>
+    <line x1="175.2" y1="56.6"  x2="175.2" y2="143.4"/>
+    <line x1="175.2" y1="143.4" x2="100"   y2="186.8"/>
+    <line x1="100"   y1="186.8" x2="24.8"  y2="143.4"/>
+    <line x1="24.8"  y1="143.4" x2="24.8"  y2="56.6"/>
+    <line x1="24.8"  y1="56.6"  x2="100"   y2="13.2"/>
   </g>
   <g fill="#1076a4">
-    <circle cx="100"   cy="100" r="22"/>
-    <circle cx="100"   cy="38"  r="18"/>
-    <circle cx="153.7" cy="69"  r="18"/>
-    <circle cx="153.7" cy="131" r="18"/>
-    <circle cx="100"   cy="162" r="18"/>
-    <circle cx="46.3"  cy="131" r="18"/>
-    <circle cx="46.3"  cy="69"  r="18"/>
+    <circle cx="100"   cy="100"   r="30.8"/>
+    <circle cx="100"   cy="13.2"  r="25.2"/>
+    <circle cx="175.2" cy="56.6"  r="25.2"/>
+    <circle cx="175.2" cy="143.4" r="25.2"/>
+    <circle cx="100"   cy="186.8" r="25.2"/>
+    <circle cx="24.8"  cy="143.4" r="25.2"/>
+    <circle cx="24.8"  cy="56.6"  r="25.2"/>
   </g>
 </svg>

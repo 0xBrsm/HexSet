@@ -883,23 +883,6 @@ def test_the_heximax_presets_spawn_with_their_documented_modes():
     assert quiet.evaluator.weights == NO_TRADE_WEIGHTS
 
 
-def test_the_k_ablation_arms_spawn_with_their_k_and_are_otherwise_heximax():
-    """P1½ arms (`heximax.md` §8): honest, trading profile, three offers,
-    differing from `heximax` in `k` alone. k=1 is `heximax` itself."""
-    board = random_base_board(random.Random(0))
-    for k in (2, 4, 8):
-        entrant = PRESETS[f"heximax-k{k}"]
-        assert entrant.k == k
-        assert entrant == Entrant(f"heximax-k{k}", kind="heximax", depth=2, width=6, max_offers=3, k=k)
-        bot = spawn(entrant, board, random.Random(0))
-        assert isinstance(bot, Heximax)
-        assert bot.k == k
-        assert (bot.mode, bot.max_offers, bot.evaluator.omniscient) == ("honest", 3, False)
-        assert bot.evaluator.weights == TRADING_WEIGHTS
-    assert "heximax-k1" not in PRESETS
-    assert spawn(PRESETS["heximax"], board, random.Random(0)).k == 1
-
-
 def test_existing_presets_are_untouched_and_still_spawn():
     assert tuple(PRESETS)[: len(EXISTING_PRESETS)] == EXISTING_PRESETS
     assert Entrant("x") == Entrant("x", mode="honest")

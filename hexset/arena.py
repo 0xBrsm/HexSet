@@ -96,7 +96,9 @@ class Entrant:
     # every other entrant is unchanged.
     mode: str = "honest"
     # `kind="heximax"` only: determinized worlds searched per decision (PIMC).
-    # One is the shipped value; the P1½ arms below vary it.
+    # P1½ (`heximax.md` §8) found no k > 1 beat k = 1 beyond the instrument's
+    # resolution over 400 games; `k = 1` ships and the field stays for anyone
+    # who wants to re-open the question, not for a preset to vary.
     k: int = 1
 
     def renamed(self, name: str) -> Entrant:
@@ -161,12 +163,6 @@ PRESETS: dict[str, Entrant] = {
     "heximax-notrade": Entrant(
         "heximax-notrade", kind="heximax", depth=2, width=6, max_offers=0, mode="notrade"
     ),
-    # P1½ ablation arms per `heximax.md` §8: `heximax` at k=2/4/8 (k=1 is
-    # `heximax` itself). Never referents. Deleted in the P2 commit once `k` is
-    # fixed by the ablation and baked into `heximax`.
-    "heximax-k2": Entrant("heximax-k2", kind="heximax", depth=2, width=6, max_offers=3, k=2),
-    "heximax-k4": Entrant("heximax-k4", kind="heximax", depth=2, width=6, max_offers=3, k=4),
-    "heximax-k8": Entrant("heximax-k8", kind="heximax", depth=2, width=6, max_offers=3, k=8),
 }
 
 

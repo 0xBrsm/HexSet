@@ -163,16 +163,15 @@ def _record_steal(
     """The one hand mutation `_snapshot_hands`/`apply_hand_diff` must never
     see: a robber or knight steal moves one card whose identity is public to
     nobody but the thief and the victim. `stolen` is `robber.steal`'s own
-    return value (`None` when the victim held nothing to take, in which case
-    nothing happened and there is nothing to record). The victim's loss is
-    resolved against the *true* resource — see `PublicLedger.spend`'s
-    docstring for why that is the only way to keep the ledger's invariant
-    true rather than merely usually true — and the thief's gain is credited
-    to `unknown` only, never to the resource itself."""
+    return value, read only for its `None`-ness (the victim held nothing to
+    take, so nothing happened and there is nothing to record) -- never for
+    the resource it names, which `ledger.PublicLedger.steal` must not be
+    told: see its docstring for the identity-independent convention that
+    keeps a steal's outcome unreadable from the encoded ledger, for every
+    seat including the thief and the victim's neighbours."""
     if stolen is None:
         return
-    game.ledger.spend(victim, int(stolen), 1)
-    game.ledger.gain_unknown(thief, 1)
+    game.ledger.steal(thief, victim)
 
 
 def _grant_initial_resources(game: Game, vertex: int) -> None:

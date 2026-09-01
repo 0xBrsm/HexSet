@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import random
 
+import numpy as np
 import pytest
 
 from hexset.actions import ActionType, apply, legal_actions, victim_of
 from hexset.board.board import random_base_board
 from hexset.board.terrain import NUM_RESOURCES, Resource
 from hexset.cards import DevCard
+from hexset.encoding import encode
 from hexset.game import (
     Phase,
     discard_one,
@@ -91,6 +93,15 @@ def _steal_action(game, thief: int, victim: int, kind=ActionType.MOVE_ROBBER):
         if action.type is kind and victim_of(game, action.b) == victim:
             return action.a
     raise AssertionError(f"no {kind.name} pairs {thief} -> {victim} on this board")
+
+
+def _ledger_block(obs, players: int = 4) -> np.ndarray:
+    """The tail of `obs.globals` the ledger owns -- `(players - 1) *
+    (NUM_RESOURCES + 1)` floats, each opponent's `known[5]` then `unknown`,
+    seat-relative, own seat excluded. Mirrors `encoding._ledger_parts`'s
+    width without importing a private helper across modules."""
+    width = (players - 1) * (NUM_RESOURCES + 1)
+    return obs.globals[-width:]
 
 
 # --- the property test: the spec ---
@@ -188,34 +199,105 @@ def test_a_knight_steal_updates_the_ledger_the_same_way_as_the_robber():
     _assert_invariant(game)
 
 
-def test_a_steal_that_exhausts_known_falls_back_to_unknown():
-    """When the ledger already has zero certified cards of every resource for
-    the victim (the whole hand is already `unknown`), a steal has nowhere
-    certified to draw from and must decrement `unknown` instead."""
+def test_a_steal_floors_every_known_resource_by_one():
+    """`PublicLedger.steal` never reads which resource was actually taken --
+    it floors *every* `known[r]` by one (never below zero) and re-solves
+    `unknown` from the seat's own previously tracked total, rather than
+    decrementing one specific entry. Mixed hand, so the floor visibly
+    touches more than one resource: known=[2,0,3,0,0] (5 total, no
+    unknown) -> known=[1,0,2,0,0] (3 total), and the one card that left
+    plus the two units the floor gave up become `unknown`."""
+    ledger = PublicLedger.new(2)
+    ledger.receive(1, int(Resource.WOOD), 2)
+    ledger.receive(1, int(Resource.SHEEP), 3)
+
+    ledger.steal(thief=0, victim=1)
+
+    assert ledger.seats[1].known == [1, 0, 2, 0, 0]
+    assert ledger.seats[1].unknown == 1
+    assert ledger.seats[1].total() == 4  # 5 true cards, one stolen
+    assert ledger.seats[0].unknown == 1
+    assert ledger.seats[0].known == [0] * NUM_RESOURCES
+
+
+def test_a_steal_from_a_fully_uncertain_hand_only_grows_unknown():
+    """When the ledger already has zero certified cards of every resource
+    for the victim (the whole hand is already `unknown`), flooring `known`
+    is a no-op and the entire loss lands on `unknown`."""
     ledger = PublicLedger.new(2)
     ledger.gain_unknown(1, 3)  # victim's hand is 3 cards, none typed
 
-    ledger.spend(1, int(Resource.ORE), 1)  # the true stolen resource
-    ledger.gain_unknown(0, 1)
+    ledger.steal(thief=0, victim=1)
 
     assert ledger.seats[1].known == [0] * NUM_RESOURCES
     assert ledger.seats[1].unknown == 2
     assert ledger.seats[0].unknown == 1
 
 
-def test_a_steal_that_hits_a_certified_resource_decrements_known_not_unknown():
-    """The mirror case: the victim's ledger is fully certified (`unknown ==
-    0`) for the resource actually taken, so `spend` must draw from `known`
-    -- decrementing `unknown` instead would leave `known[r] > true[r]`."""
+def test_a_steal_can_balloon_uncertainty_by_up_to_four():
+    """The honest cost of identity-independence: a victim certified for one
+    of every resource (`known` sums to `NUM_RESOURCES`, `unknown == 0`)
+    loses only one true card, but every entry floors to zero and `unknown`
+    absorbs the whole prior total minus one -- a jump of `NUM_RESOURCES - 1`
+    cards' worth of certainty in a single steal."""
     ledger = PublicLedger.new(2)
-    ledger.receive(1, int(Resource.WOOD), 2)
-    ledger.receive(1, int(Resource.BRICK), 1)
+    for resource in range(NUM_RESOURCES):
+        ledger.receive(1, resource, 1)
 
-    ledger.spend(1, int(Resource.WOOD), 1)
+    ledger.steal(thief=0, victim=1)
 
-    assert ledger.seats[1].known[Resource.WOOD] == 1
-    assert ledger.seats[1].known[Resource.BRICK] == 1
-    assert ledger.seats[1].unknown == 0
+    assert ledger.seats[1].known == [0] * NUM_RESOURCES
+    assert ledger.seats[1].unknown == NUM_RESOURCES - 1 == 4
+    assert ledger.seats[1].total() == NUM_RESOURCES - 1
+
+
+def test_a_steal_is_identity_independent_in_the_encoding():
+    """The regression test for the leak an earlier version of this module
+    had: resolving a steal's loss against the *true* stolen resource made
+    `known[r]` for that specific resource visibly drop, which told every
+    seat watching the encoded ledger block exactly which resource was
+    taken -- exactly the private half of a steal `encoding`'s
+    information-set rule says must never reach the observation (style per
+    `test_encoding.test_opponent_hand_contents_do_not_leak`).
+
+    Two worlds, identical except which single resource the victim holds
+    (so the steal is deterministic -- one card, one type -- and differs
+    only in identity). Every seat's encoded ledger block must be
+    byte-identical between them. The thief's own hand (a different globals
+    block entirely, exact by design) is the one place the worlds are
+    allowed -- and expected -- to differ: the thief genuinely knows what
+    they took."""
+    thief, victim = 0, 1
+
+    def a_steal_world(single_resource: int, seed: int = 42):
+        game = after_setup(seed)
+        game.phase = Phase.ROBBER
+        for player in range(game.state.num_players):
+            _set_known_hand(game, player, [0] * NUM_RESOURCES)
+        hand = [0] * NUM_RESOURCES
+        hand[single_resource] = 1
+        _set_known_hand(game, victim, hand)
+        target = _steal_action(game, thief, victim)
+        move_robber_to(game, target, victim)
+        return game
+
+    world_a = a_steal_world(int(Resource.WOOD))
+    world_b = a_steal_world(int(Resource.ORE))
+    players = world_a.state.num_players
+
+    for perspective in range(players):
+        block_a = _ledger_block(encode(world_a, perspective), players)
+        block_b = _ledger_block(encode(world_b, perspective), players)
+        assert np.array_equal(block_a, block_b), (
+            f"perspective {perspective} leaked the stolen identity"
+        )
+
+    # Sanity: the two worlds really are different, and the difference is
+    # visible exactly where it should be -- the thief's own hand, not the
+    # ledger block just checked above.
+    hand_a = encode(world_a, thief).globals[:NUM_RESOURCES]
+    hand_b = encode(world_b, thief).globals[:NUM_RESOURCES]
+    assert not np.array_equal(hand_a, hand_b)
 
 
 # --- resolving uncertainty: over-draw, monopoly, discard ---

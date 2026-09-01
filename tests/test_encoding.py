@@ -526,10 +526,13 @@ def test_the_ledger_block_reads_each_opponent_seat_relative():
 def test_a_steal_shows_up_as_unknown_in_the_encoding():
     """A bystander's view (neither thief nor victim) is what the ledger's
     common-knowledge promise is actually about: the thief's block gains an
-    `unknown`, and a victim holding exactly one certified card of the
-    resource actually taken loses it from `known`, not `unknown` -- picking
-    a one-resource hand keeps the steal's outcome deterministic regardless
-    of `robber.steal`'s random draw."""
+    `unknown`, and a victim certified for exactly one resource sees that
+    entry floor to zero (`hexset.ledger.PublicLedger.steal` floors *every*
+    `known[r]` by one, identity-independent by construction; with only one
+    nonzero entry to begin with, that is the only one visibly touched) --
+    picking a one-resource hand keeps the steal's outcome deterministic
+    regardless of `robber.steal`'s random draw, without needing the ledger
+    to know (or leak) which resource it actually drew."""
     from hexset.game import Phase, move_robber_to
     from hexset.ledger import SeatLedger
 

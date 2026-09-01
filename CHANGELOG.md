@@ -37,13 +37,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   settlement grant, builds, dev-card buys, bank and player trades, discards,
   monopoly and year of plenty are all public and update `known` exactly; a
   robber or knight steal moves one hidden card, so the thief's gain is
-  credited to `unknown` only and the victim's loss is resolved against the
-  true resource engine-side (see `ledger.PublicLedger.spend`'s docstring for
-  why that is the only convention that keeps `known[r] <= true[r]`
-  provable, not just usual). **v1 simplification, documented in the module:
-  this is the common-knowledge view** — the thief/victim's own sharper
-  knowledge of a steal is deliberately not modelled, conservative and
-  under-informed by construction rather than leaking. `encoding.global_features`
+  credited to `unknown` only and the victim's side is resolved
+  identity-independently: `ledger.PublicLedger.steal` floors *every*
+  `known[r]` by one (never below zero) and re-solves `unknown` from the
+  seat's own previously tracked total, never reading which resource was
+  actually taken (a convention that reads the true identity to decide
+  which `known[r]` to touch leaks it straight back out through which entry
+  visibly drops — an earlier draft of this did exactly that; see `steal`'s
+  docstring for the proof the floor rule stays safe regardless). **v1
+  simplification, documented in the module: this is the common-knowledge
+  view** — the thief/victim's own sharper knowledge of a steal is
+  deliberately not modelled; uncertainty can balloon by up to
+  `NUM_RESOURCES - 1` cards in one steal, the honest price of losing one
+  bit of information. `encoding.global_features`
   gains 18 features at four players, appended at the globals tail after the
   live-offer block: each opponent's `known[5]`/`unknown` (hand-scaled),
   seat-relative, own seat excluded (own hand is already exact) — 68 → 86.

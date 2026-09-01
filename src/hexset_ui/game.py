@@ -67,6 +67,12 @@ class Game:
     current_player: int = 0
     setup_queue: list[int] = field(default_factory=list)
     setup_step: int = 0
+    # A seat the setup snake reached while it was still empty, and waited out
+    # (see api.Table._settle_locks): retired from the snake and from every
+    # later main-phase turn, permanently. Never grows once setup ends -- a
+    # claimed seat is never released -- so a game's player count is fixed for
+    # good the moment setup finishes.
+    locked: frozenset[int] = field(default_factory=frozenset)
     last_settlement: int = -1
     last_roll: int | None = None
     dev_card_played: bool = False
@@ -80,10 +86,19 @@ class Game:
 
 
 def start(
-    board: Board, num_players: int, rng: random.Random | None = None
+    board: Board,
+    num_players: int,
+    rng: random.Random | None = None,
+    *,
+    first: int = 0,
 ) -> Game:
+    """`first` is the seat the setup snake starts (and, once setup ends,
+    resumes) at -- the creator's seat, once a game has no separate lobby to
+    guarantee seat 0 is occupied before dealing (see api.Tables.create). A
+    game is always immediately playable by whoever just created it, however
+    they were seated."""
     rng = rng or random.Random()
-    order = list(range(num_players))
+    order = [(first + i) % num_players for i in range(num_players)]
     # Snake order: the last player to place first also places first in round two,
     # which is what compensates them for choosing last.
     queue = order + order[::-1]
@@ -120,6 +135,7 @@ def imagine(
         current_player=game.current_player,
         setup_queue=game.setup_queue[:],
         setup_step=game.setup_step,
+        locked=game.locked,  # frozen, so sharing the reference is safe
         last_settlement=game.last_settlement,
         last_roll=game.last_roll,
         dev_card_played=game.dev_card_played,
@@ -140,6 +156,51 @@ def _require(game: Game, phase: Phase) -> None:
 
 def _in_second_setup_round(game: Game) -> bool:
     return game.setup_step >= game.state.num_players
+
+
+def _advance_setup(game: Game) -> None:
+    """Point the snake at the next entry that isn't a locked seat, or end
+    setup. Skipping is implemented by advancing `setup_step` past locked
+    entries rather than by a separate "seats placed" counter -- the queue
+    keeps all `2 * num_players` slots, which is what keeps
+    `_in_second_setup_round`'s `setup_step >= num_players` correct however
+    many seats have locked."""
+    queue = game.setup_queue
+    while game.setup_step < len(queue) and queue[game.setup_step] in game.locked:
+        game.setup_step += 1
+    if game.setup_step < len(queue):
+        game.current_player = queue[game.setup_step]
+        game.phase = Phase.SETUP_SETTLEMENT
+    else:
+        # Catan's own rule: whoever placed first in round one takes the
+        # first real turn. `queue[0]` is `start`'s `first` seat, which is
+        # never locked -- it was occupied the instant the game was created.
+        game.current_player = queue[0]
+        game.phase = Phase.ROLL
+
+
+def _next_unlocked(game: Game, after: int) -> int:
+    """The next seat past `after`, skipping locked ones -- `end_turn`'s
+    rotation. Always terminates: `start`'s `first` seat is never locked."""
+    n = game.state.num_players
+    for step in range(1, n + 1):
+        seat = (after + step) % n
+        if seat not in game.locked:
+            return seat
+    raise AssertionError("every seat is locked")  # the creator's never is
+
+
+def lock_seat(game: Game, seat: int) -> None:
+    """Retire an empty seat the setup snake has reached and waited out (see
+    api.Table._settle_locks for the grace window that decides when this
+    fires). A no-op if `seat` is already locked -- the caller does not have
+    to track that itself."""
+    if seat in game.locked:
+        return
+    game.locked |= {seat}
+    if game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD) and game.current_player == seat:
+        game.setup_step += 1
+        _advance_setup(game)
 
 
 def _snapshot_hands(game: Game) -> list[list[int]]:
@@ -205,12 +266,7 @@ def place_initial_road(game: Game, edge: int) -> None:
     update_longest_road(game.state)
 
     game.setup_step += 1
-    if game.setup_step < len(game.setup_queue):
-        game.current_player = game.setup_queue[game.setup_step]
-        game.phase = Phase.SETUP_SETTLEMENT
-    else:
-        game.current_player = 0
-        game.phase = Phase.ROLL
+    _advance_setup(game)
 
 
 def roll_dice(game: Game, roll: int | None = None) -> int:
@@ -468,7 +524,7 @@ def end_turn(game: Game) -> None:
     if game.turns >= MAX_TURNS:
         game.phase = Phase.GAME_OVER
         return
-    game.current_player = (game.current_player + 1) % game.state.num_players
+    game.current_player = _next_unlocked(game, game.current_player)
     game.phase = Phase.ROLL
 
 

@@ -378,7 +378,9 @@
     flex: 1 1 auto; min-width: 0; padding: 1rem; overflow-y: auto;
     display: flex; flex-direction: column;
   }
-  #modal-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+  /* Grab handle for wireModalDrag: cursor: move signals it, touch-action: none
+     stops touch scroll from fighting the drag on mobile. */
+  #modal-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; cursor: move; touch-action: none; }
   #modal-head h3 { margin: 0; font-size: 1.05rem; }
   /* Vertically centers whatever's below the title (the exchange row, or the
      pickers) in the space left over after it — without this, short content
@@ -717,6 +719,7 @@ let knightArmed = false;   // Knight card clicked: the board is offering its rob
 let inFlight = false;
 let logSheetOpen = false;  // the full-history sheet is only drawn while it's up — see renderLog
 let modalMode = null;      // which decision the modal is showing, if any — see openModal
+let modalDrag = {x: 0, y: 0};  // #modal-inner offset from center, dragged via #modal-head — see wireModalDrag
 let tradeGive = null;      // selected resource index, "propose" mode only
 let tradeWant = null;
 let tradeSide = "give";    // "give" | "want" — which side the picker row is currently choosing for, "propose" mode only
@@ -1729,8 +1732,8 @@ function tradeCardRow(bundle) {
 // whichever modal it's in and whoever started it: what leaves their hand on
 // the left, what arrives on the right. Both sides are their own hand, which
 // is why neither label says whose — the title says who the other party is
-// ("Trade offer from Red"), and the exchange is always the human's own view
-// of it.
+// ("Player 2 (search2) offers"), and the exchange is always the human's own
+// view of it.
 const GIVE_LABEL = "Give";
 const GET_LABEL = "Get";
 
@@ -1837,6 +1840,8 @@ function openModal(mode, {give = null} = {}) {
   } else if (mode === "year-of-plenty") {
     yopPicks = [];
   }
+  modalDrag = {x: 0, y: 0};
+  document.getElementById("modal-inner").style.transform = "";
   document.getElementById("modal").classList.add("show");
   renderModal();
 }
@@ -1895,7 +1900,7 @@ function renderRespondMode(g, title, body, actions) {
   const offer = state.offer;
   // Who it's from goes in the title so the exchange row below can stay
   // just the cards themselves plus a one-word attribution each.
-  title.textContent = `Trade offer from ${seatFullLabel(offer.proposer)}`;
+  title.textContent = `${seatFullLabel(offer.proposer)} offers`;
   // Flipped into the human's own point of view: what the proposer `want`s is
   // what leaves this hand, so it's the left/"Give" side here, and what they
   // offered to `give` is what arrives. Same direction as the propose modal,
@@ -2192,6 +2197,33 @@ document.getElementById("board-svg").addEventListener("click", (e) => {
 document.getElementById("modal").addEventListener("click", (e) => {
   if (e.target.id === "modal" && MODAL_DISMISSIBLE.has(modalMode)) closeModal();
 });
+// Press-and-drag the title bar to reposition the modal. modalDrag is reset
+// to center in openModal, so this is purely a per-decision convenience, not
+// a remembered preference.
+(function wireModalDrag() {
+  const head = document.getElementById("modal-head");
+  const inner = document.getElementById("modal-inner");
+  let dragging = false;
+  let start = {x: 0, y: 0};
+  let startDrag = {x: 0, y: 0};
+  head.addEventListener("pointerdown", (e) => {
+    dragging = true;
+    start = {x: e.clientX, y: e.clientY};
+    startDrag = {...modalDrag};
+    head.setPointerCapture(e.pointerId);
+  });
+  head.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    modalDrag = {
+      x: startDrag.x + (e.clientX - start.x),
+      y: startDrag.y + (e.clientY - start.y),
+    };
+    inner.style.transform = `translate(${modalDrag.x}px, ${modalDrag.y}px)`;
+  });
+  const stopDrag = () => { dragging = false; };
+  head.addEventListener("pointerup", stopDrag);
+  head.addEventListener("pointercancel", stopDrag);
+})();
 
 const logSheet = document.getElementById("log-sheet");
 function setLogOpen(open) {

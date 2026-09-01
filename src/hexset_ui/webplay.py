@@ -503,6 +503,10 @@ class GameSession:
     # The browser this game belongs to (`hexset_id` — see webserver), carried
     # only so the journal can record whose game it was.
     identity: str | None = None
+    # Whatever the human side registered itself as — see `POST /api/register`
+    # and the MCP `register` tool. `None` for the ordinary game nobody named,
+    # in which case `state_view` and the journal both just say so.
+    player_name: str | None = None
     # Seat -> the dice total that seat rolled on its own most recent turn.
     # `game.last_roll` is one global value, whoever rolled it last; this is
     # what lets the player list show each seat's own roll instead of just
@@ -552,6 +556,7 @@ class GameSession:
                 bot_names=self.bot_names,
                 bot_specs=self.bot_specs,
                 identity=self.identity,
+                player_name=self.player_name,
             )
 
     @property
@@ -1036,6 +1041,7 @@ class GameSession:
             "current_player": game.current_player,
             "to_move": None if over else to_move(game),
             "human_seat": self.human_seat,
+            "player_name": self.player_name,
             "winner": game.won_by,
             "game_over": over,
             # Whether POST /api/undo would succeed right now — see

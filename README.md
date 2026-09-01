@@ -59,6 +59,13 @@ So a checkpoint exported with `search=mcts` and `simulations=256` is just `mcts2
 
 Inference device is **not** read from metadata — it's a property of the host, not the checkpoint, so it stays on `--device`.
 
+## Playing without a browser
+
+The human seat can also be driven by a script or an LLM, over either interface, as a peer to the browser rather than a replacement for it — both still go through the same `apply_human_action`/`legal_actions` path the browser does, so nothing sent this way skips validation.
+
+- **HTTP**: the same `/api/*` endpoints the frontend calls (`GET /api/state`, `POST /api/action`, etc. — see `webserver.py`). `POST /api/register {"name": "..."}` names the human side, in the journal header for a fresh game and immediately in `GET /api/state`'s `player_name` for one already in progress; optional, and works before a game is dealt or mid-game.
+- **MCP**: `python -m hexset_ui.mcpserver`, run alongside an already-running `webserver.py` (`HEXSET_UI_BASE_URL`, default `http://127.0.0.1:8770`). It's a thin stdio client of that same HTTP API — one MCP connection is one `hexset_id` identity, same as one browser tab — exposing `register`, `models`, `new_game`, `board`, `state`, `act`, and `undo` as tools. `act` takes an index into `state()`'s `legal_actions` and settles the whole bot cascade before returning, so one tool call is one full human turn, not one click. Hand-rolled against the MCP stdio wire format rather than built on the official SDK, which pulls in a compiled dependency (`pydantic`) this project otherwise has none of.
+
 ## Layout
 
 - `src/hexset_ui/` — the game engine (torch-free, copied from the training repo) plus `webserver.py`/`webplay.py` (the HTTP server and session logic).

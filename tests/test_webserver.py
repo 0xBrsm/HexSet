@@ -53,7 +53,7 @@ def live_server():
     # to hand the fixture up front (see HexSetServer.entry).
     # No resume_session is passed: these tests are about the HTTP surface,
     # and the default (never resume) keeps every first request a fresh deal.
-    server = HexSetServer(("127.0.0.1", 0), lambda bots, identity: _new_session(1))
+    server = HexSetServer(("127.0.0.1", 0), lambda bots, identity, player_name: _new_session(1))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     port = server.server_address[1]
@@ -330,7 +330,7 @@ def _press_new_game(session, identity: str) -> None:
     `POST /api/new` reaches. Called rather than `journal.abandoned()` directly
     because the decision under test, whether that line gets written at all,
     lives in `replace` and not in the journal."""
-    server = HexSetServer(("127.0.0.1", 0), lambda bots, identity: _new_session(1))
+    server = HexSetServer(("127.0.0.1", 0), lambda bots, identity, player_name: _new_session(1))
     try:
         layout = board_layout(session.game.state.board)
         server.sessions[identity] = _Entry(session, layout, time.monotonic())

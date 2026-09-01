@@ -172,6 +172,7 @@ class Journal:
         bot_names: dict[int, str],
         bot_specs: dict[int, str],
         identity: str | None = None,
+        player_name: str | None = None,
     ) -> None:
         """The header: everything true before the first action.
 
@@ -184,7 +185,9 @@ class Journal:
         `identity` is the browser's `hexset_id` cookie and `spec` the string
         that built each bot, neither of which the game itself needs: they are
         here so `resume` can put this exact session back together for the
-        person whose it was.
+        person whose it was. `player_name` is whatever the human side
+        registered itself as (see `POST /api/register` and the MCP `register`
+        tool) — `None` for the ordinary browser game that never called either.
         """
         state = game.state
         self._emit(
@@ -194,6 +197,7 @@ class Journal:
                 "at": _now(),
                 "seed": seed,
                 "identity": identity,
+                "player_name": player_name,
                 "num_players": state.num_players,
                 "human_seat": human_seat,
                 "bots": {

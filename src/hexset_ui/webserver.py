@@ -140,8 +140,8 @@ class HexSetServer(ThreadingHTTPServer):
     def __init__(
         self,
         address: tuple[str, int],
-        new_session: Callable[[list[tuple[str, str]] | None, str], GameSession],
-        resume_session: Callable[[str], GameSession | None] = lambda identity: None,
+        new_session: Callable[[list[tuple[str, str]] | None, str, str | None], GameSession],
+        resume_session: Callable[[str, str | None], GameSession | None] = lambda identity, name: None,
         device: str = "cpu",
         max_offers: int | None = None,
     ) -> None:
@@ -155,6 +155,13 @@ class HexSetServer(ThreadingHTTPServer):
         self.max_offers = max_offers
         self._locks: dict[str, threading.Lock] = {}
         self._registry_lock = threading.Lock()
+        # identity -> whatever POST /api/register last set it to. Consulted
+        # by `entry`/`replace` every time a session is built or resumed, so a
+        # name registered before the first game exists still lands in that
+        # game's journal header (see `_build_session`), and one registered
+        # mid-game still reaches `state_view` (see `register_name`) even
+        # though the header it already wrote can't be rewritten.
+        self.player_names: dict[str, str] = {}
 
     def lock_for(self, identity: str) -> threading.Lock:
         """The lock to hold around any mutation of `identity`'s game."""
@@ -191,7 +198,8 @@ class HexSetServer(ThreadingHTTPServer):
         # finish it or start another. `bots` is a fresh game's lineup and has
         # nothing to say about a resumed one, whose opponents come off its own
         # file.
-        session = self.resume_session(identity) or self.new_session(bots, identity)
+        name = self.player_names.get(identity)
+        session = self.resume_session(identity, name) or self.new_session(bots, identity, name)
         built = _Entry(session, board_layout(session.game.state.board), time.monotonic())
         with self._registry_lock:
             # Another request for this same brand-new identity could have
@@ -228,11 +236,28 @@ class HexSetServer(ThreadingHTTPServer):
             and not is_over(previous.session.game)
         ):
             previous.session.journal.abandoned()
-        session = self.new_session(bots, identity)  # outside the lock — see entry()
+        # outside the lock — see entry()
+        session = self.new_session(bots, identity, self.player_names.get(identity))
         entry = _Entry(session, board_layout(session.game.state.board), time.monotonic())
         with self._registry_lock:
             self.sessions[identity] = entry
             return entry
+
+    def register_name(self, identity: str, name: str) -> None:
+        """Records `identity`'s chosen display name for every game it deals
+        or resumes from here on (see `entry`/`replace`). Also applied to
+        whatever game `identity` is already mid-way through, best-effort:
+        `state_view` picks it up immediately, but the journal header (see
+        `GameSession.__post_init__`) was already written at deal time and
+        isn't rewritten — a name is a display label, not a rule, so this is
+        allowed to leave the journal's memory of "who this was at the start"
+        alone rather than editing history for it.
+        """
+        with self._registry_lock:
+            self.player_names[identity] = name
+            entry = self.sessions.get(identity)
+        if entry is not None:
+            entry.session.player_name = name
 
     def _evict_stale(self, now: float) -> None:
         """Must be called with `_registry_lock` held. Drops any identity's
@@ -356,8 +381,25 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_confirm(payload)
         elif self.path == "/api/advance":
             self._handle_advance(payload)
+        elif self.path == "/api/register":
+            self._handle_register(payload)
         else:
             self.send_error(404)
+
+    def _handle_register(self, payload: dict) -> None:
+        """Names the human side of this browser's (or MCP client's — see
+        `mcpserver.py`) game, past or future — see `HexSetServer.register_name`.
+        Not folded into `POST /api/new`'s payload: a name is who's playing,
+        which can be set before a game even exists (first thing an MCP client
+        does) or changed mid-game, neither of which "deal a new game" means.
+        """
+        name = payload.get("name")
+        if not isinstance(name, str) or not name.strip():
+            self._json({"error": "expected {name: non-empty string}"}, status=400)
+            return
+        name = name.strip()[:40]  # a display label, not a form field to validate hard
+        self.server.register_name(self.identity, name)
+        self._json({"player_name": name})
 
     def _handle_new(self, payload: dict) -> None:
         bot_models = payload.get("bot_models")
@@ -536,6 +578,7 @@ def _build_session(
     max_offers: int | None,
     games_dir: str | None = None,
     identity: str | None = None,
+    player_name: str | None = None,
 ) -> GameSession:
     if len(bots) != NUM_PLAYERS - 1:
         raise ValueError(f"expected {NUM_PLAYERS - 1} bots, got {len(bots)}")
@@ -574,6 +617,7 @@ def _build_session(
         bot_names={seat: name for seat, (name, _) in lineup.items()},
         bot_specs={seat: spec for seat, (_, spec) in lineup.items()},
         identity=identity,
+        player_name=player_name,
     )
     session.advance_bots()  # in case the human is not first in the setup snake
     return session
@@ -602,6 +646,7 @@ def _resume_session(
     device: str,
     max_offers: int | None,
     games_dir: str | None = None,
+    player_name: str | None = None,
 ) -> GameSession | None:
     """The game this browser left unfinished, played back to where it stopped
     — or `None` if there isn't one, in which case the caller deals.
@@ -635,6 +680,12 @@ def _resume_session(
         bot_names={seat: name for seat, (name, _) in lineup.items()},
         bot_specs={seat: spec for seat, (_, spec) in lineup.items()},
         identity=identity,
+        # Whatever's registered right now takes priority over the name (if
+        # any) the header remembers from deal time, so a rename before this
+        # game was even loaded off disk carries forward the same as it would
+        # into a fresh deal — falling back to the header's own only so a
+        # process restart with no fresh POST /api/register doesn't forget it.
+        player_name=player_name or header.get("player_name"),
     )
     try:
         session.restore(
@@ -711,7 +762,9 @@ def main(argv: list[str] | None = None) -> None:
         else list(itertools.islice(itertools.cycle(model_options().items()), NUM_PLAYERS - 1))
     )
 
-    def new_session(bots: list[tuple[str, str]] | None, identity: str) -> GameSession:
+    def new_session(
+        bots: list[tuple[str, str]] | None, identity: str, player_name: str | None
+    ) -> GameSession:
         return _build_session(
             bots or default_bots,
             args.human_seat,
@@ -720,10 +773,13 @@ def main(argv: list[str] | None = None) -> None:
             args.max_offers,
             args.games_dir,
             identity,
+            player_name,
         )
 
-    def resume_session(identity: str) -> GameSession | None:
-        return _resume_session(identity, args.device, args.max_offers, args.games_dir)
+    def resume_session(identity: str, player_name: str | None) -> GameSession | None:
+        return _resume_session(
+            identity, args.device, args.max_offers, args.games_dir, player_name
+        )
 
     # No session is built here anymore — each browser deals its own on first
     # contact (see HexSetServer.entry), so there's no single "the" game to

@@ -168,6 +168,7 @@ class Journal:
         game: Game,
         *,
         seed: int,
+        first: int,
         human_seats: list[int],
         bot_names: dict[int, str],
         bot_specs: dict[int, str],
@@ -184,13 +185,16 @@ class Journal:
 
         `code` is the table's join code and `spec` the string that built each
         bot, neither of which the game itself needs: they are here so a resume
-        can put this exact table back together after a restart. `human_seats`
-        are the seats people played and `player_names` whatever they
-        registered as — a seat missing from the latter is one nobody named.
-
-        Seats absent from both `human_seats` and `bots` did not exist: a table
-        dealt with empty seats deals a game with only the occupied ones (see
-        `api.py`), so the engine never carries a seat nobody is playing.
+        can put this exact table back together after a restart. `first` is the
+        seat the setup snake started at (see `hexset_ui.game.start`) — needed
+        to rebuild the same queue on resume, since it is a free per-table
+        choice, not something derivable from `seed`/`num_players` alone.
+        `human_seats` are the seats occupied at deal time (any kind — see
+        `api.GameSession.claimed_seats`, the key name predates that) and
+        `player_names` whatever they registered as — a seat missing from the
+        latter is one nobody named. A seat claiming in later, or a seat this
+        game's setup snake locks out, both show up as their own event kind
+        (`seated`, `locked`) rather than here.
         """
         state = game.state
         self._emit(
@@ -199,6 +203,7 @@ class Journal:
                 "id": self.game_id,
                 "at": _now(),
                 "seed": seed,
+                "first": first,
                 "code": code,
                 "num_players": state.num_players,
                 "human_seats": list(human_seats),
@@ -271,11 +276,22 @@ class Journal:
         )
 
     def seated(self, *, seat: int, name: str, spec: str) -> None:
-        """A different bot took `seat` mid-game (see the web server's
-        `_handle_swap_bot`). The header names who sat down at the deal; a game
-        put back together later has to seat whoever is there now, or resuming
-        would quietly hand the human back a different set of opponents."""
+        """A seat's occupant, named after the deal: a different bot swapped
+        in mid-game, or an open seat somebody joined after the header was
+        already written (see `api.GameSession.claim`). `spec` is empty for a
+        person — there is no checkpoint to name — which the header's own
+        `bots` map already treats as absent from it, so a resumed table
+        only ever re-seats an actual bot from this."""
         self._emit({"kind": "seated", "at": _now(), "seat": seat, "name": name, "spec": spec})
+
+    def locked(self, seat: int, *, at_step: int) -> None:
+        """The setup snake reached `seat` while it was still empty and waited
+        it out (see `api.Table._settle_locks`) — retired for the rest of the
+        game. `resumable`'s reader (`locked_seats`) only needs to know *that*
+        a seat locked, not when: see `hexset_ui.game`'s own note on why
+        pre-seeding the whole set before replay reproduces the same snake
+        the live game actually walked. `at_step` is diagnostic only."""
+        self._emit({"kind": "locked", "at": _now(), "seat": seat, "at_step": at_step})
 
     def reopened(self, *, at_step: int) -> None:
         """This game was put back together from the lines above — a server
@@ -412,7 +428,11 @@ def replayable(events: list[dict]) -> list[tuple[int, Action]]:
 
 def seating(events: list[dict]) -> dict[int, tuple[str, str]]:
     """Seat -> the (name, spec) of the bot on it: the lineup the game was
-    dealt with, with every later swap applied in the order they happened."""
+    dealt with, with every later swap or bot claim applied in the order they
+    happened. A `seated` event for a person rather than a bot carries an
+    empty `spec` (see `Journal.seated`) and is skipped here -- this map is
+    bots only, which is what a table rebuilding after a restart needs to
+    know which seats to re-seat automatically (see `api.Tables._reopen`)."""
     header = events[0] if events else {}
     seats = {
         int(seat): (bot["name"], bot["spec"])
@@ -420,8 +440,19 @@ def seating(events: list[dict]) -> dict[int, tuple[str, str]]:
     }
     for event in events:
         if event.get("kind") == "seated":
-            seats[event["seat"]] = (event["name"], event["spec"])
+            if event["spec"]:
+                seats[event["seat"]] = (event["name"], event["spec"])
+            else:
+                seats.pop(event["seat"], None)
     return seats
+
+
+def locked_seats(events: list[dict]) -> frozenset[int]:
+    """Every seat the setup snake ever locked out (see `Journal.locked`).
+    Order doesn't matter for a resume: pre-seeding the whole set before
+    replay reproduces the exact same snake the live game walked (see
+    `hexset_ui.game`'s own note on why), so this is just the set."""
+    return frozenset(event["seat"] for event in events if event.get("kind") == "locked")
 
 
 def resumable(directory: str | None, code: str) -> Path | None:

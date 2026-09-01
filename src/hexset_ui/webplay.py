@@ -19,7 +19,7 @@ played-out game rather than a handful of hand-picked shapes.
 
 ## Never build an action the engine did not offer
 
-`GameSession.apply_human_action` decodes the wire action and checks it against
+`GameSession.submit` decodes the wire action and checks it against
 a *fresh* call to `legal_actions`, not merely against what was on offer at some
 earlier poll. A UI bug, a stale page, or a tampered request all fail the same
 way: the action is rejected before it reaches `hexset_ui.actions.apply`. That is
@@ -31,7 +31,6 @@ constructs an `Action` from parts, it only ever repeats one the server offered.
 from __future__ import annotations
 
 import math
-import random
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -55,18 +54,11 @@ from .game import MAX_OFFERS_PER_TURN, Game, Phase, is_over, to_move
 from .journal import Journal
 from .roads import road_lengths
 from .state import MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS, GameState, copy_state
+from .trading import responders as offer_responders
 from .victory import public_victory_points, victory_points
 
 RESOURCE_NAMES: tuple[str, ...] = tuple(r.name.title() for r in Resource)
 DEV_CARD_NAMES: tuple[str, ...] = tuple(c.name.title().replace("_", " ") for c in DevCard)
-
-# A runaway bot (or an engine bug that never hands the turn back) is bounded
-# so it surfaces as an error rather than a request that never returns — used
-# two ways: the actions within one seat's own turn (advance_one_seat), and
-# the seats within one full cascade (advance_bots). One turn or one cascade
-# is at most a few players' worth of moves, so this is already generous
-# either way.
-MAX_CASCADE_STEPS = 2000
 
 
 class ResumeError(Exception):
@@ -253,6 +245,20 @@ def _proposable_options(game: Game) -> list[Action]:
     ]
 
 
+def fair_legal_actions(game: Game) -> list[Action]:
+    """Every action currently legal, with `PROPOSE_TRADE`'s sample widened to
+    what any client — a browser, an LLM over MCP, or a bot — may see: no seat
+    is shown which specific opponents could cover an offer (see
+    `_proposable_options`), since that would leak a hand's exact composition
+    beyond what the public ledger (`hexset_ui.ledger`) already certifies. The
+    one legality authority every wire surface shares — `legal_wire_actions`
+    below and `api.Tables.record`'s `GET /api/record` both call this rather
+    than each sampling `PROPOSE_TRADE` its own way."""
+    options = [a for a in legal_actions(game) if a.type is not ActionType.PROPOSE_TRADE]
+    options += _proposable_options(game)
+    return options
+
+
 # --- Human-readable log -------------------------------------------------------
 
 
@@ -314,9 +320,11 @@ class _Snapshot:
     held: list[list[int]]
 
 
-# The placement and bank/port-trade actions the human can take back — never
-# a bot's (an opponent's misclick isn't the human's to undo). Road Building's
-# free roads need no special case: they still arrive as ordinary BUILD_ROAD
+# The placement and bank/port-trade actions any seat can take back — its own
+# only (see `_apply`'s `_UndoPoint.actor` and `undo_last_build`): an
+# opponent's misclick, or a bot's, isn't a different seat's to undo. Road
+# Building's free roads need no special case: they still arrive as ordinary
+# BUILD_ROAD
 # actions (see game.build_road), so restoring game.free_roads alongside the
 # board covers them too. PLAY_ROAD_BUILDING itself is in here too, for the
 # instant right after the card is played but before either free road has
@@ -670,20 +678,24 @@ def render_log(
 
 @dataclass
 class GameSession:
-    """One in-progress game: the engine state, which seats people are playing
-    and the bot playing the rest.
+    """One in-progress game: the engine state and which seats are claimed.
 
-    A seat is a person's or a bot's, never both, and there can be more than
-    one of either — a table dealt for one human against three checkpoints and
-    a table of four humans are the same object here, differing only in
-    `human_seats`. Everything that used to key off "the" human seat is
-    therefore asked per seat instead: whose turn it is to act, what they may
-    legally do, what they are shown, and what they may take back.
+    A seat is claimed or it isn't — never "a bot's" as a special case the
+    session itself knows about. A table dealt for one human against three
+    checkpoints and a table of four humans are the same object here,
+    differing only in `claimed_seats` and who's actually driving each one
+    from outside this session (a browser, an LLM over MCP, or a bot runner —
+    see `botclient.py`). Whoever holds a seat submits its actions through
+    `submit`, decides for itself when its own turn is over, and is asked for
+    per seat: whose turn it is to act, what they may legally do, what they
+    are shown, and what they may take back.
 
-    All mutation goes through `apply_human_action` and `advance_bots`, and both
-    route every action through `hexset_ui.actions.apply` after checking it against
-    a fresh `legal_actions(game)` — the one enforcement point the hard
-    constraint asks for.
+    All mutation goes through `submit`, which routes every action through
+    `hexset_ui.actions.apply` after checking it against a fresh
+    `legal_actions(game)` — the one enforcement point the hard constraint
+    asks for. Nothing runs a further seat's turn on another's behalf: there
+    is no cascade for this session to drive, only the one action a caller
+    just submitted.
 
     `seed` is the integer that seeded `game.rng`, and `journal` is where every
     action is written down as it happens, hidden cards and all (see
@@ -693,11 +705,14 @@ class GameSession:
     """
 
     game: Game
-    # The seats a person is playing, whether that person is a browser, a
-    # script on the HTTP API or an LLM over MCP — the engine and this session
-    # draw no distinction between them. Every other seat is `bot`'s.
-    human_seats: frozenset[int]
-    bot: Bot
+    # Every seat somebody is playing, whichever kind of client it is — a
+    # browser, a script on the HTTP API, an LLM over MCP, or a bot runner
+    # (embedded or external, see `botclient.py`). Nothing here distinguishes
+    # them: a seat submits its own actions through `submit` the same way
+    # regardless of who or what is behind it, so there is no `bot: Bot` field
+    # to route a turn to any more — a bot plays by calling `submit` from
+    # outside this session, exactly as a human's client does.
+    claimed_seats: set[int]
     seed: int = 0
     journal: Journal | None = None
     # Seat -> the model-picker display name playing it, for `state_view` to
@@ -739,12 +754,6 @@ class GameSession:
     # right after a qualifying human action, cleared by anything else. See
     # _apply and undo_last_build.
     _undo: _UndoPoint | None = field(default=None, repr=False)
-    # The seat whose setup road just handed the turn on, in the instant
-    # before they have acknowledged it — the one handoff in the game with no
-    # explicit "I'm done" the way END_TURN is everywhere else. `None` the
-    # rest of the time. Read directly by api.py to decide whether to run a
-    # bot itself or wait for that seat's confirm.
-    awaiting_confirm: int | None = field(default=None)
 
     def __post_init__(self) -> None:
         # Written here rather than on the first action because the header's
@@ -755,7 +764,11 @@ class GameSession:
             self.journal.start(
                 self.game,
                 seed=self.seed,
-                human_seats=sorted(self.human_seats),
+                # `setup_queue[0]` is `game.start`'s own `first` argument,
+                # read back off the queue it built rather than threaded
+                # through as a second copy — the two can never disagree.
+                first=self.game.setup_queue[0],
+                human_seats=sorted(self.claimed_seats),
                 bot_names=self.bot_names,
                 bot_specs=self.bot_specs,
                 player_names=self.player_names,
@@ -768,14 +781,30 @@ class GameSession:
 
         The log and the client both want a name per seat and neither cares
         which kind of player it belongs to, so the two sources are merged
-        here rather than at each of the half-dozen call sites. A human seat
-        nobody named falls back to a plain "player": every seat gets a label,
-        so `_who` never has to invent one.
+        here rather than at each of the half-dozen call sites. A claimed
+        seat with no bot label falls back to its own registered name, or
+        plain "player" if it never gave one: every seat gets a label, so
+        `_who` never has to invent one.
         """
-        labels = {seat: name for seat, name in self.bot_names.items()}
-        for seat in self.human_seats:
-            labels[seat] = self.player_names.get(seat) or "player"
+        labels = dict(self.bot_names)
+        for seat in self.claimed_seats:
+            if seat not in labels:
+                labels[seat] = self.player_names.get(seat) or "player"
         return labels
+
+    def claim(self, seat: int, name: str | None) -> None:
+        """A seat somebody just joined, after the deal — the one seat this
+        session's own header (see `__post_init__`) could not have named
+        because nobody had taken it yet. Journalled the same way a mid-game
+        bot swap is (`Journal.seated`, with an empty `spec` — there is no
+        checkpoint to name for a person), so a resumed table knows this seat
+        was somebody's without needing its lost token back (see `api.py`'s
+        module docstring: a token never touches disk)."""
+        self.claimed_seats.add(seat)
+        if name:
+            self.player_names[seat] = name
+        if self.journal is not None:
+            self.journal.seated(seat=seat, name=name or "", spec="")
 
     @property
     def round(self) -> int:
@@ -824,17 +853,19 @@ class GameSession:
         which is also what a seat that isn't theirs, or no seat at all, gets."""
         if is_over(self.game) or viewer is None or to_move(self.game) != viewer:
             return []
-        options = [a for a in legal_actions(self.game) if a.type is not ActionType.PROPOSE_TRADE]
-        options += _proposable_options(self.game)
-        return [action_to_wire(a) for a in options]
+        return [action_to_wire(a) for a in fair_legal_actions(self.game)]
 
-    def apply_human_action(self, seat: int, wire: dict) -> None:
+    def submit(self, seat: int, wire: dict) -> None:
         """Play `wire` as `seat`. The seat is the caller's to prove (it comes
         off a player token, not off the request body — see `api.py`), and
-        every other check happens here."""
+        every other check happens here — the one enforcement point every
+        client funnels through, human, LLM, or bot alike. Whoever holds
+        `seat` decides for themselves when their own turn is over (`END_TURN`
+        is a submitted action like any other); nothing here runs a further
+        seat's turn on this call's behalf."""
         if is_over(self.game):
             raise ValueError("the game is already over")
-        if seat not in self.human_seats:
+        if seat not in self.claimed_seats:
             raise ValueError(f"seat {seat} is not yours to play")
         if to_move(self.game) != seat:
             raise ValueError("it is not your turn to act")
@@ -843,119 +874,18 @@ class GameSession:
         if not is_legal(self.game, action, options):
             raise ValueError(f"{action} is not a legal action right now")
         self._apply(seat, action)
-        # place_initial_road hands current_player straight to the next seat
-        # in the snake with no separate step of its own — unlike Main phase,
-        # where that handoff only ever happens on the human's own explicit
-        # END_TURN. advance_one_seat reads this flag directly (it's a no-op
-        # while set) so the human gets the same one-button pause before the
-        # next seat's turn as everywhere else, not a same-request cascade
-        # they never got to see, let alone react to.
-        handing_off = (
-            action.type is ActionType.SETUP_ROAD
-            and not is_over(self.game)
-            and to_move(self.game) != seat
-        )
-        self.awaiting_confirm = seat if handing_off else None
-
-    def confirm_setup_turn(self, seat: int) -> None:
-        """Lets the one seat `apply_human_action` held back actually take its
-        turn. A harmless no-op, not an error, if nothing is pending for `seat`
-        — there's nothing to protect by rejecting a stale or doubled-up
-        confirm the way undo_last_build rejects a stale undo. Somebody else's
-        pending confirm is left alone, though: it is their acknowledgement to
-        give, and clearing it here would run a bot ahead of a seat that never
-        saw its own placement land."""
-        if self.awaiting_confirm != seat:
-            return
-        self.awaiting_confirm = None
-        self.advance_one_seat()
-
-    def _default_ask_order(self, proposer: int) -> tuple[int, ...]:
-        """Who to ask first when a proposer didn't say: lowest victory
-        points, tied broken by fewest development cards, then random —
-        trading with whoever's behind rather than the engine's own neutral
-        default (`ask=()`, clockwise seat order — see
-        `hexset_ui.game.propose_trade`'s docstring). Applied to every seat's
-        proposals in `_apply`, not just the human's: no bot sets `ask`
-        itself today (a training-side gap, not something to paper over
-        here), so leaving this human-only would have meant every bot kept
-        the engine's neutral default while only the human got the better
-        one.
-
-        Victory points are `public_victory_points`, not the true count: a
-        hidden victory-point development card is exactly the information the
-        real board wouldn't hand the proposer either, so this shouldn't see
-        it. Dev card *count* has no such issue — that stack is visible
-        whatever's in it.
-        """
-        state = self.game.state
-        others = [p for p in range(state.num_players) if p != proposer]
-        random.Random().shuffle(others)  # only breaks byte-for-byte ties below
-        others.sort(key=lambda p: (public_victory_points(state, p), sum(holdings(state, p))))
-        return tuple(others)
-
-    def advance_one_seat(self) -> bool:
-        """Plays exactly one seat's whole turn — however many individual
-        actions that takes (roll, trades, builds, buys, ..., END_TURN) — then
-        stops, even if the next seat is also a bot. Returns False, doing
-        nothing, once the turn belongs to any human seat or the game is over
-        — a caller can loop on this return value without tracking whose turn
-        it is itself.
-
-        Says nothing about `awaiting_confirm`: like `advance_bots` before it,
-        that gate is the caller's to apply (see `api.Tables.act`/`advance`),
-        not this method's — a setup road's handoff should hold here exactly as
-        long as it held the old whole-cascade call, no longer and no shorter.
-
-        The per-seat counterpart to `advance_bots`: one call here is one
-        seat's turn, which is what a client driving the cascade one request at
-        a time wants (see `POST /api/advance`) instead of the whole cascade
-        landing behind a single response.
-        """
-        if is_over(self.game) or to_move(self.game) in self.human_seats:
-            return False
-        seat = to_move(self.game)
-        steps = 0
-        while not is_over(self.game) and to_move(self.game) == seat:
-            if steps >= MAX_CASCADE_STEPS:
-                raise RuntimeError(
-                    f"seat {seat}'s turn did not yield within {MAX_CASCADE_STEPS} actions"
-                )
-            options = legal_actions(self.game)
-            action = self.bot.choose(self.game)
-            if not is_legal(self.game, action, options):
-                raise RuntimeError(f"bot chose an action legal_actions did not offer: {action}")
-            self._apply(seat, action)
-            steps += 1
-        return True
-
-    def advance_bots(self) -> None:
-        """The whole cascade in one call — still used wherever a single
-        request already has to include it (dealing a fresh table whose setup
-        snake doesn't start with the human, resuming a session mid-cascade):
-        see the callers in `web.py`. Everywhere else drives
-        `advance_one_seat` directly, one seat and one response at a time."""
-        seats = 0
-        while self.advance_one_seat():
-            seats += 1
-            if seats >= MAX_CASCADE_STEPS:
-                raise RuntimeError(
-                    f"bot cascade did not yield the turn within {MAX_CASCADE_STEPS} seat turns"
-                )
 
     def _apply(self, actor: int, action: Action) -> None:
-        # Every seat's proposal gets the same treatment — human or bot,
-        # whichever `actor` is — since this is the one choke point both
-        # apply_human_action and advance_bots funnel every action through.
-        if action.type is ActionType.PROPOSE_TRADE and not action.ask:
-            action = action._replace(ask=self._default_ask_order(actor))
         # Captured before apply(), not after: end_turn() increments
         # game.turns (and so self.round, derived from it), so the line for
         # the END_TURN action itself would otherwise be prefixed with the
         # *next* round's number instead of the one that just ended.
         round_num = self.round
         before = _snapshot(self.game)
-        undoable = actor in self.human_seats and action.type in _UNDOABLE_BUILDS
+        # Any claimed seat's own build/placement/trade is its own to take
+        # back — bot or human, no special case: nothing here privileges one
+        # kind of client over another (see `submit`).
+        undoable = action.type in _UNDOABLE_BUILDS
         # Taken before apply() runs, alongside `before` above, for the same
         # reason: it has to be the instant *before* this action, and nothing
         # between here and apply() touches state/events/_steps.
@@ -1006,15 +936,11 @@ class GameSession:
             if self.journal is not None:
                 self.journal.finish(self.game)
 
-        # Every action decides this fresh: a qualifying human placement that
-        # didn't win the game becomes the new (and only) undo point, anything
-        # else — a bot's move, a second placement — clears whatever was
-        # there. A win is excluded because the record above may already be
-        # on disk by now. Correct even for a setup road handing off to a
-        # bot: apply_human_action holds that handoff's advance_bots() back
-        # until confirm_setup_turn (see awaiting_confirm), so no bot action
-        # ever actually runs between the human's placement and their chance
-        # to undo it.
+        # Every action decides this fresh: a qualifying placement that didn't
+        # win the game becomes the new (and only) undo point, anything else
+        # — a different seat's move, a second placement — clears whatever
+        # was there. A win is excluded because the record above may already
+        # be on disk by now.
         self._undo = undo_point if (undo_point is not None and not is_over(self.game)) else None
 
     def undo_last_build(self, seat: int) -> None:
@@ -1050,13 +976,6 @@ class GameSession:
         if self.journal is not None:
             self.journal.undo(self.game, back_to=point.steps)
         self._undo = None
-        # A setup road is the only action that ever sets this, and only
-        # after it runs — so whatever's being undone, this seat had nothing
-        # pending going in. Left alone, undoing a road would leave it stuck:
-        # to_move is back to them (the whole point), but the client would
-        # still show the confirm button over the real board instead.
-        if self.awaiting_confirm == seat:
-            self.awaiting_confirm = None
 
     def _log_result(self, round_num: int) -> str:
         """The closing line, appended once the game is over.
@@ -1094,11 +1013,11 @@ class GameSession:
         lengths = road_lengths(state)
         for p in range(state.num_players):
             reveal = over or p == viewer
+            seat_ledger = game.ledger.seats[p]
             entry = {
                 "seat": p,
                 "bot": self.bot_names.get(p),
                 "name": labels.get(p),
-                "human": p in self.human_seats,
                 "last_roll": self.last_roll_by_seat.get(p),
                 "victory_points": victory_points(state, p)
                 if reveal
@@ -1109,6 +1028,14 @@ class GameSession:
                 "largest_army": state.largest_army_holder == p,
                 "hand_size": sum(state.hands[p]),
                 "dev_card_count": sum(holdings(state, p)),
+                # The public-knowledge ledger (`hexset_ui.ledger`) — public
+                # for every seat, reveal or not: resource *counting* is not
+                # hidden information in this game, only a steal's identity
+                # and dev-card types are (see `ledger.py`'s module
+                # docstring). `known` is a certified per-resource floor;
+                # `unknown` is what the public log can't yet type.
+                "known": dict(zip(RESOURCE_NAMES, seat_ledger.known)),
+                "unknown": seat_ledger.unknown,
             }
             if reveal:
                 entry["hand"] = dict(zip(RESOURCE_NAMES, state.hands[p]))
@@ -1126,36 +1053,32 @@ class GameSession:
                 # sending it live, before anyone has actually responded,
                 # would leak the same hidden hand information the log fix
                 # (see render_log) exists to hide, just earlier and over a
-                # different channel. Nothing on the client reads it either.
+                # different channel.
             }
+            # Who has already declined — the proposer's own information
+            # only (see `record.py:build_record`'s identical filtering): a
+            # responder must not condition on an earlier decline.
+            if viewer is not None and viewer == game.offer.proposer:
+                declined = set(offer_responders(state, game.offer)) - set(game.pending_responders)
+                offer["answered"] = sorted(declined)
 
         return {
             "phase": game.phase.name,
             "current_player": game.current_player,
             "to_move": None if over else to_move(game),
             "seat": viewer,
-            "human_seats": sorted(self.human_seats),
+            "claimed_seats": sorted(self.claimed_seats),
+            # Seats the setup snake reached while still empty and waited out
+            # — permanently retired, for good, from this game (see
+            # `hexset_ui.game.lock_seat`). `api.Table.join` refuses one of
+            # these the same way it refuses an already-occupied seat.
+            "locked": sorted(game.locked),
             "winner": game.won_by,
             "game_over": over,
             # Whether POST /api/undo would succeed right now — see
             # undo_last_build. A session convenience, not a rule, so it isn't
             # in legal_actions alongside everything hexset_ui.actions offers.
             "can_undo": self._undo is not None and self._undo.actor == viewer,
-            # True while this viewer's own setup road handoff is waiting on
-            # POST /api/confirm — see apply_human_action. `to_move` already
-            # moved on to whoever's next by this point, so the client reads
-            # this (not to_move) to know it still has a decision to make.
-            # Somebody else's pending confirm is not this reader's business
-            # and would only light a button they cannot press.
-            "awaiting_confirm": self.awaiting_confirm == viewer,
-            # Whether the cascade gate (see api.Tables.act/advance) is closed
-            # at all, for anyone — unlike `awaiting_confirm` above, which is
-            # only ever true for the one seat actually holding it. A client
-            # driving POST /api/advance on some *other* seat's behalf needs
-            # this to tell "waiting on another person's confirm" apart from
-            # "it's a bot's turn, keep going": `to_move` alone already moved
-            # past the blocked seat, and would otherwise look advanceable.
-            "advance_blocked": self.awaiting_confirm is not None,
             # "round" — one lap of the table — not game.turns' per-seat count
             # (see the `round` property docstring). The only client reader
             # is the sidebar log's current-round filter, which now needs

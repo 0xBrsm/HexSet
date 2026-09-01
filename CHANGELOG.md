@@ -60,6 +60,30 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `hexset.migrate` needs no logic change — it zero-pads any `embed_global`
   tail growth, single- or double-widening alike. **Registration owed before
   any run trains on this.**
+- **`hexset.heximax`: the honest handcrafted baseline** (design note
+  `heximax.md`, P1 of its §8). A new bot in one file, plugging into the
+  `Bot`/`arena` API exactly as `search2` does, that reads every opponent
+  through the public ledger and the public counts and never through
+  `state.hands[opponent]` or `state.dev_cards[opponent]` — information-set
+  honest by default, where `search2` reads every true hand. Four sections:
+  a `Belief` (certified counts, untyped counts, and the residual pool the
+  hidden cards are drawn from; `expected_hand`, `p_holds`, and `sample`, a
+  determinized world consistent with everything public), an
+  `HonestEvaluator` (`evaluate.Evaluator`'s term set read through the
+  belief, progress zeroed toward a piece whose supply is exhausted, and two
+  weight profiles — today's trading fit and the pre-trading fit recovered
+  from `87d9095`), a max^n search with a per-move leaf budget and iterative
+  deepening, opponents expanded from `k` determinized worlds (PIMC) and every
+  hidden draw — steal or dev-card buy — valued as the probability-weighted
+  expectation rather than one frozen sample, and the trade *valuation* layer
+  (marginal gains and losses, bundle deltas with a named counterparty).
+  Three presets: `heximax` (honest, three offers a turn, the placement prior
+  composed in), `heximax-omni` (the same bot reading every true hand, to
+  measure what honesty costs) and `heximax-notrade` (the no-trade weights, an
+  offer budget of zero, declines everything). P1 scope only: trading is the
+  engine's one-for-one sample valued by the search; the bundle-offer
+  generator and protocol adapter (P2), the `k` ablation (P1½) and the refit
+  (P3) are pending and nothing here is registered.
 
 ### Changed
 

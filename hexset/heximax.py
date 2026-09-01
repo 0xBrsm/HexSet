@@ -75,6 +75,7 @@ from .ledger import PublicLedger
 from .mcts import draws_hidden
 from .placement import best as best_opening
 from .robber import DISCARD_THRESHOLD
+from .trading import can_accept
 from .state import (
     BANK_PER_RESOURCE,
     MAX_CITIES,
@@ -106,10 +107,9 @@ class Belief:
     initial size (`state.BANK_PER_RESOURCE`, nineteen a resource in the base
     game) rather than from the true hands, which the belief may not read.
 
-    An open offer certifies two things the ledger does not record: the
-    proposer holds what it offers, and every player still to be asked can
-    cover what is wanted -- the engine only asks those who can. Without that,
-    a sampled world could put the engine in a state it cannot reach.
+    An open offer certifies one thing the ledger does not record: the
+    proposer holds what it offers. Who else can cover it is deliberately not
+    read, see `from_game`.
 
     Robustness over purity: a test fixture that writes `state.hands` behind
     the ledger's back can leave `known` summing past the public hand size, or
@@ -170,11 +170,17 @@ class Belief:
 
     @classmethod
     def from_game(cls, game: Game, perspective: int, *, omniscient: bool = False) -> Belief:
+        # Only the proposer's side of a standing offer is certified: the offer
+        # is announced and `can_propose` requires holding it. Who else could
+        # cover it is NOT read -- `game.pending_responders` is the engine's
+        # true eligibility list, and under the rules a decline reveals
+        # nothing, so from the responder's seat the other pending seats'
+        # coverage is hidden information. A sampled world may therefore hand
+        # a later responder a hand that cannot cover `want`; the search
+        # guards `ACCEPT_TRADE` with `can_accept` in that world instead.
         certify: list[tuple[int, Sequence[int]]] = []
         if game.offer is not None:
             certify.append((game.offer.proposer, game.offer.give))
-            for responder in game.pending_responders:
-                certify.append((responder, game.offer.want))
         return cls(
             game.state, game.ledger, perspective, omniscient=omniscient, certify=certify
         )
@@ -695,7 +701,7 @@ class Heximax:
         # the mover's hand, and an offer needs only what the proposer holds.
         seen: dict[Action, None] = {}
         for world in worlds:
-            for action in legal_actions(world):
+            for action in self._options_in(world):
                 seen.setdefault(action, None)
         options = within_offer_budget(game, list(seen), self.max_offers)
         if not options:
@@ -870,10 +876,29 @@ class Heximax:
         apply(child, action)
         return child
 
+    @staticmethod
+    def _options_in(world: Game) -> list[Action]:
+        """`legal_actions` in a determinized world, minus an ACCEPT it cannot honour.
+
+        The engine offers ACCEPT to whoever it is asking because it built the
+        list of responders from the true hands. A world sampled without that
+        knowledge may have dealt the seat being asked a hand that does not
+        cover the offer; there the only response is to decline, and
+        `execute_trade` is never reached with a hand that cannot pay.
+        """
+        options = legal_actions(world)
+        if (
+            world.phase is Phase.TRADE_RESPOND
+            and world.offer is not None
+            and not can_accept(world.state, world.offer, to_move(world))
+        ):
+            options = [a for a in options if a.type is not ActionType.ACCEPT_TRADE]
+        return options
+
     def _value(self, game: Game, depth: int, knower: int, ply: int) -> list[float]:
         if depth <= 0 or is_over(game):
             return self._leaf(game, knower)
-        options = legal_actions(game)
+        options = self._options_in(game)
         if not options:
             return self._leaf(game, knower)
         mover = to_move(game)

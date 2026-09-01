@@ -254,6 +254,51 @@ def test_search2_can_tell_the_same_two_worlds_apart():
     )
 
 
+def a_response_with_another_seat_pending(seed: int, swapped: bool):
+    """heximax (seat 0) is asked first; exactly one other seat is also pending.
+
+    Seats 2 and 3 each hold one card the record cannot type -- a wood and a
+    sheep between them. `swapped` says which holds which. The bank, every
+    hand size and every `known` entry are identical either way, so the two
+    positions are one information set for seat 0. The engine's
+    `pending_responders`, built from the true hands, differ: only the seat
+    that truly holds the wanted wood is pending.
+    """
+    game = after_setup(seed)
+    for p in range(4):
+        set_known_hand(game, p, [0] * NUM_RESOURCES)
+    set_known_hand(game, 0, [1, 0, 0, 0, 0])
+    set_known_hand(game, 1, [0, 0, 0, 0, 1])
+    wood_holder, sheep_holder = (3, 2) if swapped else (2, 3)
+    give_unknown(game, wood_holder, Resource.WOOD, 1)
+    give_unknown(game, sheep_holder, Resource.SHEEP, 1)
+    game.current_player = 1
+    game.phase = Phase.MAIN
+    propose_trade(game, bundle(ore=1), bundle(wood=1), ask=(0,))
+    assert game.phase is Phase.TRADE_RESPOND
+    assert to_move(game) == 0
+    assert len(game.pending_responders) == 2
+    return game
+
+
+@pytest.mark.parametrize("seed", range(4))
+def test_who_else_could_cover_an_offer_is_hidden_from_the_responder(seed):
+    """`pending_responders` is the engine's true eligibility list. Under the
+    rules a decline reveals nothing, so from the responder's seat the other
+    pending seats' coverage is hidden, and the belief may not read it."""
+    one = a_response_with_another_seat_pending(seed, swapped=False)
+    two = a_response_with_another_seat_pending(seed, swapped=True)
+    assert _record_says_the_same(one, two)
+    assert one.pending_responders != two.pending_responders
+
+    for seat in (2, 3):
+        assert Belief.from_game(one, 0).expected_hand(seat) == pytest.approx(
+            Belief.from_game(two, 0).expected_hand(seat)
+        )
+    for k in (1, 4):
+        assert a_bot(one, seed, k=k).choose(one) == a_bot(two, seed, k=k).choose(two)
+
+
 # --- belief -------------------------------------------------------------------
 
 
@@ -336,28 +381,39 @@ def test_p_holds_is_exact_for_one_card_and_certain_for_certified_cards():
     assert 0.3 < estimate < 0.7
 
 
-def test_an_open_offer_certifies_what_the_proposer_holds():
-    """The engine only asks players who can cover the offer, and a proposer
-    only offers what it holds. Both are public, so a sampled world in which
-    either side could not complete the trade would be one the engine could
-    never have reached."""
+def test_an_open_offer_certifies_the_proposers_side_and_nothing_else():
+    """A proposer only offers what it holds, and the offer is announced, so
+    `give` is public. Who else can cover `want` is not: the engine's
+    `pending_responders` is built from the true hands, and a decline reveals
+    nothing, so the belief about the other pending seats must be the plain
+    ledger reading."""
     game = after_setup(2)
     for p in range(4):
         set_known_hand(game, p, [0] * NUM_RESOURCES)
     give_unknown(game, 1, Resource.ORE, 1)  # the proposer's hidden ore
-    give_unknown(game, 2, Resource.WOOD, 1)  # the responder's hidden wood
+    give_unknown(game, 2, Resource.WOOD, 1)  # another responder's hidden wood
     set_known_hand(game, 0, [1, 0, 0, 0, 0])
     game.current_player = 1
     game.phase = Phase.MAIN
-    propose_trade(game, bundle(ore=1), bundle(wood=1))
+    propose_trade(game, bundle(ore=1), bundle(wood=1), ask=(0,))
     assert game.phase is Phase.TRADE_RESPOND
-    responder = to_move(game)
-    belief = Belief.from_game(game, responder)
-    for _ in range(5):
-        sampled = belief.sample(random.Random(_))
+    assert to_move(game) == 0
+    assert len(game.pending_responders) == 2
+
+    belief = Belief.from_game(game, 0)
+    assert belief.known[1] == [0, 0, 0, 0, 1]  # `give` certified
+    other = next(p for p in game.pending_responders if p != 0)
+    assert belief.known[other] == game.ledger.seats[other].known  # `want` not
+    assert belief.unknown[other] == game.ledger.seats[other].unknown == 1
+    # ...so the reading of `other` is what the ledger plus the announced
+    # `give` alone support: the same belief built with only that certified.
+    plain = Belief(game.state, game.ledger, 0, certify=[(1, bundle(ore=1))])
+    assert belief.known == plain.known and belief.unknown == plain.unknown
+    assert belief.expected_hand(other) == pytest.approx(plain.expected_hand(other))
+    assert belief.p_holds(other, bundle(wood=1)) == plain.p_holds(other, bundle(wood=1))
+    for seed in range(5):
+        sampled = belief.sample(random.Random(seed))
         assert sampled.hands[1][Resource.ORE] >= 1
-        for pending in game.pending_responders:
-            assert sampled.hands[pending][Resource.WOOD] >= 1
 
 
 def test_a_desynced_fixture_does_not_break_the_belief():

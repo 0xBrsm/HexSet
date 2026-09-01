@@ -1148,6 +1148,14 @@ class GameSession:
             # Somebody else's pending confirm is not this reader's business
             # and would only light a button they cannot press.
             "awaiting_confirm": self.awaiting_confirm == viewer,
+            # Whether the cascade gate (see api.Tables.act/advance) is closed
+            # at all, for anyone — unlike `awaiting_confirm` above, which is
+            # only ever true for the one seat actually holding it. A client
+            # driving POST /api/advance on some *other* seat's behalf needs
+            # this to tell "waiting on another person's confirm" apart from
+            # "it's a bot's turn, keep going": `to_move` alone already moved
+            # past the blocked seat, and would otherwise look advanceable.
+            "advance_blocked": self.awaiting_confirm is not None,
             # "round" — one lap of the table — not game.turns' per-seat count
             # (see the `round` property docstring). The only client reader
             # is the sidebar log's current-round filter, which now needs

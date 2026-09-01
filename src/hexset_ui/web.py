@@ -45,22 +45,30 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from . import journal
-from .api import CODE_ALPHABET, CODE_LENGTH, ApiError, Config, Tables, model_options
+from .api import CODE_ALPHABET, CODE_LENGTH, MAX_SEATS, ApiError, Config, Tables, model_options
+from .constants import TOKEN_HEADER
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 INDEX_HTML = STATIC_DIR / "index.html"
 
-TOKEN_HEADER = "X-HexSet-Token"
-
 
 def is_code(path: str) -> bool:
-    """Whether a URL path is a table code and not a typo or a missing asset.
-
-    Checked against the alphabet rather than just the length so that `/favicon`
-    and friends still 404 as themselves instead of being served the page.
+    """Whether a URL path is a table's own code — six characters, every one
+    of them in `CODE_ALPHABET` — as opposed to a typo or a missing asset.
     """
     code = path.lstrip("/")
     return len(code) == CODE_LENGTH and all(c in CODE_ALPHABET for c in code.upper())
+
+
+def looks_like_a_code_attempt(path: str) -> bool:
+    """Six characters — the length of a real code — even one using a
+    character `CODE_ALPHABET` deliberately excludes as too easily confused
+    with another (0/O, 1/I/L). `is_code` above still decides what actually
+    opens a table once the page loads and asks the API; this only decides
+    that a path this shape belongs on that page rather than getting a bare
+    404, the way `/favicon` (the wrong length for a code at all) still does.
+    """
+    return len(path.lstrip("/")) == CODE_LENGTH
 
 
 class HexSetServer(ThreadingHTTPServer):
@@ -118,6 +126,8 @@ class Handler(BaseHTTPRequestHandler):
             self._file(INDEX_HTML, "text/html; charset=utf-8")
         elif self.path.startswith("/api/"):
             self._serve("GET", {})
+        elif looks_like_a_code_attempt(self.path):
+            self._file(INDEX_HTML, "text/html; charset=utf-8")
         else:
             self.send_error(404)
 
@@ -183,7 +193,7 @@ def main(argv: list[str] | None = None) -> None:
         max_offers=args.max_offers,
         games_dir=args.games_dir,
         seed=args.seed,
-        default_bots=[args.checkpoint] * 3 if args.checkpoint else None,
+        default_bots=[args.checkpoint] * (MAX_SEATS - 1) if args.checkpoint else None,
     )
     server = HexSetServer((args.host, args.port), Tables(config))
 

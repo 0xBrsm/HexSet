@@ -35,11 +35,11 @@ import sys
 import urllib.error
 import urllib.request
 
+from .constants import TOKEN_HEADER
+
 BASE_URL = os.environ.get("HEXSET_UI_BASE_URL", "http://127.0.0.1:8770").rstrip("/")
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_INFO = {"name": "hexset-ui", "version": "0.1.0"}
-
-TOKEN_HEADER = "X-HexSet-Token"
 
 # The seat this connection is playing, set by new_table/join and sent on every
 # request after. A module global for the same reason the cookie jar it
@@ -110,6 +110,12 @@ def _settle(state: dict) -> dict:
     """
     for _ in range(_MAX_CASCADE_STEPS):
         if state.get("game_over") or state.get("to_move") in (state.get("human_seats") or []):
+            return state
+        # advance_blocked (unlike awaiting_confirm, which is only ever true
+        # for the one seat actually holding it) is set whenever *any* seat's
+        # pending confirm has the cascade gate closed — including one that
+        # isn't ours to clear, which nothing here can do anything about.
+        if state.get("advance_blocked") and not state.get("awaiting_confirm"):
             return state
         path = "/api/confirm" if state.get("awaiting_confirm") else "/api/advance"
         state = _request_ok("POST", path)

@@ -1250,14 +1250,19 @@ function personOnMove() {
 // response, one render() — until a person is on move again, the game ends, or
 // a setup road's handoff is waiting on our own confirm.
 async function settle() {
-  while (!state.game_over && !state.awaiting_confirm && !personOnMove()) {
+  // advance_blocked, not awaiting_confirm: the latter is only ever true for
+  // the one seat actually holding the gate (see webplay.state_view), so
+  // another viewer watching a different seat's pending confirm would
+  // otherwise see neither flag set and keep hammering /api/advance with
+  // nothing changing on the other end.
+  while (!state.game_over && !state.advance_blocked && !personOnMove()) {
     const {ok, data} = await postJSON("/api/advance", {});
-    state = data;
-    render();
     if (!ok) {
       showNotice(data.error || "Something went wrong.");
       break;
     }
+    state = data;
+    render();
   }
   pollWhileWaiting();
 }
@@ -1303,7 +1308,11 @@ function sendAction(action) {
     pendingRobberHex = null;
     knightArmed = false;
     const {ok, data} = await postJSON("/api/action", {action});
-    state = data;
+    // Only take the response's state when it succeeded: an error body has no
+    // game-state fields at all, and render() (below, unconditional so the
+    // pendingRobberHex/knightArmed reset above still shows) would throw
+    // dereferencing them off of it otherwise.
+    if (ok) state = data;
     showNotice(ok ? "" : (data.error || "That was not legal."));
     render();
     if (ok) await settle();
@@ -1325,7 +1334,7 @@ function newGame() {
 function undoBuild() {
   return blocking(async () => {
     const {ok, data} = await postJSON("/api/undo", {});
-    state = data;
+    if (ok) state = data;
     showNotice(ok ? "" : (data.error || "Nothing to undo."));
     render();
   });
@@ -1338,7 +1347,7 @@ function undoBuild() {
 function confirmSetupTurn() {
   return blocking(async () => {
     const {ok, data} = await postJSON("/api/confirm", {});
-    state = data;
+    if (ok) state = data;
     showNotice(ok ? "" : (data.error || "Could not continue."));
     render();
     if (ok) await settle();

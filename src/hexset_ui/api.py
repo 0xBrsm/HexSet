@@ -73,6 +73,11 @@ MIN_PLAYERS = 2
 CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
 CODE_LENGTH = 6
 
+# The cap every client already enforces (mcp.py, index.html) on a display
+# name, applied here too: those are conveniences, not the check, since a raw
+# POST to /api/tables, /api/join or /api/name bypasses both of them.
+MAX_NAME_LENGTH = 40
+
 # How long a table survives with nobody touching it. An open browser polls far
 # more often than this; a closed tab or an abandoned lobby doesn't at all. 24
 # hours comfortably outlasts a real game paused over a lunch break without
@@ -107,6 +112,15 @@ def new_code(taken: set[str]) -> str:
         code = "".join(rng.choice(CODE_ALPHABET) for _ in range(CODE_LENGTH))
         if code not in taken:
             return code
+
+
+def clean_name(name: str | None) -> str | None:
+    """A display name, trimmed and capped the same way everywhere one is
+    accepted, or `None` if there's nothing left of it once trimmed."""
+    if name is None:
+        return None
+    name = name.strip()[:MAX_NAME_LENGTH]
+    return name or None
 
 
 def model_options() -> dict[str, str]:
@@ -212,7 +226,7 @@ class Table:
             if seat.kind is SeatKind.EMPTY:
                 token = secrets.token_urlsafe(18)
                 self.seats[index] = Seat(
-                    kind=SeatKind.PLAYER, name=name, token=token
+                    kind=SeatKind.PLAYER, name=clean_name(name), token=token
                 )
                 return index, token
         raise ApiError("this table has no empty seats", status=409)
@@ -302,6 +316,18 @@ def seat_bots(seats: list[Seat], board: Board, seed: int, config: Config) -> Sea
     )
 
 
+def _seat_labels(seats: list[Seat]) -> tuple[dict[int, str], dict[int, str], dict[int, str]]:
+    """The three name/spec maps `GameSession` is built with, read off `seats`
+    the same way whether the game is being dealt fresh or replayed back from
+    a journal — the two must agree on how a seat's kind decides which map it
+    lands in, or a resumed game's labels would silently diverge from a fresh
+    one's."""
+    bot_names = {i: s.name for i, s in enumerate(seats) if s.kind is SeatKind.BOT and s.name}
+    bot_specs = {i: s.spec for i, s in enumerate(seats) if s.kind is SeatKind.BOT and s.spec}
+    player_names = {i: s.name for i, s in enumerate(seats) if s.kind is SeatKind.PLAYER and s.name}
+    return bot_names, bot_specs, player_names
+
+
 def build_session(code: str, seats: list[Seat], config: Config) -> GameSession:
     """A fresh game for exactly these seats, in this order."""
     seed = config.seed
@@ -317,15 +343,16 @@ def build_session(code: str, seats: list[Seat], config: Config) -> GameSession:
     # cannot reconstruct, and a journalled game would fail to resume.
     board = random_base_board(random.Random(seed))
     game = start(board, len(seats), random.Random(seed))
+    bot_names, bot_specs, player_names = _seat_labels(seats)
     session = GameSession(
         game=game,
         human_seats=frozenset(i for i, s in enumerate(seats) if s.kind is SeatKind.PLAYER),
         bot=seat_bots(seats, board, seed, config),
         seed=seed,
         journal=journal.open_journal(seed, config.games_dir),
-        bot_names={i: s.name for i, s in enumerate(seats) if s.kind is SeatKind.BOT and s.name},
-        bot_specs={i: s.spec for i, s in enumerate(seats) if s.kind is SeatKind.BOT and s.spec},
-        player_names={i: s.name for i, s in enumerate(seats) if s.kind is SeatKind.PLAYER and s.name},
+        bot_names=bot_names,
+        bot_specs=bot_specs,
+        player_names=player_names,
         code=code,
     )
     session.advance_bots()  # in case no person is first in the setup snake
@@ -356,14 +383,15 @@ def resume_session(code: str, seats: list[Seat], config: Config) -> GameSession 
     header = events[0]
     seed = header["seed"]
     board = random_base_board(random.Random(seed))
+    bot_names, bot_specs, player_names = _seat_labels(seats)
     session = GameSession(
         game=start(board, header["num_players"], random.Random(seed)),
         human_seats=frozenset(header.get("human_seats", [])),
         bot=seat_bots(seats, board, seed, config),
         seed=seed,
-        bot_names={i: s.name for i, s in enumerate(seats) if s.kind is SeatKind.BOT and s.name},
-        bot_specs={i: s.spec for i, s in enumerate(seats) if s.kind is SeatKind.BOT and s.spec},
-        player_names={i: s.name for i, s in enumerate(seats) if s.kind is SeatKind.PLAYER and s.name},
+        bot_names=bot_names,
+        bot_specs=bot_specs,
+        player_names=player_names,
         code=code,
     )
     try:
@@ -422,7 +450,7 @@ class Tables:
         for entry in bots:
             if entry not in options:
                 raise ApiError(f"unknown model: {entry}")
-        seats = [Seat(kind=SeatKind.PLAYER, name=name, token=secrets.token_urlsafe(18))]
+        seats = [Seat(kind=SeatKind.PLAYER, name=clean_name(name), token=secrets.token_urlsafe(18))]
         seats += [Seat(kind=SeatKind.BOT, name=entry, spec=options[entry]) for entry in bots]
         seats += [Seat() for _ in range(open_seats)]
         if len(seats) > MAX_SEATS:
@@ -466,10 +494,17 @@ class Tables:
     def _evict_stale(self, now: float) -> None:
         """Must be called with `_registry_lock` held. Drops any table untouched
         for longer than `TABLE_TTL_SECONDS` — an abandoned lobby or a closed
-        tab, not an active game."""
+        tab, not an active game.
+
+        A table evicted mid-game leaves its journal open otherwise: nothing
+        else ever calls `Journal.abandoned` for it, so a reader that treats an
+        unclosed file as "still in flight" would wait on this one forever.
+        """
         stale = [c for c, t in self._tables.items() if now - t.last_seen > TABLE_TTL_SECONDS]
         for code in stale:
-            del self._tables[code]
+            table = self._tables.pop(code)
+            if table.session is not None and table.session.journal is not None:
+                table.session.journal.abandoned()
 
     # --- play -------------------------------------------------------------
 
@@ -507,6 +542,7 @@ class Tables:
         return table.view(seat)
 
     def rename(self, table: Table, seat: int, name: str) -> dict:
+        name = clean_name(name)
         table.seats[seat].name = name
         if table.session is not None:
             table.session.player_names[seat] = name

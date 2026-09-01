@@ -1,15 +1,16 @@
-"""Tables, seats, codes and tokens — `hexset_ui.api` without a socket.
+"""Games, seats, codes and tokens — `hexset_ui.api` without a socket.
 
 Everything here calls `Tables.handle` the way `web.py` would, so the routing
 and the rules are pinned together; `test_web.py` covers only what the HTTP
 transport adds on top. `search2` is named explicitly at every call rather than
-left to `default_lineup()`, which would seat whatever `.onnx` files happen to
-be in `models/` and drag onnxruntime into a suite that has no need of it.
+left to `Config.default_bots`, which would seat whatever `.onnx` files happen
+to be in `models/` and drag onnxruntime into a suite that has no need of it.
 """
 
 from __future__ import annotations
 
 import random
+import time
 
 import pytest
 
@@ -18,6 +19,7 @@ from hexset_ui.actions import ActionType, legal_actions
 from hexset_ui.api import (
     CODE_ALPHABET,
     CODE_LENGTH,
+    MAX_SEATS,
     ApiError,
     Config,
     Seat,
@@ -27,7 +29,7 @@ from hexset_ui.api import (
     new_code,
     resume_session,
 )
-from hexset_ui.game import is_over, to_move
+from hexset_ui.game import is_over, lock_seat, to_move
 from hexset_ui.webplay import action_to_wire
 
 SOLO = ["search2", "search2", "search2"]
@@ -38,14 +40,19 @@ def tables(**config) -> Tables:
     # HEXSET_UI_GAMES_DIR points", and a test suite should not journal into a
     # real player's games directory.
     config.setdefault("games_dir", "")
+    config.setdefault("seat_grace", 0.0)  # deterministic locking by default
     return Tables(Config(**config))
 
 
 def deal(registry: Tables, **kwargs) -> tuple[str, str]:
-    """A new table, returned as (code, the creator's token)."""
-    kwargs.setdefault("bots", SOLO[: 3 - kwargs.get("open_seats", 0)])
-    data = registry.handle("POST", "/api/tables", kwargs, None)
+    """A new game, returned as (code, the creator's token)."""
+    kwargs.setdefault("bots", SOLO)
+    data = registry.handle("POST", "/api/games", kwargs, None)
     return data["code"], data["token"]
+
+
+def empty_seats(table) -> list[int]:
+    return [i for i, s in enumerate(table.seats) if s.kind is SeatKind.EMPTY]
 
 
 # --- Codes --------------------------------------------------------------------
@@ -65,49 +72,68 @@ def test_new_code_never_returns_one_already_in_use():
     assert new_code(taken) not in taken
 
 
-def test_two_tables_get_two_codes():
+def test_two_games_get_two_codes():
     registry = tables()
     first, _ = deal(registry)
     second, _ = deal(registry)
     assert first != second
 
 
-# --- Dealing a table ----------------------------------------------------------
+# --- Dealing a game -------------------------------------------------------------
 
 
-def test_dealing_a_table_seats_the_caller_first_and_mints_them_a_token():
+def test_dealing_seats_the_creator_at_a_random_seat_and_mints_a_token():
     registry = tables()
-    data = registry.handle("POST", "/api/tables", {"bots": SOLO, "name": "Ada"}, None)
+    data = registry.handle("POST", "/api/games", {"bots": SOLO, "name": "Ada"}, None)
 
     assert data["token"]
-    assert data["seat"] == 0
-    assert data["started"] is False
-    assert [s["kind"] for s in data["seats"]] == ["player", "bot", "bot", "bot"]
-    assert data["seats"][0]["name"] == "Ada"
+    assert 0 <= data["seat"] < MAX_SEATS
+    assert len(data["seats"]) == MAX_SEATS
+    kinds = [s["kind"] for s in data["seats"]]
+    assert kinds.count("player") == 1
+    assert kinds.count("bot") == 3
+    assert data["seats"][data["seat"]]["kind"] == "player"
+    assert data["seats"][data["seat"]]["name"] == "Ada"
     # The token is the one secret here and belongs to the response that mints
     # it, never to the seat list everyone at the table can read.
     assert all("token" not in s for s in data["seats"])
+    # Playable immediately — no lobby, no separate start.
+    assert data["phase"] == "SETUP_SETTLEMENT"
+    assert data["to_move"] is not None
 
 
-def test_open_seats_are_left_empty_for_other_people():
+def test_seats_nobody_named_are_left_open():
     registry = tables()
-    data = registry.handle("POST", "/api/tables", {"bots": ["search2"], "open_seats": 2}, None)
-    assert [s["kind"] for s in data["seats"]] == ["player", "bot", "empty", "empty"]
+    data = registry.handle("POST", "/api/games", {"bots": ["search2"]}, None)
+    kinds = [s["kind"] for s in data["seats"]]
+    assert kinds.count("player") == 1
+    assert kinds.count("bot") == 1
+    assert kinds.count("empty") == 2
 
 
-def test_the_default_lineup_gives_way_to_the_seats_asked_to_be_kept_open():
-    """A caller who names no bots is asking for a full table, not for three
-    bots specifically — so open seats shrink the lineup rather than
-    overflowing it. A caller who *names* three still gets an error (below)."""
+def test_omitting_bots_seats_nobody_but_the_creator():
+    """No automatic mixed lineup any more — filling the table is an explicit
+    choice (see Config.default_bots's own docstring)."""
+    registry = tables()
+    data = registry.handle("POST", "/api/games", {}, None)
+    kinds = [s["kind"] for s in data["seats"]]
+    assert kinds.count("player") == 1
+    assert kinds.count("empty") == MAX_SEATS - 1
+
+
+def test_config_default_bots_fills_in_for_an_unnamed_lineup():
+    """--checkpoint's own mechanism: a caller that names no bots at all
+    falls back to the server's pinned default, not to an empty table."""
     registry = tables(default_bots=SOLO)
-    data = registry.handle("POST", "/api/tables", {"open_seats": 2}, None)
-    assert [s["kind"] for s in data["seats"]] == ["player", "bot", "empty", "empty"]
+    data = registry.handle("POST", "/api/games", {}, None)
+    kinds = [s["kind"] for s in data["seats"]]
+    assert kinds.count("bot") == 3
 
 
 def test_naming_more_bots_than_fit_is_refused():
     registry = tables()
     with pytest.raises(ApiError) as caught:
-        registry.handle("POST", "/api/tables", {"bots": SOLO, "open_seats": 1}, None)
+        registry.handle("POST", "/api/games", {"bots": SOLO + ["search2"]}, None)
     assert "at most" in str(caught.value)
 
 
@@ -116,7 +142,7 @@ def test_an_unknown_model_is_refused_by_name():
     a request pointing a bot at a file of its choosing."""
     registry = tables()
     with pytest.raises(ApiError) as caught:
-        registry.handle("POST", "/api/tables", {"bots": ["../../etc/passwd"]}, None)
+        registry.handle("POST", "/api/games", {"bots": ["../../etc/passwd"]}, None)
     assert caught.value.status == 400
     assert "unknown model" in str(caught.value)
 
@@ -129,45 +155,61 @@ def test_models_lists_what_the_bots_argument_accepts():
 # --- Joining ------------------------------------------------------------------
 
 
-def test_joining_by_code_takes_the_first_empty_seat():
+def test_joining_by_code_takes_a_random_open_seat():
     registry = tables()
-    code, _ = deal(registry, bots=["search2"], open_seats=2)
+    code, _ = deal(registry, bots=["search2"])
+    table = registry.get(code)
+    open_before = set(empty_seats(table))
+    assert len(open_before) == 2
 
     data = registry.handle("POST", "/api/join", {"code": code, "name": "Bea"}, None)
 
-    assert data["seat"] == 2
+    assert data["seat"] in open_before
     assert data["token"]
-    assert [s["kind"] for s in data["seats"]] == ["player", "bot", "player", "empty"]
-    assert data["seats"][2]["name"] == "Bea"
+    assert data["seats"][data["seat"]]["kind"] == "player"
+    assert data["seats"][data["seat"]]["name"] == "Bea"
 
 
 def test_a_code_is_matched_case_insensitively():
     registry = tables()
-    code, _ = deal(registry, bots=["search2"], open_seats=2)
-    assert registry.handle("POST", "/api/join", {"code": code.lower()}, None)["seat"] == 2
+    code, _ = deal(registry, bots=["search2"])
+    data = registry.handle("POST", "/api/join", {"code": code.lower()}, None)
+    assert 0 <= data["seat"] < MAX_SEATS
 
 
-def test_joining_a_table_with_no_empty_seat_is_refused():
+def test_joining_a_full_game_is_refused():
     registry = tables()
-    code, _ = deal(registry)
+    code, _ = deal(registry, bots=SOLO)
     with pytest.raises(ApiError) as caught:
         registry.handle("POST", "/api/join", {"code": code}, None)
     assert caught.value.status == 409
-    assert "no empty seats" in str(caught.value)
+    assert "no open seats" in str(caught.value)
 
 
-def test_joining_a_game_already_in_progress_is_refused():
-    """Not a policy that could be relaxed: starting drops the empty seats, so
-    a game in progress has only the seats it was dealt with."""
+def test_join_never_offers_a_locked_seat():
     registry = tables()
-    code, token = deal(registry, bots=["search2"], open_seats=2)
-    registry.handle("POST", "/api/join", {"code": code}, None)
-    registry.handle("POST", "/api/start", {}, token)
+    code, _ = deal(registry, bots=[])
+    table = registry.get(code)
+    open_seats = empty_seats(table)
+    assert len(open_seats) == 3
+    lock_seat(table.session.game, open_seats[0])
+    lock_seat(table.session.game, open_seats[1])
+
+    seat, _ = table.join(None)
+
+    assert seat == open_seats[2]
+
+
+def test_joining_a_game_where_every_open_seat_is_locked_is_refused():
+    registry = tables()
+    code, _ = deal(registry, bots=[])
+    table = registry.get(code)
+    for seat in empty_seats(table):
+        lock_seat(table.session.game, seat)
 
     with pytest.raises(ApiError) as caught:
         registry.handle("POST", "/api/join", {"code": code}, None)
     assert caught.value.status == 409
-    assert "already started" in str(caught.value)
 
 
 def test_an_unknown_code_is_a_404():
@@ -177,16 +219,80 @@ def test_an_unknown_code_is_a_404():
     assert caught.value.status == 404
 
 
-def test_the_lobby_is_readable_without_a_token():
-    """What a browser opening /<code> shows someone who has not joined yet."""
+def test_an_observer_can_read_a_game_without_a_token():
+    """What a browser opening /<code> shows someone who hasn't (or can't)
+    join it — a full state view, not a lobby-only shape, since there is no
+    lobby any more."""
     registry = tables()
-    code, _ = deal(registry, bots=["search2"], open_seats=2)
+    code, _ = deal(registry, bots=["search2"])
 
     data = registry.handle("GET", f"/api/table/{code}", {}, None)
 
     assert data["code"] == code
     assert data["seat"] is None
-    assert data["can_start"] is True
+    assert data["phase"]
+    assert data["legal_actions"] == []  # nothing is an observer's to play
+
+
+# --- The per-seat setup lock ---------------------------------------------------
+
+
+def test_a_creator_seated_anywhere_but_the_snakes_first_slot_still_plays():
+    """`first=` follows the creator's own (random) seat, not a hardcoded 0 —
+    otherwise a creator seated anywhere else would find it seat 0's turn,
+    seat 0 empty, and nothing able to ever advance."""
+    registry = tables()
+    code, token = deal(registry, bots=[])
+    session = registry.get(code).session
+    creator_seat = registry.handle("GET", "/api/state", {}, token)["seat"]
+
+    assert to_move(session.game) == creator_seat
+    options = legal_actions(session.game)
+    assert options  # the creator really can act on their very first request
+
+
+def test_settle_locks_needs_a_second_touch_before_it_locks():
+    """The first time _settle_locks finds the snake waiting on an empty seat
+    it only starts the window; a lock fires only once seat_grace has
+    actually elapsed since then (see Table._settle_locks's own docstring)."""
+    registry = tables(seat_grace=0.0)
+    code, token = deal(registry, bots=[])
+    table = registry.get(code)
+    session = table.session
+    creator_seat = to_move(session.game)
+
+    settlement = action_to_wire(
+        next(a for a in legal_actions(session.game) if a.type is ActionType.SETUP_SETTLEMENT)
+    )
+    registry.handle("POST", "/api/action", {"action": settlement}, token)
+    road = action_to_wire(
+        next(a for a in legal_actions(session.game) if a.type is ActionType.SETUP_ROAD)
+    )
+    registry.handle("POST", "/api/action", {"action": road}, token)
+
+    next_seat = to_move(session.game)
+    assert next_seat != creator_seat
+    assert next_seat not in session.game.locked  # the first touch only starts the window
+
+    table._settle_locks(now=time.monotonic() + 1)  # a second touch, past the (zero) grace
+
+    assert next_seat in session.game.locked
+
+
+def test_a_locked_seat_stays_locked_but_the_rest_of_the_game_still_plays():
+    registry = tables()
+    code, token = deal(registry, bots=[])
+    table = registry.get(code)
+    session = table.session
+    creator_seat = to_move(session.game)
+    for seat in empty_seats(table):
+        if seat != creator_seat:
+            lock_seat(session.game, seat)
+
+    data = registry.handle("GET", "/api/state", {}, token)
+    assert set(data["locked"]) == set(empty_seats(table))
+    assert data["to_move"] == creator_seat  # every other seat locked; back to the creator
+    assert data["legal_actions"]  # and it's genuinely playable
 
 
 # --- Tokens -------------------------------------------------------------------
@@ -207,7 +313,7 @@ def test_an_unknown_token_is_a_403():
     assert caught.value.status == 403
 
 
-def test_a_token_names_one_seat_at_one_table():
+def test_a_token_names_one_seat_at_one_game():
     registry = tables()
     _, mine = deal(registry)
     _, theirs = deal(registry)
@@ -226,96 +332,23 @@ def test_an_unknown_endpoint_is_a_404_even_with_a_good_token():
     assert caught.value.status == 404
 
 
-# --- Starting -----------------------------------------------------------------
+# --- Reading the board ----------------------------------------------------------
 
 
-def test_starting_drops_the_empty_seats_rather_than_dealing_them_in():
-    """The engine never learns what "empty" means: a four-seat table two
-    people took is a two-player game."""
-    registry = tables()
-    code, token = deal(registry, bots=[], open_seats=3)
-    registry.handle("POST", "/api/join", {"code": code}, None)
-
-    data = registry.handle("POST", "/api/start", {}, token)
-
-    assert data["started"] is True
-    assert [s["kind"] for s in data["seats"]] == ["player", "player"]
-    assert len(data["players"]) == 2
-    assert data["phase"] == "SETUP_SETTLEMENT"
-
-
-def test_starting_renumbers_the_seats_that_are_left():
-    """A seat number after the deal is an engine seat and nothing else, so a
-    request that arrived naming seat 2 has to be answered about seat 1."""
-    registry = tables()
-    code, token = deal(registry, bots=["search2"], open_seats=2)
-    joiner = registry.handle("POST", "/api/join", {"code": code}, None)
-    assert joiner["seat"] == 2
-
-    data = registry.handle("POST", "/api/start", {}, joiner["token"])
-
-    assert [s["kind"] for s in data["seats"]] == ["player", "bot", "player"]
-    assert data["seat"] == 2  # unchanged here: the empty seat was after it
-
-
-def test_a_seat_the_deal_renumbered_is_answered_about_its_new_number():
-    registry = tables()
-    code, token = deal(registry, bots=["search2"], open_seats=1)
-    # Forced rather than dealt this way: `create` always appends its empty
-    # seats last, so nothing a client can ask for produces this layout today.
-    # `start` renumbers regardless, and this is what that has to mean.
-    table = registry.get(code)
-    table.seats = [Seat(), table.seats[1], table.seats[0]]
-
-    data = registry.handle("POST", "/api/start", {}, token)
-
-    assert [s["kind"] for s in data["seats"]] == ["bot", "player"]
-    assert data["seat"] == 1
-
-
-def test_a_table_that_cannot_field_two_players_will_not_start():
-    registry = tables()
-    _, token = deal(registry, bots=[], open_seats=3)
-    with pytest.raises(ApiError) as caught:
-        registry.handle("POST", "/api/start", {}, token)
-    assert caught.value.status == 409
-    assert "at least 2" in str(caught.value)
-
-
-def test_starting_twice_is_refused():
+def test_the_board_is_readable_from_the_moment_the_game_exists():
     registry = tables()
     _, token = deal(registry)
-    registry.handle("POST", "/api/start", {}, token)
-    with pytest.raises(ApiError) as caught:
-        registry.handle("POST", "/api/start", {}, token)
-    assert caught.value.status == 409
-
-
-def test_the_board_is_not_there_to_read_until_the_game_is_dealt():
-    registry = tables()
-    _, token = deal(registry)
-    with pytest.raises(ApiError) as caught:
-        registry.handle("GET", "/api/board", {}, token)
-    assert caught.value.status == 409
-
-    registry.handle("POST", "/api/start", {}, token)
     assert len(registry.handle("GET", "/api/board", {}, token)["hexes"]) == 19
 
 
-def test_state_answers_from_the_lobby_before_the_deal_and_the_game_after():
-    """One endpoint either way, so a client polls the same place from the
-    moment it joins to the moment the game ends."""
+def test_state_is_the_same_shape_from_the_first_request_onward():
+    """One endpoint, one shape, from the moment a game exists to the moment
+    it ends — there is no separate lobby shape to switch out of."""
     registry = tables()
     _, token = deal(registry)
-
-    lobby = registry.handle("GET", "/api/state", {}, token)
-    assert lobby["started"] is False
-    assert "legal_actions" not in lobby
-
-    registry.handle("POST", "/api/start", {}, token)
-    playing = registry.handle("GET", "/api/state", {}, token)
-    assert playing["started"] is True
-    assert playing["legal_actions"]
+    data = registry.handle("GET", "/api/state", {}, token)
+    assert data["phase"] == "SETUP_SETTLEMENT"
+    assert data["legal_actions"]
 
 
 # --- Playing ------------------------------------------------------------------
@@ -324,7 +357,6 @@ def test_state_answers_from_the_lobby_before_the_deal_and_the_game_after():
 def test_a_legal_action_is_accepted_and_an_illegal_one_is_a_400():
     registry = tables()
     _, token = deal(registry)
-    registry.handle("POST", "/api/start", {}, token)
     session = registry.get(registry.handle("GET", "/api/state", {}, token)["code"]).session
 
     settlement = action_to_wire(
@@ -342,12 +374,11 @@ def test_a_legal_action_is_accepted_and_an_illegal_one_is_a_400():
 
 def test_another_seats_turn_is_not_this_ones_to_play():
     registry = tables()
-    code, token = deal(registry, bots=[], open_seats=3)
+    code, token = deal(registry, bots=[])
     other = registry.handle("POST", "/api/join", {"code": code}, None)["token"]
-    registry.handle("POST", "/api/start", {}, token)
 
     session = registry.get(code).session
-    waiting = other if to_move(session.game) == 0 else token
+    waiting = other if to_move(session.game) == registry.by_token(token)[1] else token
     settlement = action_to_wire(
         next(a for a in legal_actions(session.game) if a.type is ActionType.SETUP_SETTLEMENT)
     )
@@ -357,49 +388,115 @@ def test_another_seats_turn_is_not_this_ones_to_play():
     assert "not your turn" in str(caught.value)
 
 
-def test_two_people_at_one_table_are_shown_two_different_states():
+def test_two_people_at_one_game_are_shown_two_different_states():
     registry = tables()
-    code, mine = deal(registry, bots=["search2"], open_seats=2)
+    code, mine = deal(registry, bots=[])
     theirs = registry.handle("POST", "/api/join", {"code": code}, None)["token"]
-    registry.handle("POST", "/api/start", {}, mine)
 
+    mine_seat = registry.by_token(mine)[1]
+    theirs_seat = registry.by_token(theirs)[1]
     ours = registry.handle("GET", "/api/state", {}, mine)
     hers = registry.handle("GET", "/api/state", {}, theirs)
 
-    assert ours["seat"] == 0 and hers["seat"] == 2
-    assert ours["human_seats"] == hers["human_seats"] == [0, 2]
+    assert ours["seat"] == mine_seat and hers["seat"] == theirs_seat
+    assert set(ours["claimed_seats"]) == set(hers["claimed_seats"]) == {mine_seat, theirs_seat}
     # Each is shown their own hand and nobody else's.
-    assert "hand" in {p["seat"]: p for p in ours["players"]}[0]
-    assert "hand" not in {p["seat"]: p for p in ours["players"]}[2]
-    assert "hand" in {p["seat"]: p for p in hers["players"]}[2]
-    assert "hand" not in {p["seat"]: p for p in hers["players"]}[0]
+    assert "hand" in {p["seat"]: p for p in ours["players"]}[mine_seat]
+    assert "hand" not in {p["seat"]: p for p in ours["players"]}[theirs_seat]
+    assert "hand" in {p["seat"]: p for p in hers["players"]}[theirs_seat]
+    assert "hand" not in {p["seat"]: p for p in hers["players"]}[mine_seat]
 
 
 def test_a_bot_can_be_swapped_but_a_persons_seat_cannot():
     registry = tables()
-    _, token = deal(registry)
-    registry.handle("POST", "/api/start", {}, token)
+    code, token = deal(registry, bots=["search2"])
+    bot_seat = next(
+        i for i, s in enumerate(registry.get(code).seats) if s.kind is SeatKind.BOT
+    )
+    mine_seat = registry.by_token(token)[1]
 
-    data = registry.handle("POST", "/api/bot", {"seat": 1, "model": "search2"}, token)
-    assert data["seats"][1]["name"] == "search2"
+    data = registry.handle("POST", "/api/bot", {"seat": bot_seat, "model": "search2"}, token)
+    assert data["seats"][bot_seat]["name"] == "search2"
 
     with pytest.raises(ApiError) as caught:
-        registry.handle("POST", "/api/bot", {"seat": 0, "model": "search2"}, token)
+        registry.handle("POST", "/api/bot", {"seat": mine_seat, "model": "search2"}, token)
     assert "no bot to swap" in str(caught.value)
 
 
 def test_renaming_a_seat_reaches_the_log_as_well_as_the_seat_list():
     registry = tables()
     _, token = deal(registry)
-    registry.handle("POST", "/api/start", {}, token)
+    mine_seat = registry.by_token(token)[1]
 
     data = registry.handle("POST", "/api/name", {"name": "Ada"}, token)
 
-    assert data["seats"][0]["name"] == "Ada"
-    assert {p["seat"]: p for p in data["players"]}[0]["name"] == "Ada"
+    assert data["seats"][mine_seat]["name"] == "Ada"
+    assert {p["seat"]: p for p in data["players"]}[mine_seat]["name"] == "Ada"
 
 
-# --- Resuming a game a restart interrupted -------------------------------------
+def test_record_matches_the_seat_on_move():
+    """A freshly-dealt game's setup snake starts at `first` — the creator's
+    own (random) seat, see `hexset_ui.game.start` — so the creator's own
+    token is always the mover's here."""
+    registry = tables()
+    code, token = deal(registry, bots=[])
+    mover_seat = to_move(registry.get(code).session.game)
+    assert registry.by_token(token)[1] == mover_seat
+
+    data = registry.handle("GET", "/api/record", {}, token)
+    assert data["perspective"] == mover_seat
+    assert "action_mask" in data and "ledger_known" in data
+    assert "options" in data and "offers_made" in data and "space" in data
+
+
+def test_record_is_refused_when_it_is_not_your_turn():
+    registry = tables()
+    code, token = deal(registry, bots=[])
+    other = registry.handle("POST", "/api/join", {"code": code}, None)["token"]
+    session = registry.get(code).session
+    mover = to_move(session.game)
+    waiting = other if registry.by_token(token)[1] == mover else token
+
+    with pytest.raises(ApiError) as caught:
+        registry.handle("GET", "/api/record", {}, waiting)
+    assert caught.value.status == 409
+
+
+# --- A restart: the registry loses a game, its journal doesn't -----------------
+
+
+def test_a_registry_miss_reopens_bot_seats_fresh_but_opens_the_humans(tmp_path):
+    """A lost in-memory table is rebuilt from its journal: a bot seat's
+    identity is just its spec, so it's re-tokened and reclaimed
+    automatically; a human's old token cannot be recovered (it never
+    touched disk — see api.py's module docstring), so their seat is simply
+    open again, exactly like one nobody ever claimed."""
+    registry = tables(games_dir=str(tmp_path))
+    code, token = deal(registry, bots=SOLO)  # every seat filled, none open
+    creator_seat = registry.by_token(token)[1]
+
+    del registry._tables[code]  # simulate a restart
+
+    reopened = registry.get(code)
+    kinds = {i: s.kind for i, s in enumerate(reopened.seats)}
+    assert kinds[creator_seat] is SeatKind.EMPTY
+    for seat in range(MAX_SEATS):
+        if seat != creator_seat:
+            assert kinds[seat] is SeatKind.BOT
+            assert reopened.seats[seat].token is not None
+    assert reopened.session.claimed_seats == {s for s in range(MAX_SEATS) if s != creator_seat}
+    # And the reopened game is still genuinely playable.
+    assert reopened.session.state_view(None)["phase"]
+
+
+def test_a_registry_miss_with_no_journal_is_still_just_a_404(tmp_path):
+    registry = tables(games_dir=str(tmp_path))
+    with pytest.raises(ApiError) as caught:
+        registry.get("ZZZZZZ")
+    assert caught.value.status == 404
+
+
+# --- resume_session / build_session, one layer below Tables --------------------
 
 
 def player(name: str | None = None) -> Seat:
@@ -411,15 +508,14 @@ def bot_seat() -> Seat:
 
 
 def drive(session, moves: int, rng: random.Random) -> None:
-    """Play `moves` human turns against the bots, leaving it a human's move."""
+    """Play `moves` actions total, whoever's seat is up — there is no
+    separate "human" driving here any more, every claimed seat submits the
+    same way (see webplay.GameSession.submit)."""
     for _ in range(moves):
         if is_over(session.game):
             break
         seat = to_move(session.game)
-        session.apply_human_action(seat, action_to_wire(rng.choice(legal_actions(session.game))))
-        if session.awaiting_confirm is not None:
-            session.confirm_setup_turn(seat)
-        session.advance_bots()
+        session.submit(seat, action_to_wire(rng.choice(legal_actions(session.game))))
 
 
 def test_an_unfinished_game_comes_back_where_it_was_left(tmp_path):
@@ -427,7 +523,7 @@ def test_an_unfinished_game_comes_back_where_it_was_left(tmp_path):
     so a deploy or a crash used to take every game in flight with it."""
     config = Config(games_dir=str(tmp_path), seed=99)
     seats = [player("Ada"), bot_seat(), bot_seat(), bot_seat()]
-    session = build_session("ABC123", seats, config)
+    session = build_session("ABC123", seats, config, first=0)
     drive(session, 12, random.Random(4))
     assert not is_over(session.game)
 
@@ -443,14 +539,14 @@ def test_an_unfinished_game_comes_back_where_it_was_left(tmp_path):
     assert resumed.game.turns == session.game.turns
     # Rebuilt by replaying, not stored: same actions in, same account out.
     assert resumed.log_for(0) == session.log_for(0)
-    assert (resumed.seed, resumed.human_seats) == (session.seed, session.human_seats)
+    assert (resumed.seed, resumed.claimed_seats) == (session.seed, session.claimed_seats)
     assert resumed.player_names == session.player_names
 
 
 def test_resuming_appends_to_the_same_file_rather_than_starting_another(tmp_path):
     config = Config(games_dir=str(tmp_path), seed=99)
     seats = [player("Ada"), bot_seat(), bot_seat(), bot_seat()]
-    session = build_session("ABC123", seats, config)
+    session = build_session("ABC123", seats, config, first=0)
     drive(session, 8, random.Random(4))
     before = session.journal.path
 
@@ -471,17 +567,17 @@ def test_a_game_played_out_is_not_handed_back(tmp_path):
     a result, and the next visit is a new game."""
     config = Config(games_dir=str(tmp_path), seed=99)
     seats = [player("Ada"), bot_seat(), bot_seat(), bot_seat()]
-    session = build_session("ABC123", seats, config)
+    session = build_session("ABC123", seats, config, first=0)
     drive(session, 6, random.Random(4))
     session.journal.finish(session.game)
 
     assert resume_session("ABC123", seats, config) is None
 
 
-def test_one_tables_game_is_never_handed_to_another(tmp_path):
+def test_one_games_journal_is_never_handed_to_another(tmp_path):
     config = Config(games_dir=str(tmp_path), seed=99)
     seats = [player("Ada"), bot_seat(), bot_seat(), bot_seat()]
-    drive(build_session("ABC123", seats, config), 6, random.Random(4))
+    drive(build_session("ABC123", seats, config, first=0), 6, random.Random(4))
 
     assert resume_session("XYZ789", seats, config) is None
 
@@ -489,10 +585,10 @@ def test_one_tables_game_is_never_handed_to_another(tmp_path):
 def test_an_undone_placement_is_not_replayed_back_onto_the_board(tmp_path):
     """Undone actions stay in the file by design (see Journal.undo), so a
     resume that read the lines straight through would rebuild the board the
-    human explicitly rejected."""
+    player explicitly rejected."""
     config = Config(games_dir=str(tmp_path), seed=99)
     seats = [player("Ada"), bot_seat(), bot_seat(), bot_seat()]
-    session = build_session("ABC123", seats, config)
+    session = build_session("ABC123", seats, config, first=0)
     rng = random.Random(4)
     for _ in range(400):
         drive(session, 1, rng)
@@ -507,16 +603,30 @@ def test_an_undone_placement_is_not_replayed_back_onto_the_board(tmp_path):
     assert resumed.game.state.edge_owner == session.game.state.edge_owner
 
 
-def test_a_resumed_game_keeps_the_seats_it_was_dealt_with(tmp_path):
-    """A table dealt with empty seats deals a game with only the occupied
-    ones, so the header's seat numbering is the engine's and resuming must not
-    reintroduce the seats the deal dropped."""
+def test_a_resumed_game_always_deals_max_seats(tmp_path):
+    """Every game deals MAX_SEATS from the start now, whether or not every
+    seat is claimed (see api.py's module docstring) — resuming must not
+    reintroduce the old "renumber down to just the occupied seats"
+    behaviour, or a checkpoint trained for MAX_SEATS players would find a
+    resumed 2-person game unplayable (see onnxbot.py's _check_players)."""
     config = Config(games_dir=str(tmp_path), seed=99)
-    seats = [player("Ada"), player("Bea")]
-    session = build_session("ABC123", seats, config)
+    seats = [player("Ada"), player("Bea"), Seat(), Seat()]
+    session = build_session("ABC123", seats, config, first=0)
     drive(session, 4, random.Random(4))
 
     resumed = resume_session("ABC123", seats, config)
 
-    assert resumed.game.state.num_players == 2
-    assert resumed.human_seats == frozenset({0, 1})
+    assert resumed.game.state.num_players == MAX_SEATS
+    assert resumed.claimed_seats == {0, 1}
+
+
+def test_the_snake_starts_where_first_says_not_always_seat_zero(tmp_path):
+    config = Config(games_dir=str(tmp_path), seed=99)
+    seats = [Seat(), Seat(), player("Ada"), bot_seat()]
+    session = build_session("ABC123", seats, config, first=2)
+    assert session.game.setup_queue[0] == 2
+    drive(session, 2, random.Random(4))
+
+    resumed = resume_session("ABC123", seats, config)
+
+    assert resumed.game.setup_queue[0] == 2

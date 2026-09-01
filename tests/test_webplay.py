@@ -37,7 +37,16 @@ from hexset_ui.webplay import (
 
 def a_game(players: int = 4, seed: int = 0):
     rng = random.Random(seed)
-    return start(random_base_board(rng), players, rng)
+    return start(random_base_board(rng), players, rng, first=0)
+
+def a_session(game, claimed, **kwargs) -> GameSession:
+    """A `GameSession` over `claimed` seats — every claimed seat submits its
+    own actions through `submit` the same way now, human or "bot" (there is
+    no `bot:` field any more; a seat played by a bot in these tests is just
+    driven directly, via `_apply` or `submit`, exactly like any other seat —
+    see `botclient.py` for how a real bot runner does the same from outside
+    a session entirely)."""
+    return GameSession(game=game, claimed_seats=set(claimed), **kwargs)
 
 # --- Hex-to-pixel layout ------------------------------------------------------
 
@@ -144,43 +153,44 @@ def test_wire_to_action_rejects_a_malformed_payload():
 
 def test_session_rejects_an_action_not_currently_legal():
     game = a_game(seed=2)
-    human_seat = to_move(game)
-    session = GameSession(game=game, human_seats=frozenset({human_seat}), bot=RandomBot())
+    seat = to_move(game)
+    session = a_session(game, {seat})
 
     # ROLL is never legal during setup placement.
     forged = action_to_wire(Action(ActionType.ROLL))
     with pytest.raises(ValueError):
-        session.apply_human_action(human_seat, forged)
+        session.submit(seat, forged)
     assert game.phase is Phase.SETUP_SETTLEMENT
     assert all(owner == -1 for owner in game.state.vertex_owner)
 
 def test_session_rejects_an_out_of_range_target():
     game = a_game(seed=3)
-    human_seat = to_move(game)
-    session = GameSession(game=game, human_seats=frozenset({human_seat}), bot=RandomBot())
+    seat = to_move(game)
+    session = a_session(game, {seat})
 
     forged = action_to_wire(Action(ActionType.SETUP_SETTLEMENT, a=999999))
     with pytest.raises(ValueError):
-        session.apply_human_action(human_seat, forged)
+        session.submit(seat, forged)
 
-def test_session_rejects_when_it_is_not_the_humans_turn():
+def test_session_rejects_an_action_from_a_seat_that_has_not_claimed_it():
     game = a_game(seed=4)
     mover = to_move(game)
     other = (mover + 1) % game.state.num_players
-    session = GameSession(game=game, human_seats=frozenset({other}), bot=RandomBot())
+    session = a_session(game, {other})
 
     # A perfectly legal action for whoever is actually on the move.
     legal_for_mover = action_to_wire(legal_actions(game)[0])
     with pytest.raises(ValueError):
-        session.apply_human_action(other, legal_for_mover)
+        session.submit(other, legal_for_mover)
 
 def test_legal_wire_actions_offers_every_held_resource_regardless_of_who_could_cover_it():
-    """HexSet hands are private: the human must not be able to learn what an
-    opponent holds by noticing that proposing to trade for it is or isn't
-    offered. `hexset_ui.actions.legal_actions`'s own PROPOSE_TRADE sample
-    filters to pairs some opponent could currently cover — correct for a
-    bot with full-state access, but exactly the leak a human-facing wire
-    payload must not repeat. See GameSession._proposable_options."""
+    """HexSet hands are private: no client — human, LLM, or bot — must be
+    able to learn what an opponent holds by noticing that proposing to
+    trade for it is or isn't offered. `hexset_ui.actions.legal_actions`'s
+    own PROPOSE_TRADE sample filters to pairs some opponent could currently
+    cover — correct for a search that already sees the true state, but
+    exactly the leak a wire-facing payload must not repeat. See
+    `webplay.fair_legal_actions`/`_proposable_options`."""
     from hexset_ui.board.terrain import Resource
 
     game = a_game(seed=19)
@@ -196,7 +206,7 @@ def test_legal_wire_actions_offers_every_held_resource_regardless_of_who_could_c
         for r in range(len(state.hands[seat])):
             state.hands[seat][r] = 0
 
-    session = GameSession(game=game, human_seats=frozenset({0}), bot=RandomBot())
+    session = a_session(game, {0})
     proposals = [a for a in session.legal_wire_actions(0) if a["type"] == "PROPOSE_TRADE"]
     wanted_for_wood = {
         r for a in proposals if a["give"][Resource.WOOD] == 1
@@ -217,49 +227,14 @@ def test_nothing_is_proposable_before_the_roll():
     game.current_player = 0
     game.state.hands[0][Resource.WHEAT] += 6
 
-    session = GameSession(game=game, human_seats=frozenset({0}), bot=RandomBot())
+    session = a_session(game, {0})
     kinds = {a["type"] for a in session.legal_wire_actions(0)}
 
     assert "PROPOSE_TRADE" not in kinds
     assert "BANK_TRADE" not in kinds
     assert "ROLL" in kinds
 
-def test_a_human_trade_with_no_ask_defaults_to_lowest_vp_first():
-    """GameSession's own addition on top of hexset_ui.game.propose_trade's
-    neutral ask=() default (clockwise seat order) — favours whoever's
-    behind rather than strict seat order. See GameSession._default_ask_order.
-    """
-    from hexset_ui.board.terrain import Resource
-    from hexset_ui.state import Building
-
-    game = a_game(seed=7)
-    game.phase = Phase.MAIN
-    game.current_player = 0
-    state = game.state
-
-    # Seat 0 (the proposer) can give wood; seats 1, 2, 3 can all cover the
-    # ore ask, so all three are eligible and the ordering is what's under
-    # test, not who can respond at all.
-    state.bank[Resource.WOOD] -= 1
-    state.hands[0][Resource.WOOD] += 1
-    for seat in (1, 2, 3):
-        state.bank[Resource.ORE] -= 1
-        state.hands[seat][Resource.ORE] += 1
-
-    # Seat 1: a city (2 VP). Seat 3: a settlement (1 VP). Seat 2: nothing (0
-    # VP) — expect lowest first: [2, 3, 1].
-    state.vertex_owner[0] = 1
-    state.vertex_building[0] = Building.CITY
-    state.vertex_owner[1] = 3
-    state.vertex_building[1] = Building.SETTLEMENT
-
-    session = GameSession(game=game, human_seats=frozenset({0}), bot=RandomBot())
-    offer = Action(ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1))
-    session.apply_human_action(0, action_to_wire(offer))
-
-    assert game.pending_responders == [2, 3, 1]
-
-def test_a_human_trade_honours_an_explicit_ask_instead_of_the_default():
+def test_an_explicit_ask_is_honoured():
     from hexset_ui.board.terrain import Resource
 
     game = a_game(seed=8)
@@ -273,51 +248,13 @@ def test_a_human_trade_honours_an_explicit_ask_instead_of_the_default():
         state.bank[Resource.ORE] -= 1
         state.hands[seat][Resource.ORE] += 1
 
-    session = GameSession(game=game, human_seats=frozenset({0}), bot=RandomBot())
+    session = a_session(game, {0})
     offer = Action(
         ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1), ask=(3, 2, 1)
     )
-    session.apply_human_action(0, action_to_wire(offer))
+    session.submit(0, action_to_wire(offer))
 
     assert game.pending_responders == [3, 2, 1]
-
-def test_a_bot_trade_also_defaults_to_asking_the_lowest_vp_player_first():
-    """_apply's ask-defaulting isn't human-only — every seat's proposal goes
-    through the same choke point, bot or human (see _apply's own comment)."""
-    from hexset_ui.board.terrain import Resource
-    from hexset_ui.state import Building
-
-    class _AlwaysProposes:
-        def __init__(self, give, want):
-            self._action = Action(ActionType.PROPOSE_TRADE, give=give, want=want)
-
-        def choose(self, game):
-            return self._action
-
-    game = a_game(seed=9)
-    game.phase = Phase.MAIN
-    game.current_player = 1  # the bot seat proposing; seat 0 is the human
-    state = game.state
-
-    state.bank[Resource.WOOD] -= 1
-    state.hands[1][Resource.WOOD] += 1
-    for seat in (0, 2, 3):
-        state.bank[Resource.ORE] -= 1
-        state.hands[seat][Resource.ORE] += 1
-
-    # Seat 0 (the human) has the lowest VP of the three eligible responders,
-    # so it lands first in the queue and advance_bots() stops right there —
-    # no need to also script a TRADE_RESPOND answer for this bot.
-    state.vertex_owner[0] = 2
-    state.vertex_building[0] = Building.CITY
-    state.vertex_owner[1] = 3
-    state.vertex_building[1] = Building.SETTLEMENT
-
-    bot = _AlwaysProposes(give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1))
-    session = GameSession(game=game, human_seats=frozenset({0}), bot=bot)
-    session.advance_bots()
-
-    assert game.pending_responders == [0, 3, 2]
 
 # --- Log summarizing: builds and trades collapse into one entry -----------
 
@@ -325,38 +262,46 @@ def test_setup_settlement_and_road_collapse_into_one_log_line():
     """Successive builds by the same actor merge into one entry, not one
     each — see GameSession._log_action's _BUILD_KIND streak."""
     game = a_game(seed=10)
-    human_seat = to_move(game)
-    session = GameSession(game=game, human_seats=frozenset({human_seat}), bot=RandomBot())
+    seat = to_move(game)
+    session = a_session(game, {seat})
 
     settlement = next(a for a in legal_actions(game) if a.type is ActionType.SETUP_SETTLEMENT)
-    session.apply_human_action(human_seat, action_to_wire(settlement))
-    assert len(session.log_for(human_seat)) == 1
+    session.submit(seat, action_to_wire(settlement))
+    assert len(session.log_for(seat)) == 1
 
     road = next(a for a in legal_actions(game) if a.type is ActionType.SETUP_ROAD)
-    session.apply_human_action(human_seat, action_to_wire(road))
+    session.submit(seat, action_to_wire(road))
 
-    assert len(session.log_for(human_seat)) == 1  # rewritten, not appended to
-    text = session.log_for(human_seat)[0]
+    assert len(session.log_for(seat)) == 1  # rewritten, not appended to
+    text = session.log_for(seat)[0]
     assert "settlement" in text and "road" in text
     assert text.count("placed") == 1  # one merged sentence, not two
 
 def test_a_build_streak_breaks_on_a_different_actor():
     game = a_game(seed=11)
-    human_seat = to_move(game)
-    session = GameSession(game=game, human_seats=frozenset({human_seat}), bot=RandomBot())
+    seat = to_move(game)
+    session = a_session(game, {0, 1, 2, 3})
 
     settlement = next(a for a in legal_actions(game) if a.type is ActionType.SETUP_SETTLEMENT)
-    session.apply_human_action(human_seat, action_to_wire(settlement))
+    session.submit(seat, action_to_wire(settlement))
     road = next(a for a in legal_actions(game) if a.type is ActionType.SETUP_ROAD)
-    session.apply_human_action(human_seat, action_to_wire(road))
-    mine = session.log_for(human_seat)[0]
-    assert len(session.log_for(human_seat)) == 1  # human's merged settlement+road
+    session.submit(seat, action_to_wire(road))
+    mine = session.log_for(seat)[0]
+    assert len(session.log_for(seat)) == 1  # this seat's merged settlement+road
 
-    session.advance_bots()  # the next seat(s) in the snake place too
+    # The next seat in the snake places too.
+    next_seat = to_move(game)
+    assert next_seat != seat
+    for _ in range(2):
+        action = next(
+            a for a in legal_actions(game)
+            if a.type in (ActionType.SETUP_SETTLEMENT, ActionType.SETUP_ROAD)
+        )
+        session.submit(next_seat, action_to_wire(action))
 
-    lines = session.log_for(human_seat)
-    assert len(lines) >= 2  # human's line, plus at least the next seat's
-    assert lines[0] == mine  # the bots' placements started their own, not this one
+    lines = session.log_for(seat)
+    assert len(lines) >= 2  # this seat's line, plus at least the next seat's
+    assert lines[0] == mine  # the other seat's placements started their own, not this one
 
 def test_list_with_counts_pluralises_repeats_but_not_singles():
     from hexset_ui.webplay import _list_with_counts
@@ -386,11 +331,11 @@ def test_a_trade_that_gets_accepted_summarizes_into_one_line():
         state.bank[Resource.ORE] -= 1
         state.hands[seat][Resource.ORE] += 1
 
-    session = GameSession(game=game, human_seats=frozenset({0}), bot=RandomBot())
+    session = a_session(game, {0})
     offer = Action(
         ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1), ask=(1, 2)
     )
-    session.apply_human_action(0, action_to_wire(offer))
+    session.submit(0, action_to_wire(offer))
     assert session.log_for(0) == []  # held back until the offer concludes
 
     session._apply(1, Action(ActionType.DECLINE_TRADE))
@@ -410,7 +355,7 @@ def test_a_trade_nobody_can_cover_is_still_legal_and_reads_as_declined():
     """propose_trade() concludes an uncoverable offer on the spot — no
     DECLINE_TRADE/ACCEPT_TRADE is ever coming to flush a held-back buffer,
     so this must not wait for one. And it must be reachable through
-    apply_human_action itself, not just a direct _apply: legal_actions()
+    submit itself, not just a direct _apply: legal_actions()
     only *samples* coverable (give, want) pairs (see its PROPOSE_TRADE
     enumerator's own docstring), but a proposal nobody can cover is still a
     legal move — see is_legal's docstring for why it's checked against
@@ -425,13 +370,13 @@ def test_a_trade_nobody_can_cover_is_still_legal_and_reads_as_declined():
     state.hands[0][Resource.WOOD] += 1
     # Nobody else holds any ore, so nobody is eligible to respond.
 
-    session = GameSession(game=game, human_seats=frozenset({0}), bot=RandomBot())
+    session = a_session(game, {0})
     offer = Action(ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1))
     # The server must actually have offered this — see the module docstring's
     # "never build an action the engine did not offer" rule the frontend
     # leans on — not merely tolerate it when submitted directly.
     assert action_to_wire(offer) in session.legal_wire_actions(0)
-    session.apply_human_action(0, action_to_wire(offer))
+    session.submit(0, action_to_wire(offer))
 
     assert len(session.log_for(0)) == 1
     assert "offered" in session.log_for(0)[0]
@@ -457,11 +402,11 @@ def test_a_trade_everyone_declines_summarizes_into_one_line():
         state.bank[Resource.ORE] -= 1
         state.hands[seat][Resource.ORE] += 1
 
-    session = GameSession(game=game, human_seats=frozenset({0}), bot=RandomBot())
+    session = a_session(game, {0})
     offer = Action(
         ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1), ask=(1, 2)
     )
-    session.apply_human_action(0, action_to_wire(offer))
+    session.submit(0, action_to_wire(offer))
     session._apply(1, Action(ActionType.DECLINE_TRADE))
     assert session.log_for(0) == []
 
@@ -496,7 +441,7 @@ def test_a_discard_collapses_into_one_line_however_many_cards():
     combinatorial in hand size), so a seven can cost one seat half a dozen
     steps in a row. The log is one line."""
     game = _owing_game(seed=20, seat=0, hand=[4, 4, 0, 0, 0])
-    session = GameSession(game=game, human_seats=frozenset({0}), bot=RandomBot())
+    session = a_session(game, {0})
 
     _discard_all(session, 0)
 
@@ -506,7 +451,7 @@ def test_a_discard_collapses_into_one_line_however_many_cards():
 
 def test_a_humans_discard_line_names_the_resources_with_counts():
     game = _owing_game(seed=21, seat=0, hand=[4, 4, 0, 0, 0])
-    session = GameSession(game=game, human_seats=frozenset({0}), bot=RandomBot())
+    session = a_session(game, {0})
 
     _discard_all(session, 0)
 
@@ -515,11 +460,11 @@ def test_a_humans_discard_line_names_the_resources_with_counts():
     assert "4 Wood." in text or "4 Brick." in text or "2 Wood, 2 Brick" in text
     assert "Woods" not in text and "Bricks" not in text
 
-def test_a_bots_discard_line_is_a_bare_count_never_the_resources():
+def test_another_seats_discard_line_is_a_bare_count_never_the_resources():
     """A collapsed line is exactly where a whole hidden hand would leak at
-    once — the same rule _describe applied to a single bot discard."""
+    once — the same rule _describe applies to any seat but the reader's."""
     game = _owing_game(seed=22, seat=1, hand=[4, 4, 0, 0, 0])
-    session = GameSession(game=game, human_seats=frozenset({0}), bot=RandomBot())
+    session = a_session(game, {0, 1})
 
     _discard_all(session, 1)
 
@@ -531,19 +476,19 @@ def test_two_seats_discarding_get_a_line_each():
     game = _owing_game(seed=23, seat=0, hand=[4, 4, 0, 0, 0])
     game.state.hands[1] = [4, 4, 0, 0, 0]
     game.discard_quota[1] = 4
-    session = GameSession(game=game, human_seats=frozenset({0}), bot=RandomBot())
+    session = a_session(game, {0, 1})
 
     _discard_all(session, 0)
     _discard_all(session, 1)
 
     assert len(session.log_for(0)) == 2  # not merged across actors
 
-def test_two_humans_at_one_table_are_owed_two_different_transcripts():
+def test_two_seats_at_one_table_are_owed_two_different_transcripts():
     """The whole reason the log is a fold over stored events rather than a
     list of sentences: one shared transcript cannot say two things at once,
     and a discard spells out the cards only for the seat that lost them."""
     game = _owing_game(seed=27, seat=0, hand=[4, 4, 0, 0, 0])
-    session = GameSession(game=game, human_seats=frozenset({0, 1}), bot=RandomBot())
+    session = a_session(game, {0, 1})
 
     _discard_all(session, 0)
 
@@ -554,7 +499,7 @@ def test_two_humans_at_one_table_are_owed_two_different_transcripts():
 
 def test_a_spectator_is_owed_the_least_of_anyone():
     game = _owing_game(seed=28, seat=0, hand=[4, 4, 0, 0, 0])
-    session = GameSession(game=game, human_seats=frozenset({0}), bot=RandomBot())
+    session = a_session(game, {0})
 
     _discard_all(session, 0)
 
@@ -565,7 +510,7 @@ def test_consecutive_bank_trades_of_the_same_pair_sum_into_one_line():
     game.phase = Phase.MAIN
     game.current_player = 0
     game.state.hands[0] = [8, 0, 0, 0, 0]
-    session = GameSession(game=game, human_seats=frozenset({0}), bot=RandomBot())
+    session = a_session(game, {0})
 
     trade = next(
         a for a in legal_actions(game)
@@ -582,14 +527,14 @@ def test_undoing_a_bank_trade_refunds_the_hand_and_drops_the_line():
     game.phase = Phase.MAIN
     game.current_player = 0
     game.state.hands[0] = [8, 0, 0, 0, 0]
-    session = GameSession(game=game, human_seats=frozenset({0}), bot=RandomBot())
+    session = a_session(game, {0})
 
     trade = next(
         a for a in legal_actions(game)
         if a.type is ActionType.BANK_TRADE and a.a == 0 and a.b == 4
     )
     before_bank = list(session.game.state.bank)
-    session.apply_human_action(0, action_to_wire(trade))
+    session.submit(0, action_to_wire(trade))
     assert session.game.state.hands[0] != [8, 0, 0, 0, 0]
     assert session.log_for(0)
 
@@ -605,7 +550,7 @@ def test_a_different_bank_pair_starts_its_own_line():
     game.phase = Phase.MAIN
     game.current_player = 0
     game.state.hands[0] = [4, 4, 0, 0, 0]
-    session = GameSession(game=game, human_seats=frozenset({0}), bot=RandomBot())
+    session = a_session(game, {0})
 
     for give, want in ((0, 4), (1, 4)):
         action = next(
@@ -620,7 +565,7 @@ def test_a_roll_between_two_discards_keeps_them_apart():
     """Only one run is ever open, so nothing can reach back across an
     intervening line to join something older."""
     game = _owing_game(seed=26, seat=0, hand=[4, 4, 0, 0, 0])
-    session = GameSession(game=game, human_seats=frozenset({0}), bot=RandomBot())
+    session = a_session(game, {0})
     _discard_all(session, 0)
     assert len(session.log_for(0)) == 1
 
@@ -642,7 +587,7 @@ def test_ending_a_turn_writes_no_log_line():
     game = a_game(seed=16)
     game.phase = Phase.MAIN
     game.current_player = 0
-    session = GameSession(game=game, human_seats=frozenset({0}), bot=RandomBot())
+    session = a_session(game, {0})
 
     session._apply(0, Action(ActionType.END_TURN))
 
@@ -656,7 +601,7 @@ def test_ending_a_turn_closes_an_open_run():
     game.phase = Phase.MAIN
     game.current_player = 0
     game.state.hands[0] = [8, 0, 0, 0, 0]
-    session = GameSession(game=game, human_seats=frozenset({0}), bot=RandomBot())
+    session = a_session(game, {0})
 
     trade = next(
         a for a in legal_actions(game)
@@ -673,75 +618,68 @@ def test_ending_a_turn_closes_an_open_run():
     assert len(session.log_for(0)) == 2
     assert session.round == 1  # the run's own key never changed; END_TURN broke it
 
-def test_advance_bots_always_stops_at_the_human_seat_or_game_over():
-    game = a_game(seed=5)
-    human_seat = 1
-    session = GameSession(game=game, human_seats=frozenset({human_seat}), bot=RandomBot(rng=random.Random(0)))
-    rng = random.Random(6)
-
-    session.advance_bots()
-    steps = 0
-    while not is_over(session.game) and steps < 300:
-        assert to_move(session.game) == human_seat
-        options = legal_actions(session.game)
-        wire = action_to_wire(rng.choice(options))
-        session.apply_human_action(human_seat, wire)
-        session.advance_bots()
-        steps += 1
-        assert is_over(session.game) or to_move(session.game) == human_seat
-
-def test_advance_one_seat_stops_after_a_single_seat_even_with_more_bots_still_to_go():
-    """The per-seat counterpart to advance_bots: one call plays exactly one
-    seat's turn and stops, even when the seat after that is also a bot —
-    proving it doesn't fall back to the whole-cascade behaviour."""
+def test_undo_is_available_to_any_claimed_seat_not_just_a_person():
+    """`_UNDOABLE_BUILDS` no longer special-cases who the actor is — any
+    claimed seat's own qualifying build is its own to take back, the same
+    choke point regardless of what's driving that seat (see `_apply`)."""
     game = a_game(seed=5)
     game.phase = Phase.MAIN
-    game.current_player = 0
-    human_seat = 0
-    session = GameSession(game=game, human_seats=frozenset({human_seat}), bot=RandomBot(rng=random.Random(2)))
+    game.current_player = 1
+    game.state.vertex_owner[0] = 1  # something of seat 1's own to build from
+    game.state.hands[1] = [1, 1, 0, 0, 0]  # a road's cost (see economy.Purchase.ROAD)
+    session = a_session(game, {0, 1})
 
-    session.apply_human_action(human_seat, action_to_wire(Action(ActionType.END_TURN)))
-    assert to_move(session.game) == 1  # handed off to the next seat, a bot
+    road = next(a for a in legal_actions(game) if a.type is ActionType.BUILD_ROAD)
+    session.submit(1, action_to_wire(road))
 
-    moved = session.advance_one_seat()
-    assert moved
-    assert to_move(session.game) not in (human_seat, 1)  # seat 1 alone had its turn
+    assert session._undo is not None
+    assert session._undo.actor == 1
+    session.undo_last_build(1)  # raises if seat 1 weren't allowed to
 
-    # advance_bots() reaches the same destination it always did — it's just
-    # advance_one_seat() called back to back under the hood now.
-    session.advance_bots()
-    assert to_move(session.game) == human_seat
-
-    # A no-op, not an error, once it's already the human's turn.
-    assert session.advance_one_seat() is False
-    assert to_move(session.game) == human_seat
-
-def test_state_view_hides_opponent_hands_but_not_the_humans():
+def test_state_view_hides_opponent_hands_but_reveals_the_viewers():
     game = a_game(seed=8)
-    human_seat = to_move(game)
-    other = (human_seat + 1) % game.state.num_players
-    session = GameSession(game=game, human_seats=frozenset({human_seat}), bot=RandomBot())
+    seat = to_move(game)
+    other = (seat + 1) % game.state.num_players
+    session = a_session(game, {seat})
 
-    game.state.hands[human_seat][0] = 3
+    game.state.hands[seat][0] = 3
     game.state.hands[other][0] = 5
 
-    view = session.state_view(human_seat)
+    view = session.state_view(seat)
     players = {p["seat"]: p for p in view["players"]}
-    assert "hand" in players[human_seat]
-    assert players[human_seat]["hand"]["Wood"] == 3
+    assert "hand" in players[seat]
+    assert players[seat]["hand"]["Wood"] == 3
     assert "hand" not in players[other]
     assert players[other]["hand_size"] == 5
 
 def test_state_view_reveals_every_hand_once_the_game_is_over():
     game = a_game(seed=9)
-    human_seat = to_move(game)
-    session = GameSession(game=game, human_seats=frozenset({human_seat}), bot=RandomBot())
-    game.won_by = (human_seat + 1) % game.state.num_players
+    seat = to_move(game)
+    session = a_session(game, {seat})
+    game.won_by = (seat + 1) % game.state.num_players
     game.phase = Phase.GAME_OVER
 
-    view = session.state_view(human_seat)
+    view = session.state_view(seat)
     assert all("hand" in p for p in view["players"])
     assert view["legal_actions"] == []
+
+def test_state_view_carries_the_public_ledger_for_every_seat():
+    """Resource *counting* is public knowledge in this game — only a
+    steal's identity and dev-card types are hidden (see `hexset_ui.ledger`)
+    — so `known`/`unknown` show up for every seat, reveal or not, unlike
+    `hand`."""
+    game = a_game(seed=8)
+    seat = to_move(game)
+    other = (seat + 1) % game.state.num_players
+    session = a_session(game, {seat})
+
+    game.ledger.receive(other, 0, 2)
+
+    view = session.state_view(seat)
+    players = {p["seat"]: p for p in view["players"]}
+    assert players[other]["known"]["Wood"] == 2
+    assert players[other]["unknown"] == 0
+    assert "hand" not in players[other]
 
 def test_state_view_does_not_expose_who_is_eligible_to_respond_to_an_offer():
     """`game.pending_responders` is exactly who's eligible to cover the open
@@ -761,13 +699,50 @@ def test_state_view_does_not_expose_who_is_eligible_to_respond_to_an_offer():
         state.bank[Resource.ORE] -= 1
         state.hands[seat][Resource.ORE] += 1
 
-    session = GameSession(game=game, human_seats=frozenset({0}), bot=RandomBot())
+    session = a_session(game, {0})
     offer = Action(ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1))
-    session.apply_human_action(0, action_to_wire(offer))
+    session.submit(0, action_to_wire(offer))
     assert game.pending_responders  # the offer really is pending on someone
 
     view = session.state_view(0)
     assert "responders" not in view["offer"]
+
+def test_state_view_offer_answered_is_the_proposers_own_information_only():
+    """`offer_answered`'s wire counterpart: filtered exactly the way
+    `record.py:build_record` filters it — all-zero (absent, here) unless
+    `viewer == offer.proposer`, since a responder must not condition on an
+    earlier decline."""
+    from hexset_ui.board.terrain import Resource
+
+    game = a_game(seed=18)
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    state = game.state
+    state.bank[Resource.WOOD] -= 1
+    state.hands[0][Resource.WOOD] += 1
+    for seat in (1, 2):
+        state.bank[Resource.ORE] -= 1
+        state.hands[seat][Resource.ORE] += 1
+
+    session = a_session(game, {0, 1, 2})
+    offer = Action(
+        ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1), ask=(1, 2)
+    )
+    session.submit(0, action_to_wire(offer))
+    session._apply(1, Action(ActionType.DECLINE_TRADE))
+
+    assert session.state_view(0)["offer"]["answered"] == [1]
+    assert "answered" not in session.state_view(2)["offer"]
+    assert "answered" not in session.state_view(None)["offer"]
+
+def test_state_view_reports_locked_seats():
+    from hexset_ui.game import lock_seat
+
+    game = a_game(seed=8)
+    lock_seat(game, 2)
+    session = a_session(game, {0})
+
+    assert session.state_view(0)["locked"] == [2]
 
 # --- Recording and journalling ----------------------------------------------
 
@@ -775,7 +750,11 @@ SEED = 42
 
 @pytest.fixture(scope="module")
 def played(tmp_path_factory):
-    """One game played out in full, journalled to its own directory.
+    """One game played out in full, journalled to its own directory — every
+    seat driven the same way, through `submit`, since there is no more
+    distinction between "the human seat" and "the bot's seat" at this
+    layer (see `botclient.py` for where that distinction now lives, one
+    layer up).
 
     Module-scoped because playing a whole game is by far the slowest thing in
     this file: every test below reads the same finished game rather than
@@ -783,27 +762,24 @@ def played(tmp_path_factory):
     """
     directory = tmp_path_factory.mktemp("games")
     # Two independent random.Random(SEED) instances, matching what
-    # `web._new_session` and `_resume_session` both do: the board spends
-    # one stream and `start` gets a fresh one, so the game's own rng must begin
-    # from the same untouched state here too.
+    # `api.build_session` does: the board spends one stream and `start` gets
+    # a fresh one, so the game's own rng must begin from the same untouched
+    # state here too.
     board = random_base_board(random.Random(SEED))
-    game = start(board, 4, random.Random(SEED))
-    human_seat = to_move(game)
+    game = start(board, 4, random.Random(SEED), first=0)
     session = GameSession(
         game=game,
-        human_seats=frozenset({human_seat}),
-        bot=RandomBot(rng=random.Random(1)),
+        claimed_seats={0, 1, 2, 3},
         seed=SEED,
         journal=open_journal(SEED, str(directory)),
     )
 
-    human_rng = random.Random(2)
-    session.advance_bots()
+    driver = RandomBot(rng=random.Random(2))
     steps = 0
     while not is_over(session.game) and steps < 4000:
-        options = legal_actions(session.game)
-        session.apply_human_action(human_seat, action_to_wire(human_rng.choice(options)))
-        session.advance_bots()
+        seat = to_move(session.game)
+        action = driver.choose(session.game)
+        session.submit(seat, action_to_wire(action))
         steps += 1
     assert is_over(session.game)
     return session, directory
@@ -819,7 +795,7 @@ def test_a_journalled_game_replays_clean(played):
     engine, its actions have to be legal in order and end the same game.
 
     Deliberately goes through `replayable` and `restore` — the same two calls
-    `web._resume_session` makes — rather than a replay written for the
+    `api.resume_session` makes — rather than a replay written for the
     test. A journal that replays clean here is one a returning player would
     actually get their game back from.
     """
@@ -827,12 +803,12 @@ def test_a_journalled_game_replays_clean(played):
     events = journal_events(directory)
     header = events[0]
     assert header["seed"] == SEED
+    assert header["first"] == 0
 
     board = random_base_board(random.Random(SEED))
     resumed = GameSession(
-        game=start(board, header["num_players"], random.Random(SEED)),
-        human_seats=frozenset(header["human_seats"]),
-        bot=RandomBot(rng=random.Random(1)),
+        game=start(board, header["num_players"], random.Random(SEED), first=header["first"]),
+        claimed_seats=set(header["human_seats"]),
         seed=SEED,
     )
     resumed.restore(replayable(events))  # raises ResumeError if it doesn't
@@ -879,8 +855,8 @@ def test_the_journal_names_every_development_card_in_deck_order(played):
     assert drawn == deck[::-1][: len(drawn)]
 
 def test_the_journal_names_the_card_every_steal_took(played):
-    """The sidebar hides this when neither side is the human (see `_describe`);
-    the journal never does."""
+    """The sidebar hides this from anyone but the thief and the victim (see
+    `_describe`); the journal never does."""
     _, directory = played
     events = journal_events(directory)
     steals = [e["stole"] for e in events if e.get("stole")]
@@ -917,9 +893,9 @@ def test_journalling_is_on_unless_it_is_switched_off(monkeypatch):
 
 def test_a_session_without_a_journal_still_plays():
     game = a_game(seed=13)
-    human_seat = to_move(game)
-    session = GameSession(game=game, human_seats=frozenset({human_seat}), bot=RandomBot())
-    session._apply(human_seat, legal_actions(game)[0])
+    seat = to_move(game)
+    session = a_session(game, {seat})
+    session._apply(seat, legal_actions(game)[0])
     assert session.journal is None  # nothing to have written to
 
 def test_an_unwritable_directory_costs_the_journal_and_not_the_game(tmp_path):
@@ -928,14 +904,9 @@ def test_an_unwritable_directory_costs_the_journal_and_not_the_game(tmp_path):
     blocked = tmp_path / "not-a-directory"
     blocked.write_text("")  # mkdir under a regular file cannot succeed
     game = a_game(seed=7)
-    human_seat = to_move(game)
-    session = GameSession(
-        game=game,
-        human_seats=frozenset({human_seat}),
-        bot=RandomBot(rng=random.Random(3)),
-        journal=open_journal(1, str(blocked / "games")),
-    )
-    session._apply(human_seat, legal_actions(game)[0])
+    seat = to_move(game)
+    session = a_session(game, {seat}, journal=open_journal(1, str(blocked / "games")))
+    session._apply(seat, legal_actions(game)[0])
     assert session.journal._off
 
 def test_an_undone_placement_is_written_down_not_erased(tmp_path):
@@ -943,18 +914,13 @@ def test_an_undone_placement_is_written_down_not_erased(tmp_path):
     quietly came round twice would leave a reader unable to say which of the
     two actions counted."""
     game = a_game(seed=5)
-    human_seat = to_move(game)
-    session = GameSession(
-        game=game,
-        human_seats=frozenset({human_seat}),
-        bot=RandomBot(rng=random.Random(4)),
-        journal=open_journal(5, str(tmp_path)),
-    )
+    seat = to_move(game)
+    session = a_session(game, {seat}, journal=open_journal(5, str(tmp_path)))
     settlement = next(
         a for a in legal_actions(game) if a.type is ActionType.SETUP_SETTLEMENT
     )
-    session.apply_human_action(human_seat, action_to_wire(settlement))
-    session.undo_last_build(human_seat)
+    session.submit(seat, action_to_wire(settlement))
+    session.undo_last_build(seat)
 
     events = journal_events(tmp_path)
     assert [e["kind"] for e in events] == ["game", "action", "undo"]

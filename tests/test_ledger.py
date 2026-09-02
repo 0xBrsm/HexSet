@@ -33,7 +33,7 @@ def test_a_steal_is_identity_independent_in_the_record():
     to show, since it is the thief's own hand. This is the regression test for
     a ledger that reads the true stolen resource and only sometimes moves a
     specific `known[r]`, which leaks the identity through *which entry
-    visibly dropped* (see `hexset_ui.ledger`'s module docstring)."""
+    visibly dropped* (see `hexset.ledger`'s module docstring)."""
     thief, victim, bystander = 0, 1, 2
     world_brick = _rig_one_card_steal(3, thief, victim, resource=0)
     world_wood = _rig_one_card_steal(3, thief, victim, resource=1)

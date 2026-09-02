@@ -111,7 +111,7 @@ def build_record(
             for responder in declined:
                 offer_answered[responder] = 1
 
-    # The public-knowledge ledger (`hexset_ui.ledger`): each seat's own
+    # The public-knowledge ledger (`hexset.ledger`): each seat's own
     # reconstruction from moves that were public by the rules, never from a
     # steal's hidden identity. `own_hand`/`hand_totals` above already say
     # the same thing at seat and total granularity; this is the per-resource

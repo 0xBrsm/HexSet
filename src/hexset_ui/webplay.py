@@ -3,10 +3,10 @@
 Deliberately torch-free: `hexset_ui.web` imports the network bot lazily, so
 this module — the board layout math, the wire-format mapping and the session
 that drives a game — can be imported and tested without PyTorch, the same way
-`hexset_ui.actions` and `hexset_ui.game` can. Anything with a
+`hexset.actions` and `hexset.game` can. Anything with a
 `choose(game) -> Action` method is all a session needs of its opponent:
-`NetworkBot` from `hexset_ui.onnxbot`, `SearchBot` from `hexset_ui.search2`,
-or the `RandomBot` the tests use.
+`NetworkBot` from `hexset_ui.onnxbot`, `Heximax` or `SearchBot` from
+`hexset.heximax`/`hexset.bots`, or the `RandomBot` the tests use.
 
 ## The wire format
 
@@ -20,9 +20,9 @@ played-out game rather than a handful of hand-picked shapes.
 ## Never build an action the engine did not offer
 
 `GameSession.submit` decodes the wire action and checks it against
-a *fresh* call to `legal_actions`, not merely against what was on offer at some
-earlier poll. A UI bug, a stale page, or a tampered request all fail the same
-way: the action is rejected before it reaches `hexset_ui.actions.apply`. That is
+a *fresh* call to `rules.is_legal`, not merely against what was on offer at
+some earlier poll. A UI bug, a stale page, or a tampered request all fail the same
+way: the action is rejected before it reaches `hexset.actions.apply`. That is
 also why every clickable thing in the frontend is one of the literal wire
 objects `state_view()` already sent, echoed back unchanged — the client never
 constructs an `Action` from parts, it only ever repeats one the server offered.
@@ -76,7 +76,7 @@ class ResumeError(Exception):
 # sit at angles 60*i - 30 degrees around its center, and `Topology.hex_vertices`
 # already lists a hex's vertices in that same i = 0..5 order (corner i is shared
 # with the neighbours in directions i and i+1, and the direction vectors in
-# `hexset_ui.board.coords` place direction i at angle 60*(i-1) under this same
+# `hexset.board.coords` place direction i at angle 60*(i-1) under this same
 # center formula — corner i sits at the midpoint of that, 60*i - 30). One
 # consequence worth relying on in tests: a regular hexagon's edge length equals
 # its circumradius, so every board edge should measure exactly `size` between
@@ -161,7 +161,7 @@ def board_layout(board: Board, size: float = 60.0) -> dict:
         "year_of_plenty_pairs": [
             [RESOURCE_NAMES[a], RESOURCE_NAMES[b]] for a, b in YEAR_OF_PLENTY_PAIRS
         ],
-        # The engine's own supply caps (`hexset_ui.state`), so the frontend's
+        # The engine's own supply caps (`hexset.state`), so the frontend's
         # remaining-piece HUD can't drift from what `can_place_*` actually
         # enforces.
         "piece_supply": {
@@ -609,7 +609,7 @@ def render_log(
         if kind is ActionType.DECLINE_TRADE and trade is not None:
             if not event.offer_open:
                 # Only who's *eligible* to cover an offer is ever asked
-                # (`hexset_ui.game.propose_trade`'s own `responders`/`willing`),
+                # (`hexset.game.propose_trade`'s own `responders`/`willing`),
                 # in ask order, one at a time, stopping at the first accept
                 # — so naming each individual decliner, or even just their
                 # count, would tell a reader exactly how many opponents held
@@ -644,7 +644,7 @@ class GameSession:
     are shown, and what they may take back.
 
     All mutation goes through `submit`, which routes every action through
-    `hexset_ui.actions.apply` after checking it against a fresh
+    `hexset.actions.apply` after checking it against a fresh
     `legal_actions(game)` — the one enforcement point the hard constraint
     asks for. Nothing runs a further seat's turn on another's behalf: there
     is no cascade for this session to drive, only the one action a caller
@@ -764,7 +764,7 @@ class GameSession:
         """One full lap of the table, 1-indexed — what a human watching the
         log means by "turn", distinct from `game.turns`, which counts
         per-seat and stays that way (it's a trained policy input feature; see
-        hexset_ui.encoding's TURN_SCALE). Every seat's actions within a lap
+        hexset.encoding's TURN_SCALE). Every seat's actions within a lap
         share one round number, unlike `game.turns` where each gets its own.
 
         0 during setup: the placement snake isn't a lap of the table in the
@@ -1016,7 +1016,7 @@ class GameSession:
                 "largest_army": state.largest_army_holder == p,
                 "hand_size": sum(state.hands[p]),
                 "dev_card_count": sum(holdings(state, p)),
-                # The public-knowledge ledger (`hexset_ui.ledger`) — public
+                # The public-knowledge ledger (`hexset.ledger`) — public
                 # for every seat, reveal or not: resource *counting* is not
                 # hidden information in this game, only a steal's identity
                 # and dev-card types are (see `ledger.py`'s module
@@ -1069,7 +1069,7 @@ class GameSession:
             "game_over": over,
             # Whether POST /api/undo would succeed right now — see
             # undo_last_build. A session convenience, not a rule, so it isn't
-            # in legal_actions alongside everything hexset_ui.actions offers.
+            # in legal_actions alongside everything hexset.actions offers.
             "can_undo": self._undo is not None and self._undo.actor == viewer,
             # "round" — one lap of the table — not game.turns' per-seat count
             # (see the `round` property docstring). The only client reader

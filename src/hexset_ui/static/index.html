@@ -1125,7 +1125,7 @@ function drawBoard() {
   svg.appendChild(el("g", {id: "clickable-layer"}));
 }
 
-// The engine's own Phase names (hexset_ui.game.Phase) — plain English instead of
+// The engine's own Phase names (hexset.game.Phase) — plain English instead of
 // the enum spelling for the status line; anything missing falls back to the
 // raw name rather than disappearing.
 const PHASE_LABELS = {
@@ -1351,6 +1351,15 @@ function renderStatus() {
   // Somebody else's decision to make, so the phase underneath it is beside
   // the point.
   if (state.to_move !== state.seat) {
+    // A live offer is the one case where `to_move` deliberately does not
+    // name the seat being asked: which seats can cover an offer is a fact
+    // about their hands, so the server tells everyone but the responder that
+    // the proposer is on move (see webplay._public_mover). Naming anybody
+    // here would either leak that or be wrong, so this says neither.
+    if (state.phase === "TRADE_RESPOND") {
+      phaseEl.textContent = "WAITING FOR A RESPONSE";
+      return;
+    }
     // Named when the seat is a person's, because that is a wait with no end
     // this client can see: a bot's turn resolves whenever its own runner
     // next polls, but another player's takes as long as they take (see
@@ -2222,8 +2231,8 @@ function renderProposeMode(title, body, actions) {
 
 // The bank's own rate, which is the worst one available; anything cheaper is
 // a port the human has a building on — 3:1 generic or 2:1 for this one
-// resource. See hexset_ui.board.ports (BASE_TRADE_RATIO / GENERIC_RATIO /
-// SPECIFIC_RATIO) and hexset_ui.economy.trade_ratios, which returns the cheapest
+// resource. See hexset.board.ports (BASE_TRADE_RATIO / GENERIC_RATIO /
+// SPECIFIC_RATIO) and hexset.economy.trade_ratios, which returns the cheapest
 // rate per resource without saying where it came from; the number is the only
 // thing that distinguishes them, so it's what this reads.
 const BANK_RATE = 4;

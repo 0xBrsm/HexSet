@@ -437,7 +437,7 @@ def test_renaming_a_seat_reaches_the_log_as_well_as_the_seat_list():
 
 def test_record_matches_the_seat_on_move():
     """A freshly-dealt game's setup snake starts at `first` — the creator's
-    own (random) seat, see `hexset_ui.game.start` — so the creator's own
+    own (random) seat, see `hexset_ui.seating.start_at` — so the creator's own
     token is always the mover's here."""
     registry = tables()
     code, token = deal(registry, bots=[])

@@ -188,7 +188,7 @@ def test_session_rejects_an_action_from_a_seat_that_has_not_claimed_it():
 def test_legal_wire_actions_offers_every_held_resource_regardless_of_who_could_cover_it():
     """HexSet hands are private: no client — human, LLM, or bot — must be
     able to learn what an opponent holds by noticing that proposing to
-    trade for it is or isn't offered. `hexset_ui.actions.legal_actions`'s
+    trade for it is or isn't offered. `hexset.actions.legal_actions`'s
     own PROPOSE_TRADE sample filters to pairs some opponent could currently
     cover — correct for a search that already sees the true state, but
     exactly the leak a wire-facing payload must not repeat. See
@@ -667,7 +667,7 @@ def test_state_view_reveals_every_hand_once_the_game_is_over():
 
 def test_state_view_carries_the_public_ledger_for_every_seat():
     """Resource *counting* is public knowledge in this game — only a
-    steal's identity and dev-card types are hidden (see `hexset_ui.ledger`)
+    steal's identity and dev-card types are hidden (see `hexset.ledger`)
     — so `known`/`unknown` show up for every seat, reveal or not, unlike
     `hand`."""
     game = a_game(seed=8)

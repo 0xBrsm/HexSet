@@ -186,7 +186,7 @@ class Journal:
         `code` is the table's join code and `spec` the string that built each
         bot, neither of which the game itself needs: they are here so a resume
         can put this exact table back together after a restart. `first` is the
-        seat the setup snake started at (see `hexset_ui.game.start`) — needed
+        seat the setup snake started at (see `hexset_ui.seating.start_at`) — needed
         to rebuild the same queue on resume, since it is a free per-table
         choice, not something derivable from `seed`/`num_players` alone.
         `human_seats` are the seats occupied at deal time (any kind — see
@@ -288,7 +288,7 @@ class Journal:
         """The setup snake reached `seat` while it was still empty and waited
         it out (see `api.Table._settle_locks`) — retired for the rest of the
         game. `resumable`'s reader (`locked_seats`) only needs to know *that*
-        a seat locked, not when: see `hexset_ui.game`'s own note on why
+        a seat locked, not when: see `hexset_ui.seating`'s own note on why
         pre-seeding the whole set before replay reproduces the same snake
         the live game actually walked. `at_step` is diagnostic only."""
         self._emit({"kind": "locked", "at": _now(), "seat": seat, "at_step": at_step})
@@ -451,7 +451,7 @@ def locked_seats(events: list[dict]) -> frozenset[int]:
     """Every seat the setup snake ever locked out (see `Journal.locked`).
     Order doesn't matter for a resume: pre-seeding the whole set before
     replay reproduces the exact same snake the live game walked (see
-    `hexset_ui.game`'s own note on why), so this is just the set."""
+    `hexset_ui.seating`'s own note on why), so this is just the set."""
     return frozenset(event["seat"] for event in events if event.get("kind") == "locked")
 
 

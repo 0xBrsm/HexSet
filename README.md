@@ -12,9 +12,10 @@ What it deliberately does *not* carry is the training pipeline — no self-play 
 
 ## Running it
 
-Locally:
+Locally — the engine (`hexset`) is a separate repository and is not on an
+index yet, so install it from a checkout alongside this one:
 ```
-pip install -e .
+pip install -e ../dev-hexset/src -e .
 python -m hexset_ui.web
 ```
 
@@ -23,11 +24,11 @@ Or via Docker:
 cp compose.example.yaml compose.yaml
 docker compose up -d --build
 ```
-`compose.yaml` is gitignored, so that copy is yours to edit and a `git pull` on a deployment will never collide with it. The image only carries `numpy`/`onnxruntime` — `src/` and `models/` are bind-mounted read-only, so a code change is a `git pull` + `docker compose restart`, not a rebuild; only a dependency bump touches the image. It runs unprivileged on a read-only filesystem with no Linux capabilities, with a reason next to each line.
+`compose.yaml` is gitignored, so that copy is yours to edit and a `git pull` on a deployment will never collide with it. The image only carries `numpy`/`onnxruntime` — `src/`, the engine checkout and `models/` are bind-mounted read-only, so a code change is a `git pull` + `docker compose restart`, not a rebuild; only a dependency bump touches the image. It runs unprivileged on a read-only filesystem with no Linux capabilities, with a reason next to each line.
 
-Then open the printed URL (or the mapped port, `8770` by default under compose). Opponents come from `model_options()` in `src/hexset_ui/web.py`: `search2` (a handcrafted bot, no checkpoint needed) plus one entry per `*.onnx` file found in the models directory.
+Then open the printed URL (or the mapped port, `8770` by default under compose). Opponents come from `model_options()` in `src/hexset_ui/api.py`: `heximax` and `search2` (handcrafted, no checkpoint needed — both are `hexset.arena` presets, so the server seats the same bot the training repo duels) plus one entry per `*.onnx` file found in the models directory.
 
-Tests are `pip install -e ".[test]" && pytest`. Most of them play the engine; `tests/test_packaging.py` is the odd one out, building a real wheel from a clean copy of the tree to check that an installed copy still has a frontend in it — every other entry point here reads `src/` directly and would not notice a wheel that did not.
+Tests are `pip install -e ../dev-hexset/src -e ".[test]" && pytest`. Most of them play the engine; `tests/test_packaging.py` is the odd one out, building a real wheel from a clean copy of the tree to check that an installed copy still has a frontend in it — every other entry point here reads `src/` directly and would not notice a wheel that did not.
 
 ## Adding an opponent
 
@@ -68,10 +69,12 @@ The human seat can also be driven by a script or an LLM, over either interface, 
 
 ## Layout
 
-- `src/hexset_ui/` — the game engine (torch-free, copied from the training repo) plus `web.py`/`webplay.py` (the HTTP server and session logic).
-- `src/hexset_ui/onnxbot.py` — the entire model boundary: encoding, action-space indexing, masking, sampling, and search all live behind it, and `spawn(path, board)` is the only entry point anything else uses. `mcts.py`, `encoding.py` and `modelmeta.py` are imported by this module and nothing else.
-- `src/hexset_ui/search2.py` — the handcrafted opponent, whole: its fitted evaluation and the max^n search that reads it. Needs no checkpoint, which is why an empty `models/` still gives you something to play.
-- `src/hexset_ui/bots.py` — the ~60 lines the two have in common: what a `Bot` is, how to ask the engine for legal options, and how a seat reads a per-seat vector.
+- **The engine is not in this repo.** The rules, the bots and the ONNX record contract come from the `hexset` package (`0xBrsm/dev-hexset`, `src/`), installed as a dependency: `hexset.actions`, `hexset.game`, `hexset.ledger`, `hexset.board`, `hexset.mcts`, `hexset.heximax`, `hexset.bots`, `hexset.arena`. What lives here is the gym around it. See [`docs/engine-divergence-2026-09-02.md`](docs/engine-divergence-2026-09-02.md) for what this repo used to carry its own copy of, and why two files still do.
+- `src/hexset_ui/api.py` — tables, seats, join codes, seat tokens, the `/api/*` surface. `web.py` is the HTTP transport over it, `mcp.py` a stdio MCP client of the same routes, `webplay.py` the session: what a seat may see, the human-readable log, undo, and the wire encoding of an action.
+- `src/hexset_ui/rules.py` — the one legality authority every seat shares. `fair_legal_actions` is the honest trade sample: no seat, human or bot, is shown which specific opponents could cover an offer.
+- `src/hexset_ui/seating.py` — the setup snake starting at whoever created the game, and retiring a seat nobody claimed.
+- `src/hexset_ui/onnxbot.py` — the entire model boundary: encoding, action-space indexing, masking, sampling, and search all live behind it, and `spawn(path, board)` is the only entry point anything else uses. `botclient.py` is the other half: a bot plays its seat as a peer client of the API, embedded or external, never as a privileged writer.
+- `src/hexset_ui/record.py` and `encoding_v1.py` — the two engine-adjacent files that stay, and neither by preference. `record.py` mirrors `hexset.onnx_record`, which cannot be imported here because it needs torch; `encoding_v1.py` is frozen at the `contract=1` feature layout, which every legacy `.onnx` under `models/` was trained against. Both are documented in the divergence audit.
 - `src/hexset_ui/static/index.html` — the entire frontend: inline CSS, inline SVG icons, vanilla JS. No build step.
 - `models/` — drop `.onnx` files here.
 - `games/` — where every game is journalled: one JSON lines file per game, written as it is played, with nothing hidden (the dice, the deck order, every card drawn or stolen, every seat's hand after every action — see `src/hexset_ui/journal.py`). On by default; `HEXSET_UI_GAMES_DIR` moves it, and setting that empty turns it off.

@@ -23,7 +23,7 @@ docstring) — what varies is only *how* a client decides its move, and
   can play today — a search needs the *true* state to simulate forward
   (deck contents, both dev-card piles, the setup queue, none of which are
   on the wire, deliberately), and until a proper information-set-safe
-  determinizer exists (see `hexset_ui.game.imagine`'s own note on the deck)
+  determinizer exists (see `hexset.game.imagine`'s own note on the deck)
   that need is a documented cheat, not a solved problem. `web.py` is the
   only caller: a locally-picked bot at game creation gets a `LocalSearchBrain`
   thread regardless of whether the checkpoint actually searches, since
@@ -248,7 +248,7 @@ class LocalSearchBrain:
     no HTTP route that could produce one."""
 
     bot: Bot
-    game: object  # hexset_ui.game.Game — typed loosely to avoid a game.py import cycle at module load
+    game: object  # hexset.game.Game — typed loosely to avoid a game.py import cycle at module load
 
     def decide(self, transport: Transport, token: str, seat: int) -> dict:
         return action_to_wire(self.bot.choose(self.game))

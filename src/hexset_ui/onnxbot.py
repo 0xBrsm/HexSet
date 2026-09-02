@@ -258,7 +258,7 @@ class OnnxPolicy:
         self, rows: Sequence[tuple[Game, int, tuple[Action, ...]]]
     ) -> list[tuple[np.ndarray, tuple[float, ...]]]:
         """`score`, combined into the `(prior, value)` per leaf that
-        `hexset_ui.mcts.Evaluator.evaluate` wants."""
+        `hexset.mcts.Evaluator.evaluate` wants."""
         if not rows:
             return []
         observations = [encode(game, seat) for game, seat, _ in rows]
@@ -474,7 +474,7 @@ class NetworkBot:
 
 @dataclass
 class NetworkEvaluator:
-    """The value head as `hexset_ui.search2.SearchBot`'s leaf evaluation."""
+    """The value head as `hexset.bots.SearchBot`'s leaf evaluation."""
 
     policy: OnnxPolicy | V2Policy
     players: int
@@ -487,7 +487,7 @@ class NetworkEvaluator:
 
 @dataclass
 class LeafEvaluator:
-    """A whole wave of `hexset_ui.mcts` leaves in one forward."""
+    """A whole wave of `hexset.mcts` leaves in one forward."""
 
     policy: OnnxPolicy | V2Policy
     space: ActionSpace

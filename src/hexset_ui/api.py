@@ -36,6 +36,32 @@ before it locks out for good (see `hexset_ui.seating.lock_seat`): a game that
 begins setup with two or three seats occupied stays that size for its whole
 duration, one seat's decision at a time rather than one cutoff for the table.
 `Table.join` only ever offers a seat that is both empty and unlocked.
+
+## What a seat is told, and what it is not
+
+Every response here is built for one viewer. Two of the filters are not
+obvious and both are load-bearing:
+
+`to_move` during `TRADE_RESPOND` is **not** the seat being asked. The engine
+asks only seats that can cover the offer, so publishing that seat would tell
+every poller — a bystander, and the token-free observer on
+`GET /api/table/<CODE>` — exactly who is holding the wanted card. A responder
+is told their own seat, because they have to act; everyone else is told the
+proposer, whom the offer block already names (`webplay._public_mover`).
+
+The `action_mask`/`pair_mask`/`options` on `GET /api/record` are the **honest**
+trade sample (`rules.fair_legal_actions`), and so is what an embedded bot
+searches: one mask for every seat. The engine's own `legal_actions` filters
+offers by opponents' true hands, which is fine inside a duel harness and is a
+hand-composition leak at a table with a person at it.
+
+## Liveness is people, not bots
+
+`Table.last_seen` is refreshed by a request from a person or an external
+client, never by an embedded bot runner's poll — a runner polls once a second
+until its game ends, so counting those would mean no table with a bot at it
+could ever go stale. Eviction (`_evict_stale`) runs on every `get` as well as
+on `create`, and closing a table stops its runners before the journal.
 """
 
 from __future__ import annotations
@@ -84,7 +110,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 MODELS_DIR = Path(os.environ.get("HEXSET_UI_MODELS_DIR", REPO_ROOT / "models"))
 
 # The base board seats four, so a game does too. The engine itself will deal
-# 2-6 (see `hexset_ui.state.new_game`); what caps this is the board's 19 hexes
+# 2-6 (see `hexset.state.new_game`); what caps this is the board's 19 hexes
 # and the resource bag that was balanced for them, not the code. Fixed for
 # every game regardless of how many seats end up claimed: a served checkpoint
 # hard-rejects a mismatched player count (`onnxbot.py`'s `_check_players`),
@@ -388,7 +414,7 @@ def _seat_labels(seats: list[Seat]) -> tuple[dict[int, str], dict[int, str], dic
 
 def build_session(code: str, seats: list[Seat], config: Config, *, first: int) -> GameSession:
     """A fresh `MAX_SEATS`-seat game, `first` the creator's own seat (see
-    `hexset_ui.game.start`). Every seat not already claimed here (an empty
+    `hexset_ui.seating.start_at`). Every seat not already claimed here (an empty
     one, or a named bot's) is simply left for `Table.join`/`lock_seat` to
     resolve as the game itself unfolds."""
     seed = config.seed
@@ -433,7 +459,7 @@ def resume_session(code: str, seats: list[Seat], config: Config) -> GameSession 
     before, comes back open. `game.locked` is seeded from the journal's own
     `locked` events before replay runs, which is provably equivalent to
     locking each seat at the step it actually happened (see
-    `hexset_ui.game`'s module-level note on `_advance_setup`).
+    `hexset_ui.seating`'s own note on `advance_setup`).
     """
     where = config.games_dir if config.games_dir is not None else journal.configured_dir()
     path = journal.resumable(where, code)

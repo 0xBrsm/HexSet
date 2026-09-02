@@ -148,7 +148,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `HonestEvaluator.evaluate`'s per-seat vector within one decision, cutting
   `Belief.from_game` calls from 37.2 to 3.9/decision and moving the cost to
   2.69x on the same protocol, still over the ceiling for the unchanged
-  trade-volume reason.
+  trade-volume reason. A third exact pass precomputed `progress_toward`'s
+  cost table, cached the vertex walk `progress` needs beside the survey it
+  is a function of, counted roads with `list.count`, built each `Belief`'s
+  cache signature once, and dropped a doubled legality check in
+  `candidate_bundles` — **-12.3% ms/move and -13.0% function calls** against
+  the previous code, paired in one process; **2.69x -> 2.37x**. Three
+  behaviour-changing steps were measured and none landed: a transposition
+  table across the iterative-deepening passes hits 0.046% of `_value` calls,
+  a vectorised evaluator would need a breadth-first rewrite of `_value` to
+  beat a loop that is 2.0% of runtime, and sampling the ply-1 roll (worth
+  -11.9%) missed its pre-stated no-trade strength floor by 0.6 of a game and
+  was reverted. Read the ratio beside its phase-neutral form (**2.08x**):
+  `search2` books 2481 cheap `TRADE_RESPOND` decisions to heximax's 126 over
+  the same nine games, and those sit in the mirror table's denominator.
 
 ### Fixed
 

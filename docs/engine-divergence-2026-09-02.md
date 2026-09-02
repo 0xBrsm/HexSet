@@ -4,8 +4,15 @@
 `feat/engine-from-hexset` (branched from `pr-2` = `feat/external` @ `dbbfa62`).
 
 `dev:` = `0xBrsm/dev-hexset` `src/hexset/` at branch `feat/heximax` @ `810dec7`
-(package `hexset` 0.13.0). `ui:` = this repo at the branch point `dbbfa62`.
-Line references are to those two trees.
+(package `hexset` 0.13.0), which is the tree every line reference below was
+taken against and the tree the diffs were classified from. `ui:` = this repo at
+the branch point `dbbfa62`.
+
+dev moved while this branch was being written (`feat/heximax` is at `b1763e6`,
+the catanatron-adapter merge, as of this commit); the suite here was re-run
+green against that head, and none of its commits touch the engine modules this
+document is about. The line numbers may nonetheless have shifted by a few —
+read them as "the tree at `810dec7`".
 
 This repo used to carry its own copy of the engine — `actions`, `board/`,
 `cards`, `devcards`, `economy`, `game`, `ledger`, `mcts`, `roads`, `robber`,

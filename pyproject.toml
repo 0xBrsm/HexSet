@@ -1,43 +1,49 @@
 [project]
-name = "hexset-ui"
-# Bumped together with `engine/pyproject.toml`'s `version` -- HexSet has
-# adopted the engine's 0.13.x line as its single version. See
-# `engine/tests/test_versions.py`, which fails the moment the two drift.
+name = "hexset"
+# One version line for the whole distribution -- `hexset` (the engine, the
+# bots and the ONNX record contract), `hexset.bench`, `hexset.server`,
+# `hexset.clients` and the sibling `heximax` package all ship from here. See
+# `tests/test_versions.py`, which fails the moment `hexset.__version__`
+# drifts from this file.
 version = "0.13.0"
-description = "HexSet — a human-vs-bot hex-tile strategy board game in the browser, ONNX Runtime inference"
+description = "HexSet — a numpy-only, information-set-honest hex-tile trading and building engine, a sample bot, a Catanatron adapter, and a browser/HTTP/MCP gym around them"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
-# `hexset` — the engine, the bots and the ONNX record contract — now lives in
-# this repo too, under `engine/` (imported with history from dev-HexNet's
-# `refactor/hexnet-package-split`; see `engine/README.md` for the exact SHA).
-# `heximax` — the honest handcrafted baseline bot, HexSet's sample bot rather
-# than part of the engine — is a sibling top-level package under the same
-# directory (`engine/heximax/`), registering itself with `hexset.arena`/
-# `hexset.tuning` on import rather than being imported by either. Both are
-# second/third package roots rather than separate distributions: `where`
-# below lists both `src` (hexset_ui) and `engine` (hexset, heximax,
-# benchmarks), so a single `pip install -e .` provides `import hexset_ui`,
-# `import hexset` and `import heximax` without a path dependency or extra
-# pip invocations. This is the simplest thing that works with plain
-# setuptools — a path dependency (`hexset @ file://...`) would need an
-# absolute, non-portable URL baked into this file, and running separate
-# `pip install -e` commands per package is one more step than the tests
-# below rely on. `engine/pyproject.toml` is kept for when `engine/` is later
-# split into its own repo or published; it does not govern this repo's
-# install.
+# `hexset` is the rules engine, bots, ledger, arena and tuning
+# (`src/hexset/`); `hexset.bench` the duel/throughput/tuning scripts it is
+# measured with; `hexset.server` and `hexset.clients` the gym around it --
+# an HTTP API, an MCP server, a browser client and ONNX Runtime bot inference
+# (`src/hexset/server/`, `src/hexset/clients/`); `heximax` the sample bot, a
+# sibling top-level package rather than a subpackage of `hexset`, registering
+# itself with `hexset.arena`/`hexset.tuning` on import rather than being
+# imported by either (`src/heximax/`). One `pip install -e .` from the repo
+# root provides all of them from one editable install.
 dependencies = [
     "numpy>=1.26",
-    "onnxruntime>=1.18",
 ]
 
 # pytest is not needed to run the game, only to check it. Install with
-# `pip install -e ".[test]"`. `export` and `catanatron` are the engine's own
-# extras (see `engine/pyproject.toml` for what each is for), re-exposed here
-# so `pip install -e ".[test,export,catanatron]"` still works from the repo
-# root now that `hexset` is not a separate install.
+# `pip install -e ".[test]"`.
+#
+# `server` and `clients` both pull in onnxruntime: `hexset` itself (the bare
+# `import hexset`) needs nothing but numpy, but `hexset.server.api` (and so
+# `hexset.server.web`) imports `hexset.clients.botclient` to run an embedded
+# bot, and `hexset.clients.onnxbot`/`botclient` load `.onnx` checkpoints
+# directly -- both real dependents of the runtime wheel, so onnxruntime is an
+# extra rather than a hard dependency of the distribution as a whole.
+# `hexset.server.mcp` is the one server module that needs neither: it is a
+# stdio client of the HTTP API, standard library only.
 [project.optional-dependencies]
 test = ["pytest>=8"]
+server = ["onnxruntime>=1.18"]
+clients = ["onnxruntime>=1.18"]
 export = ["onnx>=1.16", "onnxruntime>=1.18"]
+# hexset.catanatron: the Catanatron adapter (`hexset/catanatron/`). Pinned to
+# the exact commit the R-H1c gate measured against (`agents/reference/heximax.md`,
+# "R-H1c take 2"; confirmed via the installed dist's PEP 610 `direct_url.json`
+# inside `catan-bridge:ledger`) rather than floating on catanatron's default
+# branch, since a git URL with no revision was the reproducibility gap that
+# provenance stamping (`hexset.catanatron.duel.provenance`) exists to catch.
 catanatron = ["catanatron @ git+https://github.com/bcollazo/catanatron.git@d3f4ad05bb78d8b2309631d6d3cfa8fcb6fda816"]
 
 [build-system]
@@ -45,27 +51,18 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-where = ["src", "engine"]
-include = [
-    "hexset_ui", "hexset_ui.*",
-    "hexset", "hexset.*",
-    "heximax", "heximax.*",
-    "benchmarks", "benchmarks.*",
-]
+where = ["src"]
+include = ["hexset", "hexset.*", "heximax", "heximax.*"]
 
 # setuptools only auto-includes .py files under `packages.find` —
 # static/index.html (the entire frontend) is a static asset living inside the
-# hexset_ui package directory and needs to be listed explicitly, or a real
-# `pip install .` silently omits it (found by actually building and running
-# the Docker image, not by reading the config: FileNotFoundError on GET /).
+# `hexset.server` package directory and needs to be listed explicitly, or a
+# real `pip install .` silently omits it (found by actually building and
+# running the Docker image, not by reading the config: FileNotFoundError on
+# GET /).
 [tool.setuptools.package-data]
-hexset_ui = ["static/*.html"]
+"hexset.server" = ["static/*.html"]
 
-# hexset_ui's own suite. `pytest engine/tests` runs the engine's torch-free
-# slice instead — it carries its own `engine/pyproject.toml` ini section
-# (pytest resolves the nearest ancestor config to the args given, so pointing
-# at `engine/tests` picks that file up, not this one), which is why this
-# section does not also list `engine/tests` here.
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]

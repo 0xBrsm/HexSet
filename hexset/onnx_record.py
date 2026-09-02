@@ -69,7 +69,7 @@ from .victory import award_points
 
 # Every field name in the record, in the order the plan's table lists them
 # (board, then position, then information set, then legality). `_shapes` in
-# `hexset.export_onnx` reuses this order for the graph's input names.
+# `hexnet.export_onnx` reuses this order for the graph's input names.
 RECORD_FIELDS: tuple[str, ...] = (
     "terrain",
     "token",

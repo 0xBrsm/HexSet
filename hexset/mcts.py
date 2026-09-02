@@ -2,7 +2,7 @@
 """PUCT over a learned policy and value, with the leaves evaluated in batches.
 
 The shape of this module is decided by one measurement, the same one that
-decided `hexset.selfplay`: a forward costs a ~1.5 ms fixed dispatch toll plus
+decided `hexnet.selfplay`: a forward costs a ~1.5 ms fixed dispatch toll plus
 ~25 µs per position, so a search that evaluated one leaf per call would spend
 essentially all of its time in dispatch. A hundred leaves evaluated singly cost
 1.25 seconds; batched they cost about fifteen milliseconds. **Leaves are

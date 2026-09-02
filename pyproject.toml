@@ -1,15 +1,17 @@
 [project]
 name = "hexset"
 version = "0.13.0"
-description = "Graph-native Settlers of Catan engine and self-play agent"
+description = "Graph-native Settlers of Catan engine, bots and ledger (hexset), plus PPO/training research (hexnet)"
 requires-python = ">=3.11"
 dependencies = ["numpy>=1.26"]
 
-# torch itself isn't listed here — see hexset.netbot's docstring: it's
-# provisioned separately (the training/GPU image), not a hard dependency of
-# the base package, so anything that only needs the torch-free engine stays
-# installable without it. `export` is the one thing that needs torch *and*
-# these two, for hexset.export_onnx's .pt -> .onnx conversion.
+# torch itself isn't listed here. `hexnet` (PPO/training) and `hexset.onnx_record`
+# need it, but the engine, bots and ledger in `hexset` do not, so it stays
+# provisioned separately (the training/GPU image) rather than a hard dependency
+# of this distribution — anything that only needs the torch-free engine stays
+# installable without it. `export` is the one thing under `hexset` that needs
+# torch *and* these two, for hexset.onnx_record's traced encoder / a future
+# .pt -> .onnx conversion (hexnet.export_onnx).
 [project.optional-dependencies]
 export = ["onnx>=1.16", "onnxruntime>=1.18"]
 # hexset.catanatron: the Catanatron adapter (`hexset/catanatron/`). Pinned to
@@ -25,8 +27,14 @@ catanatron = ["catanatron @ git+https://github.com/bcollazo/catanatron.git@d3f4a
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
+# One distribution, two importable packages, for now: `hexset` (engine, bots,
+# ledger) and `hexnet` (PPO/training), split so the engine slice can later be
+# pulled out with `git subtree split` and imported by HexNet as a plain
+# package. hexset must never import hexnet -- see hexset.arena's registry for
+# how the one place that used to reach for a network-backed bot now does it
+# without that import.
 [tool.setuptools.packages.find]
-include = ["hexset*"]
+include = ["hexset*", "hexnet*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

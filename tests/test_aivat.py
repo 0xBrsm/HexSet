@@ -235,7 +235,7 @@ def test_the_estimator_is_unbiased_over_real_games():
 
 
 def test_the_margin_scale_inverts_relative_points():
-    from hexset.rewards import relative_points
+    from hexset.victory import relative_points
 
     rng = random.Random(4)
     for _ in range(50):

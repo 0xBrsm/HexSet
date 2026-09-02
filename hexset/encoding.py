@@ -330,7 +330,7 @@ def _offer_parts(game: Game, perspective: int) -> list[float]:
     declines. Only the proposer's own perspective carries the answered block
     (in today's engine an accept ends the offer at once, so "answered" means
     "declined so far"). With no offer standing the whole block is zero, which
-    is also what every checkpoint migrated by `hexset.migrate` reads it as
+    is also what every checkpoint migrated by `hexnet.migrate` reads it as
     until it trains further.
 
     One list, four parts, in this order: give (scaled like hands), want,

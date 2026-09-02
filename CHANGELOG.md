@@ -119,7 +119,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   per decision and shared `propose_actions`' "before" reading across its own
   calls, taking the adapter-active cost from 3.46x down to 2.87x
   `search2-offers3` per move, still over the ceiling for the same
-  trade-volume reason, not a compute one.
+  trade-volume reason, not a compute one. A second exact, census-preserving
+  pass memoized `Belief` construction (`HonestEvaluator.belief_for`) and
+  `HonestEvaluator.evaluate`'s per-seat vector within one decision, cutting
+  `Belief.from_game` calls from 37.2 to 3.9/decision and moving the cost to
+  2.69x on the same protocol, still over the ceiling for the unchanged
+  trade-volume reason.
 
 ### Changed
 

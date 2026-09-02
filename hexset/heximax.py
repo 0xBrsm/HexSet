@@ -38,24 +38,43 @@ responses are still searched from the responder's own seat. `max_offers=0`
 never proposes and always declines.
 
 Cost: leaf evaluations per move are capped by `max_nodes`
-(`DEFAULT_MAX_NODES`, 600). Measured 2026-09-02 (three four-seat games a
-side, board seeds 0/1/2, `search2-offers3`'s `max_offers=3` matching
-heximax's own budget): `heximax` 5.14 ms/move vs `search2-offers3` 1.79
-ms/move, **2.87x** -- still over the design's 2x ceiling, and not a compute
-problem: `score_proposal`'s crisp `willing` gate, read under `relative`,
-proposes far more selectively than the engine's naive one-for-one sample, so
-a real game trades roughly a third as often
-(`test_multi_card_and_one_for_one_proposals_both_occur_over_twenty_games`),
+(`DEFAULT_MAX_NODES`, 600). Measured 2026-09-02, before the structural
+performance pass (three four-seat games a side, board seeds 0/1/2,
+`search2-offers3`'s `max_offers=3` matching heximax's own budget): `heximax`
+5.14 ms/move vs `search2-offers3` 1.79 ms/move, **2.87x** -- over the
+design's 2x ceiling. The pass's two exact, census-preserving steps
+(`agents/reference/heximax.md`'s structural registration, step (a): one
+`Belief` per node, memoized per decision; step (b): `HonestEvaluator.evaluate`
+memoized per decision) followed the same day, on the same protocol, on a
+box under concurrent load (a registered bridge run): pooled over four
+independent three-games-a-side round trips (12 games a side, 4336 heximax
+moves, 9672 `search2-offers3` moves, so the absolute ms are inflated by
+contention but the paired ratio is not), `heximax` 14.87 -> 14.07 ms/move,
+`search2-offers3` (unchanged, the control) 5.19 -> 5.22 ms/move (flat, the
+run-to-run noise floor), ratio **2.86x -> 2.69x** -- still over the 2x
+ceiling. `Belief.from_game` calls drop from 37.2 to 3.9/decision (the
+belief cache's own hit rate, 64.1%, on the profile's 200-position sample;
+`worlds`/`draw_children` stay uncached, see `HonestEvaluator.belief_for`'s
+docstring), and the belief category's tottime share drops from 16.0% to
+5.0%; the evaluator memo (step (b)) hits 41.1% of its own lookups. Neither
+step is a compute problem to begin with: `score_proposal`'s crisp `willing`
+gate, read under `relative`, proposes far more selectively than the
+engine's naive one-for-one sample, so a real game trades roughly a third as
+often (`test_multi_card_and_one_for_one_proposals_both_occur_over_twenty_games`),
 and those fewer, cheap negotiation actions average against the
-leaf-budgeted build decisions that dominate the rest. Whether the gate is
-too strict, `relative` is the wrong stance for `willing`, or the ceiling
-needs a protocol allowance is a design question, not one this adapter
-should answer by loosening the gate to hit a number. `bot.choose()`'s own
-choices, and the number of leaves it spends getting to them, are checked on
-every position by
-`test_choices_are_byte_identical_to_the_recorded_census`. History (the
-optimization pass and its per-change breakdown) is in
-`agents/reference/heximax.md`.
+leaf-budgeted build decisions that dominate the rest; the ROBBER phase's
+leaf count (mean 247.2 vs `search2`'s 141.4 on the same corpus) is the
+larger remaining lever, and it is a *decision-count* problem steps (a)/(b)
+do not touch by design -- exactness meant caching identical recomputation,
+not spending the node budget differently. Whether the trade gate is too
+strict, `relative` is the wrong stance for `willing`, the ceiling needs a
+protocol allowance, or a behaviour-changing step ((c)-(e) in the
+registration) is warranted is a design question, not one this pass answers
+by loosening a gate to hit a number. `bot.choose()`'s own choices, and the
+number of leaves it spends getting to them, are checked on every position
+by `test_choices_are_byte_identical_to_the_recorded_census`, byte-identical
+through both steps above. History (the optimization pass and its
+per-change breakdown) is in `agents/reference/heximax.md`.
 """
 
 from __future__ import annotations

@@ -201,7 +201,7 @@ def translate(catanatron_game, mapping: BoardMapping, rng: random.Random) -> tup
     )
 
     game = Game(
-        state=state,
+        _state=state,
         rng=rng,
         ledger=ledger,
         phase=phase,

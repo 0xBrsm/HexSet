@@ -4,6 +4,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 from enum import IntEnum
+from typing import TYPE_CHECKING
 
 from .board.board import MAX_ROLL, MIN_ROLL, Board, pips
 from .board.terrain import TERRAIN_RESOURCE, Resource
@@ -33,6 +34,9 @@ from .state import (
 )
 from .victory import update_largest_army, update_longest_road, winner
 
+if TYPE_CHECKING:
+    from .view import View
+
 DICE = 6
 MAX_TURNS = 1000
 
@@ -61,7 +65,7 @@ class Phase(IntEnum):
 
 @dataclass
 class Game:
-    state: GameState
+    _state: GameState
     rng: random.Random
     ledger: PublicLedger
     phase: Phase = Phase.SETUP_SETTLEMENT
@@ -104,6 +108,39 @@ class Game:
     # is why `lock_seat` places no restriction on which seat or when.
     locked: frozenset[int] = field(default_factory=frozenset)
 
+    def state(self, seat: int, *, hidden: bool = True) -> GameState | View:
+        """The access path to this game's state (P0,
+        `agents/reference/trading-design.md`, "Registration -- the
+        one-event trade mechanic").
+
+        `hidden=True` (the default) returns `seat`'s information-set `View`
+        -- known/unknown hands, expected hands, hold probabilities,
+        `sample` -- built exactly as `hexset.bots.heximax.belief.Belief.
+        from_game` built it before this moved into the engine. `hidden=False`
+        returns the true `GameState` (the raw field, private otherwise as
+        `_state`): the same object every time, never a copy, so reading it
+        costs nothing and mutating it through the returned reference works
+        exactly as mutating `_state` always did. This is the only sanctioned
+        way to read the true state from outside the engine; the three
+        sanctioned callers are `hexset.bots.search2`, heximax's own
+        `omniscient` mode, and the Catanatron adapter when it hosts a
+        Catanatron bot.
+        """
+        if not hidden:
+            return self._state
+        from .view import View as _View
+
+        return _View.from_game(self, seat)
+
+    def set_state(self, state: GameState) -> None:
+        """Replace the true state outright.
+
+        The one write a determinizer needs (`Heximax.worlds`'s PIMC sample,
+        a session's undo) without exposing `_state` itself to code outside
+        the engine.
+        """
+        self._state = state
+
 
 def start(
     board: Board,
@@ -125,7 +162,7 @@ def start(
     # which is what compensates them for choosing last.
     queue = order + order[::-1]
     return Game(
-        state=new_game(board, num_players, rng),
+        _state=new_game(board, num_players, rng),
         rng=rng,
         ledger=PublicLedger.new(num_players),
         setup_queue=queue,
@@ -146,11 +183,11 @@ def imagine(
     A caller that cannot observe the deck before a later draw may defer that
     shuffle until the draw itself with `randomize_deck=False`.
     """
-    state = copy_state(game.state)
+    state = copy_state(game._state)
     if randomize_deck:
         rng.shuffle(state.deck)
     return Game(
-        state=state,
+        _state=state,
         rng=rng,
         ledger=game.ledger.copy(),
         phase=game.phase,
@@ -178,7 +215,7 @@ def _require(game: Game, phase: Phase) -> None:
 
 
 def _in_second_setup_round(game: Game) -> bool:
-    return game.setup_step >= game.state.num_players
+    return game.setup_step >= game._state.num_players
 
 
 def _advance_setup(game: Game) -> None:
@@ -213,7 +250,7 @@ def _next_unlocked(game: Game, after: int) -> int:
     retires every seat has emptied the table, and there is no seat left for
     the turn to land on.
     """
-    n = game.state.num_players
+    n = game._state.num_players
     for step in range(1, n + 1):
         seat = (after + step) % n
         if seat not in game.locked:
@@ -225,7 +262,7 @@ def _snapshot_hands(game: Game) -> list[list[int]]:
     """A copy of every seat's hand, to diff against after a mutation whose
     resource identities are public (see `ledger.PublicLedger.apply_hand_diff`
     for which events these are and why a steal is never one of them)."""
-    return [hand[:] for hand in game.state.hands]
+    return [hand[:] for hand in game._state.hands]
 
 
 def _record_steal(
@@ -246,7 +283,7 @@ def _record_steal(
 
 
 def _grant_initial_resources(game: Game, vertex: int) -> None:
-    state = game.state
+    state = game._state
     topology = state.board.topology
     for h in topology.vertex_hexes[vertex]:
         resource = TERRAIN_RESOURCE[state.board.terrain[h]]
@@ -258,21 +295,21 @@ def _grant_initial_resources(game: Game, vertex: int) -> None:
 def place_initial_settlement(game: Game, vertex: int) -> None:
     _require(game, Phase.SETUP_SETTLEMENT)
     before = _snapshot_hands(game)
-    place_settlement(game.state, game.current_player, vertex, connected=False)
+    place_settlement(game._state, game.current_player, vertex, connected=False)
     game.last_settlement = vertex
     if _in_second_setup_round(game):
         _grant_initial_resources(game, vertex)
-    game.ledger.apply_hand_diff(before, game.state.hands)
-    update_longest_road(game.state)
+    game.ledger.apply_hand_diff(before, game._state.hands)
+    update_longest_road(game._state)
     game.phase = Phase.SETUP_ROAD
 
 
 def legal_initial_roads(game: Game) -> list[int]:
-    topology = game.state.board.topology
+    topology = game._state.board.topology
     return [
         e
         for e in topology.vertex_edges[game.last_settlement]
-        if game.state.edge_owner[e] == NO_OWNER
+        if game._state.edge_owner[e] == NO_OWNER
     ]
 
 
@@ -280,8 +317,8 @@ def place_initial_road(game: Game, edge: int) -> None:
     _require(game, Phase.SETUP_ROAD)
     if edge not in legal_initial_roads(game):
         raise ValueError("the opening road must touch the settlement just placed")
-    place_road(game.state, game.current_player, edge)
-    update_longest_road(game.state)
+    place_road(game._state, game.current_player, edge)
+    update_longest_road(game._state)
 
     game.setup_step += 1
     _advance_setup(game)
@@ -301,14 +338,14 @@ def roll_dice(game: Game, roll: int | None = None) -> int:
         # ever resolve a nonzero quota for it, and `players_owing_discards`
         # would otherwise report a seat the table can no longer act for.
         game.discard_quota = [
-            0 if p in game.locked else discard_count(game.state, p)
-            for p in range(game.state.num_players)
+            0 if p in game.locked else discard_count(game._state, p)
+            for p in range(game._state.num_players)
         ]
         game.phase = Phase.DISCARD if any(game.discard_quota) else Phase.ROBBER
     else:
         before = _snapshot_hands(game)
-        distribute(game.state, roll)
-        game.ledger.apply_hand_diff(before, game.state.hands)
+        distribute(game._state, roll)
+        game.ledger.apply_hand_diff(before, game._state.hands)
         game.phase = Phase.MAIN
     return roll
 
@@ -343,8 +380,8 @@ def submit_discard(game: Game, player: int, cards: list[int]) -> None:
     if game.discard_quota[player] != sum(cards):
         raise ValueError(f"player {player} must discard {game.discard_quota[player]}")
     before = _snapshot_hands(game)
-    discard(game.state, player, cards, game.discard_quota[player])
-    game.ledger.apply_hand_diff(before, game.state.hands)
+    discard(game._state, player, cards, game.discard_quota[player])
+    game.ledger.apply_hand_diff(before, game._state.hands)
     game.discard_quota[player] = 0
     _finish_discards(game)
 
@@ -353,10 +390,10 @@ def discard_one(game: Game, player: int, resource: Resource) -> None:
     _require(game, Phase.DISCARD)
     if game.discard_quota[player] < 1:
         raise ValueError(f"player {player} owes no discard")
-    if game.state.hands[player][resource] < 1:
+    if game._state.hands[player][resource] < 1:
         raise ValueError(f"player {player} holds no {resource.name}")
-    game.state.hands[player][resource] -= 1
-    game.state.bank[resource] += 1
+    game._state.hands[player][resource] -= 1
+    game._state.bank[resource] += 1
     game.ledger.spend(player, int(resource), 1)
     game.discard_quota[player] -= 1
     _finish_discards(game)
@@ -364,15 +401,15 @@ def discard_one(game: Game, player: int, resource: Resource) -> None:
 
 def move_robber_to(game: Game, target: int, victim: int | None = None) -> None:
     _require(game, Phase.ROBBER)
-    move_robber(game.state, target)
+    move_robber(game._state, target)
     if victim is not None:
-        stolen = steal(game.state, game.current_player, victim, game.rng)
+        stolen = steal(game._state, game.current_player, victim, game.rng)
         _record_steal(game, game.current_player, victim, stolen)
     game.phase = Phase.MAIN
 
 
 def _check_win(game: Game) -> None:
-    won = winner(game.state)
+    won = winner(game._state)
     if won is not None:
         game.won_by = won
         game.phase = Phase.GAME_OVER
@@ -385,39 +422,39 @@ def build_road(game: Game, edge: int) -> None:
     if game.free_roads > 0:
         game.free_roads -= 1
     else:
-        pay(game.state, game.current_player, Purchase.ROAD)
-    game.ledger.apply_hand_diff(before, game.state.hands)
-    place_road(game.state, game.current_player, edge)
-    update_longest_road(game.state)
+        pay(game._state, game.current_player, Purchase.ROAD)
+    game.ledger.apply_hand_diff(before, game._state.hands)
+    place_road(game._state, game.current_player, edge)
+    update_longest_road(game._state)
     _check_win(game)
 
 
 def build_settlement(game: Game, vertex: int) -> None:
     _require(game, Phase.MAIN)
     before = _snapshot_hands(game)
-    pay(game.state, game.current_player, Purchase.SETTLEMENT)
-    game.ledger.apply_hand_diff(before, game.state.hands)
-    place_settlement(game.state, game.current_player, vertex)
+    pay(game._state, game.current_player, Purchase.SETTLEMENT)
+    game.ledger.apply_hand_diff(before, game._state.hands)
+    place_settlement(game._state, game.current_player, vertex)
     # A new settlement can cut an opponent's route, so this is not only the
     # builder's own longest road that may change.
-    update_longest_road(game.state)
+    update_longest_road(game._state)
     _check_win(game)
 
 
 def build_city(game: Game, vertex: int) -> None:
     _require(game, Phase.MAIN)
     before = _snapshot_hands(game)
-    pay(game.state, game.current_player, Purchase.CITY)
-    game.ledger.apply_hand_diff(before, game.state.hands)
-    upgrade_to_city(game.state, game.current_player, vertex)
+    pay(game._state, game.current_player, Purchase.CITY)
+    game.ledger.apply_hand_diff(before, game._state.hands)
+    upgrade_to_city(game._state, game.current_player, vertex)
     _check_win(game)
 
 
 def buy_development_card(game: Game) -> DevCard:
     _require(game, Phase.MAIN)
     before = _snapshot_hands(game)
-    card = buy_dev_card(game.state, game.current_player)
-    game.ledger.apply_hand_diff(before, game.state.hands)
+    card = buy_dev_card(game._state, game.current_player)
+    game.ledger.apply_hand_diff(before, game._state.hands)
     _check_win(game)
     return card
 
@@ -434,10 +471,10 @@ def play_knight_card(
     if game.phase not in (Phase.ROLL, Phase.MAIN):
         raise ValueError(f"cannot play a knight in {game.phase.name}")
     _spend_turn_card(game)
-    stolen = play_knight(game.state, game.current_player, target, victim, game.rng)
+    stolen = play_knight(game._state, game.current_player, target, victim, game.rng)
     if victim is not None:
         _record_steal(game, game.current_player, victim, stolen)
-    update_largest_army(game.state)
+    update_largest_army(game._state)
     _check_win(game)
     return stolen
 
@@ -450,7 +487,7 @@ def play_road_building_card(game: Game) -> None:
     """
     _require(game, Phase.MAIN)
     _spend_turn_card(game)
-    spend_card(game.state, game.current_player, DevCard.ROAD_BUILDING)
+    spend_card(game._state, game.current_player, DevCard.ROAD_BUILDING)
     game.free_roads += ROAD_BUILDING_ROADS
 
 
@@ -458,28 +495,28 @@ def play_year_of_plenty_card(game: Game, resources: list[Resource]) -> None:
     _require(game, Phase.MAIN)
     _spend_turn_card(game)
     before = _snapshot_hands(game)
-    play_year_of_plenty(game.state, game.current_player, resources)
-    game.ledger.apply_hand_diff(before, game.state.hands)
+    play_year_of_plenty(game._state, game.current_player, resources)
+    game.ledger.apply_hand_diff(before, game._state.hands)
 
 
 def play_monopoly_card(game: Game, resource: Resource) -> int:
     _require(game, Phase.MAIN)
     _spend_turn_card(game)
     before = _snapshot_hands(game)
-    taken = play_monopoly(game.state, game.current_player, resource)
+    taken = play_monopoly(game._state, game.current_player, resource)
     # Monopoly forces every other seat to publicly hand over every card of
     # `resource`, so the transfer is fully public despite touching every
     # seat at once -- the same `apply_hand_diff` every other public mutation
     # uses, not the hidden-identity path a steal needs.
-    game.ledger.apply_hand_diff(before, game.state.hands)
+    game.ledger.apply_hand_diff(before, game._state.hands)
     return taken
 
 
 def trade_with_bank(game: Game, give: Resource, receive: Resource) -> None:
     _require(game, Phase.MAIN)
     before = _snapshot_hands(game)
-    bank_trade(game.state, game.current_player, give, receive)
-    game.ledger.apply_hand_diff(before, game.state.hands)
+    bank_trade(game._state, game.current_player, give, receive)
+    game.ledger.apply_hand_diff(before, game._state.hands)
 
 
 def propose_trade(
@@ -513,14 +550,14 @@ def propose_trade(
         raise ValueError(f"only {MAX_OFFERS_PER_TURN} offers allowed per turn")
 
     offer = Offer(proposer=game.current_player, give=give, want=want)
-    if not can_propose(game.state, offer):
+    if not can_propose(game._state, offer):
         raise ValueError(f"player {game.current_player} cannot make this offer")
 
     game.offers_made += 1
     game.offered.add((tuple(give), tuple(want)))
     # A locked seat is never asked -- it holds nothing and builds nothing to
     # trade for, and it is never `to_move` to answer if it were.
-    willing = tuple(p for p in offer_responders(game.state, offer) if p not in game.locked)
+    willing = tuple(p for p in offer_responders(game._state, offer) if p not in game.locked)
     if not willing:
         # Nobody can cover it, so there is nothing to ask. The offer still
         # counts against the turn's allowance: it was a move that was made.
@@ -551,8 +588,8 @@ def accept_trade(game: Game, responder: int) -> None:
         raise ValueError(f"player {responder} is not the one being asked")
     assert game.offer is not None
     before = _snapshot_hands(game)
-    execute_trade(game.state, game.offer, responder)
-    game.ledger.apply_hand_diff(before, game.state.hands)
+    execute_trade(game._state, game.offer, responder)
+    game.ledger.apply_hand_diff(before, game._state.hands)
     _finish_offer(game)
 
 
@@ -567,7 +604,7 @@ def decline_trade(game: Game, responder: int) -> None:
 
 def end_turn(game: Game) -> None:
     _require(game, Phase.MAIN)
-    mature(game.state, game.current_player)
+    mature(game._state, game.current_player)
     game.dev_card_played = False
     game.offers_made = 0
     game.offered = set()
@@ -598,7 +635,7 @@ def lock_seat(game: Game, seat: int) -> None:
     `docs/engine-divergence-2026-09-02.md` request R2.
 
     It also matches that function's answer for what happens to a retired
-    seat's pieces and hand: nothing. `lock_seat` never touches `game.state`.
+    seat's pieces and hand: nothing. `lock_seat` never touches `game._state`.
     `hexset.server.api.Table._settle_locks` (`ui:api.py:304-329`) only ever calls
     it on a seat the setup snake reached still empty, so there is nothing
     built or held to clear; a caller that retires a seat mid-game gets the

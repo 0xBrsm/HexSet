@@ -20,15 +20,17 @@ never through `state.hands[opponent]` or `state.dev_cards[opponent]`. Its own
 hand is exact. An `omniscient` mode keeps the old reading, so the price of
 honesty can be measured rather than assumed.
 
-A package, so a downstream copy takes the directory: `heximax/belief.py`,
-`heximax/evaluate.py`, `heximax/search.py`, `heximax/trade.py`,
-`heximax/presets.py`, one concern a file.
+A package, so a downstream copy takes the directory: `heximax/evaluate.py`,
+`heximax/search.py`, `heximax/trade.py`, `heximax/presets.py`, one concern a
+file. The information set itself, `View` (`Belief` kept as an alias), moved
+into the engine at `hexset.view` in P0 of the trading-design registration
+(`agents/reference/trading-design.md`) -- a seat's view of the game is
+engine functionality, reached through `Game.state(seat, hidden=True)`, not
+something a bot builds for itself. `heximax` and `hexset.bots.heximax`
+re-export both names for existing callers.
 
-* `belief`   -- the information set as an object (`Belief`): what is
-  certified, what is hidden, and the residual pool the hidden cards are
-  drawn from.
 * `evaluate` -- `hexset.bots.evaluate.Evaluator`'s term set read through the
-  belief (`HonestEvaluator`), with progress zeroed where the piece supply is
+  view (`HonestEvaluator`), with progress zeroed where the piece supply is
   exhausted, and two weight profiles (`TRADING_WEIGHTS`, a trading table,
   and `NO_TRADE_WEIGHTS`, a no-trade table). Reaches the shared evaluator by
   `from ..evaluate import ...` (the sibling `hexset.bots.evaluate`), not
@@ -78,7 +80,7 @@ cannot spawn or fit heximax by name.
 
 Engine dependency: this package is a consumer of `hexset` (actions, board,
 cards, economy, game, ledger, mcts, placement, robber, trading, state,
-victory), of the sibling `hexset.bots.search2`/`hexset.bots.evaluate` (the
+victory, view), of the sibling `hexset.bots.search2`/`hexset.bots.evaluate` (the
 shared STANCES and the shared evaluation), and of `hexset.arena`/
 `hexset.tuning` for registration. It does not modify any of them. Nesting
 under `hexset.bots` means `hexset.bots`, `hexset.arena` and `hexset.mcts` now
@@ -98,7 +100,7 @@ in `agents/reference/heximax.md`.
 
 from __future__ import annotations
 
-from .belief import Belief
+from hexset.view import Belief, View
 from .evaluate import NO_TRADE_WEIGHTS, TRADING_WEIGHTS, HonestEvaluator, Weights
 from .search import BY_MODE, DEFAULT_MAX_NODES, MODES, Heximax, heximax
 
@@ -116,6 +118,7 @@ __all__ = [
     "MODES",
     "NO_TRADE_WEIGHTS",
     "TRADING_WEIGHTS",
+    "View",
     "Weights",
     "heximax",
 ]

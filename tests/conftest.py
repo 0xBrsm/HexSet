@@ -7,7 +7,7 @@ test is a behaviour-preservation gate, not a spec, so when a change to
 `heximax` deliberately changes what it chooses, the fixture has to be
 regenerated on purpose rather than hand-edited. Passing the flag makes the
 test recompute the census and overwrite
-`tests/heximax/fixtures/heximax_census_ecb5252.json` instead of asserting
+`tests/bots/heximax/fixtures/heximax_census_ecb5252.json` instead of asserting
 against it.
 
 The two movers below are not opponents anyone plays: the server deals
@@ -43,7 +43,7 @@ def pytest_addoption(parser) -> None:
         action="store_true",
         default=False,
         help=(
-            "regenerate tests/heximax/fixtures/heximax_census_ecb5252.json "
+            "regenerate tests/bots/heximax/fixtures/heximax_census_ecb5252.json "
             "from the current heximax instead of asserting against it"
         ),
     )

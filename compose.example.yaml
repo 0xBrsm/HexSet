@@ -10,14 +10,14 @@
 # style. The lines most people touch are the published port and whether src/
 # stays bind-mounted.
 services:
-  hexset-ui:
+  hexset:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    image: hexset-ui:local
-    # A convenience, so `docker logs hexset-ui` works without looking the
+    image: hexset:local
+    # A convenience, so `docker logs hexset` works without looking the
     # name up. Drop it if you want to run more than one copy at a time.
-    container_name: hexset-ui
+    container_name: hexset
     restart: unless-stopped
     ports:
       # Host side on the left. The container always listens on 8770 (the
@@ -29,19 +29,13 @@ services:
       # and index.html does not even need that much, since it is read fresh
       # per request. Read-only because nothing here writes to its own source.
       - ./src:/app/src:ro
-      # The engine, which lives in another repository: `hexset` is
-      # dev-HexNet's `src/` (the rules, the bots, the ONNX record contract),
-      # and this repo is the gym around it. Edit the path to wherever your
-      # dev-HexNet checkout is. Read-only for the same reason src/ is; it is
-      # on PYTHONPATH inside the image (see docker/Dockerfile).
-      - ../dev-HexNet/src:/app/engine:ro
       # Drop-in opponents: any *.onnx in here shows up in the in-game picker,
       # named after the file. Read-only because the app only globs and loads
       # them, never writes one.
       - ./models:/app/models:ro
       # The one writable mount. Every game is journalled here in full as it is
       # played: one JSON lines file per game, every action, hidden cards and
-      # all (see src/hexset_ui/journal.py). Bound to the host so a rebuild or a
+      # all (see src/hexset/server/journal.py). Bound to the host so a rebuild or a
       # `docker compose down` does not take the history with it.
       #
       # The container writes as uid 10001 (see docker/Dockerfile), so the host

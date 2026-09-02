@@ -104,11 +104,11 @@ rotation, so `perspective` is what tells it how far to rotate:
 | `offer_want` | `(B, NUM_RESOURCES)` | int64 | the live offer's want bundle, all-zero if none stands |
 | `offer_proposer` | `(B,)` | int64 | `NO_OWNER = -1` if no offer stands |
 | `offer_answered` | `(B, players)` | int64 | who has declined so far — **proposer's perspective only**, all-zero for anyone else |
-| `ledger_known` | `(B, players, NUM_RESOURCES)` | int64 | `hexset_ui.ledger.PublicLedger`'s per-seat certified floor |
+| `ledger_known` | `(B, players, NUM_RESOURCES)` | int64 | `hexset.ledger.PublicLedger`'s per-seat certified floor |
 | `ledger_unknown` | `(B, players)` | int64 | cards the public log accounts for but cannot type (steals only) |
 
 Resource *counting* is not hidden information in this game — only a steal's
-identity and dev-card types are (see `hexset_ui/ledger.py`'s module
+identity and dev-card types are (see `hexset/ledger.py`'s module
 docstring). `ledger_known`/`ledger_unknown` is what makes that true for
 every seat but the perspective one, whose `own_hand` above is already exact.
 

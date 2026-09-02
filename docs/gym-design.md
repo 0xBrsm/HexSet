@@ -248,3 +248,30 @@ and the `pyproject.toml` extra (~0.25 day). Excludes any work triggered by
 P0 landing under it (§4) or by the one-event trading mechanic changing the
 action space (§6) — both are separate, unscheduled efforts this design
 explicitly declines to anticipate.
+
+## PI ratification (2026-09-02, Fable)
+
+Decisions on §7, so implementation can start:
+
+1. **Observation form.** The AEC env returns a dict of the encoder's arrays
+   (`hexes (19,11)`, `vertices (54,14)`, `edges (72,5)`, `globals (86,)`) plus
+   `action_mask`. The Gymnasium wrapper flattens by default (`flatten=True`,
+   Catanatron's shape, what `MaskablePPO` users expect) and can return the dict
+   with `flatten=False`.
+2. **Source.** Observations are the encoder's arrays, never the ONNX record —
+   the record is a deployment contract for `hexset.server`/`clients`, not a
+   learning interface.
+3. **Reward.** Terminal only by default: `+1` to the winner, `0` to everyone
+   else (Catanatron parity). `reward="relative_points"` is the one alternative
+   (per-seat VP relative to the leader at the terminal step). No shaping.
+4. **Exhaustion.** Hitting `MAX_TURNS` is a `truncation` for every agent with
+   reward `0`, mirroring the arena's `exhausted` (distinct from `unfinished`).
+
+Two requirements the draft flagged become hard rules: the `action_mask` is
+built the honest way (never from the raw `legal_actions` sampler that reads
+opponents' hands), and every observation is built from
+`game.state(seat, hidden=True)` once P0 lands — implementation therefore
+starts **after** `feat/state-view` merges, not against today's boundary.
+The honesty permutation test (§4) is a merge requirement, not optional.
+Sequence: P0 → `hexset.gym` → P1 (one-event trading; the gym's observation
+gains the public valuation block and loses the trade actions then).

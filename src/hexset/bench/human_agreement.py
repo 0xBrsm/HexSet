@@ -64,16 +64,16 @@ source is a first-party human arena that journals every action with its hidden
 information and hands back this project's own action space, but nothing here
 depends on it: it takes `Record`s.
 
-    python -m benchmarks.human_agreement --records /w/tmp/human.jsonl \\
+    python -m hexset.bench.human_agreement --records /w/tmp/human.jsonl \\
         --checkpoint /w/runs/lam095/latest.pt --label lam095-human \\
         --verdicts /w/runs/eval
 
-    python -m benchmarks.human_agreement --records /w/tmp/selfplay.jsonl \\
+    python -m hexset.bench.human_agreement --records /w/tmp/selfplay.jsonl \\
         --checkpoint /w/runs/lam095/latest.pt --label lam095-control --control \\
         --verdicts /w/runs/eval
 
 `--verdicts` is spelled absolutely there on purpose. It defaults to `runs/eval`
-relative to the working directory, which is `benchmarks.duel`'s default and is
+relative to the working directory, which is `hexset.bench.duel`'s default and is
 right only when the runner's cwd is the repo root; every module here is normally
 run from `src/`, where the relative path would quietly make `src/runs/eval`.
 """
@@ -93,7 +93,7 @@ from typing import Collection, Iterable, Iterator, NamedTuple, Sequence
 
 import numpy as np
 
-from benchmarks.throughput import environment
+from hexset.bench.throughput import environment
 from hexset.actions import (
     Action,
     ActionSpace,
@@ -433,7 +433,7 @@ def summarise(scored: Sequence[Decision]) -> dict:
 
     # Nothing is rounded. A bucket's figures have to pool back to the
     # aggregate's exactly, and rounding here put a floor under that check for
-    # no gain: the printing formats its own decimals, and `benchmarks.duel`
+    # no gain: the printing formats its own decimals, and `hexset.bench.duel`
     # writes its verdict unrounded for the same reason.
     return {
         "decisions": total,

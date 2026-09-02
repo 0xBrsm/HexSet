@@ -91,7 +91,7 @@ class Game:
     # place this dataclass is read below checks `locked` only after the
     # ordinary computation, and an empty frozenset changes nothing it touches.
     #
-    # This is `hexset_ui.seating`'s per-seat setup lock, upstreamed: that
+    # This is `hexset.server.seating`'s per-seat setup lock, upstreamed: that
     # module built the same thing as a correction bolted onto a live `Game`
     # (`game.locked` as a plain, undeclared attribute) because this field did
     # not exist, and documented the one place that made wrong: `imagine` did
@@ -99,7 +99,7 @@ class Game:
     # from a table with a retired seat simulated turns for it anyway
     # (`docs/engine-divergence-2026-09-02.md`, request R2). Declaring the
     # field here and having `imagine` copy it (below) is the fix; nothing
-    # else about `hexset_ui.seating`'s policy -- *when* a seat retires, or
+    # else about `hexset.server.seating`'s policy -- *when* a seat retires, or
     # that only a still-empty seat ever does -- belongs in the engine, which
     # is why `lock_seat` places no restriction on which seat or when.
     locked: frozenset[int] = field(default_factory=frozenset)
@@ -114,7 +114,7 @@ def start(
 ) -> Game:
     """Start a game. `first` chooses which seat opens the setup snake and
     therefore takes the first real turn; `first=0` (the default) is today's
-    behaviour exactly. Rotating the snake's start is `hexset_ui.seating.start_at`
+    behaviour exactly. Rotating the snake's start is `hexset.server.seating.start_at`
     upstreamed -- a gym seats its creator at a random index and still wants the
     snake's compensating property (whoever places first in round one places
     last in round two), which holds from any starting seat, not only seat 0.
@@ -189,7 +189,7 @@ def _advance_setup(game: Game) -> None:
     "seats placed" count, which is what keeps `_in_second_setup_round`'s
     `setup_step >= num_players` test correct however many seats have retired
     -- the queue always holds all `2 * num_players` slots. Mirrors
-    `hexset_ui.seating.advance_setup`.
+    `hexset.server.seating.advance_setup`.
     """
     queue = game.setup_queue
     while game.setup_step < len(queue) and queue[game.setup_step] in game.locked:
@@ -208,7 +208,7 @@ def _advance_setup(game: Game) -> None:
 def _next_unlocked(game: Game, after: int) -> int:
     """The next seat past `after` in turn order, skipping retired ones.
 
-    Mirrors `hexset_ui.seating.next_unlocked`. Terminates unless every seat
+    Mirrors `hexset.server.seating.next_unlocked`. Terminates unless every seat
     is locked, which `lock_seat` does not itself prevent -- a caller that
     retires every seat has emptied the table, and there is no seat left for
     the turn to land on.
@@ -592,14 +592,14 @@ def lock_seat(game: Game, seat: int) -> None:
 
     From here on `seat` is skipped by the setup snake and by turn rotation,
     can never be `to_move`, and drops out of any trade offer already on the
-    table. This is the primitive `hexset_ui.seating.lock_seat`
+    table. This is the primitive `hexset.server.seating.lock_seat`
     (`ui:seating.py:148-154`) implemented as a post-apply correction because
     `hexset.game` had no such field -- see `Game.locked`'s docstring and
     `docs/engine-divergence-2026-09-02.md` request R2.
 
     It also matches that function's answer for what happens to a retired
     seat's pieces and hand: nothing. `lock_seat` never touches `game.state`.
-    `hexset_ui.api.Table._settle_locks` (`ui:api.py:304-329`) only ever calls
+    `hexset.server.api.Table._settle_locks` (`ui:api.py:304-329`) only ever calls
     it on a seat the setup snake reached still empty, so there is nothing
     built or held to clear; a caller that retires a seat mid-game gets the
     same treatment, and its hand and pieces are simply abandoned in place

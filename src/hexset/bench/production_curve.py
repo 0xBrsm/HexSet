@@ -24,7 +24,7 @@ import time
 from dataclasses import asdict, dataclass, replace
 from typing import Sequence
 
-from benchmarks.throughput import default_workers, environment
+from hexset.bench.throughput import default_workers, environment
 from hexset.arena import Z_95, compete, mean_interval, wilson
 from hexset.evaluate import Weights
 from hexset.tuning import entrant_for

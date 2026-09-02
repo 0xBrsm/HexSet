@@ -15,7 +15,7 @@ import json
 import sys
 import time
 
-from benchmarks.throughput import default_workers, environment
+from hexset.bench.throughput import default_workers, environment
 from hexset.arena import Z_95, wilson
 from hexset.dataset import base_rate, build, split_by_game
 from hexset.evaluate import TERM_NAMES, Weights
@@ -39,7 +39,7 @@ def report(name, samples, coefficients, intercept):
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--records", required=True, help="JSON lines from benchmarks.generate")
+    parser.add_argument("--records", required=True, help="JSON lines from hexset.bench.generate")
     parser.add_argument("--stride", type=int, default=8, help="actions between sampled positions")
     parser.add_argument("--epochs", type=int, default=400)
     parser.add_argument("--rate", type=float, default=0.5)

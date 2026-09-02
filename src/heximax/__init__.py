@@ -1643,7 +1643,7 @@ __all__ = [
 # `hexset.arena` and `hexset.tuning` know heximax only by name, the same way
 # they know the network-backed kinds `hexnet.netbot` provides -- neither
 # imports this package, so importing `heximax` (directly, or via anything
-# that does: `benchmarks.duel`, `hexset_ui`) is what makes the "heximax"
+# that does: `hexset.bench.duel`, `hexset.server`) is what makes the "heximax"
 # entrant kind spawnable and the "heximax-trading"/"heximax-notrade"
 # evaluator names fittable. A process that never imports `heximax` gets a
 # plain "unknown"/`KeyError` on the name rather than this module's numpy and

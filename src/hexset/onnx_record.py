@@ -27,9 +27,11 @@ record, and everything else that needs a model in hand, lives in
 `hexnet.export_onnx` instead.
 
 `record_from_game`/`record_batch` build the record from a live `Game`, for
-tests and for generating realistic export/parity samples -- not for shipping
-to hexset-ui, which builds its own from the rules it already has (phase 3 of
-the plan lives in that repo, not this one).
+tests and for generating realistic export/parity samples, and this is also
+what `hexset.server.api`'s `GET /api/record` and `hexset.clients.onnxbot` now
+call directly -- the two once carried their own copy (`hexset_ui.record`)
+because this module imported torch; it no longer does (see the module
+docstring above), so that copy is gone.
 
 Two properties of `hexset.encoding` carry over unchanged, because they are
 properties of the *feature layout*, not of who computes it:
@@ -65,7 +67,7 @@ from .state import NO_OWNER
 from .trading import responders as offer_responders
 from .victory import award_points
 
-# `hexset_ui.modelmeta`/`onnxbot._load_cached` read this off the exported
+# `hexset.server.modelmeta`/`onnxbot._load_cached` read this off the exported
 # graph's metadata: `"1"` (absent) is the old feature-tensor-in shape; `"2"`
 # the 23-input record; `"3"` contract 2 plus the four live-offer record
 # fields (trading design part 1); `"4"` contract 3 plus the two
@@ -169,7 +171,7 @@ def record_from_game(
 ) -> dict[str, np.ndarray]:
     """The information-set record for `perspective`, as a single (unbatched)
     row per field. `perspective` defaults to `to_move(game)`, same as
-    `hexset_ui.onnxbot.Request.seat` -- masks and the offer budget are
+    `hexset.clients.onnxbot.Request.seat` -- masks and the offer budget are
     properties of whoever is to move, and encoding from a different seat
     would pair a stranger's legal moves with someone else's hand.
 

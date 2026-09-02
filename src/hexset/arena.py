@@ -94,7 +94,7 @@ def register_preset(name: str, entrant: "Entrant") -> None:
 def register_checkpoint_loader(loader) -> None:
     """Register `hexnet.netbot.load`-shaped loader: `(path, topology, device)
     -> Loaded`, an object with `.policy`, `.space` and `.max_offers`. Lets
-    `benchmarks.aivat`/`benchmarks.human_agreement` load a checkpoint without
+    `hexset.bench.aivat`/`hexset.bench.human_agreement` load a checkpoint without
     importing hexnet themselves."""
     global _CHECKPOINT_LOADER
     _CHECKPOINT_LOADER = loader
@@ -562,7 +562,7 @@ def entrant_from_name(name: str) -> Entrant:
         # `max_offers=None`, which for a network means the budget its checkpoint
         # trained under — see the field's own comment. The suffix exists so a
         # duel can price the policy's *proposing* behaviour, which sits at 95%
-        # of the legal cap and 5x the rate cited in `benchmarks.behaviour`.
+        # of the legal cap and 5x the rate cited in `hexset.bench.behaviour`.
         path, separator, offers = name[len(NETWORK) :].partition("@")
         return Entrant(
             name=f"network-offers{offers}" if separator else "network",

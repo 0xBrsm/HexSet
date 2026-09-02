@@ -9,7 +9,7 @@ win-rate table would catch.
 So this walks recorded games and asks the same questions a published summary of
 Colonist.io games answers: how often is each card played, when in the game, and
 what does a player who played it go on to do. That summary is third-party and
-unverifiable — see `benchmarks/behaviour.py` for what it is and what it is not —
+unverifiable — see `hexset/bench/behaviour.py` for what it is and what it is not —
 so its figures are targets to notice divergence from, not ground truth to fit to.
 """
 

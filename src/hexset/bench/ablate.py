@@ -19,7 +19,7 @@ import sys
 import time
 from dataclasses import fields, replace
 
-from benchmarks.throughput import default_workers, environment
+from hexset.bench.throughput import default_workers, environment
 from hexset.arena import Z_95, wilson
 from hexset.tuning import WEIGHTS, duel
 

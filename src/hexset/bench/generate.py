@@ -16,7 +16,7 @@ import sys
 import time
 from multiprocessing import Pool
 
-from benchmarks.throughput import default_workers, environment
+from hexset.bench.throughput import default_workers, environment
 from hexset.arena import CHECKPOINT_KINDS, PRESETS, entrant_from_name, spawn
 from hexset.board.board import random_base_board
 from hexset.record import Record, record_game, write
@@ -41,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--games", type=int, default=100)
     # A preset name, or any checkpoint-prefixed entrant the arena resolves —
     # `network:<path>` records a trained policy's self-play, which is what
-    # `benchmarks.behaviour` needs to profile a checkpoint's style.
+    # `hexset.bench.behaviour` needs to profile a checkpoint's style.
     parser.add_argument("--bot", default="greedy")
     parser.add_argument("--players", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)

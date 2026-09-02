@@ -14,7 +14,7 @@ import argparse
 import json
 import sys
 
-from benchmarks.throughput import environment
+from hexset.bench.throughput import environment
 from hexset.arena import Z_95, wilson
 from hexset.behaviour import (
     by_count,

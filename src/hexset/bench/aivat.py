@@ -39,7 +39,7 @@ recorded duel is bit-identical to it -- which is how this gets measured on the
 800-game cells in `runs/eval/` without playing new games.
 `--check` asserts that identity against the recorded verdict.
 
-    python -m benchmarks.aivat network:/w/runs/lam095/latest.pt greedy \\
+    python -m hexset.bench.aivat network:/w/runs/lam095/latest.pt greedy \\
         --games 800 --duel-seed 20000 --workers 26 \\
         --value network:/w/runs/lam095/latest.pt
 """

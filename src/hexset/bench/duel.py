@@ -8,7 +8,7 @@ selection — `train.versus` at 400 games — between any two checkpoints, so a
 block's gain is measured as one high-resolution difference rather than fitted
 through noise.
 
-    python -m benchmarks.duel /w/runs/ppo5/latest.pt /w/runs/ppo4/latest.pt \
+    python -m hexset.bench.duel /w/runs/ppo5/latest.pt /w/runs/ppo4/latest.pt \
         --games 400 --label-a ppo5 --label-b ppo4
 
 Every verdict names its seat geometry -- see `GEOMETRIES` -- because the two
@@ -226,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 "the --workers 1 path (bare checkpoints, network-vs-network) "
                 "needs the hexnet package: import hexnet.duel, or run "
-                "`python -m hexnet.duel` instead of `python -m benchmarks.duel`, "
+                "`python -m hexnet.duel` instead of `python -m hexset.bench.duel`, "
                 "or pass --workers 2 or more to use the arena path instead.",
                 file=sys.stderr,
             )

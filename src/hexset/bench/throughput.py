@@ -84,7 +84,7 @@ def run(games: int, players: int, seed: int, workers: int) -> Result:
     )
 
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[3]
 
 
 def default_workers() -> int:

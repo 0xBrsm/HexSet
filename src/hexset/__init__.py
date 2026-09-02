@@ -9,14 +9,15 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
-# `hexset`'s version is bumped together with the root `hexset-ui` package's
-# (`../../pyproject.toml`) -- see `engine/tests/test_versions.py`, which
-# fails the moment the two drift.
+# `hexset`, `heximax`, `hexset.bench`, `hexset.server` and `hexset.clients`
+# are all one distribution now (`../../pyproject.toml`) -- see
+# `tests/test_versions.py`, which fails the moment this drifts from the
+# installed metadata.
 try:
     __version__ = metadata.version("hexset")
 except metadata.PackageNotFoundError:
     try:
-        with open(Path(__file__).resolve().parent.parent / "pyproject.toml", "rb") as f:
+        with open(Path(__file__).resolve().parent.parent.parent / "pyproject.toml", "rb") as f:
             __version__ = tomllib.load(f)["project"]["version"]
     except (OSError, KeyError, tomllib.TOMLDecodeError):
         __version__ = "0+unknown"

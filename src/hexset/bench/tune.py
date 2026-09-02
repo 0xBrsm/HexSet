@@ -13,7 +13,7 @@ import json
 import sys
 import time
 
-from benchmarks.throughput import default_workers, environment
+from hexset.bench.throughput import default_workers, environment
 from hexset.tuning import ACCEPT_Z, Step, as_source, climb, confirm
 
 

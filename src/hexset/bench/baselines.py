@@ -13,7 +13,7 @@ import json
 import sys
 from dataclasses import asdict
 
-from benchmarks.throughput import default_workers, environment
+from hexset.bench.throughput import default_workers, environment
 from hexset.arena import Z_95, compete, lineup_from_names, mean_interval, pooled
 
 DEFAULT_LINEUP = ("greedy", "greedy", "random", "random")

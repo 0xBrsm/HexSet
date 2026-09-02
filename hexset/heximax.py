@@ -39,43 +39,32 @@ tree's own responses are still searched from the responder's seat exactly as
 in P1. `max_offers=0` never proposes and always declines, unchanged.
 
 Cost: leaf evaluations per move are capped by `max_nodes`
-(`DEFAULT_MAX_NODES`, 600). P1 measured 2026-09-01 on the dev container,
-three four-seat games a side on the same boards, every seat the same bot:
-`search2` 2.08 ms/move at 37.4 leaves/move (p99 253, max 647); `heximax`
-at the default budget 3.15 ms/move at 41.4 leaves/move (p99 439, max 600),
-and 3.83 ms/move at 50.1 leaves/move (max 1541) with the budget lifted --
-1.5x `search2` per move, against the design's ceiling of 2x. P2 re-measured
-the same way 2026-09-02 (three four-seat games a side, board seeds 0/1/2,
-`search2-offers3` -- `max_offers=3`, matching heximax's own budget rather
-than the engine's unrestricted default, or the games are not comparable):
-on this build's own P1 portion (the adapter disabled, `_root_options`/
-`_options_in` reverted to the P1 shape) heximax reproduces 3.15 ms/move,
-3.146 measured, 1.66x `search2-offers3`'s 1.90 -- P1's own search and
-evaluator are unchanged. **With the P2 adapter active, 6.58 ms/move,
-3.46x -- over the 2x ceiling.** The overrun is not `propose_actions`'
-per-call cost alone (`PROPOSE_SHORTLIST` bounds that to a handful of
-`score_proposal` calls a decision, cut from an unbounded scan of
-`candidate_bundles` early in P2's own build); it is that `score_proposal`'s
-crisp `willing` gate proposes far more selectively than the engine's naive
-one-for-one sample did, so a real game trades roughly a third as often
-(measured on the 20-game census, `tests/test_heximax.py`:
-`test_multi_card_and_one_for_one_proposals_both_occur_over_twenty_games`)
--- fewer cheap negotiation actions average against the leaf-budgeted build
-decisions that dominate the remaining ones, which is enough on its own
-to move the ratio (confirmed by disabling `propose_actions`'s scoring
-entirely and re-measuring: still ~1.45x over the P1 figure from the
-trade-volume drop alone, before any of the adapter's own compute is
-counted). Flagged for the PI rather than silently absorbed: shrinking
-`PROPOSE_SHORTLIST` further has little room left to give (measured at 3
-and 5, both ~3.3-3.5x), and the volume drop is downstream of `willing`
-being read under `relative` -- a trade that also improves the proposer's
-position pulls the responder's own relative reading down by construction,
-so many real trades that look good for both sides in absolute terms score
-below `propose_margin` for the responder. Whether that is the crisp gate
-being too strict, `relative` being the wrong stance for `willing`
-specifically, or the ceiling needing a protocol-P0 allowance is a P3
-question, not one this build's adapter should answer by quietly loosening
-the gate to hit a number.
+(`DEFAULT_MAX_NODES`, 600). Measured 2026-09-02, after an optimization pass
+that memoized `Evaluator.survey` per decision, walked `_pieces` once per
+`progress()`, computed `propose_actions`' "before" reading once and reused it,
+and stopped `candidate_bundles` paying for `deficit`/`surplus` values it
+never read (see `agents/reference/heximax.md`, its own CHANGELOG entry, and
+this range's commits for the per-change breakdown) -- same methodology as
+before the pass (three four-seat games a side, same boards, board seeds
+0/1/2, `search2-offers3`'s `max_offers=3` matching heximax's own budget):
+`heximax` 5.14 ms/move vs `search2-offers3` 1.79 ms/move, **2.87x** -- down
+from 7.10 ms/move and 3.91x measured the same way before the pass, but still
+over the design's 2x ceiling. `bot.choose()`'s own choices, and the number of
+leaves it spends getting to them, are unchanged by the pass on every position
+checked (`test_choices_are_byte_identical_to_the_recorded_census`); every bit
+of the saving is the same leaves and the same decisions, computed with less
+redundant work. The remainder is not a compute problem: `score_proposal`'s
+crisp `willing` gate, read under `relative`, proposes far more selectively
+than the engine's naive one-for-one sample, so a real game trades roughly a
+third as often (the 20-game census,
+`test_multi_card_and_one_for_one_proposals_both_occur_over_twenty_games`) --
+fewer cheap negotiation actions average against the leaf-budgeted build
+decisions that dominate the rest, confirmed by disabling `propose_actions`'s
+scoring entirely and re-measuring (still ~1.45x over the P1-only figure from
+the trade-volume drop alone). Whether the gate is too strict, `relative` is
+the wrong stance for `willing`, or the ceiling needs a protocol-P0 allowance
+is a P3 question, not one this adapter should answer by loosening the gate to
+hit a number.
 """
 
 from __future__ import annotations
@@ -222,6 +211,7 @@ class Belief:
         )
 
     def exact(self, seat: int) -> bool:
+        """Whether `seat`'s hand is read verbatim rather than estimated."""
         return self.omniscient or seat == self.perspective
 
     def expected_hand(self, seat: int) -> list[float]:
@@ -538,6 +528,12 @@ class HonestEvaluator:
         knower: int | None = None,
         belief: Belief | None = None,
     ) -> tuple[float, ...]:
+        """The raw term values `score` weights, in `evaluate.TERM_NAMES` order.
+
+        `hand` is `state.hands[seat]` for the knower (or when `omniscient`)
+        and `Belief.expected_hand(seat)` otherwise -- `evaluate` decides
+        which and passes it in, so this method itself never has to ask.
+        """
         walk = self.survey(state, seat)
         held = sum(hand)
         points = walk.buildings + award_points(state, seat)
@@ -565,6 +561,7 @@ class HonestEvaluator:
         knower: int | None = None,
         belief: Belief | None = None,
     ) -> float:
+        """`terms` dotted with the weight vector, plus the win bonus at 10 VP."""
         values = self.terms(state, seat, hand, knower=knower, belief=belief)
         total = 0.0
         for weight, value in zip(self.vector, values):
@@ -596,6 +593,7 @@ class HonestEvaluator:
         return out
 
     def evaluate_game(self, game: Game, seat: int) -> list[float]:
+        """`evaluate`, building the belief from `game`'s own ledger. The leaf call."""
         belief = Belief.from_game(game, seat, omniscient=self.omniscient)
         return self.evaluate(game.state, seat, belief)
 
@@ -729,6 +727,7 @@ class Heximax:
 
     @property
     def omniscient(self) -> bool:
+        """Whether this bot reads every seat's true hand (mode="omniscient")."""
         return self.evaluator.omniscient
 
     @property
@@ -739,6 +738,15 @@ class Heximax:
     # -- the decision --------------------------------------------------------
 
     def choose(self, game: Game) -> Action:
+        """The bot's one public entry point: `Bot.choose(game) -> Action`.
+
+        Setup, a no-trade bot's forced decline, and discard are resolved
+        directly (placement's prior, `marginal_loss`, or the only option);
+        everything else determinizes the belief into `k` worlds, builds the
+        root's own options (`_root_options` -- engine legality plus, in
+        MAIN, the P2 adapter's `propose_actions`), and either returns the
+        one option available or hands the rest to `_search`.
+        """
         seat = to_move(game)
         self._spent = 0
         self._budget = self.max_nodes
@@ -905,21 +913,14 @@ class Heximax:
                 for p, value in enumerate(self._value(child, depth - 1, knower, ply + 1)):
                     total[p] += weight * value
             return total
-        child = imagine(game, self.rng)
-        apply(child, action)
-        return self._value(child, depth - 1, knower, ply + 1)
+        return self._value(self._plain_child(game, action), depth - 1, knower, ply + 1)
 
     def _over_dice(self, game: Game, depth: int, knower: int, ply: int) -> list[float]:
-        # At the shipped defaults (depth=2, exact_roll_plies=EXACT_ROLL_PLIES=2,
-        # every preset), a ply this deep in a `choose()` call is always < 2,
-        # so this branch never runs today (profile: micro_benchmarks.txt,
-        # search2_comparison.txt) -- but `depth` is a public field
-        # (`Entrant.depth`, `heximax()`'s `depth` param) the module's own
-        # design anticipates raising ("rolls stay exact eleven-way at depth
-        # <= 2 and sampled beyond", heximax.md §3(b)), and this is what makes
-        # a deeper search's cost stay bounded when that happens. Left in,
-        # not dead code by the design's own account, just unreached by every
-        # preset shipped so far.
+        # Unreached at every shipped preset (depth=2 <= exact_roll_plies=2,
+        # so `ply` never gets this high) -- kept because `depth` is a public
+        # field the design anticipates raising ("rolls stay exact eleven-way
+        # at depth <= 2 and sampled beyond", heximax.md §3(b)); this is what
+        # bounds a deeper search's cost when it is.
         if ply >= self.exact_roll_plies:
             child = imagine(game, self.rng)
             roll_dice(child)
@@ -1084,10 +1085,8 @@ class Heximax:
         someone's true hand: see `_partner_delta`.
 
         `vector`, when given, skips rebuilding the belief and re-running
-        `evaluate` -- both are pure functions of `(state, ledger, knower)`, so
-        a caller that already has the vector for this exact triple (see
-        `_before_vector`) can hand it in and pay only for `rank`'s cheap
-        read-out of `target`'s entry.
+        `evaluate` for a caller that already has it for this exact triple
+        (see `_before_vector`).
         """
         if vector is None:
             belief = Belief(state, ledger, knower, omniscient=self.omniscient)
@@ -1117,17 +1116,10 @@ class Heximax:
     def _before_vector(self, game: Game, seat: int) -> list[float]:
         """The per-seat vector for `game`'s own, unmutated state, `seat`'s belief.
 
-        Every "before" read inside one `propose_actions` call --
-        `marginal_gain`/`marginal_loss` (hence `deficit`/`surplus`),
-        `bundle_delta`'s search over counterparties, `score_proposal`'s
-        `willing`, `rank_partners`' `score` -- reads exactly this triple,
-        `(game.state, game.ledger, knower=seat)`, varying only which seat's
-        row (`target`) and which stance (`rank`) it is read with afterward.
-        Both of those are cheap lookups into the same vector, so
-        `propose_actions` computes it once and threads it through as
-        `before_vector` instead of every one of those rebuilding the belief
-        and re-running the full `evaluate` for a state and ledger that never
-        change across the call.
+        Every "before" read inside one `propose_actions` call is this exact
+        triple, `(game.state, game.ledger, knower=seat)` -- see
+        `_partner_delta`'s `before_vector` paragraph for which callers share
+        it and why that is safe.
         """
         belief = Belief(game.state, game.ledger, seat, omniscient=self.omniscient)
         return self.evaluator.evaluate(game.state, seat, belief)
@@ -1524,6 +1516,14 @@ class Heximax:
             return chance * -theirs
 
         return tuple(sorted(opponents, key=score, reverse=True))
+
+    # -- the adapter: everything above is protocol-free valuation; this
+    # method is where it meets today's protocol. Two touch points, both
+    # called from `search` above: `_root_options` calls `propose_actions`
+    # (entry -- scores shaped as today's `Action`); `_options_in` calls
+    # `accept_rule` (exit -- a plain valuation predicate reused as a gate).
+    # A later protocol changes this method and that one call site; nothing
+    # above needs to know.
 
     def propose_actions(self, game: Game, seat: int) -> list[Action]:
         """The protocol-P0 adapter: the top `propose_top_n` scored proposals.

@@ -491,26 +491,22 @@ class HonestEvaluator:
         certify: Sequence[tuple[int, Sequence[int]]] = (),
     ) -> Belief:
         """`Belief(state, ledger, perspective, ...)`, memoized for the life of
-        one `Heximax.choose()` -- the structural pass's step (a).
+        one `Heximax.choose()`.
 
         Exact by construction: the key is every field `Belief.__init__` reads
-        to build `known`/`unknown`/`pool` (every seat's hand *size*, the
-        ledger's known/unknown per seat, the bank, `num_players`,
-        `perspective` and `certify`) -- `omniscient` is fixed for this
-        evaluator's whole life, so it need not be in the key. Two calls
-        sharing a key are the same `Belief` byte-for-byte because `Belief` is
-        a pure function of exactly these inputs; nothing about *which* node
-        produced them can leak in, since none of them lives on `self.state`.
+        to build `known`/`unknown`/`pool` -- each seat's hand *size*, the
+        ledger's known/unknown, the bank, `num_players`, `perspective`,
+        `certify`. (`omniscient` is fixed for this evaluator's life.) Two
+        calls sharing a key are the same `Belief` byte-for-byte, because
+        `Belief` is a pure function of exactly those, none of which says
+        which node produced them.
 
-        Restricted to callers that only ever read the memoized fields off the
-        result (`expected_hand`/`table_holding`/`steal_odds`/`p_holds`/
-        `exact`) -- `Belief.sample` and `Belief.deck_odds`
-        (`unseen_dev_cards`) read `self.state` in full (board occupancy, the
-        deck, dev cards, knights played), which this key does not capture, so
-        a `Belief` cached under one node's key could hand back a different
-        node's board there. `Heximax.worlds`/`draw_children`, the only two
-        callers that use `sample`/`deck_odds`, keep building a fresh
-        `Belief.from_game` directly, never through this cache.
+        Only for callers that read the memoized fields alone
+        (`expected_hand`/`table_holding`/`steal_odds`/`p_holds`/`exact`).
+        `sample` and `deck_odds` read `self.state` in full -- board, deck,
+        dev cards, knights played -- which this key does not capture, so
+        `worlds`/`draw_children`, their only callers, build a fresh
+        `Belief.from_game` instead.
         """
         key = (
             tuple(tuple(hand) for hand in state.hands),
@@ -542,16 +538,13 @@ class HonestEvaluator:
         for the life of one `Heximax.choose()`.
 
         Both are pure functions of the board occupancy (`survey` also of the
-        robber -- see its own docstring), so the same key always yields the
-        same value: caching changes nothing about what `terms` reads, only
-        how often it is recomputed. Within one decision, 92.4% of these calls
-        are exact repeats of an already-seen key (the k sampled worlds share
-        the root's board occupancy, and many tree nodes never move a vertex
-        or the robber), so this turns most of that into a dict lookup. The
-        two are cached together under one key because `terms` needs both on
-        every call and the key is the expensive part to build.
-        `Heximax.choose` clears the cache at the top of every call, so it
-        never grows across decisions.
+        robber), so the key decides the value outright: caching changes
+        nothing about what `terms` reads, only how often it is recomputed.
+        92.4% of the calls in one decision repeat a key already seen -- the
+        k sampled worlds share the root's occupancy, and most tree nodes
+        move neither a vertex nor the robber. They share one key because
+        `terms` needs both and the key is the expensive part.
+        `Heximax.choose` clears the cache every decision.
         """
         key = (tuple(state.vertex_owner), tuple(state.vertex_building), state.robber, seat)
         cached = self._walk_cache.get(key)
@@ -668,17 +661,15 @@ class HonestEvaluator:
         is taken as wholly untyped: `known` empty, `unknown` the public size.
         `evaluate_game` builds the real belief from the game's ledger.
 
-        Memoized for the life of one `Heximax.choose()` -- the structural
-        pass's step (b). Exact by construction: the key names every input
-        `terms`/`score` (and what they call -- `survey`, `progress`,
-        `victory.award_points`/`card_points`) read besides `hand`/`belief`
-        themselves -- board occupancy and the robber (`survey`), road and
-        knight counts, the longest-road/largest-army holders, the knower's
-        own development cards (the only seat `card_points` scores) -- plus
-        every seat's hand and `belief`'s own `known`/`unknown`/`pool`
-        (`expected_hand`'s only inputs), so a hit is byte-identical to
-        recomputing regardless of whether `belief` came from `belief_for`,
-        a fresh `Belief.from_game`, or this method's own untyped fallback.
+        Memoized for the life of one `Heximax.choose()`, exactly: the key
+        names every input `terms`/`score` read besides `hand`/`belief` --
+        board occupancy and the robber (`survey`), road and knight counts,
+        the longest-road/largest-army holders, the knower's own development
+        cards (the only seat `card_points` scores) -- plus every seat's hand
+        and the belief's `signature()`, which is `expected_hand`'s only
+        input. A hit is byte-identical to recomputing, whether the belief
+        came from `belief_for`, a fresh `Belief.from_game`, or the untyped
+        fallback above.
         """
         if belief is None and knower is not None and not self.omniscient:
             belief = Belief(
@@ -1102,15 +1093,12 @@ class Heximax:
         """`legal_actions` in a determinized world, minus an ACCEPT it cannot
         honour or one `accept_rule` would refuse.
 
-        The engine offers ACCEPT to whoever it is asking because it built the
-        list of responders from the true hands; a world sampled without that
-        knowledge may have dealt the seat being asked a hand that cannot
-        cover the offer, so that hard constraint drops ACCEPT outright. The
-        soft constraint runs at every `TRADE_RESPOND` node the tree reaches,
-        not only the root: the search may only offer ACCEPT_TRADE where
-        `accept_rule` clears `accept_margin`, and `knower` there is always
-        the search's root seat, never the responder itself when the two
-        differ -- so a simulated opponent's row is read off `knower`'s own
+        The engine builds its responder list from the true hands, so a world
+        sampled without that knowledge may have dealt the seat being asked a
+        hand that cannot cover the offer: that hard constraint drops ACCEPT
+        outright. The soft one runs at every `TRADE_RESPOND` node, not only
+        the root, and `knower` there is always the search's root seat, never
+        the responder -- so a simulated opponent's row is read off `knower`'s
         belief (`_partner_delta`), never that world's sampled truth, and its
         accept cannot depend on which of the `k` worlds it was sampled into.
         """
@@ -1185,12 +1173,6 @@ class Heximax:
         call `_partner_delta` directly with an explicit `rank`."""
         return self._read_row(state, ledger, seat, seat, self._rank, vector=vector)
 
-    def _before_vector(self, game: Game, seat: int) -> list[float]:
-        """`game`'s own, unmutated vector under `seat`'s belief -- the
-        `before_vector` every call in one `propose_actions` shares, see
-        `_partner_delta`."""
-        return self._vector(game.state, game.ledger, seat)
-
     def marginal_gain(
         self, game: Game, seat: int, resource: int, *,
         before_vector: list[float] | None = None,
@@ -1251,22 +1233,20 @@ class Heximax:
         """`target`'s row of the vector if `target` gave `give` and got `want`
         from `counterparty`, read entirely through `knower`'s own belief.
 
-        `bundle_delta(game, seat, give, want, counterparty)` is the case
-        `target == knower == seat`, where the trader's own hand is
-        legitimately exact; this generalisation estimates what a DIFFERENT
-        seat would make of a trade without ever reading that seat's true
-        hand, only `knower`'s belief about it (`score_proposal`'s `willing`,
-        `rank_partners`, and the search's gate on a simulated opponent's
-        `ACCEPT_TRADE` all read a row other than their own this way). The
-        ledger is updated from `give`/`want` directly (`spend`/`receive`),
-        never by diffing `state.hands` before and after, so a third party's
-        hidden composition cannot leak through a clamp-at-zero. `state.hands`
-        is mutated exactly for `knower` and folded into one total for anyone
-        else -- only `knower`'s own row is ever read verbatim. `before_vector`,
-        when given, is `_before_vector(game, knower)`: the "before" side
-        never depends on `give`/`want`/`counterparty`, so a caller making
-        several of these calls against the same unmutated game computes it
-        once and passes it through.
+        `bundle_delta` is the case `target == knower == seat`, where the
+        trader's own hand is legitimately exact; this generalisation
+        estimates what a DIFFERENT seat would make of a trade from
+        `knower`'s belief alone (`score_proposal`'s `willing`,
+        `rank_partners` and the search's gate on a simulated opponent's
+        `ACCEPT_TRADE` all read someone else's row this way). Invariants:
+        the ledger is updated from `give`/`want` directly, never by diffing
+        `state.hands`, so a third party's hidden composition cannot leak
+        through a clamp-at-zero; and `state.hands` moves exactly for
+        `knower`, folded into one total for anyone else, because only
+        `knower`'s own row is ever read verbatim. `before_vector`, when
+        given, is `_vector(game.state, game.ledger, knower)` -- the "before"
+        side does not depend on `give`/`want`/`counterparty`, so a caller
+        making several of these against one unmutated game computes it once.
         """
         before = self._read_row(
             game.state, game.ledger, knower, target, rank, vector=before_vector
@@ -1351,16 +1331,14 @@ class Heximax:
 
         The give side is drawn from resources `seat` holds (a proposer can
         only offer what it has); the want side from every resource, since
-        wanting one needs no holding of `seat`'s own, only a table that
-        might supply it (`score_proposal`'s `p_holds` prices that later). A
-        2-for-1 of a single surplus resource is added whenever a port makes
-        it cheaper than the bank, independent of `max_side`. Every returned
-        pair is `well_formed` and `can_propose` against the current state,
-        so every candidate is legal to emit as-is. The resource sets are
-        built directly rather than through `deficit`/`surplus` (which would
-        each spend an `evaluate()`-backed marginal read this method never
-        uses) -- `propose_actions` calls those itself where the values are
-        actually read.
+        wanting one needs only a table that might supply it
+        (`score_proposal`'s `p_holds` prices that later). A 2-for-1 of a
+        single surplus resource is added whenever a port makes it cheaper
+        than the bank, independent of `max_side`. Every returned pair is
+        `can_propose` against the current state, so every candidate is legal
+        to emit as-is. The resource sets are built directly rather than
+        through `deficit`/`surplus`, whose `evaluate()`-backed marginal
+        reads this method never uses; `propose_actions` calls those itself.
         """
         state = game.state
         hand = state.hands[seat]
@@ -1407,7 +1385,7 @@ class Heximax:
         if not opponents:
             return 0.0
         if before_vector is None:
-            before_vector = self._before_vector(game, seat)
+            before_vector = self._vector(game.state, game.ledger, seat)
         delta_me = max(
             self.bundle_delta(game, seat, give, want, opp, before_vector=before_vector)
             for opp in opponents
@@ -1487,7 +1465,7 @@ class Heximax:
         paranoid = STANCES["paranoid"]
         opponents = [p for p in range(game.state.num_players) if p != seat]
         if before_vector is None:
-            before_vector = self._before_vector(game, seat)
+            before_vector = self._vector(game.state, game.ledger, seat)
 
         def score(opp: int) -> float:
             chance = belief.p_holds(opp, want)
@@ -1509,23 +1487,20 @@ class Heximax:
 
         Replaces the engine's one-for-one `PROPOSE_TRADE` sample
         (`actions._offer_actions`) among the root options -- mechanical and
-        untuned, rewritten whenever the protocol changes (module docstring's
-        `trade` section). Candidates and their scores are read off the true
-        game directly, not per determinized world: an offer's legality
-        depends only on what the proposer holds, which is always exact, and
-        the valuation already reads opponents through the honest belief
-        built from the real ledger. The `k` worlds still decide what a
-        proposal is *worth* once it is a root option, searched like any
-        other action. Candidates scoring at or below `propose_margin` are
-        dropped, and `score_proposal` -- a `bundle_delta`/`_partner_delta`
-        call per opponent, twice over -- is the module's single largest cost,
-        so `deficit`/`surplus` (cheap: no opponent belief) shortlist the
-        field to `PROPOSE_SHORTLIST` first and only that shortlist pays for
-        the partner-aware score.
+        untuned, rewritten whenever the protocol changes. Candidates and
+        their scores are read off the true game, not per determinized world:
+        an offer's legality depends only on what the proposer holds, which
+        is always exact, and the valuation already reads opponents through
+        the honest belief. The `k` worlds still decide what a proposal is
+        *worth* once it is a root option. Candidates at or below
+        `propose_margin` are dropped, and `score_proposal` -- a
+        `bundle_delta`/`_partner_delta` per opponent, twice over -- is the
+        module's single largest cost, so the cheap `deficit`/`surplus`
+        shortlist the field to `PROPOSE_SHORTLIST` first.
         """
         # Every "before" read below shares this one (game.state, game.ledger,
         # seat) triple, computed once rather than per candidate.
-        before_vector = self._before_vector(game, seat)
+        before_vector = self._vector(game.state, game.ledger, seat)
         candidates = self.candidate_bundles(game, seat)
         if not candidates:
             return []
@@ -1657,13 +1632,6 @@ def heximax(
 
 
 __all__ = [
-    "BY_MODE",
-    "Belief",
-    "DEFAULT_MAX_NODES",
-    "Heximax",
-    "HonestEvaluator",
-    "MODES",
-    "NO_TRADE_WEIGHTS",
-    "TRADING_WEIGHTS",
-    "heximax",
+    "BY_MODE", "Belief", "DEFAULT_MAX_NODES", "Heximax", "HonestEvaluator",
+    "MODES", "NO_TRADE_WEIGHTS", "TRADING_WEIGHTS", "heximax",
 ]

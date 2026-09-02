@@ -38,31 +38,28 @@ responses are still searched from the responder's own seat. `max_offers=0`
 never proposes and always declines.
 
 Cost: leaf evaluations per move are capped by `max_nodes`
-(`DEFAULT_MAX_NODES`, 600). The mirror table --
-`agents/scripts/heximax_cost.py`, three four-seat games an arm, board seeds
-0/1/2, every seat the same preset, `search2-offers3` at heximax's own
-three-offer budget as the control, arms interleaved seed by seed -- read
-**2.617x** before the structural performance pass (2026-09-02, `810dec7`,
-idle box: 4.759 ms/move against 1.818). That pass landed only its exact,
-census-preserving steps; paired against `810dec7` in one process, they
-remove **12.3%** of its ms/move (mean of three paired reads, 0.877) and **13.0%**
-of its function calls per game (10.47M -> 9.11M, which no load can move).
-On the reference read -- near-idle box, both arms in one process --
-**2.687x -> 2.357x**
-(`runs/eval/heximax/structural-cost-paired-vs-810dec7.json`).
+(`DEFAULT_MAX_NODES`, 600). The mirror table is
+`agents/scripts/heximax_cost.py` -- three four-seat games an arm, board
+seeds 0/1/2, every seat the same preset, `search2-offers3` at heximax's own
+three-offer budget as the control, arms interleaved seed by seed. Two rules
+for reading it, both learned the hard way in the structural pass:
 
-Read the mirror ratio only on an idle box. heximax's per-move cost inflates
-faster than `search2`'s under contention, so the same code reads anywhere
-from 2.6x to 3.1x as the box fills; the paired numbers above hold because
-both arms met the same machine. Read it beside `ratio_phase_neutral` too,
-which re-weights the control by heximax's own phase mix: `search2` books
-~20x more `TRADE_RESPOND` decisions over the same games (2481 against 126
-over nine), because the engine's naive one-for-one `PROPOSE_TRADE` sample
-makes offers `score_proposal`'s crisp `willing` gate does not, and those
-cheap decisions sit in the mirror table's denominator. Phase-neutral,
-heximax reads **2.08x** -- at the ceiling per decision of the kind it
-actually faces -- with MAIN at 2.18x, ROBBER at **1.94x** (the pass's named
-suspect, now inside it) and ROLL the one bucket over, at **3.34x**.
+* **On an idle box, and paired.** heximax's per-move cost inflates faster
+  than `search2`'s under contention, so identical code reads 2.6x idle and
+  3.1x at load 5 -- more drift than most changes are worth. Time the before
+  and after in one process instead. So paired, the pass's exact steps took
+  **2.687x -> 2.357x**: -12.3% of ms/move and -13.0% of function calls per
+  game (10.47M -> 9.11M, which no load can move;
+  `runs/eval/heximax/structural-cost-paired-vs-810dec7.json`).
+* **Beside `ratio_phase_neutral`**, which re-weights the control by
+  heximax's own phase mix. `search2` books ~20x more `TRADE_RESPOND`
+  decisions over the same games (2481 against 126 over nine), because the
+  engine's naive one-for-one `PROPOSE_TRADE` sample makes offers
+  `score_proposal`'s crisp `willing` gate does not, and those cheap
+  decisions sit in the mirror table's denominator. Phase-neutral heximax
+  reads **2.08x** -- at the ceiling per decision of the kind it actually
+  faces -- MAIN 2.18x, ROBBER **1.94x**, ROLL the one bucket over at
+  **3.34x**.
 
 Three behaviour-changing steps were registered and none landed: a
 transposition table across the iterative-deepening passes hits 0.046% of
@@ -70,18 +67,18 @@ transposition table across the iterative-deepening passes hits 0.046% of
 positions); a vectorised evaluator would need `_value` rewritten
 breadth-first to beat a Python loop that is 2.0% of runtime; and sampling
 the ply-1 roll (`EXACT_ROLL_PLIES` 2 -> 1), worth -11.9%, cleared the
-trading strength gate at 67.0% and missed the no-trade gate's pre-stated
+trading strength gate at 67.0% but missed the no-trade gate's pre-stated
 floor by 0.6 of a game, so it was reverted rather than tuned. Whether the
-remaining gap is a cost problem or a denominator problem -- the trade gate
-too strict, `relative` the wrong stance for `willing`, or the ceiling owed
-a protocol allowance -- is a design question, not one a performance pass
+rest is a cost problem or a denominator problem -- the trade gate too
+strict, `relative` the wrong stance for `willing`, or the ceiling owed a
+protocol allowance -- is a design question, not one a performance pass
 answers by loosening a gate to hit a number.
 
-`bot.choose()`'s own choices, and the number of leaves it spends getting to
-them, are checked on every position by
+`bot.choose()`'s own choices, and the leaves it spends reaching them, are
+checked on every position by
 `test_choices_are_byte_identical_to_the_recorded_census`. History -- the
-optimization pass, the structural pass, and their per-change breakdowns --
-is in `agents/reference/heximax.md`.
+optimization and structural passes, with their per-change breakdowns -- is
+in `agents/reference/heximax.md`.
 """
 
 from __future__ import annotations
@@ -474,10 +471,10 @@ class HonestEvaluator:
     when `omniscient`); victory-point cards count only for the knower.
     `progress` on an expected hand is an approximation -- a maximum of
     minimums, so the value on the mean differs from the mean of the values --
-    that `exact_progress_samples > 0` replaces with an average over that many
-    hands sampled from the belief. Supply-aware: progress toward a purchase
-    whose piece supply is exhausted is zero, so the maximum falls back to
-    what can still be built.
+    which `exact_progress_samples > 0` replaces with an average over that
+    many sampled hands. Supply-aware: progress toward a purchase whose piece
+    supply is exhausted is zero, so the maximum falls back to what can still
+    be built.
     """
 
     def __init__(
@@ -1294,12 +1291,10 @@ class Heximax:
         `losses`, would not. Under omniscience that reasoning is void: `known`
         *is* `state.hands`, every row is scored on the real cards, and folding
         would price an all-one-resource fiction whose `progress`, `diversity`
-        and `scarce` terms are nothing like the position's. Measured on the
-        seat's own row, the fold overstated how much a one-for-one trade cost
-        the partner by ~10x (`test_an_omniscient_partner_read_...`), so
-        `score_proposal`'s `willing` gate almost never fired and
-        `accept_rule`, reading a counterparty it had just impoverished under
-        `relative`, cleared far too easily.
+        and `scarce` terms are nothing like the position's -- it overstated a
+        one-for-one trade's cost to the partner by ~10x, so `willing` almost
+        never fired and `accept_rule`, reading a counterparty it had just
+        impoverished under `relative`, cleared far too easily.
         """
         hand = state.hands[seat]
         if seat == knower or exact:

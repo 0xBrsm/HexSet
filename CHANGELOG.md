@@ -9,6 +9,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`hexset.tuning` can fit heximax's two weight profiles** (honest, depth 2)
+  — the P3 prerequisite (`agents/reference/heximax.md` §7, "Harness gap").
+  `evaluator="heximax-trading"` / `"heximax-notrade"` build `kind="heximax"`
+  entrants on both sides of the climb instead of silently falling back to
+  `search2`; `heximax.heximax()` gained a `weights` keyword so a candidate
+  vector actually reaches `HonestEvaluator`.
 - **The live trade offer is observed** (trading design part 1,
   `agents/reference/trading-design.md` §3.1). `encoding.global_features`
   gains 18 features at four players, appended at the tail of the globals

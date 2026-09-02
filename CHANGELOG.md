@@ -108,6 +108,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `hexset-ui` to `hexset`. `onnxruntime` moves from a hard dependency to the
   `.[server]`/`.[clients]` extras. `hexset_ui/record.py`'s duplicate of
   `hexset.onnx_record` is deleted now that the latter no longer needs torch.
+- **`hexset.bots` holds every heuristic bot.** `hexset/bots.py` and
+  `hexset/evaluate.py` move into the package as `hexset.bots.search2` and
+  `hexset.bots.evaluate`; `heximax` moves in alongside them as
+  `hexset.bots.heximax`, split by concern (`belief`/`evaluate`/`search`/
+  `trade`/`presets`). Public API unchanged: `from hexset.bots import
+  SearchBot`, `from hexset.evaluate import Weights` and `import heximax`
+  (now a deprecated shim) all still resolve the same names.
 - The engine's own test suite now runs in place at `engine/tests` instead
   of a separate `dev-HexNet` checkout.
 - **Package renamed `catan` → `hexset`**, ahead of release as its own

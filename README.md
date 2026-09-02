@@ -14,7 +14,7 @@ this plays; see [Trademarks](#trademarks) below.
 
 ## What's here
 
-One distribution, `hexset`, ships two top-level packages from `src/`:
+One distribution, `hexset`, ships from `src/`:
 
 - **`hexset`** (`src/hexset`) — the rules engine: actions, board, trading,
   the development deck, victory conditions, a seat-balanced arena for
@@ -22,6 +22,16 @@ One distribution, `hexset`, ships two top-level packages from `src/`:
   policy may honestly read instead of the true hidden state. No seat, human
   or bot, is ever shown what it could not legally know. Depends on nothing
   but numpy.
+  - **`hexset.bots`** (`src/hexset/bots`) — every heuristic bot, sharing the
+    handcrafted evaluation at `hexset.bots.evaluate`: `search2`
+    (`hexset.bots.search2`: `SearchBot`, `greedy`, `RandomBot`, the
+    `STANCES` a per-seat vector is read through) and `heximax`
+    (`hexset.bots.heximax`, files by concern — `belief`/`evaluate`/`search`/
+    `trade`/`presets` — a handcrafted perfect-information-Monte-Carlo player
+    that reads its own belief through the ledger rather than the true
+    state, registered as a `hexset.arena` entrant on import). A one-line
+    `hexset.evaluate` shim and a deprecated top-level `heximax` package
+    (`import heximax`) keep both at their pre-move import paths.
   - **`hexset.catanatron`** (`src/hexset/catanatron`) — an adapter that
     seats `hexset` bots as players in [Catanatron](https://github.com/bcollazo/catanatron),
     for sharded duels against Catanatron's own shipped bots.
@@ -33,11 +43,6 @@ One distribution, `hexset`, ships two top-level packages from `src/`:
   - **`hexset.clients`** (`src/hexset/clients`) — the gym's client half: a
     bot as a peer client of the API (embedded or external) and the ONNX
     Runtime model boundary. No PyTorch, no GPU required to play.
-- **`heximax`** (`src/heximax`) — the sample bot, a sibling top-level
-  package rather than a subpackage of `hexset`: a handcrafted
-  perfect-information-Monte-Carlo player that reads its own belief through
-  the ledger rather than the true state, registered as an `hexset.arena`
-  entrant on import.
 
 Training — self-play, PPO, expert iteration — is not part of this repo. It
 lives in HexNet, the sibling package this gym plays exported checkpoints
@@ -151,7 +156,7 @@ Any number of these seats — browser, HTTP script, MCP-connected LLM, or an emb
 
 ## Layout
 
-- **The engine lives in this repo, under `src/hexset/`** (`actions`, `game`, `ledger`, `board`, `mcts`, `bots`, `arena`, `tuning`, `catanatron`, `bench`, and the rest; `src/heximax`: the sample bot, a sibling top-level package rather than part of `hexset` — see [`docs/engine-divergence-2026-09-02.md`](docs/engine-divergence-2026-09-02.md) for how it was imported, with history, from the training repo, and for what this repo used to carry as its own copy before that). `hexset`, `hexset.bench`, `hexset.server`, `hexset.clients` and `heximax` are all one distribution (`hexset`) and one `pyproject.toml` now; see the CHANGELOG's "one distribution" entry for what was renamed to get there.
+- **The engine lives in this repo, under `src/hexset/`** (`actions`, `game`, `ledger`, `board`, `mcts`, `arena`, `tuning`, `catanatron`, `bench`, and the rest, plus `hexset.bots` — every heuristic bot: `search2` (`hexset.bots.search2`) and `heximax` (`hexset.bots.heximax`, files by concern), sharing `hexset.bots.evaluate`; `import heximax` still works, via a deprecated top-level shim — see [`docs/engine-divergence-2026-09-02.md`](docs/engine-divergence-2026-09-02.md) for how heximax was first imported, with history, from the training repo, and for what this repo used to carry as its own copy before that). `hexset`, `hexset.bench`, `hexset.server`, `hexset.clients` and `heximax` are all one distribution (`hexset`) and one `pyproject.toml` now; see the CHANGELOG's "one distribution" entry for what was renamed to get there.
 - `src/hexset/server/api.py` — tables, seats, join codes, seat tokens, the `/api/*` surface. `web.py` is the HTTP transport over it, `mcp.py` a stdio MCP client of the same routes, `webplay.py` the session: what a seat may see, the human-readable log, undo, and the wire encoding of an action.
 - `src/hexset/server/rules.py` — the one legality authority every seat shares. `fair_legal_actions` is the honest trade sample: no seat, human or bot, is shown which specific opponents could cover an offer.
 - `src/hexset/server/seating.py` — the setup snake starting at whoever created the game, and retiring a seat nobody claimed.

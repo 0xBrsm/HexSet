@@ -483,10 +483,15 @@ class HonestEvaluator:
         return cached
 
     def progress_toward(
-        self, state: GameState, seat: int, hand: Sequence[float], purchase: Purchase
+        self,
+        state: GameState,
+        seat: int,
+        hand: Sequence[float],
+        purchase: Purchase,
+        pieces: tuple[int, int] | None = None,
     ) -> float:
         if purchase is Purchase.SETTLEMENT or purchase is Purchase.CITY:
-            settlements, cities = _pieces(state, seat)
+            settlements, cities = pieces if pieces is not None else _pieces(state, seat)
             if purchase is Purchase.SETTLEMENT and settlements >= MAX_SETTLEMENTS:
                 return 0.0
             if purchase is Purchase.CITY and cities >= MAX_CITIES:
@@ -495,8 +500,12 @@ class HonestEvaluator:
         return sum(min(hand[r], n) for r, n in enumerate(cost) if n) / sum(cost)
 
     def progress(self, state: GameState, seat: int, hand: Sequence[float]) -> float:
+        # `_pieces` walks every vertex; SETTLEMENT and CITY in
+        # `PROGRESS_PURCHASES` both need it, so it is walked once here and
+        # passed down rather than twice inside `progress_toward`.
+        pieces = _pieces(state, seat)
         return max(
-            self.progress_toward(state, seat, hand, purchase)
+            self.progress_toward(state, seat, hand, purchase, pieces)
             for purchase in PROGRESS_PURCHASES
         )
 

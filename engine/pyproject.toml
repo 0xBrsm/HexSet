@@ -28,20 +28,23 @@ build-backend = "setuptools.build_meta"
 
 # This file describes this directory as a standalone distribution -- what it
 # looks like once `engine/` is split into its own repo or published,
-# providing `hexset` and the sibling `heximax` package (HexSet's sample bot,
+# providing `hexset`, the sibling `heximax` package (HexSet's sample bot,
 # registering itself with `hexset.arena`/`hexset.tuning` on import rather
 # than being imported by either -- see `heximax/__init__.py`'s "registration"
-# section). It does not currently govern installation of the monorepo that
-# carries it: the top-level `../pyproject.toml` finds both packages in place
-# under `engine/` (a second `where` root) so `pip install -e .` from the repo
-# root provides `hexset`, `heximax` and `hexset_ui` from one distribution,
-# without reading this file at all. hexset must never import hexnet -- see
-# hexset.arena's registry for how the one place that used to reach for a
-# network-backed bot now does it without that import, now that hexnet lives
-# in a different repo entirely -- and must never import heximax either, for
-# the same reason.
+# section) and `benchmarks` (the hexset-side tools -- HexNet's own
+# `hexnet.benchmarks` imports from `benchmarks.throughput`, so a consumer
+# installing only this directory, the way HexNet's pyproject.toml documents,
+# needs it too). It does not currently govern installation of the monorepo
+# that carries it: the top-level `../pyproject.toml` finds all three packages
+# in place under `engine/` (a second `where` root) so `pip install -e .` from
+# the repo root provides `hexset`, `heximax`, `benchmarks` and `hexset_ui`
+# from one distribution, without reading this file at all. hexset must never
+# import hexnet -- see hexset.arena's registry for how the one place that
+# used to reach for a network-backed bot now does it without that import, now
+# that hexnet lives in a different repo entirely -- and must never import
+# heximax either, for the same reason.
 [tool.setuptools.packages.find]
-include = ["hexset*", "heximax*"]
+include = ["hexset*", "heximax*", "benchmarks*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

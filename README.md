@@ -22,16 +22,27 @@ One distribution, `hexset`, ships from `src/`:
   policy may honestly read instead of the true hidden state. No seat, human
   or bot, is ever shown what it could not legally know. Depends on nothing
   but numpy.
+  - **`hexset.view`** (`src/hexset/view.py`) — the per-seat information
+    set, `View`: known/unknown hands, expected hands, hold probabilities,
+    `sample`. Reached through `game.state(seat, hidden=True)` (the default);
+    `game.state(seat, hidden=False)` returns the true `GameState` instead,
+    the only sanctioned way to read it from outside the engine. Three
+    callers are sanctioned to do so: `hexset.bots.search2` (the project's
+    held-out perfect-information referent), heximax's own `omniscient`
+    mode, and the Catanatron adapter when it hosts a Catanatron bot; every
+    other outside caller that genuinely needs the true state says so with a
+    `# true state: <why>` comment at the call site. `Belief` is kept as an
+    alias for `View` for callers that have not moved to the new name yet.
   - **`hexset.bots`** (`src/hexset/bots`) — every heuristic bot, sharing the
     handcrafted evaluation at `hexset.bots.evaluate`: `search2`
     (`hexset.bots.search2`: `SearchBot`, `greedy`, `RandomBot`, the
     `STANCES` a per-seat vector is read through) and `heximax`
-    (`hexset.bots.heximax`, files by concern — `belief`/`evaluate`/`search`/
-    `trade`/`presets` — a handcrafted perfect-information-Monte-Carlo player
-    that reads its own belief through the ledger rather than the true
-    state, registered as a `hexset.arena` entrant on import). A one-line
-    `hexset.evaluate` shim and a deprecated top-level `heximax` package
-    (`import heximax`) keep both at their pre-move import paths.
+    (`hexset.bots.heximax`, files by concern — `evaluate`/`search`/`trade`/
+    `presets` — a handcrafted perfect-information-Monte-Carlo player
+    that reads its own view of the game (`hexset.view`) rather than the
+    true state, registered as a `hexset.arena` entrant on import). A
+    one-line `hexset.evaluate` shim and a deprecated top-level `heximax`
+    package (`import heximax`) keep both at their pre-move import paths.
   - **`hexset.catanatron`** (`src/hexset/catanatron`) — an adapter that
     seats `hexset` bots as players in [Catanatron](https://github.com/bcollazo/catanatron),
     for sharded duels against Catanatron's own shipped bots.

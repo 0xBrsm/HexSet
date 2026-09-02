@@ -275,3 +275,29 @@ starts **after** `feat/state-view` merges, not against today's boundary.
 The honesty permutation test (§4) is a merge requirement, not optional.
 Sequence: P0 → `hexset.gym` → P1 (one-event trading; the gym's observation
 gains the public valuation block and loses the trade actions then).
+
+## Implemented (2026-09-02)
+
+`src/hexset/gym/` (`HexSetAEC`, `HexSetEnv`, `register()`), the `gym` extra,
+and `tests/gym/` landed against this ratification, on `feat/state-view`'s
+merged `game.state(seat, hidden=True)`. Two deviations from the letter of
+this design, both mechanical necessities rather than design changes:
+
+- **`PROPOSE_TRADE` through the flat `Discrete` space.** §2 says `step`
+  decodes the index and applies it; `ActionSpace.decode` returns
+  `PROPOSE_TRADE` with empty `give`/`want` (its own documented limit — an
+  offer is ten numbers), which `trading.well_formed` rejects outright. A bare
+  `Discrete` sample choosing that slot now has `HexSetAEC` draw a concrete,
+  honest offer from the game's own seeded `rng` among
+  `fair_legal_actions`'s one-for-one pairs; a caller with its own give/want
+  heads can still pass a full `Action` to `step` directly. See
+  `hexset/gym/aec.py`'s module docstring.
+- **A pre-existing gap in `encoding._offer_parts`, found by §4's permutation
+  test.** The "who has declined" block re-derives eligibility
+  (`trading.responders`) from the *live* true state rather than a fact
+  frozen at proposal time, which is invisible in real single-timeline play
+  but moves under the audit's counterfactual redeal whenever the perspective
+  seat is a standing offer's proposer. `tests/gym/test_honesty.py` documents
+  and skips exactly that precondition rather than weakening the audit or
+  patching `hexset.trading`/`hexset.game`'s schema unreviewed; flagged for
+  the PI to triage separately.

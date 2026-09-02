@@ -159,13 +159,8 @@ class Belief:
     """
 
     def __init__(
-        self,
-        state: GameState,
-        ledger: PublicLedger,
-        perspective: int,
-        *,
-        omniscient: bool = False,
-        certify: Sequence[tuple[int, Sequence[int]]] = (),
+        self, state: GameState, ledger: PublicLedger, perspective: int, *,
+        omniscient: bool = False, certify: Sequence[tuple[int, Sequence[int]]] = (),
     ) -> None:
         self.state = state
         self.perspective = perspective
@@ -289,11 +284,7 @@ class Belief:
         return [c / total for c in unseen]
 
     def p_holds(
-        self,
-        seat: int,
-        bundle: Sequence[int],
-        *,
-        draws: int = 64,
+        self, seat: int, bundle: Sequence[int], *, draws: int = 64,
         rng: random.Random | None = None,
     ) -> float:
         """Probability that `seat` can cover `bundle`.
@@ -469,11 +460,7 @@ class HonestEvaluator:
     """
 
     def __init__(
-        self,
-        board: Board,
-        weights: Weights | None = None,
-        *,
-        omniscient: bool = False,
+        self, board: Board, weights: Weights | None = None, *, omniscient: bool = False,
         exact_progress_samples: int = 0,
     ) -> None:
         self.inner = Evaluator(board, weights)
@@ -486,11 +473,7 @@ class HonestEvaluator:
         self._evaluate_cache: dict[tuple, list[float]] = {}
 
     def belief_for(
-        self,
-        state: GameState,
-        ledger: PublicLedger,
-        perspective: int,
-        *,
+        self, state: GameState, ledger: PublicLedger, perspective: int, *,
         certify: Sequence[tuple[int, Sequence[int]]] = (),
     ) -> Belief:
         """`Belief(state, ledger, perspective, ...)`, memoized for the life of
@@ -568,11 +551,7 @@ class HonestEvaluator:
         return self._walk(state, seat)[0]
 
     def progress_toward(
-        self,
-        state: GameState,
-        seat: int,
-        hand: Sequence[float],
-        purchase: Purchase,
+        self, state: GameState, seat: int, hand: Sequence[float], purchase: Purchase,
         pieces: tuple[int, int] | None = None,
     ) -> float:
         if purchase is Purchase.SETTLEMENT or purchase is Purchase.CITY:
@@ -603,7 +582,7 @@ class HonestEvaluator:
         return best
 
     def _progress_of(
-        self, state: GameState, seat: int, hand: Sequence[float], belief: Belief | None
+        self, state: GameState, seat: int, hand: Sequence[float], belief: Belief | None,
     ) -> float:
         if (
             belief is None
@@ -623,12 +602,7 @@ class HonestEvaluator:
         return total / self.exact_progress_samples
 
     def terms(
-        self,
-        state: GameState,
-        seat: int,
-        hand: Sequence[float],
-        *,
-        knower: int | None = None,
+        self, state: GameState, seat: int, hand: Sequence[float], *, knower: int | None = None,
         belief: Belief | None = None,
     ) -> tuple[float, ...]:
         """The raw term values `score` weights, in `evaluate.TERM_NAMES` order.
@@ -656,12 +630,7 @@ class HonestEvaluator:
         )
 
     def score(
-        self,
-        state: GameState,
-        seat: int,
-        hand: Sequence[float],
-        *,
-        knower: int | None = None,
+        self, state: GameState, seat: int, hand: Sequence[float], *, knower: int | None = None,
         belief: Belief | None = None,
     ) -> float:
         """`terms` dotted with the weight vector, plus the win bonus at 10 VP."""
@@ -674,7 +643,7 @@ class HonestEvaluator:
         return total
 
     def evaluate(
-        self, state: GameState, knower: int | None = None, belief: Belief | None = None
+        self, state: GameState, knower: int | None = None, belief: Belief | None = None,
     ) -> list[float]:
         """Score every seat from `knower`'s information.
 
@@ -804,31 +773,28 @@ class Heximax:
     """Max^n over the honest evaluation, within a leaf budget.
 
     `depth` counts decisions, `width` beams the branching, and `max_nodes`
-    caps the leaf evaluations one `choose` may spend: the search deepens
-    iteratively, one ply at a time, while the next ply's estimated cost fits
-    what is left, and a ply that overruns the budget is abandoned for the
-    last completed one -- whatever the branching, no move costs more than
-    `max_nodes` leaves. Opponents are expanded from `k` determinized worlds
-    drawn from the belief at the root (`Belief.sample`) and the root values
-    averaged across them -- perfect-information Monte Carlo; in `omniscient`
-    mode `k` is ignored and the true state is searched. Hidden draws are
-    expectations, not one sample: a steal is averaged over the victim's
-    expected composition, a dev-card buy over the unseen deck composition,
-    each weighted by its probability. Rolls are exact eleven-way within
-    `EXACT_ROLL_PLIES` of the root and sampled beyond.
+    caps the leaf evaluations one `choose` may spend: the search deepens one
+    ply at a time while the next ply's estimated cost fits what is left, and
+    a ply that overruns is abandoned for the last completed one -- whatever
+    the branching, no move costs more than `max_nodes` leaves. Opponents are
+    expanded from `k` determinized worlds drawn from the belief at the root
+    (`Belief.sample`) and the root values averaged across them (PIMC); in
+    `omniscient` mode `k` is ignored and the true state is searched. Hidden
+    draws are expectations, not one sample: a steal over the victim's
+    expected composition, a dev-card buy over the unseen deck, each weighted
+    by its probability. Rolls are exact eleven-way within `EXACT_ROLL_PLIES`
+    of the root and sampled beyond.
 
     Opening settlements come from `placement.best` when `placement` is set;
     opening roads are searched. A discard gives up the card with the smallest
     marginal loss; a monopoly names the resource the table is expected to
     hold most of. `max_offers` is the bot's own budget below the engine's; at
-    zero it never proposes and always declines. The trade adapter
-    (`# --- trade` section): while `max_offers` has room, `PROPOSE_TRADE`
-    root options are the top `propose_top_n` candidates from
-    `candidate_bundles`, ranked by `score_proposal` and cut off at
-    `propose_margin` (`propose_actions`); a `TRADE_RESPOND` node may only
-    offer `ACCEPT_TRADE` to the search when `accept_rule` clears
-    `accept_margin` there too (`_options_in`). Both margins are unfitted;
-    `0.0` accepts or proposes whenever the valuation itself is positive.
+    zero it never proposes and always declines. The trade adapter has two
+    touch points: `propose_actions` supplies the `PROPOSE_TRADE` root options
+    (top `propose_top_n` candidates over `propose_margin`), and `_options_in`
+    gates every `TRADE_RESPOND` node's `ACCEPT_TRADE` on `accept_rule` at
+    `accept_margin`. Both margins are unfitted; `0.0` accepts or proposes
+    whenever the valuation itself is positive.
 
     Every random draw comes from `rng`; the real game's stream is never read.
     """
@@ -1012,11 +978,7 @@ class Heximax:
         return total
 
     def _root_values(
-        self,
-        worlds: list[Game],
-        candidates: list[Action],
-        depth: int,
-        seat: int,
+        self, worlds: list[Game], candidates: list[Action], depth: int, seat: int,
         partial: list[tuple[float, Action]],
     ) -> list[list[float]]:
         share = 1.0 / len(worlds)
@@ -1040,7 +1002,7 @@ class Heximax:
         return self.evaluator.evaluate_game(game, knower)
 
     def _after(
-        self, game: Game, action: Action, depth: int, knower: int, ply: int = 0
+        self, game: Game, action: Action, depth: int, knower: int, ply: int = 0,
     ) -> list[float]:
         """Value of the position `action` leads to, with `depth - 1` plies left."""
         if action.type is ActionType.ROLL:
@@ -1070,7 +1032,7 @@ class Heximax:
         return total
 
     def draw_children(
-        self, game: Game, action: Action, knower: int
+        self, game: Game, action: Action, knower: int,
     ) -> list[tuple[float, Game]]:
         """Every outcome of a hidden draw, with its probability under the belief.
 
@@ -1170,13 +1132,7 @@ class Heximax:
         return self._best_of(game, beam, depth, mover, knower, ply)
 
     def _best_of(
-        self,
-        game: Game,
-        options: list[Action],
-        depth: int,
-        mover: int,
-        knower: int,
-        ply: int,
+        self, game: Game, options: list[Action], depth: int, mover: int, knower: int, ply: int,
     ) -> list[float]:
         best: list[float] | None = None
         best_rank = 0.0
@@ -1197,13 +1153,7 @@ class Heximax:
         return self.evaluator.evaluate(state, knower, belief)
 
     def _read_row(
-        self,
-        state: GameState,
-        ledger: PublicLedger,
-        knower: int,
-        target: int,
-        rank,
-        *,
+        self, state: GameState, ledger: PublicLedger, knower: int, target: int, rank, *,
         vector: list[float] | None = None,
     ) -> float:
         """`target`'s row of `knower`'s vector, under `rank` -- how the
@@ -1215,11 +1165,7 @@ class Heximax:
         return rank(vector, target)
 
     def _read(
-        self,
-        state: GameState,
-        ledger: PublicLedger,
-        seat: int,
-        *,
+        self, state: GameState, ledger: PublicLedger, seat: int, *,
         vector: list[float] | None = None,
     ) -> float:
         """`seat`'s own row of the vector, under the bot's configured stance
@@ -1235,7 +1181,8 @@ class Heximax:
         return self._vector(game.state, game.ledger, seat)
 
     def marginal_gain(
-        self, game: Game, seat: int, resource: int, *, before_vector: list[float] | None = None
+        self, game: Game, seat: int, resource: int, *,
+        before_vector: list[float] | None = None,
     ) -> float:
         """Eval(hand + one `resource`) - Eval(hand), from `seat`'s own reading."""
         before = self._read(game.state, game.ledger, seat, vector=before_vector)
@@ -1246,7 +1193,8 @@ class Heximax:
         return self._read(state, game.ledger, seat) - before
 
     def marginal_loss(
-        self, game: Game, seat: int, resource: int, *, before_vector: list[float] | None = None
+        self, game: Game, seat: int, resource: int, *,
+        before_vector: list[float] | None = None,
     ) -> float:
         """Eval(hand) - Eval(hand less one `resource`); zero when none is held."""
         if game.state.hands[seat][resource] < 1:
@@ -1260,7 +1208,7 @@ class Heximax:
         return before - self._read(state, ledger, seat)
 
     def deficit(
-        self, game: Game, seat: int, *, before_vector: list[float] | None = None
+        self, game: Game, seat: int, *, before_vector: list[float] | None = None,
     ) -> dict[int, float]:
         """Marginal gain of receiving one more of each resource, `seat`'s own
         reading. Every resource is included, even ones already held: a
@@ -1271,7 +1219,7 @@ class Heximax:
         }
 
     def surplus(
-        self, game: Game, seat: int, *, before_vector: list[float] | None = None
+        self, game: Game, seat: int, *, before_vector: list[float] | None = None,
     ) -> dict[int, float]:
         """Marginal loss of giving up one of each resource `seat` actually
         holds. Resources not held are left out rather than scored zero:
@@ -1286,16 +1234,8 @@ class Heximax:
         }
 
     def _partner_delta(
-        self,
-        game: Game,
-        knower: int,
-        target: int,
-        give: Sequence[int],
-        want: Sequence[int],
-        counterparty: int,
-        rank,
-        *,
-        before_vector: list[float] | None = None,
+        self, game: Game, knower: int, target: int, give: Sequence[int], want: Sequence[int],
+        counterparty: int, rank, *, before_vector: list[float] | None = None,
     ) -> float:
         """`target`'s row of the vector if `target` gave `give` and got `want`
         from `counterparty`, read entirely through `knower`'s own belief.
@@ -1336,11 +1276,7 @@ class Heximax:
 
     @staticmethod
     def _move_hand(
-        state: GameState,
-        knower: int,
-        seat: int,
-        *,
-        gains: Sequence[int],
+        state: GameState, knower: int, seat: int, *, gains: Sequence[int],
         losses: Sequence[int],
         exact: bool = False,
     ) -> None:
@@ -1379,14 +1315,8 @@ class Heximax:
             state.hands[seat] = [max(0, sum(hand) + net)] + [0] * (len(hand) - 1)
 
     def bundle_delta(
-        self,
-        game: Game,
-        seat: int,
-        give: Sequence[int],
-        want: Sequence[int],
-        counterparty: int,
-        *,
-        before_vector: list[float] | None = None,
+        self, game: Game, seat: int, give: Sequence[int], want: Sequence[int],
+        counterparty: int, *, before_vector: list[float] | None = None,
     ) -> float:
         """How much `seat` gains by giving `give` for `want` with `counterparty`.
 
@@ -1404,7 +1334,7 @@ class Heximax:
         )
 
     def candidate_bundles(
-        self, game: Game, seat: int, *, max_side: int = 2
+        self, game: Game, seat: int, *, max_side: int = 2,
     ) -> list[tuple[Bundle, Bundle]]:
         """Bundles built from `deficit` x `surplus`'s resources, 1-2 cards a side.
 
@@ -1447,12 +1377,7 @@ class Heximax:
         ]
 
     def score_proposal(
-        self,
-        game: Game,
-        seat: int,
-        give: Sequence[int],
-        want: Sequence[int],
-        *,
+        self, game: Game, seat: int, give: Sequence[int], want: Sequence[int], *,
         before_vector: list[float] | None = None,
     ) -> float:
         """`dEval_me(after, best counterparty) x sum_opp p_holds(opp, want) * willing(opp)`.
@@ -1490,7 +1415,7 @@ class Heximax:
         return delta_me * weight
 
     def accept_rule(
-        self, game: Game, seat: int, offer: Offer, margin: float, *, knower: int | None = None
+        self, game: Game, seat: int, offer: Offer, margin: float, *, knower: int | None = None,
     ) -> bool:
         """Accept iff taking `offer` clears `margin`.
 
@@ -1533,12 +1458,7 @@ class Heximax:
         return min(candidates, key=distance)
 
     def rank_partners(
-        self,
-        game: Game,
-        seat: int,
-        give: Sequence[int],
-        want: Sequence[int],
-        *,
+        self, game: Game, seat: int, give: Sequence[int], want: Sequence[int], *,
         before_vector: list[float] | None = None,
     ) -> tuple[int, ...]:
         """Opponents ranked for `Action.ask`, first to whoever it helps least.
@@ -1675,22 +1595,11 @@ def _bundle_options(resources: list[int], max_side: int, *, cap=None) -> list[Bu
 
 
 def heximax(
-    board: Board,
-    rng: random.Random | None = None,
-    *,
-    mode: str = "honest",
-    depth: int = 2,
-    width: int | None = 6,
-    max_offers: int | None = BY_MODE,  # type: ignore[assignment]
-    max_nodes: int = DEFAULT_MAX_NODES,
-    k: int = 1,
-    stance: str = "relative",
-    placement: bool = True,
-    exact_progress_samples: int = 0,
-    weights: Weights | None = None,
-    propose_top_n: int = 3,
-    propose_margin: float = 0.0,
-    accept_margin: float = 0.0,
+    board: Board, rng: random.Random | None = None, *, mode: str = "honest", depth: int = 2,
+    width: int | None = 6, max_offers: int | None = BY_MODE,  # type: ignore[assignment]
+    max_nodes: int = DEFAULT_MAX_NODES, k: int = 1, stance: str = "relative",
+    placement: bool = True, exact_progress_samples: int = 0, weights: Weights | None = None,
+    propose_top_n: int = 3, propose_margin: float = 0.0, accept_margin: float = 0.0,
 ) -> Heximax:
     """The three shipped configurations, by `mode`.
 

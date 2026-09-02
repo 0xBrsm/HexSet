@@ -1425,12 +1425,29 @@ def test_heximax_source_never_calls_responders_or_reads_pending_responders():
     """`game.pending_responders` is the engine's true-hand eligibility list
     and `trading.responders` is built from it (`bots.SearchBot._addressed`
     uses both) -- both are off limits to an honest bot. The one line that
-    names `pending_responders` is the P1 comment explaining why."""
+    names `pending_responders` is the P1 comment explaining why.
+
+    heximax is a package (`hexset.bots.heximax`, split by concern into
+    `belief`/`evaluate`/`search`/`trade`/`presets`), not the single file this
+    test was first written against, so the source under test is every one of
+    those submodules concatenated -- the invariant is about the package as a
+    whole, not about which file a line happens to live in now. The deprecated
+    top-level `heximax` shim is one import line and is not itself part of
+    the source this checks.
+    """
     import inspect
 
-    import heximax as heximax_module
+    # Plain, unambiguous: `hexset.bots.__init__` re-exports none of
+    # `search2`/`evaluate`/`heximax`'s own names (the package's own rule --
+    # see its module docstring), so this dotted import names the submodule
+    # and nothing else, regardless of import order.
+    import hexset.bots.heximax as heximax_pkg
+    from hexset.bots.heximax import belief, evaluate, presets, search, trade
 
-    source = inspect.getsource(heximax_module)
+    source = "\n".join(
+        inspect.getsource(module)
+        for module in (heximax_pkg, belief, evaluate, search, trade, presets)
+    )
     assert "responders(" not in source
     mentions = [line for line in source.splitlines() if "pending_responders" in line]
     assert len(mentions) == 1

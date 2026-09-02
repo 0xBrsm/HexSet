@@ -12,13 +12,13 @@
 #
 # The engine is a separate mount because it is a separate repository: the
 # rules, the bots and the ONNX record contract are the `hexset` package
-# (0xBrsm/dev-hexset, src/), and this repo is the gym around it. Until that
+# (0xBrsm/dev-HexNet, src/), and this repo is the gym around it. Until that
 # package is on an index it is bind-mounted at /app/engine and reached over
 # PYTHONPATH, exactly as src/ is.
 FROM python:3.12-slim
 
-LABEL org.opencontainers.image.title="HexSet-UI"
-LABEL org.opencontainers.image.source="https://github.com/0xBrsm/HexSet-UI"
+LABEL org.opencontainers.image.title="HexSet"
+LABEL org.opencontainers.image.source="https://github.com/0xBrsm/HexSet"
 
 # Kept in step with pyproject.toml's [project].dependencies by hand. A version
 # bump belongs in both places or `pip install -e .` and this image drift
@@ -51,7 +51,7 @@ USER hexset
 # root filesystem is read-only there: anything that goes looking for a
 # writable home directory finds one instead of an error.
 ENV HOME=/tmp
-# src/ is this repo; engine/ is dev-hexset's src/, holding the `hexset`
+# src/ is this repo; engine/ is dev-HexNet's src/, holding the `hexset`
 # package. Order matters only in that both must be present.
 ENV PYTHONPATH=/app/src:/app/engine
 ENV PYTHONDONTWRITEBYTECODE=1

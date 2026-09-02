@@ -9,7 +9,7 @@ its "v1 stays" phases as history, not current behaviour.**
 
 ## The goal, in one line
 
-hexset-ui is an **interface**: it emits state, it accepts an action. `search2.py`
+HexSet is an **interface**: it emits state, it accepts an action. `search2.py`
 and any `.onnx` file are two implementations of that one interface. Nothing in
 this repo knows how a network reads a position.
 
@@ -31,7 +31,7 @@ them as the specification.
 
 The line is **the rules**, not the network.
 
-| Stays in hexset-ui | Moves into the `.onnx` file |
+| Stays in HexSet | Moves into the `.onnx` file |
 |---|---|
 | The rules, legal-move enumeration, the flat `ActionSpace` | Feature encoding (all of `encoding.py`) |
 | The information set — what a seat may legally know | Masking, log-softmax, give/want outer sum |
@@ -142,13 +142,13 @@ port of what the training interface supports. Do not reimplement sampling in the
 graph. If it is ever wanted, add a temperature input then.
 
 **Not eliminated:** `award_points` (longest road, largest army) is a rules
-computation the engine must supply, so dev-catan and hexset-ui still have to agree
+computation the engine must supply, so dev-catan and HexSet still have to agree
 on it. That is the residual shared surface — far smaller than a duplicated
 encoder, but not zero. Freeze and version it with the rest of the record.
 
 ## Phases
 
-Phases 1–2 are in **dev-catan** (`src/catan/`), 3–6 in **hexset-ui**. Keep both
+Phases 1–2 are in **dev-catan** (`src/catan/`), 3–6 in **HexSet**. Keep both
 repos green at every step; no phase may leave `pytest` failing.
 
 ### Phase 1 — a torch encoder in dev-catan
@@ -193,7 +193,7 @@ existing `rtol=1e-3, atol=1e-4` for `prior`/`value`; `action_index` and
 --out lam095-v2.onnx` succeeds with parity green, and again with
 `--search mcts --simulations 256`.
 
-### Phase 3 — the record builder in hexset-ui
+### Phase 3 — the record builder in HexSet
 
 New `src/hexset_ui/record.py`: `Game + seat + options -> dict[str, np.ndarray]`,
 exactly the table above. Pure engine code — it imports nothing model-shaped and
@@ -210,7 +210,7 @@ it from a different opponent hand with the same total.
 > (training residue). Reusing the name is fine; check the history so you do not
 > resurrect anything from it.
 
-### Phase 4 — hexset-ui speaks both contracts
+### Phase 4 — HexSet speaks both contracts
 
 `onnxbot.load` reads `contract` from metadata (absent = 1). Keep the v1 path
 working untouched; add a v2 path that builds a record, runs the graph and reads
@@ -254,7 +254,7 @@ outright. `_pair_index` and `_one_hot` stayed — `V2Policy` still uses both. Se
 
 1. **The engine may say what is true and visible. It may not say how the model
    reads it.** Every judgement call resolves against that sentence.
-2. If a phase needs a new number baked into hexset-ui that also exists in
+2. If a phase needs a new number baked into HexSet that also exists in
    dev-catan, you have taken a wrong turn. The `NUM_PAIRS` comment at
    `onnxbot.py:52` — "redefined rather than shared because that module imports
    torch" — is the exact smell this work exists to remove.

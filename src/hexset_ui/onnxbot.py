@@ -105,7 +105,7 @@ class V2Policy:
         # record happens to carry. The record is the newest contract (29
         # fields); a contract-2 graph declares 23 of them and a contract-3
         # graph 27, and onnxruntime rejects a feed containing a name it does
-        # not declare -- which is how PR #2 broke every genuine dev-hexset
+        # not declare -- which is how PR #2 broke every genuine dev-HexNet
         # export with `Invalid input name: offer_proposer`. Every contract so
         # far is a prefix-superset of the last, so serving an older graph is
         # exactly "give it the subset it asks for".

@@ -18,10 +18,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **The engine moved into this repo, under `engine/`.** `engine/hexset`
   (the rules engine, bots, ledger, arena and tuning) and `engine/heximax`
   (the honest handcrafted baseline, its own top-level package) were
-  imported with full commit history from `0xBrsm/dev-hexset`.
+  imported with full commit history from `0xBrsm/dev-HexNet`.
 - **A single `pip install -e .` from the repo root now provides `hexset`,
   `heximax` and `hexset_ui`.** `hexset` is no longer installed from a
-  separate checkout of `dev-hexset`; see the README's "Running it"
+  separate checkout of `dev-HexNet`; see the README's "Running it"
   section.
 - **`hexset.build_info()`**: version and git commit for a consumer (e.g.
   HexNet's run manifest) to stamp into its own provenance records.
@@ -99,7 +99,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - The engine's own test suite now runs in place at `engine/tests` instead
-  of a separate `dev-hexset` checkout.
+  of a separate `dev-HexNet` checkout.
 - **Package renamed `catan` → `hexset`**, ahead of release as its own
   public repo under GPL-3.0-only. `import catan` → `import hexset`
   throughout; `CatanNet` → `HexNet`; the `CATAN_EXPORT_COMMIT` env var →

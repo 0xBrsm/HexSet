@@ -114,7 +114,7 @@ Leading batch axis `B` on every tensor.
 **The engine drift this section used to list is gone.** `hexset_ui` no longer
 carries its own copy of the engine: it depends on the `hexset` distribution,
 so the `offered` re-proposal filter and the RNG-drawn trade-responder order
-are simply what this server plays now, exactly as dev-hexset does. See
+are simply what this server plays now, exactly as dev-HexNet does. See
 [`engine-divergence-2026-09-02.md`](engine-divergence-2026-09-02.md) for the
 full account of what the copy held and how each difference was resolved.
 
@@ -123,7 +123,7 @@ full account of what the copy held and how each difference was resolved.
 *honest* trade sample (`hexset_ui.rules.fair_legal_actions`): every
 one-for-one offer the mover's own hand affords, with no filter for whether
 some opponent could cover it. The engine's own `legal_actions` filters by
-opponents' true hands, and dev-hexset's training record uses that. So a
+opponents' true hands, and dev-HexNet's training record uses that. So a
 checkpoint served here sees `want` slots it never saw enabled in training.
 This is on purpose — the alternative tells a human, on every turn, exactly
 what is in a specific opponent's hand — and it now applies to *every* seat,

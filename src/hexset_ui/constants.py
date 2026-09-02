@@ -25,7 +25,7 @@ TOKEN_HEADER = "X-HexSet-Token"
 # number itself.
 #
 # The numbers are `hexset.export_onnx._CONTRACT_VERSION`'s, and only its. PR #2
-# re-stamped the 29-field record as `"2"` in this repo while dev-hexset was
+# re-stamped the 29-field record as `"2"` in this repo while dev-HexNet was
 # exporting it as `"4"`, so one number named two different graphs and no real
 # export could load. One number, one meaning, defined there.
 #

@@ -1,6 +1,6 @@
 [project]
 name = "hexset-ui"
-# Bumped together with `engine/pyproject.toml`'s `version` -- HexSet-UI has
+# Bumped together with `engine/pyproject.toml`'s `version` -- HexSet has
 # adopted the engine's 0.13.x line as its single version. See
 # `engine/tests/test_versions.py`, which fails the moment the two drift.
 version = "0.13.0"
@@ -8,7 +8,7 @@ description = "HexSet — a human-vs-bot hex-tile strategy board game in the bro
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
 # `hexset` — the engine, the bots and the ONNX record contract — now lives in
-# this repo too, under `engine/` (imported with history from dev-hexset's
+# this repo too, under `engine/` (imported with history from dev-HexNet's
 # `refactor/hexnet-package-split`; see `engine/README.md` for the exact SHA).
 # `heximax` — the honest handcrafted baseline bot, HexSet's sample bot rather
 # than part of the engine — is a sibling top-level package under the same

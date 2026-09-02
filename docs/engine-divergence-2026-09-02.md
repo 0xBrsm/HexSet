@@ -1,5 +1,10 @@
 # Engine divergence audit — `hexset_ui` vs `hexset` (dev-hexset)
 
+> **2026-09-02 (later), rename note:** this repo (`HexSet-UI`) was renamed
+> `HexSet`, and the private training repo referenced throughout as
+> `dev-hexset` was renamed `dev-HexNet`. Left unrewritten below — the names
+> here are as they were at the time of the audit.
+
 2026-09-02, written by the agent that collapsed the duplication on
 `feat/engine-from-hexset` (branched from `pr-2` = `feat/external` @ `dbbfa62`).
 

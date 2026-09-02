@@ -118,9 +118,9 @@ def test_the_record_carries_the_offer_and_filters_answered_to_the_proposer():
 
     proposer = game.current_player
     others = [s for s in range(4) if s != proposer]
-    game.state.hands[proposer][Resource.WOOD] = 2
+    game._state.hands[proposer][Resource.WOOD] = 2
     for s in others:
-        game.state.hands[s][Resource.ORE] = 1
+        game._state.hands[s][Resource.ORE] = 1
     propose_trade(game, bundle(wood=2), bundle(ore=1), ask=tuple(others))
     first = to_move(game)
     decline_trade(game, first)
@@ -151,8 +151,8 @@ def test_the_record_carries_the_ledger_in_board_seat_order():
 
     row = record_from_game(game, 0, space)
 
-    assert row["ledger_known"].shape == (game.state.num_players, 5)
-    assert row["ledger_unknown"].shape == (game.state.num_players,)
-    for seat in range(game.state.num_players):
+    assert row["ledger_known"].shape == (game._state.num_players, 5)
+    assert row["ledger_unknown"].shape == (game._state.num_players,)
+    for seat in range(game._state.num_players):
         assert list(row["ledger_known"][seat]) == game.ledger.seats[seat].known
         assert int(row["ledger_unknown"][seat]) == game.ledger.seats[seat].unknown

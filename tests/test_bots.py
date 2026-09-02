@@ -35,7 +35,7 @@ def a_game(seed: int = 0, players: int = 4):
 
 
 def snapshot(game):
-    state = game.state
+    state = game._state
     return (
         game.phase,
         game.current_player,
@@ -74,14 +74,14 @@ def nine_points_and_a_city_to_come():
     # there is exactly one of it to find.
     spots = independent_vertices(board, 4)
     for vertex in spots[:3]:
-        place_settlement(game.state, 0, vertex, connected=False)
-        upgrade_to_city(game.state, 0, vertex)
-    place_settlement(game.state, 0, spots[3], connected=False)
-    game.state.dev_cards[0][DevCard.VICTORY_POINT] += 2
-    give(game.state, 0, Resource.WHEAT, 2)
-    give(game.state, 0, Resource.ORE, 3)
+        place_settlement(game._state, 0, vertex, connected=False)
+        upgrade_to_city(game._state, 0, vertex)
+    place_settlement(game._state, 0, spots[3], connected=False)
+    game._state.dev_cards[0][DevCard.VICTORY_POINT] += 2
+    give(game._state, 0, Resource.WHEAT, 2)
+    give(game._state, 0, Resource.ORE, 3)
 
-    assert victory_points(game.state, 0) == 9
+    assert victory_points(game._state, 0) == 9
     return game, spots[3]
 
 
@@ -116,15 +116,15 @@ def test_imagining_leaves_the_real_game_untouched():
 def test_imagining_hides_the_deck_it_copies():
     game = a_game()
     copy = imagine(game, random.Random(4))
-    assert sorted(copy.state.deck) == sorted(game.state.deck)
-    assert copy.state.deck != game.state.deck
+    assert sorted(copy._state.deck) == sorted(game._state.deck)
+    assert copy._state.deck != game._state.deck
 
 
 def test_hidden_deck_randomization_can_be_deferred():
     game = a_game()
     copy = imagine(game, random.Random(4), randomize_deck=False)
-    assert copy.state.deck == game.state.deck
-    assert copy.state.deck is not game.state.deck
+    assert copy._state.deck == game._state.deck
+    assert copy._state.deck is not game._state.deck
 
 
 def test_to_move_is_the_discarding_player_not_the_roller():
@@ -132,7 +132,7 @@ def test_to_move_is_the_discarding_player_not_the_roller():
     while game.phase is not Phase.ROLL:
         apply(game, legal_actions(game)[0])
     game.current_player = 0
-    game.state.hands[2] = [4, 4, 0, 0, 0]
+    game._state.hands[2] = [4, 4, 0, 0, 0]
     roll_dice(game, 7)
 
     assert game.phase is Phase.DISCARD
@@ -151,7 +151,7 @@ def test_greedy_finishes_a_game_sooner_than_random_play():
     play_out(random_game, RandomBot(random.Random(5)))
 
     greedy_game = a_game(seed=5)
-    play_out(greedy_game, greedy(Evaluator(greedy_game.state.board), random.Random(5)))
+    play_out(greedy_game, greedy(Evaluator(greedy_game._state.board), random.Random(5)))
 
     assert greedy_game.won_by is not None
     assert greedy_game.turns < random_game.turns
@@ -159,13 +159,13 @@ def test_greedy_finishes_a_game_sooner_than_random_play():
 
 def test_greedy_takes_a_winning_build():
     game, vertex = nine_points_and_a_city_to_come()
-    chosen = greedy(Evaluator(game.state.board), random.Random(0)).choose(game)
+    chosen = greedy(Evaluator(game._state.board), random.Random(0)).choose(game)
     assert chosen == Action(ActionType.BUILD_CITY, vertex)
 
 
 def test_search_takes_a_winning_build():
     game, vertex = nine_points_and_a_city_to_come()
-    bot = SearchBot(Evaluator(game.state.board), depth=2, width=4, rng=random.Random(0))
+    bot = SearchBot(Evaluator(game._state.board), depth=2, width=4, rng=random.Random(0))
     assert bot.choose(game) == Action(ActionType.BUILD_CITY, vertex)
 
 
@@ -175,7 +175,7 @@ def test_choosing_does_not_disturb_the_game_or_its_random_stream():
         apply(game, RandomBot(random.Random(6)).choose(game))
     before = snapshot(game)
 
-    SearchBot(Evaluator(game.state.board), depth=2, rng=random.Random(6)).choose(game)
+    SearchBot(Evaluator(game._state.board), depth=2, rng=random.Random(6)).choose(game)
     assert snapshot(game) == before
 
 
@@ -183,7 +183,7 @@ def test_a_beam_of_one_is_the_greedy_choice():
     game = a_game(seed=8)
     for _ in range(80):
         apply(game, RandomBot(random.Random(8)).choose(game))
-    evaluator = Evaluator(game.state.board)
+    evaluator = Evaluator(game._state.board)
 
     beamed = SearchBot(evaluator, depth=3, width=1, rng=random.Random(0)).choose(game)
     assert beamed == greedy(evaluator, random.Random(0)).choose(game)
@@ -208,13 +208,13 @@ def test_a_stance_only_matters_relative_to_the_table():
 def test_an_unknown_stance_is_refused():
     game = a_game()
     with pytest.raises(ValueError, match="unknown stance"):
-        SearchBot(Evaluator(game.state.board), stance="spiteful")
+        SearchBot(Evaluator(game._state.board), stance="spiteful")
 
 
 def test_a_relative_bot_still_takes_a_winning_build():
     game, vertex = nine_points_and_a_city_to_come()
     chosen = greedy(
-        Evaluator(game.state.board), random.Random(0), stance="relative"
+        Evaluator(game._state.board), random.Random(0), stance="relative"
     ).choose(game)
     assert chosen == Action(ActionType.BUILD_CITY, vertex)
 
@@ -232,21 +232,21 @@ def a_trade_that_wins_the_game_for_the_proposer():
 
     spots = independent_vertices(board, 4)
     for vertex in spots[:3]:
-        place_settlement(game.state, 0, vertex, connected=False)
-        upgrade_to_city(game.state, 0, vertex)
-    place_settlement(game.state, 0, spots[3], connected=False)
-    game.state.dev_cards[0][DevCard.VICTORY_POINT] += 2
-    assert victory_points(game.state, 0) == 9
+        place_settlement(game._state, 0, vertex, connected=False)
+        upgrade_to_city(game._state, 0, vertex)
+    place_settlement(game._state, 0, spots[3], connected=False)
+    game._state.dev_cards[0][DevCard.VICTORY_POINT] += 2
+    assert victory_points(game._state, 0) == 9
 
-    clear_hand(game.state, 0)
-    give(game.state, 0, Resource.WHEAT, 2)
-    give(game.state, 0, Resource.ORE, 2)
-    give(game.state, 0, Resource.WOOD, 1)
+    clear_hand(game._state, 0)
+    give(game._state, 0, Resource.WHEAT, 2)
+    give(game._state, 0, Resource.ORE, 2)
+    give(game._state, 0, Resource.WOOD, 1)
 
-    clear_hand(game.state, 1)
-    give(game.state, 1, Resource.ORE, 1)
-    give(game.state, 1, Resource.BRICK, 1)
-    give(game.state, 1, Resource.WHEAT, 1)
+    clear_hand(game._state, 1)
+    give(game._state, 1, Resource.ORE, 1)
+    give(game._state, 1, Resource.BRICK, 1)
+    give(game._state, 1, Resource.WHEAT, 1)
 
     propose_trade(game, bundle(wood=1), bundle(ore=1))
     assert game.pending_responders == [1]
@@ -255,7 +255,7 @@ def a_trade_that_wins_the_game_for_the_proposer():
 
 def test_a_relative_bot_will_not_trade_the_leader_into_a_win():
     game = a_trade_that_wins_the_game_for_the_proposer()
-    evaluator = Evaluator(game.state.board)
+    evaluator = Evaluator(game._state.board)
 
     def responds_with(stance: str) -> ActionType:
         bot = SearchBot(
@@ -291,15 +291,15 @@ def a_table_where_one_seat_is_far_ahead():
 
     spots = independent_vertices(board, 6)
     for vertex in spots[:4]:
-        place_settlement(game.state, 1, vertex, connected=False)
-        upgrade_to_city(game.state, 1, vertex)
-    place_settlement(game.state, 3, spots[4], connected=False)
+        place_settlement(game._state, 1, vertex, connected=False)
+        upgrade_to_city(game._state, 1, vertex)
+    place_settlement(game._state, 3, spots[4], connected=False)
 
     for player in range(4):
-        clear_hand(game.state, player)
-    give(game.state, 0, Resource.WOOD, 2)
-    give(game.state, 1, Resource.ORE, 1)
-    give(game.state, 3, Resource.ORE, 1)
+        clear_hand(game._state, player)
+    give(game._state, 0, Resource.WOOD, 2)
+    give(game._state, 1, Resource.ORE, 1)
+    give(game._state, 3, Resource.ORE, 1)
     return game, board
 
 
@@ -327,7 +327,7 @@ def _offers_per_turn(max_offers: int | None, actions: int = 1200) -> int:
     """Most offers any one turn saw, with every seat sharing the same budget."""
     game = a_game(seed=3)
     bots = [
-        greedy(Evaluator(game.state.board), random.Random(seat), max_offers=max_offers)
+        greedy(Evaluator(game._state.board), random.Random(seat), max_offers=max_offers)
         for seat in range(4)
     ]
     peak = 0
@@ -356,7 +356,7 @@ def test_the_same_seed_plays_the_same_game():
     def run():
         game = a_game(seed=9)
         bot = SearchBot(
-            Evaluator(game.state.board), depth=2, width=4, rng=random.Random(9)
+            Evaluator(game._state.board), depth=2, width=4, rng=random.Random(9)
         )
         chosen = []
         for _ in range(30):

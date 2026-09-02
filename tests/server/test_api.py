@@ -537,11 +537,11 @@ def test_an_unfinished_game_comes_back_where_it_was_left(tmp_path):
 
     assert resumed is not None
     assert resumed.game.phase is session.game.phase
-    assert resumed.game.state.hands == session.game.state.hands
-    assert resumed.game.state.vertex_owner == session.game.state.vertex_owner
-    assert resumed.game.state.edge_owner == session.game.state.edge_owner
-    assert resumed.game.state.deck == session.game.state.deck
-    assert resumed.game.state.robber == session.game.state.robber
+    assert resumed.game._state.hands == session.game._state.hands
+    assert resumed.game._state.vertex_owner == session.game._state.vertex_owner
+    assert resumed.game._state.edge_owner == session.game._state.edge_owner
+    assert resumed.game._state.deck == session.game._state.deck
+    assert resumed.game._state.robber == session.game._state.robber
     assert resumed.game.turns == session.game.turns
     # Rebuilt by replaying, not stored: same actions in, same account out.
     assert resumed.log_for(0) == session.log_for(0)
@@ -605,8 +605,8 @@ def test_an_undone_placement_is_not_replayed_back_onto_the_board(tmp_path):
 
     resumed = resume_session("ABC123", seats, config)
 
-    assert resumed.game.state.vertex_owner == session.game.state.vertex_owner
-    assert resumed.game.state.edge_owner == session.game.state.edge_owner
+    assert resumed.game._state.vertex_owner == session.game._state.vertex_owner
+    assert resumed.game._state.edge_owner == session.game._state.edge_owner
 
 
 def test_a_resumed_game_always_deals_max_seats(tmp_path):
@@ -622,7 +622,7 @@ def test_a_resumed_game_always_deals_max_seats(tmp_path):
 
     resumed = resume_session("ABC123", seats, config)
 
-    assert resumed.game.state.num_players == MAX_SEATS
+    assert resumed.game._state.num_players == MAX_SEATS
     assert resumed.claimed_seats == {0, 1}
 
 
@@ -660,10 +660,10 @@ def _a_position_where_the_two_masks_differ(mover: int = 0):
     game = start_at(random_base_board(_random.Random(0)), 4, _random.Random(1), first=0)
     game.phase = Phase.MAIN
     game.current_player = mover
-    for hand in game.state.hands:
+    for hand in game._state.hands:
         hand[:] = [0] * NUM_RESOURCES
-    game.state.hands[mover] = [1, 1, 1, 1, 1]  # every give is available
-    game.state.hands[(mover + 1) % 4][0] = 1  # and exactly one want is coverable
+    game._state.hands[mover] = [1, 1, 1, 1, 1]  # every give is available
+    game._state.hands[(mover + 1) % 4][0] = 1  # and exactly one want is coverable
     return game
 
 
@@ -721,9 +721,9 @@ def test_record_matches_the_embedded_bots_options():
     served = registry.record(table, seat)
 
     game = table.session.game
-    topology = game.state.board.topology
+    topology = game._state.board.topology
     space = build_space(
-        topology.num_vertices, topology.num_edges, topology.num_hexes, game.state.num_players
+        topology.num_vertices, topology.num_edges, topology.num_hexes, game._state.num_players
     )
     in_process = record_from_game(game, seat, space, tuple(options_for(game)))
 

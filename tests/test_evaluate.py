@@ -187,7 +187,7 @@ def test_weights_are_what_the_score_is_built_from():
 def test_for_game_reads_the_board_off_the_game():
     rng = random.Random(0)
     game = start(random_base_board(rng), 4, rng)
-    scores = Evaluator.for_game(game).evaluate(game.state)
+    scores = Evaluator.for_game(game).evaluate(game._state)
     assert len(scores) == 4
 
 
@@ -234,7 +234,7 @@ def test_the_survey_agrees_with_the_rules():
 
     rng = random.Random(11)
     game = start(random_base_board(rng), 4, rng)
-    evaluator = Evaluator(game.state.board)
+    evaluator = Evaluator(game._state.board)
 
     checked = with_a_port = with_a_building = 0
     for _ in range(400):
@@ -243,12 +243,12 @@ def test_the_survey_agrees_with_the_rules():
             break
         apply(game, rng.choice(options))
         for player in range(4):
-            walk = evaluator.survey(game.state, player)
-            assert walk.buildings == building_points(game.state, player)
+            walk = evaluator.survey(game._state, player)
+            assert walk.buildings == building_points(game._state, player)
             assert walk.port_gain == sum(
-                BASE_TRADE_RATIO - r for r in trade_ratios(game.state, player)
+                BASE_TRADE_RATIO - r for r in trade_ratios(game._state, player)
             )
-            assert (walk.rate, walk.kinds) == evaluator.production(game.state, player)
+            assert (walk.rate, walk.kinds) == evaluator.production(game._state, player)
             checked += 1
             with_a_port += walk.port_gain > 0
             with_a_building += walk.buildings > 0

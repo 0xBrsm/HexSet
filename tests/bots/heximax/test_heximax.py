@@ -69,7 +69,7 @@ def a_game(seed: int = 0, players: int = 4):
 
 
 def snapshot(game):
-    state = game.state
+    state = game._state
     return (
         game.phase,
         game.current_player,
@@ -107,7 +107,7 @@ def after_setup(seed: int = 0, players: int = 4):
 
 def set_known_hand(game, player: int, counts: list[int]) -> None:
     """Exactly `counts` for `player`, from the bank, with the ledger in sync."""
-    state = game.state
+    state = game._state
     for r, n in enumerate(state.hands[player]):
         state.bank[r] += n
         state.hands[player][r] = 0
@@ -121,7 +121,7 @@ def set_known_hand(game, player: int, counts: list[int]) -> None:
 
 def give_unknown(game, player: int, resource: int, n: int = 1) -> None:
     """`n` cards of `resource` from the bank, which the public record cannot type."""
-    state = game.state
+    state = game._state
     state.bank[resource] -= n
     state.hands[player][resource] += n
     game.ledger.gain_unknown(player, n)
@@ -136,7 +136,7 @@ def steal_action(game, thief: int, victim: int, kind=ActionType.MOVE_ROBBER):
 
 
 def a_bot(game, seed: int = 0, **overrides) -> Heximax:
-    return heximax(game.state.board, random.Random(seed), **overrides)
+    return heximax(game._state.board, random.Random(seed), **overrides)
 
 
 # --- the behaviour-preservation gate -----------------------------------------
@@ -234,18 +234,18 @@ def _hidden_swap(game):
     after. Only the true hidden compositions differ.
     """
     mover = to_move(game)
-    seats = [s for s in range(game.state.num_players) if s != mover]
+    seats = [s for s in range(game._state.num_players) if s != mover]
     for a in seats:
         for b in seats:
             if a == b:
                 continue
             for r1 in range(NUM_RESOURCES):
-                if game.state.hands[a][r1] <= game.ledger.seats[a].known[r1]:
+                if game._state.hands[a][r1] <= game.ledger.seats[a].known[r1]:
                     continue
                 for r2 in range(NUM_RESOURCES):
                     if r2 == r1:
                         continue
-                    if game.state.hands[b][r2] > game.ledger.seats[b].known[r2]:
+                    if game._state.hands[b][r2] > game.ledger.seats[b].known[r2]:
                         return a, r1, b, r2
     return None
 
@@ -266,10 +266,10 @@ def two_worlds_the_record_cannot_tell_apart(
             if swap is not None:
                 a, r1, b, r2 = swap
                 other = imagine(game, random.Random(seed), randomize_deck=False)
-                other.state.hands[a][r1] -= 1
-                other.state.hands[b][r1] += 1
-                other.state.hands[b][r2] -= 1
-                other.state.hands[a][r2] += 1
+                other._state.hands[a][r1] -= 1
+                other._state.hands[b][r1] += 1
+                other._state.hands[b][r2] -= 1
+                other._state.hands[a][r2] += 1
                 return game, other
         step_randomly(game, rng)
     return None
@@ -279,15 +279,15 @@ def _record_says_the_same(one, two) -> bool:
     return (
         [(s.known, s.unknown) for s in one.ledger.seats]
         == [(s.known, s.unknown) for s in two.ledger.seats]
-        and one.state.bank == two.state.bank
-        and [sum(h) for h in one.state.hands] == [sum(h) for h in two.state.hands]
-        and one.state.hands[to_move(one)] == two.state.hands[to_move(two)]
+        and one._state.bank == two._state.bank
+        and [sum(h) for h in one._state.hands] == [sum(h) for h in two._state.hands]
+        and one._state.hands[to_move(one)] == two._state.hands[to_move(two)]
     )
 
 
 def _search2_choice(game, seed: int) -> Action:
     bot = SearchBot(
-        Evaluator(game.state.board), depth=2, width=6, rng=random.Random(seed)
+        Evaluator(game._state.board), depth=2, width=6, rng=random.Random(seed)
     )
     return bot.choose(game)
 
@@ -322,7 +322,7 @@ def test_heximax_cannot_tell_ledger_consistent_worlds_apart(seed):
     assert worlds is not None, f"seed {seed} never reached a swappable position"
     one, two = worlds
     assert _record_says_the_same(one, two)
-    assert one.state.hands != two.state.hands
+    assert one._state.hands != two._state.hands
 
     for k in (1, 3):
         assert a_bot(one, seed, k=k).choose(one) == a_bot(two, seed, k=k).choose(two)
@@ -414,23 +414,23 @@ def test_a_sample_keeps_every_public_count(seed):
         seat = to_move(game)
         belief = Belief.from_game(game, seat)
         assert all(n >= 0 for n in belief.pool)
-        for p in range(game.state.num_players):
-            assert sum(belief.expected_hand(p)) == pytest.approx(sum(game.state.hands[p]))
+        for p in range(game._state.num_players):
+            assert sum(belief.expected_hand(p)) == pytest.approx(sum(game._state.hands[p]))
         for _ in range(3):
             sampled = belief.sample(rng)
-            for p in range(game.state.num_players):
-                assert sum(sampled.hands[p]) == sum(game.state.hands[p])
+            for p in range(game._state.num_players):
+                assert sum(sampled.hands[p]) == sum(game._state.hands[p])
                 assert all(
                     sampled.hands[p][r] >= belief.known[p][r] for r in range(NUM_RESOURCES)
                 )
-                truth = game.state
+                truth = game._state
                 assert sum(sampled.dev_cards[p]) + sum(sampled.new_dev_cards[p]) == sum(
                     truth.dev_cards[p]
                 ) + sum(truth.new_dev_cards[p])
-            assert sampled.hands[seat] == game.state.hands[seat]
-            assert sampled.dev_cards[seat] == game.state.dev_cards[seat]
-            assert sampled.new_dev_cards[seat] == game.state.new_dev_cards[seat]
-            assert len(sampled.deck) == len(game.state.deck)
+            assert sampled.hands[seat] == game._state.hands[seat]
+            assert sampled.dev_cards[seat] == game._state.dev_cards[seat]
+            assert sampled.new_dev_cards[seat] == game._state.new_dev_cards[seat]
+            assert len(sampled.deck) == len(game._state.deck)
 
 
 def test_the_expected_hand_is_known_plus_the_pool_share():
@@ -496,7 +496,7 @@ def test_an_open_offer_certifies_the_proposers_side_and_nothing_else():
     assert belief.unknown[other] == game.ledger.seats[other].unknown == 1
     # ...so the reading of `other` is what the ledger plus the announced
     # `give` alone support: the same belief built with only that certified.
-    plain = Belief(game.state, game.ledger, 0, certify=[(1, bundle(ore=1))])
+    plain = Belief(game._state, game.ledger, 0, certify=[(1, bundle(ore=1))])
     assert belief.known == plain.known and belief.unknown == plain.unknown
     assert belief.expected_hand(other) == pytest.approx(plain.expected_hand(other))
     assert belief.p_holds(other, bundle(wood=1)) == plain.p_holds(other, bundle(wood=1))
@@ -509,10 +509,10 @@ def test_a_desynced_fixture_does_not_break_the_belief():
     """Test fixtures poke `state.hands` behind the ledger's back. The belief
     has to shrug: clamp, pad, and carry on."""
     game = after_setup(3)
-    clear_hand(game.state, 1)
-    give(game.state, 1, Resource.ORE, 5)
+    clear_hand(game._state, 1)
+    give(game._state, 1, Resource.ORE, 5)
     game.ledger.seats[1] = SeatLedger(known=[3, 3, 0, 0, 0], unknown=0)
-    game.state.hands[2] = [6, 6, 6, 6, 6]  # conjured from nowhere
+    game._state.hands[2] = [6, 6, 6, 6, 6]  # conjured from nowhere
     belief = Belief.from_game(game, 0)
     assert all(n >= 0 for n in belief.pool)
     assert sum(belief.expected_hand(1)) == pytest.approx(5)
@@ -526,10 +526,10 @@ def test_omniscient_belief_is_the_truth():
     game = after_setup(4)
     belief = Belief.from_game(game, 0, omniscient=True)
     for p in range(4):
-        assert belief.expected_hand(p) == game.state.hands[p]
+        assert belief.expected_hand(p) == game._state.hands[p]
     sampled = belief.sample(random.Random(0))
-    assert sampled.hands == game.state.hands
-    assert sampled.dev_cards == game.state.dev_cards
+    assert sampled.hands == game._state.hands
+    assert sampled.dev_cards == game._state.dev_cards
 
 
 @pytest.mark.parametrize("omniscient", [False, True])
@@ -548,7 +548,7 @@ def test_the_belief_cache_is_exact_against_from_game_on_random_tree_nodes(omnisc
     checked = 0
     for seed in range(8):
         for game in _positions(seed, 25):
-            for seat in range(game.state.num_players):
+            for seat in range(game._state.num_players):
                 cached = evaluator.belief_from_game(game, seat)
                 fresh = Belief.from_game(game, seat, omniscient=omniscient)
                 assert cached.known == fresh.known
@@ -601,8 +601,8 @@ def test_the_honest_evaluator_agrees_with_the_evaluator_when_nothing_is_hidden()
     game = after_setup(5)
     for p in range(4):
         set_known_hand(game, p, [p, 1, 0, 2, 1])
-    honest = HonestEvaluator(game.state.board).evaluate_game(game, 0)
-    plain = Evaluator(game.state.board).evaluate(game.state, 0)
+    honest = HonestEvaluator(game._state.board).evaluate_game(game, 0)
+    plain = Evaluator(game._state.board).evaluate(game._state, 0)
     assert honest == pytest.approx(plain)
 
 
@@ -614,12 +614,12 @@ def test_opponent_terms_read_the_expected_hand_not_the_true_one():
     give_unknown(game, 1, Resource.ORE, 3)  # a city in hand, in truth
     give_unknown(game, 2, Resource.WOOD, 5)
 
-    evaluator = HonestEvaluator(game.state.board)
+    evaluator = HonestEvaluator(game._state.board)
     honest = evaluator.evaluate_game(game, 0)
-    truth = Evaluator(game.state.board).evaluate(game.state, 0)
+    truth = Evaluator(game._state.board).evaluate(game._state, 0)
     assert honest[1] != pytest.approx(truth[1])
     # ...but the perturbation the ledger cannot see does not move it.
-    game.state.hands[1], game.state.hands[2] = game.state.hands[2], game.state.hands[1]
+    game._state.hands[1], game._state.hands[2] = game._state.hands[2], game._state.hands[1]
     assert evaluator.evaluate_game(game, 0) == pytest.approx(honest)
 
 
@@ -636,12 +636,12 @@ def test_the_evaluate_memo_is_exact_against_a_fresh_computation(omniscient):
     checked = 0
     for seed in range(8):
         for game in _positions(seed, 25):
-            for seat in range(game.state.num_players):
+            for seat in range(game._state.num_players):
                 belief = evaluator.belief_from_game(game, seat)
-                memoized = evaluator.evaluate(game.state, seat, belief)
+                memoized = evaluator.evaluate(game._state, seat, belief)
                 fresh_evaluator = HonestEvaluator(board, omniscient=omniscient)
                 fresh_belief = Belief.from_game(game, seat, omniscient=omniscient)
-                fresh = fresh_evaluator.evaluate(game.state, seat, fresh_belief)
+                fresh = fresh_evaluator.evaluate(game._state, seat, fresh_belief)
                 assert memoized == pytest.approx(fresh)
                 checked += 1
     assert checked >= 200
@@ -664,13 +664,13 @@ def nine_points_and_a_city_to_come():
     game.current_player = 0
     spots = independent_vertices(board, 4)
     for vertex in spots[:3]:
-        place_settlement(game.state, 0, vertex, connected=False)
-        upgrade_to_city(game.state, 0, vertex)
-    place_settlement(game.state, 0, spots[3], connected=False)
-    game.state.dev_cards[0][DevCard.VICTORY_POINT] += 2
-    give(game.state, 0, Resource.WHEAT, 2)
-    give(game.state, 0, Resource.ORE, 3)
-    assert victory_points(game.state, 0) == 9
+        place_settlement(game._state, 0, vertex, connected=False)
+        upgrade_to_city(game._state, 0, vertex)
+    place_settlement(game._state, 0, spots[3], connected=False)
+    game._state.dev_cards[0][DevCard.VICTORY_POINT] += 2
+    give(game._state, 0, Resource.WHEAT, 2)
+    give(game._state, 0, Resource.ORE, 3)
+    assert victory_points(game._state, 0) == 9
     return game, spots[3]
 
 
@@ -762,7 +762,7 @@ def test_deepening_stops_where_the_budget_says():
 
 def test_a_no_trade_bot_never_proposes_and_always_declines():
     game = a_game(seed=14)
-    board = game.state.board
+    board = game._state.board
     quiet = heximax(board, random.Random(0), mode="notrade", max_nodes=64)
     assert quiet.max_offers == 0
     talkers = [greedy(Evaluator(board), random.Random(s), max_offers=3) for s in (1, 2, 3)]
@@ -856,7 +856,7 @@ def test_the_opening_settlement_comes_from_the_placement_prior():
     bot = a_bot(game, 19)
     options = [a.a for a in legal_actions(game)]
     assert bot.choose(game) == Action(
-        ActionType.SETUP_SETTLEMENT, best(game.state, 0, options)
+        ActionType.SETUP_SETTLEMENT, best(game._state, 0, options)
     )
     unprimed = a_bot(game, 19, placement=False)
     assert unprimed.choose(game).type is ActionType.SETUP_SETTLEMENT
@@ -877,7 +877,7 @@ def test_a_discard_gives_up_the_card_worth_least():
     losses = {
         r: bot.marginal_loss(game, seat, r)
         for r in range(NUM_RESOURCES)
-        if game.state.hands[seat][r]
+        if game._state.hands[seat][r]
     }
     assert losses[chosen.a] == min(losses.values())
 
@@ -891,7 +891,7 @@ def test_monopoly_names_the_resource_the_table_is_expected_to_hold_most_of():
     set_known_hand(game, 3, [1, 0, 0, 0, 0])
     game.current_player = 0
     game.phase = Phase.MAIN
-    game.state.dev_cards[0][DevCard.MONOPOLY] = 1
+    game._state.dev_cards[0][DevCard.MONOPOLY] = 1
     bot = a_bot(game, 21)
     options = bot.root_options(game)
     monopolies = [a for a in options if a.type is ActionType.PLAY_MONOPOLY]
@@ -918,7 +918,7 @@ def test_a_steal_is_valued_as_the_expectation_over_the_victims_belief():
     children = bot.draw_children(world, action, thief)
     assert sorted(weight for weight, _ in children) == pytest.approx([0.5, 0.5])
     stolen = sorted(
-        r for _, child in children for r in range(NUM_RESOURCES) if child.state.hands[thief][r]
+        r for _, child in children for r in range(NUM_RESOURCES) if child._state.hands[thief][r]
     )
     assert stolen == [Resource.WOOD, Resource.ORE]
 
@@ -940,7 +940,7 @@ def test_a_dev_card_purchase_is_valued_over_the_unseen_deck():
     children = bot.draw_children(world, Action(ActionType.BUY_DEV_CARD), 0)
     assert sum(weight for weight, _ in children) == pytest.approx(1.0)
     drawn = {
-        next(c for c in range(len(DevCard)) if child.state.new_dev_cards[0][c])
+        next(c for c in range(len(DevCard)) if child._state.new_dev_cards[0][c])
         for _, child in children
     }
     assert drawn == set(range(len(DevCard)))
@@ -951,15 +951,15 @@ def test_an_omniscient_bot_ignores_k_and_searches_the_truth():
     bot = a_bot(game, 24, mode="omniscient", k=4)
     worlds = bot.worlds(game, to_move(game))
     assert len(worlds) == 1
-    assert worlds[0].state.hands == game.state.hands
+    assert worlds[0]._state.hands == game._state.hands
 
 
 def test_an_unknown_stance_or_mode_is_refused():
     game = a_game()
     with pytest.raises(ValueError, match="unknown stance"):
-        Heximax(HonestEvaluator(game.state.board), stance="spiteful")
+        Heximax(HonestEvaluator(game._state.board), stance="spiteful")
     with pytest.raises(ValueError, match="unknown heximax mode"):
-        heximax(game.state.board, random.Random(0), mode="clairvoyant")
+        heximax(game._state.board, random.Random(0), mode="clairvoyant")
 
 
 # --- trade valuation ------------------------------------------------------------
@@ -1001,11 +1001,11 @@ def _omniscient_truth_delta(bot, game, seat, give, want, counterparty):
         belief = Belief(state, game.ledger, seat, omniscient=True)
         return bot._rank(evaluator.evaluate(state, seat, belief), seat)
 
-    after = copy_state(game.state)
+    after = copy_state(game._state)
     for r in range(NUM_RESOURCES):
         after.hands[seat][r] += want[r] - give[r]
         after.hands[counterparty][r] += give[r] - want[r]
-    return read(after) - read(game.state)
+    return read(after) - read(game._state)
 
 
 def test_an_omniscient_trade_read_moves_the_counterpartys_real_cards():
@@ -1051,11 +1051,11 @@ def test_an_omniscient_partner_read_moves_the_partners_real_cards():
         belief = Belief(state, game.ledger, 0, omniscient=True)
         return bot._rank(evaluator.evaluate(state, 0, belief), 1)
 
-    after = copy_state(game.state)
+    after = copy_state(game._state)
     for r in range(NUM_RESOURCES):
         after.hands[1][r] += give[r] - want[r]
         after.hands[0][r] += want[r] - give[r]
-    assert theirs == pytest.approx(read(after) - read(game.state))
+    assert theirs == pytest.approx(read(after) - read(game._state))
 
 
 def test_an_honest_trade_read_is_unchanged_by_the_exact_partner_move():
@@ -1075,8 +1075,8 @@ def test_an_honest_trade_read_is_unchanged_by_the_exact_partner_move():
         set_known_hand(game, 0, [2, 1, 0, 0, 0])
         for seat, secret in ((1, one), (3, three)):
             for r in range(NUM_RESOURCES):
-                game.state.bank[r] -= secret[r]
-                game.state.hands[seat][r] = secret[r]
+                game._state.bank[r] -= secret[r]
+                game._state.hands[seat][r] = secret[r]
             game.ledger.seats[seat] = SeatLedger()
             game.ledger.seats[seat].unknown = 3
         bot = a_bot(game, 26)
@@ -1171,7 +1171,7 @@ def _play_and_census(seed: int):
     """
     game = a_game(seed)
     bots = [
-        heximax(game.state.board, random.Random(seed * 97 + s), max_nodes=CENSUS_MAX_NODES)
+        heximax(game._state.board, random.Random(seed * 97 + s), max_nodes=CENSUS_MAX_NODES)
         for s in range(4)
     ]
     multi = one_for_one = accepted = 0
@@ -1182,7 +1182,7 @@ def _play_and_census(seed: int):
         if action.type is ActionType.PROPOSE_TRADE:
             offer = Offer(proposer=seat, give=action.give, want=action.want)
             assert well_formed(offer)
-            assert can_propose(game.state, offer)
+            assert can_propose(game._state, offer)
             assert not any(g and w for g, w in zip(action.give, action.want))
             assert sum(action.give) <= 2 and sum(action.want) <= 2
             if sum(action.give) > 1 or sum(action.want) > 1:
@@ -1297,8 +1297,8 @@ def test_accept_rule_declines_a_leader_denial_case():
         game.phase = Phase.MAIN
         game.current_player = proposer
         for v in spots[:3]:
-            place_settlement(game.state, 1, v, connected=False)
-            upgrade_to_city(game.state, 1, v)
+            place_settlement(game._state, 1, v, connected=False)
+            upgrade_to_city(game._state, 1, v)
         for p in range(4):
             set_known_hand(game, p, list(bundle()))
         set_known_hand(game, 1, list(bundle(wood=1, ore=2, wheat=2)))  # 1 ore short of a 4th city
@@ -1372,9 +1372,9 @@ def test_counter_of_returns_a_valid_bundle_from_my_surplus_or_none():
     assert result in bot.candidate_bundles(game, 0)
     counter = Offer(proposer=0, give=give, want=want)
     assert well_formed(counter)
-    assert can_propose(game.state, counter)
+    assert can_propose(game._state, counter)
 
-    clear_hand(game.state, 0)
+    clear_hand(game._state, 0)
     assert bot.counter_of(game, 0, standing) is None
 
 
@@ -1405,7 +1405,7 @@ def test_proposals_are_among_the_root_options_at_a_main_phase_position():
     adapter. Re-enabled before this commit.
     """
     game = a_game(0)
-    bots = [heximax(game.state.board, random.Random(97 * s), max_nodes=64) for s in range(4)]
+    bots = [heximax(game._state.board, random.Random(97 * s), max_nodes=64) for s in range(4)]
     found = False
     moves = 0
     while not is_over(game) and moves < 2000:
@@ -1425,13 +1425,16 @@ def test_heximax_source_never_calls_responders_or_reads_pending_responders():
     """`game.pending_responders` is the engine's true-hand eligibility list
     and `trading.responders` is built from it (`bots.SearchBot._addressed`
     uses both) -- both are off limits to an honest bot. The one line that
-    names `pending_responders` is the P1 comment explaining why.
+    names `pending_responders` is the comment on `View.from_game` (moved
+    from `hexset.bots.heximax.belief.Belief.from_game` into the engine at
+    `hexset.view` in P0 of the trading-design registration) explaining why.
 
     heximax is a package (`hexset.bots.heximax`, split by concern into
-    `belief`/`evaluate`/`search`/`trade`/`presets`), not the single file this
-    test was first written against, so the source under test is every one of
-    those submodules concatenated -- the invariant is about the package as a
-    whole, not about which file a line happens to live in now. The deprecated
+    `evaluate`/`search`/`trade`/`presets`, plus the engine's own
+    `hexset.view`), not the single file this test was first written
+    against, so the source under test is every one of those modules
+    concatenated -- the invariant is about the package as a whole, not
+    about which file a line happens to live in now. The deprecated
     top-level `heximax` shim is one import line and is not itself part of
     the source this checks.
     """
@@ -1442,11 +1445,12 @@ def test_heximax_source_never_calls_responders_or_reads_pending_responders():
     # see its module docstring), so this dotted import names the submodule
     # and nothing else, regardless of import order.
     import hexset.bots.heximax as heximax_pkg
-    from hexset.bots.heximax import belief, evaluate, presets, search, trade
+    import hexset.view as view
+    from hexset.bots.heximax import evaluate, presets, search, trade
 
     source = "\n".join(
         inspect.getsource(module)
-        for module in (heximax_pkg, belief, evaluate, search, trade, presets)
+        for module in (heximax_pkg, view, evaluate, search, trade, presets)
     )
     assert "responders(" not in source
     mentions = [line for line in source.splitlines() if "pending_responders" in line]

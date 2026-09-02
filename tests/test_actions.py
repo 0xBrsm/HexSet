@@ -88,7 +88,7 @@ def test_the_opening_road_must_touch_the_new_settlement():
     game = a_game()
     apply(game, legal_actions(game)[0])
     offered = {a.a for a in legal_actions(game)}
-    topology = game.state.board.topology
+    topology = game._state.board.topology
     assert offered == set(topology.vertex_edges[game.last_settlement])
 
 
@@ -123,15 +123,15 @@ def test_random_games_finish_with_a_legal_winner(seed):
     game = play_random_game(num_players=4, rng=random.Random(seed))
 
     assert game.won_by is not None
-    assert victory_points(game.state, game.won_by) >= WINNING_POINTS
+    assert victory_points(game._state, game.won_by) >= WINNING_POINTS
 
 
 @pytest.mark.parametrize("seed", range(5))
 def test_resources_survive_a_whole_game(seed):
     game = play_random_game(num_players=4, rng=random.Random(seed))
-    assert total_in_play(game.state) == expected_total()
-    assert all(n >= 0 for n in game.state.bank)
-    assert all(n >= 0 for hand in game.state.hands for n in hand)
+    assert total_in_play(game._state) == expected_total()
+    assert all(n >= 0 for n in game._state.bank)
+    assert all(n >= 0 for hand in game._state.hands for n in hand)
 
 
 @pytest.mark.parametrize("players", [2, 3, 4])
@@ -154,25 +154,25 @@ def test_fast_offer_enumeration_matches_responder_rules():
     game.phase = Phase.MAIN
 
     for _ in range(100):
-        game.current_player = rng.randrange(game.state.num_players)
+        game.current_player = rng.randrange(game._state.num_players)
         game.offers_made = rng.randrange(10)
-        game.state.hands = [
+        game._state.hands = [
             [rng.randrange(4) for _ in range(5)]
-            for _ in range(game.state.num_players)
+            for _ in range(game._state.num_players)
         ]
 
         expected = []
         player = game.current_player
         if game.offers_made < 8:
             for given in range(5):
-                if not game.state.hands[player][given]:
+                if not game._state.hands[player][given]:
                     continue
                 for wanted in range(5):
                     if wanted == given:
                         continue
                     give = tuple(int(r == given) for r in range(5))
                     want = tuple(int(r == wanted) for r in range(5))
-                    if responders(game.state, Offer(player, give, want)):
+                    if responders(game._state, Offer(player, give, want)):
                         expected.append(
                             Action(ActionType.PROPOSE_TRADE, give=give, want=want)
                         )
@@ -200,6 +200,6 @@ def test_a_stranded_free_road_does_not_deadlock():
 
     # Nowhere legal to build, so the turn must still be endable.
     game.free_roads = 2
-    game.state.edge_owner = [0] * len(game.state.edge_owner)
+    game._state.edge_owner = [0] * len(game._state.edge_owner)
     kinds = {a.type for a in legal_actions(game)}
     assert ActionType.END_TURN in kinds

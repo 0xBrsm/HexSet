@@ -57,7 +57,7 @@ def _set_known_hand(game, player: int, counts: list[int]) -> None:
     sync. Unlike `helpers.give`/`clear_hand`, which poke `state.hands`
     directly, this is safe to use in a test that goes on to inspect the
     ledger -- `give`/`clear_hand` alone would desync it."""
-    state = game.state
+    state = game._state
     for r, n in enumerate(state.hands[player]):
         if n:
             state.bank[r] += n
@@ -72,7 +72,7 @@ def _set_known_hand(game, player: int, counts: list[int]) -> None:
 
 def _assert_invariant(game) -> None:
     for seat, seat_ledger in enumerate(game.ledger.seats):
-        true_hand = game.state.hands[seat]
+        true_hand = game._state.hands[seat]
         assert seat_ledger.total() == sum(true_hand), (
             f"seat {seat}: sum(known)+unknown={seat_ledger.total()} "
             f"!= true hand total {sum(true_hand)}"
@@ -155,7 +155,7 @@ def test_production_is_exact_and_public():
 def test_a_steal_credits_the_thief_with_exactly_one_unknown_card():
     game = after_setup()
     game.phase = Phase.ROBBER
-    for player in range(game.state.num_players):
+    for player in range(game._state.num_players):
         _set_known_hand(game, player, [0] * NUM_RESOURCES)
     _set_known_hand(game, 1, [2, 0, 3, 0, 0])  # wood + sheep, known exactly
     target = _steal_action(game, thief=0, victim=1)
@@ -187,8 +187,8 @@ def test_a_knight_steal_updates_the_ledger_the_same_way_as_the_robber():
     game = after_setup()
     game.phase = Phase.MAIN
     game.current_player = 0
-    game.state.dev_cards[0][DevCard.KNIGHT] = 1
-    for player in range(game.state.num_players):
+    game._state.dev_cards[0][DevCard.KNIGHT] = 1
+    for player in range(game._state.num_players):
         _set_known_hand(game, player, [0] * NUM_RESOURCES)
     _set_known_hand(game, 1, [1, 1, 0, 0, 0])
     target = _steal_action(game, thief=0, victim=1, kind=ActionType.PLAY_KNIGHT)
@@ -272,7 +272,7 @@ def test_a_steal_is_identity_independent_in_the_encoding():
     def a_steal_world(single_resource: int, seed: int = 42):
         game = after_setup(seed)
         game.phase = Phase.ROBBER
-        for player in range(game.state.num_players):
+        for player in range(game._state.num_players):
             _set_known_hand(game, player, [0] * NUM_RESOURCES)
         hand = [0] * NUM_RESOURCES
         hand[single_resource] = 1
@@ -283,7 +283,7 @@ def test_a_steal_is_identity_independent_in_the_encoding():
 
     world_a = a_steal_world(int(Resource.WOOD))
     world_b = a_steal_world(int(Resource.ORE))
-    players = world_a.state.num_players
+    players = world_a._state.num_players
 
     for perspective in range(players):
         block_a = _ledger_block(encode(world_a, perspective), players)
@@ -337,21 +337,21 @@ def test_monopoly_re_pins_the_announced_resource():
     game = after_setup()
     game.phase = Phase.MAIN
     game.current_player = 0
-    game.state.dev_cards[0][DevCard.MONOPOLY] = 1
-    for player in range(game.state.num_players):
+    game._state.dev_cards[0][DevCard.MONOPOLY] = 1
+    for player in range(game._state.num_players):
         _set_known_hand(game, player, [0] * NUM_RESOURCES)
     # Seat 1 holds 3 sheep, but the ledger only certifies 1 of them -- the
     # other 2 are folded into `unknown`, standing in for a resource whose
     # exact composition the ledger could not otherwise pin.
-    game.state.bank[Resource.SHEEP] -= 2
-    game.state.hands[1][Resource.SHEEP] += 2
+    game._state.bank[Resource.SHEEP] -= 2
+    game._state.hands[1][Resource.SHEEP] += 2
     game.ledger.gain_unknown(1, 2)
     _set_known_hand(game, 2, [0, 0, 1, 0, 0])
 
     play_monopoly_card(game, Resource.SHEEP)
 
-    assert game.state.hands[1][Resource.SHEEP] == 0
-    assert game.state.hands[2][Resource.SHEEP] == 0
+    assert game._state.hands[1][Resource.SHEEP] == 0
+    assert game._state.hands[2][Resource.SHEEP] == 0
     assert game.ledger.seats[1].known[Resource.SHEEP] == 0
     assert game.ledger.seats[1].unknown == 0
     assert game.ledger.seats[2].known[Resource.SHEEP] == 0
@@ -364,11 +364,11 @@ def test_monopoly_re_pins_the_announced_resource():
 
 def test_a_discard_reveals_the_resource_it_names():
     game = after_setup()
-    game.discard_quota = [0] * game.state.num_players
+    game.discard_quota = [0] * game._state.num_players
     game.phase = Phase.DISCARD
     _set_known_hand(game, 0, [0] * NUM_RESOURCES)
-    game.state.bank[Resource.ORE] -= 1
-    game.state.hands[0][Resource.ORE] += 1
+    game._state.bank[Resource.ORE] -= 1
+    game._state.hands[0][Resource.ORE] += 1
     game.ledger.gain_unknown(0, 1)
     game.discard_quota[0] = 1
 
@@ -381,7 +381,7 @@ def test_a_discard_reveals_the_resource_it_names():
 
 def test_submit_discard_is_also_public():
     game = after_setup()
-    game.discard_quota = [0] * game.state.num_players
+    game.discard_quota = [0] * game._state.num_players
     game.phase = Phase.DISCARD
     _set_known_hand(game, 0, [2, 2, 0, 0, 0])
     game.discard_quota[0] = 2

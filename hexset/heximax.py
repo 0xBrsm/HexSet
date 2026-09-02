@@ -6,11 +6,11 @@ one clean held-out referent, and it cheats: its evaluation reads every seat's
 true hand, its tree expands opponents from their true hands and development
 cards, and a steal or a dev-card buy is valued on one frozen draw. heximax
 is the next generation of that bot, built to the design in
-`agents/reference/heximax.md` (P1 of §8). It is **information-set honest by
-default**: every quantity about an opponent is read through the public
-ledger (`game.ledger`, `known[5]` + `unknown`) and the public counts, never
-through `state.hands[opponent]` or `state.dev_cards[opponent]`. Its own hand
-is exact. An `omniscient` mode keeps the old reading, so the price of honesty
+`agents/reference/heximax.md`. It is **information-set honest by default**:
+every quantity about an opponent is read through the public ledger
+(`game.ledger`, `known[5]` + `unknown`) and the public counts, never through
+`state.hands[opponent]` or `state.dev_cards[opponent]`. Its own hand is
+exact. An `omniscient` mode keeps the old reading, so the price of honesty
 can be measured rather than assumed.
 
 One file, four sections, so that a downstream copy takes one file:
@@ -25,46 +25,37 @@ One file, four sections, so that a downstream copy takes one file:
   and every hidden draw averaged over its distribution.
 * ``trade``    -- a valuation, protocol-free (marginal values, `deficit` and
   `surplus`, `candidate_bundles`, `score_proposal`, `accept_rule`,
-  `counter_of`, `rank_partners`), then P2's thin protocol adapter over it
+  `counter_of`, `rank_partners`), then a thin protocol adapter over it
   (`Heximax.propose_actions`, and `_options_in`'s `accept_rule` gate) --
   mechanical, untuned, and expected to be rewritten whenever the trading
   protocol changes; only the valuation is fitted or tested for strength.
 
-P1 played the engine's one-for-one `PROPOSE_TRADE` sample from
-`legal_actions`, valued by the search like any other action. P2 replaces
-that sample with heximax's own top-`propose_top_n` bundle proposals while
-`max_offers` still has room, and gates the tree's own `ACCEPT_TRADE` with
-`accept_rule` wherever a `TRADE_RESPOND` node is reached, root or not; the
-tree's own responses are still searched from the responder's seat exactly as
-in P1. `max_offers=0` never proposes and always declines, unchanged.
+The adapter replaces the engine's one-for-one `PROPOSE_TRADE` sample with
+heximax's own top-`propose_top_n` bundle proposals while `max_offers` still
+has room, and gates the tree's own `ACCEPT_TRADE` with `accept_rule`
+wherever a `TRADE_RESPOND` node is reached, root or not -- the tree's own
+responses are still searched from the responder's own seat. `max_offers=0`
+never proposes and always declines.
 
 Cost: leaf evaluations per move are capped by `max_nodes`
-(`DEFAULT_MAX_NODES`, 600). Measured 2026-09-02, after an optimization pass
-that memoized `Evaluator.survey` per decision, walked `_pieces` once per
-`progress()`, computed `propose_actions`' "before" reading once and reused it,
-and stopped `candidate_bundles` paying for `deficit`/`surplus` values it
-never read (see `agents/reference/heximax.md`, its own CHANGELOG entry, and
-this range's commits for the per-change breakdown) -- same methodology as
-before the pass (three four-seat games a side, same boards, board seeds
-0/1/2, `search2-offers3`'s `max_offers=3` matching heximax's own budget):
-`heximax` 5.14 ms/move vs `search2-offers3` 1.79 ms/move, **2.87x** -- down
-from 7.10 ms/move and 3.91x measured the same way before the pass, but still
-over the design's 2x ceiling. `bot.choose()`'s own choices, and the number of
-leaves it spends getting to them, are unchanged by the pass on every position
-checked (`test_choices_are_byte_identical_to_the_recorded_census`); every bit
-of the saving is the same leaves and the same decisions, computed with less
-redundant work. The remainder is not a compute problem: `score_proposal`'s
-crisp `willing` gate, read under `relative`, proposes far more selectively
-than the engine's naive one-for-one sample, so a real game trades roughly a
-third as often (the 20-game census,
-`test_multi_card_and_one_for_one_proposals_both_occur_over_twenty_games`) --
-fewer cheap negotiation actions average against the leaf-budgeted build
-decisions that dominate the rest, confirmed by disabling `propose_actions`'s
-scoring entirely and re-measuring (still ~1.45x over the P1-only figure from
-the trade-volume drop alone). Whether the gate is too strict, `relative` is
-the wrong stance for `willing`, or the ceiling needs a protocol-P0 allowance
-is a P3 question, not one this adapter should answer by loosening the gate to
-hit a number.
+(`DEFAULT_MAX_NODES`, 600). Measured 2026-09-02 (three four-seat games a
+side, board seeds 0/1/2, `search2-offers3`'s `max_offers=3` matching
+heximax's own budget): `heximax` 5.14 ms/move vs `search2-offers3` 1.79
+ms/move, **2.87x** -- still over the design's 2x ceiling, and not a compute
+problem: `score_proposal`'s crisp `willing` gate, read under `relative`,
+proposes far more selectively than the engine's naive one-for-one sample, so
+a real game trades roughly a third as often
+(`test_multi_card_and_one_for_one_proposals_both_occur_over_twenty_games`),
+and those fewer, cheap negotiation actions average against the
+leaf-budgeted build decisions that dominate the rest. Whether the gate is
+too strict, `relative` is the wrong stance for `willing`, or the ceiling
+needs a protocol allowance is a design question, not one this adapter
+should answer by loosening the gate to hit a number. `bot.choose()`'s own
+choices, and the number of leaves it spends getting to them, are checked on
+every position by
+`test_choices_are_byte_identical_to_the_recorded_census`. History (the
+optimization pass and its per-change breakdown) is in
+`agents/reference/heximax.md`.
 """
 
 from __future__ import annotations
@@ -116,6 +107,16 @@ MODES = ("honest", "omniscient", "notrade")
 # Sentinel for `heximax(max_offers=...)`: "whatever the mode's own budget is".
 BY_MODE: int = object()  # type: ignore[assignment]
 
+# --- public API ---------------------------------------------------------------
+#
+# heximax(board, ...) -> Heximax   the three shipped presets, by `mode`
+# Heximax                          the bot: a `Bot.choose(game) -> Action`
+# Belief                           the information set (`Belief.from_game`)
+# HonestEvaluator                  the honest evaluation
+#
+# Sections below, in dependency order: belief, evaluate, search, trade.
+# Private helpers are grouped under the section that owns them.
+
 
 # --- belief -------------------------------------------------------------------
 
@@ -127,20 +128,15 @@ class Belief:
     `unknown[s]` the number of cards the record cannot type. The perspective's
     own seat is exact (`known` is the hand, `unknown` is zero), and so is every
     seat when `omniscient`. Everything hidden is drawn from one shared
-    **residual pool**: per resource, the cards that are neither in the bank,
-    nor certified in any seat's `known`. The pool is derived from the bank's
-    initial size (`state.BANK_PER_RESOURCE`, nineteen a resource in the base
-    game) rather than from the true hands, which the belief may not read.
-
-    An open offer certifies one thing the ledger does not record: the
-    proposer holds what it offers. Who else can cover it is deliberately not
-    read, see `from_game`.
-
-    Robustness over purity: a test fixture that writes `state.hands` behind
-    the ledger's back can leave `known` summing past the public hand size, or
-    the pool short of the hidden cards. The belief clamps `known` to the size
-    and pads the pool proportionally rather than raise, because a baseline
-    that cannot cope with a position is not a baseline.
+    **residual pool**: per resource, the cards that are neither in the bank
+    nor certified in any seat's `known`, sized from the bank's initial count
+    rather than the true hands, which the belief may not read. An open offer
+    certifies one thing the ledger does not: the proposer holds what it
+    offers (see `from_game`). Robustness over purity: a test fixture that
+    writes `state.hands` behind the ledger's back can leave `known` summing
+    past the public hand size, or the pool short; the belief clamps `known`
+    to size and pads the pool proportionally rather than raise, because a
+    baseline that cannot cope with a position is not a baseline.
     """
 
     def __init__(
@@ -195,14 +191,13 @@ class Belief:
 
     @classmethod
     def from_game(cls, game: Game, perspective: int, *, omniscient: bool = False) -> Belief:
-        # Only the proposer's side of a standing offer is certified: the offer
-        # is announced and `can_propose` requires holding it. Who else could
-        # cover it is NOT read -- `game.pending_responders` is the engine's
-        # true eligibility list, and under the rules a decline reveals
-        # nothing, so from the responder's seat the other pending seats'
-        # coverage is hidden information. A sampled world may therefore hand
-        # a later responder a hand that cannot cover `want`; the search
-        # guards `ACCEPT_TRADE` with `can_accept` in that world instead.
+        # Only the proposer's side of a standing offer is certified: it is
+        # announced and `can_propose` requires holding it.
+        # `game.pending_responders` is the engine's true eligibility list, but
+        # whether OTHER pending seats can cover the offer is deliberately not
+        # read -- a decline reveals nothing -- so a sampled world may hand a
+        # later responder a hand that cannot cover `want`; the search guards
+        # `ACCEPT_TRADE` with `can_accept` there instead.
         certify: list[tuple[int, Sequence[int]]] = []
         if game.offer is not None:
             certify.append((game.offer.proposer, game.offer.give))
@@ -402,7 +397,7 @@ TRADING_WEIGHTS = Weights()
 # That fit predates the scarcity term; it is set here at the corpus exchange
 # rate `evaluate.FITTED_SCARCE` uses -- 0.91 pips at that fit's own
 # `production / ROLLS` -- rather than at zero, so the no-trade profile carries
-# the one term that was adopted untuned and won anyway. Refit at P3 (§7).
+# the one term that was adopted untuned and won anyway; still to be refit.
 NO_TRADE_WEIGHTS = Weights(
     victory_point=1.0,
     production=2.785,
@@ -420,21 +415,17 @@ NO_TRADE_WEIGHTS = Weights(
 class HonestEvaluator:
     """`evaluate.Evaluator`'s model, read through a `Belief`.
 
-    Board terms are the existing evaluator's own `survey` -- it reads only
-    public state, so it is reused rather than copied. The three hand terms
+    Board terms are the existing evaluator's own `survey`, reused rather
+    than copied since it reads only public state. The three hand terms
     (`progress`, `held`, `surplus_card`) are read on the true hand for the
-    knower and on `Belief.expected_hand` for everyone else; when `omniscient`,
-    on the true hand for everyone. Victory-point cards count only for the
-    knower, as before.
-
-    `progress` on an expected hand is an approximation: it is a maximum of
-    minimums, so the value on the mean differs from the mean of the values.
-    `exact_progress_samples > 0` replaces it with an average over that many
-    hands sampled from the belief, for the readout.
-
-    Supply-aware progress: a hand cannot be on its way to a sixth settlement
-    or a fifth city. Progress toward a purchase whose piece supply is
-    exhausted is zero, so the maximum falls back to what can still be built.
+    knower and on `Belief.expected_hand` for everyone else (or everyone,
+    when `omniscient`); victory-point cards count only for the knower.
+    `progress` on an expected hand is an approximation -- a maximum of
+    minimums, so the value on the mean differs from the mean of the values --
+    that `exact_progress_samples > 0` replaces with an average over that many
+    hands sampled from the belief. Supply-aware: progress toward a purchase
+    whose piece supply is exhausted is zero, so the maximum falls back to
+    what can still be built.
     """
 
     def __init__(
@@ -660,38 +651,29 @@ class Heximax:
     `depth` counts decisions, `width` beams the branching, and `max_nodes`
     caps the leaf evaluations one `choose` may spend: the search deepens
     iteratively, one ply at a time, while the next ply's estimated cost fits
-    what is left, and a ply that overruns the budget is abandoned for the last
-    completed one. Whatever the branching, no move costs more than
-    `max_nodes` leaves.
-
-    Opponents are expanded from `k` determinized worlds drawn from the
-    belief at the root (`Belief.sample`) and the root values averaged across
-    them -- perfect-information Monte Carlo. The world is what the tree plays
-    in; the leaf is read from the knower's own information at that node,
-    through the node's own ledger, which the hypothetical play has kept
-    up to date. In `omniscient` mode `k` is ignored and the true state is
-    searched.
-
-    Hidden draws are expectations, not one sample: a steal is averaged over
-    the victim's expected composition, a dev-card buy over the unseen deck
-    composition, each outcome weighted by its probability. Rolls are exact
-    eleven-way within `EXACT_ROLL_PLIES` of the root and sampled beyond.
+    what is left, and a ply that overruns the budget is abandoned for the
+    last completed one -- whatever the branching, no move costs more than
+    `max_nodes` leaves. Opponents are expanded from `k` determinized worlds
+    drawn from the belief at the root (`Belief.sample`) and the root values
+    averaged across them -- perfect-information Monte Carlo; in `omniscient`
+    mode `k` is ignored and the true state is searched. Hidden draws are
+    expectations, not one sample: a steal is averaged over the victim's
+    expected composition, a dev-card buy over the unseen deck composition,
+    each weighted by its probability. Rolls are exact eleven-way within
+    `EXACT_ROLL_PLIES` of the root and sampled beyond.
 
     Opening settlements come from `placement.best` when `placement` is set;
     opening roads are searched. A discard gives up the card with the smallest
-    marginal loss; a monopoly names the resource the table is expected to hold
-    most of. `max_offers` is the bot's own budget below the engine's, exactly
-    as in `SearchBot`; at zero it never proposes and always declines.
-
-    P2 (the protocol-P0 adapter, `# --- trade` section): while `max_offers`
-    still has room this turn, `PROPOSE_TRADE` root options are the top
-    `propose_top_n` candidates from `candidate_bundles`, ranked by
-    `score_proposal` and cut off at `propose_margin` -- see
-    `propose_actions`. A `TRADE_RESPOND` node may only offer `ACCEPT_TRADE`
-    to the search when `accept_rule` clears `accept_margin` there too --
-    see `_options_in`. Both margins are unfitted (P3 refits them alongside
-    the weight profiles); `0.0` accepts or proposes whenever the valuation
-    itself is positive.
+    marginal loss; a monopoly names the resource the table is expected to
+    hold most of. `max_offers` is the bot's own budget below the engine's; at
+    zero it never proposes and always declines. The trade adapter
+    (`# --- trade` section): while `max_offers` has room, `PROPOSE_TRADE`
+    root options are the top `propose_top_n` candidates from
+    `candidate_bundles`, ranked by `score_proposal` and cut off at
+    `propose_margin` (`propose_actions`); a `TRADE_RESPOND` node may only
+    offer `ACCEPT_TRADE` to the search when `accept_rule` clears
+    `accept_margin` there too (`_options_in`). Both margins are unfitted;
+    `0.0` accepts or proposes whenever the valuation itself is positive.
 
     Every random draw comes from `rng`; the real game's stream is never read.
     """
@@ -707,10 +689,10 @@ class Heximax:
     placement: bool = True
     mode: str = "honest"
     exact_roll_plies: int = EXACT_ROLL_PLIES
-    # The protocol-P0 adapter's own knobs (unfitted, P3): how many of
+    # The trade adapter's own knobs (unfitted): how many of
     # `candidate_bundles`' scored proposals become root options, and the
     # margins below which a proposal is not offered or an offer not
-    # accepted. See the class docstring's P2 paragraph.
+    # accepted. See the class docstring's trade-adapter paragraph.
     propose_top_n: int = 3
     propose_margin: float = 0.0
     accept_margin: float = 0.0
@@ -744,7 +726,7 @@ class Heximax:
         directly (placement's prior, `marginal_loss`, or the only option);
         everything else determinizes the belief into `k` worlds, builds the
         root's own options (`_root_options` -- engine legality plus, in
-        MAIN, the P2 adapter's `propose_actions`), and either returns the
+        MAIN, the trade adapter's `propose_actions`), and either returns the
         one option available or hands the rest to `_search`.
         """
         seat = to_move(game)
@@ -806,10 +788,9 @@ class Heximax:
         if game.phase is Phase.MAIN:
             # The engine's one-for-one sample (`actions._offer_actions`,
             # already folded into `seen` above) is replaced wholesale by
-            # `propose_actions` -- see `Heximax`'s P2 docstring paragraph.
-            # Guarded by the same budget test `within_offer_budget` applies
-            # below, so a bot with no offers left never pays for the
-            # candidate search.
+            # `propose_actions`. Guarded by the same budget test
+            # `within_offer_budget` applies below, so a bot with no offers
+            # left never pays for the candidate search.
             options = [a for a in options if a.type is not ActionType.PROPOSE_TRADE]
             if self.max_offers is None or game.offers_made < self.max_offers:
                 options.extend(self.propose_actions(game, seat))
@@ -916,11 +897,9 @@ class Heximax:
         return self._value(self._plain_child(game, action), depth - 1, knower, ply + 1)
 
     def _over_dice(self, game: Game, depth: int, knower: int, ply: int) -> list[float]:
-        # Unreached at every shipped preset (depth=2 <= exact_roll_plies=2,
-        # so `ply` never gets this high) -- kept because `depth` is a public
-        # field the design anticipates raising ("rolls stay exact eleven-way
-        # at depth <= 2 and sampled beyond", heximax.md §3(b)); this is what
-        # bounds a deeper search's cost when it is.
+        # Unreached at every shipped preset (depth=2 <= exact_roll_plies=2, so
+        # `ply` never gets this high) -- kept because `depth` is a public
+        # field a deeper search may raise, and this is what bounds its cost.
         if ply >= self.exact_roll_plies:
             child = imagine(game, self.rng)
             roll_dice(child)
@@ -994,24 +973,16 @@ class Heximax:
         honour or one `accept_rule` would refuse.
 
         The engine offers ACCEPT to whoever it is asking because it built the
-        list of responders from the true hands. A world sampled without that
-        knowledge may have dealt the seat being asked a hand that does not
-        cover the offer; there the only response is to decline, and
-        `execute_trade` is never reached with a hand that cannot pay. Beyond
-        that hard constraint, P2 gates the soft one: the search may only
-        offer ACCEPT_TRADE where `accept_rule` clears `accept_margin`, so a
-        table of heximax-like responders is searched playing the rule rather
-        than whatever a bare max^n over the evaluation would pick at the
-        margin. This runs at every `TRADE_RESPOND` node the tree reaches, not
-        only the root, so a simulated opponent's accept is gated the same
-        way a real one would be -- `knower` is always the SEARCH's root
-        seat (threaded down from `choose`), never the responder itself when
-        the two differ, so `accept_rule` reads that responder's row off
-        `knower`'s own belief (`_partner_delta`) rather than the world's
-        sampled truth. Without that, a simulated opponent's accept would
-        depend on which of the `k` worlds it happened to be sampled into,
-        exactly the leak `test_heximax_cannot_tell_ledger_consistent_worlds_apart`
-        guards against.
+        list of responders from the true hands; a world sampled without that
+        knowledge may have dealt the seat being asked a hand that cannot
+        cover the offer, so that hard constraint drops ACCEPT outright. The
+        soft constraint runs at every `TRADE_RESPOND` node the tree reaches,
+        not only the root: the search may only offer ACCEPT_TRADE where
+        `accept_rule` clears `accept_margin`, and `knower` there is always
+        the search's root seat, never the responder itself when the two
+        differ -- so a simulated opponent's row is read off `knower`'s own
+        belief (`_partner_delta`), never that world's sampled truth, and its
+        accept cannot depend on which of the `k` worlds it was sampled into.
         """
         options = legal_actions(world)
         if world.phase is Phase.TRADE_RESPOND and world.offer is not None:
@@ -1172,52 +1143,22 @@ class Heximax:
         """`target`'s row of the vector if `target` gave `give` and got `want`
         from `counterparty`, read entirely through `knower`'s own belief.
 
-        `bundle_delta(game, seat, give, want, counterparty)` is exactly
-        `_partner_delta(game, seat, seat, give, want, counterparty, self._rank)`
-        -- the case where the reader and the trader are the same seat, so
-        the trader's own hand is legitimately exact. This generalisation is
-        for the opposite case: estimating what a DIFFERENT seat (`target`,
-        possibly also different from `counterparty`) would make of a trade,
-        without ever looking at `target`'s true hand -- only `knower`'s
-        belief about it. `score_proposal`'s `willing`, `rank_partners`, and
-        the search's gate on a simulated opponent's `ACCEPT_TRADE`
-        (`_options_in`) all read a row other than their own this way; it is
-        the literal "same evaluator ... on its expected hand" the design
-        asks for, and it is what keeps those three honest under
-        `test_heximax_cannot_tell_ledger_consistent_worlds_apart`: `target`'s
-        hand in the vector is always `knower`'s `expected_hand(target)`
-        unless `target == knower`, never `target`'s own true composition.
-
-        The ledger is updated from `give`/`want` directly -- `spend`/
-        `receive` at the stated amounts -- never by diffing `state.hands`
-        before and after. A diff would read the *true* prior hand through
-        however much a clamp-at-zero had to bite (a real short holding
-        certifies a smaller spend than the offer's face value), and that
-        true amount is exactly what `target`'s hidden composition must not
-        leak through; two ledger-identical positions that disagree only on
-        a third party's hidden cards must produce the same certified diff
-        regardless.
-
-        `state.hands` is mutated for both `target` and `counterparty` --
-        every party's hand SIZE has to stay right, or `Belief`'s own
-        "desynced fixture" repair (built for a test that pokes `state.hands`
-        behind the ledger's back) reads the trade's ledger credit as an
-        overclaim and silently sheds it back off. But only `knower`'s own
-        row is ever read verbatim (`Belief` treats exactly one seat's hand
-        as exact: the perspective's own); everyone else's composition comes
-        from the ledger, never from `state.hands`, so a seat that is not
-        `knower` only needs its TOTAL to move by the right amount -- which
-        entries "really" changed is exactly the kind of identity-dependent
-        choice `ledger.steal` refuses to make, for the same reason -- while
-        `knower`'s own hand, when it is `target` or `counterparty`, is
-        mutated exactly, per resource, clamped at zero.
-
-        `before_vector`, when given, is `_before_vector(game, knower)` --
-        the "before" side never depends on `give`/`want`/`counterparty`, only
-        on `(game.state, game.ledger, knower)`, so a caller making several of
-        these calls against the same unmutated game (`bundle_delta`'s search
-        over counterparties, `score_proposal`'s `willing`, `rank_partners`'
-        `score`) computes it once and passes it to every one of them.
+        `bundle_delta(game, seat, give, want, counterparty)` is the case
+        `target == knower == seat`, where the trader's own hand is
+        legitimately exact; this generalisation estimates what a DIFFERENT
+        seat would make of a trade without ever reading that seat's true
+        hand, only `knower`'s belief about it (`score_proposal`'s `willing`,
+        `rank_partners`, and the search's gate on a simulated opponent's
+        `ACCEPT_TRADE` all read a row other than their own this way). The
+        ledger is updated from `give`/`want` directly (`spend`/`receive`),
+        never by diffing `state.hands` before and after, so a third party's
+        hidden composition cannot leak through a clamp-at-zero. `state.hands`
+        is mutated exactly for `knower` and folded into one total for anyone
+        else -- only `knower`'s own row is ever read verbatim. `before_vector`,
+        when given, is `_before_vector(game, knower)`: the "before" side
+        never depends on `give`/`want`/`counterparty`, so a caller making
+        several of these calls against the same unmutated game computes it
+        once and passes it through.
         """
         before = self._read_row(
             game.state, game.ledger, knower, target, rank, vector=before_vector
@@ -1290,30 +1231,18 @@ class Heximax:
     ) -> list[tuple[Bundle, Bundle]]:
         """Bundles built from `deficit` x `surplus`'s resources, 1-2 cards a side.
 
-        The give side is drawn from resources `seat` holds -- one resource
-        at sizes 1..`max_side`, or two distinct resources one each when
-        `max_side >= 2` -- since a proposer can only offer what it has. The
-        want side is drawn from every resource the same way; wanting a
-        resource needs no holding of `seat`'s own, only a table that might
-        supply it, which `score_proposal`'s `p_holds` prices later. A
-        2-for-1 of a single surplus resource is added whenever
-        `economy.trade_ratios` gives `seat` a port under the bank's rate,
-        independent of `max_side`: the port makes two of that resource
-        worth less to `seat` than the bank would ever charge for it, so it
-        is worth asking about even when the general sweep is capped at one
-        card a side. Every returned pair is `well_formed` and `can_propose`
-        against the current state -- no resource on both sides, never more
-        than `seat` holds -- so every candidate is legal to emit as-is.
-
-        This sweep only needs *which* resources are in play, not their
-        marginal values -- `deficit()` has no filter (every resource is a
-        want candidate) and `surplus()`'s only filter is `hand[r] > 0` (every
-        held resource is a give candidate) -- so the two resource sets are
-        built directly rather than through `deficit`/`surplus` themselves,
-        which would spend a `marginal_gain`/`marginal_loss` evaluation (two
-        `evaluate()` calls each) computing values this method never reads.
-        `propose_actions` calls `deficit`/`surplus` itself where the values
-        are actually used (its cheap pre-filter).
+        The give side is drawn from resources `seat` holds (a proposer can
+        only offer what it has); the want side from every resource, since
+        wanting one needs no holding of `seat`'s own, only a table that
+        might supply it (`score_proposal`'s `p_holds` prices that later). A
+        2-for-1 of a single surplus resource is added whenever a port makes
+        it cheaper than the bank, independent of `max_side`. Every returned
+        pair is `well_formed` and `can_propose` against the current state,
+        so every candidate is legal to emit as-is. The resource sets are
+        built directly rather than through `deficit`/`surplus` (which would
+        each spend an `evaluate()`-backed marginal read this method never
+        uses) -- `propose_actions` calls those itself where the values are
+        actually read.
         """
         state = game.state
         hand = state.hands[seat]
@@ -1355,22 +1284,15 @@ class Heximax:
     ) -> float:
         """`dEval_me(after, best counterparty) x sum_opp p_holds(opp, want) * willing(opp)`.
 
-        `dEval_me` is `bundle_delta` maximised over which opponent ends up
-        on the other side of the trade: partner-dependence is already in
-        `bundle_delta` under `relative` (denying a leader is worth more than
-        denying a trailer), so this asks who the trade would be best made
-        *with*, not merely whether to make it at all. `willing(opp)` reads
-        `opp`'s row of the vector on `opp`'s *expected* hand under `seat`'s
-        own belief (`_partner_delta`, never `opp`'s true hand -- `seat` is
-        the one deciding, and cannot see it) -- the design's "same evaluator
-        applied from that seat's point of view", read the way the mover
-        itself would read the table ("the table is modelled as thinking the
-        way the bot does"), hence `self._rank` rather than a fixed stance.
-        It is the crisp 0/1 test the design allows rather than a smoothed
-        one: there is no fitted slope to smooth it with before P3, and a
-        crisp gate is the simpler thing that is not obviously wrong.
-        `before_vector`: see `_partner_delta` -- the same one `propose_actions`
-        computes once and passes to every shortlisted candidate's call here.
+        `dEval_me` is `bundle_delta` maximised over which opponent ends up on
+        the other side of the trade, so this asks who the trade would be
+        best made *with*, not merely whether to make it at all. `willing(opp)`
+        reads `opp`'s row of the vector on `opp`'s *expected* hand under
+        `seat`'s own belief (`_partner_delta`, never `opp`'s true hand), the
+        same evaluator applied from that seat's point of view -- hence
+        `self._rank` rather than a fixed stance. It is a crisp 0/1 test
+        rather than a smoothed one: there is no fitted slope to smooth it
+        with yet. `before_vector`: see `_partner_delta`.
         """
         opponents = [p for p in range(game.state.num_players) if p != seat]
         if not opponents:
@@ -1400,18 +1322,14 @@ class Heximax:
         """Accept iff taking `offer` clears `margin`.
 
         Taking it means `seat` gives `offer.want` and receives `offer.give`
-        with `offer.proposer` as the counterparty -- the mirror image of how
-        the proposer reads its own offer. Leader-denial is already in the
-        number under `relative`. `margin` is a parameter rather than always
-        `self.accept_margin` so the rule can be probed at any threshold.
-
-        `knower` is whose belief the read is honestly anchored to; it
-        defaults to `seat` itself, the bot's own real decision (its own
-        hand exact, legitimately). `_options_in` passes the SEARCH's root
-        seat instead when this gates a simulated opponent's `ACCEPT_TRADE`
-        deeper in the tree, so `seat`'s hand there stays read as `knower`'s
-        `expected_hand(seat)` rather than that world's sampled truth --
-        `_partner_delta` is what makes the two calls the same function.
+        with `offer.proposer` as the counterparty. `margin` is a parameter
+        rather than always `self.accept_margin` so the rule can be probed at
+        any threshold. `knower` is whose belief the read is anchored to; it
+        defaults to `seat` itself (the bot's own real decision, hand exact),
+        but `_options_in` passes the search's root seat instead when this
+        gates a simulated opponent deeper in the tree, so that opponent's
+        hand stays read as `knower`'s `expected_hand`, never the sampled
+        world's truth.
         """
         return self._partner_delta(
             game,
@@ -1428,10 +1346,8 @@ class Heximax:
 
         Distance is taxicab on the `want` side: the candidate I would ask
         for that most resembles what the table has already shown interest
-        in, among bundles `candidate_bundles` can already offer from my
-        surplus. `None` when I have no candidate at all. This is the
-        trading-design part 3 counter-offer primitive (today's engine has
-        no counter action, so nothing calls it yet); it is unit-tested only.
+        in. `None` when I have no candidate at all. Today's engine has no
+        counter action, so nothing calls this yet; it is unit-tested only.
         """
         candidates = self.candidate_bundles(game, seat)
         if not candidates:
@@ -1456,17 +1372,12 @@ class Heximax:
 
         `p_holds(opp, want) * (-bundle_delta_them)` under `paranoid`
         regardless of the bot's own configured stance -- `paranoid` is the
-        only stance that can tell opponents apart (own less the *best*
-        opponent), which is exactly what ordering an ask needs. Uses the
-        belief for `p_holds`, never `state.hands[opp]`, for the "could they
-        even take it" question; "how much would it help them" is `opp`'s
-        row read through `seat`'s own belief (`_partner_delta`, `opp`'s
-        *expected* hand, never its true one) -- the same reasoning
-        `score_proposal`'s `willing` uses, at the `paranoid` stance the
-        design specifies for ranking partners rather than `willing`'s
-        `self._rank`. `before_vector`: see `_partner_delta` -- note it is
-        still the vector read under `seat`'s own belief, not `paranoid`'s;
-        only the read-out at the end differs by stance.
+        only stance that can tell opponents apart, which is what ordering an
+        ask needs. `p_holds` uses the belief, never `state.hands[opp]`;
+        "how much would it help them" is `opp`'s row read through `seat`'s
+        own belief (`_partner_delta`, `opp`'s *expected* hand, never its true
+        one). `before_vector`: see `_partner_delta` -- still the vector read
+        under `seat`'s own belief; only the read-out differs by stance.
         """
         belief = Belief.from_game(game, seat, omniscient=self.omniscient)
         paranoid = STANCES["paranoid"]
@@ -1483,51 +1394,33 @@ class Heximax:
 
         return tuple(sorted(opponents, key=score, reverse=True))
 
-    # -- the adapter: everything above is protocol-free valuation; this
-    # method is where it meets today's protocol. Two touch points, both
-    # called from `search` above: `_root_options` calls `propose_actions`
-    # (entry -- scores shaped as today's `Action`); `_options_in` calls
-    # `accept_rule` (exit -- a plain valuation predicate reused as a gate).
-    # A later protocol changes this method and that one call site; nothing
-    # above needs to know.
+    # -- the adapter: everything above is protocol-free valuation; this is
+    # where it meets today's protocol, at two touch points called from
+    # `search` above: `_root_options` calls `propose_actions` (entry);
+    # `_options_in` calls `accept_rule` (exit, a plain predicate reused as a
+    # gate). A later protocol changes this method and that call site only.
 
     def propose_actions(self, game: Game, seat: int) -> list[Action]:
-        """The protocol-P0 adapter: the top `propose_top_n` scored proposals.
+        """The adapter: the top `propose_top_n` scored proposals.
 
         Replaces the engine's one-for-one `PROPOSE_TRADE` sample
         (`actions._offer_actions`) among the root options -- mechanical and
-        untuned, expected to be rewritten when the protocol changes (see the
-        module docstring's `trade` section and the class docstring's P2
-        paragraph). Candidates and their scores are read off the true game
-        directly, not per determinized world: an offer's legality depends
-        only on what the proposer holds, which is always exact, and the
-        valuation already reads opponents through the honest belief built
-        from the real ledger, so a sampled world adds nothing here. The `k`
-        worlds still decide what a proposal is *worth* once it is a root
-        option -- each is searched separately by the same max^n as every
+        untuned, rewritten whenever the protocol changes (module docstring's
+        `trade` section). Candidates and their scores are read off the true
+        game directly, not per determinized world: an offer's legality
+        depends only on what the proposer holds, which is always exact, and
+        the valuation already reads opponents through the honest belief
+        built from the real ledger. The `k` worlds still decide what a
+        proposal is *worth* once it is a root option, searched like any
         other action. Candidates scoring at or below `propose_margin` are
-        dropped: the adapter's own budget-spending rule (the exhaust-fraction
-        lesson, `heximax.md` "Improvements inherited"), not the valuation's.
-
-        `score_proposal` is partner-aware -- a `bundle_delta`/`_partner_delta`
-        call per opponent, twice over (`delta_me`'s best-counterparty search
-        and `willing`'s per-opponent read) -- so scoring every candidate
-        `candidate_bundles` returns is the module's single largest cost
-        (measured: adapter cost dominates the leaf-budgeted search itself).
-        `deficit`/`surplus` are cheap (no opponent belief, one `before_vector`
-        shared with every other read this call makes -- see below) and rank
-        candidates almost as well on their own, so they shortlist the field
-        to `PROPOSE_SHORTLIST` first; only that shortlist pays for the
-        partner-aware score. This is the adapter's own cost-control, same
-        standing as `propose_margin` -- untuned, and it can only ever drop a
-        candidate `score_proposal` would have ranked outside the shortlist
-        anyway among ones already inside it.
+        dropped, and `score_proposal` -- a `bundle_delta`/`_partner_delta`
+        call per opponent, twice over -- is the module's single largest cost,
+        so `deficit`/`surplus` (cheap: no opponent belief) shortlist the
+        field to `PROPOSE_SHORTLIST` first and only that shortlist pays for
+        the partner-aware score.
         """
-        # Every "before" read below -- deficit, surplus, and every candidate's
-        # score_proposal/rank_partners -- is against this same unmutated
-        # (game.state, game.ledger, seat) triple; computed once and threaded
-        # through as before_vector rather than each rebuilding the belief and
-        # re-running evaluate() for a position that never changes here.
+        # Every "before" read below shares this one (game.state, game.ledger,
+        # seat) triple, computed once rather than per candidate.
         before_vector = self._before_vector(game, seat)
         candidates = self.candidate_bundles(game, seat)
         if not candidates:
@@ -1633,7 +1526,7 @@ def heximax(
     no-trade weights. Left at `BY_MODE`, the offer budget is three for the
     first two and zero for `notrade`; any explicit value, `None` included,
     is taken as given. `propose_top_n`, `propose_margin` and `accept_margin`
-    are the P2 adapter's own knobs, unfitted -- see `Heximax`'s docstring.
+    are the trade adapter's own knobs, unfitted -- see `Heximax`'s docstring.
 
     `weights` overrides the mode's own profile (`TRADING_WEIGHTS` or
     `NO_TRADE_WEIGHTS`) with the given vector, leaving everything else about

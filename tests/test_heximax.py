@@ -11,7 +11,10 @@ one such pair, which is the leak the regression guards against.
 from __future__ import annotations
 
 import functools
+import hashlib
+import json
 import random
+from pathlib import Path
 
 import pytest
 
@@ -132,6 +135,89 @@ def steal_action(game, thief: int, victim: int, kind=ActionType.MOVE_ROBBER):
 
 def a_bot(game, seed: int = 0, **overrides) -> Heximax:
     return heximax(game.state.board, random.Random(seed), **overrides)
+
+
+# --- the behaviour-preservation gate -----------------------------------------
+
+# The recorded census is keyed to the tree at `ecb5252` (HEAD of
+# `feat/heximax-p2` before this pass's optimizations). Regenerate it
+# deliberately, never by hand, with `pytest tests/test_heximax.py -k
+# choices_are_byte_identical --write-census` -- see `conftest.py`.
+CENSUS_FIXTURE = Path(__file__).parent / "fixtures" / "heximax_census_ecb5252.json"
+
+# preset -> seeds. `heximax` gets the full 20-game census the design's
+# robustness sweep never runs at four seats and all three presets; the other
+# two presets get 5 games each -- enough to catch a regime a change touches
+# only under `notrade` or `omniscient` without tripling the wall-clock.
+CENSUS_SPECS: dict[str, range] = {
+    "heximax": range(100, 120),
+    "heximax-notrade": range(100, 105),
+    "heximax-omni": range(100, 105),
+}
+
+
+def _census_game(preset: str, seed: int, players: int = 4) -> str:
+    """Play one seeded game, every seat `PRESETS[preset]`, and hash the choices.
+
+    Board and game start share one rng off `seed`, exactly as `a_game` builds
+    it; each seat's bot gets its own rng, deterministic per seat
+    (`f"{seed}:{seat}"`), so no seat's play depends on another seat's draws or
+    on iteration order. The hash covers the full `(seat, action)` trace, not
+    just the outcome, because two different move sequences can reach the same
+    board -- this gate is about what heximax *chooses*, not merely where it
+    ends up.
+    """
+    rng = random.Random(seed)
+    board = random_base_board(rng)
+    game = start(board, players, rng)
+    bots = [
+        spawn(PRESETS[preset], board, random.Random(f"{seed}:{seat}"))
+        for seat in range(players)
+    ]
+    trace = []
+    moves = 0
+    while not is_over(game):
+        seat = to_move(game)
+        action = bots[seat].choose(game)
+        trace.append(
+            (
+                seat,
+                int(action.type),
+                action.a,
+                action.b,
+                list(action.give),
+                list(action.want),
+                list(action.ask),
+            )
+        )
+        apply(game, action)
+        moves += 1
+        if moves > 60000:
+            raise AssertionError(f"{preset} seed {seed} did not finish")
+    return hashlib.sha256(repr(trace).encode()).hexdigest()
+
+
+def test_choices_are_byte_identical_to_the_recorded_census(request):
+    """The optimization pass's gate: every change must reproduce this exactly.
+
+    Plays the 20 (`heximax`) + 5 (`heximax-notrade`) + 5 (`heximax-omni`)
+    seeded games in `CENSUS_SPECS` and hashes each game's full `(seat,
+    action)` sequence. A change to `hexset.heximax` that flips even one of
+    these hashes has changed what the bot chooses somewhere in that game --
+    not necessarily for the worse, but it is a behaviour change, and this
+    pass is only allowed to make behaviour-*preserving* ones. `--write-census`
+    (see `conftest.py`) regenerates the fixture when a change is deliberate.
+    """
+    computed = {
+        preset: {str(seed): _census_game(preset, seed) for seed in seeds}
+        for preset, seeds in CENSUS_SPECS.items()
+    }
+    if request.config.getoption("--write-census"):
+        CENSUS_FIXTURE.parent.mkdir(parents=True, exist_ok=True)
+        CENSUS_FIXTURE.write_text(json.dumps(computed, indent=2, sort_keys=True) + "\n")
+        pytest.skip(f"wrote {CENSUS_FIXTURE}")
+    recorded = json.loads(CENSUS_FIXTURE.read_text())
+    assert computed == recorded
 
 
 # --- the information-set regression -----------------------------------------

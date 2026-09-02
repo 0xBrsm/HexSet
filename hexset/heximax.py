@@ -910,6 +910,16 @@ class Heximax:
         return self._value(child, depth - 1, knower, ply + 1)
 
     def _over_dice(self, game: Game, depth: int, knower: int, ply: int) -> list[float]:
+        # At the shipped defaults (depth=2, exact_roll_plies=EXACT_ROLL_PLIES=2,
+        # every preset), a ply this deep in a `choose()` call is always < 2,
+        # so this branch never runs today (profile: micro_benchmarks.txt,
+        # search2_comparison.txt) -- but `depth` is a public field
+        # (`Entrant.depth`, `heximax()`'s `depth` param) the module's own
+        # design anticipates raising ("rolls stay exact eleven-way at depth
+        # <= 2 and sampled beyond", heximax.md §3(b)), and this is what makes
+        # a deeper search's cost stay bounded when that happens. Left in,
+        # not dead code by the design's own account, just unreached by every
+        # preset shipped so far.
         if ply >= self.exact_roll_plies:
             child = imagine(game, self.rng)
             roll_dice(child)
@@ -1084,26 +1094,6 @@ class Heximax:
             vector = self.evaluator.evaluate(state, knower, belief)
         return rank(vector, target)
 
-    def _read_as(
-        self,
-        state: GameState,
-        ledger: PublicLedger,
-        seat: int,
-        rank,
-        *,
-        vector: list[float] | None = None,
-    ) -> float:
-        """`_read`, generalised over which stance turns the vector into a number.
-
-        `rank_partners` needs `paranoid` regardless of the bot's own
-        configured stance (it is the only stance that can tell opponents
-        apart, see `test_only_subtracting_the_max_can_tell_opponents_apart`),
-        so every valuation method that might be asked to read its own
-        proposer's row differently routes through here instead of
-        `self._rank` directly.
-        """
-        return self._read_row(state, ledger, seat, seat, rank, vector=vector)
-
     def _read(
         self,
         state: GameState,
@@ -1112,7 +1102,17 @@ class Heximax:
         *,
         vector: list[float] | None = None,
     ) -> float:
-        return self._read_as(state, ledger, seat, self._rank, vector=vector)
+        """`seat`'s own row of the vector, under the bot's configured stance.
+
+        `_read_row(state, ledger, seat, seat, self._rank, vector=vector)` --
+        `knower == target == seat`, the common case every valuation method
+        that isn't comparing what a trade does for one seat against another
+        seat's own reading uses (`rank_partners` and `score_proposal`'s
+        `willing` read a row other than their own, so they call
+        `_partner_delta`/`_read_row` directly with an explicit `rank`
+        instead).
+        """
+        return self._read_row(state, ledger, seat, seat, self._rank, vector=vector)
 
     def _before_vector(self, game: Game, seat: int) -> list[float]:
         """The per-seat vector for `game`'s own, unmutated state, `seat`'s belief.

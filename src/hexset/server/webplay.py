@@ -1,11 +1,11 @@
 """Game session and wire protocol for the local human-vs-policy web board.
 
-Deliberately torch-free: `hexset_ui.web` imports the network bot lazily, so
+Deliberately torch-free: `hexset.server.web` imports the network bot lazily, so
 this module — the board layout math, the wire-format mapping and the session
 that drives a game — can be imported and tested without PyTorch, the same way
 `hexset.actions` and `hexset.game` can. Anything with a
 `choose(game) -> Action` method is all a session needs of its opponent:
-`NetworkBot` from `hexset_ui.onnxbot`, `Heximax` or `SearchBot` from
+`NetworkBot` from `hexset.clients.onnxbot`, `Heximax` or `SearchBot` from
 `heximax`/`hexset.bots`, or the `RandomBot` the tests use.
 
 ## The wire format
@@ -345,7 +345,7 @@ class _Event:
     discard spells out the cards only for the seat that lost them (see
     `_describe` and `render_log`). One shared list of sentences cannot say two
     different things at once, so what is stored here is the truth and the
-    hiding happens per reader instead — the same split `hexset_ui.journal`
+    hiding happens per reader instead — the same split `hexset.server.journal`
     already makes, one layer up.
 
     `after` is the state the action produced, which is what most lines are
@@ -652,7 +652,7 @@ class GameSession:
 
     `seed` is the integer that seeded `game.rng`, and `journal` is where every
     action is written down as it happens, hidden cards and all (see
-    `hexset_ui.journal`). A session built without one plays exactly the same and
+    `hexset.server.journal`). A session built without one plays exactly the same and
     keeps no account of itself, which is what the tests that only care about
     the rules want.
     """
@@ -778,7 +778,7 @@ class GameSession:
 
     def restore(self, steps: list[tuple[int, Action]], journal: Journal | None = None) -> None:
         """Re-apply a journalled game's actions, bringing this session up to
-        where it left off (see `hexset_ui.journal.replayable`).
+        where it left off (see `hexset.server.journal.replayable`).
 
         Every step goes through `_apply` like any other, so the sidebar log,
         the per-seat rolls and the round numbering are rebuilt as a
@@ -862,7 +862,7 @@ class GameSession:
         apply(self.game, action)
         # `hexset.game` deals the setup snake from seat 0 and rotates turns
         # `(p + 1) % n`; this table starts the snake at its creator and
-        # retires seats nobody claimed. See `hexset_ui.seating`.
+        # retires seats nobody claimed. See `hexset.server.seating`.
         settle(self.game, seating_before)
         if action.type is ActionType.ROLL:
             self.last_roll_by_seat[actor] = self.game.last_roll
@@ -965,7 +965,7 @@ class GameSession:
         included — exactly who is holding the wanted card and who was skipped.
         That is a hand's composition, on the wire, for free; the offer block
         already omits `responders` for precisely this reason
-        (`hexset_ui.rules`, and PR #2 defect 3).
+        (`hexset.server.rules`, and PR #2 defect 3).
 
         A responder is told their own seat, because they have to act on it.
         Everyone else is told the **proposer**, which is public — the offer
@@ -1062,7 +1062,7 @@ class GameSession:
             "claimed_seats": sorted(self.claimed_seats),
             # Seats the setup snake reached while still empty and waited out
             # — permanently retired, for good, from this game (see
-            # `hexset_ui.seating.lock_seat`). `api.Table.join` refuses one of
+            # `hexset.server.seating.lock_seat`). `api.Table.join` refuses one of
             # these the same way it refuses an already-occupied seat.
             "locked": sorted(locked_of(game)),
             "winner": game.won_by,

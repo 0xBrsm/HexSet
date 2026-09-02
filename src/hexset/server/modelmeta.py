@@ -1,14 +1,14 @@
 """What a checkpoint declares about itself.
 
 Still the model side of the boundary — the engine never reads any of this —
-but split out of `hexset_ui.onnxbot` because that module imports onnxruntime
+but split out of `hexset.clients.onnxbot` because that module imports onnxruntime
 at load time and this is the part with decisions in it. Keeping the two
 together meant the bounds below could only be exercised on a machine with a
 runtime wheel installed, which the usual development machine here is not.
 
 A checkpoint carrying its own settings is the point: dropping `mcts256.onnx`
 into `models/` should be the whole of configuring it, with no spec grammar,
-no flag, and nothing outside `hexset_ui.onnxbot` that knows what a simulation
+no flag, and nothing outside `hexset.clients.onnxbot` that knows what a simulation
 is.
 """
 

@@ -1218,7 +1218,7 @@ function cancelRobberMove() {
 
 // Nobody's turn is ever run on their behalf any more: a bot seat decides
 // and submits its own action from outside this page (an embedded runner
-// thread, or an external `python -m hexset_ui.botclient` process, both
+// thread, or an external `python -m hexset.clients.botclient` process, both
 // through the same POST /api/action a browser uses — see botclient.py and
 // api.py's module docstrings). All this page does when it isn't our own
 // move is notice that something changed: poll, and render whatever the

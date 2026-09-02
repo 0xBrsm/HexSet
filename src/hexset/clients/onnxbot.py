@@ -44,19 +44,18 @@ from hexset.actions import (
     build_space,
     within_offer_budget,
 )
+from hexset.actions import pair_index as _pair_index
 from hexset.board.terrain import NUM_RESOURCES
 from hexset.board.topology import Topology
 from hexset.game import Game, to_move
 from hexset.mcts import Search
-
-from .constants import RECORD_CONTRACTS
-from .modelmeta import SearchConfig, search_config
-from .record import build_record
-from .record import pair_index as _pair_index
+from hexset.onnx_record import record_from_game
+from hexset.server.constants import RECORD_CONTRACTS
+from hexset.server.modelmeta import SearchConfig, search_config
 # The honest option list, not `hexset.bots.options_for`'s omniscient one: a
 # checkpoint served here sees exactly the mask an external client or a human
-# sees (`hexset_ui.rules`, and PR #2 defect 4).
-from .rules import options_for
+# sees (`hexset.server.rules`, and PR #2 defect 4).
+from hexset.server.rules import options_for
 
 
 def _check_players(game: Game, players: int) -> None:
@@ -100,7 +99,7 @@ class V2Policy:
         rows: Sequence[tuple[Game, int, tuple[Action, ...]]],
         outputs: list[str],
     ) -> list[np.ndarray]:
-        records = [build_record(game, seat, options, self.space) for game, seat, options in rows]
+        records = [record_from_game(game, seat, self.space, options) for game, seat, options in rows]
         # Keyed off the graph's own input names, not off every field the
         # record happens to carry. The record is the newest contract (29
         # fields); a contract-2 graph declares 23 of them and a contract-3
@@ -191,7 +190,7 @@ def _load_cached(path: str, topology: Topology, device: str, mtime_ns: int) -> L
     meta = session.get_modelmeta().custom_metadata_map
 
     players = int(meta["players"])
-    # The topology fingerprint `hexset_ui.export_onnx` embeds: a graph traced
+    # The topology fingerprint `hexnet.export_onnx` embeds: a graph traced
     # for one board shape fails silently if fed another (wrong-shaped
     # inputs, or worse, right-shaped-but-meaningless ones) rather than
     # loudly the way `net.load_state_dict` fails on a shape mismatch today
@@ -240,7 +239,7 @@ def load(path: str, topology: Topology, device: str = "cpu") -> Loaded:
 
     Cache key folds in the file's mtime, unlike the training repo's loader: its
     `.pt` checkpoints under `runs/` are effectively immutable per-run
-    artifacts, but hexset-ui's whole pitch is replacing a file in `models/`
+    artifacts, but hexset's whole pitch is replacing a file in `models/`
     by name — without the mtime, a same-named replacement would silently
     keep serving the old in-memory session.
     """

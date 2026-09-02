@@ -32,7 +32,7 @@ reopened after one simply treats every non-bot seat as open again (see
 whether or not anyone has claimed them yet — there is no "start" that
 renumbers a partial roster down to just the seats somebody's in. Instead, an
 empty seat the setup snake reaches gets a grace window (`Table._settle_locks`)
-before it locks out for good (see `hexset_ui.seating.lock_seat`): a game that
+before it locks out for good (see `hexset.server.seating.lock_seat`): a game that
 begins setup with two or three seats occupied stays that size for its whole
 duration, one seat's decision at a time rather than one cutoff for the table.
 `Table.join` only ever offers a seat that is both empty and unlocked.
@@ -81,11 +81,11 @@ from hexset.actions import build_space
 from hexset.arena import PRESETS, spawn as spawn_entrant
 from hexset.board.board import Board, random_base_board
 from hexset.bots import Bot
+from hexset.clients.botclient import BotRunner, LocalSearchBrain, LocalTransport
 from hexset.game import Phase, is_over, to_move
+from hexset.onnx_record import record_from_game
 
 from . import journal
-from .botclient import BotRunner, LocalSearchBrain, LocalTransport
-from .record import build_record
 from .rules import fair_legal_actions
 from .seating import lock_seat, locked_of, start_at
 from .webplay import (
@@ -109,7 +109,7 @@ from .webplay import (
 HANDCRAFTED = "heximax"
 HANDCRAFTED_ENTRANTS = ("heximax", "search2")
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 MODELS_DIR = Path(os.environ.get("HEXSET_UI_MODELS_DIR", REPO_ROOT / "models"))
 
 # The base board seats four, so a game does too. The engine itself will deal
@@ -417,7 +417,7 @@ def _seat_labels(seats: list[Seat]) -> tuple[dict[int, str], dict[int, str], dic
 
 def build_session(code: str, seats: list[Seat], config: Config, *, first: int) -> GameSession:
     """A fresh `MAX_SEATS`-seat game, `first` the creator's own seat (see
-    `hexset_ui.seating.start_at`). Every seat not already claimed here (an empty
+    `hexset.server.seating.start_at`). Every seat not already claimed here (an empty
     one, or a named bot's) is simply left for `Table.join`/`lock_seat` to
     resolve as the game itself unfolds."""
     seed = config.seed
@@ -453,7 +453,7 @@ def resume_session(code: str, seats: list[Seat], config: Config) -> GameSession 
 
     A session lives in memory, so it used to be lost to anything that ended the
     process: a deploy, a crash, or simply going quiet long enough to be
-    evicted. The journal is the whole game though (see `hexset_ui.journal`), and
+    evicted. The journal is the whole game though (see `hexset.server.journal`), and
     it replays exactly, so the loss was never necessary.
 
     `seats` names only the seats the caller wants pre-claimed on the rebuilt
@@ -462,7 +462,7 @@ def resume_session(code: str, seats: list[Seat], config: Config) -> GameSession 
     before, comes back open. `game.locked` is seeded from the journal's own
     `locked` events before replay runs, which is provably equivalent to
     locking each seat at the step it actually happened (see
-    `hexset_ui.seating`'s own note on `advance_setup`).
+    `hexset.server.seating`'s own note on `advance_setup`).
     """
     where = config.games_dir if config.games_dir is not None else journal.configured_dir()
     path = journal.resumable(where, code)
@@ -786,13 +786,13 @@ class Tables:
         return table.view(seat)
 
     def record(self, table: Table, seat: int) -> dict:
-        """`GET /api/record`: the information-set record `record.py` builds
-        for a checkpoint, byte-for-byte what an in-process bot would compute
-        — the wire a bot client (`botclient.py`) actually plays from, rather
-        than reconstructing one from `state_view`'s human-shaped fields (see
-        the module docstring's note on why: `legal_wire_actions`'s own
-        options are already the one fair trade-offer sample every client
-        gets, `fair_legal_actions`)."""
+        """`GET /api/record`: the information-set record `hexset.onnx_record`
+        builds for a checkpoint, byte-for-byte what an in-process bot would
+        compute — the wire a bot client (`clients/botclient.py`) actually
+        plays from, rather than reconstructing one from `state_view`'s
+        human-shaped fields (see the module docstring's note on why:
+        `legal_wire_actions`'s own options are already the one fair
+        trade-offer sample every client gets, `fair_legal_actions`)."""
         game = table.session.game
         if is_over(game) or to_move(game) != seat:
             raise ApiError("it is not your turn to act", status=409)
@@ -801,7 +801,7 @@ class Tables:
         space = build_space(
             topology.num_vertices, topology.num_edges, topology.num_hexes, game.state.num_players
         )
-        record: dict[str, Any] = build_record(game, seat, options, space)
+        record: dict[str, Any] = record_from_game(game, seat, space, options)
         return {
             **{key: value.tolist() for key, value in record.items()},
             "options": [action_to_wire(a) for a in options],

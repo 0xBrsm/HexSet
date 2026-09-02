@@ -2,7 +2,7 @@
 
 This is a thin client of the HTTP API `api.py` defines and `web.py` serves,
 not a second game engine binding: every tool below is a `urllib` call to a
-running `python -m hexset_ui.web` (see `HEXSET_UI_BASE_URL`). That server can
+running `python -m hexset.server.web` (see `HEXSET_UI_BASE_URL`). That server can
 be anywhere — this is how an LLM joins a game on a machine that actually has
 ONNX Runtime while running somewhere that does not. A bot checkpoint reaches
 the same server the same way — see `botclient.py` — this module and that one
@@ -24,7 +24,7 @@ MCP spec instead, matching the same "standard library only" choice
 
 Run it with (from `src/`, alongside an already-running web)::
 
-    python -m hexset_ui.mcp
+    python -m hexset.server.mcp
 
 stdin/stdout carry the protocol; nothing else may write to stdout, so every
 log line here goes to stderr instead.
@@ -42,7 +42,7 @@ from .constants import TOKEN_HEADER
 
 BASE_URL = os.environ.get("HEXSET_UI_BASE_URL", "http://127.0.0.1:8770").rstrip("/")
 PROTOCOL_VERSION = "2024-11-05"
-SERVER_INFO = {"name": "hexset-ui", "version": "0.1.0"}
+SERVER_INFO = {"name": "hexset", "version": "0.1.0"}
 
 # The seat this connection is playing, set by new_game/join and sent on every
 # request after. A module global for the same reason the cookie jar it
@@ -73,7 +73,7 @@ def _request(method: str, path: str, body: dict | None = None) -> dict:
     except urllib.error.URLError as error:
         raise ToolError(
             f"could not reach the HexSet server at {BASE_URL} ({error.reason}) "
-            "— is `python -m hexset_ui.web` running?"
+            "— is `python -m hexset.server.web` running?"
         ) from error
 
 
@@ -289,7 +289,7 @@ def _dispatch(message: dict) -> dict | None:
 
 
 def main() -> None:
-    print(f"hexset-ui MCP server: talking to {BASE_URL}", file=sys.stderr)
+    print(f"hexset MCP server: talking to {BASE_URL}", file=sys.stderr)
     for line in sys.stdin:
         line = line.strip()
         if not line:

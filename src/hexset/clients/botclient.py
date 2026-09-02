@@ -9,11 +9,11 @@ docstring) — what varies is only *how* a client decides its move, and
 
 - **`RecordBrain`** plays a non-search (`NetworkBot`-shaped) contract-2
   checkpoint purely off the wire: `GET /api/record` is byte-identical to
-  what `record.py:build_record` computes server-side, so there is nothing
+  what `hexset.onnx_record.record_from_game` computes server-side, so there is nothing
   here to reconstruct and no way for a client to see more than an
   in-process bot would. This is what makes an external process a
   legitimate peer at all. Run as a real subprocess against a running
-  server's public HTTP API (`python -m hexset_ui.botclient`), it needs
+  server's public HTTP API (`python -m hexset.clients.botclient`), it needs
   nothing but that URL, a join code or a fresh game, and a checkpoint path.
 
 - **`LocalSearchBrain`** is the escape hatch, and it is honestly a
@@ -50,13 +50,12 @@ import numpy as np
 import onnxruntime as ort
 
 from hexset.actions import Action, ActionSpace, ActionType, build_space
+from hexset.actions import pair_mask as _record_pair_mask
 from hexset.bots import Bot
 
-from .constants import RECORD_CONTRACTS, TOKEN_HEADER
-from .modelmeta import search_config
-from .record import action_mask as _record_action_mask
-from .record import pair_mask as _record_pair_mask
-from .webplay import action_to_wire, wire_to_action
+from hexset.server.constants import RECORD_CONTRACTS, TOKEN_HEADER
+from hexset.server.modelmeta import search_config
+from hexset.server.webplay import action_to_wire, wire_to_action
 
 NUM_RESOURCES = 5
 
@@ -83,7 +82,7 @@ class Transport(Protocol):
 class HttpTransport:
     """A real client of a running server, over the same `/api/*` surface a
     browser or MCP uses — what makes an external `python -m
-    hexset_ui.botclient` process a true peer rather than a special case."""
+    hexset.clients.botclient` process a true peer rather than a special case."""
 
     base_url: str
     timeout: float = 30.0
@@ -124,7 +123,7 @@ class LocalTransport:
         return self._call("POST", path, token, body)
 
     def _call(self, method: str, path: str, token: str, body: dict) -> dict:
-        from .api import ApiError  # deferred: api.py imports this module
+        from hexset.server.api import ApiError  # deferred: api.py imports this module
 
         try:
             return self.tables.handle(method, path, body, token)
@@ -148,6 +147,17 @@ def _providers(device: str) -> list[str]:
 def _to_input(name: str, value) -> np.ndarray:
     dtype = np.bool_ if name in _BOOL_FIELDS else np.int64
     return np.asarray(value, dtype=dtype)[np.newaxis, ...]
+
+
+def _record_action_mask(space: ActionSpace, options: list[Action]) -> np.ndarray:
+    """`hexset.onnx_record.record_from_game`'s `action_mask`, without a live
+    `Game` to build the record from — `RecordBrain` only has the
+    budget-trimmed option list (`kept`), so it recomputes the mask over that
+    directly rather than pulling in the whole record builder for one field."""
+    mask = np.zeros(space.size, dtype=bool)
+    for option in options:
+        mask[space.index(option)] = True
+    return mask
 
 
 def _within_offer_budget(options: list[Action], offers_made: int, budget: int | None) -> list[Action]:
@@ -308,7 +318,7 @@ def _main(argv: list[str] | None = None) -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--url", required=True, help="Base URL of a running `python -m hexset_ui.web`.")
+    parser.add_argument("--url", required=True, help="Base URL of a running `python -m hexset.server.web`.")
     parser.add_argument("--game", required=True, help="The game's six-character code.")
     parser.add_argument(
         "--model", required=True, help="Path to a record-contract .onnx checkpoint (2, 3 or 4)."

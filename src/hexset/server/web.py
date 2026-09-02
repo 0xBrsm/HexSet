@@ -1,4 +1,4 @@
-"""The HTTP transport in front of `hexset_ui.api`, and the CLI that starts it.
+"""The HTTP transport in front of `hexset.server.api`, and the CLI that starts it.
 
 Standard library only: `http.server` for the transport, `json` for the wire
 format. The frontend is one static HTML file (`static/index.html`) with inline
@@ -24,7 +24,7 @@ premise that one browser might hold seats at more than one game.
 
 Run it with (from `src/`)::
 
-    python -m hexset_ui.web
+    python -m hexset.server.web
 
 then open the printed URL. Opponents come from `api.model_options()`: `search2`
 (handcrafted, no checkpoint needed) plus one entry per `*.onnx` file found in
@@ -34,7 +34,7 @@ to seat copies of one opponent instead of the per-seat default lineup.
 
 How a checkpoint plays — a single forward pass or a search over its own
 priors, and with what budget — is declared in the file's own metadata and read
-by `hexset_ui.onnxbot`. Nothing here knows the difference.
+by `hexset.clients.onnxbot`. Nothing here knows the difference.
 """
 
 from __future__ import annotations

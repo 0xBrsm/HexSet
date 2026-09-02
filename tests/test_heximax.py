@@ -531,6 +531,36 @@ def test_omniscient_belief_is_the_truth():
     assert sampled.dev_cards == game.state.dev_cards
 
 
+@pytest.mark.parametrize("omniscient", [False, True])
+def test_the_belief_cache_is_exact_against_from_game_on_random_tree_nodes(omniscient):
+    """The structural pass's step (a): `HonestEvaluator.belief_for`/
+    `belief_from_game` memoize `Belief` construction within one decision. One
+    evaluator is reused across 200 positions (several different games, each
+    visited at many different seats), so the cache sees a realistic mix of
+    misses and hits -- and every single lookup, hit or miss, must equal a
+    fresh, uncached `Belief.from_game` field-for-field: that equality is the
+    whole exactness argument for keying the cache the way `belief_for`'s
+    docstring describes.
+    """
+    board = random_base_board(random.Random(0))
+    evaluator = HonestEvaluator(board, omniscient=omniscient)
+    checked = 0
+    for seed in range(8):
+        for game in _positions(seed, 25):
+            for seat in range(game.state.num_players):
+                cached = evaluator.belief_from_game(game, seat)
+                fresh = Belief.from_game(game, seat, omniscient=omniscient)
+                assert cached.known == fresh.known
+                assert cached.unknown == fresh.unknown
+                assert cached.pool == fresh.pool
+                assert cached.pool_size == fresh.pool_size
+                assert cached.sizes == fresh.sizes
+                assert cached.perspective == fresh.perspective == seat
+                assert cached.omniscient == fresh.omniscient == omniscient
+                checked += 1
+    assert checked >= 200
+
+
 # --- evaluate -----------------------------------------------------------------
 
 

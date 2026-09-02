@@ -198,11 +198,12 @@ class Belief:
         # read -- a decline reveals nothing -- so a sampled world may hand a
         # later responder a hand that cannot cover `want`; the search guards
         # `ACCEPT_TRADE` with `can_accept` there instead.
-        certify: list[tuple[int, Sequence[int]]] = []
-        if game.offer is not None:
-            certify.append((game.offer.proposer, game.offer.give))
         return cls(
-            game.state, game.ledger, perspective, omniscient=omniscient, certify=certify
+            game.state,
+            game.ledger,
+            perspective,
+            omniscient=omniscient,
+            certify=_offer_certify(game),
         )
 
     def exact(self, seat: int) -> bool:
@@ -365,6 +366,15 @@ class Belief:
         return state
 
 
+def _offer_certify(game: Game) -> list[tuple[int, Sequence[int]]]:
+    """`Belief.from_game`'s certify list, factored out so `HonestEvaluator`'s
+    memoized `belief_for` (below) can build the same list a cache key needs
+    without duplicating the offer-reading logic."""
+    if game.offer is not None:
+        return [(game.offer.proposer, game.offer.give)]
+    return []
+
+
 def _padded(pool: list[int], deficit: int) -> list[int]:
     """`pool` grown by `deficit` cards in its own proportions (uniform if empty)."""
     total = sum(pool)
@@ -442,6 +452,62 @@ class HonestEvaluator:
         self.omniscient = omniscient
         self.exact_progress_samples = exact_progress_samples
         self._survey_cache: dict[tuple, Survey] = {}
+        self._belief_cache: dict[tuple, Belief] = {}
+
+    def belief_for(
+        self,
+        state: GameState,
+        ledger: PublicLedger,
+        perspective: int,
+        *,
+        certify: Sequence[tuple[int, Sequence[int]]] = (),
+    ) -> Belief:
+        """`Belief(state, ledger, perspective, ...)`, memoized for the life of
+        one `Heximax.choose()` -- the structural pass's step (a).
+
+        Exact by construction: the key is every field `Belief.__init__` reads
+        to build `known`/`unknown`/`pool` (every seat's hand *size*, the
+        ledger's known/unknown per seat, the bank, `num_players`,
+        `perspective` and `certify`) -- `omniscient` is fixed for this
+        evaluator's whole life, so it need not be in the key. Two calls
+        sharing a key are the same `Belief` byte-for-byte because `Belief` is
+        a pure function of exactly these inputs; nothing about *which* node
+        produced them can leak in, since none of them lives on `self.state`.
+
+        Restricted to callers that only ever read the memoized fields off the
+        result (`expected_hand`/`table_holding`/`steal_odds`/`p_holds`/
+        `exact`) -- `Belief.sample` and `Belief.deck_odds`
+        (`unseen_dev_cards`) read `self.state` in full (board occupancy, the
+        deck, dev cards, knights played), which this key does not capture, so
+        a `Belief` cached under one node's key could hand back a different
+        node's board there. `Heximax.worlds`/`draw_children`, the only two
+        callers that use `sample`/`deck_odds`, keep building a fresh
+        `Belief.from_game` directly, never through this cache.
+        """
+        key = (
+            tuple(tuple(hand) for hand in state.hands),
+            tuple(tuple(seat_ledger.known) for seat_ledger in ledger.seats),
+            tuple(seat_ledger.unknown for seat_ledger in ledger.seats),
+            tuple(state.bank),
+            state.num_players,
+            perspective,
+            tuple((who, tuple(bundle)) for who, bundle in certify),
+        )
+        cached = self._belief_cache.get(key)
+        if cached is None:
+            cached = Belief(
+                state, ledger, perspective, omniscient=self.omniscient, certify=certify
+            )
+            self._belief_cache[key] = cached
+        return cached
+
+    def belief_from_game(self, game: Game, perspective: int) -> Belief:
+        """`belief_for`, reading `certify` off `game.offer` the way
+        `Belief.from_game` does -- see `belief_for`'s docstring for the
+        exactness argument and which callers may use this."""
+        return self.belief_for(
+            game.state, game.ledger, perspective, certify=_offer_certify(game)
+        )
 
     def survey(self, state: GameState, seat: int) -> Survey:
         """`self.inner.survey`, memoized for the life of one `Heximax.choose()`.
@@ -584,8 +650,16 @@ class HonestEvaluator:
         return out
 
     def evaluate_game(self, game: Game, seat: int) -> list[float]:
-        """`evaluate`, building the belief from `game`'s own ledger. The leaf call."""
-        belief = Belief.from_game(game, seat, omniscient=self.omniscient)
+        """`evaluate`, building the belief from `game`'s own ledger. The leaf call.
+
+        `belief_from_game` rather than `Belief.from_game` directly: this is
+        the dominant caller of both (39.7 leaves/decision on the profile's
+        own sample), and everything downstream (`evaluate`/`terms`) only
+        ever reads the belief's `known`/`unknown`/`pool`, never `self.state`
+        -- exactly the subset `belief_from_game`'s cache is safe for (see
+        its docstring).
+        """
+        belief = self.belief_from_game(game, seat)
         return self.evaluate(game.state, seat, belief)
 
 
@@ -734,6 +808,7 @@ class Heximax:
         self._budget = self.max_nodes
         self.depth_reached = 0
         self.evaluator._survey_cache.clear()
+        self.evaluator._belief_cache.clear()
 
         if game.phase is Phase.SETUP_SETTLEMENT and self.placement:
             options = options_for(game)
@@ -800,7 +875,7 @@ class Heximax:
 
         monopolies = [a for a in options if a.type is ActionType.PLAY_MONOPOLY]
         if len(monopolies) > 1:
-            belief = Belief.from_game(game, seat, omniscient=self.omniscient)
+            belief = self.evaluator.belief_from_game(game, seat)
             target = max(
                 range(NUM_RESOURCES), key=lambda r: (belief.table_holding(r), -r)
             )
@@ -1036,7 +1111,7 @@ class Heximax:
     def _vector(self, state: GameState, ledger: PublicLedger, knower: int) -> list[float]:
         """The per-seat vector for `state`, read through `knower`'s own belief
         (its hand exact, everyone else's `expected_hand`)."""
-        belief = Belief(state, ledger, knower, omniscient=self.omniscient)
+        belief = self.evaluator.belief_for(state, ledger, knower)
         return self.evaluator.evaluate(state, knower, belief)
 
     def _read_row(
@@ -1303,7 +1378,7 @@ class Heximax:
             self.bundle_delta(game, seat, give, want, opp, before_vector=before_vector)
             for opp in opponents
         )
-        belief = Belief.from_game(game, seat, omniscient=self.omniscient)
+        belief = self.evaluator.belief_from_game(game, seat)
         weight = 0.0
         for opp in opponents:
             chance = belief.p_holds(opp, want)
@@ -1379,7 +1454,7 @@ class Heximax:
         one). `before_vector`: see `_partner_delta` -- still the vector read
         under `seat`'s own belief; only the read-out differs by stance.
         """
-        belief = Belief.from_game(game, seat, omniscient=self.omniscient)
+        belief = self.evaluator.belief_from_game(game, seat)
         paranoid = STANCES["paranoid"]
         opponents = [p for p in range(game.state.num_players) if p != seat]
         if before_vector is None:

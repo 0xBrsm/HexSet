@@ -90,6 +90,30 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   engine's one-for-one sample valued by the search; the bundle-offer
   generator and protocol adapter (P2), the `k` ablation (P1½) and the refit
   (P3) are pending and nothing here is registered.
+  **P1½** settled `k`: every honest arm beat the omniscient `search2` at 400
+  games, but no `k > 1` beat `k = 1` beyond the instrument's resolution
+  (paired VP the registered tiebreak), so `k = 1` ships and the ablation
+  arms (`heximax-k2/-k4/-k8`) are removed from `arena.PRESETS`.
+  **P2** adds the protocol-free valuation the design's `trade` section
+  promised — `deficit`/`surplus` (marginal gain of receiving, loss of
+  giving, per resource), `candidate_bundles` (1-2 cards a side from
+  deficit × surplus, a 2-for-1 where a port makes it rational, every
+  candidate `well_formed` and `can_propose`), `score_proposal`
+  (`ΔEval_me` at the best counterparty, weighted by each opponent's
+  `p_holds` and a crisp `willing` read on their own row of the vector —
+  never their true hand), `accept_rule`, `counter_of`, and `rank_partners`
+  (opponents ranked `paranoid`, first to whoever a trade helps least) —
+  and the minimal, mechanical, disposable protocol-P0 adapter over it:
+  `Heximax.propose_actions` replaces the engine's one-for-one
+  `PROPOSE_TRADE` sample among the root options with heximax's own top-`n`
+  scored candidates, and `_options_in` gates every `TRADE_RESPOND` node's
+  `ACCEPT_TRADE` — root or simulated — with `accept_rule`. Cost: with the
+  adapter active heximax measures 3.46x `search2-offers3` per move (P1's
+  own search alone still costs 1.66x), over the design's 2x ceiling — the
+  crisp `willing` gate, read under `relative`, proposes far more
+  selectively than the engine's blind sample, and that trade-volume drop
+  alone accounts for most of the overrun; flagged for the PI rather than
+  quietly absorbed by loosening the gate (module docstring, "Cost").
 
 ### Changed
 

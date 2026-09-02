@@ -100,6 +100,13 @@ class Entrant:
     # resolution over 400 games; `k = 1` ships and the field stays for anyone
     # who wants to re-open the question, not for a preset to vary.
     k: int = 1
+    # `kind="heximax"` only: the P2 adapter's own margins -- a proposal must
+    # clear `propose_margin` to be offered, an offer must clear
+    # `accept_margin` to be accepted (`Heximax`'s class docstring, P2
+    # paragraph). Unfitted; P3's Registration sweeps both. Defaulted to
+    # `heximax()`'s own defaults so every existing preset is unchanged.
+    accept_margin: float = 0.0
+    propose_margin: float = 0.0
 
     def renamed(self, name: str) -> Entrant:
         return replace(self, name=name)
@@ -213,6 +220,8 @@ def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
             stance=entrant.stance,
             k=entrant.k,
             weights=entrant.weights,
+            accept_margin=entrant.accept_margin,
+            propose_margin=entrant.propose_margin,
         )
 
     max_offers = entrant.max_offers

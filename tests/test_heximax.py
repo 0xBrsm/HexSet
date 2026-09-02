@@ -14,6 +14,7 @@ import functools
 import hashlib
 import json
 import random
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -985,6 +986,26 @@ def test_existing_presets_are_untouched_and_still_spawn():
     board = random_base_board(random.Random(0))
     for name in EXISTING_PRESETS:
         assert spawn(PRESETS[name], board, random.Random(0)) is not None
+
+
+def test_entrant_margin_knobs_default_unchanged_and_reach_the_spawned_bot():
+    """`Entrant.accept_margin`/`propose_margin` (P3's margin-grid harness gap)
+    default to `heximax()`'s own defaults, so every existing preset spawns a
+    bot byte-identical to before this field existed -- `PRESETS["heximax"] ==
+    Entrant("heximax", ...)` above already pins that by equality. A
+    non-default value on the `Entrant` reaches the built `Heximax`, which is
+    all `_spawn`'s `kind == "heximax"` branch is responsible for; nothing
+    reads these fields for any other `kind`.
+    """
+    assert Entrant("x", kind="heximax").accept_margin == 0.0
+    assert Entrant("x", kind="heximax").propose_margin == 0.0
+    board = random_base_board(random.Random(0))
+    bot = spawn(replace(PRESETS["heximax"], accept_margin=0.2), board, random.Random(0))
+    assert bot.accept_margin == 0.2
+    assert bot.propose_margin == 0.0
+    bot = spawn(replace(PRESETS["heximax"], propose_margin=0.4), board, random.Random(0))
+    assert bot.propose_margin == 0.4
+    assert bot.accept_margin == 0.0
 
 
 # --- trade adapter (P2) --------------------------------------------------------

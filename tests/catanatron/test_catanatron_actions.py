@@ -108,7 +108,7 @@ def test_every_legal_action_resolves(seed):
             try:
                 resolved = to_catanatron(action, our_game, mapping, seats, game.playable_actions)
             except ValueError:
-                assert _known_limitation(action, game.state), (
+                assert _known_limitation(action, game._state), (
                     f"{action} failed to resolve for an unrecognised reason -- "
                     "this is a real bug, not one of the documented gaps"
                 )
@@ -116,7 +116,7 @@ def test_every_legal_action_resolves(seed):
             assert resolved in game.playable_actions
             checked += 1
 
-        action = game.state.current_player().decide(game, game.playable_actions)
+        action = game._state.current_player().decide(game, game.playable_actions)
         game.execute(action)
 
     assert checked > 200

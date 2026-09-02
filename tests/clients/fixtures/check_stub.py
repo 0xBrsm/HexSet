@@ -31,7 +31,7 @@ print("meta   :", session.get_modelmeta().custom_metadata_map)
 
 def record(game, seat, options):
     """The v2 information-set record, built the way hexset.onnx_record does."""
-    st = game.state
+    st = game._state
     mask = np.zeros(space.size, dtype=bool)
     for a in options:
         mask[space.index(a)] = True

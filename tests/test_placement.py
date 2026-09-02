@@ -53,7 +53,7 @@ def test_the_prior_prefers_more_pips_when_nothing_else_differs():
     n = topology.num_hexes
     tokens = tuple(6 if h == 0 else 2 for h in range(n))
     board = make_board(topology, (Terrain.FOREST,) * n, tokens)
-    state = start(board, 2, rng=random.Random(0)).state
+    state = start(board, 2, rng=random.Random(0))._state
     ordered = rank(state, 0, range(topology.num_vertices))
     top = ordered[0][1]
     assert 0 in topology.vertex_hexes[top]
@@ -61,7 +61,7 @@ def test_the_prior_prefers_more_pips_when_nothing_else_differs():
 
 def test_ties_break_on_vertex_index_so_the_prior_is_repeatable():
     board = random_base_board(random.Random(3))
-    state = start(board, 4, rng=random.Random(0)).state
+    state = start(board, 4, rng=random.Random(0))._state
     candidates = list(range(board.topology.num_vertices))
     first = best(state, 0, candidates)
     assert first == best(state, 0, list(reversed(candidates)))
@@ -70,7 +70,7 @@ def test_ties_break_on_vertex_index_so_the_prior_is_repeatable():
 def test_the_prior_scores_the_opening_it_would_complete_not_the_vertex_alone():
     """A candidate is rated with the seat's existing settlements, not on its own."""
     board = random_base_board(random.Random(5))
-    state = start(board, 4, rng=random.Random(0)).state
+    state = start(board, 4, rng=random.Random(0))._state
     candidates = [v for v in range(board.topology.num_vertices)]
     alone = best(state, 0, candidates)
 

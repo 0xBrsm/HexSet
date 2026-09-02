@@ -102,7 +102,7 @@ def test_a_dev_card_draw_enumerates_the_remaining_deck():
     for game, action in _positions(
         DUEL, 0, SEED, lambda g, a: a.type is ActionType.BUY_DEV_CARD, limit=3000
     ):
-        before = Counter(game.state.deck)
+        before = Counter(game._state.deck)
         outcomes = chance_outcomes(game, action, random.Random(1))
         if not outcomes:
             assert len(before) < 2
@@ -115,13 +115,13 @@ def test_a_dev_card_draw_enumerates_the_remaining_deck():
             drew = [
                 card
                 for card in range(NUM_DEV_CARDS)
-                if child.state.new_dev_cards[buyer][card]
-                > game.state.new_dev_cards[buyer][card]
+                if child._state.new_dev_cards[buyer][card]
+                > game._state.new_dev_cards[buyer][card]
             ]
             assert len(drew) == 1
             assert probability == pytest.approx(before[drew[0]] / sum(before.values()))
             # One card left the deck, and it was that card.
-            assert Counter(child.state.deck) == before - Counter({drew[0]: 1})
+            assert Counter(child._state.deck) == before - Counter({drew[0]: 1})
     assert seen, "no development card was ever bought with a mixed deck"
 
 
@@ -135,7 +135,7 @@ def test_a_steal_enumerates_the_victim_s_hand():
     seen = 0
     for game, action in _positions(DUEL, 0, SEED, wanted, limit=3000):
         victim = victim_of(game, action.b)
-        hand = list(game.state.hands[victim])
+        hand = list(game._state.hands[victim])
         outcomes = chance_outcomes(game, action, random.Random(1))
         if not outcomes:
             assert sum(1 for n in hand if n) < 2
@@ -147,12 +147,12 @@ def test_a_steal_enumerates_the_victim_s_hand():
             took = [
                 r
                 for r in range(len(hand))
-                if child.state.hands[thief][r] > game.state.hands[thief][r]
+                if child._state.hands[thief][r] > game._state.hands[thief][r]
             ]
             assert len(took) == 1
             assert probability == pytest.approx(hand[took[0]] / sum(hand))
-            assert child.state.hands[victim][took[0]] == hand[took[0]] - 1
-            assert sum(child.state.hands[victim]) == sum(hand) - 1
+            assert child._state.hands[victim][took[0]] == hand[took[0]] - 1
+            assert sum(child._state.hands[victim]) == sum(hand) - 1
     assert seen, "no steal from a mixed hand ever happened"
 
 

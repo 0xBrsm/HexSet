@@ -104,8 +104,12 @@ def to_catanatron(
         )
 
     if kind is OurActionType.MOVE_ROBBER:
+        # true state: the bridge rebuilds `our_game` fresh from catanatron's
+        # own live state every decision (`state.py`), so this is the true,
+        # sanctioned read -- not an information-set one.
+        num_players = our_game.state(0, hidden=False).num_players
         return move_robber(
-            our_action.a, our_action.b, our_game.state.num_players, mapping, seats, playable_actions
+            our_action.a, our_action.b, num_players, mapping, seats, playable_actions
         )
 
     if kind is OurActionType.PLAY_MONOPOLY:

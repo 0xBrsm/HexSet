@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""`evaluate.Evaluator`'s term set, read through a `Belief`.
+"""`evaluate.Evaluator`'s term set, read through a `View`.
 
 `HonestEvaluator` scores every seat from one knower's information. Board
 terms are the existing evaluator's own `survey`, reused rather than copied
 since it reads only public state. The three hand terms (`progress`, `held`,
 `surplus_card`) are read on the true hand for the knower (or for everyone,
-when `omniscient`) and on `Belief.expected_hand` for everyone else; victory
+when `omniscient`) and on `View.expected_hand` for everyone else; victory
 point cards count only for the knower. `TRADING_WEIGHTS` and
 `NO_TRADE_WEIGHTS` are the two shipped profiles `heximax()` picks between by
 mode -- see their own comments for provenance; `weights=` overrides either
@@ -33,7 +33,7 @@ from hexset.robber import DISCARD_THRESHOLD
 from hexset.state import MAX_CITIES, MAX_SETTLEMENTS, Building, GameState
 from hexset.victory import WINNING_POINTS, award_points, card_points
 
-from .belief import Belief, _offer_certify
+from hexset.view import View, _offer_certify
 
 
 # Today's fit, made under trading (`evaluate.Weights`' own docstring).
@@ -71,12 +71,12 @@ _PROGRESS_COST: dict[Purchase, tuple[tuple[tuple[int, int], ...], int]] = {
 
 
 class HonestEvaluator:
-    """`evaluate.Evaluator`'s model, read through a `Belief`.
+    """`evaluate.Evaluator`'s model, read through a `View`.
 
     Board terms are the existing evaluator's own `survey`, reused rather
     than copied since it reads only public state. The three hand terms
     (`progress`, `held`, `surplus_card`) are read on the true hand for the
-    knower and on `Belief.expected_hand` for everyone else (or everyone,
+    knower and on `View.expected_hand` for everyone else (or everyone,
     when `omniscient`); victory-point cards count only for the knower.
     `progress` on an expected hand is an approximation -- a maximum of
     minimums, so the value on the mean differs from the mean of the values --
@@ -96,22 +96,22 @@ class HonestEvaluator:
         self.omniscient = omniscient
         self.exact_progress_samples = exact_progress_samples
         self._walk_cache: dict[tuple, tuple[Survey, tuple[int, int]]] = {}
-        self._belief_cache: dict[tuple, Belief] = {}
+        self._belief_cache: dict[tuple, View] = {}
         self._evaluate_cache: dict[tuple, list[float]] = {}
 
     def belief_for(
         self, state: GameState, ledger: PublicLedger, perspective: int, *,
         certify: Sequence[tuple[int, Sequence[int]]] = (),
-    ) -> Belief:
-        """`Belief(state, ledger, perspective, ...)`, memoized for the life of
+    ) -> View:
+        """`View(state, ledger, perspective, ...)`, memoized for the life of
         one `Heximax.choose()`.
 
-        Exact by construction: the key is every field `Belief.__init__` reads
+        Exact by construction: the key is every field `View.__init__` reads
         to build `known`/`unknown`/`pool` -- each seat's hand *size*, the
         ledger's known/unknown, the bank, `num_players`, `perspective`,
         `certify`. (`omniscient` is fixed for this evaluator's life.) Two
-        calls sharing a key are the same `Belief` byte-for-byte, because
-        `Belief` is a pure function of exactly those, none of which says
+        calls sharing a key are the same `View` byte-for-byte, because
+        `View` is a pure function of exactly those, none of which says
         which node produced them.
 
         Only for callers that read the memoized fields alone
@@ -119,7 +119,7 @@ class HonestEvaluator:
         `sample` and `deck_odds` read `self.state` in full -- board, deck,
         dev cards, knights played -- which this key does not capture, so
         `worlds`/`draw_children`, their only callers, build a fresh
-        `Belief.from_game` instead.
+        `View.from_game` instead.
         """
         key = (
             tuple(tuple(hand) for hand in state.hands),
@@ -132,18 +132,31 @@ class HonestEvaluator:
         )
         cached = self._belief_cache.get(key)
         if cached is None:
-            cached = Belief(
+            cached = View(
                 state, ledger, perspective, omniscient=self.omniscient, certify=certify
             )
             self._belief_cache[key] = cached
         return cached
 
-    def belief_from_game(self, game: Game, perspective: int) -> Belief:
+    def belief_from_game(self, game: Game, perspective: int) -> View:
         """`belief_for`, reading `certify` off `game.offer` the way
-        `Belief.from_game` does -- see `belief_for`'s docstring for the
-        exactness argument and which callers may use this."""
+        `View.from_game` does -- see `belief_for`'s docstring for the
+        exactness argument and which callers may use this.
+
+        `game.state(perspective, hidden=False)` (true state: `belief_for`'s
+        own content-keyed cache, not `Game.state`'s per-call construction,
+        is what controls how often a `View` actually gets built --
+        `View.from_game` builds unconditionally, so routing through it here
+        would construct one throwaway `View` per call on top of the cached
+        one. `hidden=False` costs nothing: the same object the engine's
+        private state always was, never a copy. `View.__init__` -- engine
+        code -- is what
+        enforces honesty on it via `known`/`unknown`, not restricted access
+        to the object.)
+        """
         return self.belief_for(
-            game.state, game.ledger, perspective, certify=_offer_certify(game)
+            game.state(perspective, hidden=False), game.ledger, perspective,
+            certify=_offer_certify(game),
         )
 
     def _walk(self, state: GameState, seat: int) -> tuple[Survey, tuple[int, int]]:
@@ -204,7 +217,7 @@ class HonestEvaluator:
         return best
 
     def _progress_of(
-        self, state: GameState, seat: int, hand: Sequence[float], belief: Belief | None,
+        self, state: GameState, seat: int, hand: Sequence[float], belief: View | None,
         pieces: tuple[int, int] | None = None,
     ) -> float:
         if (
@@ -226,12 +239,12 @@ class HonestEvaluator:
 
     def terms(
         self, state: GameState, seat: int, hand: Sequence[float], *, knower: int | None = None,
-        belief: Belief | None = None,
+        belief: View | None = None,
     ) -> tuple[float, ...]:
         """The raw term values `score` weights, in `evaluate.TERM_NAMES` order.
 
         `hand` is `state.hands[seat]` for the knower (or when `omniscient`)
-        and `Belief.expected_hand(seat)` otherwise -- `evaluate` decides
+        and `View.expected_hand(seat)` otherwise -- `evaluate` decides
         which and passes it in, so this method itself never has to ask.
         """
         walk, pieces = self._walk(state, seat)
@@ -254,7 +267,7 @@ class HonestEvaluator:
 
     def score(
         self, state: GameState, seat: int, hand: Sequence[float], *, knower: int | None = None,
-        belief: Belief | None = None,
+        belief: View | None = None,
     ) -> float:
         """`terms` dotted with the weight vector, plus the win bonus at 10 VP."""
         values = self.terms(state, seat, hand, knower=knower, belief=belief)
@@ -266,7 +279,7 @@ class HonestEvaluator:
         return total
 
     def evaluate(
-        self, state: GameState, knower: int | None = None, belief: Belief | None = None,
+        self, state: GameState, knower: int | None = None, belief: View | None = None,
     ) -> list[float]:
         """Score every seat from `knower`'s information.
 
@@ -281,11 +294,11 @@ class HonestEvaluator:
         cards (the only seat `card_points` scores) -- plus every seat's hand
         and the belief's `signature()`, which is `expected_hand`'s only
         input. A hit is byte-identical to recomputing, whether the belief
-        came from `belief_for`, a fresh `Belief.from_game`, or the untyped
+        came from `belief_for`, a fresh `View.from_game`, or the untyped
         fallback above.
         """
         if belief is None and knower is not None and not self.omniscient:
-            belief = Belief(
+            belief = View(
                 state, PublicLedger.new(state.num_players), knower, omniscient=False
             )
         key = (
@@ -318,14 +331,20 @@ class HonestEvaluator:
     def evaluate_game(self, game: Game, seat: int) -> list[float]:
         """`evaluate`, building the belief from `game`'s own ledger. The leaf call.
 
-        `belief_from_game` rather than `Belief.from_game` directly: this is
+        `belief_from_game` rather than `View.from_game` directly: this is
         the dominant caller of both (39.7 leaves/decision on the profile's
         own sample), and `evaluate`'s own memo only ever reads the belief's
         `known`/`unknown`/`pool`, never `self.state` -- exactly the subset
         `belief_from_game`'s cache is safe for (see its docstring).
         """
         belief = self.belief_from_game(game, seat)
-        return self.evaluate(game.state, seat, belief)
+        # NOT `belief.state`: `belief_for`'s cache key covers hands/ledger/
+        # bank/perspective/certify but not board occupancy, so a cache hit
+        # can hand back a `View` built from a different (content-equal-on-
+        # that-key) game's state -- right hands, potentially a stale board.
+        # `evaluate`'s own memo, below, does key on board occupancy, so it
+        # needs this game's own true state, not the belief's.
+        return self.evaluate(game.state(seat, hidden=False), seat, belief)
 
 
 def _pieces(state: GameState, seat: int) -> tuple[int, int]:

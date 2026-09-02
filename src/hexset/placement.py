@@ -102,7 +102,10 @@ class PlacementBot:
         options = [a for a in legal_actions(game) if a.type is ActionType.SETUP_SETTLEMENT]
         if not options:
             return self.inner.choose(game)
-        chosen = best(game.state, to_move(game), [action.a for action in options])
+        # true state: scores board layout and vertex ownership only, both
+        # public.
+        seat = to_move(game)
+        chosen = best(game.state(seat, hidden=False), seat, [action.a for action in options])
         return Action(ActionType.SETUP_SETTLEMENT, chosen)
 
 

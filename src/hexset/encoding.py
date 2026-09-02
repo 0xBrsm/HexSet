@@ -337,7 +337,7 @@ def _offer_parts(game: Game, perspective: int) -> list[float]:
     proposer seat one-hot (seat-relative, no "none" slot — all zero when no
     offer stands), answered-by-seat (seat-relative).
     """
-    players = game.state.num_players
+    players = game._state.num_players
     give = [0.0] * NUM_RESOURCES
     want = [0.0] * NUM_RESOURCES
     proposer = [0.0] * players
@@ -348,7 +348,7 @@ def _offer_parts(game: Game, perspective: int) -> list[float]:
         want = [n / HAND_SCALE for n in offer.want]
         proposer[_seat(offer.proposer, perspective, players)] = 1.0
         if perspective == offer.proposer:
-            declined = set(offer_responders(game.state, offer)) - set(
+            declined = set(offer_responders(game._state, offer)) - set(
                 game.pending_responders
             )
             for s in declined:
@@ -365,7 +365,7 @@ def _ledger_parts(game: Game, perspective: int) -> list[float]:
     `(players - 1) * (NUM_RESOURCES + 1)` floats — `global_features`'s
     ledger term.
     """
-    players = game.state.num_players
+    players = game._state.num_players
     parts: list[float] = []
     for i in range(1, players):
         seat = (perspective + i) % players
@@ -380,7 +380,7 @@ def _encode_globals(
 ) -> np.ndarray:
     from .victory import award_points
 
-    state = game.state
+    state = game._state
     players = state.num_players
     seats = [(perspective + i) % players for i in range(players)]
 
@@ -431,18 +431,18 @@ def _encode_globals_batch(
 ) -> np.ndarray:
     """Write the small global blocks once per batch instead of once per game."""
     batch = len(games)
-    players = games[0].state.num_players
+    players = games[0]._state.num_players
     rows = np.arange(batch)[:, None]
     seats = (perspectives[:, None] + np.arange(players)) % players
 
-    hands = np.asarray([game.state.hands for game in games], dtype=np.int16)
-    banks = np.asarray([game.state.bank for game in games], dtype=np.int16)
-    cards = np.asarray([game.state.dev_cards for game in games], dtype=np.int16)
+    hands = np.asarray([game._state.hands for game in games], dtype=np.int16)
+    banks = np.asarray([game._state.bank for game in games], dtype=np.int16)
+    cards = np.asarray([game._state.dev_cards for game in games], dtype=np.int16)
     fresh = np.asarray(
-        [game.state.new_dev_cards for game in games], dtype=np.int16
+        [game._state.new_dev_cards for game in games], dtype=np.int16
     )
     knights = np.asarray(
-        [game.state.knights_played for game in games], dtype=np.int16
+        [game._state.knights_played for game in games], dtype=np.int16
     )
 
     out = np.zeros((batch, global_features(players)), dtype=np.float32)
@@ -469,10 +469,10 @@ def _encode_globals_batch(
     append(knights[rows, seats], 5.0)
 
     longest = np.asarray(
-        [game.state.longest_road_holder for game in games], dtype=np.intp
+        [game._state.longest_road_holder for game in games], dtype=np.intp
     )
     army = np.asarray(
-        [game.state.largest_army_holder for game in games], dtype=np.intp
+        [game._state.largest_army_holder for game in games], dtype=np.intp
     )
     awards = 2 * (longest[:, None] == seats) + 2 * (army[:, None] == seats)
     append(building_points.astype(np.float64) + awards, 10.0)
@@ -492,7 +492,7 @@ def _encode_globals_batch(
     cursor += NUM_PHASES
 
     append(np.asarray([game.free_roads for game in games]), 2.0)
-    append(np.asarray([len(game.state.deck) for game in games]), DECK_SIZE)
+    append(np.asarray([len(game._state.deck) for game in games]), DECK_SIZE)
     turns = np.minimum(
         np.asarray([game.turns for game in games], dtype=np.float64) / TURN_SCALE,
         1.0,
@@ -539,7 +539,7 @@ def encode_batch(
     if not games:
         return []
 
-    states = [game.state for game in games]
+    states = [game._state for game in games]
     players = states[0].num_players
     if any(state.num_players != players for state in states):
         raise ValueError("one batch cannot mix player counts")
@@ -607,7 +607,7 @@ def encode_batch(
 
 def encode(game: Game, perspective: int | None = None) -> Observation:
     """Encode the position as seen by `perspective`, defaulting to the mover."""
-    state = game.state
+    state = game._state
     if perspective is None:
         perspective = game.current_player
     if not 0 <= perspective < state.num_players:

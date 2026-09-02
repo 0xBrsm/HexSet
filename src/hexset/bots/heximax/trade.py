@@ -80,8 +80,9 @@ class _TradeMixin:
         before_vector: list[float] | None = None,
     ) -> float:
         """Eval(hand + one `resource`) - Eval(hand), from `seat`'s own reading."""
-        before = self._read(game.state, game.ledger, seat, vector=before_vector)
-        state = copy_state(game.state)
+        state = game.state(seat, hidden=False)
+        before = self._read(state, game.ledger, seat, vector=before_vector)
+        state = copy_state(state)
         state.hands[seat][resource] += 1
         if state.bank[resource] > 0:
             state.bank[resource] -= 1
@@ -92,10 +93,11 @@ class _TradeMixin:
         before_vector: list[float] | None = None,
     ) -> float:
         """Eval(hand) - Eval(hand less one `resource`); zero when none is held."""
-        if game.state.hands[seat][resource] < 1:
+        state = game.state(seat, hidden=False)
+        if state.hands[seat][resource] < 1:
             return 0.0
-        before = self._read(game.state, game.ledger, seat, vector=before_vector)
-        state = copy_state(game.state)
+        before = self._read(state, game.ledger, seat, vector=before_vector)
+        state = copy_state(state)
         state.hands[seat][resource] -= 1
         state.bank[resource] += 1
         ledger = game.ledger.copy()
@@ -125,7 +127,7 @@ class _TradeMixin:
         return {
             r: self.marginal_loss(game, seat, r, before_vector=before_vector)
             for r in range(NUM_RESOURCES)
-            if game.state.hands[seat][r] > 0
+            if game.state(seat, hidden=False).hands[seat][r] > 0
         }
 
     def _partner_delta(
@@ -146,14 +148,15 @@ class _TradeMixin:
         through a clamp-at-zero; and `state.hands` moves exactly for
         `knower`, folded into one total for anyone else, because only
         `knower`'s own row is ever read verbatim. `before_vector`, when
-        given, is `_vector(game.state, game.ledger, knower)` -- the "before"
+        given, is `_vector(game.state(knower, hidden=False), game.ledger, knower)` -- the "before"
         side does not depend on `give`/`want`/`counterparty`, so a caller
         making several of these against one unmutated game computes it once.
         """
+        state = game.state(knower, hidden=False)
         before = self._read_row(
-            game.state, game.ledger, knower, target, rank, vector=before_vector
+            state, game.ledger, knower, target, rank, vector=before_vector
         )
-        state = copy_state(game.state)
+        state = copy_state(state)
         exact = self.omniscient
         self._move_hand(state, knower, target, gains=want, losses=give, exact=exact)
         self._move_hand(state, knower, counterparty, gains=give, losses=want, exact=exact)
@@ -239,7 +242,7 @@ class _TradeMixin:
         through `deficit`/`surplus`, whose `evaluate()`-backed marginal
         reads this method never uses; `propose_actions` calls those itself.
         """
-        state = game.state
+        state = game.state(seat, hidden=False)
         hand = state.hands[seat]
         deficits = list(range(NUM_RESOURCES))
         surpluses = [r for r in range(NUM_RESOURCES) if hand[r] > 0]
@@ -280,11 +283,11 @@ class _TradeMixin:
         rather than a smoothed one: there is no fitted slope to smooth it
         with yet. `before_vector`: see `_partner_delta`.
         """
-        opponents = [p for p in range(game.state.num_players) if p != seat]
+        opponents = [p for p in range(game.state(seat, hidden=False).num_players) if p != seat]
         if not opponents:
             return 0.0
         if before_vector is None:
-            before_vector = self._vector(game.state, game.ledger, seat)
+            before_vector = self._vector(game.state(seat, hidden=False), game.ledger, seat)
         delta_me = max(
             self.bundle_delta(game, seat, give, want, opp, before_vector=before_vector)
             for opp in opponents
@@ -362,9 +365,9 @@ class _TradeMixin:
         """
         belief = self.evaluator.belief_from_game(game, seat)
         paranoid = STANCES["paranoid"]
-        opponents = [p for p in range(game.state.num_players) if p != seat]
+        opponents = [p for p in range(game.state(seat, hidden=False).num_players) if p != seat]
         if before_vector is None:
-            before_vector = self._vector(game.state, game.ledger, seat)
+            before_vector = self._vector(game.state(seat, hidden=False), game.ledger, seat)
 
         def score(opp: int) -> float:
             chance = belief.p_holds(opp, want)
@@ -397,9 +400,10 @@ class _TradeMixin:
         module's single largest cost, so the cheap `deficit`/`surplus`
         shortlist the field to `PROPOSE_SHORTLIST` first.
         """
-        # Every "before" read below shares this one (game.state, game.ledger,
-        # seat) triple, computed once rather than per candidate.
-        before_vector = self._vector(game.state, game.ledger, seat)
+        # Every "before" read below shares this one (game.state(seat,
+        # hidden=False), game.ledger, seat) triple, computed once rather
+        # than per candidate.
+        before_vector = self._vector(game.state(seat, hidden=False), game.ledger, seat)
         candidates = self.candidate_bundles(game, seat)
         if not candidates:
             return []

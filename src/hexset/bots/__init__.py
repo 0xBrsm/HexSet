@@ -60,6 +60,7 @@ from .heximax import (
     HonestEvaluator,
     NO_TRADE_WEIGHTS,
     TRADING_WEIGHTS,
+    View,
     Weights,
 )
 
@@ -75,6 +76,7 @@ __all__ = [
     "SearchBot",
     "STANCES",
     "TRADING_WEIGHTS",
+    "View",
     "Weights",
     "greedy",
     "options_for",

@@ -163,7 +163,7 @@ def test_session_rejects_an_action_not_currently_legal():
     with pytest.raises(ValueError):
         session.submit(seat, forged)
     assert game.phase is Phase.SETUP_SETTLEMENT
-    assert all(owner == -1 for owner in game.state.vertex_owner)
+    assert all(owner == -1 for owner in game._state.vertex_owner)
 
 def test_session_rejects_an_out_of_range_target():
     game = a_game(seed=3)
@@ -177,7 +177,7 @@ def test_session_rejects_an_out_of_range_target():
 def test_session_rejects_an_action_from_a_seat_that_has_not_claimed_it():
     game = a_game(seed=4)
     mover = to_move(game)
-    other = (mover + 1) % game.state.num_players
+    other = (mover + 1) % game._state.num_players
     session = a_session(game, {other})
 
     # A perfectly legal action for whoever is actually on the move.
@@ -198,7 +198,7 @@ def test_legal_wire_actions_offers_every_held_resource_regardless_of_who_could_c
     game = a_game(seed=19)
     game.phase = Phase.MAIN
     game.current_player = 0
-    state = game.state
+    state = game._state
     state.bank[Resource.WOOD] -= 1
     state.hands[0][Resource.WOOD] += 1
     # No opponent holds anything at all: under the omniscient sample this
@@ -227,7 +227,7 @@ def test_nothing_is_proposable_before_the_roll():
     game = a_game(seed=19)
     game.phase = Phase.ROLL
     game.current_player = 0
-    game.state.hands[0][Resource.WHEAT] += 6
+    game._state.hands[0][Resource.WHEAT] += 6
 
     session = a_session(game, {0})
     kinds = {a["type"] for a in session.legal_wire_actions(0)}
@@ -242,7 +242,7 @@ def test_an_explicit_ask_is_honoured():
     game = a_game(seed=8)
     game.phase = Phase.MAIN
     game.current_player = 0
-    state = game.state
+    state = game._state
 
     state.bank[Resource.WOOD] -= 1
     state.hands[0][Resource.WOOD] += 1
@@ -325,7 +325,7 @@ def test_a_trade_that_gets_accepted_summarizes_into_one_line():
     game = a_game(seed=13)
     game.phase = Phase.MAIN
     game.current_player = 0
-    state = game.state
+    state = game._state
 
     state.bank[Resource.WOOD] -= 1
     state.hands[0][Resource.WOOD] += 1
@@ -367,7 +367,7 @@ def test_a_trade_nobody_can_cover_is_still_legal_and_reads_as_declined():
     game = a_game(seed=14)
     game.phase = Phase.MAIN
     game.current_player = 0
-    state = game.state
+    state = game._state
     state.bank[Resource.WOOD] -= 1
     state.hands[0][Resource.WOOD] += 1
     # Nobody else holds any ore, so nobody is eligible to respond.
@@ -397,7 +397,7 @@ def test_a_trade_everyone_declines_summarizes_into_one_line():
     game = a_game(seed=15)
     game.phase = Phase.MAIN
     game.current_player = 0
-    state = game.state
+    state = game._state
     state.bank[Resource.WOOD] -= 1
     state.hands[0][Resource.WOOD] += 1
     for seat in (1, 2):
@@ -432,8 +432,8 @@ def _owing_game(seed: int, seat: int, hand: list[int]) -> GameSession:
     game = a_game(seed=seed)
     game.phase = Phase.DISCARD
     game.current_player = seat
-    game.state.hands[seat] = list(hand)
-    game.discard_quota = [0] * game.state.num_players
+    game._state.hands[seat] = list(hand)
+    game.discard_quota = [0] * game._state.num_players
     game.discard_quota[seat] = sum(hand) // 2
     return game
 
@@ -476,7 +476,7 @@ def test_another_seats_discard_line_is_a_bare_count_never_the_resources():
 
 def test_two_seats_discarding_get_a_line_each():
     game = _owing_game(seed=23, seat=0, hand=[4, 4, 0, 0, 0])
-    game.state.hands[1] = [4, 4, 0, 0, 0]
+    game._state.hands[1] = [4, 4, 0, 0, 0]
     game.discard_quota[1] = 4
     session = a_session(game, {0, 1})
 
@@ -511,7 +511,7 @@ def test_consecutive_bank_trades_of_the_same_pair_sum_into_one_line():
     game = a_game(seed=24)
     game.phase = Phase.MAIN
     game.current_player = 0
-    game.state.hands[0] = [8, 0, 0, 0, 0]
+    game._state.hands[0] = [8, 0, 0, 0, 0]
     session = a_session(game, {0})
 
     trade = next(
@@ -528,22 +528,22 @@ def test_undoing_a_bank_trade_refunds_the_hand_and_drops_the_line():
     game = a_game(seed=24)
     game.phase = Phase.MAIN
     game.current_player = 0
-    game.state.hands[0] = [8, 0, 0, 0, 0]
+    game._state.hands[0] = [8, 0, 0, 0, 0]
     session = a_session(game, {0})
 
     trade = next(
         a for a in legal_actions(game)
         if a.type is ActionType.BANK_TRADE and a.a == 0 and a.b == 4
     )
-    before_bank = list(session.game.state.bank)
+    before_bank = list(session.game._state.bank)
     session.submit(0, action_to_wire(trade))
-    assert session.game.state.hands[0] != [8, 0, 0, 0, 0]
+    assert session.game._state.hands[0] != [8, 0, 0, 0, 0]
     assert session.log_for(0)
 
     session.undo_last_build(0)
 
-    assert session.game.state.hands[0] == [8, 0, 0, 0, 0]
-    assert session.game.state.bank == before_bank
+    assert session.game._state.hands[0] == [8, 0, 0, 0, 0]
+    assert session.game._state.bank == before_bank
     assert session.log_for(0) == []
     assert session._undo is None
 
@@ -551,7 +551,7 @@ def test_a_different_bank_pair_starts_its_own_line():
     game = a_game(seed=25)
     game.phase = Phase.MAIN
     game.current_player = 0
-    game.state.hands[0] = [4, 4, 0, 0, 0]
+    game._state.hands[0] = [4, 4, 0, 0, 0]
     session = a_session(game, {0})
 
     for give, want in ((0, 4), (1, 4)):
@@ -577,7 +577,7 @@ def test_a_roll_between_two_discards_keeps_them_apart():
     assert len(session.log_for(0)) == 2
 
     session.game.phase = Phase.DISCARD
-    session.game.state.hands[0] = [2, 0, 0, 0, 0]
+    session.game._state.hands[0] = [2, 0, 0, 0, 0]
     session.game.discard_quota = [1, 0, 0, 0]
     _discard_all(session, 0)
 
@@ -602,7 +602,7 @@ def test_ending_a_turn_closes_an_open_run():
     game = a_game(seed=17)
     game.phase = Phase.MAIN
     game.current_player = 0
-    game.state.hands[0] = [8, 0, 0, 0, 0]
+    game._state.hands[0] = [8, 0, 0, 0, 0]
     session = a_session(game, {0})
 
     trade = next(
@@ -627,8 +627,8 @@ def test_undo_is_available_to_any_claimed_seat_not_just_a_person():
     game = a_game(seed=5)
     game.phase = Phase.MAIN
     game.current_player = 1
-    game.state.vertex_owner[0] = 1  # something of seat 1's own to build from
-    game.state.hands[1] = [1, 1, 0, 0, 0]  # a road's cost (see economy.Purchase.ROAD)
+    game._state.vertex_owner[0] = 1  # something of seat 1's own to build from
+    game._state.hands[1] = [1, 1, 0, 0, 0]  # a road's cost (see economy.Purchase.ROAD)
     session = a_session(game, {0, 1})
 
     road = next(a for a in legal_actions(game) if a.type is ActionType.BUILD_ROAD)
@@ -641,11 +641,11 @@ def test_undo_is_available_to_any_claimed_seat_not_just_a_person():
 def test_state_view_hides_opponent_hands_but_reveals_the_viewers():
     game = a_game(seed=8)
     seat = to_move(game)
-    other = (seat + 1) % game.state.num_players
+    other = (seat + 1) % game._state.num_players
     session = a_session(game, {seat})
 
-    game.state.hands[seat][0] = 3
-    game.state.hands[other][0] = 5
+    game._state.hands[seat][0] = 3
+    game._state.hands[other][0] = 5
 
     view = session.state_view(seat)
     players = {p["seat"]: p for p in view["players"]}
@@ -658,7 +658,7 @@ def test_state_view_reveals_every_hand_once_the_game_is_over():
     game = a_game(seed=9)
     seat = to_move(game)
     session = a_session(game, {seat})
-    game.won_by = (seat + 1) % game.state.num_players
+    game.won_by = (seat + 1) % game._state.num_players
     game.phase = Phase.GAME_OVER
 
     view = session.state_view(seat)
@@ -672,7 +672,7 @@ def test_state_view_carries_the_public_ledger_for_every_seat():
     `hand`."""
     game = a_game(seed=8)
     seat = to_move(game)
-    other = (seat + 1) % game.state.num_players
+    other = (seat + 1) % game._state.num_players
     session = a_session(game, {seat})
 
     game.ledger.receive(other, 0, 2)
@@ -694,7 +694,7 @@ def test_state_view_does_not_expose_who_is_eligible_to_respond_to_an_offer():
     game = a_game(seed=18)
     game.phase = Phase.MAIN
     game.current_player = 0
-    state = game.state
+    state = game._state
     state.bank[Resource.WOOD] -= 1
     state.hands[0][Resource.WOOD] += 1
     for seat in (1, 2):
@@ -719,7 +719,7 @@ def test_state_view_offer_answered_is_the_proposers_own_information_only():
     game = a_game(seed=18)
     game.phase = Phase.MAIN
     game.current_player = 0
-    state = game.state
+    state = game._state
     state.bank[Resource.WOOD] -= 1
     state.hands[0][Resource.WOOD] += 1
     for seat in (1, 2):
@@ -839,7 +839,7 @@ def test_the_journal_states_the_dice_and_the_hands_they_paid(played):
     assert all(len(e["hands"]) == 4 for e in rolls)
 
     actions = [e for e in events if e["kind"] == "action"]
-    assert actions[-1]["hands"] == [list(h) for h in session.game.state.hands]
+    assert actions[-1]["hands"] == [list(h) for h in session.game._state.hands]
 
 def test_the_journal_names_every_development_card_in_deck_order(played):
     """The header's deck is the whole point: every card bought later has to be
@@ -877,8 +877,8 @@ def test_the_journal_ends_with_the_result(played):
         "winner": session.game.won_by,
         "turns": session.game.turns,
         "points": [
-            victory_points(session.game.state, p)
-            for p in range(session.game.state.num_players)
+            victory_points(session.game._state, p)
+            for p in range(session.game._state.num_players)
         ],
     }
 
@@ -948,7 +948,7 @@ def test_to_move_does_not_reveal_who_can_cover_an_offer():
     game = a_game(seed=18)
     game.phase = Phase.MAIN
     game.current_player = 0
-    state = game.state
+    state = game._state
     for hand in state.hands:
         hand[Resource.ORE] = 0
     state.hands[0][Resource.WOOD] += 1
@@ -996,7 +996,7 @@ def test_to_move_is_unfiltered_in_every_phase_but_trade_respond():
 
     game.phase = Phase.DISCARD
     game.current_player = 0
-    game.state.hands[2] = [8, 0, 0, 0, 0]
+    game._state.hands[2] = [8, 0, 0, 0, 0]
     game.discard_quota = [0, 0, 4, 0]
     assert to_move(game) == 2
     for viewer in (None, 0, 1, 2, 3):

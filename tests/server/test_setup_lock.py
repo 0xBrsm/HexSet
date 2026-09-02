@@ -73,14 +73,14 @@ def test_the_worked_example_from_the_plan():
     assert (game.setup_step, game.current_player, game.phase) == (5, 2, Phase.SETUP_SETTLEMENT)
     assert _in_second_setup_round(game)
 
-    before = sum(game.state.hands[2])
+    before = sum(game._state.hands[2])
     _place(game)  # step 5: seat 2's second placement -- gets resources
-    assert sum(game.state.hands[2]) > before
+    assert sum(game._state.hands[2]) > before
     assert (game.setup_step, game.current_player, game.phase) == (7, 0, Phase.SETUP_SETTLEMENT)
 
-    before = sum(game.state.hands[0])
+    before = sum(game._state.hands[0])
     _place(game)  # step 7: seat 0's second placement -- gets resources
-    assert sum(game.state.hands[0]) > before
+    assert sum(game._state.hands[0]) > before
     assert game.setup_step == 8
     assert game.phase is Phase.ROLL
     assert game.current_player == 0  # queue[0], the creator, never locked

@@ -36,8 +36,8 @@ def a_game(players: int = 3, seed: int = 0):
 def free_vertex(game):
     return next(
         v
-        for v in range(game.state.board.topology.num_vertices)
-        if can_place_settlement(game.state, game.current_player, v, connected=False)
+        for v in range(game._state.board.topology.num_vertices)
+        if can_place_settlement(game._state, game.current_player, v, connected=False)
     )
 
 
@@ -66,19 +66,19 @@ def test_setup_places_two_settlements_and_roads_each():
     assert game.phase is Phase.ROLL
     assert game.current_player == 0
     for player in range(3):
-        assert game.state.vertex_owner.count(player) == 2
-        assert game.state.edge_owner.count(player) == 2
+        assert game._state.vertex_owner.count(player) == 2
+        assert game._state.edge_owner.count(player) == 2
 
 
 def test_only_the_first_round_is_unpaid():
     game = a_game(players=2)
     place_initial_settlement(game, free_vertex(game))
-    assert game.state.hands[0] == [0] * 5
+    assert game._state.hands[0] == [0] * 5
 
     run_setup(game)
     # Every player is given the yield of their second settlement.
-    assert any(sum(hand) > 0 for hand in game.state.hands)
-    assert total_in_play(game.state) == expected_total()
+    assert any(sum(hand) > 0 for hand in game._state.hands)
+    assert total_in_play(game._state) == expected_total()
 
 
 def test_opening_road_must_touch_the_new_settlement():
@@ -86,7 +86,7 @@ def test_opening_road_must_touch_the_new_settlement():
     place_initial_settlement(game, free_vertex(game))
     illegal = next(
         e
-        for e in range(game.state.board.topology.num_edges)
+        for e in range(game._state.board.topology.num_edges)
         if e not in legal_initial_roads(game)
     )
     with pytest.raises(ValueError):
@@ -114,10 +114,10 @@ def test_rolling_seven_goes_to_the_robber():
 
 def test_a_big_hand_must_discard_on_seven():
     game = run_setup(a_game())
-    clear_hand(game.state, 0)
+    clear_hand(game._state, 0)
     for resource in Resource:
-        give(game.state, 0, resource, 2)
-    assert sum(game.state.hands[0]) == 10
+        give(game._state, 0, resource, 2)
+    assert sum(game._state.hands[0]) == 10
 
     game.last_roll = 7
     game.phase = Phase.ROLL
@@ -130,61 +130,61 @@ def test_a_big_hand_must_discard_on_seven():
     assert game.discard_quota[0] == 5
 
     submit_discard(game, 0, [1, 1, 1, 1, 1])
-    assert sum(game.state.hands[0]) == 5
+    assert sum(game._state.hands[0]) == 5
     assert game.discard_quota[0] == 0
 
 
 def test_robber_moves_then_play_resumes():
     game = run_setup(a_game())
     game.phase = Phase.ROBBER
-    target = (game.state.robber + 1) % game.state.board.num_hexes
+    target = (game._state.robber + 1) % game._state.board.num_hexes
 
     move_robber_to(game, target)
 
-    assert game.state.robber == target
+    assert game._state.robber == target
     assert game.phase is Phase.MAIN
 
 
 def test_building_costs_resources_and_advances_the_road():
     game = run_setup(a_game())
     game.phase = Phase.MAIN
-    clear_hand(game.state, 0)
-    fund(game.state, 0, Purchase.ROAD)
-    topology = game.state.board.topology
-    mine = game.state.edge_owner.index(0)
+    clear_hand(game._state, 0)
+    fund(game._state, 0, Purchase.ROAD)
+    topology = game._state.board.topology
+    mine = game._state.edge_owner.index(0)
     junction = topology.edges[mine][0]
     edge = next(
         e
         for e in topology.vertex_edges[junction]
-        if game.state.edge_owner[e] == NO_OWNER
+        if game._state.edge_owner[e] == NO_OWNER
     )
 
     build_road(game, edge)
 
-    assert game.state.edge_owner[edge] == 0
-    assert game.state.hands[0] == [0] * 5
-    assert total_in_play(game.state) == expected_total()
+    assert game._state.edge_owner[edge] == 0
+    assert game._state.hands[0] == [0] * 5
+    assert total_in_play(game._state) == expected_total()
 
 
 def test_only_one_development_card_per_turn():
     game = run_setup(a_game())
     game.phase = Phase.MAIN
-    game.state.dev_cards[0][DevCard.KNIGHT] = 2
+    game._state.dev_cards[0][DevCard.KNIGHT] = 2
 
-    play_knight_card(game, (game.state.robber + 1) % game.state.board.num_hexes)
+    play_knight_card(game, (game._state.robber + 1) % game._state.board.num_hexes)
     with pytest.raises(ValueError):
-        play_knight_card(game, (game.state.robber + 2) % game.state.board.num_hexes)
+        play_knight_card(game, (game._state.robber + 2) % game._state.board.num_hexes)
 
 
 def test_ending_a_turn_matures_cards_and_passes_play():
     game = run_setup(a_game(players=3))
     game.phase = Phase.MAIN
-    game.state.new_dev_cards[0][DevCard.MONOPOLY] = 1
+    game._state.new_dev_cards[0][DevCard.MONOPOLY] = 1
 
     end_turn(game)
 
-    assert game.state.dev_cards[0][DevCard.MONOPOLY] == 1
-    assert game.state.new_dev_cards[0][DevCard.MONOPOLY] == 0
+    assert game._state.dev_cards[0][DevCard.MONOPOLY] == 1
+    assert game._state.new_dev_cards[0][DevCard.MONOPOLY] == 0
     assert game.current_player == 1
     assert game.phase is Phase.ROLL
 
@@ -192,7 +192,7 @@ def test_ending_a_turn_matures_cards_and_passes_play():
 def test_the_card_allowance_resets_each_turn():
     game = run_setup(a_game(players=2))
     game.phase = Phase.MAIN
-    game.state.dev_cards[0][DevCard.MONOPOLY] = 1
+    game._state.dev_cards[0][DevCard.MONOPOLY] = 1
     play_monopoly_card(game, Resource.ORE)
     assert game.dev_card_played
 
@@ -203,12 +203,12 @@ def test_the_card_allowance_resets_each_turn():
 def test_reaching_ten_points_ends_the_game():
     game = run_setup(a_game(players=2))
     game.phase = Phase.MAIN
-    fund(game.state, 0, Purchase.CITY)
+    fund(game._state, 0, Purchase.CITY)
 
     # Two opening settlements plus seven cards stands the player at nine, so
     # upgrading one of them is the winning point.
-    game.state.dev_cards[0][DevCard.VICTORY_POINT] = 7
-    settlement = game.state.vertex_owner.index(0)
+    game._state.dev_cards[0][DevCard.VICTORY_POINT] = 7
+    settlement = game._state.vertex_owner.index(0)
 
     build_city(game, settlement)
 

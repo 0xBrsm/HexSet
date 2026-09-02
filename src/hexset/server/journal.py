@@ -106,7 +106,9 @@ def effects(
     are the three things named here, and they are the three things a reader
     would otherwise have to re-run the engine to learn.
     """
-    state = game.state
+    # true state: the journal is the record of everything that
+    # happened, including outcomes no view would expose.
+    state = game.state(0, hidden=False)
     out: dict = {}
 
     if action.type is ActionType.ROLL:
@@ -196,7 +198,9 @@ class Journal:
         game's setup snake locks out, both show up as their own event kind
         (`seated`, `locked`) rather than here.
         """
-        state = game.state
+        # true state: the journal is the record of everything that
+        # happened, including outcomes no view would expose.
+        state = game.state(0, hidden=False)
         self._emit(
             {
                 "kind": "game",
@@ -230,7 +234,9 @@ class Journal:
         before_hands: list[list[int]],
         before_held: list[list[int]],
     ) -> None:
-        state = game.state
+        # true state: the journal is the record of everything that
+        # happened, including outcomes no view would expose.
+        state = game.state(0, hidden=False)
         event = {
             "kind": "action",
             "step": step,
@@ -264,7 +270,9 @@ class Journal:
         counted. This says which: everything from `back_to` onwards did not
         happen, and the steps that follow start again from there.
         """
-        state = game.state
+        # true state: the journal is the record of everything that
+        # happened, including outcomes no view would expose.
+        state = game.state(0, hidden=False)
         self._emit(
             {
                 "kind": "undo",
@@ -315,7 +323,9 @@ class Journal:
         """The closing line. A journal without one is a game that was abandoned
         rather than played out, which is the distinction anything counting
         results has to make."""
-        state = game.state
+        # true state: the journal is the record of everything that
+        # happened, including outcomes no view would expose.
+        state = game.state(0, hidden=False)
         self._emit(
             {
                 "kind": "result",

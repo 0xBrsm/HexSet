@@ -112,12 +112,17 @@ def _outcome_key(game: Game, action: Action) -> object:
     because the same reader then serves both the enumerated copies and the real
     game -- so the observed outcome is matched to its own enumerated twin by
     construction instead of by a parallel bookkeeping that could drift.
+
+    true state throughout this module: AIVAT's counterfactual variance
+    reduction enumerates every hidden outcome exactly, which needs the true
+    hand/deck contents, not an information-set estimate of them.
     """
+    thief = _thief(game)
     if action.type is ActionType.ROLL:
         return game.last_roll
     if action.type is ActionType.BUY_DEV_CARD:
-        return tuple(game.state.new_dev_cards[_thief(game)])
-    return tuple(game.state.hands[_thief(game)])
+        return tuple(game.state(thief, hidden=False).new_dev_cards[thief])
+    return tuple(game.state(thief, hidden=False).hands[thief])
 
 
 def _term_of(action: Action) -> str:
@@ -152,7 +157,7 @@ def chance_outcomes(
         return []
 
     if action.type is ActionType.BUY_DEV_CARD:
-        deck = game.state.deck
+        deck = game.state(0, hidden=False).deck
         remaining = Counter(deck)
         if len(remaining) < 2:
             return []
@@ -162,8 +167,9 @@ def chance_outcomes(
             # `devcards.buy` pops the end of the deck, so moving the forced card
             # there and calling the real `apply` keeps the rules -- the payment
             # and the victory-point card's win check -- exactly as played.
-            child.state.deck.remove(card)
-            child.state.deck.append(card)
+            child_deck = child.state(0, hidden=False).deck
+            child_deck.remove(card)
+            child_deck.append(card)
             apply(child, action)
             out.append((_outcome_key(child, action), count / len(deck), child))
         return out
@@ -172,7 +178,7 @@ def chance_outcomes(
     # so the outcome distribution is the victim's hand normalised.
     victim = victim_of(game, action.b)
     assert victim is not None  # `draws_hidden` already ruled the no-victim case out
-    hand = game.state.hands[victim]
+    hand = game.state(victim, hidden=False).hands[victim]
     total = sum(hand)
     if total == 0 or sum(1 for n in hand if n) < 2:
         return []
@@ -184,17 +190,21 @@ def chance_outcomes(
     thief = _thief(game)
     played = imagine(game, rng, randomize_deck=False)
     apply(played, action)
-    took = _moved(game.state.hands[thief], played.state.hands[thief])
+    took = _moved(
+        game.state(thief, hidden=False).hands[thief],
+        played.state(thief, hidden=False).hands[thief],
+    )
     out = []
     for resource, count in enumerate(hand):
         if not count:
             continue
         child = imagine(played, rng, randomize_deck=False)
         if resource != took:
-            child.state.hands[thief][took] -= 1
-            child.state.hands[victim][took] += 1
-            child.state.hands[thief][resource] += 1
-            child.state.hands[victim][resource] -= 1
+            child_hands = child.state(thief, hidden=False).hands
+            child_hands[thief][took] -= 1
+            child_hands[victim][took] += 1
+            child_hands[thief][resource] += 1
+            child_hands[victim][resource] -= 1
         out.append((_outcome_key(child, action), count / total, child))
     return out
 
@@ -264,9 +274,11 @@ class StubValuer:
                 * (
                     hash(
                         (
-                            tuple(map(tuple, game.state.hands)),
+                            # true state: a deterministic stub, unrelated to
+                            # any bot's information set by design.
+                            tuple(map(tuple, game.state(0, hidden=False).hands)),
                             -1 if game.last_roll is None else game.last_roll,
-                            len(game.state.deck),
+                            len(game.state(0, hidden=False).deck),
                             int(game.phase),
                         )
                     )
@@ -366,7 +378,11 @@ def instrumented(
                     }
                 )
 
-    points = tuple(victory_points(game.state, seats_taken[e]) for e in range(seats))
+    # true state: the verdict's victory points include hidden VP dev cards.
+    points = tuple(
+        victory_points(game.state(seats_taken[e], hidden=False), seats_taken[e])
+        for e in range(seats)
+    )
     half = seats // 2
     margin = sum(points[:half]) / half - sum(points[half:]) / half
     winner = None if game.won_by is None else seats_taken.index(game.won_by)

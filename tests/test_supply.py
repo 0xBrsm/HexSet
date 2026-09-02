@@ -98,7 +98,7 @@ def test_a_sixteenth_road_is_refused_and_a_fifteenth_is_not():
 def test_legal_actions_stop_offering_a_piece_that_is_not_in_the_box():
     rng = random.Random(3)
     game = start(random_base_board(rng), 4, rng)
-    state = game.state
+    state = game._state
     # Skip setup: put the game in the main phase with a rich hand.
     game.phase = Phase.MAIN
     game.current_player = 0

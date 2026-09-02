@@ -178,7 +178,7 @@ def record_from_game(
     `options` is `legal_actions(game)` if not given -- pass it when the
     caller already computed the legal-option set (a gym step, a search leaf)
     so this does not recompute it."""
-    state = game.state
+    state = game._state
     players = state.num_players
     if perspective is None:
         perspective = to_move(game)

@@ -516,7 +516,12 @@ def _play_one(
     game = play(
         lineup, board, random.Random(f"{seed}:{board_index}:game"), action_cap=action_cap
     )
-    points = tuple(victory_points(game.state, seats_taken[e]) for e in range(seats))
+    # true state: the verdict's own victory points include hidden
+    # victory-point dev cards, so the final score is read off the truth.
+    points = tuple(
+        victory_points(game.state(seats_taken[e], hidden=False), seats_taken[e])
+        for e in range(seats)
+    )
     if game.won_by is None:
         return None, None, game.turns, points
     return seats_taken.index(game.won_by), game.won_by, game.turns, points

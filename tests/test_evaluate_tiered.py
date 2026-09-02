@@ -312,4 +312,4 @@ def test_a_shared_snapshot_scores_the_same_as_a_private_one():
 def test_for_game_reads_the_board_off_the_game():
     rng = random.Random(0)
     game = start(random_base_board(rng), 4, rng)
-    assert len(Evaluator.for_game(game).evaluate(game.state)) == 4
+    assert len(Evaluator.for_game(game).evaluate(game._state)) == 4

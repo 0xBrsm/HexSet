@@ -71,7 +71,7 @@ def test_play_seats_each_bot_at_its_own_index():
     bots = [RandomBot(random.Random(i)) for i in range(4)]
     game = play(bots, board, rng)
     assert is_over(game)
-    assert game.state.num_players == 4
+    assert game._state.num_players == 4
 
 
 def test_the_action_cap_stops_a_game_that_will_not_end():

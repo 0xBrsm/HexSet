@@ -20,9 +20,9 @@ def _rig_one_card_steal(num_players: int, thief: int, victim: int, resource: int
     board = random_base_board(random.Random(0))
     game = start(board, num_players, random.Random(1))
     game.phase = Phase.ROBBER
-    for hand in game.state.hands:
+    for hand in game._state.hands:
         hand[:] = [0] * NUM_RESOURCES
-    game.state.hands[victim][resource] = 1
+    game._state.hands[victim][resource] = 1
     return game
 
 
@@ -41,15 +41,15 @@ def test_a_steal_is_identity_independent_in_the_record():
     for game in (world_brick, world_wood):
         move_robber_to(game, target=1, victim=victim)
         assert game.phase is Phase.MAIN
-        assert sum(game.state.hands[thief]) == 1
-        assert sum(game.state.hands[victim]) == 0
+        assert sum(game._state.hands[thief]) == 1
+        assert sum(game._state.hands[victim]) == 0
 
     def record_for(game, seat):
         space = build_space(
-            game.state.board.topology.num_vertices,
-            game.state.board.topology.num_edges,
-            game.state.board.topology.num_hexes,
-            game.state.num_players,
+            game._state.board.topology.num_vertices,
+            game._state.board.topology.num_edges,
+            game._state.board.topology.num_hexes,
+            game._state.num_players,
         )
         options = tuple(within_offer_budget(game, options_for(game), None))
         return record_from_game(game, seat, space, options)
@@ -101,7 +101,7 @@ def test_the_ledger_invariant_holds_over_a_random_playout():
         if game.won_by is not None:
             break
         step_randomly(game, rng)
-        for seat, hand in enumerate(game.state.hands):
+        for seat, hand in enumerate(game._state.hands):
             seat_ledger = game.ledger.seats[seat]
             assert sum(seat_ledger.known) + seat_ledger.unknown == sum(hand)
             for resource, true_count in enumerate(hand):
@@ -111,7 +111,7 @@ def test_the_ledger_invariant_holds_over_a_random_playout():
 def test_undo_restores_the_ledger_with_the_state():
     """PR #2 defect 2, reproduced at the size the PI's review measured it.
 
-    `_UndoPoint` snapshotted `game.state` and not `game.ledger`, so after an
+    `_UndoPoint` snapshotted `game._state` and not `game.ledger`, so after an
     undone `BANK_TRADE` the ledger still certified the cards the trade had
     spent and received: a `known[r]` above the seat's true count, and
     `sum(known) + unknown` no longer the hand size. Both are *floors the
@@ -130,7 +130,7 @@ def test_undo_restores_the_ledger_with_the_state():
     game = start(board, 4, random.Random(1))
     game.phase = Phase.MAIN
     game.current_player = 0
-    game.state.hands[0] = [8, 0, 0, 0, 0]
+    game._state.hands[0] = [8, 0, 0, 0, 0]
     # Certify the hand, the way a distribution would have: the ledger has to
     # start in sync for its invariant to mean anything (see `PublicLedger`).
     game.ledger.seats[0].known = [8, 0, 0, 0, 0]
@@ -150,14 +150,14 @@ def test_undo_restores_the_ledger_with_the_state():
 
     session.undo_last_build(0)
 
-    assert game.state.hands[0] == [8, 0, 0, 0, 0]
+    assert game._state.hands[0] == [8, 0, 0, 0, 0]
     assert game.ledger.seats[0].known == before_known
     assert game.ledger.seats[0].unknown == before_unknown
     # The two invariants, restated directly rather than trusted from equality:
     # a floor that exceeds the truth is the failure mode that reaches the wire.
-    for seat in range(game.state.num_players):
+    for seat in range(game._state.num_players):
         row = game.ledger.seats[seat]
-        hand = game.state.hands[seat]
+        hand = game._state.hands[seat]
         assert sum(row.known) + row.unknown == sum(hand), seat
         assert all(row.known[r] <= hand[r] for r in range(NUM_RESOURCES)), seat
 
@@ -195,9 +195,9 @@ def test_undo_keeps_the_ledger_honest_across_a_played_game():
         if action.type in PAID and session._undo is not None:
             session.undo_last_build(seat)
             undone += 1
-            for s in range(game.state.num_players):
+            for s in range(game._state.num_players):
                 row = game.ledger.seats[s]
-                hand = game.state.hands[s]
+                hand = game._state.hands[s]
                 assert sum(row.known) + row.unknown == sum(hand), (s, undone, action)
                 assert all(
                     row.known[r] <= hand[r] for r in range(NUM_RESOURCES)

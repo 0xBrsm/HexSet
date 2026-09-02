@@ -98,6 +98,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **`Game.state` is now a method, not a field.** `game.state(seat, *,
+  hidden=True)` is the access path: `hidden=True` (the default) returns
+  `seat`'s information-set `View` (`hexset.view`, moved from
+  `hexset.bots.heximax.belief.Belief` -- `Belief` is kept as an alias);
+  `hidden=False` returns the true `GameState` (the same object every time,
+  never a copy) and is the only sanctioned way to read it from outside the
+  engine. The three sanctioned callers are `hexset.bots.search2`,
+  heximax's own `omniscient` mode, and the Catanatron adapter when it hosts
+  a Catanatron bot. `Game.set_state(state)` replaces the true state outright
+  (the one write a determinizer or an undo needs) without exposing the
+  now-private `Game._state` field.
 - **HexSet is licensed GPL-3.0-only** (was AGPL-3.0). One licence for the
   whole distribution; third-party components are listed in `NOTICE.md`.
 - **One distribution, `hexset`.** `engine/` and `src/hexset_ui/` are gone;

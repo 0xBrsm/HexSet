@@ -326,7 +326,8 @@ class _UndoPoint:
 
 
 def _snapshot(game: Game) -> _Snapshot:
-    state = game.state
+    # true state: the server's own omniscient observer snapshot.
+    state = game.state(0, hidden=False)
     return _Snapshot(
         hands=[hand[:] for hand in state.hands],
         held=[holdings(state, p)[:] for p in range(state.num_players)],
@@ -774,7 +775,8 @@ class GameSession:
         """
         if self.game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
             return 0
-        return self.game.turns // self.game.state.num_players + 1
+        # true state: `num_players` is a fixed, public board property.
+        return self.game.turns // self.game.state(0, hidden=False).num_players + 1
 
     def restore(self, steps: list[tuple[int, Action]], journal: Journal | None = None) -> None:
         """Re-apply a journalled game's actions, bringing this session up to
@@ -844,7 +846,7 @@ class GameSession:
         # between here and apply() touches state/events/_steps.
         undo_point = (
             _UndoPoint(
-                state=copy_state(self.game.state),
+                state=copy_state(self.game.state(0, hidden=False)),
                 ledger=self.game.ledger.copy(),
                 free_roads=self.game.free_roads,
                 phase=self.game.phase,
@@ -926,7 +928,7 @@ class GameSession:
         point = self._undo
         if point.ledger is None:  # pragma: no cover -- defensive, see the docstring
             raise ValueError("this action cannot be undone")
-        self.game.state = point.state
+        self.game.set_state(point.state)
         self.game.ledger = point.ledger
         self.game.free_roads = point.free_roads
         self.game.phase = point.phase
@@ -952,7 +954,8 @@ class GameSession:
         if winner is None:
             return f"{round_num}\tGame over. Nobody won."
         who = _who(winner, self.seat_labels)
-        points = victory_points(self.game.state, winner)
+        # true state: victory points include hidden VP dev cards.
+        points = victory_points(self.game.state(winner, hidden=False), winner)
         return f"{round_num}\t{who} wins with {points} points."
 
     def _public_mover(self, viewer: int | None) -> int:
@@ -993,7 +996,9 @@ class GameSession:
         """
         labels = self.seat_labels
         game = self.game
-        state = game.state
+        # true state: the server's own omniscient observer view -- the
+        # per-viewer filtering happens below, not here.
+        state = game.state(0, hidden=False)
         over = is_over(game)
         players = []
         # Both are public — a route's length and a played Knight count are
@@ -1096,7 +1101,10 @@ class GameSession:
     def log_for(self, viewer: int | None) -> list[str]:
         """The sidebar transcript as `viewer` should see it, `None` for a
         spectator, who is owed the least of anyone (see `render_log`)."""
-        lines = render_log(self.events, self.game.state.board, self.seat_labels, viewer)
+        # true state: the board is public.
+        lines = render_log(
+            self.events, self.game.state(0, hidden=False).board, self.seat_labels, viewer
+        )
         if is_over(self.game):
             # The round the final action fell in, not self.round: a game that
             # ended on an END_TURN has already ticked over to the next one.

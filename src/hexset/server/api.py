@@ -568,7 +568,8 @@ class Tables:
             seats=seats,
             config=self.config,
             session=session,
-            layout=board_layout(session.game.state.board),
+            # true state: the board is public.
+            layout=board_layout(session.game.state(0, hidden=False).board),
             seat_grace=self.config.seat_grace if seat_grace is None else float(seat_grace),
         )
 
@@ -592,7 +593,8 @@ class Tables:
         checkpoint, or a search over one — and the runner drives it through
         the same token-gated `/api/action` route an external client would
         use, never a direct write to the session."""
-        board = table.session.game.state.board
+        # true state: the board is public.
+        board = table.session.game.state(0, hidden=False).board
         transport = LocalTransport(self)
         for index, seat in enumerate(table.seats):
             if seat.kind is not SeatKind.BOT:
@@ -652,7 +654,8 @@ class Tables:
             seats=seats,
             config=self.config,
             session=session,
-            layout=board_layout(session.game.state.board),
+            # true state: the board is public.
+            layout=board_layout(session.game.state(0, hidden=False).board),
             seat_grace=self.config.seat_grace,
         )
         self._tables[code] = table
@@ -771,7 +774,8 @@ class Tables:
                 thread.join(timeout=2.0)
                 del table.runners[i]
                 break
-        board = table.session.game.state.board
+        # true state: the board is public.
+        board = table.session.game.state(0, hidden=False).board
         bot = spawn_bot(spec, board, random.Random(), self.config)
         brain = LocalSearchBrain(bot=bot, game=table.session.game)
         token = table.seats[seat].token
@@ -797,9 +801,11 @@ class Tables:
         if is_over(game) or to_move(game) != seat:
             raise ApiError("it is not your turn to act", status=409)
         options = fair_legal_actions(game)
-        topology = game.state.board.topology
+        # true state: the board and `num_players` are public.
+        state = game.state(seat, hidden=False)
+        topology = state.board.topology
         space = build_space(
-            topology.num_vertices, topology.num_edges, topology.num_hexes, game.state.num_players
+            topology.num_vertices, topology.num_edges, topology.num_hexes, state.num_players
         )
         record: dict[str, Any] = record_from_game(game, seat, space, options)
         return {
@@ -810,7 +816,7 @@ class Tables:
                 "num_vertices": topology.num_vertices,
                 "num_edges": topology.num_edges,
                 "num_hexes": topology.num_hexes,
-                "players": game.state.num_players,
+                "players": state.num_players,
             },
         }
 

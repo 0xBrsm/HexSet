@@ -203,12 +203,14 @@ def _drawn(before: Game, after: Game, action: Action) -> int:
     own slot like any other rather than being special-cased.
     """
     player = before.current_player
+    # true state: identifying which card was drawn needs the actual hand/
+    # dev-card delta, not an information-set estimate of it.
     if action.type is ActionType.BUY_DEV_CARD:
-        was = before.state.new_dev_cards[player]
-        now = after.state.new_dev_cards[player]
+        was = before.state(player, hidden=False).new_dev_cards[player]
+        now = after.state(player, hidden=False).new_dev_cards[player]
     else:
-        was = before.state.hands[player]
-        now = after.state.hands[player]
+        was = before.state(player, hidden=False).hands[player]
+        now = after.state(player, hidden=False).hands[player]
     for index, (old, new) in enumerate(zip(was, now)):
         if new > old:
             return index
@@ -275,8 +277,11 @@ STANCE_ROWS = {
 
 
 def _relative(game: Game) -> tuple[float, ...]:
-    seats = game.state.num_players
-    return relative_points(tuple(victory_points(game.state, s) for s in range(seats)))
+    # true state: the search's own terminal readout needs the true victory
+    # points (including hidden VP cards), same as the arena's verdict.
+    state = game.state(0, hidden=False)
+    seats = state.num_players
+    return relative_points(tuple(victory_points(state, seat) for seat in range(seats)))
 
 
 class Search:
@@ -338,7 +343,8 @@ class Search:
             children=[None] * len(options),
             visits=np.zeros(len(options)),
             virtual=np.zeros(len(options)),
-            totals=np.zeros((len(options), game.state.num_players)),
+            # true state: `num_players` is a fixed board property.
+            totals=np.zeros((len(options), game.state(0, hidden=False).num_players)),
             ranked=np.zeros(len(options)),
         )
         if node.terminal:

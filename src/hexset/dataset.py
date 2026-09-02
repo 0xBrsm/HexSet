@@ -61,7 +61,10 @@ def samples_from(
             for seat in range(record.num_players):
                 yield Sample(
                     features=evaluator.terms(
-                        state_game.state, seat, knower=seat
+                        # true state: replaying a finished, recorded game to
+                        # build supervised labels -- every hand is already
+                        # known.
+                        state_game.state(seat, hidden=False), seat, knower=seat
                     ),
                     won=1 if seat == record.winner else 0,
                     game=game,

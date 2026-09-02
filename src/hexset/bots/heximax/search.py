@@ -77,7 +77,7 @@ from hexset.mcts import draws_hidden
 from hexset.placement import best as best_opening
 from hexset.trading import can_accept
 
-from .belief import Belief
+from hexset.view import View
 from .evaluate import NO_TRADE_WEIGHTS, TRADING_WEIGHTS, HonestEvaluator, Weights
 from .trade import _TradeMixin
 
@@ -124,7 +124,7 @@ class Heximax(_TradeMixin):
     a ply that overruns is abandoned for the last completed one -- whatever
     the branching, no move costs more than `max_nodes` leaves. Opponents are
     expanded from `k` determinized worlds drawn from the belief at the root
-    (`Belief.sample`) and the root values averaged across them (PIMC); in
+    (`View.sample`) and the root values averaged across them (PIMC); in
     `omniscient` mode `k` is ignored and the true state is searched. Hidden
     draws are expectations, not one sample: a steal over the victim's
     expected composition, a dev-card buy over the unseen deck, each weighted
@@ -206,7 +206,9 @@ class Heximax(_TradeMixin):
 
         if game.phase is Phase.SETUP_SETTLEMENT and self.placement:
             options = options_for(game)
-            chosen = best_opening(game.state, seat, [a.a for a in options])
+            # true state: opening placement scores board layout and vertex
+            # ownership only (`placement.best`), both public.
+            chosen = best_opening(game.state(seat, hidden=False), seat, [a.a for a in options])
             return Action(ActionType.SETUP_SETTLEMENT, chosen)
         if game.phase is Phase.TRADE_RESPOND and self.max_offers == 0:
             return Action(ActionType.DECLINE_TRADE)
@@ -230,11 +232,11 @@ class Heximax(_TradeMixin):
         """
         if self.omniscient:
             return [imagine(game, self.rng)]
-        belief = Belief.from_game(game, seat)
+        belief = game.state(seat)
         out = []
         for _ in range(self.k):
             world = imagine(game, self.rng, randomize_deck=False)
-            world.state = belief.sample(self.rng)
+            world.set_state(belief.sample(self.rng))
             out.append(world)
         return out
 
@@ -330,7 +332,9 @@ class Heximax(_TradeMixin):
         share = 1.0 / len(worlds)
         totals = []
         for action in candidates:
-            total = [0.0] * worlds[0].state.num_players
+            # true state: `num_players` is a fixed board property, same in
+            # every world.
+            total = [0.0] * worlds[0].state(seat, hidden=False).num_players
             for world in worlds:
                 vector = self._after(world, action, depth, seat)
                 for p, value in enumerate(vector):
@@ -354,7 +358,8 @@ class Heximax(_TradeMixin):
         if action.type is ActionType.ROLL:
             return self._over_dice(game, depth, knower, ply)
         if draws_hidden(game, action):
-            total = [0.0] * game.state.num_players
+            # true state: `num_players` is a fixed board property.
+            total = [0.0] * game.state(knower, hidden=False).num_players
             for weight, child in self.draw_children(game, action, knower):
                 for p, value in enumerate(self._value(child, depth - 1, knower, ply + 1)):
                     total[p] += weight * value
@@ -369,7 +374,8 @@ class Heximax(_TradeMixin):
             child = imagine(game, self.rng)
             roll_dice(child)
             return self._value(child, depth - 1, knower, ply + 1)
-        total = [0.0] * game.state.num_players
+        # true state: `num_players` is a fixed board property.
+        total = [0.0] * game.state(knower, hidden=False).num_players
         for roll, weight in ROLL_ODDS:
             child = imagine(game, self.rng)
             roll_dice(child, roll)
@@ -391,7 +397,11 @@ class Heximax(_TradeMixin):
         conditioning the determinization on the outcome rather than discarding
         it. Only cards the record has not certified are ever swapped.
         """
-        belief = Belief.from_game(game, knower, omniscient=self.omniscient)
+        # `omniscient` can be True here, and `Game.state(seat, hidden=True)`
+        # is never omniscient -- so this builds the `View` directly rather
+        # than through `game.state(knower)`, same as `View.from_game` always
+        # did.
+        belief = View.from_game(game, knower, omniscient=self.omniscient)
         if action.type is ActionType.BUY_DEV_CARD:
             odds = belief.deck_odds()
             children = []
@@ -399,7 +409,9 @@ class Heximax(_TradeMixin):
                 if weight <= 0:
                     continue
                 child = imagine(game, self.rng)
-                _put_on_top(child.state.deck, card)
+                # true state: the search owns `child` outright (a fresh
+                # `imagine` copy) and mutates its deck to build this outcome.
+                _put_on_top(child.state(knower, hidden=False).deck, card)
                 apply(child, action)
                 children.append((weight, child))
             return children or [(1.0, self._plain_child(game, action))]
@@ -412,7 +424,9 @@ class Heximax(_TradeMixin):
             if weight <= 0:
                 continue
             child = imagine(game, self.rng)
-            hand = child.state.hands[victim]
+            # true state: same as the deck mutation above -- `child` is the
+            # search's own copy, mutated in place to build this outcome.
+            hand = child.state(knower, hidden=False).hands[victim]
             if hand[resource] == 0:
                 donor = _donor(hand, belief.known[victim])
                 if donor is None:
@@ -449,8 +463,12 @@ class Heximax(_TradeMixin):
         options = legal_actions(world)
         if world.phase is Phase.TRADE_RESPOND and world.offer is not None:
             responder = to_move(world)
+            # true state: `world` is a determinization already, so the hard
+            # constraint below (can `responder` cover it in THIS sampled
+            # world) is read off `world`'s own sampled truth, not the honest
+            # view -- see this method's docstring.
             if not can_accept(
-                world.state, world.offer, responder
+                world.state(responder, hidden=False), world.offer, responder
             ) or not self.accept_rule(
                 world, responder, world.offer, self.accept_margin, knower=knower
             ):

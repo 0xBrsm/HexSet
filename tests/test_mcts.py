@@ -110,14 +110,14 @@ def test_search_randomizes_the_hidden_deck_only_when_buying_a_card():
 
     game.phase = Phase.MAIN
     game.current_player = 0
-    game.state.hands[0] = [3] * len(game.state.hands[0])
+    game._state.hands[0] = [3] * len(game._state.hands[0])
     node = search._node(imagine(game, random.Random(2), randomize_deck=False))
     node.options = (Action(ActionType.BUY_DEV_CARD),)
-    before = len(node.game.state.deck)
+    before = len(node.game._state.deck)
     child = search._step(node, 0, None)
 
     assert rng.shuffles == 1
-    assert len(child.game.state.deck) == before - 1
+    assert len(child.game._state.deck) == before - 1
 
 
 def after_setup(seed: int = 0):
@@ -139,10 +139,10 @@ def a_steal(seed: int = 0):
     game = after_setup(seed)
     game.phase = Phase.ROBBER
     game.current_player = 0
-    for player in range(game.state.num_players):
-        clear_hand(game.state, player)
-    give(game.state, 1, Resource.WOOD, 6)
-    give(game.state, 1, Resource.WHEAT, 6)
+    for player in range(game._state.num_players):
+        clear_hand(game._state, player)
+    give(game._state, 1, Resource.WOOD, 6)
+    give(game._state, 1, Resource.WHEAT, 6)
     index = next(
         i
         for i, action in enumerate(legal_actions(game))
@@ -156,9 +156,9 @@ def a_purchase(seed: int = 0):
     game = after_setup(seed)
     game.phase = Phase.MAIN
     game.current_player = 0
-    clear_hand(game.state, 0)
+    clear_hand(game._state, 0)
     for resource in (Resource.SHEEP, Resource.WHEAT, Resource.ORE):
-        give(game.state, 0, resource, 3)
+        give(game._state, 0, resource, 3)
     index = next(
         i
         for i, action in enumerate(legal_actions(game))
@@ -181,7 +181,7 @@ def test_a_steal_edge_averages_over_the_cards_it_draws():
     assert sorted(slot.outcomes) == [Resource.WOOD, Resource.WHEAT]
     # Two children holding two different hands, which is what "an expectation
     # over the steal" means concretely.
-    hands = {tuple(child.game.state.hands[0]) for child in slot.outcomes.values()}
+    hands = {tuple(child.game._state.hands[0]) for child in slot.outcomes.values()}
     assert len(hands) == 2
 
 
@@ -225,14 +225,14 @@ def test_the_drawn_card_names_the_slot_it_is_cached_under():
     child = search._advance(root, index, None)
     stolen = _drawn(root.game, child, root.options[index])
     assert stolen in (Resource.WOOD, Resource.WHEAT)
-    assert child.state.hands[0][stolen] == 1
+    assert child._state.hands[0][stolen] == 1
 
     game, index = a_purchase()
     root = search._node(imagine(game, search.rng, randomize_deck=False))
     child = search._advance(root, index, None)
     bought = _drawn(root.game, child, root.options[index])
     assert bought in set(DevCard)
-    assert child.state.new_dev_cards[0][bought] == 1
+    assert child._state.new_dev_cards[0][bought] == 1
 
 
 def test_two_visits_that_steal_the_same_card_share_one_child():

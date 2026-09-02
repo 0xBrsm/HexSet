@@ -184,17 +184,17 @@ def build_space(num_vertices: int, num_edges: int, num_hexes: int, players: int)
 
 
 def space_for(game: Game) -> ActionSpace:
-    topology = game.state.board.topology
+    topology = game._state.board.topology
     return build_space(
         topology.num_vertices,
         topology.num_edges,
         topology.num_hexes,
-        game.state.num_players,
+        game._state.num_players,
     )
 
 
 def _robber_targets(game: Game, kind: ActionType) -> list[Action]:
-    state = game.state
+    state = game._state
     out = []
     for h in range(state.board.num_hexes):
         if h == state.robber:
@@ -208,7 +208,7 @@ def _robber_targets(game: Game, kind: ActionType) -> list[Action]:
 
 
 def _building_actions(game: Game) -> list[Action]:
-    state = game.state
+    state = game._state
     player = game.current_player
     topology = state.board.topology
     out: list[Action] = []
@@ -235,7 +235,7 @@ def _building_actions(game: Game) -> list[Action]:
 
 
 def _card_actions(game: Game) -> list[Action]:
-    state = game.state
+    state = game._state
     player = game.current_player
     out: list[Action] = []
     if game.dev_card_played:
@@ -258,7 +258,7 @@ def _card_actions(game: Game) -> list[Action]:
 
 
 def _trade_actions(game: Game) -> list[Action]:
-    state = game.state
+    state = game._state
     ratios = trade_ratios(state, game.current_player)
     hand = state.hands[game.current_player]
     return [
@@ -287,7 +287,7 @@ def _offer_actions(game: Game) -> list[Action]:
     can only get the same answer, and the offer budget it spends is the scarce
     thing.
     """
-    state = game.state
+    state = game._state
     player = game.current_player
     if game.offers_made >= MAX_OFFERS_PER_TURN:
         return []
@@ -323,7 +323,7 @@ def _offer_actions(game: Game) -> list[Action]:
 
 
 def legal_actions(game: Game) -> list[Action]:
-    state = game.state
+    state = game._state
     player = game.current_player
 
     if game.phase is Phase.GAME_OVER:
@@ -465,7 +465,7 @@ def victim_of(game: Game, slot: int) -> int | None:
     all, and `hexset.mcts` has to know that to tell a chance edge from an
     ordinary one. Two copies of it would drift.
     """
-    return None if slot >= game.state.num_players else slot
+    return None if slot >= game._state.num_players else slot
 
 
 # A one-for-one trade offer as a flat slot: `NUM_RESOURCES` gives, times

@@ -47,10 +47,10 @@ def _play_and_snapshot(num_ticks: int, seed: int):
         if game.winning_color() is not None:
             break
         our_game, seats = translate(game, mapping, rng)
-        played = sum(get_played_dev_cards(game.state, c) for c in game.state.colors)
+        played = sum(get_played_dev_cards(game._state, c) for c in game._state.colors)
         snapshots.append((our_game, seats, played))
 
-        action = game.state.current_player().decide(game, game.playable_actions)
+        action = game._state.current_player().decide(game, game.playable_actions)
         # RandomPlayer.decide is defined on Player already; construct like Game.play does
         game.execute(action)
     return snapshots, mapping
@@ -68,7 +68,7 @@ def test_translated_snapshots_conserve_resources_and_occupancy(seed):
     )
 
     for our_game, seats, played in snapshots:
-        state = our_game.state
+        state = our_game._state
         total_resources = sum(sum(hand) for hand in state.hands) + sum(state.bank)
         assert total_resources == NUM_RESOURCES * 19
 
@@ -99,5 +99,5 @@ def test_first_snapshot_is_setup_settlement_with_nothing_built():
     snapshots, _ = _play_and_snapshot(1, seed=11)
     our_game, seats, _ = snapshots[0]
     assert our_game.phase is Phase.SETUP_SETTLEMENT
-    assert all(b == Building.NONE for b in our_game.state.vertex_building)
-    assert all(o == NO_OWNER for o in our_game.state.edge_owner)
+    assert all(b == Building.NONE for b in our_game._state.vertex_building)
+    assert all(o == NO_OWNER for o in our_game._state.edge_owner)

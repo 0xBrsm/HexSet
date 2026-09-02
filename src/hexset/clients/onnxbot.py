@@ -59,10 +59,12 @@ from hexset.server.rules import options_for
 
 
 def _check_players(game: Game, players: int) -> None:
-    if game.state.num_players != players:
+    # true state: `num_players` is a fixed, public board property.
+    num_players = game.state(0, hidden=False).num_players
+    if num_players != players:
         raise ValueError(
             f"network was trained for {players} players, "
-            f"not {game.state.num_players}"
+            f"not {num_players}"
         )
 
 

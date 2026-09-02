@@ -53,7 +53,7 @@ def test_batched_encoding_is_byte_identical_to_the_canonical_path():
                 step_randomly(game, rng)
 
         live = [game for game in games if not is_over(game)]
-        perspectives = [rng.randrange(game.state.num_players) for game in live]
+        perspectives = [rng.randrange(game._state.num_players) for game in live]
         fast = encode_batch(live, perspectives)
         canonical = [
             encode(game, perspective)
@@ -152,13 +152,13 @@ def test_the_robber_is_marked_on_exactly_one_hex():
     obs = encode(game)
     flags = obs.hexes[:, HEX_FEATURES - 1]
     assert flags.sum() == 1.0
-    assert flags[game.state.robber] == 1.0
+    assert flags[game._state.robber] == 1.0
 
 
 def test_the_mover_is_always_seat_zero():
     game = a_game()
-    topology = game.state.board.topology
-    owned = [v for v, o in enumerate(game.state.vertex_owner) if o == game.current_player]
+    topology = game._state.board.topology
+    owned = [v for v, o in enumerate(game._state.vertex_owner) if o == game.current_player]
     assert owned, "expected the mover to hold something by now"
 
     obs = encode(game)
@@ -177,7 +177,7 @@ def test_perspective_changes_what_is_seen():
 
 def test_own_hand_is_encoded_exactly():
     game = a_game()
-    state = game.state
+    state = game._state
     before = encode(game, perspective=0).globals.copy()
 
     state.bank[Resource.ORE] -= 1
@@ -189,7 +189,7 @@ def test_own_hand_is_encoded_exactly():
 def test_opponent_hand_contents_do_not_leak():
     """Swapping cards between two opponents must be invisible to a third player."""
     game = a_game(players=3)
-    state = game.state
+    state = game._state
     for player in (1, 2):
         for resource in range(5):
             state.bank[resource] += state.hands[player][resource]
@@ -211,7 +211,7 @@ def test_opponent_hand_contents_do_not_leak():
 
 def test_opponent_hand_sizes_are_visible():
     game = a_game(players=3)
-    state = game.state
+    state = game._state
     before = encode(game, perspective=0).globals.copy()
 
     state.bank[Resource.WHEAT] -= 1
@@ -224,7 +224,7 @@ def test_opponent_development_cards_show_only_as_a_count():
     from hexset.cards import DevCard
 
     game = a_game(players=3)
-    state = game.state
+    state = game._state
     state.dev_cards[1][DevCard.KNIGHT] = 2
     before = encode(game, perspective=0)
 
@@ -239,10 +239,10 @@ def test_opponent_development_cards_show_only_as_a_count():
 def test_ports_are_marked_on_both_of_their_vertices():
     game = a_game()
     obs = encode(game)
-    players = game.state.num_players
+    players = game._state.num_players
     port_base = 3 + players + 1
 
-    for port in game.state.board.ports:
+    for port in game._state.board.ports:
         for v in port.vertices:
             flags = obs.vertices[v, port_base : port_base + 6]
             assert flags.sum() >= 1.0
@@ -259,7 +259,7 @@ def test_encoding_holds_up_across_a_whole_game():
     game = start(random_base_board(rng), 4, rng)
     while not game.won_by and game.turns < 60:
         step_randomly(game, rng)
-        for seat in range(game.state.num_players):
+        for seat in range(game._state.num_players):
             obs = encode(game, perspective=seat)
             for array in arrays(obs):
                 assert np.isfinite(array).all()
@@ -296,7 +296,7 @@ def _canonical_edges(state, perspective):
 
 
 def _check_blocks(game, players):
-    state = game.state
+    state = game._state
     for perspective in range(players):
         obs = encode(game, perspective=perspective)
         block = obs.vertices[:, : NUM_BUILDINGS + players + 1]
@@ -319,7 +319,7 @@ def test_the_table_lookups_agree_with_the_loops(players):
     # Random play this short reaches no cities, so agreeing everywhere would
     # only say the two paths agree on settlements and empty vertices. Every
     # building and owner combination is planted here instead of hoped for.
-    state = game.state
+    state = game._state
     for owner in range(players):
         state.vertex_building[owner] = Building.CITY
         state.vertex_owner[owner] = owner
@@ -337,7 +337,7 @@ def test_building_points_agree_with_the_rules(players):
 
     while not is_over(game) and game.turns < 40:
         step_randomly(game, rng)
-        state = game.state
+        state = game._state
         for perspective in range(players):
             obs = encode(game, perspective=perspective)
             points = _building_points(obs.vertices, players)
@@ -369,7 +369,7 @@ def _set_hand(game, player: int, resource, n: int) -> None:
     """Fix a hand slot for a test fixture, keeping `game.ledger` in sync so
     it reads as certain rather than as drift (`hexset.ledger.PublicLedger
     .spend`'s invariant check) the next time this game's own play spends it."""
-    game.state.hands[player][resource] = n
+    game._state.hands[player][resource] = n
     game.ledger.seats[player].known[resource] = n
 
 
@@ -542,17 +542,17 @@ def test_a_steal_shows_up_as_unknown_in_the_encoding():
     game.current_player = thief
     game.ledger.seats[thief] = SeatLedger()
     game.ledger.seats[victim] = SeatLedger(known=[1, 0, 0, 0, 0], unknown=0)
-    game.state.hands[victim] = [1, 0, 0, 0, 0]
+    game._state.hands[victim] = [1, 0, 0, 0, 0]
 
     # A target hex occupied by the victim, however this board happens to be
     # laid out -- the property under test is what the ledger does with a
     # steal, not which hex triggers one.
-    topology = game.state.board.topology
+    topology = game._state.board.topology
     target = next(
         h
-        for h in range(game.state.board.num_hexes)
-        if h != game.state.robber
-        and any(game.state.vertex_owner[v] == victim for v in topology.hex_vertices[h])
+        for h in range(game._state.board.num_hexes)
+        if h != game._state.robber
+        and any(game._state.vertex_owner[v] == victim for v in topology.hex_vertices[h])
     )
 
     move_robber_to(game, target, victim)

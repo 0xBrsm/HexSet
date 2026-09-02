@@ -55,8 +55,8 @@ def a_game(players: int = 3, seed: int = 0, *, first: int = 0):
 def free_vertex(game):
     return next(
         v
-        for v in range(game.state.board.topology.num_vertices)
-        if can_place_settlement(game.state, game.current_player, v, connected=False)
+        for v in range(game._state.board.topology.num_vertices)
+        if can_place_settlement(game._state, game.current_player, v, connected=False)
     )
 
 
@@ -76,7 +76,7 @@ def a_trade_ready_game(players: int = 3):
     game = run_setup(a_game(players=players))
     game.phase = Phase.MAIN
     for player in range(players):
-        clear_hand(game.state, player)
+        clear_hand(game._state, player)
     return game
 
 
@@ -108,10 +108,10 @@ def test_locked_seat_is_skipped_by_the_setup_snake():
     run_setup(game)
 
     assert game.phase is Phase.ROLL
-    assert game.state.vertex_owner.count(1) == 0
-    assert game.state.edge_owner.count(1) == 0
-    assert game.state.vertex_owner.count(0) == 2
-    assert game.state.vertex_owner.count(2) == 2
+    assert game._state.vertex_owner.count(1) == 0
+    assert game._state.edge_owner.count(1) == 0
+    assert game._state.vertex_owner.count(0) == 2
+    assert game._state.vertex_owner.count(2) == 2
     # Whoever placed first takes the first real turn, and seat 0 (never
     # locked) is `setup_queue[0]`.
     assert game.current_player == 0
@@ -159,7 +159,7 @@ def test_locked_seat_is_skipped_by_end_turn():
 def test_locked_seat_never_owes_a_discard():
     game = run_setup(a_game(players=3))
     lock_seat(game, 1)
-    give(game.state, 1, Resource.WOOD, 8)
+    give(game._state, 1, Resource.WOOD, 8)
 
     roll_dice(game, roll=7)
 
@@ -183,9 +183,9 @@ def test_to_move_never_returns_a_locked_seat():
 
 def test_trade_offer_skips_a_locked_responder():
     game = a_trade_ready_game()
-    give(game.state, 0, Resource.WOOD, 2)
-    give(game.state, 1, Resource.ORE, 1)
-    give(game.state, 2, Resource.ORE, 1)
+    give(game._state, 0, Resource.WOOD, 2)
+    give(game._state, 1, Resource.ORE, 1)
+    give(game._state, 2, Resource.ORE, 1)
     lock_seat(game, 1)
 
     propose_trade(game, bundle(wood=2), bundle(ore=1))
@@ -195,9 +195,9 @@ def test_trade_offer_skips_a_locked_responder():
 
 def test_locking_the_head_responder_drops_it_from_the_offer():
     game = a_trade_ready_game()
-    give(game.state, 0, Resource.WOOD, 2)
-    give(game.state, 1, Resource.ORE, 1)
-    give(game.state, 2, Resource.ORE, 1)
+    give(game._state, 0, Resource.WOOD, 2)
+    give(game._state, 1, Resource.ORE, 1)
+    give(game._state, 2, Resource.ORE, 1)
     propose_trade(game, bundle(wood=2), bundle(ore=1), ask=(1, 2))
     assert game.pending_responders == [1, 2]
 
@@ -209,8 +209,8 @@ def test_locking_the_head_responder_drops_it_from_the_offer():
 
 def test_locking_the_last_responder_ends_the_offer():
     game = a_trade_ready_game()
-    give(game.state, 0, Resource.WOOD, 2)
-    give(game.state, 1, Resource.ORE, 1)
+    give(game._state, 0, Resource.WOOD, 2)
+    give(game._state, 1, Resource.ORE, 1)
     propose_trade(game, bundle(wood=2), bundle(ore=1))
     assert game.pending_responders == [1]
 

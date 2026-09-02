@@ -37,7 +37,7 @@ def test_record_hides_an_opponents_exact_hand_and_dev_composition():
         step_randomly(game, rng)
     assert game.won_by is None
 
-    state = game.state
+    state = game._state
     seat = to_move(game)
     opponent = next(p for p in range(state.num_players) if p != seat)
     assert sum(state.hands[opponent]) > 0, "nothing to redistribute -- pick a longer playout"

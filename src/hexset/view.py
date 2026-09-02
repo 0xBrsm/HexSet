@@ -2,13 +2,24 @@
 """The information set: what is certified, what is hidden, and the residual
 pool the hidden cards are drawn from.
 
-`Belief` is heximax's model of what one seat can know about every opponent's
-hand and development cards. Every opponent quantity `HonestEvaluator`
-(`evaluate.py`) and the trade adapter (`trade.py`) read comes through a
-`Belief` -- never through `state.hands[opponent]` or `state.dev_cards[opponent]`
-directly -- except in `omniscient` mode, which keeps the old true-hand reading
-so the price of honesty can be measured rather than assumed. See `Belief`'s
-own docstring for the model (`known`/`unknown`/the shared residual `pool`).
+`View` is the engine's per-seat information set -- what one seat can know
+about every hand and development cards. It moved here from
+`hexset.bots.heximax.belief.Belief` (P0 of the trading-design registration,
+`agents/reference/trading-design.md`): a seat's view of the game is engine
+functionality, not something a bot should have to build for itself. Reached
+through `Game.state(seat, hidden=True)` (`game.py`); `hidden=False` returns
+the true `GameState` instead, and is the only sanctioned way to read it from
+outside the engine. `Belief` is kept as an alias for `View` so existing
+imports (`hexset.bots.heximax.Belief`, the deprecated `heximax` shim) keep
+working unchanged.
+
+Every opponent quantity `HonestEvaluator` (`bots/heximax/evaluate.py`) and
+the trade adapter (`bots/heximax/trade.py`) read comes through a `View` --
+never through `state.hands[opponent]` or `state.dev_cards[opponent]`
+directly -- except in `omniscient` mode, which keeps the old true-hand
+reading so the price of honesty can be measured rather than assumed. See
+`View`'s own docstring for the model (`known`/`unknown`/the shared residual
+`pool`).
 """
 
 from __future__ import annotations
@@ -17,14 +28,14 @@ import math
 import random
 from typing import Sequence
 
-from hexset.board.terrain import NUM_RESOURCES
-from hexset.cards import DECK_COMPOSITION, NUM_DEV_CARDS, DevCard
-from hexset.game import Game
-from hexset.ledger import PublicLedger
-from hexset.state import BANK_PER_RESOURCE, GameState, copy_state
+from .board.terrain import NUM_RESOURCES
+from .cards import DECK_COMPOSITION, NUM_DEV_CARDS, DevCard
+from .game import Game
+from .ledger import PublicLedger
+from .state import BANK_PER_RESOURCE, GameState, copy_state
 
 
-class Belief:
+class View:
     """What one seat can know about every hand, and how to draw from it.
 
     Per seat: `known[s]` is the certified lower bound on each resource and
@@ -89,7 +100,7 @@ class Belief:
         self._signature: tuple | None = None
 
     @classmethod
-    def from_game(cls, game: Game, perspective: int, *, omniscient: bool = False) -> Belief:
+    def from_game(cls, game: Game, perspective: int, *, omniscient: bool = False) -> View:
         # Only the proposer's side of a standing offer is certified: it is
         # announced and `can_propose` requires holding it.
         # `game.pending_responders` is the engine's true eligibility list, but
@@ -98,7 +109,7 @@ class Belief:
         # later responder a hand that cannot cover `want`; the search guards
         # `ACCEPT_TRADE` with `can_accept` there instead.
         return cls(
-            game.state,
+            game._state,
             game.ledger,
             perspective,
             omniscient=omniscient,
@@ -274,8 +285,17 @@ class Belief:
         return state
 
 
+# Deprecated alias: `Belief` was this class's name before it moved from
+# `hexset.bots.heximax.belief` into the engine (P0,
+# `agents/reference/trading-design.md`). Kept so `hexset.bots.heximax.Belief`
+# and the `heximax` compat shim keep resolving to the same class, unchanged.
+Belief = View
+
+__all__ = ["Belief", "View"]
+
+
 def _offer_certify(game: Game) -> list[tuple[int, Sequence[int]]]:
-    """`Belief.from_game`'s certify list, factored out so `HonestEvaluator`'s
+    """`View.from_game`'s certify list, factored out so `HonestEvaluator`'s
     memoized `belief_for` (below) can build the same list a cache key needs
     without duplicating the offer-reading logic."""
     if game.offer is not None:

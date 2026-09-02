@@ -103,10 +103,13 @@ class DevCatanPlayer(Player):
         if self._pending_knight is not None:
             hex_index, victim_seat = self._pending_knight
             self._pending_knight = None
+            # true state: `our_game` is rebuilt fresh from catanatron's own
+            # live state every decision (`state.py`) -- the sanctioned read
+            # for this bridge, not an information-set one.
             return move_robber(
                 hex_index,
                 victim_seat,
-                our_game.state.num_players,
+                our_game.state(0, hidden=False).num_players,
                 self._mapping,
                 seats,
                 playable_actions,

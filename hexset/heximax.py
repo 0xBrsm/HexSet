@@ -575,14 +575,12 @@ class HonestEvaluator:
             if purchase is Purchase.CITY and cities >= MAX_CITIES:
                 return 0.0
         # `_PROGRESS_COST` is `COSTS[purchase]` with the zero entries dropped
-        # and the divisor kept alongside: this runs three times per seat per
-        # leaf, which is where an `enumerate`/`sum` per call showed up.
+        # and the divisor kept alongside; this runs three times per seat per
+        # leaf. The `min`/`sum` pair stays: since 3.12 `sum` compensates its
+        # float error (Neumaier), so an accumulator loop here is a different
+        # number in the last bit -- which is enough to flip a near-tie.
         needed, total = _PROGRESS_COST[purchase]
-        held = 0.0
-        for r, n in needed:
-            have = hand[r]
-            held += have if have < n else n
-        return held / total
+        return sum(min(hand[r], n) for r, n in needed) / total
 
     def progress(
         self, state: GameState, seat: int, hand: Sequence[float],

@@ -47,6 +47,7 @@ from hexset.trading import Offer, bundle, can_propose, well_formed
 from hexset.state import (
     MAX_CITIES,
     MAX_SETTLEMENTS,
+    copy_state,
     new_game,
     place_settlement,
     upgrade_to_city,
@@ -987,6 +988,100 @@ def test_a_bundle_delta_depends_on_who_the_counterparty_is():
     feeding_the_leader = bot.bundle_delta(game, 0, give_bundle, want_bundle, 1)
     feeding_a_trailer = bot.bundle_delta(game, 0, give_bundle, want_bundle, 2)
     assert feeding_the_leader != pytest.approx(feeding_a_trailer)
+
+
+def _omniscient_truth_delta(bot, game, seat, give, want, counterparty):
+    """`bundle_delta`'s value computed the only way an omniscient seat could
+    honestly compute it: evaluate the real position, move both hands exactly,
+    evaluate again. Under omniscience every hand is read verbatim, so there is
+    no belief to approximate through and this is not an estimate."""
+    evaluator = bot.evaluator
+
+    def read(state):
+        belief = Belief(state, game.ledger, seat, omniscient=True)
+        return bot._rank(evaluator.evaluate(state, seat, belief), seat)
+
+    after = copy_state(game.state)
+    for r in range(NUM_RESOURCES):
+        after.hands[seat][r] += want[r] - give[r]
+        after.hands[counterparty][r] += give[r] - want[r]
+    return read(after) - read(game.state)
+
+
+def test_an_omniscient_trade_read_moves_the_counterpartys_real_cards():
+    """An omniscient seat reads every hand verbatim, so a trade valuation must
+    move the counterparty's cards *by resource*, not fold its hand into one
+    total the way the honest reading may (the honest evaluator never looks at
+    a non-knower's composition, so folding is invisible there -- under
+    omniscience it replaces the partner's real hand with an all-one-resource
+    fiction, which is not the position being priced)."""
+    game = after_setup(26)
+    for p in range(4):
+        set_known_hand(game, p, [0] * NUM_RESOURCES)
+    set_known_hand(game, 0, [2, 1, 0, 0, 0])
+    set_known_hand(game, 1, [0, 0, 2, 1, 1])
+    set_known_hand(game, 2, [1, 1, 1, 0, 0])
+    bot = a_bot(game, 26, mode="omniscient")
+    give, want = (1, 0, 0, 0, 0), (0, 0, 1, 0, 0)
+    for counterparty in (1, 2):
+        assert bot.bundle_delta(game, 0, give, want, counterparty) == pytest.approx(
+            _omniscient_truth_delta(bot, game, 0, give, want, counterparty)
+        )
+
+
+def test_an_omniscient_partner_read_moves_the_partners_real_cards():
+    """The same, read from a row that is not the knower's own -- what
+    `score_proposal`'s `willing` gate and `rank_partners` ask: would this trade
+    help *them*? Folding the partner's hand into one total makes every trade
+    look ruinous for the partner, so an omniscient bot's `willing` gate never
+    fires and it stops proposing."""
+    game = after_setup(26)
+    for p in range(4):
+        set_known_hand(game, p, [0] * NUM_RESOURCES)
+    set_known_hand(game, 0, [2, 1, 0, 0, 0])
+    set_known_hand(game, 1, [0, 0, 2, 1, 1])
+    bot = a_bot(game, 26, mode="omniscient")
+    give, want = (1, 0, 0, 0, 0), (0, 0, 1, 0, 0)
+    # seat 1 gives `want` and receives `give` from seat 0; read from seat 1's
+    # row, through omniscient seat 0's (perfect) information.
+    theirs = bot._partner_delta(game, 0, 1, want, give, 0, bot._rank)
+    evaluator = bot.evaluator
+
+    def read(state):
+        belief = Belief(state, game.ledger, 0, omniscient=True)
+        return bot._rank(evaluator.evaluate(state, 0, belief), 1)
+
+    after = copy_state(game.state)
+    for r in range(NUM_RESOURCES):
+        after.hands[1][r] += give[r] - want[r]
+        after.hands[0][r] += want[r] - give[r]
+    assert theirs == pytest.approx(read(after) - read(game.state))
+
+
+def test_an_honest_trade_read_is_unchanged_by_the_exact_partner_move():
+    """The counterpart guarantee: honesty is not weakened by the fix. An honest
+    seat's `bundle_delta` reads the counterparty through `expected_hand`, which
+    depends only on the ledger's `known`/`unknown` and the shared pool, so it
+    must be identical whatever the counterparty's real cards are."""
+    give, want = (1, 0, 0, 0, 0), (0, 0, 1, 0, 0)
+    # Seats 1 and 3 each hold three untyped cards; swapping their real
+    # compositions leaves the bank, both hand sizes and both ledger rows
+    # identical, so the public record cannot tell the two worlds apart.
+    values = []
+    for one, three in (([3, 0, 0, 0, 0], [0, 0, 1, 1, 1]), ([0, 0, 1, 1, 1], [3, 0, 0, 0, 0])):
+        game = after_setup(26)
+        for p in range(4):
+            set_known_hand(game, p, [0] * NUM_RESOURCES)
+        set_known_hand(game, 0, [2, 1, 0, 0, 0])
+        for seat, secret in ((1, one), (3, three)):
+            for r in range(NUM_RESOURCES):
+                game.state.bank[r] -= secret[r]
+                game.state.hands[seat][r] = secret[r]
+            game.ledger.seats[seat] = SeatLedger()
+            game.ledger.seats[seat].unknown = 3
+        bot = a_bot(game, 26)
+        values.append(bot.bundle_delta(game, 0, give, want, 1))
+    assert values[0] == pytest.approx(values[1])
 
 
 # --- presets ------------------------------------------------------------------

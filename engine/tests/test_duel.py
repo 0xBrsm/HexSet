@@ -10,6 +10,7 @@ table, so the paired split can be checked slot by slot.
 from __future__ import annotations
 
 import json
+import statistics
 from types import SimpleNamespace
 
 import pytest
@@ -24,6 +25,7 @@ from benchmarks.duel import (
     sides,
 )
 from hexset.arena import Standing, Tournament, base_name, lineup_from_names, pooled
+from hexset.game import MAX_TURNS
 
 
 def test_two_checkpoints_arrive_sharing_one_name():
@@ -206,20 +208,32 @@ def test_sides_labels_an_interleaved_lineup_by_slot_not_by_position():
     assert [g.name for g in grouped] == ["lam095-805", "ppo4-585"]
 
 
-def _fake_compete(seen: dict, points):
+def _fake_compete(seen: dict, points, turns=None, winners=None):
     """Stand in for `arena.compete`: records the lineup it was handed and
-    returns a tournament with one fixed points row per game, in entrant order."""
+    returns a tournament with one fixed points row per game, in entrant order.
+
+    `turns` and `winners` default to every game running 80 turns and being won
+    by seat 0 -- ordinary finishes, so callers that do not care about game
+    length or exhaustion see `exhausted == 0` as before this stand-in grew
+    those fields.
+    """
 
     def compete(lineup, games, *, seed, workers):
         seen["lineup"] = [entrant.weights for entrant in lineup]
         seen["names"] = [entrant.name for entrant in lineup]
+        game_turns = tuple(turns) if turns is not None else tuple(80 for _ in range(games))
+        game_winners = (
+            tuple(winners) if winners is not None else tuple(0 for _ in range(games))
+        )
         return Tournament(
             standings=tuple(Standing(e.name, 1, games) for e in lineup),
             games=games,
-            unfinished=0,
-            mean_turns=80.0,
+            unfinished=sum(1 for w in game_winners if w is None),
+            mean_turns=statistics.mean(game_turns) if game_turns else 0.0,
             seconds=0.0,
+            winners=game_winners,
             points=tuple(points for _ in range(games)),
+            turns=game_turns,
         )
 
     return compete
@@ -259,6 +273,39 @@ def test_arena_verdict_can_play_interleaved_and_says_so(monkeypatch):
     assert seen["names"] == ["a#0", "b#0", "a#1", "b#1"]
     assert verdict["geometry"] == "interleaved"
     assert verdict["paired_vp"] == pytest.approx(3.5)
+
+
+def test_arena_verdict_reports_game_length_and_exhaustion(monkeypatch):
+    """The P1half gap this closes: a verdict with nothing to read game length
+    from. Two games run out `MAX_TURNS` without a winner -- exhausted -- and
+    two finish normally, one of them short."""
+    turns = (120, 340, MAX_TURNS, MAX_TURNS)
+    winners = (0, 2, None, None)
+    monkeypatch.setattr(
+        "hexset.arena.compete",
+        _fake_compete({}, POINTS, turns=turns, winners=winners),
+    )
+
+    verdict = _via_arena(_arena_args(), "a", "b")
+
+    assert verdict["turns_mean"] == pytest.approx(sum(turns) / len(turns))
+    assert verdict["turns_median"] == pytest.approx(statistics.median(turns))
+    assert verdict["turns_max"] == max(turns)
+    assert verdict["exhausted"] == 2
+    # Existing fields keep their name and meaning: `unfinished` still counts
+    # every game with no winner, `exhausted` is the subset that ran out the
+    # turn clock rather than the action cap.
+    assert verdict["unfinished"] == 2
+
+
+def test_arena_verdict_turns_are_sane_when_nothing_is_exhausted(monkeypatch):
+    monkeypatch.setattr("hexset.arena.compete", _fake_compete({}, POINTS))
+
+    verdict = _via_arena(_arena_args(), "a", "b")
+
+    assert 1 <= verdict["turns_mean"] <= MAX_TURNS
+    assert verdict["exhausted"] == 0
+    assert verdict["exhausted"] <= verdict["games"]
 
 
 def test_main_prints_the_geometry_beside_the_worker_count(monkeypatch, capsys):
@@ -305,3 +352,30 @@ def test_the_versus_path_accepts_interleaved_by_name(capsys, monkeypatch):
     assert code == 0
     _, err = capsys.readouterr()
     assert "--geometry interleaved (the only seating `train.versus` plays)" in err
+
+
+def test_main_writes_the_new_fields_to_the_verdict_json(monkeypatch, tmp_path):
+    monkeypatch.setattr("hexset.arena.compete", _fake_compete({}, POINTS))
+
+    destination = tmp_path / "verdict.json"
+    code = duel.main(
+        [A, B, "--workers", "2", "--games", "4", "--json", str(destination)]
+    )
+    assert code == 0
+
+    written = json.loads(destination.read_text())
+    assert {"turns_mean", "turns_median", "turns_max", "exhausted"} <= written.keys()
+    assert 1 <= written["turns_mean"] <= MAX_TURNS
+    assert written["exhausted"] <= written["games"]
+
+
+def test_no_json_still_writes_nothing(monkeypatch, tmp_path):
+    monkeypatch.setattr("hexset.arena.compete", _fake_compete({}, POINTS))
+
+    verdicts = tmp_path / "verdicts"
+    verdicts.mkdir()
+    code = duel.main(
+        [A, B, "--workers", "2", "--games", "4", "--no-json", "--verdicts", str(verdicts)]
+    )
+    assert code == 0
+    assert list(verdicts.iterdir()) == []

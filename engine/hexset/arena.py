@@ -386,6 +386,11 @@ class Tournament:
     # Per game, in entrant order: who won, and every seat's terminal points.
     winners: tuple[int | None, ...] = ()
     points: tuple[tuple[int, ...], ...] = ()
+    # Per game, in the same order as `winners` and `points`: `game.turns`, the
+    # engine's own counter. `mean_turns` already folds this down to one number;
+    # this is the raw sequence a caller needs to ask a finer question of it —
+    # e.g. whether length moves with a parameter, which a mean cannot answer.
+    turns: tuple[int, ...] = ()
 
     def seat_balance(self, z: float = Z_95) -> list[tuple[int, int, tuple[float, float]]]:
         decided = sum(self.seat_wins)
@@ -527,6 +532,7 @@ def compete(
         seat_wins=tuple(seat_wins),
         winners=tuple(winner for winner, _, _, _ in outcomes),
         points=tuple(row for _, _, _, row in outcomes),
+        turns=tuple(t for _, _, t, _ in outcomes),
     )
 
 

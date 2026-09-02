@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import statistics
 import sys
 import time
 from pathlib import Path
@@ -26,6 +27,7 @@ from typing import Callable
 
 import heximax  # noqa: F401 -- registers the heximax presets with hexset.arena
 from hexset.arena import NETWORK
+from hexset.game import MAX_TURNS
 
 # The `--workers 1` path (bare checkpoints, network-vs-network) runs through
 # `hexnet.collect`/`hexnet.train`, which need torch -- so this module never
@@ -332,6 +334,14 @@ def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY)
         if len(paired) > 1
         else 0.0
     )
+    turns = tournament.turns
+    # Exhausted: reached `MAX_TURNS` without a winner. Distinct from
+    # `unfinished`, which also counts games `play`'s own action cap cut off
+    # short of that -- those have `winner is None` too but never reach
+    # `MAX_TURNS` turns.
+    exhausted = sum(
+        1 for winner, t in zip(tournament.winners, turns) if winner is None and t >= MAX_TURNS
+    )
     return {
         "a": label_a, "b": label_b, "a_path": args.a, "b_path": args.b,
         "games": tournament.games, "duel_seed": args.duel_seed,
@@ -342,6 +352,10 @@ def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY)
         "wilson_low": low, "wilson_high": high,
         "paired_vp": mean,
         "paired_vp_low": mean - spread, "paired_vp_high": mean + spread,
+        "turns_mean": statistics.mean(turns) if turns else 0.0,
+        "turns_median": statistics.median(turns) if turns else 0.0,
+        "turns_max": max(turns) if turns else 0,
+        "exhausted": exhausted,
     }
 
 

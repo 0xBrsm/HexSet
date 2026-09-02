@@ -202,6 +202,7 @@ class Belief:
             pool = _padded(pool, deficit)
         self.pool = pool
         self.pool_size = sum(pool)
+        self._signature: tuple | None = None
 
     @classmethod
     def from_game(cls, game: Game, perspective: int, *, omniscient: bool = False) -> Belief:
@@ -219,6 +220,19 @@ class Belief:
             omniscient=omniscient,
             certify=_offer_certify(game),
         )
+
+    def signature(self) -> tuple:
+        """`known`/`unknown`/`pool` as one hashable tuple: everything
+        `expected_hand` reads, so the whole of what an evaluation keyed on a
+        belief depends on. Built once -- the three are set in `__init__` and
+        never mutated -- because `evaluate`'s memo rebuilt them per call."""
+        if self._signature is None:
+            self._signature = (
+                tuple(tuple(known) for known in self.known),
+                tuple(self.unknown),
+                tuple(self.pool),
+            )
+        return self._signature
 
     def exact(self, seat: int) -> bool:
         """Whether `seat`'s hand is read verbatim rather than estimated."""
@@ -570,10 +584,14 @@ class HonestEvaluator:
             held += have if have < n else n
         return held / total
 
-    def progress(self, state: GameState, seat: int, hand: Sequence[float]) -> float:
-        # The vertex walk SETTLEMENT and CITY both need is done once here
-        # (memoized with the survey) and passed down.
-        pieces = self._walk(state, seat)[1]
+    def progress(
+        self, state: GameState, seat: int, hand: Sequence[float],
+        pieces: tuple[int, int] | None = None,
+    ) -> float:
+        # The vertex walk SETTLEMENT and CITY both need is done once -- here,
+        # or by `terms`, which has it from the same memoized `_walk`.
+        if pieces is None:
+            pieces = self._walk(state, seat)[1]
         best = 0.0
         for purchase in PROGRESS_PURCHASES:
             toward = self.progress_toward(state, seat, hand, purchase, pieces)
@@ -583,6 +601,7 @@ class HonestEvaluator:
 
     def _progress_of(
         self, state: GameState, seat: int, hand: Sequence[float], belief: Belief | None,
+        pieces: tuple[int, int] | None = None,
     ) -> float:
         if (
             belief is None
@@ -590,7 +609,7 @@ class HonestEvaluator:
             or not self.exact_progress_samples
             or not belief.unknown[seat]
         ):
-            return self.progress(state, seat, hand)
+            return self.progress(state, seat, hand, pieces)
         rng = random.Random(seat)
         cards = belief._pool_cards()
         total = 0.0
@@ -598,7 +617,7 @@ class HonestEvaluator:
             counts = belief.known[seat][:]
             for r in rng.sample(cards, belief.unknown[seat]):
                 counts[r] += 1
-            total += self.progress(state, seat, counts)
+            total += self.progress(state, seat, counts, pieces)
         return total / self.exact_progress_samples
 
     def terms(
@@ -611,7 +630,7 @@ class HonestEvaluator:
         and `Belief.expected_hand(seat)` otherwise -- `evaluate` decides
         which and passes it in, so this method itself never has to ask.
         """
-        walk = self.survey(state, seat)
+        walk, pieces = self._walk(state, seat)
         held = sum(hand)
         points = walk.buildings + award_points(state, seat)
         if seat == knower:
@@ -621,7 +640,7 @@ class HonestEvaluator:
             walk.rate,
             walk.kinds,
             walk.scarce,
-            self._progress_of(state, seat, hand, belief),
+            self._progress_of(state, seat, hand, belief, pieces),
             state.edge_owner.count(seat),  # `list.count`: the same walk, in C
             state.knights_played[seat],
             held,
@@ -679,13 +698,7 @@ class HonestEvaluator:
             tuple(state.dev_cards[knower]) if knower is not None else None,
             tuple(state.new_dev_cards[knower]) if knower is not None else None,
             tuple(tuple(hand) for hand in state.hands),
-            None
-            if belief is None
-            else (
-                tuple(tuple(k) for k in belief.known),
-                tuple(belief.unknown),
-                tuple(belief.pool),
-            ),
+            None if belief is None else belief.signature(),
         )
         cached = self._evaluate_cache.get(key)
         if cached is not None:

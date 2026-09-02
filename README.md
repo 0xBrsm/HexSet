@@ -54,6 +54,11 @@ One distribution, `hexset`, ships from `src/`:
   - **`hexset.clients`** (`src/hexset/clients`) — the gym's client half: a
     bot as a peer client of the API (embedded or external) and the ONNX
     Runtime model boundary. No PyTorch, no GPU required to play.
+  - **`hexset.gym`** (`src/hexset/gym`) — a training-loop-facing gym: a
+    PettingZoo `AECEnv` (`HexSetAEC`) and a single-agent Gymnasium `Env`
+    (`HexSetEnv`, registered as `HexSet-v0`) on top of the same engine and
+    the same honest `action_mask` sample as everything above. See
+    [Gym](#gym) below.
 
 Training — self-play, PPO, expert iteration — is not part of this repo. It
 lives in HexNet, the sibling package this gym plays exported checkpoints
@@ -76,6 +81,7 @@ Extras:
   external bot process with no server of its own).
 - `.[export]` — onnx + onnxruntime, for building `.onnx` checkpoints.
 - `.[catanatron]` — pulls in Catanatron itself, for `hexset.catanatron` duels.
+- `.[gym]` — pettingzoo + gymnasium, for `hexset.gym` (see [Gym](#gym) below).
 
 `pip install -e ".[server,catanatron,test]"` covers everything below.
 
@@ -165,6 +171,62 @@ The human seat can also be driven by a script or an LLM, over either interface, 
 
 Any number of these seats — browser, HTTP script, MCP-connected LLM, or an embedded `.onnx` bot — can sit at the same table; the server does not distinguish who or what is behind a seat beyond the interface it came in on.
 
+## Gym
+
+`pip install -e ".[gym]"` adds two training-facing entry points on top of the
+engine. This is its own extra — `import hexset` stays numpy-only; only
+`import hexset.gym` needs `pettingzoo`/`gymnasium`. Full design:
+[`docs/gym-design.md`](docs/gym-design.md).
+
+**`hexset.gym.HexSetAEC`** — a [PettingZoo](https://pettingzoo.farama.org/)
+`AECEnv`, one agent per seat (`seat_0`..`seat_{n-1}`). `observe(agent)`
+returns the encoder's four arrays plus an honest `action_mask` — built from
+`hexset.server.rules.fair_legal_actions`, never the engine's own omniscient
+`PROPOSE_TRADE` sample:
+
+```python
+from hexset.gym import HexSetAEC
+
+env = HexSetAEC(num_players=4)
+env.reset(seed=0)
+for agent in env.agent_iter():
+    observation, reward, terminated, truncated, info = env.last()
+    if terminated or truncated:
+        env.step(None)
+        continue
+    mask = observation["action_mask"]
+    action = env.action_space(agent).sample(mask)
+    env.step(action)
+env.close()
+```
+
+**`hexset.gym.HexSetEnv`** — a single-agent [Gymnasium](https://gymnasium.farama.org/)
+`Env`, registered as `HexSet-v0`: one learner seat, the rest `hexset.arena`
+opponents (default three honest `heximax`) auto-played inside `step`/`reset`
+until the learner is next to move or the episode ends:
+
+```python
+import gymnasium
+import hexset.gym  # registers "HexSet-v0"
+
+env = gymnasium.make("HexSet-v0", opponents=("heximax", "heximax", "heximax"))
+observation, info = env.reset(seed=0)
+for _ in range(1000):
+    action = env.action_space.sample(mask=info["action_mask"])
+    observation, reward, terminated, truncated, info = env.step(action)
+    if terminated or truncated:
+        break
+env.close()
+```
+
+`flatten=True` (default) returns one concatenated `Box`, matching what most
+single-agent RL code and `sb3-contrib`'s `MaskablePPO` expect (`env.action_masks()`
+is that library's hook); `flatten=False` returns the dict of arrays instead.
+`learner_seat="rotate"` (default) draws a new seat each `reset()`, since seat
+is not neutral at this table; `info["view"]` carries the seat's full
+information-set object (`hexset.view.View`) for a caller that wants more than
+the encoder's arrays.
+
 ## Layout
 
 - **The engine lives in this repo, under `src/hexset/`** (`actions`, `game`, `ledger`, `board`, `mcts`, `arena`, `tuning`, `catanatron`, `bench`, and the rest, plus `hexset.bots` — every heuristic bot: `search2` (`hexset.bots.search2`) and `heximax` (`hexset.bots.heximax`, files by concern), sharing `hexset.bots.evaluate`; `import heximax` still works, via a deprecated top-level shim — see [`docs/engine-divergence-2026-09-02.md`](docs/engine-divergence-2026-09-02.md) for how heximax was first imported, with history, from the training repo, and for what this repo used to carry as its own copy before that). `hexset`, `hexset.bench`, `hexset.server`, `hexset.clients` and `heximax` are all one distribution (`hexset`) and one `pyproject.toml` now; see the CHANGELOG's "one distribution" entry for what was renamed to get there.
@@ -179,11 +241,6 @@ Any number of these seats — browser, HTTP script, MCP-connected LLM, or an emb
   These files are also what a game is resumed from. Sessions live in memory, so a restart or a long enough silence used to lose whatever was in flight; now a browser returning to a game it never finished has it replayed from its own journal instead of being dealt a new one. Pressing New Game is what ends a game short of winning it — that writes a closing line, and a closed game is never handed back. Turning journalling off turns resuming off with it.
 - `docker/Dockerfile` — a small CPU-only image (deps only) for deploying this without a GPU.
 - `compose.example.yaml` — copy to `compose.yaml` (gitignored) and edit. Bind-mounts `src/` and `models/` into the image rather than baking them in.
-
-## Roadmap
-
-A Gymnasium-style environment wrapper (`hexset.gym`) around the engine is
-planned but does not exist yet.
 
 ## License
 

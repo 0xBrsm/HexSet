@@ -11,6 +11,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `hexset.gym` (`pip install -e ".[gym]"`): `HexSetAEC`, a PettingZoo
+  `AECEnv` with one agent per seat and an honest `action_mask`; `HexSetEnv`,
+  a single-agent Gymnasium `Env` (registered as `HexSet-v0`) with one
+  learner seat and `hexset.arena` bots auto-played at the rest; `register()`.
+  `import hexset` stays numpy-only — only `import hexset.gym` needs
+  `pettingzoo`/`gymnasium`.
+- `hexset.view.View` gained `__eq__`/`__hash__`, comparing `perspective`,
+  `omniscient`, `num_players` and `signature()` rather than object identity.
 - No lobby: `POST /api/games` deals a full game immediately and seats the
   creator at a random seat; `POST /api/join` or `GET /<id>` claims an open
   seat; an empty seat locks out after a grace window. `GET /api/table/<id>`

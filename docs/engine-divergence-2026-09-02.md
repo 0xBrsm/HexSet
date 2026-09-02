@@ -306,13 +306,53 @@ otherwise unchanged. Three responses change; all three are documented in
 
 Status as landed on this branch; the tests named are new.
 
-| # | defect | status | test |
+| # | defect | status | tests |
 |---|---|---|---|
-| 1 | contract dispatch re-stamps 29 fields as `"2"`; no real dev export loads | fixed | `tests/test_contract_dispatch.py` |
-| 2 | undo restores state but not the ledger | fixed | `tests/test_ledger.py::test_undo_restores_the_ledger_with_the_state` |
-| 3 | `to_move` during `TRADE_RESPOND` reveals who can cover | fixed | `tests/test_webplay.py::test_to_move_does_not_reveal_who_can_cover_an_offer` |
-| 4 | embedded bots get the omniscient mask, everyone else the honest one | fixed | `tests/test_api.py::test_record_matches_the_embedded_bots_options` |
-| 5 | bot polls refresh `last_seen`; tests leak runner threads | fixed | `tests/test_api.py::test_a_bot_poll_does_not_keep_a_table_alive`, `tests/conftest.py` fixture |
+| 1 | contract dispatch re-stamps 29 fields as `"2"`; no real dev export loads | fixed, except for one missing fixture (below) | `tests/test_contract_dispatch.py` (18), `tests/test_record_contract.py` (5, torch-gated) |
+| 2 | undo restores state but not the ledger | fixed | `test_ledger.py::test_undo_restores_the_ledger_with_the_state`, `::test_undo_keeps_the_ledger_honest_across_a_played_game` — both verified to fail with the one restoring line removed |
+| 3 | `to_move` during `TRADE_RESPOND` reveals who can cover | fixed | `test_webplay.py::test_to_move_does_not_reveal_who_can_cover_an_offer`, `::test_to_move_is_unfiltered_in_every_phase_but_trade_respond` — the first verified to fail with the filter removed |
+| 4 | embedded bots get the omniscient mask, everyone else the honest one | fixed for ONNX bots and for the new default bot; **not** for `search2` (below) | `test_api.py::test_the_honest_and_omniscient_trade_samples_really_do_differ_here`, `::test_an_embedded_bot_is_offered_the_same_mask_the_wire_serves`, `::test_record_matches_the_embedded_bots_options` |
+| 5 | bot polls refresh `last_seen`; tests leak runner threads | fixed | `test_api.py::test_a_bot_poll_does_not_keep_a_table_alive`, `::test_a_table_only_bots_are_watching_is_evicted`, `::test_the_code_being_looked_up_is_never_evicted_out_from_under_the_request`, `::test_closing_a_registry_stops_every_runner`, plus `conftest.stop_bot_runners` (autouse) |
+
+Test counts: **143 passed / 3 skipped** at the branch point, **177 passed /
+4 skipped** here. The extra skip is `test_record_contract.py`, which needs
+torch. Live `bot-*` threads after the suite: **67 before, 0 after**.
+
+### Defect 4, precisely — what is fixed and what is not
+
+Fixed: `onnxbot`'s `options_for` is `rules.options_for`, so an embedded
+checkpoint's `action_mask`/`pair_mask` are byte-identical to what
+`GET /api/record` serves — asserted through `Tables.record` on a position
+where the two samples provably differ. And the default embedded opponent is
+now `heximax` in its `honest` mode, which does not use the engine's sample at
+all: it reads its options off worlds determinized from the public ledger and
+replaces `PROPOSE_TRADE` wholesale with its own belief-driven candidates
+(`hexset.heximax.Heximax._root_options`). That is the "`can_propose`/
+`can_accept` gating from the ledger, as dev does" the PI's recommendation
+names.
+
+**Not fixed: `search2`.** `hexset.bots.SearchBot.choose` calls
+`hexset.bots.options_for` internally, which is the engine's omniscient
+`legal_actions`. Nothing in this repo can intercept that — the call is inside
+the bot — so a `search2` seat still searches over a trade sample filtered by
+opponents' true hands. It cannot propose an offer nobody can cover, which no
+human at the table could know to avoid. The fix is the dev-side one the PI
+already recommends (PI review §E4: drop `wanted_available` from
+`actions._offer_actions`), and it is filed here as part of B4 rather than
+worked around.
+
+### Defect 1, what could not be finished
+
+`tests/fixtures/dev-contract2.onnx` is a genuine dev export and it now loads,
+plays 300 plies, and survives a live `TRADE_RESPOND` position. It was also
+seated as an embedded bot in a real game over HTTP as a manual check.
+
+**There is still no genuine contract-3 or contract-4 export anywhere to test
+against**, and none can be produced on this box: `hexset.export_onnx` requires
+torch. The two stubs are real in shape and synthetic in weights. Producing one
+real contract-4 export and adding it as a fixture is the one piece of defect 1
+this branch could not finish, and it needs a machine with torch — i.e. it is a
+dev-hexset-side job.
 
 ### Defect 1, in detail — what "a real export" could and could not be tested
 
@@ -342,3 +382,32 @@ The fix itself does not depend on the fixtures:
   does not have fails loudly with the field named.
 * `botclient.RecordBrain.load` accepts `{"2", "3", "4"}` and its refusal
   message names the contract it actually found.
+
+
+---
+
+## The resulting `hexset_ui` module map
+
+Nothing here is the engine. `hexset` is.
+
+| module | what it is |
+|---|---|
+| `api.py` | tables, seats, join codes, seat tokens, the `/api/*` dispatch, the model picker, the embedded-bot runners and their lifecycle |
+| `web.py` | the HTTP transport over `api.py`, the CLI, the static file route |
+| `mcp.py` | a stdio MCP client of the same HTTP routes; standard library only |
+| `webplay.py` | `GameSession`: what a seat may see (`state_view`), the human-readable log, undo, the wire encoding of an `Action`, board layout maths |
+| `rules.py` | **new.** The one legality authority every seat shares: `fair_legal_actions`, `proposable_options`, `options_for`, `is_legal` |
+| `seating.py` | **new.** The setup snake starting at the creator, and retiring a seat nobody claimed |
+| `journal.py` | the full per-game JSON-lines record, and replay/resume from it |
+| `botclient.py` | a bot as a peer client: `RecordBrain` (external, off `/api/record`), `LocalSearchBrain` (embedded, privileged), `BotRunner`, `LocalTransport`, `HttpTransport` |
+| `onnxbot.py` | the model boundary: `OnnxPolicy` (contract 1), `V2Policy` (record contracts), the loader and its contract dispatch, `spawn`/`network_bot`/`searcher` |
+| `record.py` | the ONNX record. **A duplicate of `hexset.onnx_record`'s torch-free half** — change request R1 |
+| `encoding_v1.py` | the frozen contract-1 feature layout. **Not the engine's encoder** — B5 |
+| `modelmeta.py` | reading and clamping a checkpoint's `search`/`simulations`/`wave` metadata |
+| `constants.py` | the token header, and the contract-number table. Imports nothing |
+| `static/index.html` | the entire frontend |
+
+What it imports from `hexset`: `actions`, `arena`, `board.*`, `bots`, `cards`,
+`devcards`, `economy`, `game`, `ledger`, `mcts`, `roads`, `state`, `trading`,
+`victory` — and, through `arena.spawn`, `heximax`, `evaluate`, `placement`.
+All torch-free; verified by the suite running in a venv with no torch in it.

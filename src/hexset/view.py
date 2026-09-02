@@ -129,6 +129,33 @@ class View:
             )
         return self._signature
 
+    def __eq__(self, other: object) -> bool:
+        """Same information set, not the same object.
+
+        Compares `perspective`/`omniscient`/`num_players` and `signature()`
+        -- everything a caller of `expected_hand`/`table_holding`/`steal_odds`/
+        `p_holds` can see -- the same fields `HonestEvaluator.belief_for`
+        already treats as the whole of what a `View` is a pure function of.
+        Deliberately not `self.state`: two `View`s built from independently
+        replayed-but-identical games hold different `GameState` objects with
+        no `__eq__` of their own, and would otherwise never compare equal --
+        which is exactly what broke `gymnasium.utils.env_checker.check_env`'s
+        `check_step_determinism` for `hexset.gym.HexSetEnv`, whose `info`
+        carries a `View` (`docs/gym-design.md` §3).
+        """
+        if not isinstance(other, View):
+            return NotImplemented
+        return (
+            self.perspective == other.perspective
+            and self.omniscient == other.omniscient
+            and self.num_players == other.num_players
+            and self.sizes == other.sizes
+            and self.signature() == other.signature()
+        )
+
+    def __hash__(self) -> int:
+        return hash((self.perspective, self.omniscient, self.num_players, tuple(self.sizes), self.signature()))
+
     def exact(self, seat: int) -> bool:
         """Whether `seat`'s hand is read verbatim rather than estimated."""
         return self.omniscient or seat == self.perspective

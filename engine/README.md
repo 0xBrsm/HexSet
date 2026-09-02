@@ -10,7 +10,7 @@
 > add --prefix=engine` so every original commit and its authorship survive
 > under `engine/` rather than arriving as one squashed import. `heximax`
 > split out of `hexset` into its own top-level package afterwards, in this
-> repo, via `git mv` (see `CHANGELOG.md`'s "Unreleased" entry).
+> repo, via `git mv` (see [`CHANGELOG.md`](../CHANGELOG.md)'s "Unreleased" entry).
 
 A full-rules four-player engine and a self-play agent that reads the board as a
 graph, implementing the classic ruleset published as *Settlers of Catan* — see

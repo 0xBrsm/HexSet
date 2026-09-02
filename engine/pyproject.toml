@@ -1,5 +1,8 @@
 [project]
 name = "hexset"
+# Bumped together with the root `pyproject.toml`'s `version` -- HexNet
+# installs this package via `#subdirectory=engine`, so the two must agree.
+# See `engine/tests/test_versions.py`, which fails the moment they drift.
 version = "0.13.0"
 description = "Graph-native Settlers of Catan engine, bots and ledger"
 requires-python = ">=3.11"

@@ -1,6 +1,9 @@
 [project]
 name = "hexset-ui"
-version = "0.1.0"
+# Bumped together with `engine/pyproject.toml`'s `version` -- HexSet-UI has
+# adopted the engine's 0.13.x line as its single version. See
+# `engine/tests/test_versions.py`, which fails the moment the two drift.
+version = "0.13.0"
 description = "HexSet — a human-vs-bot hex-tile strategy board game in the browser, ONNX Runtime inference"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }

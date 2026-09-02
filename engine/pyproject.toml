@@ -1,0 +1,41 @@
+[project]
+name = "hexset"
+version = "0.13.0"
+description = "Graph-native Settlers of Catan engine, bots and ledger (hexset), plus PPO/training research (hexnet)"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.26"]
+
+# torch itself isn't listed here. `hexnet` needs it, but the engine, bots,
+# ledger and hexset.onnx_record's information-set record (torch-free by
+# design, see that module's docstring) do not, so it stays provisioned
+# separately (the training/GPU image) rather than a hard dependency of this
+# distribution. `export` is for hexnet.export_onnx's traced encoder and
+# .pt -> .onnx conversion, which needs torch *and* these two; nothing under
+# hexset itself needs this extra.
+[project.optional-dependencies]
+export = ["onnx>=1.16", "onnxruntime>=1.18"]
+# hexset.catanatron: the Catanatron adapter (`hexset/catanatron/`). Pinned to
+# the exact commit the R-H1c gate measured against (`agents/reference/heximax.md`,
+# "R-H1c take 2"; confirmed via the installed dist's PEP 610 `direct_url.json`
+# inside `catan-bridge:ledger`) rather than floating on catanatron's default
+# branch, since `pyproject.toml` pinning to a git URL with no revision was the
+# reproducibility gap that provenance stamping (`hexset.catanatron.duel.provenance`)
+# exists to catch.
+catanatron = ["catanatron @ git+https://github.com/bcollazo/catanatron.git@d3f4ad05bb78d8b2309631d6d3cfa8fcb6fda816"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# One distribution, two importable packages, for now: `hexset` (engine, bots,
+# ledger) and `hexnet` (PPO/training), split so the engine slice can later be
+# pulled out with `git subtree split` and imported by HexNet as a plain
+# package. hexset must never import hexnet -- see hexset.arena's registry for
+# how the one place that used to reach for a network-backed bot now does it
+# without that import.
+[tool.setuptools.packages.find]
+include = ["hexset*", "hexnet*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

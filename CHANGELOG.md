@@ -26,7 +26,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the base package (`import hexset` stays catanatron-free), and the whole
   subpackage stays under `src/hexset/catanatron/` so it travels cleanly with
   the engine's extraction into its own repo. Ported with its full test suite
-  (`tests/catanatron/`, `pytest.importorskip("catanatron")`-gated so the
+  (`tests/catanatron/`, `pytest.importorskip("catanatron.game")`-gated so the
   default suite stays torch- and catanatron-free) and its two determinism
   fixes: the honest-bot rng seeded from the game seed and seat rather than
   process state, and `main()` re-execing with `PYTHONHASHSEED=0` pinned

@@ -49,6 +49,7 @@ import torch
 from torch import Tensor, nn
 
 from .actions import ActionSpace, legal_actions
+from .actions import pair_mask as _pair_mask_of
 from .board.board import Board, pips
 from .board.terrain import NUM_RESOURCES
 from .cards import DECK_SIZE
@@ -62,7 +63,6 @@ from .encoding import (
     StaticGraph,
 )
 from .game import Game, to_move
-from .policy import pair_mask as _pair_mask_of
 from .state import NO_OWNER
 from .trading import responders as offer_responders
 from .victory import award_points

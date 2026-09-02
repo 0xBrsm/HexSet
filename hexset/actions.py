@@ -6,6 +6,8 @@ from enum import IntEnum
 from itertools import combinations_with_replacement
 from typing import NamedTuple, Sequence
 
+import numpy as np
+
 from .board.terrain import NUM_RESOURCES, Resource
 from .cards import DevCard
 from .devcards import can_buy
@@ -464,3 +466,36 @@ def victim_of(game: Game, slot: int) -> int | None:
     ordinary one. Two copies of it would drift.
     """
     return None if slot >= game.state.num_players else slot
+
+
+# A one-for-one trade offer as a flat slot: `NUM_RESOURCES` gives, times
+# `NUM_RESOURCES` wants. Lives here rather than in `hexnet.policy` (which also
+# uses it, for the network's offer head) because it is a pure property of the
+# action space -- no torch, nothing hexnet needs that hexset does not already
+# have -- and `hexset.onnx_record` needs it too. hexset must never import
+# hexnet, so the one definition lives on this side and `hexnet.policy`
+# re-exports it rather than keeping a second copy.
+NUM_PAIRS = NUM_RESOURCES * NUM_RESOURCES
+
+# Which flat slots trade a resource for itself -- never legal, since
+# `can_propose` refuses a give/want overlap, but the network's offer head
+# scores every slot and has to be told which ones are structurally void.
+_OFF_DIAGONAL = ~np.eye(NUM_RESOURCES, dtype=bool).reshape(NUM_PAIRS)
+
+
+def pair_index(give: Sequence[int], want: Sequence[int]) -> int:
+    """The flat pair slot for a one-for-one offer's two one-hot bundles."""
+    return give.index(1) * NUM_RESOURCES + want.index(1)
+
+
+def pair_mask(options: Sequence[Action]) -> np.ndarray:
+    """Which one-for-one offers were legal, as a flat `(NUM_PAIRS,)` bool.
+
+    Empty for a position where proposing is not available, which is the common
+    case and is why the caller must not assume any bit is set.
+    """
+    mask = np.zeros(NUM_PAIRS, dtype=bool)
+    for option in options:
+        if option.type is ActionType.PROPOSE_TRADE:
+            mask[pair_index(option.give, option.want)] = True
+    return mask

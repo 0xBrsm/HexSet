@@ -69,15 +69,25 @@ from torch import Tensor
 
 from .actions import Action, ActionSpace, ActionType
 from .board.terrain import NUM_RESOURCES
+
+# `NUM_PAIRS`, `_OFF_DIAGONAL`, `pair_index` and `pair_mask` are defined in
+# `hexset.actions`, not here: `hexset.onnx_record` needs them too, and hexset
+# must never import this module. Re-exported rather than redefined, so every
+# existing `from .policy import NUM_PAIRS, pair_index, pair_mask` caller sees
+# no change.
+from .actions import NUM_PAIRS, _OFF_DIAGONAL, pair_index, pair_mask
 from .model import HexNet, Packing, pack, packing, unpack
 from .selfplay import Choice, Request
 
-# The off-diagonal (give, want) pairs, flattened as `give * NUM_RESOURCES +
-# want`. The diagonal is never legal — `legal_actions` skips `wanted == given`
-# — so it is masked out once here rather than checked per offer.
-NUM_PAIRS = NUM_RESOURCES * NUM_RESOURCES
-
-_OFF_DIAGONAL = ~np.eye(NUM_RESOURCES, dtype=bool).reshape(NUM_PAIRS)
+__all__ = [
+    "NUM_PAIRS",
+    "pair_index",
+    "pair_mask",
+    "masked_log_softmax",
+    "pair_logits",
+    "Evaluation",
+    "NetworkPolicy",
+]
 
 # Large and finite rather than -inf. A row whose mask is entirely False would
 # make `log_softmax` produce NaN under -inf and merely produce a uniform
@@ -85,24 +95,6 @@ _OFF_DIAGONAL = ~np.eye(NUM_RESOURCES, dtype=bool).reshape(NUM_PAIRS)
 # `Stuck` before an empty flat mask can reach us, but the pair mask is empty on
 # every non-trading position, which is most of them.
 NEG = -1e9
-
-
-def pair_index(give: Sequence[int], want: Sequence[int]) -> int:
-    """The flat pair slot for a one-for-one offer's two one-hot bundles."""
-    return give.index(1) * NUM_RESOURCES + want.index(1)
-
-
-def pair_mask(options: Sequence[Action]) -> np.ndarray:
-    """Which one-for-one offers were legal, as a flat `(NUM_PAIRS,)` bool.
-
-    Empty for a position where proposing is not available, which is the common
-    case and is why the caller must not assume any bit is set.
-    """
-    mask = np.zeros(NUM_PAIRS, dtype=bool)
-    for option in options:
-        if option.type is ActionType.PROPOSE_TRADE:
-            mask[pair_index(option.give, option.want)] = True
-    return mask
 
 
 def masked_log_softmax(logits: Tensor, mask: Tensor) -> Tensor:

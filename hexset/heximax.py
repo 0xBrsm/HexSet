@@ -1312,14 +1312,9 @@ class Heximax:
         )
 
     def candidate_bundles(
-        self,
-        game: Game,
-        seat: int,
-        *,
-        max_side: int = 2,
-        before_vector: list[float] | None = None,
+        self, game: Game, seat: int, *, max_side: int = 2
     ) -> list[tuple[Bundle, Bundle]]:
-        """Bundles built from `deficit` x `surplus`, 1-2 cards a side.
+        """Bundles built from `deficit` x `surplus`'s resources, 1-2 cards a side.
 
         The give side is drawn from resources `seat` holds -- one resource
         at sizes 1..`max_side`, or two distinct resources one each when
@@ -1335,11 +1330,21 @@ class Heximax:
         card a side. Every returned pair is `well_formed` and `can_propose`
         against the current state -- no resource on both sides, never more
         than `seat` holds -- so every candidate is legal to emit as-is.
+
+        This sweep only needs *which* resources are in play, not their
+        marginal values -- `deficit()` has no filter (every resource is a
+        want candidate) and `surplus()`'s only filter is `hand[r] > 0` (every
+        held resource is a give candidate) -- so the two resource sets are
+        built directly rather than through `deficit`/`surplus` themselves,
+        which would spend a `marginal_gain`/`marginal_loss` evaluation (two
+        `evaluate()` calls each) computing values this method never reads.
+        `propose_actions` calls `deficit`/`surplus` itself where the values
+        are actually used (its cheap pre-filter).
         """
         state = game.state
         hand = state.hands[seat]
-        deficits = list(self.deficit(game, seat, before_vector=before_vector))
-        surpluses = list(self.surplus(game, seat, before_vector=before_vector))
+        deficits = list(range(NUM_RESOURCES))
+        surpluses = [r for r in range(NUM_RESOURCES) if hand[r] > 0]
 
         give_options: list[Bundle] = [
             _one_hot(r, n) for r in surpluses for n in range(1, min(max_side, hand[r]) + 1)
@@ -1543,14 +1548,14 @@ class Heximax:
         and `willing`'s per-opponent read) -- so scoring every candidate
         `candidate_bundles` returns is the module's single largest cost
         (measured: adapter cost dominates the leaf-budgeted search itself).
-        `deficit`/`surplus` are cheap (no opponent belief, already computed
-        for `candidate_bundles`) and rank candidates almost as well on their
-        own, so they shortlist the field to `PROPOSE_SHORTLIST` first; only
-        that shortlist pays for the partner-aware score. This is the
-        adapter's own cost-control, same standing as `propose_margin` --
-        untuned, and it can only ever drop a candidate `score_proposal`
-        would have ranked outside the shortlist anyway among ones already
-        inside it.
+        `deficit`/`surplus` are cheap (no opponent belief, one `before_vector`
+        shared with every other read this call makes -- see below) and rank
+        candidates almost as well on their own, so they shortlist the field
+        to `PROPOSE_SHORTLIST` first; only that shortlist pays for the
+        partner-aware score. This is the adapter's own cost-control, same
+        standing as `propose_margin` -- untuned, and it can only ever drop a
+        candidate `score_proposal` would have ranked outside the shortlist
+        anyway among ones already inside it.
         """
         # Every "before" read below -- deficit, surplus, and every candidate's
         # score_proposal/rank_partners -- is against this same unmutated
@@ -1558,7 +1563,7 @@ class Heximax:
         # through as before_vector rather than each rebuilding the belief and
         # re-running evaluate() for a position that never changes here.
         before_vector = self._before_vector(game, seat)
-        candidates = self.candidate_bundles(game, seat, before_vector=before_vector)
+        candidates = self.candidate_bundles(game, seat)
         if not candidates:
             return []
         deficit = self.deficit(game, seat, before_vector=before_vector)

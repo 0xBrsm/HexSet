@@ -1,4 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-only
+"""`hexset.onnx_record` is the torch-free half of the information-set record
+-- these tests pin that it stays that way (no `pytest.importorskip("torch")`
+anywhere in this file, on purpose) and check the record's own construction.
+
+The traced encoder that reads this record (`hexnet.export_onnx.RecordEncoder`)
+needs torch and lives in `tests/hexnet/test_export_onnx.py` instead.
+"""
+
 from __future__ import annotations
 
 import random
@@ -6,14 +14,11 @@ import random
 import numpy as np
 import pytest
 
-torch = pytest.importorskip("torch", reason="PyTorch runs on the training box only")
-
-from hexset.actions import space_for  # noqa: E402
-from hexset.board.board import random_base_board  # noqa: E402
-from hexset.encoding import encode, encode_batch, static_graph  # noqa: E402
-from hexset.game import is_over, start, to_move  # noqa: E402
-from hexset.onnx_record import RECORD_FIELDS, RecordEncoder, record_batch, record_from_game  # noqa: E402
-from hexset.play import step_randomly  # noqa: E402
+from hexset.actions import space_for
+from hexset.board.board import random_base_board
+from hexset.game import is_over, start, to_move
+from hexset.onnx_record import RECORD_FIELDS, record_from_game
+from hexset.play import step_randomly
 
 
 def a_game(players: int = 4, seed: int = 0, steps: int = 120):
@@ -26,74 +31,33 @@ def a_game(players: int = 4, seed: int = 0, steps: int = 120):
     return game
 
 
-def as_tensors(record: dict[str, np.ndarray]) -> dict[str, torch.Tensor]:
-    return {name: torch.from_numpy(value) for name, value in record.items()}
+def test_onnx_record_module_is_torch_free():
+    """`hexset.onnx_record` is the contract module a torch-free consumer (the
+    gym, or any other information-set-only reader) builds a request from --
+    it must import and run with torch absent, whether or not torch happens
+    to be installed on the box actually running this test."""
+    import sys
 
+    class _BlockTorch:
+        def find_spec(self, name, path=None, target=None):
+            if name == "torch" or name.startswith("torch."):
+                raise ImportError("torch blocked for this check")
+            return None
 
-def run_encoder(encoder: RecordEncoder, record: dict[str, np.ndarray]):
-    tensors = as_tensors(record)
-    args = [tensors[name] for name in RECORD_FIELDS if name not in ("action_mask", "pair_mask")]
-    with torch.no_grad():
-        return encoder(*args)
+    blocker = _BlockTorch()
+    sys.meta_path.insert(0, blocker)
+    try:
+        for name in list(sys.modules):
+            if name == "hexset.onnx_record" or name.startswith("hexset.onnx_record."):
+                del sys.modules[name]
+        import hexset.onnx_record as reloaded
 
-
-def assert_exact(got: tuple, want) -> None:
-    names = ("hexes", "vertices", "edges", "globals")
-    for name, g, w in zip(names, got, (want.hexes, want.vertices, want.edges, want.globals)):
-        g_np = g.numpy()
-        assert g_np.dtype == np.float32 == w.dtype, name
-        assert g_np.shape == w.shape, name
-        assert np.array_equal(g_np, w), f"{name} mismatch: {np.abs(g_np - w).max()}"
-
-
-def test_record_encoder_matches_encode_exactly_on_a_seeded_playout():
-    """Real positions from a random playout, not gaussians: `encode` is a
-    construction from integers, so the torch mirror must match it bit for
-    bit, with no tolerance."""
-    rng = random.Random(7)
-    games = [start(random_base_board(rng), 4, rng) for _ in range(6)]
-    space = space_for(games[0])
-    graph = static_graph(games[0].state.board.topology)
-    encoder = RecordEncoder(graph, players=4)
-    encoder.eval()
-
-    checked = 0
-    for _ in range(60):
-        for game in games:
-            if not is_over(game):
-                step_randomly(game, rng)
-        for game in games:
-            if is_over(game):
-                continue
-            seat = to_move(game)
-            record = record_from_game(game, seat, space)
-            got = run_encoder(encoder, {k: v[None] for k, v in record.items()})
-            want = encode(game, seat)
-            assert_exact(tuple(g[0] for g in got), want)
-            checked += 1
-
-    assert checked > 200
-
-
-def test_record_encoder_matches_encode_batch():
-    """The batched numpy path is the one the graph actually replaces, since a
-    search encodes a whole wave of leaves at once -- so it needs its own
-    check against the torch encoder, not just the single-position path."""
-    rng = random.Random(11)
-    games = [a_game(seed=seed, steps=40 + seed) for seed in range(10)]
-    live = [g for g in games if not is_over(g)]
-    space = space_for(live[0])
-    graph = static_graph(live[0].state.board.topology)
-    encoder = RecordEncoder(graph, players=4)
-    encoder.eval()
-
-    perspectives = [to_move(g) for g in live]
-    record = record_batch(list(zip(live, perspectives)), space)
-    got = run_encoder(encoder, record)
-
-    want = encode_batch(live, perspectives)
-    for i, obs in enumerate(want):
-        assert_exact(tuple(g[i] for g in got), obs)
+        game = a_game(seed=0, steps=20)
+        space = space_for(game)
+        row = reloaded.record_from_game(game, None, space)
+        assert set(row) == set(RECORD_FIELDS)
+    finally:
+        sys.meta_path.remove(blocker)
 
 
 def test_record_from_game_defaults_perspective_to_the_mover():
@@ -112,17 +76,28 @@ def test_record_rejects_an_out_of_range_perspective():
         record_from_game(game, 99, space)
 
 
+def test_record_from_game_accepts_precomputed_options():
+    """A caller that already enumerated its legal options (a gym step, a
+    search leaf) can pass them through instead of paying for a second
+    `legal_actions` walk -- and must get exactly the same record back."""
+    from hexset.actions import legal_actions
+
+    game = a_game(seed=5, steps=30)
+    space = space_for(game)
+    options = legal_actions(game)
+
+    recomputed = record_from_game(game, None, space)
+    passed_through = record_from_game(game, None, space, options)
+    for name in RECORD_FIELDS:
+        assert np.array_equal(recomputed[name], passed_through[name])
+
+
 def test_the_record_carries_the_offer_and_filters_answered_to_the_proposer():
     """Board-seat order in the record; the answered block is the proposer's
     information alone (`encoding._offer_parts`'s rule, applied record-side
     where every other information-set filter lives)."""
-    import random
-
-    from hexset.actions import space_for
-    from hexset.board.board import random_base_board
     from hexset.board.terrain import Resource
-    from hexset.game import Phase, decline_trade, propose_trade, start, to_move
-    from hexset.play import step_randomly
+    from hexset.game import Phase, decline_trade, propose_trade
     from hexset.state import NO_OWNER
     from hexset.trading import bundle
 

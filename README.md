@@ -6,16 +6,16 @@ HexSet is a human-vs-bot hex-tile trading and building game you play in a browse
 
 The rules implemented here are those of the classic hex-tile trading game published as *Settlers of Catan*. That name is used only to say what game this plays; see [Trademarks](#trademarks) below.
 
-This repo is the UI half. It carries a one-time copy of the torch-free engine modules it needs to run a game and serve the board, taken from the separate training repo that remains the repo of record for the engine, the training pipeline and everything else; it does not track that repo's ongoing engine changes automatically.
+This repo is the UI half, and the engine's home: `engine/hexset` and `engine/heximax` carry the rules engine and its sample bot with their own history (imported from the training repo, `dev-hexset`/HexNet, which remains the repo of record for training and everything torch-dependent). `src/hexset_ui` is the gym around them — the HTTP API, the MCP server, the browser client, the journal, and the ONNX-runtime serving layer.
 
 What it deliberately does *not* carry is the training pipeline — no self-play collector, no tournament harness, no reward shaping. The game rules live here because you cannot play without them. Everything that knows a neural network exists lives behind `src/hexset_ui/onnxbot.py`, and the rest of the package talks to a bot through one method: `choose(game) -> Action`.
 
 ## Running it
 
-Locally — the engine (`hexset`) is a separate repository and is not on an
-index yet, so install it from a checkout alongside this one:
+Locally — the engine lives in this repo now (`engine/`), so one install
+covers `hexset`, `heximax` and `hexset_ui`:
 ```
-pip install -e ../dev-hexset/src -e .
+pip install -e .
 python -m hexset_ui.web
 ```
 
@@ -24,11 +24,11 @@ Or via Docker:
 cp compose.example.yaml compose.yaml
 docker compose up -d --build
 ```
-`compose.yaml` is gitignored, so that copy is yours to edit and a `git pull` on a deployment will never collide with it. The image only carries `numpy`/`onnxruntime` — `src/`, the engine checkout and `models/` are bind-mounted read-only, so a code change is a `git pull` + `docker compose restart`, not a rebuild; only a dependency bump touches the image. It runs unprivileged on a read-only filesystem with no Linux capabilities, with a reason next to each line.
+`compose.yaml` is gitignored, so that copy is yours to edit and a `git pull` on a deployment will never collide with it. The image only carries `numpy`/`onnxruntime` — `src/`, `engine/` and `models/` are bind-mounted read-only, so a code change is a `git pull` + `docker compose restart`, not a rebuild; only a dependency bump touches the image. It runs unprivileged on a read-only filesystem with no Linux capabilities, with a reason next to each line.
 
 Then open the printed URL (or the mapped port, `8770` by default under compose). Opponents come from `model_options()` in `src/hexset_ui/api.py`: `heximax` and `search2` (handcrafted, no checkpoint needed — both are `hexset.arena` presets, so the server seats the same bot the training repo duels) plus one entry per `*.onnx` file found in the models directory.
 
-Tests are `pip install -e ../dev-hexset/src -e ".[test]" && pytest`. Most of them play the engine; `tests/test_packaging.py` is the odd one out, building a real wheel from a clean copy of the tree to check that an installed copy still has a frontend in it — every other entry point here reads `src/` directly and would not notice a wheel that did not.
+Tests are `pip install -e ".[test]" && pytest` for this package's own suite (173 passed/4 skipped), and `pytest engine/tests` for the engine's torch-free slice (609 passed/6 skipped: 534 hexset, 73 heximax, 2 for `hexset.build_info`) — see `engine/README.md`. `tests/test_packaging.py` is the odd one out in this package's own suite, building a real wheel from a clean copy of the tree to check that an installed copy still has a frontend in it — every other entry point here reads `src/` directly and would not notice a wheel that did not.
 
 ## Adding an opponent
 
@@ -69,7 +69,7 @@ The human seat can also be driven by a script or an LLM, over either interface, 
 
 ## Layout
 
-- **The engine is not in this repo.** The rules, the bots and the ONNX record contract come from the `hexset` package (`0xBrsm/dev-hexset`, `src/`), installed as a dependency: `hexset.actions`, `hexset.game`, `hexset.ledger`, `hexset.board`, `hexset.mcts`, `hexset.heximax`, `hexset.bots`, `hexset.arena`. What lives here is the gym around it. See [`docs/engine-divergence-2026-09-02.md`](docs/engine-divergence-2026-09-02.md) for what this repo used to carry its own copy of, and why one file still does.
+- **The engine lives in this repo, under `engine/`** (`engine/hexset`: `actions`, `game`, `ledger`, `board`, `mcts`, `bots`, `arena`, `tuning`, and the rest; `engine/heximax`: the honest handcrafted baseline, a sibling package rather than part of `hexset` — see `engine/README.md` for how it was imported, with history, from the training repo). What lives under `src/` is the gym around it. See [`docs/engine-divergence-2026-09-02.md`](docs/engine-divergence-2026-09-02.md) for what this repo used to carry as its own copy before the import, and why one file still does.
 - `src/hexset_ui/api.py` — tables, seats, join codes, seat tokens, the `/api/*` surface. `web.py` is the HTTP transport over it, `mcp.py` a stdio MCP client of the same routes, `webplay.py` the session: what a seat may see, the human-readable log, undo, and the wire encoding of an action.
 - `src/hexset_ui/rules.py` — the one legality authority every seat shares. `fair_legal_actions` is the honest trade sample: no seat, human or bot, is shown which specific opponents could cover an offer.
 - `src/hexset_ui/seating.py` — the setup snake starting at whoever created the game, and retiring a seat nobody claimed.

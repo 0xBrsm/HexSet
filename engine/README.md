@@ -1,5 +1,17 @@
 # hexset
 
+> **Provenance.** This directory's history was imported into the HexSet-UI
+> repo (`feat/engine-in-repo`) from `0xBrsm/dev-hexset` (becoming HexNet),
+> branch `refactor/hexnet-package-split` at commit
+> `665ecb9da0a51f6c956e90282651bd0265f0a3e6`. The import used `git
+> filter-repo` to keep only `src/hexset/`, `src/benchmarks/` and the
+> torch-free slice of `src/tests/`, stripped of the `src/` prefix (tip
+> `5210f5b862152eb5e1db41b9689c9a98531fb443`), merged in with `git subtree
+> add --prefix=engine` so every original commit and its authorship survive
+> under `engine/` rather than arriving as one squashed import. `heximax`
+> split out of `hexset` into its own top-level package afterwards, in this
+> repo, via `git mv` (see `CHANGELOG.md`'s "Unreleased" entry).
+
 A full-rules four-player engine and a self-play agent that reads the board as a
 graph, implementing the classic ruleset published as *Settlers of Catan* — see
 [Trademarks](#trademarks) below. Hexes, vertices (settlement sites) and edges (road

@@ -622,6 +622,30 @@ def test_opponent_terms_read_the_expected_hand_not_the_true_one():
     assert evaluator.evaluate_game(game, 0) == pytest.approx(honest)
 
 
+@pytest.mark.parametrize("omniscient", [False, True])
+def test_the_evaluate_memo_is_exact_against_a_fresh_computation(omniscient):
+    """The structural pass's step (b): `HonestEvaluator.evaluate` memoizes its
+    per-seat vector within one decision. One evaluator is reused across 200
+    positions so the memo sees real hits and misses, and every lookup must
+    equal what a brand-new, uncached `HonestEvaluator` computes for the same
+    `(state, knower)` -- i.e. the cache changes nothing about the answer.
+    """
+    board = random_base_board(random.Random(1))
+    evaluator = HonestEvaluator(board, omniscient=omniscient)
+    checked = 0
+    for seed in range(8):
+        for game in _positions(seed, 25):
+            for seat in range(game.state.num_players):
+                belief = evaluator.belief_from_game(game, seat)
+                memoized = evaluator.evaluate(game.state, seat, belief)
+                fresh_evaluator = HonestEvaluator(board, omniscient=omniscient)
+                fresh_belief = Belief.from_game(game, seat, omniscient=omniscient)
+                fresh = fresh_evaluator.evaluate(game.state, seat, fresh_belief)
+                assert memoized == pytest.approx(fresh)
+                checked += 1
+    assert checked >= 200
+
+
 def test_the_two_weight_profiles_differ_where_trading_changed_the_fit():
     assert TRADING_WEIGHTS == Weights()
     assert NO_TRADE_WEIGHTS.production < TRADING_WEIGHTS.production

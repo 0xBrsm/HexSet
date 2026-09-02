@@ -453,6 +453,7 @@ class HonestEvaluator:
         self.exact_progress_samples = exact_progress_samples
         self._survey_cache: dict[tuple, Survey] = {}
         self._belief_cache: dict[tuple, Belief] = {}
+        self._evaluate_cache: dict[tuple, list[float]] = {}
 
     def belief_for(
         self,
@@ -635,11 +636,46 @@ class HonestEvaluator:
         Without a `belief` there is no ledger to read, so every opponent hand
         is taken as wholly untyped: `known` empty, `unknown` the public size.
         `evaluate_game` builds the real belief from the game's ledger.
+
+        Memoized for the life of one `Heximax.choose()` -- the structural
+        pass's step (b). Exact by construction: the key names every input
+        `terms`/`score` (and what they call -- `survey`, `progress`,
+        `victory.award_points`/`card_points`) read besides `hand`/`belief`
+        themselves -- board occupancy and the robber (`survey`), road and
+        knight counts, the longest-road/largest-army holders, the knower's
+        own development cards (the only seat `card_points` scores) -- plus
+        every seat's hand and `belief`'s own `known`/`unknown`/`pool`
+        (`expected_hand`'s only inputs), so a hit is byte-identical to
+        recomputing regardless of whether `belief` came from `belief_for`,
+        a fresh `Belief.from_game`, or this method's own untyped fallback.
         """
         if belief is None and knower is not None and not self.omniscient:
             belief = Belief(
                 state, PublicLedger.new(state.num_players), knower, omniscient=False
             )
+        key = (
+            tuple(state.vertex_owner),
+            tuple(state.vertex_building),
+            state.robber,
+            tuple(state.edge_owner),
+            tuple(state.knights_played),
+            state.longest_road_holder,
+            state.largest_army_holder,
+            knower,
+            tuple(state.dev_cards[knower]) if knower is not None else None,
+            tuple(state.new_dev_cards[knower]) if knower is not None else None,
+            tuple(tuple(hand) for hand in state.hands),
+            None
+            if belief is None
+            else (
+                tuple(tuple(k) for k in belief.known),
+                tuple(belief.unknown),
+                tuple(belief.pool),
+            ),
+        )
+        cached = self._evaluate_cache.get(key)
+        if cached is not None:
+            return list(cached)
         out = []
         for seat in range(state.num_players):
             if self.omniscient or seat == knower or belief is None:
@@ -647,17 +683,17 @@ class HonestEvaluator:
             else:
                 hand = belief.expected_hand(seat)
             out.append(self.score(state, seat, hand, knower=knower, belief=belief))
-        return out
+        self._evaluate_cache[key] = out
+        return list(out)
 
     def evaluate_game(self, game: Game, seat: int) -> list[float]:
         """`evaluate`, building the belief from `game`'s own ledger. The leaf call.
 
         `belief_from_game` rather than `Belief.from_game` directly: this is
         the dominant caller of both (39.7 leaves/decision on the profile's
-        own sample), and everything downstream (`evaluate`/`terms`) only
-        ever reads the belief's `known`/`unknown`/`pool`, never `self.state`
-        -- exactly the subset `belief_from_game`'s cache is safe for (see
-        its docstring).
+        own sample), and `evaluate`'s own memo only ever reads the belief's
+        `known`/`unknown`/`pool`, never `self.state` -- exactly the subset
+        `belief_from_game`'s cache is safe for (see its docstring).
         """
         belief = self.belief_from_game(game, seat)
         return self.evaluate(game.state, seat, belief)
@@ -809,6 +845,7 @@ class Heximax:
         self.depth_reached = 0
         self.evaluator._survey_cache.clear()
         self.evaluator._belief_cache.clear()
+        self.evaluator._evaluate_cache.clear()
 
         if game.phase is Phase.SETUP_SETTLEMENT and self.placement:
             options = options_for(game)

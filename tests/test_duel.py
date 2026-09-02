@@ -10,8 +10,6 @@ table, so the paired split can be checked slot by slot.
 from __future__ import annotations
 
 import json
-import sys
-import types
 from types import SimpleNamespace
 
 import pytest
@@ -20,7 +18,6 @@ from benchmarks import duel
 from benchmarks.duel import (
     ARENA_GEOMETRY,
     GEOMETRIES,
-    VERSUS_GEOMETRY,
     _default_workers,
     _via_arena,
     arena_lineup,
@@ -291,37 +288,16 @@ def test_the_versus_path_refuses_a_blocked_geometry(capsys):
     assert "--workers 2" in err
 
 
-def test_the_versus_verdict_records_interleaved(monkeypatch):
-    """`_via_versus` through fakes for its torch-bound imports."""
-    seen: dict = {}
-
-    def versus(a, b, **kwargs):
-        seen["sides"] = (a, b)
-        return {"paired_vp": 0.0, "win_rate": 0.5, "wilson_low": 0.4, "wilson_high": 0.6}
-
-    monkeypatch.setitem(sys.modules, "hexset.train", types.SimpleNamespace(versus=versus))
-    monkeypatch.setitem(
-        sys.modules,
-        "hexset.collect",
-        types.SimpleNamespace(
-            frozen=lambda *a: "frozen", named_opponent=lambda spec, seed, lanes: spec
-        ),
-    )
-    args = SimpleNamespace(
-        a="search2", b="greedy", board_seed=0, device="cpu", players=4, lanes=8,
-        duel_seed=20_000, games=4, max_offers=3, workers=1,
-    )
-
-    verdict = duel._via_versus(args, "search2", "greedy")
-
-    assert seen["sides"] == ("search2", "greedy")
-    assert verdict["geometry"] == VERSUS_GEOMETRY == "interleaved"
-    assert verdict["via"] == "train.versus"
-
-
 def test_the_versus_path_accepts_interleaved_by_name(capsys, monkeypatch):
-    """Naming the seating it plays anyway is allowed and is printed as such."""
-    monkeypatch.setattr(duel, "_via_versus", lambda args, la, lb: {
+    """Naming the seating it plays anyway is allowed and is printed as such.
+
+    `_via_versus` itself (the network-backed --workers 1 runner) now lives in
+    `hexnet.duel` and is exercised there
+    (`tests/hexnet/test_duel_versus.py::test_the_versus_verdict_records_interleaved`);
+    this only pins that `benchmarks.duel.main` calls whatever registered
+    itself as `_VERSUS_BACKEND`.
+    """
+    monkeypatch.setattr(duel, "_VERSUS_BACKEND", lambda args, la, lb: {
         "a": la, "b": lb, "games": 0, "win_rate": 0.5, "wilson_low": 0.0,
         "wilson_high": 1.0, "paired_vp": 0.0, "geometry": "interleaved",
     })

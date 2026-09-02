@@ -9,6 +9,30 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`hexset.catanatron`, an optional adapter to Catanatron's arena**
+  (`pip install -e "src[catanatron]"`). Collapses the standalone
+  `catan-bridge` repo into this package: translates a live `catanatron.Game`
+  into a `hexset.Game`/`GameState` every decision (`state.py`), maps board
+  ids both ways (`board.py`), resolves a `hexset` `Action` back onto one of
+  catanatron's `playable_actions` (`actions.py`), and exposes a
+  `catanatron.models.player.Player` (`player.py`, registered as `DC:<entrant>`
+  via catanatron's `--code` extension point) so any `hexset` bot can be
+  seated in a Catanatron duel and any Catanatron bot can be seated against
+  ours. `python -m hexset.catanatron.duel` shards a duel across worker
+  processes and stamps catanatron's resolved commit, seed, worker count and
+  `PYTHONHASHSEED` on every report. The extra pins catanatron to the exact
+  commit the R-H1c gate measured against
+  (`d3f4ad05bb78d8b2309631d6d3cfa8fcb6fda816`); no catanatron import reaches
+  the base package (`import hexset` stays catanatron-free), and the whole
+  subpackage stays under `src/hexset/catanatron/` so it travels cleanly with
+  the engine's extraction into its own repo. Ported with its full test suite
+  (`tests/catanatron/`, `pytest.importorskip("catanatron")`-gated so the
+  default suite stays torch- and catanatron-free) and its two determinism
+  fixes: the honest-bot rng seeded from the game seed and seat rather than
+  process state, and `main()` re-execing with `PYTHONHASHSEED=0` pinned
+  before any game is played -- catanatron's own tie-breaks resolve via
+  hash-order-sensitive set iteration
+  (`agents/reference/heximax.md`, "R-H1c take 2").
 - **`hexset.tuning` can fit heximax's two weight profiles** (honest, depth 2)
   — the P3 prerequisite (`agents/reference/heximax.md` §7, "Harness gap").
   `evaluator="heximax-trading"` / `"heximax-notrade"` build `kind="heximax"`

@@ -126,7 +126,7 @@ latter. `hexset` never imports `hexnet`.
 | `hexnet/run/` | `run.init`/`run.manifest`: freezing a run's full parameter set before launch, and reading it back |
 | `benchmarks/` | hexset-side: throughput, baselines, ablations, weight fitting, encoder cost, duels, human agreement, AIVAT |
 | `hexnet/benchmarks/` | hexnet-side: forward-pass and rollout cost, value-head diagnostics, ranking probes, training-loop profiling |
-| `tests/` | see below for the current count; `tests/hexnet/` carries the `hexnet`-specific tests alongside their modules, `tests/catanatron/` is skipped unless the `catanatron` extra is installed |
+| `tests/` | 607 tests across 31 files (`hexset`, torch-free); `tests/hexnet/` carries the `hexnet`-specific tests alongside their modules, `tests/catanatron/` is skipped unless the `catanatron` extra is installed |
 | `docker/` | ROCm training image |
 
 ## Design Notes

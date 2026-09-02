@@ -110,7 +110,7 @@ from .ledger import PublicLedger
 from .mcts import draws_hidden
 from .placement import best as best_opening
 from .robber import DISCARD_THRESHOLD
-from .trading import Bundle, Offer, can_accept, can_propose, well_formed
+from .trading import Bundle, Offer, can_accept, can_propose
 from .state import (
     BANK_PER_RESOURCE,
     MAX_CITIES,
@@ -441,6 +441,17 @@ NO_TRADE_WEIGHTS = Weights(
 )
 
 
+# `COSTS[purchase]` with the zero entries dropped, and its own divisor:
+# `progress_toward`'s inner loop, run three times per seat per leaf.
+_PROGRESS_COST: dict[Purchase, tuple[tuple[tuple[int, int], ...], int]] = {
+    purchase: (
+        tuple((r, n) for r, n in enumerate(COSTS[purchase]) if n),
+        sum(COSTS[purchase]),
+    )
+    for purchase in PROGRESS_PURCHASES
+}
+
+
 class HonestEvaluator:
     """`evaluate.Evaluator`'s model, read through a `Belief`.
 
@@ -470,7 +481,7 @@ class HonestEvaluator:
         self.vector = self.inner.vector
         self.omniscient = omniscient
         self.exact_progress_samples = exact_progress_samples
-        self._survey_cache: dict[tuple, Survey] = {}
+        self._walk_cache: dict[tuple, tuple[Survey, tuple[int, int]]] = {}
         self._belief_cache: dict[tuple, Belief] = {}
         self._evaluate_cache: dict[tuple, list[float]] = {}
 
@@ -529,25 +540,32 @@ class HonestEvaluator:
             game.state, game.ledger, perspective, certify=_offer_certify(game)
         )
 
-    def survey(self, state: GameState, seat: int) -> Survey:
-        """`self.inner.survey`, memoized for the life of one `Heximax.choose()`.
+    def _walk(self, state: GameState, seat: int) -> tuple[Survey, tuple[int, int]]:
+        """`(Evaluator.survey(state, seat), _pieces(state, seat))`, memoized
+        for the life of one `Heximax.choose()`.
 
-        `Evaluator.survey` reads only `vertex_owner`, `vertex_building` and
-        `robber` (see its own docstring), so the same key always yields the
-        same value -- caching changes nothing about what `terms` reads, only
-        how often it is recomputed. Within one decision, 92.4% of `survey`
-        calls are exact repeats of an already-seen key (the k sampled worlds
-        share the root's board occupancy, and many tree nodes never move a
-        vertex or the robber), so this turns most of that into a dict lookup.
+        Both are pure functions of the board occupancy (`survey` also of the
+        robber -- see its own docstring), so the same key always yields the
+        same value: caching changes nothing about what `terms` reads, only
+        how often it is recomputed. Within one decision, 92.4% of these calls
+        are exact repeats of an already-seen key (the k sampled worlds share
+        the root's board occupancy, and many tree nodes never move a vertex
+        or the robber), so this turns most of that into a dict lookup. The
+        two are cached together under one key because `terms` needs both on
+        every call and the key is the expensive part to build.
         `Heximax.choose` clears the cache at the top of every call, so it
         never grows across decisions.
         """
         key = (tuple(state.vertex_owner), tuple(state.vertex_building), state.robber, seat)
-        cached = self._survey_cache.get(key)
+        cached = self._walk_cache.get(key)
         if cached is None:
-            cached = self.inner.survey(state, seat)
-            self._survey_cache[key] = cached
+            cached = (self.inner.survey(state, seat), _pieces(state, seat))
+            self._walk_cache[key] = cached
         return cached
+
+    def survey(self, state: GameState, seat: int) -> Survey:
+        """The board half of `_walk`."""
+        return self._walk(state, seat)[0]
 
     def progress_toward(
         self,
@@ -558,23 +576,31 @@ class HonestEvaluator:
         pieces: tuple[int, int] | None = None,
     ) -> float:
         if purchase is Purchase.SETTLEMENT or purchase is Purchase.CITY:
-            settlements, cities = pieces if pieces is not None else _pieces(state, seat)
+            settlements, cities = pieces if pieces is not None else self._walk(state, seat)[1]
             if purchase is Purchase.SETTLEMENT and settlements >= MAX_SETTLEMENTS:
                 return 0.0
             if purchase is Purchase.CITY and cities >= MAX_CITIES:
                 return 0.0
-        cost = COSTS[purchase]
-        return sum(min(hand[r], n) for r, n in enumerate(cost) if n) / sum(cost)
+        # `_PROGRESS_COST` is `COSTS[purchase]` with the zero entries dropped
+        # and the divisor kept alongside: this runs three times per seat per
+        # leaf, which is where an `enumerate`/`sum` per call showed up.
+        needed, total = _PROGRESS_COST[purchase]
+        held = 0.0
+        for r, n in needed:
+            have = hand[r]
+            held += have if have < n else n
+        return held / total
 
     def progress(self, state: GameState, seat: int, hand: Sequence[float]) -> float:
-        # `_pieces` walks every vertex; SETTLEMENT and CITY in
-        # `PROGRESS_PURCHASES` both need it, so it is walked once here and
-        # passed down rather than twice inside `progress_toward`.
-        pieces = _pieces(state, seat)
-        return max(
-            self.progress_toward(state, seat, hand, purchase, pieces)
-            for purchase in PROGRESS_PURCHASES
-        )
+        # The vertex walk SETTLEMENT and CITY both need is done once here
+        # (memoized with the survey) and passed down.
+        pieces = self._walk(state, seat)[1]
+        best = 0.0
+        for purchase in PROGRESS_PURCHASES:
+            toward = self.progress_toward(state, seat, hand, purchase, pieces)
+            if toward > best:
+                best = toward
+        return best
 
     def _progress_of(
         self, state: GameState, seat: int, hand: Sequence[float], belief: Belief | None
@@ -622,7 +648,7 @@ class HonestEvaluator:
             walk.kinds,
             walk.scarce,
             self._progress_of(state, seat, hand, belief),
-            sum(1 for owner in state.edge_owner if owner == seat),
+            state.edge_owner.count(seat),  # `list.count`: the same walk, in C
             state.knights_played[seat],
             held,
             max(0, held - DISCARD_THRESHOLD),
@@ -862,7 +888,7 @@ class Heximax:
         self._spent = 0
         self._budget = self.max_nodes
         self.depth_reached = 0
-        self.evaluator._survey_cache.clear()
+        self.evaluator._walk_cache.clear()
         self.evaluator._belief_cache.clear()
         self.evaluator._evaluate_cache.clear()
 
@@ -1410,19 +1436,15 @@ class Heximax:
 
         want_options = _bundle_options(deficits, max_side)
 
-        seen: set[tuple[Bundle, Bundle]] = set()
-        out: list[tuple[Bundle, Bundle]] = []
-        for give in give_options:
-            for want in want_options:
-                key = (give, want)
-                if key in seen:
-                    continue
-                offer = Offer(proposer=seat, give=give, want=want)
-                if not well_formed(offer) or not can_propose(state, offer):
-                    continue
-                seen.add(key)
-                out.append(key)
-        return out
+        # `_bundle_options` never repeats a bundle, so the pairs are distinct
+        # by construction and no seen-set is needed; `can_propose` is
+        # `well_formed` and `holds`, so calling it alone is the whole test.
+        return [
+            (give, want)
+            for give in give_options
+            for want in want_options
+            if can_propose(state, Offer(proposer=seat, give=give, want=want))
+        ]
 
     def score_proposal(
         self,

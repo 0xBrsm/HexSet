@@ -110,7 +110,9 @@ class SearchBot:
         self._leaf = getattr(self.evaluator, "evaluate_game", None) or self._from_state
 
     def _from_state(self, game: Game, seat: int) -> list[float]:
-        return self.evaluator.evaluate(game.state, seat)
+        # true state: search2 is a sanctioned true-state reader by design
+        # (the project's one held-out perfect-information referent).
+        return self.evaluator.evaluate(game.state(seat, hidden=False), seat)
 
     def choose(self, game: Game) -> Action:
         options = within_offer_budget(game, options_for(game), self.max_offers)
@@ -137,13 +139,14 @@ class SearchBot:
         if not self.partner_choice or action.type is not ActionType.PROPOSE_TRADE:
             return action
         offer = Offer(proposer=seat, give=action.give, want=action.want)
-        willing = responders(game.state, offer)
+        # true state: search2 is a sanctioned true-state reader.
+        willing = responders(game.state(seat, hidden=False), offer)
         if len(willing) < 2:
             return action
 
         def value(responder: int) -> float:
             child = imagine(game, self.rng)
-            execute_trade(child.state, offer, responder)
+            execute_trade(child.state(seat, hidden=False), offer, responder)
             return self._rank(self._leaf(child, seat), seat)
 
         return action._replace(ask=tuple(sorted(willing, key=value, reverse=True)))
@@ -168,7 +171,8 @@ class SearchBot:
         return self._value(child, depth - 1, knower)
 
     def _over_dice(self, game: Game, depth: int, knower: int) -> list[float]:
-        total = [0.0] * game.state.num_players
+        # true state: `num_players` is a fixed, public board property.
+        total = [0.0] * game.state(knower, hidden=False).num_players
         for roll, weight in ROLL_ODDS:
             child = imagine(game, self.rng)
             roll_dice(child, roll)

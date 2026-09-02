@@ -138,7 +138,8 @@ class Evaluator:
 
     @classmethod
     def for_game(cls, game: Game, weights: Weights | None = None) -> Evaluator:
-        return cls(game.state.board, weights)
+        # true state: board layout is public.
+        return cls(game.state(0, hidden=False).board, weights)
 
     def snapshot(self, state: GameState) -> Snapshot:
         """Everything every seat needs, in one pass over the board.

@@ -48,8 +48,10 @@ def proposable_options(game: Game) -> list[Action]:
     takers (see its own `if not willing: return`) — so this is the accurate
     rule for what a human may attempt, not a laxer one.
     """
-    state = game.state
     player = game.current_player
+    # true state: only ever reads `player`'s own hand below, which is
+    # public to `player` regardless of view.
+    state = game.state(player, hidden=False)
     # Trading is a Main-phase act, same as `propose_trade`'s own check. Left
     # off, this offered pairs before the roll, which lit the hand up as
     # clickable and opened the trade modal on a turn where the bank half of
@@ -117,5 +119,7 @@ def is_legal(game: Game, action: Action, options: Sequence[Action]) -> bool:
     """
     if action.type is ActionType.PROPOSE_TRADE:
         offer = Offer(proposer=game.current_player, give=action.give, want=action.want)
-        return can_propose(game.state, offer)
+        # true state: `can_propose` only ever checks the proposer's own
+        # hand, public to them regardless of view.
+        return can_propose(game.state(game.current_player, hidden=False), offer)
     return action in options

@@ -90,19 +90,27 @@ def _timed(fn, repeats: int) -> float:
 
 
 def run(*, positions: int, players: int, seed: int, repeats: int) -> Result:
+    # true state: timing the encoder's own internals, which read the true
+    # state by design (`hexset.encoding` -- the encoder is engine code).
     games = _positions(positions, players, seed)
-    template = _template(games[0].state.board, players)
+    template = _template(games[0].state(0, hidden=False).board, players)
 
-    block = _encode_vertices(games[0].state, 0, template)
+    block = _encode_vertices(games[0].state(0, hidden=False), 0, template)
     points = _building_points(block, players)
 
     whole = _timed(lambda take=_cycle(games): encode(take()), repeats)
-    hexes = _timed(lambda take=_cycle(games): _encode_hexes(take().state, template), repeats)
+    hexes = _timed(
+        lambda take=_cycle(games): _encode_hexes(take().state(0, hidden=False), template),
+        repeats,
+    )
     vertices = _timed(
-        lambda take=_cycle(games): _encode_vertices(take().state, 0, template), repeats
+        lambda take=_cycle(games): _encode_vertices(take().state(0, hidden=False), 0, template),
+        repeats,
     )
     points_us = _timed(lambda: _building_points(block, players), repeats)
-    edges = _timed(lambda take=_cycle(games): _encode_edges(take().state, 0), repeats)
+    edges = _timed(
+        lambda take=_cycle(games): _encode_edges(take().state(0, hidden=False), 0), repeats
+    )
     globals_ = _timed(lambda take=_cycle(games): _encode_globals(take(), 0, points), repeats)
 
     parts = hexes + vertices + points_us + edges + globals_

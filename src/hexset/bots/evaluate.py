@@ -137,7 +137,8 @@ class Evaluator:
 
     @classmethod
     def for_game(cls, game: Game, weights: Weights | None = None) -> Evaluator:
-        return cls(game.state.board, weights)
+        # true state: board layout is public.
+        return cls(game.state(0, hidden=False).board, weights)
 
     def survey(self, state: GameState, player: int) -> Survey:
         """Everything the player's own vertices are worth, in one walk.

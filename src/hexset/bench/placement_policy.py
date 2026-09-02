@@ -63,8 +63,10 @@ def walk_setup(name: str, board: Board, seed: int) -> list[dict[str, Any]]:
             for action in legal_actions(game)
             if action.type is ActionType.SETUP_SETTLEMENT
         ]
-        held = [v for v, owner in enumerate(game.state.vertex_owner) if owner == seat]
-        ordered = rank(game.state, seat, options)
+        # true state: vertex ownership and the board are both public.
+        state = game.state(seat, hidden=False)
+        held = [v for v, owner in enumerate(state.vertex_owner) if owner == seat]
+        ordered = rank(state, seat, options)
         by_vertex = {vertex: value for value, vertex in ordered}
 
         chosen = bot.choose(game)

@@ -37,9 +37,11 @@ def play_random_game(
 def summarise(game: Game) -> dict[str, object]:
     from .victory import victory_points
 
+    # true state: the summary's victory points include hidden VP dev cards.
+    state = game.state(0, hidden=False)
     return {
         "winner": game.won_by,
         "turns": game.turns,
-        "points": [victory_points(game.state, p) for p in range(game.state.num_players)],
+        "points": [victory_points(state, p) for p in range(state.num_players)],
         "exhausted": game.won_by is None and game.phase is Phase.GAME_OVER,
     }

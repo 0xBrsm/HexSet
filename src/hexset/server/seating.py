@@ -135,7 +135,8 @@ def next_unlocked(game: Game, after: int) -> int:
     """The next seat past `after`, skipping retired ones. Always terminates:
     `setup_queue[0]` — the creator's seat — is never retired, it was occupied
     the instant the game was created."""
-    n = game.state.num_players
+    # true state: `num_players` is a fixed, public board property.
+    n = game.state(after, hidden=False).num_players
     locked = locked_of(game)
     for step in range(1, n + 1):
         seat = (after + step) % n

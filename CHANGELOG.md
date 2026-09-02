@@ -11,6 +11,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- No lobby: `POST /api/games` deals a full game immediately and seats the
+  creator at a random seat; `POST /api/join` or `GET /<id>` claims an open
+  seat; an empty seat locks out after a grace window. `GET /api/table/<id>`
+  serves a token-free observer view once no seat is left to claim.
 - **The engine moved into this repo, under `engine/`.** `engine/hexset`
   (the rules engine, bots, ledger, arena and tuning) and `engine/heximax`
   (the honest handcrafted baseline, its own top-level package) were
@@ -121,6 +125,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `heximax` calls both on import to register its presets and evaluator
   names. `hexset` never imports `heximax`; consumers (`benchmarks.duel`,
   `hexset_ui`) import it explicitly.
+
+### Removed
+
+- ONNX contract 1 is no longer served. `onnxbot` refuses a contract-1 or
+  contract-unspecified checkpoint by name; the server serves contracts 2, 3
+  and 4 only. `encoding_v1.py` and `OnnxPolicy` are deleted.
 
 ## 0.13.0
 
@@ -691,25 +701,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Before 0.13 — hexset-ui 0.1.0
 
-`hexset_ui`'s own history before it started consuming the `hexset` package
-directly (it carried a private copy of the engine until then; see
-`docs/engine-divergence-2026-09-02.md`).
+`hexset_ui`'s first release, before it consumed the `hexset` package (it
+carried a private copy of the engine; see `docs/engine-divergence-2026-09-02.md`).
 
 ### Added
 
-- **No lobby.** `POST /api/games` deals a full game immediately, seating the
-  creator at a random seat; `GET /<id>` or `POST /api/join` claims any open,
-  unlocked seat. An empty seat gets a grace window before it locks out for
-  good, so a game that starts short-handed stays that size. `GET
-  /api/table/<id>` serves a token-free observer view once no seat is left to
-  claim. `mcp.py`, `web.py` and the static frontend were brought up to
-  match: `new_game`/`join`/`act` replace the old start/lobby flow, and the
-  landing page goes straight into the live game instead of a roster screen.
-
-### Removed
-
-- **ONNX contract 1** is no longer served. `onnxbot` refuses a contract-1
-  (or contract-unspecified) checkpoint the same way it already refused an
-  unknown future one, naming what it found and that the server serves 2, 3
-  and 4 only; `encoding_v1.py` and `OnnxPolicy` are deleted along with it.
-  Contracts 2, 3 and 4 are unaffected.
+- A browser game of humans against bots: HTTP API with a lobby, MCP server,
+  static web client, and ONNX Runtime inference for exported networks.

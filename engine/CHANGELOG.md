@@ -9,6 +9,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `benchmarks.duel` verdicts now carry `turns_mean`/`turns_median`/`turns_max`
+  and `exhausted` (games that ran out `MAX_TURNS` without a winner, distinct
+  from `unfinished`) on the arena path (`hexset.arena.Tournament` gained a
+  `turns` tuple alongside `winners`/`points`). Ported from dev-hexset's
+  `feat/duel-game-length` (`3d4d5d1`), whose `train.versus` half now lives in
+  the HexNet repo, which consumes these same fields.
+
 - **`Game.locked`: a per-seat setup lock / seat-retirement primitive, upstreamed
   from `hexset_ui.seating`** (engine change request R2,
   `docs/engine-divergence-2026-09-02.md` in the gym repo). A retired seat is

@@ -13,9 +13,9 @@ package re-exports `hexset.bots.heximax` the same way, for `import heximax`.
 
 This module re-exports `search2`'s public names (so `from hexset.bots import
 SearchBot` keeps working exactly as it did when `bots.py` was a single file)
-and `heximax`'s (`Heximax`, `heximax`, `Belief`, `HonestEvaluator`, `Weights`,
+and most of `heximax`'s (`Heximax`, `Belief`, `HonestEvaluator`, `Weights`,
 `TRADING_WEIGHTS`, `NO_TRADE_WEIGHTS`, `MODES`, `BY_MODE`). Importing
-`heximax` here is what makes `import hexset.bots` register the "heximax"/
+`.heximax` here is what makes `import hexset.bots` register the "heximax"/
 "heximax-omni"/"heximax-notrade" presets and the "heximax-trading"/
 "heximax-notrade" evaluator names -- previously only an explicit `import
 heximax` did that; now any consumer of this package's bots gets it too, since
@@ -23,15 +23,20 @@ the two live in the same package. See `heximax`'s own module docstring for
 the import-cycle this creates with `hexset.arena`/`hexset.mcts`, and how it
 resolves.
 
-One name collides on purpose: this file's own `from .heximax import (...,
-heximax, ...)` line rebinds the attribute `hexset.bots.heximax` from the
-submodule (the package at `hexset/bots/heximax/`, which Python bound there
-automatically while resolving that same import) to the re-exported *factory
-function* -- the explicit `from ... import heximax` runs last and wins.
-Neither `import hexset.bots.heximax as x` nor `from hexset.bots import
-heximax` reaches the submodule after that, because both resolve through
-this same (now-rebound) attribute; only `sys.modules["hexset.bots.heximax"]`
-still holds it, e.g. via `importlib.import_module("hexset.bots.heximax")`.
+**Rule for this file: no re-exported name may equal a submodule's name.**
+`hexset.bots.heximax`, imported as a side effect above, is the submodule
+(the package at `hexset/bots/heximax/`) for as long as nothing here rebinds
+that attribute. An earlier version of this file did -- re-exporting the
+`heximax(...)` factory function under its own name shadowed the submodule,
+so `hexset.bots.heximax` (and `import hexset.bots.heximax as x`) meant
+whichever one was bound *last*, depending on import order: a real
+public-API bug, not merely confusing. The factory is deliberately left
+un-re-exported here for that reason; reach it at its home,
+`from hexset.bots.heximax import heximax`, the same way `search2`'s and
+`evaluate`'s own names are reached at `hexset.bots.search2`/
+`hexset.bots.evaluate` rather than through this package (neither module
+name collides with a re-export here either, and this file should stay that
+way as it grows).
 """
 
 from __future__ import annotations
@@ -56,7 +61,6 @@ from .heximax import (
     NO_TRADE_WEIGHTS,
     TRADING_WEIGHTS,
     Weights,
-    heximax,
 )
 
 __all__ = [
@@ -73,7 +77,6 @@ __all__ = [
     "TRADING_WEIGHTS",
     "Weights",
     "greedy",
-    "heximax",
     "options_for",
     "own",
     "paranoid",

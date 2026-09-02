@@ -1435,16 +1435,13 @@ def test_heximax_source_never_calls_responders_or_reads_pending_responders():
     top-level `heximax` shim is one import line and is not itself part of
     the source this checks.
     """
-    import importlib
     import inspect
 
-    # `importlib.import_module` returns the actual `sys.modules` entry;
-    # neither `import hexset.bots.heximax as x` nor
-    # `from hexset.bots import heximax` would: both resolve through
-    # attribute access on `hexset.bots`, whose own `from .heximax import
-    # (..., heximax, ...)` rebinds the attribute named `heximax` to the
-    # *factory function*, shadowing the submodule of the same name.
-    heximax_pkg = importlib.import_module("hexset.bots.heximax")
+    # Plain, unambiguous: `hexset.bots.__init__` re-exports none of
+    # `search2`/`evaluate`/`heximax`'s own names (the package's own rule --
+    # see its module docstring), so this dotted import names the submodule
+    # and nothing else, regardless of import order.
+    import hexset.bots.heximax as heximax_pkg
     from hexset.bots.heximax import belief, evaluate, presets, search, trade
 
     source = "\n".join(

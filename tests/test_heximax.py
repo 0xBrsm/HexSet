@@ -1081,11 +1081,26 @@ def test_multi_card_and_one_for_one_proposals_both_occur_over_twenty_games():
     opponent when accepting is a genuine gain for them under `relative`,
     which a table that also improves the proposer's own position often
     fails on the same trade (see `heximax.py`'s module docstring, "Cost").
+
+    Review F: those exact counts lived only in this docstring, not in an
+    assertion, so a real regression in trade shape (say, the multi-card
+    share dropping to near zero, or every proposal turning multi-card)
+    would not have failed this test. Bounds below are deliberately wide --
+    several times the measured values in either direction -- so a future,
+    intentional tuning change (a different weight profile, a different
+    `propose_margin`) does not turn this into a brittle pin, but a real
+    collapse of one shape or a wildly skewed share does trip it.
     """
     _per_game, (total_multi, total_one_for_one, total_accepted) = _trade_census()
     assert total_multi > 0, "no multi-card proposal was ever emitted"
     assert total_one_for_one > 0, "one-for-one proposals stopped occurring"
     assert total_accepted > 0
+    share = total_multi / (total_multi + total_one_for_one)
+    assert 0.05 <= share <= 0.60, f"multi-card share {share:.3f} outside the expected band"
+    accepted_per_game = total_accepted / CENSUS_GAMES
+    assert 1.0 <= accepted_per_game <= 8.0, (
+        f"{accepted_per_game:.2f} accepted trades/game outside the expected band"
+    )
 
 
 def test_accept_rule_takes_a_clearly_positive_offer():
@@ -1217,12 +1232,28 @@ def test_counter_of_returns_a_valid_bundle_from_my_surplus_or_none():
 def test_proposals_are_among_the_root_options_at_a_main_phase_position():
     """A real four-`heximax`-seat game (seed 0, `max_nodes=64` -- the census
     configuration) reaches a MAIN-phase decision where the search itself
-    chooses `PROPOSE_TRADE`: proof the adapter's candidates are actually
-    among the root options during play, not merely present unused. `choose`
-    can only return an action `root_options` offered -- most MAIN-phase
-    positions score every candidate at or below `propose_margin` (the
-    crisp `willing` gate is strict), so this walks a real game to the first
-    one that does not, rather than asserting it of an arbitrary position.
+    chooses a MULTI-CARD `PROPOSE_TRADE`: proof the adapter's candidates are
+    actually among the root options during play, not merely present unused.
+    `choose` can only return an action `root_options` offered -- most
+    MAIN-phase positions score every candidate at or below `propose_margin`
+    (the crisp `willing` gate is strict), so this walks a real game to the
+    first one that does not, rather than asserting it of an arbitrary
+    position.
+
+    Review F: the earlier version of this test only checked for *any*
+    `PROPOSE_TRADE`, which P1's engine-sample one-for-one offer (already
+    present in `legal_actions`, `_root_options`'s "seen" union before P2's
+    filter/replace) would also satisfy -- so it passed unchanged with the P2
+    adapter reverted to P1's shape, proving nothing about the adapter
+    specifically. A one-for-one offer is not proof of anything P2-specific;
+    a *multi-card* one is, since P1's engine sample -- and the P1-shaped
+    `_root_options` this test would see with the adapter disabled -- can
+    never produce one (`trading-design.md` §1, "one-for-one offers only").
+    Verified by temporarily reverting `_root_options` to the P1 shape
+    (dropping the `propose_actions` extension) and re-running this test: it
+    fails with "heximax never chose a multi-card trade in this game", exactly
+    because no multi-card candidate ever reaches `root_options` without the
+    adapter. Re-enabled before this commit.
     """
     game = a_game(0)
     bots = [heximax(game.state.board, random.Random(97 * s), max_nodes=64) for s in range(4)]
@@ -1231,12 +1262,14 @@ def test_proposals_are_among_the_root_options_at_a_main_phase_position():
     while not is_over(game) and moves < 2000:
         seat = to_move(game)
         action = bots[seat].choose(game)
-        if action.type is ActionType.PROPOSE_TRADE:
+        if action.type is ActionType.PROPOSE_TRADE and (
+            sum(action.give) > 1 or sum(action.want) > 1
+        ):
             found = True
             break
         apply(game, action)
         moves += 1
-    assert found, "heximax never chose to propose a trade in this game"
+    assert found, "heximax never chose a multi-card trade in this game"
 
 
 def test_heximax_source_never_calls_responders_or_reads_pending_responders():

@@ -1,4 +1,4 @@
-"""HTTP-layer tests for `hexset_ui.web`.
+"""HTTP-layer tests for `hexset.server.web`.
 
 Only what the transport itself adds: status codes, the static file, the token
 header, and that a refusal `api.py` raises arrives as the status it carries
@@ -20,8 +20,8 @@ import pytest
 
 from hexset.actions import ActionType, legal_actions
 from conftest import new_tables
-from hexset_ui.web import TOKEN_HEADER, HexSetServer, is_code, looks_like_a_code_attempt
-from hexset_ui.webplay import action_to_wire
+from hexset.server.web import TOKEN_HEADER, HexSetServer, is_code, looks_like_a_code_attempt
+from hexset.server.webplay import action_to_wire
 
 SOLO = ["search2", "search2", "search2"]
 

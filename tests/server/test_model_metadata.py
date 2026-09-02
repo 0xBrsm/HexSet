@@ -1,7 +1,7 @@
 """What a checkpoint declares about itself, and what is done with it.
 
 These bounds are the only thing standing between a typo'd export and a hung
-seat, and `hexset_ui.modelmeta` is importable without a runtime wheel so they
+seat, and `hexset.server.modelmeta` is importable without a runtime wheel so they
 can be checked on a machine that cannot load a session at all — which is the
 usual development machine here.
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from hexset_ui.modelmeta import MAX_SIMULATIONS, MAX_WAVE, SearchConfig, search_config
+from hexset.server.modelmeta import MAX_SIMULATIONS, MAX_WAVE, SearchConfig, search_config
 
 
 def test_a_checkpoint_that_says_nothing_is_played_as_a_single_forward():

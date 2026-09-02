@@ -6,8 +6,8 @@ from hexset.actions import ActionType, apply
 from hexset.board.board import random_base_board
 from hexset.game import Phase, _in_second_setup_round, end_turn, roll_dice, to_move
 
-from hexset_ui.rules import options_for
-from hexset_ui.seating import (
+from hexset.server.rules import options_for
+from hexset.server.seating import (
     advance_setup,
     lock_seat,
     locked_of,
@@ -25,7 +25,7 @@ def _board():
 def _apply(game, action):
     """`apply`, plus the seating correction `webplay.GameSession._apply` makes
     on every action -- the snake starts at the creator and skips retired
-    seats, neither of which `hexset.game` knows about (`hexset_ui.seating`)."""
+    seats, neither of which `hexset.game` knows about (`hexset.server.seating`)."""
     before = snapshot(game)
     apply(game, action)
     settle(game, before)

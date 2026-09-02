@@ -25,7 +25,7 @@ from collections import Counter
 import numpy as np
 import pytest
 
-from benchmarks.aivat import (
+from hexset.bench.aivat import (
     StubValuer,
     chance_outcomes,
     instrumented,
@@ -179,7 +179,7 @@ def test_a_constant_value_function_corrects_nothing(monkeypatch):
             return np.full(len(games), 3.25)
 
     row = instrumented(DUEL, 0, SEED, value="stub", detail=True)
-    monkeypatch.setattr("benchmarks.aivat.StubValuer", Flat)
+    monkeypatch.setattr("hexset.bench.aivat.StubValuer", Flat)
     flat = instrumented(DUEL, 0, SEED, value="stub", detail=True)
 
     assert flat["events"] == row["events"]

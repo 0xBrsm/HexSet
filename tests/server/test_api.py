@@ -1,4 +1,4 @@
-"""Games, seats, codes and tokens — `hexset_ui.api` without a socket.
+"""Games, seats, codes and tokens — `hexset.server.api` without a socket.
 
 Everything here calls `Tables.handle` the way `web.py` would, so the routing
 and the rules are pinned together; `test_web.py` covers only what the HTTP
@@ -15,9 +15,9 @@ import time
 
 import pytest
 
-from hexset_ui import journal
+from hexset.server import journal
 from hexset.actions import ActionType, legal_actions
-from hexset_ui.api import (
+from hexset.server.api import (
     CODE_ALPHABET,
     CODE_LENGTH,
     MAX_SEATS,
@@ -31,8 +31,8 @@ from hexset_ui.api import (
     resume_session,
 )
 from hexset.game import is_over, to_move
-from hexset_ui.seating import lock_seat
-from hexset_ui.webplay import action_to_wire
+from hexset.server.seating import lock_seat
+from hexset.server.webplay import action_to_wire
 from conftest import new_tables
 
 SOLO = ["search2", "search2", "search2"]
@@ -437,7 +437,7 @@ def test_renaming_a_seat_reaches_the_log_as_well_as_the_seat_list():
 
 def test_record_matches_the_seat_on_move():
     """A freshly-dealt game's setup snake starts at `first` — the creator's
-    own (random) seat, see `hexset_ui.seating.start_at` — so the creator's own
+    own (random) seat, see `hexset.server.seating.start_at` — so the creator's own
     token is always the mover's here."""
     registry = tables()
     code, token = deal(registry, bots=[])
@@ -655,7 +655,7 @@ def _a_position_where_the_two_masks_differ(mover: int = 0):
     from hexset.board.board import random_base_board
     from hexset.board.terrain import NUM_RESOURCES
     from hexset.game import Phase
-    from hexset_ui.seating import start_at
+    from hexset.server.seating import start_at
 
     game = start_at(random_base_board(_random.Random(0)), 4, _random.Random(1), first=0)
     game.phase = Phase.MAIN
@@ -671,7 +671,7 @@ def test_the_honest_and_omniscient_trade_samples_really_do_differ_here():
     """The premise of the next two tests, asserted rather than assumed: if
     these two ever agreed, the tests below would pass vacuously."""
     from hexset.actions import ActionType, legal_actions
-    from hexset_ui.rules import fair_legal_actions
+    from hexset.server.rules import fair_legal_actions
 
     game = _a_position_where_the_two_masks_differ()
     omniscient = {a for a in legal_actions(game) if a.type is ActionType.PROPOSE_TRADE}
@@ -691,8 +691,8 @@ def test_an_embedded_bot_is_offered_the_same_mask_the_wire_serves():
     message's claim that the record is "byte-identical to what an in-process
     bot computes" was false for `action_mask`/`pair_mask` whenever some
     resource was held by no opponent (which is this position)."""
-    from hexset_ui.rules import fair_legal_actions
-    from hexset_ui.onnxbot import options_for as onnxbot_options_for
+    from hexset.server.rules import fair_legal_actions
+    from hexset.clients.onnxbot import options_for as onnxbot_options_for
 
     game = _a_position_where_the_two_masks_differ()
     assert onnxbot_options_for(game) == fair_legal_actions(game)
@@ -707,8 +707,8 @@ def test_record_matches_the_embedded_bots_options():
 
     from hexset.actions import build_space
 
-    from hexset_ui.record import build_record
-    from hexset_ui.rules import options_for
+    from hexset.onnx_record import record_from_game
+    from hexset.server.rules import options_for
 
     registry = tables()
     code, token = deal(registry, bots=[])
@@ -725,7 +725,7 @@ def test_record_matches_the_embedded_bots_options():
     space = build_space(
         topology.num_vertices, topology.num_edges, topology.num_hexes, game.state.num_players
     )
-    in_process = build_record(game, seat, tuple(options_for(game)), space)
+    in_process = record_from_game(game, seat, space, tuple(options_for(game)))
 
     for key, value in in_process.items():
         assert np.array_equal(np.asarray(served[key]), value), key
@@ -774,7 +774,7 @@ def test_a_table_only_bots_are_watching_is_evicted():
     spares the code it was asked for (`keep`) -- a request is itself the
     liveness signal for the table it names.
     """
-    import hexset_ui.api as api
+    import hexset.server.api as api
 
     registry = tables()
     abandoned, _ = deal(registry, bots=SOLO)
@@ -797,7 +797,7 @@ def test_the_code_being_looked_up_is_never_evicted_out_from_under_the_request():
     """`get` runs eviction before the lookup, so without `keep` a request for
     a game that had just gone stale would 404 on the very table it came
     for -- a reopen from the journal at best, an error at worst."""
-    import hexset_ui.api as api
+    import hexset.server.api as api
 
     registry = tables()
     code, _ = deal(registry, bots=[])

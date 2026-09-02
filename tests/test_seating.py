@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """`Game.locked`: the per-seat setup lock / seat retirement, upstreamed.
 
-`hexset_ui.seating` (the gym's interface layer) implemented this as a
+`hexset.server.seating` (the gym's interface layer) implemented this as a
 post-apply correction bolted onto a live `Game`, because `hexset.game` had no
 notion of a locked seat: after every applied action, `settle()` re-pointed the
 setup snake or the turn rotation past a seat the table had retired. That is
@@ -13,7 +13,7 @@ turns for it as though it still played
 
 This module tests the primitive that closes that gap: `Game.locked` is now a
 real dataclass field, `imagine` copies it, and `lock_seat`/`start(first=)`
-give the engine what `hexset_ui.seating.lock_seat`/`start_at` used to bolt on
+give the engine what `hexset.server.seating.lock_seat`/`start_at` used to bolt on
 from outside. The tests below are organised the way the request was: setup-
 phase skipping, main-phase skipping, trade offers, `imagine`, and finally the
 byte-identity guard that nothing about an *unlocked* game changed at all.
@@ -91,7 +91,7 @@ def test_start_default_first_matches_todays_snake():
 
 def test_start_first_rotates_the_snake_keeping_its_compensating_property():
     """Whoever places first in round one places last in round two, from
-    whichever seat the snake starts at -- `hexset_ui.seating.start_at`'s
+    whichever seat the snake starts at -- `hexset.server.seating.start_at`'s
     argument, upstreamed."""
     game = a_game(players=3, first=2)
     assert game.setup_queue == [2, 0, 1, 1, 0, 2]

@@ -5,10 +5,10 @@ import random
 import numpy as np
 
 from hexset.actions import build_space, within_offer_budget
-from hexset_ui.rules import options_for
+from hexset.server.rules import options_for
 from hexset.board.board import random_base_board
 from hexset.game import start, to_move
-from hexset_ui.record import build_record
+from hexset.onnx_record import record_from_game
 
 from conftest import step_randomly
 
@@ -47,14 +47,14 @@ def test_record_hides_an_opponents_exact_hand_and_dev_composition():
         topology.num_vertices, topology.num_edges, topology.num_hexes, state.num_players
     )
     options = tuple(within_offer_budget(game, options_for(game), None))
-    before = build_record(game, seat, options, space)
+    before = record_from_game(game, seat, space, options)
 
     _redistribute(state.hands[opponent])
     held = state.dev_cards[opponent]
     if any(held):
         _redistribute(held)
 
-    after = build_record(game, seat, options, space)
+    after = record_from_game(game, seat, space, options)
 
     assert before.keys() == after.keys()
     for key in before:

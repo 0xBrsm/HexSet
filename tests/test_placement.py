@@ -88,7 +88,7 @@ def test_the_prior_scores_the_opening_it_would_complete_not_the_vertex_alone():
 
 def test_a_random_opener_recovers_none_of_the_prior_gap():
     """Calibrates the metric: choosing at random must score near zero, not near one."""
-    import benchmarks.placement_policy as pp
+    import hexset.bench.placement_policy as pp
 
     picks = []
     for index in range(12):
@@ -104,7 +104,7 @@ def test_a_random_opener_recovers_none_of_the_prior_gap():
 
 def test_the_prior_itself_recovers_all_of_the_prior_gap():
     """Pins the other end of the scale, so a score near one means what it says."""
-    import benchmarks.placement_policy as pp
+    import hexset.bench.placement_policy as pp
 
     picks = []
     for index in range(12):

@@ -18,9 +18,8 @@ The third case -- a real 23-input contract 2 -- is not stubbed at all:
 These stubs are NOT genuine exports. `hexset.export_onnx` needs torch, which
 this repo does not install, so no real contract-3 or contract-4 file exists
 here to test against; the field names, shapes and dtypes below are pinned
-against dev's own `_shapes` table by `test_record_contract.py` wherever torch
-happens to be available. See `docs/engine-divergence-2026-09-02.md`, "Defect 1
-in detail".
+against `hexset.onnx_record.RECORD_FIELDS` by `tests/test_onnx_record.py`,
+torch-free. See `docs/engine-divergence-2026-09-02.md`, "Defect 1 in detail".
 """
 
 import pathlib

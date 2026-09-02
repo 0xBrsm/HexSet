@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """The duel's side split and seat geometry, which decide every verdict it reports.
 
-Torch-free: `benchmarks.duel` imports its torch-bound modules where they are
+Torch-free: `hexset.bench.duel` imports its torch-bound modules where they are
 used, so the lineup, the seating and the arena path all test on a box without
 it. The arena is driven through a fake `compete` that hands back a fixed points
 table, so the paired split can be checked slot by slot.
@@ -15,8 +15,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from benchmarks import duel
-from benchmarks.duel import (
+from hexset.bench import duel
+from hexset.bench.duel import (
     ARENA_GEOMETRY,
     GEOMETRIES,
     _default_workers,
@@ -106,7 +106,7 @@ def test_the_arena_path_can_be_called_at_all():
     import ast
     from pathlib import Path
 
-    import benchmarks.duel as module
+    import hexset.bench.duel as module
 
     tree = ast.parse(Path(module.__file__).read_text())
     functions = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
@@ -341,7 +341,7 @@ def test_the_versus_path_accepts_interleaved_by_name(capsys, monkeypatch):
     `_via_versus` itself (the network-backed --workers 1 runner) now lives in
     `hexnet.duel` and is exercised there
     (`tests/hexnet/test_duel_versus.py::test_the_versus_verdict_records_interleaved`);
-    this only pins that `benchmarks.duel.main` calls whatever registered
+    this only pins that `hexset.bench.duel.main` calls whatever registered
     itself as `_VERSUS_BACKEND`.
     """
     monkeypatch.setattr(duel, "_VERSUS_BACKEND", lambda args, la, lb: {

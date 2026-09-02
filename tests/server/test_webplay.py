@@ -15,17 +15,17 @@ from hexset.board.maps import BASE_LAYOUT, MINI_LAYOUT
 from hexset.board.topology import build as build_topology
 from conftest import RandomBot
 from hexset.game import Phase, is_over, to_move
-from hexset_ui.seating import start_at
-from hexset_ui.journal import (
+from hexset.server.seating import start_at
+from hexset.server.journal import (
     DEFAULT_DIR,
     ENV_DIR,
     configured_dir,
     open_journal,
     replayable,
 )
-from hexset_ui.journal import RESOURCE_NAMES as JOURNAL_RESOURCE_NAMES
+from hexset.server.journal import RESOURCE_NAMES as JOURNAL_RESOURCE_NAMES
 from hexset.victory import victory_points
-from hexset_ui.webplay import (
+from hexset.server.webplay import (
     RESOURCE_NAMES,
     SQRT3,
     GameSession,
@@ -306,7 +306,7 @@ def test_a_build_streak_breaks_on_a_different_actor():
     assert lines[0] == mine  # the other seat's placements started their own, not this one
 
 def test_list_with_counts_pluralises_repeats_but_not_singles():
-    from hexset_ui.webplay import _list_with_counts
+    from hexset.server.webplay import _list_with_counts
 
     assert _list_with_counts(["settlement", "road"]) == "a settlement and a road"
     assert _list_with_counts(["road", "road"]) == "2 roads"
@@ -738,7 +738,7 @@ def test_state_view_offer_answered_is_the_proposers_own_information_only():
     assert "answered" not in session.state_view(None)["offer"]
 
 def test_state_view_reports_locked_seats():
-    from hexset_ui.seating import lock_seat
+    from hexset.server.seating import lock_seat
 
     game = a_game(seed=8)
     lock_seat(game, 2)

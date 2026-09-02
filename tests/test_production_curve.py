@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from benchmarks.production_curve import CurvePoint, correlation, proxy_summary, ranks
+from hexset.bench.production_curve import CurvePoint, correlation, proxy_summary, ranks
 
 
 def point(

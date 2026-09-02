@@ -8,10 +8,10 @@ import numpy as np
 import onnxruntime as ort
 
 HERE = pathlib.Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parents[1] / "src"))
+sys.path.insert(0, str(HERE.parents[2] / "src"))
 
 from hexset.actions import ActionType, apply, build_space
-from hexset_ui.rules import options_for
+from hexset.server.rules import options_for
 from hexset.board.board import random_base_board
 from hexset.game import start, to_move
 
@@ -30,7 +30,7 @@ print("meta   :", session.get_modelmeta().custom_metadata_map)
 
 
 def record(game, seat, options):
-    """The v2 information-set record, built the way hexset_ui.record will."""
+    """The v2 information-set record, built the way hexset.onnx_record does."""
     st = game.state
     mask = np.zeros(space.size, dtype=bool)
     for a in options:

@@ -21,8 +21,9 @@ Fixtures, and what each is:
   (`fixtures/build_stub.py`). Real in shape, synthetic in weights: no genuine
   contract-3 or contract-4 export exists on any box this repo runs on, because
   producing one needs `hexset.export_onnx`, which needs torch. Stated plainly
-  rather than papered over; `test_record_contract.py` pins the shapes against
-  dev's own table wherever torch is installed.
+  rather than papered over; `tests/test_onnx_record.py` pins the field names
+  and shapes of all 29 fields against `hexset.onnx_record.RECORD_FIELDS`
+  torch-free, which is the strongest check available without a real export.
 * `tiny.onnx` — a real contract-1 export (no `contract` key at all). The
   owner dropped contract 1 on 2026-09-02
   (`docs/engine-divergence-2026-09-02.md`, B5): `encoding_v1.py` and the
@@ -38,7 +39,7 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("onnxruntime", reason="hexset_ui.onnxbot needs onnxruntime installed")
+pytest.importorskip("onnxruntime", reason="hexset.clients.onnxbot needs onnxruntime installed")
 
 import onnxruntime as ort  # noqa: E402
 
@@ -46,9 +47,9 @@ from hexset.actions import apply  # noqa: E402
 from hexset.board.board import random_base_board  # noqa: E402
 from hexset.game import Phase, start  # noqa: E402
 
-from hexset_ui.constants import RECORD_CONTRACTS  # noqa: E402
-from hexset_ui.onnxbot import V2Policy, load  # noqa: E402
-from hexset_ui.rules import options_for  # noqa: E402
+from hexset.server.constants import RECORD_CONTRACTS  # noqa: E402
+from hexset.clients.onnxbot import V2Policy, load  # noqa: E402
+from hexset.server.rules import options_for  # noqa: E402
 
 FIXTURES = Path(__file__).parent / "fixtures"
 DEV_CONTRACT2 = FIXTURES / "dev-contract2.onnx"
@@ -59,7 +60,7 @@ CONTRACT1 = FIXTURES / "tiny.onnx"
 
 @pytest.fixture(autouse=True)
 def _clear_loader_cache():
-    from hexset_ui.onnxbot import _load_cached
+    from hexset.clients.onnxbot import _load_cached
 
     _load_cached.cache_clear()
     yield
@@ -174,7 +175,7 @@ def test_a_record_contract_checkpoint_plays_legal_actions_from_every_phase(
     `search=mcts` in its metadata, and this test is about the feed, not about
     how many simulations the file asks for.
     """
-    from hexset_ui.onnxbot import network_bot
+    from hexset.clients.onnxbot import network_bot
 
     board = _board()
     assert len(_declared_inputs(path)) == expected_inputs
@@ -198,7 +199,7 @@ def test_the_real_dev_export_survives_a_position_with_a_live_offer():
     onnxruntime rejected. A contract-2 graph has to keep playing through a
     `TRADE_RESPOND` position, where the record carries them all."""
     from hexset.actions import ActionType
-    from hexset_ui.onnxbot import network_bot
+    from hexset.clients.onnxbot import network_bot
 
     board = _board()
     bot = network_bot(str(DEV_CONTRACT2), board)
@@ -227,7 +228,7 @@ def test_recordbrain_accepts_every_record_contract(path):
     contract-4 file that it "is a contract=1 checkpoint". It now accepts the
     same set `onnxbot` routes to `V2Policy`, and a search-flagged file is
     still refused for being a search, not for its contract."""
-    from hexset_ui.botclient import RecordBrain
+    from hexset.clients.botclient import RecordBrain
 
     meta = _metadata(path)
     if meta.get("search") == "mcts":
@@ -239,7 +240,7 @@ def test_recordbrain_accepts_every_record_contract(path):
 
 
 def test_recordbrain_names_the_contract_it_actually_found():
-    from hexset_ui.botclient import RecordBrain
+    from hexset.clients.botclient import RecordBrain
 
     with pytest.raises(ValueError) as caught:
         RecordBrain.load(str(CONTRACT1))
@@ -254,20 +255,22 @@ def test_the_record_matches_a_real_dev_exports_declared_input_shapes():
 
     `dev-contract2.onnx` is a genuine `hexset.export_onnx` artefact, so its
     declared input shapes *are* dev's `_shapes` table for the 23 fields it
-    carries — no transcription, no stub. `test_record_contract.py` covers all
-    29 wherever torch is installed; this covers 23 everywhere.
+    carries — no transcription, no stub. This covers 23 fields; the full 29
+    are pinned against `hexset.onnx_record.RECORD_FIELDS` by
+    `tests/test_onnx_record.py`, torch-free, since `hexset.onnx_record` no
+    longer needs torch to import.
     """
     import numpy as np
 
     from hexset.actions import build_space
 
-    from hexset_ui.record import build_record
+    from hexset.onnx_record import record_from_game
 
     board = _board()
     topology = board.topology
     space = build_space(topology.num_vertices, topology.num_edges, topology.num_hexes, 4)
     game = start(board, 4, random.Random(3))
-    record = build_record(game, 0, tuple(options_for(game)), space)
+    record = record_from_game(game, 0, space, tuple(options_for(game)))
 
     session = ort.InferenceSession(str(DEV_CONTRACT2), providers=["CPUExecutionProvider"])
     checked = 0

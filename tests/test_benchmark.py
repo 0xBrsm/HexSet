@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""`benchmarks.throughput` itself. The rollout/mix-cost benchmarks that used to
+"""`hexset.bench.throughput` itself. The rollout/mix-cost benchmarks that used to
 share this file moved to `hexnet.benchmarks` with the rest of the training
 tooling -- see `tests/hexnet/test_training_benchmark.py`."""
 
 from __future__ import annotations
 
-from benchmarks.throughput import environment, main, run
+from hexset.bench.throughput import environment, main, run
 
 
 def test_a_small_run_reports_sane_numbers():

@@ -7,7 +7,7 @@ import random
 import numpy as np
 import pytest
 
-from benchmarks.human_agreement import (
+from hexset.bench.human_agreement import (
     Decision,
     Tally,
     grouped,
@@ -24,7 +24,7 @@ from hexset.board.board import random_base_board
 from hexset.game import Phase, start, to_move
 from hexset.record import Record, actions_of, board_fields, board_of, record_game
 
-# Torch is never imported here. `benchmarks.human_agreement` keeps it inside
+# Torch is never imported here. `hexset.bench.human_agreement` keeps it inside
 # `main`, and the scoring core is duck-typed on `hexset.mcts.Evaluator`, so every
 # number in this file is arithmetic over a stub whose prior is known in advance.
 

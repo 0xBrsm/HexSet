@@ -3,7 +3,7 @@ test importing it at all.
 
 Everything here runs over `LocalTransport`, which is `Tables.handle` behind the
 same `get`/`post` pair `HttpTransport` presents, so a bot plays exactly the
-route an external `python -m hexset_ui.botclient` process plays: join, poll
+route an external `python -m hexset.clients.botclient` process plays: join, poll
 `/api/state`, fetch `/api/record` when it is on move, post one action. No
 privileged access to the session, and no HTTP server to start.
 """
@@ -16,7 +16,7 @@ import pytest
 
 pytest.importorskip("onnxruntime", reason="botclient needs onnxruntime installed")
 
-from hexset_ui.botclient import (  # noqa: E402
+from hexset.clients.botclient import (  # noqa: E402
     BotRunner,
     LocalTransport,
     RecordBrain,

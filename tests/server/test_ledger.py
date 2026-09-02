@@ -7,8 +7,8 @@ from hexset.board.board import random_base_board
 from hexset.board.terrain import NUM_RESOURCES
 from hexset.game import Phase, move_robber_to, start, to_move
 
-from hexset_ui.record import build_record
-from hexset_ui.rules import options_for
+from hexset.onnx_record import record_from_game
+from hexset.server.rules import options_for
 
 from conftest import step_randomly
 
@@ -52,11 +52,11 @@ def test_a_steal_is_identity_independent_in_the_record():
             game.state.num_players,
         )
         options = tuple(within_offer_budget(game, options_for(game), None))
-        return build_record(game, seat, options, space)
+        return record_from_game(game, seat, space, options)
 
     # The two mask fields describe the *mover's* own options, and the mover
     # here is the thief. Since this branch serves one honest mask to every
-    # seat (`hexset_ui.rules`), the offer half of it is a function of the
+    # seat (`hexset.server.rules`), the offer half of it is a function of the
     # mover's own hand -- which really did receive a different card in each
     # world -- so they differ, legitimately, and only for the thief: no seat
     # but the one on move is ever served a record at all
@@ -124,7 +124,7 @@ def test_undo_restores_the_ledger_with_the_state():
     away, one of another certified in.
     """
     from hexset.actions import ActionType, legal_actions
-    from hexset_ui.webplay import GameSession, action_to_wire
+    from hexset.server.webplay import GameSession, action_to_wire
 
     board = random_base_board(random.Random(0))
     game = start(board, 4, random.Random(1))
@@ -175,7 +175,7 @@ def test_undo_keeps_the_ledger_honest_across_a_played_game():
     about them; the paid actions are the ones that move it.
     """
     from hexset.actions import ActionType
-    from hexset_ui.webplay import _UNDOABLE_BUILDS, GameSession, action_to_wire
+    from hexset.server.webplay import _UNDOABLE_BUILDS, GameSession, action_to_wire
 
     PAID = _UNDOABLE_BUILDS - {ActionType.SETUP_SETTLEMENT, ActionType.SETUP_ROAD}
 

@@ -9,9 +9,16 @@ property and masking falls out of the board rather than being bolted on. Publish
 agents for this game instead flatten the hex board onto a rectangular grid so an
 ordinary CNN can approximate hex adjacency — this works on the real adjacency.
 
-The package ships the rules engine, handcrafted evaluations and search bots, a
-seat-balanced arena for measuring one against another, and the learning layer:
-encoder, model, PPO self-play, batched MCTS and expert iteration.
+The `hexset` package ships the rules engine, handcrafted evaluations and search
+bots, a seat-balanced arena for measuring one against another, the ledger of
+public knowledge a policy may honestly read, and the observation encoder. It
+depends on nothing but numpy. The learning layer — model, PPO self-play, batched
+MCTS, expert iteration and the resumable training loop — is the sibling `hexnet`
+package: split out so the engine, bots and ledger stay installable (and
+testable) on a machine without PyTorch, with `hexset` never importing `hexnet`
+in the other direction. `hexset.arena` exposes a small registry
+(`register_entrant_kind`) that `hexnet.netbot` populates at import, which is
+how a duel can seat a trained checkpoint without the arena itself needing torch.
 
 ## Quick Start
 
@@ -28,14 +35,16 @@ python -m benchmarks.throughput --games 200 --workers 4
 # a seat-balanced duel with Wilson intervals
 python -m benchmarks.baselines --lineup search2 search2 greedy greedy --games 400
 
-# PPO self-play, resumable
-python -m hexset.train --lanes 128 --iterations 100 --checkpoint-dir runs/ppo
+# PPO self-play, resumable (hexnet, needs PyTorch)
+python -m hexnet.train --lanes 128 --iterations 100 --checkpoint-dir runs/ppo
 ```
 
-Requires Python 3.11+. The rules engine, the arena and the self-play collector need
-only numpy, which is the one declared dependency; the learning layer needs PyTorch
-and is imported lazily, so the engine can be tested on a machine where torch cannot
-be installed at all. `docker/Dockerfile` builds the ROCm training image.
+Requires Python 3.11+. `hexset` — the rules engine, the arena and the self-play
+collector — needs only numpy, which is the one declared dependency; `hexnet`
+needs PyTorch, provisioned separately (the training/GPU image) rather than a
+hard dependency of this distribution, so `hexset` can be tested on a machine
+where torch cannot be installed at all. `docker/Dockerfile` builds the ROCm
+training image.
 
 ## Any layout, no new code
 
@@ -92,23 +101,32 @@ this extra, never vendored, and no catanatron import reaches the base package. S
 
 ## Source Layout
 
+`hexset` (engine, bots, ledger — numpy only) and `hexnet` (PPO/training
+research — needs PyTorch) are two packages in this one `src/` tree, split so
+the former can be extracted and depended on as a plain package without the
+latter. `hexset` never imports `hexnet`.
+
 | Path | Purpose |
 |------|---------|
 | `hexset/board/` | `coords` (cube hex), `topology` (vertices, edges, adjacency from any layout), `terrain`, `board` (tokens, setup bags), `ports` (coastlines), `maps` (base, mini, multi-island) |
 | `hexset/state.py`, `economy.py` | Occupancy, hands, bank stock, placement legality as graph queries; costs, payment, production, port rates |
 | `hexset/game.py`, `actions.py` | The turn and phase machine, and a flat action space sized from the board with legality masking |
-| `hexset/roads.py`, `robber.py`, `devcards.py`, `cards.py`, `victory.py`, `trading.py` | Longest road as a longest trail, the robber and discards, the development deck, victory conditions, player-to-player offers |
+| `hexset/roads.py`, `robber.py`, `devcards.py`, `cards.py`, `victory.py`, `trading.py`, `ledger.py` | Longest road as a longest trail, the robber and discards, the development deck, victory conditions, player-to-player offers, and the public-knowledge ledger an honest policy reads instead of the true hidden state |
 | `hexset/evaluate.py`, `evaluate_tiered.py` | Two handcrafted per-seat evaluations — nine fitted blended terms, and a tiered priority-order reimplementation kept as a comparison baseline |
-| `hexset/bots.py`, `arena.py` | The `Bot` protocol, random / greedy / max^n search with stances; seat-rotated head-to-head play with confidence intervals |
+| `hexset/bots.py`, `arena.py`, `heximax.py` | The `Bot` protocol, random / greedy / max^n search with stances; seat-rotated head-to-head play with confidence intervals and the `register_entrant_kind` registry `hexnet.netbot` populates; the PIMC handcrafted bot that reads its own belief through the ledger |
 | `hexset/tuning.py`, `fitting.py`, `behaviour.py` | Fitting evaluation weights by hill climbing and by logistic regression, and reporting what the bot actually does in the shape published aggregates are quoted in |
-| `hexset/encoding.py`, `model.py`, `readout.py` | The seat-relative, information-set-correct graph observation; message passing over it; and the index map from heads to flat action slots |
-| `hexset/selfplay.py`, `policy.py`, `rewards.py` | Vectorised lockstep rollout collection behind a `BatchPolicy` protocol, the torch policy, and the per-seat terminal scalarisation |
-| `hexset/ppo.py`, `train.py` | GAE, clipped surrogate and value loss; the runnable, resumable training loop |
-| `hexset/mcts.py`, `expert.py` | PUCT with leaves gathered into waves, backing up a per-seat vector; and expert iteration through the existing collector |
-| `hexset/netbot.py`, `record.py`, `dataset.py`, `play.py` | A checkpoint as an arena entrant, replayable game records, labelled positions from them, and a random player |
+| `hexset/encoding.py`, `onnx_record.py` | The seat-relative, information-set-correct graph observation, and the torch-free information-set record contract a served checkpoint (or the gym) reads instead of reimplementing the encoder — see `onnx_record.py`'s own docstring |
+| `hexset/mcts.py`, `record.py`, `dataset.py`, `play.py` | PUCT with leaves gathered into waves, backing up a per-seat vector (evaluator supplied by the caller — `hexnet.netbot.LeafEvaluator` in training); replayable game records, labelled positions from them, and a random player |
 | `hexset/catanatron/` | Optional adapter to Catanatron's arena (`pip install -e "src[catanatron]"`) — see "Catanatron adapter" above |
-| `benchmarks/` | Throughput, baselines, ablations, weight fitting, encoder and forward-pass cost, rollout cost, value-head diagnostics |
-| `tests/` | 439 tests across 34 files, plus `tests/catanatron/` (skipped unless the `catanatron` extra is installed) |
+| `hexnet/model.py`, `readout.py` | Message passing over the graph observation, and the index map from heads to flat action slots |
+| `hexnet/selfplay.py`, `policy.py`, `rewards.py` | Vectorised lockstep rollout collection behind a `BatchPolicy` protocol, the torch policy, and the per-seat terminal scalarisation |
+| `hexnet/ppo.py`, `train.py`, `league.py`, `schedule.py` | GAE, clipped surrogate and value loss; the runnable, resumable training loop; the self-play ladder; learning-rate schedules |
+| `hexnet/expert.py`, `distill.py`, `distill_train.py` | Expert iteration through the existing collector, and distilling a search's target back into the policy |
+| `hexnet/netbot.py`, `export_onnx.py`, `migrate.py`, `widen.py`, `ddp.py` | A checkpoint as an arena entrant (registers with `hexset.arena`); the traced encoder (`RecordEncoder`) and ONNX export reading `hexset.onnx_record`'s contract; checkpoint migration and function-preserving widening; multi-GPU update |
+| `hexnet/run/` | `run.init`/`run.manifest`: freezing a run's full parameter set before launch, and reading it back |
+| `benchmarks/` | hexset-side: throughput, baselines, ablations, weight fitting, encoder cost, duels, human agreement, AIVAT |
+| `hexnet/benchmarks/` | hexnet-side: forward-pass and rollout cost, value-head diagnostics, ranking probes, training-loop profiling |
+| `tests/` | see below for the current count; `tests/hexnet/` carries the `hexnet`-specific tests alongside their modules, `tests/catanatron/` is skipped unless the `catanatron` extra is installed |
 | `docker/` | ROCm training image |
 
 ## Design Notes

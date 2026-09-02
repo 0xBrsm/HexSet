@@ -192,6 +192,35 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   full text) is added at this directory's root. Entries above this one describe
   the package as it was named at the time; see the repo's top-level README for
   the trademark note this rename exists to satisfy.
+- **`hexset` split into `hexset` (engine, bots, ledger) and a new sibling
+  package `hexnet` (PPO/training research)**, in prep for HexSet and HexNet
+  becoming separate repos. `collect`, `ddp`, `distill`, `distill_train`,
+  `expert`, `export_onnx`, `league`, `migrate`, `model`, `netbot`, `policy`,
+  `ppo`, `readout`, `rewards`, `schedule`, `selfplay`, `train`, `widen` and
+  `run/` move to `hexnet` (`import hexset.train` → `import hexnet.train`,
+  etc.); the training-bound benchmarks move to `hexnet/benchmarks/` so
+  `python -m benchmarks.duel` and the rest of the hexset-side tools are
+  unaffected. `hexset` still declares only numpy and never imports `hexnet`:
+  `hexset.arena` gained a small registry (`register_entrant_kind`,
+  `register_evaluator_provider`, `register_checkpoint_loader`,
+  `register_leaf_evaluator_factory`) that `hexnet.netbot` populates at
+  import, replacing five direct `hexset.X` imports of what is now `hexnet.X`
+  (`arena`↔`netbot`, `mcts`↔`rewards`, `onnx_record`↔`policy`,
+  `duel`↔`collect`/`train`, `aivat`/`human_agreement`↔`netbot`) plus a
+  sixth found during the split: `onnx_record` imported torch unconditionally
+  for `RecordEncoder`, which now lives in `hexnet.export_onnx` — the
+  torch-free half (`RECORD_FIELDS`, `record_from_game`, `record_batch`,
+  `CONTRACT_VERSION`, `record_shapes`) stays in `hexset.onnx_record`, and
+  `record_from_game` gained an optional `options` parameter so a caller that
+  already computed the legal-option set does not pay for a second one.
+  `relative_points` moved from `rewards` to `victory` (both `hexset.mcts`
+  and `hexnet.rewards` need it); `NUM_PAIRS`/`pair_index`/`pair_mask` moved
+  from `policy` to `actions` for the same reason — both modules re-export
+  their old names, so no other call site changed. Training-only tests moved
+  to `src/tests/hexnet/` alongside their modules, so `pytest src/tests -k`
+  still runs everything and the engine+bots slice runs torch-free on its
+  own. `pyproject.toml`'s `packages.find` now includes `hexnet*` alongside
+  `hexset*`, one distribution for now.
 
 ## [0.13.0] - 2026-08-31
 

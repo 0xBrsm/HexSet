@@ -4,9 +4,10 @@ import random
 
 import numpy as np
 
-from hexset_ui.actions import build_space, options_for, within_offer_budget
-from hexset_ui.board.board import random_base_board
-from hexset_ui.game import start, to_move
+from hexset.actions import build_space, within_offer_budget
+from hexset_ui.rules import options_for
+from hexset.board.board import random_base_board
+from hexset.game import start, to_move
 from hexset_ui.record import build_record
 
 from conftest import step_randomly

@@ -29,6 +29,12 @@ services:
       # and index.html does not even need that much, since it is read fresh
       # per request. Read-only because nothing here writes to its own source.
       - ./src:/app/src:ro
+      # The engine, which lives in another repository: `hexset` is
+      # dev-hexset's `src/` (the rules, the bots, the ONNX record contract),
+      # and this repo is the gym around it. Edit the path to wherever your
+      # dev-hexset checkout is. Read-only for the same reason src/ is; it is
+      # on PYTHONPATH inside the image (see docker/Dockerfile).
+      - ../dev-hexset/src:/app/engine:ro
       # Drop-in opponents: any *.onnx in here shows up in the in-game picker,
       # named after the file. Read-only because the app only globs and loads
       # them, never writes one.

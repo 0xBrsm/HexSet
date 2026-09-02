@@ -1,0 +1,51 @@
+[project]
+name = "hexset"
+version = "0.13.0"
+description = "Graph-native Settlers of Catan engine, bots and ledger"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.26"]
+
+# torch itself isn't listed here: the engine, bots, ledger and
+# hexset.onnx_record's information-set record are torch-free by design (see
+# that module's docstring), so torch stays provisioned separately by whatever
+# consumes this package for training. `export` covers the .pt -> .onnx
+# conversion side (a traced encoder plus onnxruntime to verify it), which
+# needs torch *and* these two but is otherwise unrelated to the engine.
+[project.optional-dependencies]
+export = ["onnx>=1.16", "onnxruntime>=1.18"]
+# hexset.catanatron: the Catanatron adapter (`hexset/catanatron/`). Pinned to
+# the exact commit the R-H1c gate measured against (`agents/reference/heximax.md`,
+# "R-H1c take 2"; confirmed via the installed dist's PEP 610 `direct_url.json`
+# inside `catan-bridge:ledger`) rather than floating on catanatron's default
+# branch, since `pyproject.toml` pinning to a git URL with no revision was the
+# reproducibility gap that provenance stamping (`hexset.catanatron.duel.provenance`)
+# exists to catch.
+catanatron = ["catanatron @ git+https://github.com/bcollazo/catanatron.git@d3f4ad05bb78d8b2309631d6d3cfa8fcb6fda816"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# This file describes this directory as a standalone distribution -- what it
+# looks like once `engine/` is split into its own repo or published,
+# providing `hexset`, the sibling `heximax` package (HexSet's sample bot,
+# registering itself with `hexset.arena`/`hexset.tuning` on import rather
+# than being imported by either -- see `heximax/__init__.py`'s "registration"
+# section) and `benchmarks` (the hexset-side tools -- HexNet's own
+# `hexnet.benchmarks` imports from `benchmarks.throughput`, so a consumer
+# installing only this directory, the way HexNet's pyproject.toml documents,
+# needs it too). It does not currently govern installation of the monorepo
+# that carries it: the top-level `../pyproject.toml` finds all three packages
+# in place under `engine/` (a second `where` root) so `pip install -e .` from
+# the repo root provides `hexset`, `heximax`, `benchmarks` and `hexset_ui`
+# from one distribution, without reading this file at all. hexset must never
+# import hexnet -- see hexset.arena's registry for how the one place that
+# used to reach for a network-backed bot now does it without that import, now
+# that hexnet lives in a different repo entirely -- and must never import
+# heximax either, for the same reason.
+[tool.setuptools.packages.find]
+include = ["hexset*", "heximax*", "benchmarks*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

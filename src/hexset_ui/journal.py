@@ -34,13 +34,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .actions import Action, ActionType
-from .board.board import Board
-from .board.terrain import NUM_RESOURCES, Resource
-from .cards import NUM_DEV_CARDS, DevCard
-from .devcards import holdings
-from .game import Game
-from .victory import victory_points
+from hexset.actions import Action, ActionType
+from hexset.board.board import Board
+from hexset.board.terrain import NUM_RESOURCES, Resource
+from hexset.cards import NUM_DEV_CARDS, DevCard
+from hexset.devcards import holdings
+from hexset.game import Game
+from hexset.victory import victory_points
 
 ENV_DIR = "HEXSET_UI_GAMES_DIR"
 DEFAULT_DIR = "games"
@@ -168,10 +168,12 @@ class Journal:
         game: Game,
         *,
         seed: int,
-        human_seat: int,
+        first: int,
+        human_seats: list[int],
         bot_names: dict[int, str],
         bot_specs: dict[int, str],
-        identity: str | None = None,
+        player_names: dict[int, str] | None = None,
+        code: str | None = None,
     ) -> None:
         """The header: everything true before the first action.
 
@@ -181,10 +183,18 @@ class Journal:
         against it, and the whole game's development cards are known without
         the engine's random stream being involved at all.
 
-        `identity` is the browser's `hexset_id` cookie and `spec` the string
-        that built each bot, neither of which the game itself needs: they are
-        here so `resume` can put this exact session back together for the
-        person whose it was.
+        `code` is the table's join code and `spec` the string that built each
+        bot, neither of which the game itself needs: they are here so a resume
+        can put this exact table back together after a restart. `first` is the
+        seat the setup snake started at (see `hexset_ui.seating.start_at`) — needed
+        to rebuild the same queue on resume, since it is a free per-table
+        choice, not something derivable from `seed`/`num_players` alone.
+        `human_seats` are the seats occupied at deal time (any kind — see
+        `api.GameSession.claimed_seats`, the key name predates that) and
+        `player_names` whatever they registered as — a seat missing from the
+        latter is one nobody named. A seat claiming in later, or a seat this
+        game's setup snake locks out, both show up as their own event kind
+        (`seated`, `locked`) rather than here.
         """
         state = game.state
         self._emit(
@@ -193,9 +203,11 @@ class Journal:
                 "id": self.game_id,
                 "at": _now(),
                 "seed": seed,
-                "identity": identity,
+                "first": first,
+                "code": code,
                 "num_players": state.num_players,
-                "human_seat": human_seat,
+                "human_seats": list(human_seats),
+                "player_names": {str(s): n for s, n in sorted((player_names or {}).items())},
                 "bots": {
                     str(seat): {"name": name, "spec": bot_specs.get(seat, name)}
                     for seat, name in sorted(bot_names.items())
@@ -264,11 +276,22 @@ class Journal:
         )
 
     def seated(self, *, seat: int, name: str, spec: str) -> None:
-        """A different bot took `seat` mid-game (see the web server's
-        `_handle_swap_bot`). The header names who sat down at the deal; a game
-        put back together later has to seat whoever is there now, or resuming
-        would quietly hand the human back a different set of opponents."""
+        """A seat's occupant, named after the deal: a different bot swapped
+        in mid-game, or an open seat somebody joined after the header was
+        already written (see `api.GameSession.claim`). `spec` is empty for a
+        person — there is no checkpoint to name — which the header's own
+        `bots` map already treats as absent from it, so a resumed table
+        only ever re-seats an actual bot from this."""
         self._emit({"kind": "seated", "at": _now(), "seat": seat, "name": name, "spec": spec})
+
+    def locked(self, seat: int, *, at_step: int) -> None:
+        """The setup snake reached `seat` while it was still empty and waited
+        it out (see `api.Table._settle_locks`) — retired for the rest of the
+        game. `resumable`'s reader (`locked_seats`) only needs to know *that*
+        a seat locked, not when: see `hexset_ui.seating`'s own note on why
+        pre-seeding the whole set before replay reproduces the same snake
+        the live game actually walked. `at_step` is diagnostic only."""
+        self._emit({"kind": "locked", "at": _now(), "seat": seat, "at_step": at_step})
 
     def reopened(self, *, at_step: int) -> None:
         """This game was put back together from the lines above — a server
@@ -405,7 +428,11 @@ def replayable(events: list[dict]) -> list[tuple[int, Action]]:
 
 def seating(events: list[dict]) -> dict[int, tuple[str, str]]:
     """Seat -> the (name, spec) of the bot on it: the lineup the game was
-    dealt with, with every later swap applied in the order they happened."""
+    dealt with, with every later swap or bot claim applied in the order they
+    happened. A `seated` event for a person rather than a bot carries an
+    empty `spec` (see `Journal.seated`) and is skipped here -- this map is
+    bots only, which is what a table rebuilding after a restart needs to
+    know which seats to re-seat automatically (see `api.Tables._reopen`)."""
     header = events[0] if events else {}
     seats = {
         int(seat): (bot["name"], bot["spec"])
@@ -413,17 +440,28 @@ def seating(events: list[dict]) -> dict[int, tuple[str, str]]:
     }
     for event in events:
         if event.get("kind") == "seated":
-            seats[event["seat"]] = (event["name"], event["spec"])
+            if event["spec"]:
+                seats[event["seat"]] = (event["name"], event["spec"])
+            else:
+                seats.pop(event["seat"], None)
     return seats
 
 
-def resumable(directory: str | None, identity: str) -> Path | None:
-    """The game `identity` left unfinished, or `None` to deal them a fresh one.
+def locked_seats(events: list[dict]) -> frozenset[int]:
+    """Every seat the setup snake ever locked out (see `Journal.locked`).
+    Order doesn't matter for a resume: pre-seeding the whole set before
+    replay reproduces the exact same snake the live game walked (see
+    `hexset_ui.seating`'s own note on why), so this is just the set."""
+    return frozenset(event["seat"] for event in events if event.get("kind") == "locked")
 
-    Only their most recent game is ever a candidate. An older unfinished file
-    is a game they already walked away from once — handing it back because a
-    newer one happens to have ended would be reaching further into the past
-    than the player ever asked for.
+
+def resumable(directory: str | None, code: str) -> Path | None:
+    """The unfinished game filed under join code `code`, or `None`.
+
+    Only the most recent file bearing that code is ever a candidate. An older
+    unfinished one is a game the table already walked away from once — handing
+    it back because a newer one happens to have ended would be reaching
+    further into the past than anyone asked for.
     """
     if not directory:
         return None
@@ -433,7 +471,7 @@ def resumable(directory: str | None, identity: str) -> Path | None:
         return None
     for path in paths:
         header = header_of(path)
-        if header is None or header.get("identity") != identity:
+        if header is None or header.get("code") != code:
             continue
         return None if is_closed(read(path)) else path
     return None

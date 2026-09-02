@@ -1,5 +1,12 @@
 # ONNX contract v2 — moving the model inside the model file
 
+**Status, 2026-09-02: phases 1–5 landed; phase 6 (delete the v1 path) is
+done — the owner dropped contract 1 outright rather than gating it behind a
+parity duel, once it became clear no genuine checkpoint under `models/`
+would be lost. See `docs/engine-divergence-2026-09-02.md`, B5. The plan
+below is kept as the record of how contract 2 was designed and why; treat
+its "v1 stays" phases as history, not current behaviour.**
+
 ## The goal, in one line
 
 hexset-ui is an **interface**: it emits state, it accepts an action. `search2.py`
@@ -93,6 +100,17 @@ rotation, so `perspective` is what tells it how far to rotate:
 | `hand_totals` | `(B, players)` | int64 | totals for every seat |
 | `own_dev` | `(B, NUM_DEV_CARDS)` | int64 | `dev_cards + new_dev_cards`, perspective seat |
 | `dev_totals` | `(B, players)` | int64 | totals for every seat |
+| `offer_give` | `(B, NUM_RESOURCES)` | int64 | the live offer's give bundle, all-zero if none stands |
+| `offer_want` | `(B, NUM_RESOURCES)` | int64 | the live offer's want bundle, all-zero if none stands |
+| `offer_proposer` | `(B,)` | int64 | `NO_OWNER = -1` if no offer stands |
+| `offer_answered` | `(B, players)` | int64 | who has declined so far — **proposer's perspective only**, all-zero for anyone else |
+| `ledger_known` | `(B, players, NUM_RESOURCES)` | int64 | `hexset_ui.ledger.PublicLedger`'s per-seat certified floor |
+| `ledger_unknown` | `(B, players)` | int64 | cards the public log accounts for but cannot type (steals only) |
+
+Resource *counting* is not hidden information in this game — only a steal's
+identity and dev-card types are (see `hexset_ui/ledger.py`'s module
+docstring). `ledger_known`/`ledger_unknown` is what makes that true for
+every seat but the perspective one, whose `own_hand` above is already exact.
 
 **Legality:**
 
@@ -202,6 +220,9 @@ play.
 *Done when:* the existing test suite passes unchanged against a v1 file, and the
 same suite parameterised over a v2 file passes too.
 
+**Superseded 2026-09-02:** the v1 path this phase asked to keep is gone —
+see the status note at the top of this document.
+
 ### Phase 5 — the parity gate
 
 A test that plays N seeded games with a v1 file and the same checkpoint exported
@@ -220,6 +241,14 @@ design being removed.
 fingerprint, read metadata, run, hand back what came out — and `grep -ri "logit\|
 softmax\|feature\|encode" src/hexset_ui/` returns nothing outside `record.py`'s
 mask helpers.
+
+**Done, 2026-09-02** — without the phase-5 parity gate this plan wanted first:
+the owner decided no genuine contract-1 checkpoint under `models/` was worth
+keeping a parity duel to protect, so the v1 branch, `encoding_v1.py`
+(`encoding.py`'s eventual name), `OnnxPolicy`, `Request`, `_masked_log_softmax`,
+`_pair_logits`, `NUM_PAIRS`, `_OFF_DIAGONAL` and `_board_order` were dropped
+outright. `_pair_index` and `_one_hot` stayed — `V2Policy` still uses both. See
+`docs/engine-divergence-2026-09-02.md`, B5, for the owner's decision.
 
 ## Standing rules for whoever picks this up
 

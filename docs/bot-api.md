@@ -3,9 +3,10 @@
 This is the complete interface a `.onnx` file must satisfy to plug in as an
 opponent. It is the only thing `src/hexset_ui/onnxbot.py` reads — the file
 does not need access to this repo's source, only to what is written here plus
-the public [ONNX](https://onnx.ai/) format itself. `search2.py` (the
-handcrafted opponent) implements the same interface a different way and is
-the reference for what "correct" means when in doubt.
+the public [ONNX](https://onnx.ai/) format itself. `hexset.heximax` (the
+default handcrafted opponent) and `hexset.bots`' `search2` implement the same
+interface a different way and are the reference for what "correct" means when
+in doubt.
 
 Two independent parts make up the contract:
 
@@ -20,7 +21,7 @@ Two independent parts make up the contract:
 | --- | --- | --- |
 | `players` | table size the graph was traced for | required |
 | `num_hexes` / `num_vertices` / `num_edges` | board-shape fingerprint; a mismatched board fails the load rather than running on meaningless input | required |
-| `contract` | `1` or `2` — which graph shape below applies | `1` |
+| `contract` | which graph shape below applies: `2`, `3` or `4` for the record shape | refused if absent — see below |
 | `max_offers` | trade-offer budget the run trained under | engine's cap |
 | `search` | `mcts` to search over the model's own priors; anything else plays one forward pass | none |
 | `simulations` | descents per decision, when `search=mcts` (clamped to 4096) | 128 |
@@ -34,7 +35,25 @@ failing the load — a typo'd hint costs the hint, not the whole opponent. See
 Inference device (`cpu`/GPU) is deliberately **not** a metadata key — it is a
 fact about the machine serving the game, not the checkpoint.
 
-## 2. The graph — `contract=2` (current)
+**The `contract` number is assigned by the exporter, not by this repo.**
+`hexset.export_onnx._CONTRACT_VERSION` is the one definition; `hexset_ui`
+reads it and never writes it. The record shape has three numbers because it
+grew twice: `2` is the original 23 fields, `3` adds the four live-offer
+fields, `4` adds the two public-knowledge ledger fields. A graph declares the
+fields it wants and is fed exactly those, so all three load and play off the
+one record the engine builds — a checkpoint does not have to be re-exported
+to keep working. An unknown number is refused at load with the number named,
+rather than failing later on its first move with a missing-input error.
+
+**Contract 1 is no longer served.** It was the original shape — the engine
+encoded the position into feature tensors itself, and the graph was a bare
+policy/value head, masked and softmaxed in Python. The owner dropped it
+2026-09-02 (`docs/engine-divergence-2026-09-02.md`, B5): a `contract=1` file,
+or one with no `contract` key at all, is refused at load exactly like a
+future unknown number, naming the contract found and the numbers this server
+still serves (`2, 3, 4`).
+
+## 2. The graph — the record contracts (`2`, `3`, `4`)
 
 The engine builds a **record**: the position stated in the rules' own terms,
 already filtered to what the perspective seat may legally know. The graph
@@ -70,6 +89,12 @@ Leading batch axis `B` on every tensor.
 | `hand_totals` | `(B, players)` | int64 |
 | `own_dev` | `(B, NUM_DEV_CARDS)` | int64 |
 | `dev_totals` | `(B, players)` | int64 |
+| `offer_give` | `(B, NUM_RESOURCES)` | int64 |
+| `offer_want` | `(B, NUM_RESOURCES)` | int64 |
+| `offer_proposer` | `(B,)` | int64 |
+| `offer_answered` | `(B, players)` | int64 |
+| `ledger_known` | `(B, players, NUM_RESOURCES)` | int64 |
+| `ledger_unknown` | `(B, players)` | int64 |
 | `action_mask` | `(B, space.size)` | bool |
 | `pair_mask` | `(B, NUM_PAIRS)` | bool |
 
@@ -86,36 +111,25 @@ Leading batch axis `B` on every tensor.
 `NetworkBot` reads `action_index`/`pair_index`; searches read
 `prior`/`pair_prior`/`value`. One graph serves both.
 
-## 3. The graph — `contract=1` (legacy)
+**The engine drift this section used to list is gone.** `hexset_ui` no longer
+carries its own copy of the engine: it depends on the `hexset` distribution,
+so the `offered` re-proposal filter and the RNG-drawn trade-responder order
+are simply what this server plays now, exactly as dev-hexset does. See
+[`engine-divergence-2026-09-02.md`](engine-divergence-2026-09-02.md) for the
+full account of what the copy held and how each difference was resolved.
 
-The original shape: the engine encodes the position into feature tensors
-itself (`encoding.py`), and the graph is a bare policy/value head. Masking,
-softmax, the give/want outer sum, and un-rotating `value` back to board-seat
-order all happen in `onnxbot.py`, not in the graph.
-
-**Inputs**, all float32, leading batch axis `B`:
-
-| Name | Shape |
-| --- | --- |
-| `hexes` | `(B, num_hexes, hex_features)` |
-| `vertices` | `(B, num_vertices, vertex_features)` |
-| `edges` | `(B, num_edges, edge_features)` |
-| `globals` | `(B, num_globals)` |
-
-Feature widths depend on `players`; see `encoding.py` for the exact layout.
-This encoder is a from-scratch reimplementation of the training repo's own
-encoder and the two must stay bit-identical — the reason `contract=2` exists
-is to retire that obligation, so treat this shape as legacy and prefer
-`contract=2` for anything new.
-
-**Outputs:**
-
-| Name | Shape | Note |
-| --- | --- | --- |
-| `logits` | `(B, space.size)` | pre-mask, pre-softmax action-slot scores |
-| `give` | `(B, NUM_RESOURCES)` | give-side offer logits |
-| `want` | `(B, NUM_RESOURCES)` | want-side offer logits |
-| `value` | `(B, players)` | **perspective-rotated** (seat 0 = perspective); `onnxbot.py` un-rotates it before handing it back |
+**One difference remains, deliberately, and it is not tensor-shaped.** The
+`action_mask`/`pair_mask` a checkpoint is served here are built over the
+*honest* trade sample (`hexset_ui.rules.fair_legal_actions`): every
+one-for-one offer the mover's own hand affords, with no filter for whether
+some opponent could cover it. The engine's own `legal_actions` filters by
+opponents' true hands, and dev-hexset's training record uses that. So a
+checkpoint served here sees `want` slots it never saw enabled in training.
+This is on purpose — the alternative tells a human, on every turn, exactly
+what is in a specific opponent's hand — and it now applies to *every* seat,
+embedded bots included, rather than only to the ones on the wire. The cost
+has not been measured; the audit document asks the PI for a before/after
+duel.
 
 ## What is never part of this contract
 

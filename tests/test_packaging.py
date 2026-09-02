@@ -5,7 +5,7 @@ suite puts `src` on the path (`[tool.pytest.ini_options]`), the Docker image
 sets `PYTHONPATH=/app/src` and never installs the package at all, and
 `pip install -e .` reads the source tree in place. All three work fine with a
 `pyproject.toml` that would produce a broken wheel, which is how
-`web/index.html` came to be missing from one once — caught only by building
+`static/index.html` came to be missing from one once — caught only by building
 and running the image back when it did install the package, as a
 FileNotFoundError on GET /.
 
@@ -77,10 +77,10 @@ def packaged_names() -> tuple[str, ...]:
 
 
 def test_the_frontend_ships_with_the_package():
-    """`web/index.html` is the entire frontend and the one file setuptools
+    """`static/index.html` is the entire frontend and the one file setuptools
     will not include on its own — it is a static asset inside a package
     directory, so it lives or dies by `[tool.setuptools.package-data]`."""
-    assert "hexset_ui/web/index.html" in packaged_names()
+    assert "hexset_ui/static/index.html" in packaged_names()
 
 
 def test_every_module_in_the_source_tree_ships():

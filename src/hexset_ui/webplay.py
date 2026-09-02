@@ -1,12 +1,12 @@
 """Game session and wire protocol for the local human-vs-policy web board.
 
-Deliberately torch-free: `hexset_ui.webserver` imports the network bot lazily, so
+Deliberately torch-free: `hexset_ui.web` imports the network bot lazily, so
 this module — the board layout math, the wire-format mapping and the session
 that drives a game — can be imported and tested without PyTorch, the same way
-`hexset_ui.actions` and `hexset_ui.game` can. Anything with a
+`hexset.actions` and `hexset.game` can. Anything with a
 `choose(game) -> Action` method is all a session needs of its opponent:
-`NetworkBot` from `hexset_ui.onnxbot`, `SearchBot` from `hexset_ui.search2`,
-or the `RandomBot` the tests use.
+`NetworkBot` from `hexset_ui.onnxbot`, `Heximax` or `SearchBot` from
+`heximax`/`hexset.bots`, or the `RandomBot` the tests use.
 
 ## The wire format
 
@@ -19,10 +19,10 @@ played-out game rather than a handful of hand-picked shapes.
 
 ## Never build an action the engine did not offer
 
-`GameSession.apply_human_action` decodes the wire action and checks it against
-a *fresh* call to `legal_actions`, not merely against what was on offer at some
-earlier poll. A UI bug, a stale page, or a tampered request all fail the same
-way: the action is rejected before it reaches `hexset_ui.actions.apply`. That is
+`GameSession.submit` decodes the wire action and checks it against
+a *fresh* call to `rules.is_legal`, not merely against what was on offer at
+some earlier poll. A UI bug, a stale page, or a tampered request all fail the same
+way: the action is rejected before it reaches `hexset.actions.apply`. That is
 also why every clickable thing in the frontend is one of the literal wire
 objects `state_view()` already sent, echoed back unchanged — the client never
 constructs an `Action` from parts, it only ever repeats one the server offered.
@@ -30,56 +30,44 @@ constructs an `Action` from parts, it only ever repeats one the server offered.
 
 from __future__ import annotations
 
-import copy
 import math
-import random
 from dataclasses import dataclass, field
-from typing import Protocol
 
-from .actions import (
-    ONE_RESOURCE,
+from hexset.actions import (
     YEAR_OF_PLENTY_PAIRS,
     Action,
     ActionType,
     apply,
-    is_legal,
     legal_actions,
 )
-from .board.board import Board
-from .board.coords import Hex
-from .board.terrain import NUM_RESOURCES, TERRAIN_RESOURCE, Resource
-from .board.topology import Topology
-from .cards import NUM_DEV_CARDS, DevCard
-from .devcards import holdings
-from .economy import trade_ratios
-from .game import MAX_OFFERS_PER_TURN, Game, Phase, is_over, to_move
+from hexset.board.board import Board
+from hexset.board.coords import Hex
+from hexset.board.terrain import NUM_RESOURCES, TERRAIN_RESOURCE, Resource
+from hexset.board.topology import Topology
+from hexset.cards import NUM_DEV_CARDS, DevCard
+from hexset.devcards import holdings
+from hexset.economy import trade_ratios
+from hexset.game import Game, Phase, is_over, to_move
+from hexset.ledger import PublicLedger
+from hexset.roads import road_lengths
+from hexset.state import MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS, GameState, copy_state
+from hexset.trading import responders as offer_responders
+from hexset.victory import public_victory_points, victory_points
+
 from .journal import Journal
-from .roads import road_lengths
-from .state import MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS, GameState, copy_state
-from .victory import public_victory_points, victory_points
+from .rules import fair_legal_actions, is_legal
+from .seating import locked_of, settle, snapshot
 
 RESOURCE_NAMES: tuple[str, ...] = tuple(r.name.title() for r in Resource)
 DEV_CARD_NAMES: tuple[str, ...] = tuple(c.name.title().replace("_", " ") for c in DevCard)
-
-# A runaway bot (or an engine bug that never hands the turn back) is bounded
-# so it surfaces as an error rather than a request that never returns — used
-# two ways: the actions within one seat's own turn (advance_one_seat), and
-# the seats within one full cascade (advance_bots). One turn or one cascade
-# is at most a few players' worth of moves, so this is already generous
-# either way.
-MAX_CASCADE_STEPS = 2000
 
 
 class ResumeError(Exception):
     """A journalled game would not replay — its actions no longer describe a
     legal game under this engine. Recoverable, and by design: the caller deals
-    a fresh game rather than failing the request (see `webserver.resume`), so
+    a fresh game rather than failing the request (see `api.resume_session`), so
     an engine change that invalidates old journals costs the games in flight
     at the time and nothing else."""
-
-
-class Bot(Protocol):
-    def choose(self, game: Game) -> Action: ...
 
 
 # --- Hex-to-pixel layout -----------------------------------------------------
@@ -88,7 +76,7 @@ class Bot(Protocol):
 # sit at angles 60*i - 30 degrees around its center, and `Topology.hex_vertices`
 # already lists a hex's vertices in that same i = 0..5 order (corner i is shared
 # with the neighbours in directions i and i+1, and the direction vectors in
-# `hexset_ui.board.coords` place direction i at angle 60*(i-1) under this same
+# `hexset.board.coords` place direction i at angle 60*(i-1) under this same
 # center formula — corner i sits at the midpoint of that, 60*i - 30). One
 # consequence worth relying on in tests: a regular hexagon's edge length equals
 # its circumradius, so every board edge should measure exactly `size` between
@@ -173,7 +161,7 @@ def board_layout(board: Board, size: float = 60.0) -> dict:
         "year_of_plenty_pairs": [
             [RESOURCE_NAMES[a], RESOURCE_NAMES[b]] for a, b in YEAR_OF_PLENTY_PAIRS
         ],
-        # The engine's own supply caps (`hexset_ui.state`), so the frontend's
+        # The engine's own supply caps (`hexset.state`), so the frontend's
         # remaining-piece HUD can't drift from what `can_place_*` actually
         # enforces.
         "piece_supply": {
@@ -216,44 +204,6 @@ def wire_to_action(data: dict) -> Action:
         raise ValueError(f"malformed action payload: {data!r}") from exc
 
 
-def _proposable_options(game: Game) -> list[Action]:
-    """Every one-for-one (give, want) pair the current player could open a
-    trade proposal for — from public information alone: their own hand and
-    the turn's offer count.
-
-    Deliberately not `hexset_ui.actions.legal_actions`'s own `PROPOSE_TRADE`
-    sample, which also skips any pair no opponent could currently cover.
-    That's a fair thing for a bot to lean on when picking a search target —
-    the engine already sees every hand, it's one shared `GameState` — but
-    HexSet hands are private at a real table, and this list is what tells a
-    *human* what they may propose. Reflecting that omniscient filter here,
-    whether by omission or by an "isn't available" message, would hand them
-    the one thing the actual board never does: proof of what's in a
-    specific opponent's hand. `propose_trade` doesn't require coverage
-    either — a proposal nobody can cover is still legal, it just gets no
-    takers (see its own `if not willing: return`) — so this is the accurate
-    rule for what a human may attempt, not a laxer one.
-    """
-    state = game.state
-    player = game.current_player
-    # Trading is a Main-phase act, same as `propose_trade`'s own check. Left
-    # off, this offered pairs before the roll, which lit the hand up as
-    # clickable and opened the trade modal on a turn where the bank half of
-    # it could not be there — BANK_TRADE only exists in Main.
-    if game.phase is not Phase.MAIN:
-        return []
-    if game.offers_made >= MAX_OFFERS_PER_TURN:
-        return []
-    hand = state.hands[player]
-    return [
-        Action(ActionType.PROPOSE_TRADE, give=ONE_RESOURCE[given], want=ONE_RESOURCE[wanted])
-        for given in range(NUM_RESOURCES)
-        if hand[given]
-        for wanted in range(NUM_RESOURCES)
-        if wanted != given
-    ]
-
-
 # --- Human-readable log -------------------------------------------------------
 
 
@@ -288,7 +238,7 @@ def _hand_gains(before: list[int], after: list[int]) -> str | None:
 
 
 # (verb, noun) for every action that folds into one "placed/built ..." run
-# per actor instead of a line each — see GameSession._log_action.
+# per actor instead of a line each — see render_log.
 _BUILD_KIND = {
     ActionType.SETUP_SETTLEMENT: ("placed", "settlement"),
     ActionType.SETUP_ROAD: ("placed", "road"),
@@ -315,9 +265,11 @@ class _Snapshot:
     held: list[list[int]]
 
 
-# The placement and bank/port-trade actions the human can take back — never
-# a bot's (an opponent's misclick isn't the human's to undo). Road Building's
-# free roads need no special case: they still arrive as ordinary BUILD_ROAD
+# The placement and bank/port-trade actions any seat can take back — its own
+# only (see `_apply`'s `_UndoPoint.actor` and `undo_last_build`): an
+# opponent's misclick, or a bot's, isn't a different seat's to undo. Road
+# Building's free roads need no special case: they still arrive as ordinary
+# BUILD_ROAD
 # actions (see game.build_road), so restoring game.free_roads alongside the
 # board covers them too. PLAY_ROAD_BUILDING itself is in here too, for the
 # instant right after the card is played but before either free road has
@@ -352,14 +304,25 @@ class _UndoPoint:
     either way rather than needing two separate cases."""
 
     state: GameState
+    # The public-knowledge ledger, snapshotted with the state and restored
+    # with it. Not optional and not derivable: `PublicLedger` is built
+    # forward from the moves that were public, so an undone BANK_TRADE that
+    # left the ledger alone would leave it certifying a floor the hand no
+    # longer supports -- `known[wheat] = 1` against a hand holding none, a
+    # falsehood every seat then reads out of `/api/state` and `/api/record`
+    # (PR #2 defect 2). `spend`'s own clamp hides it rather than fixing it.
+    ledger: PublicLedger
     free_roads: int
     phase: Phase
     current_player: int
     setup_step: int
     last_settlement: int
-    log: list[str]
-    run: dict | None
+    events: int
     steps: int
+    # Whose action this would take back. Only its own actor may undo it: with
+    # more than one human at a table, "the last undoable action" is not
+    # automatically the asking player's to reach for.
+    actor: int
 
 
 def _snapshot(game: Game) -> _Snapshot:
@@ -370,44 +333,84 @@ def _snapshot(game: Game) -> _Snapshot:
     )
 
 
-def _who(seat: int, human_seat: int, bot_names: dict[int, str]) -> str:
-    """"Player N (label)" — the label is "human" or the seat's model name,
-    the same one `state_view` already puts on that seat (see
-    `GameSession.bot_names`). One form for every seat, actor or bystander,
-    rather than a special case for the human that the rest of the log has to
-    match. Lowercase to match the bot names (search2, linear805, ...).
-    Player numbers are 1-indexed for the log even though `seat` itself
-    stays 0-indexed everywhere else — "Player 0" reads as a bug to anyone
-    who isn't a programmer.
+@dataclass
+class _Event:
+    """One applied action, with everything the log could ever need to describe
+    it — held in full, redacted for nobody.
+
+    The log used to be rendered to sentences the instant an action landed,
+    from the one human's point of view, and stored that way. With more than
+    one human at a table that is not expressible: a steal names the resource
+    to the thief and the victim and hides it from everyone else, and a
+    discard spells out the cards only for the seat that lost them (see
+    `_describe` and `render_log`). One shared list of sentences cannot say two
+    different things at once, so what is stored here is the truth and the
+    hiding happens per reader instead — the same split `hexset_ui.journal`
+    already makes, one layer up.
+
+    `after` is the state the action produced, which is what most lines are
+    actually about (what a roll paid out, what a Monopoly swept). `before` is
+    kept alongside it because every one of those is a *difference*, and the
+    engine only keeps the current hand.
     """
-    label = "human" if seat == human_seat else bot_names.get(seat, "bot")
-    return f"Player {seat + 1} ({label})"
+
+    round_num: int
+    actor: int
+    action: Action
+    before: _Snapshot
+    after: _Snapshot
+    last_roll: int | None
+    # Whether an offer was still open once this action had been applied. What
+    # separates a proposal nobody was even eligible to cover (concluded on the
+    # spot, no responses ever coming) from one still waiting on them.
+    offer_open: bool
+
+
+def _who(seat: int, labels: dict[int, str]) -> str:
+    """"Player N (label)" — the label is whoever holds the seat, the player's
+    own registered name or the model name, the same one `state_view` already
+    puts on that seat (see `GameSession.seat_labels`). One form for every
+    seat, actor or bystander, rather than a special case for the reader that
+    the rest of the log has to match — and with several humans at a table,
+    "human" would no longer identify anyone anyway. Player numbers are
+    1-indexed for the log even though `seat` itself stays 0-indexed
+    everywhere else — "Player 0" reads as a bug to anyone who isn't a
+    programmer.
+    """
+    return f"Player {seat + 1} ({labels.get(seat, 'bot')})"
 
 
 def _describe(
-    game: Game,
-    actor: int,
-    action: Action,
-    before: _Snapshot,
-    human_seat: int,
-    bot_names: dict[int, str],
+    event: _Event,
+    board: Board,
+    labels: dict[int, str],
+    viewer: int | None,
 ) -> str:
-    state = game.state
+    """One event as a sentence, told to `viewer`.
+
+    `viewer` is the seat reading the log, and the only thing it changes is
+    what stays hidden: a card bought, a card stolen. Everything else reads
+    identically to everyone, including whoever wasn't at the table at all
+    (`viewer=None`), which is what a spectator or a replay gets.
+    """
+    actor, action = event.actor, event.action
+    before, after = event.before, event.after
+    num_players = len(after.hands)
     kind = action.type
-    who = _who(actor, human_seat, bot_names)
+    who = _who(actor, labels)
 
     if kind is ActionType.ROLL:
-        line = f"{who} rolled {game.last_roll}."
+        line = f"{who} rolled {event.last_roll}."
         gains = [
-            f"{_who(p, human_seat, bot_names)} collects {g}."
-            for p in range(state.num_players)
-            if (g := _hand_gains(before.hands[p], state.hands[p])) is not None
+            f"{_who(p, labels)} collects {g}."
+            for p in range(num_players)
+            if (g := _hand_gains(before.hands[p], after.hands[p])) is not None
         ]
         return " ".join([line, *gains])
 
     if kind is ActionType.SETUP_SETTLEMENT:
         line = f"{who} placed a settlement."
-        gains = _hand_gains(before.hands[actor], state.hands[actor])
+        gains = _hand_gains(before.hands[actor], after.hands[actor])
         if gains:
             line += f" {who} collects {gains}."
         return line
@@ -425,10 +428,8 @@ def _describe(
         return f"{who} built a city."
 
     if kind is ActionType.BUY_DEV_CARD:
-        gained = [
-            c for c in range(NUM_DEV_CARDS) if before.held[actor][c] < holdings(state, actor)[c]
-        ]
-        if actor == human_seat and gained:
+        gained = [c for c in range(NUM_DEV_CARDS) if before.held[actor][c] < after.held[actor][c]]
+        if actor == viewer and gained:
             return f"{who} bought a {DEV_CARD_NAMES[gained[0]]}."
         return f"{who} bought a development card."
 
@@ -437,23 +438,27 @@ def _describe(
 
     if kind in (ActionType.MOVE_ROBBER, ActionType.PLAY_KNIGHT):
         prefix = f"{who} played a Knight and " if kind is ActionType.PLAY_KNIGHT else f"{who} "
-        victim = action.b if action.b < state.num_players else None
-        line = f"{prefix}moved the robber to {_hex_label(state.board, action.a)}"
+        victim = action.b if action.b < num_players else None
+        line = f"{prefix}moved the robber to {_hex_label(board, action.a)}"
         if victim is None:
             return line + "."
-        stolen = _hand_gains(before.hands[victim], state.hands[victim])
-        if human_seat in (actor, victim) and stolen:
+        stolen = _hand_gains(before.hands[victim], after.hands[victim])
+        # Named only to the two seats who already know it — the thief saw what
+        # they took, the victim saw what left. To everyone else a steal is a
+        # card, and which one is exactly the hidden-hand information the rest
+        # of this module works to keep hidden.
+        if viewer in (actor, victim) and stolen:
             resource = next(
                 RESOURCE_NAMES[r]
                 for r in range(NUM_RESOURCES)
-                if state.hands[victim][r] < before.hands[victim][r]
+                if after.hands[victim][r] < before.hands[victim][r]
             )
-            return line + f" and stole {resource} from {_who(victim, human_seat, bot_names)}."
-        return line + f" and stole a card from {_who(victim, human_seat, bot_names)}."
+            return line + f" and stole {resource} from {_who(victim, labels)}."
+        return line + f" and stole a card from {_who(victim, labels)}."
 
     if kind is ActionType.PLAY_MONOPOLY:
         resource = RESOURCE_NAMES[action.a]
-        swept = state.hands[actor][action.a] - before.hands[actor][action.a]
+        swept = after.hands[actor][action.a] - before.hands[actor][action.a]
         return f"{who} played Monopoly on {resource} and collected {swept} card(s)."
 
     if kind is ActionType.PLAY_YEAR_OF_PLENTY:
@@ -466,18 +471,184 @@ def _describe(
     return f"{who} played {kind.name}."
 
 
+def render_log(
+    events: list[_Event],
+    board: Board,
+    labels: dict[int, str],
+    viewer: int | None,
+) -> list[str]:
+    """Every event as the sidebar transcript `viewer` should see.
+
+    A pure fold, run fresh per reader, because two humans at one table are
+    owed two different transcripts (see `_Event`). That it is recomputed
+    rather than appended to is also what makes undo trivial: dropping the
+    events drops their lines, with no separate log to wind back.
+
+    Three kinds of action arrive as a burst of engine steps that a reader
+    would only ever want as one sentence, and each collapses into a run
+    rewritten in place as it grows:
+
+      builds     one "placed/built ..." per actor per round
+      discards   one line per actor per discard, however many cards
+      bank       consecutive trades of the same pair, summed
+
+    Only ever one run is open at a time — anything that doesn't continue the
+    current one clears it, so a run can never reach back across an intervening
+    line to join something older (a second seven in the same round starts a
+    fresh discard line rather than swelling the first).
+
+    PROPOSE_TRADE is held back differently: buffered until the offer
+    concludes, then written as "accepted" naming who took it, or as a uniform
+    "Everyone declined." that never says who was asked or how many (see the
+    DECLINE_TRADE branch). END_TURN writes nothing at all.
+
+    Tab-separated, matching every other line: the client splits on the first
+    tab for the round-number column.
+    """
+    lines: list[str] = []
+    run: dict | None = None
+    trade: str | None = None
+
+    def emit(round_num: int, text: str, continuing: bool) -> None:
+        # A run is exactly one line, rewritten in place as it grows, so
+        # continuing one means replacing the line it already wrote.
+        if continuing:
+            lines.pop()
+        lines.append(f"{round_num}\t{text}")
+
+    for event in events:
+        action, actor, round_num = event.action, event.actor, event.round_num
+        kind = action.type
+        who = _who(actor, labels)
+
+        if kind in _BUILD_KIND:
+            verb, item = _BUILD_KIND[kind]
+            key = ("build", actor, round_num)
+            continuing = run is not None and run["key"] == key
+            if not continuing:
+                run = {"key": key, "verb": verb, "items": [], "extra": []}
+            run["items"].append(item)
+            if kind is ActionType.SETUP_SETTLEMENT:
+                gains = _hand_gains(event.before.hands[actor], event.after.hands[actor])
+                if gains:
+                    run["extra"].append(f"{who} collects {gains}.")
+            line = f"{who} {run['verb']} {_list_with_counts(run['items'])}."
+            emit(round_num, " ".join([line, *run["extra"]]), continuing)
+            continue
+
+        if kind is ActionType.DISCARD:
+            # The engine takes discards one card at a time (see
+            # `legal_actions` under Phase.DISCARD, which deliberately keeps
+            # the action space linear in resources rather than combinatorial
+            # in hand size), so one seven can cost a full hand half a dozen
+            # steps in a row — and for a bot every one of them said the same
+            # six words. They collapse to a single line.
+            #
+            # Which resources went is the discarding seat's own line only. A
+            # collapsed line is exactly where a whole hand would leak at once.
+            key = ("discard", actor, round_num)
+            continuing = run is not None and run["key"] == key
+            if not continuing:
+                run = {"key": key, "counts": [0] * NUM_RESOURCES}
+            run["counts"][action.a] += 1
+            total = sum(run["counts"])
+            if actor == viewer:
+                # Same wording as the "collects" half of a roll line, since
+                # it's the same fact pointed the other way.
+                line = f"{who} discarded {_resource_counts(run['counts'])}."
+            else:
+                line = f"{who} discarded {total} card{'' if total == 1 else 's'}."
+            emit(round_num, line, continuing)
+            continue
+
+        if kind is ActionType.BANK_TRADE:
+            # Ports make this the one action people repeat back to back —
+            # four wood for a wheat, then four more for another — and each
+            # step was its own line. Same pair in a row sums into one; a
+            # different pair is a different trade and starts its own (the
+            # pair is part of the run's key).
+            key = ("bank", actor, round_num, action.a, action.b)
+            continuing = run is not None and run["key"] == key
+            if not continuing:
+                run = {"key": key, "given": 0, "got": 0}
+            run["given"] += event.before.hands[actor][action.a] - event.after.hands[actor][action.a]
+            run["got"] += 1
+            line = (
+                f"{who} traded {run['given']} {RESOURCE_NAMES[action.a]} "
+                f"for {run['got']} {RESOURCE_NAMES[action.b]} with the bank."
+            )
+            emit(round_num, line, continuing)
+            continue
+
+        run = None  # anything else ends whatever run was open
+
+        if kind is ActionType.END_TURN:
+            # Whatever line comes next (the following seat's roll, build,
+            # ...) already implies the previous turn ended — a dedicated
+            # "X ended the turn." line for every single turn was pure noise,
+            # not information.
+            continue
+
+        if kind is ActionType.PROPOSE_TRADE:
+            line = _describe(event, board, labels, viewer)
+            if event.offer_open:
+                trade = line
+            else:
+                # propose_trade() found nobody eligible and concluded the
+                # offer immediately, with no ACCEPT_TRADE/DECLINE_TRADE ever
+                # coming — logged the same as the "everyone who was asked
+                # said no" case below, for the same reason: see there.
+                lines.append(f"{round_num}\t{line} Everyone declined.")
+            continue
+
+        if kind is ActionType.ACCEPT_TRADE and trade is not None:
+            lines.append(f"{round_num}\t{trade} {who} accepted.")
+            trade = None
+            continue
+
+        if kind is ActionType.DECLINE_TRADE and trade is not None:
+            if not event.offer_open:
+                # Only who's *eligible* to cover an offer is ever asked
+                # (`hexset.game.propose_trade`'s own `responders`/`willing`),
+                # in ask order, one at a time, stopping at the first accept
+                # — so naming each individual decliner, or even just their
+                # count, would tell a reader exactly how many opponents held
+                # what was wanted before the queue ran out. HexSet hands are
+                # private, so every "nobody took it" offer reads identically
+                # regardless of how many were actually asked, or whether any
+                # were: "Everyone declined." every time, full stop.
+                lines.append(f"{round_num}\t{trade} Everyone declined.")
+                trade = None
+            continue
+
+        lines.append(f"{round_num}\t{_describe(event, board, labels, viewer)}")
+
+    return lines
+
+
 # --- The session ---------------------------------------------------------------
 
 
 @dataclass
 class GameSession:
-    """One in-progress game: the engine state, the human's seat and the bot
-    playing every other seat.
+    """One in-progress game: the engine state and which seats are claimed.
 
-    All mutation goes through `apply_human_action` and `advance_bots`, and both
-    route every action through `hexset_ui.actions.apply` after checking it against
-    a fresh `legal_actions(game)` — the one enforcement point the hard
-    constraint asks for.
+    A seat is claimed or it isn't — never "a bot's" as a special case the
+    session itself knows about. A table dealt for one human against three
+    checkpoints and a table of four humans are the same object here,
+    differing only in `claimed_seats` and who's actually driving each one
+    from outside this session (a browser, an LLM over MCP, or a bot runner —
+    see `botclient.py`). Whoever holds a seat submits its actions through
+    `submit`, decides for itself when its own turn is over, and is asked for
+    per seat: whose turn it is to act, what they may legally do, what they
+    are shown, and what they may take back.
+
+    All mutation goes through `submit`, which routes every action through
+    `hexset.actions.apply` after checking it against a fresh
+    `legal_actions(game)` — the one enforcement point the hard constraint
+    asks for. Nothing runs a further seat's turn on another's behalf: there
+    is no cascade for this session to drive, only the one action a caller
+    just submitted.
 
     `seed` is the integer that seeded `game.rng`, and `journal` is where every
     action is written down as it happens, hidden cards and all (see
@@ -487,57 +658,55 @@ class GameSession:
     """
 
     game: Game
-    human_seat: int
-    bot: Bot
+    # Every seat somebody is playing, whichever kind of client it is — a
+    # browser, a script on the HTTP API, an LLM over MCP, or a bot runner
+    # (embedded or external, see `botclient.py`). Nothing here distinguishes
+    # them: a seat submits its own actions through `submit` the same way
+    # regardless of who or what is behind it, so there is no `bot: Bot` field
+    # to route a turn to any more — a bot plays by calling `submit` from
+    # outside this session, exactly as a human's client does.
+    claimed_seats: set[int]
     seed: int = 0
     journal: Journal | None = None
     # Seat -> the model-picker display name playing it, for `state_view` to
     # echo back so the client can label seats by bot rather than by number.
-    # Empty for the human seat and for any caller that never set it.
+    # Empty for human seats and for any caller that never set it.
     bot_names: dict[int, str] = field(default_factory=dict)
     # Seat -> the entrant spec that built the bot on it, which the display
     # name above does not always give back (an .onnx entry is named after its
     # file, not its path). Journalled so a resumed game can put the same
     # opponents back, and unused by play itself.
     bot_specs: dict[int, str] = field(default_factory=dict)
-    # The browser this game belongs to (`hexset_id` — see webserver), carried
-    # only so the journal can record whose game it was.
-    identity: str | None = None
+    # Seat -> whatever the person playing it registered as, for the same
+    # labelling `bot_names` does for the other seats. A seat with no entry
+    # here is one nobody named, which the log and the journal just say.
+    player_names: dict[int, str] = field(default_factory=dict)
+    # The join code of the table this game was dealt for, journalled in the
+    # header so a restart can find this game again by the code people already
+    # have. Nothing about play reads it, and a session dealt outside a table
+    # (every test, for one) has none.
+    code: str | None = None
     # Seat -> the dice total that seat rolled on its own most recent turn.
     # `game.last_roll` is one global value, whoever rolled it last; this is
     # what lets the player list show each seat's own roll instead of just
     # whoever moved most recently.
     last_roll_by_seat: dict[int, int] = field(default_factory=dict)
-    log: list[str] = field(default_factory=list)
+    # Every action applied so far, in full and unredacted — the sidebar
+    # transcript is folded out of these per reader (see `render_log`) rather
+    # than accumulated as text, because different seats are owed different
+    # accounts of the same game.
+    events: list[_Event] = field(default_factory=list)
     # How many actions have been applied, which is the step number the next
-    # one is journalled under. A count rather than the actions themselves:
-    # the journal on disk is the only thing that needs them, and it already
-    # has every one it was handed.
+    # one is journalled under. Distinct from `len(events)` only in intent:
+    # this is the journal's own numbering and follows it through an undo.
     _steps: int = field(default=0, repr=False)
-    # Set the first time the game is seen to be over, so the closing log line
-    # is written (and the game filed away) exactly once however many more
-    # times _apply runs afterwards.
+    # Set the first time the game is seen to be over, so the game is filed
+    # away exactly once however many more times _apply runs afterwards.
     _ended: bool = field(default=False, repr=False)
-    # A run of build actions by the same actor in the same round, folded
-    # into one log line instead of one each — see _log_action. Cleared by
-    # any other action from any seat.
-    _run: dict | None = field(default=None, repr=False)
-    # A trade's proposal line, held back from `log` until the offer
-    # concludes — see _log_action. `None` whenever no trade is in flight.
-    # Deliberately just the proposal, not a running list of responses:
-    # who was actually asked (and how many) is exactly the hidden-hand
-    # information a human must not be able to read off the log.
-    _trade_buffer: str | None = field(default=None, repr=False)
-    # Set only right after a human BUILD_ROAD/BUILD_SETTLEMENT/BUILD_CITY,
-    # cleared by literally anything else — see _apply and undo_last_build.
+    # The one action that could still be taken back, and by whom — set only
+    # right after a qualifying human action, cleared by anything else. See
+    # _apply and undo_last_build.
     _undo: _UndoPoint | None = field(default=None, repr=False)
-    # True only in the instant right after the human's own setup road handed
-    # the turn to someone else — the one handoff in the game with no
-    # explicit "I'm done" the way END_TURN is everywhere else. Public (no
-    # underscore) since the webserver reads it directly to decide whether to
-    # run advance_bots() itself or wait for POST /api/confirm — see
-    # apply_human_action/confirm_setup_turn.
-    awaiting_confirm: bool = field(default=False)
 
     def __post_init__(self) -> None:
         # Written here rather than on the first action because the header's
@@ -548,18 +717,54 @@ class GameSession:
             self.journal.start(
                 self.game,
                 seed=self.seed,
-                human_seat=self.human_seat,
+                # `setup_queue[0]` is `game.start`'s own `first` argument,
+                # read back off the queue it built rather than threaded
+                # through as a second copy — the two can never disagree.
+                first=self.game.setup_queue[0],
+                human_seats=sorted(self.claimed_seats),
                 bot_names=self.bot_names,
                 bot_specs=self.bot_specs,
-                identity=self.identity,
+                player_names=self.player_names,
+                code=self.code,
             )
+
+    @property
+    def seat_labels(self) -> dict[int, str]:
+        """Seat -> what to call whoever holds it, people and bots in one map.
+
+        The log and the client both want a name per seat and neither cares
+        which kind of player it belongs to, so the two sources are merged
+        here rather than at each of the half-dozen call sites. A claimed
+        seat with no bot label falls back to its own registered name, or
+        plain "player" if it never gave one: every seat gets a label, so
+        `_who` never has to invent one.
+        """
+        labels = dict(self.bot_names)
+        for seat in self.claimed_seats:
+            if seat not in labels:
+                labels[seat] = self.player_names.get(seat) or "player"
+        return labels
+
+    def claim(self, seat: int, name: str | None) -> None:
+        """A seat somebody just joined, after the deal — the one seat this
+        session's own header (see `__post_init__`) could not have named
+        because nobody had taken it yet. Journalled the same way a mid-game
+        bot swap is (`Journal.seated`, with an empty `spec` — there is no
+        checkpoint to name for a person), so a resumed table knows this seat
+        was somebody's without needing its lost token back (see `api.py`'s
+        module docstring: a token never touches disk)."""
+        self.claimed_seats.add(seat)
+        if name:
+            self.player_names[seat] = name
+        if self.journal is not None:
+            self.journal.seated(seat=seat, name=name or "", spec="")
 
     @property
     def round(self) -> int:
         """One full lap of the table, 1-indexed — what a human watching the
         log means by "turn", distinct from `game.turns`, which counts
         per-seat and stays that way (it's a trained policy input feature; see
-        hexset_ui.encoding's TURN_SCALE). Every seat's actions within a lap
+        hexset.encoding's TURN_SCALE). Every seat's actions within a lap
         share one round number, unlike `game.turns` where each gets its own.
 
         0 during setup: the placement snake isn't a lap of the table in the
@@ -596,163 +801,82 @@ class GameSession:
         if journal is not None:
             journal.reopened(at_step=self._steps)
 
-    def legal_wire_actions(self) -> list[dict]:
-        if is_over(self.game) or to_move(self.game) != self.human_seat:
+    def legal_wire_actions(self, viewer: int | None) -> list[dict]:
+        """What `viewer` may play right now — empty unless it is their turn,
+        which is also what a seat that isn't theirs, or no seat at all, gets."""
+        if is_over(self.game) or viewer is None or to_move(self.game) != viewer:
             return []
-        options = [a for a in legal_actions(self.game) if a.type is not ActionType.PROPOSE_TRADE]
-        options += _proposable_options(self.game)
-        return [action_to_wire(a) for a in options]
+        return [action_to_wire(a) for a in fair_legal_actions(self.game)]
 
-    def apply_human_action(self, wire: dict) -> None:
+    def submit(self, seat: int, wire: dict) -> None:
+        """Play `wire` as `seat`. The seat is the caller's to prove (it comes
+        off a player token, not off the request body — see `api.py`), and
+        every other check happens here — the one enforcement point every
+        client funnels through, human, LLM, or bot alike. Whoever holds
+        `seat` decides for themselves when their own turn is over (`END_TURN`
+        is a submitted action like any other); nothing here runs a further
+        seat's turn on this call's behalf."""
         if is_over(self.game):
             raise ValueError("the game is already over")
-        if to_move(self.game) != self.human_seat:
+        if seat not in self.claimed_seats:
+            raise ValueError(f"seat {seat} is not yours to play")
+        if to_move(self.game) != seat:
             raise ValueError("it is not your turn to act")
         action = wire_to_action(wire)
         options = legal_actions(self.game)
         if not is_legal(self.game, action, options):
             raise ValueError(f"{action} is not a legal action right now")
-        self._apply(self.human_seat, action)
-        # place_initial_road hands current_player straight to the next seat
-        # in the snake with no separate step of its own — unlike Main phase,
-        # where that handoff only ever happens on the human's own explicit
-        # END_TURN. advance_one_seat reads this flag directly (it's a no-op
-        # while set) so the human gets the same one-button pause before the
-        # next seat's turn as everywhere else, not a same-request cascade
-        # they never got to see, let alone react to.
-        self.awaiting_confirm = (
-            action.type is ActionType.SETUP_ROAD
-            and not is_over(self.game)
-            and to_move(self.game) != self.human_seat
-        )
-
-    def confirm_setup_turn(self) -> None:
-        """Lets the one seat `apply_human_action` held back actually take its
-        turn. A harmless no-op, not an error, if nothing is actually pending
-        — there's nothing to protect by rejecting a stale or doubled-up
-        confirm the way undo_last_build rejects a stale undo. Only that one
-        seat: if it hands off to another bot, the client's own follow-up
-        request (see `webserver.py`'s `POST /api/advance`) picks that up,
-        same as after any other action."""
-        self.awaiting_confirm = False
-        self.advance_one_seat()
-
-    def _default_ask_order(self, proposer: int) -> tuple[int, ...]:
-        """Who to ask first when a proposer didn't say: lowest victory
-        points, tied broken by fewest development cards, then random —
-        trading with whoever's behind rather than the engine's own neutral
-        default (`ask=()`, clockwise seat order — see
-        `hexset_ui.game.propose_trade`'s docstring). Applied to every seat's
-        proposals in `_apply`, not just the human's: no bot sets `ask`
-        itself today (a training-side gap, not something to paper over
-        here), so leaving this human-only would have meant every bot kept
-        the engine's neutral default while only the human got the better
-        one.
-
-        Victory points are `public_victory_points`, not the true count: a
-        hidden victory-point development card is exactly the information the
-        real board wouldn't hand the proposer either, so this shouldn't see
-        it. Dev card *count* has no such issue — that stack is visible
-        whatever's in it.
-        """
-        state = self.game.state
-        others = [p for p in range(state.num_players) if p != proposer]
-        random.Random().shuffle(others)  # only breaks byte-for-byte ties below
-        others.sort(key=lambda p: (public_victory_points(state, p), sum(holdings(state, p))))
-        return tuple(others)
-
-    def advance_one_seat(self) -> bool:
-        """Plays exactly one seat's whole turn — however many individual
-        actions that takes (roll, trades, builds, buys, ..., END_TURN) — then
-        stops, even if the next seat is also a bot. Returns False, doing
-        nothing, once it's already the human's turn or the game is over — a
-        caller can loop on this return value without tracking whose turn it
-        is itself.
-
-        Says nothing about `awaiting_confirm`: like `advance_bots` before it,
-        that gate is the caller's to apply (see `webserver.py`'s
-        `_handle_action`/`_handle_advance`), not this method's — a setup
-        road's handoff should hold here exactly as long as it held the old
-        whole-cascade call, no longer and no shorter.
-
-        The per-seat counterpart to `advance_bots`: one call here is one
-        seat's turn, which is what a client driving the cascade one request
-        at a time wants (see `webserver.py`'s `POST /api/advance`) instead of
-        the whole cascade landing behind a single response.
-        """
-        if is_over(self.game) or to_move(self.game) == self.human_seat:
-            return False
-        seat = to_move(self.game)
-        steps = 0
-        while not is_over(self.game) and to_move(self.game) == seat:
-            if steps >= MAX_CASCADE_STEPS:
-                raise RuntimeError(
-                    f"seat {seat}'s turn did not yield within {MAX_CASCADE_STEPS} actions"
-                )
-            options = legal_actions(self.game)
-            action = self.bot.choose(self.game)
-            if not is_legal(self.game, action, options):
-                raise RuntimeError(f"bot chose an action legal_actions did not offer: {action}")
-            self._apply(seat, action)
-            steps += 1
-        return True
-
-    def advance_bots(self) -> None:
-        """The whole cascade in one call — still used wherever a single
-        request already has to include it (dealing a fresh table whose setup
-        snake doesn't start with the human, resuming a session mid-cascade):
-        see the callers in `webserver.py`. Everywhere else drives
-        `advance_one_seat` directly, one seat and one response at a time."""
-        seats = 0
-        while self.advance_one_seat():
-            seats += 1
-            if seats >= MAX_CASCADE_STEPS:
-                raise RuntimeError(
-                    f"bot cascade did not yield the turn within {MAX_CASCADE_STEPS} seat turns"
-                )
+        self._apply(seat, action)
 
     def _apply(self, actor: int, action: Action) -> None:
-        # Every seat's proposal gets the same treatment — human or bot,
-        # whichever `actor` is — since this is the one choke point both
-        # apply_human_action and advance_bots funnel every action through.
-        if action.type is ActionType.PROPOSE_TRADE and not action.ask:
-            action = action._replace(ask=self._default_ask_order(actor))
         # Captured before apply(), not after: end_turn() increments
         # game.turns (and so self.round, derived from it), so the line for
         # the END_TURN action itself would otherwise be prefixed with the
         # *next* round's number instead of the one that just ended.
         round_num = self.round
         before = _snapshot(self.game)
-        undoable = actor == self.human_seat and action.type in _UNDOABLE_BUILDS
+        # Any claimed seat's own build/placement/trade is its own to take
+        # back — bot or human, no special case: nothing here privileges one
+        # kind of client over another (see `submit`).
+        undoable = action.type in _UNDOABLE_BUILDS
         # Taken before apply() runs, alongside `before` above, for the same
         # reason: it has to be the instant *before* this action, and nothing
-        # between here and apply() touches state/log/_run/_steps.
-        # self._run is whatever run was open *before* this action — a build
-        # run from earlier this same round, a bank-trade or discard run left
-        # over from something else entirely, or None — not necessarily a
-        # build-shaped dict, since _run_for only replaces it once _log_action
-        # runs for *this* action, further down. copy.deepcopy rather than
-        # reaching into it by name is what makes this correct regardless of
-        # which kind it happens to be.
+        # between here and apply() touches state/events/_steps.
         undo_point = (
             _UndoPoint(
                 state=copy_state(self.game.state),
+                ledger=self.game.ledger.copy(),
                 free_roads=self.game.free_roads,
                 phase=self.game.phase,
                 current_player=self.game.current_player,
                 setup_step=self.game.setup_step,
                 last_settlement=self.game.last_settlement,
-                log=list(self.log),
-                run=copy.deepcopy(self._run),
+                events=len(self.events),
                 steps=self._steps,
+                actor=actor,
             )
             if undoable
             else None
         )
+        seating_before = snapshot(self.game)
         apply(self.game, action)
+        # `hexset.game` deals the setup snake from seat 0 and rotates turns
+        # `(p + 1) % n`; this table starts the snake at its creator and
+        # retires seats nobody claimed. See `hexset_ui.seating`.
+        settle(self.game, seating_before)
         if action.type is ActionType.ROLL:
             self.last_roll_by_seat[actor] = self.game.last_roll
-        self._log_action(round_num, actor, action, before)
+        self.events.append(
+            _Event(
+                round_num=round_num,
+                actor=actor,
+                action=action,
+                before=before,
+                after=_snapshot(self.game),
+                last_roll=self.game.last_roll,
+                offer_open=self.game.offer is not None,
+            )
+        )
 
         if self.journal is not None:
             self.journal.action(
@@ -768,227 +892,106 @@ class GameSession:
 
         if is_over(self.game) and not self._ended:
             self._ended = True
-            self._log_result(round_num)
             if self.journal is not None:
                 self.journal.finish(self.game)
 
-        # Every action decides this fresh: a qualifying human placement that
-        # didn't win the game becomes the new (and only) undo point, anything
-        # else — a bot's move, a second placement — clears whatever was
-        # there. A win is excluded because the record above may already be
-        # on disk by now. Correct even for a setup road handing off to a
-        # bot: apply_human_action holds that handoff's advance_bots() back
-        # until confirm_setup_turn (see awaiting_confirm), so no bot action
-        # ever actually runs between the human's placement and their chance
-        # to undo it.
+        # Every action decides this fresh: a qualifying placement that didn't
+        # win the game becomes the new (and only) undo point, anything else
+        # — a different seat's move, a second placement — clears whatever
+        # was there. A win is excluded because the record above may already
+        # be on disk by now.
         self._undo = undo_point if (undo_point is not None and not is_over(self.game)) else None
 
-    def undo_last_build(self) -> None:
-        """Reverts the human's most recent placement, bank/port trade, or
-        Road Building play back to exactly how the session stood the instant
+    def undo_last_build(self, seat: int) -> None:
+        """Reverts `seat`'s most recent placement, bank/port trade, or Road
+        Building play back to exactly how the session stood the instant
         before it: piece removed and resources refunded (including a second
         setup settlement's grant) or traded resources returned, or the card
         handed back and free_roads zeroed, longest road/largest army
         recomputed from the restored board, whose turn it is un-advanced if
-        the action handed off to someone else, log line shortened or
-        dropped, step count wound back. Only ever available since the
-        human's own last qualifying action — see _apply.
+        the action handed off to someone else, the event (and so its log
+        line) dropped, step count wound back. Only ever available since that
+        seat's own last qualifying action — see _apply.
+
+        Somebody else's undoable action is not offered here even though the
+        session only ever holds one: at a table with several people, the most
+        recent take-back-able move frequently belongs to a different player,
+        and reaching it would rewind the board out from under them.
 
         The journal is the one thing not reverted: it is append-only, so the
         undo goes into it as its own entry (see `journal.Journal.undo`).
         """
-        if self._undo is None:
+        if self._undo is None or self._undo.actor != seat:
             raise ValueError("nothing to undo")
         point = self._undo
+        if point.ledger is None:  # pragma: no cover -- defensive, see the docstring
+            raise ValueError("this action cannot be undone")
         self.game.state = point.state
+        self.game.ledger = point.ledger
         self.game.free_roads = point.free_roads
         self.game.phase = point.phase
         self.game.current_player = point.current_player
         self.game.setup_step = point.setup_step
         self.game.last_settlement = point.last_settlement
-        self.log = point.log
-        self._run = point.run
+        del self.events[point.events :]
         self._steps = point.steps
         if self.journal is not None:
             self.journal.undo(self.game, back_to=point.steps)
         self._undo = None
-        # A setup road is the only action that ever sets this, and only
-        # after it runs — so whatever's being undone, it was false going
-        # in. Left alone, undoing a road would leave it stuck true: to_move
-        # is back to the human (the whole point), but the client would
-        # still show the confirm button over the real board instead.
-        self.awaiting_confirm = False
 
-    def _run_for(self, kind: str, key: tuple, fresh: dict) -> tuple[dict, bool]:
-        """The open run for `key`, or a new one seeded from `fresh`.
-
-        Returns `(run, continuing)`. When continuing, the last line in the
-        log is this run's own and the caller's rewritten line replaces it
-        rather than following it — which is the whole trick: a run is always
-        exactly one line, rewritten in place as it grows.
-
-        Only ever one run open at a time. Anything that doesn't continue the
-        current one replaces or clears it (see `_log_action`), so a run can
-        never reach back across an intervening line to join something older
-        — a second seven in the same round starts a fresh discard line
-        rather than swelling the first.
-        """
-        run = self._run
-        if run is not None and run["kind"] == kind and run["key"] == key:
-            return run, True
-        self._run = {"kind": kind, "key": key, **fresh}
-        return self._run, False
-
-    def _log_run(self, round_num: int, line: str, continuing: bool) -> None:
-        if continuing:
-            self.log.pop()
-        self.log.append(f"{round_num}\t{line}")
-
-    def _log_result(self, round_num: int) -> None:
-        """The closing line, written once the game is over.
+    def _log_result(self, round_num: int) -> str:
+        """The closing line, appended once the game is over.
 
         The board itself already says who won — the client draws it across the
         phase banner — but the log is the only part of a game that outlives it
         on disk, and a transcript that stops mid-turn without saying how it
         ended is no use for counting anything afterwards. Names the winner the
-        same way every other line names a seat, so "(human)" is what a reader
-        (or a grep) matches on.
+        same way every other line names a seat.
         """
         winner = self.game.won_by
         if winner is None:
-            self.log.append(f"{round_num}\tGame over. Nobody won.")
-            return
-        who = _who(winner, self.human_seat, self.bot_names)
+            return f"{round_num}\tGame over. Nobody won."
+        who = _who(winner, self.seat_labels)
         points = victory_points(self.game.state, winner)
-        self.log.append(f"{round_num}\t{who} wins with {points} points.")
+        return f"{round_num}\t{who} wins with {points} points."
 
-    def _log_action(self, round_num: int, actor: int, action: Action, before: _Snapshot) -> None:
-        """Appends this action's line to `self.log`.
+    def _public_mover(self, viewer: int | None) -> int:
+        """Whose move it is, as `viewer` may be told.
 
-        Three kinds of action arrive as a burst of engine steps that a reader
-        would only ever want as one sentence, and each collapses into a run
-        (see `_run_for`) rewritten in place as it grows:
+        Everywhere but `TRADE_RESPOND` this is just `to_move`. During
+        `TRADE_RESPOND` it is not: `game.pending_responders` is
+        `trading.responders(...)`, the seats that **can cover the offer**, so
+        publishing its head tells every poller — the token-free observer
+        included — exactly who is holding the wanted card and who was skipped.
+        That is a hand's composition, on the wire, for free; the offer block
+        already omits `responders` for precisely this reason
+        (`hexset_ui.rules`, and PR #2 defect 3).
 
-          builds     one "placed/built ..." per actor per round
-          discards   one line per actor per discard, however many cards
-          bank       consecutive trades of the same pair, summed
-
-        PROPOSE_TRADE is held back differently — buffered in `_trade_buffer`
-        and only written once the whole offer concludes, as "accepted" naming
-        who took it or as a uniform "Everyone declined." that never says who
-        was asked or how many (see those branches for why). END_TURN writes
-        nothing at all.
-
-        Tab-separated, matching every other line: the client splits on the
-        first tab for the round-number column.
+        A responder is told their own seat, because they have to act on it.
+        Everyone else is told the **proposer**, which is public — the offer
+        block names them — and which is also the seat the phase is really
+        about. The alternative, `None`, would break every client's "am I on
+        move?" test and read as "the game is over".
         """
-        kind = action.type
-        who = _who(actor, self.human_seat, self.bot_names)
+        game = self.game
+        if is_over(game):
+            return game.current_player
+        mover = to_move(game)
+        if game.phase is not Phase.TRADE_RESPOND or game.offer is None:
+            return mover
+        return mover if viewer == mover else game.offer.proposer
 
-        if kind in _BUILD_KIND:
-            verb, item = _BUILD_KIND[kind]
-            run, continuing = self._run_for(
-                "build", (actor, round_num), {"verb": verb, "items": [], "extra": []}
-            )
-            run["items"].append(item)
-            if kind is ActionType.SETUP_SETTLEMENT:
-                gains = _hand_gains(before.hands[actor], self.game.state.hands[actor])
-                if gains:
-                    run["extra"].append(f"{who} collects {gains}.")
-            line = f"{who} {run['verb']} {_list_with_counts(run['items'])}."
-            self._log_run(round_num, " ".join([line, *run["extra"]]), continuing)
-            return
+    def state_view(self, viewer: int | None = None) -> dict:
+        """The whole game as `viewer` is allowed to see it.
 
-        if kind is ActionType.DISCARD:
-            # The engine takes discards one card at a time (see
-            # `legal_actions` under Phase.DISCARD, which deliberately keeps
-            # the action space linear in resources rather than combinatorial
-            # in hand size), so one seven can cost a full hand half a dozen
-            # steps in a row — and for a bot every one of them said the same
-            # six words. They collapse to a single line.
-            #
-            # Which resources went is the human's own line only. `_describe`
-            # drew that line for a single discard and it matters more here,
-            # not less: a collapsed line is exactly where a whole hand would
-            # leak at once.
-            run, continuing = self._run_for(
-                "discard", (actor, round_num), {"counts": [0] * NUM_RESOURCES}
-            )
-            run["counts"][action.a] += 1
-            total = sum(run["counts"])
-            if actor == self.human_seat:
-                # Same wording as the "collects" half of a roll line, since
-                # it's the same fact pointed the other way.
-                line = f"{who} discarded {_resource_counts(run['counts'])}."
-            else:
-                line = f"{who} discarded {total} card{'' if total == 1 else 's'}."
-            self._log_run(round_num, line, continuing)
-            return
-
-        if kind is ActionType.BANK_TRADE:
-            # Ports make this the one action people repeat back to back —
-            # four wood for a wheat, then four more for another — and each
-            # step was its own line. Same pair in a row sums into one; a
-            # different pair is a different trade and starts its own (the
-            # pair is part of the run's key).
-            given = before.hands[actor][action.a] - self.game.state.hands[actor][action.a]
-            run, continuing = self._run_for(
-                "bank", (actor, round_num, action.a, action.b), {"given": 0, "got": 0}
-            )
-            run["given"] += given
-            run["got"] += 1
-            line = (
-                f"{who} traded {run['given']} {RESOURCE_NAMES[action.a]} "
-                f"for {run['got']} {RESOURCE_NAMES[action.b]} with the bank."
-            )
-            self._log_run(round_num, line, continuing)
-            return
-
-        self._run = None  # anything else ends whatever run was open
-
-        if kind is ActionType.END_TURN:
-            # Whatever line comes next (the following seat's roll, build,
-            # ...) already implies the previous turn ended — a dedicated
-            # "X ended the turn." line for every single turn was pure noise,
-            # not information.
-            return
-
-        if kind is ActionType.PROPOSE_TRADE:
-            line = _describe(self.game, actor, action, before, self.human_seat, self.bot_names)
-            if self.game.offer is None:
-                # propose_trade() found nobody eligible and concluded the
-                # offer immediately, with no ACCEPT_TRADE/DECLINE_TRADE ever
-                # coming — logged the same as the "everyone who was asked
-                # said no" case below, for the same reason: see there.
-                self.log.append(f"{round_num}\t{line} Everyone declined.")
-            else:
-                self._trade_buffer = line
-            return
-
-        if kind is ActionType.ACCEPT_TRADE and self._trade_buffer is not None:
-            self.log.append(f"{round_num}\t{self._trade_buffer} {who} accepted.")
-            self._trade_buffer = None
-            return
-
-        if kind is ActionType.DECLINE_TRADE and self._trade_buffer is not None:
-            if self.game.offer is None:
-                # Only who's *eligible* to cover an offer is ever asked
-                # (`hexset_ui.game.propose_trade`'s own `responders`/`willing`),
-                # in ask order, one at a time, stopping at the first accept
-                # — so naming each individual decliner, or even just their
-                # count, would tell a human exactly how many opponents held
-                # what was wanted before the queue ran out. HexSet hands are
-                # private, so every "nobody took it" offer reads identically
-                # regardless of how many were actually asked, or whether any
-                # were: "Everyone declined." every time, full stop.
-                self.log.append(f"{round_num}\t{self._trade_buffer} Everyone declined.")
-                self._trade_buffer = None
-            return
-
-        line = _describe(self.game, actor, action, before, self.human_seat, self.bot_names)
-        self.log.append(f"{round_num}\t{line}")
-
-    def state_view(self) -> dict:
+        `viewer` is a seat at this table, or `None` for someone watching
+        without one. It decides three things and nothing else: whose hand and
+        true victory-point count come back in full, which seat's port ratios
+        the trade panel gets, and how the transcript redacts (see
+        `render_log`). Everything else here is public and identical to every
+        reader, which is why it is computed once regardless of who is asking.
+        """
+        labels = self.seat_labels
         game = self.game
         state = game.state
         over = is_over(game)
@@ -997,10 +1000,12 @@ class GameSession:
         # visible on the board/in front of everyone, unlike hand contents.
         lengths = road_lengths(state)
         for p in range(state.num_players):
-            reveal = over or p == self.human_seat
+            reveal = over or p == viewer
+            seat_ledger = game.ledger.seats[p]
             entry = {
                 "seat": p,
                 "bot": self.bot_names.get(p),
+                "name": labels.get(p),
                 "last_roll": self.last_roll_by_seat.get(p),
                 "victory_points": victory_points(state, p)
                 if reveal
@@ -1011,6 +1016,14 @@ class GameSession:
                 "largest_army": state.largest_army_holder == p,
                 "hand_size": sum(state.hands[p]),
                 "dev_card_count": sum(holdings(state, p)),
+                # The public-knowledge ledger (`hexset.ledger`) — public
+                # for every seat, reveal or not: resource *counting* is not
+                # hidden information in this game, only a steal's identity
+                # and dev-card types are (see `ledger.py`'s module
+                # docstring). `known` is a certified per-resource floor;
+                # `unknown` is what the public log can't yet type.
+                "known": dict(zip(RESOURCE_NAMES, seat_ledger.known)),
+                "unknown": seat_ledger.unknown,
             }
             if reveal:
                 entry["hand"] = dict(zip(RESOURCE_NAMES, state.hands[p]))
@@ -1027,26 +1040,37 @@ class GameSession:
                 # exactly who's eligible to cover the offer, in ask order —
                 # sending it live, before anyone has actually responded,
                 # would leak the same hidden hand information the log fix
-                # (see _log_action) exists to hide, just earlier and over a
-                # different channel. Nothing on the client reads it either.
+                # (see render_log) exists to hide, just earlier and over a
+                # different channel.
             }
+            # Who has already declined — the proposer's own information
+            # only (see `record.py:build_record`'s identical filtering): a
+            # responder must not condition on an earlier decline.
+            if viewer is not None and viewer == game.offer.proposer:
+                declined = set(offer_responders(state, game.offer)) - set(game.pending_responders)
+                offer["answered"] = sorted(declined)
 
         return {
             "phase": game.phase.name,
+            # Not filtered, and does not need to be: during TRADE_RESPOND
+            # `game.current_player` is still the *proposer* (the turn is
+            # theirs; only the decision moved), and the offer block names the
+            # proposer anyway. It is `to_move` that says who was asked.
             "current_player": game.current_player,
-            "to_move": None if over else to_move(game),
-            "human_seat": self.human_seat,
+            "to_move": None if over else self._public_mover(viewer),
+            "seat": viewer,
+            "claimed_seats": sorted(self.claimed_seats),
+            # Seats the setup snake reached while still empty and waited out
+            # — permanently retired, for good, from this game (see
+            # `hexset_ui.seating.lock_seat`). `api.Table.join` refuses one of
+            # these the same way it refuses an already-occupied seat.
+            "locked": sorted(locked_of(game)),
             "winner": game.won_by,
             "game_over": over,
             # Whether POST /api/undo would succeed right now — see
             # undo_last_build. A session convenience, not a rule, so it isn't
-            # in legal_actions alongside everything hexset_ui.actions offers.
-            "can_undo": self._undo is not None,
-            # True while a setup road's handoff is waiting on POST
-            # /api/confirm — see apply_human_action. `to_move` already moved
-            # on to whoever's next by this point, so the client reads this
-            # (not to_move) to know the human still has a decision to make.
-            "awaiting_confirm": self.awaiting_confirm,
+            # in legal_actions alongside everything hexset.actions offers.
+            "can_undo": self._undo is not None and self._undo.actor == viewer,
             # "round" — one lap of the table — not game.turns' per-seat count
             # (see the `round` property docstring). The only client reader
             # is the sidebar log's current-round filter, which now needs
@@ -1060,11 +1084,21 @@ class GameSession:
             "bank": dict(zip(RESOURCE_NAMES, state.bank)),
             "dev_cards_remaining": len(state.deck),
             "discard_quota": list(game.discard_quota),
-            "trade_ratios": dict(
-                zip(RESOURCE_NAMES, trade_ratios(state, self.human_seat))
-            ),
+            "trade_ratios": dict(zip(RESOURCE_NAMES, trade_ratios(state, viewer)))
+            if viewer is not None
+            else {},
             "players": players,
             "offer": offer,
-            "legal_actions": self.legal_wire_actions(),
-            "log": self.log,
+            "legal_actions": self.legal_wire_actions(viewer),
+            "log": self.log_for(viewer),
         }
+
+    def log_for(self, viewer: int | None) -> list[str]:
+        """The sidebar transcript as `viewer` should see it, `None` for a
+        spectator, who is owed the least of anyone (see `render_log`)."""
+        lines = render_log(self.events, self.game.state.board, self.seat_labels, viewer)
+        if is_over(self.game):
+            # The round the final action fell in, not self.round: a game that
+            # ended on an END_TURN has already ticked over to the next one.
+            lines.append(self._log_result(self.events[-1].round_num if self.events else 0))
+        return lines

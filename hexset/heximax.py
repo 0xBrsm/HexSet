@@ -1035,10 +1035,7 @@ class Heximax:
         if depth == 1 or self.width is None or len(options) <= self.width:
             return self._best_of(game, options, depth, mover, knower, ply)
         ranked = sorted(
-            (
-                (self._rank(self._after(game, a, 1, knower, ply), mover), a)
-                for a in options
-            ),
+            ((self._rank(self._after(game, a, 1, knower, ply), mover), a) for a in options),
             key=lambda pair: -pair[0],
         )
         beam = [a for _, a in ranked[: self.width]]
@@ -1065,6 +1062,12 @@ class Heximax:
 
     # --- trade --------------------------------------------------------------
 
+    def _vector(self, state: GameState, ledger: PublicLedger, knower: int) -> list[float]:
+        """The per-seat vector for `state`, read through `knower`'s own belief
+        (its hand exact, everyone else's `expected_hand`)."""
+        belief = Belief(state, ledger, knower, omniscient=self.omniscient)
+        return self.evaluator.evaluate(state, knower, belief)
+
     def _read_row(
         self,
         state: GameState,
@@ -1075,22 +1078,12 @@ class Heximax:
         *,
         vector: list[float] | None = None,
     ) -> float:
-        """`target`'s row of the vector, honestly through `knower`'s belief.
-
-        The belief and the evaluated vector are always built from `knower`'s
-        own information set (its hand exact, everyone else's `expected_hand`)
-        -- `target` included, even when `target != knower`. Reading a row
-        other than the belief's own owner is how the valuation ever
-        estimates "what would someone else do" without looking at that
-        someone's true hand: see `_partner_delta`.
-
-        `vector`, when given, skips rebuilding the belief and re-running
-        `evaluate` for a caller that already has it for this exact triple
-        (see `_before_vector`).
-        """
+        """`target`'s row of `knower`'s vector, under `rank` -- how the
+        valuation ever estimates "what would someone else do" without
+        reading that someone's true hand, see `_partner_delta`. `vector`,
+        when given, skips rebuilding it for a caller that already has it."""
         if vector is None:
-            belief = Belief(state, ledger, knower, omniscient=self.omniscient)
-            vector = self.evaluator.evaluate(state, knower, belief)
+            vector = self._vector(state, ledger, knower)
         return rank(vector, target)
 
     def _read(
@@ -1101,28 +1094,17 @@ class Heximax:
         *,
         vector: list[float] | None = None,
     ) -> float:
-        """`seat`'s own row of the vector, under the bot's configured stance.
-
-        `_read_row(state, ledger, seat, seat, self._rank, vector=vector)` --
-        `knower == target == seat`, the common case every valuation method
-        that isn't comparing what a trade does for one seat against another
-        seat's own reading uses (`rank_partners` and `score_proposal`'s
-        `willing` read a row other than their own, so they call
-        `_partner_delta`/`_read_row` directly with an explicit `rank`
-        instead).
-        """
+        """`seat`'s own row of the vector, under the bot's configured stance
+        (`_read_row` with `knower == target == seat`) -- the common case
+        every valuation method that isn't comparing seats uses; the others
+        call `_partner_delta` directly with an explicit `rank`."""
         return self._read_row(state, ledger, seat, seat, self._rank, vector=vector)
 
     def _before_vector(self, game: Game, seat: int) -> list[float]:
-        """The per-seat vector for `game`'s own, unmutated state, `seat`'s belief.
-
-        Every "before" read inside one `propose_actions` call is this exact
-        triple, `(game.state, game.ledger, knower=seat)` -- see
-        `_partner_delta`'s `before_vector` paragraph for which callers share
-        it and why that is safe.
-        """
-        belief = Belief(game.state, game.ledger, seat, omniscient=self.omniscient)
-        return self.evaluator.evaluate(game.state, seat, belief)
+        """`game`'s own, unmutated vector under `seat`'s belief -- the
+        `before_vector` every call in one `propose_actions` shares, see
+        `_partner_delta`."""
+        return self._vector(game.state, game.ledger, seat)
 
     def marginal_gain(
         self, game: Game, seat: int, resource: int, *, before_vector: list[float] | None = None
@@ -1338,15 +1320,7 @@ class Heximax:
         deficits = list(range(NUM_RESOURCES))
         surpluses = [r for r in range(NUM_RESOURCES) if hand[r] > 0]
 
-        give_options: list[Bundle] = [
-            _one_hot(r, n) for r in surpluses for n in range(1, min(max_side, hand[r]) + 1)
-        ]
-        if max_side >= 2:
-            give_options.extend(
-                _two_hot(r1, r2)
-                for i, r1 in enumerate(surpluses)
-                for r2 in surpluses[i + 1 :]
-            )
+        give_options = _bundle_options(surpluses, max_side, cap=lambda r: hand[r])
         ratios = trade_ratios(state, seat)
         for r in surpluses:
             if ratios[r] < BANK_TRADE_RATIO and hand[r] >= 2:
@@ -1354,15 +1328,7 @@ class Heximax:
                 if ported not in give_options:
                     give_options.append(ported)
 
-        want_options: list[Bundle] = [
-            _one_hot(r, n) for r in deficits for n in range(1, max_side + 1)
-        ]
-        if max_side >= 2:
-            want_options.extend(
-                _two_hot(r1, r2)
-                for i, r1 in enumerate(deficits)
-                for r2 in deficits[i + 1 :]
-            )
+        want_options = _bundle_options(deficits, max_side)
 
         seen: set[tuple[Bundle, Bundle]] = set()
         out: list[tuple[Bundle, Bundle]] = []
@@ -1628,6 +1594,18 @@ def _two_hot(r1: int, r2: int) -> Bundle:
     out[r1] += 1
     out[r2] += 1
     return tuple(out)
+
+
+def _bundle_options(resources: list[int], max_side: int, *, cap=None) -> list[Bundle]:
+    """One-hot bundles of each resource up to `max_side` (or `cap(r)` if
+    given), plus every two-hot pair once `max_side >= 2`."""
+    size = (lambda r: min(max_side, cap(r))) if cap else (lambda r: max_side)
+    options = [_one_hot(r, n) for r in resources for n in range(1, size(r) + 1)]
+    if max_side >= 2:
+        options.extend(
+            _two_hot(r1, r2) for i, r1 in enumerate(resources) for r2 in resources[i + 1 :]
+        )
+    return options
 
 
 def heximax(

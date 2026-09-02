@@ -27,17 +27,26 @@ import time
 from dataclasses import dataclass, replace
 from math import sqrt
 from multiprocessing import Pool
-from typing import Callable, Sequence
+from typing import TYPE_CHECKING, Callable, Sequence
 
 from .actions import apply
 from .board.board import Board, random_base_board
 from .board.topology import Topology
-from .bots import Bot, RandomBot, SearchBot, greedy
-from .evaluate import Evaluator
-from .evaluate_tiered import Evaluator as TieredEvaluator
 from .game import Game, is_over, start, to_move
 from .placement import PlacementBot
 from .victory import victory_points
+
+if TYPE_CHECKING:
+    # `Bot` is annotation-only here (`from __future__ import annotations`
+    # makes every annotation a string) -- never imported for real. The three
+    # names `_spawn` actually calls at runtime (`RandomBot`, `SearchBot`,
+    # `greedy`) are imported locally inside `_spawn` instead of at module
+    # level, because `hexset.bots` now imports `heximax`, which imports
+    # this module back (for `Entrant`/`register_entrant_kind`/
+    # `register_preset`) -- a module-level `from .bots import ...` here
+    # would deadlock that cycle on whichever of the two is cold-started
+    # first. See `heximax`'s own module docstring for the full cycle.
+    from .bots import Bot
 
 Z_95 = 1.959964
 
@@ -195,7 +204,38 @@ class Entrant:
         return replace(self, name=name)
 
 
-EVALUATORS = {"default": Evaluator, "tiered": TieredEvaluator}
+# `Evaluator`/`TieredEvaluator` are not imported at module level, and
+# `EVALUATORS` is not a module-level literal -- see `_evaluators` below for
+# why: `hexset.bots` now imports `heximax`, which imports this module back
+# for `Entrant`/`register_entrant_kind`/`register_evaluator_provider`/
+# `register_preset`.
+_EVALUATORS: dict[str, type] | None = None
+
+
+def _evaluators() -> dict[str, type]:
+    """`{"default": Evaluator, "tiered": TieredEvaluator}`, built on first use
+    and cached.
+
+    Deferred rather than a module-level import + literal: a module-level
+    `from .evaluate import Evaluator` would resolve through the
+    `hexset.evaluate` shim into `hexset.bots.evaluate`, which -- because
+    `hexset.bots.evaluate` is a submodule of the `hexset.bots` *package* --
+    requires `hexset/bots/__init__.py` to finish running first, and that
+    module now imports `heximax`, which imports this module back for the
+    four names above. A module-level import here would deadlock that cycle
+    on whichever of `hexset.arena`/`hexset.tuning` is cold-started first, so
+    the whole dependency is pushed to first use, well after every module
+    involved has finished importing. See `heximax`'s own module docstring
+    for the full cycle and why `hexset.mcts` carries the same pattern for
+    `STANCES`.
+    """
+    global _EVALUATORS
+    if _EVALUATORS is None:
+        from .evaluate import Evaluator
+        from .evaluate_tiered import Evaluator as TieredEvaluator
+
+        _EVALUATORS = {"default": Evaluator, "tiered": TieredEvaluator}
+    return _EVALUATORS
 
 PRESETS: dict[str, Entrant] = {
     "random": Entrant("random", kind="random"),
@@ -253,6 +293,8 @@ def spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
 
 
 def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
+    from .bots import RandomBot, SearchBot, greedy
+
     if entrant.kind == "random":
         return RandomBot(rng)
     if entrant.kind in _ENTRANT_KIND_FACTORIES:
@@ -269,10 +311,10 @@ def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
             max_offers = getattr(evaluator, "max_offers", None)
     elif entrant.evaluator in _NETWORK_EVALUATORS:
         raise ValueError(f"evaluator {entrant.evaluator!r} {_HEXNET_HINT}")
-    elif entrant.evaluator not in EVALUATORS:
+    elif entrant.evaluator not in _evaluators():
         raise ValueError(f"unknown evaluator: {entrant.evaluator}")
     else:
-        evaluator = EVALUATORS[entrant.evaluator](board, entrant.weights)
+        evaluator = _evaluators()[entrant.evaluator](board, entrant.weights)
 
     if entrant.kind == "greedy":
         return greedy(

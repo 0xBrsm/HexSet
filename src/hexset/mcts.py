@@ -76,7 +76,6 @@ from .actions import (
     victim_of,
     within_offer_budget,
 )
-from .bots import STANCES
 from .game import ROLL_ODDS, Game, imagine, is_over, roll_dice, to_move
 from .victory import relative_points, victory_points
 
@@ -302,6 +301,13 @@ class Search:
         noise_fraction: float = 0.25,
         rng: random.Random | None = None,
     ) -> None:
+        # `STANCES` is imported here, not at module level: `hexset.bots` now
+        # imports `heximax`, which imports `hexset.mcts` back (`draws_hidden`)
+        # -- a module-level `from .bots import STANCES` would deadlock that
+        # cycle on whichever of the two is cold-started first. See
+        # `heximax`'s own module docstring for the full cycle.
+        from .bots import STANCES
+
         if stance not in STANCES:
             raise ValueError(f"unknown stance: {stance}")
         if simulations < 1 or wave < 1:

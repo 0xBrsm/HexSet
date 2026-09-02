@@ -24,8 +24,6 @@ from dataclasses import dataclass, fields, replace
 from typing import Callable
 
 from .arena import Z_95, Entrant, compete, wilson
-from .evaluate import Weights
-from .evaluate_tiered import Weights as TieredWeights
 
 # Pinned so the search cannot wander along the scale direction. A position's
 # score is only ever compared with another position's, so the unit is free.
@@ -38,11 +36,33 @@ ACCEPT_Z = 1.0
 
 # Which weights go with which evaluation. The two greedy/search evaluations do
 # not share a term set — that is the point of keeping both — so a fit is
-# always for one of them.
-WEIGHTS = {
-    "default": Weights,
-    "tiered": TieredWeights,
-}
+# always for one of them. `"default"`/`"tiered"` are seeded lazily by
+# `_seed_default_weights` (see there) rather than at module level, so
+# `Weights`/`TieredWeights` are not imported here at module level either.
+WEIGHTS: dict[str, Callable[[], "Weights"]] = {}
+
+
+def _seed_default_weights() -> None:
+    """Populates `WEIGHTS["default"]`/`WEIGHTS["tiered"]` on first use.
+
+    Not a module-level `from .evaluate import Weights` + literal: that would
+    resolve through the `hexset.evaluate` shim into `hexset.bots.evaluate`,
+    which -- because it is a submodule of the `hexset.bots` package --
+    requires `hexset/bots/__init__.py` to finish running first, and that
+    module now imports `heximax`, which imports this module back for
+    `register_heximax_evaluator`. A module-level import here would deadlock
+    that cycle on whichever of `hexset.arena`/`hexset.tuning` is
+    cold-started first (`hexset.arena` carries the identical pattern, as
+    `_evaluators`; see its docstring for the full cycle), so the dependency
+    is pushed to first use instead, after every module involved has
+    finished importing.
+    """
+    if "default" not in WEIGHTS:
+        from .evaluate import Weights
+        from .evaluate_tiered import Weights as TieredWeights
+
+        WEIGHTS["default"] = Weights
+        WEIGHTS["tiered"] = TieredWeights
 
 # `evaluator=` keys that build a `kind="heximax"` entrant instead of a
 # greedy/search one, and the heximax `mode` each one fits. Neither dict is
@@ -189,6 +209,7 @@ def climb(
     that waiting for the return value is not useful.
     """
     rng = random.Random(seed)
+    _seed_default_weights()
     incumbent = start or WEIGHTS[evaluator]()
     history: list[Step] = []
 
@@ -263,6 +284,7 @@ def confirm(
     accepted a handful of candidates has very likely accepted noise, and the
     only way to tell is one honest high-budget duel at the end, judged at 95%.
     """
+    _seed_default_weights()
     wins, decided = duel(
         fitted,
         baseline or WEIGHTS[evaluator](),

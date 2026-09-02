@@ -9,6 +9,27 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`Game.locked`: a per-seat setup lock / seat-retirement primitive, upstreamed
+  from `hexset_ui.seating`** (engine change request R2,
+  `docs/engine-divergence-2026-09-02.md` in the gym repo). A retired seat is
+  skipped by the setup snake and by turn rotation, is never `to_move`, and
+  drops out of any trade offer -- live or already on the table -- via the new
+  `lock_seat(game, seat)`. `Game.locked: frozenset[int]` defaults to empty and
+  `imagine` now copies it, which is the actual fix: the gym's own
+  implementation bolted `locked` onto a live `Game` as an undeclared
+  attribute because this field did not exist, so a bot's search forward from
+  a table with a retired seat simulated turns for it as though it still
+  played. `start()` also gained a `first=` keyword so the setup snake can
+  begin at any seat, keeping its round-two compensation whichever seat it
+  starts from -- needed because a gym seats its creator at a random index
+  rather than always seat 0. Both default to today's exact behaviour
+  (`locked=frozenset()`, `first=0`); `tests/test_seating.py` pins that with a
+  byte-for-byte replay of five seeded games against the pre-change hashes, on
+  top of the lock/retirement semantics themselves. What a retired seat's hand
+  and pieces become is unchanged from `hexset_ui.seating.lock_seat`: nothing
+  -- the primitive never touches `game.state`, matching that the gym only
+  ever retires a seat the setup snake reached still empty.
+
 - **`hexset.catanatron`, an optional adapter to Catanatron's arena**
   (`pip install -e "src[catanatron]"`). Collapses the standalone
   `catan-bridge` repo into this package: translates a live `catanatron.Game`

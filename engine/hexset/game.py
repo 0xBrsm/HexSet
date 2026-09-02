@@ -84,13 +84,43 @@ class Game:
     # turned down is legal, and `apply` will still carry one out, but nothing
     # has changed since the decline and it is not worth an action.
     offered: set[tuple[Bundle, Bundle]] = field(default_factory=set)
+    # Seats retired from the game: skipped by the setup snake, skipped by
+    # turn rotation, never `to_move`, never asked for a trade. Empty for every
+    # game this module deals unless a caller retires a seat with `lock_seat`,
+    # so a game that never locks anyone is unaffected byte-for-byte -- every
+    # place this dataclass is read below checks `locked` only after the
+    # ordinary computation, and an empty frozenset changes nothing it touches.
+    #
+    # This is `hexset_ui.seating`'s per-seat setup lock, upstreamed: that
+    # module built the same thing as a correction bolted onto a live `Game`
+    # (`game.locked` as a plain, undeclared attribute) because this field did
+    # not exist, and documented the one place that made wrong: `imagine` did
+    # not know to copy an attribute it never declared, so a search forward
+    # from a table with a retired seat simulated turns for it anyway
+    # (`docs/engine-divergence-2026-09-02.md`, request R2). Declaring the
+    # field here and having `imagine` copy it (below) is the fix; nothing
+    # else about `hexset_ui.seating`'s policy -- *when* a seat retires, or
+    # that only a still-empty seat ever does -- belongs in the engine, which
+    # is why `lock_seat` places no restriction on which seat or when.
+    locked: frozenset[int] = field(default_factory=frozenset)
 
 
 def start(
-    board: Board, num_players: int, rng: random.Random | None = None
+    board: Board,
+    num_players: int,
+    rng: random.Random | None = None,
+    *,
+    first: int = 0,
 ) -> Game:
+    """Start a game. `first` chooses which seat opens the setup snake and
+    therefore takes the first real turn; `first=0` (the default) is today's
+    behaviour exactly. Rotating the snake's start is `hexset_ui.seating.start_at`
+    upstreamed -- a gym seats its creator at a random index and still wants the
+    snake's compensating property (whoever places first in round one places
+    last in round two), which holds from any starting seat, not only seat 0.
+    """
     rng = rng or random.Random()
-    order = list(range(num_players))
+    order = [(first + i) % num_players for i in range(num_players)]
     # Snake order: the last player to place first also places first in round two,
     # which is what compensates them for choosing last.
     queue = order + order[::-1]
@@ -138,6 +168,7 @@ def imagine(
         pending_responders=game.pending_responders[:],
         offers_made=game.offers_made,
         offered=set(game.offered),
+        locked=game.locked,
     )
 
 
@@ -148,6 +179,46 @@ def _require(game: Game, phase: Phase) -> None:
 
 def _in_second_setup_round(game: Game) -> bool:
     return game.setup_step >= game.state.num_players
+
+
+def _advance_setup(game: Game) -> None:
+    """Point the snake at the next entry that is not a retired seat, or end
+    setup if none remains.
+
+    Advances `setup_step` past locked entries rather than keeping a separate
+    "seats placed" count, which is what keeps `_in_second_setup_round`'s
+    `setup_step >= num_players` test correct however many seats have retired
+    -- the queue always holds all `2 * num_players` slots. Mirrors
+    `hexset_ui.seating.advance_setup`.
+    """
+    queue = game.setup_queue
+    while game.setup_step < len(queue) and queue[game.setup_step] in game.locked:
+        game.setup_step += 1
+    if game.setup_step < len(queue):
+        game.current_player = queue[game.setup_step]
+        game.phase = Phase.SETUP_SETTLEMENT
+    else:
+        # Whoever placed first takes the first real turn -- `queue[0]`, which
+        # `lock_seat` never retires while it is `current_player` without also
+        # moving the snake off it first, so this is never a locked seat.
+        game.current_player = queue[0]
+        game.phase = Phase.ROLL
+
+
+def _next_unlocked(game: Game, after: int) -> int:
+    """The next seat past `after` in turn order, skipping retired ones.
+
+    Mirrors `hexset_ui.seating.next_unlocked`. Terminates unless every seat
+    is locked, which `lock_seat` does not itself prevent -- a caller that
+    retires every seat has emptied the table, and there is no seat left for
+    the turn to land on.
+    """
+    n = game.state.num_players
+    for step in range(1, n + 1):
+        seat = (after + step) % n
+        if seat not in game.locked:
+            return seat
+    raise AssertionError("every seat is locked")
 
 
 def _snapshot_hands(game: Game) -> list[list[int]]:
@@ -213,12 +284,7 @@ def place_initial_road(game: Game, edge: int) -> None:
     update_longest_road(game.state)
 
     game.setup_step += 1
-    if game.setup_step < len(game.setup_queue):
-        game.current_player = game.setup_queue[game.setup_step]
-        game.phase = Phase.SETUP_SETTLEMENT
-    else:
-        game.current_player = 0
-        game.phase = Phase.ROLL
+    _advance_setup(game)
 
 
 def roll_dice(game: Game, roll: int | None = None) -> int:
@@ -230,9 +296,13 @@ def roll_dice(game: Game, roll: int | None = None) -> int:
 
     if roll == 7:
         # Quotas are fixed now rather than recomputed as hands shrink, so
-        # discarding does not reduce what is still owed.
+        # discarding does not reduce what is still owed. A locked seat is
+        # quoted 0 unconditionally: it is never `to_move`, so nothing would
+        # ever resolve a nonzero quota for it, and `players_owing_discards`
+        # would otherwise report a seat the table can no longer act for.
         game.discard_quota = [
-            discard_count(game.state, p) for p in range(game.state.num_players)
+            0 if p in game.locked else discard_count(game.state, p)
+            for p in range(game.state.num_players)
         ]
         game.phase = Phase.DISCARD if any(game.discard_quota) else Phase.ROBBER
     else:
@@ -448,7 +518,9 @@ def propose_trade(
 
     game.offers_made += 1
     game.offered.add((tuple(give), tuple(want)))
-    willing = offer_responders(game.state, offer)
+    # A locked seat is never asked -- it holds nothing and builds nothing to
+    # trade for, and it is never `to_move` to answer if it were.
+    willing = tuple(p for p in offer_responders(game.state, offer) if p not in game.locked)
     if not willing:
         # Nobody can cover it, so there is nothing to ask. The offer still
         # counts against the turn's allowance: it was a move that was made.
@@ -507,9 +579,54 @@ def end_turn(game: Game) -> None:
     if game.turns >= MAX_TURNS:
         game.phase = Phase.GAME_OVER
         return
-    game.current_player = (game.current_player + 1) % game.state.num_players
+    game.current_player = _next_unlocked(game, game.current_player)
     game.phase = Phase.ROLL
 
 
 def is_over(game: Game) -> bool:
     return game.phase is Phase.GAME_OVER
+
+
+def lock_seat(game: Game, seat: int) -> None:
+    """Retire `seat`. A no-op if it is already retired.
+
+    From here on `seat` is skipped by the setup snake and by turn rotation,
+    can never be `to_move`, and drops out of any trade offer already on the
+    table. This is the primitive `hexset_ui.seating.lock_seat`
+    (`ui:seating.py:148-154`) implemented as a post-apply correction because
+    `hexset.game` had no such field -- see `Game.locked`'s docstring and
+    `docs/engine-divergence-2026-09-02.md` request R2.
+
+    It also matches that function's answer for what happens to a retired
+    seat's pieces and hand: nothing. `lock_seat` never touches `game.state`.
+    `hexset_ui.api.Table._settle_locks` (`ui:api.py:304-329`) only ever calls
+    it on a seat the setup snake reached still empty, so there is nothing
+    built or held to clear; a caller that retires a seat mid-game gets the
+    same treatment, and its hand and pieces are simply abandoned in place
+    rather than erased or returned to the bank. Retiring a seat is a
+    decision about whose turn it is, not a rules event -- it does not
+    forfeit pieces the way `robber.discard` or `economy.pay` does.
+    """
+    if seat in game.locked:
+        return
+    game.locked = game.locked | {seat}
+
+    if seat < len(game.discard_quota):
+        game.discard_quota[seat] = 0
+    if game.phase is Phase.DISCARD:
+        _finish_discards(game)
+
+    game.pending_responders = [p for p in game.pending_responders if p != seat]
+    if game.phase is Phase.TRADE_RESPOND and not game.pending_responders:
+        _finish_offer(game)
+
+    if game.current_player != seat:
+        return
+    if game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
+        game.setup_step += 1
+        _advance_setup(game)
+    elif game.phase in (Phase.ROLL, Phase.ROBBER, Phase.MAIN):
+        # The only phases where `to_move` reads `current_player` directly
+        # (see its docstring); DISCARD and TRADE_RESPOND already handled
+        # above, GAME_OVER has no next turn to hand off.
+        game.current_player = _next_unlocked(game, seat)

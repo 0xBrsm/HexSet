@@ -5,11 +5,11 @@ import random
 from dataclasses import dataclass, field
 from typing import Protocol, Sequence
 
-from .actions import Action, ActionType, apply, legal_actions, within_offer_budget
+from ..actions import Action, ActionType, apply, legal_actions, within_offer_budget
 from .evaluate import Evaluator
-from .game import ROLL_ODDS, Game, imagine, is_over, roll_dice, to_move
-from .play import Stuck
-from .trading import Offer, execute as execute_trade, responders
+from ..game import ROLL_ODDS, Game, imagine, is_over, roll_dice, to_move
+from ..play import Stuck
+from ..trading import Offer, execute as execute_trade, responders
 
 
 class Bot(Protocol):

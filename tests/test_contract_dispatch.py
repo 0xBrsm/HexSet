@@ -5,10 +5,11 @@ This is the regression suite for the headline finding of the PI's review of
 PR #2: the branch redefined contract `"2"` to mean the 29-input record while
 `onnxbot._load_cached` still dispatched `V2Policy if contract == "2"`, so a
 real 23-input contract-2 export died on its first move with `Invalid input
-name: offer_proposer`, a 29-input contract-4 export was routed to `OnnxPolicy`
-and died with `Required inputs ([terrain, token, ...]) are missing`, and the
-only file that worked was the repo's own re-stamped fixture — which is exactly
-why the suite was green. Every test here would have failed on that branch.
+name: offer_proposer`, a 29-input contract-4 export was routed to the
+contract-1 feature-tensor policy and died with `Required inputs ([terrain,
+token, ...]) are missing`, and the only file that worked was the repo's own
+re-stamped fixture — which is exactly why the suite was green. Every test
+here would have failed on that branch.
 
 Fixtures, and what each is:
 
@@ -22,7 +23,12 @@ Fixtures, and what each is:
   producing one needs `hexset.export_onnx`, which needs torch. Stated plainly
   rather than papered over; `test_record_contract.py` pins the shapes against
   dev's own table wherever torch is installed.
-* `tiny.onnx` — a real contract-1 export (no `contract` key at all).
+* `tiny.onnx` — a real contract-1 export (no `contract` key at all). The
+  owner dropped contract 1 on 2026-09-02
+  (`docs/engine-divergence-2026-09-02.md`, B5): `encoding_v1.py` and the
+  policy that read it are gone, so this fixture now exists only to pin that
+  a contract-1 (or contract-less) file is refused by name at load, both here
+  and in `RecordBrain`.
 """
 
 from __future__ import annotations
@@ -40,8 +46,8 @@ from hexset.actions import apply  # noqa: E402
 from hexset.board.board import random_base_board  # noqa: E402
 from hexset.game import Phase, start  # noqa: E402
 
-from hexset_ui.constants import LEGACY_CONTRACTS, RECORD_CONTRACTS  # noqa: E402
-from hexset_ui.onnxbot import OnnxPolicy, V2Policy, load  # noqa: E402
+from hexset_ui.constants import RECORD_CONTRACTS  # noqa: E402
+from hexset_ui.onnxbot import V2Policy, load  # noqa: E402
 from hexset_ui.rules import options_for  # noqa: E402
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -112,18 +118,24 @@ def test_every_record_contract_routes_to_the_record_policy(path):
     assert isinstance(load(str(path), _board().topology).policy, V2Policy)
 
 
-def test_a_contract_1_export_routes_to_the_feature_tensor_policy():
+def test_a_contract_1_export_is_refused_by_name():
     """`tiny.onnx` carries no `contract` key at all — the pre-metadata
-    exports. Absent means 1, and 1 means the frozen `encoding_v1` layout."""
+    exports, which default to contract 1. The owner dropped contract 1
+    2026-09-02: there is no feature-tensor policy left to route it to, so it
+    is refused exactly like any other unsupported contract, naming what it
+    found and what this server still serves."""
     assert "contract" not in _metadata(CONTRACT1)
-    assert isinstance(load(str(CONTRACT1), _board().topology).policy, OnnxPolicy)
+    with pytest.raises(ValueError) as caught:
+        load(str(CONTRACT1), _board().topology)
+    assert "contract='1'" in str(caught.value)
+    assert "2, 3, 4" in str(caught.value)
 
 
 def test_an_unknown_contract_is_refused_by_name(tmp_path):
-    """Not silently routed to `OnnxPolicy`, which is what PR #2 did with
-    contract 4 — the failure then surfaced as a missing-input error naming
-    tensors nobody had asked about, one second at a time, on a runner thread's
-    stderr while the table hung."""
+    """Not silently routed to a guessed graph shape, which is what PR #2 did
+    with contract 4 — the failure then surfaced as a missing-input error
+    naming tensors nobody had asked about, one second at a time, on a
+    runner thread's stderr while the table hung."""
     import onnx
 
     model = onnx.load(str(STUB_CONTRACT4))
@@ -139,8 +151,7 @@ def test_an_unknown_contract_is_refused_by_name(tmp_path):
     assert "2, 3, 4" in str(caught.value)
 
 
-def test_the_contract_table_is_disjoint_and_covers_what_the_policies_serve():
-    assert not LEGACY_CONTRACTS & RECORD_CONTRACTS
+def test_the_contract_table_covers_what_the_policy_serves():
     assert RECORD_CONTRACTS == {"2", "3", "4"}
 
 

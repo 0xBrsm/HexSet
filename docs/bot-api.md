@@ -21,7 +21,7 @@ Two independent parts make up the contract:
 | --- | --- | --- |
 | `players` | table size the graph was traced for | required |
 | `num_hexes` / `num_vertices` / `num_edges` | board-shape fingerprint; a mismatched board fails the load rather than running on meaningless input | required |
-| `contract` | which graph shape below applies: `2`, `3` or `4` for the record shape, `1` (or absent) for the legacy feature-tensor shape | `1` |
+| `contract` | which graph shape below applies: `2`, `3` or `4` for the record shape | refused if absent — see below |
 | `max_offers` | trade-offer budget the run trained under | engine's cap |
 | `search` | `mcts` to search over the model's own priors; anything else plays one forward pass | none |
 | `simulations` | descents per decision, when `search=mcts` (clamped to 4096) | 128 |
@@ -43,7 +43,15 @@ fields, `4` adds the two public-knowledge ledger fields. A graph declares the
 fields it wants and is fed exactly those, so all three load and play off the
 one record the engine builds — a checkpoint does not have to be re-exported
 to keep working. An unknown number is refused at load with the number named,
-rather than being routed to the legacy path and failing on its first move.
+rather than failing later on its first move with a missing-input error.
+
+**Contract 1 is no longer served.** It was the original shape — the engine
+encoded the position into feature tensors itself, and the graph was a bare
+policy/value head, masked and softmaxed in Python. The owner dropped it
+2026-09-02 (`docs/engine-divergence-2026-09-02.md`, B5): a `contract=1` file,
+or one with no `contract` key at all, is refused at load exactly like a
+future unknown number, naming the contract found and the numbers this server
+still serves (`2, 3, 4`).
 
 ## 2. The graph — the record contracts (`2`, `3`, `4`)
 
@@ -122,44 +130,6 @@ what is in a specific opponent's hand — and it now applies to *every* seat,
 embedded bots included, rather than only to the ones on the wire. The cost
 has not been measured; the audit document asks the PI for a before/after
 duel.
-
-## 3. The graph — `contract=1` (legacy, frozen)
-
-The original shape: the engine encodes the position into feature tensors
-itself (`encoding_v1.py`), and the graph is a bare policy/value head.
-
-`encoding_v1.py` is **frozen** at this layout and is not kept in step with
-`hexset.encoding`, which has since widened its global feature block (86 floats
-against this one's 50). That is the whole point of the `contract` key: a
-contract-1 file keeps its contract-1 features for as long as it is served.
-
-Masking, softmax, the give/want outer sum, and un-rotating `value` back to
-board-seat order all happen in `onnxbot.py`, not in the graph.
-
-**Inputs**, all float32, leading batch axis `B`:
-
-| Name | Shape |
-| --- | --- |
-| `hexes` | `(B, num_hexes, hex_features)` |
-| `vertices` | `(B, num_vertices, vertex_features)` |
-| `edges` | `(B, num_edges, edge_features)` |
-| `globals` | `(B, num_globals)` |
-
-Feature widths depend on `players`; see `encoding_v1.py` for the exact layout.
-This encoder was a from-scratch reimplementation of the training repo's own
-encoder, and keeping the two bit-identical is the obligation the record
-contracts exist to retire — which they have: the two have already diverged,
-and only the `contract` key keeps old files playable. Treat this shape as
-legacy and export anything new against the current record contract.
-
-**Outputs:**
-
-| Name | Shape | Note |
-| --- | --- | --- |
-| `logits` | `(B, space.size)` | pre-mask, pre-softmax action-slot scores |
-| `give` | `(B, NUM_RESOURCES)` | give-side offer logits |
-| `want` | `(B, NUM_RESOURCES)` | want-side offer logits |
-| `value` | `(B, players)` | **perspective-rotated** (seat 0 = perspective); `onnxbot.py` un-rotates it before handing it back |
 
 ## What is never part of this contract
 

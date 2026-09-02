@@ -163,6 +163,18 @@ worth serving. If they are not, `encoding_v1.py` and `OnnxPolicy` both go and
 the last engine-shaped file leaves this repo. If they are, it stays frozen
 forever, which is what `contract` metadata is for.
 
+**2026-09-02, post-recommendation note:** the owner dropped contract 1.
+`encoding_v1.py` and `OnnxPolicy` are deleted; `onnxbot._load_cached` now
+refuses `contract=1` (and the absent-key default that meant it) by the same
+path as any other unsupported contract, naming what it found and that this
+server serves `2, 3, 4`. `models/` in this working tree held nothing but
+`.gitkeep`, so no checkpoint was lost; the g4 deployment share
+(`//10.10.10.10/stacks/hexset-ui/models/`) was not reachable from this
+environment and was not checked — if a contract-1-only `.onnx` is sitting
+there, it will now be refused at load rather than served, and is a candidate
+for removal from that share. `constants.LEGACY_CONTRACTS` is gone along with
+it; `RECORD_CONTRACTS` (`2, 3, 4`) is the whole table now.
+
 ### B6. `hexset_ui.record` cannot yet be replaced by `hexset.onnx_record` — dev change required
 
 `dev:onnx_record.py` is the canonical definition of the ONNX record

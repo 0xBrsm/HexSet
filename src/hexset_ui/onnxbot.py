@@ -1,26 +1,29 @@
 """A dropped-in ONNX checkpoint as an opponent.
 
 This module is the whole boundary between the game and a model. Everything
-that knows a network exists — the observation encoding, the flat action
-space, masking, sampling, the give/want pair distribution, and how a
-checkpoint wants to be played — lives behind here. The rest of the package
-hands over a `Game` and gets an `Action` back, and `spawn` below is the only
-entry point it needs.
+that knows a network exists — the record encoding, the flat action space,
+masking, sampling, the give/want pair distribution, and how a checkpoint
+wants to be played — lives behind here. The rest of the package hands over a
+`Game` and gets an `Action` back, and `spawn` below is the only entry point
+it needs.
 
-`NetworkBot`, `NetworkEvaluator` and `LeafEvaluator` are thin adapters over
-a policy; they only ever call methods on `self.policy` and never inspect a
-network directly. `OnnxPolicy` and `V2Policy` are each an onnxruntime
-`InferenceSession` with their own math in numpy — mechanical, since none of
-it has learned parameters.
+`NetworkBot`, `NetworkEvaluator` and `LeafEvaluator` are thin adapters over a
+policy; they only ever call methods on `self.policy` and never inspect a
+network directly. `V2Policy` is an onnxruntime `InferenceSession` with its
+own math in numpy — mechanical, since none of it has learned parameters.
 
-A checkpoint's `contract` metadata picks which of two graph shapes it is.
-Contract 1 is "observation in, raw logits/give/want/value out", with masking,
-softmax and give/want decode done here in Python (`OnnxPolicy`). Contract 2
-is "record in, decision out" — the graph itself masks, normalises, argmaxes
-and un-rotates, and `V2Policy` just reads its outputs. `NetworkBot`,
-`NetworkEvaluator` and `LeafEvaluator` call `act_rows`/`value_rows`/
-`score_rows`, an interface both policies share, and never learn which
-contract they are holding.
+A checkpoint's `contract` metadata names which record shape it declares
+(`2`, `3` or `4` — "record in, decision out": the graph itself masks,
+normalises, argmaxes and un-rotates, and `V2Policy` just reads its outputs).
+`NetworkBot`, `NetworkEvaluator` and `LeafEvaluator` call
+`act_rows`/`value_rows`/`score_rows`, an interface `V2Policy` presents for
+every record contract, and never learn which one they are holding.
+
+Contract 1 ("observation in, raw logits/give/want/value out", masked and
+decoded here in Python against the frozen `encoding_v1` feature layout) is no
+longer served — the owner dropped it 2026-09-02
+(`docs/engine-divergence-2026-09-02.md`, B5). A `contract=1` file, or one
+with no `contract` key at all, is refused by name at load.
 """
 
 from __future__ import annotations
@@ -46,49 +49,14 @@ from hexset.board.topology import Topology
 from hexset.game import Game, to_move
 from hexset.mcts import Search
 
-from .constants import LEGACY_CONTRACTS, RECORD_CONTRACTS
-from .encoding_v1 import Observation, encode
+from .constants import RECORD_CONTRACTS
 from .modelmeta import SearchConfig, search_config
-from .record import action_mask, build_record
+from .record import build_record
 from .record import pair_index as _pair_index
-from .record import pair_mask as _pair_mask
 # The honest option list, not `hexset.bots.options_for`'s omniscient one: a
 # checkpoint served here sees exactly the mask an external client or a human
 # sees (`hexset_ui.rules`, and PR #2 defect 4).
 from .rules import options_for
-
-# The off-diagonal (give, want) pairs, flattened as `give * NUM_RESOURCES +
-# want`. The diagonal is never legal — `legal_actions` skips `wanted ==
-# given` — so it is masked out once here rather than checked per offer.
-# Same constant the training repo's policy module defines; redefined rather
-# than shared because that module imports torch, which this one must not.
-NUM_PAIRS = NUM_RESOURCES * NUM_RESOURCES
-_OFF_DIAGONAL = ~np.eye(NUM_RESOURCES, dtype=bool).reshape(NUM_PAIRS)
-
-# Large and finite rather than -inf, so a row whose mask is entirely False
-# produces a diagnosable uniform distribution instead of NaN — same
-# reasoning as the training repo's own NEG.
-NEG = -1e9
-
-
-@dataclass(frozen=True)
-class Request:
-    """One position put to the network.
-
-    `options` rides along with `mask` because the two are not interchangeable:
-    an offer is ten numbers, so `PROPOSE_TRADE` occupies one slot in the flat
-    space and its bundles cannot be recovered from an index. Choosing that slot
-    still leaves the offer itself to name.
-
-    `seat` is `to_move`, which is not always `current_player` — discarding on a
-    seven and answering an offer belong to somebody else — and it is the
-    perspective `observation` was encoded from.
-    """
-
-    seat: int
-    observation: Observation
-    mask: np.ndarray
-    options: tuple[Action, ...]
 
 
 def _check_players(game: Game, players: int) -> None:
@@ -99,29 +67,8 @@ def _check_players(game: Game, players: int) -> None:
         )
 
 
-def _board_order(value: np.ndarray, seat: int) -> tuple[float, ...]:
-    """Undo the encoder's seat rotation and restore board-seat order."""
-    players = len(value)
-    return tuple(
-        float(value[(board_seat - seat) % players]) for board_seat in range(players)
-    )
-
-
 def _one_hot(resource: int) -> tuple[int, ...]:
     return tuple(1 if r == resource else 0 for r in range(NUM_RESOURCES))
-
-
-def _masked_log_softmax(logits: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """`log_softmax` over the legal entries of each row."""
-    filled = np.where(mask, logits, NEG)
-    shifted = filled - filled.max(axis=-1, keepdims=True)
-    return shifted - np.log(np.exp(shifted).sum(axis=-1, keepdims=True))
-
-
-def _pair_logits(give: np.ndarray, want: np.ndarray) -> np.ndarray:
-    """`(B, NUM_PAIRS)` outer sum, so the two heads factor the joint offer."""
-    batch = give.shape[0]
-    return (give[:, :, None] + want[:, None, :]).reshape(batch, NUM_PAIRS)
 
 
 def _providers_for(device: str) -> list[str]:
@@ -135,168 +82,12 @@ def _providers_for(device: str) -> list[str]:
     return [f"{device.upper()}ExecutionProvider", "CPUExecutionProvider"]
 
 
-class OnnxPolicy:
-    """An onnxruntime `InferenceSession` behind the four-member interface the
-    training repo's policy class presents (`.act`, `.values`, `.score`,
-    `.trade_slot`).
-
-    Always greedy in practice: every checkpoint served here plays argmax, so
-    there is no behaviour distribution anything actually reads. The stochastic
-    path exists anyway, as the honest port of what the interface supports.
-    """
-
-    def __init__(
-        self,
-        session: ort.InferenceSession,
-        space: ActionSpace,
-        *,
-        greedy: bool = True,
-        rng: np.random.Generator | None = None,
-    ) -> None:
-        self.session = session
-        self.space = space
-        self.greedy = greedy
-        self.rng = rng or np.random.default_rng()
-        self.trade_slot = space.offsets[ActionType.PROPOSE_TRADE]
-
-    def _forward(self, observations) -> dict[str, np.ndarray]:
-        inputs = {
-            "hexes": np.stack([o.hexes for o in observations]).astype(np.float32),
-            "vertices": np.stack([o.vertices for o in observations]).astype(np.float32),
-            "edges": np.stack([o.edges for o in observations]).astype(np.float32),
-            "globals": np.stack([o.globals for o in observations]).astype(np.float32),
-        }
-        logits, give, want, value = self.session.run(
-            ["logits", "give", "want", "value"], inputs
-        )
-        return {"logits": logits, "give": give, "want": want, "value": value}
-
-    def _sample(self, log_probs: np.ndarray) -> np.ndarray:
-        if self.greedy:
-            return log_probs.argmax(axis=-1)
-        # Gumbel-max: a fully vectorised categorical draw over log-probs,
-        # with no second normalising pass needed since the rows are already
-        # log-softmax'd.
-        gumbel = -np.log(-np.log(self.rng.random(log_probs.shape)))
-        return (log_probs + gumbel).argmax(axis=-1)
-
-    def _log_probs(
-        self, prediction: dict[str, np.ndarray], mask: np.ndarray, pair: np.ndarray
-    ) -> tuple[np.ndarray, np.ndarray]:
-        slots = _masked_log_softmax(prediction["logits"], mask)
-        offers = _masked_log_softmax(
-            _pair_logits(prediction["give"], prediction["want"]),
-            pair & _OFF_DIAGONAL,
-        )
-        return slots, offers
-
-    def act(self, requests: Sequence[Request]) -> list[Action]:
-        """One action per request, in order."""
-        if not requests:
-            return []
-
-        masks = np.stack([request.mask for request in requests])
-        pairs = np.stack([_pair_mask(request.options) for request in requests])
-        prediction = self._forward([request.observation for request in requests])
-        slot_log_probs, offer_log_probs = self._log_probs(prediction, masks, pairs)
-        chosen = self._sample(slot_log_probs)
-        offer = self._sample(offer_log_probs)
-
-        out = []
-        for row in range(len(requests)):
-            index = int(chosen[row])
-            if index == self.trade_slot:
-                slot = int(offer[row])
-                out.append(
-                    Action(
-                        ActionType.PROPOSE_TRADE,
-                        give=_one_hot(slot // NUM_RESOURCES),
-                        want=_one_hot(slot % NUM_RESOURCES),
-                    )
-                )
-            else:
-                out.append(self.space.decode(index))
-        return out
-
-    def values(self, observations) -> np.ndarray:
-        """The value head alone, `(B, players)`, in each row's own frame."""
-        return self._forward(list(observations))["value"]
-
-    def score(
-        self, observations, masks: np.ndarray, pairs: np.ndarray
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Masked slot log-probs, masked offer log-probs and values for a
-        batch — what a batched search needs and `act` does not give it."""
-        prediction = self._forward(list(observations))
-        slots, offers = self._log_probs(prediction, masks, pairs)
-        return slots, offers, prediction["value"]
-
-    def act_rows(self, rows: Sequence[tuple[Game, int, tuple[Action, ...]]]) -> list[Action]:
-        """`act`, addressed by `(game, seat, options)` rather than a caller-built
-        `Request` — the row shape `NetworkBot` and friends share with `V2Policy`."""
-        if not rows:
-            return []
-        requests = [
-            Request(
-                seat=seat,
-                observation=encode(game, seat),
-                mask=action_mask(self.space, options),
-                options=tuple(options),
-            )
-            for game, seat, options in rows
-        ]
-        return self.act(requests)
-
-    def value_rows(self, rows: Sequence[tuple[Game, int]]) -> list[tuple[float, ...]]:
-        """`values`, in board-seat order, addressed by `(game, seat)` rows."""
-        if not rows:
-            return []
-        values = self.values([encode(game, seat) for game, seat in rows])
-        return [_board_order(values[i], seat) for i, (_, seat) in enumerate(rows)]
-
-    def score_rows(
-        self, rows: Sequence[tuple[Game, int, tuple[Action, ...]]]
-    ) -> list[tuple[np.ndarray, tuple[float, ...]]]:
-        """`score`, combined into the `(prior, value)` per leaf that
-        `hexset.mcts.Evaluator.evaluate` wants."""
-        if not rows:
-            return []
-        observations = [encode(game, seat) for game, seat, _ in rows]
-        masks = np.stack([action_mask(self.space, options) for _, _, options in rows])
-        pairs = np.stack([_pair_mask(options) for _, _, options in rows])
-        slots, offers, values = self.score(observations, masks, pairs)
-        return [
-            (
-                self._combine_prior(options, slots[i], offers[i]),
-                _board_order(values[i], seat),
-            )
-            for i, (_, seat, options) in enumerate(rows)
-        ]
-
-    def _combine_prior(self, options, slots: np.ndarray, offers: np.ndarray) -> np.ndarray:
-        """A leaf's options, scored from this row's masked slot and offer
-        log-probs — log-space addition, since `PROPOSE_TRADE`'s slot and its
-        offer are two separate heads whose probabilities multiply."""
-        trade = self.trade_slot
-        log_probs = np.empty(len(options))
-        for i, option in enumerate(options):
-            index = self.space.index(option)
-            log_probs[i] = slots[index]
-            if index == trade:
-                log_probs[i] += offers[_pair_index(option.give, option.want)]
-        prior = np.exp(log_probs)
-        total = prior.sum()
-        if total <= 0:
-            return np.full(len(options), 1.0 / len(options))
-        return prior / total
-
-
 class V2Policy:
-    """A contract-2 checkpoint: the graph itself masks, normalises, argmaxes
-    and un-rotates, so this class only states the position and reads the
-    graph's decision back. Same row-shaped interface as `OnnxPolicy`
-    (`act_rows`, `value_rows`, `score_rows`, `trade_slot`) — `NetworkBot` and
-    friends call one or the other without knowing which they hold.
+    """A record-contract checkpoint: the graph itself masks, normalises,
+    argmaxes and un-rotates, so this class only states the position and reads
+    the graph's decision back. `NetworkBot`, `NetworkEvaluator` and
+    `LeafEvaluator` call it through `act_rows`/`value_rows`/`score_rows`
+    without knowing which of contracts 2, 3 or 4 they are holding.
     """
 
     def __init__(self, session: ort.InferenceSession, space: ActionSpace) -> None:
@@ -344,10 +135,10 @@ class V2Policy:
         return [self._decode(int(a), int(p)) for a, p in zip(action_index, pair_index_out)]
 
     def value_rows(self, rows: Sequence[tuple[Game, int]]) -> list[tuple[float, ...]]:
-        """`value`, already in board-seat order — no `_board_order` un-rotation
-        needed for contract 2. `options_for` stands in for this row's options,
-        since a bare `(game, seat)` value query has none to offer, and an
-        empty mask would leave the graph nothing legal to normalise over."""
+        """`value`, already in board-seat order — the graph un-rotates it
+        itself. `options_for` stands in for this row's options, since a bare
+        `(game, seat)` value query has none to offer, and an empty mask would
+        leave the graph nothing legal to normalise over."""
         if not rows:
             return []
         (value,) = self._run([(game, seat, options_for(game)) for game, seat in rows], ["value"])
@@ -367,8 +158,8 @@ class V2Policy:
 
     def _combine_prior(self, options, prior: np.ndarray, pair_prior: np.ndarray) -> np.ndarray:
         """A leaf's options, scored from this row's dense priors — plain
-        multiplication, since contract 2 hands back linear probabilities
-        rather than the log-probs contract 1's heads produce."""
+        multiplication, since the graph hands back linear probabilities
+        rather than log-probs."""
         trade = self.trade_slot
         weights = np.empty(len(options))
         for i, option in enumerate(options):
@@ -386,7 +177,7 @@ class V2Policy:
 class Loaded:
     """A checkpoint made playable, plus what the run it came from was doing."""
 
-    policy: OnnxPolicy | V2Policy
+    policy: V2Policy
     space: ActionSpace
     players: int
     max_offers: int | None
@@ -421,18 +212,18 @@ def _load_cached(path: str, topology: Topology, device: str, mtime_ns: int) -> L
         topology.num_vertices, topology.num_edges, topology.num_hexes, players
     )
     contract = meta.get("contract", "1")
-    if contract in RECORD_CONTRACTS:
-        policy: OnnxPolicy | V2Policy = V2Policy(session, space)
-    elif contract in LEGACY_CONTRACTS:
-        policy = OnnxPolicy(session, space)
-    else:
-        # Loudly, rather than falling through to `OnnxPolicy` and dying on the
+    if contract not in RECORD_CONTRACTS:
+        # Loudly, rather than guessing at a graph shape and dying on the
         # first move with a missing-input error naming tensors nobody asked
-        # about. An unknown contract is a checkpoint from a future exporter.
+        # about. Contract 1 (or no `contract` key at all) is refused here by
+        # the same path as a genuinely unknown future contract — the owner
+        # dropped it 2026-09-02, and there is no legacy path left to fall
+        # back to (`docs/engine-divergence-2026-09-02.md`, B5).
         raise ValueError(
             f"{path} declares contract={contract!r}, which this server does not serve "
-            f"(known: {', '.join(sorted(LEGACY_CONTRACTS | RECORD_CONTRACTS))})"
+            f"(known: {', '.join(sorted(RECORD_CONTRACTS))})"
         )
+    policy = V2Policy(session, space)
     max_offers = meta.get("max_offers") or None
     return Loaded(
         policy=policy,
@@ -460,7 +251,7 @@ def load(path: str, topology: Topology, device: str = "cpu") -> Loaded:
 class NetworkBot:
     """A policy answering one position at a time."""
 
-    policy: OnnxPolicy | V2Policy
+    policy: V2Policy
     space: ActionSpace
     players: int
     max_offers: int | None = None
@@ -476,7 +267,7 @@ class NetworkBot:
 class NetworkEvaluator:
     """The value head as `hexset.bots.SearchBot`'s leaf evaluation."""
 
-    policy: OnnxPolicy | V2Policy
+    policy: V2Policy
     players: int
     max_offers: int | None = None
 
@@ -489,7 +280,7 @@ class NetworkEvaluator:
 class LeafEvaluator:
     """A whole wave of `hexset.mcts` leaves in one forward."""
 
-    policy: OnnxPolicy | V2Policy
+    policy: V2Policy
     space: ActionSpace
     pad_to: int | None = None
 

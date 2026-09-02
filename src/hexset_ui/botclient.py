@@ -188,12 +188,14 @@ class RecordBrain:
         if contract not in RECORD_CONTRACTS:
             # Naming the contract actually found, rather than asserting it is
             # 1: PR #2 told the owner of a genuine contract-4 export that
-            # their file "is a contract=1 checkpoint".
+            # their file "is a contract=1 checkpoint". Contract 1 itself is
+            # no longer served at all — the owner dropped it 2026-09-02
+            # (`docs/engine-divergence-2026-09-02.md`, B5) — so it is refused
+            # here the same as any other unsupported contract, with no
+            # "run it embedded instead" escape hatch left to point to.
             raise ValueError(
                 f"{spec} declares contract={contract!r}; RecordBrain plays "
-                f"{', '.join(sorted(RECORD_CONTRACTS))} — a contract-1 checkpoint reads a "
-                "feature tensor rather than the record, so run it as a local (embedded) "
-                "bot instead"
+                f"{', '.join(sorted(RECORD_CONTRACTS))} only"
             )
         if search_config(meta).searches:
             raise ValueError(

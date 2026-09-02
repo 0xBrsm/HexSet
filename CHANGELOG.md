@@ -126,6 +126,24 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   2.69x on the same protocol, still over the ceiling for the unchanged
   trade-volume reason.
 
+### Fixed
+
+- **`heximax-omni` priced trades against a hand that did not exist.**
+  `Heximax._partner_delta` builds the post-trade position with `_move_hand`,
+  which folds a non-knower's hand into one all-one-resource total rather than
+  moving it per resource. That is exact for the honest bot -- an honest
+  evaluation reaches a non-knower only through `Belief.expected_hand`, and the
+  one thing it takes from `state.hands` is the size, which the fold preserves
+  while a per-resource move (clamped at zero where the seat cannot cover what
+  it gives) would not. Under `omniscient` every row is scored on `state.hands`
+  verbatim, so the fold replaced the counterparty's real cards with a fiction:
+  `score_proposal`'s `willing` gate saw every trade as ~10x more ruinous for
+  the partner than it was and stopped firing, while `accept_rule`, reading a
+  proposer it had just impoverished under the `relative` stance, cleared far
+  too easily. `_move_hand` now takes `exact`, and `_partner_delta` passes
+  `self.omniscient`. `heximax` and `heximax-notrade` are byte-identical
+  through the change; only `heximax-omni` moves.
+
 ### Changed
 
 - **Package renamed `catan` → `hexset`**, in prep for release under GPL-3.0-only

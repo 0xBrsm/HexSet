@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import random
 
-from hexset_ui.actions import build_space, options_for, within_offer_budget
-from hexset_ui.board.board import random_base_board
-from hexset_ui.board.terrain import NUM_RESOURCES
-from hexset_ui.game import Phase, move_robber_to, start
+from hexset.actions import build_space, within_offer_budget
+from hexset_ui.rules import options_for
+from hexset.board.board import random_base_board
+from hexset.board.terrain import NUM_RESOURCES
+from hexset.game import Phase, move_robber_to, start
 from hexset_ui.record import build_record
 
 from conftest import step_randomly
@@ -52,16 +53,28 @@ def test_a_steal_is_identity_independent_in_the_record():
         options = tuple(within_offer_budget(game, options_for(game), None))
         return build_record(game, seat, options, space)
 
-    # The bystander sees nothing that distinguishes the two worlds at all.
+    # The two mask fields describe the *mover's* own options, and the mover
+    # here is the thief. Since this branch serves one honest mask to every
+    # seat (`hexset_ui.rules`), the offer half of it is a function of the
+    # mover's own hand -- which really did receive a different card in each
+    # world -- so they differ, legitimately, and only for the thief: no seat
+    # but the one on move is ever served a record at all
+    # (`api.Tables.record` 409s everyone else), and `state_view` gives a
+    # seat that is not on move an empty `legal_actions`.
+    MOVERS_OWN = {"action_mask", "pair_mask"}
+
+    # The bystander sees nothing that distinguishes the two worlds.
     bystander_brick = record_for(world_brick, bystander)
     bystander_wood = record_for(world_wood, bystander)
     assert bystander_brick.keys() == bystander_wood.keys()
     for key in bystander_brick:
+        if key in MOVERS_OWN:
+            continue
         assert (bystander_brick[key] == bystander_wood[key]).all(), key
 
-    # The thief's own record differs in exactly one place: their own hand,
-    # which really did receive a different card in each world. Everything
-    # else -- including the victim's ledger row -- must still agree.
+    # The thief's own record differs only where the truth is theirs to know:
+    # their own hand, and the options that hand affords them. Everything else
+    # -- including the victim's ledger row -- must still agree.
     thief_brick = record_for(world_brick, thief)
     thief_wood = record_for(world_wood, thief)
     assert thief_brick.keys() == thief_wood.keys()
@@ -70,7 +83,8 @@ def test_a_steal_is_identity_independent_in_the_record():
         for key in thief_brick
         if not (thief_brick[key] == thief_wood[key]).all()
     }
-    assert differing == {"own_hand"}, differing
+    assert differing <= {"own_hand"} | MOVERS_OWN, differing
+    assert "own_hand" in differing
 
 
 def test_the_ledger_invariant_holds_over_a_random_playout():

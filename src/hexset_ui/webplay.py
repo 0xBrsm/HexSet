@@ -32,30 +32,31 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Protocol
 
-from .actions import (
-    ONE_RESOURCE,
+from hexset.actions import (
     YEAR_OF_PLENTY_PAIRS,
     Action,
     ActionType,
     apply,
-    is_legal,
     legal_actions,
 )
-from .board.board import Board
-from .board.coords import Hex
-from .board.terrain import NUM_RESOURCES, TERRAIN_RESOURCE, Resource
-from .board.topology import Topology
-from .cards import NUM_DEV_CARDS, DevCard
-from .devcards import holdings
-from .economy import trade_ratios
-from .game import MAX_OFFERS_PER_TURN, Game, Phase, is_over, to_move
+from hexset.board.board import Board
+from hexset.board.coords import Hex
+from hexset.board.terrain import NUM_RESOURCES, TERRAIN_RESOURCE, Resource
+from hexset.board.topology import Topology
+from hexset.cards import NUM_DEV_CARDS, DevCard
+from hexset.devcards import holdings
+from hexset.economy import trade_ratios
+from hexset.game import Game, Phase, is_over, to_move
+from hexset.ledger import PublicLedger
+from hexset.roads import road_lengths
+from hexset.state import MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS, GameState, copy_state
+from hexset.trading import responders as offer_responders
+from hexset.victory import public_victory_points, victory_points
+
 from .journal import Journal
-from .roads import road_lengths
-from .state import MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS, GameState, copy_state
-from .trading import responders as offer_responders
-from .victory import public_victory_points, victory_points
+from .rules import fair_legal_actions, is_legal
+from .seating import locked_of, settle, snapshot
 
 RESOURCE_NAMES: tuple[str, ...] = tuple(r.name.title() for r in Resource)
 DEV_CARD_NAMES: tuple[str, ...] = tuple(c.name.title().replace("_", " ") for c in DevCard)
@@ -67,10 +68,6 @@ class ResumeError(Exception):
     a fresh game rather than failing the request (see `api.resume_session`), so
     an engine change that invalidates old journals costs the games in flight
     at the time and nothing else."""
-
-
-class Bot(Protocol):
-    def choose(self, game: Game) -> Action: ...
 
 
 # --- Hex-to-pixel layout -----------------------------------------------------
@@ -207,58 +204,6 @@ def wire_to_action(data: dict) -> Action:
         raise ValueError(f"malformed action payload: {data!r}") from exc
 
 
-def _proposable_options(game: Game) -> list[Action]:
-    """Every one-for-one (give, want) pair the current player could open a
-    trade proposal for — from public information alone: their own hand and
-    the turn's offer count.
-
-    Deliberately not `hexset_ui.actions.legal_actions`'s own `PROPOSE_TRADE`
-    sample, which also skips any pair no opponent could currently cover.
-    That's a fair thing for a bot to lean on when picking a search target —
-    the engine already sees every hand, it's one shared `GameState` — but
-    HexSet hands are private at a real table, and this list is what tells a
-    *human* what they may propose. Reflecting that omniscient filter here,
-    whether by omission or by an "isn't available" message, would hand them
-    the one thing the actual board never does: proof of what's in a
-    specific opponent's hand. `propose_trade` doesn't require coverage
-    either — a proposal nobody can cover is still legal, it just gets no
-    takers (see its own `if not willing: return`) — so this is the accurate
-    rule for what a human may attempt, not a laxer one.
-    """
-    state = game.state
-    player = game.current_player
-    # Trading is a Main-phase act, same as `propose_trade`'s own check. Left
-    # off, this offered pairs before the roll, which lit the hand up as
-    # clickable and opened the trade modal on a turn where the bank half of
-    # it could not be there — BANK_TRADE only exists in Main.
-    if game.phase is not Phase.MAIN:
-        return []
-    if game.offers_made >= MAX_OFFERS_PER_TURN:
-        return []
-    hand = state.hands[player]
-    return [
-        Action(ActionType.PROPOSE_TRADE, give=ONE_RESOURCE[given], want=ONE_RESOURCE[wanted])
-        for given in range(NUM_RESOURCES)
-        if hand[given]
-        for wanted in range(NUM_RESOURCES)
-        if wanted != given
-    ]
-
-
-def fair_legal_actions(game: Game) -> list[Action]:
-    """Every action currently legal, with `PROPOSE_TRADE`'s sample widened to
-    what any client — a browser, an LLM over MCP, or a bot — may see: no seat
-    is shown which specific opponents could cover an offer (see
-    `_proposable_options`), since that would leak a hand's exact composition
-    beyond what the public ledger (`hexset_ui.ledger`) already certifies. The
-    one legality authority every wire surface shares — `legal_wire_actions`
-    below and `api.Tables.record`'s `GET /api/record` both call this rather
-    than each sampling `PROPOSE_TRADE` its own way."""
-    options = [a for a in legal_actions(game) if a.type is not ActionType.PROPOSE_TRADE]
-    options += _proposable_options(game)
-    return options
-
-
 # --- Human-readable log -------------------------------------------------------
 
 
@@ -359,6 +304,14 @@ class _UndoPoint:
     either way rather than needing two separate cases."""
 
     state: GameState
+    # The public-knowledge ledger, snapshotted with the state and restored
+    # with it. Not optional and not derivable: `PublicLedger` is built
+    # forward from the moves that were public, so an undone BANK_TRADE that
+    # left the ledger alone would leave it certifying a floor the hand no
+    # longer supports -- `known[wheat] = 1` against a hand holding none, a
+    # falsehood every seat then reads out of `/api/state` and `/api/record`
+    # (PR #2 defect 2). `spend`'s own clamp hides it rather than fixing it.
+    ledger: PublicLedger
     free_roads: int
     phase: Phase
     current_player: int
@@ -892,6 +845,7 @@ class GameSession:
         undo_point = (
             _UndoPoint(
                 state=copy_state(self.game.state),
+                ledger=self.game.ledger.copy(),
                 free_roads=self.game.free_roads,
                 phase=self.game.phase,
                 current_player=self.game.current_player,
@@ -904,7 +858,12 @@ class GameSession:
             if undoable
             else None
         )
+        seating_before = snapshot(self.game)
         apply(self.game, action)
+        # `hexset.game` deals the setup snake from seat 0 and rotates turns
+        # `(p + 1) % n`; this table starts the snake at its creator and
+        # retires seats nobody claimed. See `hexset_ui.seating`.
+        settle(self.game, seating_before)
         if action.type is ActionType.ROLL:
             self.last_roll_by_seat[actor] = self.game.last_roll
         self.events.append(
@@ -965,7 +924,10 @@ class GameSession:
         if self._undo is None or self._undo.actor != seat:
             raise ValueError("nothing to undo")
         point = self._undo
+        if point.ledger is None:  # pragma: no cover -- defensive, see the docstring
+            raise ValueError("this action cannot be undone")
         self.game.state = point.state
+        self.game.ledger = point.ledger
         self.game.free_roads = point.free_roads
         self.game.phase = point.phase
         self.game.current_player = point.current_player
@@ -992,6 +954,32 @@ class GameSession:
         who = _who(winner, self.seat_labels)
         points = victory_points(self.game.state, winner)
         return f"{round_num}\t{who} wins with {points} points."
+
+    def _public_mover(self, viewer: int | None) -> int:
+        """Whose move it is, as `viewer` may be told.
+
+        Everywhere but `TRADE_RESPOND` this is just `to_move`. During
+        `TRADE_RESPOND` it is not: `game.pending_responders` is
+        `trading.responders(...)`, the seats that **can cover the offer**, so
+        publishing its head tells every poller — the token-free observer
+        included — exactly who is holding the wanted card and who was skipped.
+        That is a hand's composition, on the wire, for free; the offer block
+        already omits `responders` for precisely this reason
+        (`hexset_ui.rules`, and PR #2 defect 3).
+
+        A responder is told their own seat, because they have to act on it.
+        Everyone else is told the **proposer**, which is public — the offer
+        block names them — and which is also the seat the phase is really
+        about. The alternative, `None`, would break every client's "am I on
+        move?" test and read as "the game is over".
+        """
+        game = self.game
+        if is_over(game):
+            return game.current_player
+        mover = to_move(game)
+        if game.phase is not Phase.TRADE_RESPOND or game.offer is None:
+            return mover
+        return mover if viewer == mover else game.offer.proposer
 
     def state_view(self, viewer: int | None = None) -> dict:
         """The whole game as `viewer` is allowed to see it.
@@ -1064,15 +1052,19 @@ class GameSession:
 
         return {
             "phase": game.phase.name,
+            # Not filtered, and does not need to be: during TRADE_RESPOND
+            # `game.current_player` is still the *proposer* (the turn is
+            # theirs; only the decision moved), and the offer block names the
+            # proposer anyway. It is `to_move` that says who was asked.
             "current_player": game.current_player,
-            "to_move": None if over else to_move(game),
+            "to_move": None if over else self._public_mover(viewer),
             "seat": viewer,
             "claimed_seats": sorted(self.claimed_seats),
             # Seats the setup snake reached while still empty and waited out
             # — permanently retired, for good, from this game (see
-            # `hexset_ui.game.lock_seat`). `api.Table.join` refuses one of
+            # `hexset_ui.seating.lock_seat`). `api.Table.join` refuses one of
             # these the same way it refuses an already-occupied seat.
-            "locked": sorted(game.locked),
+            "locked": sorted(locked_of(game)),
             "winner": game.won_by,
             "game_over": over,
             # Whether POST /api/undo would succeed right now — see

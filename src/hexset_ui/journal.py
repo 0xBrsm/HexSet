@@ -34,13 +34,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .actions import Action, ActionType
-from .board.board import Board
-from .board.terrain import NUM_RESOURCES, Resource
-from .cards import NUM_DEV_CARDS, DevCard
-from .devcards import holdings
-from .game import Game
-from .victory import victory_points
+from hexset.actions import Action, ActionType
+from hexset.board.board import Board
+from hexset.board.terrain import NUM_RESOURCES, Resource
+from hexset.cards import NUM_DEV_CARDS, DevCard
+from hexset.devcards import holdings
+from hexset.game import Game
+from hexset.victory import victory_points
 
 ENV_DIR = "HEXSET_UI_GAMES_DIR"
 DEFAULT_DIR = "games"

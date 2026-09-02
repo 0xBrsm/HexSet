@@ -34,23 +34,28 @@ from typing import Sequence
 import numpy as np
 import onnxruntime as ort
 
-from .actions import (
+from hexset.actions import (
     Action,
     ActionSpace,
     ActionType,
     build_space,
-    options_for,
     within_offer_budget,
 )
-from .board.terrain import NUM_RESOURCES
-from .board.topology import Topology
-from .encoding import Observation, encode
-from .game import Game, to_move
-from .mcts import Search
+from hexset.board.terrain import NUM_RESOURCES
+from hexset.board.topology import Topology
+from hexset.game import Game, to_move
+from hexset.mcts import Search
+
+from .constants import LEGACY_CONTRACTS, RECORD_CONTRACTS
+from .encoding_v1 import Observation, encode
 from .modelmeta import SearchConfig, search_config
 from .record import action_mask, build_record
 from .record import pair_index as _pair_index
 from .record import pair_mask as _pair_mask
+# The honest option list, not `hexset.bots.options_for`'s omniscient one: a
+# checkpoint served here sees exactly the mask an external client or a human
+# sees (`hexset_ui.rules`, and PR #2 defect 4).
+from .rules import options_for
 
 # The off-diagonal (give, want) pairs, flattened as `give * NUM_RESOURCES +
 # want`. The diagonal is never legal — `legal_actions` skips `wanted ==
@@ -305,7 +310,22 @@ class V2Policy:
         outputs: list[str],
     ) -> list[np.ndarray]:
         records = [build_record(game, seat, options, self.space) for game, seat, options in rows]
-        inputs = {key: np.stack([record[key] for record in records]) for key in records[0]}
+        # Keyed off the graph's own input names, not off every field the
+        # record happens to carry. The record is the newest contract (29
+        # fields); a contract-2 graph declares 23 of them and a contract-3
+        # graph 27, and onnxruntime rejects a feed containing a name it does
+        # not declare -- which is how PR #2 broke every genuine dev-hexset
+        # export with `Invalid input name: offer_proposer`. Every contract so
+        # far is a prefix-superset of the last, so serving an older graph is
+        # exactly "give it the subset it asks for".
+        wanted = [i.name for i in self.session.get_inputs()]
+        missing = [name for name in wanted if name not in records[0]]
+        if missing:
+            raise ValueError(
+                f"this graph asks for {missing}, which the record does not carry — "
+                "it was exported against a newer contract than this server builds"
+            )
+        inputs = {key: np.stack([record[key] for record in records]) for key in wanted}
         return self.session.run(outputs, inputs)
 
     def _decode(self, index: int, pair: int) -> Action:
@@ -401,7 +421,18 @@ def _load_cached(path: str, topology: Topology, device: str, mtime_ns: int) -> L
         topology.num_vertices, topology.num_edges, topology.num_hexes, players
     )
     contract = meta.get("contract", "1")
-    policy = V2Policy(session, space) if contract == "2" else OnnxPolicy(session, space)
+    if contract in RECORD_CONTRACTS:
+        policy: OnnxPolicy | V2Policy = V2Policy(session, space)
+    elif contract in LEGACY_CONTRACTS:
+        policy = OnnxPolicy(session, space)
+    else:
+        # Loudly, rather than falling through to `OnnxPolicy` and dying on the
+        # first move with a missing-input error naming tensors nobody asked
+        # about. An unknown contract is a checkpoint from a future exporter.
+        raise ValueError(
+            f"{path} declares contract={contract!r}, which this server does not serve "
+            f"(known: {', '.join(sorted(LEGACY_CONTRACTS | RECORD_CONTRACTS))})"
+        )
     max_offers = meta.get("max_offers") or None
     return Loaded(
         policy=policy,

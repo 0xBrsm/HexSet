@@ -1,14 +1,30 @@
 """The position, stated in the rules' own terms and filtered to what one seat
 may legally know — the interface between the engine and any way of choosing
-an action, whether that is `search2.py` or a `.onnx` file.
+an action, whether that is a handcrafted search or a `.onnx` file.
 
-See `docs/onnx-contract-v2.md` for the field-by-field contract this mirrors.
-This module says what is true and visible; it never says how a network reads
-it, so it imports nothing model-shaped and knows no feature layout.
+**This is the one engine-adjacent module this package still carries its own
+copy of**, and it should not be. The canonical definition of the record is
+`hexset.onnx_record` (`RECORD_FIELDS`, `record_from_game`), with the per-field
+shapes in `hexset.export_onnx._shapes` and the contract number in
+`_CONTRACT_VERSION`. All three are unreachable from here: those two modules
+import torch at module scope, and this package ships an onnxruntime-only
+image. `docs/engine-divergence-2026-09-02.md` files that as change request R1
+— split the torch-free half out of `onnx_record.py` and this file deletes.
+Until then `tests/test_record_contract.py` pins every field name and shape
+against dev's own definitions wherever torch happens to be installed.
+
+The one deliberate difference from `record_from_game`, and it stays after R1:
+`options` is a *parameter* here. dev's version calls `legal_actions` itself,
+which is the engine's omniscient trade sample; every seat at a HexSet table
+gets the honest one instead (`hexset_ui.rules.fair_legal_actions`).
+
+See `docs/onnx-contract-v2.md` for the field-by-field contract. This module
+says what is true and visible; it never says how a network reads it, so it
+imports nothing model-shaped and knows no feature layout.
 
 Filtering here is load-bearing, not incidental: own hand and dev cards are
 exact; everyone else's resource composition is only ever as certain as the
-public log makes it (`ledger_known`/`ledger_unknown`, see `hexset_ui.ledger`
+public log makes it (`ledger_known`/`ledger_unknown`, see `hexset.ledger`
 — counting resources is not hidden information in this game, only a steal's
 identity is), and dev-card composition is a total alone. A caller that wants
 more than this record describes is asking the engine to leak a hidden card.
@@ -20,13 +36,13 @@ from typing import Sequence
 
 import numpy as np
 
-from .actions import Action, ActionSpace, ActionType
-from .board.terrain import NUM_RESOURCES
-from .devcards import holdings
-from .game import Game
-from .state import NO_OWNER
-from .trading import responders as offer_responders
-from .victory import award_points
+from hexset.actions import Action, ActionSpace, ActionType
+from hexset.board.terrain import NUM_RESOURCES
+from hexset.devcards import holdings
+from hexset.game import Game
+from hexset.state import NO_OWNER
+from hexset.trading import responders as offer_responders
+from hexset.victory import award_points
 
 NUM_PAIRS = NUM_RESOURCES * NUM_RESOURCES
 

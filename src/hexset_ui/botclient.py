@@ -49,12 +49,14 @@ from typing import Protocol
 import numpy as np
 import onnxruntime as ort
 
-from .actions import Action, ActionSpace, ActionType, build_space
-from .constants import TOKEN_HEADER
+from hexset.actions import Action, ActionSpace, ActionType, build_space
+from hexset.bots import Bot
+
+from .constants import RECORD_CONTRACTS, TOKEN_HEADER
 from .modelmeta import search_config
 from .record import action_mask as _record_action_mask
 from .record import pair_mask as _record_pair_mask
-from .webplay import Bot, action_to_wire, wire_to_action
+from .webplay import action_to_wire, wire_to_action
 
 NUM_RESOURCES = 5
 
@@ -168,7 +170,7 @@ def _decode(index: int, pair: int, space: ActionSpace) -> Action:
 
 @dataclass
 class RecordBrain:
-    """A non-search contract-2 checkpoint, playing entirely off `GET
+    """A non-search record-contract checkpoint, playing entirely off `GET
     /api/record` — no live `Game`, no reconstruction. Loads the ONNX session
     directly rather than through `onnxbot.load` (which wants a live
     `Topology` to fingerprint against); the wire record's own `space` field
@@ -182,10 +184,16 @@ class RecordBrain:
     def load(cls, spec: str, device: str = "cpu") -> "RecordBrain":
         session = ort.InferenceSession(spec, providers=_providers(device))
         meta = session.get_modelmeta().custom_metadata_map
-        if meta.get("contract", "1") != "2":
+        contract = meta.get("contract", "1")
+        if contract not in RECORD_CONTRACTS:
+            # Naming the contract actually found, rather than asserting it is
+            # 1: PR #2 told the owner of a genuine contract-4 export that
+            # their file "is a contract=1 checkpoint".
             raise ValueError(
-                f"{spec} is a contract=1 checkpoint — RecordBrain only plays contract=2; "
-                "run it as a local (embedded) bot instead"
+                f"{spec} declares contract={contract!r}; RecordBrain plays "
+                f"{', '.join(sorted(RECORD_CONTRACTS))} — a contract-1 checkpoint reads a "
+                "feature tensor rather than the record, so run it as a local (embedded) "
+                "bot instead"
             )
         if search_config(meta).searches:
             raise ValueError(
@@ -204,9 +212,18 @@ class RecordBrain:
         options = [wire_to_action(wire) for wire in record["options"]]
         kept = _within_offer_budget(options, record["offers_made"], self.max_offers)
 
+        # Keyed off the graph's own declared inputs, so a 23-input contract-2
+        # file, a 27-input contract-3 and a 29-input contract-4 all play off
+        # the one record the server sends (see `onnxbot.V2Policy._run`).
+        wanted = [i.name for i in self.session.get_inputs()]
+        missing = [name for name in wanted if name not in record]
+        if missing:
+            raise RuntimeError(
+                f"this checkpoint asks for {missing}, which /api/record does not carry"
+            )
         inputs = {
-            key: _to_input(key, value)
-            for key, value in record.items()
+            key: _to_input(key, record[key])
+            for key in wanted
             if key not in _SIDECAR_FIELDS and key not in _BOOL_FIELDS
         }
         # Recomputed from `kept`, not taken from the wire as-is: the record's
@@ -291,7 +308,9 @@ def _main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", required=True, help="Base URL of a running `python -m hexset_ui.web`.")
     parser.add_argument("--game", required=True, help="The game's six-character code.")
-    parser.add_argument("--model", required=True, help="Path to a contract=2 .onnx checkpoint.")
+    parser.add_argument(
+        "--model", required=True, help="Path to a record-contract .onnx checkpoint (2, 3 or 4)."
+    )
     parser.add_argument("--name", default=None, help="Display name for this seat.")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--poll-interval", type=float, default=1.0)

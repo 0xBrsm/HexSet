@@ -7,13 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from hexset_ui.actions import Action, ActionType, apply, legal_actions
-from hexset_ui.board.board import random_base_board
-from hexset_ui.board.coords import BASE_LAYOUT, MINI_LAYOUT, Hex, hexagon
+from hexset.actions import Action, ActionType, apply, legal_actions
+from hexset.board.board import random_base_board
+from hexset.board.coords import Hex, hexagon
+from hexset.board.maps import BASE_LAYOUT, MINI_LAYOUT
 
-from hexset_ui.board.topology import build as build_topology
+from hexset.board.topology import build as build_topology
 from conftest import RandomBot
-from hexset_ui.game import Phase, is_over, start, to_move
+from hexset.game import Phase, is_over, to_move
+from hexset_ui.seating import start_at
 from hexset_ui.journal import (
     DEFAULT_DIR,
     ENV_DIR,
@@ -22,7 +24,7 @@ from hexset_ui.journal import (
     replayable,
 )
 from hexset_ui.journal import RESOURCE_NAMES as JOURNAL_RESOURCE_NAMES
-from hexset_ui.victory import victory_points
+from hexset.victory import victory_points
 from hexset_ui.webplay import (
     RESOURCE_NAMES,
     SQRT3,
@@ -37,7 +39,7 @@ from hexset_ui.webplay import (
 
 def a_game(players: int = 4, seed: int = 0):
     rng = random.Random(seed)
-    return start(random_base_board(rng), players, rng, first=0)
+    return start_at(random_base_board(rng), players, rng, first=0)
 
 def a_session(game, claimed, **kwargs) -> GameSession:
     """A `GameSession` over `claimed` seats — every claimed seat submits its
@@ -191,7 +193,7 @@ def test_legal_wire_actions_offers_every_held_resource_regardless_of_who_could_c
     cover — correct for a search that already sees the true state, but
     exactly the leak a wire-facing payload must not repeat. See
     `webplay.fair_legal_actions`/`_proposable_options`."""
-    from hexset_ui.board.terrain import Resource
+    from hexset.board.terrain import Resource
 
     game = a_game(seed=19)
     game.phase = Phase.MAIN
@@ -220,7 +222,7 @@ def test_nothing_is_proposable_before_the_roll():
     clickable and opened the trade modal on a turn where the bank half of it
     could not be there — BANK_TRADE only exists in Main — so a port the human
     could plainly afford showed up dimmed."""
-    from hexset_ui.board.terrain import Resource
+    from hexset.board.terrain import Resource
 
     game = a_game(seed=19)
     game.phase = Phase.ROLL
@@ -235,7 +237,7 @@ def test_nothing_is_proposable_before_the_roll():
     assert "ROLL" in kinds
 
 def test_an_explicit_ask_is_honoured():
-    from hexset_ui.board.terrain import Resource
+    from hexset.board.terrain import Resource
 
     game = a_game(seed=8)
     game.phase = Phase.MAIN
@@ -318,7 +320,7 @@ def test_a_trade_that_gets_accepted_summarizes_into_one_line():
     only who's eligible to cover an offer is ever asked, so naming a
     decliner would tell a human they hold the wanted resource — hidden
     information a real board never gives up."""
-    from hexset_ui.board.terrain import Resource
+    from hexset.board.terrain import Resource
 
     game = a_game(seed=13)
     game.phase = Phase.MAIN
@@ -360,7 +362,7 @@ def test_a_trade_nobody_can_cover_is_still_legal_and_reads_as_declined():
     enumerator's own docstring), but a proposal nobody can cover is still a
     legal move — see is_legal's docstring for why it's checked against
     can_propose instead of sample membership."""
-    from hexset_ui.board.terrain import Resource
+    from hexset.board.terrain import Resource
 
     game = a_game(seed=14)
     game.phase = Phase.MAIN
@@ -390,7 +392,7 @@ def test_a_trade_everyone_declines_summarizes_into_one_line():
     decliner and not a count — regardless of how many opponents were
     actually asked, so it can't be distinguished from an offer nobody was
     eligible to take at all (see test_a_trade_nobody_can_cover...)."""
-    from hexset_ui.board.terrain import Resource
+    from hexset.board.terrain import Resource
 
     game = a_game(seed=15)
     game.phase = Phase.MAIN
@@ -687,7 +689,7 @@ def test_state_view_does_not_expose_who_is_eligible_to_respond_to_an_offer():
     actually responded would leak the same hidden hand information the log
     (see _log_action's "Everyone declined." handling) is built to hide,
     just earlier and over a different channel."""
-    from hexset_ui.board.terrain import Resource
+    from hexset.board.terrain import Resource
 
     game = a_game(seed=18)
     game.phase = Phase.MAIN
@@ -712,7 +714,7 @@ def test_state_view_offer_answered_is_the_proposers_own_information_only():
     `record.py:build_record` filters it — all-zero (absent, here) unless
     `viewer == offer.proposer`, since a responder must not condition on an
     earlier decline."""
-    from hexset_ui.board.terrain import Resource
+    from hexset.board.terrain import Resource
 
     game = a_game(seed=18)
     game.phase = Phase.MAIN
@@ -736,7 +738,7 @@ def test_state_view_offer_answered_is_the_proposers_own_information_only():
     assert "answered" not in session.state_view(None)["offer"]
 
 def test_state_view_reports_locked_seats():
-    from hexset_ui.game import lock_seat
+    from hexset_ui.seating import lock_seat
 
     game = a_game(seed=8)
     lock_seat(game, 2)
@@ -766,7 +768,7 @@ def played(tmp_path_factory):
     # a fresh one, so the game's own rng must begin from the same untouched
     # state here too.
     board = random_base_board(random.Random(SEED))
-    game = start(board, 4, random.Random(SEED), first=0)
+    game = start_at(board, 4, random.Random(SEED), first=0)
     session = GameSession(
         game=game,
         claimed_seats={0, 1, 2, 3},
@@ -807,7 +809,7 @@ def test_a_journalled_game_replays_clean(played):
 
     board = random_base_board(random.Random(SEED))
     resumed = GameSession(
-        game=start(board, header["num_players"], random.Random(SEED), first=header["first"]),
+        game=start_at(board, header["num_players"], random.Random(SEED), first=header["first"]),
         claimed_seats=set(header["human_seats"]),
         seed=SEED,
     )

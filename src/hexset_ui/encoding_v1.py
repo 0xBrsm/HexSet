@@ -31,12 +31,12 @@ from functools import lru_cache
 
 import numpy as np
 
-from .board.board import Board, pips
-from .board.terrain import NUM_RESOURCES, Terrain
-from .board.topology import Topology
-from .cards import DECK_SIZE
-from .game import Game, Phase
-from .state import NO_OWNER, Building, GameState
+from hexset.board.board import Board, pips
+from hexset.board.terrain import NUM_RESOURCES, Terrain
+from hexset.board.topology import Topology
+from hexset.cards import DECK_SIZE
+from hexset.game import Game, Phase
+from hexset.state import NO_OWNER, Building, GameState
 
 NUM_TERRAIN = len(Terrain)
 NUM_BUILDINGS = len(Building)
@@ -284,7 +284,7 @@ def _encode_edges(state: GameState, perspective: int) -> np.ndarray:
 def _encode_globals(
     game: Game, perspective: int, building_points: np.ndarray
 ) -> np.ndarray:
-    from .victory import award_points
+    from hexset.victory import award_points
 
     state = game.state
     players = state.num_players

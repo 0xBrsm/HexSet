@@ -18,8 +18,8 @@ import urllib.request
 
 import pytest
 
-from hexset_ui.actions import ActionType, legal_actions
-from hexset_ui.api import Config, Tables
+from hexset.actions import ActionType, legal_actions
+from conftest import new_tables
 from hexset_ui.web import TOKEN_HEADER, HexSetServer, is_code, looks_like_a_code_attempt
 from hexset_ui.webplay import action_to_wire
 
@@ -28,7 +28,7 @@ SOLO = ["search2", "search2", "search2"]
 
 @pytest.fixture
 def live_server():
-    server = HexSetServer(("127.0.0.1", 0), Tables(Config(games_dir="", seat_grace=0.0)))
+    server = HexSetServer(("127.0.0.1", 0), new_tables())
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:

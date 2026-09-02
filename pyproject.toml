@@ -4,7 +4,16 @@ version = "0.1.0"
 description = "HexSet — a human-vs-bot hex-tile strategy board game in the browser, ONNX Runtime inference"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
+# `hexset` is the engine, the bots and the ONNX record contract, consumed
+# from the repo that owns them (0xBrsm/dev-hexset, `src/`) rather than copied
+# in. This package is the gym around it: the HTTP API, the MCP server, the
+# browser client, the journal, and the ONNX-runtime serving layer. Until
+# `hexset` is published, install it from a checkout:
+#     pip install -e /path/to/dev-hexset/src -e ".[test]"
+# See `docs/engine-divergence-2026-09-02.md` for what the copy used to hold
+# and what came back the other way.
 dependencies = [
+    "hexset>=0.13",
     "numpy>=1.26",
     "onnxruntime>=1.18",
 ]

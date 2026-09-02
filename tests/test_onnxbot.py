@@ -7,9 +7,9 @@ import pytest
 
 pytest.importorskip("onnxruntime", reason="hexset_ui.onnxbot needs onnxruntime installed")
 
-from hexset_ui.actions import legal_actions, within_offer_budget  # noqa: E402
-from hexset_ui.board.board import random_base_board  # noqa: E402
-from hexset_ui.game import start, to_move  # noqa: E402
+from hexset.actions import legal_actions, within_offer_budget  # noqa: E402
+from hexset.board.board import random_base_board  # noqa: E402
+from hexset.game import start, to_move  # noqa: E402
 from hexset_ui.onnxbot import load, network_bot  # noqa: E402
 from conftest import step_randomly  # noqa: E402
 
@@ -34,7 +34,7 @@ def checkpoint_v2():
 
 
 def test_a_v2_checkpoint_plays_a_legal_action_from_every_phase(checkpoint_v2):
-    from hexset_ui.actions import apply
+    from hexset.actions import apply
 
     path, board = checkpoint_v2
     bot = network_bot(path, board)
@@ -68,7 +68,7 @@ def test_a_v2_checkpoints_value_head_is_already_board_seat_order(checkpoint_v2):
 
 
 def test_a_v2_search_over_a_learned_prior_plays_a_legal_action(checkpoint_v2):
-    from hexset_ui.actions import apply
+    from hexset.actions import apply
     from hexset_ui.onnxbot import searcher
 
     path, board = checkpoint_v2
@@ -118,7 +118,7 @@ def test_a_checkpoint_plays_a_legal_action_from_every_phase(checkpoint):
         action = bot.choose(game)
         assert action in legal_actions(game)
         seen.add(game.phase)
-        from hexset_ui.actions import apply
+        from hexset.actions import apply
 
         apply(game, action)
     assert len(seen) > 3
@@ -162,7 +162,7 @@ def test_the_budget_is_honoured_exactly_as_the_search_bot_honours_it(checkpoint)
     rng = random.Random(11)
     game = start(board, 4, rng)
 
-    from hexset_ui.actions import apply
+    from hexset.actions import apply
 
     for _ in range(600):
         if game.won_by is not None:
@@ -192,7 +192,7 @@ def test_scoring_is_greedy_so_a_position_answers_the_same_way_twice(checkpoint):
 
 
 def test_the_search_reads_the_value_head_in_board_seat_order(checkpoint):
-    from hexset_ui.encoding import encode
+    from hexset_ui.encoding_v1 import encode
     from hexset_ui.onnxbot import network_evaluator
 
     path, board = checkpoint
@@ -218,14 +218,14 @@ def test_a_search_over_a_learned_prior_plays_a_legal_action(checkpoint):
     for _ in range(20):
         action = search.choose(game)
         assert action in set(legal_actions(game))
-        from hexset_ui.actions import apply
+        from hexset.actions import apply
 
         apply(game, action)
 
 
 def test_the_prior_covers_every_offer_rather_than_one_arbitrary_one(checkpoint):
-    from hexset_ui.actions import ActionType
-    from hexset_ui.mcts import Leaf
+    from hexset.actions import ActionType
+    from hexset.mcts import Leaf
     from hexset_ui.onnxbot import searcher
 
     path, board = checkpoint

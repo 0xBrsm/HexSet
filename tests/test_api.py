@@ -15,7 +15,7 @@ import time
 import pytest
 
 from hexset_ui import journal
-from hexset_ui.actions import ActionType, legal_actions
+from hexset.actions import ActionType, legal_actions
 from hexset_ui.api import (
     CODE_ALPHABET,
     CODE_LENGTH,
@@ -29,19 +29,19 @@ from hexset_ui.api import (
     new_code,
     resume_session,
 )
-from hexset_ui.game import is_over, lock_seat, to_move
+from hexset.game import is_over, to_move
+from hexset_ui.seating import lock_seat
 from hexset_ui.webplay import action_to_wire
+from conftest import new_tables
 
 SOLO = ["search2", "search2", "search2"]
 
 
 def tables(**config) -> Tables:
-    # games_dir="" rather than the default None: None means "wherever
-    # HEXSET_UI_GAMES_DIR points", and a test suite should not journal into a
-    # real player's games directory.
-    config.setdefault("games_dir", "")
-    config.setdefault("seat_grace", 0.0)  # deterministic locking by default
-    return Tables(Config(**config))
+    """`conftest.new_tables`: a registry whose bot runner threads are stopped
+    when the test ends (see that fixture for why a test may not just build
+    one)."""
+    return new_tables(**config)
 
 
 def deal(registry: Tables, **kwargs) -> tuple[str, str]:
@@ -475,7 +475,12 @@ def test_a_registry_miss_reopens_bot_seats_fresh_but_opens_the_humans(tmp_path):
     code, token = deal(registry, bots=SOLO)  # every seat filled, none open
     creator_seat = registry.by_token(token)[1]
 
-    del registry._tables[code]  # simulate a restart
+    # Simulate a restart: the process going away takes its runner threads
+    # with it. `stop_runners` rather than `close`, because a restart does not
+    # mark the journal abandoned -- that is exactly what leaves the game
+    # resumable, which is what this test is about. Dropping the entry alone
+    # would leave three bots polling a table nothing can reach.
+    registry._tables.pop(code).stop_runners()
 
     reopened = registry.get(code)
     kinds = {i: s.kind for i, s in enumerate(reopened.seats)}

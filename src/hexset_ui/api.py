@@ -32,7 +32,7 @@ reopened after one simply treats every non-bot seat as open again (see
 whether or not anyone has claimed them yet — there is no "start" that
 renumbers a partial roster down to just the seats somebody's in. Instead, an
 empty seat the setup snake reaches gets a grace window (`Table._settle_locks`)
-before it locks out for good (see `hexset_ui.game.lock_seat`): a game that
+before it locks out for good (see `hexset_ui.seating.lock_seat`): a game that
 begins setup with two or three seats occupied stays that size for its whole
 duration, one seat's decision at a time rather than one cutoff for the table.
 `Table.join` only ever offers a seat that is both empty and unlocked.
@@ -45,30 +45,40 @@ import random
 import secrets
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from hexset.actions import build_space
+from hexset.arena import PRESETS, spawn as spawn_entrant
+from hexset.board.board import Board, random_base_board
+from hexset.bots import Bot
+from hexset.game import Phase, is_over, to_move
+
 from . import journal
-from .actions import build_space
-from .board.board import Board, random_base_board
 from .botclient import BotRunner, LocalSearchBrain, LocalTransport
-from .game import Phase, is_over, lock_seat, start, to_move
 from .record import build_record
-from .search2 import search2
+from .rules import fair_legal_actions
+from .seating import lock_seat, locked_of, start_at
 from .webplay import (
-    Bot,
     GameSession,
     ResumeError,
     action_to_wire,
     board_layout,
-    fair_legal_actions,
 )
 
-# The one opponent that is not a file. Everything else in the picker is a path
-# to a checkpoint, and what it does is the checkpoint's business.
-HANDCRAFTED = "search2"
+# The opponents that are not files. Everything else in the picker is a path to
+# a checkpoint, and what it does is the checkpoint's business.
+#
+# Both are `hexset.arena` presets, built through `hexset.arena.spawn` so this
+# server seats the same bot the training repo duels — `heximax` is the honest
+# handcrafted search (it reads the public ledger, never a hidden hand) and is
+# the default embedded opponent; `search2` is the older depth-two bot every
+# ladder number on record was measured against, kept by name so a game can
+# still be played against it.
+HANDCRAFTED = "heximax"
+HANDCRAFTED_ENTRANTS = ("heximax", "search2")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODELS_DIR = Path(os.environ.get("HEXSET_UI_MODELS_DIR", REPO_ROOT / "models"))
@@ -150,7 +160,7 @@ def clean_name(name: str | None) -> str | None:
 def model_options() -> dict[str, str]:
     """Display name -> entrant spec, for the per-seat model picker.
 
-    `search2` (handcrafted, no checkpoint) is always first; every `*.onnx`
+    The handcrafted entrants (no checkpoint) come first; every `*.onnx`
     file under `MODELS_DIR` follows, filename stem as the display name. A
     client only ever sends a name back; specs never cross the wire, so a
     request cannot point a bot at an arbitrary file — this function is the one
@@ -160,7 +170,7 @@ def model_options() -> dict[str, str]:
     handful of files is sub-millisecond, and the entire point of this function
     is that dropping a file in shows up without a restart.
     """
-    options = {HANDCRAFTED: HANDCRAFTED}
+    options = {name: name for name in HANDCRAFTED_ENTRANTS}
     for path in sorted(MODELS_DIR.glob("*.onnx")):
         options[path.stem] = str(path)
     return options
@@ -244,15 +254,24 @@ class Table:
                 return index
         raise ApiError("that token is not for a seat at this game", status=403)
 
+    def stop_runners(self) -> None:
+        """Stops every embedded bot runner at this table and waits for it.
+
+        Signalled in one pass and joined in a second, so three bots take one
+        poll interval between them rather than three.
+        """
+        for runner, _ in self.runners:
+            runner.stop.set()
+        for _, thread in self.runners:
+            thread.join(timeout=2.0)
+        self.runners.clear()
+
     def close(self) -> None:
         """Stops every embedded bot runner at this table, then closes the
         journal. Order matters: a runner still mid-decision when the journal
         is marked abandoned could otherwise submit one more action into a
         game already filed as over."""
-        for runner, _ in self.runners:
-            runner.stop.set()
-        for _, thread in self.runners:
-            thread.join(timeout=2.0)
+        self.stop_runners()
         if self.session.journal is not None:
             self.session.journal.abandoned()
 
@@ -270,7 +289,7 @@ class Table:
         game = self.session.game
         while not is_over(game) and game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
             seat = to_move(game)
-            if self.seats[seat].kind is not SeatKind.EMPTY or seat in game.locked:
+            if self.seats[seat].kind is not SeatKind.EMPTY or seat in locked_of(game):
                 self.blocked_since = None
                 return
             if self.blocked_since is None:
@@ -299,7 +318,7 @@ class Table:
         candidates = [
             i
             for i, seat in enumerate(self.seats)
-            if seat.kind is SeatKind.EMPTY and i not in self.session.game.locked
+            if seat.kind is SeatKind.EMPTY and i not in locked_of(self.session.game)
         ]
         if not candidates:
             raise ApiError("this game has no open seats", status=409)
@@ -341,8 +360,14 @@ def spawn_bot(spec: str, board: Board, rng: random.Random, config: Config) -> Bo
     bot plays its seat from outside the session, the same as any other
     client (see the module docstring).
     """
-    if spec == HANDCRAFTED:
-        return search2(board, rng, max_offers=config.max_offers)
+    if spec in PRESETS:
+        # `hexset.arena` is the training repo's own bot registry, and the one
+        # `search2` every duel on record was played against — built here
+        # rather than re-declared, so "the handcrafted opponent" means one
+        # thing in both repos. The offer budget is this deployment's
+        # (`Config.max_offers`), not the preset's `None`: a served game caps
+        # offers so a turn cannot spend a minute of wall clock on them.
+        return spawn_entrant(replace(PRESETS[spec], max_offers=config.max_offers), board, rng)
 
     from .onnxbot import spawn  # onnxruntime-free import boundary
 
@@ -378,7 +403,7 @@ def build_session(code: str, seats: list[Seat], config: Config, *, first: int) -
     # object on to `start` would leave `start`'s rng at a position resuming
     # cannot reconstruct, and a journalled game would fail to resume.
     board = random_base_board(random.Random(seed))
-    game = start(board, MAX_SEATS, random.Random(seed), first=first)
+    game = start_at(board, MAX_SEATS, random.Random(seed), first=first)
     bot_names, bot_specs, player_names = _seat_labels(seats)
     claimed = {i for i, s in enumerate(seats) if s.kind is not SeatKind.EMPTY}
     return GameSession(
@@ -421,8 +446,8 @@ def resume_session(code: str, seats: list[Seat], config: Config) -> GameSession 
     first = header.get("first", 0)
     board = random_base_board(random.Random(seed))
     bot_names, bot_specs, player_names = _seat_labels(seats)
-    game = start(board, MAX_SEATS, random.Random(seed), first=first)
-    game.locked = journal.locked_seats(events)
+    game = start_at(board, MAX_SEATS, random.Random(seed), first=first)
+    game.locked = journal.locked_seats(events)  # noqa: attribute, see seating.py
     claimed = {i for i, s in enumerate(seats) if s.kind is not SeatKind.EMPTY}
     session = GameSession(
         game=game,
@@ -492,8 +517,10 @@ class Tables:
             raise ApiError(f"a game seats at most {MAX_SEATS}; asked for {1 + len(bots)}")
 
         with self._registry_lock:
-            self._evict_stale(time.monotonic())
+            evicted = self._evict_stale(time.monotonic())
             code = new_code(set(self._tables))
+        for table in evicted:
+            table.close()
 
         creator_seat = random.SystemRandom().randrange(MAX_SEATS)
         seats: list[Seat] = [Seat() for _ in range(MAX_SEATS)]
@@ -554,9 +581,14 @@ class Tables:
     def get(self, code: str) -> Table:
         code = code.upper()
         with self._registry_lock:
+            # Every lookup, not just `create`: a box that deals one game and
+            # is then only ever read would otherwise never reap anything.
+            evicted = self._evict_stale(time.monotonic(), keep=code)
             table = self._tables.get(code)
             if table is None:
                 table = self._reopen(code)
+        for stale in evicted:
+            stale.close()
         if table is None:
             raise ApiError(f"no game with code {code}", status=404)
         table.last_seen = time.monotonic()
@@ -604,6 +636,16 @@ class Tables:
         A linear scan of live games. There are tens of these, not millions,
         and a second index would be one more thing to keep in step with
         eviction for no measurable gain.
+
+        **A bot seat's request does not refresh `last_seen`.** An embedded
+        runner polls once a second for the life of the game, so counting its
+        polls as activity meant `now - last_seen` could never reach
+        `TABLE_TTL_SECONDS` while a runner lived, and a runner lives until the
+        game is over: a human who dealt against three bots and closed the tab
+        left three threads polling a table that could never be evicted, with
+        its journal handle never closed (PR #2 defect 5). Liveness means *a
+        person or an external client is still here*, which is exactly the
+        seats that are not this server's own bots.
         """
         if not token:
             raise ApiError("this needs a seat token — join a game first", status=401)
@@ -612,22 +654,48 @@ class Tables:
         for table in tables:
             for seat in table.seats:
                 if seat.token is not None and secrets.compare_digest(seat.token, token):
-                    table.last_seen = time.monotonic()
-                    return table, table.seat_of(token)
+                    index = table.seat_of(token)
+                    if table.seats[index].kind is not SeatKind.BOT:
+                        table.last_seen = time.monotonic()
+                    return table, index
         raise ApiError("unknown or expired seat token", status=403)
 
-    def _evict_stale(self, now: float) -> None:
+    def _evict_stale(self, now: float, keep: str | None = None) -> list[Table]:
         """Must be called with `_registry_lock` held. Drops any game untouched
         for longer than `TABLE_TTL_SECONDS` — an abandoned game or a closed
-        tab, not an active one.
+        tab, not an active one. `keep` is the code the caller is about to look
+        up, spared so a request can never evict the game it came for.
 
         A game evicted mid-play leaves its journal open otherwise: nothing
         else ever calls `Journal.abandoned` for it, so a reader that treats an
         unclosed file as "still in flight" would wait on this one forever.
+
+        Returns the popped tables rather than closing them: `close` joins each
+        runner thread with a two-second timeout, and doing that while holding
+        the registry lock stalls every other game's `by_token` for up to two
+        seconds per runner. The caller closes them once it has let go.
         """
-        stale = [c for c, t in self._tables.items() if now - t.last_seen > TABLE_TTL_SECONDS]
-        for code in stale:
-            self._tables.pop(code).close()
+        stale = [
+            c
+            for c, t in self._tables.items()
+            if c != keep and now - t.last_seen > TABLE_TTL_SECONDS
+        ]
+        return [self._tables.pop(code) for code in stale]
+
+    def close(self) -> None:
+        """Stop every runner at every table and close every journal.
+
+        Nothing in a long-lived server calls this — eviction does the same job
+        one table at a time — but a test, or a shutting-down process, has no
+        other way to get its threads back, and a suite that deals a few dozen
+        bot games leaks a runner thread per bot seat without it (PR #2 defect
+        5: 67 live `bot-*` threads after `test_api.py` + `test_web.py`).
+        """
+        with self._registry_lock:
+            tables = list(self._tables.values())
+            self._tables.clear()
+        for table in tables:
+            table.close()
 
     # --- play -------------------------------------------------------------
 

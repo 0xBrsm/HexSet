@@ -113,7 +113,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   crisp `willing` gate, read under `relative`, proposes far more
   selectively than the engine's blind sample, and that trade-volume drop
   alone accounts for most of the overrun; flagged for the PI rather than
-  quietly absorbed by loosening the gate (module docstring, "Cost").
+  quietly absorbed by loosening the gate (module docstring, "Cost"). A later,
+  behaviour-preserving optimization pass — gated by a byte-identical choice
+  census over 30 seeded games (`test_heximax.py`) — memoized `Evaluator.survey`
+  per decision and shared `propose_actions`' "before" reading across its own
+  calls, taking the adapter-active cost from 3.46x down to 2.87x
+  `search2-offers3` per move, still over the ceiling for the same
+  trade-volume reason, not a compute one.
 
 ### Changed
 

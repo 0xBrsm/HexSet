@@ -928,3 +928,76 @@ def test_an_undone_placement_is_written_down_not_erased(tmp_path):
     assert [e["kind"] for e in events] == ["game", "action", "undo"]
     assert events[1]["type"] == "SETUP_SETTLEMENT"
     assert events[2]["back_to"] == 0  # everything from step 0 did not happen
+
+
+def test_to_move_does_not_reveal_who_can_cover_an_offer():
+    """PR #2 defect 3. `to_move` during `TRADE_RESPOND` is
+    `pending_responders[0]`, and `pending_responders` is
+    `trading.responders(...)` -- the seats that *can cover the offer*. Sending
+    it to every poller says which seats hold the wanted card and which were
+    skipped: a hand's composition, on the wire, to bystanders and to the
+    token-free observer, at exactly the moment the offer block is careful to
+    omit `responders` and the log is careful to say a uniform "Everyone
+    declined."
+
+    Rigged so only seat 2 holds ore: seat 0 offers wood for ore, so seat 2 is
+    the only responder, and a leak is unambiguous rather than probabilistic.
+    """
+    from hexset.board.terrain import Resource
+
+    game = a_game(seed=18)
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    state = game.state
+    for hand in state.hands:
+        hand[Resource.ORE] = 0
+    state.hands[0][Resource.WOOD] += 1
+    state.hands[2][Resource.ORE] = 1
+
+    session = a_session(game, {0, 1, 2, 3})
+    offer = Action(ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1))
+    session.submit(0, action_to_wire(offer))
+    assert game.phase is Phase.TRADE_RESPOND
+    assert game.pending_responders == [2]
+
+    # The one seat actually being asked is told so -- it has to act.
+    assert session.state_view(2)["to_move"] == 2
+
+    # Nobody else is. They are told the proposer, which the offer block
+    # already names, so no client loses its "am I on move?" test.
+    for viewer in (0, 1, 3, None):
+        view = session.state_view(viewer)
+        assert view["to_move"] == 0, viewer
+        assert view["to_move"] != 2, viewer
+
+    # And `current_player` was never the leak: during TRADE_RESPOND the turn
+    # is still the proposer's, only the decision moved.
+    assert session.state_view(None)["current_player"] == 0
+
+
+def test_to_move_is_unfiltered_in_every_phase_but_trade_respond():
+    """The filter is narrow on purpose. Discarding also hands the decision to
+    somebody other than the current player, but who owes a discard is public
+    (hand sizes are, and `discard_quota` is served), so filtering there would
+    cost every client its turn indicator for nothing."""
+    from hexset.board.terrain import Resource
+
+    game = a_game(seed=31)
+    session = a_session(game, {0, 1, 2, 3})
+    for _ in range(40):
+        if is_over(game):
+            break
+        if game.phase is Phase.TRADE_RESPOND:
+            continue
+        seat = to_move(game)
+        for viewer in (None, 0, 1, 2, 3):
+            assert session.state_view(viewer)["to_move"] == seat, (game.phase, viewer)
+        session.submit(seat, action_to_wire(legal_actions(game)[0]))
+
+    game.phase = Phase.DISCARD
+    game.current_player = 0
+    game.state.hands[2] = [8, 0, 0, 0, 0]
+    game.discard_quota = [0, 0, 4, 0]
+    assert to_move(game) == 2
+    for viewer in (None, 0, 1, 2, 3):
+        assert session.state_view(viewer)["to_move"] == 2, viewer

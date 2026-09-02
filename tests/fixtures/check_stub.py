@@ -10,9 +10,10 @@ import onnxruntime as ort
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1] / "src"))
 
-from hexset_ui.actions import ActionType, apply, build_space, options_for
-from hexset_ui.board.board import random_base_board
-from hexset_ui.game import start, to_move
+from hexset.actions import ActionType, apply, build_space
+from hexset_ui.rules import options_for
+from hexset.board.board import random_base_board
+from hexset.game import start, to_move
 
 NUM_RESOURCES = 5
 
@@ -22,7 +23,7 @@ game = start(board, 4, rng)
 space = build_space(
     board.topology.num_vertices, board.topology.num_edges, board.topology.num_hexes, 4
 )
-session = ort.InferenceSession(str(HERE / "stub-v2.onnx"), providers=["CPUExecutionProvider"])
+session = ort.InferenceSession(str(HERE / "stub-contract4.onnx"), providers=["CPUExecutionProvider"])
 
 print("inputs :", len(session.get_inputs()), "outputs:", len(session.get_outputs()))
 print("meta   :", session.get_modelmeta().custom_metadata_map)

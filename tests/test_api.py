@@ -10,6 +10,7 @@ to be in `models/` and drag onnxruntime into a suite that has no need of it.
 from __future__ import annotations
 
 import random
+import threading
 import time
 
 import pytest
@@ -635,3 +636,188 @@ def test_the_snake_starts_where_first_says_not_always_seat_zero(tmp_path):
     resumed = resume_session("ABC123", seats, config)
 
     assert resumed.game.setup_queue[0] == 2
+
+
+# --- One mask for every seat --------------------------------------------------
+
+
+def _a_position_where_the_two_masks_differ(mover: int = 0):
+    """A `Game` in MAIN where the mover holds a resource no opponent holds.
+
+    That is exactly when the engine's omniscient `PROPOSE_TRADE` sample
+    (`actions._offer_actions`, which skips a `want` nobody can cover) and the
+    honest one (`rules.proposable_options`, which asks only what the mover
+    holds) come apart -- common in the first twenty turns, and the whole of
+    what defect 4 is about.
+    """
+    import random as _random
+
+    from hexset.board.board import random_base_board
+    from hexset.board.terrain import NUM_RESOURCES
+    from hexset.game import Phase
+    from hexset_ui.seating import start_at
+
+    game = start_at(random_base_board(_random.Random(0)), 4, _random.Random(1), first=0)
+    game.phase = Phase.MAIN
+    game.current_player = mover
+    for hand in game.state.hands:
+        hand[:] = [0] * NUM_RESOURCES
+    game.state.hands[mover] = [1, 1, 1, 1, 1]  # every give is available
+    game.state.hands[(mover + 1) % 4][0] = 1  # and exactly one want is coverable
+    return game
+
+
+def test_the_honest_and_omniscient_trade_samples_really_do_differ_here():
+    """The premise of the next two tests, asserted rather than assumed: if
+    these two ever agreed, the tests below would pass vacuously."""
+    from hexset.actions import ActionType, legal_actions
+    from hexset_ui.rules import fair_legal_actions
+
+    game = _a_position_where_the_two_masks_differ()
+    omniscient = {a for a in legal_actions(game) if a.type is ActionType.PROPOSE_TRADE}
+    honest = {a for a in fair_legal_actions(game) if a.type is ActionType.PROPOSE_TRADE}
+    assert omniscient < honest
+    # The omniscient sample offers only the `want` seat 1 can cover; the
+    # honest one offers every want for every resource the mover holds.
+    assert {tuple(a.want) for a in omniscient} == {(1, 0, 0, 0, 0)}
+    assert len({tuple(a.want) for a in honest}) == 5
+
+
+def test_an_embedded_bot_is_offered_the_same_mask_the_wire_serves():
+    """PR #2 defect 4. `NetworkBot.choose` called the engine's omniscient
+    `options_for`, while `/api/record` and every human client got the honest
+    list -- so the same checkpoint played a different game depending on
+    whether it was seated embedded or joined over HTTP, and the commit
+    message's claim that the record is "byte-identical to what an in-process
+    bot computes" was false for `action_mask`/`pair_mask` whenever some
+    resource was held by no opponent (which is this position)."""
+    from hexset_ui.rules import fair_legal_actions
+    from hexset_ui.onnxbot import options_for as onnxbot_options_for
+
+    game = _a_position_where_the_two_masks_differ()
+    assert onnxbot_options_for(game) == fair_legal_actions(game)
+
+
+def test_record_matches_the_embedded_bots_options():
+    """The same claim at the level it was actually made, through the real
+    route: the record `GET /api/record` serves and the record an in-process
+    bot builds for itself (`onnxbot.V2Policy._run`) must agree field for
+    field, `action_mask` and `pair_mask` included."""
+    import numpy as np
+
+    from hexset.actions import build_space
+
+    from hexset_ui.record import build_record
+    from hexset_ui.rules import options_for
+
+    registry = tables()
+    code, token = deal(registry, bots=[])
+    table = registry.get(code)
+    seat = registry.by_token(token)[1]
+
+    # Park the table on the position where the two samples come apart.
+    table.session.game = _a_position_where_the_two_masks_differ(mover=seat)
+
+    served = registry.record(table, seat)
+
+    game = table.session.game
+    topology = game.state.board.topology
+    space = build_space(
+        topology.num_vertices, topology.num_edges, topology.num_hexes, game.state.num_players
+    )
+    in_process = build_record(game, seat, tuple(options_for(game)), space)
+
+    for key, value in in_process.items():
+        assert np.array_equal(np.asarray(served[key]), value), key
+    # And the wire carries the honest offers, not a filtered subset.
+    offers = [w for w in served["options"] if w["type"] == "PROPOSE_TRADE"]
+    assert len({tuple(w["want"]) for w in offers}) == 5
+
+
+# --- Runner lifecycle ---------------------------------------------------------
+
+
+def test_a_bot_poll_does_not_keep_a_table_alive():
+    """PR #2 defect 5. `by_token` refreshed `last_seen` for every request,
+    including an embedded runner's once-a-second poll, and a runner lives
+    until the game is over -- so `now - last_seen` could never reach
+    `TABLE_TTL_SECONDS` while a bot sat at the table. A human who dealt
+    against three bots and closed the tab left three threads polling a game
+    that could never be evicted and a journal handle that was never closed.
+
+    Liveness means a person or an external client is still here, which is
+    exactly the seats that are not this server's own bots.
+    """
+    registry = tables()
+    code, token = deal(registry, bots=SOLO)
+    table = registry.get(code)
+    bot_seat_index = next(
+        i for i, s in enumerate(table.seats) if s.kind is SeatKind.BOT
+    )
+    bot_token = table.seats[bot_seat_index].token
+
+    table.last_seen = 0.0
+    registry.by_token(bot_token)
+    assert table.last_seen == 0.0, "a bot's own poll refreshed the table"
+
+    registry.by_token(token)
+    assert table.last_seen > 0.0, "a person's request must refresh the table"
+
+
+def test_a_table_only_bots_are_watching_is_evicted():
+    """The consequence of the above, end to end: an abandoned bot game goes
+    on somebody else's next request, runners and journal with it. PR #2 only
+    ran eviction inside `create`, so a box that dealt one game and was then
+    only read never reaped anything.
+
+    The reaping request is a lookup of a *different* game, because `get`
+    spares the code it was asked for (`keep`) -- a request is itself the
+    liveness signal for the table it names.
+    """
+    import hexset_ui.api as api
+
+    registry = tables()
+    abandoned, _ = deal(registry, bots=SOLO)
+    watched, _ = deal(registry, bots=[])
+    assert [t for t in threading.enumerate() if t.name.startswith(f"bot-{abandoned}")]
+
+    original = api.TABLE_TTL_SECONDS
+    api.TABLE_TTL_SECONDS = -1.0
+    try:
+        registry.get(watched)  # somebody else's poll does the reaping
+    finally:
+        api.TABLE_TTL_SECONDS = original
+
+    assert abandoned not in registry._tables
+    assert not [t for t in threading.enumerate() if t.name.startswith(f"bot-{abandoned}")]
+    assert watched in registry._tables
+
+
+def test_the_code_being_looked_up_is_never_evicted_out_from_under_the_request():
+    """`get` runs eviction before the lookup, so without `keep` a request for
+    a game that had just gone stale would 404 on the very table it came
+    for -- a reopen from the journal at best, an error at worst."""
+    import hexset_ui.api as api
+
+    registry = tables()
+    code, _ = deal(registry, bots=[])
+    registry.get(code).last_seen = 0.0
+
+    original = api.TABLE_TTL_SECONDS
+    api.TABLE_TTL_SECONDS = -1.0
+    try:
+        assert registry.get(code).code == code
+    finally:
+        api.TABLE_TTL_SECONDS = original
+
+
+def test_closing_a_registry_stops_every_runner():
+    """What the test suite's own fixture leans on, asserted directly."""
+    registry = tables()
+    code, _ = deal(registry, bots=SOLO)
+    assert [t for t in threading.enumerate() if t.name.startswith(f"bot-{code}")]
+
+    registry.close()
+
+    assert not [t for t in threading.enumerate() if t.name.startswith(f"bot-{code}")]
+    assert not registry._tables

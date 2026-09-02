@@ -8,23 +8,30 @@ import pytest
 pytest.importorskip("onnxruntime", reason="hexset_ui.onnxbot needs onnxruntime installed")
 
 from hexset.actions import legal_actions, within_offer_budget  # noqa: E402
+from hexset_ui.rules import options_for  # noqa: E402
 from hexset.board.board import random_base_board  # noqa: E402
 from hexset.game import start, to_move  # noqa: E402
 from hexset_ui.onnxbot import load, network_bot  # noqa: E402
 from conftest import step_randomly  # noqa: E402
 
 FIXTURE = Path(__file__).parent / "fixtures" / "tiny.onnx"
-FIXTURE_V2 = Path(__file__).parent / "fixtures" / "stub-v2.onnx"
+FIXTURE_V2 = Path(__file__).parent / "fixtures" / "stub-contract4.onnx"
 
 
 @pytest.fixture
 def checkpoint_v2():
-    """`stub-v2.onnx`: a contract-2 stub for the same 4-player base board as
-    `checkpoint` — uniform-over-legal prior, zero value, no learned weights
-    (see `tests/fixtures/build_stub_v2.py`). Exercises `V2Policy` through the
-    same public entry points `checkpoint` exercises for `OnnxPolicy`, so the
-    two contracts are held to the same behavioural bar rather than only the
-    one this repo happens to have a trained checkpoint for.
+    """`stub-contract4.onnx`: a record-contract stub for the same 4-player
+    base board as `checkpoint` — uniform-over-legal prior, zero value, no
+    learned weights (see `tests/fixtures/build_stub.py`). Exercises
+    `V2Policy` through the same public entry points `checkpoint` exercises
+    for `OnnxPolicy`, so the two contracts are held to the same behavioural
+    bar rather than only the one this repo happens to have a trained
+    checkpoint for.
+
+    Contract *dispatch* — which graph shape a `contract` value routes to, and
+    whether a genuine dev-hexset export loads at all — is
+    `test_contract_dispatch.py`'s job, against a real export rather than this
+    stub.
     """
     board = random_base_board(random.Random(0))
     yield str(FIXTURE_V2), board
@@ -46,7 +53,7 @@ def test_a_v2_checkpoint_plays_a_legal_action_from_every_phase(checkpoint_v2):
         if game.won_by is not None:
             break
         action = bot.choose(game)
-        assert action in legal_actions(game)
+        assert action in options_for(game)
         seen.add(game.phase)
         apply(game, action)
     assert len(seen) > 3
@@ -76,14 +83,14 @@ def test_a_v2_search_over_a_learned_prior_plays_a_legal_action(checkpoint_v2):
     game = start(board, 4, random.Random(2))
     for _ in range(20):
         action = search.choose(game)
-        assert action in set(legal_actions(game))
+        assert action in set(options_for(game))
         apply(game, action)
 
 
 def test_a_v2_stub_spawns_a_single_forward_bot(checkpoint_v2):
-    """`stub-v2.onnx`'s metadata asks for no search, same as `tiny.onnx`'s —
-    `spawn` must read that off contract 2's metadata exactly as it does off
-    contract 1's."""
+    """The stub's metadata asks for no search, same as `tiny.onnx`'s —
+    `spawn` must read that off a record contract's metadata exactly as it
+    does off contract 1's."""
     from hexset_ui.onnxbot import NetworkBot, spawn
 
     path, board = checkpoint_v2
@@ -116,7 +123,7 @@ def test_a_checkpoint_plays_a_legal_action_from_every_phase(checkpoint):
         if game.won_by is not None:
             break
         action = bot.choose(game)
-        assert action in legal_actions(game)
+        assert action in options_for(game)
         seen.add(game.phase)
         from hexset.actions import apply
 
@@ -217,7 +224,7 @@ def test_a_search_over_a_learned_prior_plays_a_legal_action(checkpoint):
     game = start(board, 4, random.Random(2))
     for _ in range(20):
         action = search.choose(game)
-        assert action in set(legal_actions(game))
+        assert action in set(options_for(game))
         from hexset.actions import apply
 
         apply(game, action)

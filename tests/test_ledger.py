@@ -3,11 +3,12 @@ from __future__ import annotations
 import random
 
 from hexset.actions import build_space, within_offer_budget
-from hexset_ui.rules import options_for
 from hexset.board.board import random_base_board
 from hexset.board.terrain import NUM_RESOURCES
-from hexset.game import Phase, move_robber_to, start
+from hexset.game import Phase, move_robber_to, start, to_move
+
 from hexset_ui.record import build_record
+from hexset_ui.rules import options_for
 
 from conftest import step_randomly
 
@@ -105,3 +106,100 @@ def test_the_ledger_invariant_holds_over_a_random_playout():
             assert sum(seat_ledger.known) + seat_ledger.unknown == sum(hand)
             for resource, true_count in enumerate(hand):
                 assert seat_ledger.known[resource] <= true_count
+
+
+def test_undo_restores_the_ledger_with_the_state():
+    """PR #2 defect 2, reproduced at the size the PI's review measured it.
+
+    `_UndoPoint` snapshotted `game.state` and not `game.ledger`, so after an
+    undone `BANK_TRADE` the ledger still certified the cards the trade had
+    spent and received: a `known[r]` above the seat's true count, and
+    `sum(known) + unknown` no longer the hand size. Both are *floors the
+    record states to every seat* -- once one is wrong, every later
+    `/api/record` and `state_view` carries a falsehood, and `PublicLedger.
+    spend`'s clamp hides it rather than raising.
+
+    Four-to-one at the bank rather than a build, because a bank trade moves
+    the ledger in both directions at once: four of one resource certified
+    away, one of another certified in.
+    """
+    from hexset.actions import ActionType, legal_actions
+    from hexset_ui.webplay import GameSession, action_to_wire
+
+    board = random_base_board(random.Random(0))
+    game = start(board, 4, random.Random(1))
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    game.state.hands[0] = [8, 0, 0, 0, 0]
+    # Certify the hand, the way a distribution would have: the ledger has to
+    # start in sync for its invariant to mean anything (see `PublicLedger`).
+    game.ledger.seats[0].known = [8, 0, 0, 0, 0]
+    game.ledger.seats[0].unknown = 0
+
+    session = GameSession(game=game, claimed_seats={0})
+    before_known = list(game.ledger.seats[0].known)
+    before_unknown = game.ledger.seats[0].unknown
+
+    trade = next(
+        a
+        for a in legal_actions(game)
+        if a.type is ActionType.BANK_TRADE and a.a == 0 and a.b == 4
+    )
+    session.submit(0, action_to_wire(trade))
+    assert game.ledger.seats[0].known != before_known  # the trade was recorded
+
+    session.undo_last_build(0)
+
+    assert game.state.hands[0] == [8, 0, 0, 0, 0]
+    assert game.ledger.seats[0].known == before_known
+    assert game.ledger.seats[0].unknown == before_unknown
+    # The two invariants, restated directly rather than trusted from equality:
+    # a floor that exceeds the truth is the failure mode that reaches the wire.
+    for seat in range(game.state.num_players):
+        row = game.ledger.seats[seat]
+        hand = game.state.hands[seat]
+        assert sum(row.known) + row.unknown == sum(hand), seat
+        assert all(row.known[r] <= hand[r] for r in range(NUM_RESOURCES)), seat
+
+
+def test_undo_keeps_the_ledger_honest_across_a_played_game():
+    """The same defect, found the way the review found it: play until a paid
+    build or bank trade shows up, undo it, and check the invariant -- the
+    check `test_the_ledger_invariant_holds_over_a_random_playout` cannot
+    make, because it never undoes anything.
+
+    Setup placements are excluded from the undo, and not because they are
+    uninteresting: undoing every one of them leaves a random mover picking a
+    fresh settlement and undoing that too, forever, and the game never leaves
+    setup. They cost no resources anyway, so the ledger has nothing to say
+    about them; the paid actions are the ones that move it.
+    """
+    from hexset.actions import ActionType
+    from hexset_ui.webplay import _UNDOABLE_BUILDS, GameSession, action_to_wire
+
+    PAID = _UNDOABLE_BUILDS - {ActionType.SETUP_SETTLEMENT, ActionType.SETUP_ROAD}
+
+    board = random_base_board(random.Random(0))
+    rng = random.Random(0)
+    game = start(board, 4, rng)
+    session = GameSession(game=game, claimed_seats=set(range(4)))
+
+    undone = 0
+    for _ in range(3000):
+        if game.won_by is not None:
+            break
+        seat = to_move(game)
+        session.claimed_seats.add(seat)
+        action = rng.choice(options_for(game))
+        session.submit(seat, action_to_wire(action))
+        if action.type in PAID and session._undo is not None:
+            session.undo_last_build(seat)
+            undone += 1
+            for s in range(game.state.num_players):
+                row = game.ledger.seats[s]
+                hand = game.state.hands[s]
+                assert sum(row.known) + row.unknown == sum(hand), (s, undone, action)
+                assert all(
+                    row.known[r] <= hand[r] for r in range(NUM_RESOURCES)
+                ), (s, undone, action)
+    assert undone > 0, "the playout never reached a paid undoable action"

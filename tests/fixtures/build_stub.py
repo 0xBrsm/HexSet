@@ -1,12 +1,30 @@
-"""Build a contract-v2 stub graph: right names, right shapes, no learned weights.
+"""Build a record-contract stub graph: right names, right shapes, no weights.
+
+    python build_stub.py 4      # 29 inputs -> stub-contract4.onnx
+    python build_stub.py 3      # 27 inputs -> stub-contract3.onnx
 
 Semantics are deliberately trivial and deliberately *legal*: uniform over the
 legal mask, first legal slot as the chosen action, zero value. A stub that
 could emit an illegal action would send whoever builds against it chasing a
 phantom engine bug, so the mask is the only thing this graph reads.
+
+Two contracts, because the difference between them is the whole point of the
+fixture: contract 3 declares 27 of the record's fields and contract 4 all 29,
+and a loader that feeds a graph every field it happens to have rather than the
+ones the graph declares breaks on the shorter one (`onnxbot.V2Policy._run`).
+The third case -- a real 23-input contract 2 -- is not stubbed at all:
+`dev-contract2.onnx` is a genuine dev-hexset export.
+
+These stubs are NOT genuine exports. `hexset.export_onnx` needs torch, which
+this repo does not install, so no real contract-3 or contract-4 file exists
+here to test against; the field names, shapes and dtypes below are pinned
+against dev's own `_shapes` table by `test_record_contract.py` wherever torch
+happens to be available. See `docs/engine-divergence-2026-09-02.md`, "Defect 1
+in detail".
 """
 
 import pathlib
+import sys
 
 import numpy as np
 import onnx
@@ -49,6 +67,16 @@ INPUTS = [
     ("action_mask", TP.BOOL, [B, SPACE]),
     ("pair_mask", TP.BOOL, [B, PAIRS]),
 ]
+
+# Contract 4 is contract 3 plus the two public-knowledge ledger fields; the
+# `contract` metadata number is `hexset.export_onnx._CONTRACT_VERSION`'s.
+LEDGER_FIELDS = ("ledger_known", "ledger_unknown")
+
+CONTRACT = sys.argv[1] if len(sys.argv) > 1 else "4"
+if CONTRACT not in ("3", "4"):
+    raise SystemExit("contract must be 3 or 4")
+if CONTRACT == "3":
+    INPUTS = [row for row in INPUTS if row[0] not in LEDGER_FIELDS]
 
 OUTPUTS = [
     ("action_index", TP.INT64, [B]),
@@ -95,7 +123,7 @@ nodes.append(helper.make_node("Mul", ["ht_f", "zero"], ["value"]))
 
 graph = helper.make_graph(
     nodes,
-    "hexset-contract-v2-stub",
+    f"hexset-contract-{CONTRACT}-stub",
     [helper.make_tensor_value_info(n, t, s) for n, t, s in INPUTS],
     [helper.make_tensor_value_info(n, t, s) for n, t, s in OUTPUTS],
     initializer=[one, zero, axis1, axis1b],
@@ -105,13 +133,14 @@ model = helper.make_model(
     graph, opset_imports=[helper.make_opsetid("", 18)], ir_version=10
 )
 model.doc_string = (
-    "Contract-v2 STUB. No learned parameters. Uniform over the legal mask, "
-    "first legal slot as the action, zero value. For building and testing the "
-    "v2 loader path only -- never for play or measurement."
+    f"Contract-{CONTRACT} STUB. No learned parameters. Uniform over the legal "
+    "mask, first legal slot as the action, zero value. For building and "
+    "testing the record-contract loader path only -- never for play or "
+    "measurement."
 )
 
 meta = {
-    "contract": "2",
+    "contract": CONTRACT,
     "players": str(PLAYERS),
     "num_hexes": str(NUM_HEXES),
     "num_vertices": str(NUM_VERTICES),
@@ -126,5 +155,6 @@ for k, v in meta.items():
     entry.key, entry.value = k, v
 
 onnx.checker.check_model(model)
-onnx.save(model, str(pathlib.Path(__file__).with_name("stub-v2.onnx")))
-print("written")
+out = pathlib.Path(__file__).with_name(f"stub-contract{CONTRACT}.onnx")
+onnx.save(model, str(out))
+print(f"written {out.name}: {len(INPUTS)} inputs")

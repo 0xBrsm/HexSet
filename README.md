@@ -66,6 +66,30 @@ frozen picklable descriptions, so a lineup goes into a run manifest verbatim. A
 checkpoint enters as `network:<path>`, or as the leaf evaluation of the ordinary
 search with `netsearch:<path>` / `netgreedy:<path>`, or as a tree with `mcts:<path>`.
 
+## Catanatron adapter (optional)
+
+`hexset/catanatron/` plugs this engine into [Catanatron](https://github.com/bcollazo/catanatron)'s
+arena as an external benchmark, in both directions: any `hexset` bot can be seated as
+a Catanatron `Player` (`DC:<entrant>`, e.g. `DC:search2-offers3` or
+`DC:network:<checkpoint>.pt`), and any Catanatron bot can be seated in a `hexset`
+lineup the same way. Catanatron's `Player` interface is the adapter surface —
+`hexset.catanatron.player.DevCatanPlayer` re-translates a live `catanatron.Game` into
+a `hexset.Game`/`GameState` fresh on every decision (`state.py`), rather than
+mirroring the two engines' turn machines incrementally. Our engine, ledger, and
+trading are unchanged on this path; the translation is one-way and stateless, so an
+honest bot seated through the bridge sees a *memoryless* public ledger — nothing
+certified by type, the whole opponent hand counted as unknown — a deliberate lower
+bound on what an information-set-honest bot could know there, not a limitation of
+the ledger itself (see `state.py`'s `translate` docstring). `python -m
+hexset.catanatron.duel` shards a duel across worker processes and stamps
+catanatron's resolved commit, seed, worker count, and `PYTHONHASHSEED` on every
+report — see `_ensure_pythonhashseed_zero`'s docstring for why the last one matters
+(catanatron's own robber-move tie-break resolves via hash-order-sensitive set
+iteration, so a reproducibility check across two launches needs it pinned).
+Install with `pip install -e "src[catanatron]"`; catanatron is a real dependency of
+this extra, never vendored, and no catanatron import reaches the base package. See
+`agents/reference/bridge-container.md` for the containerized recipe.
+
 ## Source Layout
 
 | Path | Purpose |
@@ -82,8 +106,9 @@ search with `netsearch:<path>` / `netgreedy:<path>`, or as a tree with `mcts:<pa
 | `hexset/ppo.py`, `train.py` | GAE, clipped surrogate and value loss; the runnable, resumable training loop |
 | `hexset/mcts.py`, `expert.py` | PUCT with leaves gathered into waves, backing up a per-seat vector; and expert iteration through the existing collector |
 | `hexset/netbot.py`, `record.py`, `dataset.py`, `play.py` | A checkpoint as an arena entrant, replayable game records, labelled positions from them, and a random player |
+| `hexset/catanatron/` | Optional adapter to Catanatron's arena (`pip install -e "src[catanatron]"`) — see "Catanatron adapter" above |
 | `benchmarks/` | Throughput, baselines, ablations, weight fitting, encoder and forward-pass cost, rollout cost, value-head diagnostics |
-| `tests/` | 439 tests across 34 files |
+| `tests/` | 439 tests across 34 files, plus `tests/catanatron/` (skipped unless the `catanatron` extra is installed) |
 | `docker/` | ROCm training image |
 
 ## Design Notes

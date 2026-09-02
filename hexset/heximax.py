@@ -1055,7 +1055,14 @@ class Heximax:
     # --- trade --------------------------------------------------------------
 
     def _read_row(
-        self, state: GameState, ledger: PublicLedger, knower: int, target: int, rank
+        self,
+        state: GameState,
+        ledger: PublicLedger,
+        knower: int,
+        target: int,
+        rank,
+        *,
+        vector: list[float] | None = None,
     ) -> float:
         """`target`'s row of the vector, honestly through `knower`'s belief.
 
@@ -1065,12 +1072,26 @@ class Heximax:
         other than the belief's own owner is how the valuation ever
         estimates "what would someone else do" without looking at that
         someone's true hand: see `_partner_delta`.
+
+        `vector`, when given, skips rebuilding the belief and re-running
+        `evaluate` -- both are pure functions of `(state, ledger, knower)`, so
+        a caller that already has the vector for this exact triple (see
+        `_before_vector`) can hand it in and pay only for `rank`'s cheap
+        read-out of `target`'s entry.
         """
-        belief = Belief(state, ledger, knower, omniscient=self.omniscient)
-        return rank(self.evaluator.evaluate(state, knower, belief), target)
+        if vector is None:
+            belief = Belief(state, ledger, knower, omniscient=self.omniscient)
+            vector = self.evaluator.evaluate(state, knower, belief)
+        return rank(vector, target)
 
     def _read_as(
-        self, state: GameState, ledger: PublicLedger, seat: int, rank
+        self,
+        state: GameState,
+        ledger: PublicLedger,
+        seat: int,
+        rank,
+        *,
+        vector: list[float] | None = None,
     ) -> float:
         """`_read`, generalised over which stance turns the vector into a number.
 
@@ -1081,25 +1102,54 @@ class Heximax:
         proposer's row differently routes through here instead of
         `self._rank` directly.
         """
-        return self._read_row(state, ledger, seat, seat, rank)
+        return self._read_row(state, ledger, seat, seat, rank, vector=vector)
 
-    def _read(self, state: GameState, ledger: PublicLedger, seat: int) -> float:
-        return self._read_as(state, ledger, seat, self._rank)
+    def _read(
+        self,
+        state: GameState,
+        ledger: PublicLedger,
+        seat: int,
+        *,
+        vector: list[float] | None = None,
+    ) -> float:
+        return self._read_as(state, ledger, seat, self._rank, vector=vector)
 
-    def marginal_gain(self, game: Game, seat: int, resource: int) -> float:
+    def _before_vector(self, game: Game, seat: int) -> list[float]:
+        """The per-seat vector for `game`'s own, unmutated state, `seat`'s belief.
+
+        Every "before" read inside one `propose_actions` call --
+        `marginal_gain`/`marginal_loss` (hence `deficit`/`surplus`),
+        `bundle_delta`'s search over counterparties, `score_proposal`'s
+        `willing`, `rank_partners`' `score` -- reads exactly this triple,
+        `(game.state, game.ledger, knower=seat)`, varying only which seat's
+        row (`target`) and which stance (`rank`) it is read with afterward.
+        Both of those are cheap lookups into the same vector, so
+        `propose_actions` computes it once and threads it through as
+        `before_vector` instead of every one of those rebuilding the belief
+        and re-running the full `evaluate` for a state and ledger that never
+        change across the call.
+        """
+        belief = Belief(game.state, game.ledger, seat, omniscient=self.omniscient)
+        return self.evaluator.evaluate(game.state, seat, belief)
+
+    def marginal_gain(
+        self, game: Game, seat: int, resource: int, *, before_vector: list[float] | None = None
+    ) -> float:
         """Eval(hand + one `resource`) - Eval(hand), from `seat`'s own reading."""
-        before = self._read(game.state, game.ledger, seat)
+        before = self._read(game.state, game.ledger, seat, vector=before_vector)
         state = copy_state(game.state)
         state.hands[seat][resource] += 1
         if state.bank[resource] > 0:
             state.bank[resource] -= 1
         return self._read(state, game.ledger, seat) - before
 
-    def marginal_loss(self, game: Game, seat: int, resource: int) -> float:
+    def marginal_loss(
+        self, game: Game, seat: int, resource: int, *, before_vector: list[float] | None = None
+    ) -> float:
         """Eval(hand) - Eval(hand less one `resource`); zero when none is held."""
         if game.state.hands[seat][resource] < 1:
             return 0.0
-        before = self._read(game.state, game.ledger, seat)
+        before = self._read(game.state, game.ledger, seat, vector=before_vector)
         state = copy_state(game.state)
         state.hands[seat][resource] -= 1
         state.bank[resource] += 1
@@ -1107,13 +1157,20 @@ class Heximax:
         ledger.spend(seat, resource, 1)
         return before - self._read(state, ledger, seat)
 
-    def deficit(self, game: Game, seat: int) -> dict[int, float]:
+    def deficit(
+        self, game: Game, seat: int, *, before_vector: list[float] | None = None
+    ) -> dict[int, float]:
         """Marginal gain of receiving one more of each resource, `seat`'s own
         reading. Every resource is included, even ones already held: a
         second wheat can still be worth more than nothing."""
-        return {r: self.marginal_gain(game, seat, r) for r in range(NUM_RESOURCES)}
+        return {
+            r: self.marginal_gain(game, seat, r, before_vector=before_vector)
+            for r in range(NUM_RESOURCES)
+        }
 
-    def surplus(self, game: Game, seat: int) -> dict[int, float]:
+    def surplus(
+        self, game: Game, seat: int, *, before_vector: list[float] | None = None
+    ) -> dict[int, float]:
         """Marginal loss of giving up one of each resource `seat` actually
         holds. Resources not held are left out rather than scored zero:
         `marginal_loss` reads 0.0 for an empty resource because there is
@@ -1121,7 +1178,7 @@ class Heximax:
         keeping it in would make an absent resource look like the cheapest
         one to part with."""
         return {
-            r: self.marginal_loss(game, seat, r)
+            r: self.marginal_loss(game, seat, r, before_vector=before_vector)
             for r in range(NUM_RESOURCES)
             if game.state.hands[seat][r] > 0
         }
@@ -1135,6 +1192,8 @@ class Heximax:
         want: Sequence[int],
         counterparty: int,
         rank,
+        *,
+        before_vector: list[float] | None = None,
     ) -> float:
         """`target`'s row of the vector if `target` gave `give` and got `want`
         from `counterparty`, read entirely through `knower`'s own belief.
@@ -1178,8 +1237,17 @@ class Heximax:
         choice `ledger.steal` refuses to make, for the same reason -- while
         `knower`'s own hand, when it is `target` or `counterparty`, is
         mutated exactly, per resource, clamped at zero.
+
+        `before_vector`, when given, is `_before_vector(game, knower)` --
+        the "before" side never depends on `give`/`want`/`counterparty`, only
+        on `(game.state, game.ledger, knower)`, so a caller making several of
+        these calls against the same unmutated game (`bundle_delta`'s search
+        over counterparties, `score_proposal`'s `willing`, `rank_partners`'
+        `score`) computes it once and passes it to every one of them.
         """
-        before = self._read_row(game.state, game.ledger, knower, target, rank)
+        before = self._read_row(
+            game.state, game.ledger, knower, target, rank, vector=before_vector
+        )
         state = copy_state(game.state)
         self._move_hand(state, knower, target, gains=want, losses=give)
         self._move_hand(state, knower, counterparty, gains=give, losses=want)
@@ -1225,6 +1293,8 @@ class Heximax:
         give: Sequence[int],
         want: Sequence[int],
         counterparty: int,
+        *,
+        before_vector: list[float] | None = None,
     ) -> float:
         """How much `seat` gains by giving `give` for `want` with `counterparty`.
 
@@ -1235,12 +1305,19 @@ class Heximax:
         result is part of the reading. `seat` is assumed to hold `give`
         (true for every candidate `candidate_bundles` emits, `can_propose`
         checked); its own hand is clamped at zero rather than driven
-        negative if not.
+        negative if not. `before_vector`: see `_partner_delta`.
         """
-        return self._partner_delta(game, seat, seat, give, want, counterparty, self._rank)
+        return self._partner_delta(
+            game, seat, seat, give, want, counterparty, self._rank, before_vector=before_vector
+        )
 
     def candidate_bundles(
-        self, game: Game, seat: int, *, max_side: int = 2
+        self,
+        game: Game,
+        seat: int,
+        *,
+        max_side: int = 2,
+        before_vector: list[float] | None = None,
     ) -> list[tuple[Bundle, Bundle]]:
         """Bundles built from `deficit` x `surplus`, 1-2 cards a side.
 
@@ -1261,8 +1338,8 @@ class Heximax:
         """
         state = game.state
         hand = state.hands[seat]
-        deficits = list(self.deficit(game, seat))
-        surpluses = list(self.surplus(game, seat))
+        deficits = list(self.deficit(game, seat, before_vector=before_vector))
+        surpluses = list(self.surplus(game, seat, before_vector=before_vector))
 
         give_options: list[Bundle] = [
             _one_hot(r, n) for r in surpluses for n in range(1, min(max_side, hand[r]) + 1)
@@ -1305,7 +1382,13 @@ class Heximax:
         return out
 
     def score_proposal(
-        self, game: Game, seat: int, give: Sequence[int], want: Sequence[int]
+        self,
+        game: Game,
+        seat: int,
+        give: Sequence[int],
+        want: Sequence[int],
+        *,
+        before_vector: list[float] | None = None,
     ) -> float:
         """`dEval_me(after, best counterparty) x sum_opp p_holds(opp, want) * willing(opp)`.
 
@@ -1323,18 +1406,27 @@ class Heximax:
         It is the crisp 0/1 test the design allows rather than a smoothed
         one: there is no fitted slope to smooth it with before P3, and a
         crisp gate is the simpler thing that is not obviously wrong.
+        `before_vector`: see `_partner_delta` -- the same one `propose_actions`
+        computes once and passes to every shortlisted candidate's call here.
         """
         opponents = [p for p in range(game.state.num_players) if p != seat]
         if not opponents:
             return 0.0
-        delta_me = max(self.bundle_delta(game, seat, give, want, opp) for opp in opponents)
+        if before_vector is None:
+            before_vector = self._before_vector(game, seat)
+        delta_me = max(
+            self.bundle_delta(game, seat, give, want, opp, before_vector=before_vector)
+            for opp in opponents
+        )
         belief = Belief.from_game(game, seat, omniscient=self.omniscient)
         weight = 0.0
         for opp in opponents:
             chance = belief.p_holds(opp, want)
             if chance <= 0:
                 continue
-            theirs = self._partner_delta(game, seat, opp, want, give, seat, self._rank)
+            theirs = self._partner_delta(
+                game, seat, opp, want, give, seat, self._rank, before_vector=before_vector
+            )
             if theirs > 0:
                 weight += chance
         return delta_me * weight
@@ -1389,7 +1481,13 @@ class Heximax:
         return min(candidates, key=distance)
 
     def rank_partners(
-        self, game: Game, seat: int, give: Sequence[int], want: Sequence[int]
+        self,
+        game: Game,
+        seat: int,
+        give: Sequence[int],
+        want: Sequence[int],
+        *,
+        before_vector: list[float] | None = None,
     ) -> tuple[int, ...]:
         """Opponents ranked for `Action.ask`, first to whoever it helps least.
 
@@ -1403,15 +1501,21 @@ class Heximax:
         *expected* hand, never its true one) -- the same reasoning
         `score_proposal`'s `willing` uses, at the `paranoid` stance the
         design specifies for ranking partners rather than `willing`'s
-        `self._rank`.
+        `self._rank`. `before_vector`: see `_partner_delta` -- note it is
+        still the vector read under `seat`'s own belief, not `paranoid`'s;
+        only the read-out at the end differs by stance.
         """
         belief = Belief.from_game(game, seat, omniscient=self.omniscient)
         paranoid = STANCES["paranoid"]
         opponents = [p for p in range(game.state.num_players) if p != seat]
+        if before_vector is None:
+            before_vector = self._before_vector(game, seat)
 
         def score(opp: int) -> float:
             chance = belief.p_holds(opp, want)
-            theirs = self._partner_delta(game, seat, opp, want, give, seat, paranoid)
+            theirs = self._partner_delta(
+                game, seat, opp, want, give, seat, paranoid, before_vector=before_vector
+            )
             return chance * -theirs
 
         return tuple(sorted(opponents, key=score, reverse=True))
@@ -1448,11 +1552,17 @@ class Heximax:
         would have ranked outside the shortlist anyway among ones already
         inside it.
         """
-        candidates = self.candidate_bundles(game, seat)
+        # Every "before" read below -- deficit, surplus, and every candidate's
+        # score_proposal/rank_partners -- is against this same unmutated
+        # (game.state, game.ledger, seat) triple; computed once and threaded
+        # through as before_vector rather than each rebuilding the belief and
+        # re-running evaluate() for a position that never changes here.
+        before_vector = self._before_vector(game, seat)
+        candidates = self.candidate_bundles(game, seat, before_vector=before_vector)
         if not candidates:
             return []
-        deficit = self.deficit(game, seat)
-        surplus = self.surplus(game, seat)
+        deficit = self.deficit(game, seat, before_vector=before_vector)
+        surplus = self.surplus(game, seat, before_vector=before_vector)
 
         def cheap_score(pair: tuple[Bundle, Bundle]) -> float:
             give, want = pair
@@ -1462,7 +1572,8 @@ class Heximax:
 
         shortlist = sorted(candidates, key=cheap_score, reverse=True)[:PROPOSE_SHORTLIST]
         scored = [
-            (self.score_proposal(game, seat, give, want), give, want) for give, want in shortlist
+            (self.score_proposal(game, seat, give, want, before_vector=before_vector), give, want)
+            for give, want in shortlist
         ]
         scored = [s for s in scored if s[0] > self.propose_margin]
         scored.sort(key=lambda s: -s[0])
@@ -1471,7 +1582,7 @@ class Heximax:
                 ActionType.PROPOSE_TRADE,
                 give=give,
                 want=want,
-                ask=self.rank_partners(game, seat, give, want),
+                ask=self.rank_partners(game, seat, give, want, before_vector=before_vector),
             )
             for _, give, want in scored[: self.propose_top_n]
         ]

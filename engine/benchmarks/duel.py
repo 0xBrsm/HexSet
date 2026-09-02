@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
+import heximax  # noqa: F401 -- registers the heximax presets with hexset.arena
 from hexset.arena import NETWORK
 
 # The `--workers 1` path (bare checkpoints, network-vs-network) runs through

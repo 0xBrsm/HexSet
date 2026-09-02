@@ -58,12 +58,14 @@ _LEAF_EVALUATOR_FACTORY: Callable[..., object] | None = None
 # used only to tell "not registered yet" apart from "not a real kind at all".
 _NETWORK_KINDS = frozenset({"network", "mcts"})
 _NETWORK_EVALUATORS = frozenset({"network"})
+_HEXIMAX_KINDS = frozenset({"heximax"})
 
 _HEXNET_HINT = (
     "is provided by the hexnet package; import hexnet.netbot (or an entry "
     "point that does, such as hexnet.train/hexnet.league/hexnet.collect) "
     "before spawning it"
 )
+_HEXIMAX_HINT = "is provided by the heximax package; import heximax before spawning it"
 
 
 def register_entrant_kind(kind: str, factory) -> None:
@@ -79,6 +81,14 @@ def register_evaluator_provider(name: str, factory) -> None:
     the object just needs an `evaluate_game(game, seat)` method and may carry
     its own `max_offers`."""
     _EVALUATOR_PROVIDERS[name] = factory
+
+
+def register_preset(name: str, entrant: "Entrant") -> None:
+    """Register a named lineup shortcut (`PRESETS[name]`, resolved by
+    `entrant_from_name`/`lineup_from_names`) for an entrant hexset does not
+    ship itself -- how the `heximax` package makes "heximax",
+    "heximax-omni" and "heximax-notrade" resolvable by name once imported."""
+    PRESETS[name] = entrant
 
 
 def register_checkpoint_loader(loader) -> None:
@@ -163,7 +173,7 @@ class Entrant:
     # a wider wave changes collision rate as well as network batch size.
     simulations: int = 128
     wave: int = 16
-    # `kind="heximax"` only: which of `hexset.heximax.MODES` to build --
+    # `kind="heximax"` only: which of `heximax.MODES` to build --
     # `honest` (the referent), `omniscient` (the information price), or
     # `notrade` (the no-trade weights, declining everything). Defaulted so
     # every other entrant is unchanged.
@@ -230,19 +240,10 @@ PRESETS: dict[str, Entrant] = {
     # eight setup settlements from everything else.
     "random-placement": Entrant("random-placement", kind="random", placement=True),
     "greedy-placement": Entrant("greedy-placement", kind="greedy", placement=True),
-    # The honest handcrafted baseline (`hexset.heximax`; design note
-    # `heximax.md` §5). The placement prior is composed into the bot rather
-    # than wrapped around it, so `placement` stays False here and `spawn`
-    # returns the bot itself. `heximax-omni` is the same bot reading every
-    # true hand, kept to measure what honesty costs; `heximax-notrade` plays
-    # the no-trade table at an offer budget of zero.
-    "heximax": Entrant("heximax", kind="heximax", depth=2, width=6, max_offers=3),
-    "heximax-omni": Entrant(
-        "heximax-omni", kind="heximax", depth=2, width=6, max_offers=3, mode="omniscient"
-    ),
-    "heximax-notrade": Entrant(
-        "heximax-notrade", kind="heximax", depth=2, width=6, max_offers=0, mode="notrade"
-    ),
+    # "heximax"/"heximax-omni"/"heximax-notrade" are not built in -- they are
+    # registered by the `heximax` package at import time via `register_preset`
+    # (see that package's "registration" section), the same way `hexnet`
+    # registers "network"/"mcts".
 }
 
 
@@ -258,26 +259,8 @@ def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
         return _ENTRANT_KIND_FACTORIES[entrant.kind](entrant, board, rng)
     if entrant.kind in _NETWORK_KINDS:
         raise ValueError(f"entrant kind {entrant.kind!r} {_HEXNET_HINT}")
-
-    if entrant.kind == "heximax":
-        # Imported here like the network kinds: `hexset.heximax` reaches
-        # `hexset.mcts` for its hidden-draw predicate, and that module wants
-        # numpy, which not every caller of this one has.
-        from .heximax import heximax
-
-        return heximax(
-            board,
-            rng,
-            mode=entrant.mode,
-            depth=entrant.depth,
-            width=entrant.width,
-            max_offers=entrant.max_offers,
-            stance=entrant.stance,
-            k=entrant.k,
-            weights=entrant.weights,
-            accept_margin=entrant.accept_margin,
-            propose_margin=entrant.propose_margin,
-        )
+    if entrant.kind in _HEXIMAX_KINDS:
+        raise ValueError(f"entrant kind {entrant.kind!r} {_HEXIMAX_HINT}")
 
     max_offers = entrant.max_offers
     if entrant.evaluator in _EVALUATOR_PROVIDERS:

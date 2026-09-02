@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""`hexset.heximax`: the honest handcrafted baseline (design: heximax.md §6).
+"""`heximax`: the honest handcrafted baseline (design: heximax.md §6).
 
 The tests here are the gate the design says must be written first. The one
 that matters most is the information-set regression: two positions that the
@@ -31,7 +31,7 @@ from hexset.cards import DevCard
 from hexset.economy import COSTS, Purchase
 from hexset.evaluate import Evaluator, Weights
 from hexset.game import Phase, imagine, is_over, propose_trade, roll_dice, start, to_move
-from hexset.heximax import (
+from heximax import (
     MODES,
     NO_TRADE_WEIGHTS,
     TRADING_WEIGHTS,
@@ -204,7 +204,7 @@ def test_choices_are_byte_identical_to_the_recorded_census(request):
 
     Plays the 20 (`heximax`) + 5 (`heximax-notrade`) + 5 (`heximax-omni`)
     seeded games in `CENSUS_SPECS` and hashes each game's full `(seat,
-    action)` sequence. A change to `hexset.heximax` that flips even one of
+    action)` sequence. A change to `heximax` that flips even one of
     these hashes has changed what the bot chooses somewhere in that game --
     not necessarily for the worse, but it is a behaviour change, and this
     pass is only allowed to make behaviour-*preserving* ones. `--write-census`
@@ -1428,7 +1428,7 @@ def test_heximax_source_never_calls_responders_or_reads_pending_responders():
     names `pending_responders` is the P1 comment explaining why."""
     import inspect
 
-    import hexset.heximax as heximax_module
+    import heximax as heximax_module
 
     source = inspect.getsource(heximax_module)
     assert "responders(" not in source

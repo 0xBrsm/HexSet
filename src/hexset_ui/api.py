@@ -76,6 +76,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+import heximax  # noqa: F401 -- registers the "heximax" preset with hexset.arena
 from hexset.actions import build_space
 from hexset.arena import PRESETS, spawn as spawn_entrant
 from hexset.board.board import Board, random_base_board
@@ -102,7 +103,9 @@ from .webplay import (
 # handcrafted search (it reads the public ledger, never a hidden hand) and is
 # the default embedded opponent; `search2` is the older depth-two bot every
 # ladder number on record was measured against, kept by name so a game can
-# still be played against it.
+# still be played against it. `heximax` is registered as a preset by the
+# sibling `heximax` package (imported above for that side effect), not by
+# `hexset` itself -- see `heximax`'s "registration" section.
 HANDCRAFTED = "heximax"
 HANDCRAFTED_ENTRANTS = ("heximax", "search2")
 

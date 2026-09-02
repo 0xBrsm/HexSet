@@ -88,7 +88,7 @@ import random
 from dataclasses import dataclass, field
 from typing import Sequence
 
-from .actions import (
+from hexset.actions import (
     Action,
     ActionType,
     apply,
@@ -96,12 +96,12 @@ from .actions import (
     victim_of,
     within_offer_budget,
 )
-from .board.board import Board
-from .board.terrain import NUM_RESOURCES
-from .bots import STANCES, options_for
-from .cards import DECK_COMPOSITION, NUM_DEV_CARDS, DevCard
-from .economy import BANK_TRADE_RATIO, COSTS, Purchase, trade_ratios
-from .evaluate import (
+from hexset.board.board import Board
+from hexset.board.terrain import NUM_RESOURCES
+from hexset.bots import STANCES, options_for
+from hexset.cards import DECK_COMPOSITION, NUM_DEV_CARDS, DevCard
+from hexset.economy import BANK_TRADE_RATIO, COSTS, Purchase, trade_ratios
+from hexset.evaluate import (
     PROGRESS_PURCHASES,
     ROLLS,
     WIN_SCORE,
@@ -109,13 +109,13 @@ from .evaluate import (
     Survey,
     Weights,
 )
-from .game import ROLL_ODDS, Game, Phase, imagine, is_over, roll_dice, to_move
-from .ledger import PublicLedger
-from .mcts import draws_hidden
-from .placement import best as best_opening
-from .robber import DISCARD_THRESHOLD
-from .trading import Bundle, Offer, can_accept, can_propose
-from .state import (
+from hexset.game import ROLL_ODDS, Game, Phase, imagine, is_over, roll_dice, to_move
+from hexset.ledger import PublicLedger
+from hexset.mcts import draws_hidden
+from hexset.placement import best as best_opening
+from hexset.robber import DISCARD_THRESHOLD
+from hexset.trading import Bundle, Offer, can_accept, can_propose
+from hexset.state import (
     BANK_PER_RESOURCE,
     MAX_CITIES,
     MAX_SETTLEMENTS,
@@ -123,7 +123,7 @@ from .state import (
     GameState,
     copy_state,
 )
-from .victory import WINNING_POINTS, award_points, card_points
+from hexset.victory import WINNING_POINTS, award_points, card_points
 
 MODES = ("honest", "omniscient", "notrade")
 
@@ -1636,3 +1636,61 @@ __all__ = [
     "BY_MODE", "Belief", "DEFAULT_MAX_NODES", "Heximax", "HonestEvaluator",
     "MODES", "NO_TRADE_WEIGHTS", "TRADING_WEIGHTS", "heximax",
 ]
+
+
+# --- registration ------------------------------------------------------
+#
+# `hexset.arena` and `hexset.tuning` know heximax only by name, the same way
+# they know the network-backed kinds `hexnet.netbot` provides -- neither
+# imports this package, so importing `heximax` (directly, or via anything
+# that does: `benchmarks.duel`, `hexset_ui`) is what makes the "heximax"
+# entrant kind spawnable and the "heximax-trading"/"heximax-notrade"
+# evaluator names fittable. A process that never imports `heximax` gets a
+# plain "unknown"/`KeyError` on the name rather than this module's numpy and
+# `hexset.mcts` imports forced on it.
+
+from hexset.arena import Entrant, register_entrant_kind, register_preset
+from hexset.tuning import register_heximax_evaluator
+
+
+def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Heximax:
+    return heximax(
+        board,
+        rng,
+        mode=entrant.mode,
+        depth=entrant.depth,
+        width=entrant.width,
+        max_offers=entrant.max_offers,
+        stance=entrant.stance,
+        k=entrant.k,
+        weights=entrant.weights,
+        accept_margin=entrant.accept_margin,
+        propose_margin=entrant.propose_margin,
+    )
+
+
+register_entrant_kind("heximax", _spawn)
+
+# The honest handcrafted baseline (design note `heximax.md` §5). The
+# placement prior is composed into the bot rather than wrapped around it, so
+# `placement` stays False here and `spawn` returns the bot itself.
+# `heximax-omni` is the same bot reading every true hand, kept to measure
+# what honesty costs; `heximax-notrade` plays the no-trade table at an offer
+# budget of zero.
+register_preset("heximax", Entrant("heximax", kind="heximax", depth=2, width=6, max_offers=3))
+register_preset(
+    "heximax-omni",
+    Entrant("heximax-omni", kind="heximax", depth=2, width=6, max_offers=3, mode="omniscient"),
+)
+register_preset(
+    "heximax-notrade",
+    Entrant("heximax-notrade", kind="heximax", depth=2, width=6, max_offers=0, mode="notrade"),
+)
+
+# `hexset.tuning.entrant_for(evaluator="heximax-trading"/"heximax-notrade")`
+# climbs from these starting points -- `heximax-trading` shares
+# `evaluate.Weights` with "default" (`HonestEvaluator` wraps the same
+# `Evaluator`) but starts from heximax's own `TRADING_WEIGHTS` rather than
+# the bare default, and `heximax-notrade` starts from `NO_TRADE_WEIGHTS`.
+register_heximax_evaluator("heximax-trading", "honest", lambda: TRADING_WEIGHTS)
+register_heximax_evaluator("heximax-notrade", "notrade", lambda: NO_TRADE_WEIGHTS)

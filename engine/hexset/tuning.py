@@ -36,33 +36,33 @@ ANCHOR = "victory_point"
 ACCEPT_Z = 1.0
 
 
-def _no_trade_weights() -> Weights:
-    # Imported lazily: `hexset.heximax` reaches `hexset.mcts`, which wants
-    # numpy, and not every caller of this module has it (`hexset.arena`
-    # imports `heximax` the same way, for the same reason).
-    from .heximax import NO_TRADE_WEIGHTS
-
-    return NO_TRADE_WEIGHTS
-
-
 # Which weights go with which evaluation. The two greedy/search evaluations do
 # not share a term set — that is the point of keeping both — so a fit is
-# always for one of them. `heximax-trading` and `heximax-notrade` share
-# `evaluate.Weights` with "default" (heximax's `HonestEvaluator` wraps the
-# same `Evaluator`), but they start the climb from heximax's own profile
-# (`TRADING_WEIGHTS`, which is `Weights()`, and `NO_TRADE_WEIGHTS`) rather
-# than from the bare default, so each gets its own registry entry.
+# always for one of them.
 WEIGHTS = {
     "default": Weights,
     "tiered": TieredWeights,
-    "heximax-trading": Weights,
-    "heximax-notrade": _no_trade_weights,
 }
 
-# `evaluator=` keys that build heximax entrants instead of greedy/search ones,
-# and the heximax `mode` each one fits. `honest` plays at the shipped offer
-# budget (3); `notrade` plays at zero, per `heximax.BY_MODE`.
-HEXIMAX_MODES = {"heximax-trading": "honest", "heximax-notrade": "notrade"}
+# `evaluator=` keys that build a `kind="heximax"` entrant instead of a
+# greedy/search one, and the heximax `mode` each one fits. Neither dict is
+# populated here: `hexset` does not know heximax's weight profiles, the same
+# way `hexset.arena` does not know its entrant kind. The `heximax` package
+# populates both via `register_heximax_evaluator` at import time -- see that
+# package's "registration" section -- so a hexset-only process that never
+# imports it simply does not offer these evaluator names.
+HEXIMAX_MODES: dict[str, str] = {}
+
+
+def register_heximax_evaluator(name: str, mode: str, weights: Callable[[], Weights]) -> None:
+    """Register an `evaluator=` name (e.g. "heximax-trading") that
+    `entrant_for` should build as a `kind="heximax"` entrant in `mode`,
+    starting the climb from `weights()`. `heximax-trading` and
+    `heximax-notrade` share `evaluate.Weights` with "default" (heximax's
+    `HonestEvaluator` wraps the same `Evaluator`), but start from heximax's
+    own profile rather than the bare default, so each gets its own entry."""
+    WEIGHTS[name] = weights
+    HEXIMAX_MODES[name] = mode
 
 
 def tunable(weights: Weights | TieredWeights) -> tuple[str, ...]:
@@ -99,12 +99,14 @@ def entrant_for(
 ) -> Entrant:
     """Build the entrant a fit plays with `weights`.
 
-    For a heximax `evaluator` (`heximax-trading`/`heximax-notrade`) this is a
-    `kind="heximax"` bot in the matching mode, `weights` reaching the
-    evaluator via `arena._spawn`'s heximax branch; the offer budget follows
-    the mode the way `heximax.heximax`'s own `BY_MODE` does, since a fit has
-    to compare bots that are heximax in every way but the vector under test.
-    Otherwise it is the plain greedy/search entrant the harness always built.
+    For a heximax `evaluator` (`heximax-trading`/`heximax-notrade`, only
+    resolvable once the `heximax` package has registered them -- see
+    `register_heximax_evaluator`) this is a `kind="heximax"` bot in the
+    matching mode, `weights` reaching the evaluator via the factory `heximax`
+    registered with `hexset.arena`; the offer budget follows the mode the way
+    `heximax.heximax`'s own `BY_MODE` does, since a fit has to compare bots
+    that are heximax in every way but the vector under test. Otherwise it is
+    the plain greedy/search entrant the harness always built.
     """
     if evaluator in HEXIMAX_MODES:
         mode = HEXIMAX_MODES[evaluator]

@@ -221,6 +221,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   still runs everything and the engine+bots slice runs torch-free on its
   own. `pyproject.toml`'s `packages.find` now includes `hexnet*` alongside
   `hexset*`, one distribution for now.
+- **`heximax` split out of `hexset` into its own top-level package**
+  (`hexset/heximax.py` → `heximax/__init__.py`, `git mv`'d so history
+  follows), the same shape as the hexset/hexnet split above: HexSet is a
+  gym with UI, adapters, an API and a sample heuristic bot, not an engine
+  that ships one handcrafted bot baked in. `hexset.arena` gained
+  `register_preset` alongside its existing registry, and `hexset.tuning`
+  gained `register_heximax_evaluator`; `heximax` calls both at import time
+  to make the "heximax"/"heximax-omni"/"heximax-notrade" presets and the
+  "heximax-trading"/"heximax-notrade" evaluator names resolvable, replacing
+  the two direct `.heximax` imports `hexset.arena._spawn` and
+  `hexset.tuning._no_trade_weights` used to make lazily. `hexset` never
+  imports `heximax`, in either direction now — `benchmarks.duel` and
+  `hexset_ui` import it explicitly for its presets, the same way a HexNet
+  entry point imports `hexnet.netbot` for its entrant kinds. Its test suite
+  (`tests/heximax/`, 73 tests including the byte-identical census) moved
+  with it unchanged — the census fixture's hash is untouched by a pure move.
 
 ## [0.13.0] - 2026-08-31
 

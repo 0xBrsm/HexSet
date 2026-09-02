@@ -6,7 +6,7 @@ that drives a game — can be imported and tested without PyTorch, the same way
 `hexset.actions` and `hexset.game` can. Anything with a
 `choose(game) -> Action` method is all a session needs of its opponent:
 `NetworkBot` from `hexset_ui.onnxbot`, `Heximax` or `SearchBot` from
-`hexset.heximax`/`hexset.bots`, or the `RandomBot` the tests use.
+`heximax`/`hexset.bots`, or the `RandomBot` the tests use.
 
 ## The wire format
 

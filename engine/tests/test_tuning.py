@@ -10,7 +10,7 @@ from hexset.arena import compete, spawn
 from hexset.board.board import random_base_board
 from hexset.evaluate import Weights
 from hexset.evaluate_tiered import Weights as TieredWeights
-from hexset.heximax import NO_TRADE_WEIGHTS, TRADING_WEIGHTS, Heximax
+from heximax import NO_TRADE_WEIGHTS, TRADING_WEIGHTS, Heximax
 from hexset.tuning import (
     ANCHOR,
     WEIGHTS,

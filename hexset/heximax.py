@@ -1028,6 +1028,7 @@ def heximax(
     stance: str = "relative",
     placement: bool = True,
     exact_progress_samples: int = 0,
+    weights: Weights | None = None,
 ) -> Heximax:
     """The three shipped configurations, by `mode`.
 
@@ -1036,12 +1037,19 @@ def heximax(
     no-trade weights. Left at `BY_MODE`, the offer budget is three for the
     first two and zero for `notrade`; any explicit value, `None` included,
     is taken as given.
+
+    `weights` overrides the mode's own profile (`TRADING_WEIGHTS` or
+    `NO_TRADE_WEIGHTS`) with the given vector, leaving everything else about
+    the mode -- the offer budget, `omniscient` -- unchanged. This is the hook
+    `hexset.tuning` fits through: a candidate and the incumbent are otherwise
+    identical heximax bots, differing only in this vector.
     """
     if mode not in MODES:
         raise ValueError(f"unknown heximax mode: {mode}")
     if max_offers is BY_MODE:
         max_offers = 0 if mode == "notrade" else 3
-    weights = NO_TRADE_WEIGHTS if mode == "notrade" else TRADING_WEIGHTS
+    if weights is None:
+        weights = NO_TRADE_WEIGHTS if mode == "notrade" else TRADING_WEIGHTS
     evaluator = HonestEvaluator(
         board,
         weights,

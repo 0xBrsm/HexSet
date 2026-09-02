@@ -35,9 +35,34 @@ ANCHOR = "victory_point"
 # One standard error. See the module docstring for why not 1.96.
 ACCEPT_Z = 1.0
 
-# Which weights go with which evaluation. The two do not share a term set —
-# that is the point of keeping both — so a fit is always for one of them.
-WEIGHTS = {"default": Weights, "tiered": TieredWeights}
+
+def _no_trade_weights() -> Weights:
+    # Imported lazily: `hexset.heximax` reaches `hexset.mcts`, which wants
+    # numpy, and not every caller of this module has it (`hexset.arena`
+    # imports `heximax` the same way, for the same reason).
+    from .heximax import NO_TRADE_WEIGHTS
+
+    return NO_TRADE_WEIGHTS
+
+
+# Which weights go with which evaluation. The two greedy/search evaluations do
+# not share a term set — that is the point of keeping both — so a fit is
+# always for one of them. `heximax-trading` and `heximax-notrade` share
+# `evaluate.Weights` with "default" (heximax's `HonestEvaluator` wraps the
+# same `Evaluator`), but they start the climb from heximax's own profile
+# (`TRADING_WEIGHTS`, which is `Weights()`, and `NO_TRADE_WEIGHTS`) rather
+# than from the bare default, so each gets its own registry entry.
+WEIGHTS = {
+    "default": Weights,
+    "tiered": TieredWeights,
+    "heximax-trading": Weights,
+    "heximax-notrade": _no_trade_weights,
+}
+
+# `evaluator=` keys that build heximax entrants instead of greedy/search ones,
+# and the heximax `mode` each one fits. `honest` plays at the shipped offer
+# budget (3); `notrade` plays at zero, per `heximax.BY_MODE`.
+HEXIMAX_MODES = {"heximax-trading": "honest", "heximax-notrade": "notrade"}
 
 
 def tunable(weights: Weights | TieredWeights) -> tuple[str, ...]:
@@ -72,6 +97,28 @@ def entrant_for(
     stance: str = "relative",
     evaluator: str = "default",
 ) -> Entrant:
+    """Build the entrant a fit plays with `weights`.
+
+    For a heximax `evaluator` (`heximax-trading`/`heximax-notrade`) this is a
+    `kind="heximax"` bot in the matching mode, `weights` reaching the
+    evaluator via `arena._spawn`'s heximax branch; the offer budget follows
+    the mode the way `heximax.heximax`'s own `BY_MODE` does, since a fit has
+    to compare bots that are heximax in every way but the vector under test.
+    Otherwise it is the plain greedy/search entrant the harness always built.
+    """
+    if evaluator in HEXIMAX_MODES:
+        mode = HEXIMAX_MODES[evaluator]
+        return Entrant(
+            name=name,
+            kind="heximax",
+            weights=weights,
+            mode=mode,
+            k=1,
+            depth=depth,
+            width=width,
+            stance=stance,
+            max_offers=0 if mode == "notrade" else 3,
+        )
     kind = "greedy" if depth <= 1 else "search"
     return Entrant(
         name=name,

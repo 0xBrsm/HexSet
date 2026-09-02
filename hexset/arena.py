@@ -216,6 +216,7 @@ def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
             max_offers=entrant.max_offers,
             stance=entrant.stance,
             k=entrant.k,
+            weights=entrant.weights,
         )
 
     max_offers = entrant.max_offers

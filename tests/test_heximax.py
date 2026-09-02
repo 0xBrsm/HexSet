@@ -10,6 +10,7 @@ one such pair, which is the leak the regression guards against.
 
 from __future__ import annotations
 
+import functools
 import random
 
 import pytest
@@ -38,7 +39,7 @@ from hexset.heximax import (
 from hexset.ledger import SeatLedger
 from hexset.mcts import draws_hidden
 from hexset.play import step_randomly
-from hexset.trading import bundle
+from hexset.trading import Offer, bundle, can_propose, well_formed
 from hexset.state import (
     MAX_CITIES,
     MAX_SETTLEMENTS,
@@ -594,13 +595,19 @@ def test_deepening_stops_where_the_budget_says():
     rng = random.Random(13)
     while (
         game.phase is not Phase.MAIN
-        or len(legal_actions(game)) < 4
+        # At least 4 non-trade options: P2's adapter replaces every
+        # `PROPOSE_TRADE` in `legal_actions` with its own (possibly empty)
+        # candidates, so a position that only clears 4 by counting the
+        # engine's one-for-one trade sample can collapse to a single
+        # option (END_TURN) once that sample is gone.
+        or len([a for a in legal_actions(game) if a.type is not ActionType.PROPOSE_TRADE]) < 4
         or any(draws_hidden(game, a) for a in legal_actions(game))
     ):
         step_randomly(game, rng)
     # Every option is a single deterministic child, so depth one costs exactly
-    # one leaf per option.
-    options = len(legal_actions(game))
+    # one leaf per option. The root's own option count, not `legal_actions`':
+    # a heximax proposal or two may still be among them.
+    options = len(a_bot(game, 13, max_nodes=100000).root_options(game))
     shallow = a_bot(game, 13, max_nodes=options + 1)
     shallow.choose(game)
     assert shallow.nodes <= options + 1
@@ -892,3 +899,250 @@ def test_existing_presets_are_untouched_and_still_spawn():
     board = random_base_board(random.Random(0))
     for name in EXISTING_PRESETS:
         assert spawn(PRESETS[name], board, random.Random(0)) is not None
+
+
+# --- trade adapter (P2) --------------------------------------------------------
+
+CENSUS_GAMES = 20
+CENSUS_MAX_NODES = 64
+
+
+def _play_and_census(seed: int):
+    """Play one seeded four-`heximax`-seat game to completion, checking every
+    `PROPOSE_TRADE` heximax emits, as it is chosen, for legality and shape.
+
+    Returns `(multi, one_for_one, accepted)` for this one game.
+    """
+    game = a_game(seed)
+    bots = [
+        heximax(game.state.board, random.Random(seed * 97 + s), max_nodes=CENSUS_MAX_NODES)
+        for s in range(4)
+    ]
+    multi = one_for_one = accepted = 0
+    moves = 0
+    while not is_over(game) and moves < 8000:
+        seat = to_move(game)
+        action = bots[seat].choose(game)
+        if action.type is ActionType.PROPOSE_TRADE:
+            offer = Offer(proposer=seat, give=action.give, want=action.want)
+            assert well_formed(offer)
+            assert can_propose(game.state, offer)
+            assert not any(g and w for g, w in zip(action.give, action.want))
+            assert sum(action.give) <= 2 and sum(action.want) <= 2
+            if sum(action.give) > 1 or sum(action.want) > 1:
+                multi += 1
+            else:
+                one_for_one += 1
+        elif action.type is ActionType.ACCEPT_TRADE:
+            accepted += 1
+        apply(game, action)
+        moves += 1
+    assert is_over(game), f"seed {seed} did not finish in {moves} moves"
+    return multi, one_for_one, accepted
+
+
+@functools.lru_cache(maxsize=1)
+def _trade_census():
+    """The 20-game census, run once and cached: both gate tests below read
+    the same run rather than paying for it twice."""
+    per_game = tuple(_play_and_census(seed) for seed in range(CENSUS_GAMES))
+    totals = tuple(sum(column) for column in zip(*per_game))
+    return per_game, totals
+
+
+def test_every_proposal_is_legal_and_shaped_right_over_twenty_games():
+    """Every `PROPOSE_TRADE` heximax emits, over 20 seeded four-`heximax`-seat
+    games (`CENSUS_MAX_NODES = 64`), is `well_formed`, passes `can_propose`
+    against the state at the moment it was chosen, never repeats a resource
+    on both sides, and never exceeds two cards a side -- checked inline, as
+    each proposal is chosen, inside `_play_and_census`.
+    """
+    _trade_census()
+
+
+def test_multi_card_and_one_for_one_proposals_both_occur_over_twenty_games():
+    """Measured on this run (seeds 0-19, `CENSUS_MAX_NODES = 64`, four
+    `heximax` seats, `functools.lru_cache`d with the legality test above so
+    the games are only played once): 32 multi-card proposals against 112
+    one-for-one ones -- a 22.2% multi-card share of 144 total -- and 65
+    accepted trades across the 20 games, 3.25 a game. Both shapes occur in
+    every run this was measured on; the exact counts drift with any change
+    to the valuation, the search, or `CENSUS_MAX_NODES`, but the qualitative
+    claim this test gates -- neither shape disappears -- does not. The
+    volume itself is low relative to the engine's naive one-for-one sample
+    it replaced: `score_proposal`'s crisp `willing` gate only credits an
+    opponent when accepting is a genuine gain for them under `relative`,
+    which a table that also improves the proposer's own position often
+    fails on the same trade (see `heximax.py`'s module docstring, "Cost").
+    """
+    _per_game, (total_multi, total_one_for_one, total_accepted) = _trade_census()
+    assert total_multi > 0, "no multi-card proposal was ever emitted"
+    assert total_one_for_one > 0, "one-for-one proposals stopped occurring"
+    assert total_accepted > 0
+
+
+def test_accept_rule_takes_a_clearly_positive_offer():
+    """A city-completing ore for a wood I have no use for: clearly worth it."""
+    game = after_setup(30)
+    for p in range(4):
+        set_known_hand(game, p, list(bundle()))
+    set_known_hand(game, 0, list(bundle(wood=1, ore=2, wheat=2)))  # 1 ore short of a city
+    set_known_hand(game, 1, list(bundle(ore=3)))
+    game.current_player = 1
+    game.phase = Phase.MAIN
+    bot = a_bot(game, 30)
+    offer = Offer(proposer=1, give=bundle(ore=1), want=bundle(wood=1))
+    assert bot.accept_rule(game, 0, offer, 0.0)
+
+
+def test_accept_rule_declines_a_clearly_negative_offer():
+    """Giving up the ore that completes a city outright, for a useless sheep."""
+    game = after_setup(31)
+    for p in range(4):
+        set_known_hand(game, p, list(bundle()))
+    set_known_hand(game, 0, list(bundle(ore=3, wheat=2)))  # a city ready to build
+    set_known_hand(game, 1, list(bundle(sheep=1)))
+    game.current_player = 1
+    game.phase = Phase.MAIN
+    bot = a_bot(game, 31)
+    offer = Offer(proposer=1, give=bundle(sheep=1), want=bundle(ore=1))
+    assert not bot.accept_rule(game, 0, offer, 0.0)
+
+
+def test_accept_rule_declines_a_leader_denial_case():
+    """Helps me a little, helps the runaway leader a lot -- declined under
+    `relative`. Seat 1 already has three cities and is one ore short of a
+    fourth; I hold that ore and would receive a wood I have some use for
+    (there is no other seat mid-purchase to route it to). The same trade
+    read with a trailing seat as the counterparty (no cities, nothing
+    in progress) costs the leader-denial term nothing extra, and is read
+    as less negative -- the counterparty-dependence `bundle_delta`'s own
+    docstring promises under `relative`."""
+    board = mini_board()
+    spots = independent_vertices(board, 4)
+
+    def a_table(proposer: int):
+        game = start(board, 4, random.Random(0))
+        game.phase = Phase.MAIN
+        game.current_player = proposer
+        for v in spots[:3]:
+            place_settlement(game.state, 1, v, connected=False)
+            upgrade_to_city(game.state, 1, v)
+        for p in range(4):
+            set_known_hand(game, p, list(bundle()))
+        set_known_hand(game, 1, list(bundle(wood=1, ore=2, wheat=2)))  # 1 ore short of a 4th city
+        set_known_hand(game, 2, list(bundle(wood=1)))
+        set_known_hand(game, 0, list(bundle(ore=1)))
+        return game
+
+    leader_game = a_table(proposer=1)
+    trailing_game = a_table(proposer=2)
+    leader_bot = a_bot(leader_game, 32)
+    trailing_bot = a_bot(trailing_game, 32)
+    leader_offer = Offer(proposer=1, give=bundle(wood=1), want=bundle(ore=1))
+    trailing_offer = Offer(proposer=2, give=bundle(wood=1), want=bundle(ore=1))
+
+    leader_delta = leader_bot.bundle_delta(
+        leader_game, 0, leader_offer.want, leader_offer.give, leader_offer.proposer
+    )
+    trailing_delta = trailing_bot.bundle_delta(
+        trailing_game, 0, trailing_offer.want, trailing_offer.give, trailing_offer.proposer
+    )
+    assert leader_delta < trailing_delta
+    assert not leader_bot.accept_rule(leader_game, 0, leader_offer, 0.0)
+
+
+def test_rank_partners_asks_first_whoever_it_helps_least():
+    """Seat 1 is one ore short of a city (giving up ore costs it dearly);
+    seat 2 is stacked five ore deep (giving up one costs it almost
+    nothing). Both truly hold ore, so both are eligible; seat 1, whom the
+    trade helps least (hurts most), is asked first."""
+
+    def a_table(swapped: bool):
+        game = after_setup(40, players=3)
+        for p in range(3):
+            set_known_hand(game, p, list(bundle()))
+        set_known_hand(game, 0, list(bundle(wood=2)))
+        set_known_hand(game, 1, list(bundle(ore=2, wheat=2)))
+        set_known_hand(game, 2, list(bundle(ore=5)))
+        game.current_player = 0
+        game.phase = Phase.MAIN
+        # One untyped card each for seats 1 and 2 -- which true resource it
+        # is differs, but the ledger (known/unknown) is identical either way.
+        a, b = (Resource.SHEEP, Resource.BRICK) if not swapped else (Resource.BRICK, Resource.SHEEP)
+        give_unknown(game, 1, a, 1)
+        give_unknown(game, 2, b, 1)
+        return game
+
+    give, want = bundle(wood=1), bundle(ore=1)
+    one = a_table(swapped=False)
+    two = a_table(swapped=True)
+    assert _record_says_the_same(one, two)
+    bot_one = a_bot(one, 40)
+    bot_two = a_bot(two, 40)
+    order = bot_one.rank_partners(one, 0, give, want)
+    assert order == (1, 2)
+    assert bot_two.rank_partners(two, 0, give, want) == order
+
+
+def test_counter_of_returns_a_valid_bundle_from_my_surplus_or_none():
+    game = after_setup(33)
+    for p in range(4):
+        set_known_hand(game, p, list(bundle()))
+    set_known_hand(game, 0, list(bundle(wood=3, brick=2)))
+    game.current_player = 1
+    game.phase = Phase.MAIN
+    bot = a_bot(game, 33)
+    standing = Offer(proposer=1, give=bundle(ore=1), want=bundle(wheat=2))
+
+    result = bot.counter_of(game, 0, standing)
+    assert result is not None
+    give, want = result
+    assert result in bot.candidate_bundles(game, 0)
+    counter = Offer(proposer=0, give=give, want=want)
+    assert well_formed(counter)
+    assert can_propose(game.state, counter)
+
+    clear_hand(game.state, 0)
+    assert bot.counter_of(game, 0, standing) is None
+
+
+def test_proposals_are_among_the_root_options_at_a_main_phase_position():
+    """A real four-`heximax`-seat game (seed 0, `max_nodes=64` -- the census
+    configuration) reaches a MAIN-phase decision where the search itself
+    chooses `PROPOSE_TRADE`: proof the adapter's candidates are actually
+    among the root options during play, not merely present unused. `choose`
+    can only return an action `root_options` offered -- most MAIN-phase
+    positions score every candidate at or below `propose_margin` (the
+    crisp `willing` gate is strict), so this walks a real game to the first
+    one that does not, rather than asserting it of an arbitrary position.
+    """
+    game = a_game(0)
+    bots = [heximax(game.state.board, random.Random(97 * s), max_nodes=64) for s in range(4)]
+    found = False
+    moves = 0
+    while not is_over(game) and moves < 2000:
+        seat = to_move(game)
+        action = bots[seat].choose(game)
+        if action.type is ActionType.PROPOSE_TRADE:
+            found = True
+            break
+        apply(game, action)
+        moves += 1
+    assert found, "heximax never chose to propose a trade in this game"
+
+
+def test_heximax_source_never_calls_responders_or_reads_pending_responders():
+    """`game.pending_responders` is the engine's true-hand eligibility list
+    and `trading.responders` is built from it (`bots.SearchBot._addressed`
+    uses both) -- both are off limits to an honest bot. The one line that
+    names `pending_responders` is the P1 comment explaining why."""
+    import inspect
+
+    import hexset.heximax as heximax_module
+
+    source = inspect.getsource(heximax_module)
+    assert "responders(" not in source
+    mentions = [line for line in source.splitlines() if "pending_responders" in line]
+    assert len(mentions) == 1
+    assert "is the engine's" in mentions[0]

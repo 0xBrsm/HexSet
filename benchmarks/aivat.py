@@ -60,7 +60,7 @@ from pathlib import Path
 import numpy as np
 
 from hexset.actions import Action, ActionType, apply, victim_of
-from hexset.arena import MAX_ACTIONS, entrant_from_name, seat_of, spawn
+from hexset.arena import MAX_ACTIONS, entrant_from_name, load_checkpoint, seat_of, spawn
 from hexset.board.board import Board, random_base_board
 from hexset.encoding import encode
 from hexset.game import ROLL_ODDS, Game, imagine, is_over, roll_dice, start, to_move
@@ -229,9 +229,7 @@ class Valuer:
         theirs: list[int],
         players: int,
     ) -> None:
-        from hexset.netbot import load
-
-        self.loaded = load(path, board.topology, "cpu")
+        self.loaded = load_checkpoint(path, board.topology, "cpu")
         self.perspective = perspective
         self.scale = margin_scale(players)
         self.ours = [(s - perspective) % players for s in ours]

@@ -49,7 +49,7 @@ reported, and `nontrivial_per_game` is the number that says how many recorded
 games the measurement actually needs.
 
 **The distribution scored is the one the search sees**, via
-`hexset.netbot.LeafEvaluator.evaluate` on a `hexset.mcts.Leaf` -- not a
+`hexnet.netbot.LeafEvaluator.evaluate` on a `hexset.mcts.Leaf` -- not a
 separately-built softmax. That matters most at the trade slot, which is one slot
 in the flat categorical standing for "propose something" whose mass the
 evaluator splits across the legal offers by the pair distribution. A policy that
@@ -102,7 +102,7 @@ from hexset.actions import (
     legal_actions,
     within_offer_budget,
 )
-from hexset.arena import Z_95, wilson
+from hexset.arena import Z_95, leaf_evaluator, load_checkpoint, wilson
 from hexset.game import imagine, is_over, start, to_move
 from hexset.mcts import Leaf
 from hexset.record import Record, actions_of, board_of, read as read_records
@@ -285,7 +285,7 @@ def _check_space(record: Record, space: ActionSpace | None) -> None:
     A 3-player record scored by a 4-player checkpoint, or a Seafarers layout
     scored by a base-board one, does not fail loudly on its own: the encoder
     would build a differently shaped observation and the mismatch would surface
-    somewhere unrelated. `hexset.netbot._check_players` makes the same argument
+    somewhere unrelated. `hexnet.netbot._check_players` makes the same argument
     for the arena path.
     """
     if space is None:
@@ -316,7 +316,7 @@ def score(
     """Every non-trivial decision in `records`, scored by `evaluator`.
 
     `evaluator` is a `hexset.mcts.Evaluator` -- in production
-    `hexset.netbot.LeafEvaluator`, which is the same object a batched search
+    `hexnet.netbot.LeafEvaluator`, which is the same object a batched search
     scores its leaves with, so the distribution measured here and the
     distribution the search acts on cannot drift apart.
 
@@ -562,8 +562,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-json", action="store_true")
     args = parser.parse_args(argv)
 
-    from hexset.netbot import LeafEvaluator, load
-
     records: list[Record] = []
     for path in args.records:
         for record in read_records(path):
@@ -576,9 +574,9 @@ def main(argv: list[str] | None = None) -> int:
         print("no records read", file=sys.stderr)
         return 1
 
-    loaded = load(args.checkpoint, board_of(records[0]).topology, args.device)
+    loaded = load_checkpoint(args.checkpoint, board_of(records[0]).topology, args.device)
     budget = loaded.max_offers if args.max_offers is None else args.max_offers
-    evaluator = LeafEvaluator(policy=loaded.policy, space=loaded.space)
+    evaluator = leaf_evaluator(loaded.policy, loaded.space)
 
     started = time.perf_counter()
     scored, tally = score(

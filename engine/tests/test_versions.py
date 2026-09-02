@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""HexSet-UI adopted the engine's 0.13.x line as its single version
+"""HexSet adopted the engine's 0.13.x line as its single version
 (`CHANGELOG.md`, "one version line"): the root `pyproject.toml` and
 `engine/pyproject.toml` are bumped together and must always agree, and the
 installed `hexset` package must report that same version.

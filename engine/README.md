@@ -1,7 +1,7 @@
 # hexset
 
-> **Provenance.** This directory's history was imported into the HexSet-UI
-> repo (`feat/engine-in-repo`) from `0xBrsm/dev-hexset` (becoming HexNet),
+> **Provenance.** This directory's history was imported into the HexSet
+> repo (`feat/engine-in-repo`) from `0xBrsm/dev-HexNet` (becoming HexNet),
 > branch `refactor/hexnet-package-split` at commit
 > `665ecb9da0a51f6c956e90282651bd0265f0a3e6`. The import used `git
 > filter-repo` to keep only `src/hexset/`, `src/benchmarks/` and the

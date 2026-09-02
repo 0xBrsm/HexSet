@@ -1,5 +1,5 @@
 """Which graph shape a checkpoint's `contract` metadata gets routed to, and
-whether a genuine dev-hexset export actually loads and plays.
+whether a genuine dev-HexNet export actually loads and plays.
 
 This is the regression suite for the headline finding of the PI's review of
 PR #2: the branch redefined contract `"2"` to mean the 29-input record while
@@ -13,7 +13,7 @@ here would have failed on that branch.
 
 Fixtures, and what each is:
 
-* `dev-contract2.onnx` — a **genuine** dev-hexset export (`tmp/export/
+* `dev-contract2.onnx` — a **genuine** dev-HexNet export (`tmp/export/
   linear2k.onnx`, exporter commit `36a8fa03`, 2026-08-31): contract `"2"`,
   23 declared inputs, `search=mcts`, real learned weights. The file PR #2
   broke.

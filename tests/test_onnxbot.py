@@ -29,7 +29,7 @@ def checkpoint_v2():
     frozen contract-1 checkpoint.
 
     Contract *dispatch* — which graph shape a `contract` value routes to, and
-    whether a genuine dev-hexset export loads at all — is
+    whether a genuine dev-HexNet export loads at all — is
     `test_contract_dispatch.py`'s job, against a real export rather than this
     stub.
     """

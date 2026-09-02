@@ -13,7 +13,7 @@ fixture: contract 3 declares 27 of the record's fields and contract 4 all 29,
 and a loader that feeds a graph every field it happens to have rather than the
 ones the graph declares breaks on the shorter one (`onnxbot.V2Policy._run`).
 The third case -- a real 23-input contract 2 -- is not stubbed at all:
-`dev-contract2.onnx` is a genuine dev-hexset export.
+`dev-contract2.onnx` is a genuine dev-HexNet export.
 
 These stubs are NOT genuine exports. `hexset.export_onnx` needs torch, which
 this repo does not install, so no real contract-3 or contract-4 file exists

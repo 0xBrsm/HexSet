@@ -1,4 +1,4 @@
-"""`hexset_ui.record` against dev-hexset's own definition of the record.
+"""`hexset_ui.record` against dev-HexNet's own definition of the record.
 
 `record.py` is the one engine-adjacent module this package still carries its
 own copy of, and it is a copy only because the canonical version
@@ -10,7 +10,7 @@ this module is the guard until it lands.
 
 Everything here skips without torch, which is the normal case on a serving
 box and in CI here. That is a real limitation and not a hidden one: on a
-machine that *does* have torch — a developer's, or dev-hexset's own — these
+machine that *does* have torch — a developer's, or dev-HexNet's own — these
 are the tests that catch the two repos' contracts drifting apart, which is the
 failure PR #2 shipped.
 """
@@ -32,7 +32,7 @@ from hexset_ui.rules import options_for
 from conftest import step_randomly
 
 torch = pytest.importorskip(
-    "torch", reason="dev-hexset's canonical record definition imports torch"
+    "torch", reason="dev-HexNet's canonical record definition imports torch"
 )
 onnx_record = pytest.importorskip("hexset.onnx_record")
 export_onnx = pytest.importorskip("hexset.export_onnx")

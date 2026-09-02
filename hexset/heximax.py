@@ -1267,9 +1267,8 @@ class Heximax:
 
     @staticmethod
     def _move_hand(
-        state: GameState, knower: int, seat: int, *, gains: Sequence[int],
-        losses: Sequence[int],
-        exact: bool = False,
+        state: GameState, knower: int, seat: int, *,
+        gains: Sequence[int], losses: Sequence[int], exact: bool = False,
     ) -> None:
         """`seat`'s hand in `state` after gaining `gains` and losing `losses`.
 

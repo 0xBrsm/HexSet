@@ -37,6 +37,12 @@ import numpy as np
 import torch
 
 from .actions import Action, ActionSpace, build_space, within_offer_budget
+from .arena import (
+    register_checkpoint_loader,
+    register_entrant_kind,
+    register_evaluator_provider,
+    register_leaf_evaluator_factory,
+)
 from .board.board import Board
 from .board.topology import Topology
 from .bots import options_for
@@ -309,3 +315,47 @@ def network_bot(
         players=loaded.players,
         max_offers=loaded.max_offers if max_offers is None else max_offers,
     )
+
+
+def _spawn_network(entrant, board: Board, rng) -> NetworkBot:
+    """`hexset.arena`'s "network" entrant kind, wired through the registry in
+    `hexset.arena` so a torch-free process never imports this module."""
+    if not isinstance(entrant.weights, str):
+        raise ValueError("a network entrant's weights is a checkpoint path")
+    return network_bot(entrant.weights, board, max_offers=entrant.max_offers)
+
+
+def _spawn_mcts(entrant, board: Board, rng) -> Search:
+    """`hexset.arena`'s "mcts" entrant kind, same registry."""
+    if not isinstance(entrant.weights, str):
+        raise ValueError("an mcts entrant's weights is a checkpoint path")
+    return searcher(
+        entrant.weights,
+        board,
+        simulations=entrant.simulations,
+        wave=entrant.wave,
+        max_offers=entrant.max_offers,
+        rng=rng,
+    )
+
+
+def _network_evaluator_provider(weights: object, board: Board) -> NetworkEvaluator:
+    """`hexset.arena`'s "network" evaluator, same registry."""
+    if not isinstance(weights, str):
+        raise ValueError("a network evaluator's weights is a checkpoint path")
+    return network_evaluator(weights, board)
+
+
+def _leaf_evaluator_factory(policy, space, pad_to=None) -> LeafEvaluator:
+    return LeafEvaluator(policy=policy, space=space, pad_to=pad_to)
+
+
+# Registered at import so any process that imports `hexset.netbot` -- directly,
+# or via `hexnet.train`/`hexnet.league`/`hexnet.collect`/`hexnet.duel` -- can
+# spawn a network-backed entrant through `hexset.arena.spawn` without
+# `hexset.arena` itself ever importing torch or this module.
+register_entrant_kind("network", _spawn_network)
+register_entrant_kind("mcts", _spawn_mcts)
+register_evaluator_provider("network", _network_evaluator_provider)
+register_checkpoint_loader(load)
+register_leaf_evaluator_factory(_leaf_evaluator_factory)

@@ -27,10 +27,11 @@ import time
 from dataclasses import dataclass, replace
 from math import sqrt
 from multiprocessing import Pool
-from typing import Sequence
+from typing import Callable, Sequence
 
 from .actions import apply
 from .board.board import Board, random_base_board
+from .board.topology import Topology
 from .bots import Bot, RandomBot, SearchBot, greedy
 from .evaluate import Evaluator
 from .evaluate_tiered import Evaluator as TieredEvaluator
@@ -39,6 +40,78 @@ from .placement import PlacementBot
 from .victory import victory_points
 
 Z_95 = 1.959964
+
+# Network-backed entrant kinds and evaluators are not implemented here: they
+# need torch and a trained checkpoint, which live in the `hexnet` package, and
+# hexset must never import hexnet. Instead `hexnet.netbot` registers factories
+# here at import time -- so any HexNet entry point (train, league, collect,
+# its duel wrapper) that imports `hexnet.netbot` makes "network"/"mcts"
+# entrants and the "network" evaluator spawnable, and a hexset-only process
+# that never imports it gets a clear error naming the package that provides
+# them rather than a silent `ImportError` on torch.
+_ENTRANT_KIND_FACTORIES: dict[str, Callable[[Entrant, Board, random.Random], Bot]] = {}
+_EVALUATOR_PROVIDERS: dict[str, Callable[[object, Board], object]] = {}
+_CHECKPOINT_LOADER: Callable[[str, Topology, str], object] | None = None
+_LEAF_EVALUATOR_FACTORY: Callable[..., object] | None = None
+
+# Kinds/evaluators hexset knows the *name* of but does not implement itself --
+# used only to tell "not registered yet" apart from "not a real kind at all".
+_NETWORK_KINDS = frozenset({"network", "mcts"})
+_NETWORK_EVALUATORS = frozenset({"network"})
+
+_HEXNET_HINT = (
+    "is provided by the hexnet package; import hexnet.netbot (or an entry "
+    "point that does, such as hexnet.train/hexnet.league/hexnet.collect) "
+    "before spawning it"
+)
+
+
+def register_entrant_kind(kind: str, factory) -> None:
+    """Register a bot-building factory for an `Entrant.kind` hexset does not
+    implement itself. `factory(entrant, board, rng) -> Bot`."""
+    _ENTRANT_KIND_FACTORIES[kind] = factory
+
+
+def register_evaluator_provider(name: str, factory) -> None:
+    """Register a leaf-evaluation factory for an `Entrant.evaluator` value
+    hexset does not implement itself. `factory(weights, board) -> Evaluator`,
+    matching `EVALUATORS[name](board, weights)`'s role for the built-in ones --
+    the object just needs an `evaluate_game(game, seat)` method and may carry
+    its own `max_offers`."""
+    _EVALUATOR_PROVIDERS[name] = factory
+
+
+def register_checkpoint_loader(loader) -> None:
+    """Register `hexnet.netbot.load`-shaped loader: `(path, topology, device)
+    -> Loaded`, an object with `.policy`, `.space` and `.max_offers`. Lets
+    `benchmarks.aivat`/`benchmarks.human_agreement` load a checkpoint without
+    importing hexnet themselves."""
+    global _CHECKPOINT_LOADER
+    _CHECKPOINT_LOADER = loader
+
+
+def register_leaf_evaluator_factory(factory) -> None:
+    """Register a `hexnet.netbot.LeafEvaluator`-shaped factory:
+    `(policy, space, pad_to=None) -> object` with an `evaluate(leaves)`
+    method matching `hexset.mcts.Evaluator`."""
+    global _LEAF_EVALUATOR_FACTORY
+    _LEAF_EVALUATOR_FACTORY = factory
+
+
+def load_checkpoint(path: str, topology: Topology, device: str = "cpu"):
+    """A trained checkpoint, loaded through whatever registered
+    `register_checkpoint_loader`. Raises with a clear message if nothing has."""
+    if _CHECKPOINT_LOADER is None:
+        raise RuntimeError(f"loading a checkpoint {_HEXNET_HINT}")
+    return _CHECKPOINT_LOADER(path, topology, device)
+
+
+def leaf_evaluator(policy, space, pad_to: int | None = None):
+    """A `hexset.mcts.Evaluator` over a loaded network policy, through
+    whatever registered `register_leaf_evaluator_factory`."""
+    if _LEAF_EVALUATOR_FACTORY is None:
+        raise RuntimeError(f"a network leaf evaluator {_HEXNET_HINT}")
+    return _LEAF_EVALUATOR_FACTORY(policy, space, pad_to)
 
 # The engine caps turns, but nothing caps actions within a turn, so a policy
 # that liked trading in circles would never reach the turn cap. A game that
@@ -181,28 +254,10 @@ def spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
 def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
     if entrant.kind == "random":
         return RandomBot(rng)
-    if entrant.kind == "network":
-        # Imported here rather than at module scope because it pulls in torch,
-        # and `hexset.selfplay` imports this module: the collector is tested and
-        # timed on a machine where torch cannot be installed at all.
-        from .netbot import network_bot
-
-        if not isinstance(entrant.weights, str):
-            raise ValueError("a network entrant's weights is a checkpoint path")
-        return network_bot(entrant.weights, board, max_offers=entrant.max_offers)
-    if entrant.kind == "mcts":
-        from .netbot import searcher
-
-        if not isinstance(entrant.weights, str):
-            raise ValueError("an mcts entrant's weights is a checkpoint path")
-        return searcher(
-            entrant.weights,
-            board,
-            simulations=entrant.simulations,
-            wave=entrant.wave,
-            max_offers=entrant.max_offers,
-            rng=rng,
-        )
+    if entrant.kind in _ENTRANT_KIND_FACTORIES:
+        return _ENTRANT_KIND_FACTORIES[entrant.kind](entrant, board, rng)
+    if entrant.kind in _NETWORK_KINDS:
+        raise ValueError(f"entrant kind {entrant.kind!r} {_HEXNET_HINT}")
 
     if entrant.kind == "heximax":
         # Imported here like the network kinds: `hexset.heximax` reaches
@@ -225,16 +280,12 @@ def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
         )
 
     max_offers = entrant.max_offers
-    if entrant.evaluator == "network":
-        # The search, unchanged, with the value head where the handcrafted
-        # evaluation was. Same import reason as above.
-        from .netbot import network_evaluator
-
-        if not isinstance(entrant.weights, str):
-            raise ValueError("a network evaluator's weights is a checkpoint path")
-        evaluator = network_evaluator(entrant.weights, board)
+    if entrant.evaluator in _EVALUATOR_PROVIDERS:
+        evaluator = _EVALUATOR_PROVIDERS[entrant.evaluator](entrant.weights, board)
         if max_offers is None:
-            max_offers = evaluator.max_offers
+            max_offers = getattr(evaluator, "max_offers", None)
+    elif entrant.evaluator in _NETWORK_EVALUATORS:
+        raise ValueError(f"evaluator {entrant.evaluator!r} {_HEXNET_HINT}")
     elif entrant.evaluator not in EVALUATORS:
         raise ValueError(f"unknown evaluator: {entrant.evaluator}")
     else:

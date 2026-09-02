@@ -246,6 +246,10 @@ what the Docker image already does. Depending on the package rather than
 carrying a header-stripped copy makes the provenance correct rather than
 merely compatible.
 
+> **2026-09-02 note:** superseded — HexSet relicensed to `GPL-3.0-only` as
+> one distribution; the AGPLv3 §13 analysis above no longer applies. See
+> `LICENSE` and `NOTICE.md`.
+
 ---
 
 ## Engine changes needed from dev-hexset

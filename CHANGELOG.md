@@ -98,6 +98,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **HexSet is licensed GPL-3.0-only** (was AGPL-3.0). One licence for the
+  whole distribution; third-party components are listed in `NOTICE.md`.
 - **One distribution, `hexset`.** `engine/` and `src/hexset_ui/` are gone;
   everything now ships from `src/` as `hexset` (engine, bots, ledger),
   `hexset.bench`, `hexset.server`, `hexset.clients` and the sibling

@@ -171,10 +171,8 @@ planned but does not exist yet.
 
 ## License
 
-AGPL-3.0 — see [LICENSE](LICENSE). Running a modified copy of this
-project as a network service carries the same source-disclosure obligation
-as distributing it: your users are entitled to the corresponding source of
-what they're playing against.
+GPL-3.0-only — see [LICENSE](LICENSE). Third-party components used or
+bundled by this distribution are listed in [NOTICE.md](NOTICE.md).
 
 ## Trademarks
 

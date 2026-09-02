@@ -1,10 +1,19 @@
-"""Test-only ways to drive a game forward, and the fixture that stops the
-bots afterwards.
+"""Project-wide pytest options, test-only ways to drive a game forward, and
+the fixture that stops the bots afterwards.
 
-The two movers are not opponents anyone plays: the server deals `heximax`,
-`search2` or a checkpoint from `models/` and nothing else. They live here
-rather than in `src/` because a random mover is a fixture, and the package
-should not ship one to make its own tests convenient.
+`--write-census` is the escape hatch for
+`test_heximax.test_choices_are_byte_identical_to_the_recorded_census`: that
+test is a behaviour-preservation gate, not a spec, so when a change to
+`heximax` deliberately changes what it chooses, the fixture has to be
+regenerated on purpose rather than hand-edited. Passing the flag makes the
+test recompute the census and overwrite
+`tests/heximax/fixtures/heximax_census_ecb5252.json` instead of asserting
+against it.
+
+The two movers below are not opponents anyone plays: the server deals
+`heximax`, `search2` or a checkpoint from `models/` and nothing else. They
+live here rather than in `src/` because a random mover is a fixture, and the
+package should not ship one to make its own tests convenient.
 
 `registry` is the one way a test should build a `Tables`. Every bot seat at
 every table starts a runner thread that polls once a second until its game
@@ -24,9 +33,20 @@ import pytest
 
 from hexset.actions import Action, apply
 from hexset.game import Game
+from hexset.server.api import Config, Tables
+from hexset.server.rules import options_for
 
-from hexset_ui.api import Config, Tables
-from hexset_ui.rules import options_for
+
+def pytest_addoption(parser) -> None:
+    parser.addoption(
+        "--write-census",
+        action="store_true",
+        default=False,
+        help=(
+            "regenerate tests/heximax/fixtures/heximax_census_ecb5252.json "
+            "from the current heximax instead of asserting against it"
+        ),
+    )
 
 
 @dataclass

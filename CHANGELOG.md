@@ -1,8 +1,8 @@
 # Changelog
 
-All notable changes to HexSet are recorded here — the `hexset` engine and
-`heximax` bot under `engine/`, and the `hexset_ui` web app and MCP server
-under `src/`.
+All notable changes to HexSet are recorded here — the `hexset` engine
+(`hexset.bench`, `hexset.server`, `hexset.clients` included) and the
+`heximax` bot, both shipped from `src/` as one distribution.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -98,6 +98,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **One distribution, `hexset`.** `engine/` and `src/hexset_ui/` are gone;
+  everything now ships from `src/` as `hexset` (engine, bots, ledger),
+  `hexset.bench`, `hexset.server`, `hexset.clients` and the sibling
+  `heximax`, under one `pyproject.toml`. Update any import of `benchmarks.*`
+  to `hexset.bench.*`, and of `hexset_ui.*` to `hexset.server.*` or
+  `hexset.clients.*`; the PyPI/Docker distribution name changes from
+  `hexset-ui` to `hexset`, and the MCP server's advertised name from
+  `hexset-ui` to `hexset`. `onnxruntime` moves from a hard dependency to the
+  `.[server]`/`.[clients]` extras. `hexset_ui/record.py`'s duplicate of
+  `hexset.onnx_record` is deleted now that the latter no longer needs torch.
 - The engine's own test suite now runs in place at `engine/tests` instead
   of a separate `dev-HexNet` checkout.
 - **Package renamed `catan` → `hexset`**, ahead of release as its own

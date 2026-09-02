@@ -1,7 +1,7 @@
 # The bot API
 
 This is the complete interface a `.onnx` file must satisfy to plug in as an
-opponent. It is the only thing `src/hexset_ui/onnxbot.py` reads — the file
+opponent. It is the only thing `src/hexset/clients/onnxbot.py` reads — the file
 does not need access to this repo's source, only to what is written here plus
 the public [ONNX](https://onnx.ai/) format itself. `hexset.heximax` (the
 default handcrafted opponent) and `hexset.bots`' `search2` implement the same
@@ -30,13 +30,13 @@ Two independent parts make up the contract:
 
 Unreadable or missing optional keys fall back to their default rather than
 failing the load — a typo'd hint costs the hint, not the whole opponent. See
-`src/hexset_ui/modelmeta.py` for the exact clamping.
+`src/hexset/server/modelmeta.py` for the exact clamping.
 
 Inference device (`cpu`/GPU) is deliberately **not** a metadata key — it is a
 fact about the machine serving the game, not the checkpoint.
 
 **The `contract` number is assigned by the exporter, not by this repo.**
-`hexset.export_onnx._CONTRACT_VERSION` is the one definition; `hexset_ui`
+`hexset.export_onnx._CONTRACT_VERSION` is the one definition; `hexset.server`
 reads it and never writes it. The record shape has three numbers because it
 grew twice: `2` is the original 23 fields, `3` adds the four live-offer
 fields, `4` adds the two public-knowledge ledger fields. A graph declares the
@@ -59,7 +59,7 @@ The engine builds a **record**: the position stated in the rules' own terms,
 already filtered to what the perspective seat may legally know. The graph
 owns everything downstream of that — encoding, masking, normalising,
 argmax, un-rotating back to board-seat order. Built by
-`src/hexset_ui/record.py:build_record`; the full field-by-field derivation
+`hexset.onnx_record.record_from_game`; the full field-by-field derivation
 lives in [`onnx-contract-v2.md`](onnx-contract-v2.md).
 
 Leading batch axis `B` on every tensor.
@@ -111,16 +111,18 @@ Leading batch axis `B` on every tensor.
 `NetworkBot` reads `action_index`/`pair_index`; searches read
 `prior`/`pair_prior`/`value`. One graph serves both.
 
-**The engine drift this section used to list is gone.** `hexset_ui` no longer
-carries its own copy of the engine: it depends on the `hexset` distribution,
-so the `offered` re-proposal filter and the RNG-drawn trade-responder order
-are simply what this server plays now, exactly as dev-HexNet does. See
+**The engine drift this section used to list is gone.** This server no longer
+carries its own copy of the engine: it depends on the `hexset` package (now
+one distribution together with the gym, see the CHANGELOG's "one
+distribution" entry), so the `offered` re-proposal filter and the RNG-drawn
+trade-responder order are simply what this server plays now, exactly as
+dev-HexNet does. See
 [`engine-divergence-2026-09-02.md`](engine-divergence-2026-09-02.md) for the
 full account of what the copy held and how each difference was resolved.
 
 **One difference remains, deliberately, and it is not tensor-shaped.** The
 `action_mask`/`pair_mask` a checkpoint is served here are built over the
-*honest* trade sample (`hexset_ui.rules.fair_legal_actions`): every
+*honest* trade sample (`hexset.server.rules.fair_legal_actions`): every
 one-for-one offer the mover's own hand affords, with no filter for whether
 some opponent could cover it. The engine's own `legal_actions` filters by
 opponents' true hands, and dev-HexNet's training record uses that. So a

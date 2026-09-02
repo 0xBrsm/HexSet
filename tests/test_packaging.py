@@ -26,7 +26,12 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-PACKAGE_SRC = REPO_ROOT / "src" / "hexset_ui"
+SRC = REPO_ROOT / "src"
+# Two top-level packages ship from one `src/`: `hexset` (the engine, the
+# ledger, `hexset.bench`, `hexset.server`, `hexset.clients`) and `heximax`,
+# the sample bot -- a sibling package rather than a subpackage of `hexset`
+# (see `src/heximax/__init__.py`'s "registration" section for why).
+PACKAGE_ROOTS = {"hexset": SRC / "hexset", "heximax": SRC / "heximax"}
 
 # Everything a fresh clone would not have. `.egg-info` is the one that
 # matters and the reason this test builds from a copy at all: setuptools
@@ -80,7 +85,7 @@ def test_the_frontend_ships_with_the_package():
     """`static/index.html` is the entire frontend and the one file setuptools
     will not include on its own — it is a static asset inside a package
     directory, so it lives or dies by `[tool.setuptools.package-data]`."""
-    assert "hexset_ui/static/index.html" in packaged_names()
+    assert "hexset/server/static/index.html" in packaged_names()
 
 
 def test_every_module_in_the_source_tree_ships():
@@ -88,16 +93,18 @@ def test_every_module_in_the_source_tree_ships():
     installed it and nothing at all for anyone running from source, so
     compare the two directly rather than trusting `packages.find`."""
     expected = {
-        f"hexset_ui/{path.relative_to(PACKAGE_SRC).as_posix()}"
-        for path in PACKAGE_SRC.rglob("*.py")
+        f"{name}/{path.relative_to(root).as_posix()}"
+        for name, root in PACKAGE_ROOTS.items()
+        for path in root.rglob("*.py")
         if "__pycache__" not in path.parts
     }
     missing = sorted(expected - set(packaged_names()))
-    assert not missing, f"in src/hexset_ui but not in the wheel: {missing}"
+    assert not missing, f"in src/ but not in the wheel: {missing}"
 
 
 def test_the_wheel_carries_nothing_from_outside_the_package():
-    """`packages.find` is scoped to `hexset_ui*`; tests/, models/ and docker/ have
-    no business in an installed copy."""
-    strays = sorted(n for n in packaged_names() if not n.startswith("hexset_ui/"))
+    """`packages.find` is scoped to `hexset*`/`heximax*`; tests/, models/ and
+    docker/ have no business in an installed copy."""
+    prefixes = tuple(f"{name}/" for name in PACKAGE_ROOTS)
+    strays = sorted(n for n in packaged_names() if not n.startswith(prefixes))
     assert not strays, f"unexpected files in the wheel: {strays}"

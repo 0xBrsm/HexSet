@@ -84,3 +84,40 @@ def winner(state: GameState) -> int | None:
         if victory_points(state, player) >= WINNING_POINTS:
             return player
     return None
+
+
+def relative_points(points: tuple[int, ...]) -> tuple[float, ...]:
+    """Each seat's terminal points less the mean of the others, over 10.
+
+    Exactly zero-sum: the per-seat values sum to zero for any input, since
+    subtracting the mean of the others is an affine transform whose total
+    cancels. That is the property worth having — it says in the reward what the
+    game already says, that Catan has one winner and a position is only worth
+    what it is worth compared to the table. An action that lifts every seat
+    equally earns nothing, which is the whole reason for reading points this
+    way rather than absolutely.
+
+    Scaled by the 10 points that win a game, so a seat's reward lands in about
+    [-1, +1] and a value head does not have to learn the units.
+
+    **Do not discount this.** With a zero-sum reward roughly half of terminal
+    values are negative, and γ < 1 makes a negative terminal cheaper the later
+    it arrives — which pays a losing policy to stall. Trading in circles is
+    precisely that move, and it is why the action cap exists. Horizon control
+    belongs in the offer budget (`actions.within_offer_budget`), which is
+    measured, not in a discount factor that quietly changes the objective.
+
+    Lives here rather than in `hexset.mcts` or `hexnet.rewards` (both of which
+    use it) because it is a pure function of terminal points and `WINNING_POINTS`
+    -- the engine side of the hexset/hexnet boundary, with nothing else pulled
+    in. `hexnet.rewards.relative_points` re-exports this definition rather than
+    keeping a second one, so this docstring's warning still travels with the
+    one function anything trains against.
+    """
+    seats = len(points)
+    if seats < 2:
+        raise ValueError("a relative reward needs at least two seats")
+    total = sum(points)
+    return tuple(
+        (own - (total - own) / (seats - 1)) / WINNING_POINTS for own in points
+    )

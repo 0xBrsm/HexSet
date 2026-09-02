@@ -23,37 +23,15 @@ discount — see `relative_points` on why γ < 1 is a trap here.
 from __future__ import annotations
 
 from .selfplay import Outcome
-from .victory import WINNING_POINTS
 
+# `relative_points` lives in `hexset.victory`: `hexset.mcts` needs it too, and
+# hexset must never import this module (hexnet depends on hexset, not the
+# other way around). Re-exported here, not redefined, so callers that already
+# read `hexnet.rewards.relative_points` see no change and there is still only
+# one definition of the quantity the value head is trained to predict.
+from hexset.victory import relative_points
 
-def relative_points(points: tuple[int, ...]) -> tuple[float, ...]:
-    """Each seat's terminal points less the mean of the others, over 10.
-
-    Exactly zero-sum: the per-seat values sum to zero for any input, since
-    subtracting the mean of the others is an affine transform whose total
-    cancels. That is the property worth having — it says in the reward what the
-    game already says, that Catan has one winner and a position is only worth
-    what it is worth compared to the table. An action that lifts every seat
-    equally earns nothing, which is the whole reason for reading points this
-    way rather than absolutely.
-
-    Scaled by the 10 points that win a game, so a seat's reward lands in about
-    [-1, +1] and a value head does not have to learn the units.
-
-    **Do not discount this.** With a zero-sum reward roughly half of terminal
-    values are negative, and γ < 1 makes a negative terminal cheaper the later
-    it arrives — which pays a losing policy to stall. Trading in circles is
-    precisely that move, and it is why the action cap exists. Horizon control
-    belongs in the offer budget (`actions.within_offer_budget`), which is
-    measured, not in a discount factor that quietly changes the objective.
-    """
-    seats = len(points)
-    if seats < 2:
-        raise ValueError("a relative reward needs at least two seats")
-    total = sum(points)
-    return tuple(
-        (own - (total - own) / (seats - 1)) / WINNING_POINTS for own in points
-    )
+__all__ = ["relative_points", "win_loss", "reward"]
 
 
 def win_loss(outcome: Outcome) -> tuple[float, ...]:

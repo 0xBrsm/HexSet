@@ -55,7 +55,7 @@ engine per ply against ~25 µs for a batched network evaluation, so a path of an
 depth would cost more to walk than to evaluate.
 
 **Terminal nodes are not evaluated.** A finished game has a known value, and it
-is `hexset.rewards.relative_points` — the same quantity the value head is trained
+is `hexset.victory.relative_points` — the same quantity the value head is trained
 to predict, so the two are on one scale and a backup can mix them.
 """
 
@@ -78,8 +78,7 @@ from .actions import (
 )
 from .bots import STANCES
 from .game import ROLL_ODDS, Game, imagine, is_over, roll_dice, to_move
-from .rewards import relative_points
-from .victory import victory_points
+from .victory import relative_points, victory_points
 
 
 @dataclass(frozen=True)

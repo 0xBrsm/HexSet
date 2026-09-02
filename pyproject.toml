@@ -5,13 +5,13 @@ description = "Graph-native Settlers of Catan engine, bots and ledger (hexset), 
 requires-python = ">=3.11"
 dependencies = ["numpy>=1.26"]
 
-# torch itself isn't listed here. `hexnet` (PPO/training) and `hexset.onnx_record`
-# need it, but the engine, bots and ledger in `hexset` do not, so it stays
-# provisioned separately (the training/GPU image) rather than a hard dependency
-# of this distribution — anything that only needs the torch-free engine stays
-# installable without it. `export` is the one thing under `hexset` that needs
-# torch *and* these two, for hexset.onnx_record's traced encoder / a future
-# .pt -> .onnx conversion (hexnet.export_onnx).
+# torch itself isn't listed here. `hexnet` needs it, but the engine, bots,
+# ledger and hexset.onnx_record's information-set record (torch-free by
+# design, see that module's docstring) do not, so it stays provisioned
+# separately (the training/GPU image) rather than a hard dependency of this
+# distribution. `export` is for hexnet.export_onnx's traced encoder and
+# .pt -> .onnx conversion, which needs torch *and* these two; nothing under
+# hexset itself needs this extra.
 [project.optional-dependencies]
 export = ["onnx>=1.16", "onnxruntime>=1.18"]
 # hexset.catanatron: the Catanatron adapter (`hexset/catanatron/`). Pinned to

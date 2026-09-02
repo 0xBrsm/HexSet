@@ -1295,8 +1295,9 @@ class Heximax:
             game.state, game.ledger, knower, target, rank, vector=before_vector
         )
         state = copy_state(game.state)
-        self._move_hand(state, knower, target, gains=want, losses=give)
-        self._move_hand(state, knower, counterparty, gains=give, losses=want)
+        exact = self.omniscient
+        self._move_hand(state, knower, target, gains=want, losses=give, exact=exact)
+        self._move_hand(state, knower, counterparty, gains=give, losses=want, exact=exact)
         ledger = game.ledger.copy()
         for r in range(NUM_RESOURCES):
             if give[r]:
@@ -1315,15 +1316,34 @@ class Heximax:
         *,
         gains: Sequence[int],
         losses: Sequence[int],
+        exact: bool = False,
     ) -> None:
         """`seat`'s hand in `state` after gaining `gains` and losing `losses`.
 
         Exact, per resource, when `seat == knower` -- its own hand is read
         verbatim, so it must reflect the trade precisely. Otherwise only the
         total moves (folded into one resource slot): see `_partner_delta`.
+
+        `exact` forces the per-resource move for every seat, and
+        `_partner_delta` passes `self.omniscient`. The fold is not an
+        approximation the honest bot tolerates but an exact identity for it:
+        a non-knower's hand reaches the honest evaluation only through
+        `Belief.expected_hand`, which reads `known`/`unknown`/`pool` off the
+        ledger and the bank, and the one thing it takes from `state.hands` is
+        the *size* (`Belief.sizes`) -- which the fold preserves while a
+        per-resource move, clamped at zero when the seat cannot cover
+        `losses`, would not. Under omniscience that reasoning is void: `known`
+        *is* `state.hands`, every row is scored on the real cards, and folding
+        would price an all-one-resource fiction whose `progress`, `diversity`
+        and `scarce` terms are nothing like the position's. Measured on the
+        seat's own row, the fold overstated how much a one-for-one trade cost
+        the partner by ~10x (`test_an_omniscient_partner_read_...`), so
+        `score_proposal`'s `willing` gate almost never fired and
+        `accept_rule`, reading a counterparty it had just impoverished under
+        `relative`, cleared far too easily.
         """
         hand = state.hands[seat]
-        if seat == knower:
+        if seat == knower or exact:
             for r in range(len(hand)):
                 hand[r] += gains[r] - losses[r]
                 if hand[r] < 0:

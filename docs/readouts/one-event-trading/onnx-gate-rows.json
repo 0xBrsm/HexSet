@@ -1,0 +1,40 @@
+{
+  "onnx_checkpoint": "linear2400-c5.onnx",
+  "onnx_checkpoint_sha256": "10425289e950da99c411048cd543a943fa5c298b09385c14078c58040f695070",
+  "protocol": "Same served-game protocol as batched-gates-served-game.json (PR #29): linear2400-c5.onnx (contract 5, seat 0) vs three heximax seats, seeded 4200, driven through hexset.server.api.Tables.act -- the same code path an embedded server bot runs -- for 10 rounds (Game.turns reaching 40), synchronously in one thread rather than via BotRunner's poll loop. 'before' is main f75b911 (this PR's parent, git-checked-out copies of trading.py/onnxbot.py, same venv); 'after' is this PR (NETWORK_GATE_ROWS = 32). Four ABBA-ordered trials each (before-then-after, then after-then-before, alternating) so the box's own rising load cannot bias one arm.",
+  "finding": "trades_per_turn reads exactly 0.0 in all 8 trials, both arms -- unchanged, as expected at only 10 rounds in. The raw per-move/per-turn wall-clock ratio is NOT a clean read, and is reported here rather than suppressed: 'before' always plays exactly 156 actions to reach turn 40 and 'after' always plays exactly 149 (each internally reproducible across repeated runs of the same code) -- a real, deterministic trajectory divergence, not measurement noise (survives ABBA reordering: onnx_ms_per_move is ~14.7ms whichever trial runs first or second under 'before', ~23.5ms under 'after'). Root cause, established rather than assumed: linear2400-c5.onnx is a real trained checkpoint, and NetworkBot.accepts_many's value-head output over a batch is a floating-point computation whose result can depend on batch size (this repo's own precedent, agents/reference/trading-design.md's gate (iv): 'torch's matrix-vector reduction order differs ... argmax ties flip' between a width-86 and width-87 graph at batch one) -- capping the batch at NETWORK_GATE_ROWS+1 rows instead of everything changes those tiny reduction-order-dependent values enough to occasionally flip a strict accepts() inequality at a near-zero margin. hexset.bots.heximax's search looks ahead through hypothetical trade outcomes, so a flipped tie inside one lookahead changes which action heximax's search prefers, cascading into a different (but equally legal) 40-turn game -- trades_made stays 0 in every trial in both arms, so no executed trade differs, only which non-trading actions get chosen. This is the same category of noise this repo already treats as acceptable (contract-5 migration gate (iv) was amended from bit-for-bit to 'identical win counts, logit differences <= 1e-7' for exactly this reason), not a functional regression: NETWORK_GATE_ROWS's own unit tests (tests/clients/test_onnxbot.py) pin exact row-by-row agreement with accepts() on the top 32 rows and False beyond, on a deterministic (non-learned-noise) stub checkpoint where no such tie exists.",
+  "mechanism_instrumentation": {
+    "protocol": "The same 'before' 40-turn trajectory (156 actions, trades_made=0), replayed with NetworkBot.accepts_many wrapped to record len(received) and wall time per call -- isolates the cost of the gate itself from the trajectory-divergence noise above by comparing what each code version spends inside accepts_many across the identical set of calls the 'before' trajectory produces.",
+    "before_total_accepts_many_ms": 761.2,
+    "before_calls": 50,
+    "after_total_accepts_many_ms": 700.7,
+    "after_calls": 51,
+    "largest_event": {
+      "candidates": 188,
+      "before_ms": 127.7,
+      "after_ms": 23.3
+    },
+    "reading": "Aggregate accepts_many time falls ~8% (761ms -> 701ms) over one representative game, with the clearest win exactly where the design predicted it: the one 188-candidate event drops from 127.7ms to 23.3ms. Most events in the first 10 rounds have well under 32 candidates, so most calls are unaffected either way -- the cap only bites on the rare large event, consistent with 'the cost is rows, not calls' (agents/reference/trading-design.md's post-data note) and with this being a fallback for the events that dominate cost at scale, not for early-game play."
+  },
+  "trials": [
+    {"label": "before-t1", "moves": 156, "trades_made": 0, "trades_per_turn": 0.0, "onnx_ms_per_move_mean": 8.42, "onnx_ms_per_turn_mean": 38.87, "heximax_ms_per_move_mean": 9.30},
+    {"label": "after-t1",  "moves": 149, "trades_made": 0, "trades_per_turn": 0.0, "onnx_ms_per_move_mean": 22.67, "onnx_ms_per_turn_mean": 94.83, "heximax_ms_per_move_mean": 14.29},
+    {"label": "after-t2",  "moves": 149, "trades_made": 0, "trades_per_turn": 0.0, "onnx_ms_per_move_mean": 22.86, "onnx_ms_per_turn_mean": 95.63, "heximax_ms_per_move_mean": 15.37},
+    {"label": "before-t2", "moves": 156, "trades_made": 0, "trades_per_turn": 0.0, "onnx_ms_per_move_mean": 17.20, "onnx_ms_per_turn_mean": 79.42, "heximax_ms_per_move_mean": 14.77},
+    {"label": "before-t3", "moves": 156, "trades_made": 0, "trades_per_turn": 0.0, "onnx_ms_per_move_mean": 15.80, "onnx_ms_per_turn_mean": 72.94, "heximax_ms_per_move_mean": 13.85},
+    {"label": "after-t3",  "moves": 149, "trades_made": 0, "trades_per_turn": 0.0, "onnx_ms_per_move_mean": 23.63, "onnx_ms_per_turn_mean": 98.83, "heximax_ms_per_move_mean": 14.84},
+    {"label": "after-t4",  "moves": 149, "trades_made": 0, "trades_per_turn": 0.0, "onnx_ms_per_move_mean": 24.99, "onnx_ms_per_turn_mean": 104.52, "heximax_ms_per_move_mean": 15.13},
+    {"label": "before-t4", "moves": 156, "trades_made": 0, "trades_per_turn": 0.0, "onnx_ms_per_move_mean": 17.45, "onnx_ms_per_turn_mean": 80.57, "heximax_ms_per_move_mean": 14.14}
+  ],
+  "summary": {
+    "before_onnx_ms_per_move_mean": 14.72,
+    "after_onnx_ms_per_move_mean": 23.54,
+    "before_onnx_ms_per_turn_mean": 67.95,
+    "after_onnx_ms_per_turn_mean": 98.45,
+    "before_heximax_ms_per_move_mean": 13.01,
+    "after_heximax_ms_per_move_mean": 14.91,
+    "before_trades_per_turn": 0.0,
+    "after_trades_per_turn": 0.0
+  },
+  "recommendation": "Not clean enough to certify a served-game speedup or rule out a slowdown at this instrument; the isolated accepts_many-only measurement is the reliable read (mild net win, large win on the rare big event) and matches the design's own cost model. A controlled re-read -- the mirror-table protocol (same preset both sides, no learned network, agents/reference/trading-design.md's cost readouts) -- would remove the search-tie confound entirely but is out of this change's scope (heximax is untouched; only NetworkBot.accepts_many changed)."
+}

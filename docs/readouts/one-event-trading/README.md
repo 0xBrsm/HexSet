@@ -558,3 +558,46 @@ wall clock, ms/move reads the same ratio; the `heximax` control seats'
 ratio stays near 1.0 (noise from the rising box load, no systematic
 direction), confirming the improvement is specific to the batched gate
 and not an artifact of the shared box. `batched-gates-served-game.json`.
+
+## `NETWORK_GATE_ROWS` — a network gate scores only its top-ranked prefix (2026-09-03)
+
+`agents/reference/trading-design.md`'s post-data note "gate re-run with
+batched gates: 3.0-3.3x, still failing" — batching cut calls, not rows, and
+~85% of events clear nothing, so a batched ask over every candidate still
+scored everything the sequential ask would have stopped short of.
+`hexset.trading.NETWORK_GATE_ROWS = 32` (beside `VALUE_SCALE`) bounds
+`hexset.clients.onnxbot.NetworkBot.accepts_many` to the top 32
+public-rank-ordered candidates in one batched forward, declining the rest
+outright; `accepts` and the engine itself (which still asks about every
+candidate) are unchanged.
+
+### Served-game measurement — noisier than expected, reported as measured
+
+Same protocol as the batched-gates readout above (`linear2400-c5.onnx` vs
+three `heximax` seats via `Tables.act`, 10 rounds, seed 4200), four
+ABBA-ordered trials (`onnx-gate-rows.json`). `trades_per_turn` reads `0.0`
+in all 8 trials, both arms — unchanged, as the registration expected. The
+per-move/per-turn wall-clock ratio is **not** a clean read here: `before`
+always plays exactly 156 actions to reach turn 40 and `after` always plays
+exactly 149, reproducibly regardless of trial order — a real trajectory
+divergence, not box noise (established by replaying the recorded action
+sequence through `NetworkBot.accepts_many` directly: `linear2400-c5.onnx`'s
+value head is a real trained checkpoint, whose batched output can depend on
+batch size at the bit level, the same phenomenon contract-5's migration
+gate (iv) already documented — "torch's matrix-vector reduction order
+differs ... argmax ties flip" — and `heximax`'s search looks ahead through
+hypothetical trade outcomes, so a flipped tie in one lookahead changes which
+action it prefers, cascading into a different but equally legal game).
+Reported rather than suppressed; see `onnx-gate-rows.json`'s `finding` field
+for the full account.
+
+The reliable read is the mechanism-level one: replaying the same recorded
+156-action trajectory with `accepts_many` wrapped to time each call directly
+shows total time inside it falling from 761ms to 701ms over 50-51 calls,
+with the clearest win exactly where predicted — the one 188-candidate event
+in that game drops from 127.7ms to 23.3ms. Most early-game events have well
+under 32 candidates and are unaffected either way. A controlled served-game
+re-read (mirror-table protocol, no learned network, matching the (v) cost
+readouts above) would remove the search-tie confound entirely; out of scope
+for this change, which touches only `NetworkBot.accepts_many`.
+`onnx-gate-rows.json`.

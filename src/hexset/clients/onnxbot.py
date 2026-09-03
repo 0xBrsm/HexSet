@@ -48,7 +48,7 @@ from hexset.server.constants import RECORD_CONTRACTS
 from hexset.server.modelmeta import SearchConfig, search_config
 from hexset.server.rules import options_for
 from hexset.state import copy_state
-from hexset.trading import NO_VALUATION, VALUE_SCALE
+from hexset.trading import NETWORK_GATE_ROWS, NO_VALUATION, VALUE_SCALE
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from hexset.trading import Bundle
@@ -353,16 +353,34 @@ class NetworkBot:
         received: Sequence["Bundle"],
         counterparties: Sequence[int],
     ) -> list[bool]:
-        """Batched `accepts`: one graph call over the hand plus every
-        candidate's post-trade successor, instead of one call per candidate
-        (`agents/reference/trading-design.md`'s post-data note, "the
-        collector cost gate fails at 2.9-3.6x" -- an unbatched network gate
-        asked one candidate at a time against hundreds of clearing
-        candidates was the entire excess collection cost). Mirrors
-        `valuation`'s own one-forward fan-out (`_own_values` ->
-        `V2Policy.value_of`, which already falls back to one call per row
-        when the graph's declared batch axis is not dynamic) rather than
-        `accepts`'s one-candidate-at-a-time forward.
+        """Batched `accepts`: one graph call over the hand plus the
+        post-trade successors of the top `NETWORK_GATE_ROWS` candidates,
+        instead of one call per candidate (`agents/reference/
+        trading-design.md`'s post-data note, "the collector cost gate fails
+        at 2.9-3.6x" -- an unbatched network gate asked one candidate at a
+        time against hundreds of clearing candidates was the entire excess
+        collection cost) and instead of scoring every candidate in that one
+        call ("gate re-run with batched gates: 3.0-3.3x, still failing" --
+        batching cut calls, not rows, and ~85% of events clear nothing, so a
+        batched ask over every candidate still pays for everything the
+        sequential ask would have stopped short of). Mirrors `valuation`'s
+        own one-forward fan-out (`_own_values` -> `V2Policy.value_of`, which
+        already falls back to one call per row when the graph's declared
+        batch axis is not dynamic) rather than `accepts`'s
+        one-candidate-at-a-time forward.
+
+        `received` arrives in public-rank order: `trading._best_clearing`
+        ranks every coverable candidate by public surplus into `ranked`
+        before it ever asks a gate, then builds `receiveds = [received for
+        received, _them in ranked]` and calls `judged_many` (hence
+        `accepts_many`) over that list -- so `received[0]` is this event's
+        highest-ranked candidate, and the first `NETWORK_GATE_ROWS` entries
+        are its best-ranked prefix, not an arbitrary slice. Only that
+        prefix is scored; every candidate beyond it declines outright
+        (`hexset.trading.NETWORK_GATE_ROWS`'s docstring: clearing deals sit
+        near the top of the ranking, so this costs at most ~5% of
+        trades/turn). The engine still asks about every candidate -- only
+        this gate's own evaluation is bounded.
 
         `counterparties` is accepted for signature parity with
         `hexset.bots.Bot.accepts_many` but not read, for the same reason
@@ -372,22 +390,25 @@ class NetworkBot:
         del counterparties
         if self.max_trades == 0 or self._seated is None or not received:
             return [False] * len(received)
+        gated = received[:NETWORK_GATE_ROWS]
         seat = view.perspective
         hand = list(view.known[seat])
         afters: list[list[int]] = []
         valid: list[bool] = []
-        for wanted in received:
+        for wanted in gated:
             after = [n + d for n, d in zip(hand, wanted)]
             ok = all(n >= 0 for n in after)
             valid.append(ok)
             # An uncoverable candidate still needs a row so every position
-            # in `received` lines up with one in `values` below; the hand
+            # in `gated` lines up with one in `values` below; the hand
             # itself is a safe, always-valid placeholder, and its result is
             # discarded (`ok and ...`) rather than trusted.
             afters.append(after if ok else hand)
         values = self._own_values(seat, [hand] + afters)
         before_value = values[0]
-        return [ok and values[1 + i] > before_value for i, ok in enumerate(valid)]
+        verdicts = [ok and values[1 + i] > before_value for i, ok in enumerate(valid)]
+        verdicts.extend([False] * (len(received) - len(gated)))
+        return verdicts
 
     def _own_values(self, seat: int, hands: Sequence[Sequence[int]]) -> list[float]:
         """Each hand's value on `seat`'s own row, `seat`'s hand swapped in

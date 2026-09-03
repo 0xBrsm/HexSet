@@ -216,6 +216,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   candidates.
 ### Fixed
 
+- **A new game always gave the creator the first turn, even seated away from
+  Player 1.** The setup snake started wherever `POST /api/games` happened to
+  land the creator's random seat instead of seat 0. It now always opens on
+  seat 0, whoever holds it, and the page highlights that seat as current;
+  seat 0 is held open rather than retired while it waits to be filled.
+- **An empty seat's picker read "open seat" in the same white as a chosen
+  bot's name.** It now reads "empty", in the same muted grey as a locked
+  seat, so an unfilled seat reads as unfilled at a glance; your own row's
+  "human" placeholder is styled to the normal name color instead of the
+  browser's own dimmer default.
 - Opening a full game's address logged a console error. The page asked for a
   seat first and read the refusal as "watch this one instead"; arriving at a
   full table is the ordinary way to reach a game you are not playing in, so

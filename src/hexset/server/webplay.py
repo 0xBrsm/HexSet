@@ -1043,9 +1043,8 @@ class GameSession:
             finally:
                 self.game.gates = live
             apply_trades(self.game, replay)
-        # `hexset.game` deals the setup snake from seat 0 and rotates turns
-        # `(p + 1) % n`; this table starts the snake at its creator and
-        # retires seats nobody claimed. See `hexset.server.seating`.
+        # See `hexset.server.seating`'s module docstring: turn order is seat
+        # order, seat 0 first, and this re-points it past a retired seat.
         settle(self.game, seating_before)
         if action.type is ActionType.ROLL:
             self.last_roll_by_seat[actor] = self.game.last_roll

@@ -40,6 +40,17 @@ from conftest import new_tables
 SOLO = ["search2", "search2", "search2"]
 
 
+@pytest.fixture(autouse=True)
+def _creator_at_seat_zero(monkeypatch):
+    """Turn order is seat order from seat 0 now (`Tables.create` always
+    deals `first=0`, see `hexset.server.seating`'s module docstring), not
+    "whoever created the game" -- so most of this file's tests, which treat
+    the token `deal()`/`create()` hands back as the one that moves first,
+    pin the creator to seat 0 for that determinism. A test about the
+    creator landing elsewhere overrides this itself."""
+    monkeypatch.setattr(random.SystemRandom, "randrange", lambda self, n: 0)
+
+
 def tables(**config) -> Tables:
     """`conftest.new_tables`: a registry whose bot runner threads are stopped
     when the test ends (see that fixture for why a test may not just build
@@ -296,18 +307,21 @@ def test_the_public_routes_refuse_anything_but_a_game_and_its_board():
 # --- The per-seat setup lock ---------------------------------------------------
 
 
-def test_a_creator_seated_anywhere_but_the_snakes_first_slot_still_plays():
-    """`first=` follows the creator's own (random) seat, not a hardcoded 0 —
-    otherwise a creator seated anywhere else would find it seat 0's turn,
-    seat 0 empty, and nothing able to ever advance."""
+def test_turn_order_is_seat_order_not_the_creators_seat(monkeypatch):
+    """Turn order is seat order, seat 0 first, regardless of which random
+    seat the creator was dealt (`Tables.create` always passes `first=0` —
+    the historical bug was starting the snake at the creator instead). Seat
+    0 does not lose its seat while it waits to be filled
+    (`Table._settle_locks`'s `setup_step == 0` carve-out)."""
+    monkeypatch.setattr(random.SystemRandom, "randrange", lambda self, n: 2)
     registry = tables()
     code, token = deal(registry, bots=[])
     session = registry.get(code).session
     creator_seat = registry.handle("GET", "/api/state", {}, token)["seat"]
 
-    assert to_move(session.game) == creator_seat
-    options = legal_actions(session.game)
-    assert options  # the creator really can act on their very first request
+    assert creator_seat == 2
+    assert to_move(session.game) == 0
+    assert registry.handle("GET", "/api/state", {}, token)["locked"] == []
 
 
 def test_an_empty_seat_the_snake_reaches_is_retired_on_sight():

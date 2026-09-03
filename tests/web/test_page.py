@@ -406,6 +406,9 @@ def test_an_observer_without_a_seat_still_gets_a_board(live, browser):
     assert watcher.page.locator("#players .player-row").count() == 4
     assert watcher.page.locator("#board-svg polygon").count() > 0
     assert watcher.page.inner_text("#phase") != "Loading..."
+    # No token, so nothing here is this reader's to change.
+    assert watcher.page.locator("#players select:not([disabled])").count() == 0
+    assert player.page.locator("#players select:not([disabled])").count() == 3
     # The join it tries first is answered 409 on a full table, by design; the
     # browser logs any 4xx as a console error, so that one is expected here
     # and nothing else is.

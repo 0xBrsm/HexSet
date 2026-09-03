@@ -1589,6 +1589,12 @@ function renderSeatName(entry, p) {
   }
   entry.row.classList.toggle("seat-empty", kind === "empty");
   if (kind === "bot") {
+    // Swapping a bot is a seated player's call — an observer holds no token
+    // and would only get a 403 out of it, so the control says so rather than
+    // offering a choice it cannot make. Written only when it changes:
+    // assigning `disabled` blurs the element, open picker and all.
+    const observing = state.seat === null || state.seat === undefined;
+    if (entry.select.disabled !== observing) entry.select.disabled = observing;
     // Never while the picker is open. Writing .value to a <select> the user
     // is looking into closes it just as surely as replacing the element does.
     if (document.activeElement !== entry.select) {

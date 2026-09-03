@@ -190,7 +190,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   no token for either, so the page took a 401 where its board should have
   been and stopped at "Loading...". `GET /api/table/<CODE>/board` serves the
   (public) layout without a token, and an observer polls
-  `GET /api/table/<CODE>` for state.
+  `GET /api/table/<CODE>` for state. The seat panel's bot pickers are
+  disabled for a reader with no seat, which is the only thing they could
+  ever have answered.
 - **A human seat auto-cleared trades against its published vector.** `POST
   /api/games` and `POST /api/join` left a human seat's gate at
   `PostedValuation` (auto-accept) unless `confirm` was set at seat-up, so a

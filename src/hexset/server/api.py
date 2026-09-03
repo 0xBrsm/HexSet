@@ -801,7 +801,7 @@ class Tables:
         table.session.player_names[seat] = name
         return table.view(seat)
 
-    def swap_bot(self, table: Table, seat: int, model: str) -> dict:
+    def swap_bot(self, table: Table, viewer: int, seat: int, model: str) -> dict:
         """Re-seat one bot mid-game — models can be swapped at any point, not
         just between games. Rebuilding from `model_options()` (rather than
         accepting a spec) keeps this the same chokepoint: a request names a
@@ -809,7 +809,13 @@ class Tables:
         thread and starts a fresh one on the new spec — the old bot's own
         in-flight decision, if any, still lands (it was already submitted
         through `/api/action` like any other move), but nothing further
-        comes from it."""
+        comes from it.
+
+        `viewer` is who asked and `seat` is who was swapped, and the two are
+        never the same seat. Answering with `view(seat)` handed the caller the
+        *swapped bot's* own view — its hand, its true victory points, its
+        legal actions — and the page believed it was that seat until its next
+        poll. Every other route here answers the caller, and so does this."""
         if not 0 <= seat < len(table.seats) or table.seats[seat].kind is not SeatKind.BOT:
             raise ApiError(f"seat {seat} has no bot to swap")
         try:
@@ -843,7 +849,7 @@ class Tables:
         table.runners.append((new_runner, new_thread))
         new_thread.start()
 
-        return table.view(seat)
+        return table.view(viewer)
 
     def set_valuation(self, table: Table, seat: int, vector) -> dict:
         """`PUT /api/games/<CODE>/valuation`: this seat publishes its vector.
@@ -957,8 +963,17 @@ class Tables:
         if method == "GET" and path == "/api/models":
             return {"models": list(model_options())}
 
-        # The only read that needs no token: an observer's view of a game
-        # they haven't (or couldn't) join.
+        # The two reads that need no token: an observer's view of a game they
+        # haven't (or couldn't) join, and that game's board layout. The board
+        # is public — `view(None)` above already ships every piece standing on
+        # it — so gating the layout behind a seat token left an observer's page
+        # with a 401 where its geometry should be and nothing to draw
+        # (`index.html`'s `loadBoard`). `/api/board` stays as it is for a
+        # seated client; this is the same bytes by code instead of by token.
+        if method == "GET" and path.startswith("/api/table/") and path.endswith("/board"):
+            code = path[len("/api/table/") : -len("/board")]
+            return self.get(code).layout
+
         if method == "GET" and path.startswith("/api/table/"):
             return self.get(path[len("/api/table/") :]).view(None)
 
@@ -1018,7 +1033,9 @@ class Tables:
         if method == "POST" and path == "/api/name":
             return self.rename(table, seat, str(payload.get("name", "")))
         if method == "POST" and path == "/api/bot":
-            return self.swap_bot(table, int(payload.get("seat", -1)), str(payload.get("model", "")))
+            return self.swap_bot(
+                table, seat, int(payload.get("seat", -1)), str(payload.get("model", ""))
+            )
         if method == "PUT" and path == f"/api/games/{table.code}/valuation":
             return self.set_valuation(table, seat, payload.get("valuation"))
         if method == "POST" and path == f"/api/games/{table.code}/trade":

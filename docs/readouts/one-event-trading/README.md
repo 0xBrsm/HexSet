@@ -81,3 +81,64 @@ more than search2's single `+1`/`-1` pair, and clears more. The engine's one
 assertion (trades in an event ≤ cards on the table) never fired.
 
 `cost.json`.
+
+## Re-run after `trade_event`/`Game.publish` split (fix/publish-not-call)
+
+The engine correction registered in `agents/reference/trading-design.md`'s
+post-data note "HexNet lands contract 5": `trade_event(game, gate)` reads
+`game.valuations` instead of calling each seat's `valuation` at event time;
+drivers publish once, right after the acting seat's own decision
+(`Game.publish`). Both gates (iii)/(v) are re-run rather than reused, since
+the timing change moves what a seat's vector reads as at anyone else's
+trade event and therefore re-baselines every trading game (the two censuses
+confirm this: `heximax`/`heximax-omni`/`search2` changed, `heximax-notrade`/
+`search2-notrade` stayed byte-identical).
+
+### (iii) Strength
+
+`heximax` vs `search2`, 800 blocked games, duel seed 42000, 26 workers.
+
+| | |
+|---|---|
+| wins | **485 / 800 = 60.6%** |
+| Wilson 95% | [57.2, 64.0] |
+| paired VP | **+0.929** [+0.759, +1.100] |
+| bar | point ≥ 50%, Wilson lower bound > 45% |
+| met | yes |
+
+`publish-heximax-vs-search2.json`.
+
+### (v) Cost
+
+Same mirror protocol, re-timed in one process (`sys.setprofile` call
+counting active throughout, which inflates every absolute ms/move figure
+above the un-instrumented `cost.json` reading but is common to both arms,
+so the *ratio* is the number to read).
+
+| | heximax | search2 | ratio |
+|---|---|---|---|
+| ms / move (profiled) | 6.963 | 4.427 | **1.57x** |
+| function calls / move | 10,904 | 7,954 | **1.37x** |
+| moves (3 games) | 896 | 1051 | |
+
+Comfortably inside the design's "≤2x `search2` per move" ceiling, and in
+the same range as the pre-fix 1.53x — this readout is a non-regression
+check on heximax's own search cost, not a demonstration of the collector
+speedup the fix targets: that 5.8x-slower-per-step finding was in HexNet's
+batched collector (`agents/reference/trading-design.md`'s post-data note),
+a different repo's driver, not `arena.play`'s per-move cost measured here.
+
+**Trades per turn**, over the lineup (iii) plays
+(`[heximax, heximax, search2, search2]`, blocked, duel seed 42000, the
+first 6 games):
+
+| trades in the event | events |
+|---|---|
+| 0 | 393 |
+| 1 | 57 |
+
+Mean **0.127**, max 1, over 450 events — same order as the pre-fix 0.151
+mean, no cycle and no runaway trading; the engine's one assertion never
+fired.
+
+`publish-cost.json`.

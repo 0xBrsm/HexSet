@@ -82,6 +82,7 @@ from hexset.bots import Bot
 from hexset.clients.botclient import BotRunner, LocalSearchBrain, LocalTransport
 from hexset.game import Phase, is_over, to_move
 from hexset.onnx_record import record_from_game
+from hexset.trading import publish_valuation
 
 from . import journal
 from hexset.actions import legal_actions
@@ -737,6 +738,16 @@ class Tables:
     def act(self, table: Table, seat: int, wire: dict) -> dict:
         table._settle_locks()
         table.session.submit(seat, wire)
+        if table.seats[seat].kind is SeatKind.BOT:
+            # The one driver that acts on a seat's behalf rather than at its
+            # own request: right after its own action, an embedded bot is
+            # asked for its current vector and it is recorded, exactly as
+            # `arena.play`'s loop does it for every seat. A human seat is
+            # unaffected -- it publishes only through `PUT .../valuation`,
+            # never tied to its own actions.
+            trader = table.session.traders.get(seat)
+            if trader is not None:
+                publish_valuation(table.session.game, seat, trader)
         return table.view(seat)
 
     def undo(self, table: Table, seat: int) -> dict:

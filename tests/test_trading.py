@@ -68,10 +68,19 @@ class Trader:
 
 
 def run(game, traders):
-    game.traders = tuple(traders)
+    """Seat `traders` as the game's gates, publish each one's vector exactly
+    as a driver would at that seat's own decision, then run the event.
+
+    `trade_event` itself no longer takes a valuation callback -- it only
+    reads `game.valuations` -- so the harness does what `arena.play`'s loop
+    (and every other driver) does: ask, then `Game.publish`, once per seat,
+    before the event that reads them.
+    """
+    game.gates = tuple(traders)
+    for seat, trader in enumerate(traders):
+        game.publish(seat, trader.valuation(game.state(seat)))
     return trade_event(
         game,
-        lambda seat, view: traders[seat].valuation(view),
         lambda seat, view, received, other: traders[seat].accepts(view, received, other),
     )
 
@@ -282,7 +291,7 @@ def test_max_trades_zero_is_the_off_switch():
         Trader(),
     ]
     assert run(game, traders) == []
-    assert not traders[0].views, "a switched-off event should not even ask"
+    assert not traders[0].asked, "a switched-off event should not even ask a gate"
 
 
 def test_the_published_vectors_are_recorded_on_the_game():
@@ -363,16 +372,29 @@ def test_equal_deals_break_by_the_lower_counterparty():
 # --- where the event runs -----------------------------------------------------
 
 
+def _seat_and_publish(game, traders):
+    """Seat `traders` as the game's gates and publish each one's vector --
+    what a driver has already done by the time a roll or a robber move
+    reaches `enter_main`, since publishing rides on a seat's own decision,
+    not on the trade event."""
+    game.gates = tuple(traders)
+    for seat, trader in enumerate(traders):
+        game.publish(seat, trader.vec)
+
+
 def test_the_event_runs_on_the_way_into_main_from_a_roll():
     game = a_game()
     game.phase = Phase.ROLL
     give(game._state, 0, Resource.WOOD, 1)
     give(game._state, 1, Resource.ORE, 1)
-    game.traders = (
-        Trader(vector(ore=1.0, wood=-1.0)),
-        Trader(vector(wood=1.0, ore=-1.0)),
-        Trader(),
-        Trader(),
+    _seat_and_publish(
+        game,
+        (
+            Trader(vector(ore=1.0, wood=-1.0)),
+            Trader(vector(wood=1.0, ore=-1.0)),
+            Trader(),
+            Trader(),
+        ),
     )
     roll_dice(game, 8)
     assert game.phase is Phase.MAIN
@@ -384,11 +406,14 @@ def test_the_event_runs_on_the_way_into_main_from_the_robber():
     game.phase = Phase.ROBBER
     give(game._state, 0, Resource.WOOD, 1)
     give(game._state, 1, Resource.ORE, 1)
-    game.traders = (
-        Trader(vector(ore=1.0, wood=-1.0)),
-        Trader(vector(wood=1.0, ore=-1.0)),
-        Trader(),
-        Trader(),
+    _seat_and_publish(
+        game,
+        (
+            Trader(vector(ore=1.0, wood=-1.0)),
+            Trader(vector(wood=1.0, ore=-1.0)),
+            Trader(),
+            Trader(),
+        ),
     )
     move_robber_to(game, 3)
     assert game.phase is Phase.MAIN
@@ -440,12 +465,12 @@ def test_an_imagined_game_carries_the_published_vectors():
     assert game.valuations[0] == vector(ore=0.5)
 
 
-def test_an_imagined_game_does_not_carry_the_seated_traders():
+def test_an_imagined_game_does_not_carry_the_seated_gates():
     """A hypothetical must not reach the real opponents' private gates."""
     game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
-    game.traders = tuple(Trader(vector(ore=1.0, wood=-1.0)) for _ in range(4))
+    game.gates = tuple(Trader(vector(ore=1.0, wood=-1.0)) for _ in range(4))
     child = imagine(game, random.Random(1))
-    assert child.traders is None
+    assert child.gates is None
     child.phase = Phase.MAIN
     enter_main(child)
     assert child.trades == []

@@ -65,6 +65,7 @@ from hexset.board.board import Board, random_base_board
 from hexset.encoding import encode
 from hexset.game import ROLL_ODDS, Game, imagine, is_over, roll_dice, start, to_move
 from hexset.mcts import draws_hidden
+from hexset.trading import publish_valuation
 from hexset.victory import WINNING_POINTS, victory_points
 
 # Which chance families the correction covers. Separable because they are not
@@ -145,10 +146,13 @@ def chance_outcomes(
     `game` and its random stream are untouched: every successor is an
     `imagine` copy drawing from `rng`.
 
-    Every successor is also re-seated with `game.traders`, which `imagine`
-    deliberately does not copy (`hexset.game.Game.traders`): this is an
+    Every successor is also re-seated with `game.gates`, which `imagine`
+    deliberately does not copy (`hexset.game.Game.gates`): this is an
     instrumented *replay* of a real game, not a bot's hypothetical, so its
-    successors must clear the same trades the real one would. A roll and a
+    successors must clear the same trades the real one would. `valuations`
+    itself *is* carried by `imagine`, and there is no new decision inside
+    any of these branches to publish -- only the gates, which judge whatever
+    the roll or the steal just changed, need re-seating. A roll and a
     steal both change hands before the turn's trade event runs, so the
     outcomes genuinely differ by more than the one card drawn.
     """
@@ -156,7 +160,7 @@ def chance_outcomes(
         out = []
         for roll, probability in ROLL_ODDS:
             child = imagine(game, rng, randomize_deck=False)
-            child.traders = game.traders
+            child.gates = game.gates
             roll_dice(child, roll)
             out.append((roll, probability, child))
         return out
@@ -172,7 +176,7 @@ def chance_outcomes(
         out = []
         for card, count in sorted(remaining.items()):
             child = imagine(game, rng, randomize_deck=False)
-            child.traders = game.traders
+            child.gates = game.gates
             # `devcards.buy` pops the end of the deck, so moving the forced card
             # there and calling the real `apply` keeps the rules -- the payment
             # and the victory-point card's win check -- exactly as played.
@@ -206,7 +210,7 @@ def chance_outcomes(
         if not count:
             continue
         child = imagine(game, rng, randomize_deck=False)
-        child.traders = game.traders
+        child.gates = game.gates
         child.rng = _Forced(sum(hand[:resource]))  # type: ignore[assignment]
         apply(child, action)
         child.rng = rng
@@ -360,7 +364,7 @@ def instrumented(
     # Seated as `arena.play` seats them, so the engine's one trade event a
     # turn asks the same bots the same questions here as it does there --
     # without this the replay would be a no-trade game against a trading one.
-    game.traders = tuple(lineup)
+    game.gates = tuple(lineup)
     # Its own stream, so the enumeration cannot be blamed for a divergence and
     # a rerun at a different `--terms` still plays the same game.
     aux = random.Random(f"aivat:{seed}:{board_index}")
@@ -371,11 +375,18 @@ def instrumented(
     per_event: list[dict] = []
     actions = 0
     while not is_over(game) and actions < action_cap:
-        action = lineup[to_move(game)].choose(game)
+        seat = to_move(game)
+        bot = lineup[seat]
+        action = bot.choose(game)
         chance = action.type in CHANCE_ACTIONS
         term = _term_of(action) if chance else ""
         outcomes = chance_outcomes(game, action, aux) if term in terms else []
         apply(game, action)
+        # A line-for-line twin of `arena.play`: the acting seat publishes
+        # right after its own action, so this replay's vectors match a real
+        # duel's bit-for-bit rather than staying at whatever they were when
+        # the game started.
+        publish_valuation(game, seat, bot)
         actions += 1
         if len(outcomes) > 1:
             keys, probabilities, children = zip(*outcomes)

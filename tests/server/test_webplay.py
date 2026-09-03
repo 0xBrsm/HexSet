@@ -768,7 +768,6 @@ def test_the_trade_log_and_the_valuations_ride_in_the_state_view():
     filtered per viewer -- both are things a table hears."""
     from hexset.board.terrain import Resource
     from hexset.game import roll_dice
-    from hexset.server.webplay import PostedValuation
 
     game = a_game(seed=13)
     game.phase = Phase.ROLL
@@ -784,7 +783,7 @@ def test_the_trade_log_and_the_valuations_ride_in_the_state_view():
     wants_ore[Resource.ORE] = 1.0
     wants_ore[Resource.WOOD] = -1.0
     session.publish(0, wants_ore)
-    session.set_trader(1, PostedValuation(tuple(-v for v in wants_ore)))
+    session.publish(1, [-v for v in wants_ore])
 
     roll_dice(game, 8)
 

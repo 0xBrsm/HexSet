@@ -867,12 +867,10 @@ def test_a_published_valuation_clears_a_trade_and_it_shows_in_the_view():
     wants_ore[Resource.ORE] = 1.0
     wants_ore[Resource.WOOD] = -1.0
     registry.handle("PUT", f"/api/games/{code}/valuation", {"valuation": wants_ore}, token)
-    # The bot seat wants the wood back; `PostedValuation` stands in for it so
-    # the exchange has two willing sides without depending on what a
-    # particular checkpoint would advertise.
-    from hexset.server.webplay import PostedValuation
-
-    table.session.set_trader(other, PostedValuation(tuple(-v for v in wants_ore)))
+    # The bot seat wants the wood back; publishing on its behalf stands in
+    # for it so the exchange has two willing sides without depending on what
+    # a particular checkpoint would advertise.
+    table.session.publish(other, tuple(-v for v in wants_ore))
 
     roll_dice(game, 8)
     assert game.phase is Phase.MAIN

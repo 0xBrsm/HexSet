@@ -56,10 +56,14 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 Bundle = tuple[int, ...]
 
-# What a seat publishes, and how it judges a concrete exchange. `view` is
-# always that seat's own `Game.state(seat)` information set, never the true
-# state and never another seat's.
-Valuation = Callable[[int, "View"], Sequence[float]]
+# How a seat judges a concrete exchange. `view` is always that seat's own
+# `Game.state(seat)` information set, never the true state and never another
+# seat's. There is no `Valuation` callable any more: a seat's vector is
+# published onto `Game.valuations` at its own decisions (`Game.publish`,
+# driven by whichever driver is stepping the game), and `trade_event` only
+# ever reads it -- see the module docstring's "one-event" account and
+# `agents/reference/trading-design.md`'s post-data note on why the callback
+# form was wrong (one forward per seat per lane per turn, uncollectable).
 Gate = Callable[[int, "View", Bundle, int], bool]
 
 
@@ -155,7 +159,7 @@ def _candidates(state: GameState, me: int, locked: frozenset[int]) -> list[tuple
     return out
 
 
-def trade_event(game: "Game", valuation_of: Valuation, gate: Gate) -> list[Trade]:
+def trade_event(game: "Game", gate: Gate) -> list[Trade]:
     """Clear every deal the current player and one other seat both want.
 
     Called once a turn by the engine, on the transition into
@@ -164,12 +168,16 @@ def trade_event(game: "Game", valuation_of: Valuation, gate: Gate) -> list[Trade
     Returns the trades executed, in the order they cleared, and appends them
     to `game.trades`.
 
-    `valuation_of(seat, view)` publishes each seat's public vector, read once
-    at the start of the event and fixed for its duration: the vectors were
-    published at the last decision, and only the private gates move as cards
-    change hands, which is what makes the second ore worth less than the
-    first. `gate(seat, view, bundle, counterparty)` is that seat's private
-    judgement of one concrete exchange; both sides must return True.
+    **Reads `game.valuations`; publishes nothing.** Every seat's vector was
+    already written there by `Game.publish`, at that seat's own last
+    decision -- a driver's job, not this function's (a callback here that
+    asked each seat fresh was tried and measured: one forward per seat per
+    lane per turn, the one place a batched collector stopped batching). The
+    vectors are therefore already fixed for the whole event by the time this
+    runs; only the private gates move as cards change hands, which is what
+    makes the second ore worth less than the first. `gate(seat, view,
+    bundle, counterparty)` is that seat's private judgement of one concrete
+    exchange; both sides must return True.
 
     The single engine limit is the assertion below: an event cannot execute
     more trades than there are cards on the table. It can only fire if a
@@ -182,7 +190,7 @@ def trade_event(game: "Game", valuation_of: Valuation, gate: Gate) -> list[Trade
 
     state = game._state
     me = game.current_player
-    players = state.num_players
+    vectors = game.valuations
     views: dict[int, "View"] = {}
 
     def view(seat: int) -> "View":
@@ -191,11 +199,6 @@ def trade_event(game: "Game", valuation_of: Valuation, gate: Gate) -> list[Trade
             got = game.state(seat)
             views[seat] = got
         return got
-
-    game.valuations = [
-        _checked(valuation_of(seat, view(seat)), seat) for seat in range(players)
-    ]
-    vectors = game.valuations
 
     # The assertion's ceiling, measured before anything moves: a one-for-one
     # exchange conserves the number of cards held, so this is fixed for the
@@ -275,13 +278,42 @@ def _best_clearing(
     return None
 
 
-def _checked(vector: Sequence[float], seat: int) -> tuple[float, ...]:
-    """A published vector, validated: `NUM_RESOURCES` floats in `[-1, 1]`."""
-    out = tuple(float(x) for x in vector)
+def checked_valuation(vector: Sequence[float], seat: int) -> tuple[float, ...]:
+    """A published vector, validated: `NUM_RESOURCES` numbers in `[-1, 1]`.
+
+    Rejected rather than clamped or padded -- a caller that sent something
+    else meant something, and silently repairing it would hide the bug.
+    `Game.publish` is the one place this runs live; it is public here so
+    nothing needs its own copy (`hexset.server.webplay` used to keep one).
+    """
+    try:
+        out = tuple(float(x) for x in vector)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"seat {seat} published a malformed valuation: {vector!r}") from exc
     if len(out) != NUM_RESOURCES:
         raise ValueError(
             f"seat {seat} published {len(out)} valuations, expected {NUM_RESOURCES}"
         )
-    if any(x < -1.0 or x > 1.0 for x in out):
+    if any(x < -1.0 or x > 1.0 or x != x for x in out):
         raise ValueError(f"seat {seat} published a valuation outside [-1, 1]: {out}")
     return out
+
+
+def publish_valuation(game: "Game", seat: int, trader: object) -> None:
+    """The driver's fixed point: right after `seat`'s own decision, ask what
+    `trader` now brings to the table and record it as `seat`'s current
+    public vector (`Game.publish`), so it is there whenever anyone's trade
+    event next reads it -- this seat's own turn included, since only the
+    private gates move within one event, not the vectors.
+
+    Every driver that steps a seated game calls this once per decision, for
+    whichever seat just acted (`hexset.arena.play`, `hexset.bench.aivat`,
+    `hexset.record.record_game`, the gym's auto-played opponents, the
+    server's embedded bots). A trader with no `valuation` method (`Bot`'s
+    documented default) is skipped outright rather than published as an
+    explicit zero, since that is already every seat's resting value until it
+    first speaks.
+    """
+    method = getattr(trader, "valuation", None)
+    if method is not None:
+        game.publish(seat, published(trader, game.state(seat)))

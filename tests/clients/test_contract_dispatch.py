@@ -220,7 +220,9 @@ def test_a_checkpoint_plays_on_through_a_turn_the_engine_traded_in():
     traders = [None] * 4
     traders[mover] = PostedValuation(wants)
     traders[other] = PostedValuation(tuple(-v for v in wants))
-    game.traders = tuple(traders)
+    game.gates = tuple(traders)
+    game.publish(mover, wants)
+    game.publish(other, tuple(-v for v in wants))
 
     roll_dice(game, 8)
     assert game.trades, "the engine cleared nothing to play on through"

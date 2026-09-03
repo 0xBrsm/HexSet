@@ -24,6 +24,7 @@ from hexset import encoding
 from hexset.actions import Action
 from hexset.arena import Entrant, entrant_from_name, spawn
 from hexset.bots import Bot
+from hexset.trading import publish_valuation
 
 from .aec import TOPOLOGY, HexSetAEC, agent_name
 
@@ -87,7 +88,8 @@ class HexSetEnv(Env):
     `info["action_mask"]`, and `action_masks()` is the `sb3-contrib` hook.
     The learner's seat publishes no valuation vector, so it never trades;
     the opponent seats trade with each other and with the learner's cards
-    only through what their own bots advertise and accept.
+    only through what their own bots advertise and accept, each publishing
+    right after its own auto-played action (`_auto_play_opponents`).
     `info["view"]` carries `hexset.view.View`, the seat's full information-set
     object (`known`/`unknown`/`sample`), for a caller that wants more than
     the encoder's arrays.
@@ -172,11 +174,13 @@ class HexSetEnv(Env):
             bot_rng = random.Random(episode_rng.randrange(2**31))
             self._bots[seat] = spawn(entrant, board, bot_rng)
         # The opponents bring their own trading to the table: their
-        # `valuation`/`accepts` are what the engine's one trade event a turn
-        # asks (`hexset.trading`). The learner seat has no bot, so it
-        # publishes nothing and never trades -- the deferred half of the
-        # mechanic's interface, not an omission here.
-        self._aec._game.traders = tuple(
+        # `accepts` is what the engine's one trade event a turn asks
+        # (`hexset.trading`); their `valuation` is published by
+        # `_auto_play_opponents`, right after each one's own action. The
+        # learner seat has no bot, so it publishes nothing and never trades
+        # -- the deferred half of the mechanic's interface, not an omission
+        # here.
+        self._aec._game.gates = tuple(
             self._bots.get(seat) for seat in range(self._aec.num_players)
         )
 
@@ -247,8 +251,13 @@ class HexSetEnv(Env):
                 aec.step(None)
                 continue
             seat = aec.possible_agents.index(agent)
-            action = self._bots[seat].choose(aec._game)
+            bot = self._bots[seat]
+            action = bot.choose(aec._game)
             aec.step(action)
+            # Right after its own action, exactly like `arena.play`'s loop:
+            # the vector any future trade event reads for this seat is
+            # always the one its latest decision stood behind.
+            publish_valuation(aec._game, seat, bot)
 
     def _observe_learner(self) -> tuple[Any, dict[str, Any]]:
         learner = agent_name(self._learner_seat)

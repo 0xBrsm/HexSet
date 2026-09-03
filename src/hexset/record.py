@@ -32,7 +32,7 @@ from .board.terrain import Resource, Terrain
 from .board.topology import build as build_topology
 from .bots import Bot
 from .game import Game, is_over, start, to_move
-from .trading import Trade, apply_trades
+from .trading import Trade, apply_trades, publish_valuation
 
 
 class ReplayError(RuntimeError):
@@ -105,19 +105,23 @@ def record_game(
 ) -> Record:
     """Play one game and record it. Each bot is seated at its own index.
 
-    The bots are seated as the game's `traders` too, exactly as
-    `arena.play` seats them, so a recorded game trades the way a played one
-    does -- and the exchanges the engine cleared are written down, because
-    nothing in the action list implies them.
+    The bots are seated as the game's `gates` too, and each one publishes
+    right after its own action, exactly as `arena.play` does both, so a
+    recorded game trades the way a played one does -- and the exchanges the
+    engine cleared are written down, because nothing in the action list
+    implies them.
     """
     game = start(board, len(bots), random.Random(seed))
-    game.traders = tuple(bots)
+    game.gates = tuple(bots)
     actions: list[tuple[int, int, int]] = []
     trades: list[tuple[int, int, int, tuple[int, ...]]] = []
     while not is_over(game) and len(actions) < action_cap:
-        action = bots[to_move(game)].choose(game)
+        seat = to_move(game)
+        bot = bots[seat]
+        action = bot.choose(game)
         before = len(game.trades)
         apply(game, action)
+        publish_valuation(game, seat, bot)
         for trade in game.trades[before:]:
             trades.append((len(actions), trade.a, trade.b, tuple(trade.received)))
         actions.append((int(action.type), action.a, action.b))

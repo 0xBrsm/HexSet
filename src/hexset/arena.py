@@ -34,6 +34,7 @@ from .board.board import Board, random_base_board
 from .board.topology import Topology
 from .game import Game, is_over, start, to_move
 from .placement import PlacementBot
+from .trading import publish_valuation
 from .victory import victory_points
 
 if TYPE_CHECKING:
@@ -435,19 +436,26 @@ def play(
 ) -> Game:
     """One game, each bot seated at its own index.
 
-    Seating a bot also seats what it brings to a trade: `game.traders` is
-    the lineup itself, so the engine's one trade event a turn
-    (`hexset.trading`) asks each seat's own `valuation`/`accepts` rather
-    than this loop having to remember to run anything. A bot that defines
-    neither never trades, which is how `RandomBot` and any external bot that
-    predates the mechanic behave.
+    Seating a bot also seats its private gate: `game.gates` is the lineup
+    itself, so the engine's one trade event a turn (`hexset.trading`) asks
+    each seat's own `accepts` rather than this loop having to remember to
+    run anything. Publishing is this loop's own job, not the event's --
+    right after a seat's own action, it is asked for its current vector and
+    the answer is recorded (`hexset.trading.publish_valuation`), so the
+    vector every future trade event reads is always the one that seat's
+    latest decision stood behind. A bot that defines neither `valuation` nor
+    `accepts` never trades, which is how `RandomBot` and any external bot
+    that predates the mechanic behave.
     """
     game = start(board, len(bots), rng)
-    game.traders = tuple(bots)
+    game.gates = tuple(bots)
     game.max_trades = None
     actions = 0
     while not is_over(game) and actions < action_cap:
-        apply(game, bots[to_move(game)].choose(game))
+        seat = to_move(game)
+        bot = bots[seat]
+        apply(game, bot.choose(game))
+        publish_valuation(game, seat, bot)
         actions += 1
     return game
 

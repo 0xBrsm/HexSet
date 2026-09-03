@@ -19,9 +19,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   no cap — the gate must be strictly positive and is re-asked after every
   exchange.
 - `Game.valuations` — every seat's public vector, five floats in `[-1, 1]`,
-  all-zero until something publishes; `Game.trades` and `Game.trades_made`
-  for the turn's exchanges; `Game.max_trades` (`0` off, `None` unbounded);
-  `Game.traders`, the per-seat objects the engine asks. `Game.num_players`.
+  all-zero until something publishes; `Game.publish(seat, vector)` is the
+  one way to set one, validated and recorded, nothing else; `Game.trades`
+  and `Game.trades_made` for the turn's exchanges; `Game.max_trades` (`0`
+  off, `None` unbounded); `Game.gates`, the per-seat objects `trade_event`
+  asks for a private judgement. `Game.num_players`.
 - `hexset.bots.Bot.valuation(view)` and
   `Bot.accepts(view, received, counterparty)`, both defaulting to "this seat
   never trades", so a bot written before the mechanic keeps working.
@@ -136,6 +138,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **The trade event reads published vectors instead of fetching them.**
+  `hexset.trading.trade_event(game, gate)` drops its `valuation_of`
+  parameter and reads `game.valuations` directly; a driver publishes a
+  seat's vector once, right after that seat's own decision
+  (`Game.publish(seat, vector)`, or `hexset.trading.publish_valuation(game,
+  seat, trader)` for the common "ask the trader, then publish" case).
+  `hexset.arena.play`, `hexset.record.record_game`, `hexset.bench.aivat`,
+  `hexset.gym`'s auto-played opponents and the server's embedded bots all
+  publish this way now. `CONTRACT_VERSION` stamps `"5"` (it stayed `"4"`
+  after `RECORD_FIELDS` had already changed).
 - ONNX record contract `"4"` → `"5"`: the four `offer_*` fields and
   `pair_mask` are gone, `valuations` (`players × 5` floats) is added, and a
   graph no longer needs a `pair_index` output. Contracts 2, 3 and 4 are

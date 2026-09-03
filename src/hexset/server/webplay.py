@@ -202,21 +202,6 @@ class PostedValuation:
         return True
 
 
-def _checked_valuation(vector: Sequence[float]) -> tuple[float, ...]:
-    """One published vector, validated for the wire: `NUM_RESOURCES` numbers
-    in [-1, 1]. Rejected rather than clamped -- a client that sent 5 meant
-    something, and quietly turning it into 1 would hide the bug."""
-    try:
-        out = tuple(float(x) for x in vector)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"a valuation must be {NUM_RESOURCES} numbers") from exc
-    if len(out) != NUM_RESOURCES:
-        raise ValueError(f"a valuation is {NUM_RESOURCES} numbers, got {len(out)}")
-    if any(x < -1.0 or x > 1.0 or x != x for x in out):
-        raise ValueError("every valuation must be between -1 and 1")
-    return out
-
-
 # --- Wire format for actions --------------------------------------------------
 
 
@@ -723,21 +708,21 @@ class GameSession:
     # right after a qualifying human action, cleared by anything else. See
     # _apply and undo_last_build.
     _undo: _UndoPoint | None = field(default=None, repr=False)
-    # Seat -> whatever brings that seat to a trade (`hexset.trading`): an
-    # embedded bot's own `valuation`/`accepts` for a bot seat, a
-    # `PostedValuation` for a seat a person is playing, nothing at all for
-    # an empty one. Kept here rather than on `Game` directly because a seat
-    # can change hands mid-game (`api.Tables.swap_bot`), and `set_trader` is
-    # the one place that rewrites the engine's tuple.
+    # Seat -> whatever answers that seat's private gate (`hexset.trading`):
+    # an embedded bot itself for a bot seat, a `PostedValuation` for a seat
+    # a person is playing, nothing at all for an empty one. Kept here rather
+    # than on `Game` directly because a seat can change hands mid-game
+    # (`api.Tables.swap_bot`), and `set_trader` is the one place that
+    # rewrites the engine's tuple.
     traders: dict[int, object] = field(default_factory=dict, repr=False)
 
     def set_trader(self, seat: int, trader: object | None) -> None:
-        """Seat (or unseat) what plays `seat`'s side of a trade."""
+        """Seat (or unseat) what answers `seat`'s side of a trade's gate."""
         if trader is None:
             self.traders.pop(seat, None)
         else:
             self.traders[seat] = trader
-        self.game.traders = tuple(
+        self.game.gates = tuple(
             self.traders.get(s) for s in range(self.game.num_players)
         )
 
@@ -750,13 +735,13 @@ class GameSession:
 
         Takes effect at the next trade event, which is the next time the
         main phase opens (`hexset.trading`) -- publishing does not move any
-        cards by itself. Written straight onto `game.valuations` as well, so
-        every viewer sees it immediately rather than only after the seat's
-        next turn.
+        cards by itself. `Game.publish` validates and records it; a
+        `PostedValuation` of the same (checked) vector becomes this seat's
+        gate, unconditionally accepting -- the engine only ever asks about a
+        bundle whose public surplus already says this seat wants it.
         """
-        posted = PostedValuation(_checked_valuation(vector))
-        self.set_trader(seat, posted)
-        self.game.valuations[seat] = posted.vector
+        self.game.publish(seat, vector)
+        self.set_trader(seat, PostedValuation(tuple(self.game.valuations[seat])))
 
     def __post_init__(self) -> None:
         # Written here rather than on the first action because the header's
@@ -924,11 +909,11 @@ class GameSession:
             # vectors this game traded on are not here, so the engine's own
             # event would clear a different set (usually none). The recorded
             # exchanges are re-executed instead -- see `trading.apply_trades`.
-            live, self.game.traders = self.game.traders, None
+            live, self.game.gates = self.game.gates, None
             try:
                 apply(self.game, action)
             finally:
-                self.game.traders = live
+                self.game.gates = live
             apply_trades(self.game, replay)
         # `hexset.game` deals the setup snake from seat 0 and rotates turns
         # `(p + 1) % n`; this table starts the snake at its creator and

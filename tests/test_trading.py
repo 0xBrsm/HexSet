@@ -14,7 +14,6 @@ from hexset.board.board import random_base_board
 from hexset.board.terrain import NUM_RESOURCES, Resource
 from hexset.game import Phase, end_turn, enter_main, imagine, move_robber_to, roll_dice, start
 from hexset.trading import (
-    GATE_BUDGET,
     NO_VALUATION,
     Trade,
     _candidates,
@@ -70,16 +69,14 @@ class Trader:
         return self.gate
 
 
-def run(game, traders, **kwargs):
+def run(game, traders):
     """Seat `traders` as the game's gates, publish each one's vector exactly
     as a driver would at that seat's own decision, then run the event.
 
     `trade_event` itself no longer takes a valuation callback -- it only
     reads `game.valuations` -- so the harness does what `arena.play`'s loop
     (and every other driver) does: ask, then `Game.publish`, once per seat,
-    before the event that reads them. `**kwargs` forwards to `trade_event`
-    (`gate_budget`, `order`) so a test can exercise the ablation's
-    parameters without every other call site having to name them.
+    before the event that reads them.
     """
     game.gates = tuple(traders)
     for seat, trader in enumerate(traders):
@@ -87,7 +84,6 @@ def run(game, traders, **kwargs):
     return trade_event(
         game,
         lambda seat, view, received, other: traders[seat].accepts(view, received, other),
-        **kwargs,
     )
 
 
@@ -516,13 +512,17 @@ def test_ranking_prefers_the_fairer_bundle_over_a_bigger_lopsided_one():
     assert done[0].received == bundle(ore=-1, sheep=1)
 
 
-def test_the_gate_budget_binds_and_is_counted():
-    """Fourteen candidates advertise (every subset of my four resources
+def test_every_candidate_is_asked_in_rank_order_until_the_last_one_clears():
+    """No budget (`agents/reference/trading-design.md`'s post-data note "the
+    gate budget goes away"): the private gates are asked in rank order until
+    one clears or candidates run out, however many candidates there are.
+    Fourteen candidates advertise here -- every subset of my four resources
     against every size of the counterparty's ore pile that receives more
-    cards than it gives); both gates refuse everything. `GATE_BUDGET` (8)
-    candidate pairs get asked, no more -- without the cap this hand would
-    price all fourteen against two position evaluations every time it
-    looked for a deal."""
+    cards than it gives (the same hand the deleted gate-budget tests used,
+    back when a cap of 8 would have stopped short of all fourteen) -- and
+    both seats' gates refuse every one of them except the bundle ranked dead
+    last. That bundle must still be reached and clear.
+    """
     game = stocked(
         (0, Resource.WOOD, 1),
         (0, Resource.BRICK, 1),
@@ -538,124 +538,35 @@ def test_the_gate_budget_binds_and_is_counted():
     # so `mine == theirs == received_cards - given_cards`.
     wants_more = vector(wood=1.0, brick=1.0, sheep=1.0, wheat=1.0, ore=1.0)
     wants_less = vector(wood=-1.0, brick=-1.0, sheep=-1.0, wheat=-1.0, ore=-1.0)
+
+    candidates = list(_candidates(game._state, 0, game.locked))
+    vectors = [wants_more, wants_less, NO_VALUATION, NO_VALUATION]
+    ranked = _rank_candidates_loop(0, vectors, candidates)
+    assert len(ranked) == 14
+    last_received, last_them = ranked[-1]
+    mirror = tuple(-n for n in last_received)
+
+    class ExactGate:
+        """Accepts one exact bundle from its own side, refuses every other."""
+
+        def __init__(self, vec, target):
+            self.vec = vec
+            self.target = target
+
+        def valuation(self, view):
+            return self.vec
+
+        def accepts(self, view, received, counterparty):
+            return tuple(received) == self.target
+
     traders = [
-        Trader(wants_more, gate=False),
-        Trader(wants_less, gate=False),
+        ExactGate(wants_more, last_received),
+        ExactGate(wants_less, mirror),
         Trader(),
         Trader(),
     ]
-    assert GATE_BUDGET == 8
-    assert run(game, traders) == []
-    assert game.budget_binds == 1
-
-
-def test_the_budget_does_not_bind_when_there_are_few_enough_candidates():
-    """The ordinary one-for-one position from `test_a_deal_both_sides_want_clears`
-    never comes close to the budget, so it must never be counted as binding."""
-    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
-    traders = [
-        Trader(vector(ore=1.0, wood=-1.0)),
-        Trader(vector(wood=1.0, ore=-1.0)),
-        Trader(),
-        Trader(),
-    ]
-    run(game, traders)
-    assert game.budget_binds == 0
-
-
-# --- the gate-budget ablation's parameters ------------------------------------
-# `agents/reference/trading-design.md`'s post-data note "bundles land":
-# `gate_budget`/`order` are keyword parameters of `trade_event`, not module
-# constants, so a run can choose them without editing `GATE_BUDGET`. Defaults
-# reproduce today's behaviour exactly -- every test above calls `trade_event`
-# without them and is unaffected.
-
-
-def test_a_wider_gate_budget_asks_every_candidate_and_never_binds():
-    """The same fourteen-candidate refusal `test_the_gate_budget_binds_and_is_counted`
-    uses (both gates refuse everything): at `gate_budget=8` the budget caps
-    the attempt before all fourteen are asked, and it counts as a bind. At
-    `gate_budget=16` every one of the fourteen is asked -- none clears, but
-    the budget was never the reason, so it must not be counted as one. Same
-    position, same refusal, only the parameter differs."""
-    hands = (
-        (0, Resource.WOOD, 1),
-        (0, Resource.BRICK, 1),
-        (0, Resource.SHEEP, 1),
-        (0, Resource.WHEAT, 1),
-        (1, Resource.ORE, 3),
-    )
-    wants_more = vector(wood=1.0, brick=1.0, sheep=1.0, wheat=1.0, ore=1.0)
-    wants_less = vector(wood=-1.0, brick=-1.0, sheep=-1.0, wheat=-1.0, ore=-1.0)
-
-    def traders():
-        return [
-            Trader(wants_more, gate=False),
-            Trader(wants_less, gate=False),
-            Trader(),
-            Trader(),
-        ]
-
-    narrow = stocked(*hands)
-    assert run(narrow, traders(), gate_budget=8) == []
-    assert narrow.budget_binds == 1
-
-    wide = stocked(*hands)
-    assert run(wide, traders(), gate_budget=16) == []
-    assert wide.budget_binds == 0
-
-
-def test_gate_budget_none_is_unbounded_and_never_binds():
-    """The same fourteen-candidate refusal, with no budget at all: every
-    candidate is asked, none clears, and `budget_binds` -- a *cost bound*
-    statistic -- has nothing to count because there was no bound."""
-    game = stocked(
-        (0, Resource.WOOD, 1),
-        (0, Resource.BRICK, 1),
-        (0, Resource.SHEEP, 1),
-        (0, Resource.WHEAT, 1),
-        (1, Resource.ORE, 3),
-    )
-    wants_more = vector(wood=1.0, brick=1.0, sheep=1.0, wheat=1.0, ore=1.0)
-    wants_less = vector(wood=-1.0, brick=-1.0, sheep=-1.0, wheat=-1.0, ore=-1.0)
-    traders = [
-        Trader(wants_more, gate=False),
-        Trader(wants_less, gate=False),
-        Trader(),
-        Trader(),
-    ]
-    assert run(game, traders, gate_budget=None) == []
-    assert game.budget_binds == 0
-
-
-def test_minimal_bundle_order_ranks_fewer_cards_first_on_a_tie():
-    """Two candidates engineered to tie exactly on `order="maximin"`'s first
-    three keys (the smaller public surplus, the actor's own surplus, the
-    total) but differing in size: one card a side against seat 1, two cards
-    a side against seat 2. `order="minimal_bundle"` must rank the smaller
-    bundle first regardless of which the default's canonical/lower-seat
-    fallback would have chosen; tested directly against the ranking
-    function so the result does not depend on which candidate the
-    determinism fallback happens to prefer.
-    """
-    WOOD, BRICK, SHEEP, WHEAT, ORE = (int(r) for r in Resource)
-    vectors = [
-        vector(ore=1.0, wood=-1.0, wheat=0.5, sheep=-0.5),  # me (seat 0)
-        vector(wood=1.0, ore=-1.0),  # seat 1: the small counterparty
-        vector(sheep=0.5, wheat=-0.5),  # seat 2: the big counterparty
-    ]
-    small = (1, one_for_one(WOOD, ORE))  # 1 card a side, counterparty 1
-    big = (2, bundle(sheep=-2, wheat=2))  # 2 cards a side, counterparty 2
-    candidates = [small, big]
-
-    ranked_minimal, seen = _rank_candidates_loop(0, vectors, candidates, "minimal_bundle")
-    assert seen == 2
-    assert ranked_minimal[0] == (small[1], small[0])
-
-    # The tie is genuine under "maximin" too -- both candidates carry
-    # identical min/own/total surplus -- so this is not a vacuous check.
-    ranked_maximin, _ = _rank_candidates_loop(0, vectors, candidates, "maximin")
-    assert {r[1] for r in ranked_maximin} == {small[0], big[0]}
+    done = run(game, traders)
+    assert done == [Trade(0, last_them, last_received)]
 
 
 def test_the_bundle_engine_is_deterministic():
@@ -925,11 +836,9 @@ def test_the_count_and_the_log_reset_with_the_turn():
         ],
     )
     assert game.trades_made == 1
-    game.budget_binds = 3
     end_turn(game)
     assert game.trades_made == 0
     assert game.trades == []
-    assert game.budget_binds == 0
 
 
 def test_trading_is_not_in_the_action_space():
@@ -997,11 +906,9 @@ def test_an_imagined_game_carries_the_trade_switch_and_the_log():
     game.max_trades = 0
     game.trades.append(Trade(0, 1, one_for_one(WOOD, ORE)))
     game.trades_made = 1
-    game.budget_binds = 2
     child = imagine(game, random.Random(1))
     assert child.max_trades == 0
     assert child.trades_made == 1
-    assert child.budget_binds == 2
     child.trades.append(Trade(0, 2, one_for_one(WOOD, ORE)))
     assert len(game.trades) == 1
 

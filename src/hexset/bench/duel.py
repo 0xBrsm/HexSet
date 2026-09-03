@@ -37,12 +37,6 @@ from hexset.game import MAX_TURNS
 # inside `hexnet.train`.
 _VERSUS_BACKEND: Callable[[argparse.Namespace, str, str], dict] | None = None
 
-# Distinguishes "--gate-budget not given" (use `arena.compete`'s own default,
-# `hexset.trading.GATE_BUDGET`) from "--gate-budget none" (explicitly
-# unbounded) -- `None` alone cannot carry that distinction since it is also
-# the unbounded value itself.
-_UNSET = object()
-
 
 def register_versus_backend(runner: Callable[[argparse.Namespace, str, str], dict]) -> None:
     """Register the network-backed `--workers 1` runner: `hexnet.duel` calls
@@ -177,34 +171,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="really write nothing, for a throwaway probe",
     )
-    p.add_argument(
-        "--gate-budget",
-        default=None,
-        help="`hexset.trading.trade_event`'s `gate_budget` for every game in "
-        "this duel (registered ablation: 8/16/32/none). `none` or `unbounded` "
-        "asks every ranked candidate until one clears or none are left. "
-        "Default: the engine's own default (`GATE_BUDGET`, today's 8) -- "
-        "only the arena path (`--workers` > 1) honours this.",
-    )
-    p.add_argument(
-        "--order",
-        default=None,
-        choices=sorted(("maximin", "minimal_bundle")),
-        help="`trade_event`'s `order` for every game in this duel (registered "
-        "ablation's fifth arm, 'minimal_bundle'). Default: the engine's own "
-        "default ('maximin') -- only the arena path (`--workers` > 1) honours "
-        "this.",
-    )
     args = p.parse_args(argv)
-    if args.gate_budget is None:
-        args.gate_budget = _UNSET
-    elif args.gate_budget.lower() in ("none", "unbounded"):
-        args.gate_budget = None
-    else:
-        try:
-            args.gate_budget = int(args.gate_budget)
-        except ValueError:
-            p.error(f"--gate-budget must be an integer or 'none', got {args.gate_budget!r}")
 
     if args.threads:
         import torch
@@ -254,12 +221,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.workers > 1:
         result = _via_arena(args, label_a, label_b, geometry)
     else:
-        if args.gate_budget is not _UNSET or args.order is not None:
-            print(
-                "--gate-budget/--order only apply to the arena path "
-                "(--workers > 1); ignored at --workers 1.",
-                file=sys.stderr,
-            )
         if _VERSUS_BACKEND is None:
             print(
                 "the --workers 1 path (bare checkpoints, network-vs-network) "
@@ -352,19 +313,8 @@ def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY)
     names, mine, theirs = arena_lineup(args.a, args.b, geometry)
     lineup = sides(lineup_from_names(names), label_a, label_b, mine)
 
-    # Only pass `gate_budget`/`order` through when the caller actually named
-    # a flag, so an ordinary duel with neither goes through `compete` exactly
-    # as it always has and takes the engine's own defaults.
-    overrides: dict = {}
-    if getattr(args, "gate_budget", _UNSET) is not _UNSET:
-        overrides["gate_budget"] = args.gate_budget
-    if getattr(args, "order", None) is not None:
-        overrides["order"] = args.order
-
     started = time.monotonic()
-    tournament = compete(
-        lineup, args.games, seed=args.duel_seed, workers=args.workers, **overrides
-    )
+    tournament = compete(lineup, args.games, seed=args.duel_seed, workers=args.workers)
     seconds = time.monotonic() - started
 
     grouped = pooled(tournament.standings, tournament.games)
@@ -394,8 +344,6 @@ def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY)
         "games": tournament.games, "duel_seed": args.duel_seed,
         "workers": args.workers, "seconds": seconds, "via": "arena.compete",
         "geometry": geometry,
-        "gate_budget": overrides.get("gate_budget", "default"),
-        "order": overrides.get("order", "default"),
         "unfinished": tournament.unfinished,
         "wins": wins, "win_rate": wins / tournament.games if tournament.games else 0.0,
         "wilson_low": low, "wilson_high": high,

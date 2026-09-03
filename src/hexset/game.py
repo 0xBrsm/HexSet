@@ -20,7 +20,7 @@ from .devcards import (
 from .economy import Purchase, bank_trade, distribute, pay
 from .ledger import PublicLedger
 from .robber import discard, discard_count, move_robber, steal
-from .trading import GATE_BUDGET, Trade, checked_valuation, judged, trade_event
+from .trading import Trade, checked_valuation, judged, trade_event
 from .state import (
     NO_OWNER,
     GameState,
@@ -84,23 +84,6 @@ class Game:
     trades: list[Trade] = field(default_factory=list)
     trades_made: int = 0
     max_trades: int | None = None
-    # How many times this turn `hexset.trading._best_clearing` gave up on a
-    # clearing attempt because more than `GATE_BUDGET` candidate bundles were
-    # advertised and none of the first `GATE_BUDGET` cleared -- the owner's
-    # cost bound on a bundle language that can advertise dozens of exchanges
-    # at once (trading-design.md, 2026-09-03), not a knob. Reset with
-    # `trades_made` at `end_turn` so it is a per-turn count a readout can sum
-    # across a duel the way it already sums `trades_made`.
-    budget_binds: int = 0
-    # `trade_event`'s `gate_budget`/`order` for this game, read by
-    # `run_trade_event` at every call so a run can set them once at
-    # construction rather than editing `hexset.trading.GATE_BUDGET` per run
-    # (the registered ablation, `agents/reference/trading-design.md`'s
-    # post-data note "bundles land": gate budget 8/16/32/unbounded, plus a
-    # ranking variant). Defaults (`GATE_BUDGET`, `"maximin"`) are today's
-    # behaviour exactly, so a game that never sets these is unaffected.
-    gate_budget: int | None = GATE_BUDGET
-    bundle_order: str = "maximin"
     # Whether this turn's *first* trade event is still waiting to run.
     # `enter_main` sets this and no longer runs the event itself -- the PI
     # amendment "publish points and the event trigger"
@@ -336,9 +319,6 @@ def imagine(
         trades=game.trades[:],
         trades_made=game.trades_made,
         max_trades=game.max_trades,
-        budget_binds=game.budget_binds,
-        gate_budget=game.gate_budget,
-        bundle_order=game.bundle_order,
         event_pending=game.event_pending,
         locked=game.locked,
     )
@@ -700,8 +680,6 @@ def run_trade_event(game: Game) -> None:
     trade_event(
         game,
         lambda seat, view, received, other: judged(gates[seat], view, received, other),
-        gate_budget=game.gate_budget,
-        order=game.bundle_order,
     )
 
 
@@ -752,7 +730,6 @@ def end_turn(game: Game) -> None:
     game.dev_card_played = False
     game.trades = []
     game.trades_made = 0
-    game.budget_binds = 0
     # Free roads with nowhere legal to go are simply lost.
     game.free_roads = 0
     game.turns += 1

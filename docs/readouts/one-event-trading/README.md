@@ -435,3 +435,75 @@ action's step, `len(actions) - 1`, matching what `hexset.record.advance`
 already replays as `apply(that action); apply_trades(...)`), which the
 session's own per-action bookkeeping in `webplay.py` would need too, and
 does not yet have.
+
+## The gate budget goes away (2026-09-03)
+
+The ablation above found unbounded both the strongest arm and within cost
+(`agents/reference/trading-design.md`'s post-data note "the gate budget
+goes away"), so `GATE_BUDGET`, the `gate_budget`/`order` keyword
+parameters, `Game.gate_budget`/`Game.bundle_order`/`Game.budget_binds`, the
+`order="minimal_bundle"` ranking path, and the arena/`bench.duel` threading
+of all of it are deleted: private gates are asked in public-surplus rank
+order until one clears or candidates run out, always. The maximin ranking
+and its actor's-surplus tie-break are unchanged. No-trade census fixtures
+verified byte-identical (the gate budget only ever bore on games where
+trading was possible).
+
+**Measured on top of "publish points and the event trigger" (`main` at
+552ded7), not the ablation's own base.** This PR landed after that one
+merged, so both readouts below are read against the combined tree —
+publish-once-a-turn *and* no gate budget — rather than against the older
+per-action-publish baseline the ablation above used; the two changes are
+therefore not read in isolation from each other here.
+
+### (iii) Strength — the 800-game confirmation
+
+`heximax` vs `search2`, 800 blocked games, duel seed 42000, 26 workers —
+read against the publish-points baseline (478/800 = 59.8%, paired VP
++0.681), the immediately preceding (iii) in this document.
+
+| | |
+|---|---|
+| wins | **506 / 800 = 63.2%** |
+| Wilson 95% | [59.9, 66.5] |
+| paired VP | **+0.893** [+0.716, +1.069] |
+| bar | point ≥ 50%, Wilson lower bound > 45% |
+| met | yes |
+
+Higher than the publish-points-only reading, in the direction the ablation
+predicts (unbounded read stronger than budget-8 there too); dropping the
+budget on top of the sparser, once-a-turn vectors still finds more clearing
+trades than a budget of 8 would have. `nobudget-heximax-vs-search2.json`.
+
+### (v) Cost and trades/turn
+
+Same mirror protocol (three four-seat games an arm, board seeds 0/1/2,
+every seat the same preset, `search2` the control, arms interleaved seed by
+seed, one process, publishing gated on `Game.publish_due` exactly as
+`arena.play` does), measured three times back-to-back for a noise check —
+the box was not idle (load average 10–16 throughout).
+
+| | heximax | search2 | ratio |
+|---|---|---|---|
+| ms / move (mean of 3 passes) | 4.817 | 2.332 | **2.07x** (2.00–2.10x across passes) |
+| trades / turn (mean) | 0.234 | 0.158 | |
+| trades / turn (max) | 2 | 2 | |
+| max candidates asked in one clearing attempt | 7,133 | 2,915 | |
+
+Just over the design's "≤2x `search2` per move" ceiling on a shared, noisy
+box (one pass read exactly 2.00x); every prior reading in this file at or
+near this ceiling carries the same box-contention caveat, so this is read
+as "at the ceiling," not as a clean pass or fail — an idle-box re-read is
+the way to resolve it precisely if it matters later. Trades/turn (0.234
+mean, all-heximax mirror games) is markedly lower than the pre-publish-
+points unbounded arm's 0.254 (all-heximax mirror games too, so the two are
+comparable): publish-points' own finding — fixing vectors for the whole
+turn rather than refreshing them after every action sharply reduces how
+often two seats' wants overlap — holds with the budget gone as well as
+with it. (Not compared against publish-points' own 0.0166: that number is
+the *mixed* `[heximax, heximax, search2, search2]` lineup readout (iii)
+plays, not a mirror-table figure, so the two are not the same measurement.)
+The engine's one assertion (trades per event ≤ cards on the table) never
+fired.
+
+`nobudget-cost.json`.

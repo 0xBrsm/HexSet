@@ -47,10 +47,10 @@ def _play_and_snapshot(num_ticks: int, seed: int):
         if game.winning_color() is not None:
             break
         our_game, seats = translate(game, mapping, rng)
-        played = sum(get_played_dev_cards(game._state, c) for c in game._state.colors)
+        played = sum(get_played_dev_cards(game.state, c) for c in game.state.colors)
         snapshots.append((our_game, seats, played))
 
-        action = game._state.current_player().decide(game, game.playable_actions)
+        action = game.state.current_player().decide(game, game.playable_actions)
         # RandomPlayer.decide is defined on Player already; construct like Game.play does
         game.execute(action)
     return snapshots, mapping

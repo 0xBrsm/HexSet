@@ -112,6 +112,10 @@
     align-items: center; column-gap: 0.25rem; padding: 0.3rem 0.2rem; border-radius: 6px;
   }
   .player-row.active { background: color-mix(in srgb, var(--accent) 15%, var(--panel)); }
+  /* A seat nobody took — still open, or retired by the setup snake. Kept in
+     the list (the colours are the board's, and its pieces would be too) but
+     dimmed, so "occupied" and "not" are one glance apart. */
+  .player-row.seat-empty { opacity: 0.45; font-style: italic; }
   .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.35); }
   /* No fixed width any more — the name column itself (minmax(0, 1fr) above)
      is what sizes this, and shrinks first when the row's tight. Overflow is
@@ -961,7 +965,13 @@ async function postJSON(path, body) {
 // --- Loading -----------------------------------------------------------
 
 async function loadBoard() {
-  board = await getJSON("/api/board");
+  // By code, not by token: an observer has no token, and `/api/board` is
+  // seat-gated, so this used to 401 for exactly the reader the code-sharing
+  // flow exists for — leaving `board` an error object and the page dead at
+  // "Loading..." on the first `board.vertices` it reached. The layout is
+  // public (api.Tables.handle), and a seated player knows its own code too,
+  // so one route serves both.
+  board = await getJSON(`/api/table/${tableCode}/board`);
   vertexById = {};
   for (const v of board.vertices) vertexById[v.id] = v;
   hexById = {};
@@ -1004,11 +1014,16 @@ function seatFullLabel(seat) {
   return `Player ${seat + 1} (${seatLabel(seat)})`;
 }
 
-// Re-seats one live seat's bot without restarting the game. `slot` is that
-// seat's position among the non-human seats (ascending), so the choice also
-// updates currentBotModels — the next New game remembers it.
-async function swapBot(seat, slot, model) {
-  currentBotModels[slot] = model;
+// Re-seats one live seat's bot without restarting the game. The lineup slot
+// is that seat's position among the *bot* seats (ascending), read off
+// state.seats here rather than counted by the renderer: counting rows gave a
+// four-seat table four slots, and writing slot 3 grew currentBotModels to
+// four entries — one more than a table has room for beside the human — after
+// which every New game asked for five seats and was refused (400), which is
+// what "the New game button does nothing" was.
+async function swapBot(seat, model) {
+  const slot = (state.seats || []).filter((s, i) => i < seat && s.kind === "bot").length;
+  if (slot < currentBotModels.length) currentBotModels[slot] = model;
   if (inFlight) return;
   inFlight = true;
   try {
@@ -1297,12 +1312,23 @@ function cancelRobberMove() {
 // every entry point clears the previous timer, so there is never more than
 // one of these running.
 let waitTimer = null;
+
+// Where this page reads the game from. `/api/state` is the seat's own view
+// and needs the seat's token; an observer holds none and reads the table's
+// public one by code instead — the same shape, redacted for `viewer=None`
+// (webplay.state_view). Polling the seated route without a token answered 401
+// and the error body landed in `state`, which is where "state.players is not
+// iterable" came from a second after an observer's page finished loading.
+function stateUrl() {
+  return tokenFor(tableCode) ? "/api/state" : `/api/table/${tableCode}`;
+}
+
 function pollWhileWaiting() {
   clearTimeout(waitTimer);
   if (state.game_over || state.to_move === state.seat) return;
   waitTimer = setTimeout(async () => {
     if (inFlight) { pollWhileWaiting(); return; }
-    state = await getJSON("/api/state");
+    state = await getJSON(stateUrl());
     render();
     pollWhileWaiting();
   }, 1500);
@@ -1378,8 +1404,13 @@ function render() {
   // rather than one fixed purple — every CSS rule that used to hardcode a
   // shade of #6d5ce8 now derives it from this custom property instead (see
   // the color-mix() rules on .clickable-vertex etc.). Set on every render
-  // rather than once, since a new game can seat the human differently.
-  document.documentElement.style.setProperty("--accent", SEAT_COLORS[state.seat].fill);
+  // rather than once, since a new game can seat the human differently. An
+  // observer has no seat and so no colour of their own: leave the stylesheet's
+  // own default standing rather than dereferencing SEAT_COLORS[null], which
+  // threw on the first render and took the whole page down with it.
+  if (state.seat !== null && state.seat !== undefined) {
+    document.documentElement.style.setProperty("--accent", SEAT_COLORS[state.seat].fill);
+  }
   // Arming a Knight is purely client-side, so nothing else clears it: a new
   // state where playing one is no longer legal (it was played, the turn moved
   // on, the game ended) has to. legal_actions is empty whenever it isn't the
@@ -1442,15 +1473,18 @@ function renderStatus() {
 
 // One icon + (optional) number, for the player list's stat row — glyphs
 // throughout rather than "3 VP", "Longest road" as English text.
-function statChip(iconId, value, extraClass, title) {
-  // A double-digit value is wide enough, inside the player row's fixed-width
-  // stat columns (see .player-row's grid-template-columns), to crowd right
-  // into the next column's glyph if the icon-to-number gap stays put — .wide
-  // shrinks that gap instead, so the extra digit eats padding that was
-  // never doing much rather than eating the next stat's breathing room.
+// A double-digit value is wide enough, inside the player row's fixed-width
+// stat columns (see .player-row's grid-template-columns), to crowd right
+// into the next column's glyph if the icon-to-number gap stays put — .wide
+// shrinks that gap instead, so the extra digit eats padding that was
+// never doing much rather than eating the next stat's breathing room.
+function statClasses(value, extraClass) {
   const wide = value !== undefined && String(value).length > 1 ? " wide" : "";
-  const classes = `stat${extraClass ? ` ${extraClass}` : ""}${wide}`;
-  const chip = html("span", {class: classes, title});
+  return `stat${extraClass ? ` ${extraClass}` : ""}${wide}`;
+}
+
+function statChip(iconId, value, extraClass, title) {
+  const chip = html("span", {class: statClasses(value, extraClass), title});
   chip.appendChild(iconSvg(iconId, {cls: "stat-icon"}));
   if (value !== undefined) chip.appendChild(document.createTextNode(String(value)));
   return chip;
@@ -1466,63 +1500,128 @@ function handColHeader(iconId, text) {
   return header;
 }
 
-function renderPlayers() {
-  const container = document.getElementById("players");
-  container.innerHTML = "";
-  let slot = 0;
-  for (const p of state.players) {
-    const color = SEAT_COLORS[p.seat];
-    const row = html("div", {class: `player-row${state.to_move === p.seat ? " active" : ""}`});
-    const swatch = html("div", {class: "swatch"});
-    swatch.style.background = color.fill;
-    swatch.style.borderColor = color.stroke;
-    row.appendChild(swatch);
+// One row per seat, built once and thereafter *updated*, never rebuilt.
+//
+// Every other panel on this page can be thrown away and redrawn on each poll
+// because nothing in it holds interaction state. This one can't: a bot seat's
+// row is a <select>, and replacing the element under an open dropdown closes
+// it. With the page polling every 1.5 s while it isn't your move, that is a
+// picker you cannot use — it shut about a second after it opened, every time.
+// So the row, its swatch, its name cell and its stat chips are all kept, and
+// each render writes only the values that changed.
+const playerRows = new Map();
 
-    const nameEl = html("div", {class: "player-name"});
-    if (p.human) {
-      // A person's seat, mine or somebody else's: a name, not a bot picker.
-      // There is nothing to swap — the seat belongs to whoever is in it.
-      nameEl.classList.add("player-name-plain");
-      nameEl.textContent = p.seat === state.seat ? (p.name || "you") : (p.name || `Player ${p.seat + 1}`);
-    } else {
+function playerRow(seat) {
+  let entry = playerRows.get(seat);
+  if (entry) return entry;
+  const row = html("div", {class: "player-row"});
+  const color = SEAT_COLORS[seat];
+  const swatch = html("div", {class: "swatch"});
+  swatch.style.background = color.fill;
+  swatch.style.borderColor = color.stroke;
+  row.appendChild(swatch);
+  const nameEl = html("div", {class: "player-name"});
+  row.appendChild(nameEl);
+  // Each chip is its own grid cell (see .player-row's
+  // grid-template-columns), appended straight onto the row rather than into
+  // a wrapping div — that's what lets every row share the same column
+  // tracks instead of each row sizing its own flex children. The dice chip
+  // is the one that isn't always shown: `hidden` rather than absent, so it
+  // occupies no track when a seat hasn't rolled and every other row's
+  // columns stay aligned either way.
+  const chips = new Map();
+  for (const [key, iconId, title] of [
+    ["points", "victory-point", "Victory points"],
+    ["cards", "card", "Resource cards"],
+    ["dev", "dev-card", "Development cards"],
+    // Route length and Knights played sit in every row, always — comparable
+    // seat to seat, tinted only for whoever actually holds the title right
+    // now (see statClasses' "held" class, gated in CSS on
+    // .stat.road.held/.stat.army.held).
+    ["road", "road", "Longest road"],
+    ["army", "knight", "Largest army"],
+    // Each seat's own last roll, not one global value — lets you compare
+    // who's been running hot or cold rather than only ever seeing whoever
+    // rolled most recently.
+    ["roll", "dice", "Last roll"],
+  ]) {
+    const chip = statChip(iconId, 0, "", title);
+    chips.set(key, chip);
+    row.appendChild(chip);
+  }
+  entry = {row, nameEl, chips, kind: null, select: null};
+  playerRows.set(seat, entry);
+  return entry;
+}
+
+function setChip(entry, key, value, extraClass) {
+  const chip = entry.chips.get(key);
+  chip.className = statClasses(value, extraClass);
+  chip.lastChild.nodeValue = String(value);
+}
+
+// A seat's line: a name for a person, a model picker for a bot, and what the
+// table decided about a seat nobody took. Which of the three it is comes from
+// `state.seats`, the server's own per-seat kind (api.Seat.public) — the
+// player rows themselves stopped carrying a `human` flag when the lobby went
+// away, so this branched on `undefined` and gave *every* seat a bot picker:
+// your own occupied seat, an open one, and a permanently locked one all drawn
+// identically, and none of them saying who was in it.
+function renderSeatName(entry, p) {
+  const kind = (state.seats && state.seats[p.seat] && state.seats[p.seat].kind)
+    || (p.bot ? "bot" : "player");
+  if (kind !== entry.kind) {
+    entry.nameEl.textContent = "";
+    entry.select = null;
+    entry.kind = kind;
+    if (kind === "bot") {
       // The picker *is* the player line: changing this seat's bot mid-game
       // goes straight through swapBot, no separate "apply" step.
-      const mySlot = slot++;
       const select = html("select", {});
       for (const name of modelNames) select.appendChild(html("option", {value: name}, name));
-      select.value = p.bot || currentBotModels[mySlot] || modelNames[0];
-      select.addEventListener("change", () => swapBot(p.seat, mySlot, select.value));
-      nameEl.appendChild(select);
+      select.addEventListener("change", () => swapBot(p.seat, select.value));
+      entry.nameEl.classList.remove("player-name-plain");
+      entry.nameEl.appendChild(select);
+      entry.select = select;
+    } else {
+      entry.nameEl.classList.add("player-name-plain");
     }
-    row.appendChild(nameEl);
+  }
+  entry.row.classList.toggle("seat-empty", kind === "empty");
+  if (kind === "bot") {
+    // Never while the picker is open. Writing .value to a <select> the user
+    // is looking into closes it just as surely as replacing the element does.
+    if (document.activeElement !== entry.select) {
+      entry.select.value = p.bot || entry.select.value || modelNames[0];
+    }
+    return;
+  }
+  // A person's seat, mine or somebody else's: a name, not a bot picker.
+  // There is nothing to swap — the seat belongs to whoever is in it. A seat
+  // nobody took says so instead ("open seat", or "locked seat" once the setup
+  // snake has retired it). All four readings are seatLabel's, so this row and
+  // the status line above it cannot disagree about who is where.
+  entry.nameEl.textContent = seatLabel(p.seat);
+}
+
+function renderPlayers() {
+  const container = document.getElementById("players");
+  for (const p of state.players) {
+    const entry = playerRow(p.seat);
+    if (entry.row.parentNode !== container) container.appendChild(entry.row);
+    entry.row.classList.toggle("active", state.to_move === p.seat);
+    renderSeatName(entry, p);
 
     const cards = p.hand !== undefined
       ? board.resources.map((r) => p.hand[r]).reduce((a, b) => a + b, 0)
       : p.hand_size;
-    // Each chip is its own grid cell now (see .player-row's
-    // grid-template-columns), appended straight onto the row rather than
-    // into a wrapping div — that's what lets every row share the same
-    // column tracks instead of each row sizing its own flex children.
-    row.appendChild(statChip("victory-point", p.victory_points, "", "Victory points"));
-    row.appendChild(statChip("card", cards, "", "Resource cards"));
-    row.appendChild(statChip("dev-card", p.dev_card_count, "", "Development cards"));
-    // Route length and Knights played sit in every row, always — comparable
-    // seat to seat, tinted only for whoever actually holds the title right
-    // now (see statChip's "held" class, gated in CSS on
-    // .stat.road.held/.stat.army.held).
-    row.appendChild(
-      statChip("road", p.road_length, `road${p.longest_road ? " held" : ""}`, "Longest road")
-    );
-    row.appendChild(
-      statChip("knight", p.knights_played, `army${p.largest_army ? " held" : ""}`, "Largest army")
-    );
-    // Each seat's own last roll, not one global value — lets you compare
-    // who's been running hot or cold rather than only ever seeing whoever
-    // rolled most recently. It's the row's last (and only ever-absent)
-    // column, so leaving it out when a seat hasn't rolled yet still leaves
-    // every other row's columns aligned.
-    if (p.last_roll) row.appendChild(statChip("dice", p.last_roll, "roll", "Last roll"));
-    container.appendChild(row);
+    setChip(entry, "points", p.victory_points, "");
+    setChip(entry, "cards", cards, "");
+    setChip(entry, "dev", p.dev_card_count, "");
+    setChip(entry, "road", p.road_length, `road${p.longest_road ? " held" : ""}`);
+    setChip(entry, "army", p.knights_played, `army${p.largest_army ? " held" : ""}`);
+    setChip(entry, "roll", p.last_roll || 0, "roll");
+    entry.chips.get("roll").hidden = !p.last_roll;
   }
 }
 
@@ -1885,6 +1984,10 @@ function renderPieceSupply() {
   const container = document.getElementById("piece-supply");
   container.innerHTML = "";
   const seat = state.seat;
+  // What *this* seat has left to build with, so an observer — who has no
+  // seat, and so no supply of their own — gets nothing here rather than a
+  // dereference of SEAT_COLORS[null].
+  if (seat === null || seat === undefined) return;
   const color = SEAT_COLORS[seat];
   const roadsBuilt = state.edge_owner.filter((o) => o === seat).length;
   const settlementsBuilt = state.vertex_owner.filter(

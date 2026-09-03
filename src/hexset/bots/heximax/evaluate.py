@@ -122,18 +122,29 @@ class HonestEvaluator:
         dev cards, knights played -- which this key does not capture, so
         `worlds`/`draw_children`, their only callers, build a fresh
         `View.from_game` instead.
+
+        Built to be cheap on a hit, not just correct: this runs on every
+        call, hit or miss, so its own cost is pure overhead on a cache that
+        exists to avoid work. `map(tuple, ...)` over the two nested fields
+        (hands, each seat's `known`) skips a generator's per-item frame
+        switch that a comprehension pays for the same values in the same
+        order; `certify` is `()` at both of this method's call sites today,
+        so the common case skips building its sub-tuple at all rather than
+        running an empty generator to discover it is empty. Every field is
+        still the same one `View.__init__` reads plus board/robber, just
+        assembled more directly -- the key's *value* is unchanged.
         """
         key = (
-            tuple(tuple(hand) for hand in state.hands),
-            tuple(tuple(seat_ledger.known) for seat_ledger in ledger.seats),
-            tuple(seat_ledger.unknown for seat_ledger in ledger.seats),
+            tuple(map(tuple, state.hands)),
+            tuple([tuple(seat_ledger.known) for seat_ledger in ledger.seats]),
+            tuple([seat_ledger.unknown for seat_ledger in ledger.seats]),
             tuple(state.bank),
             tuple(state.vertex_owner),
             tuple(state.vertex_building),
             state.robber,
             state.num_players,
             perspective,
-            tuple((who, tuple(bundle)) for who, bundle in certify),
+            () if not certify else tuple((who, tuple(bundle)) for who, bundle in certify),
         )
         cached = self._belief_cache.get(key)
         if cached is None:

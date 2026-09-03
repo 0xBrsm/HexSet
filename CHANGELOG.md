@@ -252,6 +252,21 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `heximax-notrade` 20,192,176 -> 18,685,520 (-7.5%). Wall-clock ms/decision
   moved within this box's cross-run noise (shared with a GPU training run);
   the call-count drop is the reliable signal.
+- **`HonestEvaluator.belief_for`'s cache key is cheaper to build, on a hit
+  or a miss.** `map(tuple, state.hands)` in place of a generator expression
+  over the same hands in the same order, list comprehensions in place of
+  generator expressions for each seat's ledger `known`/`unknown`, and a
+  fast path that returns `()` for `certify` outright rather than draining
+  an empty generator to discover it is empty (`certify` is `()` at both of
+  this method's call sites today). Same key value, same cache semantics,
+  same `View.__init__` fields covered (board occupancy and the robber
+  included, per the method's own exactness argument) — only the
+  construction is cheaper. Behaviour-neutral: the byte-identical choice
+  census is unchanged. Measured with `hexset.bench.profile_heximax` (3
+  games, seed 100, single process), cumulative with the `progress_toward`
+  change above: `heximax` mean ms/decision 8.998 -> 8.315 (-7.6%), 6.260s
+  -> 5.753s/game (-8.1%); `heximax-notrade` mean ms/decision 7.105 -> 6.679
+  (-6.0%), 2.678s -> 2.532s/game (-5.5%).
 - **Trade candidates are bundles, not one-for-one swaps.**
   `hexset.trading._candidates` now enumerates every signed bundle on
   disjoint resources, coverable from the true hands, rather than only

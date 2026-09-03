@@ -165,6 +165,34 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   candidates.
 ### Fixed
 
+- **The seat panel could not tell an occupied seat from an open or a locked
+  one.** Every seat's line was drawn as a bot model picker — your own, a
+  seat nobody had taken, and one the setup snake had retired — because the
+  player rows stopped carrying a `human` flag when the lobby was removed and
+  the page still branched on it. Each line now reads the server's own
+  per-seat kind: a name for a person, a picker for a bot, and "open seat" /
+  "locked seat", dimmed, for a seat nobody is in.
+- **The New game button did nothing once a bot had been swapped.** Because
+  every seat was drawn as a picker, swapping wrote a fourth entry into a
+  lineup that has room for three, and `POST /api/games` then asked for five
+  seats at a four-seat table and was refused. The lineup slot is now read off
+  the bot seats themselves and cannot grow past them.
+- **A bot model picker closed about a second after it opened.** The page
+  rebuilds its panels on every poll (1.5 s while it is not your move), which
+  replaced the open `<select>` element. The seat panel now updates its rows
+  in place and never touches a picker that has focus.
+- **`POST /api/bot` answered with the swapped seat's view, not the caller's.**
+  Changing a bot handed the page that bot's own seat number, hand and legal
+  actions until its next poll. It now answers whoever asked, like every other
+  route.
+- **A game opened by someone with no seat rendered nothing.** `GET
+  /api/board` and `GET /api/state` are both seat-gated and an observer holds
+  no token for either, so the page took a 401 where its board should have
+  been and stopped at "Loading...". `GET /api/table/<CODE>/board` serves the
+  (public) layout without a token, and an observer polls
+  `GET /api/table/<CODE>` for state. The seat panel's bot pickers are
+  disabled for a reader with no seat, which is the only thing they could
+  ever have answered.
 - **A human seat auto-cleared trades against its published vector.** `POST
   /api/games` and `POST /api/join` left a human seat's gate at
   `PostedValuation` (auto-accept) unless `confirm` was set at seat-up, so a

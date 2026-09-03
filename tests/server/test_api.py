@@ -237,6 +237,23 @@ def test_an_observer_can_read_a_game_without_a_token():
     assert data["legal_actions"] == []  # nothing is an observer's to play
 
 
+def test_an_observer_can_read_the_board_layout_without_a_token():
+    """The geometry the page needs before it can draw anything.
+
+    `GET /api/board` is seat-gated, so an observer's page answered 401 where
+    its board should have been and died on the first `board.vertices` it
+    reached — a blank screen for exactly the reader a shared code exists for.
+    The board is public (`view(None)` above already ships every piece on it),
+    so this is the same bytes, addressed by code instead of by token."""
+    registry = tables()
+    code, token = deal(registry, bots=["search2"])
+
+    public = registry.handle("GET", f"/api/table/{code}/board", {}, None)
+
+    assert public["vertices"] and public["hexes"]
+    assert public == registry.handle("GET", "/api/board", {}, token)
+
+
 # --- The per-seat setup lock ---------------------------------------------------
 
 
@@ -420,6 +437,12 @@ def test_a_bot_can_be_swapped_but_a_persons_seat_cannot():
 
     data = registry.handle("POST", "/api/bot", {"seat": bot_seat, "model": "search2"}, token)
     assert data["seats"][bot_seat]["name"] == "search2"
+    # Answered to whoever asked, not to the seat that was swapped: this used
+    # to hand the caller the swapped bot's own view — its seat number, its
+    # hand, its legal actions — and the web page then believed it was that
+    # seat until its next poll.
+    assert data["seat"] == mine_seat
+    assert [p["seat"] for p in data["players"] if "hand" in p] == [mine_seat]
 
     with pytest.raises(ApiError) as caught:
         registry.handle("POST", "/api/bot", {"seat": mine_seat, "model": "search2"}, token)

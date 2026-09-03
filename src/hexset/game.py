@@ -84,6 +84,14 @@ class Game:
     trades: list[Trade] = field(default_factory=list)
     trades_made: int = 0
     max_trades: int | None = None
+    # How many times this turn `hexset.trading._best_clearing` gave up on a
+    # clearing attempt because more than `GATE_BUDGET` candidate bundles were
+    # advertised and none of the first `GATE_BUDGET` cleared -- the owner's
+    # cost bound on a bundle language that can advertise dozens of exchanges
+    # at once (trading-design.md, 2026-09-03), not a knob. Reset with
+    # `trades_made` at `end_turn` so it is a per-turn count a readout can sum
+    # across a duel the way it already sums `trades_made`.
+    budget_binds: int = 0
     # Who answers a private gate, one per seat -- the driver's own bots
     # (`arena.play`), the gym's opponents, the server's seated players, or a
     # search's stand-in for the whole table. Gate-only: publishing a
@@ -245,6 +253,7 @@ def imagine(
         trades=game.trades[:],
         trades_made=game.trades_made,
         max_trades=game.max_trades,
+        budget_binds=game.budget_binds,
         locked=game.locked,
     )
 
@@ -464,6 +473,7 @@ def build_road(game: Game, edge: int) -> None:
     place_road(game._state, game.current_player, edge)
     update_longest_road(game._state)
     _check_win(game)
+    run_trade_event(game)
 
 
 def build_settlement(game: Game, vertex: int) -> None:
@@ -476,6 +486,7 @@ def build_settlement(game: Game, vertex: int) -> None:
     # builder's own longest road that may change.
     update_longest_road(game._state)
     _check_win(game)
+    run_trade_event(game)
 
 
 def build_city(game: Game, vertex: int) -> None:
@@ -485,6 +496,7 @@ def build_city(game: Game, vertex: int) -> None:
     game.ledger.apply_hand_diff(before, game._state.hands)
     upgrade_to_city(game._state, game.current_player, vertex)
     _check_win(game)
+    run_trade_event(game)
 
 
 def buy_development_card(game: Game) -> DevCard:
@@ -493,6 +505,7 @@ def buy_development_card(game: Game) -> DevCard:
     card = buy_dev_card(game._state, game.current_player)
     game.ledger.apply_hand_diff(before, game._state.hands)
     _check_win(game)
+    run_trade_event(game)
     return card
 
 
@@ -513,6 +526,10 @@ def play_knight_card(
         _record_steal(game, game.current_player, victim, stolen)
     update_largest_army(game._state)
     _check_win(game)
+    # `run_trade_event` no-ops itself when `game.phase` is `ROLL` (a knight
+    # played before rolling): this is the one action legal in both phases,
+    # and the interleaving only ever applies to `MAIN`.
+    run_trade_event(game)
     return stolen
 
 
@@ -526,6 +543,7 @@ def play_road_building_card(game: Game) -> None:
     _spend_turn_card(game)
     spend_card(game._state, game.current_player, DevCard.ROAD_BUILDING)
     game.free_roads += ROAD_BUILDING_ROADS
+    run_trade_event(game)
 
 
 def play_year_of_plenty_card(game: Game, resources: list[Resource]) -> None:
@@ -534,6 +552,7 @@ def play_year_of_plenty_card(game: Game, resources: list[Resource]) -> None:
     before = _snapshot_hands(game)
     play_year_of_plenty(game._state, game.current_player, resources)
     game.ledger.apply_hand_diff(before, game._state.hands)
+    run_trade_event(game)
 
 
 def play_monopoly_card(game: Game, resource: Resource) -> int:
@@ -546,6 +565,7 @@ def play_monopoly_card(game: Game, resource: Resource) -> int:
     # seat at once -- the same `apply_hand_diff` every other public mutation
     # uses, not the hidden-identity path a steal needs.
     game.ledger.apply_hand_diff(before, game._state.hands)
+    run_trade_event(game)
     return taken
 
 
@@ -554,17 +574,26 @@ def trade_with_bank(game: Game, give: Resource, receive: Resource) -> None:
     before = _snapshot_hands(game)
     bank_trade(game._state, game.current_player, give, receive)
     game.ledger.apply_hand_diff(before, game._state.hands)
+    run_trade_event(game)
 
 
-def enter_main(game: Game) -> None:
-    """Enter the main phase, running this turn's one trade event on the way.
+def run_trade_event(game: Game) -> None:
+    """Clear this turn's trade event for the current player, if anybody is
+    seated to answer a gate.
 
-    Every path from `ROLL` or `ROBBER` into `MAIN` goes through here, so the
-    trade event happens once a turn for **every** driver -- the arena's loop,
-    the gym, the server, a search stepping its own copy -- rather than each
-    of them having to remember to call it. It runs after the roll and the
-    robber have resolved and before any build action is served, which is the
-    order the mechanic is specified in (`hexset.trading`).
+    Called on the way into `MAIN` (`enter_main`) and again after every MAIN
+    action the current player takes -- build, buy, a bank/port trade, a
+    development card -- on the same published vectors (the owner's review of
+    the mechanic against the rulebook, 2026-09-03: trade and build
+    interleave, rather than one event before the first build). The current
+    player's hand just changed, so a different bundle may now clear; other
+    seats' vectors are unchanged within the turn. Never runs after
+    `end_turn` (`end_turn` moves the phase to `ROLL` before this could be
+    reached) and never during setup, `ROLL`, `ROBBER` or discard resolution
+    -- every caller of this function already requires `game.phase is
+    Phase.MAIN` to reach it (`play_knight_card` is the one action legal in
+    both `ROLL` and `MAIN`, and checks explicitly), so the guard below is a
+    second line of defence, not the only one.
 
     A game whose `gates` is `None` -- a bare `start()` with nobody seated --
     simply does not trade. The vectors `trade_event` reads (`game.valuations`)
@@ -572,7 +601,8 @@ def enter_main(game: Game) -> None:
     seat to this point already published them (`Game.publish`, usually via
     `hexset.trading.publish_valuation`) as part of that seat's own decision.
     """
-    game.phase = Phase.MAIN
+    if game.phase is not Phase.MAIN:
+        return
     gates = game.gates
     if gates is None:
         return
@@ -582,12 +612,24 @@ def enter_main(game: Game) -> None:
     )
 
 
+def enter_main(game: Game) -> None:
+    """Enter the main phase, running this turn's first trade event on the
+    way. Every path from `ROLL` or `ROBBER` into `MAIN` goes through here, so
+    every driver gets it without having to remember to call it. See
+    `run_trade_event` for the event itself and the interleaving with the
+    actions that follow.
+    """
+    game.phase = Phase.MAIN
+    run_trade_event(game)
+
+
 def end_turn(game: Game) -> None:
     _require(game, Phase.MAIN)
     mature(game._state, game.current_player)
     game.dev_card_played = False
     game.trades = []
     game.trades_made = 0
+    game.budget_binds = 0
     # Free roads with nowhere legal to go are simply lost.
     game.free_roads = 0
     game.turns += 1

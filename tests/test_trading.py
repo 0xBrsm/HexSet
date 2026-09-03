@@ -14,8 +14,10 @@ from hexset.board.board import random_base_board
 from hexset.board.terrain import NUM_RESOURCES, Resource
 from hexset.game import Phase, end_turn, enter_main, imagine, move_robber_to, roll_dice, start
 from hexset.trading import (
+    GATE_BUDGET,
     NO_VALUATION,
     Trade,
+    _candidates,
     bundle,
     exchange,
     holds,
@@ -251,17 +253,29 @@ def test_the_engine_checks_coverage_itself():
 
 
 def test_the_event_keeps_going_while_anything_clears():
-    game = stocked((0, Resource.WOOD, 3), (1, Resource.ORE, 3))
+    """No bundle-size cap (owner review, 2026-09-03), so a single bundle
+    with the counterparty who wants it can move a whole three-card holding
+    at once -- what makes the loop necessary now is a *second*, unrelated
+    deal with a different counterparty, not a size limit. Wood clears
+    against seat 1 in one bundle; brick, still held, only then clears
+    against seat 2."""
+    game = stocked(
+        (0, Resource.WOOD, 3), (0, Resource.BRICK, 3), (1, Resource.ORE, 3), (2, Resource.WHEAT, 3)
+    )
     traders = [
-        Trader(vector(ore=1.0, wood=-1.0)),
-        Trader(vector(wood=1.0, ore=-1.0)),
-        Trader(),
+        Trader(vector(ore=1.0, wood=-1.0, wheat=1.0, brick=-1.0)),
+        Trader(vector(wood=1.0, ore=-1.0, brick=-0.5)),
+        Trader(vector(brick=1.0, wheat=-1.0, wood=-0.5)),
         Trader(),
     ]
     done = run(game, traders)
-    assert len(done) == 3
-    assert game._state.hands[0][ORE] == 3
-    assert game._state.hands[0][WOOD] == 0
+    assert done == [
+        Trade(0, 1, bundle(wood=-3, ore=3)),
+        Trade(0, 2, bundle(brick=-3, wheat=3)),
+    ]
+    assert game._state.hands[0] == [0, 0, 0, 3, 3]
+    assert game._state.hands[1] == [3, 0, 0, 0, 0]
+    assert game._state.hands[2] == [0, 3, 0, 0, 0]
 
 
 def test_a_gate_that_stops_saying_yes_stops_the_event():
@@ -329,7 +343,12 @@ def test_the_vectors_are_fixed_for_the_whole_event():
 
 
 def test_the_best_deal_goes_first():
-    """Two clearing swaps; the one with the larger smaller-surplus wins."""
+    """Three clearing candidates against the same counterparty: wood alone,
+    brick alone, and the bundle of both. The bundle strictly dominates
+    either single-resource swap here (giving up more of something both
+    sides dislike-in-my-hand/want-in-theirs only adds surplus), so it wins
+    -- a 2-for-1 that no sequence of 1-for-1 steps could reach, since a
+    1-for-1 step re-asks both gates on its own."""
     game = stocked((0, Resource.WOOD, 1), (0, Resource.BRICK, 1), (1, Resource.ORE, 1))
     traders = [
         Trader(vector(ore=1.0, wood=-0.1, brick=-0.9)),
@@ -338,23 +357,35 @@ def test_the_best_deal_goes_first():
         Trader(),
     ]
     done = run(game, traders)
-    # brick->ore: min(1.0 - -0.9, 0.9 - -1.0) = 1.9
-    # wood->ore: min(1.0 - -0.1, 0.1 - -1.0) = 1.1
-    assert done[0].received == one_for_one(BRICK, ORE)
+    # wood+brick->ore: min(1.0+0.1+0.9, 0.1+0.9+1.0) = 2.0
+    # brick->ore alone: min(1.0+0.9, 0.9+1.0) = 1.9
+    # wood->ore alone: min(1.0+0.1, 0.1+1.0) = 1.1
+    assert done[0].received == bundle(wood=-1, brick=-1, ore=1)
+    # And the same position clears nothing for either single-card swap
+    # between these two seats once the bundle has already gone through.
+    assert len(done) == 1
 
 
-def test_equal_surpluses_break_by_the_canonical_trade_index():
-    """Wood(0) and brick(1) are worth the same to both sides, so the pair
-    ordered first by `given * NUM_RESOURCES + wanted` clears first."""
+def test_a_tie_on_the_smaller_surplus_goes_to_the_actor_s_bigger_own_surplus():
+    """Owner review (2026-09-03), "the tie-break": real-valued surpluses
+    essentially never tie, but when they do the rulebook gives the current
+    player the choice among equally fair deals, so it takes the better one
+    for itself.
+
+    Giving brick alone and giving wood+brick together both leave the
+    counterparty (who does not value wood either way) at exactly the same
+    surplus, 1.1 -- engineered so `min(mine, theirs)` ties at 1.1 for both
+    (brick-alone: mine 1.9, theirs 1.0, min 1.0 is *not* one of the tied
+    pair; wood-alone: mine 1.1, theirs 1.1, min 1.1; wood+brick: mine 2.0,
+    theirs 1.1, min 1.1) -- while the actor's own surplus does not: 2.0 for
+    the bundle that also gives away the unwanted wood, 1.1 for wood alone.
+    The bigger-owned-surplus bundle wins."""
     game = stocked((0, Resource.WOOD, 1), (0, Resource.BRICK, 1), (1, Resource.ORE, 1))
-    traders = [
-        Trader(vector(ore=1.0, wood=-1.0, brick=-1.0)),
-        Trader(vector(wood=1.0, brick=1.0, ore=-1.0)),
-        Trader(),
-        Trader(),
-    ]
+    v_me = vector(ore=1.0, wood=-0.1, brick=-0.9)
+    v_them = vector(wood=0.1, ore=-1.0)  # brick left at 0: indifferent to it
+    traders = [Trader(v_me), Trader(v_them), Trader(), Trader()]
     done = run(game, traders)
-    assert done[0].received == one_for_one(WOOD, ORE)
+    assert done[0].received == bundle(wood=-1, brick=-1, ore=1)
 
 
 def test_equal_deals_break_by_the_lower_counterparty():
@@ -367,6 +398,188 @@ def test_equal_deals_break_by_the_lower_counterparty():
         Trader(),
     ]
     assert run(game, traders)[0].b == 1
+
+
+# --- bundles: the owner's 2026-09-03 correction --------------------------------
+#
+# `agents/reference/trading-design.md`'s post-data note found the shipped
+# `_candidates` wrong: it enumerated only coverable one-for-one swaps and
+# claimed a 2-for-1 "arises as a sequence" of those, which is false because
+# each step in such a sequence would have to clear both gates entirely on
+# its own. These tests exercise the fix directly: real multi-card bundles,
+# the disjoint-sides rule, coverability from the true hands, ranking by the
+# smaller surplus rather than the total, and the gate budget the owner's
+# correction adds as a cost bound.
+
+
+def test_a_two_for_one_clears_when_no_one_for_one_between_the_same_seats_does():
+    """The gate is what makes this the load-bearing case: `HoldsOutForTwo`
+    refuses anything under three cards, so neither of the two candidate
+    one-for-one swaps between these seats can ever clear on its own -- only
+    the bundle that gives both of my resources for the counterparty's one
+    card reaches three cards and clears."""
+    game = stocked((0, Resource.WOOD, 1), (0, Resource.BRICK, 1), (1, Resource.ORE, 1))
+
+    class HoldsOutForTwo(Trader):
+        def accepts(self, view, received, counterparty):
+            self.asked.append((tuple(received), counterparty))
+            return sum(abs(n) for n in received) >= 3
+
+    v_me = vector(ore=1.0, wood=-1.0, brick=-1.0)
+    v_them = vector(wood=1.0, brick=1.0, ore=-1.0)
+    traders = [HoldsOutForTwo(v_me), HoldsOutForTwo(v_them), Trader(), Trader()]
+
+    # Neither one-for-one candidate this position could offer would have
+    # cleared on its own -- confirmed directly against the same gate.
+    view0, view1 = game.state(0), game.state(1)
+    assert not traders[0].accepts(view0, one_for_one(WOOD, ORE), 1)
+    assert not traders[0].accepts(view0, one_for_one(BRICK, ORE), 1)
+    assert not traders[1].accepts(view1, one_for_one(ORE, WOOD), 0)
+    traders[0].asked.clear()
+    traders[1].asked.clear()
+
+    done = run(game, traders)
+    assert done == [Trade(0, 1, bundle(wood=-1, brick=-1, ore=1))]
+
+
+def test_disjoint_sides_forbids_a_resource_on_both_sides_of_one_bundle():
+    """Both seats hold both resources on the table, so every combination
+    that repeats a resource across the give and receive sides -- "give wood,
+    receive wood back" and its mirror -- is a candidate only the
+    disjoint-resource-sets rule rules out; what is left is exactly the two
+    genuine one-for-one swaps."""
+    game = stocked(
+        (0, Resource.WOOD, 1),
+        (0, Resource.ORE, 1),
+        (1, Resource.WOOD, 1),
+        (1, Resource.ORE, 1),
+    )
+    candidates = _candidates(game._state, 0, game.locked)
+    assert set(candidates) == {
+        (1, bundle(wood=-1, ore=1)),
+        (1, bundle(ore=-1, wood=1)),
+    }
+
+
+def test_candidates_are_coverable_from_the_true_hands():
+    """No candidate ever asks `me` to give more than its hand holds, or the
+    counterparty to give more than theirs -- the engine is the referee, so
+    nothing downstream has to check this again."""
+    game = stocked(
+        (0, Resource.WOOD, 2),
+        (0, Resource.BRICK, 1),
+        (1, Resource.ORE, 2),
+        (1, Resource.SHEEP, 3),
+    )
+    state = game._state
+    candidates = list(_candidates(state, 0, game.locked))  # a generator now
+    assert candidates  # the position actually has something to check
+    for them, received in candidates:
+        for r in range(NUM_RESOURCES):
+            if received[r] < 0:
+                assert -received[r] <= state.hands[0][r]
+            elif received[r] > 0:
+                assert received[r] <= state.hands[them][r]
+
+
+def test_ranking_prefers_the_fairer_bundle_over_a_bigger_lopsided_one():
+    """Two candidates against two different counterparties (so they cannot
+    merge into one bigger bundle): one lopsided (mine 1.01, theirs 0.02 --
+    total 1.03, but the counterparty barely wants it), one fair (mine 0.3,
+    theirs 0.1 -- total 0.4, and its smaller half, 0.1, still beats the
+    lopsided candidate's smaller half, 0.02). Ranking by the smaller surplus
+    picks the fair one despite its far smaller total. Every vector component
+    is given explicitly (no bundle-size cap any more, so an unlisted "0"
+    component is a free resource either side would happily add for nothing
+    -- that would let a bigger combined bundle win on the actor's-own-surplus
+    key instead, which is not what this test is about)."""
+    game = stocked(
+        (0, Resource.WOOD, 1),
+        (0, Resource.ORE, 1),
+        (1, Resource.BRICK, 1),
+        (2, Resource.SHEEP, 1),
+    )
+    v_me = vector(wood=-0.01, ore=-0.1, brick=1.0, sheep=0.2, wheat=0.0)
+    v_lopsided_partner = vector(wood=0.01, brick=-0.01, ore=-0.02, sheep=-0.02, wheat=0.0)
+    v_fair_partner = vector(ore=0.05, sheep=-0.05, wood=-0.02, brick=-0.02, wheat=0.0)
+    traders = [
+        Trader(v_me),
+        Trader(v_lopsided_partner),
+        Trader(v_fair_partner),
+        Trader(),
+    ]
+    done = run(game, traders)
+    assert done[0].received == bundle(ore=-1, sheep=1)
+
+
+def test_the_gate_budget_binds_and_is_counted():
+    """Fourteen candidates advertise (every subset of my four resources
+    against every size of the counterparty's ore pile that receives more
+    cards than it gives); both gates refuse everything. `GATE_BUDGET` (8)
+    candidate pairs get asked, no more -- without the cap this hand would
+    price all fourteen against two position evaluations every time it
+    looked for a deal."""
+    game = stocked(
+        (0, Resource.WOOD, 1),
+        (0, Resource.BRICK, 1),
+        (0, Resource.SHEEP, 1),
+        (0, Resource.WHEAT, 1),
+        (1, Resource.ORE, 3),
+    )
+    # `theirs = dot(v_them, -b)`, so an identical vector on both seats would
+    # make `theirs == -mine` always -- never both positive. `wants_more`
+    # (receiving is worth more than giving, uniformly) on one seat and
+    # `wants_less` (the mirror: giving is worth more than receiving) on the
+    # other both read as "receiving beats giving" from each seat's own side,
+    # so `mine == theirs == received_cards - given_cards`.
+    wants_more = vector(wood=1.0, brick=1.0, sheep=1.0, wheat=1.0, ore=1.0)
+    wants_less = vector(wood=-1.0, brick=-1.0, sheep=-1.0, wheat=-1.0, ore=-1.0)
+    traders = [
+        Trader(wants_more, gate=False),
+        Trader(wants_less, gate=False),
+        Trader(),
+        Trader(),
+    ]
+    assert GATE_BUDGET == 8
+    assert run(game, traders) == []
+    assert game.budget_binds == 1
+
+
+def test_the_budget_does_not_bind_when_there_are_few_enough_candidates():
+    """The ordinary one-for-one position from `test_a_deal_both_sides_want_clears`
+    never comes close to the budget, so it must never be counted as binding."""
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    traders = [
+        Trader(vector(ore=1.0, wood=-1.0)),
+        Trader(vector(wood=1.0, ore=-1.0)),
+        Trader(),
+        Trader(),
+    ]
+    run(game, traders)
+    assert game.budget_binds == 0
+
+
+def test_the_bundle_engine_is_deterministic():
+    """The same position, replayed from scratch, clears the same trades in
+    the same order -- nothing here depends on dict, set, or hash-order
+    iteration."""
+
+    def once():
+        game = stocked(
+            (0, Resource.WOOD, 3), (0, Resource.BRICK, 2), (1, Resource.ORE, 4)
+        )
+        traders = [
+            Trader(vector(ore=1.0, wood=-1.0, brick=-0.5)),
+            Trader(vector(wood=1.0, brick=0.5, ore=-1.0)),
+            Trader(),
+            Trader(),
+        ]
+        return run(game, traders)
+
+    first = once()
+    second = once()
+    assert first == second
+    assert len(first) > 0
 
 
 # --- where the event runs -----------------------------------------------------
@@ -441,9 +654,11 @@ def test_the_count_and_the_log_reset_with_the_turn():
         ],
     )
     assert game.trades_made == 1
+    game.budget_binds = 3
     end_turn(game)
     assert game.trades_made == 0
     assert game.trades == []
+    assert game.budget_binds == 0
 
 
 def test_trading_is_not_in_the_action_space():
@@ -481,9 +696,11 @@ def test_an_imagined_game_carries_the_trade_switch_and_the_log():
     game.max_trades = 0
     game.trades.append(Trade(0, 1, one_for_one(WOOD, ORE)))
     game.trades_made = 1
+    game.budget_binds = 2
     child = imagine(game, random.Random(1))
     assert child.max_trades == 0
     assert child.trades_made == 1
+    assert child.budget_binds == 2
     child.trades.append(Trade(0, 2, one_for_one(WOOD, ORE)))
     assert len(game.trades) == 1
 

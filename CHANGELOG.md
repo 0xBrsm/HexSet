@@ -19,17 +19,24 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   dimension allows it; `accepts` is the head's strict preference for the
   concrete post-trade hand. `hexset.trading.VALUE_SCALE`, the pinned
   constant both cite.
-- **Trading is one event a turn.** `hexset.trading.trade_event` clears deals
-  for the current player after the roll and the robber and before any build
-  is served: a one-for-one exchange executes when both seats' public
+- **Trading is one event, interleaved with the turn.** `hexset.trading.trade_event`
+  clears deals for the current player after the roll and the robber, and
+  again after every MAIN action (build, buy, bank/port trade, a development
+  card): a bundle — any signed counts on disjoint resources, each side
+  bounded only by what that hand holds — executes when both seats' public
   valuation vectors say it helps them *and* both seats' private gates
-  accept, best deal first, repeatedly, until nothing clears. No budget and
-  no cap — the gate must be strictly positive and is re-asked after every
-  exchange.
+  accept, best deal first, repeatedly, until nothing clears. No cap on
+  trades themselves — the gate must be strictly positive and is re-asked
+  after every exchange — but each clearing attempt only asks the two
+  private gates about the best `GATE_BUDGET` (8) candidate bundles by
+  public surplus, a cost bound on hands fertile enough to advertise
+  thousands at once.
 - `Game.valuations` — every seat's public vector, five floats in `[-1, 1]`,
   all-zero until something publishes; `Game.publish(seat, vector)` is the
   one way to set one, validated and recorded, nothing else; `Game.trades`
-  and `Game.trades_made` for the turn's exchanges; `Game.max_trades` (`0`
+  and `Game.trades_made` for the turn's exchanges; `Game.budget_binds`,
+  reset with the turn, counting how often a clearing attempt exhausted
+  `GATE_BUDGET` candidates without one clearing; `Game.max_trades` (`0`
   off, `None` unbounded); `Game.gates`, the per-seat objects `trade_event`
   asks for a private judgement. `Game.num_players`.
 - `hexset.bots.Bot.valuation(view)` and
@@ -146,6 +153,31 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Trade candidates are bundles, not one-for-one swaps.**
+  `hexset.trading._candidates` now enumerates every signed bundle on
+  disjoint resources, coverable from the true hands, rather than only
+  coverable one-card-for-one-card swaps — a 2-for-1 clears as one bundle
+  now, where before it could not clear at all, since no sequence of
+  one-card steps that each has to satisfy both gates on its own reaches it.
+  A bundle's size is bounded only by what each side's hand holds — no fixed
+  cap (owner review, 2026-09-03, against an interim 1..3-cards-a-side
+  limit) — so each clearing attempt gates at most `GATE_BUDGET` (8)
+  candidates by public surplus rather than pricing all of them
+  (`Game.budget_binds` counts binds).
+- **Trade and build interleave.** The trade event runs at the start of
+  `Phase.MAIN` and again after every MAIN action the current player takes —
+  build, buy, a bank/port trade, a development card — on the same published
+  vectors (owner review against the rulebook, 2026-09-03; replaces "one
+  event before any build"). Never runs after `end_turn`, and never during
+  setup, `ROLL`, `ROBBER` or discard resolution.
+- **The tie-break is the acting seat's choice among fair deals, not fewer
+  cards.** Rank keys: the smaller of the two public surpluses, highest
+  first (unchanged, the maximin); the current player's own surplus, highest
+  first — among equally fair deals the actor takes the better one for
+  itself; the total surplus, highest first; a canonical bundle order, then
+  the lower counterparty seat, for determinism only (owner review,
+  2026-09-03, "the tie-break" — replaces fewer-cards/canonical/lower-seat as
+  the whole rule).
 - **The trade event reads published vectors instead of fetching them.**
   `hexset.trading.trade_event(game, gate)` drops its `valuation_of`
   parameter and reads `game.valuations` directly; a driver publishes a

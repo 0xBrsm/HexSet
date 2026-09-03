@@ -9,6 +9,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Changed
+
+- **`hexset.trading._candidates` skips a zero-valuation seat's enumeration.**
+  A seat that has never published (`NO_VALUATION`, all zero) can never clear
+  a trade as either party — `_rank_candidates_loop`/`_rank_candidates_
+  vectorized` already discard every candidate touching it (`mine <= 0.0` /
+  `theirs <= 0.0`) — so `_candidates` now skips walking that seat's hand
+  before generating any bundle, rather than enumerating them only to have
+  ranking throw them away. Behaviour-preserving: the heximax choice census
+  is byte-identical.
+
 ### Added
 
 - **`hexset.trading.NETWORK_GATE_ROWS`** (`32`): the most candidates a network

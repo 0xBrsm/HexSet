@@ -497,6 +497,105 @@ def test_candidates_are_coverable_from_the_true_hands():
                 assert received[r] <= state.hands[them][r]
 
 
+def test_zero_valuation_seats_are_never_enumerated():
+    """A seat that has not published (`NO_VALUATION`, all zero) is skipped
+    before any hand is walked, in either role: as `me` (nothing enumerated
+    at all) and as a counterparty (that seat's hand is never passed to
+    `_hand_multisets`) -- the actual expensive part `_candidates` exists to
+    avoid doing needlessly."""
+    import hexset.trading as trading_mod
+
+    game = stocked(
+        (0, Resource.WOOD, 2),
+        (0, Resource.ORE, 1),
+        (1, Resource.BRICK, 2),
+        (2, Resource.SHEEP, 2),  # seat 2 never publishes
+    )
+    state = game._state
+    vectors = [
+        vector(wood=-0.1, ore=-0.1, brick=1.0, sheep=0.5),
+        vector(wood=1.0, ore=1.0, brick=-0.2, sheep=-0.1),
+        NO_VALUATION,
+        NO_VALUATION,
+    ]
+
+    real = trading_mod._hand_multisets
+    walked: list[list[int]] = []
+
+    def spy(hand):
+        walked.append(list(hand))
+        return real(hand)
+
+    orig = trading_mod._hand_multisets
+    trading_mod._hand_multisets = spy
+    try:
+        # `me` non-zero, one counterparty non-zero, one zero: seat 2's hand
+        # (`sheep`) is never walked.
+        list(_candidates(state, 0, game.locked, vectors))
+        assert walked == [list(state.hands[0]), list(state.hands[1])]
+
+        # `me` itself zero: nothing is walked at all, not even `me`'s own
+        # hand for `give_options`.
+        walked.clear()
+        list(_candidates(state, 2, game.locked, vectors))
+        assert walked == []
+    finally:
+        trading_mod._hand_multisets = orig
+
+
+def test_zero_valuation_candidates_do_not_change_the_ranking():
+    """Neutrality: a zero-valuation seat contributes exactly zero to both
+    sides of every candidate it touches (`dot` with the zero vector is
+    always zero), so `_rank_candidates_loop`/`_rank_candidates_vectorized`
+    already discard every such candidate downstream (`mine <= 0.0` /
+    `theirs <= 0.0`). Skipping their enumeration in `_candidates` changes
+    what gets *computed*, never what gets *chosen*: ranking the unfiltered
+    candidate set and the filtered one produces the identical ranked list,
+    on the same seats and vectors `test_zero_valuation_seats_are_never_
+    enumerated` uses."""
+    game = stocked(
+        (0, Resource.WOOD, 2),
+        (0, Resource.ORE, 1),
+        (1, Resource.BRICK, 2),
+        (2, Resource.SHEEP, 2),
+    )
+    state = game._state
+    vectors = [
+        vector(wood=-0.1, ore=-0.1, brick=1.0, sheep=0.5),
+        vector(wood=1.0, ore=1.0, brick=-0.2, sheep=-0.1),
+        NO_VALUATION,
+        NO_VALUATION,
+    ]
+    unfiltered = list(_candidates(state, 0, game.locked))
+    filtered = list(_candidates(state, 0, game.locked, vectors))
+    assert len(filtered) < len(unfiltered)  # seat 2's candidates were pruned early
+    assert _rank_candidates_loop(0, vectors, unfiltered) == _rank_candidates_loop(
+        0, vectors, filtered
+    )
+
+
+def test_trade_event_chooses_the_same_trade_with_a_zero_valuation_bystander():
+    """End-to-end: a mixed table (two publishing seats, one that has never
+    published) clears the same deal the two publishing seats would have
+    cleared alone -- the bystander's presence, and the skip that ignores
+    it, changes nothing about which trade executes."""
+    game = stocked(
+        (0, Resource.WOOD, 1),
+        (1, Resource.BRICK, 1),
+        (2, Resource.SHEEP, 3),  # never publishes; not a party to anything
+    )
+    v0 = vector(wood=-1.0, brick=1.0)
+    v1 = vector(brick=-1.0, wood=1.0)
+    traders = [Trader(v0), Trader(v1), Trader()]  # seat 2: default NO_VALUATION
+    done = run(game, traders)
+    assert done == [Trade(0, 1, bundle(wood=-1, brick=1))]
+
+    # Seat 2 was never asked anything: its gate has no record of a call,
+    # confirming it was skipped as a counterparty candidate, not merely
+    # never chosen among several.
+    assert traders[2].asked == []
+
+
 def test_ranking_prefers_the_fairer_bundle_over_a_bigger_lopsided_one():
     """Two candidates against two different counterparties (so they cannot
     merge into one bigger bundle): one lopsided (mine 1.01, theirs 0.02 --

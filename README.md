@@ -185,16 +185,19 @@ one-for-one swap; a 2-for-1 has to clear as one bundle, since no sequence of
 one-card steps can be relied on to reach it. A bundle is *advertised* when
 both sides' vectors say it helps them; it *clears* only when each seat's own
 private gate, its judgement of the position the exchange leads to, also
-says yes, and only the best `GATE_BUDGET` (8) candidates by public surplus
-are ever asked their gates in one clearing attempt — a cost bound on hands
-fertile enough to advertise thousands of bundles late in a game. Best deal
-first — the smaller of the two surpluses, highest; ties fall to the acting
-seat's own surplus (the rulebook lets the actor choose among equally fair
-deals), then the total, then a canonical order, for determinism — then
-again, and again, until nothing clears. There is no budget on trades
-themselves: the gate must be strictly positive and is re-asked after every
-exchange, so the acting seat's own valuation strictly increases and the
-event ends on its own.
+says yes, and only the best `gate_budget` candidates by public surplus are ever
+asked their gates in one clearing attempt — a cost bound on hands fertile
+enough to advertise thousands of bundles late in a game. Both `gate_budget`
+(default `GATE_BUDGET`, 8; `None` is unbounded) and the ranking's tie-break
+(`order`, default `"maximin"`) are keyword parameters of
+`hexset.trading.trade_event`, not constants — a run can choose them without
+editing the module. Best deal first — the smaller of the two surpluses,
+highest; ties fall to the acting seat's own surplus (the rulebook lets the
+actor choose among equally fair deals), then the total, then a canonical order,
+for determinism — then again, and again, until nothing clears. There is no
+budget on trades themselves: the gate must be strictly positive and is re-asked
+after every exchange, so the acting seat's own valuation strictly increases and
+the event ends on its own.
 
 Nobody proposes, accepts or declines: there are no trade actions at all, no
 phase in which somebody is asked, and nothing in the action space to mask —

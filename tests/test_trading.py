@@ -18,6 +18,7 @@ from hexset.trading import (
     NO_VALUATION,
     Trade,
     _candidates,
+    _rank_candidates_loop,
     bundle,
     exchange,
     holds,
@@ -69,14 +70,16 @@ class Trader:
         return self.gate
 
 
-def run(game, traders):
+def run(game, traders, **kwargs):
     """Seat `traders` as the game's gates, publish each one's vector exactly
     as a driver would at that seat's own decision, then run the event.
 
     `trade_event` itself no longer takes a valuation callback -- it only
     reads `game.valuations` -- so the harness does what `arena.play`'s loop
     (and every other driver) does: ask, then `Game.publish`, once per seat,
-    before the event that reads them.
+    before the event that reads them. `**kwargs` forwards to `trade_event`
+    (`gate_budget`, `order`) so a test can exercise the ablation's
+    parameters without every other call site having to name them.
     """
     game.gates = tuple(traders)
     for seat, trader in enumerate(traders):
@@ -84,6 +87,7 @@ def run(game, traders):
     return trade_event(
         game,
         lambda seat, view, received, other: traders[seat].accepts(view, received, other),
+        **kwargs,
     )
 
 
@@ -557,6 +561,101 @@ def test_the_budget_does_not_bind_when_there_are_few_enough_candidates():
     ]
     run(game, traders)
     assert game.budget_binds == 0
+
+
+# --- the gate-budget ablation's parameters ------------------------------------
+# `agents/reference/trading-design.md`'s post-data note "bundles land":
+# `gate_budget`/`order` are keyword parameters of `trade_event`, not module
+# constants, so a run can choose them without editing `GATE_BUDGET`. Defaults
+# reproduce today's behaviour exactly -- every test above calls `trade_event`
+# without them and is unaffected.
+
+
+def test_a_wider_gate_budget_asks_every_candidate_and_never_binds():
+    """The same fourteen-candidate refusal `test_the_gate_budget_binds_and_is_counted`
+    uses (both gates refuse everything): at `gate_budget=8` the budget caps
+    the attempt before all fourteen are asked, and it counts as a bind. At
+    `gate_budget=16` every one of the fourteen is asked -- none clears, but
+    the budget was never the reason, so it must not be counted as one. Same
+    position, same refusal, only the parameter differs."""
+    hands = (
+        (0, Resource.WOOD, 1),
+        (0, Resource.BRICK, 1),
+        (0, Resource.SHEEP, 1),
+        (0, Resource.WHEAT, 1),
+        (1, Resource.ORE, 3),
+    )
+    wants_more = vector(wood=1.0, brick=1.0, sheep=1.0, wheat=1.0, ore=1.0)
+    wants_less = vector(wood=-1.0, brick=-1.0, sheep=-1.0, wheat=-1.0, ore=-1.0)
+
+    def traders():
+        return [
+            Trader(wants_more, gate=False),
+            Trader(wants_less, gate=False),
+            Trader(),
+            Trader(),
+        ]
+
+    narrow = stocked(*hands)
+    assert run(narrow, traders(), gate_budget=8) == []
+    assert narrow.budget_binds == 1
+
+    wide = stocked(*hands)
+    assert run(wide, traders(), gate_budget=16) == []
+    assert wide.budget_binds == 0
+
+
+def test_gate_budget_none_is_unbounded_and_never_binds():
+    """The same fourteen-candidate refusal, with no budget at all: every
+    candidate is asked, none clears, and `budget_binds` -- a *cost bound*
+    statistic -- has nothing to count because there was no bound."""
+    game = stocked(
+        (0, Resource.WOOD, 1),
+        (0, Resource.BRICK, 1),
+        (0, Resource.SHEEP, 1),
+        (0, Resource.WHEAT, 1),
+        (1, Resource.ORE, 3),
+    )
+    wants_more = vector(wood=1.0, brick=1.0, sheep=1.0, wheat=1.0, ore=1.0)
+    wants_less = vector(wood=-1.0, brick=-1.0, sheep=-1.0, wheat=-1.0, ore=-1.0)
+    traders = [
+        Trader(wants_more, gate=False),
+        Trader(wants_less, gate=False),
+        Trader(),
+        Trader(),
+    ]
+    assert run(game, traders, gate_budget=None) == []
+    assert game.budget_binds == 0
+
+
+def test_minimal_bundle_order_ranks_fewer_cards_first_on_a_tie():
+    """Two candidates engineered to tie exactly on `order="maximin"`'s first
+    three keys (the smaller public surplus, the actor's own surplus, the
+    total) but differing in size: one card a side against seat 1, two cards
+    a side against seat 2. `order="minimal_bundle"` must rank the smaller
+    bundle first regardless of which the default's canonical/lower-seat
+    fallback would have chosen; tested directly against the ranking
+    function so the result does not depend on which candidate the
+    determinism fallback happens to prefer.
+    """
+    WOOD, BRICK, SHEEP, WHEAT, ORE = (int(r) for r in Resource)
+    vectors = [
+        vector(ore=1.0, wood=-1.0, wheat=0.5, sheep=-0.5),  # me (seat 0)
+        vector(wood=1.0, ore=-1.0),  # seat 1: the small counterparty
+        vector(sheep=0.5, wheat=-0.5),  # seat 2: the big counterparty
+    ]
+    small = (1, one_for_one(WOOD, ORE))  # 1 card a side, counterparty 1
+    big = (2, bundle(sheep=-2, wheat=2))  # 2 cards a side, counterparty 2
+    candidates = [small, big]
+
+    ranked_minimal, seen = _rank_candidates_loop(0, vectors, candidates, "minimal_bundle")
+    assert seen == 2
+    assert ranked_minimal[0] == (small[1], small[0])
+
+    # The tie is genuine under "maximin" too -- both candidates carry
+    # identical min/own/total surplus -- so this is not a vacuous check.
+    ranked_maximin, _ = _rank_candidates_loop(0, vectors, candidates, "maximin")
+    assert {r[1] for r in ranked_maximin} == {small[0], big[0]}
 
 
 def test_the_bundle_engine_is_deterministic():

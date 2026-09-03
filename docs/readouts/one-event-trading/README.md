@@ -249,3 +249,74 @@ candidate set, the ranking, and the interleaving all changed);
 `heximax-notrade`/`search2-notrade` are checked byte-identical against
 `origin/main` before writing the new fixtures, and are — `max_trades=0`
 still short-circuits `trade_event` before any of this PR's code runs.
+
+## Registered ablation — the gate budget and the ranking (2026-09-03)
+
+The "bundles land" post-data note's registered ablation
+(`agents/reference/trading-design.md`), run before the registered first run
+opens: five arms, each a 400-game blocked duel `heximax` vs `search2` at
+duel seed 42000, 26 workers. `gate_budget` and `order` are now keyword
+parameters of `trade_event` (defaults unchanged: `GATE_BUDGET` (8),
+`"maximin"`) rather than constants edited per run, so the five arms are one
+code path with different arguments (`hexset.arena.play`/`compete` and
+`hexset.bench.duel --gate-budget`/`--order` thread them through). No-trade
+and default-arm census fixtures verified byte-identical.
+
+| arm | wins/400 (Wilson 95%) | paired VP | trades/turn (heximax) | budget-bind rate (heximax) | ms/move (x search2) | max candidates asked/event |
+|---|---|---|---|---|---|---|
+| gate-budget-8 (today) | 240/400 = 60.0% [55.1, 64.7] | +0.594 [+0.346, +0.842] | 0.163 | 61.3% | 1.89x (1.79–2.03x, 3 runs) | 22 |
+| gate-budget-16 | 228/400 = 57.0% [52.1, 61.8] | +0.627 [+0.371, +0.884] | 0.205 | 42.3% | 1.55x (1.54–1.57x) | 32 |
+| gate-budget-32 | 236/400 = 59.0% [54.1, 63.7] | +0.755 [+0.499, +1.011] | 0.250 | 30.6% | 1.94x (1.86–2.05x) | 63 |
+| gate-budget-unbounded | 250/400 = 62.5% [57.7, 67.1] | +0.762 [+0.517, +1.008] | 0.254 | 0.0% | 1.97x (1.94–2.00x) | 6798 |
+| gate-budget-minimal (`order=minimal_bundle`, budget 8) | 229/400 = 57.2% [52.4, 62.0] | +0.425 [+0.172, +0.678] | 0.196 | 59.1% | 1.48x (1.42–1.54x) | 20 |
+
+`gate-budget-{8,16,32,unbounded,minimal}.json`, each carrying its own
+`duel` (the 400-game strength read) and `cost` (the mirror-table read:
+three four-seat games a side, board seeds 0/1/2, `search2` the control,
+extended with trades/turn, the executed-bundle-size distribution, the
+gate-budget bind rate, and the max candidates put to a private gate in one
+trade event) sections. `search2`'s own trades/turn ran 0.057/0.109/0.124/
+0.186/0.077 over the same arms — lower than heximax's throughout, and its
+bind rate stays above 65% even unbounded's own vectors (search2's simple
+`+1`/`-1` valuations tie broadly, so it hits the same maximin key on far
+more candidates than heximax's continuous `tanh` vector does).
+
+**Reading, pre-stated in the registration; reported here, not adjudicated:**
+cheapest arm whose trades/turn is within 10% of the unbounded arm's and
+whose cost stays ≤2x; if unbounded is itself ≤2x, the budget goes away.
+
+- **Trades/turn within 10% of unbounded's 0.254** (i.e. ≥ 0.229): only
+  gate-budget-32 (0.250, −1.6%) and gate-budget-unbounded itself qualify.
+  Gate-budget-8, -16 and -minimal fall short by 36%, 19% and 23%
+  respectively.
+- **Cost ≤2x**: on the 3-run mean, all five arms read under 2x (1.89x,
+  1.55x, 1.94x, 1.97x, 1.48x) — but gate-budget-32 and gate-budget-unbounded
+  each poked above 2x on at least one of the three individual runs (2.047x
+  and 1.999x), so neither clears the ceiling comfortably on this box.
+- Combining both conditions, only **gate-budget-32** and
+  **gate-budget-unbounded** satisfy them among the five arms measured.
+- **Unbounded's own cost (mean 1.97x, range 1.94–2.00x) reads at or under
+  2x** — the pre-stated condition under which "the budget goes away" — on
+  a measurement close enough to the ceiling that a cleaner box could move
+  it either side.
+
+**Not exact — the box was not idle.** An unrelated job (another agent's
+`pytest` run, `hexset-publish-points`) shared the machine for the whole
+measurement window, pushing load average above 25 while the 26-worker
+duels ran. `hexset.bots.heximax.search`'s module docstring warns that
+heximax's per-move cost inflates faster than search2's under contention, so
+the ms/move ratios above are the mean of 3 back-to-back single-process
+passes (all 5 arms interleaved seed-by-seed within each pass, per
+`ratio_noise_check` in each JSON) rather than one reading. The deterministic
+statistics — trades/turn, bind rate, bundle-size distribution, max
+candidates asked — are identical across all 3 passes and are not affected
+by the contention; only the ms/move ratios carry the noise shown above.
+
+**Wall time.** The five 400-game duels: 68–129 s each (~7 min total, the
+unbounded arm slowest as expected). The cost script: ~67 s per pass, 3
+passes (~3.5 min). Verification (the parameterisation's own tests plus the
+full byte-identity census, run once, not repeated per arm): ~23 min,
+almost entirely contention-bound on the same shared box.
+
+`gate-budget-8.json`, `gate-budget-16.json`, `gate-budget-32.json`,
+`gate-budget-unbounded.json`, `gate-budget-minimal.json`.

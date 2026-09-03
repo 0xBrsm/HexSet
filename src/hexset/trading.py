@@ -104,6 +104,33 @@ NO_VALUATION: tuple[float, ...] = (0.0,) * NUM_RESOURCES
 # recomputes it).
 VALUE_SCALE = 0.022126919066234662
 
+# A hand with several resources in quantity can advertise many bundles at
+# once (no size cap, owner review 2026-09-03); pricing every one of them
+# against two private gates -- a position evaluation each -- would make one
+# clearing attempt as expensive as the hand is fertile. The budget is the
+# cost bound, not a fixed enumeration limit: `Game.budget_binds` counts
+# every time it is the reason nothing cleared. `trade_event`'s default
+# (registered ablation, `agents/reference/trading-design.md`'s post-data
+# note "bundles land": gate budget 8/16/32/unbounded, plus a ranking
+# variant, measured before any of them replaces this default). `None` means
+# unbounded: every candidate that clears the public filter is asked, in
+# rank order, until one clears both private gates or none are left.
+GATE_BUDGET = 8
+
+# The two `_best_clearing` rank orders `trade_event`'s `order` keyword
+# selects between. Both keep the maximin key first (the smaller of the two
+# public surpluses, highest first) -- neither is a different clearing rule,
+# only a different tie-break among candidates equally fair by that key:
+# "maximin" (the default, owner review 2026-09-03, "the tie-break") breaks
+# ties by the acting seat's own surplus, then the total surplus, then a
+# canonical bundle order and the lower counterparty seat for determinism.
+# "minimal_bundle" (the registered ablation's fifth arm) breaks ties by
+# fewer total cards moved first instead -- a cost-motivated ordering that
+# may raise the clearing rate within a fixed gate budget, distinct from the
+# fairness tie-break it replaces -- falling back to the same canonical
+# order and lower counterparty seat for determinism beyond that.
+BUNDLE_ORDERS = ("maximin", "minimal_bundle")
+
 
 def published(trader: object, view: "View") -> Sequence[float]:
     """What `trader` advertises, or nothing at all.
@@ -224,7 +251,13 @@ def _candidates(state: GameState, me: int, locked: frozenset[int]):
                 yield them, tuple(r - g for r, g in zip(received, given))
 
 
-def trade_event(game: "Game", gate: Gate) -> list[Trade]:
+def trade_event(
+    game: "Game",
+    gate: Gate,
+    *,
+    gate_budget: int | None = GATE_BUDGET,
+    order: str = "maximin",
+) -> list[Trade]:
     """Clear every deal the current player and one other seat both want.
 
     Called by `hexset.game.run_trade_event`, once on the transition into
@@ -246,6 +279,18 @@ def trade_event(game: "Game", gate: Gate) -> list[Trade]:
     makes the second ore worth less than the first. `gate(seat, view,
     bundle, counterparty)` is that seat's private judgement of one concrete
     exchange; both sides must return True.
+
+    `gate_budget` and `order` are keyword parameters, not module constants,
+    so a caller can run the registered ablation
+    (`agents/reference/trading-design.md`'s post-data note "bundles land")
+    as one code path with different arguments rather than editing
+    `GATE_BUDGET` per run. `gate_budget` bounds how many ranked candidates
+    per clearing attempt are put to the two private gates (`None` is
+    unbounded: every candidate the public filter passes is asked, in rank
+    order, until one clears or none are left); `order` selects
+    `_best_clearing`'s tie-break among candidates equal on the maximin key
+    (`BUNDLE_ORDERS`). Defaults (`GATE_BUDGET`, `"maximin"`) reproduce
+    today's behaviour exactly -- every existing call site is unaffected.
 
     The single engine limit is the assertion below: an event cannot execute
     more trades than there are cards on the table. It can only fire if a
@@ -276,7 +321,9 @@ def trade_event(game: "Game", gate: Gate) -> list[Trade]:
     executed: list[Trade] = []
     while game.max_trades is None or len(executed) < game.max_trades:
         views.clear()
-        best = _best_clearing(game, me, vectors, gate, view)
+        best = _best_clearing(
+            game, me, vectors, gate, view, gate_budget=gate_budget, order=order
+        )
         if best is None:
             break
         them, received = best
@@ -310,14 +357,6 @@ def apply_trades(game: "Game", trades: Sequence[Trade]) -> None:
         game.trades_made += 1
 
 
-# A hand with several resources in quantity can advertise many bundles at
-# once (no size cap, owner review 2026-09-03); pricing every one of them
-# against two private gates -- a position evaluation each -- would make one
-# clearing attempt as expensive as the hand is fertile. The budget is the
-# cost bound instead, not a fixed enumeration limit: `Game.budget_binds`
-# counts every time it is the reason nothing cleared.
-GATE_BUDGET = 8
-
 # Encodes a signed bundle as one integer that sorts exactly the way the
 # bundle's own tuple does lexicographically (resource 0 most significant),
 # so key 4's "canonical bundle order" is one more vectorisable arithmetic
@@ -336,26 +375,37 @@ _VECTORIZE_ABOVE = 32
 
 
 def _best_clearing(
-    game: "Game", me: int, vectors: Sequence[Sequence[float]], gate: Gate, view
+    game: "Game",
+    me: int,
+    vectors: Sequence[Sequence[float]],
+    gate: Gate,
+    view,
+    *,
+    gate_budget: int | None,
+    order: str,
 ) -> tuple[int, Bundle] | None:
     """The clearing deal ranked highest, or None.
 
-    Rank keys (owner review, 2026-09-03, "the tie-break" -- replacing fewer
-    cards/canonical/lower-seat as the *whole* rule): (1) the smaller of the
-    two public surpluses, highest first -- maximin, so the party who gains
-    less from a deal still gains the most one is available; (2) the current
-    player's own surplus, highest first -- the rulebook gives the acting
-    seat the choice among the deals on offer, so among equally fair ones it
-    takes the better one for itself; (3) the total surplus, highest first;
-    (4) a canonical order over the bundle, then the lower counterparty seat
-    -- determinism only, since real-valued surpluses essentially never tie
-    on keys 1-3 in practice.
+    Rank keys under `order="maximin"` (the default; owner review,
+    2026-09-03, "the tie-break" -- replacing fewer cards/canonical/lower-seat
+    as the *whole* rule): (1) the smaller of the two public surpluses,
+    highest first -- maximin, so the party who gains less from a deal still
+    gains the most one is available; (2) the current player's own surplus,
+    highest first -- the rulebook gives the acting seat the choice among the
+    deals on offer, so among equally fair ones it takes the better one for
+    itself; (3) the total surplus, highest first; (4) a canonical order over
+    the bundle, then the lower counterparty seat -- determinism only, since
+    real-valued surpluses essentially never tie on keys 1-3 in practice.
+    Under `order="minimal_bundle"` (the registered ablation's fifth arm,
+    `BUNDLE_ORDERS`), key (1) is unchanged and keys (2)-(3) are replaced by
+    fewer total cards moved, highest first; key (4) still breaks any
+    remaining tie.
 
     Candidates are ranked by public surplus alone (cheap: a dot product per
     side) and the gates -- the expensive half -- are asked in that order,
-    capped at `GATE_BUDGET` candidates, so the first one within the budget
-    both gates accept *is* the maximiser over the clearing set that budget
-    could reach.
+    capped at `gate_budget` candidates (`None` is unbounded: every ranked
+    candidate is asked), so the first one within the budget both gates
+    accept *is* the maximiser over the clearing set that budget could reach.
     """
     state = game._state
     candidates = list(_candidates(state, me, game.locked))
@@ -363,21 +413,25 @@ def _best_clearing(
         return None
 
     if len(candidates) < _VECTORIZE_ABOVE:
-        ranked, seen = _rank_candidates_loop(me, vectors, candidates)
+        ranked, seen = _rank_candidates_loop(me, vectors, candidates, order)
     else:
-        ranked, seen = _rank_candidates_vectorized(me, vectors, candidates)
+        ranked, seen = _rank_candidates_vectorized(me, vectors, candidates, order)
 
-    for received, them in ranked[:GATE_BUDGET]:
+    asking = ranked if gate_budget is None else ranked[:gate_budget]
+    for received, them in asking:
         mirror = tuple(-n for n in received)
         if gate(me, view(me), received, them) and gate(them, view(them), mirror, me):
             return them, received
-    if seen > GATE_BUDGET:
+    if gate_budget is not None and seen > gate_budget:
         game.budget_binds += 1
     return None
 
 
 def _rank_candidates_loop(
-    me: int, vectors: Sequence[Sequence[float]], candidates: list[tuple[int, Bundle]]
+    me: int,
+    vectors: Sequence[Sequence[float]],
+    candidates: list[tuple[int, Bundle]],
+    order: str,
 ) -> tuple[list[tuple[Bundle, int]], int]:
     """Plain Python: cheaper than building `numpy` arrays for a short list
     of candidates (see `_VECTORIZE_ABOVE`)."""
@@ -395,23 +449,35 @@ def _rank_candidates_loop(
 
     def rank_key(row):
         min_surplus, mine, total, received, them, neg_them = row
+        canonical = tuple(-n for n in received)  # descending sort -> smallest bundle first
+        if order == "minimal_bundle":
+            # (1) maximin, unchanged; (2) fewer total cards first, in place
+            # of the dropped own-surplus/total-surplus tie-break; (3) the
+            # same determinism fallback as "maximin".
+            total_cards = sum(abs(n) for n in received)
+            return (min_surplus, -total_cards, canonical, neg_them)
         # Keys 1-3 are "highest first"; key 4 is "lowest first"
         # (determinism only) -- negating the bundle tuple element-wise
         # reverses its lexicographic order, so sorting descending on the
         # negated tuple picks the smallest original bundle on a tie.
-        return (min_surplus, mine, total, tuple(-n for n in received), neg_them)
+        return (min_surplus, mine, total, canonical, neg_them)
 
     rows.sort(key=rank_key, reverse=True)
     return [(row[3], row[4]) for row in rows], len(rows)
 
 
 def _rank_candidates_vectorized(
-    me: int, vectors: Sequence[Sequence[float]], candidates: list[tuple[int, Bundle]]
+    me: int,
+    vectors: Sequence[Sequence[float]],
+    candidates: list[tuple[int, Bundle]],
+    order: str,
 ) -> tuple[list[tuple[Bundle, int]], int]:
     """`numpy`: one dot product per side over every candidate at once, and
-    one `lexsort` over all four rank keys (bundle and counterparty encoded
-    as sortable integer columns, `_BUNDLE_OFFSET`/`_BUNDLE_BASE` above) --
-    exact, not an approximation of the loop version, just vectorised."""
+    one `lexsort` over the rank keys (bundle and counterparty encoded as
+    sortable integer columns, `_BUNDLE_OFFSET`/`_BUNDLE_BASE` above) --
+    exact, not an approximation of the loop version, just vectorised. Sorts
+    the whole viable set (not only the top `gate_budget`) so the caller can
+    slice at any budget, including unbounded."""
     bundles = np.array([b for _, b in candidates], dtype=np.int64)
     thems = np.array([t for t, _ in candidates], dtype=np.intp)
     v_me_arr = np.asarray(vectors[me], dtype=np.float64)
@@ -432,12 +498,16 @@ def _rank_candidates_vectorized(
     codes = (bundles[idx] + _BUNDLE_OFFSET) @ weights
     counterparties = thems[idx]
 
-    # `lexsort`'s last key is primary; keys 1-3 want "highest first"
-    # (negate, since `lexsort` is ascending) and key 4's two components want
-    # "lowest first" (used as-is).
-    order = np.lexsort((counterparties, codes, -total, -mine[idx], -min_surplus))
-    top = idx[order[:GATE_BUDGET]]
-    ranked = [(candidates[i][1], int(thems[i])) for i in top]
+    # `lexsort`'s last key is primary; keys wanting "highest first" are
+    # negated (`lexsort` is ascending); the canonical-order/lower-seat
+    # determinism keys want "lowest first" and are used as-is.
+    if order == "minimal_bundle":
+        total_cards = np.abs(bundles[idx]).sum(axis=1)
+        sort_idx = np.lexsort((counterparties, codes, total_cards, -min_surplus))
+    else:
+        sort_idx = np.lexsort((counterparties, codes, -total, -mine[idx], -min_surplus))
+    ranked_idx = idx[sort_idx]
+    ranked = [(candidates[i][1], int(thems[i])) for i in ranked_idx]
     return ranked, seen
 
 

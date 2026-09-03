@@ -11,6 +11,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **The browser board is the pre-tables UI again**, rebuilt from `f6856d7`
+  onto the current server rather than carried forward through the lobby
+  rework. Loading the page puts you in a game — the one you were last at if
+  it is still going, a fresh one otherwise — and the address bar shows that
+  game's code. Every seat but the creator's starts empty, the creator's row
+  reads "human", and each other row is a model picker: choosing one seats
+  that bot, and a person who opens the link takes a seat instead. A link to a
+  game that is full or gone says so rather than dealing a different game
+  under the same address.
+- Player-to-player trading is gone from the browser with the offers that
+  backed it (`PROPOSE_TRADE`/`ACCEPT_TRADE`/`DECLINE_TRADE`, `TRADE_RESPOND`,
+  the view's `offer` block). The modal a resource card opens is the bank and
+  port route, which is unchanged.
 - An empty seat the setup snake reaches is retired on sight. The grace
   window in front of that is gone, and with it `SEAT_GRACE_SECONDS`,
   `Config.seat_grace`, `POST /api/games`'s `seat_grace`, `--seat-grace`,

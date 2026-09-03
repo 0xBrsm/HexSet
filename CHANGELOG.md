@@ -267,6 +267,25 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   change above: `heximax` mean ms/decision 8.998 -> 8.315 (-7.6%), 6.260s
   -> 5.753s/game (-8.1%); `heximax-notrade` mean ms/decision 7.105 -> 6.679
   (-6.0%), 2.678s -> 2.532s/game (-5.5%).
+- **`Heximax._marginal_gain`/`_marginal_loss`/`_delta` clone only what a
+  marginal/delta check actually touches.** A new `_thin_copy` (heximax's
+  own, alongside `copy_state`, not a change to it) copies `hands` and,
+  where the caller mutates it, `bank`; the board, deck, dev cards, knight
+  counts and (for `_delta`) the bank are shared with the real live game
+  state these checks read `view.state` from, never copied, since none of
+  these three methods ever mutates them. Safe only because nothing
+  downstream reads `.state` back off a `belief_for` cache hit for one of
+  these calls (`_thin_copy`'s own docstring records the invariant this
+  depends on for the next person to touch this path). Byte-identical
+  choice census and the full non-slow suite (881 passed) both unchanged.
+  Measured with `hexset.bench.profile_heximax` (3 games, seed 100, single
+  process, before/after run back-to-back to isolate the change from this
+  box's own load swings): `heximax` mean ms/decision 8.865 -> 8.388
+  (-5.4%), 5.970s -> 5.688s/game (-4.7%); `heximax-notrade` mean
+  ms/decision 6.930 -> 6.776 (-2.2%), 2.624s -> 2.563s/game (-2.3%) — a
+  smaller win than the other two changes above, since these three methods
+  fire only during the real game-level trade event, never inside the
+  search's own lookahead.
 - **Trade candidates are bundles, not one-for-one swaps.**
   `hexset.trading._candidates` now enumerates every signed bundle on
   disjoint resources, coverable from the true hands, rather than only

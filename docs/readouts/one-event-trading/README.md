@@ -435,3 +435,115 @@ action's step, `len(actions) - 1`, matching what `hexset.record.advance`
 already replays as `apply(that action); apply_trades(...)`), which the
 session's own per-action bookkeeping in `webplay.py` would need too, and
 does not yet have.
+
+## Re-run for "two publish points, not one" (2026-09-03 PI correction)
+
+The correction registered in `agents/reference/trading-design.md`'s PI
+correction "two publish points, not one": `Game.publish_due(seat)` is now
+true at two points a turn instead of one -- post-roll/robber (unchanged)
+and, new, right after `seat`'s own `END_TURN` is applied, plus once for
+every seat the instant setup completes. Drivers (`arena.play`,
+`record.record_game`, `bench.aivat`'s replay, the gym's auto-played
+opponents, the server's `Tables.act`, `clients.botclient.LocalSearchBrain`)
+publish at all three points; the two byte-identity censuses (`heximax`/
+`test_search2`) were updated to publish the same way, since they replay
+real games too.
+
+### (iii) Strength — a fresh comparison
+
+`heximax` vs `search2`, 800 blocked games, duel seed 42000, 20 workers. Both
+arms changed again (the second publish point changes which vectors every
+event reads), so this is read on its own terms, not against the
+single-point correction's 59.8%.
+
+| | |
+|---|---|
+| wins | **462 / 800 = 57.75%** |
+| Wilson 95% | [54.3, 61.1] |
+| paired VP | **+0.551** [+0.368, +0.734] |
+| bar | point ≥ 50%, Wilson lower bound > 45% |
+| met | yes |
+
+`two-points-heximax-vs-search2.json`.
+
+### (v) Cost, publish calls per turn, and trades per turn
+
+Same mirror protocol (three four-seat games an arm, board seeds 0/1/2,
+every seat the same preset, `search2` the control, seated as the game's own
+gates, publishing gated by `Game.publish_due` at both points exactly as
+`hexset.arena.play` does it now), `sys.setprofile` call-counting active
+throughout.
+
+| | heximax | search2 | ratio |
+|---|---|---|---|
+| ms / move (profiled, mean of 3 passes) | 6.83 (6.69–6.90 per pass) | 4.87 (4.57–5.38 per pass) | **1.41x** (1.28–1.47x across 3 passes) |
+| function calls / move | 16,986 | 19,304 | **0.88x** |
+
+Comfortably inside the design's "≤2x `search2` per move" ceiling on every
+pass. **Not exact — the box was not idle**: another agent's full `pytest`
+run shared the machine for the whole measurement window (loadavg 6–24
+throughout), so the ms/move figures are the range across 3 back-to-back
+passes rather than one reading, per this file's own established practice.
+The call-count ratio is deterministic (fixed board seeds, no timing) and
+identical across all 3 passes, so it is not a noise artifact — but it is
+worth flagging as a genuine reversal, not adjudicated here: every prior
+mirror-table reading in this file had heximax costing *more* calls/move
+than `search2` (1.15x–1.43x); this one has it costing *fewer* (0.88x). The
+likely mechanism is that trades, and the private-gate/valuation work that
+comes with them, are now much rarer per move than at any previous reading
+(see below) — but that is offered as the plausible explanation, not a
+verified attribution the way the no-trade census divergence was pinned
+down with a stub-and-reproduce test.
+
+**Publish calls per turn: 2.05 for heximax, 2.05 for search2** (heximax
+193/149/219 over 94/72/107 turns per board seed; search2 187/233/237 over
+91/114/116 turns) — matches the design's expectation of two publishes per
+seat per turn (post-roll, post-end-turn), up from the single-point
+correction's 1.01.
+
+**Trades per turn, over the lineup readout (iii) plays**
+(`[heximax, heximax, search2, search2]`, blocked, duel seed 42000):
+
+| sample | trades | turns | trades/turn |
+|---|---|---|---|
+| first 6 games (this file's own protocol) | 29 | 619 | **0.0468** |
+| supplementary, first 40 games (checked for small-sample noise) | 153 | 3696 | **0.0414** |
+
+**Not the recovery the registration asked for, reported exactly as
+instructed.** The registration: "Readout (v) must recover trades/turn to
+the unbounded ablation's order (≈ 0.25); if it does not, the staleness
+diagnosis was wrong and the note says so." It does not: 0.041–0.047 is
+roughly **2.5–2.8x the single-point correction's 0.017** (a real,
+reproducible improvement — the second publish point does let *something*
+clear that the first point alone suppressed) but roughly **5–6x short of
+the ≈0.25 order** the unbounded gate-budget ablation read before the
+publish-points mechanism existed at all. The 40-game sample confirms the
+6-game one is not a small-sample artifact (0.0414 vs 0.0468, same order).
+
+A plausible mechanism for the remaining gap, offered without adjudicating
+it: the ≈0.25 reading predates the publish/call split entirely (the
+gate-budget ablation's own trade_event still *called* every seat's
+`valuation` live at each event), so every seat's advertised vector there
+tracked the *entire* evolving board in real time, at every one of a turn's
+several interleaved event firings, not just its own hand at one or two
+snapshots a turn. Two publish points fix the specific staleness the
+single-point correction caused (a stale *pre-build* vector for the whole
+round) but do not restore that continuous tracking: a non-acting seat's
+vector is now frozen at whichever of its own last two publish points is
+most recent, for everything that happens on someone else's turn in
+between, however much the board changes meanwhile. Whether that gap is
+worth closing, and how, is a design question for the PI, not a performance
+defect in what this PR implements: it published a correction with a
+pre-stated recovery target and the number came in short, exactly what the
+registration's own contingency asked to have reported.
+
+`two-points-cost.json`.
+
+### Census
+
+`heximax`/`heximax-omni`/`search2` re-baseline by construction (the second
+publish point changes which vectors a turn's later events read, so which
+trades clear); `heximax-notrade`/`search2-notrade` are checked
+byte-identical against the fixtures recorded for the single-point
+correction, and are — `max_trades=0` still short-circuits `trade_event`
+before any vector-timing change could reach it.

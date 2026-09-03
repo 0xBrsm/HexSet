@@ -1,0 +1,33 @@
+{
+  "a": "heximax",
+  "b": "search2",
+  "duel_seed": 42000,
+  "games": 800,
+  "geometry": "blocked",
+  "lineup": [
+    "heximax#0",
+    "heximax#1",
+    "search2#0",
+    "search2#1"
+  ],
+  "paired_vp": 0.550625,
+  "paired_vp_high": 0.7336051898384385,
+  "paired_vp_low": 0.3676448101615616,
+  "seat_wins": [
+    194,
+    213,
+    171,
+    222
+  ],
+  "seconds": 138.24075902695768,
+  "turns_max": 189,
+  "turns_mean": 93.8525,
+  "turns_median": 93.0,
+  "unfinished": 0,
+  "via": "arena.compete",
+  "wilson_high": 0.61127862116101,
+  "wilson_low": 0.5429806530154806,
+  "win_rate": 0.5775,
+  "wins": 462,
+  "workers": 20
+}

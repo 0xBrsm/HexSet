@@ -42,18 +42,16 @@ duration, one seat's decision at a time rather than one cutoff for the table.
 Every response here is built for one viewer. Two of the filters are not
 obvious and both are load-bearing:
 
-`to_move` during `TRADE_RESPOND` is **not** the seat being asked. The engine
-asks only seats that can cover the offer, so publishing that seat would tell
-every poller — a bystander, and the token-free observer on
-`GET /api/table/<CODE>` — exactly who is holding the wanted card. A responder
-is told their own seat, because they have to act; everyone else is told the
-proposer, whom the offer block already names (`webplay._public_mover`).
+Every seat's **valuation vector** is public, and so is the turn's trade log:
+those are what a table hears (`hexset.trading`), and `PUT
+/api/games/<CODE>/valuation` is how a seat sets its own. Nothing else about
+trading is on the wire, because nothing else exists -- there is no offer to
+address, accept or decline.
 
-The `action_mask`/`pair_mask`/`options` on `GET /api/record` are the **honest**
-trade sample (`rules.fair_legal_actions`), and so is what an embedded bot
-searches: one mask for every seat. The engine's own `legal_actions` filters
-offers by opponents' true hands, which is fine inside a duel harness and is a
-hand-composition leak at a table with a person at it.
+The `action_mask`/`options` on `GET /api/record` are the engine's own
+`legal_actions`, and so is what an embedded bot searches: one list for every
+seat, honest by construction now that no action's legality depends on
+another seat's hand.
 
 ## Liveness is people, not bots
 
@@ -76,7 +74,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-import heximax  # noqa: F401 -- registers the "heximax" preset with hexset.arena
+import hexset.bots  # noqa: F401 -- registers the "heximax" presets with hexset.arena
 from hexset.actions import build_space
 from hexset.arena import PRESETS, spawn as spawn_entrant
 from hexset.board.board import Board, random_base_board
@@ -86,7 +84,7 @@ from hexset.game import Phase, is_over, to_move
 from hexset.onnx_record import record_from_game
 
 from . import journal
-from .rules import fair_legal_actions
+from hexset.actions import legal_actions
 from .seating import lock_seat, locked_of, start_at
 from .webplay import (
     GameSession,
@@ -211,7 +209,9 @@ class Config:
     `web.py`), passed in once rather than threaded through every call."""
 
     device: str = "cpu"
-    max_offers: int | None = 1
+    # The trade off switch every bot seat is held to (`hexset.trading`):
+    # `0` seats bots that never trade, `None` (the default) lets them.
+    max_trades: int | None = None
     games_dir: str | None = None
     seed: int | None = None
     # The lineup to seat at creation when a request doesn't name its own, for
@@ -393,14 +393,13 @@ def spawn_bot(spec: str, board: Board, rng: random.Random, config: Config) -> Bo
         # `hexset.arena` is the training repo's own bot registry, and the one
         # `search2` every duel on record was played against — built here
         # rather than re-declared, so "the handcrafted opponent" means one
-        # thing in both repos. The offer budget is this deployment's
-        # (`Config.max_offers`), not the preset's `None`: a served game caps
-        # offers so a turn cannot spend a minute of wall clock on them.
-        return spawn_entrant(replace(PRESETS[spec], max_offers=config.max_offers), board, rng)
+        # thing in both repos. The trade switch is this deployment's
+        # (`Config.max_trades`), not the preset's.
+        return spawn_entrant(replace(PRESETS[spec], max_trades=config.max_trades), board, rng)
 
     from .onnxbot import spawn  # onnxruntime-free import boundary
 
-    return spawn(spec, board, rng=rng, device=config.device, max_offers=config.max_offers)
+    return spawn(spec, board, rng=rng, device=config.device, max_trades=config.max_trades)
 
 
 def _seat_labels(seats: list[Seat]) -> tuple[dict[int, str], dict[int, str], dict[int, str]]:
@@ -601,6 +600,10 @@ class Tables:
                 continue
             assert seat.spec is not None and seat.token is not None
             bot = spawn_bot(seat.spec, board, random.Random(), self.config)
+            # A bot seat brings its own trading (`hexset.trading`): the
+            # engine asks this object for the seat's vector and gate, the
+            # same object the runner plays the seat with.
+            table.session.set_trader(index, bot)
             brain = LocalSearchBrain(bot=bot, game=table.session.game)
             runner = BotRunner(seat=index, token=seat.token, transport=transport, brain=brain)
             thread = threading.Thread(
@@ -777,6 +780,7 @@ class Tables:
         # true state: the board is public.
         board = table.session.game.state(0, hidden=False).board
         bot = spawn_bot(spec, board, random.Random(), self.config)
+        table.session.set_trader(seat, bot)
         brain = LocalSearchBrain(bot=bot, game=table.session.game)
         token = table.seats[seat].token
         assert token is not None
@@ -789,6 +793,20 @@ class Tables:
 
         return table.view(seat)
 
+    def set_valuation(self, table: Table, seat: int, vector) -> dict:
+        """`PUT /api/games/<CODE>/valuation`: this seat publishes its vector.
+
+        The one trading endpoint there is, and the whole of the mechanic's
+        API surface (`hexset.trading`): five numbers in [-1, 1], positive
+        for "I want more of this". It may be set at any time, takes effect
+        at the next trade event, and is public to the whole table the moment
+        it lands -- `state_view`'s `valuations` block carries every seat's.
+        """
+        if vector is None:
+            raise ApiError("send a `valuation` of five numbers between -1 and 1")
+        table.session.publish(seat, vector)
+        return table.view(seat)
+
     def record(self, table: Table, seat: int) -> dict:
         """`GET /api/record`: the information-set record `hexset.onnx_record`
         builds for a checkpoint, byte-for-byte what an in-process bot would
@@ -796,11 +814,11 @@ class Tables:
         plays from, rather than reconstructing one from `state_view`'s
         human-shaped fields (see the module docstring's note on why:
         `legal_wire_actions`'s own options are already the one fair
-        trade-offer sample every client gets, `fair_legal_actions`)."""
+        option list every client gets, `hexset.actions.legal_actions`)."""
         game = table.session.game
         if is_over(game) or to_move(game) != seat:
             raise ApiError("it is not your turn to act", status=409)
-        options = fair_legal_actions(game)
+        options = legal_actions(game)
         # true state: the board and `num_players` are public.
         state = game.state(seat, hidden=False)
         topology = state.board.topology
@@ -811,7 +829,6 @@ class Tables:
         return {
             **{key: value.tolist() for key, value in record.items()},
             "options": [action_to_wire(a) for a in options],
-            "offers_made": game.offers_made,
             "space": {
                 "num_vertices": topology.num_vertices,
                 "num_edges": topology.num_edges,
@@ -886,4 +903,6 @@ class Tables:
             return self.rename(table, seat, str(payload.get("name", "")))
         if method == "POST" and path == "/api/bot":
             return self.swap_bot(table, int(payload.get("seat", -1)), str(payload.get("model", "")))
+        if method == "PUT" and path == f"/api/games/{table.code}/valuation":
+            return self.set_valuation(table, seat, payload.get("valuation"))
         raise ApiError(f"no such endpoint: {method} {path}", status=404)

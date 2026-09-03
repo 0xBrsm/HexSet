@@ -1,0 +1,23 @@
+{
+  "what": "Readout (iii)(b)'s attribution. The registration predicted the no-trade pair would reproduce 485/800 = 60.625% bit-for-bit. It does not: it reads 499/800 = 62.375%. This run establishes why, and that the why is the whole of it.",
+  "method": "Replay the same duel (`heximax-notrade` vs `search2-notrade`, 800 blocked games, seed 59300, 26 workers) on origin/main (839dcb6) with one change: `hexset.actions._offer_actions` stubbed to return `[]`. Everything else about the old tree -- the offer protocol, the phase, the actions, the bots -- is untouched.",
+  "why_it_moves": "Both no-trade presets suppressed *proposing* (`max_offers=0` through `within_offer_budget` at the root) and *accepting*, but neither filtered the engine's offer sample out of the interior of its own search tree: `SearchBot._value` and `Heximax._options_in` both took `legal_actions` whole. So the no-trade referents searched hypothetical offers on every node, and were never trade-free games in their own model.",
+  "old_tree_with_the_offer_sample_stubbed": {
+    "wins": 499,
+    "games": 800,
+    "decided": 800,
+    "win_rate": 0.62375,
+    "wilson": [0.5896640652879066, 0.6566531628326187],
+    "paired_vp": 0.766875
+  },
+  "this_branch": {
+    "wins": 499,
+    "games": 800,
+    "decided": 800,
+    "win_rate": 0.62375,
+    "wilson": [0.5896640652879066, 0.6566531628326187],
+    "paired_vp": 0.766875
+  },
+  "reading": "Identical to the digit, at 800 games. The offer sample's removal is the entire difference; nothing else in the one-event mechanic -- the trade event, the Bot seam, `max_trades`, the view/ledger changes, `belief_for`'s widened cache key, the encoder -- moves a no-trade game at all. The same attribution holds at the census level: stubbing `_offer_actions` on the old tree reproduces every re-baselined no-trade hash exactly (20/20 search2-notrade seeds 300-319, 5/5 heximax-notrade seeds 100-104, 5/5 unlocked-greedy traces in test_seating).",
+  "recorded_by": "the HexSet one-event-trading PR, 2026-09-03"
+}

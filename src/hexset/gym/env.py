@@ -85,6 +85,9 @@ class HexSetEnv(Env):
 
     The action mask never rides in the observation -- it is always
     `info["action_mask"]`, and `action_masks()` is the `sb3-contrib` hook.
+    The learner's seat publishes no valuation vector, so it never trades;
+    the opponent seats trade with each other and with the learner's cards
+    only through what their own bots advertise and accept.
     `info["view"]` carries `hexset.view.View`, the seat's full information-set
     object (`known`/`unknown`/`sample`), for a caller that wants more than
     the encoder's arrays.
@@ -168,6 +171,14 @@ class HexSetEnv(Env):
             seat = (self._learner_seat + offset) % self._aec.num_players
             bot_rng = random.Random(episode_rng.randrange(2**31))
             self._bots[seat] = spawn(entrant, board, bot_rng)
+        # The opponents bring their own trading to the table: their
+        # `valuation`/`accepts` are what the engine's one trade event a turn
+        # asks (`hexset.trading`). The learner seat has no bot, so it
+        # publishes nothing and never trades -- the deferred half of the
+        # mechanic's interface, not an omission here.
+        self._aec._game.traders = tuple(
+            self._bots.get(seat) for seat in range(self._aec.num_players)
+        )
 
         self._auto_play_opponents()
         observation, info = self._observe_learner()

@@ -49,25 +49,27 @@ from typing import Protocol
 import numpy as np
 import onnxruntime as ort
 
-from hexset.actions import Action, ActionSpace, ActionType, build_space
-from hexset.actions import pair_mask as _record_pair_mask
+from hexset.actions import build_space
 from hexset.bots import Bot
 
 from hexset.server.constants import RECORD_CONTRACTS, TOKEN_HEADER
 from hexset.server.modelmeta import search_config
-from hexset.server.webplay import action_to_wire, wire_to_action
+from hexset.server.webplay import action_to_wire
 
-NUM_RESOURCES = 5
 
 # The two fields the graph reads as bool; every other declared input in the
 # contract-2 record is int64 (see docs/onnx-contract-v2.md). Recomputed by
 # `RecordBrain` from the budget-trimmed options rather than trusted from the
 # wire as-is (see its own docstring for why).
-_BOOL_FIELDS = frozenset({"action_mask", "pair_mask"})
+_BOOL_FIELDS = frozenset({"action_mask"})
+
+# The one record field that is not an integer count: valuations are floats
+# in [-1, 1] (`hexset.trading`).
+_FLOAT_FIELDS = frozenset({"valuations"})
 
 # Fields `GET /api/record` sends alongside the record proper that are not
 # themselves graph inputs.
-_SIDECAR_FIELDS = frozenset({"options", "offers_made", "space"})
+_SIDECAR_FIELDS = frozenset({"options", "space"})
 
 
 # --- Transport: the same two routes every client uses, HTTP or in-process ---
@@ -145,37 +147,13 @@ def _providers(device: str) -> list[str]:
 
 
 def _to_input(name: str, value) -> np.ndarray:
-    dtype = np.bool_ if name in _BOOL_FIELDS else np.int64
+    if name in _BOOL_FIELDS:
+        dtype = np.bool_
+    elif name in _FLOAT_FIELDS:
+        dtype = np.float32
+    else:
+        dtype = np.int64
     return np.asarray(value, dtype=dtype)[np.newaxis, ...]
-
-
-def _record_action_mask(space: ActionSpace, options: list[Action]) -> np.ndarray:
-    """`hexset.onnx_record.record_from_game`'s `action_mask`, without a live
-    `Game` to build the record from — `RecordBrain` only has the
-    budget-trimmed option list (`kept`), so it recomputes the mask over that
-    directly rather than pulling in the whole record builder for one field."""
-    mask = np.zeros(space.size, dtype=bool)
-    for option in options:
-        mask[space.index(option)] = True
-    return mask
-
-
-def _within_offer_budget(options: list[Action], offers_made: int, budget: int | None) -> list[Action]:
-    """`actions.within_offer_budget`, without a live `Game` — it only ever
-    reads `game.offers_made`, which `GET /api/record` already sends."""
-    if budget is None or offers_made < budget:
-        return options
-    kept = [a for a in options if a.type is not ActionType.PROPOSE_TRADE]
-    return kept or options
-
-
-def _decode(index: int, pair: int, space: ActionSpace) -> Action:
-    trade_slot = space.offsets[ActionType.PROPOSE_TRADE]
-    if index == trade_slot:
-        give = tuple(1 if r == pair // NUM_RESOURCES else 0 for r in range(NUM_RESOURCES))
-        want = tuple(1 if r == pair % NUM_RESOURCES else 0 for r in range(NUM_RESOURCES))
-        return Action(ActionType.PROPOSE_TRADE, give=give, want=want)
-    return space.decode(index)
 
 
 @dataclass
@@ -188,7 +166,6 @@ class RecordBrain:
     needs those, not the topology's adjacency."""
 
     session: ort.InferenceSession
-    max_offers: int | None
 
     @classmethod
     def load(cls, spec: str, device: str = "cpu") -> "RecordBrain":
@@ -213,20 +190,16 @@ class RecordBrain:
                 "game state to simulate forward, which no external client should have; run it "
                 "as a local (embedded) bot instead (see LocalSearchBrain)"
             )
-        max_offers = meta.get("max_offers") or None
-        return cls(session=session, max_offers=int(max_offers) if max_offers is not None else None)
+        return cls(session=session)
 
     def decide(self, transport: Transport, token: str, seat: int) -> dict:
         record = transport.get("/api/record", token)
         if "error" in record:
             raise RuntimeError(record["error"])
         space = build_space(**record["space"])
-        options = [wire_to_action(wire) for wire in record["options"]]
-        kept = _within_offer_budget(options, record["offers_made"], self.max_offers)
 
-        # Keyed off the graph's own declared inputs, so a 23-input contract-2
-        # file, a 27-input contract-3 and a 29-input contract-4 all play off
-        # the one record the server sends (see `onnxbot.V2Policy._run`).
+        # Keyed off the graph's own declared inputs rather than off every
+        # field the record carries (see `onnxbot.V2Policy._run`).
         wanted = [i.name for i in self.session.get_inputs()]
         missing = [name for name in wanted if name not in record]
         if missing:
@@ -236,18 +209,10 @@ class RecordBrain:
         inputs = {
             key: _to_input(key, record[key])
             for key in wanted
-            if key not in _SIDECAR_FIELDS and key not in _BOOL_FIELDS
+            if key not in _SIDECAR_FIELDS
         }
-        # Recomputed from `kept`, not taken from the wire as-is: the record's
-        # own mask reflects every fair option the server offered, before this
-        # checkpoint's own trade-offer budget trims it — the graph has to see
-        # the same trimmed mask the checkpoint was trained under.
-        inputs["action_mask"] = _to_input("action_mask", _record_action_mask(space, kept))
-        inputs["pair_mask"] = _to_input("pair_mask", _record_pair_mask(kept))
-
-        action_index, pair_index = self.session.run(["action_index", "pair_index"], inputs)
-        action = _decode(int(action_index[0]), int(pair_index[0]), space)
-        return action_to_wire(action)
+        (action_index,) = self.session.run(["action_index"], inputs)
+        return action_to_wire(space.decode(int(action_index[0])))
 
 
 @dataclass

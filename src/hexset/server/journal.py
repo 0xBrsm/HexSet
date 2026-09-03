@@ -33,6 +33,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Sequence
 
 from hexset.actions import Action, ActionType
 from hexset.board.board import Board
@@ -40,6 +41,7 @@ from hexset.board.terrain import NUM_RESOURCES, Resource
 from hexset.cards import NUM_DEV_CARDS, DevCard
 from hexset.devcards import holdings
 from hexset.game import Game
+from hexset.trading import Trade
 from hexset.victory import victory_points
 
 ENV_DIR = "HEXSET_UI_GAMES_DIR"
@@ -233,6 +235,7 @@ class Journal:
         action: Action,
         before_hands: list[list[int]],
         before_held: list[list[int]],
+        trades: Sequence[Trade] = (),
     ) -> None:
         # true state: the journal is the record of everything that
         # happened, including outcomes no view would expose.
@@ -255,10 +258,12 @@ class Journal:
             "dev": [holdings(state, p) for p in range(state.num_players)],
             "deck_left": len(state.deck),
         }
-        if action.give or action.want:
-            event["give"] = list(action.give)
-            event["want"] = list(action.want)
-            event["ask"] = list(action.ask)
+        if trades:
+            # The exchanges the engine cleared inside this action
+            # (`hexset.trading`). Written down because they are not a
+            # function of the action -- they depend on what every seat had
+            # published -- so a replay cannot re-derive them.
+            event["trades"] = [[t.a, t.b, list(t.received)] for t in trades]
         self._emit(event)
 
     def undo(self, game: Game, *, back_to: int) -> None:
@@ -408,29 +413,30 @@ def action_of(event: dict) -> Action:
     engine's to decide again from the same seed, and reading them back would
     turn a check that the replay agrees into a way of papering over that it
     does not."""
-    offer = {}
-    if "give" in event:
-        offer = {
-            "give": tuple(event["give"]),
-            "want": tuple(event["want"]),
-            "ask": tuple(event.get("ask", ())),
-        }
-    return Action(ActionType[event["type"]], event["a"], event["b"], **offer)
+    return Action(ActionType[event["type"]], event["a"], event["b"])
 
 
-def replayable(events: list[dict]) -> list[tuple[int, Action]]:
-    """Every (actor, action) to re-apply, in order.
+def trades_of(event: dict) -> tuple[Trade, ...]:
+    """The exchanges an action line cleared. Unlike the effects above these
+    *are* read back and re-executed: they are not a function of the action
+    and the seed, but of what every seat had published at the time, which the
+    replay has no way to reconstruct."""
+    return tuple(Trade(a, b, tuple(received)) for a, b, received in event.get("trades", ()))
+
+
+def replayable(events: list[dict]) -> list[tuple[int, Action, tuple[Trade, ...]]]:
+    """Every (actor, action, trades) to re-apply, in order.
 
     Undo lines are honoured by dropping what they took back. The file is
     append-only — an undone placement is still written down, by design (see
     `Journal.undo`) — so replaying the lines as they come would build the
     board the human explicitly rejected.
     """
-    steps: list[tuple[int, Action]] = []
+    steps: list[tuple[int, Action, tuple[Trade, ...]]] = []
     for event in events:
         kind = event.get("kind")
         if kind == "action":
-            steps.append((event["actor"], action_of(event)))
+            steps.append((event["actor"], action_of(event), trades_of(event)))
         elif kind == "undo":
             del steps[event["back_to"] :]
     return steps

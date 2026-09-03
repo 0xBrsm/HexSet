@@ -10,26 +10,21 @@ information set.
 which is already information-set correct by construction (own hand and
 own development cards exact, everyone else a count plus the ledger's
 public-knowledge reconstruction -- see that module's docstring). The
-`action_mask` is built from `hexset.server.rules.fair_legal_actions`, never
-from `hexset.actions.legal_actions`'s own `PROPOSE_TRADE` sample, which
-reads opponents' true hands to decide who could cover an offer -- exactly
-the leak `fair_legal_actions` exists to close (see its module docstring).
+`action_mask` is the engine's own `hexset.actions.legal_actions`, which is
+now honest by construction: the one branch that read opponents' true hands
+was the `PROPOSE_TRADE` sample (who could cover an offer), and trading is
+no longer an action at all (`hexset.trading`). Every action in the space
+also decodes exactly from its index, so a random policy sampling the flat
+`Discrete` space needs no filling-in either -- the interim random-offer
+fill this environment carried is gone with the slot it filled.
 
-**The `PROPOSE_TRADE` gap.** `hexset.actions.ActionSpace` gives `PROPOSE_TRADE`
-a single flat slot meaning "proposing is available" -- an offer is ten
-numbers and cannot be recovered from an index (`ActionSpace.decode`'s own
-docstring). A caller with its own give/want heads (a trained policy) can
-still name an exact offer by passing a `hexset.actions.Action` to `step`
-directly instead of a bare index. A caller sampling the flat `Discrete`
-space -- which is what `gymnasium.spaces.Discrete.sample(mask)` does, and so
-what PettingZoo's own `api_test`/`seed_test` and a random policy do -- gets
-one drawn uniformly, from the game's own seeded `rng`, among every
-one-for-one pair `fair_legal_actions` would show this seat. This is a
-necessary filling-in this implementation adds beneath the ratified design's
-literal "decode the index, apply the action" (`docs/gym-design.md` §2): decoding
-a bare `PROPOSE_TRADE` index yields empty `give`/`want` tuples, which
-`hexset.trading.well_formed` rejects outright, so every random-policy episode
-would otherwise crash the first time the sampler touched that slot.
+**Trading.** A seat trades by publishing a valuation vector and answering a
+gate, not by taking an action, and this environment gives its agents no way
+to publish: every seat's vector stays all-zero and nothing clears.
+`hexset.gym.HexSetEnv` seats real bots for the non-learner seats and does
+supply theirs. The learner's own vector is the deferred half of the
+mechanic's interface (the trading design defers the human/LLM surface), so
+it is not in the action space here.
 """
 
 from __future__ import annotations
@@ -43,12 +38,11 @@ from gymnasium import spaces
 from pettingzoo.utils.env import AECEnv
 
 from hexset import encoding
-from hexset.actions import Action, ActionSpace, ActionType, apply, build_space
+from hexset.actions import Action, ActionSpace, apply, build_space, legal_actions
 from hexset.board.board import random_base_board
 from hexset.board.maps import BASE_LAYOUT
 from hexset.board.topology import build as build_topology
 from hexset.game import Game, is_over, start, to_move
-from hexset.server.rules import fair_legal_actions
 from hexset.victory import relative_points, victory_points
 
 REWARD_MODES = ("terminal", "relative_points")
@@ -173,9 +167,9 @@ class HexSetAEC(AECEnv):
         mask = np.zeros(self._space.size, dtype=np.int8)
         # Per PettingZoo convention (`pettingzoo.classic.tictactoe`), the mask
         # is all zeros for every agent except the one currently to move --
-        # `fair_legal_actions` only ever answers for `to_move(game)` anyway.
+        # `legal_actions` only ever answers for `to_move(game)` anyway.
         if agent == self.agent_selection:
-            for action in fair_legal_actions(game):
+            for action in legal_actions(game):
                 mask[self._space.index(action)] = 1
 
         return {
@@ -197,13 +191,7 @@ class HexSetAEC(AECEnv):
         game = self._game
         assert game is not None, "step() called before reset()"
 
-        if isinstance(action, Action):
-            decoded = action
-        else:
-            decoded = self._space.decode(int(action))
-            if decoded.type is ActionType.PROPOSE_TRADE:
-                decoded = self._fill_propose_trade(game)
-
+        decoded = action if isinstance(action, Action) else self._space.decode(int(action))
         apply(game, decoded)
 
         self._clear_rewards()
@@ -229,19 +217,6 @@ class HexSetAEC(AECEnv):
         self._game = None
 
     # -- internals --------------------------------------------------------
-
-    def _fill_propose_trade(self, game: Game) -> Action:
-        """A concrete, honest offer for a bare `PROPOSE_TRADE` index.
-
-        Drawn from `game`'s own seeded `rng` (the same stream every other
-        engine-internal choice -- responder order, robber ties -- already
-        uses), so an episode replayed under the same `reset(seed=...)` picks
-        the same offers. See the module docstring for why this exists.
-        """
-        options = [a for a in fair_legal_actions(game) if a.type is ActionType.PROPOSE_TRADE]
-        if not options:
-            raise ValueError("PROPOSE_TRADE is not currently legal")
-        return game.rng.choice(options)
 
     def _finish_episode(self, game: Game, acted_agent: str) -> None:
         won = game.won_by

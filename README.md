@@ -31,18 +31,17 @@ One distribution, `hexset`, ships from `src/`:
     held-out perfect-information referent), heximax's own `omniscient`
     mode, and the Catanatron adapter when it hosts a Catanatron bot; every
     other outside caller that genuinely needs the true state says so with a
-    `# true state: <why>` comment at the call site. `Belief` is kept as an
-    alias for `View` for callers that have not moved to the new name yet.
+    `# true state: <why>` comment at the call site. It is also what the trade
+    mechanic hands a seat: `Bot.valuation(view)` and
+    `Bot.accepts(view, bundle, counterparty)` receive nothing else.
   - **`hexset.bots`** (`src/hexset/bots`) — every heuristic bot, sharing the
     handcrafted evaluation at `hexset.bots.evaluate`: `search2`
     (`hexset.bots.search2`: `SearchBot`, `greedy`, `RandomBot`, the
     `STANCES` a per-seat vector is read through) and `heximax`
-    (`hexset.bots.heximax`, files by concern — `evaluate`/`search`/`trade`/
+    (`hexset.bots.heximax`, files by concern — `evaluate`/`search`/
     `presets` — a handcrafted perfect-information-Monte-Carlo player
     that reads its own view of the game (`hexset.view`) rather than the
-    true state, registered as a `hexset.arena` entrant on import). A
-    one-line `hexset.evaluate` shim and a deprecated top-level `heximax`
-    package (`import heximax`) keep both at their pre-move import paths.
+    true state, registered as a `hexset.arena` entrant on import).
   - **`hexset.catanatron`** (`src/hexset/catanatron`) — an adapter that
     seats `hexset` bots as players in [Catanatron](https://github.com/bcollazo/catanatron),
     for sharded duels against Catanatron's own shipped bots.
@@ -92,14 +91,14 @@ python -m hexset.bench.duel heximax search2 --games 400
 ```
 
 `a`/`b` are checkpoint paths or `hexset.arena` entrant names (`heximax`,
-`heximax-omni`, `search2`, `search2-offers3`, ...). Reports a Wilson interval,
+`heximax-omni`, `search2`, `search2-notrade`, ...). Reports a Wilson interval,
 not a raw win count. See `python -m hexset.bench.duel --help` for the full
 flag set (workers, board/duel seeds, geometry).
 
 To duel against Catanatron's own bots instead:
 
 ```
-python -m hexset.catanatron.duel --players=DC:search2-offers3,AB:2,AB:2,AB:2 --num=400 --workers=8
+python -m hexset.catanatron.duel --players=DC:search2-notrade,AB:2,AB:2,AB:2 --num=400 --workers=8
 ```
 
 ## Run the server
@@ -153,7 +152,7 @@ How an opponent plays is declared in the `.onnx` file, not here. `export_onnx` w
 | --- | --- | --- |
 | `players` | table size the graph was traced for | required |
 | `num_hexes` / `num_vertices` / `num_edges` | board-shape fingerprint, so a mismatched board fails loudly | required |
-| `max_offers` | trade-offer budget the run trained under | engine's cap |
+| `max_trades` | `0` to switch trading off for this checkpoint | trading on |
 | `search` | `mcts` to search over the model's own priors; anything else plays one forward pass | none |
 | `simulations` | descents per decision, when `search=mcts` | 128 |
 | `wave` | leaves batched per expansion, when `search=mcts` | 16 |
@@ -170,6 +169,30 @@ The human seat can also be driven by a script or an LLM, over either interface, 
 - **MCP**: `python -m hexset.server.mcp`, run alongside an already-running `web.py` (`HEXSET_UI_BASE_URL`, default `http://127.0.0.1:8770`). It's a thin stdio client of that same HTTP API — one MCP connection is one `hexset_id` identity, same as one browser tab — exposing `register`, `models`, `new_game`, `board`, `state`, `act`, and `undo` as tools. `act` takes an index into `state()`'s `legal_actions` and settles the whole bot cascade before returning, so one tool call is one full human turn, not one click. Hand-rolled against the MCP stdio wire format rather than built on the official SDK, which pulls in a compiled dependency (`pydantic`) this project otherwise has none of.
 
 Any number of these seats — browser, HTTP script, MCP-connected LLM, or an embedded `.onnx` bot — can sit at the same table; the server does not distinguish who or what is behind a seat beyond the interface it came in on.
+
+## Trading
+
+Trading is one event a turn, not a language of actions. Every seat holds a
+public **valuation vector** — five numbers in `[-1, 1]`, positive for "I want
+more of this", negative for "I would give this up" — and after the roll and
+the robber, before any build is served, the engine clears deals for the
+player whose turn it is. A one-for-one exchange is *advertised* when both
+sides' vectors say it helps them; it *clears* only when each seat's own
+private gate, its judgement of the position the exchange leads to, also says
+yes. Best deal first — the one maximising the smaller public surplus — then
+again, and again, until nothing clears. There is no budget: the gate must be
+strictly positive and is re-asked after every exchange, so the acting seat's
+own valuation strictly increases and the event ends on its own.
+
+Nobody proposes, accepts or declines: there are no trade actions at all, no
+phase in which somebody is asked, and nothing in the action space to mask —
+which is also what makes the legal-action list honest for every seat, since
+no remaining action's legality depends on another seat's hand. A bot brings
+its two methods (`Bot.valuation(view)`, `Bot.accepts(view, bundle,
+counterparty)`, both defaulting to "never trades"); a person sets their
+vector with `PUT /api/games/<CODE>/valuation` and sees every seat's vector
+and the turn's trade log beside the board. `max_trades=0` is the off switch
+for the no-trade referents (`search2-notrade`, `heximax-notrade`).
 
 ## Gym
 
@@ -229,12 +252,12 @@ the encoder's arrays.
 
 ## Layout
 
-- **The engine lives in this repo, under `src/hexset/`** (`actions`, `game`, `ledger`, `board`, `mcts`, `arena`, `tuning`, `catanatron`, `bench`, and the rest, plus `hexset.bots` — every heuristic bot: `search2` (`hexset.bots.search2`) and `heximax` (`hexset.bots.heximax`, files by concern), sharing `hexset.bots.evaluate`; `import heximax` still works, via a deprecated top-level shim — see [`docs/engine-divergence-2026-09-02.md`](docs/engine-divergence-2026-09-02.md) for how heximax was first imported, with history, from the training repo, and for what this repo used to carry as its own copy before that). `hexset`, `hexset.bench`, `hexset.server`, `hexset.clients` and `heximax` are all one distribution (`hexset`) and one `pyproject.toml` now; see the CHANGELOG's "one distribution" entry for what was renamed to get there.
+- **The engine lives in this repo, under `src/hexset/`** (`actions`, `game`, `ledger`, `board`, `mcts`, `arena`, `tuning`, `catanatron`, `bench`, and the rest, plus `hexset.bots` — every heuristic bot: `search2` (`hexset.bots.search2`) and `heximax` (`hexset.bots.heximax`, files by concern), sharing `hexset.bots.evaluate` — see [`docs/engine-divergence-2026-09-02.md`](docs/engine-divergence-2026-09-02.md) for how heximax was first imported, with history, from the training repo, and for what this repo used to carry as its own copy before that). `hexset`, `hexset.bench`, `hexset.server` and `hexset.clients` are all one distribution (`hexset`) and one `pyproject.toml`; see the CHANGELOG's "one distribution" entry for what was renamed to get there.
 - `src/hexset/server/api.py` — tables, seats, join codes, seat tokens, the `/api/*` surface. `web.py` is the HTTP transport over it, `mcp.py` a stdio MCP client of the same routes, `webplay.py` the session: what a seat may see, the human-readable log, undo, and the wire encoding of an action.
-- `src/hexset/server/rules.py` — the one legality authority every seat shares. `fair_legal_actions` is the honest trade sample: no seat, human or bot, is shown which specific opponents could cover an offer.
+- `src/hexset/server/rules.py` — what a served table needs beyond the engine's own `legal_actions`: naming an empty option list as the bug it is, and checking a submitted action against the list. It used to hold a second, honest enumeration, because the engine's offer sample read opponents' hands; trading is no longer an action, so there is one list for every seat.
 - `src/hexset/server/seating.py` — the setup snake starting at whoever created the game, and retiring a seat nobody claimed.
-- `src/hexset/clients/onnxbot.py` — the entire model boundary: the record contract, action-space indexing, masking, sampling, and search all live behind it, and `spawn(path, board)` is the only entry point anything else uses. Builds its record with `hexset.onnx_record.record_from_game` directly — the torch-free split that used to block that (`docs/engine-divergence-2026-09-02.md`, R1) has landed, so this package no longer carries its own copy. `botclient.py` is the other half: a bot plays its seat as a peer client of the API, embedded or external, never as a privileged writer. Only the record contracts (`2`, `3`, `4`) are served — contract 1 was dropped 2026-09-02, see the divergence audit.
-- `src/hexset/server/static/index.html` — the entire frontend: inline CSS, inline SVG icons, vanilla JS. No build step.
+- `src/hexset/clients/onnxbot.py` — the entire model boundary: the record contract, action-space indexing, masking, sampling, and search all live behind it, and `spawn(path, board)` is the only entry point anything else uses. Builds its record with `hexset.onnx_record.record_from_game` directly — the torch-free split that used to block that (`docs/engine-divergence-2026-09-02.md`, R1) has landed, so this package no longer carries its own copy. `botclient.py` is the other half: a bot plays its seat as a peer client of the API, embedded or external, never as a privileged writer. Only record contract `5` is served — 2, 3 and 4 are the offer protocol's contracts and describe a game this engine no longer plays; contract 1 was dropped 2026-09-02, see the divergence audit.
+- `src/hexset/server/static/index.html` — the entire frontend: inline CSS, inline SVG icons, vanilla JS. No build step. Its trading surface is five per-resource toggles that `PUT` this seat's valuation vector, plus a read-out of every seat's vector and the turn's trades; there is nothing to propose or answer.
 - `models/` — drop `.onnx` files here.
 - `games/` — where every game is journalled: one JSON lines file per game, written as it is played, with nothing hidden (the dice, the deck order, every card drawn or stolen, every seat's hand after every action — see `src/hexset/server/journal.py`). On by default; `HEXSET_UI_GAMES_DIR` moves it, and setting that empty turns it off.
 

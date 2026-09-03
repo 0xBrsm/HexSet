@@ -447,7 +447,8 @@ def test_record_matches_the_seat_on_move():
     data = registry.handle("GET", "/api/record", {}, token)
     assert data["perspective"] == mover_seat
     assert "action_mask" in data and "ledger_known" in data
-    assert "options" in data and "offers_made" in data and "space" in data
+    assert "options" in data and "space" in data
+    assert "valuations" in data
 
 
 def test_record_is_refused_when_it_is_not_your_turn():
@@ -640,16 +641,20 @@ def test_the_snake_starts_where_first_says_not_always_seat_zero(tmp_path):
 
 # --- One mask for every seat --------------------------------------------------
 
+# There used to be two masks. The engine's own `legal_actions` filtered the
+# `PROPOSE_TRADE` sample by opponents' true hands, so a served table had to
+# build a second, honest one (`rules.fair_legal_actions`) -- and PR #2 defect
+# 4 was an embedded bot searching the first while every other client got the
+# second, which meant the same checkpoint played a different game depending
+# on how it had been seated. Trading is no longer an action
+# (`hexset.trading`), so no remaining action's legality depends on another
+# seat's hand, there is one list, and the tests below pin that rather than
+# the agreement of two.
 
-def _a_position_where_the_two_masks_differ(mover: int = 0):
-    """A `Game` in MAIN where the mover holds a resource no opponent holds.
 
-    That is exactly when the engine's omniscient `PROPOSE_TRADE` sample
-    (`actions._offer_actions`, which skips a `want` nobody can cover) and the
-    honest one (`rules.proposable_options`, which asks only what the mover
-    holds) come apart -- common in the first twenty turns, and the whole of
-    what defect 4 is about.
-    """
+def _a_position_where_no_opponent_holds_anything(mover: int = 0):
+    """A `Game` in MAIN where the mover holds every resource and nobody else
+    holds any -- the position that used to separate the two samples."""
     import random as _random
 
     from hexset.board.board import random_base_board
@@ -662,47 +667,22 @@ def _a_position_where_the_two_masks_differ(mover: int = 0):
     game.current_player = mover
     for hand in game._state.hands:
         hand[:] = [0] * NUM_RESOURCES
-    game._state.hands[mover] = [1, 1, 1, 1, 1]  # every give is available
-    game._state.hands[(mover + 1) % 4][0] = 1  # and exactly one want is coverable
+    game._state.hands[mover] = [1, 1, 1, 1, 1]
     return game
 
 
-def test_the_honest_and_omniscient_trade_samples_really_do_differ_here():
-    """The premise of the next two tests, asserted rather than assumed: if
-    these two ever agreed, the tests below would pass vacuously."""
-    from hexset.actions import ActionType, legal_actions
-    from hexset.server.rules import fair_legal_actions
-
-    game = _a_position_where_the_two_masks_differ()
-    omniscient = {a for a in legal_actions(game) if a.type is ActionType.PROPOSE_TRADE}
-    honest = {a for a in fair_legal_actions(game) if a.type is ActionType.PROPOSE_TRADE}
-    assert omniscient < honest
-    # The omniscient sample offers only the `want` seat 1 can cover; the
-    # honest one offers every want for every resource the mover holds.
-    assert {tuple(a.want) for a in omniscient} == {(1, 0, 0, 0, 0)}
-    assert len({tuple(a.want) for a in honest}) == 5
-
-
-def test_an_embedded_bot_is_offered_the_same_mask_the_wire_serves():
-    """PR #2 defect 4. `NetworkBot.choose` called the engine's omniscient
-    `options_for`, while `/api/record` and every human client got the honest
-    list -- so the same checkpoint played a different game depending on
-    whether it was seated embedded or joined over HTTP, and the commit
-    message's claim that the record is "byte-identical to what an in-process
-    bot computes" was false for `action_mask`/`pair_mask` whenever some
-    resource was held by no opponent (which is this position)."""
-    from hexset.server.rules import fair_legal_actions
+def test_an_embedded_bot_is_offered_the_same_list_the_wire_serves():
+    from hexset.actions import legal_actions
     from hexset.clients.onnxbot import options_for as onnxbot_options_for
 
-    game = _a_position_where_the_two_masks_differ()
-    assert onnxbot_options_for(game) == fair_legal_actions(game)
+    game = _a_position_where_no_opponent_holds_anything()
+    assert onnxbot_options_for(game) == legal_actions(game)
 
 
 def test_record_matches_the_embedded_bots_options():
-    """The same claim at the level it was actually made, through the real
-    route: the record `GET /api/record` serves and the record an in-process
-    bot builds for itself (`onnxbot.V2Policy._run`) must agree field for
-    field, `action_mask` and `pair_mask` included."""
+    """The claim at the level it was actually made, through the real route:
+    the record `GET /api/record` serves and the record an in-process bot
+    builds for itself (`onnxbot.V2Policy._run`) must agree field for field."""
     import numpy as np
 
     from hexset.actions import build_space
@@ -715,9 +695,7 @@ def test_record_matches_the_embedded_bots_options():
     table = registry.get(code)
     seat = registry.by_token(token)[1]
 
-    # Park the table on the position where the two samples come apart.
-    table.session.game = _a_position_where_the_two_masks_differ(mover=seat)
-
+    table.session.game = _a_position_where_no_opponent_holds_anything(mover=seat)
     served = registry.record(table, seat)
 
     game = table.session.game
@@ -729,9 +707,19 @@ def test_record_matches_the_embedded_bots_options():
 
     for key, value in in_process.items():
         assert np.array_equal(np.asarray(served[key]), value), key
-    # And the wire carries the honest offers, not a filtered subset.
-    offers = [w for w in served["options"] if w["type"] == "PROPOSE_TRADE"]
-    assert len({tuple(w["want"]) for w in offers}) == 5
+
+
+def test_the_option_list_does_not_move_when_opponents_hands_do():
+    """The property the second enumeration existed to guarantee, asserted
+    directly: nothing the mover may do depends on what anybody else holds."""
+    from hexset.actions import legal_actions
+    from hexset.board.terrain import NUM_RESOURCES
+
+    game = _a_position_where_no_opponent_holds_anything()
+    before = legal_actions(game)
+    for seat in range(1, 4):
+        game._state.hands[seat] = [2] * NUM_RESOURCES
+    assert legal_actions(game) == before
 
 
 # --- Runner lifecycle ---------------------------------------------------------
@@ -821,3 +809,77 @@ def test_closing_a_registry_stops_every_runner():
 
     assert not [t for t in threading.enumerate() if t.name.startswith(f"bot-{code}")]
     assert not registry._tables
+
+
+# --- Trading (`hexset.trading`) -----------------------------------------------
+
+
+def test_a_seat_publishes_its_valuation_and_every_viewer_sees_it():
+    """`PUT /api/games/<CODE>/valuation` is the whole of the trading API
+    surface: a seat sets its own vector, and the vector is public."""
+    registry = tables()
+    code, token = deal(registry)
+    vector = [1.0, 0.0, 0.0, 0.0, -1.0]
+
+    view = registry.handle("PUT", f"/api/games/{code}/valuation", {"valuation": vector}, token)
+    assert view["valuations"][view["seat"]] == vector
+
+    # Public: an observer with no seat at all reads the same block.
+    watched = registry.handle("GET", f"/api/table/{code}", {}, None)
+    assert watched["valuations"][view["seat"]] == vector
+
+
+@pytest.mark.parametrize(
+    "bad", [None, [1.0, 0.0], [0.0, 0.0, 0.0, 0.0, 5.0], "wood"]
+)
+def test_a_malformed_valuation_is_refused(bad):
+    registry = tables()
+    code, token = deal(registry)
+    with pytest.raises(ApiError):
+        registry.handle("PUT", f"/api/games/{code}/valuation", {"valuation": bad}, token)
+
+
+def test_a_published_valuation_clears_a_trade_and_it_shows_in_the_view():
+    """End to end: a human seat publishes, the engine's trade event clears an
+    exchange on the way into the main phase, and the game view reports it."""
+    from hexset.board.terrain import Resource
+    from hexset.game import Phase, roll_dice
+
+    registry = tables()
+    code, token = deal(registry)
+    table = registry.get(code)
+    game = table.session.game
+    seat = table.seat_of(token)
+    other = next(s for s in range(game.num_players) if s != seat)
+
+    # Park the game in ROLL with the human to move, holding one wood, and the
+    # bot seat holding one ore. A non-seven roll opens the main phase, which
+    # is where the trade event runs.
+    game.phase = Phase.ROLL
+    game.current_player = seat
+    state = game.state(seat, hidden=False)
+    for hand in state.hands:
+        hand[:] = [0, 0, 0, 0, 0]
+    state.hands[seat][Resource.WOOD] = 1
+    state.hands[other][Resource.ORE] = 1
+
+    wants_ore = [0.0] * 5
+    wants_ore[Resource.ORE] = 1.0
+    wants_ore[Resource.WOOD] = -1.0
+    registry.handle("PUT", f"/api/games/{code}/valuation", {"valuation": wants_ore}, token)
+    # The bot seat wants the wood back; `PostedValuation` stands in for it so
+    # the exchange has two willing sides without depending on what a
+    # particular checkpoint would advertise.
+    from hexset.server.webplay import PostedValuation
+
+    table.session.set_trader(other, PostedValuation(tuple(-v for v in wants_ore)))
+
+    roll_dice(game, 8)
+    assert game.phase is Phase.MAIN
+
+    view = table.view(seat)
+    assert view["trades"], "the engine cleared nothing"
+    trade = view["trades"][0]
+    assert {trade["a"], trade["b"]} == {seat, other}
+    assert state.hands[seat][Resource.ORE] == 1
+    assert state.hands[other][Resource.WOOD] == 1

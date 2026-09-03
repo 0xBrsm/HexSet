@@ -41,11 +41,11 @@ if TYPE_CHECKING:
     # makes every annotation a string) -- never imported for real. The three
     # names `_spawn` actually calls at runtime (`RandomBot`, `SearchBot`,
     # `greedy`) are imported locally inside `_spawn` instead of at module
-    # level, because `hexset.bots` now imports `heximax`, which imports
-    # this module back (for `Entrant`/`register_entrant_kind`/
+    # level, because `hexset.bots` imports `hexset.bots.heximax`, which
+    # imports this module back (for `Entrant`/`register_entrant_kind`/
     # `register_preset`) -- a module-level `from .bots import ...` here
     # would deadlock that cycle on whichever of the two is cold-started
-    # first. See `heximax`'s own module docstring for the full cycle.
+    # first. See `hexset.bots.heximax`'s own docstring for the full cycle.
     from .bots import Bot
 
 Z_95 = 1.959964
@@ -74,7 +74,7 @@ _HEXNET_HINT = (
     "point that does, such as hexnet.train/hexnet.league/hexnet.collect) "
     "before spawning it"
 )
-_HEXIMAX_HINT = "is provided by the heximax package; import heximax before spawning it"
+_HEXIMAX_HINT = "is provided by hexset.bots.heximax; import hexset.bots before spawning it"
 
 
 def register_entrant_kind(kind: str, factory) -> None:
@@ -88,21 +88,21 @@ def register_evaluator_provider(name: str, factory) -> None:
     hexset does not implement itself. `factory(weights, board) -> Evaluator`,
     matching `EVALUATORS[name](board, weights)`'s role for the built-in ones --
     the object just needs an `evaluate_game(game, seat)` method and may carry
-    its own `max_offers`."""
+    its own `max_trades`."""
     _EVALUATOR_PROVIDERS[name] = factory
 
 
 def register_preset(name: str, entrant: "Entrant") -> None:
     """Register a named lineup shortcut (`PRESETS[name]`, resolved by
     `entrant_from_name`/`lineup_from_names`) for an entrant hexset does not
-    ship itself -- how the `heximax` package makes "heximax",
+    ship itself -- how `hexset.bots.heximax` makes "heximax",
     "heximax-omni" and "heximax-notrade" resolvable by name once imported."""
     PRESETS[name] = entrant
 
 
 def register_checkpoint_loader(loader) -> None:
     """Register `hexnet.netbot.load`-shaped loader: `(path, topology, device)
-    -> Loaded`, an object with `.policy`, `.space` and `.max_offers`. Lets
+    -> Loaded`, an object with `.policy`, `.space` and `.max_trades`. Lets
     `hexset.bench.aivat`/`hexset.bench.human_agreement` load a checkpoint without
     importing hexnet themselves."""
     global _CHECKPOINT_LOADER
@@ -136,9 +136,11 @@ def leaf_evaluator(policy, space, pad_to: int | None = None):
 # that liked trading in circles would never reach the turn cap. A game that
 # trips this is a bug worth seeing, not a result worth counting.
 #
-# Raised once trading landed: negotiating costs an action per offer and one per
-# response, so a random four-player game went from about 1400 actions to 3400,
-# and 5000 had stopped being a guard and started being a limit.
+# Raised once the old offer protocol landed: negotiating cost an action per
+# offer and one per response, so a random four-player game went from about
+# 1400 actions to 3400 and 5000 had stopped being a guard. Trading is one
+# engine event now and costs no actions at all, so the headroom is larger
+# than it needs to be -- kept, because a guard is not a target.
 MAX_ACTIONS = 20000
 
 
@@ -161,22 +163,17 @@ class Entrant:
     # How the per-seat vector is read: see `hexset.bots.STANCES`. Defaults to
     # the stance that wins; `greedy-own` reproduces the plain max^n baseline.
     stance: str = "relative"
-    # Whether the proposer names who it would rather have take an offer.
-    partner_choice: bool = False
     # Whether the opening settlements come from the fitted placement prior
     # rather than from whatever this entrant would otherwise do. Orthogonal to
     # `kind`, so any entrant can be duelled against itself with only the eight
     # setup picks differing.
     placement: bool = False
-    # How many offers a turn this entrant allows itself, or None for the
-    # engine's whole budget. Self-imposed so a duel can see the difference.
-    #
-    # A network entrant reads `None` differently, and deliberately: it means the
-    # budget its checkpoint recorded training under. A policy trained at three
-    # offers a turn and scored at the engine's eight is being measured on a
-    # horizon it never saw, and defaulting to the engine's cap here would make
-    # that the easy mistake rather than the deliberate one.
-    max_offers: int | None = None
+    # The trade off switch: `0` means this entrant publishes no valuation and
+    # refuses every exchange, so it never trades. Not a budget -- the engine
+    # has no cap (`hexset.trading`) -- and self-imposed rather than engine-wide
+    # so a duel can see what trading is worth: only a bot that declines what
+    # its opponent still has can price it.
+    max_trades: int | None = None
     # `kind="mcts"` only: how many descents the tree gets per decision, and how
     # many it may launch before expanding new leaves. They are separate because
     # a wider wave changes collision rate as well as network batch size.
@@ -192,13 +189,6 @@ class Entrant:
     # resolution over 400 games; `k = 1` ships and the field stays for anyone
     # who wants to re-open the question, not for a preset to vary.
     k: int = 1
-    # `kind="heximax"` only: the P2 adapter's own margins -- a proposal must
-    # clear `propose_margin` to be offered, an offer must clear
-    # `accept_margin` to be accepted (`Heximax`'s class docstring, P2
-    # paragraph). Unfitted; P3's Registration sweeps both. Defaulted to
-    # `heximax()`'s own defaults so every existing preset is unchanged.
-    accept_margin: float = 0.0
-    propose_margin: float = 0.0
 
     def renamed(self, name: str) -> Entrant:
         return replace(self, name=name)
@@ -216,22 +206,20 @@ def _evaluators() -> dict[str, type]:
     """`{"default": Evaluator, "tiered": TieredEvaluator}`, built on first use
     and cached.
 
-    Deferred rather than a module-level import + literal: a module-level
-    `from .evaluate import Evaluator` would resolve through the
-    `hexset.evaluate` shim into `hexset.bots.evaluate`, which -- because
-    `hexset.bots.evaluate` is a submodule of the `hexset.bots` *package* --
-    requires `hexset/bots/__init__.py` to finish running first, and that
-    module now imports `heximax`, which imports this module back for the
-    four names above. A module-level import here would deadlock that cycle
+    Deferred rather than a module-level import + literal:
+    `hexset.bots.evaluate` is a submodule of the `hexset.bots` *package*, so
+    importing it requires `hexset/bots/__init__.py` to finish running first,
+    and that module imports `hexset.bots.heximax`, which imports this module
+    back for the four names above. A module-level import here would deadlock that cycle
     on whichever of `hexset.arena`/`hexset.tuning` is cold-started first, so
     the whole dependency is pushed to first use, well after every module
-    involved has finished importing. See `heximax`'s own module docstring
+    involved has finished importing. See `hexset.bots.heximax`'s own docstring
     for the full cycle and why `hexset.mcts` carries the same pattern for
     `STANCES`.
     """
     global _EVALUATORS
     if _EVALUATORS is None:
-        from .evaluate import Evaluator
+        from .bots.evaluate import Evaluator
         from .evaluate_tiered import Evaluator as TieredEvaluator
 
         _EVALUATORS = {"default": Evaluator, "tiered": TieredEvaluator}
@@ -254,23 +242,13 @@ PRESETS: dict[str, Entrant] = {
         "search2-tiered", kind="search", depth=2, width=6, evaluator="tiered"
     ),
     "greedy-relative": Entrant("greedy-relative", kind="greedy", stance="relative"),
-    # Partner choice needs `paranoid`: subtracting the mean of the other seats
-    # cannot tell them apart, since a trade hands the same value to whoever
-    # takes it. See `test_only_subtracting_the_max_can_tell_opponents_apart`.
-    "greedy-partner": Entrant(
-        "greedy-partner", kind="greedy", stance="paranoid", partner_choice=True
-    ),
     "greedy-paranoid": Entrant("greedy-paranoid", kind="greedy", stance="paranoid"),
-    # Self-limited offer budgets. Greedy saturates the engine's cap of eight,
-    # and 84% of a game's actions are negotiation, so what those offers are
-    # worth decides whether a training horizon has to be that long.
-    "greedy-offers1": Entrant("greedy-offers1", kind="greedy", max_offers=1),
-    "greedy-offers2": Entrant("greedy-offers2", kind="greedy", max_offers=2),
-    "greedy-offers3": Entrant("greedy-offers3", kind="greedy", max_offers=3),
-    # The search on the training horizon, so a duel against learned leaves
-    # differs in the leaf evaluation and in nothing else.
-    "search2-offers3": Entrant(
-        "search2-offers3", kind="search", depth=2, width=6, max_offers=3
+    # The no-trade referents: same bot, trade switch off, so a duel between
+    # them and their trading twins prices the mechanic and a duel between two
+    # of them is a game with no trading in it at all.
+    "greedy-notrade": Entrant("greedy-notrade", kind="greedy", max_trades=0),
+    "search2-notrade": Entrant(
+        "search2-notrade", kind="search", depth=2, width=6, max_trades=0
     ),
     "search2-relative": Entrant(
         "search2-relative", kind="search", depth=2, width=6, stance="relative"
@@ -281,7 +259,7 @@ PRESETS: dict[str, Entrant] = {
     "random-placement": Entrant("random-placement", kind="random", placement=True),
     "greedy-placement": Entrant("greedy-placement", kind="greedy", placement=True),
     # "heximax"/"heximax-omni"/"heximax-notrade" are not built in -- they are
-    # registered by the `heximax` package at import time via `register_preset`
+    # registered by `hexset.bots.heximax` at import time via `register_preset`
     # (see that package's "registration" section), the same way `hexnet`
     # registers "network"/"mcts".
 }
@@ -304,11 +282,11 @@ def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
     if entrant.kind in _HEXIMAX_KINDS:
         raise ValueError(f"entrant kind {entrant.kind!r} {_HEXIMAX_HINT}")
 
-    max_offers = entrant.max_offers
+    max_trades = entrant.max_trades
     if entrant.evaluator in _EVALUATOR_PROVIDERS:
         evaluator = _EVALUATOR_PROVIDERS[entrant.evaluator](entrant.weights, board)
-        if max_offers is None:
-            max_offers = getattr(evaluator, "max_offers", None)
+        if max_trades is None:
+            max_trades = getattr(evaluator, "max_trades", None)
     elif entrant.evaluator in _NETWORK_EVALUATORS:
         raise ValueError(f"evaluator {entrant.evaluator!r} {_HEXNET_HINT}")
     elif entrant.evaluator not in _evaluators():
@@ -321,8 +299,7 @@ def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
             evaluator,
             rng,
             stance=entrant.stance,
-            partner_choice=entrant.partner_choice,
-            max_offers=max_offers,
+            max_trades=max_trades,
         )
     if entrant.kind == "search":
         return SearchBot(
@@ -331,8 +308,7 @@ def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
             width=entrant.width,
             rng=rng,
             stance=entrant.stance,
-            partner_choice=entrant.partner_choice,
-            max_offers=max_offers,
+            max_trades=max_trades,
         )
     raise ValueError(f"unknown bot kind: {entrant.kind}")
 
@@ -457,8 +433,18 @@ def play(
     *,
     action_cap: int = MAX_ACTIONS,
 ) -> Game:
-    """One game, each bot seated at its own index."""
+    """One game, each bot seated at its own index.
+
+    Seating a bot also seats what it brings to a trade: `game.traders` is
+    the lineup itself, so the engine's one trade event a turn
+    (`hexset.trading`) asks each seat's own `valuation`/`accepts` rather
+    than this loop having to remember to run anything. A bot that defines
+    neither never trades, which is how `RandomBot` and any external bot that
+    predates the mechanic behave.
+    """
     game = start(board, len(bots), rng)
+    game.traders = tuple(bots)
+    game.max_trades = None
     actions = 0
     while not is_over(game) and actions < action_cap:
         apply(game, bots[to_move(game)].choose(game))
@@ -604,18 +590,15 @@ MCTS = "mcts:"
 def entrant_from_name(name: str) -> Entrant:
     """One preset name, or one `<kind>:<checkpoint>` spec, as an entrant."""
     if name.startswith(NETWORK):
-        # `network:<path>@<offers>` self-imposes an offer budget, mirroring
-        # `mcts:<path>@<simulations>`. Without a suffix the entrant keeps
-        # `max_offers=None`, which for a network means the budget its checkpoint
-        # trained under — see the field's own comment. The suffix exists so a
-        # duel can price the policy's *proposing* behaviour, which sits at 95%
-        # of the legal cap and 5x the rate cited in `hexset.bench.behaviour`.
-        path, separator, offers = name[len(NETWORK) :].partition("@")
+        # `network:<path>@<trades>` switches trading off with `@0`, mirroring
+        # `mcts:<path>@<simulations>`. Nothing else is a meaningful value:
+        # the engine has no trade budget to tune, only an off switch.
+        path, separator, trades = name[len(NETWORK) :].partition("@")
         return Entrant(
-            name=f"network-offers{offers}" if separator else "network",
+            name=f"network-trades{trades}" if separator else "network",
             kind="network",
             weights=path,
-            max_offers=int(offers) if separator else None,
+            max_trades=int(trades) if separator else None,
         )
     if name.startswith(MCTS):
         path, _, search = name[len(MCTS) :].partition("@")

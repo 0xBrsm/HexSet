@@ -10,7 +10,7 @@ from hexset.board.maps import MINI_LAYOUT
 from hexset.board.terrain import TERRAIN_RESOURCE, Resource, Terrain
 from hexset.board.topology import build as build_topology
 from hexset.cards import DevCard
-from hexset.evaluate import FITTED_SCARCE, ROLLS, WIN_SCORE, Evaluator, Weights
+from hexset.bots.evaluate import FITTED_SCARCE, ROLLS, WIN_SCORE, Evaluator, Weights
 from hexset.game import start
 from hexset.state import new_game, place_settlement, upgrade_to_city
 from hexset.victory import WINNING_POINTS, victory_points

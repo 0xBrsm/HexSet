@@ -1,35 +1,30 @@
 # SPDX-License-Identifier: GPL-3.0-only
+"""The one-event trade mechanic (`hexset.trading`), gate (i) of the trading
+design's registration: clearing, the veto, termination, the tie-break, and
+what `imagine` carries."""
+
 from __future__ import annotations
 
 import random
 
 import pytest
 
-from hexset.actions import Action, ActionType, apply, legal_actions
+from hexset.actions import Action, ActionType
 from hexset.board.board import random_base_board
-from hexset.board.terrain import Resource
-from hexset.game import (
-    MAX_OFFERS_PER_TURN,
-    Phase,
-    accept_trade,
-    decline_trade,
-    end_turn,
-    imagine,
-    propose_trade,
-    start,
-    to_move,
-)
+from hexset.board.terrain import NUM_RESOURCES, Resource
+from hexset.game import Phase, end_turn, enter_main, imagine, move_robber_to, roll_dice, start
 from hexset.trading import (
-    Offer,
+    NO_VALUATION,
+    Trade,
     bundle,
-    can_accept,
-    can_propose,
-    execute,
+    exchange,
     holds,
-    responders,
-    well_formed,
+    one_for_one,
+    trade_event,
 )
 from helpers import give
+
+WOOD, BRICK, SHEEP, WHEAT, ORE = (int(r) for r in Resource)
 
 
 def a_game(players: int = 4):
@@ -47,321 +42,441 @@ def stocked(*hands: tuple[int, Resource, int]):
     return game
 
 
+def vector(**amounts: float) -> tuple[float, ...]:
+    out = [0.0] * NUM_RESOURCES
+    for name, value in amounts.items():
+        out[Resource[name.upper()]] = value
+    return tuple(out)
+
+
+class Trader:
+    """A seat that publishes a fixed vector and answers a fixed gate."""
+
+    def __init__(self, vec=NO_VALUATION, gate=True):
+        self.vec = vec
+        self.gate = gate
+        self.asked: list[tuple[tuple[int, ...], int]] = []
+        self.views: list = []
+
+    def valuation(self, view):
+        self.views.append(view)
+        return self.vec
+
+    def accepts(self, view, received, counterparty):
+        self.asked.append((tuple(received), counterparty))
+        return self.gate
+
+
+def run(game, traders):
+    game.traders = tuple(traders)
+    return trade_event(
+        game,
+        lambda seat, view: traders[seat].valuation(view),
+        lambda seat, view, received, other: traders[seat].accepts(view, received, other),
+    )
+
+
+# --- the bundle helpers -------------------------------------------------------
+
+
 def test_a_bundle_reads_by_resource_name():
     assert bundle(wood=2, ore=1) == (2, 0, 0, 0, 1)
 
 
-def test_both_sides_must_be_non_empty():
-    assert not well_formed(Offer(0, bundle(wood=1), bundle()))
-    assert not well_formed(Offer(0, bundle(), bundle(ore=1)))
-    assert well_formed(Offer(0, bundle(wood=1), bundle(ore=1)))
-
-
-def test_a_resource_may_not_appear_on_both_sides():
-    """Two wood for one wood and one brick is just one wood for one brick."""
-    assert not well_formed(Offer(0, bundle(wood=2), bundle(wood=1, brick=1)))
-    assert well_formed(Offer(0, bundle(wood=2), bundle(brick=1)))
-
-
-def test_negative_amounts_are_not_an_offer():
-    assert not well_formed(Offer(0, (-1, 0, 0, 0, 0), bundle(ore=1)))
-
-
-def test_offers_are_uncapped_in_size():
-    """The rules place no limit on how much may change hands."""
-    game = stocked((0, Resource.WOOD, 12), (1, Resource.ORE, 9))
-    big = Offer(0, bundle(wood=12), bundle(ore=9))
-    assert can_propose(game._state, big)
-    assert can_accept(game._state, big, 1)
-
-
-def test_a_player_cannot_offer_what_they_do_not_hold():
-    game = stocked((0, Resource.WOOD, 1))
-    assert not can_propose(game._state, Offer(0, bundle(wood=2), bundle(ore=1)))
-
-
-def test_a_player_cannot_accept_what_they_cannot_cover():
-    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1))
-    offer = Offer(0, bundle(wood=2), bundle(ore=2))
-    assert not can_accept(game._state, offer, 1)
-
-
-def test_nobody_may_take_their_own_offer():
-    game = stocked((0, Resource.WOOD, 2), (0, Resource.ORE, 2))
-    assert not can_accept(game._state, Offer(0, bundle(wood=2), bundle(ore=1)), 0)
-
-
-def test_only_players_who_can_cover_the_offer_are_asked():
-    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1), (3, Resource.ORE, 4))
-    offer = Offer(0, bundle(wood=2), bundle(ore=1))
-    assert responders(game._state, offer) == (1, 3)
-
-
-def test_the_offer_goes_round_the_table_from_the_proposer():
-    """First refusal follows the proposer, so it belongs to no seat permanently."""
-    game = stocked((2, Resource.WOOD, 2), (0, Resource.ORE, 1), (3, Resource.ORE, 1))
-    offer = Offer(2, bundle(wood=2), bundle(ore=1))
-    assert responders(game._state, offer) == (3, 0)
-
-
-def test_the_proposer_can_name_who_it_would_rather_ask():
-    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1), (3, Resource.ORE, 1))
-    propose_trade(game, bundle(wood=2), bundle(ore=1), ask=(3, 1))
-    assert game.pending_responders == [3, 1]
-
-
-def test_naming_cannot_add_a_player_who_cannot_cover_the_offer():
-    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1))
-    propose_trade(game, bundle(wood=2), bundle(ore=1), ask=(2, 3, 1))
-    assert game.pending_responders == [1]
-
-
-def test_players_left_out_of_the_naming_queue_behind_those_named():
-    game = stocked(
-        (0, Resource.WOOD, 2),
-        (1, Resource.ORE, 1),
-        (2, Resource.ORE, 1),
-        (3, Resource.ORE, 1),
-    )
-    propose_trade(game, bundle(wood=2), bundle(ore=1), ask=(3,))
-    assert game.pending_responders == [3, 1, 2]
-
-
-def test_going_round_wraps_past_the_last_seat():
-    game = stocked((3, Resource.WOOD, 2), (0, Resource.ORE, 1), (2, Resource.ORE, 1))
-    offer = Offer(3, bundle(wood=2), bundle(ore=1))
-    assert responders(game._state, offer) == (0, 2)
-
-
-def test_executing_moves_both_sides_and_conserves_the_cards():
-    game = stocked((0, Resource.WOOD, 3), (2, Resource.ORE, 2))
-    before = sum(sum(h) for h in game._state.hands)
-
-    execute(game._state, Offer(0, bundle(wood=2), bundle(ore=1)), 2)
-    assert game._state.hands[0][Resource.WOOD] == 1
-    assert game._state.hands[0][Resource.ORE] == 1
-    assert game._state.hands[2][Resource.WOOD] == 2
-    assert game._state.hands[2][Resource.ORE] == 1
-    assert sum(sum(h) for h in game._state.hands) == before
-
-
-def test_executing_an_offer_nobody_can_cover_is_refused():
-    game = stocked((0, Resource.WOOD, 2))
-    with pytest.raises(ValueError, match="cannot take"):
-        execute(game._state, Offer(0, bundle(wood=2), bundle(ore=1)), 1)
-
-
 def test_holds_checks_every_resource():
-    game = stocked((0, Resource.WOOD, 2), (0, Resource.ORE, 1))
-    assert holds(game._state, 0, bundle(wood=2, ore=1))
-    assert not holds(game._state, 0, bundle(wood=2, ore=2))
+    game = stocked((0, Resource.WOOD, 1))
+    assert holds(game._state, 0, bundle(wood=1))
+    assert not holds(game._state, 0, bundle(wood=1, ore=1))
 
 
-def test_proposing_hands_the_decision_to_the_players_being_asked():
-    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1), (2, Resource.ORE, 1))
-    propose_trade(game, bundle(wood=2), bundle(ore=1), ask=(1, 2))  # fixed order: the protocol is under test, not the draw
-
-    assert game.phase is Phase.TRADE_RESPOND
-    assert game.pending_responders == [1, 2]
-    assert to_move(game) == 1
-    assert game.current_player == 0
+def test_one_for_one_is_signed_towards_the_receiver():
+    assert one_for_one(WOOD, ORE) == (-1, 0, 0, 0, 1)
 
 
-def test_declining_passes_the_offer_along_and_then_drops_it():
-    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1), (2, Resource.ORE, 1))
-    propose_trade(game, bundle(wood=2), bundle(ore=1), ask=(1, 2))  # fixed order: the protocol is under test, not the draw
-
-    decline_trade(game, 1)
-    assert to_move(game) == 2
-    decline_trade(game, 2)
-    assert game.phase is Phase.MAIN
-    assert game.offer is None
-    assert game._state.hands[0][Resource.WOOD] == 2
-
-
-def test_the_first_player_to_accept_takes_the_trade():
-    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1), (2, Resource.ORE, 1))
-    propose_trade(game, bundle(wood=2), bundle(ore=1), ask=(1, 2))  # fixed order: the protocol is under test, not the draw
-
-    accept_trade(game, 1)
-    assert game.phase is Phase.MAIN
-    assert game._state.hands[1][Resource.WOOD] == 2
-    assert game._state.hands[2][Resource.ORE] == 1
-
-
-def test_only_the_player_being_asked_may_answer():
-    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1), (2, Resource.ORE, 1))
-    propose_trade(game, bundle(wood=2), bundle(ore=1), ask=(1, 2))  # fixed order: the protocol is under test, not the draw
-    with pytest.raises(ValueError, match="not the one being asked"):
-        accept_trade(game, 2)
-
-
-def test_an_offer_nobody_can_cover_never_reaches_a_response():
-    game = stocked((0, Resource.WOOD, 2))
-    propose_trade(game, bundle(wood=2), bundle(ore=1))
-    assert game.phase is Phase.MAIN
-    # It still counts as a move that was made.
-    assert game.offers_made == 1
-
-
-def test_a_turn_may_not_negotiate_forever():
-    game = stocked((0, Resource.WOOD, 8))
-    for _ in range(MAX_OFFERS_PER_TURN):
-        propose_trade(game, bundle(wood=1), bundle(ore=1))
-    with pytest.raises(ValueError, match="offers allowed per turn"):
-        propose_trade(game, bundle(wood=1), bundle(ore=1))
-
-
-def test_the_allowance_resets_with_the_turn():
-    game = stocked((0, Resource.WOOD, 8))
-    for _ in range(MAX_OFFERS_PER_TURN):
-        propose_trade(game, bundle(wood=1), bundle(ore=1))
-    end_turn(game)
-    game.phase = Phase.MAIN
-    game.current_player = 0
-    propose_trade(game, bundle(wood=1), bundle(ore=1))
-    assert game.offers_made == 1
-
-
-def offers(game):
-    return {
-        (action.give, action.want)
-        for action in legal_actions(game)
-        if action.type is ActionType.PROPOSE_TRADE
-    }
-
-
-def test_a_bundle_already_declined_is_not_offered_again_this_turn():
-    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1), (1, Resource.BRICK, 1))
-    repeat = (bundle(wood=1), bundle(ore=1))
-    assert repeat in offers(game)
-
-    propose_trade(game, *repeat)
-    decline_trade(game, 1)
-
-    assert repeat not in offers(game)
-    # Only that bundle goes. The rest of the sample is untouched.
-    assert (bundle(wood=1), bundle(brick=1)) in offers(game)
-    assert game.offered == {repeat}
-
-
-def test_repeating_an_offer_stays_legal_even_though_it_is_not_enumerated():
-    """The sample narrows; the rules do not.
-
-    `_offer_actions` is documented as a sample rather than the whole legal set,
-    and this is what keeps that true. A stronger policy that wants to ask twice
-    still can, which is also why `--max-offers` remains the thing that bounds a
-    turn.
-    """
+def test_exchange_moves_both_sides_and_conserves_the_cards():
     game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1))
-    propose_trade(game, bundle(wood=1), bundle(ore=1))
-    decline_trade(game, 1)
-
-    propose_trade(game, bundle(wood=1), bundle(ore=1))
-    assert game.offers_made == 2
-
-
-def test_the_offer_record_resets_with_the_turn():
-    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1))
-    propose_trade(game, bundle(wood=1), bundle(ore=1))
-    decline_trade(game, 1)
-    end_turn(game)
-
-    game.phase = Phase.MAIN
-    game.current_player = 0
-    assert game.offered == set()
-    assert (bundle(wood=1), bundle(ore=1)) in offers(game)
+    before = sum(sum(hand) for hand in game._state.hands)
+    exchange(game._state, 0, 1, one_for_one(WOOD, ORE))
+    assert game._state.hands[0][WOOD] == 1
+    assert game._state.hands[0][ORE] == 1
+    assert game._state.hands[1][WOOD] == 1
+    assert game._state.hands[1][ORE] == 0
+    assert sum(sum(hand) for hand in game._state.hands) == before
 
 
-def test_an_imagined_game_carries_what_has_been_offered():
-    """Without this a search reads every repeat as a fresh option.
-
-    `imagine` is the search's only view of the position, so a field the engine
-    keeps and the copy drops is worse than one that never existed.
-    """
-    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1))
-    propose_trade(game, bundle(wood=1), bundle(ore=1))
-    decline_trade(game, 1)
-
-    copy = imagine(game, random.Random(1))
-    assert copy.offered == game.offered
-    assert (bundle(wood=1), bundle(ore=1)) not in offers(copy)
-
-    # And the copy's own record does not leak back into the real game.
-    propose_trade(copy, bundle(wood=2), bundle(ore=1))
-    assert game.offered == {(bundle(wood=1), bundle(ore=1))}
+# --- clearing -----------------------------------------------------------------
 
 
-def test_responding_is_in_the_action_space():
-    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1))
-    propose_trade(game, bundle(wood=2), bundle(ore=1))
-
-    options = legal_actions(game)
-    assert options == [
-        Action(ActionType.ACCEPT_TRADE),
-        Action(ActionType.DECLINE_TRADE),
+def test_a_deal_both_sides_want_clears():
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    traders = [
+        Trader(vector(ore=1.0, wood=-1.0)),
+        Trader(vector(wood=1.0, ore=-1.0)),
+        Trader(),
+        Trader(),
     ]
-    apply(game, Action(ActionType.ACCEPT_TRADE))
+    done = run(game, traders)
+    assert done == [Trade(0, 1, one_for_one(WOOD, ORE))]
+    assert game._state.hands[0][ORE] == 1
+    assert game._state.hands[1][WOOD] == 1
+    assert game.trades_made == 1
+    assert game.trades == done
+
+
+def test_the_ledger_certifies_what_a_trade_moved():
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    traders = [
+        Trader(vector(ore=1.0, wood=-1.0)),
+        Trader(vector(wood=1.0, ore=-1.0)),
+        Trader(),
+        Trader(),
+    ]
+    run(game, traders)
+    assert game.ledger.seats[1].known[WOOD] == 1
+
+
+def test_a_seat_that_publishes_nothing_never_trades():
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    traders = [Trader(vector(ore=1.0, wood=-1.0)), Trader(), Trader(), Trader()]
+    assert run(game, traders) == []
+
+
+def test_one_positive_surplus_is_not_enough():
+    """The counterparty has to want it too, not merely not mind."""
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    traders = [
+        Trader(vector(ore=1.0, wood=-1.0)),
+        Trader(vector(wood=1.0, ore=1.0)),  # values them equally: surplus 0
+        Trader(),
+        Trader(),
+    ]
+    assert run(game, traders) == []
+
+
+def test_ties_do_not_clear():
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    traders = [
+        Trader(vector(ore=0.5, wood=0.5)),
+        Trader(vector(wood=0.5, ore=0.5)),
+        Trader(),
+        Trader(),
+    ]
+    assert run(game, traders) == []
+
+
+def test_either_private_gate_vetoes_a_deal_both_vectors_advertise():
+    """§8.3's safety property: no vector anyone posts can force a trade a
+    seat's own gate rejects."""
+    for refuser in (0, 1):
+        game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+        traders = [
+            Trader(vector(ore=1.0, wood=-1.0)),
+            Trader(vector(wood=1.0, ore=-1.0)),
+            Trader(),
+            Trader(),
+        ]
+        traders[refuser].gate = False
+        assert run(game, traders) == [], f"seat {refuser}'s veto was ignored"
+
+
+def test_the_gate_is_asked_about_the_bundle_from_each_seat_s_own_side():
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    traders = [
+        Trader(vector(ore=1.0, wood=-1.0)),
+        Trader(vector(wood=1.0, ore=-1.0)),
+        Trader(),
+        Trader(),
+    ]
+    run(game, traders)
+    assert traders[0].asked[0] == (one_for_one(WOOD, ORE), 1)
+    assert traders[1].asked[0] == (one_for_one(ORE, WOOD), 0)
+
+
+def test_both_sides_are_handed_their_own_view_and_nothing_else():
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    traders = [Trader(vector(ore=1.0, wood=-1.0)) for _ in range(4)]
+    run(game, traders)
+    for seat, trader in enumerate(traders):
+        assert trader.views, f"seat {seat} was never asked to publish"
+        assert all(view.perspective == seat for view in trader.views)
+        assert all(not view.omniscient for view in trader.views)
+
+
+def test_only_the_current_player_trades():
+    """Seats 1 and 2 would both love the swap; it is not their turn."""
+    game = stocked((1, Resource.WOOD, 1), (2, Resource.ORE, 1))
+    traders = [
+        Trader(),
+        Trader(vector(ore=1.0, wood=-1.0)),
+        Trader(vector(wood=1.0, ore=-1.0)),
+        Trader(),
+    ]
+    assert run(game, traders) == []
+
+
+def test_a_locked_seat_is_never_a_counterparty():
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    game.locked = frozenset({1})
+    traders = [
+        Trader(vector(ore=1.0, wood=-1.0)),
+        Trader(vector(wood=1.0, ore=-1.0)),
+        Trader(),
+        Trader(),
+    ]
+    assert run(game, traders) == []
+
+
+def test_the_engine_checks_coverage_itself():
+    """Seat 1 wants wood and would give ore, but holds none to give."""
+    game = stocked((0, Resource.WOOD, 1))
+    traders = [
+        Trader(vector(ore=1.0, wood=-1.0)),
+        Trader(vector(wood=1.0, ore=-1.0)),
+        Trader(),
+        Trader(),
+    ]
+    assert run(game, traders) == []
+
+
+# --- the loop -----------------------------------------------------------------
+
+
+def test_the_event_keeps_going_while_anything_clears():
+    game = stocked((0, Resource.WOOD, 3), (1, Resource.ORE, 3))
+    traders = [
+        Trader(vector(ore=1.0, wood=-1.0)),
+        Trader(vector(wood=1.0, ore=-1.0)),
+        Trader(),
+        Trader(),
+    ]
+    done = run(game, traders)
+    assert len(done) == 3
+    assert game._state.hands[0][ORE] == 3
+    assert game._state.hands[0][WOOD] == 0
+
+
+def test_a_gate_that_stops_saying_yes_stops_the_event():
+    game = stocked((0, Resource.WOOD, 3), (1, Resource.ORE, 3))
+
+    class Fussy(Trader):
+        def accepts(self, view, received, counterparty):
+            # Only ever wants one more ore.
+            return view.state.hands[view.perspective][ORE] < 1
+
+    traders = [
+        Fussy(vector(ore=1.0, wood=-1.0)),
+        Trader(vector(wood=1.0, ore=-1.0)),
+        Trader(),
+        Trader(),
+    ]
+    assert len(run(game, traders)) == 1
+
+
+def test_max_trades_zero_is_the_off_switch():
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    game.max_trades = 0
+    traders = [
+        Trader(vector(ore=1.0, wood=-1.0)),
+        Trader(vector(wood=1.0, ore=-1.0)),
+        Trader(),
+        Trader(),
+    ]
+    assert run(game, traders) == []
+    assert not traders[0].views, "a switched-off event should not even ask"
+
+
+def test_the_published_vectors_are_recorded_on_the_game():
+    game = stocked((0, Resource.WOOD, 1))
+    traders = [Trader(vector(ore=0.25)) for _ in range(4)]
+    run(game, traders)
+    assert game.valuations[0] == vector(ore=0.25)
+    assert len(game.valuations) == 4
+
+
+def test_a_published_vector_must_be_five_numbers_in_range():
+    game = stocked((0, Resource.WOOD, 1))
+    for bad in ((1.0, 1.0), (0.0, 0.0, 0.0, 0.0, 2.0)):
+        traders = [Trader(bad)] + [Trader() for _ in range(3)]
+        with pytest.raises(ValueError):
+            run(game, traders)
+
+
+def test_the_vectors_are_fixed_for_the_whole_event():
+    """Published at the last decision; only the private gates move as cards
+    change hands, which is what makes the second ore worth less."""
+    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 2))
+    traders = [
+        Trader(vector(ore=1.0, wood=-1.0)),
+        Trader(vector(wood=1.0, ore=-1.0)),
+        Trader(),
+        Trader(),
+    ]
+    run(game, traders)
+    assert len(traders[0].views) == 1
+    assert len(traders[1].views) == 1
+
+
+# --- the tie-break ------------------------------------------------------------
+
+
+def test_the_best_deal_goes_first():
+    """Two clearing swaps; the one with the larger smaller-surplus wins."""
+    game = stocked((0, Resource.WOOD, 1), (0, Resource.BRICK, 1), (1, Resource.ORE, 1))
+    traders = [
+        Trader(vector(ore=1.0, wood=-0.1, brick=-0.9)),
+        Trader(vector(brick=0.9, wood=0.1, ore=-1.0)),
+        Trader(),
+        Trader(),
+    ]
+    done = run(game, traders)
+    # brick->ore: min(1.0 - -0.9, 0.9 - -1.0) = 1.9
+    # wood->ore: min(1.0 - -0.1, 0.1 - -1.0) = 1.1
+    assert done[0].received == one_for_one(BRICK, ORE)
+
+
+def test_equal_surpluses_break_by_the_canonical_trade_index():
+    """Wood(0) and brick(1) are worth the same to both sides, so the pair
+    ordered first by `given * NUM_RESOURCES + wanted` clears first."""
+    game = stocked((0, Resource.WOOD, 1), (0, Resource.BRICK, 1), (1, Resource.ORE, 1))
+    traders = [
+        Trader(vector(ore=1.0, wood=-1.0, brick=-1.0)),
+        Trader(vector(wood=1.0, brick=1.0, ore=-1.0)),
+        Trader(),
+        Trader(),
+    ]
+    done = run(game, traders)
+    assert done[0].received == one_for_one(WOOD, ORE)
+
+
+def test_equal_deals_break_by_the_lower_counterparty():
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1), (2, Resource.ORE, 1))
+    partner = vector(wood=1.0, ore=-1.0)
+    traders = [
+        Trader(vector(ore=1.0, wood=-1.0)),
+        Trader(partner),
+        Trader(partner),
+        Trader(),
+    ]
+    assert run(game, traders)[0].b == 1
+
+
+# --- where the event runs -----------------------------------------------------
+
+
+def test_the_event_runs_on_the_way_into_main_from_a_roll():
+    game = a_game()
+    game.phase = Phase.ROLL
+    give(game._state, 0, Resource.WOOD, 1)
+    give(game._state, 1, Resource.ORE, 1)
+    game.traders = (
+        Trader(vector(ore=1.0, wood=-1.0)),
+        Trader(vector(wood=1.0, ore=-1.0)),
+        Trader(),
+        Trader(),
+    )
+    roll_dice(game, 8)
     assert game.phase is Phase.MAIN
-    assert game._state.hands[1][Resource.WOOD] == 2
+    assert game.trades_made == 1
 
 
-def test_declining_through_the_action_space_ends_the_offer():
-    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1))
-    propose_trade(game, bundle(wood=2), bundle(ore=1))
-    apply(game, Action(ActionType.DECLINE_TRADE))
+def test_the_event_runs_on_the_way_into_main_from_the_robber():
+    game = a_game()
+    game.phase = Phase.ROBBER
+    give(game._state, 0, Resource.WOOD, 1)
+    give(game._state, 1, Resource.ORE, 1)
+    game.traders = (
+        Trader(vector(ore=1.0, wood=-1.0)),
+        Trader(vector(wood=1.0, ore=-1.0)),
+        Trader(),
+        Trader(),
+    )
+    move_robber_to(game, 3)
     assert game.phase is Phase.MAIN
-    assert game._state.hands[0][Resource.WOOD] == 2
+    assert game.trades_made == 1
 
 
-def test_an_imagined_game_carries_the_open_offer():
-    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1))
-    propose_trade(game, bundle(wood=2), bundle(ore=1))
-
-    copy = imagine(game, random.Random(1))
-    assert copy.offer == game.offer
-    assert copy.pending_responders == game.pending_responders
-    assert copy.offers_made == game.offers_made
-
-    apply(copy, Action(ActionType.ACCEPT_TRADE))
-    assert copy.phase is Phase.MAIN
-    assert game.phase is Phase.TRADE_RESPOND
+def test_a_game_with_nobody_seated_simply_does_not_trade():
+    game = a_game()
+    game.phase = Phase.ROLL
+    give(game._state, 0, Resource.WOOD, 1)
+    give(game._state, 1, Resource.ORE, 1)
+    roll_dice(game, 8)
+    assert game.trades == []
 
 
-def test_the_table_is_asked_in_a_random_order_unless_the_proposer_says():
-    """First refusal goes to nobody in particular: the neutral order is a
-    permutation drawn from the game's RNG, not the next seat in turn order."""
-    from hexset.game import Phase, propose_trade, start
+def test_the_count_and_the_log_reset_with_the_turn():
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    run(
+        game,
+        [
+            Trader(vector(ore=1.0, wood=-1.0)),
+            Trader(vector(wood=1.0, ore=-1.0)),
+            Trader(),
+            Trader(),
+        ],
+    )
+    assert game.trades_made == 1
+    end_turn(game)
+    assert game.trades_made == 0
+    assert game.trades == []
 
-    def a_game(seed: int):
-        rng = random.Random(seed)
-        game = start(random_base_board(rng), 4, rng)
-        game.phase = Phase.MAIN
-        game.current_player = 0
-        for hand in game._state.hands:
-            for r in range(len(hand)):
-                hand[r] = 0
-        game._state.hands[0][Resource.WOOD] = 1
-        for p in (1, 2, 3):
-            game._state.hands[p][Resource.ORE] = 1
-        return game
 
-    orders = set()
-    for seed in range(40):
-        game = a_game(seed)
-        propose_trade(game, bundle(wood=1), bundle(ore=1))
-        assert sorted(game.pending_responders) == [1, 2, 3]
-        orders.add(tuple(game.pending_responders))
-    assert len(orders) > 1, "the order never varied"
-    assert (1, 2, 3) in orders or len(orders) >= 3
+def test_trading_is_not_in_the_action_space():
+    names = {kind.name for kind in ActionType}
+    assert names & {"PROPOSE_TRADE", "ACCEPT_TRADE", "DECLINE_TRADE"} == set()
+    assert "BANK_TRADE" in names
+    assert Action(ActionType.BANK_TRADE, 0, 1)._fields == ("type", "a", "b")
 
-    # The same seed asks in the same order: the draw comes from the game's RNG.
-    a, b = a_game(7), a_game(7)
-    propose_trade(a, bundle(wood=1), bundle(ore=1))
-    propose_trade(b, bundle(wood=1), bundle(ore=1))
-    assert a.pending_responders == b.pending_responders
 
-    # A proposer who says who to ask first is obeyed, whatever the RNG says.
-    game = a_game(3)
-    propose_trade(game, bundle(wood=1), bundle(ore=1), ask=(3, 1))
-    assert game.pending_responders == [3, 1, 2]
+# --- imagine ------------------------------------------------------------------
+
+
+def test_an_imagined_game_carries_the_published_vectors():
+    game = stocked((0, Resource.WOOD, 1))
+    game.valuations[0] = vector(ore=0.5)
+    child = imagine(game, random.Random(1))
+    assert child.valuations[0] == vector(ore=0.5)
+    child.valuations[0] = vector(ore=-0.5)
+    assert game.valuations[0] == vector(ore=0.5)
+
+
+def test_an_imagined_game_does_not_carry_the_seated_traders():
+    """A hypothetical must not reach the real opponents' private gates."""
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    game.traders = tuple(Trader(vector(ore=1.0, wood=-1.0)) for _ in range(4))
+    child = imagine(game, random.Random(1))
+    assert child.traders is None
+    child.phase = Phase.MAIN
+    enter_main(child)
+    assert child.trades == []
+
+
+def test_an_imagined_game_carries_the_trade_switch_and_the_log():
+    game = stocked((0, Resource.WOOD, 1))
+    game.max_trades = 0
+    game.trades.append(Trade(0, 1, one_for_one(WOOD, ORE)))
+    game.trades_made = 1
+    child = imagine(game, random.Random(1))
+    assert child.max_trades == 0
+    assert child.trades_made == 1
+    child.trades.append(Trade(0, 2, one_for_one(WOOD, ORE)))
+    assert len(game.trades) == 1
+
+
+# --- the assertion ------------------------------------------------------------
+
+
+def test_an_event_never_outruns_the_cards_on_the_table():
+    """The one engine limit (`trade_event`'s own assertion), exercised on a
+    position that trades as hard as the mechanic allows: a gate that always
+    says yes and vectors that make every swap advertised."""
+    game = stocked((0, Resource.WOOD, 4), (1, Resource.ORE, 4))
+    cards = sum(sum(hand) for hand in game._state.hands)
+    traders = [
+        Trader(vector(ore=1.0, wood=-1.0)),
+        Trader(vector(wood=1.0, ore=-1.0)),
+        Trader(),
+        Trader(),
+    ]
+    done = run(game, traders)
+    assert 0 < len(done) <= cards

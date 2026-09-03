@@ -18,7 +18,7 @@ import time
 from hexset.bench.throughput import default_workers, environment
 from hexset.arena import Z_95, wilson
 from hexset.dataset import base_rate, build, split_by_game
-from hexset.evaluate import TERM_NAMES, Weights
+from hexset.bots.evaluate import TERM_NAMES, Weights
 from hexset.fitting import accuracy, fit, log_loss
 from hexset.record import read
 from hexset.tuning import as_source, duel

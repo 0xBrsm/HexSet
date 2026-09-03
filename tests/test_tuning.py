@@ -8,9 +8,9 @@ import pytest
 
 from hexset.arena import compete, spawn
 from hexset.board.board import random_base_board
-from hexset.evaluate import Weights
+from hexset.bots.evaluate import Weights
 from hexset.evaluate_tiered import Weights as TieredWeights
-from heximax import NO_TRADE_WEIGHTS, TRADING_WEIGHTS, Heximax
+from hexset.bots.heximax import NO_TRADE_WEIGHTS, TRADING_WEIGHTS, Heximax
 from hexset.tuning import (
     ANCHOR,
     WEIGHTS,
@@ -127,18 +127,18 @@ def test_weights_round_trip_through_their_source_form():
 
 
 @pytest.mark.parametrize(
-    "evaluator, mode, max_offers",
-    [("heximax-trading", "honest", 3), ("heximax-notrade", "notrade", 0)],
+    "evaluator, mode, max_trades",
+    [("heximax-trading", "honest", None), ("heximax-notrade", "notrade", 0)],
 )
 def test_a_heximax_fit_builds_heximax_entrants_carrying_the_candidate(
-    evaluator, mode, max_offers
+    evaluator, mode, max_trades
 ):
     candidate = perturb(WEIGHTS[evaluator](), random.Random(0), sigma=0.4, count=2)
     entrant = entrant_for("challenger", candidate, depth=2, width=6, evaluator=evaluator)
 
     assert entrant.kind == "heximax"
     assert entrant.mode == mode
-    assert entrant.max_offers == max_offers
+    assert entrant.max_trades == max_trades
     assert entrant.k == 1
     assert entrant.weights == candidate
 
@@ -146,7 +146,7 @@ def test_a_heximax_fit_builds_heximax_entrants_carrying_the_candidate(
     bot = spawn(entrant, board, random.Random(0))
     assert isinstance(bot, Heximax)
     assert bot.mode == mode
-    assert bot.max_offers == max_offers
+    assert bot.max_trades == max_trades
     assert bot.evaluator.weights == candidate
 
 

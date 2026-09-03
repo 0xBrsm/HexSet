@@ -23,7 +23,7 @@ from math import exp, log
 from typing import Sequence
 
 from .dataset import Sample
-from .evaluate import TERM_NAMES, Weights
+from .bots.evaluate import TERM_NAMES, Weights
 
 EPS = 1e-12
 

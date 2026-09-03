@@ -144,11 +144,19 @@ def chance_outcomes(
 
     `game` and its random stream are untouched: every successor is an
     `imagine` copy drawing from `rng`.
+
+    Every successor is also re-seated with `game.traders`, which `imagine`
+    deliberately does not copy (`hexset.game.Game.traders`): this is an
+    instrumented *replay* of a real game, not a bot's hypothetical, so its
+    successors must clear the same trades the real one would. A roll and a
+    steal both change hands before the turn's trade event runs, so the
+    outcomes genuinely differ by more than the one card drawn.
     """
     if action.type is ActionType.ROLL:
         out = []
         for roll, probability in ROLL_ODDS:
             child = imagine(game, rng, randomize_deck=False)
+            child.traders = game.traders
             roll_dice(child, roll)
             out.append((roll, probability, child))
         return out
@@ -164,6 +172,7 @@ def chance_outcomes(
         out = []
         for card, count in sorted(remaining.items()):
             child = imagine(game, rng, randomize_deck=False)
+            child.traders = game.traders
             # `devcards.buy` pops the end of the deck, so moving the forced card
             # there and calling the real `apply` keeps the rules -- the payment
             # and the victory-point card's win check -- exactly as played.
@@ -183,30 +192,38 @@ def chance_outcomes(
     if total == 0 or sum(1 for n in hand if n) < 2:
         return []
 
-    # Played once, then patched. Exact rather than approximate: a steal moves one
-    # resource and nothing else, and neither `update_largest_army` nor the win
-    # check reads which resource it was -- so the alternative outcomes differ
-    # from the played one in exactly two hand entries.
-    thief = _thief(game)
-    played = imagine(game, rng, randomize_deck=False)
-    apply(played, action)
-    took = _moved(
-        game.state(thief, hidden=False).hands[thief],
-        played.state(thief, hidden=False).hands[thief],
-    )
+    # Each outcome is played out in full rather than patched afterwards.
+    # Patching the played child's two hand entries was exact while a steal
+    # moved one card and nothing else; it is not any more, because the steal
+    # resolves the robber and so opens the main phase, and the turn's trade
+    # event then clears deals off the *post-steal* hands. `_Forced` stands in
+    # for the child's rng exactly as `hexset.bots.heximax` does it: `steal`
+    # draws `randrange(total)` and walks the hand in resource order, so
+    # returning the index of the first card of the wanted resource makes the
+    # draw deterministic, and nothing else on the path consults the rng.
     out = []
     for resource, count in enumerate(hand):
         if not count:
             continue
-        child = imagine(played, rng, randomize_deck=False)
-        if resource != took:
-            child_hands = child.state(thief, hidden=False).hands
-            child_hands[thief][took] -= 1
-            child_hands[victim][took] += 1
-            child_hands[thief][resource] += 1
-            child_hands[victim][resource] -= 1
+        child = imagine(game, rng, randomize_deck=False)
+        child.traders = game.traders
+        child.rng = _Forced(sum(hand[:resource]))  # type: ignore[assignment]
+        apply(child, action)
+        child.rng = rng
         out.append((_outcome_key(child, action), count / total, child))
     return out
+
+
+class _Forced:
+    """A stand-in rng that makes `robber.steal` take one chosen card."""
+
+    __slots__ = ("index",)
+
+    def __init__(self, index: int) -> None:
+        self.index = index
+
+    def randrange(self, _stop: int) -> int:
+        return self.index
 
 
 def _moved(before: list[int], after: list[int]) -> int:
@@ -340,6 +357,10 @@ def instrumented(
     )
 
     game = start(board, seats, random.Random(f"{seed}:{board_index}:game"))
+    # Seated as `arena.play` seats them, so the engine's one trade event a
+    # turn asks the same bots the same questions here as it does there --
+    # without this the replay would be a no-trade game against a trading one.
+    game.traders = tuple(lineup)
     # Its own stream, so the enumeration cannot be blamed for a divergence and
     # a rerun at a different `--terms` still plays the same game.
     aux = random.Random(f"aivat:{seed}:{board_index}")

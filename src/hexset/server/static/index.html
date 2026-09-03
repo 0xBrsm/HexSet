@@ -336,6 +336,20 @@
      hugs the two board edges instead of running a column up the left one.
      Placed by name, so this holds whatever order renderPieceSupply happens
      to build the three tiles in. */
+  #trading { margin-top: 10px; font-size: 12px; }
+  #trading h4 { margin: 0 0 4px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; opacity: .65; }
+  .val-row { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+  .val-row .val-name { width: 46px; opacity: .8; }
+  .val-row button {
+    width: 26px; padding: 2px 0; font-size: 11px; line-height: 1;
+    border-radius: 6px; cursor: pointer;
+  }
+  .val-row button.on { background: var(--accent); color: #fff; }
+  .val-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+  .val-table th, .val-table td { padding: 1px 3px; text-align: right; font-variant-numeric: tabular-nums; }
+  .val-table th:first-child, .val-table td:first-child { text-align: left; }
+  .val-table th { opacity: .6; font-weight: 500; }
+  #trading .trade-line { opacity: .8; margin-top: 2px; }
   #piece-supply {
     position: absolute; left: 16px; bottom: 16px; display: grid; gap: 6px;
     grid-template-columns: repeat(2, 34px);
@@ -697,6 +711,7 @@
     <div id="play-area">
       <div id="players"></div>
       <div id="hand"></div>
+      <div id="trading"></div>
       <div id="notice"></div>
     </div>
     <div id="log"></div>
@@ -878,6 +893,15 @@ function authHeaders(extra) {
 async function getJSON(path) {
   const res = await fetch(path, {headers: authHeaders()});
   return res.json();
+}
+
+async function putJSON(path, body) {
+  const res = await fetch(path, {
+    method: "PUT",
+    headers: authHeaders({"Content-Type": "application/json"}),
+    body: JSON.stringify(body || {}),
+  });
+  return {ok: res.ok, data: await res.json()};
 }
 
 async function postJSON(path, body) {
@@ -1135,7 +1159,6 @@ const PHASE_LABELS = {
   DISCARD: "DISCARD",
   ROBBER: "PLACE ROBBER",
   MAIN: "BUILD · BUY · TRADE",
-  TRADE_RESPOND: "TRADE",
   GAME_OVER: "GAME OVER",
 };
 
@@ -1147,12 +1170,12 @@ const EDGE_TYPES = new Set(["SETUP_ROAD", "BUILD_ROAD"]);
 // new, then rob one of that hex's neighbours — reached two different ways.
 // They get separate buckets here only so robberMove() below can tell which
 // way you came, because that is the sole thing the rest of the page needs.
-const SIMPLE_TYPES = new Set(["ROLL", "END_TURN", "BUY_DEV_CARD", "PLAY_ROAD_BUILDING", "ACCEPT_TRADE", "DECLINE_TRADE"]);
+const SIMPLE_TYPES = new Set(["ROLL", "END_TURN", "BUY_DEV_CARD", "PLAY_ROAD_BUILDING"]);
 
 function groupActions(actions) {
   const g = {
     vertex: {}, edge: {}, robberByHex: {}, knightByHex: {}, simple: {},
-    monopoly: [], yearOfPlenty: [], bankTrade: [], proposeTrade: [], discard: [],
+    monopoly: [], yearOfPlenty: [], bankTrade: [], discard: [],
   };
   for (const a of actions) {
     if (VERTEX_TYPES.has(a.type)) (g.vertex[a.a] = g.vertex[a.a] || []).push(a);
@@ -1163,7 +1186,6 @@ function groupActions(actions) {
     else if (a.type === "PLAY_MONOPOLY") g.monopoly.push(a);
     else if (a.type === "PLAY_YEAR_OF_PLENTY") g.yearOfPlenty.push(a);
     else if (a.type === "BANK_TRADE") g.bankTrade.push(a);
-    else if (a.type === "PROPOSE_TRADE") g.proposeTrade.push(a);
     else if (a.type === "DISCARD") g.discard.push(a);
   }
   return g;
@@ -1324,6 +1346,7 @@ function render() {
   renderStatus();
   renderPlayers();
   renderHand();
+  renderTrading();
   renderBoardDynamic();
   renderPieceSupply();
   renderBoardButtons();
@@ -1351,15 +1374,6 @@ function renderStatus() {
   // Somebody else's decision to make, so the phase underneath it is beside
   // the point.
   if (state.to_move !== state.seat) {
-    // A live offer is the one case where `to_move` deliberately does not
-    // name the seat being asked: which seats can cover an offer is a fact
-    // about their hands, so the server tells everyone but the responder that
-    // the proposer is on move (see webplay._public_mover). Naming anybody
-    // here would either leak that or be wrong, so this says neither.
-    if (state.phase === "TRADE_RESPOND") {
-      phaseEl.textContent = "WAITING FOR A RESPONSE";
-      return;
-    }
     // Named when the seat is a person's, because that is a wait with no end
     // this client can see: a bot's turn resolves whenever its own runner
     // next polls, but another player's takes as long as they take (see
@@ -1521,11 +1535,14 @@ function renderHand() {
   // no separate game_over/to_move check to keep in sync with it.
   const g = groupActions(state.legal_actions);
   // The same condition the old floating trade button gated its own
-  // visibility on: a bank trade or a player offer is proposable right now.
+  // visibility on: a bank trade is available right now. Trading with another
+  // player is not something a card click can do any more — it is one engine
+  // event a turn off the published valuation vectors (`hexset.trading`),
+  // and the sidebar's five toggles are the whole of the human's part in it.
   // Discarding is the other thing a resource card can do, but it happens in
   // the modal that DISCARD opens over the whole page (see syncModal), not
   // here — these cards aren't reachable while that's up.
-  const canTrade = !robberMove(g) && (g.bankTrade.length > 0 || g.proposeTrade.length > 0);
+  const canTrade = !robberMove(g) && g.bankTrade.length > 0;
 
   // Two columns, side by side, both always present — the header and the
   // row's height hold their place even at zero cards, so buying a first dev
@@ -1577,6 +1594,70 @@ function renderHand() {
 // this can't drift from what can_place_settlement/_road/_city actually
 // enforce; built counts are just what's already on the board in this seat's
 // colour.
+// The whole human interface to trading (`hexset.trading`): five per-resource
+// toggles that PUT this seat's valuation vector, plus what everyone else has
+// published and what the engine cleared this turn. Deliberately minimal --
+// there is nothing to propose, accept or decline, and the richer negotiation
+// surface is deferred by the trading design. A trade takes effect at the next
+// trade event, which is the next time a main phase opens.
+async function setValuation(index, value) {
+  const vector = (state.valuations[state.seat] || [0, 0, 0, 0, 0]).slice();
+  vector[index] = vector[index] === value ? 0 : value;
+  const {ok, data} = await putJSON(`/api/games/${state.code || tableCode}/valuation`, {valuation: vector});
+  if (!ok) { showNotice(data.error || "could not set that valuation"); return; }
+  state = data;
+  render();
+}
+
+function renderTrading() {
+  const container = document.getElementById("trading");
+  container.innerHTML = "";
+  if (!state.valuations || state.seat === null || state.seat === undefined) return;
+
+  container.appendChild(html("h4", {}, "What I want / would give"));
+  const mine = state.valuations[state.seat] || [0, 0, 0, 0, 0];
+  board.resources.forEach((name, index) => {
+    const row = html("div", {class: "val-row"});
+    row.appendChild(html("div", {class: "val-name"}, name));
+    for (const [label, value] of [["\u2212", -1], ["0", 0], ["+", 1]]) {
+      const on = value === 0 ? mine[index] === 0 : mine[index] === value;
+      const button = html("button", {class: on ? "on" : "", title: `${name}: ${label}`}, label);
+      button.addEventListener("click", () => setValuation(index, value));
+      row.appendChild(button);
+    }
+    container.appendChild(row);
+  });
+
+  const table = html("table", {class: "val-table"});
+  const head = html("tr", {});
+  head.appendChild(html("th", {}, "Seat"));
+  for (const name of board.resources) head.appendChild(html("th", {}, name.slice(0, 2)));
+  table.appendChild(head);
+  state.valuations.forEach((vector, seat) => {
+    const row = html("tr", {});
+    row.appendChild(html("td", {}, seat === state.seat ? "you" : `P${seat + 1}`));
+    for (const v of vector) row.appendChild(html("td", {}, v ? v.toFixed(2) : "\u00b7"));
+    table.appendChild(row);
+  });
+  container.appendChild(table);
+
+  container.appendChild(html("h4", {style: "margin-top:8px"}, "Trades this turn"));
+  if (!state.trades || !state.trades.length) {
+    container.appendChild(html("div", {class: "trade-line"}, "none"));
+  } else {
+    for (const trade of state.trades) {
+      container.appendChild(html("div", {class: "trade-line"},
+        `P${trade.a + 1} gave ${bundleText(trade.gave)} to P${trade.b + 1} for ${bundleText(trade.got)}`));
+    }
+  }
+}
+
+function bundleText(counts) {
+  const parts = [];
+  counts.forEach((n, index) => { if (n) parts.push(`${n} ${board.resources[index]}`); });
+  return parts.join(", ") || "nothing";
+}
+
 function renderPieceSupply() {
   const container = document.getElementById("piece-supply");
   container.innerHTML = "";
@@ -1796,12 +1877,12 @@ function legalAction(type) {
 // Modes syncModal owns: each one appears the moment its condition does and
 // goes away the moment it stops, so nothing else has to remember to open or
 // close it. The other three are opened by a click and only ever closed by one.
-const MODAL_AUTO = new Set(["respond", "discard", "steal"]);
+const MODAL_AUTO = new Set(["discard", "steal"]);
 
-// Modes Escape and a backdrop click may close. The two left out are the two
-// the game is actually waiting on: an offer has to be answered, and cards owed
-// to the bank after a seven have to be handed over. "steal" is here because
-// closing it only backs out to the hex list, not out of the move.
+// Modes Escape and a backdrop click may close. The one left out is the one
+// the game is actually waiting on: cards owed to the bank after a seven have
+// to be handed over. "steal" is here because closing it only backs out to
+// the hex list, not out of the move.
 const MODAL_DISMISSIBLE = new Set(["propose", "monopoly", "year-of-plenty", "steal"]);
 
 // A right-column icon-only button. `label` is the tooltip/screen-reader text,
@@ -1834,49 +1915,11 @@ function pickCard(resourceIdx, {selected, disabled, count, forceCount, title, on
   return card;
 }
 
-// A bundle (as the wire format carries it: one count per resource index),
-// display-only — the "respond" mode's read of what's being offered.
-// bundle.length must match board.resources.length (both are NUM_RESOURCES);
-// the server and tradePicker below share that assumption too.
-function tradeCardRow(bundle) {
-  const row = html("div", {class: "pick-row"});
-  for (let r = 0; r < bundle.length; r++) {
-    if (!bundle[r]) continue;
-    row.appendChild(pickCard(r, {count: bundle[r]}));
-  }
-  return row;
-}
-
-// Every trade the human sees reads the same way round and in the same words,
-// whichever modal it's in and whoever started it: what leaves their hand on
-// the left, what arrives on the right. Both sides are their own hand, which
-// is why neither label says whose — the title says who the other party is
-// ("Player 2 (search2) offers"), and the exchange is always the human's own
-// view of it.
+// Every trade the human sees reads the same way round and in the same words:
+// what leaves their hand on the left, what arrives on the right.
 const GIVE_LABEL = "Give";
 const GET_LABEL = "Get";
 
-// The read-only version of that row, for an offer someone else has made.
-// Bundles are the wire format's own (one count per resource index), and
-// they arrive from the *proposer's* point of view — see renderRespondMode,
-// which flips them, since a bundle they called "give" is one the human gets.
-function tradeExchangeRow(giveBundle, getBundle) {
-  const row = html("div", {class: "trade-exchange"});
-  const giveSide = html("div", {class: "trade-side"});
-  giveSide.appendChild(html("div", {class: "trade-side-label"}, GIVE_LABEL));
-  giveSide.appendChild(tradeCardRow(giveBundle));
-  const getSide = html("div", {class: "trade-side"});
-  getSide.appendChild(html("div", {class: "trade-side-label"}, GET_LABEL));
-  getSide.appendChild(tradeCardRow(getBundle));
-  row.appendChild(giveSide);
-  row.appendChild(html("div", {class: "trade-arrow"}, "→"));
-  row.appendChild(getSide);
-  return row;
-}
-
-// The "propose" mode's give/want row: the shape of the trade being built,
-// and the target of the picker below it. Each side shows its own current
-// card (or an empty slot before anything's chosen) and tapping either aims
 // the picker at that side.
 function tradeProposeRow() {
   const row = html("div", {class: "trade-exchange"});
@@ -1938,11 +1981,10 @@ function tradePicker(p) {
   return wrap;
 }
 
-// The six modes, and what puts each one up:
+// The five modes, and what puts each one up:
 //   "propose"        clicking a resource card in hand (renderHand)
 //   "monopoly"       clicking the Monopoly card in hand (devCardPlay)
 //   "year-of-plenty" clicking the Year of Plenty card in hand (devCardPlay)
-//   "respond"        an incoming offer waiting on the human (syncModal)
 //   "discard"        cards owed to the bank after a seven (syncModal)
 //   "steal"          a robber hex with more than one victim (syncModal)
 function openModal(mode, {give = null} = {}) {
@@ -1977,15 +2019,14 @@ function closeModal() {
   document.getElementById("modal").classList.remove("show");
 }
 
-// Called every render(). The three MODAL_AUTO modes are conditions rather
-// than clicks — an offer is waiting, cards are owed, a hex with more than one
-// neighbour has been picked — so this is the single place that decides which
-// of them (if any) should be up, and closes whichever no longer should be.
-// The click-driven three are left alone entirely.
+// Called every render(). The two MODAL_AUTO modes are conditions rather than
+// clicks — cards are owed, a hex with more than one neighbour has been
+// picked — so this is the single place that decides which of them (if any)
+// should be up, and closes whichever no longer should be. The click-driven
+// three are left alone entirely.
 function syncModal() {
   const g = groupActions(state.legal_actions);
-  const live = state.offer && state.to_move === state.seat && !state.game_over ? "respond"
-    : g.discard.length ? "discard"
+  const live = g.discard.length ? "discard"
     : pendingRobberHex !== null ? "steal"
     : null;
   if (live) {
@@ -2004,8 +2045,7 @@ function renderModal() {
   actions.innerHTML = "";
   const g = groupActions(state.legal_actions);
 
-  if (modalMode === "respond") renderRespondMode(g, title, body, actions);
-  else if (modalMode === "discard") renderDiscardMode(g, title, body);
+  if (modalMode === "discard") renderDiscardMode(g, title, body);
   else if (modalMode === "steal") renderStealMode(g, title, body, actions);
   else if (modalMode === "monopoly") renderMonopolyMode(g, title, body, actions);
   else if (modalMode === "year-of-plenty") renderYearOfPlentyMode(g, title, body, actions);
@@ -2015,30 +2055,6 @@ function renderModal() {
   // 96px gutter reads as a button that failed to render rather than as no
   // button at all.
   actions.style.display = actions.children.length ? "" : "none";
-}
-
-function renderRespondMode(g, title, body, actions) {
-  const offer = state.offer;
-  // Who it's from goes in the title so the exchange row below can stay
-  // just the cards themselves plus a one-word attribution each.
-  title.textContent = `${seatFullLabel(offer.proposer)} offers`;
-  // Flipped into the human's own point of view: what the proposer `want`s is
-  // what leaves this hand, so it's the left/"Give" side here, and what they
-  // offered to `give` is what arrives. Same direction as the propose modal,
-  // which is the whole point — an offer shouldn't read backwards just
-  // because someone else started it.
-  body.appendChild(tradeExchangeRow(offer.want, offer.give));
-
-  if (g.simple.ACCEPT_TRADE) {
-    const btn = modalActionButton("check", "Accept trade");
-    btn.addEventListener("click", () => { closeModal(); sendAction(g.simple.ACCEPT_TRADE); });
-    actions.appendChild(btn);
-  }
-  if (g.simple.DECLINE_TRADE) {
-    const btn = modalActionButton("close", "Decline trade", {primary: false});
-    btn.addEventListener("click", () => { closeModal(); sendAction(g.simple.DECLINE_TRADE); });
-    actions.appendChild(btn);
-  }
 }
 
 // One card at a time, which is how the engine models it too (see
@@ -2176,56 +2192,36 @@ function renderYearOfPlentyMode(g, title, body, actions) {
 }
 
 function renderProposeMode(title, body, actions) {
-  title.textContent = "Propose a trade";
+  title.textContent = "Trade with the bank";
   const p = state.players.find((pl) => pl.seat === state.seat);
 
-  // Resolved before the body is built, not after: which of the two the picked
-  // pair lands on decides both what the preview's give side costs and which
-  // glyph the primary button carries (see the end of this function).
-  let bank = null, offer = null;
+  // Resolved before the body is built, not after: the picked pair decides
+  // what the preview's give side costs and which glyph the button carries
+  // (see the end of this function).
+  //
+  // The bank is the only counterparty a click can reach now. Trading with
+  // another player is not an action (`hexset.trading`): a seat publishes a
+  // valuation vector -- the five toggles in the sidebar -- and the engine
+  // clears the deals once a turn. So this modal lost its "offer to the
+  // other players" half rather than having it disabled.
+  let bank = null;
   if (tradeGive !== null && tradeWant !== null) {
     bank = state.legal_actions.find(
       (a) => a.type === "BANK_TRADE" && a.a === tradeGive && a.b === tradeWant
-    );
-    // Found, never built: the server's own `legal_wire_actions` always
-    // includes every (give held, want different) pair as a PROPOSE_TRADE
-    // option — see GameSession._proposable_options — regardless of whether
-    // anyone else could currently cover it. Hands are private in HexSet, so
-    // that's deliberate: whether a trade is "available" depends on hidden
-    // opponent hands, which nothing here may act on, and this find() always
-    // succeeds as a result. Building the action from parts instead would
-    // break the one hard rule this whole page follows (see the module
-    // docstring): the client only ever echoes back a wire object the server
-    // itself offered.
-    offer = state.legal_actions.find(
-      (a) => a.type === "PROPOSE_TRADE" && a.give[tradeGive] === 1 && a.want[tradeWant] === 1
     );
   }
 
   // The trade as it stands on top, the one picker row aimed at whichever
   // half is being chosen underneath. Both are drawn whatever's been picked
-  // so far, so nothing in here changes height between taps. One-for-one,
-  // which is the shape of the offer to the table; what the bank would charge
-  // instead is on its own button (the rate under the glyph), since the two
-  // are alternatives and the row can only show one.
+  // so far, so nothing in here changes height between taps.
   body.appendChild(tradeProposeRow());
   body.appendChild(tradePicker(p));
 
-  // Both routes, whenever both are open: the bank or a port takes the cards
-  // now at its own rate, the table might take them one-for-one or might not.
-  // Neither is the default — they are different trades, not two ways of
-  // making the same one — so both sit in the primary slot and the human
-  // picks.
-  //
-  // Always all three, disabled until the trade they'd send actually exists:
-  // this column is centered on its own axis, so a button appearing as the
-  // second half of the pair lands would shove the others off the position
-  // the finger was already heading for.
+  // Disabled until the trade it would send actually exists: this column is
+  // centered on its own axis, so a button appearing as the second half of
+  // the pair lands would shove the others off the position the finger was
+  // already heading for.
   actions.appendChild(bankTradeButton(bank));
-  const send = modalActionButton("send", "Offer to the other players");
-  if (offer) send.addEventListener("click", () => { closeModal(); sendAction(offer); });
-  else send.disabled = true;
-  actions.appendChild(send);
   actions.appendChild(modalCancelButton());
 }
 

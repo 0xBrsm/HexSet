@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """End-to-end: DevCatanPlayer playing real, complete catanatron games.
 
-This is the test the earlier ones were building towards -- `search2-offers3`
+This is the test the earlier ones were building towards -- `search2-notrade`
 (no torch, so it runs anywhere) driven entirely through the bridge, against
 catanatron's own bots, for whole games rather than isolated decisions. It is
 also what actually exercises PLAY_KNIGHT's two-step resolution, which none of
@@ -41,13 +41,13 @@ def test_entrant_spec_survives_catanatrons_own_colon_split():
 
 def test_entrant_spec_defaults_when_no_parts_given():
     bridge = DevCatanPlayer(Color.RED)
-    assert bridge.entrant_spec == "search2-offers3"
+    assert bridge.entrant_spec == "search2-notrade"
 
 
 @pytest.mark.parametrize("seed", range(8))
 def test_full_games_complete_against_random(seed):
     random.seed(seed)
-    bridge = DevCatanPlayer(Color.RED, "search2-offers3")
+    bridge = DevCatanPlayer(Color.RED, "search2-notrade")
     players = [bridge, RandomPlayer(Color.BLUE), RandomPlayer(Color.WHITE), RandomPlayer(Color.ORANGE)]
     catan_map = CatanMap.from_template(BASE_MAP_TEMPLATE)
     game = CatanatronGame(players, catan_map=catan_map)
@@ -78,7 +78,7 @@ def test_rng_is_seeded_from_the_game_seed_and_seat_not_from_process_state():
     def first_draws(seed, color, n=5):
         catan_map = CatanMap.from_template(BASE_MAP_TEMPLATE)
         players = [
-            DevCatanPlayer(color, "search2-offers3") if c is color else RandomPlayer(c)
+            DevCatanPlayer(color, "search2-notrade") if c is color else RandomPlayer(c)
             for c in Color
         ]
         game = CatanatronGame(players, catan_map=catan_map, seed=seed)
@@ -102,7 +102,7 @@ def test_a_search_bot_beats_random_and_victory_point_most_of_the_time():
     games = 20
     for seed in range(games):
         random.seed(seed)
-        bridge = DevCatanPlayer(Color.RED, "search2-offers3")
+        bridge = DevCatanPlayer(Color.RED, "search2-notrade")
         players = [
             bridge,
             RandomPlayer(Color.BLUE),

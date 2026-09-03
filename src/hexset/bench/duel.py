@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-import heximax  # noqa: F401 -- registers the heximax presets with hexset.arena
+import hexset.bots  # noqa: F401 -- registers the heximax presets with hexset.arena
 from hexset.arena import NETWORK
 from hexset.game import MAX_TURNS
 
@@ -99,14 +99,13 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("a", help="checkpoint path, or an arena entrant name")
     p.add_argument(
-        "b", help="checkpoint path, or an arena entrant name, e.g. search2-offers3"
+        "b", help="checkpoint path, or an arena entrant name, e.g. search2-notrade"
     )
     p.add_argument("--label-a", default=None)
     p.add_argument("--label-b", default=None)
     p.add_argument("--games", type=int, default=400)
     p.add_argument("--lanes", type=int, default=512)
     p.add_argument("--players", type=int, default=4)
-    p.add_argument("--max-offers", type=int, default=3)
     p.add_argument("--device", default="cuda")
     # Board seed 0 matches the training runs; the duel seed is deliberately
     # *not* the in-loop ladder's `seed + 10_000` — those boards were already
@@ -124,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
         "`train.versus` (workers=1) batches network inference across lanes in ONE "
         "process, which is ideal for network-vs-network — 400 games in 134 s — and "
         "catastrophic against a scripted bot, whose search cannot batch and gets "
-        "one core: 200 games against search2-offers3 had not finished in 11 "
+        "one core: 200 games against search2 had not finished in 11 "
         "minutes, where the recorded arena run did 4000 in 607 s. Use workers for "
         "anything with a handcrafted bot on either side. Default: 1 when both "
         "entrants are bare network checkpoints, 26 otherwise -- see "

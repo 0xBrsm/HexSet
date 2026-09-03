@@ -102,10 +102,11 @@ def relative_points(points: tuple[int, ...]) -> tuple[float, ...]:
 
     **Do not discount this.** With a zero-sum reward roughly half of terminal
     values are negative, and γ < 1 makes a negative terminal cheaper the later
-    it arrives — which pays a losing policy to stall. Trading in circles is
-    precisely that move, and it is why the action cap exists. Horizon control
-    belongs in the offer budget (`actions.within_offer_budget`), which is
-    measured, not in a discount factor that quietly changes the objective.
+    it arrives — which pays a losing policy to stall. Trading in circles was
+    precisely that move, and it is why the action cap exists; a policy cannot
+    stall that way any more, since trading is not an action at all
+    (`hexset.trading`). Horizon control belongs in what is measured, not in a
+    discount factor that quietly changes the objective.
 
     Lives here rather than in `hexset.mcts` or `hexnet.rewards` (both of which
     use it) because it is a pure function of terminal points and `WINNING_POINTS`

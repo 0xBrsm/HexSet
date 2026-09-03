@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """The file to pass to `catanatron-play --code`.
 
-    catanatron-play --code path/to/register.py --players=DC:search2-offers3,AB:2
+    catanatron-play --code path/to/register.py --players=DC:search2-notrade,AB:2
 
 `--code` loads this file standalone via `importlib.util.spec_from_file_location`
 (see catanatron's `cli/play.py`), not as part of any package, so the import

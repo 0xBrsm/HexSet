@@ -7,7 +7,7 @@ from enum import IntEnum
 from typing import TYPE_CHECKING
 
 from .board.board import MAX_ROLL, MIN_ROLL, Board, pips
-from .board.terrain import TERRAIN_RESOURCE, Resource
+from .board.terrain import NUM_RESOURCES, TERRAIN_RESOURCE, Resource
 from .cards import ROAD_BUILDING_ROADS, DevCard
 from .devcards import buy as buy_dev_card
 from .devcards import (
@@ -20,9 +20,7 @@ from .devcards import (
 from .economy import Purchase, bank_trade, distribute, pay
 from .ledger import PublicLedger
 from .robber import discard, discard_count, move_robber, steal
-from .trading import Bundle, Offer, can_propose
-from .trading import execute as execute_trade
-from .trading import responders as offer_responders
+from .trading import Trade, judged, published, trade_event
 from .state import (
     NO_OWNER,
     GameState,
@@ -40,13 +38,6 @@ if TYPE_CHECKING:
 DICE = 6
 MAX_TURNS = 1000
 
-# Offers are uncapped in composition — a player may ask for anything in exchange
-# for anything they hold. This caps how many *separate* offers one turn may
-# contain, and is a termination guarantee rather than a rule: the turn counter
-# only advances on `end_turn`, so a player who negotiated forever would never
-# reach `MAX_TURNS`. Humans stop because their opponents lose patience.
-MAX_OFFERS_PER_TURN = 8
-
 ROLL_ODDS: tuple[tuple[int, float], ...] = tuple(
     (roll, pips(roll) / DICE**2) for roll in range(MIN_ROLL, MAX_ROLL + 1)
 )
@@ -60,7 +51,6 @@ class Phase(IntEnum):
     ROBBER = 4
     MAIN = 5
     GAME_OVER = 6
-    TRADE_RESPOND = 7
 
 
 @dataclass
@@ -79,15 +69,38 @@ class Game:
     free_roads: int = 0
     turns: int = 0
     won_by: int | None = None
-    offer: Offer | None = None
-    pending_responders: list[int] = field(default_factory=list)
-    offers_made: int = 0
-    # Every (give, want) already put to the table this turn. Recorded by the
-    # engine, acted on only by `actions._offer_actions`, which drops them from
-    # the sample it enumerates: re-proposing a bundle the table has already
-    # turned down is legal, and `apply` will still carry one out, but nothing
-    # has changed since the decline and it is not worth an action.
-    offered: set[tuple[Bundle, Bundle]] = field(default_factory=set)
+    # Every seat's public valuation vector (`hexset.trading`): what each
+    # resource is worth to that seat right now, in [-1, 1], positive for
+    # "I want more". All-zero at `start()` -- a seat trades only once it has
+    # published -- and refreshed by the engine at every trade event from
+    # whatever `traders` supplies.
+    valuations: list[tuple[float, ...]] = field(default_factory=list)
+    # This turn's executed trades and their count, cleared by `end_turn` the
+    # way the offer counter was. `trades_made` is the recorded statistic;
+    # `max_trades` is the knob, and `0` is the off switch for the no-trade
+    # referents (a mode, not a budget -- `None`, unbounded, is the default:
+    # the event stops when nothing clears, not when a counter runs out).
+    trades: list[Trade] = field(default_factory=list)
+    trades_made: int = 0
+    max_trades: int | None = None
+    # Who publishes a valuation and answers a gate, one per seat -- the
+    # driver's own bots (`arena.play`), the gym's opponents, the server's
+    # seated players, or a search's stand-in for the whole table. `None`
+    # means nobody trades, which is what a bare `start()` game does until a
+    # driver seats somebody.
+    #
+    # **`imagine` deliberately does not copy this**, so a hypothetical never
+    # trades. Two reasons, one of principle and one of cost. Principle: a
+    # search must not reach the *real* opponents' private gates, any more
+    # than it may read their hands, and the alternative -- every search
+    # installing its own stand-in for the whole table -- is one forgotten
+    # call site away from that leak. Cost: the gate is a position
+    # evaluation, so re-clearing the event at every node would multiply the
+    # evaluator by the branching factor to re-derive an exchange both seats
+    # have already agreed improves them. A bot's trading judgement is
+    # exercised for real, at every event, through `accepts`; the tree plans
+    # the position that judgement hands it.
+    traders: tuple[object, ...] | None = None
     # Seats retired from the game: skipped by the setup snake, skipped by
     # turn rotation, never `to_move`, never asked for a trade. Empty for every
     # game this module deals unless a caller retires a seat with `lock_seat`,
@@ -132,6 +145,13 @@ class Game:
 
         return _View.from_game(self, seat)
 
+    @property
+    def num_players(self) -> int:
+        """How many seats this game has. Public to everyone, always: it is a
+        property of the table, not of anybody's hand, so reading it needs no
+        view and is not an omniscient read."""
+        return self._state.num_players
+
     def set_state(self, state: GameState) -> None:
         """Replace the true state outright.
 
@@ -168,6 +188,8 @@ def start(
         setup_queue=queue,
         current_player=queue[0],
         discard_quota=[0] * num_players,
+        # All-zero: a seat trades only after it has published something.
+        valuations=[(0.0,) * NUM_RESOURCES for _ in range(num_players)],
     )
 
 
@@ -201,10 +223,10 @@ def imagine(
         free_roads=game.free_roads,
         turns=game.turns,
         won_by=game.won_by,
-        offer=game.offer,
-        pending_responders=game.pending_responders[:],
-        offers_made=game.offers_made,
-        offered=set(game.offered),
+        valuations=[tuple(v) for v in game.valuations],
+        trades=game.trades[:],
+        trades_made=game.trades_made,
+        max_trades=game.max_trades,
         locked=game.locked,
     )
 
@@ -346,7 +368,7 @@ def roll_dice(game: Game, roll: int | None = None) -> int:
         before = _snapshot_hands(game)
         distribute(game._state, roll)
         game.ledger.apply_hand_diff(before, game._state.hands)
-        game.phase = Phase.MAIN
+        enter_main(game)
     return roll
 
 
@@ -357,16 +379,13 @@ def players_owing_discards(game: Game) -> list[int]:
 def to_move(game: Game) -> int:
     """Whose decision the legal actions belong to.
 
-    Usually the player whose turn it is, but two phases hand the decision to
-    somebody else: discarding on a seven is decided by whoever owes cards, and
-    a trade offer is decided by whoever is being asked to take it.
+    Usually the player whose turn it is, but one phase hands the decision to
+    somebody else: discarding on a seven is decided by whoever owes cards.
     """
     if game.phase is Phase.DISCARD:
         owing = players_owing_discards(game)
         if owing:
             return owing[0]
-    if game.phase is Phase.TRADE_RESPOND and game.pending_responders:
-        return game.pending_responders[0]
     return game.current_player
 
 
@@ -405,7 +424,7 @@ def move_robber_to(game: Game, target: int, victim: int | None = None) -> None:
     if victim is not None:
         stolen = steal(game._state, game.current_player, victim, game.rng)
         _record_steal(game, game.current_player, victim, stolen)
-    game.phase = Phase.MAIN
+    enter_main(game)
 
 
 def _check_win(game: Game) -> None:
@@ -519,97 +538,36 @@ def trade_with_bank(game: Game, give: Resource, receive: Resource) -> None:
     game.ledger.apply_hand_diff(before, game._state.hands)
 
 
-def propose_trade(
-    game: Game,
-    give: tuple[int, ...],
-    want: tuple[int, ...],
-    ask: tuple[int, ...] = (),
-) -> None:
-    """Put an offer to the table. Nobody is obliged to take it.
+def enter_main(game: Game) -> None:
+    """Enter the main phase, running this turn's one trade event on the way.
 
-    `ask` is the proposer's order of preference, best first. It only reorders
-    who is asked — it cannot add a player who could not cover the offer, and
-    anyone left out of it keeps the engine's neutral order behind those named.
+    Every path from `ROLL` or `ROBBER` into `MAIN` goes through here, so the
+    trade event happens once a turn for **every** driver -- the arena's loop,
+    the gym, the server, a search stepping its own copy -- rather than each
+    of them having to remember to call it. It runs after the roll and the
+    robber have resolved and before any build action is served, which is the
+    order the mechanic is specified in (`hexset.trading`).
 
-    **The neutral order is random, drawn from the game's own RNG** (decided
-    2026-08-29; the trading design note, §5). An offer stops at
-    the first player to take it, so whoever is asked first has first refusal,
-    and the previous neutral order — clockwise from the proposer — handed that
-    to the next seat in turn order. In a 2v2 duel that is a copy of yourself
-    half the time when the copies sit together and never when they alternate,
-    which is the whole of the "seat geometry" effect the harness-path check
-    measured (+0.08 vs +0.43 VP for the same pair). A random order gives the
-    advantage to nobody in either seating. It is still not the rulebook, where
-    the proposer chooses among everyone who accepts; that is the design in the
-    document above, deferred. Drawing from `game.rng` keeps a seeded game
-    reproducible, at the price that every game's dice sequence differs from
-    the one the same seed produced before this change.
+    A game whose `traders` is `None` -- a bare `start()` with nobody seated --
+    simply does not trade.
     """
-    _require(game, Phase.MAIN)
-    if game.offers_made >= MAX_OFFERS_PER_TURN:
-        raise ValueError(f"only {MAX_OFFERS_PER_TURN} offers allowed per turn")
-
-    offer = Offer(proposer=game.current_player, give=give, want=want)
-    if not can_propose(game._state, offer):
-        raise ValueError(f"player {game.current_player} cannot make this offer")
-
-    game.offers_made += 1
-    game.offered.add((tuple(give), tuple(want)))
-    # A locked seat is never asked -- it holds nothing and builds nothing to
-    # trade for, and it is never `to_move` to answer if it were.
-    willing = tuple(p for p in offer_responders(game._state, offer) if p not in game.locked)
-    if not willing:
-        # Nobody can cover it, so there is nothing to ask. The offer still
-        # counts against the turn's allowance: it was a move that was made.
-        return
-
-    if ask:
-        rank = {p: i for i, p in enumerate(ask)}
-        willing = tuple(sorted(willing, key=lambda p: rank.get(p, len(ask))))
-    else:
-        shuffled = list(willing)
-        game.rng.shuffle(shuffled)
-        willing = tuple(shuffled)
-
-    game.offer = offer
-    game.pending_responders = list(willing)
-    game.phase = Phase.TRADE_RESPOND
-
-
-def _finish_offer(game: Game) -> None:
-    game.offer = None
-    game.pending_responders = []
     game.phase = Phase.MAIN
-
-
-def accept_trade(game: Game, responder: int) -> None:
-    _require(game, Phase.TRADE_RESPOND)
-    if not game.pending_responders or game.pending_responders[0] != responder:
-        raise ValueError(f"player {responder} is not the one being asked")
-    assert game.offer is not None
-    before = _snapshot_hands(game)
-    execute_trade(game._state, game.offer, responder)
-    game.ledger.apply_hand_diff(before, game._state.hands)
-    _finish_offer(game)
-
-
-def decline_trade(game: Game, responder: int) -> None:
-    _require(game, Phase.TRADE_RESPOND)
-    if not game.pending_responders or game.pending_responders[0] != responder:
-        raise ValueError(f"player {responder} is not the one being asked")
-    game.pending_responders.pop(0)
-    if not game.pending_responders:
-        _finish_offer(game)
+    traders = game.traders
+    if traders is None:
+        return
+    trade_event(
+        game,
+        lambda seat, view: published(traders[seat], view),
+        lambda seat, view, received, other: judged(traders[seat], view, received, other),
+    )
 
 
 def end_turn(game: Game) -> None:
     _require(game, Phase.MAIN)
     mature(game._state, game.current_player)
     game.dev_card_played = False
-    game.offers_made = 0
-    game.offered = set()
-    game.offer = None
-    game.pending_responders = []
+    game.trades = []
+    game.trades_made = 0
     # Free roads with nowhere legal to go are simply lost.
     game.free_roads = 0
     game.turns += 1
@@ -628,8 +586,7 @@ def lock_seat(game: Game, seat: int) -> None:
     """Retire `seat`. A no-op if it is already retired.
 
     From here on `seat` is skipped by the setup snake and by turn rotation,
-    can never be `to_move`, and drops out of any trade offer already on the
-    table. This is the primitive `hexset.server.seating.lock_seat`
+    can never be `to_move`, and is never a counterparty in a trade event. This is the primitive `hexset.server.seating.lock_seat`
     (`ui:seating.py:148-154`) implemented as a post-apply correction because
     `hexset.game` had no such field -- see `Game.locked`'s docstring and
     `docs/engine-divergence-2026-09-02.md` request R2.
@@ -653,10 +610,6 @@ def lock_seat(game: Game, seat: int) -> None:
     if game.phase is Phase.DISCARD:
         _finish_discards(game)
 
-    game.pending_responders = [p for p in game.pending_responders if p != seat]
-    if game.phase is Phase.TRADE_RESPOND and not game.pending_responders:
-        _finish_offer(game)
-
     if game.current_player != seat:
         return
     if game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
@@ -664,6 +617,6 @@ def lock_seat(game: Game, seat: int) -> None:
         _advance_setup(game)
     elif game.phase in (Phase.ROLL, Phase.ROBBER, Phase.MAIN):
         # The only phases where `to_move` reads `current_player` directly
-        # (see its docstring); DISCARD and TRADE_RESPOND already handled
-        # above, GAME_OVER has no next turn to hand off.
+        # (see its docstring); DISCARD is already handled above, GAME_OVER
+        # has no next turn to hand off.
         game.current_player = _next_unlocked(game, seat)

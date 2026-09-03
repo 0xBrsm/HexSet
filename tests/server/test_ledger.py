@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 
-from hexset.actions import build_space, within_offer_budget
+from hexset.actions import build_space
 from hexset.board.board import random_base_board
 from hexset.board.terrain import NUM_RESOURCES
 from hexset.game import Phase, move_robber_to, start, to_move
@@ -51,18 +51,16 @@ def test_a_steal_is_identity_independent_in_the_record():
             game._state.board.topology.num_hexes,
             game._state.num_players,
         )
-        options = tuple(within_offer_budget(game, options_for(game), None))
+        options = tuple(options_for(game))
         return record_from_game(game, seat, space, options)
 
-    # The two mask fields describe the *mover's* own options, and the mover
-    # here is the thief. Since this branch serves one honest mask to every
-    # seat (`hexset.server.rules`), the offer half of it is a function of the
-    # mover's own hand -- which really did receive a different card in each
-    # world -- so they differ, legitimately, and only for the thief: no seat
+    # `action_mask` describes the *mover's* own options, and the mover here
+    # is the thief, whose own hand really did receive a different card in
+    # each world -- so it differs, legitimately, and only for the thief: no seat
     # but the one on move is ever served a record at all
     # (`api.Tables.record` 409s everyone else), and `state_view` gives a
     # seat that is not on move an empty `legal_actions`.
-    MOVERS_OWN = {"action_mask", "pair_mask"}
+    MOVERS_OWN = {"action_mask"}
 
     # The bystander sees nothing that distinguishes the two worlds.
     bystander_brick = record_for(world_brick, bystander)

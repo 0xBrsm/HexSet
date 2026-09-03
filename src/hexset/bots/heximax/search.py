@@ -2,22 +2,24 @@
 """Max^n over the honest evaluation, within a leaf budget.
 
 `Heximax`'s search core: `choose` (the one public entry point, plus the
-setup/no-trade/discard shortcuts it resolves directly), iterative deepening
+setup/discard shortcuts it resolves directly), iterative deepening
 (`_search`/`_estimate`/`_root_values`), the tree itself
 (`_value`/`_after`/`_best_of`), roll expansion (`_over_dice`), and hidden-draw
 expansion (`draw_children`: a steal weighted over the victim's belief, a
-dev-card buy weighted over the unseen deck). `Heximax` also inherits
-`trade._TradeMixin`, so `_options_in`'s `ACCEPT_TRADE` gate reaches
-`self.accept_rule` there by the same attribute lookup as everything declared
-in this file -- the split changes no lookup, only which file a definition
-lives in.
+dev-card buy weighted over the unseen deck). It also carries the bot's whole
+trading surface -- `valuation` and `accepts`, and the marginal-value
+machinery they are built from -- which is two methods and no protocol at
+all now that trading is one engine event rather than an action language
+(`hexset.trading`). The offer adapter this file used to inherit from
+`heximax/trade.py` (candidate bundles, `score_proposal`, `accept_rule`,
+`rank_partners`, `propose_actions`) is gone with the protocol it adapted to.
 
 Cost: leaf evaluations per move are capped by `max_nodes`
 (`DEFAULT_MAX_NODES`, 600). The mirror table is
 `agents/scripts/heximax_cost.py` -- three four-seat games an arm, board
-seeds 0/1/2, every seat the same preset, `search2-offers3` at heximax's own
-three-offer budget as the control, arms interleaved seed by seed. Two rules
-for reading it, both learned the hard way in the structural pass:
+seeds 0/1/2, every seat the same preset, `search2` as the control, arms
+interleaved seed by seed. Two rules for reading it, both learned the hard way
+in the structural pass:
 
 * **On an idle box, and paired.** heximax's per-move cost inflates faster
   than `search2`'s under contention, so identical code reads 2.6x idle and
@@ -27,14 +29,13 @@ for reading it, both learned the hard way in the structural pass:
   game (10.47M -> 9.11M, which no load can move;
   `runs/eval/heximax/structural-cost-paired-vs-810dec7.json`).
 * **Beside `ratio_phase_neutral`**, which re-weights the control by
-  heximax's own phase mix. `search2` books ~20x more `TRADE_RESPOND`
-  decisions over the same games (2481 against 126 over nine), because the
-  engine's naive one-for-one `PROPOSE_TRADE` sample makes offers
-  `score_proposal`'s crisp `willing` gate does not, and those cheap
-  decisions sit in the mirror table's denominator. Phase-neutral heximax
-  reads **2.08x** -- at the ceiling per decision of the kind it actually
-  faces -- MAIN 2.18x, ROBBER **1.94x**, ROLL the one bucket over at
-  **3.34x**.
+  heximax's own phase mix. Under the offer protocol `search2` booked ~20x
+  more `TRADE_RESPOND` decisions over the same games (2481 against 126 over
+  nine) and those cheap decisions sat in the mirror table's denominator;
+  phase-neutral heximax read **2.08x** against a raw 2.36x. The phase that
+  caused the skew no longer exists -- there are no trade decisions at all --
+  so the raw ratio and the phase-neutral one now measure the same games,
+  and the re-read belongs to the one-event readout, not to this note.
 
 Three behaviour-changing steps were registered and none landed: a
 transposition table across the iterative-deepening passes hits 0.046% of
@@ -58,28 +59,23 @@ in `agents/reference/heximax.md`.
 
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass, field
 
-from hexset.actions import (
-    Action,
-    ActionType,
-    apply,
-    legal_actions,
-    victim_of,
-    within_offer_budget,
-)
+from hexset.actions import Action, ActionType, apply, legal_actions, victim_of
 from hexset.board.board import Board
 from hexset.board.terrain import NUM_RESOURCES
 from ..search2 import STANCES, options_for
 from hexset.game import ROLL_ODDS, Game, Phase, imagine, is_over, roll_dice, to_move
+from hexset.ledger import PublicLedger
 from hexset.mcts import draws_hidden
 from hexset.placement import best as best_opening
-from hexset.trading import can_accept
+from hexset.state import GameState, copy_state
+from hexset.trading import NO_VALUATION, Bundle
 
 from hexset.view import View
 from .evaluate import NO_TRADE_WEIGHTS, TRADING_WEIGHTS, HonestEvaluator, Weights
-from .trade import _TradeMixin
 
 # Leaf evaluations a move may spend. Chosen so the default configuration costs
 # no more than twice `search2` per move (the design's ceiling): at 600 the
@@ -91,6 +87,24 @@ DEFAULT_MAX_NODES = 600
 # eleven outcomes; deeper rolls are sampled once. At the default depth of two
 # every roll in the tree is exact.
 EXACT_ROLL_PLIES = 2
+
+# The common scale every seat's published valuation is squashed onto
+# (`Heximax.valuation`): the mean absolute one-card marginal of the shipped
+# profile. Fixed per evaluator rather than rescaled per decision, because
+# the clearing rule compares two seats' surpluses and they must be in the
+# same unit (the PI's ratification of decision 1,
+# `agents/reference/trading-design.md`).
+#
+# Computed once, over the trade-free census games -- `heximax-notrade`,
+# seeds 100..104, every seat the same preset -- as the mean of
+# `|Eval(hand + one r) - Eval(hand)|` under `TRADING_WEIGHTS` and the
+# `relative` stance, over every resource at every position the mover
+# reaches (9280 marginals). Trade-free deliberately: the games that fix the
+# scale must not themselves depend on it, and `max_trades=0` makes them
+# independent of this constant by construction.
+# `test_marginal_scale_is_the_recorded_mean` recomputes it from those same
+# games and pins it to 1e-9.
+MARGINAL_SCALE = 0.10231140469178995
 
 
 class _Exhausted(Exception):
@@ -115,7 +129,7 @@ class _Forced:
 
 
 @dataclass
-class Heximax(_TradeMixin):
+class Heximax:
     """Max^n over the honest evaluation, within a leaf budget.
 
     `depth` counts decisions, `width` beams the branching, and `max_nodes`
@@ -134,13 +148,10 @@ class Heximax(_TradeMixin):
     Opening settlements come from `placement.best` when `placement` is set;
     opening roads are searched. A discard gives up the card with the smallest
     marginal loss; a monopoly names the resource the table is expected to
-    hold most of. `max_offers` is the bot's own budget below the engine's; at
-    zero it never proposes and always declines. The trade adapter has two
-    touch points: `propose_actions` supplies the `PROPOSE_TRADE` root options
-    (top `propose_top_n` candidates over `propose_margin`), and `_options_in`
-    gates every `TRADE_RESPOND` node's `ACCEPT_TRADE` on `accept_rule` at
-    `accept_margin`. Both margins are unfitted; `0.0` accepts or proposes
-    whenever the valuation itself is positive.
+    hold most of. Trading is not an action: this bot advertises a valuation
+    vector and answers a gate (`valuation`/`accepts` below), and the engine
+    clears the deals. `max_trades=0` publishes nothing and refuses
+    everything, which is the whole of the no-trade referent.
 
     Every random draw comes from `rng`; the real game's stream is never read.
     """
@@ -152,17 +163,13 @@ class Heximax(_TradeMixin):
     k: int = 1
     rng: random.Random = field(default_factory=random.Random)
     stance: str = "relative"
-    max_offers: int | None = 3
+    # The trade off switch (`hexset.bots.search2.SearchBot.max_trades`): `0`
+    # publishes nothing and refuses everything. Not a budget -- the engine
+    # has no cap.
+    max_trades: int | None = None
     placement: bool = True
     mode: str = "honest"
     exact_roll_plies: int = EXACT_ROLL_PLIES
-    # The trade adapter's own knobs (unfitted): how many of
-    # `candidate_bundles`' scored proposals become root options, and the
-    # margins below which a proposal is not offered or an offer not
-    # accepted. See the class docstring's trade-adapter paragraph.
-    propose_top_n: int = 3
-    propose_margin: float = 0.0
-    accept_margin: float = 0.0
 
     def __post_init__(self) -> None:
         if self.stance not in STANCES:
@@ -189,12 +196,11 @@ class Heximax(_TradeMixin):
     def choose(self, game: Game) -> Action:
         """The bot's one public entry point: `Bot.choose(game) -> Action`.
 
-        Setup, a no-trade bot's forced decline, and discard are resolved
-        directly (placement's prior, `marginal_loss`, or the only option);
-        everything else determinizes the belief into `k` worlds, builds the
-        root's own options (`_root_options` -- engine legality plus, in
-        MAIN, the trade adapter's `propose_actions`), and either returns the
-        one option available or hands the rest to `_search`.
+        Setup and discard are resolved directly (placement's prior, the
+        smallest marginal loss, or the only option); everything else
+        determinizes the belief into `k` worlds, builds the root's own
+        options (`_root_options`) and either returns the one option
+        available or hands the rest to `_search`.
         """
         seat = to_move(game)
         self._spent = 0
@@ -210,13 +216,12 @@ class Heximax(_TradeMixin):
             # ownership only (`placement.best`), both public.
             chosen = best_opening(game.state(seat, hidden=False), seat, [a.a for a in options])
             return Action(ActionType.SETUP_SETTLEMENT, chosen)
-        if game.phase is Phase.TRADE_RESPOND and self.max_offers == 0:
-            return Action(ActionType.DECLINE_TRADE)
         if game.phase is Phase.DISCARD:
             options = options_for(game)
             if len(options) == 1:
                 return options[0]
-            return min(options, key=lambda a: self.marginal_loss(game, seat, a.a))
+            view = game.state(seat)
+            return min(options, key=lambda a: self._marginal_loss(view, a.a))
 
         worlds = self.worlds(game, seat)
         options = self._root_options(game, worlds, seat)
@@ -246,26 +251,15 @@ class Heximax(_TradeMixin):
         return self._root_options(game, self.worlds(game, seat), seat)
 
     def _root_options(self, game: Game, worlds: list[Game], seat: int) -> list[Action]:
-        # The engine's offer sample is built from the opponents' true hands
-        # (who could cover what), so the root's options are read off the
-        # worlds instead, in first-seen order. Every action legal in a world
-        # is legal in the truth: builds, cards and bank trades depend only on
-        # the mover's hand, and an offer needs only what the proposer holds.
+        # Read off the determinized worlds rather than off the truth, in
+        # first-seen order: every action legal in a world is legal in the
+        # truth, since builds, cards and bank trades depend only on the
+        # mover's own hand, which every world reproduces exactly.
         seen: dict[Action, None] = {}
         for world in worlds:
             for action in self._options_in(world, seat):
                 seen.setdefault(action, None)
         options = list(seen)
-        if game.phase is Phase.MAIN:
-            # The engine's one-for-one sample (`actions._offer_actions`,
-            # already folded into `seen` above) is replaced wholesale by
-            # `propose_actions`. Guarded by the same budget test
-            # `within_offer_budget` applies below, so a bot with no offers
-            # left never pays for the candidate search.
-            options = [a for a in options if a.type is not ActionType.PROPOSE_TRADE]
-            if self.max_offers is None or game.offers_made < self.max_offers:
-                options.extend(self.propose_actions(game, seat))
-        options = within_offer_budget(game, options, self.max_offers)
         if not options:
             options = options_for(game)
 
@@ -332,9 +326,7 @@ class Heximax(_TradeMixin):
         share = 1.0 / len(worlds)
         totals = []
         for action in candidates:
-            # true state: `num_players` is a fixed board property, same in
-            # every world.
-            total = [0.0] * worlds[0].state(seat, hidden=False).num_players
+            total = [0.0] * worlds[0].num_players
             for world in worlds:
                 vector = self._after(world, action, depth, seat)
                 for p, value in enumerate(vector):
@@ -342,6 +334,160 @@ class Heximax(_TradeMixin):
             totals.append(total)
             partial.append((self._rank(total, seat), action))
         return totals
+
+    # -- trading (`hexset.trading`) -----------------------------------------
+
+    def valuation(self, view: View) -> tuple[float, ...]:
+        """What each resource is worth to this seat now, in [-1, 1].
+
+        `tanh(marginal(r) / MARGINAL_SCALE)`, where `marginal(r)` is
+        `Eval(hand + one r) - Eval(hand)` read on this seat's own row under
+        its stance. The squash is not cosmetic: the clearing rule *compares*
+        two seats' surpluses, so every seat has to publish on one common
+        scale, and raw evaluation units have no ceiling to normalise
+        against. `MARGINAL_SCALE` is that shared unit, fixed per evaluator
+        and pinned beside its weights -- never a per-decision rescaling,
+        which would make one seat's "1.0" mean something different from
+        another's.
+
+        Read through the view alone, so it is a function of the information
+        set: the seat's own hand is exact there, every other seat's is the
+        ledger's reconstruction, and neither the bank nor the board is
+        private.
+        """
+        if self.max_trades == 0:
+            return NO_VALUATION
+        return tuple(
+            math.tanh(self._marginal_gain(view, r) / MARGINAL_SCALE)
+            for r in range(NUM_RESOURCES)
+        )
+
+    def accepts(self, view: View, received: Bundle, counterparty: int) -> bool:
+        """Take this exchange iff it strictly improves my own evaluation.
+
+        The private gate of the mechanic: the public vectors say a deal is
+        advertised, this says whether it is actually good, and it is read
+        under the bot's stance -- so under `relative` the counterparty's
+        gain is already priced in, which is what makes "not with the
+        leader" expressible without a partner term. Strict: an exchange
+        worth exactly nothing does not clear, which is what bounds the
+        event (`hexset.trading.trade_event`).
+        """
+        if self.max_trades == 0:
+            return False
+        seat = view.perspective
+        return self._delta(view, seat, seat, received, counterparty, self._rank) > 0.0
+
+    # -- the valuation the two above are built from --------------------------
+
+    def _vector(self, state: GameState, ledger: PublicLedger, knower: int) -> list[float]:
+        """The per-seat vector for `state`, read through `knower`'s own belief
+        (its hand exact, everyone else's `expected_hand`)."""
+        belief = self.evaluator.belief_for(state, ledger, knower)
+        return self.evaluator.evaluate(state, knower, belief)
+
+    def _read_row(
+        self, state: GameState, ledger: PublicLedger, knower: int, target: int, rank, *,
+        vector: list[float] | None = None,
+    ) -> float:
+        """`target`'s row of `knower`'s vector, under `rank` -- how the
+        valuation estimates "what would someone else make of this" without
+        reading that someone's true hand."""
+        if vector is None:
+            vector = self._vector(state, ledger, knower)
+        return rank(vector, target)
+
+    def _marginal_gain(self, view: View, resource: int) -> float:
+        """Eval(hand + one `resource`) - Eval(hand), from this seat's reading."""
+        seat = view.perspective
+        state = view.state
+        before = self._read_row(state, view.ledger, seat, seat, self._rank)
+        after = copy_state(state)
+        after.hands[seat][resource] += 1
+        if after.bank[resource] > 0:
+            after.bank[resource] -= 1
+        ledger = view.ledger.copy()
+        ledger.receive(seat, resource, 1)
+        return self._read_row(after, ledger, seat, seat, self._rank) - before
+
+    def _marginal_loss(self, view: View, resource: int) -> float:
+        """Eval(hand) - Eval(hand less one `resource`); zero when none is held."""
+        seat = view.perspective
+        state = view.state
+        if state.hands[seat][resource] < 1:
+            return 0.0
+        before = self._read_row(state, view.ledger, seat, seat, self._rank)
+        after = copy_state(state)
+        after.hands[seat][resource] -= 1
+        after.bank[resource] += 1
+        ledger = view.ledger.copy()
+        ledger.spend(seat, resource, 1)
+        return before - self._read_row(after, ledger, seat, seat, self._rank)
+
+    def _delta(
+        self, view: View, knower: int, target: int, received: Bundle, counterparty: int,
+        rank,
+    ) -> float:
+        """`target`'s row after `target` receives `received` from
+        `counterparty`, less what it is now, read entirely through
+        `knower`'s own information.
+
+        Invariants, both load-bearing for honesty: the ledger is updated from
+        `received` directly rather than by diffing hands, so a third party's
+        hidden composition cannot leak through a clamp at zero; and hands
+        move exactly for `knower` and as one total for anyone else, because
+        only `knower`'s own row is ever read verbatim -- see `_move_hand`.
+        """
+        state = view.state
+        before = self._read_row(state, view.ledger, knower, target, rank)
+        after = copy_state(state)
+        gains = [max(0, n) for n in received]
+        losses = [max(0, -n) for n in received]
+        exact = self.omniscient
+        self._move_hand(after, knower, target, gains=gains, losses=losses, exact=exact)
+        self._move_hand(after, knower, counterparty, gains=losses, losses=gains, exact=exact)
+        ledger = view.ledger.copy()
+        for r in range(NUM_RESOURCES):
+            if losses[r]:
+                ledger.spend(target, r, losses[r])
+                ledger.receive(counterparty, r, losses[r])
+            if gains[r]:
+                ledger.spend(counterparty, r, gains[r])
+                ledger.receive(target, r, gains[r])
+        return self._read_row(after, ledger, knower, target, rank) - before
+
+    @staticmethod
+    def _move_hand(
+        state: GameState, knower: int, seat: int, *,
+        gains: list[int], losses: list[int], exact: bool = False,
+    ) -> None:
+        """`seat`'s hand after gaining `gains` and losing `losses`.
+
+        Exact, per resource, when `seat == knower` -- its own hand is read
+        verbatim, so it must reflect the exchange precisely. Otherwise only
+        the total moves, folded into one resource slot: a non-knower's hand
+        reaches the honest evaluation only through `View.expected_hand`,
+        which reads `known`/`unknown`/`pool` off the ledger and the bank,
+        and the one thing it takes from `state.hands` is the *size* -- which
+        the fold preserves and a per-resource move, clamped at zero when the
+        seat cannot cover `losses`, would not.
+
+        `exact` forces the per-resource move for every seat, and the
+        omniscient bot passes it. Under omniscience the reasoning above is
+        void: `known` *is* `state.hands`, every row is scored on the real
+        cards, and folding would price an all-one-resource fiction whose
+        `progress`, `diversity` and `scarce` terms are nothing like the
+        position's.
+        """
+        hand = state.hands[seat]
+        if seat == knower or exact:
+            for r in range(len(hand)):
+                hand[r] += gains[r] - losses[r]
+                if hand[r] < 0:
+                    hand[r] = 0
+        else:
+            net = sum(gains) - sum(losses)
+            state.hands[seat] = [max(0, sum(hand) + net)] + [0] * (len(hand) - 1)
 
     # -- the tree ------------------------------------------------------------
 
@@ -358,8 +504,7 @@ class Heximax(_TradeMixin):
         if action.type is ActionType.ROLL:
             return self._over_dice(game, depth, knower, ply)
         if draws_hidden(game, action):
-            # true state: `num_players` is a fixed board property.
-            total = [0.0] * game.state(knower, hidden=False).num_players
+            total = [0.0] * game.num_players
             for weight, child in self.draw_children(game, action, knower):
                 for p, value in enumerate(self._value(child, depth - 1, knower, ply + 1)):
                     total[p] += weight * value
@@ -374,8 +519,7 @@ class Heximax(_TradeMixin):
             child = imagine(game, self.rng)
             roll_dice(child)
             return self._value(child, depth - 1, knower, ply + 1)
-        # true state: `num_players` is a fixed board property.
-        total = [0.0] * game.state(knower, hidden=False).num_players
+        total = [0.0] * game.num_players
         for roll, weight in ROLL_ODDS:
             child = imagine(game, self.rng)
             roll_dice(child, roll)
@@ -448,32 +592,15 @@ class Heximax(_TradeMixin):
         return child
 
     def _options_in(self, world: Game, knower: int) -> list[Action]:
-        """`legal_actions` in a determinized world, minus an ACCEPT it cannot
-        honour or one `accept_rule` would refuse.
+        """`legal_actions` in a determinized world.
 
-        The engine builds its responder list from the true hands, so a world
-        sampled without that knowledge may have dealt the seat being asked a
-        hand that cannot cover the offer: that hard constraint drops ACCEPT
-        outright. The soft one runs at every `TRADE_RESPOND` node, not only
-        the root, and `knower` there is always the search's root seat, never
-        the responder -- so a simulated opponent's row is read off `knower`'s
-        belief (`_partner_delta`), never that world's sampled truth, and its
-        accept cannot depend on which of the `k` worlds it was sampled into.
+        Nothing to filter any more: with trading an engine event rather than
+        an action (`hexset.trading`), no legal action's legality depends on
+        another seat's hand, so every action a world offers is one the truth
+        offers too.
         """
-        options = legal_actions(world)
-        if world.phase is Phase.TRADE_RESPOND and world.offer is not None:
-            responder = to_move(world)
-            # true state: `world` is a determinization already, so the hard
-            # constraint below (can `responder` cover it in THIS sampled
-            # world) is read off `world`'s own sampled truth, not the honest
-            # view -- see this method's docstring.
-            if not can_accept(
-                world.state(responder, hidden=False), world.offer, responder
-            ) or not self.accept_rule(
-                world, responder, world.offer, self.accept_margin, knower=knower
-            ):
-                options = [a for a in options if a.type is not ActionType.ACCEPT_TRADE]
-        return options
+        del knower
+        return legal_actions(world)
 
     def _value(self, game: Game, depth: int, knower: int, ply: int) -> list[float]:
         if depth <= 0 or is_over(game):
@@ -530,36 +657,34 @@ def _donor(hand: list[int], known: list[int]) -> int | None:
 
 MODES = ("honest", "omniscient", "notrade")
 
-# Sentinel for `heximax(max_offers=...)`: "whatever the mode's own budget is".
+# Sentinel for `heximax(max_trades=...)`: "whatever the mode's own setting is".
 BY_MODE: int = object()  # type: ignore[assignment]
 
 
 def heximax(
     board: Board, rng: random.Random | None = None, *, mode: str = "honest", depth: int = 2,
-    width: int | None = 6, max_offers: int | None = BY_MODE,  # type: ignore[assignment]
+    width: int | None = 6, max_trades: int | None = BY_MODE,  # type: ignore[assignment]
     max_nodes: int = DEFAULT_MAX_NODES, k: int = 1, stance: str = "relative",
     placement: bool = True, exact_progress_samples: int = 0, weights: Weights | None = None,
-    propose_top_n: int = 3, propose_margin: float = 0.0, accept_margin: float = 0.0,
 ) -> Heximax:
     """The three shipped configurations, by `mode`.
 
     `honest` reads the ledger and the trading-table weights; `omniscient`
     reads every true hand with the same weights; `notrade` is honest with the
-    no-trade weights. Left at `BY_MODE`, the offer budget is three for the
-    first two and zero for `notrade`; any explicit value, `None` included,
-    is taken as given. `propose_top_n`, `propose_margin` and `accept_margin`
-    are the trade adapter's own knobs, unfitted -- see `Heximax`'s docstring.
+    no-trade weights. Left at `BY_MODE`, trading is on for the first two and
+    off (`max_trades=0`) for `notrade`; any explicit value, `None` included,
+    is taken as given.
 
     `weights` overrides the mode's own profile (`TRADING_WEIGHTS` or
     `NO_TRADE_WEIGHTS`) with the given vector, leaving everything else about
-    the mode -- the offer budget, `omniscient` -- unchanged. This is the hook
+    the mode -- the trade switch, `omniscient` -- unchanged. This is the hook
     `hexset.tuning` fits through: a candidate and the incumbent are otherwise
     identical heximax bots, differing only in this vector.
     """
     if mode not in MODES:
         raise ValueError(f"unknown heximax mode: {mode}")
-    if max_offers is BY_MODE:
-        max_offers = 0 if mode == "notrade" else 3
+    if max_trades is BY_MODE:
+        max_trades = 0 if mode == "notrade" else None
     if weights is None:
         weights = NO_TRADE_WEIGHTS if mode == "notrade" else TRADING_WEIGHTS
     evaluator = HonestEvaluator(
@@ -576,10 +701,7 @@ def heximax(
         k=k,
         rng=rng or random.Random(),
         stance=stance,
-        max_offers=max_offers,
+        max_trades=max_trades,
         placement=placement,
         mode=mode,
-        propose_top_n=propose_top_n,
-        propose_margin=propose_margin,
-        accept_margin=accept_margin,
     )

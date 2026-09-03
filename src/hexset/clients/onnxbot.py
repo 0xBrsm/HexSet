@@ -2,8 +2,8 @@
 
 This module is the whole boundary between the game and a model. Everything
 that knows a network exists — the record encoding, the flat action space,
-masking, sampling, the give/want pair distribution, and how a checkpoint
-wants to be played — lives behind here. The rest of the package hands over a
+masking, sampling, and how a checkpoint wants to be played — lives behind
+here. The rest of the package hands over a
 `Game` and gets an `Action` back, and `spawn` below is the only entry point
 it needs.
 
@@ -13,7 +13,7 @@ network directly. `V2Policy` is an onnxruntime `InferenceSession` with its
 own math in numpy — mechanical, since none of it has learned parameters.
 
 A checkpoint's `contract` metadata names which record shape it declares
-(`2`, `3` or `4` — "record in, decision out": the graph itself masks,
+(`5` — "record in, decision out": the graph itself masks,
 normalises, argmaxes and un-rotates, and `V2Policy` just reads its outputs).
 `NetworkBot`, `NetworkEvaluator` and `LeafEvaluator` call
 `act_rows`/`value_rows`/`score_rows`, an interface `V2Policy` presents for
@@ -37,24 +37,13 @@ from typing import Sequence
 import numpy as np
 import onnxruntime as ort
 
-from hexset.actions import (
-    Action,
-    ActionSpace,
-    ActionType,
-    build_space,
-    within_offer_budget,
-)
-from hexset.actions import pair_index as _pair_index
-from hexset.board.terrain import NUM_RESOURCES
+from hexset.actions import Action, ActionSpace, build_space
 from hexset.board.topology import Topology
 from hexset.game import Game, to_move
 from hexset.mcts import Search
 from hexset.onnx_record import record_from_game
 from hexset.server.constants import RECORD_CONTRACTS
 from hexset.server.modelmeta import SearchConfig, search_config
-# The honest option list, not `hexset.bots.options_for`'s omniscient one: a
-# checkpoint served here sees exactly the mask an external client or a human
-# sees (`hexset.server.rules`, and PR #2 defect 4).
 from hexset.server.rules import options_for
 
 
@@ -66,10 +55,6 @@ def _check_players(game: Game, players: int) -> None:
             f"network was trained for {players} players, "
             f"not {num_players}"
         )
-
-
-def _one_hot(resource: int) -> tuple[int, ...]:
-    return tuple(1 if r == resource else 0 for r in range(NUM_RESOURCES))
 
 
 def _providers_for(device: str) -> list[str]:
@@ -94,7 +79,6 @@ class V2Policy:
     def __init__(self, session: ort.InferenceSession, space: ActionSpace) -> None:
         self.session = session
         self.space = space
-        self.trade_slot = space.offsets[ActionType.PROPOSE_TRADE]
 
     def _run(
         self,
@@ -103,13 +87,11 @@ class V2Policy:
     ) -> list[np.ndarray]:
         records = [record_from_game(game, seat, self.space, options) for game, seat, options in rows]
         # Keyed off the graph's own input names, not off every field the
-        # record happens to carry. The record is the newest contract (29
-        # fields); a contract-2 graph declares 23 of them and a contract-3
-        # graph 27, and onnxruntime rejects a feed containing a name it does
-        # not declare -- which is how PR #2 broke every genuine dev-HexNet
-        # export with `Invalid input name: offer_proposer`. Every contract so
-        # far is a prefix-superset of the last, so serving an older graph is
-        # exactly "give it the subset it asks for".
+        # record happens to carry. onnxruntime rejects a feed containing a
+        # name it does not declare, so this is exactly "give the graph the
+        # subset it asks for" -- and refuses loudly, below, if it asks for
+        # something a contract-5 record no longer carries (the four
+        # `offer_*` fields and `pair_mask`, gone with the offer protocol).
         wanted = [i.name for i in self.session.get_inputs()]
         missing = [name for name in wanted if name not in records[0]]
         if missing:
@@ -120,20 +102,11 @@ class V2Policy:
         inputs = {key: np.stack([record[key] for record in records]) for key in wanted}
         return self.session.run(outputs, inputs)
 
-    def _decode(self, index: int, pair: int) -> Action:
-        if index == self.trade_slot:
-            return Action(
-                ActionType.PROPOSE_TRADE,
-                give=_one_hot(pair // NUM_RESOURCES),
-                want=_one_hot(pair % NUM_RESOURCES),
-            )
-        return self.space.decode(index)
-
     def act_rows(self, rows: Sequence[tuple[Game, int, tuple[Action, ...]]]) -> list[Action]:
         if not rows:
             return []
-        action_index, pair_index_out = self._run(rows, ["action_index", "pair_index"])
-        return [self._decode(int(a), int(p)) for a, p in zip(action_index, pair_index_out)]
+        (action_index,) = self._run(rows, ["action_index"])
+        return [self.space.decode(int(a)) for a in action_index]
 
     def value_rows(self, rows: Sequence[tuple[Game, int]]) -> list[tuple[float, ...]]:
         """`value`, already in board-seat order — the graph un-rotates it
@@ -148,26 +121,20 @@ class V2Policy:
     def score_rows(
         self, rows: Sequence[tuple[Game, int, tuple[Action, ...]]]
     ) -> list[tuple[np.ndarray, tuple[float, ...]]]:
-        prior, pair_prior, value = self._run(rows, ["prior", "pair_prior", "value"])
+        prior, value = self._run(rows, ["prior", "value"])
         return [
             (
-                self._combine_prior(options, prior[i], pair_prior[i]),
+                self._combine_prior(options, prior[i]),
                 tuple(float(v) for v in value[i]),
             )
             for i, (_, _, options) in enumerate(rows)
         ]
 
-    def _combine_prior(self, options, prior: np.ndarray, pair_prior: np.ndarray) -> np.ndarray:
-        """A leaf's options, scored from this row's dense priors — plain
-        multiplication, since the graph hands back linear probabilities
-        rather than log-probs."""
-        trade = self.trade_slot
+    def _combine_prior(self, options, prior: np.ndarray) -> np.ndarray:
+        """A leaf's options, scored from this row's dense prior."""
         weights = np.empty(len(options))
         for i, option in enumerate(options):
-            index = self.space.index(option)
-            weights[i] = prior[index]
-            if index == trade:
-                weights[i] *= pair_prior[_pair_index(option.give, option.want)]
+            weights[i] = prior[self.space.index(option)]
         total = weights.sum()
         if total <= 0:
             return np.full(len(options), 1.0 / len(options))
@@ -181,7 +148,7 @@ class Loaded:
     policy: V2Policy
     space: ActionSpace
     players: int
-    max_offers: int | None
+    max_trades: int | None
     iteration: int
     search: SearchConfig = SearchConfig()
 
@@ -225,12 +192,12 @@ def _load_cached(path: str, topology: Topology, device: str, mtime_ns: int) -> L
             f"(known: {', '.join(sorted(RECORD_CONTRACTS))})"
         )
     policy = V2Policy(session, space)
-    max_offers = meta.get("max_offers") or None
+    max_trades = meta.get("max_trades") or None
     return Loaded(
         policy=policy,
         space=space,
         players=players,
-        max_offers=int(max_offers) if max_offers is not None else None,
+        max_trades=int(max_trades) if max_trades is not None else None,
         iteration=int(meta.get("iteration", 0)),
         search=search_config(meta),
     )
@@ -250,18 +217,22 @@ def load(path: str, topology: Topology, device: str = "cpu") -> Loaded:
 
 @dataclass
 class NetworkBot:
-    """A policy answering one position at a time."""
+    """A policy answering one position at a time.
+
+    `max_trades` is carried, not used: a checkpoint publishes no valuation
+    vector yet (the network's own trade head is HexNet's side of this
+    change), so a network seat never trades whatever this says.
+    """
 
     policy: V2Policy
     space: ActionSpace
     players: int
-    max_offers: int | None = None
+    max_trades: int | None = None
 
     def choose(self, game: Game) -> Action:
         _check_players(game, self.players)
         seat = to_move(game)
-        options = tuple(within_offer_budget(game, options_for(game), self.max_offers))
-        return self.policy.act_rows([(game, seat, options)])[0]
+        return self.policy.act_rows([(game, seat, tuple(options_for(game)))])[0]
 
 
 @dataclass
@@ -270,7 +241,7 @@ class NetworkEvaluator:
 
     policy: V2Policy
     players: int
-    max_offers: int | None = None
+    max_trades: int | None = None
 
     def evaluate_game(self, game: Game, seat: int) -> list[float]:
         _check_players(game, self.players)
@@ -306,14 +277,14 @@ def searcher(
     *,
     simulations: int = 128,
     wave: int = 16,
-    max_offers: int | None = None,
+    max_trades: int | None = None,
     device: str = "cpu",
     inference_batch: int | None = None,
     rng=None,
 ) -> Search:
     """The checkpoint at `path` as a batched PUCT search, playing on `board`."""
     loaded = load(path, board.topology, device)
-    budget = loaded.max_offers if max_offers is None else max_offers
+    budget = loaded.max_trades if max_trades is None else max_trades
     return Search(
         LeafEvaluator(
             policy=loaded.policy,
@@ -322,7 +293,7 @@ def searcher(
         ),
         simulations=simulations,
         wave=wave,
-        max_offers=budget,
+        max_trades=budget,
         rng=rng,
     )
 
@@ -331,12 +302,12 @@ def network_evaluator(path: str, board, *, device: str = "cpu") -> NetworkEvalua
     """The checkpoint at `path` as a leaf evaluation for the search."""
     loaded = load(path, board.topology, device)
     return NetworkEvaluator(
-        policy=loaded.policy, players=loaded.players, max_offers=loaded.max_offers
+        policy=loaded.policy, players=loaded.players, max_trades=loaded.max_trades
     )
 
 
 def network_bot(
-    path: str, board, *, max_offers: int | None = None, device: str = "cpu"
+    path: str, board, *, max_trades: int | None = None, device: str = "cpu"
 ) -> NetworkBot:
     """The checkpoint at `path`, playing on `board`."""
     loaded = load(path, board.topology, device)
@@ -344,7 +315,7 @@ def network_bot(
         policy=loaded.policy,
         space=loaded.space,
         players=loaded.players,
-        max_offers=loaded.max_offers if max_offers is None else max_offers,
+        max_trades=loaded.max_trades if max_trades is None else max_trades,
     )
 
 
@@ -354,7 +325,7 @@ def spawn(
     *,
     rng: random.Random | None = None,
     device: str = "cpu",
-    max_offers: int | None = None,
+    max_trades: int | None = None,
 ):
     """The checkpoint at `path` as something with `.choose(game) -> Action`.
 
@@ -369,13 +340,13 @@ def spawn(
     """
     loaded = load(path, board.topology, device)
     if not loaded.search.searches:
-        return network_bot(path, board, max_offers=max_offers, device=device)
+        return network_bot(path, board, max_trades=max_trades, device=device)
     return searcher(
         path,
         board,
         simulations=loaded.search.simulations,
         wave=loaded.search.wave,
-        max_offers=max_offers,
+        max_trades=max_trades,
         device=device,
         rng=rng,
     )

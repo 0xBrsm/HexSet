@@ -1,0 +1,74 @@
+{
+  "protocol": "Readout (v): the mirror cost table, plus the trades-per-turn distribution.\n\nThe protocol is `hexset.bots.heximax.search`'s own module docstring: three\nfour-seat games an arm, board seeds 0/1/2, every seat the same preset, arms\ninterleaved seed by seed, timed in one process on an idle box (paired -- the\nabsolute numbers drift with load, the ratio does not). The control is\n`search2`; it used to be `search2-offers3`, heximax's own three-offer budget,\nand there is no budget any more.\n\nThe trades-per-turn distribution is measured over the lineup readout (iii)\nactually plays: `[heximax, heximax, search2, search2]`, blocked.",
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "heximax": {
+    "games": 3,
+    "moves": 950,
+    "seconds": 3.9833442339440808,
+    "ms_per_move": 4.192993930467454,
+    "calls_per_game": 6158169.0,
+    "calls_per_move": 19446.84947368421,
+    "by_phase_moves": {
+      "SETUP_SETTLEMENT": 24,
+      "SETUP_ROAD": 24,
+      "ROLL": 305,
+      "ROBBER": 47,
+      "MAIN": 542,
+      "DISCARD": 8
+    },
+    "trades_per_turn_mirror": {
+      "events": 276,
+      "total": 58,
+      "mean": 0.21014492753623187,
+      "max": 2
+    }
+  },
+  "search2": {
+    "games": 3,
+    "moves": 1216,
+    "seconds": 3.3434318099170923,
+    "ms_per_move": 2.7495327384186616,
+    "calls_per_game": 6833985.333333333,
+    "calls_per_move": 16860.161184210527,
+    "by_phase_moves": {
+      "SETUP_SETTLEMENT": 24,
+      "SETUP_ROAD": 24,
+      "ROLL": 362,
+      "ROBBER": 61,
+      "MAIN": 674,
+      "DISCARD": 71
+    },
+    "trades_per_turn_mirror": {
+      "events": 340,
+      "total": 43,
+      "mean": 0.1264705882352941,
+      "max": 2
+    }
+  },
+  "ratio_ms_per_move": 1.5249841807226379,
+  "ratio_calls_per_game": 0.901109484382856,
+  "ratio_calls_per_move": 1.1534201400100557,
+  "reading": "The design's ceiling is <=2x `search2` per move (`hexset.bots.heximax.search`'s module docstring). Read the per-MOVE numbers: heximax's games are shorter, so a per-game total flatters it. The phase-neutral re-weighting that note also asks for is moot -- it existed because `search2` booked ~20x more TRADE_RESPOND decisions than heximax and those cheap decisions sat in the denominator, and there is no such phase any more.",
+  "trades_per_turn": {
+    "lineup": [
+      "heximax",
+      "heximax",
+      "search2",
+      "search2"
+    ],
+    "games": 6,
+    "events": 590,
+    "total_trades": 89,
+    "mean": 0.15084745762711865,
+    "max": 2,
+    "histogram": {
+      "0": 506,
+      "1": 79,
+      "2": 5
+    }
+  }
+}

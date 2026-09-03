@@ -1,5 +1,14 @@
 # ONNX contract v2 — moving the model inside the model file
 
+**Status, 2026-09-03: superseded in part by contract 5.** The one-event trade
+mechanic (`agents/reference/trading-design.md` §8) removed the offer protocol,
+so the four `offer_*` fields, the `pair_mask` input and the `pair_index`/
+`pair_prior` outputs below are gone and a `valuations` field
+(`(B, players, NUM_RESOURCES)`, float32) takes their place; contracts 2, 3
+and 4 are no longer served. `docs/bot-api.md` is the current field list. The
+design below stands for everything else — it is why the record exists and how
+each remaining field is derived.
+
 **Status, 2026-09-02: phases 1–5 landed; phase 6 (delete the v1 path) is
 done — the owner dropped contract 1 outright rather than gating it behind a
 parity duel, once it became clear no genuine checkpoint under `models/`

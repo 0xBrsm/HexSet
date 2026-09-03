@@ -34,13 +34,14 @@ itself: held-out log-loss 1.3746 against 1.3863 for chance.
 Both differences are reported **paired**, per position, because the difference
 is what the null is for and pairing is free once the null is per-position.
 
-**The aggregate alone would be a statement about trading.** `PROPOSE_TRADE` is
-the most common sibling kind on record and `_offer_actions` is ~26% of
-`legal_actions`, so an unstratified mean is dominated by the one decision type
-whose option set is largest and whose stakes are smallest. Everything is
-therefore broken down per `ActionType`, per `Phase` and by game progress, and
-each breakdown partitions the decisions exactly, so it sums back to the
-aggregate.
+**The aggregate alone hides which decision is being measured.** Everything is
+broken down per `ActionType`, per `Phase` and by game progress, and each
+breakdown partitions the decisions exactly, so it sums back to the aggregate.
+This mattered most under the offer protocol, where the enumerated proposals
+were ~26% of `legal_actions` and an unstratified mean was dominated by the
+decision type with the largest option set and the smallest stakes; trading is
+no longer an action at all, and the stratification stays because it was always
+the right way to read the number.
 
 **Trivial decisions are excluded and counted.** Where one action is legal,
 agreement is 1.0 by construction and carries no information; a policy could be
@@ -50,14 +51,8 @@ games the measurement actually needs.
 
 **The distribution scored is the one the search sees**, via
 `hexnet.netbot.LeafEvaluator.evaluate` on a `hexset.mcts.Leaf` -- not a
-separately-built softmax. That matters most at the trade slot, which is one slot
-in the flat categorical standing for "propose something" whose mass the
-evaluator splits across the legal offers by the pair distribution. A policy that
-wants to trade 40% of the time and has twenty legal offers puts ~2% on each, so
-a *single* recorded proposal is a hard target by construction. Scoring a
-hand-rolled distribution instead would quietly measure a different agent, and
-scoring the flat slot alone would credit the policy for naming an offer it did
-not name.
+separately-built softmax. Scoring a hand-rolled distribution instead would
+quietly measure a different agent.
 
 Records come from anywhere that produces a `hexset.record.Record`. The motivating
 source is a first-party human arena that journals every action with its hidden
@@ -98,14 +93,12 @@ from hexset.actions import (
     Action,
     ActionSpace,
     ActionType,
-    apply,
     legal_actions,
-    within_offer_budget,
 )
 from hexset.arena import Z_95, leaf_evaluator, load_checkpoint, wilson
 from hexset.game import imagine, is_over, start, to_move
 from hexset.mcts import Leaf
-from hexset.record import Record, actions_of, board_of, read as read_records
+from hexset.record import Record, advance, board_of, read as read_records, steps
 
 PROGRESS_BUCKETS = 5
 
@@ -118,22 +111,10 @@ FLOOR = 1e-12
 
 
 def option_key(action: Action) -> tuple:
-    """What the policy actually chose, with the parts it does not choose dropped.
-
-    `Action` is a `NamedTuple`, so `==` includes `ask` -- the proposer's
-    preferred responder order. `actions._offer_actions` enumerates every offer
-    with `ask=()` while a recorded game may carry a real order there, so
-    comparing whole actions would fail to match *every* proposal and silently
-    file the most common decision type in the corpus as unrepresentable. The
-    network has no `ask` head; it is not part of the decision being scored.
-    """
-    return (
-        int(action.type),
-        action.a,
-        action.b,
-        tuple(action.give),
-        tuple(action.want),
-    )
+    """What the policy actually chose. An `Action` is now exactly its type
+    and two operands, so this is the whole of it -- kept as a function
+    because every comparison in this module goes through one place."""
+    return (int(action.type), action.a, action.b)
 
 
 @dataclass
@@ -212,7 +193,7 @@ def positions(
     game: int,
     tally: Tally,
     *,
-    max_offers: int | None = None,
+    max_trades: int | None = None,
     seats: Collection[int] | None = None,
     sample: float = 1.0,
     rng: random.Random | None = None,
@@ -223,8 +204,9 @@ def positions(
     start from the board and seed the record carries, step `actions_of` in order,
     and read the live game before each action rather than after. Legality is not
     rechecked -- `hexset.record.replay` is what verifies a record -- but a taken
-    action that is not in the enumerated option set is counted, because for
-    proposals the enumeration is a *sample* and not the whole legal set.
+    action that is not in the option set is still counted rather than dropped,
+    so a corpus recorded against a different engine shows up as unrepresented
+    rather than as agreement.
 
     A snapshot rides on each `Leaf` so a batch can be scored after the replay
     has moved on. `randomize_deck=False`: the copy is scored, never stepped, and
@@ -235,7 +217,7 @@ def positions(
     total = max(1, len(record.actions))
     tally.games += 1
 
-    for step, action in enumerate(actions_of(record)):
+    for step, (action, trades) in enumerate(steps(record)):
         if is_over(live):
             break
         tally.actions += 1
@@ -243,14 +225,14 @@ def positions(
 
         if seats is not None and seat not in seats:
             tally.off_seat += 1
-            apply(live, action)
+            advance(live, action, trades)
             continue
         if sample < 1.0 and (rng or random).random() >= sample:
             tally.unsampled += 1
-            apply(live, action)
+            advance(live, action, trades)
             continue
 
-        options = tuple(within_offer_budget(live, legal_actions(live), max_offers))
+        options = tuple(legal_actions(live))
         tally.considered += 1
         if len(options) < 2:
             tally.trivial += 1
@@ -276,7 +258,7 @@ def positions(
                 tally.unrepresented_by_kind[name] = (
                     tally.unrepresented_by_kind.get(name, 0) + 1
                 )
-        apply(live, action)
+        advance(live, action, trades)
 
 
 def _check_space(record: Record, space: ActionSpace | None) -> None:
@@ -306,7 +288,7 @@ def score(
     records: Iterable[Record],
     evaluator,
     *,
-    max_offers: int | None = None,
+    max_trades: int | None = None,
     seats: Collection[int] | None = None,
     space: ActionSpace | None = None,
     batch: int = 64,
@@ -336,7 +318,7 @@ def score(
             record,
             game,
             tally,
-            max_offers=max_offers,
+            max_trades=max_trades,
             seats=seats,
             sample=sample,
             rng=rng,
@@ -542,13 +524,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--batch", type=int, default=64)
     parser.add_argument("--device", default="cpu")
     parser.add_argument(
-        "--max-offers",
+        "--max-trades",
         type=int,
         default=None,
-        help="offer budget the option set is enumerated under. Default: the "
-        "budget the checkpoint records training under, which is the horizon it "
-        "learned on. A recorded game played to a wider budget will have "
-        "proposals this rules out, and they are counted as unrepresented",
+        help="trade switch the checkpoint is scored under (0 = never trades). "
+        "Default: whatever the checkpoint records",
     )
     parser.add_argument(
         "--control",
@@ -575,14 +555,14 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     loaded = load_checkpoint(args.checkpoint, board_of(records[0]).topology, args.device)
-    budget = loaded.max_offers if args.max_offers is None else args.max_offers
+    budget = loaded.max_trades if args.max_trades is None else args.max_trades
     evaluator = leaf_evaluator(loaded.policy, loaded.space)
 
     started = time.perf_counter()
     scored, tally = score(
         records,
         evaluator,
-        max_offers=budget,
+        max_trades=budget,
         seats=_seats(args.seats),
         space=loaded.space,
         batch=args.batch,
@@ -604,7 +584,7 @@ def main(argv: list[str] | None = None) -> int:
         "iteration": loaded.iteration,
         "records": args.records,
         "seats": args.seats,
-        "max_offers": budget,
+        "max_trades": budget,
         "sample": args.sample,
         "seed": args.seed,
         "seconds": round(elapsed, 1),
@@ -624,7 +604,7 @@ def main(argv: list[str] | None = None) -> int:
     counts = payload["tally"]
     if args.control:
         print("CONTROL: a policy against its own games. Not a human result.")
-    print(f"{label} @ iteration {loaded.iteration}, offer budget {budget}")
+    print(f"{label} @ iteration {loaded.iteration}, trade switch {budget}")
     print(
         f"{counts['games']} games, {counts['actions']} actions, "
         f"{overall['decisions']} non-trivial decisions scored "

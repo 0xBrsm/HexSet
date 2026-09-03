@@ -1,10 +1,18 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """The behaviour-preservation gate for `hexset.bots.search2` (and the shared
-`hexset.bots.evaluate`), written before `hexset/bots.py` and `hexset/evaluate.py`
-move into the `hexset.bots` package -- see `test_heximax.py`'s own census gate,
-which this mirrors. Written and greened against the pre-move tree so the move
-itself is provably exact: any later diff that flips one of these hashes has
-changed what `search2` chooses somewhere in that game, not merely moved code.
+`hexset.bots.evaluate`) -- see `test_heximax.py`'s own census gate, which
+this mirrors. Any diff that flips one of these hashes has changed what
+`search2` chooses somewhere in that game, not merely moved code.
+
+**Re-baselined deliberately for the one-event trade mechanic.** Both arms
+changed, including the no-trade one, and the reason is worth recording
+because the registration predicted otherwise: `search2-notrade` suppressed
+*proposing*, but `SearchBot._value` enumerated the engine's offer sample
+inside the tree regardless, so the no-trade referent still searched
+hypothetical offers. Stubbing `actions._offer_actions` to `[]` on the old
+tree reproduces every hash below exactly, which is the attribution: the
+offer sample's removal is the whole of the difference, and nothing else in
+the mechanic moves a no-trade game.
 """
 
 from __future__ import annotations
@@ -23,15 +31,12 @@ from hexset.game import is_over, start, to_move
 
 CENSUS_FIXTURE = Path(__file__).parent / "fixtures" / "search2_census.json"
 
-# name -> (Entrant, seeds). `search2` is the registered preset; `search2-offers0`
-# is not registered anywhere (today's `PRESETS` has no zero-offer search2
-# entry) and is built here directly -- `spawn` works on any `Entrant`, and
-# adding a preset to `hexset.arena.PRESETS` is no part of a pure move.
+# name -> Entrant. Both are registered presets now: `search2-notrade` is the
+# no-trade referent the strength gates duel against, so it belongs in
+# `hexset.arena.PRESETS` rather than being built here.
 CENSUS_ENTRANTS: dict[str, Entrant] = {
     "search2": PRESETS["search2"],
-    "search2-offers0": Entrant(
-        "search2-offers0", kind="search", depth=2, width=6, max_offers=0
-    ),
+    "search2-notrade": PRESETS["search2-notrade"],
 }
 CENSUS_SEEDS = range(300, 320)
 
@@ -42,7 +47,9 @@ def _census_game(entrant: Entrant, seed: int, players: int = 4) -> str:
     Same construction as `test_heximax._census_game`: one rng off `seed`
     builds the board and starts the game, each seat's bot gets its own rng
     deterministic per seat, and the hash covers the full `(seat, action)`
-    trace rather than just the outcome.
+    trace rather than just the outcome. The bots are seated as the game's
+    `traders` too, exactly as `arena.play` seats them, so the census covers
+    what they trade as well as what they choose.
     """
     rng = random.Random(seed)
     board = random_base_board(rng)
@@ -51,23 +58,23 @@ def _census_game(entrant: Entrant, seed: int, players: int = 4) -> str:
         spawn(entrant, board, random.Random(f"{seed}:{seat}"))
         for seat in range(players)
     ]
+    game.traders = tuple(bots)
     trace = []
     moves = 0
     while not is_over(game):
         seat = to_move(game)
         action = bots[seat].choose(game)
+        cleared = len(game.trades)
+        apply(game, action)
         trace.append(
             (
                 seat,
                 int(action.type),
                 action.a,
                 action.b,
-                list(action.give),
-                list(action.want),
-                list(action.ask),
+                [(t.a, t.b, t.received) for t in game.trades[cleared:]],
             )
         )
-        apply(game, action)
         moves += 1
         if moves > 60000:
             raise AssertionError(f"{entrant.name} seed {seed} did not finish")
@@ -75,7 +82,7 @@ def _census_game(entrant: Entrant, seed: int, players: int = 4) -> str:
 
 
 def test_choices_are_byte_identical_to_the_recorded_census(request):
-    """Plays 20 seeded games each for `search2` and `search2-offers0` and
+    """Plays 20 seeded games each for `search2` and `search2-notrade` and
     hashes every game's full `(seat, action)` sequence, the same gate
     `test_heximax` runs for heximax. `--write-census` (registered once,
     repo-wide, in `tests/conftest.py`) regenerates the fixture."""

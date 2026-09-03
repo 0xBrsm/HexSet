@@ -1,25 +1,24 @@
 """Build a record-contract stub graph: right names, right shapes, no weights.
 
-    python build_stub.py 4      # 29 inputs -> stub-contract4.onnx
-    python build_stub.py 3      # 27 inputs -> stub-contract3.onnx
+    python build_stub.py 5      # 26 inputs -> stub-contract5.onnx
+    python build_stub.py 5 --partial   # a graph that declares only a subset
 
 Semantics are deliberately trivial and deliberately *legal*: uniform over the
 legal mask, first legal slot as the chosen action, zero value. A stub that
 could emit an illegal action would send whoever builds against it chasing a
 phantom engine bug, so the mask is the only thing this graph reads.
 
-Two contracts, because the difference between them is the whole point of the
-fixture: contract 3 declares 27 of the record's fields and contract 4 all 29,
-and a loader that feeds a graph every field it happens to have rather than the
-ones the graph declares breaks on the shorter one (`onnxbot.V2Policy._run`).
-The third case -- a real 23-input contract 2 -- is not stubbed at all:
-`dev-contract2.onnx` is a genuine dev-HexNet export.
+Two files, because the difference between them is the whole point of the
+fixture: a loader that feeds a graph every field it happens to have rather
+than the ones the graph *declares* breaks on the shorter one
+(`onnxbot.V2Policy._run`). `--partial` therefore drops the two ledger fields,
+which is the shape a graph trained before them would have.
 
 These stubs are NOT genuine exports. `hexset.export_onnx` needs torch, which
-this repo does not install, so no real contract-3 or contract-4 file exists
-here to test against; the field names, shapes and dtypes below are pinned
-against `hexset.onnx_record.RECORD_FIELDS` by `tests/test_onnx_record.py`,
-torch-free. See `docs/engine-divergence-2026-09-02.md`, "Defect 1 in detail".
+this repo does not install, so no real contract-5 file exists here to test
+against; the field names, shapes and dtypes below are pinned against
+`hexset.onnx_record.RECORD_FIELDS` by `tests/test_onnx_record.py`, torch-free.
+See `docs/engine-divergence-2026-09-02.md`, "Defect 1 in detail".
 """
 
 import pathlib
@@ -31,7 +30,7 @@ from onnx import TensorProto as TP
 from onnx import helper, numpy_helper
 
 NUM_HEXES, NUM_VERTICES, NUM_EDGES = 19, 54, 72
-PLAYERS, SPACE, PAIRS = 4, 553, 25
+PLAYERS, SPACE = 4, 550
 RESOURCES, DEV = 5, 5
 B = "B"
 
@@ -57,31 +56,25 @@ INPUTS = [
     ("hand_totals", TP.INT64, [B, PLAYERS]),
     ("own_dev", TP.INT64, [B, DEV]),
     ("dev_totals", TP.INT64, [B, PLAYERS]),
-    ("offer_give", TP.INT64, [B, RESOURCES]),
-    ("offer_want", TP.INT64, [B, RESOURCES]),
-    ("offer_proposer", TP.INT64, [B]),
-    ("offer_answered", TP.INT64, [B, PLAYERS]),
+    ("valuations", TP.FLOAT, [B, PLAYERS, RESOURCES]),
     ("ledger_known", TP.INT64, [B, PLAYERS, RESOURCES]),
     ("ledger_unknown", TP.INT64, [B, PLAYERS]),
     ("action_mask", TP.BOOL, [B, SPACE]),
-    ("pair_mask", TP.BOOL, [B, PAIRS]),
 ]
 
-# Contract 4 is contract 3 plus the two public-knowledge ledger fields; the
-# `contract` metadata number is `hexset.export_onnx._CONTRACT_VERSION`'s.
+# The `contract` metadata number is `hexset.export_onnx._CONTRACT_VERSION`'s.
 LEDGER_FIELDS = ("ledger_known", "ledger_unknown")
 
-CONTRACT = sys.argv[1] if len(sys.argv) > 1 else "4"
-if CONTRACT not in ("3", "4"):
-    raise SystemExit("contract must be 3 or 4")
-if CONTRACT == "3":
+CONTRACT = sys.argv[1] if len(sys.argv) > 1 else "5"
+if CONTRACT != "5":
+    raise SystemExit("contract must be 5")
+PARTIAL = "--partial" in sys.argv
+if PARTIAL:
     INPUTS = [row for row in INPUTS if row[0] not in LEDGER_FIELDS]
 
 OUTPUTS = [
     ("action_index", TP.INT64, [B]),
-    ("pair_index", TP.INT64, [B]),
     ("prior", TP.FLOAT, [B, SPACE]),
-    ("pair_prior", TP.FLOAT, [B, PAIRS]),
     ("value", TP.FLOAT, [B, PLAYERS]),
 ]
 
@@ -110,10 +103,8 @@ def normalise(mask_name, out_prior, out_index, tag):
 
 
 axis1 = numpy_helper.from_array(np.array([1], dtype=np.int64), "act_axis")
-axis1b = numpy_helper.from_array(np.array([1], dtype=np.int64), "pair_axis")
 
 normalise("action_mask", "prior", "action_index", "act")
-normalise("pair_mask", "pair_prior", "pair_index", "pair")
 
 # Value rides the batch axis off an input so the shape follows B, and is
 # multiplied to zero: a stub must not look like it has an opinion.
@@ -122,10 +113,10 @@ nodes.append(helper.make_node("Mul", ["ht_f", "zero"], ["value"]))
 
 graph = helper.make_graph(
     nodes,
-    f"hexset-contract-{CONTRACT}-stub",
+    f"hexset-contract-{CONTRACT}{'-partial' if PARTIAL else ''}-stub",
     [helper.make_tensor_value_info(n, t, s) for n, t, s in INPUTS],
     [helper.make_tensor_value_info(n, t, s) for n, t, s in OUTPUTS],
-    initializer=[one, zero, axis1, axis1b],
+    initializer=[one, zero, axis1],
 )
 
 model = helper.make_model(
@@ -144,7 +135,7 @@ meta = {
     "num_hexes": str(NUM_HEXES),
     "num_vertices": str(NUM_VERTICES),
     "num_edges": str(NUM_EDGES),
-    "max_offers": "",
+    "max_trades": "",
     "iteration": "0",
     "search": "none",
     "stub": "uniform-over-legal",
@@ -154,6 +145,7 @@ for k, v in meta.items():
     entry.key, entry.value = k, v
 
 onnx.checker.check_model(model)
-out = pathlib.Path(__file__).with_name(f"stub-contract{CONTRACT}.onnx")
+name = f"stub-contract{CONTRACT}{'-partial' if PARTIAL else ''}.onnx"
+out = pathlib.Path(__file__).with_name(name)
 onnx.save(model, str(out))
 print(f"written {out.name}: {len(INPUTS)} inputs")

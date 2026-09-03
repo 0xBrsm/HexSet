@@ -57,14 +57,12 @@ from typing import Sequence
 import numpy as np
 
 from .actions import Action, ActionSpace, legal_actions
-from .actions import NUM_PAIRS, pair_mask as _pair_mask_of
 from .board.board import Board
 from .board.terrain import NUM_RESOURCES
 from .cards import NUM_DEV_CARDS
 from .encoding import StaticGraph
 from .game import Game, to_move
 from .state import NO_OWNER
-from .trading import responders as offer_responders
 from .victory import award_points
 
 # `hexset.server.modelmeta`/`onnxbot._load_cached` read this off the exported
@@ -102,14 +100,10 @@ RECORD_FIELDS: tuple[str, ...] = (
     "hand_totals",
     "own_dev",
     "dev_totals",
-    "offer_give",
-    "offer_want",
-    "offer_proposer",
-    "offer_answered",
+    "valuations",
     "ledger_known",
     "ledger_unknown",
     "action_mask",
-    "pair_mask",
 )
 
 
@@ -140,14 +134,10 @@ def record_shapes(graph: StaticGraph, players: int, space: ActionSpace) -> dict[
         "hand_totals": (players,),
         "own_dev": (NUM_DEV_CARDS,),
         "dev_totals": (players,),
-        "offer_give": (NUM_RESOURCES,),
-        "offer_want": (NUM_RESOURCES,),
-        "offer_proposer": (),
-        "offer_answered": (players,),
+        "valuations": (players, NUM_RESOURCES),
         "ledger_known": (players, NUM_RESOURCES),
         "ledger_unknown": (players,),
         "action_mask": (space.size,),
-        "pair_mask": (NUM_PAIRS,),
     }
 
 
@@ -171,9 +161,9 @@ def record_from_game(
 ) -> dict[str, np.ndarray]:
     """The information-set record for `perspective`, as a single (unbatched)
     row per field. `perspective` defaults to `to_move(game)`, same as
-    `hexset.clients.onnxbot.Request.seat` -- masks and the offer budget are
-    properties of whoever is to move, and encoding from a different seat
-    would pair a stranger's legal moves with someone else's hand.
+    `hexset.clients.onnxbot.Request.seat` -- the mask is a property of
+    whoever is to move, and encoding from a different seat would pair a
+    stranger's legal moves with someone else's hand.
 
     `options` is `legal_actions(game)` if not given -- pass it when the
     caller already computed the legal-option set (a gym step, a search leaf)
@@ -202,25 +192,13 @@ def record_from_game(
     )
     award = np.array([award_points(state, s) for s in range(players)], dtype=np.int64)
 
-    # The live trade offer, filtered exactly as `encoding._offer_parts` filters
-    # it: give/want and the proposer are public while an offer stands; who has
-    # answered is the proposer's information only (part 3 of the trading design
-    # approximates simultaneous responses, so a responder must not condition on
-    # earlier declines). Board-seat order here, like every other field — the
-    # rotation to seat-relative happens inside `RecordEncoder`.
-    offer = game.offer
-    offer_give = np.zeros(NUM_RESOURCES, dtype=np.int64)
-    offer_want = np.zeros(NUM_RESOURCES, dtype=np.int64)
-    offer_proposer = np.int64(NO_OWNER)
-    offer_answered = np.zeros(players, dtype=np.int64)
-    if offer is not None:
-        offer_give = np.asarray(offer.give, dtype=np.int64)
-        offer_want = np.asarray(offer.want, dtype=np.int64)
-        offer_proposer = np.int64(offer.proposer)
-        if perspective == offer.proposer:
-            declined = set(offer_responders(state, offer)) - set(game.pending_responders)
-            for seat in declined:
-                offer_answered[seat] = 1
+    # Every seat's public valuation vector (`hexset.trading`), board-seat
+    # order like every other field -- `RecordEncoder` rotates it. Public in
+    # full: these are what the table has been told, so no filtering by
+    # perspective applies, unlike the live-offer block this replaces.
+    valuations = np.asarray(game.valuations, dtype=np.float32).reshape(
+        players, NUM_RESOURCES
+    )
 
     # The public-knowledge ledger (`hexset.ledger`), board-seat order like
     # every other field -- `RecordEncoder` rotates it and drops the
@@ -254,14 +232,10 @@ def record_from_game(
         "hand_totals": hand_totals,
         "own_dev": own_dev,
         "dev_totals": dev_totals,
-        "offer_give": offer_give,
-        "offer_want": offer_want,
-        "offer_proposer": offer_proposer,
-        "offer_answered": offer_answered,
+        "valuations": valuations,
         "ledger_known": ledger_known,
         "ledger_unknown": ledger_unknown,
         "action_mask": mask,
-        "pair_mask": _pair_mask_of(options),
     }
 
 

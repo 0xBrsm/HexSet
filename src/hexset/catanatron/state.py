@@ -12,7 +12,7 @@ own move generator (`generate_playable_actions`) never emits `OFFER_TRADE`
 during a normal turn -- it exists in the rules but no bundled player, ours
 included, can reach it without constructing an action outside
 `playable_actions`. `Phase.TRADE_RESPOND` is therefore unreachable here and
-`player.py` forces `max_offers=0` on every dev-catan entrant so our own bot
+`player.py` forces `max_trades=0` on every dev-catan entrant so our own bot
 never tries to propose one either.
 """
 

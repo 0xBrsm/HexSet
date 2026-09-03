@@ -45,12 +45,11 @@ WEIGHTS: dict[str, Callable[[], "Weights"]] = {}
 def _seed_default_weights() -> None:
     """Populates `WEIGHTS["default"]`/`WEIGHTS["tiered"]` on first use.
 
-    Not a module-level `from .evaluate import Weights` + literal: that would
-    resolve through the `hexset.evaluate` shim into `hexset.bots.evaluate`,
-    which -- because it is a submodule of the `hexset.bots` package --
-    requires `hexset/bots/__init__.py` to finish running first, and that
-    module now imports `heximax`, which imports this module back for
-    `register_heximax_evaluator`. A module-level import here would deadlock
+    Not a module-level `from .bots.evaluate import Weights` + literal:
+    `hexset.bots.evaluate` is a submodule of the `hexset.bots` package, so
+    importing it requires `hexset/bots/__init__.py` to finish running first, and that
+    module imports `hexset.bots.heximax`, which imports this module back
+    for `register_heximax_evaluator`. A module-level import here would deadlock
     that cycle on whichever of `hexset.arena`/`hexset.tuning` is
     cold-started first (`hexset.arena` carries the identical pattern, as
     `_evaluators`; see its docstring for the full cycle), so the dependency
@@ -58,7 +57,7 @@ def _seed_default_weights() -> None:
     finished importing.
     """
     if "default" not in WEIGHTS:
-        from .evaluate import Weights
+        from .bots.evaluate import Weights
         from .evaluate_tiered import Weights as TieredWeights
 
         WEIGHTS["default"] = Weights
@@ -123,7 +122,7 @@ def entrant_for(
     resolvable once the `heximax` package has registered them -- see
     `register_heximax_evaluator`) this is a `kind="heximax"` bot in the
     matching mode, `weights` reaching the evaluator via the factory `heximax`
-    registered with `hexset.arena`; the offer budget follows the mode the way
+    registered with `hexset.arena`; the trade switch follows the mode the way
     `heximax.heximax`'s own `BY_MODE` does, since a fit has to compare bots
     that are heximax in every way but the vector under test. Otherwise it is
     the plain greedy/search entrant the harness always built.
@@ -139,7 +138,7 @@ def entrant_for(
             depth=depth,
             width=width,
             stance=stance,
-            max_offers=0 if mode == "notrade" else 3,
+            max_trades=0 if mode == "notrade" else None,
         )
     kind = "greedy" if depth <= 1 else "search"
     return Entrant(

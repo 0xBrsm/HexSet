@@ -1,11 +1,11 @@
 [project]
 name = "hexset"
 # One version line for the whole distribution -- `hexset` (the engine, the
-# bots and the ONNX record contract), `hexset.bench`, `hexset.server`,
-# `hexset.clients` and the sibling `heximax` package all ship from here. See
+# bots and the ONNX record contract), `hexset.bench`, `hexset.server` and
+# `hexset.clients` all ship from here. See
 # `tests/test_versions.py`, which fails the moment `hexset.__version__`
 # drifts from this file.
-version = "0.15.0"
+version = "0.16.0"
 description = "HexSet — a numpy-only, information-set-honest hex-tile trading and building engine, a sample bot, a Catanatron adapter, and a browser/HTTP/MCP gym around them"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
@@ -13,11 +13,10 @@ license = { file = "LICENSE" }
 # (`src/hexset/`); `hexset.bench` the duel/throughput/tuning scripts it is
 # measured with; `hexset.server` and `hexset.clients` the gym around it --
 # an HTTP API, an MCP server, a browser client and ONNX Runtime bot inference
-# (`src/hexset/server/`, `src/hexset/clients/`); `heximax` the sample bot, a
-# sibling top-level package rather than a subpackage of `hexset`, registering
-# itself with `hexset.arena`/`hexset.tuning` on import rather than being
-# imported by either (`src/heximax/`). One `pip install -e .` from the repo
-# root provides all of them from one editable install.
+# (`src/hexset/server/`, `src/hexset/clients/`). The bots live in
+# `hexset.bots` (`search2` and `heximax`), registering themselves with
+# `hexset.arena`/`hexset.tuning` on import. One `pip install -e .` from the
+# repo root provides all of them from one editable install.
 dependencies = [
     "numpy>=1.26",
 ]
@@ -56,7 +55,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["hexset", "hexset.*", "heximax", "heximax.*"]
+include = ["hexset", "hexset.*"]
 
 # setuptools only auto-includes .py files under `packages.find` —
 # static/index.html (the entire frontend) is a static asset living inside the

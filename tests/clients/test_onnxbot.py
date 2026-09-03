@@ -12,6 +12,7 @@ from hexset.server.rules import options_for  # noqa: E402
 from hexset.board.board import random_base_board  # noqa: E402
 from hexset.game import Phase, start, to_move  # noqa: E402
 from hexset.clients.onnxbot import load, network_bot  # noqa: E402
+from hexset.trading import NETWORK_GATE_ROWS  # noqa: E402
 from conftest import step_randomly  # noqa: E402
 
 FIXTURE_V2 = Path(__file__).parent / "fixtures" / "stub-contract5.onnx"
@@ -343,3 +344,93 @@ def test_accepts_many_matches_accepts_within_tolerance_on_random_bundles(checkpo
             continue
         before_value, after_value = bot._own_values(seat, [list(hand), after])
         assert (after_value > before_value) == bot.accepts(view, r, c)
+
+
+# --- NETWORK_GATE_ROWS: a network gate only scores its top-ranked prefix
+# (`agents/reference/trading-design.md`'s post-data note, "gate re-run with
+# batched gates: 3.0-3.3x, still failing") ---
+
+
+def _many_candidates(seat: int, count: int, seed: int = 11):
+    """`count` one-card exchanges from `seat`'s point of view, in the same
+    shape `trading._best_clearing` hands to `accepts_many` -- an
+    already-rank-ordered list, here just long enough (well past
+    `NETWORK_GATE_ROWS`) to exercise the cutoff rather than to mean anything
+    about public rank itself."""
+    rng = random.Random(seed)
+    received = []
+    counterparties = []
+    for _ in range(count):
+        wanted = [0, 0, 0, 0, 0]
+        give_from = rng.randrange(5)
+        take_to = rng.randrange(5)
+        if give_from == take_to:
+            take_to = (take_to + 1) % 5
+        wanted[give_from] -= 1
+        wanted[take_to] += 1
+        received.append(tuple(wanted))
+        counterparties.append((seat + 1 + rng.randrange(3)) % 4)
+    return received, counterparties
+
+
+def test_accepts_many_only_reaches_the_session_for_the_top_gate_rows(
+    checkpoint_valued, monkeypatch
+):
+    """100 candidates in, but only `NETWORK_GATE_ROWS` post-trade successors
+    plus the seat's own hand reach the graph -- counted directly off the
+    stub's `session.run`, not inferred from the returned verdicts."""
+    path, board = checkpoint_valued
+    bot, game = _seated_at_main(path, board, hand=(2, 2, 1, 2, 3))
+    seat = to_move(game)
+    view = game.state(seat)
+    received, counterparties = _many_candidates(seat, 100)
+
+    batch_sizes: list[int] = []
+    real_run = bot.policy.session.run
+
+    def counting_run(outputs, inputs, *args, **kwargs):
+        batch_sizes.append(next(iter(inputs.values())).shape[0])
+        return real_run(outputs, inputs, *args, **kwargs)
+
+    monkeypatch.setattr(bot.policy.session, "run", counting_run)
+
+    many = bot.accepts_many(view, received, counterparties)
+
+    assert len(many) == 100
+    # One batched call: the hand plus NETWORK_GATE_ROWS candidate successors.
+    assert batch_sizes == [NETWORK_GATE_ROWS + 1]
+
+
+def test_accepts_many_top_rows_match_accepts_and_the_rest_decline(checkpoint_valued):
+    """The first `NETWORK_GATE_ROWS` verdicts equal what looping `accepts`
+    would say, row by row; everything past the cutoff declines outright,
+    never having reached the graph."""
+    path, board = checkpoint_valued
+    bot, game = _seated_at_main(path, board, hand=(2, 2, 1, 2, 3))
+    seat = to_move(game)
+    view = game.state(seat)
+    received, counterparties = _many_candidates(seat, 100)
+
+    many = bot.accepts_many(view, received, counterparties)
+
+    expected_top = [
+        bot.accepts(view, r, c)
+        for r, c in zip(received[:NETWORK_GATE_ROWS], counterparties[:NETWORK_GATE_ROWS])
+    ]
+    assert many[:NETWORK_GATE_ROWS] == expected_top
+    assert many[NETWORK_GATE_ROWS:] == [False] * (100 - NETWORK_GATE_ROWS)
+
+
+def test_accepts_many_at_or_under_the_gate_rows_limit_is_unchanged(checkpoint_valued):
+    """At exactly `NETWORK_GATE_ROWS` candidates -- the boundary where the
+    old, uncapped `accepts_many` and the new bounded one must still agree on
+    every row -- nothing is dropped."""
+    path, board = checkpoint_valued
+    bot, game = _seated_at_main(path, board, hand=(2, 2, 1, 2, 3))
+    seat = to_move(game)
+    view = game.state(seat)
+    received, counterparties = _many_candidates(seat, NETWORK_GATE_ROWS)
+
+    expected = [bot.accepts(view, r, c) for r, c in zip(received, counterparties)]
+    many = bot.accepts_many(view, received, counterparties)
+    assert many == expected

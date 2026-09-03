@@ -103,6 +103,28 @@ NO_VALUATION: tuple[float, ...] = (0.0,) * NUM_RESOURCES
 # recomputes it).
 VALUE_SCALE = 0.022126919066234662
 
+# How many of a trade event's public-rank-ordered candidates a network gate
+# will score, at most, in its one batched forward. `_best_clearing` ranks
+# every coverable candidate by public surplus before asking any private gate
+# (see its `ranked` list, built once per event) and asks `judged_many` over
+# that list in rank order -- so a gate that only reads the first
+# `NETWORK_GATE_ROWS` of `received` is reading the highest-ranked candidates
+# this event considered, not an arbitrary prefix. Registered fallback
+# (`agents/reference/trading-design.md`'s post-data note, "gate re-run with
+# batched gates: 3.0-3.3x, still failing"): batching cut calls, not rows --
+# ~85% of events clear nothing, so a batched ask over every clearing
+# candidate still scores everything the sequential ask would have stopped
+# short of. Bounding a network gate to its top-ranked rows and declining the
+# rest costs at most ~5% of trades/turn (budget 32 read 0.250 against
+# unbounded's 0.254 in the registered gate-budget ablation) because clearing
+# deals sit near the top of the public ranking. The engine itself asks about
+# every candidate and is unchanged; only a network gate's own evaluation is
+# bounded. Lives here, beside `VALUE_SCALE`, so `hexnet.policy.
+# NETWORK_GATE_ROWS` can import the same number rather than carry its own
+# copy -- exactly the reason `VALUE_SCALE` lives here instead of beside one
+# bot's implementation.
+NETWORK_GATE_ROWS = 32
+
 
 def published(trader: object, view: "View") -> Sequence[float]:
     """What `trader` advertises, or nothing at all.

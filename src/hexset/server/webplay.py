@@ -1267,10 +1267,10 @@ class GameSession:
             "to_move": None if over else self._public_mover(viewer),
             "seat": viewer,
             "claimed_seats": sorted(self.claimed_seats),
-            # Seats the setup snake reached while still empty and waited out
-            # — permanently retired, for good, from this game (see
-            # `hexset.server.seating.lock_seat`). `api.Table.join` refuses one of
-            # these the same way it refuses an already-occupied seat.
+            # Seats somebody closed outright rather than sit empty forever
+            # (`api.Tables.close_seat`, `hexset.game.lock_seat`) — permanently
+            # retired, for good, from this game. `api.Table.join` refuses one
+            # of these the same way it refuses an already-occupied seat.
             "locked": sorted(locked_of(game)),
             "winner": game.won_by,
             "game_over": over,

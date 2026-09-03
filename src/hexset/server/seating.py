@@ -5,16 +5,15 @@ they live in the interface layer and not in `hexset.game`:
 
 *The snake starts at seat 0, not at the creator.* `api.Tables.create` passes
 `start_at` `first=0`, so turn order is seat order regardless of which random
-seat the creator was dealt. `api.Table._settle_locks`'s `setup_step == 0`
-carve-out is the one accommodation this needs: seat 0 isn't guaranteed
-occupied the instant a game exists the way the creator's own seat is, so it
-is held open rather than retired like any other empty seat the snake reaches.
+seat the creator was dealt. Safe with no carve-out for seat 0: nobody moves
+at all while any seat is still empty (`api.Table.waiting_for`), so setup
+never reaches seat 0 before it has a real occupant.
 
-*An empty seat the snake reaches is retired on sight* -- except seat 0's own
-opening placement, per the carve-out above. See `api.Table._settle_locks`. A
-locked seat leaves the setup snake and every later turn rotation permanently
-— a claimed seat is never released, so a game's player count is fixed for
-good the moment setup finishes.
+*A seat is retired only when somebody closes it outright* — never on sight,
+never on a timer. `POST /api/close` (`api.Tables.close_seat`) is the one way
+an empty seat locks; a locked seat leaves the setup snake and every later
+turn rotation permanently — a claimed seat is never released, so a game's
+player count is fixed for good the moment setup finishes.
 
 Both are implemented as a **correction applied after each action**, because
 `hexset.game` does not know about either. `settle` re-points the snake or the
@@ -146,8 +145,10 @@ def next_unlocked(game: Game, after: int) -> int:
 
 
 def lock_seat(game: Game, seat: int) -> None:
-    """Retire an empty seat the setup snake reached and waited out. A no-op if
-    `seat` is already retired — the caller does not have to track that."""
+    """Retire `seat` outright. A no-op if it is already retired — the caller
+    does not have to track that. `api.py` calls `hexset.game.lock_seat`
+    (the upstreamed primitive this mirrors) rather than this one; kept here
+    for the tests and callers that still drive this module directly."""
     if seat in locked_of(game):
         return
     game.locked = locked_of(game) | {seat}  # type: ignore[attr-defined]

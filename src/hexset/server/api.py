@@ -19,8 +19,8 @@ calling `join` with it, claims a random still-open seat and hands back a
 token.
 
 A still-open seat can also be given to a bot from the board itself
-(`POST /api/bot`, see `Tables.seat_bot`) right up until the setup snake
-retires it — the same request that swaps one bot for another, because with no
+(`POST /api/bot`, see `Tables.seat_bot`) right up until it is filled or
+closed — the same request that swaps one bot for another, because with no
 lobby the player list is the only place a table says who else is playing.
 
 That token, not the request's source or a cookie, is the identity here. It
@@ -31,22 +31,25 @@ nothing to log out of — and, deliberately, the token never touches disk (see
 reopened after one simply treats every non-bot seat as open again (see
 `Tables._reopen`).
 
-## A seat locks; it is never dropped
+## A seat resolves before anyone moves
 
 `MAX_SEATS` seats are dealt into the engine from the moment a game exists,
 whether or not anyone has claimed them yet — there is no "start" that
-renumbers a partial roster down to just the seats somebody's in. Instead, the
-setup snake retires an empty seat the moment it reaches one
-(`Table._settle_locks`, `hexset.server.seating.lock_seat`): a game that begins
-setup with two or three seats occupied stays that size for its whole duration,
-one seat's decision at a time rather than one cutoff for the table.
+renumbers a partial roster down to just the seats somebody's in. During
+setup, nobody moves while any seat is still `SeatKind.EMPTY` and unlocked
+(`Table.waiting_for`, carried on every view as `waiting_for`) — a person
+opening the link, the creator picking a bot for it, or the creator closing it
+outright (`POST /api/close`, `hexset.game.lock_seat`) are the three ways a
+seat resolves, and only once none is left does play start, from seat 0. A
+seat locks; it is never dropped — a game that begins setup with two or three
+seats occupied and the rest closed stays that size for its whole duration.
 `Table.join` only ever offers a seat that is both empty and unlocked.
 
-There is no waiting window in front of that, and deliberately so. A turn only
-ever advances because the seat holding it says so, so somebody expecting a
-friend just does not finish their own placement until that friend has sat
-down — the wait is a person choosing to wait, which a timer can only cut
-short.
+There is no timer anywhere in this. A turn only ever advances because the
+seat holding it says so, so somebody expecting a friend just does not finish
+their own placement until that friend has sat down or the creator closes
+their seat outright — the wait is a person choosing to wait, or to stop
+waiting, never a clock doing it for them.
 
 ## What a seat is told, and what it is not
 
@@ -98,13 +101,13 @@ from hexset.arena import PRESETS, spawn as spawn_entrant
 from hexset.board.board import Board, random_base_board
 from hexset.bots import Bot
 from hexset.clients.botclient import BotRunner, LocalSearchBrain, LocalTransport
-from hexset.game import Phase, is_over, to_move
+from hexset.game import is_over, lock_seat, to_move
 from hexset.onnx_record import record_from_game
 from hexset.trading import publish_valuation
 
 from . import journal
 from hexset.actions import legal_actions
-from .seating import lock_seat, locked_of, start_at
+from .seating import SETUP_PHASES, locked_of, start_at
 from .webplay import (
     GameSession,
     ResumeError,
@@ -363,30 +366,22 @@ class Table:
         if self.session.journal is not None:
             self.session.journal.abandoned()
 
-    def _settle_locks(self) -> None:
-        """Must be called with `self.lock` held. Retires every empty seat the
-        setup snake has reached, on sight -- except seat 0's own opening
-        placement (`game.setup_step == 0`), held open instead.
+    def waiting_for(self) -> list[int]:
+        """The still-empty, still-unlocked seats holding up setup — empty
+        once none is left, and always empty once setup has ended, since a
+        seat can only resolve (filled or closed), never re-empty.
 
-        That one exception exists because turn order is seat order, seat 0
-        first (`Tables.create` deals `first=0`), while only the creator's
-        actual seat is guaranteed occupied the instant a game exists.
-        Without it, a creator dealt anywhere else would lose seat 0 to this
-        same retirement before they had seated anyone there. Every seat
-        after the first has already had a real move pace it here, which is
-        what makes retiring those on sight safe; seat 0 has not.
-        """
+        Nobody moves while this is non-empty: `Tables.act` refuses every
+        `POST /api/action`, and every view's `to_move` reads `None` (see
+        `Table.view`) so an embedded bot runner, which only ever acts when a
+        view hands it its own seat, does nothing either. A seat leaves this
+        list by being filled (`Table.join`, `Tables.seat_bot`) or closed
+        (`Tables.close_seat`) — there is no fourth way and no timer."""
         game = self.session.game
-        while not is_over(game) and game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
-            if game.setup_step == 0:
-                return
-            seat = to_move(game)
-            if self.seats[seat].kind is not SeatKind.EMPTY or seat in locked_of(game):
-                return
-            lock_seat(game, seat)
-            self.bump()
-            if self.session.journal is not None:
-                self.session.journal.locked(seat, at_step=self.session._steps)
+        if game.phase not in SETUP_PHASES:
+            return []
+        locked = locked_of(game)
+        return [i for i, seat in enumerate(self.seats) if seat.kind is SeatKind.EMPTY and i not in locked]
 
     def join(self, name: str | None, *, confirm: bool = False) -> tuple[int, str]:
         """Seats a person (or an external bot process) at a random still-open,
@@ -403,7 +398,6 @@ class Table:
         explicit opt-out. `hexset.server.mcp`'s `join` tool sends `confirm`
         explicitly on every call, so an LLM seat's own opt-in default
         (decision 3) is unaffected by that route-level flip."""
-        self._settle_locks()
         candidates = [
             i
             for i, seat in enumerate(self.seats)
@@ -430,13 +424,19 @@ class Table:
         alongside a seat rather than trusting the caller: it holds back
         nothing at all, which is the right answer for somebody watching and
         the wrong one for anybody playing."""
-        self._settle_locks()
         # `state_view` is one of the engine's trade-event trigger points, so
         # a read is itself a mutation whenever an event was pending here.
         traded = len(self.session.game.trades)
         state = self.session.state_view(viewer, omniscient=omniscient)
         if len(self.session.game.trades) != traded:
             self.bump()
+        waiting = self.waiting_for()
+        state["waiting_for"] = waiting
+        if waiting:
+            # Nobody's turn while a seat is still empty — overrides
+            # `state_view`'s own `to_move`, which knows nothing about the
+            # hold (see `waiting_for`'s docstring).
+            state["to_move"] = None
         state["code"] = self.code
         state["seats"] = [seat.public(i) for i, seat in enumerate(self.seats)]
         state["version"] = self.version
@@ -603,8 +603,9 @@ class Tables:
         mixed lineup any more (see `Config.default_bots`'s own docstring).
 
         Turn order is seat order, seat 0 first, regardless of which seat the
-        creator landed on -- see `Table._settle_locks`'s `setup_step == 0`
-        carve-out, which is what keeps that safe.
+        creator landed on -- safe now for a reason simpler than a carve-out:
+        nobody moves at all until every seat has resolved (`Table.waiting_for`),
+        so seat 0 is never short a beat to be filled in.
 
         `confirm` opts the creator's own seat into confirm-mode trading (see
         `Table.join`). Defaults to `False` here -- this method's own
@@ -818,7 +819,10 @@ class Tables:
     # --- play -------------------------------------------------------------
 
     def act(self, table: Table, seat: int, wire: dict) -> dict:
-        table._settle_locks()
+        waiting = table.waiting_for()
+        if waiting:
+            names = ", ".join(str(s) for s in waiting)
+            raise ApiError(f"waiting for seats: {names}", status=409)
         game = table.session.game
         if table.seats[seat].kind is SeatKind.BOT and game.publish_due(seat):
             # The one driver that acts on a seat's behalf rather than at its
@@ -859,9 +863,9 @@ class Tables:
         lineup in, the player list on the board is the only place a table
         decides who else is playing — filling an open seat and changing your
         mind about a bot already in one are the same gesture there. An open
-        seat can be filled right up until the setup snake retires it (see
-        `Table._settle_locks`), and a bot can be swapped at any point in the
-        game, not just between games.
+        seat can be filled right up until somebody closes it (`close_seat`),
+        and a bot can be swapped at any point in the game, not just between
+        games.
 
         Rebuilding from `model_options()` (rather than accepting a spec)
         keeps this the same chokepoint: a request names a bot, it never hands
@@ -886,10 +890,6 @@ class Tables:
         kind = table.seats[seat].kind
         if kind is SeatKind.PLAYER:
             raise ApiError(f"seat {seat} belongs to a player")
-        # Before the open/retired test, not after: the window a seat has left
-        # only advances when somebody asks (see `_settle_locks`), and this is
-        # exactly such a request.
-        table._settle_locks()
         if kind is SeatKind.EMPTY and seat in locked_of(table.session.game):
             raise ApiError(f"seat {seat} has been retired from this game")
         try:
@@ -936,6 +936,31 @@ class Tables:
         table.bump()
         return table.view(viewer)
 
+    def close_seat(self, table: Table, viewer: int, seat: int) -> dict:
+        """`POST /api/close`: close `seat` outright — no bot, no person, ever,
+        for the rest of this game. The third way an empty seat resolves,
+        alongside a bot picked for it and a person taking it, and the only
+        one that used to happen for a table by itself, on sight, the moment
+        the setup snake reached a still-empty seat. It no longer does; a seat
+        stays open until this is called for it.
+
+        Same permission as `seat_bot`: any seated person at the table, not
+        only the creator. Refuses a seat that already holds a bot or a
+        person — closing is only ever for one that is otherwise going to sit
+        empty forever. Idempotent for a seat already closed, the same as
+        `hexset.game.lock_seat` itself.
+        """
+        if not 0 <= seat < len(table.seats):
+            raise ApiError(f"there is no seat {seat} at this game")
+        if table.seats[seat].kind is not SeatKind.EMPTY:
+            raise ApiError(f"seat {seat} belongs to a {table.seats[seat].kind.value}")
+        if seat not in locked_of(table.session.game):
+            lock_seat(table.session.game, seat)
+            if table.session.journal is not None:
+                table.session.journal.locked(seat, at_step=table.session._steps)
+            table.bump()
+        return table.view(viewer)
+
     def set_valuation(self, table: Table, seat: int, vector) -> dict:
         """`PUT /api/games/<code>/valuation`: this seat publishes its vector.
 
@@ -963,7 +988,6 @@ class Tables:
         public vector doesn't already want it, a seat that is neither the
         proposer nor the current player, or a counterparty gate that declines.
         """
-        table._settle_locks()
         counterparty = payload.get("counterparty")
         if not isinstance(counterparty, int):
             raise ApiError("send a `counterparty` seat")
@@ -984,7 +1008,6 @@ class Tables:
         received)`), then drop it from `game.pending` -- confirming a stale
         entry against hands that already moved fails `execute_trade`'s own
         checks the same way a fresh proposal would."""
-        table._settle_locks()
         index = payload.get("index")
         mine = self._pending_of(table, seat)
         if not isinstance(index, int) or not 0 <= index < len(mine):
@@ -998,7 +1021,6 @@ class Tables:
     def decline_trade(self, table: Table, seat: int, payload: dict) -> dict:
         """`POST /api/games/<CODE>/trade/decline`: drop `seat`'s pending offer
         at `index`. No cards move."""
-        table._settle_locks()
         index = payload.get("index")
         mine = self._pending_of(table, seat)
         if not isinstance(index, int) or not 0 <= index < len(mine):
@@ -1163,6 +1185,8 @@ class Tables:
             return self.seat_bot(
                 table, seat, int(payload.get("seat", -1)), str(payload.get("model", ""))
             )
+        if method == "POST" and path == "/api/close":
+            return self.close_seat(table, seat, int(payload.get("seat", -1)))
         if method == "PUT" and path == f"/api/games/{table.code}/valuation":
             return self.set_valuation(table, seat, payload.get("valuation"))
         if method == "POST" and path == f"/api/games/{table.code}/trade":

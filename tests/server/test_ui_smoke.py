@@ -88,6 +88,7 @@ def test_the_page_calls_no_trading_route():
         "/api/undo",
         "/api/name",
         "/api/bot",
+        "/api/close",
         # The two public reads, addressed by code: the game as a spectator
         # sees it, and the layout it is drawn on.
         "/api/table/${tableCode}",

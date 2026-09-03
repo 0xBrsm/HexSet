@@ -135,10 +135,11 @@ Each open seat's row is a model picker — choosing one seats that bot for the
 rest of the game — and a person who opens the link takes one instead.
 Opponents come from `model_options()` in `src/hexset/server/api.py`:
 `heximax` and `search2` (handcrafted, no checkpoint needed) plus one entry
-per `*.onnx` file found in the models directory. An open seat that the setup
-snake reaches is retired on sight, permanently: a turn only ever advances
-because the seat holding it said so, so a table waiting on a friend who never
-came is a table nobody can play at.
+per `*.onnx` file found in the models directory. Nobody moves while any seat
+is still open: a friend takes it, the picker fills it with a bot, or the
+picker's "none" closes it outright, permanently — a turn only ever advances
+because the seat holding it said so, and there is no timer that closes a
+seat for you.
 
 **Your own row is your name.** It reads "human" until you type something;
 what you type is what everyone else's player list and the game log call you

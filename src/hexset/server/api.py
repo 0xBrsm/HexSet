@@ -73,7 +73,7 @@ another seat's hand.
 ## Liveness is people, not bots
 
 `Table.last_seen` is refreshed by a request from a person or an external
-client, never by an embedded bot runner's poll — a runner polls once a second
+client, never by an embedded bot runner's poll — a runner parks on a long poll
 until its game ends, so counting those would mean no table with a bot at it
 could ever go stale. Eviction (`_evict_stale`) runs on every `get` as well as
 on `create`, and closing a table stops its runners before the journal.
@@ -90,6 +90,7 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs
 
 import hexset.bots  # noqa: F401 -- registers the "heximax" presets with hexset.arena
 from hexset.actions import build_space
@@ -163,6 +164,11 @@ MAX_NAME_LENGTH = 40
 # lunch break without holding onto dead ones indefinitely.
 TABLE_TTL_SECONDS = 24 * 60 * 60
 
+# The longest a read may park waiting for its table to change. Long enough
+# that an idle table costs one request a half-minute, short enough that a
+# proxy's own idle timeout is never the thing that decides.
+MAX_WAIT_SECONDS = 25.0
+
 
 class ApiError(Exception):
     """A request that cannot be served, with the HTTP status to say so with.
@@ -219,6 +225,24 @@ def model_options() -> dict[str, str]:
     for path in sorted(MODELS_DIR.glob("*.onnx")):
         options[path.stem] = str(path)
     return options
+
+
+def wait_query(query: str) -> tuple[int | None, float]:
+    """`after`/`wait` out of a read's query string.
+
+    No `after` means answer now, which is every request that does not ask to
+    be woken. `wait` is capped at `MAX_WAIT_SECONDS`.
+    """
+    params = parse_qs(query)
+    raw = params.get("after", [None])[0]
+    if raw is None:
+        return None, 0.0
+    try:
+        after = int(raw)
+        wait = float(params.get("wait", ["0"])[0])
+    except ValueError:
+        raise ApiError("`after` is a version number and `wait` is seconds") from None
+    return after, max(0.0, min(wait, MAX_WAIT_SECONDS))
 
 
 @dataclass
@@ -291,6 +315,24 @@ class Table:
     last_seen: float = field(default_factory=time.monotonic)
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
+    # Every change a view can show bumps `version` and wakes `changed`, so a
+    # reader waits on the table itself rather than on a timer. Its own lock,
+    # never `self.lock`: a waiter holding that could not be changed.
+    version: int = 0
+    changed: threading.Condition = field(default_factory=threading.Condition, repr=False)
+
+    def bump(self) -> None:
+        """Marks this table changed and wakes everyone parked on it."""
+        with self.changed:
+            self.version += 1
+            self.changed.notify_all()
+
+    def wait_for_change(self, after: int, timeout: float) -> None:
+        """Blocks until `version` passes `after`, or `timeout` seconds go by.
+        Must be called with no other lock held."""
+        with self.changed:
+            self.changed.wait_for(lambda: self.version > after, timeout=timeout)
+
     def seat_of(self, token: str) -> int:
         for index, seat in enumerate(self.seats):
             if seat.token is not None and secrets.compare_digest(seat.token, token):
@@ -300,11 +342,14 @@ class Table:
     def stop_runners(self) -> None:
         """Stops every embedded bot runner at this table and waits for it.
 
-        Signalled in one pass and joined in a second, so three bots take one
-        poll interval between them rather than three.
+        Signalled in one pass, woken, and joined in a third, so three bots
+        take one wake between them rather than three.
         """
         for runner, _ in self.runners:
             runner.stop.set()
+        # A runner parked on a long poll cannot see `stop` until something
+        # wakes it, and its `run` loop checks `stop` before acting again.
+        self.bump()
         for _, thread in self.runners:
             thread.join(timeout=2.0)
         self.runners.clear()
@@ -339,6 +384,7 @@ class Table:
             if self.seats[seat].kind is not SeatKind.EMPTY or seat in locked_of(game):
                 return
             lock_seat(game, seat)
+            self.bump()
             if self.session.journal is not None:
                 self.session.journal.locked(seat, at_step=self.session._steps)
 
@@ -372,6 +418,7 @@ class Table:
         self.session.claim(index, clean)
         if confirm:
             self.session.confirm_mode(index)
+        self.bump()
         return index, token
 
     def view(self, viewer: int | None = None, *, omniscient: bool = False) -> dict:
@@ -384,9 +431,15 @@ class Table:
         nothing at all, which is the right answer for somebody watching and
         the wrong one for anybody playing."""
         self._settle_locks()
+        # `state_view` is one of the engine's trade-event trigger points, so
+        # a read is itself a mutation whenever an event was pending here.
+        traded = len(self.session.game.trades)
         state = self.session.state_view(viewer, omniscient=omniscient)
+        if len(self.session.game.trades) != traded:
+            self.bump()
         state["code"] = self.code
         state["seats"] = [seat.public(i) for i, seat in enumerate(self.seats)]
+        state["version"] = self.version
         return state
 
 
@@ -783,16 +836,19 @@ class Tables:
             if trader is not None:
                 publish_valuation(game, seat, trader)
         table.session.submit(seat, wire)
+        table.bump()
         return table.view(seat)
 
     def undo(self, table: Table, seat: int) -> dict:
         table.session.undo_last_build(seat)
+        table.bump()
         return table.view(seat)
 
     def rename(self, table: Table, seat: int, name: str) -> dict:
         name = clean_name(name)
         table.seats[seat].name = name
         table.session.player_names[seat] = name
+        table.bump()
         return table.view(seat)
 
     def seat_bot(self, table: Table, viewer: int, seat: int, model: str) -> dict:
@@ -877,6 +933,7 @@ class Tables:
         table.runners.append((new_runner, new_thread))
         new_thread.start()
 
+        table.bump()
         return table.view(viewer)
 
     def set_valuation(self, table: Table, seat: int, vector) -> dict:
@@ -894,6 +951,7 @@ class Tables:
         if vector is None:
             raise ApiError("send a `valuation` of five numbers between -1 and 1")
         table.session.publish(seat, vector)
+        table.bump()
         return table.view(seat)
 
     def trade(self, table: Table, seat: int, payload: dict) -> dict:
@@ -911,6 +969,7 @@ class Tables:
             raise ApiError("send a `counterparty` seat")
         bundle = bundle_from_wire(payload.get("give") or {}, payload.get("receive") or {})
         table.session.game.execute_trade(seat, counterparty, bundle)
+        table.bump()
         return table.view(seat)
 
     def _pending_of(self, table: Table, seat: int) -> list:
@@ -933,6 +992,7 @@ class Tables:
         trade = mine[index]
         table.session.game.execute_trade(trade.a, trade.b, trade.received)
         table.session.game.pending.remove(trade)
+        table.bump()
         return table.view(seat)
 
     def decline_trade(self, table: Table, seat: int, payload: dict) -> dict:
@@ -944,6 +1004,7 @@ class Tables:
         if not isinstance(index, int) or not 0 <= index < len(mine):
             raise ApiError("no pending offer at that index", status=404)
         table.session.game.pending.remove(mine[index])
+        table.bump()
         return table.view(seat)
 
     def record(self, table: Table, seat: int) -> dict:
@@ -978,6 +1039,15 @@ class Tables:
 
     # --- the /api/* surface -----------------------------------------------
 
+    def await_change(self, table: Table, query: str) -> None:
+        """Parks a read until `table` has changed past the `after` it named,
+        or its `wait` runs out. Called with no lock held: a waiter holding
+        the registry's or the table's could not be woken by the very
+        mutation it is waiting for."""
+        after, wait = wait_query(query)
+        if after is not None:
+            table.wait_for_change(after, wait)
+
     def handle(self, method: str, path: str, payload: dict, token: str | None) -> dict:
         """One request, dispatched. Raises `ApiError` for anything refused.
 
@@ -987,7 +1057,13 @@ class Tables:
         same way (a real external process) or in-process, directly, for a
         locally-embedded bot. Routing lives with the rules rather than in the
         transport so none of them can drift into serving different games.
+
+        The query string is split off here rather than by any one transport,
+        so `/api/state?after=7&wait=20` means the same thing over HTTP and
+        in-process (`botclient.LocalTransport`). A read that names no `after`
+        is answered on the spot, exactly as every read always was.
         """
+        path, _, query = path.partition("?")
         if method == "GET" and path == "/api/models":
             return {"models": list(model_options())}
 
@@ -1015,6 +1091,8 @@ class Tables:
             code, _, tail = path[len("/api/table/") :].partition("/")
             table = self.get(code)
             if not tail:
+                self.await_change(table, query)
+                table.last_seen = time.monotonic()
                 return table.view(None, omniscient=True)
             if tail == "board":
                 return table.layout
@@ -1047,6 +1125,13 @@ class Tables:
         # Everything past here acts on a seat, so it needs the token that names
         # one. Resolved once, here, rather than in each branch.
         table, seat = self.by_token(token)
+        if method == "GET" and path == "/api/state":
+            # Outside the lock below, which the mutation this is waiting for
+            # needs. A person's long poll is activity like any other request;
+            # an embedded bot's is not (see `by_token`).
+            self.await_change(table, query)
+            if table.seats[seat].kind is not SeatKind.BOT:
+                table.last_seen = time.monotonic()
         with table.lock:
             # The session and the engine refuse in Python's terms — a
             # ValueError for a move that is not legal, not this seat's, or not

@@ -161,6 +161,10 @@ def test_confirm_mode_seat_reviews_pending_offers(live_server):
     seat = data["seat"]
     table = server.tables.get(data["code"])
     bot = next(s for s in range(table.session.game.num_players) if s != seat)
+    # This test hand-drives the engine, so the bot's own runner has to be off
+    # the table first: it wakes on every change and would play the very turn
+    # being staged here out from under it.
+    table.stop_runners()
 
     game = table.session.game
     game.phase = Phase.MAIN

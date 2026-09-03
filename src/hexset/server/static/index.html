@@ -759,7 +759,7 @@ let hexById = {};
 let pendingRobberHex = null;  // when a hex has more than one victim option
 let knightArmed = false;   // Knight card clicked: the board is offering its robber targets — see renderHand
 let inFlight = false;
-let waitTimer = null;      // the poll that watches somebody else's turn — see settle
+let watchSeq = 0;          // bumping it retires the long poll already out — see settle
 let openSeat = null;       // watching only: whose cards the hand area shows — see renderPlayers
 let logSheetOpen = false;  // the full-history sheet is only drawn while it's up — see renderLog
 let modalMode = null;      // which decision the modal is showing, if any — see openModal
@@ -1346,30 +1346,57 @@ function cancelRobberMove() {
 // is a client like any other, running in the server and submitting its own
 // moves through the same route this browser posts to, and the seat next to
 // yours might be a person on their own phone. So the client's job is no
-// longer to drive the table, only to watch it — one GET a second and a half
-// until the move is ours again.
+// longer to drive the table, only to watch it.
+//
+// And it watches by asking the table to tell it, not by asking again every
+// second and a half: `after` is the version this page is showing, and the
+// server holds the request until the table passes it. A bot's move reaches
+// the board as fast as the bot played it, and an idle table costs one open
+// request rather than forty a minute.
+//
+// It never sets inFlight — the reader's own actions must never queue behind
+// a read that is deliberately sitting still — and it never applies a
+// response older than what is already on screen, which is the one thing a
+// request that can be seconds old has to guard against.
 //
 // A render per response, so whatever renderStatus() shows (see its "not our
 // turn" branch) is the truth as of that response rather than a guess dressed
 // up to look like progress. That was the point of the old per-seat request
 // too, and it survives the change.
 function settle() {
-  clearTimeout(waitTimer);
-  // Watching, every move is somebody else's, so the poll never stops until
-  // the game does — that is the whole of what a spectator's page does.
+  const mine = ++watchSeq;  // retires whatever loop was already running
+  // Watching, every move is somebody else's, so this never stops until the
+  // game does — that is the whole of what a spectator's page does.
   if (state.game_over || (!watching() && state.to_move === state.seat)) return;
-  waitTimer = setTimeout(async () => {
-    if (inFlight) { settle(); return; }
-    // A seat reads its own view; a spectator has no token to read one with,
-    // and asks for the table's public view instead.
-    const next = await getJSON(watching() ? `/api/table/${tableCode}` : "/api/state");
-    if (!next.error) {
-      state = next;
-      render();
+  (async () => {
+    while (mine === watchSeq) {
+      // A seat reads its own view; a spectator has no token to read one
+      // with, and asks for the table's public view instead.
+      const route = watching() ? `/api/table/${tableCode}` : "/api/state";
+      let next = null;
+      try {
+        next = await getJSON(`${route}?after=${state.version}&wait=20`);
+      } catch (e) {
+        next = null;
+      }
+      if (mine !== watchSeq) return;
+      if (!next || next.error || next.version === undefined) {
+        // Never a tight loop, whatever the server said.
+        await new Promise((done) => setTimeout(done, 1500));
+        continue;
+      }
+      if (next.version >= state.version) {
+        state = next;
+        render();
+      }
+      if (state.game_over || (!watching() && state.to_move === state.seat)) return;
     }
-    settle();
-  }, 1500);
+  })();
 }
+
+// Leaving the page retires the loop with it: a long poll outliving its own
+// document is a request nobody will ever read.
+window.addEventListener("pagehide", () => { watchSeq++; });
 
 // Every action that touches the server has the same shape: refuse to
 // overlap with one already running, dim the board while it's out, and

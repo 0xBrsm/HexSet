@@ -165,6 +165,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   candidates.
 ### Fixed
 
+- **A human seat auto-cleared trades against its published vector.** `POST
+  /api/games` and `POST /api/join` left a human seat's gate at
+  `PostedValuation` (auto-accept) unless `confirm` was set at seat-up, so a
+  bot could clear a trade against a human who never confirmed anything —
+  the same gate an LLM seat gets by design, but not what the negotiation
+  interface intends for a person at the web page. Both routes now default a
+  request that omits `confirm` to confirm mode (`PendingGate`): a bot's
+  clearing candidate lands in `pending` for the human to `confirm`/`decline`
+  instead. `confirm: false` still opts a human seat back out to
+  auto-accept. `hexset.server.mcp`'s `new_game`/`join` tools are unaffected
+  — they now send `confirm` explicitly on every call, keeping an LLM seat's
+  own opt-in default (PI ratification decision 3).
 - **The served game never traded.** `hexset.server.webplay.GameSession.
   state_view` fired the turn's pending trade event as a side effect of
   *any* viewer's poll (a spectator's, or an acting bot's own runner

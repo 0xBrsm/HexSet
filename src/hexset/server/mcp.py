@@ -120,8 +120,13 @@ def _new_game(
         body["bots"] = opponents
     if name:
         body["name"] = str(name).strip()[:40]
-    if confirm:
-        body["confirm"] = True
+    # Sent explicitly, every call, even when False: `POST /api/games` itself
+    # now defaults a request that *omits* `confirm` to confirm mode on (a
+    # human at the web page never sends this field, and nothing may
+    # auto-clear against a human). An LLM's own default is the opposite --
+    # opt-in, per PI ratification decision 3 -- so this tool must always
+    # state its choice rather than lean on the route's default.
+    body["confirm"] = bool(confirm)
     return _seat(_request_ok("POST", "/api/games", body))
 
 
@@ -131,8 +136,8 @@ def _join(code: str, name: str | None = None, confirm: bool = False) -> dict:
     body: dict = {"code": code.strip().upper()}
     if name:
         body["name"] = str(name).strip()[:40]
-    if confirm:
-        body["confirm"] = True
+    # Same reasoning as `_new_game` above.
+    body["confirm"] = bool(confirm)
     return _seat(_request_ok("POST", "/api/join", body))
 
 
@@ -223,9 +228,11 @@ _TOOLS: dict[str, tuple] = {
                     "description": (
                         "Opt your own seat into confirm mode: trades against you never "
                         "clear on their own — each one lands in state()'s `pending` for "
-                        "you to confirm_trade()/decline_trade() instead. Off by default, "
-                        "in which case your set_valuation() vector is your standing "
-                        "consent, the same as a bot's. Fixed for the game once set."
+                        "you to confirm_trade()/decline_trade() instead. Off by default "
+                        "for this tool (an LLM's set_valuation() vector is its standing "
+                        "consent, the same as a bot's) -- unlike the web page's own "
+                        "seat-up, where confirm mode is the default. Fixed for the game "
+                        "once set."
                     ),
                 },
             },

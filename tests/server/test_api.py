@@ -842,13 +842,17 @@ def test_a_malformed_valuation_is_refused(bad):
 
 
 def test_a_published_valuation_clears_a_trade_and_it_shows_in_the_view():
-    """End to end: a human seat publishes, the engine's trade event clears an
-    exchange on the way into the main phase, and the game view reports it."""
+    """End to end, `confirm=False` (the opt-out, `PostedValuation`): a human
+    seat publishes, the engine's trade event clears an exchange on the way
+    into the main phase, and the game view reports it. The default --
+    `confirm` omitted entirely -- is covered by
+    `test_a_human_seat_defaults_to_confirm_mode_and_records_a_pending_candidate`
+    below, where the identical setup records a pending candidate instead."""
     from hexset.board.terrain import Resource
     from hexset.game import Phase, roll_dice
 
     registry = tables()
-    code, token = deal(registry)
+    code, token = deal(registry, confirm=False)
     table = registry.get(code)
     game = table.session.game
     seat = table.seat_of(token)
@@ -883,6 +887,63 @@ def test_a_published_valuation_clears_a_trade_and_it_shows_in_the_view():
     assert {trade["a"], trade["b"]} == {seat, other}
     assert state.hands[seat][Resource.ORE] == 1
     assert state.hands[other][Resource.WOOD] == 1
+
+
+def test_a_human_seat_defaults_to_confirm_mode_and_records_a_pending_candidate():
+    """The bug fix: `POST /api/games` with no `confirm` key at all -- exactly
+    what the web page's own seat-up sends -- must default a human seat to
+    `PendingGate`, not `PostedValuation`. Same setup as the opt-out test
+    above; the only difference is the missing `confirm` kwarg, and the
+    outcome flips from an executed trade to a recorded, unexecuted one."""
+    from hexset.board.terrain import Resource
+    from hexset.game import Phase, roll_dice
+
+    registry = tables()
+    code, token = deal(registry)  # no `confirm`: this is the default under test
+    table = registry.get(code)
+    game = table.session.game
+    seat = table.seat_of(token)
+    other = next(s for s in range(game.num_players) if s != seat)
+    assert seat in table.session.confirm_seats
+
+    game.phase = Phase.ROLL
+    game.current_player = seat
+    state = game.state(seat, hidden=False)
+    for hand in state.hands:
+        hand[:] = [0, 0, 0, 0, 0]
+    state.hands[seat][Resource.WOOD] = 1
+    state.hands[other][Resource.ORE] = 1
+
+    wants_ore = [0.0] * 5
+    wants_ore[Resource.ORE] = 1.0
+    wants_ore[Resource.WOOD] = -1.0
+    registry.handle("PUT", f"/api/games/{code}/valuation", {"valuation": wants_ore}, token)
+    table.session.publish(other, tuple(-v for v in wants_ore))
+
+    roll_dice(game, 8)
+    assert game.phase is Phase.MAIN
+
+    view = table.view(seat)
+    assert view["trades"] == [], "nothing may auto-clear against a human without confirm=false"
+    assert view["pending"] == [{"counterparty": other, "gave": [1, 0, 0, 0, 0], "got": [0, 0, 0, 0, 1]}]
+    assert state.hands[seat][Resource.WOOD] == 1, "a PendingGate must never itself move cards"
+    assert state.hands[other][Resource.ORE] == 1
+
+
+def test_a_joining_human_also_defaults_to_confirm_mode():
+    """Same default, the other seat-up route: `POST /api/join` with no
+    `confirm` key installs `PendingGate` for the joiner too, and an explicit
+    `confirm=false` still opts back out to `PostedValuation`."""
+    registry = tables()
+    code, _ = deal(registry, bots=[])
+
+    defaulted = registry.handle("POST", "/api/join", {"code": code}, None)
+    defaulted_seat = registry.by_token(defaulted["token"])[1]
+    assert defaulted_seat in registry.get(code).session.confirm_seats
+
+    opted_out = registry.handle("POST", "/api/join", {"code": code, "confirm": False}, None)
+    opted_out_seat = registry.by_token(opted_out["token"])[1]
+    assert opted_out_seat not in registry.get(code).session.confirm_seats
 
 
 # --- The negotiation interface (docs/negotiation-interface.md) -----------------
@@ -1138,12 +1199,19 @@ def test_a_spectator_poll_before_the_bots_publish_does_not_spend_the_event():
     (unaffected by this fix, `run_pending_event`'s own docstring), but the
     seat's publish moments later still works, and reaches the turn's next
     event -- every interleaved one after a MAIN action -- rather than being
-    silently dropped."""
+    silently dropped.
+
+    `confirm=False`: this test is about the publish/event race, not the
+    negotiation interface's confirm mode, so the human seat is opted out of
+    `PendingGate` the same way `test_a_published_valuation_clears_a_trade_...`
+    is -- otherwise the human's own gate would record a pending candidate
+    instead of clearing, and the assertion below would be testing the wrong
+    thing."""
     from hexset.board.terrain import Resource
     from hexset.game import Phase, roll_dice, run_trade_event
 
     registry = tables()
-    code, token = deal(registry)
+    code, token = deal(registry, confirm=False)
     table = registry.get(code)
     game = table.session.game
     seat = table.seat_of(token)

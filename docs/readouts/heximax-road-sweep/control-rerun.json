@@ -1,0 +1,2736 @@
+{
+  "environment": {
+    "commit": "61ac38e",
+    "dirty": "true",
+    "python": "3.12.14",
+    "platform": "Linux-6.18.33.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "machine": "x86_64"
+  },
+  "settings": {
+    "games": 96,
+    "seed": 90000,
+    "depth": 2,
+    "width": 6,
+    "workers": 8,
+    "cells": "/tmp/claude-1000/-workspaces-dev-hexset/cf509f6a-a959-4268-9419-0208b3be7160/scratchpad/control_cell.json",
+    "json": true
+  },
+  "seconds": 63.8,
+  "cells": [
+    {
+      "games": 96,
+      "decided": 96,
+      "unfinished": 0,
+      "wins": 47,
+      "win_rate": 0.4895833333333333,
+      "interval_95": [
+        0.39192861157493286,
+        0.5880396298509275
+      ],
+      "challenger_roads_per_game": 9.911458333333334,
+      "baseline_roads_per_game": 9.71875,
+      "challenger_settlements_per_game": 2.71875,
+      "baseline_settlements_per_game": 2.75,
+      "challenger_cities_per_game": 0.9895833333333334,
+      "baseline_cities_per_game": 0.8854166666666666,
+      "challenger_vp_mean": 6.71875,
+      "baseline_vp_mean": 6.677083333333333,
+      "mean_turns": 89.29166666666667,
+      "seconds": 63.8,
+      "per_game": [
+        {
+          "winner": 3,
+          "turns": 63,
+          "points": [
+            3,
+            6,
+            3,
+            10
+          ],
+          "roads": [
+            3,
+            12,
+            5,
+            13
+          ],
+          "settlements": [
+            3,
+            3,
+            1,
+            5
+          ],
+          "cities": [
+            0,
+            1,
+            1,
+            0
+          ]
+        },
+        {
+          "winner": 1,
+          "turns": 95,
+          "points": [
+            5,
+            10,
+            4,
+            9
+          ],
+          "roads": [
+            11,
+            13,
+            6,
+            15
+          ],
+          "settlements": [
+            1,
+            3,
+            2,
+            3
+          ],
+          "cities": [
+            1,
+            2,
+            1,
+            1
+          ]
+        },
+        {
+          "winner": 3,
+          "turns": 120,
+          "points": [
+            7,
+            4,
+            6,
+            10
+          ],
+          "roads": [
+            15,
+            15,
+            5,
+            12
+          ],
+          "settlements": [
+            3,
+            4,
+            3,
+            4
+          ],
+          "cities": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        {
+          "winner": 3,
+          "turns": 138,
+          "points": [
+            8,
+            5,
+            8,
+            10
+          ],
+          "roads": [
+            7,
+            15,
+            15,
+            15
+          ],
+          "settlements": [
+            0,
+            2,
+            4,
+            2
+          ],
+          "cities": [
+            4,
+            0,
+            1,
+            2
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 56,
+          "points": [
+            4,
+            6,
+            10,
+            3
+          ],
+          "roads": [
+            8,
+            5,
+            10,
+            8
+          ],
+          "settlements": [
+            4,
+            2,
+            5,
+            3
+          ],
+          "cities": [
+            0,
+            1,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 0,
+          "turns": 52,
+          "points": [
+            10,
+            3,
+            4,
+            5
+          ],
+          "roads": [
+            9,
+            8,
+            9,
+            5
+          ],
+          "settlements": [
+            4,
+            3,
+            4,
+            3
+          ],
+          "cities": [
+            1,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 1,
+          "turns": 72,
+          "points": [
+            5,
+            10,
+            4,
+            6
+          ],
+          "roads": [
+            9,
+            9,
+            9,
+            4
+          ],
+          "settlements": [
+            1,
+            5,
+            1,
+            2
+          ],
+          "cities": [
+            1,
+            0,
+            1,
+            2
+          ]
+        },
+        {
+          "winner": 0,
+          "turns": 129,
+          "points": [
+            10,
+            7,
+            5,
+            9
+          ],
+          "roads": [
+            13,
+            12,
+            14,
+            14
+          ],
+          "settlements": [
+            1,
+            5,
+            3,
+            5
+          ],
+          "cities": [
+            4,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 114,
+          "points": [
+            8,
+            7,
+            10,
+            7
+          ],
+          "roads": [
+            11,
+            9,
+            15,
+            15
+          ],
+          "settlements": [
+            2,
+            1,
+            3,
+            5
+          ],
+          "cities": [
+            2,
+            2,
+            2,
+            0
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 124,
+          "points": [
+            8,
+            9,
+            10,
+            6
+          ],
+          "roads": [
+            15,
+            15,
+            15,
+            9
+          ],
+          "settlements": [
+            4,
+            4,
+            3,
+            3
+          ],
+          "cities": [
+            1,
+            1,
+            2,
+            1
+          ]
+        },
+        {
+          "winner": 1,
+          "turns": 78,
+          "points": [
+            5,
+            10,
+            4,
+            3
+          ],
+          "roads": [
+            10,
+            9,
+            5,
+            11
+          ],
+          "settlements": [
+            4,
+            4,
+            3,
+            2
+          ],
+          "cities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 3,
+          "turns": 98,
+          "points": [
+            6,
+            6,
+            5,
+            10
+          ],
+          "roads": [
+            8,
+            11,
+            14,
+            10
+          ],
+          "settlements": [
+            3,
+            1,
+            4,
+            4
+          ],
+          "cities": [
+            1,
+            2,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 0,
+          "turns": 70,
+          "points": [
+            10,
+            6,
+            6,
+            6
+          ],
+          "roads": [
+            12,
+            7,
+            11,
+            7
+          ],
+          "settlements": [
+            4,
+            3,
+            4,
+            0
+          ],
+          "cities": [
+            1,
+            0,
+            0,
+            3
+          ]
+        },
+        {
+          "winner": 3,
+          "turns": 75,
+          "points": [
+            6,
+            8,
+            8,
+            10
+          ],
+          "roads": [
+            11,
+            11,
+            10,
+            9
+          ],
+          "settlements": [
+            5,
+            1,
+            2,
+            1
+          ],
+          "cities": [
+            0,
+            2,
+            2,
+            3
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 105,
+          "points": [
+            9,
+            7,
+            10,
+            4
+          ],
+          "roads": [
+            11,
+            13,
+            15,
+            8
+          ],
+          "settlements": [
+            3,
+            3,
+            4,
+            1
+          ],
+          "cities": [
+            2,
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "winner": 0,
+          "turns": 93,
+          "points": [
+            10,
+            8,
+            8,
+            5
+          ],
+          "roads": [
+            15,
+            13,
+            6,
+            15
+          ],
+          "settlements": [
+            4,
+            3,
+            1,
+            4
+          ],
+          "cities": [
+            2,
+            2,
+            1,
+            0
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 90,
+          "points": [
+            3,
+            6,
+            10,
+            5
+          ],
+          "roads": [
+            6,
+            9,
+            10,
+            6
+          ],
+          "settlements": [
+            1,
+            4,
+            3,
+            3
+          ],
+          "cities": [
+            1,
+            0,
+            1,
+            0
+          ]
+        },
+        {
+          "winner": 3,
+          "turns": 125,
+          "points": [
+            8,
+            9,
+            7,
+            10
+          ],
+          "roads": [
+            10,
+            10,
+            7,
+            7
+          ],
+          "settlements": [
+            3,
+            1,
+            0,
+            1
+          ],
+          "cities": [
+            2,
+            3,
+            3,
+            2
+          ]
+        },
+        {
+          "winner": 1,
+          "turns": 90,
+          "points": [
+            6,
+            10,
+            8,
+            7
+          ],
+          "roads": [
+            8,
+            11,
+            10,
+            10
+          ],
+          "settlements": [
+            3,
+            3,
+            5,
+            1
+          ],
+          "cities": [
+            0,
+            1,
+            1,
+            3
+          ]
+        },
+        {
+          "winner": 3,
+          "turns": 90,
+          "points": [
+            8,
+            7,
+            6,
+            10
+          ],
+          "roads": [
+            10,
+            10,
+            8,
+            11
+          ],
+          "settlements": [
+            5,
+            1,
+            3,
+            3
+          ],
+          "cities": [
+            1,
+            3,
+            0,
+            1
+          ]
+        },
+        {
+          "winner": 1,
+          "turns": 59,
+          "points": [
+            4,
+            10,
+            2,
+            4
+          ],
+          "roads": [
+            4,
+            9,
+            10,
+            10
+          ],
+          "settlements": [
+            3,
+            4,
+            2,
+            4
+          ],
+          "cities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 3,
+          "turns": 87,
+          "points": [
+            5,
+            3,
+            5,
+            11
+          ],
+          "roads": [
+            14,
+            15,
+            5,
+            11
+          ],
+          "settlements": [
+            5,
+            1,
+            3,
+            5
+          ],
+          "cities": [
+            0,
+            1,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 93,
+          "points": [
+            8,
+            5,
+            10,
+            6
+          ],
+          "roads": [
+            11,
+            13,
+            15,
+            14
+          ],
+          "settlements": [
+            5,
+            3,
+            3,
+            3
+          ],
+          "cities": [
+            0,
+            0,
+            2,
+            1
+          ]
+        },
+        {
+          "winner": 0,
+          "turns": 93,
+          "points": [
+            10,
+            6,
+            8,
+            5
+          ],
+          "roads": [
+            15,
+            14,
+            11,
+            13
+          ],
+          "settlements": [
+            3,
+            3,
+            5,
+            3
+          ],
+          "cities": [
+            2,
+            1,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 106,
+          "points": [
+            7,
+            8,
+            10,
+            6
+          ],
+          "roads": [
+            15,
+            10,
+            12,
+            11
+          ],
+          "settlements": [
+            0,
+            3,
+            2,
+            3
+          ],
+          "cities": [
+            3,
+            2,
+            1,
+            1
+          ]
+        },
+        {
+          "winner": 0,
+          "turns": 118,
+          "points": [
+            11,
+            8,
+            7,
+            8
+          ],
+          "roads": [
+            12,
+            15,
+            15,
+            12
+          ],
+          "settlements": [
+            1,
+            4,
+            1,
+            3
+          ],
+          "cities": [
+            2,
+            2,
+            2,
+            2
+          ]
+        },
+        {
+          "winner": 1,
+          "turns": 70,
+          "points": [
+            6,
+            10,
+            5,
+            7
+          ],
+          "roads": [
+            9,
+            6,
+            5,
+            11
+          ],
+          "settlements": [
+            3,
+            2,
+            0,
+            2
+          ],
+          "cities": [
+            1,
+            2,
+            2,
+            1
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 61,
+          "points": [
+            6,
+            8,
+            10,
+            9
+          ],
+          "roads": [
+            8,
+            7,
+            13,
+            4
+          ],
+          "settlements": [
+            0,
+            0,
+            2,
+            0
+          ],
+          "cities": [
+            3,
+            3,
+            2,
+            3
+          ]
+        },
+        {
+          "winner": 0,
+          "turns": 114,
+          "points": [
+            10,
+            5,
+            6,
+            3
+          ],
+          "roads": [
+            11,
+            10,
+            11,
+            9
+          ],
+          "settlements": [
+            4,
+            5,
+            4,
+            2
+          ],
+          "cities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 0,
+          "turns": 116,
+          "points": [
+            10,
+            3,
+            7,
+            6
+          ],
+          "roads": [
+            15,
+            10,
+            7,
+            7
+          ],
+          "settlements": [
+            4,
+            2,
+            4,
+            5
+          ],
+          "cities": [
+            1,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 93,
+          "points": [
+            5,
+            6,
+            10,
+            9
+          ],
+          "roads": [
+            6,
+            10,
+            11,
+            11
+          ],
+          "settlements": [
+            2,
+            1,
+            3,
+            1
+          ],
+          "cities": [
+            0,
+            2,
+            1,
+            4
+          ]
+        },
+        {
+          "winner": 3,
+          "turns": 96,
+          "points": [
+            8,
+            9,
+            5,
+            10
+          ],
+          "roads": [
+            10,
+            12,
+            7,
+            14
+          ],
+          "settlements": [
+            5,
+            2,
+            3,
+            1
+          ],
+          "cities": [
+            0,
+            3,
+            0,
+            3
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 94,
+          "points": [
+            5,
+            9,
+            10,
+            8
+          ],
+          "roads": [
+            8,
+            11,
+            11,
+            11
+          ],
+          "settlements": [
+            1,
+            0,
+            3,
+            1
+          ],
+          "cities": [
+            1,
+            3,
+            3,
+            2
+          ]
+        },
+        {
+          "winner": 0,
+          "turns": 82,
+          "points": [
+            10,
+            4,
+            7,
+            5
+          ],
+          "roads": [
+            12,
+            8,
+            7,
+            11
+          ],
+          "settlements": [
+            2,
+            0,
+            2,
+            1
+          ],
+          "cities": [
+            2,
+            2,
+            1,
+            2
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 131,
+          "points": [
+            7,
+            7,
+            10,
+            6
+          ],
+          "roads": [
+            15,
+            15,
+            14,
+            7
+          ],
+          "settlements": [
+            3,
+            5,
+            4,
+            1
+          ],
+          "cities": [
+            1,
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "winner": 3,
+          "turns": 118,
+          "points": [
+            7,
+            5,
+            6,
+            10
+          ],
+          "roads": [
+            10,
+            7,
+            15,
+            15
+          ],
+          "settlements": [
+            4,
+            2,
+            4,
+            5
+          ],
+          "cities": [
+            1,
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 116,
+          "points": [
+            6,
+            5,
+            11,
+            8
+          ],
+          "roads": [
+            9,
+            15,
+            11,
+            13
+          ],
+          "settlements": [
+            3,
+            5,
+            4,
+            5
+          ],
+          "cities": [
+            1,
+            0,
+            1,
+            0
+          ]
+        },
+        {
+          "winner": 0,
+          "turns": 116,
+          "points": [
+            11,
+            8,
+            6,
+            5
+          ],
+          "roads": [
+            11,
+            13,
+            9,
+            15
+          ],
+          "settlements": [
+            4,
+            5,
+            3,
+            5
+          ],
+          "cities": [
+            1,
+            0,
+            1,
+            0
+          ]
+        },
+        {
+          "winner": 1,
+          "turns": 72,
+          "points": [
+            3,
+            10,
+            2,
+            6
+          ],
+          "roads": [
+            6,
+            8,
+            5,
+            4
+          ],
+          "settlements": [
+            3,
+            5,
+            2,
+            2
+          ],
+          "cities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 3,
+          "turns": 72,
+          "points": [
+            2,
+            6,
+            2,
+            10
+          ],
+          "roads": [
+            5,
+            4,
+            6,
+            8
+          ],
+          "settlements": [
+            2,
+            2,
+            2,
+            5
+          ],
+          "cities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 82,
+          "points": [
+            7,
+            5,
+            10,
+            5
+          ],
+          "roads": [
+            12,
+            6,
+            13,
+            11
+          ],
+          "settlements": [
+            5,
+            3,
+            2,
+            3
+          ],
+          "cities": [
+            0,
+            1,
+            2,
+            0
+          ]
+        },
+        {
+          "winner": 0,
+          "turns": 66,
+          "points": [
+            10,
+            5,
+            4,
+            4
+          ],
+          "roads": [
+            10,
+            9,
+            10,
+            4
+          ],
+          "settlements": [
+            3,
+            2,
+            4,
+            3
+          ],
+          "cities": [
+            1,
+            1,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 3,
+          "turns": 100,
+          "points": [
+            4,
+            5,
+            7,
+            10
+          ],
+          "roads": [
+            9,
+            7,
+            12,
+            12
+          ],
+          "settlements": [
+            2,
+            1,
+            4,
+            4
+          ],
+          "cities": [
+            0,
+            1,
+            0,
+            2
+          ]
+        },
+        {
+          "winner": 1,
+          "turns": 136,
+          "points": [
+            6,
+            11,
+            8,
+            7
+          ],
+          "roads": [
+            15,
+            15,
+            11,
+            7
+          ],
+          "settlements": [
+            5,
+            2,
+            4,
+            0
+          ],
+          "cities": [
+            0,
+            3,
+            0,
+            3
+          ]
+        },
+        {
+          "winner": 0,
+          "turns": 118,
+          "points": [
+            10,
+            6,
+            4,
+            6
+          ],
+          "roads": [
+            15,
+            15,
+            7,
+            11
+          ],
+          "settlements": [
+            3,
+            5,
+            2,
+            3
+          ],
+          "cities": [
+            2,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 3,
+          "turns": 131,
+          "points": [
+            2,
+            8,
+            8,
+            10
+          ],
+          "roads": [
+            5,
+            15,
+            11,
+            15
+          ],
+          "settlements": [
+            2,
+            4,
+            5,
+            4
+          ],
+          "cities": [
+            0,
+            1,
+            0,
+            1
+          ]
+        },
+        {
+          "winner": 1,
+          "turns": 68,
+          "points": [
+            4,
+            10,
+            7,
+            4
+          ],
+          "roads": [
+            8,
+            13,
+            7,
+            7
+          ],
+          "settlements": [
+            3,
+            2,
+            4,
+            3
+          ],
+          "cities": [
+            0,
+            2,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 3,
+          "turns": 68,
+          "points": [
+            6,
+            3,
+            4,
+            10
+          ],
+          "roads": [
+            6,
+            6,
+            8,
+            9
+          ],
+          "settlements": [
+            2,
+            2,
+            4,
+            4
+          ],
+          "cities": [
+            1,
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "winner": 0,
+          "turns": 60,
+          "points": [
+            10,
+            5,
+            4,
+            5
+          ],
+          "roads": [
+            10,
+            8,
+            8,
+            9
+          ],
+          "settlements": [
+            5,
+            2,
+            2,
+            5
+          ],
+          "cities": [
+            0,
+            0,
+            1,
+            0
+          ]
+        },
+        {
+          "winner": 1,
+          "turns": 79,
+          "points": [
+            7,
+            10,
+            8,
+            5
+          ],
+          "roads": [
+            11,
+            12,
+            11,
+            9
+          ],
+          "settlements": [
+            3,
+            4,
+            5,
+            3
+          ],
+          "cities": [
+            1,
+            2,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 3,
+          "turns": 64,
+          "points": [
+            8,
+            4,
+            4,
+            10
+          ],
+          "roads": [
+            6,
+            9,
+            9,
+            10
+          ],
+          "settlements": [
+            2,
+            3,
+            3,
+            1
+          ],
+          "cities": [
+            1,
+            0,
+            0,
+            3
+          ]
+        },
+        {
+          "winner": 3,
+          "turns": 90,
+          "points": [
+            6,
+            9,
+            6,
+            10
+          ],
+          "roads": [
+            10,
+            8,
+            6,
+            12
+          ],
+          "settlements": [
+            4,
+            2,
+            1,
+            3
+          ],
+          "cities": [
+            0,
+            3,
+            1,
+            2
+          ]
+        },
+        {
+          "winner": 1,
+          "turns": 155,
+          "points": [
+            7,
+            10,
+            6,
+            6
+          ],
+          "roads": [
+            15,
+            15,
+            12,
+            15
+          ],
+          "settlements": [
+            4,
+            4,
+            3,
+            5
+          ],
+          "cities": [
+            0,
+            1,
+            1,
+            0
+          ]
+        },
+        {
+          "winner": 3,
+          "turns": 59,
+          "points": [
+            5,
+            4,
+            4,
+            10
+          ],
+          "roads": [
+            8,
+            6,
+            9,
+            13
+          ],
+          "settlements": [
+            2,
+            2,
+            3,
+            5
+          ],
+          "cities": [
+            1,
+            1,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 0,
+          "turns": 67,
+          "points": [
+            10,
+            5,
+            3,
+            6
+          ],
+          "roads": [
+            15,
+            12,
+            10,
+            7
+          ],
+          "settlements": [
+            2,
+            5,
+            3,
+            2
+          ],
+          "cities": [
+            3,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 67,
+          "points": [
+            4,
+            6,
+            10,
+            5
+          ],
+          "roads": [
+            9,
+            7,
+            15,
+            12
+          ],
+          "settlements": [
+            4,
+            2,
+            2,
+            5
+          ],
+          "cities": [
+            0,
+            0,
+            3,
+            0
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 54,
+          "points": [
+            4,
+            7,
+            10,
+            5
+          ],
+          "roads": [
+            10,
+            7,
+            10,
+            8
+          ],
+          "settlements": [
+            2,
+            3,
+            0,
+            3
+          ],
+          "cities": [
+            0,
+            2,
+            4,
+            0
+          ]
+        },
+        {
+          "winner": 0,
+          "turns": 58,
+          "points": [
+            10,
+            5,
+            3,
+            9
+          ],
+          "roads": [
+            8,
+            9,
+            8,
+            9
+          ],
+          "settlements": [
+            0,
+            3,
+            3,
+            3
+          ],
+          "cities": [
+            4,
+            0,
+            0,
+            2
+          ]
+        },
+        {
+          "winner": 0,
+          "turns": 69,
+          "points": [
+            10,
+            2,
+            5,
+            9
+          ],
+          "roads": [
+            8,
+            7,
+            5,
+            8
+          ],
+          "settlements": [
+            1,
+            2,
+            2,
+            3
+          ],
+          "cities": [
+            3,
+            0,
+            0,
+            2
+          ]
+        },
+        {
+          "winner": 1,
+          "turns": 68,
+          "points": [
+            5,
+            10,
+            9,
+            2
+          ],
+          "roads": [
+            5,
+            8,
+            10,
+            8
+          ],
+          "settlements": [
+            2,
+            2,
+            2,
+            2
+          ],
+          "cities": [
+            0,
+            3,
+            2,
+            0
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 116,
+          "points": [
+            9,
+            5,
+            10,
+            4
+          ],
+          "roads": [
+            9,
+            6,
+            11,
+            11
+          ],
+          "settlements": [
+            2,
+            1,
+            4,
+            2
+          ],
+          "cities": [
+            3,
+            1,
+            1,
+            0
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 98,
+          "points": [
+            5,
+            3,
+            11,
+            5
+          ],
+          "roads": [
+            8,
+            9,
+            9,
+            6
+          ],
+          "settlements": [
+            3,
+            2,
+            4,
+            0
+          ],
+          "cities": [
+            0,
+            0,
+            1,
+            2
+          ]
+        },
+        {
+          "winner": 1,
+          "turns": 44,
+          "points": [
+            2,
+            10,
+            2,
+            3
+          ],
+          "roads": [
+            7,
+            8,
+            8,
+            5
+          ],
+          "settlements": [
+            2,
+            4,
+            2,
+            3
+          ],
+          "cities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 3,
+          "turns": 44,
+          "points": [
+            2,
+            3,
+            2,
+            10
+          ],
+          "roads": [
+            8,
+            5,
+            7,
+            8
+          ],
+          "settlements": [
+            2,
+            3,
+            2,
+            4
+          ],
+          "cities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 3,
+          "turns": 67,
+          "points": [
+            4,
+            4,
+            4,
+            10
+          ],
+          "roads": [
+            4,
+            5,
+            5,
+            9
+          ],
+          "settlements": [
+            2,
+            2,
+            2,
+            5
+          ],
+          "cities": [
+            0,
+            0,
+            1,
+            0
+          ]
+        },
+        {
+          "winner": 1,
+          "turns": 67,
+          "points": [
+            4,
+            10,
+            4,
+            4
+          ],
+          "roads": [
+            5,
+            9,
+            4,
+            5
+          ],
+          "settlements": [
+            2,
+            5,
+            2,
+            2
+          ],
+          "cities": [
+            1,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 0,
+          "turns": 105,
+          "points": [
+            10,
+            5,
+            6,
+            5
+          ],
+          "roads": [
+            10,
+            6,
+            9,
+            12
+          ],
+          "settlements": [
+            1,
+            1,
+            2,
+            1
+          ],
+          "cities": [
+            3,
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 97,
+          "points": [
+            4,
+            4,
+            10,
+            3
+          ],
+          "roads": [
+            7,
+            7,
+            8,
+            8
+          ],
+          "settlements": [
+            1,
+            2,
+            1,
+            2
+          ],
+          "cities": [
+            1,
+            0,
+            2,
+            0
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 76,
+          "points": [
+            7,
+            5,
+            10,
+            7
+          ],
+          "roads": [
+            10,
+            11,
+            12,
+            11
+          ],
+          "settlements": [
+            2,
+            5,
+            1,
+            0
+          ],
+          "cities": [
+            2,
+            0,
+            3,
+            2
+          ]
+        },
+        {
+          "winner": 1,
+          "turns": 69,
+          "points": [
+            8,
+            10,
+            9,
+            9
+          ],
+          "roads": [
+            10,
+            10,
+            9,
+            11
+          ],
+          "settlements": [
+            3,
+            0,
+            0,
+            4
+          ],
+          "cities": [
+            2,
+            4,
+            4,
+            1
+          ]
+        },
+        {
+          "winner": 0,
+          "turns": 95,
+          "points": [
+            10,
+            7,
+            3,
+            3
+          ],
+          "roads": [
+            13,
+            12,
+            9,
+            8
+          ],
+          "settlements": [
+            3,
+            5,
+            2,
+            2
+          ],
+          "cities": [
+            2,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 111,
+          "points": [
+            6,
+            3,
+            10,
+            7
+          ],
+          "roads": [
+            12,
+            10,
+            15,
+            9
+          ],
+          "settlements": [
+            2,
+            2,
+            3,
+            4
+          ],
+          "cities": [
+            0,
+            0,
+            2,
+            1
+          ]
+        },
+        {
+          "winner": 0,
+          "turns": 68,
+          "points": [
+            10,
+            6,
+            5,
+            4
+          ],
+          "roads": [
+            10,
+            8,
+            6,
+            7
+          ],
+          "settlements": [
+            2,
+            2,
+            2,
+            3
+          ],
+          "cities": [
+            2,
+            2,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 64,
+          "points": [
+            4,
+            3,
+            10,
+            4
+          ],
+          "roads": [
+            7,
+            8,
+            12,
+            8
+          ],
+          "settlements": [
+            2,
+            2,
+            4,
+            3
+          ],
+          "cities": [
+            0,
+            0,
+            1,
+            0
+          ]
+        },
+        {
+          "winner": 3,
+          "turns": 100,
+          "points": [
+            8,
+            5,
+            4,
+            10
+          ],
+          "roads": [
+            6,
+            15,
+            8,
+            9
+          ],
+          "settlements": [
+            2,
+            4,
+            4,
+            0
+          ],
+          "cities": [
+            1,
+            0,
+            0,
+            3
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 73,
+          "points": [
+            3,
+            6,
+            10,
+            4
+          ],
+          "roads": [
+            8,
+            5,
+            9,
+            10
+          ],
+          "settlements": [
+            3,
+            1,
+            3,
+            3
+          ],
+          "cities": [
+            0,
+            2,
+            1,
+            0
+          ]
+        },
+        {
+          "winner": 0,
+          "turns": 82,
+          "points": [
+            10,
+            7,
+            3,
+            3
+          ],
+          "roads": [
+            6,
+            12,
+            10,
+            8
+          ],
+          "settlements": [
+            3,
+            5,
+            2,
+            3
+          ],
+          "cities": [
+            1,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 94,
+          "points": [
+            9,
+            3,
+            10,
+            4
+          ],
+          "roads": [
+            13,
+            11,
+            7,
+            14
+          ],
+          "settlements": [
+            2,
+            3,
+            0,
+            2
+          ],
+          "cities": [
+            2,
+            0,
+            3,
+            0
+          ]
+        },
+        {
+          "winner": 0,
+          "turns": 95,
+          "points": [
+            10,
+            5,
+            4,
+            3
+          ],
+          "roads": [
+            10,
+            8,
+            7,
+            10
+          ],
+          "settlements": [
+            2,
+            2,
+            3,
+            2
+          ],
+          "cities": [
+            2,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 1,
+          "turns": 94,
+          "points": [
+            4,
+            10,
+            6,
+            8
+          ],
+          "roads": [
+            12,
+            15,
+            9,
+            8
+          ],
+          "settlements": [
+            3,
+            0,
+            0,
+            0
+          ],
+          "cities": [
+            0,
+            3,
+            2,
+            4
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 74,
+          "points": [
+            3,
+            9,
+            10,
+            7
+          ],
+          "roads": [
+            6,
+            11,
+            7,
+            6
+          ],
+          "settlements": [
+            2,
+            3,
+            1,
+            0
+          ],
+          "cities": [
+            0,
+            1,
+            3,
+            3
+          ]
+        },
+        {
+          "winner": 1,
+          "turns": 83,
+          "points": [
+            5,
+            11,
+            3,
+            8
+          ],
+          "roads": [
+            11,
+            7,
+            9,
+            14
+          ],
+          "settlements": [
+            3,
+            1,
+            3,
+            1
+          ],
+          "cities": [
+            1,
+            3,
+            0,
+            2
+          ]
+        },
+        {
+          "winner": 0,
+          "turns": 109,
+          "points": [
+            10,
+            7,
+            6,
+            9
+          ],
+          "roads": [
+            15,
+            11,
+            5,
+            15
+          ],
+          "settlements": [
+            2,
+            2,
+            3,
+            2
+          ],
+          "cities": [
+            3,
+            2,
+            0,
+            2
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 97,
+          "points": [
+            5,
+            7,
+            10,
+            8
+          ],
+          "roads": [
+            8,
+            15,
+            15,
+            10
+          ],
+          "settlements": [
+            3,
+            1,
+            4,
+            1
+          ],
+          "cities": [
+            0,
+            3,
+            1,
+            2
+          ]
+        },
+        {
+          "winner": 1,
+          "turns": 75,
+          "points": [
+            4,
+            11,
+            3,
+            6
+          ],
+          "roads": [
+            12,
+            12,
+            8,
+            8
+          ],
+          "settlements": [
+            3,
+            5,
+            3,
+            5
+          ],
+          "cities": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 1,
+          "turns": 121,
+          "points": [
+            6,
+            10,
+            8,
+            9
+          ],
+          "roads": [
+            13,
+            15,
+            15,
+            15
+          ],
+          "settlements": [
+            3,
+            5,
+            5,
+            5
+          ],
+          "cities": [
+            1,
+            2,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 1,
+          "turns": 60,
+          "points": [
+            5,
+            10,
+            4,
+            4
+          ],
+          "roads": [
+            6,
+            7,
+            3,
+            6
+          ],
+          "settlements": [
+            3,
+            1,
+            2,
+            3
+          ],
+          "cities": [
+            0,
+            3,
+            0,
+            0
+          ]
+        },
+        {
+          "winner": 3,
+          "turns": 84,
+          "points": [
+            6,
+            3,
+            7,
+            10
+          ],
+          "roads": [
+            3,
+            11,
+            10,
+            8
+          ],
+          "settlements": [
+            2,
+            3,
+            5,
+            3
+          ],
+          "cities": [
+            0,
+            0,
+            0,
+            2
+          ]
+        },
+        {
+          "winner": 1,
+          "turns": 65,
+          "points": [
+            3,
+            10,
+            3,
+            7
+          ],
+          "roads": [
+            4,
+            9,
+            7,
+            7
+          ],
+          "settlements": [
+            3,
+            1,
+            1,
+            3
+          ],
+          "cities": [
+            0,
+            3,
+            1,
+            0
+          ]
+        },
+        {
+          "winner": 1,
+          "turns": 63,
+          "points": [
+            3,
+            10,
+            3,
+            8
+          ],
+          "roads": [
+            7,
+            8,
+            5,
+            7
+          ],
+          "settlements": [
+            1,
+            3,
+            3,
+            1
+          ],
+          "cities": [
+            1,
+            0,
+            0,
+            3
+          ]
+        },
+        {
+          "winner": 2,
+          "turns": 83,
+          "points": [
+            4,
+            8,
+            10,
+            7
+          ],
+          "roads": [
+            11,
+            8,
+            13,
+            11
+          ],
+          "settlements": [
+            3,
+            3,
+            2,
+            2
+          ],
+          "cities": [
+            0,
+            0,
+            3,
+            2
+          ]
+        },
+        {
+          "winner": 3,
+          "turns": 94,
+          "points": [
+            9,
+            6,
+            3,
+            10
+          ],
+          "roads": [
+            13,
+            11,
+            13,
+            9
+          ],
+          "settlements": [
+            3,
+            3,
+            2,
+            3
+          ],
+          "cities": [
+            2,
+            1,
+            0,
+            1
+          ]
+        },
+        {
+          "winner": 0,
+          "turns": 142,
+          "points": [
+            10,
+            8,
+            5,
+            7
+          ],
+          "roads": [
+            14,
+            14,
+            12,
+            13
+          ],
+          "settlements": [
+            4,
+            3,
+            3,
+            5
+          ],
+          "cities": [
+            1,
+            1,
+            1,
+            0
+          ]
+        },
+        {
+          "winner": 3,
+          "turns": 127,
+          "points": [
+            5,
+            6,
+            8,
+            10
+          ],
+          "roads": [
+            15,
+            13,
+            15,
+            15
+          ],
+          "settlements": [
+            3,
+            5,
+            5,
+            3
+          ],
+          "cities": [
+            1,
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "winner": 1,
+          "turns": 84,
+          "points": [
+            4,
+            10,
+            5,
+            7
+          ],
+          "roads": [
+            7,
+            5,
+            11,
+            7
+          ],
+          "settlements": [
+            2,
+            5,
+            3,
+            3
+          ],
+          "cities": [
+            1,
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "winner": 0,
+          "turns": 109,
+          "points": [
+            10,
+            5,
+            5,
+            5
+          ],
+          "roads": [
+            14,
+            6,
+            7,
+            7
+          ],
+          "settlements": [
+            5,
+            2,
+            3,
+            4
+          ],
+          "cities": [
+            0,
+            1,
+            0,
+            0
+          ]
+        }
+      ],
+      "cell": {
+        "road": 0.1209,
+        "card": 0.005406
+      }
+    }
+  ]
+}

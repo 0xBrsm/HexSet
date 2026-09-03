@@ -11,6 +11,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`hexset.bench.road_sweep`**: heximax-vs-heximax duels across a grid of
+  challenger `road`/`card` evaluation weights, recording roads, settlements,
+  cities and VP per seat alongside the win rate `hexset.bench.ablate` already
+  tracked. `docs/readouts/heximax-road-sweep/` has the first sweep.
 - **`hexset.trading.NETWORK_GATE_ROWS`** (`32`): the most candidates a network
   gate's `accepts_many` will score in one batched forward, beside
   `VALUE_SCALE`. `hexset.clients.onnxbot.NetworkBot.accepts_many` now scores

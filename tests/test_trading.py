@@ -12,7 +12,16 @@ import pytest
 from hexset.actions import Action, ActionType, legal_actions
 from hexset.board.board import random_base_board
 from hexset.board.terrain import NUM_RESOURCES, Resource
-from hexset.game import Phase, end_turn, enter_main, imagine, move_robber_to, roll_dice, start
+from hexset.game import (
+    Phase,
+    end_turn,
+    enter_main,
+    imagine,
+    move_robber_to,
+    roll_dice,
+    run_trade_event,
+    start,
+)
 from hexset.trading import (
     NO_VALUATION,
     Trade,
@@ -803,16 +812,69 @@ def test_the_event_never_fires_twice_for_one_turn():
 
 
 def test_publish_due_is_true_once_per_turn_for_the_current_player_in_main():
+    """`publish_due` is keyed off `awaiting_publish` (set by `enter_main`,
+    cleared by this seat's own `Game.publish`), not `event_pending` -- the
+    regression fix. An observation can consume `event_pending` without ever
+    making a still-unpublished current player's own publish moot."""
     game = a_game()
     game.gates = tuple(Trader() for _ in range(4))
-    game.event_pending = True
+    game.phase = Phase.ROLL
+    enter_main(game)
     assert game.publish_due(0) is True
     assert game.publish_due(1) is False  # not the current player
     game.phase = Phase.ROLL
     assert game.publish_due(0) is False  # not MAIN
     game.phase = Phase.MAIN
-    game.event_pending = False
-    assert game.publish_due(0) is False  # already fired this turn
+    # An observation fires (and so consumes) `event_pending` -- but
+    # `publish_due` must not go false as a side effect of that.
+    legal_actions(game)
+    assert game.event_pending is False
+    assert game.publish_due(0) is True
+    game.publish(0, NO_VALUATION)
+    assert game.publish_due(0) is False  # published this turn
+
+
+def test_an_observation_before_the_current_players_publish_still_lets_it_publish():
+    """The regression this decoupling fixes, reproduced directly:
+    `hexset.server.webplay.state_view` polls the current player through one
+    of the three trigger points on *every* viewer's request -- a
+    spectator's, or an acting bot's own runner checking whose turn it is
+    before it ever calls `decide`. That observation still fires the turn's
+    first event early, on whatever vector is already standing for the
+    current player (`run_pending_event`'s docstring on why that is not
+    changed) -- but it must not stop the current player from publishing a
+    moment later, the way `publish_due` used to (the actual regression)."""
+    game = a_game()
+    give(game._state, 0, Resource.WOOD, 1)
+    give(game._state, 1, Resource.ORE, 1)
+    game.gates = (
+        Trader(vector(ore=1.0, wood=-1.0)),
+        Trader(vector(wood=1.0, ore=-1.0)),
+        Trader(),
+        Trader(),
+    )
+    game.valuations[1] = game.gates[1].vec
+    # Seat 0's own vector is nothing yet -- e.g. its very first turn ever.
+    game.phase = Phase.ROLL
+    enter_main(game)
+    assert game.event_pending is True
+    # An observation of the current player -- exactly what `state_view` and
+    # a bot runner's own poll do -- fires the event early, on seat 0's
+    # standing (here: all-zero) vector, so nothing clears yet.
+    game.state(0)
+    assert game.event_pending is False
+    assert game.trades_made == 0
+    # The regression: this used to make `publish_due` false too, so the
+    # publish below never happened. It still works.
+    assert game.publish_due(0) is True
+    game.publish(0, vector(ore=1.0, wood=-1.0))
+    assert game.publish_due(0) is False
+    # The published vector reaches the turn's *next* event -- every
+    # interleaved one after a MAIN action -- even though the first one
+    # already ran on the stale vector above.
+    game.trades = []
+    run_trade_event(game)
+    assert game.trades_made == 1
 
 
 def test_a_game_with_nobody_seated_simply_does_not_trade():
@@ -881,6 +943,18 @@ def test_an_imagined_game_carries_event_pending():
     assert child.event_pending is True
     child.event_pending = False
     assert game.event_pending is True  # independent copies, not aliased
+
+
+def test_an_imagined_game_carries_awaiting_publish():
+    """`imagine` copies `awaiting_publish` alongside `event_pending`, for the
+    same reason: a chain of simulated turns arms and consumes both flags the
+    same way a real game does."""
+    game = a_game()
+    game.awaiting_publish = True
+    child = imagine(game, random.Random(1))
+    assert child.awaiting_publish is True
+    child.awaiting_publish = False
+    assert game.awaiting_publish is True  # independent copies, not aliased
 
 
 def test_a_search_stepping_its_own_copy_never_re_runs_a_live_event():

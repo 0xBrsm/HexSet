@@ -152,6 +152,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   candidates.
 ### Fixed
 
+- **The served game never traded.** `hexset.server.webplay.GameSession.
+  state_view` fired the turn's pending trade event as a side effect of
+  *any* viewer's poll (a spectator's, or an acting bot's own runner
+  checking whose turn it is), by reading the current player's own hidden
+  view unconditionally; `Game.publish_due(seat)` was then defined as "the
+  event has not run yet", so that poll made a bot seat's own publish look
+  moot before it ever happened, permanently, for that turn and every turn
+  after. `Game.publish_due` is now keyed off a seat's own turn-scoped
+  `awaiting_publish` flag instead of the event, so an early observation no
+  longer stops the seat's publish from taking effect; `state_view` now
+  triggers the pending event through `hexset.game.run_pending_event`
+  directly rather than reading `game.state(game.current_player)` for a
+  reader who may not be that player at all.
 - `hexset.server.api.spawn_bot` imported `.onnxbot` from `hexset.server`,
   where the module no longer lives after the one-distribution restructure
   moved it to `hexset.clients.onnxbot`. Any `.onnx` model picked in the web

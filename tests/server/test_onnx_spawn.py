@@ -98,13 +98,16 @@ def test_a_network_seats_first_action_publishes_a_nonzero_valuation(monkeypatch,
     # Park the game in MAIN with the network seat to move -- past setup, so
     # `legal_actions` offers more than one option and the stub's
     # uniform-over-legal policy has an ordinary turn to choose from. Armed
-    # by hand rather than via `enter_main`/`roll_dice`, so `event_pending`
-    # is set explicitly too: it is what makes `Game.publish_due(seat)` true
-    # for this seat's first decision (the PI amendment "publish points and
-    # the event trigger").
+    # by hand rather than via `enter_main`/`roll_dice`, so both flags
+    # `enter_main` would have set are set explicitly too: `event_pending`
+    # and `awaiting_publish` (the latter is what makes `Game.publish_due
+    # (seat)` true for this seat's first decision -- decoupled from
+    # `event_pending` by the `publish_due`/`state_view` fix, see
+    # `Game.publish_due`'s docstring).
     game.phase = Phase.MAIN
     game.current_player = seat
     game.event_pending = True
+    game.awaiting_publish = True
 
     assert all(v == 0.0 for v in table.session.game.valuations[seat])
 

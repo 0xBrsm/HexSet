@@ -114,6 +114,25 @@ class Game:
     # every imagined copy's `gates` is, so a copy's own `legal_actions`
     # call never re-runs a live event with the copy's stand-in gates.
     event_pending: bool = False
+    # Whether the current player still owes this turn's publish
+    # (`publish_due`'s own flag, deliberately separate from `event_pending`
+    # above). `enter_main` sets it, `Game.publish` clears it for the current
+    # player. Regression this decoupling fixes: the server's own
+    # `state_view` reads *any* viewer's poll through `game.state(current)`
+    # to trigger the pending event (one of the three trigger points), so a
+    # spectator's `/api/state` -- or an acting bot's own poll of its state
+    # before it decides -- could consume `event_pending` before the current
+    # player ever published, and `publish_due` used to be defined as
+    # "`event_pending` still true", so it went permanently false for that
+    # turn the instant anybody merely looked. Keying `publish_due` off this
+    # flag instead means an observation can still fire the event early (the
+    # turn's first event may run on this seat's standing vector from its own
+    # last turn, same as it always could -- `run_pending_event`'s docstring
+    # on why that is not fixed too) without ever making a still-unpublished
+    # seat's publish look moot: the seat's fresh vector reaches every event
+    # after that first one, the same turn, once it does publish. `imagine`
+    # copies it for the same reason it copies `event_pending`.
+    awaiting_publish: bool = False
     # Who answers a private gate, one per seat -- the driver's own bots
     # (`arena.play`), the gym's opponents, the server's seated players, or a
     # search's stand-in for the whole table. Gate-only: publishing a
@@ -222,21 +241,32 @@ class Game:
         """Whether `seat` should publish its valuation right now.
 
         True exactly once per seat per turn: while `seat` is the current
-        player, the phase is `MAIN`, and this turn's first trade event has
-        not yet run (`event_pending`). A driver checks this before calling
-        `hexset.trading.publish_valuation` so a seat publishes once, at the
-        engine-defined post-roll/robber point, rather than after every
-        action -- the PI amendment that replaced "publish after every
-        action", which measured 8.4x collection cost for an event that can
-        only ever observe two publishes a turn
+        player, the phase is `MAIN`, and `seat` has not published since
+        `enter_main` armed this turn (`awaiting_publish`). A driver checks
+        this before calling `hexset.trading.publish_valuation` so a seat
+        publishes once, at the engine-defined post-roll/robber point,
+        rather than after every action -- the PI amendment that replaced
+        "publish after every action", which measured 8.4x collection cost
+        for an event that can only ever observe two publishes a turn
         (`agents/reference/trading-design.md`). A human seat is unaffected:
         it publishes whenever it likes through the server's endpoint,
         `publish_due` or not.
+
+        Deliberately keyed off `awaiting_publish`, not `event_pending`: an
+        observation (the server's `state_view`, polled by a spectator or by
+        an acting bot's own runner before it decides) can fire this turn's
+        first trade event -- one of the three trigger points,
+        `run_pending_event`'s docstring -- before the current player has
+        published, and used to make `publish_due` false for the rest of the
+        turn as a result, so the seat's own publish, moments later, never
+        happened. `awaiting_publish` only ever goes false when this seat
+        itself publishes, so an event firing early on a still-unpublished
+        vector no longer stops the publish that should have preceded it.
         """
         return (
             seat == self.current_player
             and self.phase is Phase.MAIN
-            and self.event_pending
+            and self.awaiting_publish
         )
 
     def publish(self, seat: int, vector: Sequence[float]) -> None:
@@ -254,14 +284,17 @@ class Game:
         standing behind.
 
         One of the three event-trigger points (`event_pending`'s
-        docstring): when `seat` is the current player, this fires this
-        turn's pending first trade event, if one is still outstanding,
-        *after* the new vector is recorded -- so a driver that publishes
-        before it ever observes the game trades on the vector it just
-        published, not the one standing from its last turn.
+        docstring): when `seat` is the current player, this clears
+        `awaiting_publish` (so `publish_due` reports this seat's turn-scoped
+        publish as done) and then fires this turn's pending first trade
+        event, if one is still outstanding, *after* the new vector is
+        recorded -- so a driver that publishes before it ever observes the
+        game trades on the vector it just published, not the one standing
+        from its last turn.
         """
         self.valuations[seat] = checked_valuation(vector, seat)
         if seat == self.current_player:
+            self.awaiting_publish = False
             run_pending_event(self)
 
     def execute_trade(self, proposer: int, counterparty: int, bundle: Bundle) -> Trade:
@@ -346,6 +379,7 @@ def imagine(
         trades_made=game.trades_made,
         max_trades=game.max_trades,
         event_pending=game.event_pending,
+        awaiting_publish=game.awaiting_publish,
         locked=game.locked,
     )
 
@@ -710,8 +744,9 @@ def run_trade_event(game: Game) -> None:
 
 
 def run_pending_event(game: Game) -> None:
-    """Fire this turn's *first* trade event now, if one is still pending,
-    then clear the flag so it can never fire twice for the same turn.
+    """Fire this turn's *first* trade event now, if one is still pending
+    and due, then clear the flag so it can never fire twice for the same
+    turn.
 
     The lazy half of `event_pending`'s mechanism (see its docstring on
     `Game`): called from the current player's own `legal_actions(game)`,
@@ -729,6 +764,40 @@ def run_pending_event(game: Game) -> None:
     game does) but never carries real gates, and stepping that copy through
     its own `legal_actions` must not so much as touch the flag, let alone
     run anything, using the copy's stand-in `gates=None`.
+
+    Does **not** wait for the current player's own publish before firing,
+    even though `awaiting_publish` (`Game`'s own docstring) may still be
+    true -- deliberately, chosen over the alternative (make this a no-op
+    while the current player is a seat that publishes as part of its own
+    decision and has not yet done so this turn, distinguished by
+    `hasattr(gates[current], "choose")`) because that alternative reaches
+    past this function's own remit: `hexset.trading.publish_valuation`
+    itself calls `game.state(seat)` to build the view it hands the seat's
+    `valuation` -- one of the three trigger points -- *before* calling
+    `Game.publish` with the result, for every driver that steps a seated
+    game (`arena.play`, `record.record_game`, `bench.aivat`, the gym's
+    auto-played opponents, the server's embedded bots alike). Waiting here
+    would therefore also delay the arena's own turn-opening event from the
+    seat's standing vector to the one it is about to compute, changing what
+    every one of those drivers has always done and re-baselining the
+    census for no reason connected to the regression below. So: the first
+    event of a turn can still run on the current player's standing vector
+    from its own last turn (`[0, ...]` on that seat's very first turn ever)
+    -- a driver publishing before observing (`arena.play`'s own idiom) still
+    reaches this before that happens, exactly as today. What changed is
+    `publish_due` (see its docstring): an observation that spends this
+    event early no longer makes a still-unpublished seat's own publish, a
+    moment later, look like it already happened -- so the seat's fresh
+    vector reaches the turn's *next* event (every interleaved one after a
+    MAIN action) even on the turn where the first one ran early. This is
+    the regression fix: `hexset.server.webplay.GameSession.state_view` used
+    to read the current player's hidden view on *any* viewer's poll,
+    consuming this event before an embedded bot -- or that bot's own
+    runner, polling its own state before it decides -- ever got to
+    publish, and `publish_due` used to go false as a result, so the
+    publish that should have followed never happened, for that turn or any
+    after it -- the deploy report that pinned this down called it "the
+    served game never trades".
     """
     if not game.event_pending or game.phase is not Phase.MAIN or game.gates is None:
         return
@@ -743,11 +812,16 @@ def enter_main(game: Game) -> None:
     `game.state`, or `Game.publish` is reached (the PI amendment "publish
     points and the event trigger"). Every path from `ROLL` or `ROBBER` into
     `MAIN` goes through here, so every driver arms the pending event without
-    having to remember to. See `run_trade_event` for the event itself and
-    the interleaving with the actions that follow it.
+    having to remember to. Also arms `awaiting_publish`, so `publish_due`
+    reports the current player as owing a fresh publish for this turn
+    regardless of whether that first event has already been observed (and so
+    already run) by the time the seat gets to publish. See `run_trade_event`
+    for the event itself and the interleaving with the actions that follow
+    it.
     """
     game.phase = Phase.MAIN
     game.event_pending = True
+    game.awaiting_publish = True
 
 
 def end_turn(game: Game) -> None:

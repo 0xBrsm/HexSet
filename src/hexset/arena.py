@@ -34,7 +34,7 @@ from .board.board import Board, random_base_board
 from .board.topology import Topology
 from .game import Game, is_over, start, to_move
 from .placement import PlacementBot
-from .trading import GATE_BUDGET, publish_valuation
+from .trading import publish_valuation
 from .victory import victory_points
 
 if TYPE_CHECKING:
@@ -433,8 +433,6 @@ def play(
     rng: random.Random,
     *,
     action_cap: int = MAX_ACTIONS,
-    gate_budget: int | None = GATE_BUDGET,
-    order: str = "maximin",
 ) -> Game:
     """One game, each bot seated at its own index.
 
@@ -452,17 +450,10 @@ def play(
     turn stands behind. A bot that defines neither `valuation` nor
     `accepts` never trades, which is how `RandomBot` and any external bot
     that predates the mechanic behave.
-
-    `gate_budget`/`order` set `game.gate_budget`/`game.bundle_order` once,
-    at construction, so a duel can run the registered gate-budget ablation
-    without editing `hexset.trading.GATE_BUDGET` -- defaults reproduce
-    today's behaviour exactly.
     """
     game = start(board, len(bots), rng)
     game.gates = tuple(bots)
     game.max_trades = None
-    game.gate_budget = gate_budget
-    game.bundle_order = order
     actions = 0
     while not is_over(game) and actions < action_cap:
         seat = to_move(game)
@@ -475,7 +466,7 @@ def play(
 
 
 def _play_one(
-    job: tuple[tuple[Entrant, ...], int, int, int, bool, int | None, str],
+    job: tuple[tuple[Entrant, ...], int, int, int, bool],
 ) -> tuple[int | None, int | None, int, tuple[int, ...]]:
     """Play game `index`. Returns (winning entrant, winning seat, turns, points).
 
@@ -485,14 +476,8 @@ def _play_one(
     Module level and taking only picklable arguments, so a pool can call it.
     Every random stream is derived from the seed and the game index, so a game
     plays identically whichever worker draws it and however many there are.
-
-    `gate_budget`/`order` are optional trailing elements (default `GATE_BUDGET`,
-    `"maximin"`) so a 5-element job -- every call site that predates the
-    gate-budget ablation -- still unpacks and plays exactly as before.
     """
-    entrants, index, seed, action_cap, antithetic = job[:5]
-    gate_budget = job[5] if len(job) > 5 else GATE_BUDGET
-    order = job[6] if len(job) > 6 else "maximin"
+    entrants, index, seed, action_cap, antithetic = job
     seats = len(entrants)
     # Antithetic pairing: the board comes from the pair, the rotation from the
     # position within it, so the two halves of a pair are the same board played
@@ -532,8 +517,6 @@ def _play_one(
         board,
         random.Random(f"{seed}:{board_index}:game"),
         action_cap=action_cap,
-        gate_budget=gate_budget,
-        order=order,
     )
     # true state: the verdict's own victory points include hidden
     # victory-point dev cards, so the final score is read off the truth.
@@ -554,8 +537,6 @@ def compete(
     action_cap: int = MAX_ACTIONS,
     workers: int = 1,
     antithetic: bool = True,
-    gate_budget: int | None = GATE_BUDGET,
-    order: str = "maximin",
 ) -> Tournament:
     """Run `games` games, rotating the lineup so every entrant sits every seat.
 
@@ -564,12 +545,6 @@ def compete(
 
     `workers` only changes the wall clock. Results are identical at any worker
     count, which is the property that makes a parallel run quotable.
-
-    `gate_budget`/`order` are passed straight through to `play` for every
-    game (the registered gate-budget ablation): the same knobs on every
-    game in the tournament, not per-entrant, since they are a property of
-    the engine's trade event, not of a bot. Defaults reproduce today's
-    behaviour exactly.
     """
     seats = len(entrants)
     if seats < 2:
@@ -578,9 +553,7 @@ def compete(
         raise ValueError(f"{games} games does not divide evenly over {seats} seats")
 
     lineup = tuple(entrants)
-    jobs = [
-        (lineup, i, seed, action_cap, antithetic, gate_budget, order) for i in range(games)
-    ]
+    jobs = [(lineup, i, seed, action_cap, antithetic) for i in range(games)]
     started = time.perf_counter()
     if workers > 1:
         with Pool(workers) as pool:

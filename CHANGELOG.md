@@ -25,18 +25,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   card): a bundle — any signed counts on disjoint resources, each side
   bounded only by what that hand holds — executes when both seats' public
   valuation vectors say it helps them *and* both seats' private gates
-  accept, best deal first, repeatedly, until nothing clears. No cap on
-  trades themselves — the gate must be strictly positive and is re-asked
-  after every exchange — but each clearing attempt only asks the two
-  private gates about the best `GATE_BUDGET` (8) candidate bundles by
-  public surplus, a cost bound on hands fertile enough to advertise
-  thousands at once.
+  accept, best deal first, repeatedly, until nothing clears. Candidates are
+  ranked by public surplus and the two private gates are asked in that rank
+  order until one clears or candidates run out — no budget, and no cap on
+  trades themselves: the gate must be strictly positive and is re-asked
+  after every exchange, so the acting seat's own valuation strictly
+  increases and the event ends on its own.
 - `Game.valuations` — every seat's public vector, five floats in `[-1, 1]`,
   all-zero until something publishes; `Game.publish(seat, vector)` is the
   one way to set one, validated and recorded, nothing else; `Game.trades`
-  and `Game.trades_made` for the turn's exchanges; `Game.budget_binds`,
-  reset with the turn, counting how often a clearing attempt exhausted
-  `GATE_BUDGET` candidates without one clearing; `Game.max_trades` (`0`
+  and `Game.trades_made` for the turn's exchanges; `Game.max_trades` (`0`
   off, `None` unbounded); `Game.gates`, the per-seat objects `trade_event`
   asks for a private judgement. `Game.num_players`.
 - `hexset.bots.Bot.valuation(view)` and
@@ -130,16 +128,6 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `rank_partners`) and a minimal adapter, `Heximax.propose_actions`, that
   replaces the engine's one-for-one trade sample with heximax's own scored
   candidates.
-- `hexset.trading.trade_event(game, gate, *, gate_budget=GATE_BUDGET,
-  order="maximin")`: `gate_budget` (an int, or `None` for unbounded)
-  and `order` (`"maximin"` or `"minimal_bundle"`, the latter breaking
-  ties on the maximin key by fewer total cards moved first) are now
-  keyword parameters instead of the `GATE_BUDGET` module constant.
-  `Game.gate_budget`/`Game.bundle_order` carry them per game;
-  `hexset.arena.play`/`compete` and `hexset.bench.duel`'s
-  `--gate-budget`/`--order` thread them through. Defaults are
-  unchanged.
-
 ### Fixed
 
 - `hexset.server.api.spawn_bot` imported `.onnxbot` from `hexset.server`,
@@ -170,9 +158,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   one-card steps that each has to satisfy both gates on its own reaches it.
   A bundle's size is bounded only by what each side's hand holds — no fixed
   cap (owner review, 2026-09-03, against an interim 1..3-cards-a-side
-  limit) — so each clearing attempt gates at most `GATE_BUDGET` (8)
-  candidates by public surplus rather than pricing all of them
-  (`Game.budget_binds` counts binds).
+  limit).
 - **Trade and build interleave.** The trade event runs at the start of
   `Phase.MAIN` and again after every MAIN action the current player takes —
   build, buy, a bank/port trade, a development card — on the same published
@@ -300,6 +286,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Removed
 
+- **The gate budget.** A registered ablation (8/16/32 candidates per
+  clearing attempt vs. unbounded) found unbounded both the strongest arm
+  and within cost, so the cap is gone: private gates are asked in public-
+  surplus rank order until one clears or candidates run out, always.
+  `hexset.trading.GATE_BUDGET`, the `gate_budget`/`order` keyword
+  parameters of `trade_event`/`_best_clearing` and the ranking helpers,
+  `Game.gate_budget`/`Game.bundle_order`, `Game.budget_binds` (nothing
+  binds now), the `order="minimal_bundle"` ranking path,
+  `hexset.arena.play`/`_play_one`/`compete`'s threading of these, and
+  `hexset.bench.duel --gate-budget`/`--order` are all deleted. The maximin
+  ranking and its actor's-surplus tie-break are unchanged.
 - **The offer protocol.** `Phase.TRADE_RESPOND`, `propose_trade`/
   `accept_trade`/`decline_trade`, `Offer`, `Game.offer`/`.pending_responders`/
   `.offers_made`/`.offered`, `MAX_OFFERS_PER_TURN`, `trading.responders`/

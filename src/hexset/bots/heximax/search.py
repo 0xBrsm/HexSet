@@ -326,9 +326,7 @@ class Heximax:
         share = 1.0 / len(worlds)
         totals = []
         for action in candidates:
-            # true state: `num_players` is a fixed board property, same in
-            # every world.
-            total = [0.0] * worlds[0].state(seat, hidden=False).num_players
+            total = [0.0] * worlds[0].num_players
             for world in worlds:
                 vector = self._after(world, action, depth, seat)
                 for p, value in enumerate(vector):
@@ -506,8 +504,7 @@ class Heximax:
         if action.type is ActionType.ROLL:
             return self._over_dice(game, depth, knower, ply)
         if draws_hidden(game, action):
-            # true state: `num_players` is a fixed board property.
-            total = [0.0] * game.state(knower, hidden=False).num_players
+            total = [0.0] * game.num_players
             for weight, child in self.draw_children(game, action, knower):
                 for p, value in enumerate(self._value(child, depth - 1, knower, ply + 1)):
                     total[p] += weight * value
@@ -522,8 +519,7 @@ class Heximax:
             child = imagine(game, self.rng)
             roll_dice(child)
             return self._value(child, depth - 1, knower, ply + 1)
-        # true state: `num_players` is a fixed board property.
-        total = [0.0] * game.state(knower, hidden=False).num_players
+        total = [0.0] * game.num_players
         for roll, weight in ROLL_ODDS:
             child = imagine(game, self.rng)
             roll_dice(child, roll)

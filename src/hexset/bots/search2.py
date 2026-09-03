@@ -238,8 +238,7 @@ class SearchBot:
         return self._value(child, depth - 1, knower)
 
     def _over_dice(self, game: Game, depth: int, knower: int) -> list[float]:
-        # true state: `num_players` is a fixed, public board property.
-        total = [0.0] * game.state(knower, hidden=False).num_players
+        total = [0.0] * game.num_players
         for roll, weight in ROLL_ODDS:
             child = imagine(game, self.rng)
             roll_dice(child, roll)

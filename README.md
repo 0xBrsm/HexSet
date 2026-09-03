@@ -166,7 +166,7 @@ Inference device is **not** read from metadata — it's a property of the host, 
 The human seat can also be driven by a script or an LLM, over either interface, as a peer to the browser rather than a replacement for it — both still go through the same `apply_human_action`/`legal_actions` path the browser does, so nothing sent this way skips validation.
 
 - **HTTP**: the same `/api/*` endpoints the frontend calls (`GET /api/state`, `POST /api/action`, etc. — see `web.py`). `POST /api/register {"name": "..."}` names the human side, in the journal header for a fresh game and immediately in `GET /api/state`'s `player_name` for one already in progress; optional, and works before a game is dealt or mid-game.
-- **MCP**: `python -m hexset.server.mcp`, run alongside an already-running `web.py` (`HEXSET_UI_BASE_URL`, default `http://127.0.0.1:8770`). It's a thin stdio client of that same HTTP API — one MCP connection is one `hexset_id` identity, same as one browser tab — exposing `register`, `models`, `new_game`, `board`, `state`, `act`, and `undo` as tools. `act` takes an index into `state()`'s `legal_actions` and settles the whole bot cascade before returning, so one tool call is one full human turn, not one click. Hand-rolled against the MCP stdio wire format rather than built on the official SDK, which pulls in a compiled dependency (`pydantic`) this project otherwise has none of.
+- **MCP**: `python -m hexset.server.mcp`, run alongside an already-running `web.py` (`HEXSET_UI_BASE_URL`, default `http://127.0.0.1:8770`). It's a thin stdio client of that same HTTP API — one MCP connection is one `hexset_id` identity, same as one browser tab — exposing `register`, `models`, `new_game`, `join`, `board`, `state`, `act`, `undo`, and the negotiation interface's `set_valuation`, `get_table`, `propose_trade`, `confirm_trade`, `decline_trade` as tools. `act` takes an index into `state()`'s `legal_actions` and settles the whole bot cascade before returning, so one tool call is one full human turn, not one click. `new_game`/`join` take an optional `confirm` flag to opt the connecting seat into confirm-mode trading (see "Trading" below); left off, `set_valuation`'s vector is standing consent to trade, the same as a bot's. Hand-rolled against the MCP stdio wire format rather than built on the official SDK, which pulls in a compiled dependency (`pydantic`) this project otherwise has none of.
 
 Any number of these seats — browser, HTTP script, MCP-connected LLM, or an embedded `.onnx` bot — can sit at the same table; the server does not distinguish who or what is behind a seat beyond the interface it came in on.
 
@@ -200,15 +200,30 @@ must be strictly positive and is re-asked after every exchange, so the
 acting seat's own valuation strictly increases and the event ends on its
 own.
 
-Nobody proposes, accepts or declines: there are no trade actions at all, no
-phase in which somebody is asked, and nothing in the action space to mask —
-which is also what makes the legal-action list honest for every seat, since
-no remaining action's legality depends on another seat's hand. A bot brings
+The automatic event above is engine-driven and asks nobody a question: no
+trade action, no phase, nothing in the action space to mask — which is what
+keeps the legal-action list honest for every seat regardless. A bot brings
 its two methods (`Bot.valuation(view)`, `Bot.accepts(view, bundle,
-counterparty)`, both defaulting to "never trades"); a person sets their
-vector with `PUT /api/games/<CODE>/valuation` and sees every seat's vector
-and the turn's trade log beside the board. `max_trades=0` is the off switch
-for the no-trade referents (`search2-notrade`, `heximax-notrade`).
+counterparty)`, both defaulting to "never trades").
+
+A human or LLM seat gets a **negotiation interface** on top of the same
+engine: `POST /api/games/<CODE>/trade` composes and submits any bundle a
+counterparty's own published vector already wants — on that seat's own turn
+against anyone, or during another seat's turn naming only that seat. The
+counterparty's public surplus is a hard rule (its own vector must call the
+bundle a gain) and its private gate still decides, but the proposer's own
+vector is never consulted — submitting is consent. A seat opted into
+**confirm mode** at seat-up never clears on its own: every candidate the
+table's own event finds against it lands in `pending` (`GET /api/state`,
+filtered to the seat it names) instead, answered with `POST
+.../trade/confirm` or `.../trade/decline`. The web UI's negotiation panel
+renders a counterparty's wants/gives as clickable chips composing the
+bundle; the five-toggle advertisement panel above it is unchanged and
+independent — publishing a vector is a standing statement, not a
+submission. Full interface, including the PI's ratified decisions on what
+was left open: [`docs/negotiation-interface.md`](docs/negotiation-interface.md).
+`max_trades=0` is the off switch for the no-trade referents
+(`search2-notrade`, `heximax-notrade`).
 
 ## Gym
 
@@ -273,7 +288,7 @@ the encoder's arrays.
 - `src/hexset/server/rules.py` — what a served table needs beyond the engine's own `legal_actions`: naming an empty option list as the bug it is, and checking a submitted action against the list. It used to hold a second, honest enumeration, because the engine's offer sample read opponents' hands; trading is no longer an action, so there is one list for every seat.
 - `src/hexset/server/seating.py` — the setup snake starting at whoever created the game, and retiring a seat nobody claimed.
 - `src/hexset/clients/onnxbot.py` — the entire model boundary: the record contract, action-space indexing, masking, sampling, and search all live behind it, and `spawn(path, board)` is the only entry point anything else uses. Builds its record with `hexset.onnx_record.record_from_game` directly — the torch-free split that used to block that (`docs/engine-divergence-2026-09-02.md`, R1) has landed, so this package no longer carries its own copy. `botclient.py` is the other half: a bot plays its seat as a peer client of the API, embedded or external, never as a privileged writer. Only record contract `5` is served — 2, 3 and 4 are the offer protocol's contracts and describe a game this engine no longer plays; contract 1 was dropped 2026-09-02, see the divergence audit.
-- `src/hexset/server/static/index.html` — the entire frontend: inline CSS, inline SVG icons, vanilla JS. No build step. Its trading surface is five per-resource toggles that `PUT` this seat's valuation vector, plus a read-out of every seat's vector and the turn's trades; there is nothing to propose or answer.
+- `src/hexset/server/static/index.html` — the entire frontend: inline CSS, inline SVG icons, vanilla JS. No build step. Its advertisement panel is five per-resource toggles that `PUT` this seat's valuation vector, plus a read-out of every seat's vector and the turn's trades; below it, the negotiation panel composes and submits a bundle against a counterparty's published wants/gives (rendered as clickable chips) and shows any pending offers from confirm-mode seats to accept or decline (`docs/negotiation-interface.md`).
 - `models/` — drop `.onnx` files here.
 - `games/` — where every game is journalled: one JSON lines file per game, written as it is played, with nothing hidden (the dice, the deck order, every card drawn or stolen, every seat's hand after every action — see `src/hexset/server/journal.py`). On by default; `HEXSET_UI_GAMES_DIR` moves it, and setting that empty turns it off.
 

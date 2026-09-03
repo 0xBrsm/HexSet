@@ -185,6 +185,25 @@ calls `PUT /api/games/<code>/valuation`. That gap is pre-existing and is not
 this contract's concern — an external checkpoint that wants to trade can
 still publish through that route the same way a human client does.
 
+**The negotiation interface (human and LLM seats).** Everything above is the
+automatic event; a human or LLM seat additionally gets `POST
+/api/games/<code>/trade` (`hexset.game.Game.execute_trade`) to compose and
+submit a bundle directly, bypassing the automatic candidate search — any
+bundle both sides can cover, not only what the event would have found. It is
+legal on the proposer's own turn against any seat, or during another seat's
+turn against that seat only, and still enforces the counterparty's public
+surplus as a hard rule and its private gate (`accepts`) exactly as the
+automatic event does; the proposer's own vector and gate are never
+consulted, since submitting is its own consent. A checkpoint served through
+this contract is never itself a *proposer* here — nothing calls this route
+on a bot's behalf — but it is a valid **counterparty**: a person or an LLM
+may propose a bundle against a served checkpoint's own published vector at
+any time, and the checkpoint's `accepts` answers it exactly as it would an
+automatically-found candidate, because the call is the same. `GET
+/api/state`'s `pending` block and the confirm/decline routes exist only for
+a seat opted into confirm mode at seat-up, which a `.onnx` checkpoint never
+is. Full interface: [`docs/negotiation-interface.md`](negotiation-interface.md).
+
 ## What is never part of this contract
 
 `onnxbot.py`'s job stops at reading these names and shapes. It never imports

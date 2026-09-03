@@ -20,6 +20,7 @@ from hexset.trading import (
     _rank_candidates_loop,
     bundle,
     exchange,
+    execute_trade,
     holds,
     one_for_one,
     trade_event,
@@ -914,6 +915,173 @@ def test_an_imagined_game_carries_the_trade_switch_and_the_log():
 
 
 # --- the assertion ------------------------------------------------------------
+
+
+# --- execute_trade (the negotiation interface, docs/negotiation-interface.md) -
+
+
+def _seated(game, traders):
+    """Seats `traders` as `game`'s gates, publishing nothing -- `execute_trade`
+    tests set `game.valuations` directly, since the interface under test is
+    the manual bundle, not the automatic candidate search."""
+    game.gates = tuple(traders)
+
+
+def test_execute_trade_clears_on_coverage_surplus_and_gate():
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    game.valuations[1] = vector(wood=1.0, ore=-1.0)
+    _seated(game, [Trader(), Trader(gate=True), Trader(), Trader()])
+    received = one_for_one(WOOD, ORE)  # proposer gives wood, receives ore
+    trade = execute_trade(game, 0, 1, received)
+    assert trade == Trade(0, 1, received)
+    assert game._state.hands[0] == [0, 0, 0, 0, 1]
+    assert game._state.hands[1] == [1, 0, 0, 0, 0]
+    assert game.trades == [trade]
+    assert game.trades_made == 1
+
+
+def test_execute_trade_rejects_a_proposer_who_cannot_cover_it():
+    game = stocked((1, Resource.ORE, 1))
+    game.valuations[1] = vector(wood=1.0, ore=-1.0)
+    _seated(game, [Trader(), Trader(), Trader(), Trader()])
+    with pytest.raises(ValueError, match="seat 0 cannot cover"):
+        execute_trade(game, 0, 1, one_for_one(WOOD, ORE))
+
+
+def test_execute_trade_rejects_a_counterparty_who_cannot_cover_it():
+    game = stocked((0, Resource.WOOD, 1))
+    game.valuations[1] = vector(wood=1.0, ore=-1.0)
+    _seated(game, [Trader(), Trader(), Trader(), Trader()])
+    with pytest.raises(ValueError, match="seat 1 cannot cover"):
+        execute_trade(game, 0, 1, one_for_one(WOOD, ORE))
+
+
+def test_execute_trade_rejects_a_non_clearing_counterparty_surplus():
+    """The counterparty's public surplus is a hard rule (PI ratification
+    decision 4): a bundle its own vector doesn't call an improvement never
+    clears, whatever the proposer thinks of it."""
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    # seat 1 has published nothing -- NO_VALUATION, so no bundle can clear it.
+    _seated(game, [Trader(), Trader(), Trader(), Trader()])
+    with pytest.raises(ValueError, match="not advertised wanting"):
+        execute_trade(game, 0, 1, one_for_one(WOOD, ORE))
+
+
+def test_execute_trade_rejects_a_declining_gate():
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    game.valuations[1] = vector(wood=1.0, ore=-1.0)
+    _seated(game, [Trader(), Trader(gate=False), Trader(), Trader()])
+    with pytest.raises(ValueError, match="declined"):
+        execute_trade(game, 0, 1, one_for_one(WOOD, ORE))
+
+
+def test_execute_trade_ignores_the_proposers_own_surplus():
+    """Ratification decision 4: submitting is the proposer's own consent, so
+    a bundle the proposer's own vector calls bad for itself still clears."""
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    game.valuations[0] = vector(wood=1.0, ore=-1.0)  # "giving up wood is bad for me"
+    game.valuations[1] = vector(wood=1.0, ore=-1.0)
+    _seated(game, [Trader(), Trader(), Trader(), Trader()])
+    trade = execute_trade(game, 0, 1, one_for_one(WOOD, ORE))
+    assert trade == Trade(0, 1, one_for_one(WOOD, ORE))
+
+
+def test_execute_trade_never_asks_the_proposers_own_gate():
+    """A gate that raises if ever called, seated on the proposer, still lets
+    the trade clear -- submitting is consent, so the proposer's own gate is
+    never consulted (`docs/negotiation-interface.md` §1)."""
+
+    class Boom:
+        def valuation(self, view):
+            return NO_VALUATION
+
+        def accepts(self, view, received, counterparty):
+            raise AssertionError("the proposer's own gate must never be asked")
+
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    game.valuations[1] = vector(wood=1.0, ore=-1.0)
+    _seated(game, [Boom(), Trader(), Trader(), Trader()])
+    trade = execute_trade(game, 0, 1, one_for_one(WOOD, ORE))
+    assert trade == Trade(0, 1, one_for_one(WOOD, ORE))
+
+
+def test_execute_trade_rejects_a_seat_that_is_neither_proposer_nor_current_player():
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    game.valuations[1] = vector(wood=1.0, ore=-1.0)
+    game.current_player = 2
+    _seated(game, [Trader(), Trader(), Trader(), Trader()])
+    with pytest.raises(ValueError, match="neither seat"):
+        execute_trade(game, 0, 1, one_for_one(WOOD, ORE))
+
+
+def test_execute_trade_allows_the_current_player_to_answer_another_seats_offer():
+    """The turn-timing rule's other half: a seat may also propose during
+    another seat's turn, naming only that seat -- so the counterparty being
+    `current_player` is just as legal as the proposer being it."""
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    game.valuations[1] = vector(wood=1.0, ore=-1.0)
+    game.current_player = 1
+    _seated(game, [Trader(), Trader(), Trader(), Trader()])
+    trade = execute_trade(game, 0, 1, one_for_one(WOOD, ORE))
+    assert trade == Trade(0, 1, one_for_one(WOOD, ORE))
+
+
+def test_execute_trade_requires_main_phase():
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    game.valuations[1] = vector(wood=1.0, ore=-1.0)
+    game.phase = Phase.ROLL
+    _seated(game, [Trader(), Trader(), Trader(), Trader()])
+    with pytest.raises(ValueError, match="MAIN"):
+        execute_trade(game, 0, 1, one_for_one(WOOD, ORE))
+
+
+def test_execute_trade_rejects_a_seat_trading_with_itself():
+    game = stocked((0, Resource.WOOD, 1))
+    _seated(game, [Trader(), Trader(), Trader(), Trader()])
+    with pytest.raises(ValueError, match="itself"):
+        execute_trade(game, 0, 0, one_for_one(WOOD, ORE))
+
+
+def test_execute_trade_bypasses_candidates_any_coverable_bundle_is_legal():
+    """`_candidates` still enumerates single-resource-per-side multisets; a
+    manual trade is not limited to what it would have found."""
+    game = stocked((0, Resource.WOOD, 2), (0, Resource.BRICK, 1), (1, Resource.ORE, 3))
+    v = vector(wood=1.0, brick=1.0, ore=-1.0)
+    game.valuations[1] = v
+    _seated(game, [Trader(), Trader(), Trader(), Trader()])
+    received = [0, 0, 0, 0, 0]
+    received[ORE] = 3
+    received[WOOD] = -2
+    received[BRICK] = -1
+    trade = execute_trade(game, 0, 1, tuple(received))
+    assert trade.received == tuple(received)
+    assert game._state.hands[0][ORE] == 3
+    assert game._state.hands[1][WOOD] == 2 and game._state.hands[1][BRICK] == 1
+
+
+# --- Game.pending (a snapshot of the last event) -------------------------------
+
+
+def test_pending_is_cleared_at_the_start_of_every_trade_event():
+    game = stocked((0, Resource.WOOD, 1))
+    game.pending.append(Trade(1, 0, one_for_one(WOOD, ORE)))
+    game.gates = tuple(Trader() for _ in range(4))
+    trade_event(game, lambda seat, view, received, other: True)
+    assert game.pending == []
+
+
+def test_pending_is_cleared_by_end_turn():
+    game = a_game()
+    game.pending.append(Trade(1, 0, one_for_one(WOOD, ORE)))
+    end_turn(game)
+    assert game.pending == []
+
+
+def test_pending_is_not_copied_by_imagine():
+    game = a_game()
+    game.pending.append(Trade(1, 0, one_for_one(WOOD, ORE)))
+    child = imagine(game, random.Random(1))
+    assert child.pending == []
 
 
 def test_an_event_never_outruns_the_cards_on_the_table():

@@ -19,9 +19,10 @@ class Bot(Protocol):
     """Anything that can pick an action, and what it brings to a trade.
 
     `choose` is the whole of the old protocol and still the only required
-    method. The other two are the trade mechanic's seam
-    (`hexset.trading`), and both have a default that means "this seat never
-    trades", so an existing bot keeps working untouched:
+    method. The other three are the trade mechanic's seam
+    (`hexset.trading`), and all have a default that means "this seat never
+    trades" or "answer one candidate at a time", so an existing bot keeps
+    working untouched:
 
     * `valuation(view)` -- the public vector this seat advertises, five
       numbers in [-1, 1], positive for "I want more of this". Default: all
@@ -29,12 +30,23 @@ class Bot(Protocol):
     * `accepts(view, received, counterparty)` -- this seat's private
       judgement of one concrete exchange, `received` signed and positive
       towards this seat. Default: False.
+    * `accepts_many(view, received, counterparties)` -- this seat's private
+      judgement of every candidate in `received` at once, in the same
+      order, so `hexset.trading.trade_event` can ask a seat's gate once per
+      event instead of once per candidate bundle
+      (`agents/reference/trading-design.md`'s post-data note, "the
+      collector cost gate fails at 2.9-3.6x": an unbatched network gate,
+      asked one candidate at a time against hundreds of clearing
+      candidates, was the entire excess collection cost). Default: loop
+      over `accepts`, so a bot that only ever answers one candidate at a
+      time is unaffected; a bot that can answer a whole batch in one
+      forward (`hexset.clients.onnxbot.NetworkBot`) overrides it.
 
-    Both are handed the engine's information-set `View` for that seat and
-    nothing else, so neither can be a function of anything the seat may not
-    know. The defaults are applied by `hexset.trading.published`/`judged`
-    rather than by inheritance, so they hold for a bot that satisfies this
-    protocol structurally.
+    All three are handed the engine's information-set `View` for that seat
+    and nothing else, so none can be a function of anything the seat may
+    not know. The defaults are applied by `hexset.trading.published`/
+    `judged`/`judged_many` rather than by inheritance, so they hold for a
+    bot that satisfies this protocol structurally.
     """
 
     def choose(self, game: Game) -> Action: ...
@@ -44,6 +56,11 @@ class Bot(Protocol):
 
     def accepts(self, view: View, received: Bundle, counterparty: int) -> bool:
         return False
+
+    def accepts_many(
+        self, view: View, received: Sequence[Bundle], counterparties: Sequence[int]
+    ) -> list[bool]:
+        return [self.accepts(view, r, c) for r, c in zip(received, counterparties)]
 
 
 def own(vector: Sequence[float], seat: int) -> float:

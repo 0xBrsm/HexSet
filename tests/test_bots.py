@@ -21,7 +21,7 @@ from hexset.game import (
     to_move,
 )
 from hexset.state import copy_state, place_settlement, upgrade_to_city
-from hexset.trading import NO_VALUATION, one_for_one
+from hexset.trading import NO_VALUATION, judged, judged_many, one_for_one
 from hexset.victory import victory_points
 from helpers import clear_hand, give, independent_vertices, mini_board
 
@@ -284,6 +284,25 @@ def test_the_gate_prices_who_gets_stronger():
         return paranoid(bot.evaluator.evaluate(after, 0), 0)
 
     assert value(1) != pytest.approx(value(2))
+
+
+def test_accepts_many_default_equals_per_candidate_accepts():
+    """`Bot.accepts_many`'s documented default -- loop over `accepts` --
+    holds for `SearchBot`, which defines only `accepts` and never overrides
+    `accepts_many`. The default lives in `hexset.trading.judged_many`
+    (structural, not inheritance -- `SearchBot` does not subclass `Bot`),
+    exactly as `judged` already implements `accepts`'s own default."""
+    game = a_trade_that_wins_the_game_for_the_counterparty()
+    bot = SearchBot(Evaluator(game._state.board), depth=2, width=6, rng=random.Random(0))
+    view = game.state(0)
+    wanted = one_for_one(int(Resource.WOOD), int(Resource.ORE))
+    unwanted = tuple(-n for n in wanted)
+    received = [wanted, unwanted]
+    counterparties = [1, 1]
+
+    assert judged_many(bot, view, received, counterparties) == [
+        judged(bot, view, r, c) for r, c in zip(received, counterparties)
+    ]
 
 
 def test_a_bot_that_never_trades_publishes_nothing_and_refuses_everything():

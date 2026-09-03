@@ -11,6 +11,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`hexset.bots.Bot.accepts_many(view, received, counterparties)`**: a seat's
+  private gate answered for a whole batch of candidate bundles in one call,
+  defaulting to a loop over `accepts` so an existing bot is unaffected.
+  `hexset.trading.trade_event` now asks a seat's gate this way — once for the
+  current player over every ranked candidate, then once per counterparty over
+  the candidates it accepted — instead of once per candidate bundle.
+  `hexset.clients.onnxbot.NetworkBot` overrides it with one batched graph call.
 - **A negotiation interface for human and LLM seats.** `Game.execute_trade(proposer,
   counterparty, bundle)` composes and executes any bundle both sides can
   cover directly, bypassing the automatic candidate search — legal on the

@@ -276,3 +276,70 @@ def test_accepts_takes_a_strictly_improving_exchange(checkpoint_valued):
 
     improving = (0, -1, 0, 1, 0)
     assert bot.accepts(view, improving, (seat + 1) % 4) is True
+
+
+def test_accepts_many_agrees_with_accepts_row_by_row(checkpoint_valued):
+    """The batched gate (`agents/reference/trading-design.md`'s post-data
+    note, "the collector cost gate fails at 2.9-3.6x") must answer exactly
+    what looping `accepts` would, one graph call instead of many: a mix of
+    a refused zero-delta trade, the strictly-improving trade above, its
+    strict reverse (refused), and an uncoverable bundle (negative resulting
+    count -- refused without ever reaching the graph)."""
+    path, board = checkpoint_valued
+    bot, game = _seated_at_main(path, board, hand=(1, 2, 0, 1, 3))
+    seat = to_move(game)
+    view = game.state(seat)
+
+    no_change = (0, 0, 0, 0, 0)
+    improving = (0, -1, 0, 1, 0)
+    worsening = (0, 1, 0, -1, 0)
+    uncoverable = (0, 0, -1, 0, 0)  # this hand holds zero sheep
+    received = [no_change, improving, worsening, uncoverable]
+    counterparties = [(seat + 1) % 4] * len(received)
+
+    expected = [bot.accepts(view, r, c) for r, c in zip(received, counterparties)]
+    many = bot.accepts_many(view, received, counterparties)
+
+    assert many == expected
+    assert many == [False, True, False, False]
+
+
+def test_accepts_many_matches_accepts_within_tolerance_on_random_bundles(checkpoint_valued):
+    """Row-by-row agreement within 1e-6, the strong check item 4 asks for,
+    over a spread of coverable one-card and two-card exchanges rather than
+    the four hand-picked cases above."""
+    import random as _random
+
+    path, board = checkpoint_valued
+    bot, game = _seated_at_main(path, board, hand=(2, 2, 1, 2, 3))
+    seat = to_move(game)
+    view = game.state(seat)
+    hand = view.known[seat]
+
+    rng = _random.Random(11)
+    received = []
+    counterparties = []
+    for _ in range(15):
+        wanted = [0, 0, 0, 0, 0]
+        give_from = rng.randrange(5)
+        take_to = rng.randrange(5)
+        if give_from == take_to:
+            take_to = (take_to + 1) % 5
+        wanted[give_from] -= 1
+        wanted[take_to] += 1
+        received.append(tuple(wanted))
+        counterparties.append((seat + 1 + rng.randrange(3)) % 4)
+
+    expected = [bot.accepts(view, r, c) for r, c in zip(received, counterparties)]
+    many = bot.accepts_many(view, received, counterparties)
+    assert many == expected
+
+    # And the underlying value comparisons agree to float precision, not
+    # only the thresholded boolean -- rebuild each row's raw value the same
+    # way `accepts`/`accepts_many` do and diff them directly.
+    for r, c in zip(received, counterparties):
+        after = [n + d for n, d in zip(hand, r)]
+        if any(n < 0 for n in after):
+            continue
+        before_value, after_value = bot._own_values(seat, [list(hand), after])
+        assert (after_value > before_value) == bot.accepts(view, r, c)

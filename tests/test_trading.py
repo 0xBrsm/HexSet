@@ -25,9 +25,14 @@ from hexset.game import (
 from hexset.trading import (
     NO_VALUATION,
     Trade,
+    _best_clearing,
     _candidates,
     _rank_candidates_loop,
+    _rank_candidates_vectorized,
+    _VECTORIZE_ABOVE,
     bundle,
+    judged,
+    judged_many,
     exchange,
     execute_trade,
     holds,
@@ -1172,3 +1177,184 @@ def test_an_event_never_outruns_the_cards_on_the_table():
     ]
     done = run(game, traders)
     assert 0 < len(done) <= cards
+
+
+# --- Batched gates (`agents/reference/trading-design.md`'s post-data note, ---
+# --- "the collector cost gate fails at 2.9-3.6x") ----------------------------
+
+
+class _AcceptsOnly:
+    """A trader with `accepts` and no `accepts_many` -- exercises
+    `judged_many`'s structural default (`Bot.accepts_many`'s documented
+    default is "loop over `accepts`", implemented here rather than by
+    inheritance, exactly as `judged` already implements `accepts`'s own
+    default)."""
+
+    def __init__(self):
+        self.asked: list[tuple[tuple[int, ...], int]] = []
+
+    def accepts(self, view, received, counterparty):
+        self.asked.append((received, counterparty))
+        return received[WOOD] > 0
+
+
+def test_judged_many_default_loops_over_accepts_in_order():
+    trader = _AcceptsOnly()
+    view = a_game().state(0)
+    received = [
+        one_for_one(ORE, WOOD),  # gives wood -> True
+        one_for_one(WOOD, ORE),  # takes wood -> False
+        one_for_one(WHEAT, SHEEP),  # no wood either way -> False
+    ]
+    counterparties = [1, 2, 3]
+
+    many = judged_many(trader, view, received, counterparties)
+    asked_via_many = list(trader.asked)
+
+    trader.asked.clear()
+    looped = [judged(trader, view, r, c) for r, c in zip(received, counterparties)]
+
+    assert many == looped == [True, False, False]
+    assert asked_via_many == list(zip(received, counterparties))
+
+
+class BatchTrader:
+    """A seat that answers a fixed, deterministic per-candidate rule --
+    accepting some candidates and refusing others, so the winner is not
+    simply "whatever ranks first" -- and only ever exposes `accepts_many`.
+
+    `accepts` raises if called at all: `_best_clearing`, once `game.gates`
+    is seated, must never fall back to asking this trader one candidate at
+    a time.
+    """
+
+    def __init__(self, seat: int, vec: tuple[float, ...]):
+        self.seat = seat
+        self.vec = vec
+        self.batch_calls = 0
+        self.asked: list[tuple[tuple[int, ...], int]] = []
+
+    def valuation(self, view):
+        return self.vec
+
+    def accepts(self, view, received, counterparty):  # pragma: no cover
+        raise AssertionError(
+            "accepts was called; the batched gate should have used accepts_many"
+        )
+
+    def accepts_many(self, view, received, counterparties):
+        self.batch_calls += 1
+        self.asked.extend(zip(received, counterparties))
+        return [_verdict(self.seat, r, c) for r, c in zip(received, counterparties)]
+
+
+def _verdict(seat: int, received: tuple[int, ...], counterparty: int) -> bool:
+    """A fixed, reproducible per-candidate rule with no Python-hash
+    dependence: some candidates pass, some don't, for every seat."""
+    return (sum(abs(n) for n in received) + counterparty + seat) % 3 != 0
+
+
+def _reference_best_clearing(game, me: int, vectors):
+    """The pre-batching `_best_clearing`, verbatim: candidates ranked once,
+    then `_verdict` asked one candidate at a time, stopping at the first
+    the acting seat and the counterparty both accept. The ground truth this
+    module's batched `_best_clearing` must keep matching."""
+    candidates = list(_candidates(game._state, me, game.locked))
+    if not candidates:
+        return None
+    if len(candidates) < _VECTORIZE_ABOVE:
+        ranked = _rank_candidates_loop(me, vectors, candidates)
+    else:
+        ranked = _rank_candidates_vectorized(me, vectors, candidates)
+    for received, them in ranked:
+        mirror = tuple(-n for n in received)
+        if _verdict(me, received, them) and _verdict(them, mirror, me):
+            return them, received
+    return None
+
+
+def _random_trade_ready_game(seed: int, players: int = 4):
+    rng = random.Random(seed)
+    game = a_game(players=players)
+    for seat in range(players):
+        for resource in range(NUM_RESOURCES):
+            count = rng.choice([0, 0, 1, 1, 2, 3])
+            if count:
+                give(game._state, seat, Resource(resource), count)
+    vectors = [tuple(rng.uniform(-1.0, 1.0) for _ in range(NUM_RESOURCES)) for _ in range(players)]
+    return game, vectors
+
+
+def test_best_clearing_asks_each_seats_gate_at_most_once():
+    """The call-count bound: one batched ask for the acting seat, plus at
+    most one more per counterparty whose candidates it accepted -- never one
+    ask per candidate, however many candidates are on the table."""
+    game, vectors = _random_trade_ready_game(seed=7)
+    traders = [BatchTrader(seat, vectors[seat]) for seat in range(game.num_players)]
+    game.gates = tuple(traders)
+    for seat, trader in enumerate(traders):
+        game.publish(seat, trader.valuation(game.state(seat)))
+
+    def view(seat):
+        return game.state(seat)
+
+    candidates = list(_candidates(game._state, game.current_player, game.locked))
+    assert len(candidates) > 0, "the seeded position should offer at least one candidate"
+
+    result = _best_clearing(
+        game,
+        game.current_player,
+        game.valuations,
+        lambda seat, v, received, other: (_ for _ in ()).throw(
+            AssertionError("the single-ask gate must not be used when game.gates is seated")
+        ),
+        view,
+    )
+
+    me = traders[game.current_player]
+    assert me.batch_calls == 1
+    counterparties_asked = {t.seat for t in traders if t is not me and t.batch_calls}
+    for t in traders:
+        assert t.batch_calls <= 1
+    total_calls = sum(t.batch_calls for t in traders)
+    assert total_calls <= 1 + max(0, game.num_players - 1)
+    assert counterparties_asked <= {t.seat for t in traders if t is not me}
+    # The reference (pre-batching) algorithm must agree on the winner.
+    assert result == _reference_best_clearing(game, game.current_player, game.valuations)
+
+
+def test_trade_event_executes_the_same_trades_as_the_sequential_reference():
+    """20 seeded random trade-ready positions: `trade_event`, run against
+    batched-only traders (`BatchTrader`, `accepts` disabled), must execute
+    exactly the sequence of trades the pre-batching, one-candidate-at-a-time
+    algorithm (`_reference_best_clearing`) would have found on the same
+    starting position -- the batching changes how the booleans are
+    gathered, never which trade wins."""
+    for seed in range(20):
+        game, vectors = _random_trade_ready_game(seed)
+        traders = [BatchTrader(seat, vectors[seat]) for seat in range(game.num_players)]
+        game.gates = tuple(traders)
+        for seat, trader in enumerate(traders):
+            game.publish(seat, trader.valuation(game.state(seat)))
+
+        # The reference walk, over an independent copy of the same starting
+        # state, using the same deterministic verdict but the old
+        # sequential, one-candidate-at-a-time algorithm.
+        ref_game, ref_vectors = _random_trade_ready_game(seed)
+        expected: list[Trade] = []
+        me = ref_game.current_player
+        while True:
+            best = _reference_best_clearing(ref_game, me, ref_vectors)
+            if best is None:
+                break
+            them, received = best
+            exchange(ref_game._state, me, them, received)
+            expected.append(Trade(me, them, received))
+
+        def gate(seat, view, received, other):  # pragma: no cover
+            raise AssertionError("single-ask gate must not be used when game.gates is seated")
+
+        done = trade_event(game, gate)
+
+        assert done == expected, f"seed {seed}: batched execution diverged from the reference"
+        assert game.trades == expected

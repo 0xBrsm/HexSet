@@ -347,6 +347,48 @@ class NetworkBot:
         before_value, after_value = self._own_values(seat, [hand, after])
         return after_value > before_value
 
+    def accepts_many(
+        self,
+        view: "View",
+        received: Sequence["Bundle"],
+        counterparties: Sequence[int],
+    ) -> list[bool]:
+        """Batched `accepts`: one graph call over the hand plus every
+        candidate's post-trade successor, instead of one call per candidate
+        (`agents/reference/trading-design.md`'s post-data note, "the
+        collector cost gate fails at 2.9-3.6x" -- an unbatched network gate
+        asked one candidate at a time against hundreds of clearing
+        candidates was the entire excess collection cost). Mirrors
+        `valuation`'s own one-forward fan-out (`_own_values` ->
+        `V2Policy.value_of`, which already falls back to one call per row
+        when the graph's declared batch axis is not dynamic) rather than
+        `accepts`'s one-candidate-at-a-time forward.
+
+        `counterparties` is accepted for signature parity with
+        `hexset.bots.Bot.accepts_many` but not read, for the same reason
+        `accepts` does not read its own `counterparty`: the joint post-trade
+        hand is enough to judge.
+        """
+        del counterparties
+        if self.max_trades == 0 or self._seated is None or not received:
+            return [False] * len(received)
+        seat = view.perspective
+        hand = list(view.known[seat])
+        afters: list[list[int]] = []
+        valid: list[bool] = []
+        for wanted in received:
+            after = [n + d for n, d in zip(hand, wanted)]
+            ok = all(n >= 0 for n in after)
+            valid.append(ok)
+            # An uncoverable candidate still needs a row so every position
+            # in `received` lines up with one in `values` below; the hand
+            # itself is a safe, always-valid placeholder, and its result is
+            # discarded (`ok and ...`) rather than trusted.
+            afters.append(after if ok else hand)
+        values = self._own_values(seat, [hand] + afters)
+        before_value = values[0]
+        return [ok and values[1 + i] > before_value for i, ok in enumerate(valid)]
+
     def _own_values(self, seat: int, hands: Sequence[Sequence[int]]) -> list[float]:
         """Each hand's value on `seat`'s own row, `seat`'s hand swapped in
         turn and everything else about the live position held fixed.

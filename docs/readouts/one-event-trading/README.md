@@ -507,3 +507,54 @@ The engine's one assertion (trades per event ≤ cards on the table) never
 fired.
 
 `nobudget-cost.json`.
+
+## Batched private gates (2026-09-03)
+
+`agents/reference/trading-design.md`'s post-data note "the collector cost
+gate fails at 2.9-3.6x": `hexset.bots.Bot.accepts_many(view, received,
+counterparties)` answers a whole batch of candidate bundles at once
+(default: loop over `accepts`), and `hexset.trading.trade_event`/
+`_best_clearing` ask a seat's gate this way — once for the current player
+over every ranked candidate, then once per counterparty over the candidates
+it accepted — instead of once per candidate bundle.
+`hexset.clients.onnxbot.NetworkBot.accepts_many` answers with one batched
+graph call. `heximax`/`search2` take the default (a loop), unchanged.
+
+### `heximax` vs `search2` mirror-table cost — expected unchanged
+
+Same mirror protocol (three four-seat games an arm, board seeds 0/1/2,
+`search2` the control, arms interleaved seed by seed, one process, 3
+repeats). Neither bot overrides `accepts_many`, so this reading exists to
+confirm the batching change carries no cost for the heuristic arms, not to
+measure the batching itself.
+
+| | heximax | search2 | ratio |
+|---|---|---|---|
+| ms / move (mean of 3 passes) | 3.789 | 1.898 | **2.00x** (1.93–2.04x across passes) |
+
+Matches the pre-existing baseline (`nobudget-cost.json`, 2.07x, 2.00-2.10x
+across passes) within run-to-run noise — unchanged, as expected.
+`batched-gates-cost.json`.
+
+### Served-game measurement — the regression this PR fixes
+
+`linear2400-c5.onnx` (contract 5) as one seat against three `heximax`
+seats, driven through `hexset.server.api.Tables`/
+`hexset.clients.botclient.LocalSearchBrain` (the code path an embedded
+server bot actually runs) for 10 rounds, seed 4200, three interleaved
+before/after trials on a box whose load rose over the run (loadavg
+climbed roughly 5 to 14 across the six runs — driven synchronously,
+one thread, to keep a millisecond-scale gate-cost change from being
+drowned in `BotRunner`'s real 1-second poll interval).
+
+| trial | ONNX seat ms/turn before | after | ratio | heximax control ratio |
+|---|---|---|---|---|
+| 1 | 126.4 | 89.0 | 0.704x | 1.155x |
+| 2 | 138.0 | 90.7 | 0.657x | 1.089x |
+| 3 | 147.2 | 79.4 | 0.539x | 0.873x |
+
+Mean ratio **0.633x** (a ~1.58x speedup) on the ONNX seat's own per-turn
+wall clock, ms/move reads the same ratio; the `heximax` control seats'
+ratio stays near 1.0 (noise from the rising box load, no systematic
+direction), confirming the improvement is specific to the batched gate
+and not an artifact of the shared box. `batched-gates-served-game.json`.

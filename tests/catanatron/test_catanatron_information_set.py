@@ -5,7 +5,7 @@ dev-catan's encoder is documented as information-set correct — "opponents
 contribute counts, never contents" — and its own tests assert that against
 states dev-catan itself built. That is an argument from code. This pins it
 against a *foreign* engine's richer state, which is the only place the claim
-can actually fail in the way that would matter: `hexset.catanatron._state.translate`
+can actually fail in the way that would matter: `hexset.catanatron.state.translate`
 reads catanatron's full `player_state`, including every opponent's exact hand
 and the entire remaining development deck in order, and hands all of it to a
 `GameState`. Nothing but the encoder stands between that and the network.
@@ -62,7 +62,7 @@ def _advance(seed: int, ticks: int):
     for _ in range(ticks):
         if game.winning_color() is not None:
             break
-        game.execute(game._state.current_player().decide(game, game.playable_actions))
+        game.execute(game.state.current_player().decide(game, game.playable_actions))
     return game, translate_board(catan_map)
 
 
@@ -142,7 +142,7 @@ def _first_difference(a, b) -> str:
 def test_opponent_hands_and_deck_do_not_reach_the_encoding(seed, perspective):
     """Permute everything the seat cannot see; its Observation must not move."""
     game, mapping = _advance(seed, ticks=140)
-    cstate = game._state
+    cstate = game.state
     before = _observe(game, mapping, perspective)
 
     colors = list(cstate.colors)
@@ -177,7 +177,7 @@ def test_the_audit_can_fail(seed):
     read as proof. Moving the perspective seat's own hand must be visible.
     """
     game, mapping = _advance(seed, ticks=140)
-    cstate = game._state
+    cstate = game.state
     perspective = 0
     before = _observe(game, mapping, perspective)
 

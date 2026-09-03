@@ -122,6 +122,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   every hand verbatim. `_move_hand` now takes an `exact` flag, and
   `_partner_delta` passes `self.omniscient`. Only `heximax-omni`'s
   behaviour changes.
+- `hexset.catanatron.state.translate` left `Game.valuations` at its empty
+  default instead of one all-zero vector per seat, so `hexset.encoding`
+  raised `IndexError` reading a bridged position; `tests/catanatron`'s
+  three white-box suites read the upstream `catanatron.Game`'s `state`
+  field as `_state` (a leftover from a project-wide sed that meant to
+  touch only `hexset.game.Game`'s newly private field).
 
 ### Changed
 

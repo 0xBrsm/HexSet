@@ -66,6 +66,7 @@ from dataclasses import dataclass, field
 from hexset.actions import Action, ActionType, apply, legal_actions, victim_of
 from hexset.board.board import Board
 from hexset.board.terrain import NUM_RESOURCES
+from ..evaluate import hand_shifted
 from ..search2 import STANCES, options_for
 from hexset.game import ROLL_ODDS, Game, Phase, imagine, is_over, roll_dice, to_move
 from hexset.ledger import PublicLedger
@@ -126,6 +127,93 @@ class _Forced:
 
     def randrange(self, _stop: int) -> int:
         return self.index
+
+
+class _ShiftedBelief:
+    """A `View`'s `known`/`unknown`/`pool` after one candidate trade, built
+    from the event's own pre-trade `View` (`belief_for`, already memoized
+    for the whole event) plus the two hands a candidate moves -- never by
+    constructing a fresh `View` or cloning `GameState`/`PublicLedger`.
+
+    A trade only ever changes two seats' `known` counts (the mover's own,
+    exact; the counterparty's, through the same clamp `PublicLedger.spend`
+    applies -- replicated here rather than called, since only its `known`
+    effect is needed and building a real ledger copy to get it would be
+    exactly the per-candidate object this exists to avoid). Every other
+    seat's `known`/`unknown` is untouched by the trade -- but the shared
+    residual `pool` still moves, because `spend`'s clamp can resolve some of
+    the counterparty's *own* `unknown` into certainty when it gives away
+    more of a resource than the ledger had certified, which shrinks the
+    pool for every seat still drawing from it, not merely the trading two.
+    `expected_hand`/`exact` mirror `View`'s own methods exactly, operand for
+    operand, so a fresh score computed from this is exact wherever the
+    ledger has no other seat mid-desync.
+    """
+
+    __slots__ = ("known", "unknown", "pool", "pool_size", "perspective", "omniscient")
+
+    def __init__(
+        self,
+        known: list[list[int]],
+        unknown: list[int],
+        pool: list[int],
+        pool_size: int,
+        perspective: int,
+        omniscient: bool,
+    ) -> None:
+        self.known = known
+        self.unknown = unknown
+        self.pool = pool
+        self.pool_size = pool_size
+        self.perspective = perspective
+        self.omniscient = omniscient
+
+    def exact(self, seat: int) -> bool:
+        return self.omniscient or seat == self.perspective
+
+    def expected_hand(self, seat: int) -> list[float]:
+        known = self.known[seat]
+        hidden = self.unknown[seat]
+        if not hidden or not self.pool_size:
+            return [float(k) for k in known]
+        share = hidden / self.pool_size
+        return [k + share * p for k, p in zip(known, self.pool)]
+
+
+def _after_trade_belief(
+    belief0: View, target: int, counterparty: int, gains: list[int], losses: list[int],
+) -> _ShiftedBelief:
+    """`_ShiftedBelief` for `target` (always the knower/perspective, always
+    exact) receiving `gains` and giving `losses` to `counterparty`, from the
+    event's shared pre-trade `belief0`. See `_ShiftedBelief` for why only
+    these two seats' `known` and the shared `pool` need recomputing.
+    """
+    known_target = belief0.known[target]
+    new_known_target = [known_target[r] + gains[r] - losses[r] for r in range(NUM_RESOURCES)]
+
+    known_cp = belief0.known[counterparty]
+    new_known_cp = list(known_cp)
+    for r in range(NUM_RESOURCES):
+        if losses[r]:  # counterparty receives -- always safe, per `PublicLedger.receive`
+            new_known_cp[r] = known_cp[r] + losses[r]
+        elif gains[r]:  # counterparty spends -- clamped, per `PublicLedger.spend`
+            new_known_cp[r] = known_cp[r] - min(gains[r], known_cp[r])
+
+    pool = list(belief0.pool)
+    for r in range(NUM_RESOURCES):
+        moved = (new_known_target[r] - known_target[r]) + (new_known_cp[r] - known_cp[r])
+        pool[r] = max(0, belief0.pool[r] - moved)
+    pool_size = sum(pool)
+
+    known = list(belief0.known)
+    known[target] = new_known_target
+    known[counterparty] = new_known_cp
+
+    unknown = list(belief0.unknown)
+    new_size_cp = belief0.sizes[counterparty] - sum(gains) + sum(losses)
+    unknown[counterparty] = new_size_cp - sum(new_known_cp)
+
+    return _ShiftedBelief(known, unknown, pool, pool_size, target, belief0.omniscient)
 
 
 @dataclass
@@ -431,6 +519,64 @@ class Heximax:
         """`target`'s row after `target` receives `received` from
         `counterparty`, less what it is now, read entirely through
         `knower`'s own information.
+
+        No state clone, no ledger copy, no fresh `View`, for the one shape
+        every real caller uses (`target == knower`: `accepts`/`accepts_many`
+        only ever price the acting seat's own row). A trade only ever moves
+        two hands, so only `target`'s and `counterparty`'s hand-dependent
+        terms -- and the shared pool the rest of the table's `expected_hand`
+        draws from -- can move at all; `_after_trade_belief` derives them
+        from the event's own pre-trade belief (`belief_for`, already
+        memoized for the whole event) instead of rebuilding a `View` from a
+        cloned `GameState`/`PublicLedger`, and `score` is called fresh for
+        every seat on the result, reusing the same board terms (`_walk` is
+        keyed on board occupancy alone, untouched by a trade) and the same
+        weighted sum `evaluate` always used -- so this is exact wherever the
+        ledger is in sync with the hands it describes, which every position
+        `hexset.game` reaches on its own keeps true (`hexset.ledger`'s own
+        invariant). `target != knower` -- nothing in this repo calls `_delta`
+        that way -- falls back to the exact, clone-based reference path
+        rather than extend the fast path to a shape nothing exercises.
+        """
+        if target != knower:
+            return self._delta_reference(view, knower, target, received, counterparty, rank)
+
+        state = view.state
+        ledger = view.ledger
+        before = rank(self._vector(state, ledger, knower), target)
+        gains = [max(0, n) for n in received]
+        losses = [max(0, -n) for n in received]
+
+        if self.omniscient:
+            after = hand_shifted(
+                state, {target: received, counterparty: tuple(-n for n in received)}
+            )
+            after_vector = self.evaluator.evaluate(after, knower)
+            return rank(after_vector, target) - before
+
+        belief0 = self.evaluator.belief_for(state, ledger, knower)
+        belief1 = _after_trade_belief(belief0, target, counterparty, gains, losses)
+        after_vector = [
+            self.evaluator.score(
+                state,
+                seat,
+                belief1.known[seat] if belief1.exact(seat) else belief1.expected_hand(seat),
+                knower=knower,
+                belief=belief1,
+            )
+            for seat in range(state.num_players)
+        ]
+        return rank(after_vector, target) - before
+
+    def _delta_reference(
+        self, view: View, knower: int, target: int, received: Bundle, counterparty: int,
+        rank,
+    ) -> float:
+        """The exact, clone-based computation `_delta` fast-paths around for
+        `target == knower` -- kept, not deleted, for the one shape (`target
+        != knower`) nothing in this repo's `accepts`/`accepts_many` calls
+        exercises, so a caller with a different shape stays correct instead
+        of silently wrong.
 
         Invariants, both load-bearing for honesty: the ledger is updated from
         `received` directly rather than by diffing hands, so a third party's

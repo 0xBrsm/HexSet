@@ -19,6 +19,25 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   before generating any bundle, rather than enumerating them only to have
   ranking throw them away. Behaviour-preserving: the heximax choice census
   is byte-identical.
+- **A private trade gate prices a candidate without cloning the position.**
+  `hexset.bots.evaluate.hand_shifted(state, changes)` returns `state` with
+  only the named seats' hands changed, sharing the board, bank, deck and
+  every dev-card pile by reference rather than copying them the way
+  `state.copy_state` does — a trade only ever moves two hands, so nothing
+  else needs to move. `hexset.bots.search2.SearchBot.accepts` and
+  `hexset.bots.heximax.search.Heximax._delta` (the shape every real caller
+  uses, `target == knower`) now price a candidate this way: heximax's own
+  gate additionally recomputes the shared belief's `known`/`pool` from the
+  event's already-memoized pre-trade belief (`_after_trade_belief`,
+  `_ShiftedBelief`) instead of rebuilding a `View` from a cloned ledger, so
+  a third seat's `expected_hand` — which the pool a certified trade
+  shrinks does move, under `relative`/`paranoid` stance — is priced
+  correctly without a clone either. Verified exact against the prior
+  clone-and-evaluate path over real self-play (both stances, both modes,
+  zero mismatches across 200k+ live gate calls) and the heximax/search2
+  byte-identical choice censuses. `target != knower` — a shape nothing in
+  this repo calls `_delta` with — keeps the old clone-based path
+  (`Heximax._delta_reference`).
 
 ### Added
 

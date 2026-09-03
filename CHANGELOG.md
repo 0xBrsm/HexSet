@@ -116,6 +116,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `hexset.server.api.spawn_bot` imported `.onnxbot` from `hexset.server`,
+  where the module no longer lives after the one-distribution restructure
+  moved it to `hexset.clients.onnxbot`. Any `.onnx` model picked in the web
+  UI returned HTTP 500 (`ModuleNotFoundError`); now it imports from
+  `hexset.clients.onnxbot`.
 - `heximax-omni` priced trades against a hand that did not exist:
   `_move_hand` folded a non-knower's hand into one all-one-resource total,
   which is exact for the honest bot but wrong once `omniscient` scores

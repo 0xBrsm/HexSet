@@ -397,7 +397,7 @@ def spawn_bot(spec: str, board: Board, rng: random.Random, config: Config) -> Bo
         # (`Config.max_trades`), not the preset's.
         return spawn_entrant(replace(PRESETS[spec], max_trades=config.max_trades), board, rng)
 
-    from .onnxbot import spawn  # onnxruntime-free import boundary
+    from hexset.clients.onnxbot import spawn  # onnxruntime-free import boundary
 
     return spawn(spec, board, rng=rng, device=config.device, max_trades=config.max_trades)
 

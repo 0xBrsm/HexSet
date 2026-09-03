@@ -778,10 +778,17 @@ class GameSession:
     # rewrites the engine's tuple.
     traders: dict[int, object] = field(default_factory=dict, repr=False)
     # Seats opted into confirm mode at seat-up (`POST /api/games`/`/api/join`'s
-    # `confirm` flag, PI ratification decision 3: opt-in, not the default).
-    # `publish` reads this to decide which gate a seat's own vector installs
-    # -- `PendingGate` here, `PostedValuation` otherwise. Never populated for
-    # a bot seat; nothing reads it for one.
+    # `confirm` flag). `publish` reads this to decide which gate a seat's own
+    # vector installs -- `PendingGate` here, `PostedValuation` otherwise.
+    # Never populated for a bot seat; nothing reads it for one.
+    #
+    # The *default*, when a request omits `confirm`, is transport-dependent
+    # by design: those two routes default it to `True` for a caller that
+    # says nothing -- a human's gate is the explicit submit, so nothing
+    # auto-clears against one without an opt-out (`Tables.create`/`join`'s
+    # docstrings, `api.py`). `hexset.server.mcp`'s `new_game`/`join` tools
+    # send `confirm` explicitly on every call instead, keeping an LLM seat's
+    # own default the opt-in one from PI ratification decision 3.
     confirm_seats: set[int] = field(default_factory=set)
 
     def set_trader(self, seat: int, trader: object | None) -> None:

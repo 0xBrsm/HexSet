@@ -353,7 +353,16 @@ class Table:
         still-unlocked seat, returning it and their token. `confirm` opts this
         seat into confirm-mode trading at seat-up (PI ratification decision 3,
         `docs/negotiation-interface.md`) -- a later change of heart needs a
-        fresh seat, not a flag flipped mid-game."""
+        fresh seat, not a flag flipped mid-game.
+
+        `False` is this method's own default, same reasoning as
+        `Tables.create` above: `POST /api/join` (`Tables.handle`) is what a
+        human at the web page actually calls, and it passes `True` when the
+        request body omits `confirm`, so a joining human also defaults to
+        `PendingGate` -- nothing auto-clears against a human without an
+        explicit opt-out. `hexset.server.mcp`'s `join` tool sends `confirm`
+        explicitly on every call, so an LLM seat's own opt-in default
+        (decision 3) is unaffected by that route-level flip."""
         self._settle_locks()
         candidates = [
             i
@@ -549,7 +558,16 @@ class Tables:
         wanting the table filled says so explicitly, there is no automatic
         mixed lineup any more (see `Config.default_bots`'s own docstring).
         `confirm` opts the creator's own seat into confirm-mode trading (see
-        `Table.join`).
+        `Table.join`). Defaults to `False` here -- this method's own
+        default, kept the conservative one for any caller that isn't a
+        wire request. `POST /api/games` (`Tables.handle`, below) is the one
+        caller that matters for a human at a keyboard, and it passes `True`
+        for a request whose JSON body omits `confirm` entirely: nothing
+        ever auto-clears against a human, so a human seat's gate is
+        `PendingGate` unless it explicitly opts out. An LLM through
+        `hexset.server.mcp`'s `new_game` keeps its own opt-in default by
+        always sending `confirm` explicitly (PI ratification decision 3),
+        so this flip is invisible to it.
         """
         if bots is None:
             bots = list(self.config.default_bots or [])
@@ -945,19 +963,27 @@ class Tables:
             return self.get(path[len("/api/table/") :]).view(None)
 
         if method == "POST" and path == "/api/games":
+            # Wire-level default is confirm mode ON (`PendingGate`): a human
+            # creator's gate is the explicit submit, not an advertised vector
+            # that clears itself. This is *this endpoint's* default, not
+            # `Tables.create`'s -- `mcp.py`'s `new_game` sends `confirm`
+            # explicitly on every call so an LLM seat keeps its own opt-in
+            # default (PI ratification decision 3) regardless of what this
+            # route defaults to for a caller that omits the key.
             table, new_token = self.create(
                 bots=payload.get("bots"),
                 name=payload.get("name"),
                 seat_grace=payload.get("seat_grace"),
-                confirm=bool(payload.get("confirm", False)),
+                confirm=bool(payload.get("confirm", True)),
             )
             return {"token": new_token, **table.view(table.seat_of(new_token))}
 
         if method == "POST" and path == "/api/join":
             table = self.get(str(payload.get("code", "")))
             with table.lock:
+                # Same default as `/api/games` above, and the same reason.
                 seat, new_token = table.join(
-                    payload.get("name"), confirm=bool(payload.get("confirm", False))
+                    payload.get("name"), confirm=bool(payload.get("confirm", True))
                 )
                 return {"token": new_token, **table.view(seat)}
 

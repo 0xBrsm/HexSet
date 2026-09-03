@@ -244,3 +244,19 @@ Sequencing: implement after HexSet's bundle and event-timing PRs land (same
 engine files: `Game.pending`, `execute_trade`). The interleaved-event design
 noted above as "not yet implemented here" lands in those PRs first; this
 interface then sees several windows per bot turn as designed.
+
+**2026-09-03, default correction.** Decision 3 above says confirm mode is
+opt-in *for LLM seats*; the implementation had shipped it opt-in for every
+seat, human included, so `POST /api/games`/`POST /api/join` — the web page's
+own seat-up — left a human at `PostedValuation` unless it explicitly asked
+for `PendingGate`. That let a bot's trade event clear against a human who
+never confirmed anything, which decision 3's own reasoning does not license:
+an LLM's vector is its statement because *it* chose confirm mode's absence,
+but a human at the web page never sees a `confirm` toggle at all, so nothing
+it did could be read as that choice. Fixed by splitting the default: `POST
+/api/games`/`POST /api/join` now install `PendingGate` when a request omits
+`confirm` — a human seat's gate is the explicit submit, not an advertised
+vector that clears itself, and `confirm: false` still opts back out to
+auto-accept — while `hexset.server.mcp`'s `new_game`/`join` tools send
+`confirm` explicitly on every call, so an LLM seat's own default stays the
+opt-in one decision 3 describes.

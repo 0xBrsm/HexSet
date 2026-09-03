@@ -201,8 +201,19 @@ may propose a bundle against a served checkpoint's own published vector at
 any time, and the checkpoint's `accepts` answers it exactly as it would an
 automatically-found candidate, because the call is the same. `GET
 /api/state`'s `pending` block and the confirm/decline routes exist only for
-a seat opted into confirm mode at seat-up, which a `.onnx` checkpoint never
-is. Full interface: [`docs/negotiation-interface.md`](negotiation-interface.md).
+a seat in confirm mode, which a `.onnx` checkpoint never is.
+
+**Confirm mode's default differs by seat-up route.** `POST
+/api/games`/`POST /api/join` — the web page's own seat-up — default a
+request that omits `confirm` to confirm mode *on*: nothing auto-clears
+against a human without an explicit `confirm: false` opting back out to
+auto-accept. `hexset.server.mcp`'s `new_game`/`join` tools keep the opposite
+default — `confirm` omitted means auto-accept, the same standing-consent
+gate a bot gets — since an LLM's own published vector already is its
+consent (opt-in per PI ratification decision 3,
+`docs/negotiation-interface.md`). A checkpoint served through this contract
+is seated neither way; the distinction is seat-up policy, not the contract
+above. Full interface: [`docs/negotiation-interface.md`](negotiation-interface.md).
 
 ## What is never part of this contract
 

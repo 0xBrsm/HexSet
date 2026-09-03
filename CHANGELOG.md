@@ -216,6 +216,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   candidates.
 ### Fixed
 
+- Opening a full game's address logged a console error. The page asked for a
+  seat first and read the refusal as "watch this one instead"; arriving at a
+  full table is the ordinary way to reach a game you are not playing in, so
+  it reads `GET /api/table/<code>` first and only asks for a seat when one
+  is open.
+- Trades the engine cleared on a poll were never mentioned in the game log.
+  A turn's first trade event runs lazily, at whichever of the engine's
+  trigger points is reached first, which on the server is a poll rather than
+  an action — those exchanges reached `trades` in the state and the ledger
+  but no log line. They are attributed to the last action applied, matching
+  `hexset.record.record_game`.
+
 - **The seat panel could not tell an occupied seat from an open or a locked
   one.** Every seat's line was drawn as a bot model picker — your own, a
   seat nobody had taken, and one the setup snake had retired — because the
@@ -288,6 +300,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   touch only `hexset.game.Game`'s newly private field).
 
 ### Changed
+
+- **The web page offers a person no way to trade with another seat.** The
+  advertisement controls, the negotiation panel and the pending-offer cards
+  are gone from the browser; the bank/port modal a resource card opens is
+  unchanged. Every route behind them is untouched and still answers an LLM
+  or API client: `PUT /api/games/<code>/valuation`, `POST
+  /api/games/<code>/trade`, `.../trade/confirm`, `.../trade/decline`, and
+  the MCP trading tools.
+- **A person's seat is gated when it sits down, not when it first
+  publishes.** `hexset.server.webplay.GameSession.confirm_mode(seat)`
+  installs a `PendingGate` over `hexset.trading.NO_VALUATION` at seat-up,
+  and `POST /api/games`/`POST /api/join` call it. The seat advertises
+  nothing and accepts nothing, and a seat whose vector is all-zero is
+  dropped when candidates are ranked, before any gate is asked — so no
+  exchange a person is party to can clear. Bot seats are unaffected and go
+  on trading with each other.
 
 - **The browser board has no front page.** Opening `/` deals a game and
   moves to its address; that address is the whole invitation — everyone who

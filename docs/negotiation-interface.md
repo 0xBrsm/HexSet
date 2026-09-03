@@ -260,3 +260,17 @@ vector that clears itself, and `confirm: false` still opts back out to
 auto-accept — while `hexset.server.mcp`'s `new_game`/`join` tools send
 `confirm` explicitly on every call, so an LLM seat's own default stays the
 opt-in one decision 3 describes.
+
+**2026-09-03, human trading surfaces withheld from the page for now (owner),
+API retained.** "No trading for humans at this point. We need to build back
+up gradually." The browser page carries none of §3: no advertisement
+controls, no negotiation panel, no pending-offer cards, and it calls no
+trading route. Everything in §1, §2, §4 and §5 stands — `PUT
+/api/games/<code>/valuation`, `POST .../trade`, `.../trade/confirm`,
+`.../trade/decline` and the MCP tools all answer as documented, and an LLM
+seat is unaffected. A person's seat is now gated at seat-up rather than at
+its first publish (`GameSession.confirm_mode`): a `PendingGate` over
+`NO_VALUATION`, so the seat advertises nothing and clears nothing, and a
+zero vector is dropped at `_best_clearing`'s ranking before any gate is
+asked — a human is simply not a counterparty. Bots go on trading with each
+other through the same engine event. §3 comes back when the page does.

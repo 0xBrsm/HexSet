@@ -934,3 +934,61 @@ def test_state_view_pending_is_filtered_per_viewer():
     assert session.state_view(0)["pending"] == []
     assert session.state_view(None)["pending"] == []
 
+
+
+def test_a_trade_a_poll_cleared_is_told_in_the_log():
+    """A turn's first trade event fires from `state_view`, not from inside
+    `_apply` -- so its exchanges have to be attributed to an action after
+    the fact, or the log never mentions them at all.
+
+    `_apply` reads an action's trades out of `game.trades` from inside
+    itself, which was the whole story back when `enter_main` ran the turn's
+    first event directly. It doesn't any more: the event is armed and runs
+    lazily, and on this server the first thing to reach it is whichever poll
+    lands next (`state_view` -> `run_pending_event`). Everything that event
+    cleared reached the state's own `trades` block and the engine's ledger,
+    and no `_Event` -- so `render_log` had nothing to describe. Three
+    `heximax` seats dealing with each other over sixteen turns in a browser:
+    seven exchanges in the state, none in the transcript.
+
+    Attributed to the last action applied, matching what
+    `hexset.record.record_game` already does with a lazily triggered first
+    event (the previous action's step).
+    """
+    from hexset.board.terrain import Resource
+
+    # This seed's roll is an 8, so the turn reaches MAIN and arms the event
+    # rather than stopping on the robber -- asserted below rather than left
+    # to the seed, so a change to the deal fails here instead of quietly
+    # testing nothing.
+    game = a_game(seed=2)
+    game.phase = Phase.ROLL
+    game.current_player = 0
+    for hand in game._state.hands:
+        hand[:] = [0, 0, 0, 0, 0]
+    game._state.hands[0][Resource.WOOD] = 1
+    game._state.hands[1][Resource.ORE] = 1
+
+    session = a_session(game, {0, 1})
+    wants_ore = [0.0] * 5
+    wants_ore[Resource.ORE] = 1.0
+    wants_ore[Resource.WOOD] = -1.0
+    session.publish(0, wants_ore)
+    session.publish(1, [-v for v in wants_ore])
+
+    # Through the session, so there is a recorded event for the roll -- and
+    # the trade event it arms does not run inside it.
+    session._apply(0, Action(ActionType.ROLL))
+    assert game.phase is Phase.MAIN
+    assert session.events[-1].trades == ()
+    assert not any("traded" in line for line in session.log_for(None))
+
+    view = session.state_view(None)
+    assert len(view["trades"]) == 1
+
+    line = next(line for line in session.log_for(None) if " to Player " in line)
+    assert "traded" in line and "Ore" in line and "Wood" in line
+    # Told once, however many times the table is polled after it.
+    session.state_view(None)
+    session.state_view(0)
+    assert sum(" to Player " in line for line in session.log_for(None)) == 1

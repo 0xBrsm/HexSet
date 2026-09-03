@@ -1205,7 +1205,24 @@ class GameSession:
         # never on the current player, except through public fields).
         # `run_pending_event` does exactly the same triggering work with no
         # view built and no seat's hand touched.
+        #
+        # Whatever it clears is attributed to the last action applied, the
+        # way `hexset.record.record_game` already attributes a lazily
+        # triggered first event to the previous action's step. Without this
+        # the exchanges happen and are simply never told: `_apply` records
+        # an action's trades from inside itself (`self.game.trades[
+        # trades_before:]`), and a turn's *first* event no longer runs
+        # there -- it runs here, on whichever poll reaches the table first
+        # -- so every trade it cleared reached `state["trades"]` and the
+        # engine's own ledger but no `_Event`, and therefore no line in the
+        # transcript. Watching three bots deal with each other for sixteen
+        # turns, that was five exchanges in the state and none in the log.
+        traded_before = len(game.trades)
         run_pending_event(game)
+        cleared = game.trades[traded_before:]
+        if cleared and self.events:
+            last = self.events[-1]
+            last.trades = last.trades + tuple(cleared)
         # true state: the server's own omniscient observer view -- the
         # per-viewer filtering happens below, not here.
         state = game.state(0, hidden=False)

@@ -11,6 +11,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`hexset.bench.profile_heximax`**: plays N complete four-seat games under
+  `cProfile` for one preset, reporting ms/decision (mean/p50/p95) and the top
+  functions by cumulative and total time. `docs/readouts/heximax-profile/`
+  has the first reading: real per-turn trade clearing, not anything inside
+  the search's lookahead, is the largest cost center in a heximax game.
 - **`hexset.trading.NETWORK_GATE_ROWS`** (`32`): the most candidates a network
   gate's `accepts_many` will score in one batched forward, beside
   `VALUE_SCALE`. `hexset.clients.onnxbot.NetworkBot.accepts_many` now scores

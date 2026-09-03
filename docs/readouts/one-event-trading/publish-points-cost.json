@@ -1,0 +1,184 @@
+{
+  "heximax": {
+    "by_phase_moves": {
+      "DISCARD": 31,
+      "MAIN": 564,
+      "ROBBER": 48,
+      "ROLL": 316,
+      "SETUP_ROAD": 24,
+      "SETUP_SETTLEMENT": 24
+    },
+    "calls_per_move": 11411.924528301886,
+    "calls_total": 11491808,
+    "games": 3,
+    "moves": 1007,
+    "ms_per_move": 7.707836048500917,
+    "ms_total": 7761.790900840424,
+    "per_game": [
+      {
+        "board_seed": 0,
+        "by_phase_moves": {
+          "DISCARD": 23,
+          "MAIN": 208,
+          "ROBBER": 17,
+          "ROLL": 114,
+          "SETUP_ROAD": 8,
+          "SETUP_SETTLEMENT": 8
+        },
+        "calls_per_move": 12721.693121693123,
+        "calls_total": 4808800,
+        "moves": 378,
+        "ms_per_move": 8.585665565632066,
+        "ms_total": 3245.3815838089213,
+        "publish_calls": 104,
+        "turns": 103
+      },
+      {
+        "board_seed": 1,
+        "by_phase_moves": {
+          "DISCARD": 4,
+          "MAIN": 182,
+          "ROBBER": 17,
+          "ROLL": 106,
+          "SETUP_ROAD": 8,
+          "SETUP_SETTLEMENT": 8
+        },
+        "calls_per_move": 10395.335384615384,
+        "calls_total": 3378484,
+        "moves": 325,
+        "ms_per_move": 7.141132298140572,
+        "ms_total": 2320.867996895686,
+        "publish_calls": 94,
+        "turns": 93
+      },
+      {
+        "board_seed": 2,
+        "by_phase_moves": {
+          "DISCARD": 4,
+          "MAIN": 174,
+          "ROBBER": 14,
+          "ROLL": 96,
+          "SETUP_ROAD": 8,
+          "SETUP_SETTLEMENT": 8
+        },
+        "calls_per_move": 10870.144736842105,
+        "calls_total": 3304524,
+        "moves": 304,
+        "ms_per_move": 7.2221753951836085,
+        "ms_total": 2195.541320135817,
+        "publish_calls": 88,
+        "turns": 87
+      }
+    ],
+    "publish_calls_per_turn": 1.010600706713781,
+    "publish_calls_total": 286,
+    "turns_total": 283
+  },
+  "loadavg": "6.78 6.81 7.91 11/2097 726089",
+  "protocol": "Readout (v), publish-points PR: the mirror cost table (three four-seat games an arm, board seeds 0/1/2, every seat the same preset, arms interleaved, seated as the game's own gates, publishing gated by Game.publish_due exactly as hexset.arena.play does it now), plus publish-calls-per-turn (expect ~1/seat/turn) and the trades-per-turn distribution over the lineup readout (iii) plays, seed 42000, first 6 games.",
+  "ratio_calls_per_move": 1.4344025607154938,
+  "ratio_ms_per_move": 1.6906504637921553,
+  "reading": "The design's ceiling is <=2x search2 per move (hexset.bots.heximax.search's module docstring).",
+  "search2": {
+    "by_phase_moves": {
+      "DISCARD": 70,
+      "MAIN": 644,
+      "ROBBER": 54,
+      "ROLL": 341,
+      "SETUP_ROAD": 24,
+      "SETUP_SETTLEMENT": 24
+    },
+    "calls_per_move": 7955.872947277442,
+    "calls_total": 9204945,
+    "games": 3,
+    "moves": 1157,
+    "ms_per_move": 4.55909498360301,
+    "ms_total": 5274.872896028683,
+    "per_game": [
+      {
+        "board_seed": 0,
+        "by_phase_moves": {
+          "DISCARD": 22,
+          "MAIN": 258,
+          "ROBBER": 20,
+          "ROLL": 133,
+          "SETUP_ROAD": 8,
+          "SETUP_SETTLEMENT": 8
+        },
+        "calls_per_move": 8623.541202672606,
+        "calls_total": 3871970,
+        "moves": 449,
+        "ms_per_move": 4.610267125551313,
+        "ms_total": 2070.0099393725395,
+        "publish_calls": 123,
+        "turns": 122
+      },
+      {
+        "board_seed": 1,
+        "by_phase_moves": {
+          "DISCARD": 12,
+          "MAIN": 178,
+          "ROBBER": 16,
+          "ROLL": 90,
+          "SETUP_ROAD": 8,
+          "SETUP_SETTLEMENT": 8
+        },
+        "calls_per_move": 9191.65064102564,
+        "calls_total": 2867795,
+        "moves": 312,
+        "ms_per_move": 5.489163071242495,
+        "ms_total": 1712.6188782276586,
+        "publish_calls": 86,
+        "turns": 85
+      },
+      {
+        "board_seed": 2,
+        "by_phase_moves": {
+          "DISCARD": 36,
+          "MAIN": 208,
+          "ROBBER": 18,
+          "ROLL": 118,
+          "SETUP_ROAD": 8,
+          "SETUP_SETTLEMENT": 8
+        },
+        "calls_per_move": 6225.20202020202,
+        "calls_total": 2465180,
+        "moves": 396,
+        "ms_per_move": 3.768293127344658,
+        "ms_total": 1492.2440784284845,
+        "publish_calls": 115,
+        "turns": 114
+      }
+    ],
+    "publish_calls_per_turn": 1.0093457943925233,
+    "publish_calls_total": 324,
+    "turns_total": 321
+  },
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "trades_per_turn": {
+    "duel_seed": 42000,
+    "events": 603,
+    "games": 6,
+    "histogram": {
+      "0": 594,
+      "1": 8,
+      "2": 1
+    },
+    "lineup": [
+      "heximax",
+      "heximax",
+      "search2",
+      "search2"
+    ],
+    "max": 2,
+    "mean": 0.01658374792703151,
+    "publish_calls": 609,
+    "publish_calls_per_turn": 1.0099502487562189,
+    "total_trades": 10,
+    "turns_total": 603
+  }
+}

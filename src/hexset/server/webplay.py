@@ -1045,6 +1045,21 @@ class GameSession:
         """
         labels = self.seat_labels
         game = self.game
+        # A poll of the table is one of the engine's three event-trigger
+        # points (`Game.event_pending`'s docstring) -- fired here,
+        # deliberately, before `trades`/`valuations` below are read, rather
+        # than moments later inside `legal_wire_actions`, which would
+        # otherwise hand back a snapshot whose `trades` still predates the
+        # event it itself just caused to run. Observed through the current
+        # player, not `viewer`: `trades`/`valuations` are public to the
+        # whole table regardless of who asks (this function's own
+        # docstring, "computed once regardless of who is asking"), so
+        # whether the pending event has run cannot depend on it either --
+        # an observer's own seat, or none at all, still deserves an
+        # up-to-date table. Only `hidden=True` fires it (`Game.state`'s own
+        # docstring on why); the result is discarded, a side effect, not
+        # data this function needs.
+        game.state(game.current_player)
         # true state: the server's own omniscient observer view -- the
         # per-viewer filtering happens below, not here.
         state = game.state(0, hidden=False)

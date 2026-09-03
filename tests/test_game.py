@@ -6,6 +6,7 @@ import random
 import pytest
 from helpers import clear_hand, give
 
+from hexset.actions import legal_actions
 from hexset.board.board import random_base_board
 from hexset.board.terrain import Resource
 from hexset.cards import DevCard
@@ -371,4 +372,11 @@ def test_trade_event_never_runs_during_discard_resolution(monkeypatch):
     assert calls == []  # finishing discards moves to ROBBER, not MAIN
 
     move_robber_to(game, (game._state.robber + 1) % game._state.board.num_hexes)
+    # `enter_main` only arms `event_pending` now -- it does not call
+    # `trade_event` itself any more (the PI amendment "publish points and
+    # the event trigger"). The event still runs exactly once, the first
+    # time anything observes the game for the current player.
+    assert game.phase is Phase.MAIN
+    assert calls == []
+    legal_actions(game)
     assert calls == [Phase.MAIN]  # the one legitimate trigger: entering MAIN

@@ -225,6 +225,10 @@ def test_a_checkpoint_plays_on_through_a_turn_the_engine_traded_in():
     game.publish(other, tuple(-v for v in wants))
 
     roll_dice(game, 8)
+    # The turn's first trade event runs lazily now, the first time anything
+    # observes the game for the current player (`Game.event_pending`) --
+    # rather than eagerly inside `roll_dice`'s own `enter_main` call.
+    game.state(mover)
     assert game.trades, "the engine cleared nothing to play on through"
     assert bot.choose(game) in options_for(game)
 

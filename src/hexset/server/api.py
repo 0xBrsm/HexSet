@@ -737,17 +737,23 @@ class Tables:
 
     def act(self, table: Table, seat: int, wire: dict) -> dict:
         table._settle_locks()
-        table.session.submit(seat, wire)
-        if table.seats[seat].kind is SeatKind.BOT:
+        game = table.session.game
+        if table.seats[seat].kind is SeatKind.BOT and game.publish_due(seat):
             # The one driver that acts on a seat's behalf rather than at its
-            # own request: right after its own action, an embedded bot is
-            # asked for its current vector and it is recorded, exactly as
-            # `arena.play`'s loop does it for every seat. A human seat is
-            # unaffected -- it publishes only through `PUT .../valuation`,
-            # never tied to its own actions.
+            # own request: once a turn, when the engine says this seat is
+            # due (`Game.publish_due`), an embedded bot is asked for its
+            # current vector and it is recorded, exactly as `arena.play`'s
+            # loop does it for every seat -- the PI amendment "publish
+            # points and the event trigger". Checked, and published if due,
+            # *before* `submit` below, which validates the action through
+            # `legal_actions` and so would otherwise consume the turn's
+            # pending event on the engine's standing vector first. A human
+            # seat is unaffected -- it publishes only through
+            # `PUT .../valuation`, never tied to its own actions.
             trader = table.session.traders.get(seat)
             if trader is not None:
-                publish_valuation(table.session.game, seat, trader)
+                publish_valuation(game, seat, trader)
+        table.session.submit(seat, wire)
         return table.view(seat)
 
     def undo(self, table: Table, seat: int) -> dict:

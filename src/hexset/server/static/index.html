@@ -1036,21 +1036,37 @@ async function resumeGame(code) {
     }
     forgetSeat(code);
   }
-  // No seat here, or not one of ours any more: take an open one if the game
-  // has one left.
-  const {ok, data} = await postJSON("/api/join", {code});
-  if (ok) {
-    rememberSeat(code, data.token);
-    showCodeInUrl(code);
-    return data;
-  }
-  // Every seat taken, or no game at all — the join refuses both the same
-  // way, and only the table's own view tells them apart. Every game is
-  // public, so a full one still opens; it just opens to watch.
+  // No seat here, or not one of ours any more. Ask the table itself what it
+  // has before knocking: every game is public, so this one read answers both
+  // questions — whether the game exists at all, and whether a seat is left.
+  //
+  // Knocking first and reading the refusal is the same two outcomes and one
+  // request fewer for somebody who gets a seat, and it is what this did. But
+  // a full table is a *normal* arrival here, not an error — watching is what
+  // the link is for — and a refused POST is one the browser writes into the
+  // console as a failed request whatever the page then does with it. A page
+  // whose ordinary path logs an error has no clean console left to read a
+  // real one out of (`tests/web/test_page.py` asserts an empty one on every
+  // test for exactly that reason), so the read comes first.
   const view = await getJSON(`/api/table/${code}`);
   if (view.error) {
     seatError = view.error;
     return null;
+  }
+  const open = (view.seats || []).some(
+    (s) => s.kind === "empty" && !(view.locked || []).includes(s.seat)
+  );
+  if (open) {
+    // Still a race — somebody else can take the last seat between that read
+    // and this — and losing it lands on the view already in hand, which is
+    // the right answer anyway. A 409 in the console *there* is a genuinely
+    // unusual event rather than the way everyone arrives.
+    const {ok, data} = await postJSON("/api/join", {code});
+    if (ok) {
+      rememberSeat(code, data.token);
+      showCodeInUrl(code);
+      return data;
+    }
   }
   showCodeInUrl(code);
   return view;

@@ -112,6 +112,7 @@ def test_a_negative_victory_point_coefficient_is_refused():
         to_weights((-1.0,) + (0.0,) * (len(TERM_NAMES) - 1))
 
 
+@pytest.mark.slow
 def test_fitted_weights_are_usable_by_the_evaluator():
     # Twenty games, not four: below that the fit is under-determined enough
     # that the victory-point coefficient can come out negative and the

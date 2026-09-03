@@ -86,6 +86,7 @@ def _census_game(entrant: Entrant, seed: int, players: int = 4) -> str:
     return hashlib.sha256(repr(trace).encode()).hexdigest()
 
 
+@pytest.mark.slow
 def test_choices_are_byte_identical_to_the_recorded_census(request):
     """Plays 20 seeded games each for `search2` and `search2-notrade` and
     hashes every game's full `(seat, action)` sequence, the same gate

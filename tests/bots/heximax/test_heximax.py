@@ -218,6 +218,7 @@ def _census_game(preset: str, seed: int, players: int = 4) -> str:
     return hashlib.sha256(repr(trace).encode()).hexdigest()
 
 
+@pytest.mark.slow
 def test_choices_are_byte_identical_to_the_recorded_census(request):
     """The optimization pass's gate: every change must reproduce this exactly.
 

@@ -24,10 +24,10 @@ from pathlib import Path
 
 import pytest
 
-from hexset.actions import apply
+from hexset.actions import ActionType, apply
 from hexset.arena import PRESETS, Entrant, spawn
 from hexset.board.board import random_base_board
-from hexset.game import is_over, start, to_move
+from hexset.game import Phase, is_over, start, to_move
 from hexset.trading import publish_valuation
 
 CENSUS_FIXTURE = Path(__file__).parent / "fixtures" / "search2_census.json"
@@ -49,10 +49,9 @@ def _census_game(entrant: Entrant, seed: int, players: int = 4) -> str:
     builds the board and starts the game, each seat's bot gets its own rng
     deterministic per seat, and the hash covers the full `(seat, action)`
     trace rather than just the outcome. The bots are seated as the game's
-    `gates` too, and each publishes once a turn, when the engine says it is
-    due (`Game.publish_due`), exactly as `arena.play` does both -- the PI
-    amendment "publish points and the event trigger" -- so the census
-    covers what they trade as well as what they choose.
+    `gates` too, and each publishes at the engine's two publish points (PI
+    correction "two publish points, not one"), exactly as `arena.play`
+    does, so the census covers what they trade as well as what they choose.
     """
     rng = random.Random(seed)
     board = random_base_board(rng)
@@ -71,6 +70,15 @@ def _census_game(entrant: Entrant, seed: int, players: int = 4) -> str:
             publish_valuation(game, seat, bots[seat])
         action = bots[seat].choose(game)
         apply(game, action)
+        if action.type is ActionType.END_TURN:
+            # (b): `seat` just stopped being the current player.
+            if game.publish_due(seat):
+                publish_valuation(game, seat, bots[seat])
+        elif action.type is ActionType.SETUP_ROAD and game.phase is Phase.ROLL:
+            # (c): that road completed setup -- every seat is due at once.
+            for other_seat, other_bot in enumerate(bots):
+                if game.publish_due(other_seat):
+                    publish_valuation(game, other_seat, other_bot)
         trace.append(
             (
                 seat,

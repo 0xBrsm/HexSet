@@ -196,13 +196,22 @@ def _census_game(preset: str, seed: int, players: int = 4) -> str:
     while not is_over(game):
         seat = to_move(game)
         cleared = len(game.trades)
-        # Once a turn, when the engine says it is due (`Game.publish_due`),
-        # exactly as `arena.play` does it -- the PI amendment "publish
-        # points and the event trigger" -- not after every action.
+        # At the engine's two publish points (`Game.publish_due`, the PI
+        # correction "two publish points, not one") -- exactly as
+        # `arena.play` does it -- not after every action.
         if game.publish_due(seat):
             publish_valuation(game, seat, bots[seat])
         action = bots[seat].choose(game)
         apply(game, action)
+        if action.type is ActionType.END_TURN:
+            # (b): `seat` just stopped being the current player.
+            if game.publish_due(seat):
+                publish_valuation(game, seat, bots[seat])
+        elif action.type is ActionType.SETUP_ROAD and game.phase is Phase.ROLL:
+            # (c): that road completed setup -- every seat is due at once.
+            for other_seat, other_bot in enumerate(bots):
+                if game.publish_due(other_seat):
+                    publish_valuation(game, other_seat, other_bot)
         trace.append(
             (
                 seat,

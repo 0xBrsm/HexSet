@@ -79,6 +79,18 @@ class Trade(NamedTuple):
 # no bundle it is party to can ever have positive public surplus.
 NO_VALUATION: tuple[float, ...] = (0.0,) * NUM_RESOURCES
 
+# The unit a derived valuation is published in: `v_r = tanh(delta_V_r /
+# VALUE_SCALE)`, where `delta_V_r` is a value head's own-row marginal for one
+# more card of resource `r`. Lives here rather than beside any one bot's
+# implementation so that every derived trader in this repo -- and dev-HexNet's
+# `hexnet.policy.DerivedTrader`, which should import it from here rather than
+# carry its own copy -- cites the same number. Fixed across checkpoints: the
+# mean absolute one-card value-head marginal on the mover's own row over five
+# trade-free games (`agents/reference/trading-design.md`'s post-data note,
+# "HexNet lands contract 5"; dev-HexNet's `agents/scripts/value_scale.py`
+# recomputes it).
+VALUE_SCALE = 0.022126919066234662
+
 
 def published(trader: object, view: "View") -> Sequence[float]:
     """What `trader` advertises, or nothing at all.

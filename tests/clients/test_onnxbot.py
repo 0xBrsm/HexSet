@@ -10,11 +10,13 @@ pytest.importorskip("onnxruntime", reason="hexset.clients.onnxbot needs onnxrunt
 from hexset.actions import legal_actions  # noqa: E402
 from hexset.server.rules import options_for  # noqa: E402
 from hexset.board.board import random_base_board  # noqa: E402
-from hexset.game import start, to_move  # noqa: E402
+from hexset.game import Phase, start, to_move  # noqa: E402
 from hexset.clients.onnxbot import load, network_bot  # noqa: E402
 from conftest import step_randomly  # noqa: E402
 
 FIXTURE_V2 = Path(__file__).parent / "fixtures" / "stub-contract5.onnx"
+FIXTURE_VALUED = Path(__file__).parent / "fixtures" / "stub-contract5-valued.onnx"
+FIXTURE_VALUED_BATCH1 = Path(__file__).parent / "fixtures" / "stub-contract5-valued-batch1.onnx"
 
 
 @pytest.fixture
@@ -164,3 +166,113 @@ def test_scoring_is_greedy_so_a_position_answers_the_same_way_twice(checkpoint_v
         step_randomly(game, rng)
     assert to_move(game) is not None
     assert bot.choose(game) == bot.choose(game)
+
+
+# --- Trading: valuation/accepts off the value head, mirroring
+# `hexnet.policy.DerivedTrader` (`agents/reference/trading-design.md` §8) ---
+
+
+@pytest.fixture
+def checkpoint_valued():
+    """`stub-contract5-valued.onnx`: same shape as `stub-contract5.onnx`, but
+    `value` reads `own_hand` through five fixed, distinct, non-zero
+    per-resource weights instead of being identically zero (see
+    `fixtures/build_stub.py --valued`). Linear in the hand, so a one-card
+    imagined successor's delta is exactly that resource's weight whatever the
+    starting hand holds -- deterministic and non-degenerate enough to
+    exercise `NetworkBot.valuation`/`accepts` for real, without pretending
+    this is a trained network.
+    """
+    board = random_base_board(random.Random(0))
+    yield str(FIXTURE_VALUED), board
+    from hexset.clients.onnxbot import _load_cached
+
+    _load_cached.cache_clear()
+
+
+def _seated_at_main(path: str, board, seat: int = 0, hand=(1, 2, 0, 1, 3)):
+    """A bot that has just chosen once at a `MAIN`-phase position with
+    `seat`'s hand pinned to `hand` -- `valuation`/`accepts` only ever answer
+    for the game `choose` last handed the bot (see `NetworkBot._seated`'s
+    docstring), so every trading test needs one `choose` first, exactly as
+    the server's own `Tables.act` does before it ever asks for a vector.
+    """
+    bot = network_bot(path, board)
+    game = start(board, 4, random.Random(1))
+    game.phase = Phase.MAIN
+    game.current_player = seat
+    game.state(seat, hidden=False).hands[seat] = list(hand)
+    bot.choose(game)
+    return bot, game
+
+
+def test_valuation_is_five_floats_in_range_and_deterministic(checkpoint_valued):
+    path, board = checkpoint_valued
+    bot, game = _seated_at_main(path, board)
+    seat = to_move(game)
+    view = game.state(seat)
+
+    first = bot.valuation(view)
+    second = bot.valuation(view)
+
+    assert len(first) == 5
+    assert all(-1.0 <= x <= 1.0 for x in first)
+    assert first == second
+
+
+def test_valuation_scores_the_six_rows_in_one_batched_call_when_the_graph_allows_it(
+    checkpoint_valued,
+):
+    """`stub-contract5-valued.onnx` declares a dynamic batch axis (like every
+    other fixture here), so `V2Policy.value_of`'s one-call path applies —
+    the six-row fan-out (the hand plus its five one-card successors) costs
+    one graph dispatch, not six."""
+    path, board = checkpoint_valued
+    bot, _ = _seated_at_main(path, board)
+    assert bot.policy._batchable(6)
+
+
+def test_valuation_falls_back_to_six_calls_when_the_graphs_batch_is_fixed_to_one():
+    """The graph's own declared shape, not a caller's guess, decides this:
+    `stub-contract5-valued-batch1.onnx` is the same weights with every input's
+    batch axis pinned to the literal `1` (`fixtures/build_stub.py --valued
+    --fixed-batch`), and `V2Policy.value_of` must fall back to one call per
+    row rather than feed it a batch of six and let onnxruntime refuse."""
+    board = random_base_board(random.Random(0))
+    bot, game = _seated_at_main(str(FIXTURE_VALUED_BATCH1), board)
+    assert not bot.policy._batchable(6)
+
+    seat = to_move(game)
+    view = game.state(seat)
+    values = bot.valuation(view)
+    assert len(values) == 5
+    assert all(-1.0 <= x <= 1.0 for x in values)
+
+
+def test_accepts_refuses_a_trade_with_zero_delta(checkpoint_valued):
+    """Strict, not `>=`: an exchange that leaves the hand (and so the value)
+    exactly where it was must be refused, the same termination argument
+    `hexnet.policy.DerivedTrader.accepts` and `hexset.trading.trade_event`
+    both rest on."""
+    path, board = checkpoint_valued
+    bot, game = _seated_at_main(path, board)
+    seat = to_move(game)
+    view = game.state(seat)
+
+    no_change = (0, 0, 0, 0, 0)
+    assert bot.accepts(view, no_change, (seat + 1) % 4) is False
+
+
+def test_accepts_takes_a_strictly_improving_exchange(checkpoint_valued):
+    """`stub-contract5-valued.onnx`'s weights are `[0.006, -0.011, 0.004,
+    0.013, -0.008]`: giving up resource 1 (the most negative weight) for
+    resource 3 (the most positive) strictly increases the linear value, so
+    the private gate must say yes -- the mirror image of the zero-delta
+    refusal above, pinning that `accepts` is not vacuously `False`."""
+    path, board = checkpoint_valued
+    bot, game = _seated_at_main(path, board, hand=(1, 2, 0, 1, 3))
+    seat = to_move(game)
+    view = game.state(seat)
+
+    improving = (0, -1, 0, 1, 0)
+    assert bot.accepts(view, improving, (seat + 1) % 4) is True

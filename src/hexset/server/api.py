@@ -35,12 +35,18 @@ reopened after one simply treats every non-bot seat as open again (see
 
 `MAX_SEATS` seats are dealt into the engine from the moment a game exists,
 whether or not anyone has claimed them yet — there is no "start" that
-renumbers a partial roster down to just the seats somebody's in. Instead, an
-empty seat the setup snake reaches gets a grace window (`Table._settle_locks`)
-before it locks out for good (see `hexset.server.seating.lock_seat`): a game that
-begins setup with two or three seats occupied stays that size for its whole
-duration, one seat's decision at a time rather than one cutoff for the table.
+renumbers a partial roster down to just the seats somebody's in. Instead, the
+setup snake retires an empty seat the moment it reaches one
+(`Table._settle_locks`, `hexset.server.seating.lock_seat`): a game that begins
+setup with two or three seats occupied stays that size for its whole duration,
+one seat's decision at a time rather than one cutoff for the table.
 `Table.join` only ever offers a seat that is both empty and unlocked.
+
+There is no waiting window in front of that, and deliberately so. A turn only
+ever advances because the seat holding it says so, so somebody expecting a
+friend just does not finish their own placement until that friend has sat
+down — the wait is a person choosing to wait, which a timer can only cut
+short.
 
 ## What a seat is told, and what it is not
 
@@ -143,13 +149,6 @@ CODE_LENGTH = 6
 # POST to /api/games, /api/join or /api/name bypasses both of them.
 MAX_NAME_LENGTH = 40
 
-# How long an empty, unlocked seat the setup snake is waiting on stays open
-# before `Table._settle_locks` locks it out — per seat, not once for the
-# whole table (see the module docstring). Overridable per game (`POST
-# /api/games`'s `seat_grace`) and by `HEXSET_UI_SEAT_GRACE` (see `web.py`);
-# tests pass `0` for determinism.
-SEAT_GRACE_SECONDS = 120.0
-
 # How long a game survives with nobody touching it. An open browser or a bot
 # runner polls far more often than this; a closed tab or an abandoned game
 # doesn't at all. 24 hours comfortably outlasts a real game paused over a
@@ -232,7 +231,6 @@ class Config:
     # since filling the table is now an explicit choice, not the assumption a
     # lobby used to make on a caller's behalf.
     default_bots: list[str] | None = None
-    seat_grace: float = SEAT_GRACE_SECONDS
 
 
 class SeatKind(str, Enum):
@@ -269,12 +267,10 @@ class Table:
     """A row of seats, a code to reach them by, and the game they're playing
     — dealt the instant this exists, never gated behind a lobby.
 
-    `seat_grace`/`blocked_since` are `_settle_locks`'s own bookkeeping for the
-    per-seat setup-lock window (see the module docstring); nothing else here
-    reads them. `runners` is every embedded bot-client thread playing a seat
-    at this table (see `Tables._spawn_local_bots`) — `close` has to stop
-    those before the journal, or one could still be mid-decision when its
-    game is marked abandoned.
+    `runners` is every embedded bot-client thread playing a seat at this
+    table (see `Tables._spawn_local_bots`) — `close` has to stop those
+    before the journal, or one could still be mid-decision when its game is
+    marked abandoned.
     """
 
     code: str
@@ -282,8 +278,7 @@ class Table:
     config: Config
     session: GameSession
     layout: dict
-    seat_grace: float = SEAT_GRACE_SECONDS
-    blocked_since: float | None = None
+
     runners: list[tuple[BotRunner, threading.Thread]] = field(default_factory=list, repr=False)
     last_seen: float = field(default_factory=time.monotonic)
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -315,41 +310,31 @@ class Table:
         if self.session.journal is not None:
             self.session.journal.abandoned()
 
-    def _settle_locks(self, now: float | None = None) -> None:
-        """Must be called with `self.lock` held. Advances the per-seat grace
-        window: an empty, unlocked seat the setup snake is waiting on gets
-        locked once `seat_grace` seconds pass with nobody claiming it.
+    def _settle_locks(self) -> None:
+        """Must be called with `self.lock` held. Retires every empty seat the
+        setup snake has reached, on sight.
 
-        No timer thread — this runs lazily at the top of every request that
-        touches the game (`view`, `join`, `Tables.act`), so a game somebody
-        is actually polling ticks on schedule and one nobody is watching
-        simply doesn't, until `Tables._evict_stale` reaps it outright.
+        There is no waiting window, because there is nothing a window would
+        add. A turn only ever advances because the seat holding it says so,
+        so somebody expecting a friend simply does not finish their own
+        placement until that friend is in — the wait is a person deciding to
+        wait, not a timer counting down behind them. A window on top of that
+        could only ever retire a seat somebody was still holding the table
+        for.
+
+        No timer thread either, for the same reason: nothing here is
+        time-dependent any more. It runs at the top of every request that
+        touches the game (`view`, `join`, `Tables.act`, `Tables.seat_bot`),
+        which is exactly when the snake can have moved.
         """
-        now = time.monotonic() if now is None else now
         game = self.session.game
         while not is_over(game) and game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
             seat = to_move(game)
             if self.seats[seat].kind is not SeatKind.EMPTY or seat in locked_of(game):
-                self.blocked_since = None
-                return
-            if self.blocked_since is None:
-                self.blocked_since = now
-                return
-            if now - self.blocked_since < self.seat_grace:
                 return
             lock_seat(game, seat)
             if self.session.journal is not None:
                 self.session.journal.locked(seat, at_step=self.session._steps)
-            self.blocked_since = now  # the next empty seat gets its own full window
-
-    def _waiting_for(self) -> dict | None:
-        if self.blocked_since is None:
-            return None
-        game = self.session.game
-        if is_over(game) or game.phase not in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
-            return None
-        remaining = max(0.0, self.seat_grace - (time.monotonic() - self.blocked_since))
-        return {"seat": to_move(game), "seconds_remaining": round(remaining, 1)}
 
     def join(self, name: str | None) -> tuple[int, str]:
         """Seats a person (or an external bot process) at a random still-open,
@@ -367,12 +352,6 @@ class Table:
         clean = clean_name(name)
         self.seats[index] = Seat(kind=SeatKind.PLAYER, name=clean, token=token)
         self.session.claim(index, clean)
-        # Arrival at the game keeps a currently-waiting door open one more
-        # window, even if this join filled a different seat than the one the
-        # snake is blocked on — see the module docstring.
-        if self.blocked_since is not None:
-            game = self.session.game
-            self.blocked_since = None if to_move(game) == index else time.monotonic()
         return index, token
 
     def view(self, viewer: int | None = None) -> dict:
@@ -383,7 +362,6 @@ class Table:
         state = self.session.state_view(viewer)
         state["code"] = self.code
         state["seats"] = [seat.public(i) for i, seat in enumerate(self.seats)]
-        state["waiting_for"] = self._waiting_for()
         return state
 
 
@@ -536,7 +514,6 @@ class Tables:
         self,
         bots: list[str] | None = None,
         name: str | None = None,
-        seat_grace: float | None = None,
     ) -> tuple[Table, str]:
         """A new game, dealt immediately: the creator at a random seat, any
         named bots seated (and tokened) alongside them, everything else
@@ -580,7 +557,6 @@ class Tables:
             session=session,
             # true state: the board is public.
             layout=board_layout(session.game.state(0, hidden=False).board),
-            seat_grace=self.config.seat_grace if seat_grace is None else float(seat_grace),
         )
 
         # Registered *before* any bot runner thread starts: a runner's first
@@ -670,7 +646,6 @@ class Tables:
             session=session,
             # true state: the board is public.
             layout=board_layout(session.game.state(0, hidden=False).board),
-            seat_grace=self.config.seat_grace,
         )
         self._tables[code] = table
         self._spawn_local_bots(table)
@@ -814,13 +789,6 @@ class Tables:
             # is not, and the runner about to start plays through exactly
             # that route.
             table.session.claimed_seats.add(seat)
-            # Somebody arriving keeps a currently-waiting door open one more
-            # window, whichever seat they took — the same rule, and the same
-            # reasoning, as a person's `Table.join`.
-            if table.blocked_since is not None:
-                table.blocked_since = (
-                    None if to_move(table.session.game) == seat else time.monotonic()
-                )
         else:
             table.seats[seat].name = model
             table.seats[seat].spec = spec
@@ -919,7 +887,6 @@ class Tables:
             table, new_token = self.create(
                 bots=payload.get("bots"),
                 name=payload.get("name"),
-                seat_grace=payload.get("seat_grace"),
             )
             return {"token": new_token, **table.view(table.seat_of(new_token))}
 

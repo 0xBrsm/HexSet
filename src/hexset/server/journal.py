@@ -298,8 +298,8 @@ class Journal:
         self._emit({"kind": "seated", "at": _now(), "seat": seat, "name": name, "spec": spec})
 
     def locked(self, seat: int, *, at_step: int) -> None:
-        """The setup snake reached `seat` while it was still empty and waited
-        it out (see `api.Table._settle_locks`) — retired for the rest of the
+        """The setup snake reached `seat` while it was still empty (see
+        `api.Table._settle_locks`) — retired for the rest of the
         game. `resumable`'s reader (`locked_seats`) only needs to know *that*
         a seat locked, not when: see `hexset.server.seating`'s own note on why
         pre-seeding the whole set before replay reproduces the same snake

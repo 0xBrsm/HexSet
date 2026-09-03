@@ -593,7 +593,7 @@ def lock_seat(game: Game, seat: int) -> None:
 
     It also matches that function's answer for what happens to a retired
     seat's pieces and hand: nothing. `lock_seat` never touches `game._state`.
-    `hexset.server.api.Table._settle_locks` (`ui:api.py:304-329`) only ever calls
+    `hexset.server.api.Table._settle_locks` only ever calls
     it on a seat the setup snake reached still empty, so there is nothing
     built or held to clear; a caller that retires a seat mid-game gets the
     same treatment, and its hand and pieces are simply abandoned in place

@@ -258,11 +258,11 @@ def test_a_creator_seated_anywhere_but_the_snakes_first_slot_still_plays():
     assert options  # the creator really can act on their very first request
 
 
-def test_settle_locks_needs_a_second_touch_before_it_locks():
-    """The first time _settle_locks finds the snake waiting on an empty seat
-    it only starts the window; a lock fires only once seat_grace has
-    actually elapsed since then (see Table._settle_locks's own docstring)."""
-    registry = tables(seat_grace=0.0)
+def test_an_empty_seat_the_snake_reaches_is_retired_on_sight():
+    """No waiting window: the creator holds the table simply by not
+    finishing their own placement, so the moment they do finish, an empty
+    seat next in the snake is out (see Table._settle_locks's docstring)."""
+    registry = tables()
     code, token = deal(registry, bots=[])
     table = registry.get(code)
     session = table.session
@@ -275,15 +275,12 @@ def test_settle_locks_needs_a_second_touch_before_it_locks():
     road = action_to_wire(
         next(a for a in legal_actions(session.game) if a.type is ActionType.SETUP_ROAD)
     )
-    registry.handle("POST", "/api/action", {"action": road}, token)
+    data = registry.handle("POST", "/api/action", {"action": road}, token)
 
-    next_seat = to_move(session.game)
-    assert next_seat != creator_seat
-    assert next_seat not in session.game.locked  # the first touch only starts the window
-
-    table._settle_locks(now=time.monotonic() + 1)  # a second touch, past the (zero) grace
-
-    assert next_seat in session.game.locked
+    # Every other seat was empty, so finishing the first placement retires
+    # all three at once and hands the table straight back to the creator.
+    assert set(data["locked"]) == {s for s in range(MAX_SEATS) if s != creator_seat}
+    assert to_move(session.game) == creator_seat
 
 
 def test_a_locked_seat_stays_locked_but_the_rest_of_the_game_still_plays():

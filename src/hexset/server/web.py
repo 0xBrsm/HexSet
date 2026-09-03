@@ -44,7 +44,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import traceback
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -55,18 +54,12 @@ from .api import (
     CODE_ALPHABET,
     CODE_LENGTH,
     MAX_SEATS,
-    SEAT_GRACE_SECONDS,
     ApiError,
     Config,
     Tables,
     model_options,
 )
 from .constants import TOKEN_HEADER
-
-# The per-seat setup-lock grace window's env override — see `api.py`'s
-# `SEAT_GRACE_SECONDS` for what it gates and `Config.seat_grace` for the
-# default this falls back to absent either one.
-ENV_SEAT_GRACE = "HEXSET_UI_SEAT_GRACE"
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 INDEX_HTML = STATIC_DIR / "index.html"
@@ -209,29 +202,10 @@ def main(argv: list[str] | None = None) -> None:
             f"'{journal.DEFAULT_DIR}'). Pass an empty string to journal nothing."
         ),
     )
-    parser.add_argument(
-        "--seat-grace",
-        type=float,
-        default=None,
-        help=(
-            "Seconds an empty seat the setup snake is waiting on stays open "
-            f"before it locks out for good (default: ${ENV_SEAT_GRACE}, itself "
-            f"defaulting to {SEAT_GRACE_SECONDS:g}). A game can override this "
-            "per creation too (POST /api/games's `seat_grace`); 0 deals a "
-            "solo game immediately, useful for trying the board out alone."
-        ),
-    )
     args = parser.parse_args(argv)
 
     if args.checkpoint and args.checkpoint not in model_options():
         parser.error(f"unknown checkpoint: {args.checkpoint}")
-
-    if args.seat_grace is not None:
-        seat_grace = args.seat_grace
-    elif os.environ.get(ENV_SEAT_GRACE):
-        seat_grace = float(os.environ[ENV_SEAT_GRACE])
-    else:
-        seat_grace = SEAT_GRACE_SECONDS
 
     config = Config(
         device=args.device,
@@ -239,7 +213,6 @@ def main(argv: list[str] | None = None) -> None:
         games_dir=args.games_dir,
         seed=args.seed,
         default_bots=[args.checkpoint] * (MAX_SEATS - 1) if args.checkpoint else None,
-        seat_grace=seat_grace,
     )
     server = HexSetServer((args.host, args.port), Tables(config))
 

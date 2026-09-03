@@ -11,6 +11,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- An empty seat the setup snake reaches is retired on sight. The grace
+  window in front of that is gone, and with it `SEAT_GRACE_SECONDS`,
+  `Config.seat_grace`, `POST /api/games`'s `seat_grace`, `--seat-grace`,
+  `HEXSET_UI_SEAT_GRACE` and the view's `waiting_for` block. A turn only
+  advances because the seat holding it says so, so somebody expecting a
+  friend holds the table by not finishing their own placement — a timer
+  could only ever cut that short.
 - Game codes are lowercase (`abcdef`), since a code is only ever seen as a
   URL. Lookups normalise, so a code capitalised on the way into an address
   bar still opens its game, and a game journalled under a capitalised code

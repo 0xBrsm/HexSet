@@ -20,7 +20,7 @@ from .devcards import (
 from .economy import Purchase, bank_trade, distribute, pay
 from .ledger import PublicLedger
 from .robber import discard, discard_count, move_robber, steal
-from .trading import Trade, checked_valuation, judged, trade_event
+from .trading import GATE_BUDGET, Trade, checked_valuation, judged, trade_event
 from .state import (
     NO_OWNER,
     GameState,
@@ -92,6 +92,15 @@ class Game:
     # `trades_made` at `end_turn` so it is a per-turn count a readout can sum
     # across a duel the way it already sums `trades_made`.
     budget_binds: int = 0
+    # `trade_event`'s `gate_budget`/`order` for this game, read by
+    # `run_trade_event` at every call so a run can set them once at
+    # construction rather than editing `hexset.trading.GATE_BUDGET` per run
+    # (the registered ablation, `agents/reference/trading-design.md`'s
+    # post-data note "bundles land": gate budget 8/16/32/unbounded, plus a
+    # ranking variant). Defaults (`GATE_BUDGET`, `"maximin"`) are today's
+    # behaviour exactly, so a game that never sets these is unaffected.
+    gate_budget: int | None = GATE_BUDGET
+    bundle_order: str = "maximin"
     # Who answers a private gate, one per seat -- the driver's own bots
     # (`arena.play`), the gym's opponents, the server's seated players, or a
     # search's stand-in for the whole table. Gate-only: publishing a
@@ -254,6 +263,8 @@ def imagine(
         trades_made=game.trades_made,
         max_trades=game.max_trades,
         budget_binds=game.budget_binds,
+        gate_budget=game.gate_budget,
+        bundle_order=game.bundle_order,
         locked=game.locked,
     )
 
@@ -609,6 +620,8 @@ def run_trade_event(game: Game) -> None:
     trade_event(
         game,
         lambda seat, view, received, other: judged(gates[seat], view, received, other),
+        gate_budget=game.gate_budget,
+        order=game.bundle_order,
     )
 
 

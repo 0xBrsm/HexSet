@@ -1,0 +1,109 @@
+{
+  "arm": "gate-budget-minimal",
+  "cost": {
+    "arm": "gate-budget-minimal",
+    "board_seeds": [
+      0,
+      1,
+      2
+    ],
+    "control": "search2",
+    "gate_budget": 8,
+    "loadavg": "12.24 20.92 14.84 6/2023 701062",
+    "max_candidates_asked_per_event": 20,
+    "order": "minimal_bundle",
+    "pooled": {
+      "heximax": {
+        "bind_rate_per_turn": 0.5906432748538012,
+        "bundle_size_distribution": {
+          "1-for-1": 26,
+          "1-for-2": 1,
+          "2-for-1": 1,
+          "2-for-2": 22,
+          "2-for-3": 1,
+          "3-for-2": 3,
+          "3-for-3": 8,
+          "4-for-3": 1,
+          "4-for-4": 3,
+          "5-for-5": 1
+        },
+        "moves": 1177,
+        "ms_per_move": 3.6635651269384812,
+        "ratio_to_control": 1.4744808589864276,
+        "total_binds": 317,
+        "trades_per_turn_max": 3,
+        "trades_per_turn_mean": 0.195906432748538,
+        "trades_total": 67,
+        "turns": 342,
+        "turns_total_for_binds": 342,
+        "turns_with_a_bind": 202
+      },
+      "search2": {
+        "bind_rate_per_turn": 0.8773946360153256,
+        "bundle_size_distribution": {
+          "1-for-1": 6,
+          "2-for-1": 2,
+          "2-for-2": 3,
+          "2-for-3": 3,
+          "3-for-3": 4,
+          "3-for-4": 1,
+          "4-for-3": 1
+        },
+        "moves": 992,
+        "ms_per_move": 2.4846474639601976,
+        "ratio_to_control": 1.0,
+        "total_binds": 373,
+        "trades_per_turn_max": 2,
+        "trades_per_turn_mean": 0.07662835249042145,
+        "trades_total": 20,
+        "turns": 261,
+        "turns_total_for_binds": 261,
+        "turns_with_a_bind": 229
+      }
+    },
+    "protocol": "Registered gate-budget ablation, readout (v) extended: mirror-table cost (three four-seat games an arm, board seeds 0/1/2, every seat the same preset, search2 the control), all five arms interleaved seed by seed in one process so the ratios pair; adds trades/turn, the bundle-size distribution per executed trade (cards given, cards received), the gate-budget bind rate, and the max candidates asked in a single trade event.",
+    "ratio_noise_check": {
+      "heximax_ratio_mean": 1.4778134103911622,
+      "heximax_ratio_repeats": [
+        1.4744808589864276,
+        1.5373889691714624,
+        1.4215704030155971
+      ],
+      "note": "ms/move ratio measured 3x back-to-back (this run + 2 reruns), same process pattern each time; the box was not idle (an unrelated pytest job shared the machine throughout) so absolute ms and the ratio carry real run-to-run noise. trades/turn, bind rate, bundle sizes and max-candidates-asked are deterministic and identical across all 3 runs.",
+      "search2_ratio_repeats": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "wall_time_all_arms_seconds": 67.29485001496505
+  },
+  "duel": {
+    "a": "heximax",
+    "a_path": "heximax",
+    "b": "search2",
+    "b_path": "search2",
+    "duel_seed": 42000,
+    "exhausted": 0,
+    "games": 400,
+    "gate_budget": 8,
+    "geometry": "blocked",
+    "order": "minimal_bundle",
+    "paired_vp": 0.425,
+    "paired_vp_high": 0.6782132102094229,
+    "paired_vp_low": 0.17178678979057704,
+    "seconds": 69.3153396450216,
+    "turns_max": 192,
+    "turns_mean": 93.1825,
+    "turns_median": 90.0,
+    "unfinished": 0,
+    "via": "arena.compete",
+    "wilson_high": 0.6200654125619756,
+    "wilson_low": 0.5235553047379993,
+    "win_rate": 0.5725,
+    "wins": 229,
+    "workers": 26
+  },
+  "gate_budget": 8,
+  "order": "minimal_bundle"
+}

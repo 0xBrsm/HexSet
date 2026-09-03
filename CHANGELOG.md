@@ -130,6 +130,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `rank_partners`) and a minimal adapter, `Heximax.propose_actions`, that
   replaces the engine's one-for-one trade sample with heximax's own scored
   candidates.
+- `hexset.trading.trade_event(game, gate, *, gate_budget=GATE_BUDGET,
+  order="maximin")`: `gate_budget` (an int, or `None` for unbounded)
+  and `order` (`"maximin"` or `"minimal_bundle"`, the latter breaking
+  ties on the maximin key by fewer total cards moved first) are now
+  keyword parameters instead of the `GATE_BUDGET` module constant.
+  `Game.gate_budget`/`Game.bundle_order` carry them per game;
+  `hexset.arena.play`/`compete` and `hexset.bench.duel`'s
+  `--gate-budget`/`--order` thread them through. Defaults are
+  unchanged.
 
 ### Fixed
 

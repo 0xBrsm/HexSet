@@ -228,15 +228,18 @@ def _spy_on_trade_event(monkeypatch):
     name `run_trade_event` calls -- recording the phase at each call. A
     patch on `hexset.trading.trade_event` would not be seen here: `game.py`
     imported the name directly (`from .trading import ... trade_event`), so
-    it holds its own reference, same as any other `from x import y`."""
+    it holds its own reference, same as any other `from x import y`. The spy
+    forwards `**kwargs` (`gate_budget`/`order`) untouched -- it counts calls
+    and phases, not what `run_trade_event` passes through from
+    `game.gate_budget`/`game.bundle_order`."""
     import hexset.game as gamemod
 
     calls: list[Phase] = []
     real = gamemod.trade_event
 
-    def spy(game, gate):
+    def spy(game, gate, **kwargs):
         calls.append(game.phase)
-        return real(game, gate)
+        return real(game, gate, **kwargs)
 
     monkeypatch.setattr(gamemod, "trade_event", spy)
     return calls

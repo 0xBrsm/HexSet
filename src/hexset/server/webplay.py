@@ -48,7 +48,7 @@ from hexset.board.topology import Topology
 from hexset.cards import NUM_DEV_CARDS, DevCard
 from hexset.devcards import holdings
 from hexset.economy import trade_ratios
-from hexset.game import Game, Phase, is_over, to_move
+from hexset.game import Game, Phase, is_over, run_pending_event, to_move
 from hexset.ledger import PublicLedger
 from hexset.roads import road_lengths
 from hexset.state import MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS, GameState, copy_state
@@ -1122,16 +1122,25 @@ class GameSession:
         # deliberately, before `trades`/`valuations` below are read, rather
         # than moments later inside `legal_wire_actions`, which would
         # otherwise hand back a snapshot whose `trades` still predates the
-        # event it itself just caused to run. Observed through the current
-        # player, not `viewer`: `trades`/`valuations` are public to the
-        # whole table regardless of who asks (this function's own
-        # docstring, "computed once regardless of who is asking"), so
-        # whether the pending event has run cannot depend on it either --
-        # an observer's own seat, or none at all, still deserves an
-        # up-to-date table. Only `hidden=True` fires it (`Game.state`'s own
-        # docstring on why); the result is discarded, a side effect, not
-        # data this function needs.
-        game.state(game.current_player)
+        # event it itself just caused to run. Observed regardless of
+        # `viewer`: `trades`/`valuations` are public to the whole table
+        # regardless of who asks (this function's own docstring, "computed
+        # once regardless of who is asking"), so whether the pending event
+        # has run cannot depend on it either -- an observer's own seat, or
+        # none at all, still deserves an up-to-date table.
+        #
+        # Calls `run_pending_event` directly rather than `game.state
+        # (game.current_player)` -- that used to be how this fired, and it
+        # was the regression: it built the *current player's own hidden
+        # information-set view* as a side effect of literally any viewer's
+        # poll, including a spectator's or an acting bot's own runner
+        # checking whose turn it is before that bot ever got to publish --
+        # a cross-seat view read this function must never make (this
+        # function's own docstring: what comes back depends on `viewer`,
+        # never on the current player, except through public fields).
+        # `run_pending_event` does exactly the same triggering work with no
+        # view built and no seat's hand touched.
+        run_pending_event(game)
         # true state: the server's own omniscient observer view -- the
         # per-viewer filtering happens below, not here.
         state = game.state(0, hidden=False)

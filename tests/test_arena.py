@@ -324,11 +324,19 @@ def test_a_pair_is_one_game_played_twice_with_the_seat_pairs_exchanged(monkeypat
     assert second[0] == (first[0] + 2) % 4
 
 
+@pytest.mark.slow
 def test_antithetic_pairing_splits_an_identical_pair_exactly(monkeypatch):
     monkeypatch.setattr(arena, "spawn", lambda entrant, board, rng: Streamless())
     lineup = lineup_from_names(["random"] * 4)
 
-    paired = compete(lineup, 48, seed=20000)
+    # `workers=8`: `compete`'s own contract is that results are identical at
+    # any worker count (see its docstring), so this is a wall-clock-only
+    # change. `Streamless` always plays the first legal action, which mostly
+    # never reaches ten points, so most of these 48-game blocks run every game
+    # out to `action_cap` -- parallelizing across processes is the fix that
+    # does not touch what is asserted, unlike shrinking the cap or the game
+    # count would.
+    paired = compete(lineup, 48, seed=20000, workers=8)
     wins = [standing.wins for standing in paired.standings]
     # Every decided game is decided twice, once for each side, so the split is
     # exact rather than close. Counted over decided games because a stub that
@@ -346,10 +354,10 @@ def test_antithetic_pairing_splits_an_identical_pair_exactly(monkeypatch):
     # most a minority of them, where the paired split is exact in all.
     uneven = 0
     for seed in range(20000, 20005):
-        plain = compete(lineup, 48, seed=seed, antithetic=False)
+        plain = compete(lineup, 48, seed=seed, antithetic=False, workers=8)
         loose = [standing.wins for standing in plain.standings]
         uneven += loose[0] + loose[1] != loose[2] + loose[3]
-        again = compete(lineup, 48, seed=seed)
+        again = compete(lineup, 48, seed=seed, workers=8)
         tight = [standing.wins for standing in again.standings]
         assert tight[0] + tight[1] == tight[2] + tight[3]
     assert uneven >= 3

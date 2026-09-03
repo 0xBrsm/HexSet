@@ -21,6 +21,12 @@ ends, and a test that deals three bots and then asserts one thing leaves three
 of them running: PR #2's suite left 67 live `bot-*` threads behind
 (`docs/engine-divergence-2026-09-02.md`, defect 5). Going through the fixture
 means teardown stops them.
+
+The `slow` marker (registered in `pyproject.toml`) is the other lever on wall
+clock: `pytest` excludes it by default (`addopts = -m "not slow"`) so the
+everyday suite stays a ~10-minute inner loop, and `pytest -m slow` runs it --
+see the README's "Tests" section for what that covers and when it is
+required before merging.
 """
 
 from __future__ import annotations

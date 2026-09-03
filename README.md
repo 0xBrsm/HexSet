@@ -127,6 +127,15 @@ checkpoint needed) plus one entry per `*.onnx` file found in the models
 directory.
 
 Tests are `pip install -e ".[test,server,clients,catanatron]" && pytest`.
+Default `pytest` (~5-10 minutes) skips tests marked `slow` — full-game
+runs, including the two byte-identity censuses
+(`tests/bots/heximax/test_heximax.py`,
+`tests/bots/test_search2.py::test_choices_are_byte_identical_to_the_recorded_census`)
+that pin exactly what `heximax`/`search2` choose move by move. Run the full
+gate with `pytest -m slow`. **Any change under `src/hexset/` or
+`src/hexset/bots/` must run `pytest -m slow` (or at least
+`-k choices_are_byte_identical`) before it merges** — those hashes are the
+only thing standing between "refactored" and "changed what the bot does."
 
 ## Adding an opponent
 

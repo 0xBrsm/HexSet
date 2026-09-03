@@ -197,9 +197,14 @@ class HonestEvaluator:
         # and the divisor kept alongside; this runs three times per seat per
         # leaf. The `min`/`sum` pair stays: since 3.12 `sum` compensates its
         # float error (Neumaier), so an accumulator loop here is a different
-        # number in the last bit -- which is enough to flip a near-tie.
+        # number in the last bit -- which is enough to flip a near-tie. A
+        # list comprehension over the same operands in the same order feeds
+        # `sum` the identical values, so the result is bit-for-bit the same
+        # as the generator it replaces -- only the generator's per-item
+        # frame-switch overhead (needless for `needed`'s two or three pairs)
+        # is gone.
         needed, total = _PROGRESS_COST[purchase]
-        return sum(min(hand[r], n) for r, n in needed) / total
+        return sum([min(hand[r], n) for r, n in needed]) / total
 
     def progress(
         self, state: GameState, seat: int, hand: Sequence[float],

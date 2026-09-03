@@ -238,6 +238,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **`HonestEvaluator.progress_toward`'s inner sum is a list comprehension,
+  not a generator expression**, over the identical operands in the
+  identical order (`sum([min(hand[r], n) for r, n in needed]) / total`) —
+  bit-identical to the generator it replaces (CPython 3.12's `sum` is
+  Neumaier-compensated, so only the same values in the same order are safe
+  here), just without a generator's per-item frame-switch overhead on
+  `needed`'s two or three pairs. Behaviour-neutral: the byte-identical
+  choice census (`test_choices_are_byte_identical_to_the_recorded_census`,
+  both `heximax` and `search2`) is unchanged. Measured with
+  `hexset.bench.profile_heximax` (3 games, seed 100, single process):
+  `heximax` 42,695,282 -> 38,238,671 function calls over the 3 games (-10.4%);
+  `heximax-notrade` 20,192,176 -> 18,685,520 (-7.5%). Wall-clock ms/decision
+  moved within this box's cross-run noise (shared with a GPU training run);
+  the call-count drop is the reliable signal.
 - **Trade candidates are bundles, not one-for-one swaps.**
   `hexset.trading._candidates` now enumerates every signed bundle on
   disjoint resources, coverable from the true hands, rather than only

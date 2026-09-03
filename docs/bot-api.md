@@ -124,11 +124,17 @@ action's legality depends on another seat's hand, and there is now one list,
 
 A checkpoint does not act to trade. Every seat holds a **public valuation
 vector** — `valuations` above, five floats in `[-1, 1]` per seat in
-board-seat order, positive for "I want more of this" — and once a turn, after
-the roll and the robber and before any build is served, the engine clears
-exchanges between the current player and each other seat: one card for one
-card, executed when both sides' vectors say it helps them and both sides'
-private gates accept, best deal first, until nothing clears.
+board-seat order, positive for "I want more of this" — and the engine clears
+exchanges between the current player and each other seat after the roll and
+the robber, and again after every MAIN action the current player takes
+(build, buy, a bank/port trade, a development card): any signed bundle on
+disjoint resources, each side bounded only by what that hand holds (not one
+card for one card — a candidate can give several resources and receive
+several back in the same exchange), executed when both sides' vectors say
+it helps them and both sides' private gates accept. Best deal first — the
+smaller of the two surpluses, highest; ties fall to the current player's own
+surplus, then the total, then a canonical order for determinism — until
+nothing clears.
 
 A checkpoint served embedded (`hexset.clients.onnxbot.NetworkBot`) trades off
 the same `value` head this contract already declares: `valuation` is

@@ -172,17 +172,29 @@ Any number of these seats — browser, HTTP script, MCP-connected LLM, or an emb
 
 ## Trading
 
-Trading is one event a turn, not a language of actions. Every seat holds a
+Trading is one event, not a language of actions, interleaved with the turn
+rather than sitting before it: it runs after the roll and the robber, and
+again after every MAIN action the current player takes (build, buy, a
+bank/port trade, a development card), never after ending the turn and never
+during setup, rolling, the robber or discard resolution. Every seat holds a
 public **valuation vector** — five numbers in `[-1, 1]`, positive for "I want
-more of this", negative for "I would give this up" — and after the roll and
-the robber, before any build is served, the engine clears deals for the
-player whose turn it is. A one-for-one exchange is *advertised* when both
-sides' vectors say it helps them; it *clears* only when each seat's own
-private gate, its judgement of the position the exchange leads to, also says
-yes. Best deal first — the one maximising the smaller public surplus — then
-again, and again, until nothing clears. There is no budget: the gate must be
-strictly positive and is re-asked after every exchange, so the acting seat's
-own valuation strictly increases and the event ends on its own.
+more of this", negative for "I would give this up". A candidate is a
+**bundle** — any signed counts on disjoint resources, each side bounded only
+by what that hand holds, both sides coverable from the true hands — not a
+one-for-one swap; a 2-for-1 has to clear as one bundle, since no sequence of
+one-card steps can be relied on to reach it. A bundle is *advertised* when
+both sides' vectors say it helps them; it *clears* only when each seat's own
+private gate, its judgement of the position the exchange leads to, also
+says yes, and only the best `GATE_BUDGET` (8) candidates by public surplus
+are ever asked their gates in one clearing attempt — a cost bound on hands
+fertile enough to advertise thousands of bundles late in a game. Best deal
+first — the smaller of the two surpluses, highest; ties fall to the acting
+seat's own surplus (the rulebook lets the actor choose among equally fair
+deals), then the total, then a canonical order, for determinism — then
+again, and again, until nothing clears. There is no budget on trades
+themselves: the gate must be strictly positive and is re-asked after every
+exchange, so the acting seat's own valuation strictly increases and the
+event ends on its own.
 
 Nobody proposes, accepts or declines: there are no trade actions at all, no
 phase in which somebody is asked, and nothing in the action space to mask —

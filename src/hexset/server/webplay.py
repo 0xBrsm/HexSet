@@ -377,9 +377,12 @@ class _Event:
     before: _Snapshot
     after: _Snapshot
     last_roll: int | None
-    # The exchanges the engine cleared inside this action -- the trade event
-    # runs on the way into the main phase (`hexset.trading`), so a roll or a
-    # robber move can carry several. Empty for everything else.
+    # The exchanges the engine cleared inside this action (`hexset.trading`).
+    # The trade event runs on the way into the main phase and again after
+    # every MAIN action the current player takes (owner review against the
+    # rulebook, 2026-09-03: trade and build interleave), so any of those --
+    # not only the roll or robber move that enters MAIN -- can carry several.
+    # Empty for setup, discards, and every other seat's actions.
     trades: tuple[Trade, ...] = ()
 
 

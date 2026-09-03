@@ -817,6 +817,40 @@ class GameSession:
         """What `seat` has published, all-zero if it has published nothing."""
         return tuple(self.game.valuations[seat])
 
+    def confirm_mode(self, seat: int) -> None:
+        """`seat` opted into confirm mode at seat-up: gate it now, on the
+        vector it has not published (`hexset.trading.NO_VALUATION`).
+
+        Installing the gate here rather than waiting for a first `publish`
+        is what makes "a person at the web page does not trade" a property
+        of sitting down, not of what the page happens to call. The page
+        offers no way to publish (owner, 2026-09-03 -- human trading
+        surfaces are withheld; `docs/negotiation-interface.md`), so without
+        this a human seat's gate stays `None` for the whole game and the
+        rule rests entirely on the vector.
+
+        Both halves say no, and either alone would be enough:
+
+        *The vector.* All-zero, so every bundle this seat is party to scores
+        a public surplus of exactly 0 on its side, and
+        `hexset.trading._best_clearing` keeps only candidates whose surplus
+        is *strictly* positive for both sides -- in either role, proposer or
+        counterparty. A zero-vector seat is dropped at ranking and its gate
+        is never even asked, which is the sense in which a human here is
+        simply not a counterparty.
+
+        *The gate.* `PendingGate` never clears on its own. Should this seat
+        ever publish (`PUT /api/games/<code>/valuation` is untouched, for an
+        LLM or an API client), what it advertises still cannot be taken
+        without an explicit `POST .../trade/confirm`.
+
+        Bots are unaffected: their own gates and vectors are seated by
+        `api.Tables._spawn_local_bots`/`seat_bot`, and they go on trading
+        with each other through the same engine event.
+        """
+        self.confirm_seats.add(seat)
+        self.set_trader(seat, PendingGate(self.game, seat, NO_VALUATION))
+
     def publish(self, seat: int, vector: Sequence[float]) -> None:
         """`PUT /api/games/<code>/valuation`: `seat` sets its own vector.
 

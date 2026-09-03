@@ -373,7 +373,7 @@ class Table:
         self.seats[index] = Seat(kind=SeatKind.PLAYER, name=clean, token=token)
         self.session.claim(index, clean)
         if confirm:
-            self.session.confirm_seats.add(index)
+            self.session.confirm_mode(index)
         return index, token
 
     def view(self, viewer: int | None = None, *, omniscient: bool = False) -> dict:
@@ -590,7 +590,7 @@ class Tables:
 
         session = build_session(code, seats, self.config, first=creator_seat)
         if confirm:
-            session.confirm_seats.add(creator_seat)
+            session.confirm_mode(creator_seat)
         table = Table(
             code=code,
             seats=seats,

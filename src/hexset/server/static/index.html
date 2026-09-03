@@ -1408,11 +1408,7 @@ function renderStatus() {
   // the point. True as of the last poll rather than the last render — see
   // settle() — which is as current as anything here gets.
   if (state.to_move !== state.seat) {
-    const turn = `PLAYER ${state.to_move + 1}'S TURN`;
-    // Watching needs saying: with no seat, every turn is somebody else's,
-    // and a status line that only ever named other people would look like a
-    // game that had stopped offering us ours.
-    phaseEl.textContent = watching() ? `WATCHING · ${turn}` : turn;
+    phaseEl.textContent = `PLAYER ${state.to_move + 1}'S TURN`;
     return;
   }
   // The same move either way, so the same words either way — PHASE_LABELS

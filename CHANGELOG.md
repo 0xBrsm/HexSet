@@ -11,6 +11,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`hexset.trading.NETWORK_GATE_ROWS`** (`32`): the most candidates a network
+  gate's `accepts_many` will score in one batched forward, beside
+  `VALUE_SCALE`. `hexset.clients.onnxbot.NetworkBot.accepts_many` now scores
+  only the top `NETWORK_GATE_ROWS` candidates by public rank and declines the
+  rest outright; `accepts` is unchanged. The engine still asks about every
+  candidate — only a network gate's own evaluation is bounded.
 - **`hexset.bots.Bot.accepts_many(view, received, counterparties)`**: a seat's
   private gate answered for a whole batch of candidate bundles in one call,
   defaulting to a loop over `accepts` so an existing bot is unaffected.

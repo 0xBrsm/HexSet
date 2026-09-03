@@ -144,6 +144,21 @@
        respects the padding above, same as any other element would. */
     appearance: none; -webkit-appearance: none;
   }
+  /* Your own row, on the same terms: a control standing in for the name,
+     sized and weighted like the picker opposite it so the column reads as
+     one thing. Flat until you touch it — a row of names should look like a
+     row of names, not a form. */
+  .player-name input {
+    font: inherit; font-weight: 600; width: 100%; padding: 0.1rem 0.25rem; border-radius: 5px;
+    border: 1px solid transparent; background: transparent; color: var(--ink);
+    /* Same as the picker opposite it: a name too long for the column reads
+       as cut off rather than as a shorter name. */
+    text-overflow: ellipsis;
+  }
+  .player-name input:hover { border-color: var(--border); }
+  .player-name input:focus {
+    outline: none; border-color: var(--accent); background: #232733;
+  }
   .player-meta { color: var(--muted); font-size: 0.82rem; flex: 1; }
   .stat { display: inline-flex; align-items: center; gap: 0.12rem; color: var(--muted); font-size: 0.82rem; }
   /* Double digits (see statChip) take up the icon-to-number gap instead of
@@ -916,6 +931,27 @@ function seatFullLabel(seat) {
   return `Player ${seat + 1} (${seatLabel(seat)})`;
 }
 
+// Your own name at this game, as everyone else's log and player list will
+// read it from here on (the server keeps one name per seat — see
+// api.Tables.rename). Trimmed and capped server-side, so a blank one simply
+// puts the seat back to unnamed rather than being refused.
+async function renameSelf(name) {
+  if (inFlight) return;
+  if ((name || "").trim() === (state.seats[state.seat].name || "")) return;
+  inFlight = true;
+  try {
+    const {ok, data} = await postJSON("/api/name", {name});
+    if (ok) {
+      state = data;
+      render();
+    } else {
+      showNotice(data.error || "Could not change that name.");
+    }
+  } finally {
+    inFlight = false;
+  }
+}
+
 // Puts a bot on one seat without restarting the game: a fresh one on a seat
 // nobody has taken, or a different one in place of the bot already there —
 // see api.Tables.seat_bot, which handles both.
@@ -1498,8 +1534,22 @@ function renderPlayers() {
         });
       }
     } else if (p.seat === state.seat) {
-      nameEl.classList.add("player-name-plain");
-      nameEl.textContent = "human";
+      // Your own seat, and the one thing on this row you can change. It is an
+      // input for the same reason a bot seat is a <select>: the control *is*
+      // the player line, with nothing extra to click first.
+      //
+      // The poll rebuilds this whole list every 1.5s while somebody else is
+      // on move, which would take the caret with it mid-word — the guard at
+      // the top of renderPlayers is what stops that, since a focused input is
+      // inside this container.
+      const input = html("input", {
+        maxlength: "40", autocomplete: "off", spellcheck: "false",
+        placeholder: "human", title: "Your name at this game",
+      });
+      input.value = state.seats[p.seat].name || "";
+      input.addEventListener("change", () => renameSelf(input.value));
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter") input.blur(); });
+      nameEl.appendChild(input);
     } else if (kind === "player") {
       // Somebody else who opened this link. Their seat is theirs; there is
       // nothing here to change about it.

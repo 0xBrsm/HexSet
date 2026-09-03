@@ -38,6 +38,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`state_view` refuses `omniscient` alongside a seat outright), so nothing a
   bot or a training run reads is affected; the exposure is to people, at a
   table, who choose to look.
+- Your own row in the player list is your name: an input standing in for the
+  line, the way a bot seat's row is a picker. It reads "human" until you type
+  something, and what you type reaches the other players' lists and the log.
+  Blanking it puts the seat back to unnamed. (`POST /api/name`, unchanged.)
 - Player-to-player trading is gone from the browser with the offers that
   backed it (`PROPOSE_TRADE`/`ACCEPT_TRADE`/`DECLINE_TRADE`, `TRADE_RESPOND`,
   the view's `offer` block). The modal a resource card opens is the bank and

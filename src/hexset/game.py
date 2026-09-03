@@ -20,7 +20,7 @@ from .devcards import (
 from .economy import Purchase, bank_trade, distribute, pay
 from .ledger import PublicLedger
 from .robber import discard, discard_count, move_robber, steal
-from .trading import Trade, checked_valuation, judged, trade_event
+from .trading import Bundle, Trade, checked_valuation, execute_trade, judged, trade_event
 from .state import (
     NO_OWNER,
     GameState,
@@ -84,6 +84,17 @@ class Game:
     trades: list[Trade] = field(default_factory=list)
     trades_made: int = 0
     max_trades: int | None = None
+    # Candidates the current player's trade event found against a manual
+    # (human/LLM) seat's `PendingGate` (`hexset.server.webplay`) -- a
+    # snapshot of the *last* event, not an accumulating log like `trades`.
+    # Recomputed (cleared, then repopulated as `trade_event` runs) at the
+    # start of every trade event and cleared again by `end_turn`, so nothing
+    # pending survives a change of hands it was computed against (PI
+    # ratification, `docs/negotiation-interface.md`, decision 2). Not copied
+    # by `imagine`, for the same reason `gates` is not: a hypothetical must
+    # not leak a real seat's pending offers, and a search's own copy never
+    # seats a `PendingGate` anyway.
+    pending: list[Trade] = field(default_factory=list)
     # Whether this turn's *first* trade event is still waiting to run.
     # `enter_main` sets this and no longer runs the event itself -- the PI
     # amendment "publish points and the event trigger"
@@ -252,6 +263,21 @@ class Game:
         self.valuations[seat] = checked_valuation(vector, seat)
         if seat == self.current_player:
             run_pending_event(self)
+
+    def execute_trade(self, proposer: int, counterparty: int, bundle: Bundle) -> Trade:
+        """A manually composed exchange between `proposer` and `counterparty`
+        (`docs/negotiation-interface.md` §1), bypassing `_candidates`/
+        `_best_clearing` entirely -- `bundle` is taken as composed, signed
+        positive towards `proposer`, so it may be any exchange both sides can
+        cover, not only what the automatic event would have enumerated.
+
+        See `hexset.trading.execute_trade` for the checks this runs (coverage,
+        the counterparty's public surplus as a hard rule, the counterparty's
+        private gate) and what it raises `ValueError` for. Submitting is the
+        proposer's own consent -- their gate is never asked, and their public
+        surplus is never checked either (PI ratification, decision 4).
+        """
+        return execute_trade(self, proposer, counterparty, bundle)
 
 
 def start(
@@ -730,6 +756,7 @@ def end_turn(game: Game) -> None:
     game.dev_card_played = False
     game.trades = []
     game.trades_made = 0
+    game.pending = []
     # Free roads with nowhere legal to go are simply lost.
     game.free_roads = 0
     game.turns += 1

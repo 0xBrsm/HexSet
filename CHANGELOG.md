@@ -11,6 +11,28 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **A negotiation interface for human and LLM seats.** `Game.execute_trade(proposer,
+  counterparty, bundle)` composes and executes any bundle both sides can
+  cover directly, bypassing the automatic candidate search — legal on the
+  proposer's own turn against any seat, or during another seat's turn
+  against that seat only; re-validates coverage and the counterparty's
+  public surplus as a hard rule, then its private gate, exactly as the
+  automatic event does, but never consults the proposer's own vector or
+  gate, since submitting is its own consent. `POST
+  /api/games/<CODE>/trade {counterparty, give, receive}` is the HTTP entry
+  point. `Game.pending` is a snapshot of the last trade event's candidates
+  against a confirm-mode seat, recomputed every event and cleared by
+  `end_turn`; `hexset.server.webplay.PendingGate` is such a seat's private
+  gate — it never clears on its own, recording each candidate instead — and
+  is installed by opting a seat into confirm mode at seat-up (`confirm` on
+  `POST /api/games`/`POST /api/join`). `GET /api/state`'s `pending` block
+  (filtered per viewer) and `POST /api/games/<CODE>/trade/confirm`/`.../decline`
+  answer one. The web UI gained a negotiation panel below the advertisement
+  toggles: a counterparty's published wants/gives as clickable chips
+  composing a draft bundle, a client-side clears/affordable indicator, and
+  pending-offer cards during a bot's turn. The MCP server gained
+  `set_valuation`, `get_table`, `propose_trade`, `confirm_trade`,
+  `decline_trade` tools and a `confirm` flag on `new_game`/`join`.
 - **An embedded ONNX seat now trades.** `hexset.clients.onnxbot.NetworkBot`
   gained `valuation`/`accepts`, both derived from the checkpoint's own value
   head with no new graph output: `valuation` is `tanh(delta_V_r /

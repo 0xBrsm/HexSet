@@ -48,6 +48,11 @@ SERVER_INFO = {"name": "hexset", "version": "0.1.0"}
 # request after. A module global for the same reason the cookie jar it
 # replaced was one: the process is the client, and there is exactly one of it.
 _token: str | None = None
+# The game this connection is seated at, needed to address the trade routes
+# (`/api/games/<code>/...`) -- `/api/state`/`/api/action` don't need it, since
+# the token alone already names one game, but the trade endpoints are
+# addressed by code (`api.py`), so it is remembered here the same way.
+_code: str | None = None
 
 
 class ToolError(Exception):
@@ -94,10 +99,12 @@ def _seat(result: dict) -> dict:
 
     The LLM never needs to see it — it is sent on its behalf by `_request` —
     and a token in the transcript is a token in the context window of whatever
-    reads that transcript next.
+    reads that transcript next. Also remembers the game's code, off the same
+    response (`table.view` always carries `code`), for the trade routes below.
     """
-    global _token
+    global _token, _code
     _token = result.pop("token")
+    _code = result.get("code")
     return result
 
 
@@ -105,21 +112,27 @@ def _models() -> dict:
     return _request_ok("GET", "/api/models")
 
 
-def _new_game(opponents: list[str] | None = None, name: str | None = None) -> dict:
+def _new_game(
+    opponents: list[str] | None = None, name: str | None = None, confirm: bool = False
+) -> dict:
     body: dict = {}
     if opponents:
         body["bots"] = opponents
     if name:
         body["name"] = str(name).strip()[:40]
+    if confirm:
+        body["confirm"] = True
     return _seat(_request_ok("POST", "/api/games", body))
 
 
-def _join(code: str, name: str | None = None) -> dict:
+def _join(code: str, name: str | None = None, confirm: bool = False) -> dict:
     if not isinstance(code, str) or not code.strip():
         raise ToolError("code must be a game's six-character code")
     body: dict = {"code": code.strip().upper()}
     if name:
         body["name"] = str(name).strip()[:40]
+    if confirm:
+        body["confirm"] = True
     return _seat(_request_ok("POST", "/api/join", body))
 
 
@@ -151,6 +164,35 @@ def _undo() -> dict:
     return _request_ok("POST", "/api/undo")
 
 
+# --- The negotiation interface (docs/negotiation-interface.md §4) ------------
+
+
+def _set_valuation(vector: list) -> dict:
+    _seated()
+    return _request_ok("PUT", f"/api/games/{_code}/valuation", {"valuation": vector})
+
+
+def _get_table() -> dict:
+    _seated()
+    return _request_ok("GET", "/api/state")
+
+
+def _propose_trade(counterparty: int, give: dict | None = None, receive: dict | None = None) -> dict:
+    _seated()
+    body = {"counterparty": counterparty, "give": give or {}, "receive": receive or {}}
+    return _request_ok("POST", f"/api/games/{_code}/trade", body)
+
+
+def _confirm_trade(index: int) -> dict:
+    _seated()
+    return _request_ok("POST", f"/api/games/{_code}/trade/confirm", {"index": index})
+
+
+def _decline_trade(index: int) -> dict:
+    _seated()
+    return _request_ok("POST", f"/api/games/{_code}/trade/decline", {"index": index})
+
+
 # name -> (handler, description, JSON Schema for `arguments`)
 _TOOLS: dict[str, tuple] = {
     "models": (
@@ -176,6 +218,16 @@ _TOOLS: dict[str, tuple] = {
                     ),
                 },
                 "name": {"type": "string", "description": "Your display name, up to 40 characters."},
+                "confirm": {
+                    "type": "boolean",
+                    "description": (
+                        "Opt your own seat into confirm mode: trades against you never "
+                        "clear on their own — each one lands in state()'s `pending` for "
+                        "you to confirm_trade()/decline_trade() instead. Off by default, "
+                        "in which case your set_valuation() vector is your standing "
+                        "consent, the same as a bot's. Fixed for the game once set."
+                    ),
+                },
             },
         },
     ),
@@ -190,6 +242,10 @@ _TOOLS: dict[str, tuple] = {
             "properties": {
                 "code": {"type": "string", "description": "The game's six-character code."},
                 "name": {"type": "string", "description": "Your display name, up to 40 characters."},
+                "confirm": {
+                    "type": "boolean",
+                    "description": "Opt your own seat into confirm mode -- see new_game()'s.",
+                },
             },
             "required": ["code"],
         },
@@ -230,6 +286,78 @@ _TOOLS: dict[str, tuple] = {
         "true. Anything else (another seat's move, a played development card) "
         "cannot be undone.",
         {"type": "object", "properties": {}},
+    ),
+    "set_valuation": (
+        _set_valuation,
+        "Publish your standing valuation: what each resource is worth to you right "
+        "now, five numbers in [-1, 1] (positive = you want more, negative = you'd "
+        "give it up, 0 = indifferent), in state()'s resource order. Takes effect at "
+        "the next trade event and is public to the whole table. Unless you joined "
+        "with confirm mode on, this is also your consent to trade — any bundle "
+        "another seat proposes (or the table's own automatic event clears) against "
+        "a vector you published will go through without asking you again.",
+        {
+            "type": "object",
+            "properties": {
+                "vector": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                    "description": "Five numbers in [-1, 1], one per resource in order.",
+                }
+            },
+            "required": ["vector"],
+        },
+    ),
+    "get_table": (
+        _get_table,
+        "Everything the table has said about trading: every seat's published "
+        "`valuations`, this turn's cleared `trades`, and your own `pending` offers "
+        "(only meaningful in confirm mode) — alongside everything state() already "
+        "returns, since it's the same call.",
+        {"type": "object", "properties": {}},
+    ),
+    "propose_trade": (
+        _propose_trade,
+        "Compose and submit a bundle against `counterparty`: on your own turn "
+        "against anyone, or during another seat's turn against that seat only. "
+        "Fails (with a reason) unless the counterparty's own published vector "
+        "already says the bundle helps it and its private judgement agrees — your "
+        "own vector is never consulted, since proposing this is your consent.",
+        {
+            "type": "object",
+            "properties": {
+                "counterparty": {"type": "integer", "description": "The seat to trade with."},
+                "give": {
+                    "type": "object",
+                    "description": "Resource name -> count you give, e.g. {\"Wood\": 2}.",
+                },
+                "receive": {
+                    "type": "object",
+                    "description": "Resource name -> count you receive.",
+                },
+            },
+            "required": ["counterparty"],
+        },
+    ),
+    "confirm_trade": (
+        _confirm_trade,
+        "Execute one of your pending offers (get_table()'s `pending`, confirm mode "
+        "only) exactly as the table found it. May still fail if hands moved since.",
+        {
+            "type": "object",
+            "properties": {"index": {"type": "integer", "description": "Index into your `pending`."}},
+            "required": ["index"],
+        },
+    ),
+    "decline_trade": (
+        _decline_trade,
+        "Drop one of your pending offers (confirm mode only) without moving any "
+        "cards.",
+        {
+            "type": "object",
+            "properties": {"index": {"type": "integer", "description": "Index into your `pending`."}},
+            "required": ["index"],
+        },
     ),
 }
 

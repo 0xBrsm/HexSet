@@ -350,6 +350,42 @@
   .val-table th:first-child, .val-table td:first-child { text-align: left; }
   .val-table th { opacity: .6; font-weight: 500; }
   #trading .trade-line { opacity: .8; margin-top: 2px; }
+  /* The negotiation panel (docs/negotiation-interface.md §3): one block per
+     counterparty with a nonzero vector, its wants/gives as clickable chips
+     composing a draft bundle, a live clears/affordable indicator, then
+     Clear/Propose. Pending offers (confirm mode) render above it as plain
+     Accept/Decline cards. */
+  #negotiation { margin-top: 10px; font-size: 12px; }
+  #negotiation h4 { margin: 8px 0 4px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; opacity: .65; }
+  #negotiation h4:first-child { margin-top: 0; }
+  .pending-offer {
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    padding: 4px 8px; margin-bottom: 4px;
+  }
+  .pending-offer button { padding: 2px 8px; border-radius: 6px; cursor: pointer; }
+  .pending-accept { background: var(--accent); color: #fff; border: none; }
+  .pending-decline { background: transparent; border: 1px solid var(--border); color: inherit; }
+  .negotiate-panel {
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
+    margin-bottom: 6px;
+  }
+  .negotiate-panel.negotiate-readonly { opacity: .5; }
+  .negotiate-seat { font-weight: 600; margin-bottom: 4px; }
+  .negotiate-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .negotiate-chip { width: 24px; height: 24px; cursor: pointer; }
+  .negotiate-chip svg { width: 14px; height: 14px; }
+  .negotiate-panel.negotiate-readonly .negotiate-chip { cursor: default; }
+  .chip-want { box-shadow: inset 0 0 0 2px #3cb371; }
+  .chip-give { box-shadow: inset 0 0 0 2px #d9534f; }
+  .negotiate-summary { margin-top: 4px; opacity: .85; }
+  .negotiate-indicator { margin-top: 2px; font-weight: 600; opacity: .7; }
+  .negotiate-indicator.clears { color: #3cb371; opacity: 1; }
+  .negotiate-buttons { display: flex; gap: 6px; margin-top: 4px; }
+  .negotiate-buttons button { padding: 2px 10px; border-radius: 6px; cursor: pointer; }
+  .negotiate-clear { background: transparent; border: 1px solid var(--border); color: inherit; }
+  .negotiate-submit { background: var(--accent); color: #fff; border: none; }
+  .negotiate-submit:disabled { opacity: .4; cursor: not-allowed; }
   #piece-supply {
     position: absolute; left: 16px; bottom: 16px; display: grid; gap: 6px;
     grid-template-columns: repeat(2, 34px);
@@ -712,6 +748,7 @@
       <div id="players"></div>
       <div id="hand"></div>
       <div id="trading"></div>
+      <div id="negotiation"></div>
       <div id="notice"></div>
     </div>
     <div id="log"></div>
@@ -800,6 +837,14 @@ let yopPicks = [];         // 0, 1, or 2 resource indices, "year-of-plenty" mode
 let monopolyPick = null;   // selected resource index, "monopoly" mode only
 let modelNames = [];       // GET /api/models, in MODEL_OPTIONS order
 let currentBotModels = []; // this game's (or the next one's) 3 non-human-seat picks, ascending seat order
+
+// The negotiation panel's draft bundles (`docs/negotiation-interface.md` §3):
+// counterparty seat -> {give: [count...], receive: [count...]}, client-side
+// only until Propose posts it. Reset whenever a different game's state
+// arrives (negotiationCode tracks which game the drafts belong to) — see
+// renderNegotiation.
+let draftBundles = {};
+let negotiationCode = null;
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -1347,6 +1392,7 @@ function render() {
   renderPlayers();
   renderHand();
   renderTrading();
+  renderNegotiation();
   renderBoardDynamic();
   renderPieceSupply();
   renderBoardButtons();
@@ -1594,12 +1640,14 @@ function renderHand() {
 // this can't drift from what can_place_settlement/_road/_city actually
 // enforce; built counts are just what's already on the board in this seat's
 // colour.
-// The whole human interface to trading (`hexset.trading`): five per-resource
-// toggles that PUT this seat's valuation vector, plus what everyone else has
-// published and what the engine cleared this turn. Deliberately minimal --
-// there is nothing to propose, accept or decline, and the richer negotiation
-// surface is deferred by the trading design. A trade takes effect at the next
-// trade event, which is the next time a main phase opens.
+// The advertisement half of trading (`hexset.trading`): five per-resource
+// toggles that PUT this seat's standing valuation vector, plus what everyone
+// else has published and what the engine cleared this turn. Toggling one of
+// these never itself proposes or answers anything -- it only changes what
+// the automatic event, or a manual bundle composed in the negotiation panel
+// below (renderNegotiation), reads as this seat's public consent. A trade
+// takes effect at the next trade event, which is the next time a main phase
+// opens (or, for a manual bundle, immediately -- see submitTrade).
 async function setValuation(index, value) {
   const vector = (state.valuations[state.seat] || [0, 0, 0, 0, 0]).slice();
   vector[index] = vector[index] === value ? 0 : value;
@@ -1656,6 +1704,181 @@ function bundleText(counts) {
   const parts = [];
   counts.forEach((n, index) => { if (n) parts.push(`${n} ${board.resources[index]}`); });
   return parts.join(", ") || "nothing";
+}
+
+// --- The negotiation panel (`docs/negotiation-interface.md` §3) --------------
+//
+// Below the five-toggle advertisement panel above, and independent of it
+// (setValuation still just publishes a standing vector; composing a bundle
+// here never touches it). One block per counterparty with any nonzero
+// vector entry: their wants (positive) render as green-ringed chips, their
+// gives (negative) as red-ringed ones. Clicking a "want" chip adds one card
+// of that resource to the draft's give side (they want it, so I'd give it);
+// clicking a "give" chip adds to the receive side. `POST .../trade` is the
+// only round trip; clears/affordable are computed here from state already
+// on hand, exactly the formula `_best_clearing` runs server-side.
+
+function draftFor(seat) {
+  if (!draftBundles[seat]) draftBundles[seat] = {give: [0, 0, 0, 0, 0], receive: [0, 0, 0, 0, 0]};
+  return draftBundles[seat];
+}
+
+function clearDraft(seat) {
+  draftBundles[seat] = {give: [0, 0, 0, 0, 0], receive: [0, 0, 0, 0, 0]};
+  renderNegotiation();
+}
+
+// dot(vector, bundle) -- the same public-surplus formula `_best_clearing`
+// (hexset/trading.py) runs server-side, so "clears" here means the server
+// will not reject the bundle for a non-positive surplus on either side.
+// Pure functions, deliberately: no DOM, no `state` global, so a fixed
+// vector/hand can be checked directly (see test_ui_smoke.py).
+function surplus(vector, bundle) {
+  return vector.reduce((sum, v, index) => sum + v * bundle[index], 0);
+}
+
+function bundleClears(myVector, theirVector, bundle) {
+  const mine = surplus(myVector, bundle);
+  const theirs = surplus(theirVector, bundle.map((n) => -n));
+  return mine > 0 && theirs > 0;
+}
+
+// Each `give` count must not exceed my own hand; each `receive` count is
+// bounded by the counterparty's total hand size, not a per-resource figure
+// -- exact per-resource counts aren't visible cross-seat
+// (`docs/negotiation-interface.md` §3).
+function bundleAffordable(resourceNames, give, myHand, receiveTotal, counterpartyHandSize) {
+  return resourceNames.every((name, index) => give[index] <= (myHand[name] || 0))
+    && receiveTotal <= counterpartyHandSize;
+}
+
+async function submitTrade(counterparty) {
+  const draft = draftFor(counterparty);
+  const give = {}, receive = {};
+  board.resources.forEach((name, index) => {
+    if (draft.give[index]) give[name] = draft.give[index];
+    if (draft.receive[index]) receive[name] = draft.receive[index];
+  });
+  const {ok, data} = await postJSON(`/api/games/${state.code || tableCode}/trade`,
+    {counterparty, give, receive});
+  if (!ok) { showNotice(data.error || "that trade did not go through"); return; }
+  state = data;
+  clearDraft(counterparty);
+  render();
+}
+
+async function confirmPending(index) {
+  const {ok, data} = await postJSON(`/api/games/${state.code || tableCode}/trade/confirm`, {index});
+  if (!ok) { showNotice(data.error || "could not confirm that trade"); return; }
+  state = data;
+  render();
+}
+
+async function declinePending(index) {
+  const {ok, data} = await postJSON(`/api/games/${state.code || tableCode}/trade/decline`, {index});
+  if (!ok) { showNotice(data.error || "could not decline that trade"); return; }
+  state = data;
+  render();
+}
+
+function renderNegotiation() {
+  const container = document.getElementById("negotiation");
+  container.innerHTML = "";
+  if (!state.valuations || state.seat === null || state.seat === undefined) return;
+
+  // A different game entirely -- the drafts on hand describe hands and
+  // seats that no longer exist.
+  if (state.code !== negotiationCode) {
+    draftBundles = {};
+    negotiationCode = state.code;
+  }
+
+  if (state.pending && state.pending.length) {
+    container.appendChild(html("h4", {}, "Pending offers"));
+    state.pending.forEach((offer, index) => {
+      const row = html("div", {class: "pending-offer"});
+      row.appendChild(html("span", {},
+        `P${offer.counterparty + 1} offers ${bundleText(offer.got)} for ${bundleText(offer.gave)}`));
+      const buttons = html("div", {});
+      const accept = html("button", {class: "pending-accept"}, "Accept");
+      accept.addEventListener("click", () => confirmPending(index));
+      const decline = html("button", {class: "pending-decline"}, "Decline");
+      decline.addEventListener("click", () => declinePending(index));
+      buttons.appendChild(accept);
+      buttons.appendChild(decline);
+      row.appendChild(buttons);
+      container.appendChild(row);
+    });
+  }
+
+  container.appendChild(html("h4", {}, "Propose a trade"));
+  const myTurn = !state.game_over && state.to_move === state.seat;
+  const myHand = (state.players[state.seat] && state.players[state.seat].hand) || {};
+  let any = false;
+
+  state.valuations.forEach((vector, seat) => {
+    if (seat === state.seat) return;
+    if (!vector.some((v) => v !== 0)) return; // nothing advertised to compose against
+    any = true;
+
+    // Turn-timing rule (`docs/negotiation-interface.md` §2): on my own turn
+    // every panel is a proposer; otherwise only the current player's panel is.
+    const active = !state.game_over && (myTurn || state.to_move === seat);
+    const panel = html("div", {class: `negotiate-panel${active ? "" : " negotiate-readonly"}`});
+    panel.appendChild(html("div", {class: "negotiate-seat"}, `P${seat + 1}`));
+
+    const draft = draftFor(seat);
+    const chips = html("div", {class: "negotiate-chips"});
+    board.resources.forEach((name, index) => {
+      const v = vector[index];
+      if (v === 0) return;
+      const chip = resourceCardTile(name, {
+        extraClasses: ["negotiate-chip", v > 0 ? "chip-want" : "chip-give"],
+        title: `${name}: P${seat + 1} ${v > 0 ? "wants" : "would give"} this`,
+      });
+      if (active) {
+        chip.addEventListener("click", () => {
+          if (v > 0) draft.give[index] += 1; else draft.receive[index] += 1;
+          renderNegotiation();
+        });
+      }
+      chips.appendChild(chip);
+    });
+    panel.appendChild(chips);
+
+    const totalGive = draft.give.reduce((a, b) => a + b, 0);
+    const totalReceive = draft.receive.reduce((a, b) => a + b, 0);
+    if (totalGive || totalReceive) {
+      panel.appendChild(html("div", {class: "negotiate-summary"},
+        `give ${bundleText(draft.give)} / receive ${bundleText(draft.receive)}`));
+
+      const bundle = board.resources.map((_, index) => draft.receive[index] - draft.give[index]);
+      const clears = bundleClears(state.valuations[state.seat] || [0, 0, 0, 0, 0], vector, bundle);
+      const counterpartyHandSize = (state.players[seat] && state.players[seat].hand_size) || 0;
+      const affordable = bundleAffordable(board.resources, draft.give, myHand, totalReceive, counterpartyHandSize);
+
+      panel.appendChild(html("div", {class: `negotiate-indicator${clears ? " clears" : ""}`},
+        clears ? "clears" : "does not clear"));
+
+      const buttons = html("div", {class: "negotiate-buttons"});
+      const clearBtn = html("button", {class: "negotiate-clear"}, "Clear");
+      clearBtn.addEventListener("click", () => clearDraft(seat));
+      buttons.appendChild(clearBtn);
+
+      const submit = html("button", {class: "negotiate-submit"}, "Propose");
+      const reason = !active ? "not this seat's turn" : !affordable ? "not affordable"
+        : !clears ? "does not clear" : "";
+      submit.disabled = !!reason;
+      if (reason) submit.title = reason;
+      submit.addEventListener("click", () => submitTrade(seat));
+      buttons.appendChild(submit);
+      panel.appendChild(buttons);
+    }
+
+    container.appendChild(panel);
+  });
+
+  if (!any) container.appendChild(html("div", {class: "trade-line"}, "nobody has published a vector yet"));
 }
 
 function renderPieceSupply() {

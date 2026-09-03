@@ -259,6 +259,11 @@ def trade_event(game: "Game", gate: Gate) -> list[Trade]:
     seat's own valuation), and that is a bug to surface rather than a knob
     to tune.
     """
+    # A snapshot of *this* event only (PI ratification,
+    # `docs/negotiation-interface.md` decision 2): whatever a manual seat's
+    # `PendingGate` recorded last event no longer describes hands that may
+    # have since moved, so it is dropped before this event records its own.
+    game.pending = []
     if game.max_trades == 0:
         return []
 
@@ -314,6 +319,81 @@ def apply_trades(game: "Game", trades: Sequence[Trade]) -> None:
         game.ledger.apply_hand_diff(before, state.hands)
         game.trades.append(trade)
         game.trades_made += 1
+
+
+def execute_trade(game: "Game", proposer: int, counterparty: int, received: Bundle) -> Trade:
+    """A manually composed exchange between `proposer` and `counterparty`,
+    signed positive towards `proposer` (`docs/negotiation-interface.md` §1) --
+    the negotiation interface's one engine entry point for a bundle that was
+    never enumerated by `_candidates`.
+
+    Re-validates, in order, and raises `ValueError` naming the first check
+    that fails:
+
+    1. **Coverage.** Both sides can actually pay their half, from the true
+       hands (`holds`) -- the engine is the referee, exactly as it is for the
+       automatic event.
+    2. **The counterparty's public surplus, a hard rule.** `dot(v[counterparty],
+       -received)` must be strictly positive: the counterparty's own
+       advertised vector must already say this exchange helps it. The
+       proposer's own surplus is never checked -- submitting a trade *is* the
+       proposer's consent (PI ratification, decision 4), so a seat may
+       compose a bundle its own vector calls bad for itself.
+    3. **The counterparty's private gate.** `judged` against `game.gates
+       [counterparty]` and that seat's own view (`game.state(counterparty)`)
+       -- the same call the automatic event makes for `them`. **The
+       proposer's own gate is never asked**, for the same reason as (2).
+
+    Also enforces the turn-timing rule (`docs/negotiation-interface.md` §2):
+    one of `proposer`/`counterparty` must be `game.current_player`, and the
+    phase must be `Phase.MAIN` -- a seat proposes on its own turn to anyone,
+    or during another seat's turn naming only that seat.
+
+    On success, moves the cards (`exchange`), certifies the diff on the
+    ledger, appends to `game.trades` -- the same two calls `trade_event`
+    makes for an automatic clearing -- and returns the `Trade`.
+    """
+    from .game import Phase  # local: avoids a game/trading import cycle
+
+    if proposer == counterparty:
+        raise ValueError("a seat cannot trade with itself")
+    if game.phase is not Phase.MAIN:
+        raise ValueError(f"trading is only open in {Phase.MAIN.name}, not {game.phase.name}")
+    if game.current_player not in (proposer, counterparty):
+        raise ValueError(
+            f"neither seat {proposer} nor {counterparty} is the current player"
+        )
+
+    state = game._state
+    # `received` is signed towards `proposer`: its negative entries are what
+    # `proposer` must give, and its positive entries -- what `proposer`
+    # receives -- are exactly what `counterparty` must give, the same cards
+    # seen from the other side.
+    give = [max(0, -n) for n in received]
+    if not holds(state, proposer, give):
+        raise ValueError(f"seat {proposer} cannot cover its side of this trade")
+    take = [max(0, n) for n in received]
+    if not holds(state, counterparty, take):
+        raise ValueError(f"seat {counterparty} cannot cover its side of this trade")
+    counterparty_received = tuple(-n for n in received)
+
+    vectors = game.valuations
+    theirs = sum(vectors[counterparty][r] * n for r, n in enumerate(counterparty_received))
+    if theirs <= 0.0:
+        raise ValueError(f"seat {counterparty} has not advertised wanting this exchange")
+
+    trader = game.gates[counterparty] if game.gates is not None else None
+    view = game.state(counterparty)
+    if not judged(trader, view, counterparty_received, proposer):
+        raise ValueError(f"seat {counterparty} declined this trade")
+
+    before = [hand[:] for hand in state.hands]
+    exchange(state, proposer, counterparty, received)
+    game.ledger.apply_hand_diff(before, state.hands)
+    trade = Trade(proposer, counterparty, received)
+    game.trades.append(trade)
+    game.trades_made += 1
+    return trade
 
 
 # Encodes a signed bundle as one integer that sorts exactly the way the

@@ -52,7 +52,7 @@ from hexset.game import Game, Phase, is_over, to_move
 from hexset.ledger import PublicLedger
 from hexset.roads import road_lengths
 from hexset.state import MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS, GameState, copy_state
-from hexset.trading import Bundle, Trade, apply_trades
+from hexset.trading import NO_VALUATION, Bundle, Trade, apply_trades
 from hexset.victory import public_victory_points, victory_points
 
 from .journal import Journal
@@ -202,6 +202,42 @@ class PostedValuation:
         return True
 
 
+@dataclass(frozen=True)
+class PendingGate:
+    """A seat's gate under confirm mode: never clears on its own, and
+    records every candidate the table's automatic trade event found for it
+    instead (`docs/negotiation-interface.md` §1).
+
+    Parallel to `PostedValuation` -- `valuation` is unchanged, so a
+    confirm-mode seat still advertises through the same five numbers -- but
+    `accepts` always returns `False`, and its only side effect is appending
+    the candidate to `game.pending` for the player (or LLM) to review
+    through `POST .../trade/confirm` or `.../decline`.
+
+    Because `_best_clearing` asks the acting seat's own gate before the
+    counterparty's and short-circuits on `False`, a candidate is only ever
+    recorded for a seat sitting as the *counterparty* once the other side's
+    own gate has already accepted that exact bundle -- nothing pending here
+    is speculative in the common case (a confirm-mode seat answering another
+    seat's trade event). Holds `game` rather than `game.pending` itself so
+    that a later event's `game.pending = []` (see `trade_event`) is seen
+    through the same reference, not one already left behind.
+    """
+
+    game: "Game"
+    seat: int
+    vector: tuple[float, ...] = NO_VALUATION
+
+    def valuation(self, view) -> tuple[float, ...]:
+        del view
+        return self.vector
+
+    def accepts(self, view, received: Bundle, counterparty: int) -> bool:
+        del view
+        self.game.pending.append(Trade(self.seat, counterparty, received))
+        return False
+
+
 # --- Wire format for actions --------------------------------------------------
 
 
@@ -218,6 +254,29 @@ def wire_to_action(data: dict) -> Action:
         return Action(type=kind, a=int(data.get("a", 0)), b=int(data.get("b", 0)))
     except (TypeError, ValueError) as exc:
         raise ValueError(f"malformed action payload: {data!r}") from exc
+
+
+# --- Wire format for a manually composed trade ---------------------------------
+
+
+def bundle_from_wire(give: dict, receive: dict) -> Bundle:
+    """A signed `Bundle`, positive towards the proposer, from the named
+    amounts `POST .../trade`'s body carries (`{"Wood": 2}`, matching
+    `RESOURCE_NAMES`'s own resource-name convention). Raises `ValueError` --
+    the same as a malformed action -- for an unknown name or a non-integer
+    count."""
+    index = {name: r for r, name in enumerate(RESOURCE_NAMES)}
+    counts = [0] * NUM_RESOURCES
+    for side, sign in ((give, -1), (receive, 1)):
+        for name, n in (side or {}).items():
+            r = index.get(name)
+            if r is None:
+                raise ValueError(f"unknown resource: {name!r}")
+            try:
+                counts[r] += sign * int(n)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"malformed amount for {name!r}: {n!r}") from exc
+    return tuple(counts)
 
 
 # --- Human-readable log -------------------------------------------------------
@@ -718,6 +777,12 @@ class GameSession:
     # (`api.Tables.swap_bot`), and `set_trader` is the one place that
     # rewrites the engine's tuple.
     traders: dict[int, object] = field(default_factory=dict, repr=False)
+    # Seats opted into confirm mode at seat-up (`POST /api/games`/`/api/join`'s
+    # `confirm` flag, PI ratification decision 3: opt-in, not the default).
+    # `publish` reads this to decide which gate a seat's own vector installs
+    # -- `PendingGate` here, `PostedValuation` otherwise. Never populated for
+    # a bot seat; nothing reads it for one.
+    confirm_seats: set[int] = field(default_factory=set)
 
     def set_trader(self, seat: int, trader: object | None) -> None:
         """Seat (or unseat) what answers `seat`'s side of a trade's gate."""
@@ -738,13 +803,20 @@ class GameSession:
 
         Takes effect at the next trade event, which is the next time the
         main phase opens (`hexset.trading`) -- publishing does not move any
-        cards by itself. `Game.publish` validates and records it; a
-        `PostedValuation` of the same (checked) vector becomes this seat's
-        gate, unconditionally accepting -- the engine only ever asks about a
-        bundle whose public surplus already says this seat wants it.
+        cards by itself. `Game.publish` validates and records it; the
+        (checked) vector then becomes this seat's gate -- a `PostedValuation`,
+        unconditionally accepting once the engine's own public-surplus test
+        already says this seat wants the bundle, for most seats; a
+        `PendingGate` instead for a seat that opted into confirm mode at
+        seat-up (`confirm_seats`), which never clears on its own and records
+        the candidate to `game.pending` for this seat to confirm or decline.
         """
         self.game.publish(seat, vector)
-        self.set_trader(seat, PostedValuation(tuple(self.game.valuations[seat])))
+        vector = tuple(self.game.valuations[seat])
+        if seat in self.confirm_seats:
+            self.set_trader(seat, PendingGate(self.game, seat, vector))
+        else:
+            self.set_trader(seat, PostedValuation(vector))
 
     def __post_init__(self) -> None:
         # Written here rather than on the first action because the header's
@@ -1147,6 +1219,23 @@ class GameSession:
                 }
                 for t in game.trades
             ],
+            # This turn's *pending* offers (`Game.pending`): a snapshot of
+            # the last trade event against a confirm-mode seat, filtered per
+            # viewer -- only the seat named `a` (the one the offer is
+            # standing against) ever sees an entry, since it names a private
+            # exchange nobody has agreed to yet (`docs/negotiation-interface.md`
+            # §2). Empty for a spectator (`viewer is None`).
+            "pending": [
+                {
+                    "counterparty": t.b,
+                    "gave": [max(0, -n) for n in t.received],
+                    "got": [max(0, n) for n in t.received],
+                }
+                for t in game.pending
+                if t.a == viewer
+            ]
+            if viewer is not None
+            else [],
             "legal_actions": self.legal_wire_actions(viewer),
             "log": self.log_for(viewer),
         }

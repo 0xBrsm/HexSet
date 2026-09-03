@@ -195,10 +195,14 @@ def _census_game(preset: str, seed: int, players: int = 4) -> str:
     moves = 0
     while not is_over(game):
         seat = to_move(game)
-        action = bots[seat].choose(game)
         cleared = len(game.trades)
+        # Once a turn, when the engine says it is due (`Game.publish_due`),
+        # exactly as `arena.play` does it -- the PI amendment "publish
+        # points and the event trigger" -- not after every action.
+        if game.publish_due(seat):
+            publish_valuation(game, seat, bots[seat])
+        action = bots[seat].choose(game)
         apply(game, action)
-        publish_valuation(game, seat, bots[seat])
         trace.append(
             (
                 seat,

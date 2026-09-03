@@ -441,11 +441,15 @@ def play(
     Seating a bot also seats its private gate: `game.gates` is the lineup
     itself, so the engine's one trade event a turn (`hexset.trading`) asks
     each seat's own `accepts` rather than this loop having to remember to
-    run anything. Publishing is this loop's own job, not the event's --
-    right after a seat's own action, it is asked for its current vector and
-    the answer is recorded (`hexset.trading.publish_valuation`), so the
-    vector every future trade event reads is always the one that seat's
-    latest decision stood behind. A bot that defines neither `valuation` nor
+    run anything. Publishing is this loop's own job, not the event's, and
+    once a turn, not after every action: right when it is that seat's turn
+    to decide and `game.publish_due(seat)` says so (the engine-defined
+    post-roll/robber point, before the turn's first trade event -- the PI
+    amendment "publish points and the event trigger",
+    `agents/reference/trading-design.md`), it is asked for its current
+    vector and the answer is recorded (`hexset.trading.publish_valuation`),
+    so the vector every trade event this turn reads is the one this seat's
+    turn stands behind. A bot that defines neither `valuation` nor
     `accepts` never trades, which is how `RandomBot` and any external bot
     that predates the mechanic behave.
 
@@ -463,8 +467,9 @@ def play(
     while not is_over(game) and actions < action_cap:
         seat = to_move(game)
         bot = bots[seat]
+        if game.publish_due(seat):
+            publish_valuation(game, seat, bot)
         apply(game, bot.choose(game))
-        publish_valuation(game, seat, bot)
         actions += 1
     return game
 

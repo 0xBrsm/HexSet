@@ -227,7 +227,34 @@ class LocalSearchBrain:
     bot: Bot
     game: object  # hexset.game.Game — typed loosely to avoid a game.py import cycle at module load
 
+    def __post_init__(self) -> None:
+        # A `NetworkBot`'s `valuation`/`accepts` need the live `Game` to
+        # build the hypothetical hands they score (`onnxbot.py`'s
+        # `_own_values`), which it otherwise only learns from `choose`'s own
+        # side effect (`NetworkBot._seated`) -- fine when `choose` always
+        # runs first, not when a driver may publish before a seat's very
+        # first decision of the game (`Game.publish_due`, checked in
+        # `decide` below, before `choose`). `LocalSearchBrain` already holds
+        # this seat's one live `Game` for its whole life -- one instance per
+        # bot-runner thread -- so handing it over now is not new
+        # information, only earlier than `choose` would have. A bot kind
+        # without this attribute (`search2`, an MCTS `Search`) is untouched.
+        if getattr(self.bot, "_seated", "not-a-network-bot") is None:
+            self.bot._seated = self.game
+
     def decide(self, transport: Transport, token: str, seat: int) -> dict:
+        # Checked and published, if due, *before* `choose` below -- not in
+        # `Tables.act` after the move is submitted. `choose` calls
+        # `hexset.actions.legal_actions` on this same live `game` to work
+        # out its move, which is itself one of the engine's three
+        # event-trigger points (`Game.event_pending`'s docstring) and would
+        # otherwise consume the turn's pending event on this seat's
+        # *standing* vector before `Tables.act`'s own check ever ran (the
+        # PI amendment "publish points and the event trigger").
+        if self.game.publish_due(seat):
+            from hexset.trading import publish_valuation  # avoids a hard game.py import cycle
+
+            publish_valuation(self.game, seat, self.bot)
         return action_to_wire(self.bot.choose(self.game))
 
 

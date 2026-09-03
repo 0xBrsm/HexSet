@@ -252,12 +252,15 @@ class HexSetEnv(Env):
                 continue
             seat = aec.possible_agents.index(agent)
             bot = self._bots[seat]
+            # Once a turn, exactly like `arena.play`'s loop: only when the
+            # engine says this seat is due (`Game.publish_due`, the
+            # post-roll/robber point, before the turn's first trade event --
+            # the PI amendment "publish points and the event trigger"), not
+            # after every action.
+            if aec._game.publish_due(seat):
+                publish_valuation(aec._game, seat, bot)
             action = bot.choose(aec._game)
             aec.step(action)
-            # Right after its own action, exactly like `arena.play`'s loop:
-            # the vector any future trade event reads for this seat is
-            # always the one its latest decision stood behind.
-            publish_valuation(aec._game, seat, bot)
 
     def _observe_learner(self) -> tuple[Any, dict[str, Any]]:
         learner = agent_name(self._learner_seat)

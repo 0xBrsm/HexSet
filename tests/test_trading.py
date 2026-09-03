@@ -9,7 +9,7 @@ import random
 
 import pytest
 
-from hexset.actions import Action, ActionType
+from hexset.actions import Action, ActionType, legal_actions
 from hexset.board.board import random_base_board
 from hexset.board.terrain import NUM_RESOURCES, Resource
 from hexset.game import Phase, end_turn, enter_main, imagine, move_robber_to, roll_dice, start
@@ -694,7 +694,11 @@ def _seat_and_publish(game, traders):
         game.publish(seat, trader.vec)
 
 
-def test_the_event_runs_on_the_way_into_main_from_a_roll():
+def test_entering_main_from_a_roll_arms_the_event_rather_than_running_it():
+    """`enter_main` no longer runs the turn's first event itself (the PI
+    amendment "publish points and the event trigger") -- it only arms
+    `event_pending`; the event fires lazily, the first time anything
+    observes or publishes for the current player."""
     game = a_game()
     game.phase = Phase.ROLL
     give(game._state, 0, Resource.WOOD, 1)
@@ -710,10 +714,14 @@ def test_the_event_runs_on_the_way_into_main_from_a_roll():
     )
     roll_dice(game, 8)
     assert game.phase is Phase.MAIN
+    assert game.event_pending is True
+    assert game.trades_made == 0
+    legal_actions(game)
     assert game.trades_made == 1
+    assert game.event_pending is False
 
 
-def test_the_event_runs_on_the_way_into_main_from_the_robber():
+def test_entering_main_from_the_robber_arms_the_event_rather_than_running_it():
     game = a_game()
     game.phase = Phase.ROBBER
     give(game._state, 0, Resource.WOOD, 1)
@@ -729,7 +737,170 @@ def test_the_event_runs_on_the_way_into_main_from_the_robber():
     )
     move_robber_to(game, 3)
     assert game.phase is Phase.MAIN
+    assert game.event_pending is True
+    assert game.trades_made == 0
+    legal_actions(game)
     assert game.trades_made == 1
+    assert game.event_pending is False
+
+
+def test_the_event_fires_on_legal_actions_the_observation_first_path():
+    """One of the three trigger points (`Game.event_pending`'s docstring):
+    the current player's own `legal_actions(game)` fires the pending event,
+    using whatever vector is already standing -- the seat has not
+    published this turn yet."""
+    game = a_game()
+    give(game._state, 0, Resource.WOOD, 1)
+    give(game._state, 1, Resource.ORE, 1)
+    game.gates = (
+        Trader(vector(ore=1.0, wood=-1.0)),
+        Trader(vector(wood=1.0, ore=-1.0)),
+        Trader(),
+        Trader(),
+    )
+    for seat, trader in enumerate(game.gates):
+        game.valuations[seat] = trader.vec  # a standing vector, not published now
+    game.event_pending = True
+    assert game.trades_made == 0
+    legal_actions(game)
+    assert game.trades_made == 1
+    assert game.event_pending is False
+
+
+def test_the_event_fires_on_state_the_observation_first_path():
+    """The second trigger point: `game.state(seat)` for the current seat."""
+    game = a_game()
+    give(game._state, 0, Resource.WOOD, 1)
+    give(game._state, 1, Resource.ORE, 1)
+    game.gates = (
+        Trader(vector(ore=1.0, wood=-1.0)),
+        Trader(vector(wood=1.0, ore=-1.0)),
+        Trader(),
+        Trader(),
+    )
+    for seat, trader in enumerate(game.gates):
+        game.valuations[seat] = trader.vec
+    game.event_pending = True
+    game.state(game.current_player)
+    assert game.trades_made == 1
+    assert game.event_pending is False
+
+
+def test_a_hidden_false_read_of_the_current_player_s_state_does_not_fire_it():
+    """`game.state(seat, hidden=False)` is the true-state access path used
+    for reasons unrelated to that seat's own turn -- omniscient search,
+    final scoring, a value function hashing a hypothetical position -- and
+    must not double as an event trigger: `hexset.bench.aivat.
+    chance_outcomes` re-seats a hypothetical child with the real seated
+    bots' gates for scoring, and a value function's `child.state(0,
+    hidden=False)` firing a live trade event there, using those bots' real
+    judgement, measurably diverged the real game from what it would
+    otherwise have played (`test_aivat.py`'s exact-replay gate). Only
+    `hidden=True` triggers; `legal_actions` and `Game.publish` are
+    unaffected and still reach the same seat's pending event."""
+    game = a_game()
+    give(game._state, 0, Resource.WOOD, 1)
+    give(game._state, 1, Resource.ORE, 1)
+    game.gates = (
+        Trader(vector(ore=1.0, wood=-1.0)),
+        Trader(vector(wood=1.0, ore=-1.0)),
+        Trader(),
+        Trader(),
+    )
+    for seat, trader in enumerate(game.gates):
+        game.valuations[seat] = trader.vec
+    game.event_pending = True
+    game.state(game.current_player, hidden=False)
+    assert game.trades_made == 0
+    assert game.event_pending is True
+    # The pending event is still reachable normally afterwards.
+    game.state(game.current_player)
+    assert game.trades_made == 1
+    assert game.event_pending is False
+
+
+def test_the_event_fires_on_publish_before_any_observation():
+    """The third trigger point, and the other order: the current player's
+    own `Game.publish`, reached before anything has observed the game this
+    turn, fires the event on the vector *just* published -- not the one
+    standing from its last turn."""
+    game = a_game()
+    give(game._state, 0, Resource.WOOD, 1)
+    give(game._state, 1, Resource.ORE, 1)
+    game.gates = (
+        Trader(),
+        Trader(vector(wood=1.0, ore=-1.0)),
+        Trader(),
+        Trader(),
+    )
+    # Seat 1 published on its own, earlier turn; seat 0 (the current
+    # player) has not yet -- `game.publish` for a seat that is not the
+    # current player never fires the trigger, so this alone sets up the
+    # counterparty's side without spending the event.
+    game.publish(1, vector(wood=1.0, ore=-1.0))
+    game.event_pending = True
+    assert game.trades_made == 0
+    # Nothing has called `legal_actions` or `game.state` for seat 0 yet.
+    game.publish(0, vector(ore=1.0, wood=-1.0))
+    assert game.trades_made == 1
+    assert game.event_pending is False
+
+
+def test_the_event_fires_on_observation_even_if_nobody_ever_publishes():
+    """The idle-human path: a seat that never calls `Game.publish` still
+    gets its event, on whatever vector is already standing, the first time
+    anything observes the game for it."""
+    game = a_game()
+    give(game._state, 0, Resource.WOOD, 1)
+    give(game._state, 1, Resource.ORE, 1)
+    game.gates = (
+        Trader(vector(ore=1.0, wood=-1.0)),
+        Trader(vector(wood=1.0, ore=-1.0)),
+        Trader(),
+        Trader(),
+    )
+    for seat, trader in enumerate(game.gates):
+        game.valuations[seat] = trader.vec
+    game.event_pending = True
+    assert game.trades_made == 0
+    view = game.state(game.current_player)  # e.g. a server rendering the human's own view
+    assert game.trades_made == 1
+    assert view is not None
+
+
+def test_the_event_never_fires_twice_for_one_turn():
+    game = a_game()
+    give(game._state, 0, Resource.WOOD, 4)
+    give(game._state, 1, Resource.ORE, 4)
+    game.gates = (
+        Trader(vector(ore=1.0, wood=-1.0)),
+        Trader(vector(wood=1.0, ore=-1.0)),
+        Trader(),
+        Trader(),
+    )
+    for seat, trader in enumerate(game.gates):
+        game.valuations[seat] = trader.vec
+    game.event_pending = True
+    legal_actions(game)
+    made = game.trades_made
+    assert made > 0
+    game.state(game.current_player)
+    game.publish(0, vector(ore=1.0, wood=-1.0))
+    legal_actions(game)
+    assert game.trades_made == made
+
+
+def test_publish_due_is_true_once_per_turn_for_the_current_player_in_main():
+    game = a_game()
+    game.gates = tuple(Trader() for _ in range(4))
+    game.event_pending = True
+    assert game.publish_due(0) is True
+    assert game.publish_due(1) is False  # not the current player
+    game.phase = Phase.ROLL
+    assert game.publish_due(0) is False  # not MAIN
+    game.phase = Phase.MAIN
+    game.event_pending = False
+    assert game.publish_due(0) is False  # already fired this turn
 
 
 def test_a_game_with_nobody_seated_simply_does_not_trade():
@@ -738,6 +909,7 @@ def test_a_game_with_nobody_seated_simply_does_not_trade():
     give(game._state, 0, Resource.WOOD, 1)
     give(game._state, 1, Resource.ORE, 1)
     roll_dice(game, 8)
+    legal_actions(game)
     assert game.trades == []
 
 
@@ -788,6 +960,36 @@ def test_an_imagined_game_does_not_carry_the_seated_gates():
     child.phase = Phase.MAIN
     enter_main(child)
     assert child.trades == []
+
+
+def test_an_imagined_game_carries_event_pending():
+    """`imagine` copies `event_pending` -- a chain of simulated turns arms
+    and consumes the flag the same way a real game does."""
+    game = a_game()
+    game.event_pending = True
+    child = imagine(game, random.Random(1))
+    assert child.event_pending is True
+    child.event_pending = False
+    assert game.event_pending is True  # independent copies, not aliased
+
+
+def test_a_search_stepping_its_own_copy_never_re_runs_a_live_event():
+    """A search's `imagine`d copy carries `gates=None` (the test above), and
+    stepping that copy through its own `legal_actions` -- exactly what a
+    search does turn after simulated turn -- must not re-run a live event
+    with the copy's stand-in gates. The trigger is a true no-op then: it
+    does not even consume `event_pending`, so a later real handoff of gates
+    to the copy (which never happens today, but the invariant should not
+    depend on that) would not have silently missed an event."""
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    game.gates = (Trader(vector(ore=1.0, wood=-1.0)), Trader(), Trader(), Trader())
+    game.event_pending = True
+    child = imagine(game, random.Random(1))
+    assert child.gates is None
+    assert child.event_pending is True
+    legal_actions(child)
+    assert child.trades == []
+    assert child.event_pending is True
 
 
 def test_an_imagined_game_carries_the_trade_switch_and_the_log():

@@ -136,6 +136,20 @@ smaller of the two surpluses, highest; ties fall to the current player's own
 surplus, then the total, then a canonical order for determinism — until
 nothing clears.
 
+**When a seat's vector is read.** A turn's first trade event does not run at
+a fixed point in the engine's own code any more; it runs lazily, the first
+time anything reaches the current player's own `legal_actions(game)`,
+`game.state(seat)`, or `Game.publish` — whichever comes first
+(`Game.event_pending`, the PI amendment "publish points and the event
+trigger" in `agents/reference/trading-design.md`). `Game.publish_due(seat)`
+is the engine's own answer to "should I publish right now?": true exactly
+once per seat per turn, while `seat` is the current player, the phase is
+`MAIN`, and this turn's first event has not fired yet. Every event after the
+first one in a turn (after every subsequent MAIN action) runs
+unconditionally, on whatever is currently published — publishing more often
+than once a turn does not break anything, it is simply extra work a driver
+does not need to do.
+
 A checkpoint served embedded (`hexset.clients.onnxbot.NetworkBot`) trades off
 the same `value` head this contract already declares: `valuation` is
 `tanh(delta_V_r / VALUE_SCALE)` per resource, `delta_V_r` the head's own-row
@@ -144,12 +158,25 @@ delta between the seat's hand and that hand holding one more card of `r`, and
 over the current one — the derivation `hexnet.policy.DerivedTrader` trains
 under, reimplemented here against the wire record instead of a live forward
 (`hexset.trading.VALUE_SCALE` is the pinned constant both cite). Published
-right after the seat's own action, same as any other seat
+once a turn, when `Game.publish_due(seat)` says so, same as any other seat
 (`hexset.trading.publish_valuation`), so it lands in `game.valuations` and
 this record's `valuations` field before the table's next trade event.
 `max_trades=0` in the metadata is still the explicit off switch — a seat with
 it set publishes nothing and accepts nothing, exactly like a bot with no
 `valuation` method at all.
+
+**When a human should set theirs.** `PUT /api/games/<code>/valuation` is
+unconditional — a human seat may call it as often as it likes, `publish_due`
+or not, and the two are unrelated: a bot's driver *checks* `publish_due` so
+it does not do needless work, but nothing enforces the check, and a human
+client has no reason to. What matters is *when*, relative to the event: a
+value set before the current player's own `GET /api/state` (or any other
+read of the game while it is that seat's turn) is what the turn's first
+event sees; a value set later only takes effect from the next observation or
+the next turn's event onward, since the first event already ran on whatever
+was standing before it. A seat that never calls it at all keeps trading on
+whatever it last set — all-zero, and so never a party to a clearing deal,
+until it sets something.
 
 A checkpoint served externally (`hexset.clients.botclient.RecordBrain`, the
 `python -m hexset.clients.botclient` peer) does not share this brain and does

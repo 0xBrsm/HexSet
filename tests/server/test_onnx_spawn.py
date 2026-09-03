@@ -97,9 +97,14 @@ def test_a_network_seats_first_action_publishes_a_nonzero_valuation(monkeypatch,
     bot = table.session.traders[seat]
     # Park the game in MAIN with the network seat to move -- past setup, so
     # `legal_actions` offers more than one option and the stub's
-    # uniform-over-legal policy has an ordinary turn to choose from.
+    # uniform-over-legal policy has an ordinary turn to choose from. Armed
+    # by hand rather than via `enter_main`/`roll_dice`, so `event_pending`
+    # is set explicitly too: it is what makes `Game.publish_due(seat)` true
+    # for this seat's first decision (the PI amendment "publish points and
+    # the event trigger").
     game.phase = Phase.MAIN
     game.current_player = seat
+    game.event_pending = True
 
     assert all(v == 0.0 for v in table.session.game.valuations[seat])
 

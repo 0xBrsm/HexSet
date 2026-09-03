@@ -149,12 +149,27 @@ def chance_outcomes(
     Every successor is also re-seated with `game.gates`, which `imagine`
     deliberately does not copy (`hexset.game.Game.gates`): this is an
     instrumented *replay* of a real game, not a bot's hypothetical, so its
-    successors must clear the same trades the real one would. `valuations`
-    itself *is* carried by `imagine`, and there is no new decision inside
-    any of these branches to publish -- only the gates, which judge whatever
-    the roll or the steal just changed, need re-seating. A roll and a
-    steal both change hands before the turn's trade event runs, so the
-    outcomes genuinely differ by more than the one card drawn.
+    successors must clear the same trades the real one would.
+
+    Neither a roll's nor a steal's successor forces that event to run: it
+    stays pending on `child` exactly as it stays pending on the real
+    `game` at this same point in `instrumented`'s own loop (`roll_dice`/
+    `move_robber_to` only *arm* the turn's first event now,
+    `Game.event_pending` -- the PI amendment "publish points and the event
+    trigger" -- rather than running it eagerly), so a child and the real
+    game it stands in for are read at the identical point relative to that
+    event -- both before it, consistently -- whether that read is
+    `_outcome_key` below or a value function scoring `child` for the
+    correction. Forcing it on either one and not the other was tried and
+    was wrong twice over: forcing only the children left `_outcome_key`
+    unable to find the real game's (still pre-event) outcome among the
+    (post-event) enumerated ones, and forcing the real game too, right
+    after `apply`, consumed its `event_pending` before that seat's own
+    `Game.publish_due` check -- reached one loop iteration later -- ever
+    saw it, so the seat silently never got to publish that turn at all.
+    `Game.state`'s own docstring is what actually keeps a value function's
+    `hidden=False` read (`child.state(0, hidden=False)`, scoring, not a
+    decision) from firing anything: only `hidden=True` is a trigger.
     """
     if action.type is ActionType.ROLL:
         out = []
@@ -199,12 +214,14 @@ def chance_outcomes(
     # Each outcome is played out in full rather than patched afterwards.
     # Patching the played child's two hand entries was exact while a steal
     # moved one card and nothing else; it is not any more, because the steal
-    # resolves the robber and so opens the main phase, and the turn's trade
-    # event then clears deals off the *post-steal* hands. `_Forced` stands in
-    # for the child's rng exactly as `hexset.bots.heximax` does it: `steal`
-    # draws `randrange(total)` and walks the hand in resource order, so
-    # returning the index of the first card of the wanted resource makes the
-    # draw deterministic, and nothing else on the path consults the rng.
+    # resolves the robber and so opens the main phase (`move_robber_to`
+    # only *arms* that turn's first trade event, per this function's own
+    # docstring -- it stays pending on `child`, unrun, matching the real
+    # game at this same point). `_Forced` stands in for the child's rng
+    # exactly as `hexset.bots.heximax` does it: `steal` draws
+    # `randrange(total)` and walks the hand in resource order, so returning
+    # the index of the first card of the wanted resource makes the draw
+    # deterministic, and nothing else on the path consults the rng.
     out = []
     for resource, count in enumerate(hand):
         if not count:
@@ -377,16 +394,18 @@ def instrumented(
     while not is_over(game) and actions < action_cap:
         seat = to_move(game)
         bot = lineup[seat]
+        # A line-for-line twin of `arena.play`: the acting seat publishes
+        # once a turn, when the engine says it is due (`Game.publish_due`),
+        # not after every action, so this replay's vectors match a real
+        # duel's bit-for-bit rather than staying at whatever they were when
+        # the game started.
+        if game.publish_due(seat):
+            publish_valuation(game, seat, bot)
         action = bot.choose(game)
         chance = action.type in CHANCE_ACTIONS
         term = _term_of(action) if chance else ""
         outcomes = chance_outcomes(game, action, aux) if term in terms else []
         apply(game, action)
-        # A line-for-line twin of `arena.play`: the acting seat publishes
-        # right after its own action, so this replay's vectors match a real
-        # duel's bit-for-bit rather than staying at whatever they were when
-        # the game started.
-        publish_valuation(game, seat, bot)
         actions += 1
         if len(outcomes) > 1:
             keys, probabilities, children = zip(*outcomes)

@@ -320,3 +320,118 @@ almost entirely contention-bound on the same shared box.
 
 `gate-budget-8.json`, `gate-budget-16.json`, `gate-budget-32.json`,
 `gate-budget-unbounded.json`, `gate-budget-minimal.json`.
+
+## Re-run for "publish points and the event trigger" (fix/publish-points)
+
+The correction registered in `agents/reference/trading-design.md`'s post-data
+note "HexNet lands contract 5", PI amendment "publish points and the event
+trigger": a seat publishes once a turn (`Game.publish_due`, the engine-defined
+post-roll/robber point) instead of after every action, and the turn's first
+trade event no longer runs inside `enter_main` — it runs lazily, the first
+time the current player's own `legal_actions`, `Game.state(seat)` (at
+`hidden=True` only — see below), or `Game.publish` is reached, whichever
+comes first (`Game.event_pending`).
+
+### (iii) Strength — a fresh comparison
+
+`heximax` vs `search2`, 800 blocked games, duel seed 42000, 26 workers. Both
+arms changed again (publish timing, event trigger), so this is read on its
+own terms, not against the bundle engine's 61.9%.
+
+| | |
+|---|---|
+| wins | **478 / 800 = 59.8%** |
+| Wilson 95% | [56.3, 63.1] |
+| paired VP | **+0.681** [+0.503, +0.859] |
+| bar | point ≥ 50%, Wilson lower bound > 45% |
+| met | yes |
+
+`publish-points-heximax-vs-search2.json`.
+
+### (v) Cost, publish calls per turn
+
+Same mirror protocol (three four-seat games an arm, board seeds 0/1/2, every
+seat the same preset, `search2` the control, arms interleaved seed by seed,
+one process), both arms now seated as the game's own gates and publishing
+through the same `Game.publish_due` gate the drivers use, extended with
+publish-calls-per-turn.
+
+| | heximax | search2 | ratio |
+|---|---|---|---|
+| ms / move | 7.708 | 4.559 | **1.69x** |
+| function calls / move | — | — | **1.43x** |
+
+Comfortably inside the design's "≤2x `search2` per move" ceiling on both
+readings. The call-count ratio is load-independent; the ms/move ratio was
+taken on a contended box (loadavg ~15–33 throughout this run, two other
+pytest processes and an 800-game duel running concurrently), so read it as
+"comfortably under 2x," not to the second decimal — every prior reading in
+this file notes the same caveat when it applies.
+
+**Publish calls per turn: 1.01 for both arms** (heximax 286/283, search2
+324/321, and the lineup readout (iii) plays: 609/603) — matches the
+design's expectation of one publish per seat per turn, down from "after
+every action" (the collector-cost problem this correction exists to fix).
+
+**Trades per turn, over the lineup readout (iii) actually plays**
+(`[heximax, heximax, search2, search2]`, blocked, duel seed 42000, first 6
+games): mean **0.0166**, max 2, 10 trades over 603 turns (594 turns clear
+nothing, 8 clear one, 1 clears two) — an order of magnitude lower than the
+bundle engine's 0.161/0.057 mean. This is a real, expected consequence of
+the correction, not a regression: a seat's vector is now fixed for the
+*entire* turn at whatever it published at the post-roll point (the
+design's own "public vectors fixed within one event, published at the last
+decision" — now literally the *only* decision each turn that publishes),
+rather than refreshed after every build/trade as the previous ("publish
+after every action") shape did. Fewer, staler vector updates mean fewer
+opportunities for two seats' advertised wants to overlap.
+
+`publish-points-cost.json`.
+
+### Census
+
+`heximax`/`heximax-omni`/`search2` re-baseline by construction (publish
+timing changed, which changes which trades clear and when — verified
+directly: `search2-notrade`/`heximax-notrade` reproduce their prior hashes
+bit-for-bit, 20/20 and 5/5, confirming the *only* thing that moved a
+no-trade game was gone; the trading presets do not reproduce and the
+fixtures were regenerated).
+
+### Two correctness bugs found and fixed while implementing this, not just measured
+
+- **`Game.state(seat, hidden=False)` must not be an event trigger, only
+  `hidden=True` is.** `hexset.bench.aivat.chance_outcomes` re-seats a
+  *hypothetical* child position with the real seated bots' gates so it can
+  score what a real trade event would do there; a value function reading
+  `child.state(0, hidden=False)` to hash the position was, before this
+  fix, enough to fire a live trade event using those bots' real judgement
+  as a side effect of being asked to score a position, measurably
+  diverging the real game (`test_aivat.py`'s exact-replay gate caught it:
+  `_play_one` and `instrumented()` stopped reproducing the same game
+  bit-for-bit). Fixed in the engine (`Game.state`), not by special-casing
+  `aivat.py`.
+- **`hexset.server.webplay.GameSession.state_view` read `trades`/
+  `valuations` before the field that would have triggered the pending
+  event (`legal_actions`, further down the same dict).** A poll of a fresh
+  `MAIN` position could report `trades: []` even though the event had a
+  clearing deal waiting, because the snapshot's own `legal_actions` field —
+  the thing that would have fired it — was computed after the fields that
+  needed its result. Fixed by observing the current player's own state
+  (`hidden=True`, discarding the result) before those fields are built.
+
+### A known gap, not fixed here
+
+`hexset.server.webplay.GameSession._apply`'s own per-action `Event`/journal
+`trades` field is captured as `game.trades` since the *previous* `_apply`
+call, which undercounts a turn's first event when it fires lazily between
+two `_apply` calls (e.g. via an embedded bot's pre-submit publish, or a
+client's own `legal_actions`-fetching poll) rather than inside either one:
+the trade is fully reflected in the live `state_view` (fixed above), but is
+not attributed to any discrete step in `self.events`/the journal, so a
+game resumed from the journal after a server restart would not replay it.
+No test currently exercises this path; `hexset.record.record_game` has the
+analogous fix (attributing a lazily-triggered first event to the *previous*
+action's step, `len(actions) - 1`, matching what `hexset.record.advance`
+already replays as `apply(that action); apply_trades(...)`), which the
+session's own per-action bookkeeping in `webplay.py` would need too, and
+does not yet have.

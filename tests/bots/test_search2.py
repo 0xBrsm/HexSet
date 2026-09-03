@@ -49,9 +49,10 @@ def _census_game(entrant: Entrant, seed: int, players: int = 4) -> str:
     builds the board and starts the game, each seat's bot gets its own rng
     deterministic per seat, and the hash covers the full `(seat, action)`
     trace rather than just the outcome. The bots are seated as the game's
-    `gates` too, and each publishes right after its own action, exactly as
-    `arena.play` does both, so the census covers what they trade as well as
-    what they choose.
+    `gates` too, and each publishes once a turn, when the engine says it is
+    due (`Game.publish_due`), exactly as `arena.play` does both -- the PI
+    amendment "publish points and the event trigger" -- so the census
+    covers what they trade as well as what they choose.
     """
     rng = random.Random(seed)
     board = random_base_board(rng)
@@ -65,10 +66,11 @@ def _census_game(entrant: Entrant, seed: int, players: int = 4) -> str:
     moves = 0
     while not is_over(game):
         seat = to_move(game)
-        action = bots[seat].choose(game)
         cleared = len(game.trades)
+        if game.publish_due(seat):
+            publish_valuation(game, seat, bots[seat])
+        action = bots[seat].choose(game)
         apply(game, action)
-        publish_valuation(game, seat, bots[seat])
         trace.append(
             (
                 seat,

@@ -5,7 +5,7 @@ name = "hexset"
 # `hexset.clients` all ship from here. See
 # `tests/test_versions.py`, which fails the moment `hexset.__version__`
 # drifts from this file.
-version = "0.16.0"
+version = "0.25.2"
 description = "HexSet — a numpy-only, information-set-honest hex-tile trading and building engine, a sample bot, a Catanatron adapter, and a browser/HTTP/MCP gym around them"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
@@ -69,3 +69,12 @@ include = ["hexset", "hexset.*"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+# `slow` covers the byte-identity censuses and the handful of other tests
+# that play enough full games to run ~20s or more -- excluded by default so
+# `pytest` stays a ~10-minute inner-loop suite, included with `pytest -m
+# slow`. See the README's "Tests" section for the gate this must pass before
+# merging a change under `src/hexset/` or `src/hexset/bots/`.
+addopts = "-m \"not slow\""
+markers = [
+    "slow: full-game / behaviour-preservation tests too slow (~20s+) for the default run; select with `pytest -m slow`",
+]

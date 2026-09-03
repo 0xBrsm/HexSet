@@ -10,11 +10,14 @@ pytest.importorskip("onnxruntime", reason="hexset.clients.onnxbot needs onnxrunt
 from hexset.actions import legal_actions  # noqa: E402
 from hexset.server.rules import options_for  # noqa: E402
 from hexset.board.board import random_base_board  # noqa: E402
-from hexset.game import start, to_move  # noqa: E402
+from hexset.game import Phase, start, to_move  # noqa: E402
 from hexset.clients.onnxbot import load, network_bot  # noqa: E402
+from hexset.trading import NETWORK_GATE_ROWS  # noqa: E402
 from conftest import step_randomly  # noqa: E402
 
 FIXTURE_V2 = Path(__file__).parent / "fixtures" / "stub-contract5.onnx"
+FIXTURE_VALUED = Path(__file__).parent / "fixtures" / "stub-contract5-valued.onnx"
+FIXTURE_VALUED_BATCH1 = Path(__file__).parent / "fixtures" / "stub-contract5-valued-batch1.onnx"
 
 
 @pytest.fixture
@@ -164,3 +167,270 @@ def test_scoring_is_greedy_so_a_position_answers_the_same_way_twice(checkpoint_v
         step_randomly(game, rng)
     assert to_move(game) is not None
     assert bot.choose(game) == bot.choose(game)
+
+
+# --- Trading: valuation/accepts off the value head, mirroring
+# `hexnet.policy.DerivedTrader` (`agents/reference/trading-design.md` §8) ---
+
+
+@pytest.fixture
+def checkpoint_valued():
+    """`stub-contract5-valued.onnx`: same shape as `stub-contract5.onnx`, but
+    `value` reads `own_hand` through five fixed, distinct, non-zero
+    per-resource weights instead of being identically zero (see
+    `fixtures/build_stub.py --valued`). Linear in the hand, so a one-card
+    imagined successor's delta is exactly that resource's weight whatever the
+    starting hand holds -- deterministic and non-degenerate enough to
+    exercise `NetworkBot.valuation`/`accepts` for real, without pretending
+    this is a trained network.
+    """
+    board = random_base_board(random.Random(0))
+    yield str(FIXTURE_VALUED), board
+    from hexset.clients.onnxbot import _load_cached
+
+    _load_cached.cache_clear()
+
+
+def _seated_at_main(path: str, board, seat: int = 0, hand=(1, 2, 0, 1, 3)):
+    """A bot that has just chosen once at a `MAIN`-phase position with
+    `seat`'s hand pinned to `hand` -- `valuation`/`accepts` only ever answer
+    for the game `choose` last handed the bot (see `NetworkBot._seated`'s
+    docstring), so every trading test needs one `choose` first, exactly as
+    the server's own `Tables.act` does before it ever asks for a vector.
+    """
+    bot = network_bot(path, board)
+    game = start(board, 4, random.Random(1))
+    game.phase = Phase.MAIN
+    game.current_player = seat
+    game.state(seat, hidden=False).hands[seat] = list(hand)
+    bot.choose(game)
+    return bot, game
+
+
+def test_valuation_is_five_floats_in_range_and_deterministic(checkpoint_valued):
+    path, board = checkpoint_valued
+    bot, game = _seated_at_main(path, board)
+    seat = to_move(game)
+    view = game.state(seat)
+
+    first = bot.valuation(view)
+    second = bot.valuation(view)
+
+    assert len(first) == 5
+    assert all(-1.0 <= x <= 1.0 for x in first)
+    assert first == second
+
+
+def test_valuation_scores_the_six_rows_in_one_batched_call_when_the_graph_allows_it(
+    checkpoint_valued,
+):
+    """`stub-contract5-valued.onnx` declares a dynamic batch axis (like every
+    other fixture here), so `V2Policy.value_of`'s one-call path applies —
+    the six-row fan-out (the hand plus its five one-card successors) costs
+    one graph dispatch, not six."""
+    path, board = checkpoint_valued
+    bot, _ = _seated_at_main(path, board)
+    assert bot.policy._batchable(6)
+
+
+def test_valuation_falls_back_to_six_calls_when_the_graphs_batch_is_fixed_to_one():
+    """The graph's own declared shape, not a caller's guess, decides this:
+    `stub-contract5-valued-batch1.onnx` is the same weights with every input's
+    batch axis pinned to the literal `1` (`fixtures/build_stub.py --valued
+    --fixed-batch`), and `V2Policy.value_of` must fall back to one call per
+    row rather than feed it a batch of six and let onnxruntime refuse."""
+    board = random_base_board(random.Random(0))
+    bot, game = _seated_at_main(str(FIXTURE_VALUED_BATCH1), board)
+    assert not bot.policy._batchable(6)
+
+    seat = to_move(game)
+    view = game.state(seat)
+    values = bot.valuation(view)
+    assert len(values) == 5
+    assert all(-1.0 <= x <= 1.0 for x in values)
+
+
+def test_accepts_refuses_a_trade_with_zero_delta(checkpoint_valued):
+    """Strict, not `>=`: an exchange that leaves the hand (and so the value)
+    exactly where it was must be refused, the same termination argument
+    `hexnet.policy.DerivedTrader.accepts` and `hexset.trading.trade_event`
+    both rest on."""
+    path, board = checkpoint_valued
+    bot, game = _seated_at_main(path, board)
+    seat = to_move(game)
+    view = game.state(seat)
+
+    no_change = (0, 0, 0, 0, 0)
+    assert bot.accepts(view, no_change, (seat + 1) % 4) is False
+
+
+def test_accepts_takes_a_strictly_improving_exchange(checkpoint_valued):
+    """`stub-contract5-valued.onnx`'s weights are `[0.006, -0.011, 0.004,
+    0.013, -0.008]`: giving up resource 1 (the most negative weight) for
+    resource 3 (the most positive) strictly increases the linear value, so
+    the private gate must say yes -- the mirror image of the zero-delta
+    refusal above, pinning that `accepts` is not vacuously `False`."""
+    path, board = checkpoint_valued
+    bot, game = _seated_at_main(path, board, hand=(1, 2, 0, 1, 3))
+    seat = to_move(game)
+    view = game.state(seat)
+
+    improving = (0, -1, 0, 1, 0)
+    assert bot.accepts(view, improving, (seat + 1) % 4) is True
+
+
+def test_accepts_many_agrees_with_accepts_row_by_row(checkpoint_valued):
+    """The batched gate (`agents/reference/trading-design.md`'s post-data
+    note, "the collector cost gate fails at 2.9-3.6x") must answer exactly
+    what looping `accepts` would, one graph call instead of many: a mix of
+    a refused zero-delta trade, the strictly-improving trade above, its
+    strict reverse (refused), and an uncoverable bundle (negative resulting
+    count -- refused without ever reaching the graph)."""
+    path, board = checkpoint_valued
+    bot, game = _seated_at_main(path, board, hand=(1, 2, 0, 1, 3))
+    seat = to_move(game)
+    view = game.state(seat)
+
+    no_change = (0, 0, 0, 0, 0)
+    improving = (0, -1, 0, 1, 0)
+    worsening = (0, 1, 0, -1, 0)
+    uncoverable = (0, 0, -1, 0, 0)  # this hand holds zero sheep
+    received = [no_change, improving, worsening, uncoverable]
+    counterparties = [(seat + 1) % 4] * len(received)
+
+    expected = [bot.accepts(view, r, c) for r, c in zip(received, counterparties)]
+    many = bot.accepts_many(view, received, counterparties)
+
+    assert many == expected
+    assert many == [False, True, False, False]
+
+
+def test_accepts_many_matches_accepts_within_tolerance_on_random_bundles(checkpoint_valued):
+    """Row-by-row agreement within 1e-6, the strong check item 4 asks for,
+    over a spread of coverable one-card and two-card exchanges rather than
+    the four hand-picked cases above."""
+    import random as _random
+
+    path, board = checkpoint_valued
+    bot, game = _seated_at_main(path, board, hand=(2, 2, 1, 2, 3))
+    seat = to_move(game)
+    view = game.state(seat)
+    hand = view.known[seat]
+
+    rng = _random.Random(11)
+    received = []
+    counterparties = []
+    for _ in range(15):
+        wanted = [0, 0, 0, 0, 0]
+        give_from = rng.randrange(5)
+        take_to = rng.randrange(5)
+        if give_from == take_to:
+            take_to = (take_to + 1) % 5
+        wanted[give_from] -= 1
+        wanted[take_to] += 1
+        received.append(tuple(wanted))
+        counterparties.append((seat + 1 + rng.randrange(3)) % 4)
+
+    expected = [bot.accepts(view, r, c) for r, c in zip(received, counterparties)]
+    many = bot.accepts_many(view, received, counterparties)
+    assert many == expected
+
+    # And the underlying value comparisons agree to float precision, not
+    # only the thresholded boolean -- rebuild each row's raw value the same
+    # way `accepts`/`accepts_many` do and diff them directly.
+    for r, c in zip(received, counterparties):
+        after = [n + d for n, d in zip(hand, r)]
+        if any(n < 0 for n in after):
+            continue
+        before_value, after_value = bot._own_values(seat, [list(hand), after])
+        assert (after_value > before_value) == bot.accepts(view, r, c)
+
+
+# --- NETWORK_GATE_ROWS: a network gate only scores its top-ranked prefix
+# (`agents/reference/trading-design.md`'s post-data note, "gate re-run with
+# batched gates: 3.0-3.3x, still failing") ---
+
+
+def _many_candidates(seat: int, count: int, seed: int = 11):
+    """`count` one-card exchanges from `seat`'s point of view, in the same
+    shape `trading._best_clearing` hands to `accepts_many` -- an
+    already-rank-ordered list, here just long enough (well past
+    `NETWORK_GATE_ROWS`) to exercise the cutoff rather than to mean anything
+    about public rank itself."""
+    rng = random.Random(seed)
+    received = []
+    counterparties = []
+    for _ in range(count):
+        wanted = [0, 0, 0, 0, 0]
+        give_from = rng.randrange(5)
+        take_to = rng.randrange(5)
+        if give_from == take_to:
+            take_to = (take_to + 1) % 5
+        wanted[give_from] -= 1
+        wanted[take_to] += 1
+        received.append(tuple(wanted))
+        counterparties.append((seat + 1 + rng.randrange(3)) % 4)
+    return received, counterparties
+
+
+def test_accepts_many_only_reaches_the_session_for_the_top_gate_rows(
+    checkpoint_valued, monkeypatch
+):
+    """100 candidates in, but only `NETWORK_GATE_ROWS` post-trade successors
+    plus the seat's own hand reach the graph -- counted directly off the
+    stub's `session.run`, not inferred from the returned verdicts."""
+    path, board = checkpoint_valued
+    bot, game = _seated_at_main(path, board, hand=(2, 2, 1, 2, 3))
+    seat = to_move(game)
+    view = game.state(seat)
+    received, counterparties = _many_candidates(seat, 100)
+
+    batch_sizes: list[int] = []
+    real_run = bot.policy.session.run
+
+    def counting_run(outputs, inputs, *args, **kwargs):
+        batch_sizes.append(next(iter(inputs.values())).shape[0])
+        return real_run(outputs, inputs, *args, **kwargs)
+
+    monkeypatch.setattr(bot.policy.session, "run", counting_run)
+
+    many = bot.accepts_many(view, received, counterparties)
+
+    assert len(many) == 100
+    # One batched call: the hand plus NETWORK_GATE_ROWS candidate successors.
+    assert batch_sizes == [NETWORK_GATE_ROWS + 1]
+
+
+def test_accepts_many_top_rows_match_accepts_and_the_rest_decline(checkpoint_valued):
+    """The first `NETWORK_GATE_ROWS` verdicts equal what looping `accepts`
+    would say, row by row; everything past the cutoff declines outright,
+    never having reached the graph."""
+    path, board = checkpoint_valued
+    bot, game = _seated_at_main(path, board, hand=(2, 2, 1, 2, 3))
+    seat = to_move(game)
+    view = game.state(seat)
+    received, counterparties = _many_candidates(seat, 100)
+
+    many = bot.accepts_many(view, received, counterparties)
+
+    expected_top = [
+        bot.accepts(view, r, c)
+        for r, c in zip(received[:NETWORK_GATE_ROWS], counterparties[:NETWORK_GATE_ROWS])
+    ]
+    assert many[:NETWORK_GATE_ROWS] == expected_top
+    assert many[NETWORK_GATE_ROWS:] == [False] * (100 - NETWORK_GATE_ROWS)
+
+
+def test_accepts_many_at_or_under_the_gate_rows_limit_is_unchanged(checkpoint_valued):
+    """At exactly `NETWORK_GATE_ROWS` candidates -- the boundary where the
+    old, uncapped `accepts_many` and the new bounded one must still agree on
+    every row -- nothing is dropped."""
+    path, board = checkpoint_valued
+    bot, game = _seated_at_main(path, board, hand=(2, 2, 1, 2, 3))
+    seat = to_move(game)
+    view = game.state(seat)
+    received, counterparties = _many_candidates(seat, NETWORK_GATE_ROWS)
+
+    expected = [bot.accepts(view, r, c) for r, c in zip(received, counterparties)]
+    many = bot.accepts_many(view, received, counterparties)
+    assert many == expected

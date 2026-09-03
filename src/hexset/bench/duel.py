@@ -314,9 +314,7 @@ def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY)
     lineup = sides(lineup_from_names(names), label_a, label_b, mine)
 
     started = time.monotonic()
-    tournament = compete(
-        lineup, args.games, seed=args.duel_seed, workers=args.workers
-    )
+    tournament = compete(lineup, args.games, seed=args.duel_seed, workers=args.workers)
     seconds = time.monotonic() - started
 
     grouped = pooled(tournament.standings, tournament.games)

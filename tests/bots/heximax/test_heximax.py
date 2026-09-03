@@ -44,7 +44,7 @@ from hexset.bots.heximax.search import MARGINAL_SCALE
 from hexset.ledger import SeatLedger
 from hexset.mcts import draws_hidden
 from hexset.play import step_randomly
-from hexset.trading import NO_VALUATION, bundle, one_for_one
+from hexset.trading import NO_VALUATION, bundle, one_for_one, publish_valuation
 from hexset.state import (
     MAX_CITIES,
     MAX_SETTLEMENTS,
@@ -190,13 +190,18 @@ def _census_game(preset: str, seed: int, players: int = 4) -> str:
         spawn(PRESETS[preset], board, random.Random(f"{seed}:{seat}"))
         for seat in range(players)
     ]
-    game.traders = tuple(bots)
+    game.gates = tuple(bots)
     trace = []
     moves = 0
     while not is_over(game):
         seat = to_move(game)
-        action = bots[seat].choose(game)
         cleared = len(game.trades)
+        # Once a turn, when the engine says it is due (`Game.publish_due`),
+        # exactly as `arena.play` does it -- the PI amendment "publish
+        # points and the event trigger" -- not after every action.
+        if game.publish_due(seat):
+            publish_valuation(game, seat, bots[seat])
+        action = bots[seat].choose(game)
         apply(game, action)
         trace.append(
             (
@@ -213,6 +218,7 @@ def _census_game(preset: str, seed: int, players: int = 4) -> str:
     return hashlib.sha256(repr(trace).encode()).hexdigest()
 
 
+@pytest.mark.slow
 def test_choices_are_byte_identical_to_the_recorded_census(request):
     """The optimization pass's gate: every change must reproduce this exactly.
 
@@ -738,10 +744,12 @@ def test_a_no_trade_bot_publishes_nothing_and_refuses_everything():
 
     talkers = [a_bot(game, s, max_nodes=64) for s in (1, 2, 3)]
     bots = [quiet, *talkers]
-    game.traders = tuple(bots)
+    game.gates = tuple(bots)
     moves = 0
     while not is_over(game) and moves < 20000:
-        apply(game, bots[to_move(game)].choose(game))
+        seat = to_move(game)
+        apply(game, bots[seat].choose(game))
+        publish_valuation(game, seat, bots[seat])
         moves += 1
     assert is_over(game)
     assert all(t.a != 0 and t.b != 0 for t in game.trades)
@@ -750,7 +758,7 @@ def test_a_no_trade_bot_publishes_nothing_and_refuses_everything():
 def test_a_trading_bot_publishes_a_vector_and_trades():
     game = a_game(seed=15)
     bots = [a_bot(game, s, max_nodes=200) for s in range(4)]
-    game.traders = tuple(bots)
+    game.gates = tuple(bots)
     published = bots[0].valuation(game.state(0))
     assert len(published) == NUM_RESOURCES
     assert all(-1.0 <= v <= 1.0 for v in published)
@@ -758,8 +766,10 @@ def test_a_trading_bot_publishes_a_vector_and_trades():
     traded = 0
     moves = 0
     while not is_over(game) and moves < 20000:
+        seat = to_move(game)
         cleared = len(game.trades)
-        apply(game, bots[to_move(game)].choose(game))
+        apply(game, bots[seat].choose(game))
+        publish_valuation(game, seat, bots[seat])
         traded += len(game.trades[cleared:])
         moves += 1
     assert traded > 0
@@ -1120,7 +1130,7 @@ def _recomputed_marginal_scale() -> float:
             spawn(PRESETS["heximax-notrade"], board, random.Random(f"{seed}:{seat}"))
             for seat in range(4)
         ]
-        game.traders = tuple(bots)
+        game.gates = tuple(bots)
         meter = Heximax(HonestEvaluator(board, TRADING_WEIGHTS))
         while not is_over(game):
             seat = to_move(game)

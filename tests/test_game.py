@@ -6,6 +6,7 @@ import random
 import pytest
 from helpers import clear_hand, give
 
+from hexset.actions import legal_actions
 from hexset.board.board import random_base_board
 from hexset.board.terrain import Resource
 from hexset.cards import DevCard
@@ -14,6 +15,7 @@ from hexset.game import (
     Phase,
     build_city,
     build_road,
+    buy_development_card,
     end_turn,
     legal_initial_roads,
     move_robber_to,
@@ -21,10 +23,13 @@ from hexset.game import (
     place_initial_settlement,
     play_knight_card,
     play_monopoly_card,
+    play_road_building_card,
+    play_year_of_plenty_card,
     players_owing_discards,
     roll_dice,
     start,
     submit_discard,
+    trade_with_bank,
 )
 from hexset.state import NO_OWNER, can_place_settlement
 
@@ -214,3 +219,161 @@ def test_reaching_ten_points_ends_the_game():
 
     assert game.phase is Phase.GAME_OVER
     assert game.won_by == 0
+
+
+# --- trade/build interleaving (owner review against the rulebook, 2026-09-03) -
+
+
+def _spy_on_trade_event(monkeypatch):
+    """Count calls to `trade_event` as `hexset.game` itself sees it -- the
+    name `run_trade_event` calls -- recording the phase at each call. A
+    patch on `hexset.trading.trade_event` would not be seen here: `game.py`
+    imported the name directly (`from .trading import ... trade_event`), so
+    it holds its own reference, same as any other `from x import y`."""
+    import hexset.game as gamemod
+
+    calls: list[Phase] = []
+    real = gamemod.trade_event
+
+    def spy(game, gate):
+        calls.append(game.phase)
+        return real(game, gate)
+
+    monkeypatch.setattr(gamemod, "trade_event", spy)
+    return calls
+
+
+def _seated(game):
+    """The minimum for `run_trade_event` to reach `trade_event` rather than
+    short-circuiting on `gates is None`. An object with neither `valuation`
+    nor `accepts` trades nothing -- these tests count the *call*, not
+    whether anything clears."""
+    n = game._state.num_players
+    game.gates = tuple(object() for _ in range(n))
+    return game
+
+
+@pytest.mark.parametrize(
+    "setup, act",
+    [
+        (
+            lambda g: (clear_hand(g._state, 0), fund(g._state, 0, Purchase.ROAD)),
+            lambda g: build_road(
+                g,
+                next(
+                    e
+                    for e in g._state.board.topology.vertex_edges[
+                        g._state.board.topology.edges[g._state.edge_owner.index(0)][0]
+                    ]
+                    if g._state.edge_owner[e] == NO_OWNER
+                ),
+            ),
+        ),
+        (
+            lambda g: fund(g._state, 0, Purchase.CITY),
+            lambda g: build_city(g, g._state.vertex_owner.index(0)),
+        ),
+        (
+            lambda g: fund(g._state, 0, Purchase.DEV_CARD),
+            lambda g: buy_development_card(g),
+        ),
+        (
+            lambda g: give(g._state, 0, Resource.WOOD, 4),
+            lambda g: trade_with_bank(g, Resource.WOOD, Resource.ORE),
+        ),
+        (
+            lambda g: g._state.dev_cards[0].__setitem__(DevCard.MONOPOLY, 1),
+            lambda g: play_monopoly_card(g, Resource.ORE),
+        ),
+        (
+            lambda g: g._state.dev_cards[0].__setitem__(DevCard.ROAD_BUILDING, 1),
+            lambda g: play_road_building_card(g),
+        ),
+        (
+            lambda g: g._state.dev_cards[0].__setitem__(DevCard.YEAR_OF_PLENTY, 1),
+            lambda g: play_year_of_plenty_card(g, [Resource.WOOD, Resource.BRICK]),
+        ),
+    ],
+    ids=["build_road", "build_city", "buy_dev_card", "bank_trade", "monopoly", "road_building", "year_of_plenty"],
+)
+def test_trade_event_runs_again_after_every_main_action(monkeypatch, setup, act):
+    game = _seated(run_setup(a_game(players=3)))
+    game.phase = Phase.MAIN
+    setup(game)
+    calls = _spy_on_trade_event(monkeypatch)
+
+    act(game)
+
+    assert calls == [Phase.MAIN]
+
+
+def test_trade_event_runs_again_after_a_knight_in_main_but_not_in_roll(monkeypatch):
+    """`play_knight_card` is the one action legal in both `ROLL` and `MAIN`
+    (playing it before the roll, to move the robber pre-emptively). The
+    interleaving only ever applies to `MAIN`."""
+    game = _seated(run_setup(a_game(players=3)))
+    game._state.dev_cards[0][DevCard.KNIGHT] = 2
+    target = (game._state.robber + 1) % game._state.board.num_hexes
+    other_target = (game._state.robber + 2) % game._state.board.num_hexes
+
+    game.phase = Phase.ROLL
+    calls = _spy_on_trade_event(monkeypatch)
+    play_knight_card(game, target)
+    assert calls == []
+
+    game.dev_card_played = False
+    game.phase = Phase.MAIN
+    play_knight_card(game, other_target)
+    assert calls == [Phase.MAIN]
+
+
+def test_trade_event_never_runs_after_end_turn(monkeypatch):
+    game = _seated(run_setup(a_game(players=3)))
+    game.phase = Phase.MAIN
+    calls = _spy_on_trade_event(monkeypatch)
+
+    end_turn(game)
+
+    assert calls == []
+    assert game.phase is Phase.ROLL
+
+
+def test_trade_event_never_runs_during_setup(monkeypatch):
+    game = _seated(a_game(players=3))
+    calls = _spy_on_trade_event(monkeypatch)
+
+    run_setup(game)
+
+    assert calls == []
+    assert game.phase is Phase.ROLL
+
+
+def test_trade_event_never_runs_during_discard_resolution(monkeypatch):
+    game = _seated(run_setup(a_game()))
+    clear_hand(game._state, 0)
+    for resource in Resource:
+        give(game._state, 0, resource, 2)
+    game.last_roll = 7
+    game.phase = Phase.ROLL
+    game.rng = random.Random(1)
+    calls = _spy_on_trade_event(monkeypatch)
+
+    while roll_dice(game) != 7:
+        game.phase = Phase.ROLL
+        calls.clear()  # only the seven that sticks matters
+    assert game.phase is Phase.DISCARD
+    assert calls == []  # rolling a 7 with discards owed never enters MAIN
+
+    submit_discard(game, 0, [1, 1, 1, 1, 1])
+    assert game.phase is Phase.ROBBER
+    assert calls == []  # finishing discards moves to ROBBER, not MAIN
+
+    move_robber_to(game, (game._state.robber + 1) % game._state.board.num_hexes)
+    # `enter_main` only arms `event_pending` now -- it does not call
+    # `trade_event` itself any more (the PI amendment "publish points and
+    # the event trigger"). The event still runs exactly once, the first
+    # time anything observes the game for the current player.
+    assert game.phase is Phase.MAIN
+    assert calls == []
+    legal_actions(game)
+    assert calls == [Phase.MAIN]  # the one legitimate trigger: entering MAIN

@@ -1,0 +1,163 @@
+{
+  "heximax": {
+    "by_phase_moves": {
+      "DISCARD": 42,
+      "MAIN": 492,
+      "ROBBER": 45,
+      "ROLL": 269,
+      "SETUP_ROAD": 24,
+      "SETUP_SETTLEMENT": 24
+    },
+    "calls_per_move": 10903.630580357143,
+    "calls_total": 9769653,
+    "games": 3,
+    "moves": 896,
+    "ms_per_move": 6.962954717502206,
+    "ms_total": 6238.807426881976,
+    "per_game": [
+      {
+        "board_seed": 0,
+        "by_phase_moves": {
+          "DISCARD": 16,
+          "MAIN": 156,
+          "ROBBER": 15,
+          "ROLL": 86,
+          "SETUP_ROAD": 8,
+          "SETUP_SETTLEMENT": 8
+        },
+        "calls_per_move": 9765.757785467127,
+        "calls_total": 2822304,
+        "moves": 289,
+        "ms_per_move": 6.131226368486933,
+        "ms_total": 1771.9244204927236
+      },
+      {
+        "board_seed": 1,
+        "by_phase_moves": {
+          "DISCARD": 4,
+          "MAIN": 144,
+          "ROBBER": 17,
+          "ROLL": 87,
+          "SETUP_ROAD": 8,
+          "SETUP_SETTLEMENT": 8
+        },
+        "calls_per_move": 9202.421641791045,
+        "calls_total": 2466249,
+        "moves": 268,
+        "ms_per_move": 6.07573374308326,
+        "ms_total": 1628.2966431463137
+      },
+      {
+        "board_seed": 2,
+        "by_phase_moves": {
+          "DISCARD": 22,
+          "MAIN": 192,
+          "ROBBER": 13,
+          "ROLL": 96,
+          "SETUP_ROAD": 8,
+          "SETUP_SETTLEMENT": 8
+        },
+        "calls_per_move": 13218.58407079646,
+        "calls_total": 4481100,
+        "moves": 339,
+        "ms_per_move": 8.37341110101162,
+        "ms_total": 2838.586363242939
+      }
+    ]
+  },
+  "loadavg": "7.41 9.46 7.61 5/2232 604730",
+  "protocol": "Readout (v), publish-not-call fix: the mirror cost table, plus the trades-per-turn distribution. Protocol is hexset.bots.heximax.search's module docstring: three four-seat games an arm, board seeds 0/1/2, every seat the same preset, arms interleaved seed by seed, timed in one process on an idle box (paired). Control is search2. The trades-per-turn distribution is measured over the lineup readout (iii) actually plays: [heximax, heximax, search2, search2], blocked, duel_seed 42000, 6 games.",
+  "ratio_calls_per_game": 1.1686869999109997,
+  "ratio_calls_per_move": 1.3708594161902463,
+  "ratio_ms_per_move": 1.5727582811080691,
+  "reading": "The design's ceiling is <=2x search2 per move (hexset.bots.heximax.search's module docstring).",
+  "search2": {
+    "by_phase_moves": {
+      "DISCARD": 64,
+      "MAIN": 584,
+      "ROBBER": 47,
+      "ROLL": 308,
+      "SETUP_ROAD": 24,
+      "SETUP_SETTLEMENT": 24
+    },
+    "calls_per_move": 7953.864890580399,
+    "calls_total": 8359512,
+    "games": 3,
+    "moves": 1051,
+    "ms_per_move": 4.427224959576455,
+    "ms_total": 4653.013432514854,
+    "per_game": [
+      {
+        "board_seed": 0,
+        "by_phase_moves": {
+          "DISCARD": 33,
+          "MAIN": 268,
+          "ROBBER": 20,
+          "ROLL": 136,
+          "SETUP_ROAD": 8,
+          "SETUP_SETTLEMENT": 8
+        },
+        "calls_per_move": 8169.708245243129,
+        "calls_total": 3864272,
+        "moves": 473,
+        "ms_per_move": 4.443665079124681,
+        "ms_total": 2101.8535824259743
+      },
+      {
+        "board_seed": 1,
+        "by_phase_moves": {
+          "DISCARD": 14,
+          "MAIN": 186,
+          "ROBBER": 15,
+          "ROLL": 106,
+          "SETUP_ROAD": 8,
+          "SETUP_SETTLEMENT": 8
+        },
+        "calls_per_move": 7534.878338278932,
+        "calls_total": 2539254,
+        "moves": 337,
+        "ms_per_move": 4.318684381667735,
+        "ms_total": 1455.3966366220266
+      },
+      {
+        "board_seed": 2,
+        "by_phase_moves": {
+          "DISCARD": 17,
+          "MAIN": 130,
+          "ROBBER": 12,
+          "ROLL": 66,
+          "SETUP_ROAD": 8,
+          "SETUP_SETTLEMENT": 8
+        },
+        "calls_per_move": 8116.124481327801,
+        "calls_total": 1955986,
+        "moves": 241,
+        "ms_per_move": 4.546735325588601,
+        "ms_total": 1095.763213466853
+      }
+    ]
+  },
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "trades_per_turn": {
+    "duel_seed": 42000,
+    "events": 450,
+    "games": 6,
+    "histogram": {
+      "0": 393,
+      "1": 57
+    },
+    "lineup": [
+      "heximax",
+      "heximax",
+      "search2",
+      "search2"
+    ],
+    "max": 1,
+    "mean": 0.12666666666666668,
+    "total_trades": 57
+  }
+}

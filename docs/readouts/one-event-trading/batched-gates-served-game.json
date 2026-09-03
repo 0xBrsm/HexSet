@@ -1,0 +1,197 @@
+{
+  "onnx_checkpoint": "linear2400-c5.onnx",
+  "onnx_checkpoint_sha256": "10425289e950da99c411048cd543a943fa5c298b09385c14078c58040f695070",
+  "protocol": "Served-game measurement for the batched-gates change (agents/reference/trading-design.md's post-data note, 'the collector cost gate fails at 2.9-3.6x'): linear2400-c5.onnx (contract 5, seat 0) vs three heximax seats, seeded 4200, driven through hexset.server.api.Tables / hexset.clients.botclient.LocalSearchBrain -- the same Tables.act code path an embedded server bot runs -- for 10 rounds (Game.turns reaching 40). BotRunner's real poll loop (1s default interval, one thread a seat) would drown a millisecond-scale gate-cost change in polling latency, so this drives the same LocalSearchBrain.decide/Tables.act calls synchronously in one thread, back to back, instead of via background poller threads -- still Tables end to end, just without poll-interval noise that would land equally on both arms anyway. 'before' is origin/main at 5596778 (git stash of this PR's diff, same venv, no reinstall needed); 'after' is this PR. Three interleaved before/after trials, same seed each time, on a box whose load rose across the run (loadavg climbed roughly 5 -> 14 over the six runs) -- heximax's own per-turn cost is the control: its ratio should read ~1.0 (noise only), since neither heximax nor search2 override accepts_many.",
+  "rounds": 10,
+  "seed": 4200,
+  "summary": {
+    "heximax_ms_per_turn_ratio_per_trial_control": [
+      1.1546002443961585,
+      1.0886145003423628,
+      0.8731654890988011
+    ],
+    "onnx_ms_per_move_ratio_mean": 0.6333809672690663,
+    "onnx_ms_per_turn_ratio_mean": 0.6333809672690665,
+    "onnx_ms_per_turn_ratio_per_trial": [
+      0.7042143091172027,
+      0.6567795224969204,
+      0.5391490701930761
+    ]
+  },
+  "trials": [
+    {
+      "after": {
+        "heximax_ms_per_move_mean": 14.89225828637635,
+        "heximax_ms_per_turn_mean": 37.9075665471398,
+        "heximax_turns_sampled": 33,
+        "label": "after",
+        "loadavg": "7.82 6.09 7.05 37/1994 911456",
+        "moves": 156,
+        "onnx_ms_per_move_mean": 19.069102154129983,
+        "onnx_ms_per_turn_mean": 88.98914338593993,
+        "onnx_seat": 0,
+        "onnx_turns_sampled": 12,
+        "per_seat_move_mean_ms": {
+          "0": 19.069102154129983,
+          "1": 13.620989586882017,
+          "2": 13.803036417812109,
+          "3": 16.91303323698981
+        },
+        "per_seat_turn_mean_ms": {
+          "0": 88.98914338593993,
+          "1": 36.77667188458145,
+          "2": 29.90657890525957,
+          "3": 47.66400275878947
+        },
+        "turns_reached": 40,
+        "wall_seconds": 2.5963938236236572
+      },
+      "before": {
+        "heximax_ms_per_move_mean": 12.898194295952894,
+        "heximax_ms_per_turn_mean": 32.83176729878919,
+        "heximax_turns_sampled": 33,
+        "label": "before",
+        "loadavg": "5.05 5.54 6.89 36/1988 911281",
+        "moves": 156,
+        "onnx_ms_per_move_mean": 27.07854967905275,
+        "onnx_ms_per_turn_mean": 126.36656516891283,
+        "onnx_seat": 0,
+        "onnx_turns_sampled": 12,
+        "per_seat_move_mean_ms": {
+          "0": 27.07854967905275,
+          "1": 13.247774659518015,
+          "2": 12.958559203140725,
+          "3": 12.543092444238644
+        },
+        "per_seat_turn_mean_ms": {
+          "0": 126.36656516891283,
+          "1": 35.76899158069864,
+          "2": 28.076878273471568,
+          "3": 35.348715070127085
+        },
+        "turns_reached": 40,
+        "wall_seconds": 2.8064746856689453
+      },
+      "heximax_ms_per_turn_ratio_after_over_before": 1.1546002443961585,
+      "onnx_ms_per_move_ratio_after_over_before": 0.7042143091172027,
+      "onnx_ms_per_turn_ratio_after_over_before": 0.7042143091172027,
+      "trial": 1
+    },
+    {
+      "after": {
+        "heximax_ms_per_move_mean": 15.414672418652723,
+        "heximax_ms_per_turn_mean": 39.23734797475239,
+        "heximax_turns_sampled": 33,
+        "label": "after-2",
+        "loadavg": "11.95 7.08 7.35 37/1989 911692",
+        "moves": 156,
+        "onnx_ms_per_move_mean": 19.426529867424897,
+        "onnx_ms_per_turn_mean": 90.65713938131618,
+        "onnx_seat": 0,
+        "onnx_turns_sampled": 12,
+        "per_seat_move_mean_ms": {
+          "0": 19.426529867424897,
+          "1": 14.383970449368158,
+          "2": 13.199329259805381,
+          "3": 18.170410331578985
+        },
+        "per_seat_turn_mean_ms": {
+          "0": 90.65713938131618,
+          "1": 38.83672021329403,
+          "2": 28.598546729578327,
+          "3": 51.20752002535896
+        },
+        "turns_reached": 40,
+        "wall_seconds": 2.619255781173706
+      },
+      "before": {
+        "heximax_ms_per_move_mean": 14.159899958897205,
+        "heximax_ms_per_turn_mean": 36.04338171355652,
+        "heximax_turns_sampled": 33,
+        "label": "before-2",
+        "loadavg": "9.77 6.57 7.19 36/1989 911606",
+        "moves": 156,
+        "onnx_ms_per_move_mean": 29.578464617121167,
+        "onnx_ms_per_turn_mean": 138.0328348798988,
+        "onnx_seat": 0,
+        "onnx_turns_sampled": 12,
+        "per_seat_move_mean_ms": {
+          "0": 29.578464617121167,
+          "1": 14.184174300343901,
+          "2": 14.427983690089045,
+          "3": 13.913913370831118
+        },
+        "per_seat_turn_mean_ms": {
+          "0": 138.0328348798988,
+          "1": 38.297270610928535,
+          "2": 31.260631328526262,
+          "3": 39.21193768143315
+        },
+        "turns_reached": 40,
+        "wall_seconds": 3.0998103618621826
+      },
+      "heximax_ms_per_turn_ratio_after_over_before": 1.0886145003423628,
+      "onnx_ms_per_move_ratio_after_over_before": 0.6567795224969204,
+      "onnx_ms_per_turn_ratio_after_over_before": 0.6567795224969204,
+      "trial": 2
+    },
+    {
+      "after": {
+        "heximax_ms_per_move_mean": 13.044030965483259,
+        "heximax_ms_per_turn_mean": 33.20298791213921,
+        "heximax_turns_sampled": 33,
+        "label": "after-3",
+        "loadavg": "13.95 7.57 7.51 36/1988 911865",
+        "moves": 156,
+        "onnx_ms_per_move_mean": 17.009031726047397,
+        "onnx_ms_per_turn_mean": 79.37548138822119,
+        "onnx_seat": 0,
+        "onnx_turns_sampled": 12,
+        "per_seat_move_mean_ms": {
+          "0": 17.009031726047397,
+          "1": 11.536365340429324,
+          "2": 12.747089190480228,
+          "3": 14.60620703085536
+        },
+        "per_seat_turn_mean_ms": {
+          "0": 79.37548138822119,
+          "1": 31.148186419159174,
+          "2": 27.618693246040493,
+          "3": 41.16294708695602
+        },
+        "turns_reached": 40,
+        "wall_seconds": 2.2993340492248535
+      },
+      "before": {
+        "heximax_ms_per_move_mean": 14.9387843751659,
+        "heximax_ms_per_turn_mean": 38.02599659133138,
+        "heximax_turns_sampled": 33,
+        "label": "before-3",
+        "loadavg": "11.95 7.08 7.35 36/1989 911783",
+        "moves": 156,
+        "onnx_ms_per_move_mean": 31.547919984274944,
+        "onnx_ms_per_turn_mean": 147.22362659328306,
+        "onnx_seat": 0,
+        "onnx_turns_sampled": 12,
+        "per_seat_move_mean_ms": {
+          "0": 31.547919984274944,
+          "1": 16.024739261613124,
+          "2": 14.408709038084803,
+          "3": 14.437532014844399
+        },
+        "per_seat_turn_mean_ms": {
+          "0": 147.22362659328306,
+          "1": 43.266796006355435,
+          "2": 31.218869582517073,
+          "3": 40.68759022365239
+        },
+        "turns_reached": 40,
+        "wall_seconds": 3.2638070583343506
+      },
+      "heximax_ms_per_turn_ratio_after_over_before": 0.8731654890988011,
+      "onnx_ms_per_move_ratio_after_over_before": 0.539149070193076,
+      "onnx_ms_per_turn_ratio_after_over_before": 0.5391490701930761,
+      "trial": 3
+    }
+  ]
+}

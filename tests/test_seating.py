@@ -193,11 +193,9 @@ def test_a_locked_seat_is_never_a_trade_counterparty():
 
     keen = tuple(1.0 if r == Resource.ORE else -1.0 for r in range(NUM_RESOURCES))
     theirs = tuple(-v for v in keen)
-    done = trade_event(
-        game,
-        lambda seat, view: keen if seat == 0 else theirs,
-        lambda seat, view, received, other: True,
-    )
+    for seat in range(game.num_players):
+        game.publish(seat, keen if seat == 0 else theirs)
+    done = trade_event(game, lambda seat, view, received, other: True)
     assert done
     assert all(trade.b == 2 for trade in done)
 

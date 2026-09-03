@@ -29,6 +29,7 @@ from .game import (
     play_year_of_plenty_card,
     players_owing_discards,
     roll_dice,
+    run_pending_event,
     trade_with_bank,
 )
 from .robber import victims
@@ -238,6 +239,15 @@ def _trade_actions(game: Game) -> list[Action]:
 
 
 def legal_actions(game: Game) -> list[Action]:
+    # One of the three event-trigger points (`Game.event_pending`'s
+    # docstring): the current player's first `legal_actions` call of the
+    # turn fires this turn's pending trade event, if one is still
+    # outstanding, before the options below are computed off the
+    # (possibly now different) hand -- the PI amendment "publish points
+    # and the event trigger".
+    if game.phase is Phase.MAIN:
+        run_pending_event(game)
+
     state = game._state
     player = game.current_player
 

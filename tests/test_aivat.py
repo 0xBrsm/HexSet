@@ -189,6 +189,7 @@ def test_a_constant_value_function_corrects_nothing(monkeypatch):
     assert flat["priced"] == {"roll": 0, "deck": 0, "steal": 0}
 
 
+@pytest.mark.slow
 def test_the_instrumented_replay_reproduces_the_arena_game_exactly():
     """The same games, not merely games from the same distribution.
 
@@ -213,14 +214,20 @@ def test_the_correction_does_not_disturb_the_game_s_random_stream():
     assert base["correction"] == 0.0
 
 
+@pytest.mark.slow
 def test_the_estimator_is_unbiased_over_real_games():
     """The two estimators agree in expectation on the same games.
 
     Their difference is the mean correction and nothing else, so the test is a
     one-sample t on it. Deliberately run with the wrong value function: a
     correct one would shrink the corrections and weaken the test.
+
+    `workers=8`: `replay`'s jobs are pure functions of their own index (same
+    board stream, same per-entrant stream, no shared state), and `pool.map`
+    preserves job order, so this is a wall-clock-only change -- the returned
+    rows are identical to a serial run.
     """
-    rows = replay(DUEL, 40, seed=SEED, value="stub")
+    rows = replay(DUEL, 40, seed=SEED, value="stub", workers=8)
     summary = summarise(rows)
     assert summary["boards"] == 20
     assert summary["mean_correction_se"] > 0

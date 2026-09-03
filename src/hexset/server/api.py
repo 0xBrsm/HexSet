@@ -55,9 +55,15 @@ obvious and both are load-bearing:
 
 Every seat's **valuation vector** is public, and so is the turn's trade log:
 those are what a table hears (`hexset.trading`), and `PUT
-/api/games/<code>/valuation` is how a seat sets its own. Nothing else about
-trading is on the wire, because nothing else exists -- there is no offer to
-address, accept or decline.
+/api/games/<code>/valuation` is how a seat sets its own -- unchanged by, and
+independent of, everything below. `POST /api/games/<code>/trade` lets a seat
+compose a bundle against any counterparty whose public vector already wants
+it (`hexset.game.Game.execute_trade`,
+`docs/negotiation-interface.md`), on its own turn against anyone or during
+another seat's turn against that seat only; `pending` in the per-viewer state
+is a snapshot of what the current player's own trade event found against a
+confirm-mode seat, and `.../trade/confirm`/`.../trade/decline` answer one of
+those.
 
 The `action_mask`/`options` on `GET /api/record` are the engine's own
 `legal_actions`, and so is what an embedded bot searches: one list for every
@@ -93,6 +99,7 @@ from hexset.bots import Bot
 from hexset.clients.botclient import BotRunner, LocalSearchBrain, LocalTransport
 from hexset.game import Phase, is_over, to_move
 from hexset.onnx_record import record_from_game
+from hexset.trading import publish_valuation
 
 from . import journal
 from hexset.actions import legal_actions
@@ -102,6 +109,7 @@ from .webplay import (
     ResumeError,
     action_to_wire,
     board_layout,
+    bundle_from_wire,
 )
 
 # The opponents that are not files. Everything else in the picker is a path to
@@ -336,9 +344,21 @@ class Table:
             if self.session.journal is not None:
                 self.session.journal.locked(seat, at_step=self.session._steps)
 
-    def join(self, name: str | None) -> tuple[int, str]:
+    def join(self, name: str | None, *, confirm: bool = False) -> tuple[int, str]:
         """Seats a person (or an external bot process) at a random still-open,
-        still-unlocked seat, returning it and their token."""
+        still-unlocked seat, returning it and their token. `confirm` opts this
+        seat into confirm-mode trading at seat-up (PI ratification decision 3,
+        `docs/negotiation-interface.md`) -- a later change of heart needs a
+        fresh seat, not a flag flipped mid-game.
+
+        `False` is this method's own default, same reasoning as
+        `Tables.create` above: `POST /api/join` (`Tables.handle`) is what a
+        human at the web page actually calls, and it passes `True` when the
+        request body omits `confirm`, so a joining human also defaults to
+        `PendingGate` -- nothing auto-clears against a human without an
+        explicit opt-out. `hexset.server.mcp`'s `join` tool sends `confirm`
+        explicitly on every call, so an LLM seat's own opt-in default
+        (decision 3) is unaffected by that route-level flip."""
         self._settle_locks()
         candidates = [
             i
@@ -352,6 +372,8 @@ class Table:
         clean = clean_name(name)
         self.seats[index] = Seat(kind=SeatKind.PLAYER, name=clean, token=token)
         self.session.claim(index, clean)
+        if confirm:
+            self.session.confirm_seats.add(index)
         return index, token
 
     def view(self, viewer: int | None = None, *, omniscient: bool = False) -> dict:
@@ -519,6 +541,7 @@ class Tables:
         self,
         bots: list[str] | None = None,
         name: str | None = None,
+        confirm: bool = False,
     ) -> tuple[Table, str]:
         """A new game, dealt immediately: the creator at a random seat, any
         named bots seated (and tokened) alongside them, everything else
@@ -527,6 +550,17 @@ class Tables:
         (`--checkpoint`'s pin) or, absent that, no bots at all; a caller
         wanting the table filled says so explicitly, there is no automatic
         mixed lineup any more (see `Config.default_bots`'s own docstring).
+        `confirm` opts the creator's own seat into confirm-mode trading (see
+        `Table.join`). Defaults to `False` here -- this method's own
+        default, kept the conservative one for any caller that isn't a
+        wire request. `POST /api/games` (`Tables.handle`, below) is the one
+        caller that matters for a human at a keyboard, and it passes `True`
+        for a request whose JSON body omits `confirm` entirely: nothing
+        ever auto-clears against a human, so a human seat's gate is
+        `PendingGate` unless it explicitly opts out. An LLM through
+        `hexset.server.mcp`'s `new_game` keeps its own opt-in default by
+        always sending `confirm` explicitly (PI ratification decision 3),
+        so this flip is invisible to it.
         """
         if bots is None:
             bots = list(self.config.default_bots or [])
@@ -555,6 +589,8 @@ class Tables:
             )
 
         session = build_session(code, seats, self.config, first=creator_seat)
+        if confirm:
+            session.confirm_seats.add(creator_seat)
         table = Table(
             code=code,
             seats=seats,
@@ -727,6 +763,22 @@ class Tables:
 
     def act(self, table: Table, seat: int, wire: dict) -> dict:
         table._settle_locks()
+        game = table.session.game
+        if table.seats[seat].kind is SeatKind.BOT and game.publish_due(seat):
+            # The one driver that acts on a seat's behalf rather than at its
+            # own request: once a turn, when the engine says this seat is
+            # due (`Game.publish_due`), an embedded bot is asked for its
+            # current vector and it is recorded, exactly as `arena.play`'s
+            # loop does it for every seat -- the PI amendment "publish
+            # points and the event trigger". Checked, and published if due,
+            # *before* `submit` below, which validates the action through
+            # `legal_actions` and so would otherwise consume the turn's
+            # pending event on the engine's standing vector first. A human
+            # seat is unaffected -- it publishes only through
+            # `PUT .../valuation`, never tied to its own actions.
+            trader = table.session.traders.get(seat)
+            if trader is not None:
+                publish_valuation(game, seat, trader)
         table.session.submit(seat, wire)
         return table.view(seat)
 
@@ -827,15 +879,68 @@ class Tables:
     def set_valuation(self, table: Table, seat: int, vector) -> dict:
         """`PUT /api/games/<code>/valuation`: this seat publishes its vector.
 
-        The one trading endpoint there is, and the whole of the mechanic's
-        API surface (`hexset.trading`): five numbers in [-1, 1], positive
-        for "I want more of this". It may be set at any time, takes effect
-        at the next trade event, and is public to the whole table the moment
-        it lands -- `state_view`'s `valuations` block carries every seat's.
+        The advertisement half of the mechanic (`hexset.trading`): five
+        numbers in [-1, 1], positive for "I want more of this". It may be
+        set at any time, takes effect at the next trade event, and is public
+        to the whole table the moment it lands -- `state_view`'s
+        `valuations` block carries every seat's. Independent of, and
+        unchanged by, `trade`/`trade/confirm`/`trade/decline` below
+        (`docs/negotiation-interface.md`, PI ratification decision 1): a
+        submitted bundle never updates this seat's standing vector.
         """
         if vector is None:
             raise ApiError("send a `valuation` of five numbers between -1 and 1")
         table.session.publish(seat, vector)
+        return table.view(seat)
+
+    def trade(self, table: Table, seat: int, payload: dict) -> dict:
+        """`POST /api/games/<CODE>/trade`: `seat` proposes a bundle to
+        `counterparty` (`docs/negotiation-interface.md` §2). `give`/`receive`
+        are named amounts (`{"Wood": 2}`); `hexset.game.Game.execute_trade`
+        raises `ValueError` -- turned into a 400 by `handle`'s caller like any
+        other -- for a bundle either side can't cover, a counterparty whose
+        public vector doesn't already want it, a seat that is neither the
+        proposer nor the current player, or a counterparty gate that declines.
+        """
+        table._settle_locks()
+        counterparty = payload.get("counterparty")
+        if not isinstance(counterparty, int):
+            raise ApiError("send a `counterparty` seat")
+        bundle = bundle_from_wire(payload.get("give") or {}, payload.get("receive") or {})
+        table.session.game.execute_trade(seat, counterparty, bundle)
+        return table.view(seat)
+
+    def _pending_of(self, table: Table, seat: int) -> list:
+        """`seat`'s own filtered slice of `game.pending`, in the same order
+        `state_view`'s `pending` block lists them -- what a confirm/decline
+        call's `index` counts into (`docs/negotiation-interface.md` §2)."""
+        return [t for t in table.session.game.pending if t.a == seat]
+
+    def confirm_trade(self, table: Table, seat: int, payload: dict) -> dict:
+        """`POST /api/games/<CODE>/trade/confirm`: execute `seat`'s pending
+        offer at `index` exactly as the table found it (its own `(a, b,
+        received)`), then drop it from `game.pending` -- confirming a stale
+        entry against hands that already moved fails `execute_trade`'s own
+        checks the same way a fresh proposal would."""
+        table._settle_locks()
+        index = payload.get("index")
+        mine = self._pending_of(table, seat)
+        if not isinstance(index, int) or not 0 <= index < len(mine):
+            raise ApiError("no pending offer at that index", status=404)
+        trade = mine[index]
+        table.session.game.execute_trade(trade.a, trade.b, trade.received)
+        table.session.game.pending.remove(trade)
+        return table.view(seat)
+
+    def decline_trade(self, table: Table, seat: int, payload: dict) -> dict:
+        """`POST /api/games/<CODE>/trade/decline`: drop `seat`'s pending offer
+        at `index`. No cards move."""
+        table._settle_locks()
+        index = payload.get("index")
+        mine = self._pending_of(table, seat)
+        if not isinstance(index, int) or not 0 <= index < len(mine):
+            raise ApiError("no pending offer at that index", status=404)
+        table.session.game.pending.remove(mine[index])
         return table.view(seat)
 
     def record(self, table: Table, seat: int) -> dict:
@@ -913,16 +1018,27 @@ class Tables:
             raise ApiError(f"no such endpoint: {method} {path}", status=404)
 
         if method == "POST" and path == "/api/games":
+            # Wire-level default is confirm mode ON (`PendingGate`): a human
+            # creator's gate is the explicit submit, not an advertised vector
+            # that clears itself. This is *this endpoint's* default, not
+            # `Tables.create`'s -- `mcp.py`'s `new_game` sends `confirm`
+            # explicitly on every call so an LLM seat keeps its own opt-in
+            # default (PI ratification decision 3) regardless of what this
+            # route defaults to for a caller that omits the key.
             table, new_token = self.create(
                 bots=payload.get("bots"),
                 name=payload.get("name"),
+                confirm=bool(payload.get("confirm", True)),
             )
             return {"token": new_token, **table.view(table.seat_of(new_token))}
 
         if method == "POST" and path == "/api/join":
             table = self.get(str(payload.get("code", "")))
             with table.lock:
-                seat, new_token = table.join(payload.get("name"))
+                # Same default as `/api/games` above, and the same reason.
+                seat, new_token = table.join(
+                    payload.get("name"), confirm=bool(payload.get("confirm", True))
+                )
                 return {"token": new_token, **table.view(seat)}
 
         # Everything past here acts on a seat, so it needs the token that names
@@ -961,4 +1077,10 @@ class Tables:
             )
         if method == "PUT" and path == f"/api/games/{table.code}/valuation":
             return self.set_valuation(table, seat, payload.get("valuation"))
+        if method == "POST" and path == f"/api/games/{table.code}/trade":
+            return self.trade(table, seat, payload)
+        if method == "POST" and path == f"/api/games/{table.code}/trade/confirm":
+            return self.confirm_trade(table, seat, payload)
+        if method == "POST" and path == f"/api/games/{table.code}/trade/decline":
+            return self.decline_trade(table, seat, payload)
         raise ApiError(f"no such endpoint: {method} {path}", status=404)

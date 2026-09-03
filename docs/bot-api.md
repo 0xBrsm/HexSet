@@ -124,16 +124,96 @@ action's legality depends on another seat's hand, and there is now one list,
 
 A checkpoint does not act to trade. Every seat holds a **public valuation
 vector** — `valuations` above, five floats in `[-1, 1]` per seat in
-board-seat order, positive for "I want more of this" — and once a turn, after
-the roll and the robber and before any build is served, the engine clears
-exchanges between the current player and each other seat: one card for one
-card, executed when both sides' vectors say it helps them and both sides'
-private gates accept, best deal first, until nothing clears.
+board-seat order, positive for "I want more of this" — and the engine clears
+exchanges between the current player and each other seat after the roll and
+the robber, and again after every MAIN action the current player takes
+(build, buy, a bank/port trade, a development card): any signed bundle on
+disjoint resources, each side bounded only by what that hand holds (not one
+card for one card — a candidate can give several resources and receive
+several back in the same exchange), executed when both sides' vectors say
+it helps them and both sides' private gates accept. Best deal first — the
+smaller of the two surpluses, highest; ties fall to the current player's own
+surplus, then the total, then a canonical order for determinism — until
+nothing clears.
 
-A graph publishes nothing yet: a network seat's vector stays all-zero, so a
-served checkpoint never trades — but the table does, and the record it is fed
-carries every seat's vector and hands that a trade has moved. `max_trades=0`
-in the metadata is the explicit off switch.
+**When a seat's vector is read.** A turn's first trade event does not run at
+a fixed point in the engine's own code any more; it runs lazily, the first
+time anything reaches the current player's own `legal_actions(game)`,
+`game.state(seat)`, or `Game.publish` — whichever comes first
+(`Game.event_pending`, the PI amendment "publish points and the event
+trigger" in `agents/reference/trading-design.md`). `Game.publish_due(seat)`
+is the engine's own answer to "should I publish right now?": true exactly
+once per seat per turn, while `seat` is the current player, the phase is
+`MAIN`, and this turn's first event has not fired yet. Every event after the
+first one in a turn (after every subsequent MAIN action) runs
+unconditionally, on whatever is currently published — publishing more often
+than once a turn does not break anything, it is simply extra work a driver
+does not need to do.
+
+A checkpoint served embedded (`hexset.clients.onnxbot.NetworkBot`) trades off
+the same `value` head this contract already declares: `valuation` is
+`tanh(delta_V_r / VALUE_SCALE)` per resource, `delta_V_r` the head's own-row
+delta between the seat's hand and that hand holding one more card of `r`, and
+`accepts` is the head's strict preference for the concrete post-trade hand
+over the current one — the derivation `hexnet.policy.DerivedTrader` trains
+under, reimplemented here against the wire record instead of a live forward
+(`hexset.trading.VALUE_SCALE` is the pinned constant both cite). Published
+once a turn, when `Game.publish_due(seat)` says so, same as any other seat
+(`hexset.trading.publish_valuation`), so it lands in `game.valuations` and
+this record's `valuations` field before the table's next trade event.
+`max_trades=0` in the metadata is still the explicit off switch — a seat with
+it set publishes nothing and accepts nothing, exactly like a bot with no
+`valuation` method at all.
+
+**When a human should set theirs.** `PUT /api/games/<code>/valuation` is
+unconditional — a human seat may call it as often as it likes, `publish_due`
+or not, and the two are unrelated: a bot's driver *checks* `publish_due` so
+it does not do needless work, but nothing enforces the check, and a human
+client has no reason to. What matters is *when*, relative to the event: a
+value set before the current player's own `GET /api/state` (or any other
+read of the game while it is that seat's turn) is what the turn's first
+event sees; a value set later only takes effect from the next observation or
+the next turn's event onward, since the first event already ran on whatever
+was standing before it. A seat that never calls it at all keeps trading on
+whatever it last set — all-zero, and so never a party to a clearing deal,
+until it sets something.
+
+A checkpoint served externally (`hexset.clients.botclient.RecordBrain`, the
+`python -m hexset.clients.botclient` peer) does not share this brain and does
+not trade: it reads `GET /api/record` for `action_index` alone and never
+calls `PUT /api/games/<code>/valuation`. That gap is pre-existing and is not
+this contract's concern — an external checkpoint that wants to trade can
+still publish through that route the same way a human client does.
+
+**The negotiation interface (human and LLM seats).** Everything above is the
+automatic event; a human or LLM seat additionally gets `POST
+/api/games/<code>/trade` (`hexset.game.Game.execute_trade`) to compose and
+submit a bundle directly, bypassing the automatic candidate search — any
+bundle both sides can cover, not only what the event would have found. It is
+legal on the proposer's own turn against any seat, or during another seat's
+turn against that seat only, and still enforces the counterparty's public
+surplus as a hard rule and its private gate (`accepts`) exactly as the
+automatic event does; the proposer's own vector and gate are never
+consulted, since submitting is its own consent. A checkpoint served through
+this contract is never itself a *proposer* here — nothing calls this route
+on a bot's behalf — but it is a valid **counterparty**: a person or an LLM
+may propose a bundle against a served checkpoint's own published vector at
+any time, and the checkpoint's `accepts` answers it exactly as it would an
+automatically-found candidate, because the call is the same. `GET
+/api/state`'s `pending` block and the confirm/decline routes exist only for
+a seat in confirm mode, which a `.onnx` checkpoint never is.
+
+**Confirm mode's default differs by seat-up route.** `POST
+/api/games`/`POST /api/join` — the web page's own seat-up — default a
+request that omits `confirm` to confirm mode *on*: nothing auto-clears
+against a human without an explicit `confirm: false` opting back out to
+auto-accept. `hexset.server.mcp`'s `new_game`/`join` tools keep the opposite
+default — `confirm` omitted means auto-accept, the same standing-consent
+gate a bot gets — since an LLM's own published vector already is its
+consent (opt-in per PI ratification decision 3,
+`docs/negotiation-interface.md`). A checkpoint served through this contract
+is seated neither way; the distinction is seat-up policy, not the contract
+above. Full interface: [`docs/negotiation-interface.md`](negotiation-interface.md).
 
 ## What is never part of this contract
 

@@ -28,6 +28,7 @@ from hexset.actions import apply
 from hexset.arena import PRESETS, Entrant, spawn
 from hexset.board.board import random_base_board
 from hexset.game import is_over, start, to_move
+from hexset.trading import publish_valuation
 
 CENSUS_FIXTURE = Path(__file__).parent / "fixtures" / "search2_census.json"
 
@@ -48,8 +49,10 @@ def _census_game(entrant: Entrant, seed: int, players: int = 4) -> str:
     builds the board and starts the game, each seat's bot gets its own rng
     deterministic per seat, and the hash covers the full `(seat, action)`
     trace rather than just the outcome. The bots are seated as the game's
-    `traders` too, exactly as `arena.play` seats them, so the census covers
-    what they trade as well as what they choose.
+    `gates` too, and each publishes once a turn, when the engine says it is
+    due (`Game.publish_due`), exactly as `arena.play` does both -- the PI
+    amendment "publish points and the event trigger" -- so the census
+    covers what they trade as well as what they choose.
     """
     rng = random.Random(seed)
     board = random_base_board(rng)
@@ -58,13 +61,15 @@ def _census_game(entrant: Entrant, seed: int, players: int = 4) -> str:
         spawn(entrant, board, random.Random(f"{seed}:{seat}"))
         for seat in range(players)
     ]
-    game.traders = tuple(bots)
+    game.gates = tuple(bots)
     trace = []
     moves = 0
     while not is_over(game):
         seat = to_move(game)
-        action = bots[seat].choose(game)
         cleared = len(game.trades)
+        if game.publish_due(seat):
+            publish_valuation(game, seat, bots[seat])
+        action = bots[seat].choose(game)
         apply(game, action)
         trace.append(
             (
@@ -81,6 +86,7 @@ def _census_game(entrant: Entrant, seed: int, players: int = 4) -> str:
     return hashlib.sha256(repr(trace).encode()).hexdigest()
 
 
+@pytest.mark.slow
 def test_choices_are_byte_identical_to_the_recorded_census(request):
     """Plays 20 seeded games each for `search2` and `search2-notrade` and
     hashes every game's full `(seat, action)` sequence, the same gate

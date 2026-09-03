@@ -62,17 +62,67 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   fills the seat for the rest of the game. `POST /api/bot` (`Tables.seat_bot`,
   formerly `swap_bot`) now takes an empty seat as well as one with a bot on
   it, refusing a person's seat and a retired one.
-- **Trading is one event a turn.** `hexset.trading.trade_event` clears deals
-  for the current player after the roll and the robber and before any build
-  is served: a one-for-one exchange executes when both seats' public
+- **`hexset.trading.NETWORK_GATE_ROWS`** (`32`): the most candidates a network
+  gate's `accepts_many` will score in one batched forward, beside
+  `VALUE_SCALE`. `hexset.clients.onnxbot.NetworkBot.accepts_many` now scores
+  only the top `NETWORK_GATE_ROWS` candidates by public rank and declines the
+  rest outright; `accepts` is unchanged. The engine still asks about every
+  candidate — only a network gate's own evaluation is bounded.
+- **`hexset.bots.Bot.accepts_many(view, received, counterparties)`**: a seat's
+  private gate answered for a whole batch of candidate bundles in one call,
+  defaulting to a loop over `accepts` so an existing bot is unaffected.
+  `hexset.trading.trade_event` now asks a seat's gate this way — once for the
+  current player over every ranked candidate, then once per counterparty over
+  the candidates it accepted — instead of once per candidate bundle.
+  `hexset.clients.onnxbot.NetworkBot` overrides it with one batched graph call.
+- **A negotiation interface for human and LLM seats.** `Game.execute_trade(proposer,
+  counterparty, bundle)` composes and executes any bundle both sides can
+  cover directly, bypassing the automatic candidate search — legal on the
+  proposer's own turn against any seat, or during another seat's turn
+  against that seat only; re-validates coverage and the counterparty's
+  public surplus as a hard rule, then its private gate, exactly as the
+  automatic event does, but never consults the proposer's own vector or
+  gate, since submitting is its own consent. `POST
+  /api/games/<CODE>/trade {counterparty, give, receive}` is the HTTP entry
+  point. `Game.pending` is a snapshot of the last trade event's candidates
+  against a confirm-mode seat, recomputed every event and cleared by
+  `end_turn`; `hexset.server.webplay.PendingGate` is such a seat's private
+  gate — it never clears on its own, recording each candidate instead — and
+  is installed by opting a seat into confirm mode at seat-up (`confirm` on
+  `POST /api/games`/`POST /api/join`). `GET /api/state`'s `pending` block
+  (filtered per viewer) and `POST /api/games/<CODE>/trade/confirm`/`.../decline`
+  answer one. The web UI gained a negotiation panel below the advertisement
+  toggles: a counterparty's published wants/gives as clickable chips
+  composing a draft bundle, a client-side clears/affordable indicator, and
+  pending-offer cards during a bot's turn. The MCP server gained
+  `set_valuation`, `get_table`, `propose_trade`, `confirm_trade`,
+  `decline_trade` tools and a `confirm` flag on `new_game`/`join`.
+- **An embedded ONNX seat now trades.** `hexset.clients.onnxbot.NetworkBot`
+  gained `valuation`/`accepts`, both derived from the checkpoint's own value
+  head with no new graph output: `valuation` is `tanh(delta_V_r /
+  VALUE_SCALE)` per resource, from one batched forward over the seat's hand
+  plus its five one-card imagined successors when the graph's declared batch
+  dimension allows it; `accepts` is the head's strict preference for the
+  concrete post-trade hand. `hexset.trading.VALUE_SCALE`, the pinned
+  constant both cite.
+- **Trading is one event, interleaved with the turn.** `hexset.trading.trade_event`
+  clears deals for the current player after the roll and the robber, and
+  again after every MAIN action (build, buy, bank/port trade, a development
+  card): a bundle — any signed counts on disjoint resources, each side
+  bounded only by what that hand holds — executes when both seats' public
   valuation vectors say it helps them *and* both seats' private gates
-  accept, best deal first, repeatedly, until nothing clears. No budget and
-  no cap — the gate must be strictly positive and is re-asked after every
-  exchange.
+  accept, best deal first, repeatedly, until nothing clears. Candidates are
+  ranked by public surplus and the two private gates are asked in that rank
+  order until one clears or candidates run out — no budget, and no cap on
+  trades themselves: the gate must be strictly positive and is re-asked
+  after every exchange, so the acting seat's own valuation strictly
+  increases and the event ends on its own.
 - `Game.valuations` — every seat's public vector, five floats in `[-1, 1]`,
-  all-zero until something publishes; `Game.trades` and `Game.trades_made`
-  for the turn's exchanges; `Game.max_trades` (`0` off, `None` unbounded);
-  `Game.traders`, the per-seat objects the engine asks. `Game.num_players`.
+  all-zero until something publishes; `Game.publish(seat, vector)` is the
+  one way to set one, validated and recorded, nothing else; `Game.trades`
+  and `Game.trades_made` for the turn's exchanges; `Game.max_trades` (`0`
+  off, `None` unbounded); `Game.gates`, the per-seat objects `trade_event`
+  asks for a private judgement. `Game.num_players`.
 - `hexset.bots.Bot.valuation(view)` and
   `Bot.accepts(view, received, counterparty)`, both defaulting to "this seat
   never trades", so a bot written before the mechanic keeps working.
@@ -164,18 +214,61 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `rank_partners`) and a minimal adapter, `Heximax.propose_actions`, that
   replaces the engine's one-for-one trade sample with heximax's own scored
   candidates.
-
 ### Fixed
 
-- `POST /api/bot` answered with the *target* seat's view rather than the
-  caller's, so changing a bot's picker handed that bot's whole hand back to
-  whoever touched it and left the client believing it was sitting at the
-  bot's seat. It answers as the seat that asked.
-- The browser's player list decided bot-picker-or-name on a `human` field no
-  response has ever carried, so every row rendered as a bot picker —
-  a person's seat and an open one included. Row kind now comes from
-  `seats[].kind`, and a name from `seats[].name` rather than from the log's
-  own label (which reads "player" for anyone unnamed, hiding "you").
+- **The seat panel could not tell an occupied seat from an open or a locked
+  one.** Every seat's line was drawn as a bot model picker — your own, a
+  seat nobody had taken, and one the setup snake had retired — because the
+  player rows stopped carrying a `human` flag when the lobby was removed and
+  the page still branched on it. Each line now reads the server's own
+  per-seat kind: a name for a person, a picker for a bot, and "open seat" /
+  "locked seat", dimmed, for a seat nobody is in.
+- **The New game button did nothing once a bot had been swapped.** Because
+  every seat was drawn as a picker, swapping wrote a fourth entry into a
+  lineup that has room for three, and `POST /api/games` then asked for five
+  seats at a four-seat table and was refused. The lineup slot is now read off
+  the bot seats themselves and cannot grow past them.
+- **A bot model picker closed about a second after it opened.** The page
+  rebuilds its panels on every poll (1.5 s while it is not your move), which
+  replaced the open `<select>` element. The seat panel now updates its rows
+  in place and never touches a picker that has focus.
+- **`POST /api/bot` answered with the swapped seat's view, not the caller's.**
+  Changing a bot handed the page that bot's own seat number, hand and legal
+  actions until its next poll. It now answers whoever asked, like every other
+  route.
+- **A game opened by someone with no seat rendered nothing.** `GET
+  /api/board` and `GET /api/state` are both seat-gated and an observer holds
+  no token for either, so the page took a 401 where its board should have
+  been and stopped at "Loading...". `GET /api/table/<CODE>/board` serves the
+  (public) layout without a token, and an observer polls
+  `GET /api/table/<CODE>` for state. The seat panel's bot pickers are
+  disabled for a reader with no seat, which is the only thing they could
+  ever have answered.
+- **A human seat auto-cleared trades against its published vector.** `POST
+  /api/games` and `POST /api/join` left a human seat's gate at
+  `PostedValuation` (auto-accept) unless `confirm` was set at seat-up, so a
+  bot could clear a trade against a human who never confirmed anything —
+  the same gate an LLM seat gets by design, but not what the negotiation
+  interface intends for a person at the web page. Both routes now default a
+  request that omits `confirm` to confirm mode (`PendingGate`): a bot's
+  clearing candidate lands in `pending` for the human to `confirm`/`decline`
+  instead. `confirm: false` still opts a human seat back out to
+  auto-accept. `hexset.server.mcp`'s `new_game`/`join` tools are unaffected
+  — they now send `confirm` explicitly on every call, keeping an LLM seat's
+  own opt-in default (PI ratification decision 3).
+- **The served game never traded.** `hexset.server.webplay.GameSession.
+  state_view` fired the turn's pending trade event as a side effect of
+  *any* viewer's poll (a spectator's, or an acting bot's own runner
+  checking whose turn it is), by reading the current player's own hidden
+  view unconditionally; `Game.publish_due(seat)` was then defined as "the
+  event has not run yet", so that poll made a bot seat's own publish look
+  moot before it ever happened, permanently, for that turn and every turn
+  after. `Game.publish_due` is now keyed off a seat's own turn-scoped
+  `awaiting_publish` flag instead of the event, so an early observation no
+  longer stops the seat's publish from taking effect; `state_view` now
+  triggers the pending event through `hexset.game.run_pending_event`
+  directly rather than reading `game.state(game.current_player)` for a
+  reader who may not be that player at all.
 - `hexset.server.api.spawn_bot` imported `.onnxbot` from `hexset.server`,
   where the module no longer lives after the one-distribution restructure
   moved it to `hexset.clients.onnxbot`. Any `.onnx` model picked in the web
@@ -202,6 +295,68 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   to a bot from the player list. The deal/join/name/code-entry screen is
   gone, and with it the browser's own name field (`POST /api/name` is
   unchanged for API and MCP clients).
+- **Trade candidates are bundles, not one-for-one swaps.**
+  `hexset.trading._candidates` now enumerates every signed bundle on
+  disjoint resources, coverable from the true hands, rather than only
+  coverable one-card-for-one-card swaps — a 2-for-1 clears as one bundle
+  now, where before it could not clear at all, since no sequence of
+  one-card steps that each has to satisfy both gates on its own reaches it.
+  A bundle's size is bounded only by what each side's hand holds — no fixed
+  cap (owner review, 2026-09-03, against an interim 1..3-cards-a-side
+  limit).
+- **Trade and build interleave.** The trade event runs at the start of
+  `Phase.MAIN` and again after every MAIN action the current player takes —
+  build, buy, a bank/port trade, a development card — on the same published
+  vectors (owner review against the rulebook, 2026-09-03; replaces "one
+  event before any build"). Never runs after `end_turn`, and never during
+  setup, `ROLL`, `ROBBER` or discard resolution.
+- **The tie-break is the acting seat's choice among fair deals, not fewer
+  cards.** Rank keys: the smaller of the two public surpluses, highest
+  first (unchanged, the maximin); the current player's own surplus, highest
+  first — among equally fair deals the actor takes the better one for
+  itself; the total surplus, highest first; a canonical bundle order, then
+  the lower counterparty seat, for determinism only (owner review,
+  2026-09-03, "the tie-break" — replaces fewer-cards/canonical/lower-seat as
+  the whole rule).
+- **The trade event reads published vectors instead of fetching them.**
+  `hexset.trading.trade_event(game, gate)` drops its `valuation_of`
+  parameter and reads `game.valuations` directly; a driver publishes a
+  seat's vector once, right after that seat's own decision
+  (`Game.publish(seat, vector)`, or `hexset.trading.publish_valuation(game,
+  seat, trader)` for the common "ask the trader, then publish" case).
+  `hexset.arena.play`, `hexset.record.record_game`, `hexset.bench.aivat`,
+  `hexset.gym`'s auto-played opponents and the server's embedded bots all
+  publish this way now. `CONTRACT_VERSION` stamps `"5"` (it stayed `"4"`
+  after `RECORD_FIELDS` had already changed).
+- **A seat publishes once a turn, not after every action, and the turn's
+  first trade event runs lazily.** `Game.publish_due(seat)`: true exactly
+  once per seat per turn, while `seat` is the current player, the phase is
+  `MAIN`, and this turn's first event has not run yet.
+  `hexset.arena.play`, `hexset.record.record_game`, `hexset.bench.aivat`,
+  `hexset.gym`'s auto-played opponents and the server's embedded bots call
+  `hexset.trading.publish_valuation` only when this is true, at the
+  post-roll/robber point, instead of after every action (measured at 8.4x
+  collection cost in a batched collector for an event that can only ever
+  observe two publishes a turn). `enter_main` no longer runs the turn's
+  first event directly — it sets `Game.event_pending`, and the event runs
+  the first time the current player's own `hexset.actions.legal_actions`,
+  `Game.state(seat)` at `hidden=True`, or `Game.publish` is reached,
+  whichever comes first (a `hidden=False` read of the true state does not
+  trigger it — that path is for reading state for a reason unrelated to
+  this seat's own turn), so a driver that publishes before it ever observes
+  the game trades on the vector it just published, and a seat that never
+  publishes (an idle human) still gets its event on whatever is already
+  standing. Every event after the first one in a turn is unaffected. A
+  human still publishes whenever it likes through
+  `PUT /api/games/<code>/valuation`, `publish_due` or not.
+  `hexset.record.record_game` attributes a lazily-triggered first event to
+  the *previous* action's step (the roll or robber resolution), matching
+  what `hexset.record.advance` already replays there.
+  `hexset.clients.botclient.LocalSearchBrain` now hands an embedded
+  `NetworkBot` the live `Game` at construction rather than waiting for its
+  first `choose()` call, so `publish_due`-gated publishing before a seat's
+  very first decision of a game does not read its `valuation`/`accepts` off
+  an unseated bot.
 - ONNX record contract `"4"` → `"5"`: the four `offer_*` fields and
   `pair_mask` are gone, `valuations` (`players × 5` floats) is added, and a
   graph no longer needs a `pair_index` output. Contracts 2, 3 and 4 are
@@ -276,6 +431,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Removed
 
+- **The gate budget.** A registered ablation (8/16/32 candidates per
+  clearing attempt vs. unbounded) found unbounded both the strongest arm
+  and within cost, so the cap is gone: private gates are asked in public-
+  surplus rank order until one clears or candidates run out, always.
+  `hexset.trading.GATE_BUDGET`, the `gate_budget`/`order` keyword
+  parameters of `trade_event`/`_best_clearing` and the ranking helpers,
+  `Game.gate_budget`/`Game.bundle_order`, `Game.budget_binds` (nothing
+  binds now), the `order="minimal_bundle"` ranking path,
+  `hexset.arena.play`/`_play_one`/`compete`'s threading of these, and
+  `hexset.bench.duel --gate-budget`/`--order` are all deleted. The maximin
+  ranking and its actor's-surplus tie-break are unchanged.
 - **The offer protocol.** `Phase.TRADE_RESPOND`, `propose_trade`/
   `accept_trade`/`decline_trade`, `Offer`, `Game.offer`/`.pending_responders`/
   `.offers_made`/`.offered`, `MAX_OFFERS_PER_TURN`, `trading.responders`/

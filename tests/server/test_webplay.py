@@ -24,13 +24,17 @@ from hexset.server.journal import (
     replayable,
 )
 from hexset.server.journal import RESOURCE_NAMES as JOURNAL_RESOURCE_NAMES
+from hexset.trading import Trade
 from hexset.victory import victory_points
 from hexset.server.webplay import (
     RESOURCE_NAMES,
     SQRT3,
     GameSession,
+    PendingGate,
+    PostedValuation,
     action_to_wire,
     board_layout,
+    bundle_from_wire,
     hex_center,
     hex_corner,
     vertex_pixels,
@@ -801,7 +805,6 @@ def test_the_trade_log_and_the_valuations_ride_in_the_state_view():
     filtered per viewer -- both are things a table hears."""
     from hexset.board.terrain import Resource
     from hexset.game import roll_dice
-    from hexset.server.webplay import PostedValuation
 
     game = a_game(seed=13)
     game.phase = Phase.ROLL
@@ -817,7 +820,7 @@ def test_the_trade_log_and_the_valuations_ride_in_the_state_view():
     wants_ore[Resource.ORE] = 1.0
     wants_ore[Resource.WOOD] = -1.0
     session.publish(0, wants_ore)
-    session.set_trader(1, PostedValuation(tuple(-v for v in wants_ore)))
+    session.publish(1, [-v for v in wants_ore])
 
     roll_dice(game, 8)
 
@@ -828,4 +831,106 @@ def test_the_trade_log_and_the_valuations_ride_in_the_state_view():
         assert view["trades"][0]["a"] == 0 and view["trades"][0]["b"] == 1
         assert view["trades"][0]["got"][Resource.ORE] == 1
         assert view["trades"][0]["gave"][Resource.WOOD] == 1
+
+
+# --- the negotiation interface (docs/negotiation-interface.md) -----------------
+
+
+def test_bundle_from_wire_is_signed_towards_the_proposer():
+    from hexset.board.terrain import Resource
+
+    b = bundle_from_wire({"Wood": 1}, {"Ore": 2})
+    assert b[Resource.WOOD] == -1
+    assert b[Resource.ORE] == 2
+
+
+def test_bundle_from_wire_rejects_an_unknown_resource():
+    with pytest.raises(ValueError, match="unknown resource"):
+        bundle_from_wire({"Unobtainium": 1}, {})
+
+
+def test_publish_installs_posted_valuation_by_default():
+    game = a_game(seed=3)
+    session = a_session(game, {0})
+    session.publish(0, [0.5, 0, 0, 0, -0.5])
+    assert isinstance(game.gates[0], PostedValuation)
+    assert game.gates[0].accepts(None, (1, 0, 0, 0, -1), 1) is True
+
+
+def test_publish_installs_pending_gate_for_a_confirm_mode_seat():
+    game = a_game(seed=3)
+    session = a_session(game, {0})
+    session.confirm_seats.add(0)
+    session.publish(0, [0.5, 0, 0, 0, -0.5])
+    assert isinstance(game.gates[0], PendingGate)
+    assert game.gates[0].valuation(None) == (0.5, 0, 0, 0, -0.5)
+
+
+def test_pending_gate_always_declines_and_records_the_candidate():
+    game = a_game(seed=3)
+    gate = PendingGate(game, seat=1, vector=(0.0,) * 5)
+    accepted = gate.accepts(None, (1, 0, 0, 0, -1), 0)
+    assert accepted is False
+    assert game.pending == [Trade(1, 0, (1, 0, 0, 0, -1))]
+
+
+def test_pending_gate_records_nothing_when_the_other_side_declines_first():
+    """The short-circuit property: `_best_clearing` asks the acting seat's
+    own gate first, so a `PendingGate` sitting as the counterparty never
+    fires for a candidate the other side already refused."""
+    from hexset.board.terrain import Resource
+    from hexset.game import Phase
+    from hexset.trading import trade_event
+
+    game = a_game(seed=3)
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    game._state.hands[0][Resource.WOOD] = 1
+    game._state.hands[1][Resource.ORE] = 1
+
+    class Declines:
+        def valuation(self, view):
+            return (1.0, 0, 0, 0, -1.0)  # wants ore, would give wood
+
+        def accepts(self, view, received, counterparty):
+            return False
+
+    pending_gate = PendingGate(game, seat=1, vector=(-1.0, 0, 0, 0, 1.0))
+    game.gates = (Declines(), pending_gate, PostedValuation((0.0,) * 5), PostedValuation((0.0,) * 5))
+    game.valuations[0] = (1.0, 0, 0, 0, -1.0)
+    game.valuations[1] = (-1.0, 0, 0, 0, 1.0)
+
+    trade_event(game, lambda seat, view, received, other: game.gates[seat].accepts(view, received, other))
+    assert game.pending == []
+
+
+def test_execute_trade_reaches_the_session_and_moves_cards():
+    from hexset.board.terrain import Resource
+    from hexset.game import Phase
+
+    game = a_game(seed=3)
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    game._state.hands[0][Resource.WOOD] = 1
+    game._state.hands[1][Resource.ORE] = 1
+    session = a_session(game, {0, 1})
+    session.publish(1, [1.0, 0, 0, 0, -1.0])  # seat 1 wants wood, gives ore
+    received = [0, 0, 0, 0, 0]
+    received[Resource.ORE] = 1
+    received[Resource.WOOD] = -1
+    trade = game.execute_trade(0, 1, tuple(received))
+    assert trade.received == tuple(received)
+    assert game._state.hands[0][Resource.ORE] == 1
+    assert game._state.hands[1][Resource.WOOD] == 1
+
+
+def test_state_view_pending_is_filtered_per_viewer():
+    game = a_game(seed=3)
+    game.pending.append(Trade(1, 0, (1, 0, 0, 0, -1)))
+    session = a_session(game, {0, 1})
+    assert session.state_view(1)["pending"] == [
+        {"counterparty": 0, "gave": [0, 0, 0, 0, 1], "got": [1, 0, 0, 0, 0]}
+    ]
+    assert session.state_view(0)["pending"] == []
+    assert session.state_view(None)["pending"] == []
 

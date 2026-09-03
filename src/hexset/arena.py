@@ -34,6 +34,7 @@ from .board.board import Board, random_base_board
 from .board.topology import Topology
 from .game import Game, is_over, start, to_move
 from .placement import PlacementBot
+from .trading import publish_valuation
 from .victory import victory_points
 
 if TYPE_CHECKING:
@@ -435,25 +436,37 @@ def play(
 ) -> Game:
     """One game, each bot seated at its own index.
 
-    Seating a bot also seats what it brings to a trade: `game.traders` is
-    the lineup itself, so the engine's one trade event a turn
-    (`hexset.trading`) asks each seat's own `valuation`/`accepts` rather
-    than this loop having to remember to run anything. A bot that defines
-    neither never trades, which is how `RandomBot` and any external bot that
-    predates the mechanic behave.
+    Seating a bot also seats its private gate: `game.gates` is the lineup
+    itself, so the engine's one trade event a turn (`hexset.trading`) asks
+    each seat's own `accepts` rather than this loop having to remember to
+    run anything. Publishing is this loop's own job, not the event's, and
+    once a turn, not after every action: right when it is that seat's turn
+    to decide and `game.publish_due(seat)` says so (the engine-defined
+    post-roll/robber point, before the turn's first trade event -- the PI
+    amendment "publish points and the event trigger",
+    `agents/reference/trading-design.md`), it is asked for its current
+    vector and the answer is recorded (`hexset.trading.publish_valuation`),
+    so the vector every trade event this turn reads is the one this seat's
+    turn stands behind. A bot that defines neither `valuation` nor
+    `accepts` never trades, which is how `RandomBot` and any external bot
+    that predates the mechanic behave.
     """
     game = start(board, len(bots), rng)
-    game.traders = tuple(bots)
+    game.gates = tuple(bots)
     game.max_trades = None
     actions = 0
     while not is_over(game) and actions < action_cap:
-        apply(game, bots[to_move(game)].choose(game))
+        seat = to_move(game)
+        bot = bots[seat]
+        if game.publish_due(seat):
+            publish_valuation(game, seat, bot)
+        apply(game, bot.choose(game))
         actions += 1
     return game
 
 
 def _play_one(
-    job: tuple[tuple[Entrant, ...], int, int, int],
+    job: tuple[tuple[Entrant, ...], int, int, int, bool],
 ) -> tuple[int | None, int | None, int, tuple[int, ...]]:
     """Play game `index`. Returns (winning entrant, winning seat, turns, points).
 
@@ -500,7 +513,10 @@ def _play_one(
         )
 
     game = play(
-        lineup, board, random.Random(f"{seed}:{board_index}:game"), action_cap=action_cap
+        lineup,
+        board,
+        random.Random(f"{seed}:{board_index}:game"),
+        action_cap=action_cap,
     )
     # true state: the verdict's own victory points include hidden
     # victory-point dev cards, so the final score is read off the truth.

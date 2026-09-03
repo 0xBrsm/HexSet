@@ -330,6 +330,39 @@ def test_another_seats_discard_line_is_a_bare_count_never_the_resources():
     assert "discarded 4 cards" in text
     assert not any(r in text for r in RESOURCE_NAMES)
 
+def test_a_spectators_log_redacts_nothing_a_seats_log_would():
+    """The same discard, read three ways. A seat sees its own cards named; a
+    seat across the table sees a bare count; somebody watching from outside
+    the game sees the cards, because they are outside it (see `render_log`'s
+    `omniscient`)."""
+    game = _owing_game(seed=22, seat=1, hand=[4, 4, 0, 0, 0])
+    session = a_session(game, {0, 1})
+
+    _discard_all(session, 1)
+
+    theirs = session.log_for(1)[0]
+    across = session.log_for(0)[0]
+    watching = session.log_for(None, omniscient=True)[0]
+
+    assert any(r in theirs for r in RESOURCE_NAMES)
+    assert "discarded 4 cards" in across
+    assert not any(r in across for r in RESOURCE_NAMES)
+    assert watching == theirs
+
+
+def test_a_blind_spectators_log_still_redacts():
+    """`omniscient` is what lifts it, not the absence of a seat: a reader with
+    no seat and no omniscience is still owed the least of anyone."""
+    game = _owing_game(seed=22, seat=1, hand=[4, 4, 0, 0, 0])
+    session = a_session(game, {0, 1})
+
+    _discard_all(session, 1)
+
+    text = session.log_for(None)[0]
+    assert "discarded 4 cards" in text
+    assert not any(r in text for r in RESOURCE_NAMES)
+
+
 def test_two_seats_discarding_get_a_line_each():
     game = _owing_game(seed=23, seat=0, hand=[4, 4, 0, 0, 0])
     game._state.hands[1] = [4, 4, 0, 0, 0]

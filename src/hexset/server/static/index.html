@@ -112,6 +112,15 @@
     align-items: center; column-gap: 0.25rem; padding: 0.3rem 0.2rem; border-radius: 6px;
   }
   .player-row.active { background: color-mix(in srgb, var(--accent) 15%, var(--panel)); }
+  /* Watching only: a row you can open, and the one that's open. The ring is
+     the seat's own colour, set inline — it names whose cards are below
+     without spending the accent, which belongs to no seat while watching. */
+  .player-row-openable { cursor: pointer; }
+  .player-row-open { box-shadow: inset 0 0 0 2px var(--open-ring); }
+  /* Standing in for the hand area while watching and no row is open — the
+     one place the page has to say what a click does, since a row that opens
+     looks like any other until you try it. */
+  .hand-hint { color: var(--muted); font-size: 0.82rem; padding: 0.3rem 0.2rem; }
   .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.35); }
   /* No fixed width any more — the name column itself (minmax(0, 1fr) above)
      is what sizes this, and shrinks first when the row's tight. Overflow is
@@ -728,6 +737,7 @@ let pendingRobberHex = null;  // when a hex has more than one victim option
 let knightArmed = false;   // Knight card clicked: the board is offering its robber targets — see renderHand
 let inFlight = false;
 let waitTimer = null;      // the poll that watches somebody else's turn — see settle
+let openSeat = null;       // watching only: whose cards the hand area shows — see renderPlayers
 let logSheetOpen = false;  // the full-history sheet is only drawn while it's up — see renderLog
 let modalMode = null;      // which decision the modal is showing, if any — see openModal
 let modalDrag = {x: 0, y: 0};  // #modal-inner offset from center, dragged via #modal-head — see wireModalDrag
@@ -1468,9 +1478,25 @@ function renderPlayers() {
     const kind = state.seats[p.seat] && state.seats[p.seat].kind;
     if (watching()) {
       // Nothing here is ours to change — seating a bot needs a seat's own
-      // token — so every row reads as text, empty ones included.
+      // token — so every row reads as text, empty ones included. What a row
+      // does instead is open: a spectator is told every hand at the table
+      // (see api.Tables.handle's public routes), and clicking a row picks
+      // which one the hand area below shows.
       nameEl.classList.add("player-name-plain");
       nameEl.textContent = seatLabel(p.seat);
+      if (p.hand !== undefined) {
+        row.classList.add("player-row-openable");
+        if (openSeat === p.seat) {
+          row.classList.add("player-row-open");
+          row.style.setProperty("--open-ring", color.fill);
+        }
+        // Clicking the open row again closes it, so there is always a way
+        // back to showing nobody's cards in particular.
+        row.addEventListener("click", () => {
+          openSeat = openSeat === p.seat ? null : p.seat;
+          render();
+        });
+      }
     } else if (p.seat === state.seat) {
       nameEl.classList.add("player-name-plain");
       nameEl.textContent = "human";
@@ -1573,10 +1599,20 @@ function devCardPlay(name, g) {
 
 // The human's own cards, kept in a fixed spot below the seat list (in actual
 // seat order) rather than tied to wherever their seat happens to fall.
+//
+// Watching, there is no own seat, and this shows whichever one was clicked in
+// the player list instead (openSeat) — nobody's until one is. The clicks that
+// make a card do something all come off `legal_actions`, which is empty for a
+// spectator, so every card here is inert without a check of its own.
 function renderHand() {
   const container = document.getElementById("hand");
   container.innerHTML = "";
-  const p = state.players.find((p) => p.seat === state.seat);
+  const seat = watching() ? openSeat : state.seat;
+  if (seat === null) {
+    container.appendChild(html("div", {class: "hand-hint"}, "Click a player to see their cards."));
+    return;
+  }
+  const p = state.players.find((p) => p.seat === seat);
   if (!p || p.hand === undefined) return;
 
   // What a click on a card does is decided by what's actually legal, which

@@ -354,12 +354,17 @@ class Table:
         self.session.claim(index, clean)
         return index, token
 
-    def view(self, viewer: int | None = None) -> dict:
-        """The whole game as `viewer` (a seat, or `None` for an observer) is
+    def view(self, viewer: int | None = None, *, omniscient: bool = False) -> dict:
+        """The whole game as `viewer` (a seat, or `None` for a spectator) is
         allowed to see it — reachable from the moment a game exists, since
-        there's no separate lobby shape any more."""
+        there's no separate lobby shape any more.
+
+        `omniscient` is for a spectator only, and `state_view` refuses it
+        alongside a seat rather than trusting the caller: it holds back
+        nothing at all, which is the right answer for somebody watching and
+        the wrong one for anybody playing."""
         self._settle_locks()
-        state = self.session.state_view(viewer)
+        state = self.session.state_view(viewer, omniscient=omniscient)
         state["code"] = self.code
         state["seats"] = [seat.public(i) for i, seat in enumerate(self.seats)]
         return state
@@ -880,16 +885,29 @@ class Tables:
 
         # The reads that need no token, and the whole of what "every game is
         # public" means: `GET /api/table/<code>` is the game as a spectator
-        # sees it — the board, the log, every seat's public standing, and no
-        # hand but a finished game's — and `.../board` is the layout that
-        # view is drawn on. Neither reveals anything a seat at the table
-        # could not already see (`Table.view(None)` does the filtering), so
-        # neither is gated: a link is all it takes.
+        # sees it and `.../board` is the layout that view is drawn on. A link
+        # is all either one takes.
+        #
+        # **A spectator sees everything** — every hand, every dev card, every
+        # true victory-point count, and a transcript that names the card
+        # bought, the card stolen and the cards discarded. That is the point
+        # of watching, and it is also the one place in this module where
+        # hidden information leaves it, so it is worth being plain about what
+        # follows: this route is not authenticated and cannot be, since
+        # holding the link is the whole qualification. Anyone playing at the
+        # table holds the link. A seat that opens its own game's public view
+        # is therefore reading every opponent's hand, and nothing here can
+        # tell that apart from a bystander doing the same.
+        #
+        # Every route that *acts* still answers a token and still gets its
+        # own seat's honest view (`state_view` refuses `omniscient` for a
+        # seat outright), so nothing a bot or a training run reads is
+        # affected. The exposure is to people, at a table, who choose to look.
         if method == "GET" and path.startswith("/api/table/"):
             code, _, tail = path[len("/api/table/") :].partition("/")
             table = self.get(code)
             if not tail:
-                return table.view(None)
+                return table.view(None, omniscient=True)
             if tail == "board":
                 return table.layout
             raise ApiError(f"no such endpoint: {method} {path}", status=404)

@@ -239,9 +239,34 @@ def test_an_observer_can_read_a_game_without_a_token():
     assert data["seat"] is None
     assert data["phase"]
     assert data["legal_actions"] == []  # nothing is an observer's to play
-    # Nobody's hand, not even a bot's: `reveal` is the viewer's own seat or a
-    # finished game, and an observer is neither.
-    assert not any("hand" in p for p in data["players"])
+
+
+def test_a_spectator_sees_every_hand_and_a_seat_still_sees_only_its_own():
+    """Watching is omniscient on purpose: a spectator is outside the game and
+    is shown all of it. A seat is inside it and is not — the same table, read
+    two ways, and the difference is the whole of what the token buys."""
+    registry = tables()
+    code, token = deal(registry, bots=["search2", "search2", "search2"])
+    mine = registry.by_token(token)[1]
+
+    watched = registry.handle("GET", f"/api/table/{code}", {}, None)
+    seated = registry.handle("GET", "/api/state", {}, token)
+
+    assert {p["seat"] for p in watched["players"] if "hand" in p} == set(range(MAX_SEATS))
+    assert {p["seat"] for p in watched["players"] if "dev_cards" in p} == set(range(MAX_SEATS))
+    assert {p["seat"] for p in seated["players"] if "hand" in p} == {mine}
+
+
+def test_an_omniscient_view_cannot_be_built_for_a_seat():
+    """The guard is in `state_view` rather than trusted to the one caller:
+    a seat handed a view like this would be reading every opponent's hand
+    while still choosing its own moves."""
+    registry = tables()
+    code, _ = deal(registry)
+    table = registry.get(code)
+
+    with pytest.raises(ValueError):
+        table.view(0, omniscient=True)
 
 
 def test_an_observer_can_read_the_board_without_a_token():

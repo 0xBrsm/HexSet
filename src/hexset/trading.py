@@ -123,6 +123,29 @@ def judged(trader: object, view: "View", received: Bundle, counterparty: int) ->
     return False if method is None else bool(method(view, received, counterparty))
 
 
+def judged_many(
+    trader: object,
+    view: "View",
+    received: Sequence[Bundle],
+    counterparties: Sequence[int],
+) -> list[bool]:
+    """Batched `judged`: `trader`'s verdict on every one of `received` at
+    once, in the same order, via `accepts_many` when `trader` defines it.
+
+    `hexset.bots.Bot.accepts_many`'s documented default -- loop over
+    `accepts` -- is implemented here rather than by inheritance, exactly as
+    `judged` already implements `accepts`'s own default, so it holds for a
+    bot that satisfies `Bot` only structurally. This is what lets
+    `_best_clearing` ask a seat's gate once per event instead of once per
+    candidate bundle (`agents/reference/trading-design.md`'s post-data
+    note, "the collector cost gate fails at 2.9-3.6x").
+    """
+    method = getattr(trader, "accepts_many", None)
+    if method is not None:
+        return [bool(x) for x in method(view, list(received), list(counterparties))]
+    return [judged(trader, view, r, c) for r, c in zip(received, counterparties)]
+
+
 def bundle(**amounts: int) -> Bundle:
     """A resource bundle by name, for tests and hand-written trades."""
     from .board.terrain import Resource
@@ -440,6 +463,23 @@ def _best_clearing(
     `agents/reference/trading-design.md`'s post-data note "the gate budget
     goes away", found a cap only ever suppressed clearing trades that
     unbounded found within cost).
+
+    **The gates themselves are asked in two batches, not one per candidate**
+    (`agents/reference/trading-design.md`'s post-data note, "the collector
+    cost gate fails at 2.9-3.6x"): `me`'s gate is asked once, over every
+    ranked candidate, via `judged_many`; then, only for the candidates `me`
+    accepted, each distinct counterparty's gate is asked once, over its own
+    accepted subset. The winner is still the first candidate in rank order
+    where both sides said yes -- identical to the old one-candidate-at-a-
+    time loop's result, since a batched `accepts_many` is required to agree
+    with `accepts` row for row -- but the whole clearing attempt costs at
+    most `1 + (distinct counterparties)` gate calls instead of up to `2 *
+    len(ranked)`. `game.gates` (the real trader objects, when the event has
+    any -- `run_trade_event` never reaches here otherwise) is what makes the
+    batching possible; the single-candidate `gate` callable is the fallback
+    for a direct caller with no seated `game.gates` (this module's own
+    tests), where nothing can be batched because there is no trader object
+    to call `accepts_many` on.
     """
     state = game._state
     candidates = list(_candidates(state, me, game.locked))
@@ -450,10 +490,38 @@ def _best_clearing(
         ranked = _rank_candidates_loop(me, vectors, candidates)
     else:
         ranked = _rank_candidates_vectorized(me, vectors, candidates)
+    if not ranked:
+        return None
 
-    for received, them in ranked:
-        mirror = tuple(-n for n in received)
-        if gate(me, view(me), received, them) and gate(them, view(them), mirror, me):
+    traders = game.gates
+
+    def ask(seat: int, seat_view, receiveds: list[Bundle], counterparties: list[int]) -> list[bool]:
+        if traders is not None:
+            return judged_many(traders[seat], seat_view, receiveds, counterparties)
+        return [gate(seat, seat_view, r, c) for r, c in zip(receiveds, counterparties)]
+
+    receiveds = [received for received, _them in ranked]
+    thems = [them for _received, them in ranked]
+    mine_ok = ask(me, view(me), receiveds, thems)
+
+    # Group the candidates `me` accepted by counterparty, preserving rank
+    # order within each group -- exactly the candidates the old sequential
+    # loop would have asked that counterparty about, just gathered into one
+    # call per counterparty instead of one call per candidate.
+    by_counterparty: dict[int, list[int]] = {}
+    for i, ok in enumerate(mine_ok):
+        if ok:
+            by_counterparty.setdefault(thems[i], []).append(i)
+
+    theirs_ok = [False] * len(ranked)
+    for them, indices in by_counterparty.items():
+        mirrors = [tuple(-n for n in receiveds[i]) for i in indices]
+        answers = ask(them, view(them), mirrors, [me] * len(indices))
+        for i, ok in zip(indices, answers):
+            theirs_ok[i] = ok
+
+    for i, (received, them) in enumerate(ranked):
+        if mine_ok[i] and theirs_ok[i]:
             return them, received
     return None
 

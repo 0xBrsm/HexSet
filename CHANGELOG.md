@@ -20,6 +20,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that bot, and a person who opens the link takes a seat instead. A link to a
   game that is full or gone says so rather than dealing a different game
   under the same address.
+- **Every game is public.** A link to a game with no seat left opens it to
+  watch: the board, the log, and every seat's public standing, updating as
+  the game goes. Nothing is revealed that a seat at the table could not
+  already see — no hands until the game is over — and nothing is actionable,
+  so the pickers, the board buttons and the piece supply are simply absent.
+  `GET /api/table/<code>/board` serves the layout that view is drawn on,
+  alongside the existing token-free `GET /api/table/<code>`.
 - Player-to-player trading is gone from the browser with the offers that
   backed it (`PROPOSE_TRADE`/`ACCEPT_TRADE`/`DECLINE_TRADE`, `TRADE_RESPOND`,
   the view's `offer` block). The modal a resource card opens is the bank and

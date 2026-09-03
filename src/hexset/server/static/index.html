@@ -856,7 +856,9 @@ async function postJSON(path, body) {
 // --- Loading -----------------------------------------------------------
 
 async function loadBoard() {
-  board = await getJSON("/api/board");
+  // The same layout either way — a board is public, and the seated route
+  // only exists because it is the one a token already reaches.
+  board = await getJSON(watching() ? `/api/table/${tableCode}/board` : "/api/board");
   vertexById = {};
   for (const v of board.vertices) vertexById[v.id] = v;
   hexById = {};
@@ -874,6 +876,15 @@ async function loadModels() {
 // The one place that turns a seat number into what a human reads, so the
 // status line, the robber prompt and trade offers all agree. The player list
 // itself renders a bot seat as a <select>, not this — see renderPlayers.
+// Every game is public: the link is all it takes to open one, and a table
+// with no seat left still shows its board and its log to whoever follows it.
+// `state.seat` is null then — the server answers `GET /api/table/<code>`
+// for anyone, with no token and no hand revealed — and this is the one test
+// the seat-shaped parts of the page ask before assuming they have one.
+function watching() {
+  return state.seat === null || state.seat === undefined;
+}
+
 function seatLabel(seat) {
   if (seat === state.seat) return "human";
   // What a seat *is* comes from state.seats, not from the player entry:
@@ -952,14 +963,21 @@ async function dealGame() {
   return data;
 }
 
-// Why the last sit-down attempt failed, in the server's own words — read by
-// init() to tell somebody handed a dead link what happened to it.
+// Why the last attempt at a game came back with nothing at all — read by
+// init() to tell somebody handed a dead link what happened to it. A game
+// that exists but has no seat left is not this: that is watching, and it
+// works.
 let seatError = null;
 
-// The game named in the URL, or the last one we sat at. Returns its state,
-// or null if there is no seat for us there — a game played out, evicted,
-// full, or a token this server has never heard of (a restart re-tokens bot
-// seats and reopens every human one, so there is no lost token to recover).
+// The game named in the URL, or the last one we sat at. Returns its state
+// — seated if there is a seat to be had, watching if the table is full —
+// or null if there is no such game to be at: played out, evicted, or a code
+// with nothing behind it.
+//
+// A token this server has never heard of counts as no seat rather than no
+// game: a restart re-tokens bot seats and reopens every human one, so there
+// is no lost token to recover, and the right answer is to try for a seat
+// again from scratch.
 async function resumeGame(code) {
   if (!code) return null;
   tableCode = code;
@@ -973,15 +991,23 @@ async function resumeGame(code) {
     forgetSeat(code);
   }
   // No seat here, or not one of ours any more: take an open one if the game
-  // exists and has one left.
+  // has one left.
   const {ok, data} = await postJSON("/api/join", {code});
-  if (!ok) {
-    seatError = data.error || "That game could not be joined.";
+  if (ok) {
+    rememberSeat(code, data.token);
+    showCodeInUrl(code);
+    return data;
+  }
+  // Every seat taken, or no game at all — the join refuses both the same
+  // way, and only the table's own view tells them apart. Every game is
+  // public, so a full one still opens; it just opens to watch.
+  const view = await getJSON(`/api/table/${code}`);
+  if (view.error) {
+    seatError = view.error;
     return null;
   }
-  rememberSeat(code, data.token);
   showCodeInUrl(code);
-  return data;
+  return view;
 }
 
 // --- Static board drawing ------------------------------------------------
@@ -1259,10 +1285,14 @@ function cancelRobberMove() {
 // too, and it survives the change.
 function settle() {
   clearTimeout(waitTimer);
-  if (state.game_over || state.to_move === state.seat) return;
+  // Watching, every move is somebody else's, so the poll never stops until
+  // the game does — that is the whole of what a spectator's page does.
+  if (state.game_over || (!watching() && state.to_move === state.seat)) return;
   waitTimer = setTimeout(async () => {
     if (inFlight) { settle(); return; }
-    const next = await getJSON("/api/state");
+    // A seat reads its own view; a spectator has no token to read one with,
+    // and asks for the table's public view instead.
+    const next = await getJSON(watching() ? `/api/table/${tableCode}` : "/api/state");
     if (!next.error) {
       state = next;
       render();
@@ -1342,7 +1372,12 @@ function render() {
   // shade of #6d5ce8 now derives it from this custom property instead (see
   // the color-mix() rules on .clickable-vertex etc.). Set on every render
   // rather than once, since a new game can seat the human differently.
-  document.documentElement.style.setProperty("--accent", SEAT_COLORS[state.seat].fill);
+  //
+  // Watching rather than playing, there is no seat and so no colour of our
+  // own: it falls back to the stylesheet's own #6d5ce8, which belongs to no
+  // seat and highlights nothing anyone can click anyway.
+  document.documentElement.style.setProperty(
+    "--accent", watching() ? "#6d5ce8" : SEAT_COLORS[state.seat].fill);
   // Arming a Knight is purely client-side, so nothing else clears it: a new
   // state where playing one is no longer legal (it was played, the turn moved
   // on, the game ended) has to. legal_actions is empty whenever it isn't the
@@ -1373,7 +1408,11 @@ function renderStatus() {
   // the point. True as of the last poll rather than the last render — see
   // settle() — which is as current as anything here gets.
   if (state.to_move !== state.seat) {
-    phaseEl.textContent = `PLAYER ${state.to_move + 1}'S TURN`;
+    const turn = `PLAYER ${state.to_move + 1}'S TURN`;
+    // Watching needs saying: with no seat, every turn is somebody else's,
+    // and a status line that only ever named other people would look like a
+    // game that had stopped offering us ours.
+    phaseEl.textContent = watching() ? `WATCHING · ${turn}` : turn;
     return;
   }
   // The same move either way, so the same words either way — PHASE_LABELS
@@ -1431,7 +1470,12 @@ function renderPlayers() {
 
     const nameEl = html("div", {class: "player-name"});
     const kind = state.seats[p.seat] && state.seats[p.seat].kind;
-    if (p.seat === state.seat) {
+    if (watching()) {
+      // Nothing here is ours to change — seating a bot needs a seat's own
+      // token — so every row reads as text, empty ones included.
+      nameEl.classList.add("player-name-plain");
+      nameEl.textContent = seatLabel(p.seat);
+    } else if (p.seat === state.seat) {
       nameEl.classList.add("player-name-plain");
       nameEl.textContent = "human";
     } else if (kind === "player") {
@@ -1606,6 +1650,9 @@ function renderHand() {
 function renderPieceSupply() {
   const container = document.getElementById("piece-supply");
   container.innerHTML = "";
+  // One seat's own pieces. Watching, there is no such seat, and a supply
+  // count for nobody would read as somebody's.
+  if (watching()) return;
   const seat = state.seat;
   const color = SEAT_COLORS[seat];
   const roadsBuilt = state.edge_owner.filter((o) => o === seat).length;
@@ -2347,7 +2394,8 @@ document.addEventListener("keydown", (e) => {
       (seatError || "COULD NOT DEAL A GAME").toUpperCase();
     return;
   }
-  // After the seat, not alongside it: /api/board answers a seat's token.
+  // After the game, not alongside it: which board route to ask depends on
+  // whether we ended up with a seat at it.
   await loadBoard();
   render();
   settle();

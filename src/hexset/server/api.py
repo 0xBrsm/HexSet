@@ -878,10 +878,21 @@ class Tables:
         if method == "GET" and path == "/api/models":
             return {"models": list(model_options())}
 
-        # The only read that needs no token: an observer's view of a game
-        # they haven't (or couldn't) join.
+        # The reads that need no token, and the whole of what "every game is
+        # public" means: `GET /api/table/<code>` is the game as a spectator
+        # sees it — the board, the log, every seat's public standing, and no
+        # hand but a finished game's — and `.../board` is the layout that
+        # view is drawn on. Neither reveals anything a seat at the table
+        # could not already see (`Table.view(None)` does the filtering), so
+        # neither is gated: a link is all it takes.
         if method == "GET" and path.startswith("/api/table/"):
-            return self.get(path[len("/api/table/") :]).view(None)
+            code, _, tail = path[len("/api/table/") :].partition("/")
+            table = self.get(code)
+            if not tail:
+                return table.view(None)
+            if tail == "board":
+                return table.layout
+            raise ApiError(f"no such endpoint: {method} {path}", status=404)
 
         if method == "POST" and path == "/api/games":
             table, new_token = self.create(

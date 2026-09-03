@@ -239,6 +239,31 @@ def test_an_observer_can_read_a_game_without_a_token():
     assert data["seat"] is None
     assert data["phase"]
     assert data["legal_actions"] == []  # nothing is an observer's to play
+    # Nobody's hand, not even a bot's: `reveal` is the viewer's own seat or a
+    # finished game, and an observer is neither.
+    assert not any("hand" in p for p in data["players"])
+
+
+def test_an_observer_can_read_the_board_without_a_token():
+    """The layout a spectator's page is drawn on. Every game is public, so
+    the board behind one is too — and it is the same board the seats get,
+    since a board is public knowledge at the table anyway."""
+    registry = tables()
+    code, token = deal(registry, bots=["search2"])
+
+    public = registry.handle("GET", f"/api/table/{code}/board", {}, None)
+
+    assert public == registry.handle("GET", "/api/board", {}, token)
+    assert public["hexes"] and public["vertices"] and public["ports"]
+
+
+def test_the_public_routes_refuse_anything_but_a_game_and_its_board():
+    registry = tables()
+    code, _ = deal(registry)
+
+    with pytest.raises(ApiError) as caught:
+        registry.handle("GET", f"/api/table/{code}/record", {}, None)
+    assert caught.value.status == 404
 
 
 # --- The per-seat setup lock ---------------------------------------------------

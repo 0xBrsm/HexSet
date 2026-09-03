@@ -130,10 +130,27 @@ exchanges between the current player and each other seat: one card for one
 card, executed when both sides' vectors say it helps them and both sides'
 private gates accept, best deal first, until nothing clears.
 
-A graph publishes nothing yet: a network seat's vector stays all-zero, so a
-served checkpoint never trades — but the table does, and the record it is fed
-carries every seat's vector and hands that a trade has moved. `max_trades=0`
-in the metadata is the explicit off switch.
+A checkpoint served embedded (`hexset.clients.onnxbot.NetworkBot`) trades off
+the same `value` head this contract already declares: `valuation` is
+`tanh(delta_V_r / VALUE_SCALE)` per resource, `delta_V_r` the head's own-row
+delta between the seat's hand and that hand holding one more card of `r`, and
+`accepts` is the head's strict preference for the concrete post-trade hand
+over the current one — the derivation `hexnet.policy.DerivedTrader` trains
+under, reimplemented here against the wire record instead of a live forward
+(`hexset.trading.VALUE_SCALE` is the pinned constant both cite). Published
+right after the seat's own action, same as any other seat
+(`hexset.trading.publish_valuation`), so it lands in `game.valuations` and
+this record's `valuations` field before the table's next trade event.
+`max_trades=0` in the metadata is still the explicit off switch — a seat with
+it set publishes nothing and accepts nothing, exactly like a bot with no
+`valuation` method at all.
+
+A checkpoint served externally (`hexset.clients.botclient.RecordBrain`, the
+`python -m hexset.clients.botclient` peer) does not share this brain and does
+not trade: it reads `GET /api/record` for `action_index` alone and never
+calls `PUT /api/games/<code>/valuation`. That gap is pre-existing and is not
+this contract's concern — an external checkpoint that wants to trade can
+still publish through that route the same way a human client does.
 
 ## What is never part of this contract
 

@@ -11,6 +11,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **An embedded ONNX seat now trades.** `hexset.clients.onnxbot.NetworkBot`
+  gained `valuation`/`accepts`, both derived from the checkpoint's own value
+  head with no new graph output: `valuation` is `tanh(delta_V_r /
+  VALUE_SCALE)` per resource, from one batched forward over the seat's hand
+  plus its five one-card imagined successors when the graph's declared batch
+  dimension allows it; `accepts` is the head's strict preference for the
+  concrete post-trade hand. `hexset.trading.VALUE_SCALE`, the pinned
+  constant both cite.
 - **Trading is one event a turn.** `hexset.trading.trade_event` clears deals
   for the current player after the roll and the robber and before any build
   is served: a one-for-one exchange executes when both seats' public

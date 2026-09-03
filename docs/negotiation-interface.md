@@ -218,3 +218,29 @@ candidate does).
 (panel, client-side formula, pending cards): 2 days. MCP (four tools,
 confirm-mode flag): 0.5 day. Total, one engineer: **~5 days**, excluding
 whatever the PI's answers above add.
+
+## PI ratification (2026-09-03, Fable)
+
+Decisions on the open questions:
+
+1. **A submitted bundle does not update the advertisement vector.** The
+   advertisement is a standing statement for bots' candidate search; a
+   submission is a one-off proposal. Keeping them independent means a human
+   who never touches the five controls can still trade by composing.
+2. **Pending proposals are a snapshot of the last event.** They are recomputed
+   at every trade event and expire at the next event or at the end of the
+   proposing bot's turn, whichever comes first. Nothing pending survives a
+   change of hands it was computed against.
+3. **Confirm mode is opt-in for LLM seats.** An LLM's vector is its statement,
+   the same as a bot's; confirm mode exists for seats that want a per-trade
+   veto and is enabled per seat at seat-up.
+4. **The counterparty's public-surplus check is a hard rule; the proposer's is
+   waived.** A submission is the proposer's consent, so its own vector (which
+   may be zero or unpublished) is not consulted; the counterparty's published
+   vector must say the exchange is good for it, then its private gate decides.
+   Manual trades never bypass the counterparty's vector.
+
+Sequencing: implement after HexSet's bundle and event-timing PRs land (same
+engine files: `Game.pending`, `execute_trade`). The interleaved-event design
+noted above as "not yet implemented here" lands in those PRs first; this
+interface then sees several windows per bot turn as designed.

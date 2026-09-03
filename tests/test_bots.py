@@ -10,7 +10,7 @@ from hexset.board.board import pips, random_base_board
 from hexset.board.terrain import Resource
 from hexset.bots import RandomBot, SearchBot, greedy, own, paranoid, relative
 from hexset.cards import DevCard
-from hexset.evaluate import Evaluator
+from hexset.bots.evaluate import Evaluator
 from hexset.game import (
     MAX_OFFERS_PER_TURN,
     ROLL_ODDS,

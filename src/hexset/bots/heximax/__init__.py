@@ -4,9 +4,7 @@
 Lives at `hexset.bots.heximax`, a subpackage of `hexset.bots` -- the package
 that holds every heuristic bot (`hexset.bots.search2` is the other one) so
 they can share code, chiefly the handcrafted evaluation at
-`hexset.bots.evaluate`. A deprecated top-level `heximax` package (`import
-heximax`) shims `from hexset.bots.heximax import *` for old callers; new code
-should use `hexset.bots.heximax` (or the `hexset.bots` re-exports) directly.
+`hexset.bots.evaluate`.
 
 `hexset.bots.search2.SearchBot` over `hexset.bots.evaluate.Evaluator` --
 `search2` -- is the project's one clean held-out referent, and it cheats: its
@@ -21,13 +19,10 @@ hand is exact. An `omniscient` mode keeps the old reading, so the price of
 honesty can be measured rather than assumed.
 
 A package, so a downstream copy takes the directory: `heximax/evaluate.py`,
-`heximax/search.py`, `heximax/trade.py`, `heximax/presets.py`, one concern a
-file. The information set itself, `View` (`Belief` kept as an alias), moved
-into the engine at `hexset.view` in P0 of the trading-design registration
-(`agents/reference/trading-design.md`) -- a seat's view of the game is
-engine functionality, reached through `Game.state(seat, hidden=True)`, not
-something a bot builds for itself. `heximax` and `hexset.bots.heximax`
-re-export both names for existing callers.
+`heximax/search.py`, `heximax/presets.py`, one concern a file. The
+information set itself, `View`, lives in the engine at `hexset.view` -- a
+seat's view of the game is engine functionality, reached through
+`Game.state(seat, hidden=True)`, not something a bot builds for itself.
 
 * `evaluate` -- `hexset.bots.evaluate.Evaluator`'s term set read through the
   view (`HonestEvaluator`), with progress zeroed where the piece supply is
@@ -43,35 +38,25 @@ re-export both names for existing callers.
   samples of the belief (PIMC over `k` worlds), and every hidden draw
   averaged over its distribution. See its module docstring for the leaf
   budget's cost accounting.
-* `trade`    -- a valuation, protocol-free (marginal values, `deficit` and
-  `surplus`, `candidate_bundles`, `score_proposal`, `accept_rule`,
-  `counter_of`, `rank_partners`), then a thin protocol adapter over it
-  (`Heximax.propose_actions`, and the `TRADE_RESPOND` gate on
-  `accept_rule`) -- mechanical, untuned, and expected to be rewritten
-  whenever the trading protocol changes; only the valuation is fitted or
-  tested for strength. `Heximax` is assembled by inheriting `trade`'s
-  `_TradeMixin` in `search.py`, so `self.accept_rule` and friends resolve
-  the same way regardless of which file defines them.
 * `presets`  -- registers "heximax"/"heximax-omni"/"heximax-notrade" with
   `hexset.arena` and "heximax-trading"/"heximax-notrade" with
   `hexset.tuning`, as an import-time side effect of importing this package
   (and therefore of `import hexset.bots`, which imports this package).
 
-The adapter replaces the engine's one-for-one `PROPOSE_TRADE` sample with
-heximax's own top-`propose_top_n` bundle proposals while `max_offers` still
-has room, and gates the tree's own `ACCEPT_TRADE` with `accept_rule`
-wherever a `TRADE_RESPOND` node is reached, root or not -- the tree's own
-responses are still searched from the responder's own seat. `max_offers=0`
-never proposes and always declines.
+Trading is not an action and needs no adapter: `Heximax.valuation` publishes
+`tanh(marginal / MARGINAL_SCALE)` and `Heximax.accepts` gates on a strictly
+positive change in its own evaluation, and the engine's one trade event a
+turn does the rest (`hexset.trading`). `max_trades=0` publishes nothing and
+refuses everything.
 
 Instantiate through the `heximax(board, ...)` factory, not `Heximax(...)`
 directly, unless you are building a custom evaluator or weight vector by
 hand: `heximax(board, mode="honest")` is the shipped bot, `mode="omniscient"`
 reads every true hand at the same weights (the honest/omni dial this module
 exists to measure the cost of), and `mode="notrade"` plays the no-trade
-weight table at an offer budget of zero. `weights=` overrides either mode's
+weight table with trading switched off. `weights=` overrides either mode's
 profile with a candidate vector while leaving the mode's other defaults (the
-offer budget, `omniscient`) unchanged -- the hook `hexset.tuning` fits
+trade switch, `omniscient`) unchanged -- the hook `hexset.tuning` fits
 through. Importing this package, or `hexset.bots` (which imports it), or
 anything that imports either, registers the three presets above with
 `hexset.arena` and the two evaluator names above with `hexset.tuning`; a
@@ -79,7 +64,7 @@ process that never imports `hexset.bots` (or the deprecated `heximax` shim)
 cannot spawn or fit heximax by name.
 
 Engine dependency: this package is a consumer of `hexset` (actions, board,
-cards, economy, game, ledger, mcts, placement, robber, trading, state,
+cards, economy, game, ledger, mcts, placement, robber, state, trading,
 victory, view), of the sibling `hexset.bots.search2`/`hexset.bots.evaluate` (the
 shared STANCES and the shared evaluation), and of `hexset.arena`/
 `hexset.tuning` for registration. It does not modify any of them. Nesting
@@ -100,7 +85,7 @@ in `agents/reference/heximax.md`.
 
 from __future__ import annotations
 
-from hexset.view import Belief, View
+from hexset.view import View
 from .evaluate import NO_TRADE_WEIGHTS, TRADING_WEIGHTS, HonestEvaluator, Weights
 from .search import BY_MODE, DEFAULT_MAX_NODES, MODES, Heximax, heximax
 
@@ -111,7 +96,6 @@ from . import presets  # noqa: F401
 
 __all__ = [
     "BY_MODE",
-    "Belief",
     "DEFAULT_MAX_NODES",
     "Heximax",
     "HonestEvaluator",

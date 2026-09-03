@@ -6,7 +6,7 @@ import random
 import pytest
 
 from hexset.dataset import Sample, base_rate, build, split_by_game
-from hexset.evaluate import TERM_NAMES, Weights
+from hexset.bots.evaluate import TERM_NAMES, Weights
 from hexset.fitting import (
     accuracy,
     fit,

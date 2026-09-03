@@ -26,7 +26,7 @@ from typing import Sequence
 
 from hexset.bench.throughput import default_workers, environment
 from hexset.arena import Z_95, compete, mean_interval, wilson
-from hexset.evaluate import Weights
+from hexset.bots.evaluate import Weights
 from hexset.tuning import entrant_for
 
 DEFAULT_LEVELS = (0.0, 1.0, 2.0, 3.0, 3.5, 5.0, Weights().production, 10.0, 14.0)

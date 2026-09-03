@@ -45,12 +45,11 @@ WEIGHTS: dict[str, Callable[[], "Weights"]] = {}
 def _seed_default_weights() -> None:
     """Populates `WEIGHTS["default"]`/`WEIGHTS["tiered"]` on first use.
 
-    Not a module-level `from .evaluate import Weights` + literal: that would
-    resolve through the `hexset.evaluate` shim into `hexset.bots.evaluate`,
-    which -- because it is a submodule of the `hexset.bots` package --
-    requires `hexset/bots/__init__.py` to finish running first, and that
-    module now imports `heximax`, which imports this module back for
-    `register_heximax_evaluator`. A module-level import here would deadlock
+    Not a module-level `from .bots.evaluate import Weights` + literal:
+    `hexset.bots.evaluate` is a submodule of the `hexset.bots` package, so
+    importing it requires `hexset/bots/__init__.py` to finish running first, and that
+    module imports `hexset.bots.heximax`, which imports this module back
+    for `register_heximax_evaluator`. A module-level import here would deadlock
     that cycle on whichever of `hexset.arena`/`hexset.tuning` is
     cold-started first (`hexset.arena` carries the identical pattern, as
     `_evaluators`; see its docstring for the full cycle), so the dependency
@@ -58,7 +57,7 @@ def _seed_default_weights() -> None:
     finished importing.
     """
     if "default" not in WEIGHTS:
-        from .evaluate import Weights
+        from .bots.evaluate import Weights
         from .evaluate_tiered import Weights as TieredWeights
 
         WEIGHTS["default"] = Weights

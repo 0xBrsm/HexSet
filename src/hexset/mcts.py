@@ -74,7 +74,6 @@ from .actions import (
     apply,
     legal_actions,
     victim_of,
-    within_offer_budget,
 )
 from .game import ROLL_ODDS, Game, imagine, is_over, roll_dice, to_move
 from .victory import relative_points, victory_points
@@ -301,7 +300,7 @@ class Search:
         wave: int = 16,
         exploration: float = 1.25,
         stance: str = "relative",
-        max_offers: int | None = None,
+        max_trades: int | None = None,
         root_noise: float = 0.0,
         noise_fraction: float = 0.25,
         rng: random.Random | None = None,
@@ -324,7 +323,7 @@ class Search:
         self.stance = stance
         self.rank = STANCES[stance]
         self.rank_rows = STANCE_ROWS[stance]
-        self.max_offers = max_offers
+        self.max_trades = max_trades
         self.root_noise = root_noise
         self.noise_fraction = noise_fraction
         self.rng = rng or random.Random()
@@ -332,7 +331,7 @@ class Search:
     def _options(self, game: Game) -> tuple[Action, ...]:
         if is_over(game):
             return ()
-        return tuple(within_offer_budget(game, legal_actions(game), self.max_offers))
+        return tuple(legal_actions(game))
 
     def _node(self, game: Game) -> Node:
         options = self._options(game)

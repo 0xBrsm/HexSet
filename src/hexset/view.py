@@ -9,17 +9,22 @@ about every hand and development cards. It moved here from
 functionality, not something a bot should have to build for itself. Reached
 through `Game.state(seat, hidden=True)` (`game.py`); `hidden=False` returns
 the true `GameState` instead, and is the only sanctioned way to read it from
-outside the engine. `Belief` is kept as an alias for `View` so existing
-imports (`hexset.bots.heximax.Belief`, the deprecated `heximax` shim) keep
-working unchanged.
+outside the engine.
 
-Every opponent quantity `HonestEvaluator` (`bots/heximax/evaluate.py`) and
-the trade adapter (`bots/heximax/trade.py`) read comes through a `View` --
-never through `state.hands[opponent]` or `state.dev_cards[opponent]`
-directly -- except in `omniscient` mode, which keeps the old true-hand
-reading so the price of honesty can be measured rather than assumed. See
-`View`'s own docstring for the model (`known`/`unknown`/the shared residual
-`pool`).
+It is also what the trade mechanic hands a seat: `Bot.valuation(view)` and
+`Bot.accepts(view, bundle, counterparty)` (`hexset.bots`) receive nothing
+else, so a published vector and a private gate are functions of the
+information set by construction. The `ledger` a view was built from rides
+along for exactly that reason -- pricing a hypothetical exchange means
+re-reading the position with the transfer certified, and the certification
+is a ledger operation.
+
+Every opponent quantity `HonestEvaluator` (`bots/heximax/evaluate.py`)
+reads comes through a `View` -- never through `state.hands[opponent]` or
+`state.dev_cards[opponent]` directly -- except in `omniscient` mode, which
+keeps the old true-hand reading so the price of honesty can be measured
+rather than assumed. See `View`'s own docstring for the model
+(`known`/`unknown`/the shared residual `pool`).
 """
 
 from __future__ import annotations
@@ -44,9 +49,9 @@ class View:
     seat when `omniscient`. Everything hidden is drawn from one shared
     **residual pool**: per resource, the cards that are neither in the bank
     nor certified in any seat's `known`, sized from the bank's initial count
-    rather than the true hands, which the belief may not read. An open offer
-    certifies one thing the ledger does not: the proposer holds what it
-    offers (see `from_game`). Robustness over purity: a test fixture that
+    rather than the true hands, which the belief may not read. `certify`
+    adds lower bounds the ledger does not carry, for a caller that knows a
+    seat holds something. Robustness over purity: a test fixture that
     writes `state.hands` behind the ledger's back can leave `known` summing
     past the public hand size, or the pool short; the belief clamps `known`
     to size and pads the pool proportionally rather than raise, because a
@@ -58,6 +63,7 @@ class View:
         omniscient: bool = False, certify: Sequence[tuple[int, Sequence[int]]] = (),
     ) -> None:
         self.state = state
+        self.ledger = ledger
         self.perspective = perspective
         self.omniscient = omniscient
         n = state.num_players
@@ -101,20 +107,7 @@ class View:
 
     @classmethod
     def from_game(cls, game: Game, perspective: int, *, omniscient: bool = False) -> View:
-        # Only the proposer's side of a standing offer is certified: it is
-        # announced and `can_propose` requires holding it.
-        # `game.pending_responders` is the engine's true eligibility list, but
-        # whether OTHER pending seats can cover the offer is deliberately not
-        # read -- a decline reveals nothing -- so a sampled world may hand a
-        # later responder a hand that cannot cover `want`; the search guards
-        # `ACCEPT_TRADE` with `can_accept` there instead.
-        return cls(
-            game._state,
-            game.ledger,
-            perspective,
-            omniscient=omniscient,
-            certify=_offer_certify(game),
-        )
+        return cls(game._state, game.ledger, perspective, omniscient=omniscient)
 
     def signature(self) -> tuple:
         """`known`/`unknown`/`pool` as one hashable tuple: everything
@@ -312,22 +305,7 @@ class View:
         return state
 
 
-# Deprecated alias: `Belief` was this class's name before it moved from
-# `hexset.bots.heximax.belief` into the engine (P0,
-# `agents/reference/trading-design.md`). Kept so `hexset.bots.heximax.Belief`
-# and the `heximax` compat shim keep resolving to the same class, unchanged.
-Belief = View
-
-__all__ = ["Belief", "View"]
-
-
-def _offer_certify(game: Game) -> list[tuple[int, Sequence[int]]]:
-    """`View.from_game`'s certify list, factored out so `HonestEvaluator`'s
-    memoized `belief_for` (below) can build the same list a cache key needs
-    without duplicating the offer-reading logic."""
-    if game.offer is not None:
-        return [(game.offer.proposer, game.offer.give)]
-    return []
+__all__ = ["View"]
 
 
 def _padded(pool: list[int], deficit: int) -> list[int]:

@@ -8,7 +8,7 @@ import pytest
 from hexset.actions import Action, ActionType
 from hexset.board.board import random_base_board
 from hexset.bots import RandomBot, greedy
-from hexset.evaluate import Evaluator
+from hexset.bots.evaluate import Evaluator
 from hexset.game import is_over
 from hexset.record import (
     Record,

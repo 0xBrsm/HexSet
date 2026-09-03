@@ -32,6 +32,7 @@ from .board.terrain import Resource, Terrain
 from .board.topology import build as build_topology
 from .bots import Bot
 from .game import Game, is_over, start, to_move
+from .trading import Trade, apply_trades
 
 
 class ReplayError(RuntimeError):
@@ -49,13 +50,13 @@ class Record:
     actions: tuple[tuple[int, int, int], ...]
     winner: int | None
     turns: int
-    # Trade offers, sparse by step: the two bundles and who the proposer wanted
-    # to take it. An offer will not fit in an action triple, and proposals are a
-    # small fraction of the actions in a game, so widening every action to carry
-    # mostly-empty fields would cost far more than storing the few that exist.
-    offers: tuple[
-        tuple[int, tuple[int, ...], tuple[int, ...], tuple[int, ...]], ...
-    ] = ()
+    # Trades, sparse by step: `(step, a, b, received)` for every exchange the
+    # engine cleared inside the action at `step`, `received` signed towards
+    # `a`. Trading is not an action (`hexset.trading`), so it cannot ride in
+    # the action triple, and it is not a function of the actions either --
+    # it depends on what the seated bots published and accepted. Recording
+    # it is therefore what makes a record replayable at all.
+    trades: tuple[tuple[int, int, int, tuple[int, ...]], ...] = ()
 
     @property
     def decided(self) -> bool:
@@ -102,31 +103,30 @@ def record_game(
     *,
     action_cap: int = MAX_ACTIONS,
 ) -> Record:
-    """Play one game and record it. Each bot is seated at its own index."""
+    """Play one game and record it. Each bot is seated at its own index.
+
+    The bots are seated as the game's `traders` too, exactly as
+    `arena.play` seats them, so a recorded game trades the way a played one
+    does -- and the exchanges the engine cleared are written down, because
+    nothing in the action list implies them.
+    """
     game = start(board, len(bots), random.Random(seed))
+    game.traders = tuple(bots)
     actions: list[tuple[int, int, int]] = []
-    offers: list[
-        tuple[int, tuple[int, ...], tuple[int, ...], tuple[int, ...]]
-    ] = []
+    trades: list[tuple[int, int, int, tuple[int, ...]]] = []
     while not is_over(game) and len(actions) < action_cap:
         action = bots[to_move(game)].choose(game)
+        before = len(game.trades)
         apply(game, action)
-        if action.give or action.want:
-            offers.append(
-                (
-                    len(actions),
-                    tuple(action.give),
-                    tuple(action.want),
-                    tuple(action.ask),
-                )
-            )
+        for trade in game.trades[before:]:
+            trades.append((len(actions), trade.a, trade.b, tuple(trade.received)))
         actions.append((int(action.type), action.a, action.b))
 
     return Record(
         num_players=len(bots),
         seed=seed,
         actions=tuple(actions),
-        offers=tuple(offers),
+        trades=tuple(trades),
         winner=game.won_by,
         turns=game.turns,
         **board_fields(board),
@@ -134,29 +134,47 @@ def record_game(
 
 
 def actions_of(record: Record) -> Iterator[Action]:
-    """The recorded actions, with trade offers put back on the ones that had them.
+    """The recorded actions, in order."""
+    for kind, a, b in record.actions:
+        yield Action(ActionType(kind), a, b)
+
+
+def steps(record: Record) -> Iterator[tuple[Action, tuple[Trade, ...]]]:
+    """Each action with the trades the engine cleared inside it.
 
     Everything that walks a record goes through here, so the reconstruction
     lives in one place and cannot drift between replaying, featurising and
     behaviour analysis.
     """
-    offers = {
-        step: (tuple(g), tuple(w), tuple(k)) for step, g, w, k in record.offers
-    }
-    for step, (kind, a, b) in enumerate(record.actions):
-        give, want, ask = offers.get(step, ((), (), ()))
-        yield Action(ActionType(kind), a, b, give, want, ask)
+    by_step: dict[int, list[Trade]] = {}
+    for step, a, b, received in record.trades:
+        by_step.setdefault(step, []).append(Trade(a, b, tuple(received)))
+    for step, action in enumerate(actions_of(record)):
+        yield action, tuple(by_step.get(step, ()))
+
+
+def advance(game: Game, action: Action, trades: Sequence[Trade]) -> None:
+    """Apply one recorded step: the action, then the trades it cleared.
+
+    A replayed game has no seated bots, so its trade event clears nothing
+    and the recorded exchanges are re-executed here instead. Applying them
+    immediately after `apply` returns is exactly where they happened:
+    the event runs on the way into `Phase.MAIN` and nothing between it and
+    the end of `roll_dice`/`move_robber_to` reads a hand.
+    """
+    apply(game, action)
+    apply_trades(game, trades)
 
 
 def replay(record: Record) -> Game:
     """Re-play a record, checking it still describes the game it claims to."""
     game = start(board_of(record), record.num_players, random.Random(record.seed))
-    for step, action in enumerate(actions_of(record)):
+    for step, (action, trades) in enumerate(steps(record)):
         if action not in legal_actions(game):
             raise ReplayError(
                 f"step {step}: {action} is not legal in {game.phase.name}"
             )
-        apply(game, action)
+        advance(game, action, trades)
 
     if (game.won_by, game.turns) != (record.winner, record.turns):
         raise ReplayError(
@@ -180,9 +198,9 @@ def from_json(line: str) -> Record:
         num_players=raw["num_players"],
         seed=raw["seed"],
         actions=tuple(tuple(a) for a in raw["actions"]),
-        offers=tuple(
-            (step, tuple(give), tuple(want), tuple(ask))
-            for step, give, want, ask in raw.get("offers", ())
+        trades=tuple(
+            (step, a, b, tuple(received))
+            for step, a, b, received in raw.get("trades", ())
         ),
         winner=raw["winner"],
         turns=raw["turns"],

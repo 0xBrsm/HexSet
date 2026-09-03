@@ -1,19 +1,18 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Every heuristic bot lives here, so they can share code.
 
-`search2` (`hexset.bots.search2`: `SearchBot`, `greedy`, `RandomBot`, the
-`STANCES` a per-seat vector is read through) and `heximax`
-(`hexset.bots.heximax`, split by concern into `belief`/`evaluate`/`search`/
-`trade`/`presets`) both build on the same handcrafted evaluation,
-`hexset.bots.evaluate` -- the old `hexset/evaluate.py`, moved here alongside
-its consumers rather than left a level up from all of them. A one-line shim
-at `hexset.evaluate` re-exports it for existing callers (`hexset.tuning`,
-`hexset.fitting`, `hexset.dataset`, HexNet); a deprecated `heximax` top-level
-package re-exports `hexset.bots.heximax` the same way, for `import heximax`.
+`search2` (`hexset.bots.search2`: `Bot`, `SearchBot`, `greedy`, `RandomBot`,
+the `STANCES` a per-seat vector is read through) and `heximax`
+(`hexset.bots.heximax`, split by concern into `evaluate`/`search`/`presets`)
+both build on the same handcrafted evaluation, `hexset.bots.evaluate`.
+
+`Bot` is the seam every driver and the engine share: `choose(game)`, plus
+`valuation(view)` and `accepts(view, received, counterparty)` for the trade
+mechanic (`hexset.trading`), both defaulting to "this seat never trades".
 
 This module re-exports `search2`'s public names (so `from hexset.bots import
 SearchBot` keeps working exactly as it did when `bots.py` was a single file)
-and most of `heximax`'s (`Heximax`, `Belief`, `HonestEvaluator`, `Weights`,
+and most of `heximax`'s (`Heximax`, `HonestEvaluator`, `Weights`,
 `TRADING_WEIGHTS`, `NO_TRADE_WEIGHTS`, `MODES`, `BY_MODE`). Importing
 `.heximax` here is what makes `import hexset.bots` register the "heximax"/
 "heximax-omni"/"heximax-notrade" presets and the "heximax-trading"/
@@ -55,7 +54,6 @@ from .search2 import (
 from .heximax import (
     BY_MODE,
     MODES,
-    Belief,
     Heximax,
     HonestEvaluator,
     NO_TRADE_WEIGHTS,
@@ -66,7 +64,6 @@ from .heximax import (
 
 __all__ = [
     "BY_MODE",
-    "Belief",
     "Bot",
     "Heximax",
     "HonestEvaluator",

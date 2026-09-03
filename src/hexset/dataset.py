@@ -20,10 +20,9 @@ import random
 from dataclasses import dataclass
 from typing import Iterable, Iterator, Sequence
 
-from .actions import apply
-from .evaluate import Evaluator, Weights
+from .bots.evaluate import Evaluator, Weights
 from .game import is_over, start
-from .record import Record, actions_of, board_of
+from .record import Record, advance, board_of, steps
 
 DEFAULT_STRIDE = 8
 
@@ -55,7 +54,7 @@ def samples_from(
     state_game = start(board_of(record), record.num_players, random.Random(record.seed))
     total = len(record.actions)
 
-    for step, action in enumerate(actions_of(record)):
+    for step, (action, trades) in enumerate(steps(record)):
         if step % stride == 0 and not is_over(state_game):
             fraction = step / total
             for seat in range(record.num_players):
@@ -71,7 +70,7 @@ def samples_from(
                     seat=seat,
                     progress=fraction,
                 )
-        apply(state_game, action)
+        advance(state_game, action, trades)
 
 
 def build(

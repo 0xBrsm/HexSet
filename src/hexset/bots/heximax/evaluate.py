@@ -33,7 +33,7 @@ from hexset.robber import DISCARD_THRESHOLD
 from hexset.state import MAX_CITIES, MAX_SETTLEMENTS, Building, GameState
 from hexset.victory import WINNING_POINTS, award_points, card_points
 
-from hexset.view import View, _offer_certify
+from hexset.view import View
 
 
 # Today's fit, made under trading (`evaluate.Weights`' own docstring).
@@ -109,14 +109,16 @@ class HonestEvaluator:
         Exact by construction: the key is every field `View.__init__` reads
         to build `known`/`unknown`/`pool` -- each seat's hand *size*, the
         ledger's known/unknown, the bank, `num_players`, `perspective`,
-        `certify`. (`omniscient` is fixed for this evaluator's life.) Two
-        calls sharing a key are the same `View` byte-for-byte, because
-        `View` is a pure function of exactly those, none of which says
-        which node produced them.
+        `certify` -- **plus the board occupancy and the robber**, which
+        `View.__init__` does not read but `View.state` carries. Without
+        those last two a hit could hand back a `View` whose `.state` is a
+        different game's (right hands, stale board), which was a live trap
+        the moment anything read `.state` off a cached view: the trade gate
+        does exactly that (`Heximax._delta` reads `view.state`), so the key
+        covers it rather than the caller having to remember not to.
+        (`omniscient` is fixed for this evaluator's life.)
 
-        Only for callers that read the memoized fields alone
-        (`expected_hand`/`table_holding`/`steal_odds`/`p_holds`/`exact`).
-        `sample` and `deck_odds` read `self.state` in full -- board, deck,
+        `sample` and `deck_odds` read `self.state` further still -- deck,
         dev cards, knights played -- which this key does not capture, so
         `worlds`/`draw_children`, their only callers, build a fresh
         `View.from_game` instead.
@@ -126,6 +128,9 @@ class HonestEvaluator:
             tuple(tuple(seat_ledger.known) for seat_ledger in ledger.seats),
             tuple(seat_ledger.unknown for seat_ledger in ledger.seats),
             tuple(state.bank),
+            tuple(state.vertex_owner),
+            tuple(state.vertex_building),
+            state.robber,
             state.num_players,
             perspective,
             tuple((who, tuple(bundle)) for who, bundle in certify),
@@ -139,9 +144,8 @@ class HonestEvaluator:
         return cached
 
     def belief_from_game(self, game: Game, perspective: int) -> View:
-        """`belief_for`, reading `certify` off `game.offer` the way
-        `View.from_game` does -- see `belief_for`'s docstring for the
-        exactness argument and which callers may use this.
+        """`belief_for` for a live game -- see `belief_for`'s docstring for
+        the exactness argument and which callers may use this.
 
         `game.state(perspective, hidden=False)` (true state: `belief_for`'s
         own content-keyed cache, not `Game.state`'s per-call construction,
@@ -150,14 +154,10 @@ class HonestEvaluator:
         would construct one throwaway `View` per call on top of the cached
         one. `hidden=False` costs nothing: the same object the engine's
         private state always was, never a copy. `View.__init__` -- engine
-        code -- is what
-        enforces honesty on it via `known`/`unknown`, not restricted access
-        to the object.)
+        code -- is what enforces honesty on it via `known`/`unknown`, not
+        restricted access to the object.)
         """
-        return self.belief_for(
-            game.state(perspective, hidden=False), game.ledger, perspective,
-            certify=_offer_certify(game),
-        )
+        return self.belief_for(game.state(perspective, hidden=False), game.ledger, perspective)
 
     def _walk(self, state: GameState, seat: int) -> tuple[Survey, tuple[int, int]]:
         """`(Evaluator.survey(state, seat), _pieces(state, seat))`, memoized
@@ -338,12 +338,11 @@ class HonestEvaluator:
         `belief_from_game`'s cache is safe for (see its docstring).
         """
         belief = self.belief_from_game(game, seat)
-        # NOT `belief.state`: `belief_for`'s cache key covers hands/ledger/
-        # bank/perspective/certify but not board occupancy, so a cache hit
-        # can hand back a `View` built from a different (content-equal-on-
-        # that-key) game's state -- right hands, potentially a stale board.
-        # `evaluate`'s own memo, below, does key on board occupancy, so it
-        # needs this game's own true state, not the belief's.
+        # true state: `evaluate`'s own memo keys on board occupancy and the
+        # rest of the position, so it needs this game's own state object.
+        # `belief.state` is now the same object -- `belief_for`'s key covers
+        # occupancy and the robber too -- but reading it from the game is
+        # what says so.
         return self.evaluate(game.state(seat, hidden=False), seat, belief)
 
 

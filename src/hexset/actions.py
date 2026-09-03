@@ -4,22 +4,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import IntEnum
 from itertools import combinations_with_replacement
-from typing import NamedTuple, Sequence
-
-import numpy as np
+from typing import NamedTuple
 
 from .board.terrain import NUM_RESOURCES, Resource
 from .cards import DevCard
 from .devcards import can_buy
 from .economy import Purchase, can_afford, trade_ratios
 from .game import (
-    MAX_OFFERS_PER_TURN,
     Game,
     Phase,
-    accept_trade,
-    decline_trade,
-    propose_trade,
-    to_move,
     build_city,
     build_road,
     build_settlement,
@@ -45,10 +38,6 @@ from .state import can_place_road, can_place_settlement, can_upgrade_to_city
 YEAR_OF_PLENTY_PAIRS: tuple[tuple[int, int], ...] = tuple(
     combinations_with_replacement(range(NUM_RESOURCES), 2)
 )
-ONE_RESOURCE: tuple[tuple[int, ...], ...] = tuple(
-    tuple(int(r == resource) for r in range(NUM_RESOURCES))
-    for resource in range(NUM_RESOURCES)
-)
 
 
 class ActionType(IntEnum):
@@ -67,34 +56,22 @@ class ActionType(IntEnum):
     PLAY_YEAR_OF_PLENTY = 12
     BANK_TRADE = 13
     DISCARD = 14
-    ACCEPT_TRADE = 15
-    DECLINE_TRADE = 16
-    PROPOSE_TRADE = 17
 
 
 class Action(NamedTuple):
     """`a` and `b` carry the operands: a board index, a resource, or a victim.
 
-    `give` and `want` carry a trade offer, and are the one operand that will not
-    fit in an index. An offer is ten numbers, so `PROPOSE_TRADE` occupies a
-    single slot in the flat space meaning "an offer is available", and the
-    bundles ride alongside it. A network emits them from their own heads rather
-    than by choosing among enumerated offers.
-
-    `ask` is who the proposer would rather have take it, best first. An offer
-    stops at the first player to accept, so the order is worth something and it
-    is the proposer's to choose — preferring the player it costs least to feed
-    is a tactic, not a rule, and imposing it in `trading.responders` would bind
-    every bot to one opinion. Empty means no preference, and the engine's
-    neutral order stands.
+    Two operands and nothing else: every action in this space fits in a flat
+    index. Player-to-player trading used to be the exception -- an offer is
+    ten numbers, so a propose action carried `give`/`want`/`ask` alongside
+    its index -- and it is no longer an action at all. Trades clear once a turn
+    from the seats' published valuation vectors (`hexset.trading`), which are
+    observation, not action.
     """
 
     type: ActionType
     a: int = 0
     b: int = 0
-    give: tuple[int, ...] = ()
-    want: tuple[int, ...] = ()
-    ask: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -119,11 +96,7 @@ class ActionSpace:
         return self.offsets[action.type] + action.a * stride + action.b
 
     def decode(self, index: int) -> Action:
-        """The action at `index`.
-
-        Lossy for `PROPOSE_TRADE`, which comes back with empty bundles: the
-        offer is not recoverable from an index because it was never in one.
-        """
+        """The action at `index`. Exactly invertible with `index`."""
         for kind in reversed(ActionType):
             start = self.offsets[kind]
             if index >= start:
@@ -160,11 +133,6 @@ def build_space(num_vertices: int, num_edges: int, num_hexes: int, players: int)
         ActionType.PLAY_YEAR_OF_PLENTY: len(YEAR_OF_PLENTY_PAIRS),
         ActionType.BANK_TRADE: NUM_RESOURCES * NUM_RESOURCES,
         ActionType.DISCARD: NUM_RESOURCES,
-        ActionType.ACCEPT_TRADE: 1,
-        ActionType.DECLINE_TRADE: 1,
-        # One slot, not one per offer. Offers are uncapped, so they cannot be
-        # enumerated; this bit says only that proposing is available now.
-        ActionType.PROPOSE_TRADE: 1,
     }
     ordered = tuple(sizes[kind] for kind in ActionType)
     offsets = []
@@ -269,59 +237,6 @@ def _trade_actions(game: Game) -> list[Action]:
     ]
 
 
-def _offer_actions(game: Game) -> list[Action]:
-    """A representative sample of offers, not every legal one.
-
-    Offers are uncapped, so enumerating them is not possible and this is the
-    one place `legal_actions` is a sample rather than the whole set. It covers
-    one-for-one trades, which are the overwhelming majority of what gets traded,
-    and skips any offer nobody at the table could cover. `apply` will still
-    carry out any well-formed offer a stronger policy comes up with.
-
-    It also skips whatever has already been proposed this turn. That is a
-    narrower *sample*, not a narrower rule -- re-proposing a declined bundle
-    stays legal and `apply` still performs it -- which is what keeps it out of
-    the trap recorded under "Who gets asked first": the engine grants no
-    capability here, it only stops offering a wasted action to whoever asks.
-    Nothing has changed between the decline and the repeat, so the second ask
-    can only get the same answer, and the offer budget it spends is the scarce
-    thing.
-    """
-    state = game._state
-    player = game.current_player
-    if game.offers_made >= MAX_OFFERS_PER_TURN:
-        return []
-
-    # For a one-for-one offer, responder eligibility depends only on what is
-    # wanted. Compute that once per resource instead of rebuilding two bundles
-    # and walking every opponent for every (give, want) pair.
-    wanted_available = tuple(
-        any(
-            responder != player and state.hands[responder][wanted] > 0
-            for responder in range(state.num_players)
-        )
-        for wanted in range(NUM_RESOURCES)
-    )
-
-    out: list[Action] = []
-    for given in range(NUM_RESOURCES):
-        if not state.hands[player][given]:
-            continue
-        for wanted in range(NUM_RESOURCES):
-            if wanted == given or not wanted_available[wanted]:
-                continue
-            if (ONE_RESOURCE[given], ONE_RESOURCE[wanted]) in game.offered:
-                continue
-            out.append(
-                Action(
-                    ActionType.PROPOSE_TRADE,
-                    give=ONE_RESOURCE[given],
-                    want=ONE_RESOURCE[wanted],
-                )
-            )
-    return out
-
-
 def legal_actions(game: Game) -> list[Action]:
     state = game._state
     player = game.current_player
@@ -358,21 +273,11 @@ def legal_actions(game: Game) -> list[Action]:
             if state.hands[discarding][r] > 0
         ]
 
-    if game.phase is Phase.TRADE_RESPOND:
-        # Only players who can cover the offer are asked, so accepting is
-        # always available to whoever is being asked.
-        return [Action(ActionType.ACCEPT_TRADE), Action(ActionType.DECLINE_TRADE)]
-
     if game.phase is Phase.ROBBER:
         return _robber_targets(game, ActionType.MOVE_ROBBER)
 
     building = _building_actions(game)
-    out = (
-        building
-        + _card_actions(game)
-        + _trade_actions(game)
-        + _offer_actions(game)
-    )
+    out = building + _card_actions(game) + _trade_actions(game)
     if can_buy(state, player):
         out.append(Action(ActionType.BUY_DEV_CARD))
 
@@ -384,27 +289,6 @@ def legal_actions(game: Game) -> list[Action]:
     if not owed_roads:
         out.append(Action(ActionType.END_TURN))
     return out
-
-
-def within_offer_budget(
-    game: Game, options: Sequence[Action], budget: int | None
-) -> list[Action]:
-    """Drop proposals once a player has spent an offer budget of its own.
-
-    A budget below `MAX_OFFERS_PER_TURN` is a choice a player makes, not a rule
-    the engine enforces, and it has to stay that way: a cap in the engine
-    reaches every entrant at once, and a mirror duel cannot see a capability
-    everyone receives. Three offers a turn cost about 0.1 victory points and cut
-    a game from 2225 actions to 950, which is why a training run wants one.
-
-    Shared by `bots.SearchBot` and `selfplay.Collector` because the two must
-    agree. If a policy trained under one budget were evaluated under another,
-    the horizon the training assumed would be quietly wrong.
-    """
-    if budget is None or game.offers_made < budget:
-        return list(options)
-    kept = [a for a in options if a.type is not ActionType.PROPOSE_TRADE]
-    return kept or list(options)
 
 
 def legal_mask(game: Game, space: ActionSpace | None = None) -> list[bool]:
@@ -448,12 +332,6 @@ def apply(game: Game, action: Action) -> None:
         trade_with_bank(game, Resource(action.a), Resource(action.b))
     elif kind is ActionType.DISCARD:
         discard_one(game, players_owing_discards(game)[0], Resource(action.a))
-    elif kind is ActionType.ACCEPT_TRADE:
-        accept_trade(game, to_move(game))
-    elif kind is ActionType.DECLINE_TRADE:
-        decline_trade(game, to_move(game))
-    elif kind is ActionType.PROPOSE_TRADE:
-        propose_trade(game, action.give, action.want, ask=action.ask)
     else:
         raise ValueError(f"unhandled action {action}")
 
@@ -466,36 +344,3 @@ def victim_of(game: Game, slot: int) -> int | None:
     ordinary one. Two copies of it would drift.
     """
     return None if slot >= game._state.num_players else slot
-
-
-# A one-for-one trade offer as a flat slot: `NUM_RESOURCES` gives, times
-# `NUM_RESOURCES` wants. Lives here rather than in `hexnet.policy` (which also
-# uses it, for the network's offer head) because it is a pure property of the
-# action space -- no torch, nothing hexnet needs that hexset does not already
-# have -- and `hexset.onnx_record` needs it too. hexset must never import
-# hexnet, so the one definition lives on this side and `hexnet.policy`
-# re-exports it rather than keeping a second copy.
-NUM_PAIRS = NUM_RESOURCES * NUM_RESOURCES
-
-# Which flat slots trade a resource for itself -- never legal, since
-# `can_propose` refuses a give/want overlap, but the network's offer head
-# scores every slot and has to be told which ones are structurally void.
-_OFF_DIAGONAL = ~np.eye(NUM_RESOURCES, dtype=bool).reshape(NUM_PAIRS)
-
-
-def pair_index(give: Sequence[int], want: Sequence[int]) -> int:
-    """The flat pair slot for a one-for-one offer's two one-hot bundles."""
-    return give.index(1) * NUM_RESOURCES + want.index(1)
-
-
-def pair_mask(options: Sequence[Action]) -> np.ndarray:
-    """Which one-for-one offers were legal, as a flat `(NUM_PAIRS,)` bool.
-
-    Empty for a position where proposing is not available, which is the common
-    case and is why the caller must not assume any bit is set.
-    """
-    mask = np.zeros(NUM_PAIRS, dtype=bool)
-    for option in options:
-        if option.type is ActionType.PROPOSE_TRADE:
-            mask[pair_index(option.give, option.want)] = True
-    return mask

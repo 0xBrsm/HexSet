@@ -16,13 +16,17 @@ TOKEN_HEADER = "X-HexSet-Token"
 
 
 # Which graph shape an ONNX checkpoint's `contract` metadata value names.
-# Contracts 2, 3 and 4 are "record in, decision out" -- the graph masks,
-# normalises, argmaxes and un-rotates, and the caller only states the
-# position (`record.build_record`) and reads the answer back. They differ
-# from each other only in how many record fields the graph declares -- 23,
-# then +4 live-offer fields, then +2 public-ledger fields -- which every
-# reader here works out from `session.get_inputs()` rather than from the
-# number itself.
+# Contract 5 is "record in, decision out" -- the graph masks, normalises,
+# argmaxes and un-rotates, and the caller only states the position
+# (`hexset.onnx_record.record_from_game`) and reads the answer back.
+#
+# 2, 3 and 4 are no longer served. They are the offer protocol's contracts:
+# 3 added the four live-offer fields, 4 the two public-ledger ones, and all
+# three declare a `pair_mask` input and a `pair_index` output for the
+# one-for-one give/want heads. Trading is now one engine event with no
+# actions at all (`hexset.trading`), so those graphs describe a game this
+# engine does not play -- there is no honest way to feed them, and refusing
+# by name beats guessing.
 #
 # The numbers are `hexset.export_onnx._CONTRACT_VERSION`'s, and only its. PR #2
 # re-stamped the 29-field record as `"2"` in this repo while dev-HexNet was
@@ -30,9 +34,10 @@ TOKEN_HEADER = "X-HexSet-Token"
 # export could load. One number, one meaning, defined there.
 #
 # Contract 1 ("observation in, raw logits/give/want/value out", masked and
-# softmaxed in Python against the frozen `encoding_v1` feature layout) is no
-# longer served: the owner decided on 2026-09-02 that legacy checkpoints are
-# not worth carrying `encoding_v1.py` for (`docs/engine-divergence-2026-09-02.md`,
-# B5). A `contract=1` file, or one with no `contract` key at all, is refused
-# by name at load, same as any other unknown contract.
-RECORD_CONTRACTS = frozenset({"2", "3", "4"})
+# softmaxed in Python against the frozen `encoding_v1` feature layout) went
+# the same way earlier: the owner decided on 2026-09-02 that legacy
+# checkpoints are not worth carrying `encoding_v1.py` for
+# (`docs/engine-divergence-2026-09-02.md`, B5). A file with no `contract`
+# key at all is refused by name at load, same as any other unknown
+# contract.
+RECORD_CONTRACTS = frozenset({"5"})

@@ -30,12 +30,10 @@ def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Heximax:
         mode=entrant.mode,
         depth=entrant.depth,
         width=entrant.width,
-        max_offers=entrant.max_offers,
+        max_trades=entrant.max_trades,
         stance=entrant.stance,
         k=entrant.k,
         weights=entrant.weights,
-        accept_margin=entrant.accept_margin,
-        propose_margin=entrant.propose_margin,
     )
 
 
@@ -45,16 +43,16 @@ register_entrant_kind("heximax", _spawn)
 # placement prior is composed into the bot rather than wrapped around it, so
 # `placement` stays False here and `spawn` returns the bot itself.
 # `heximax-omni` is the same bot reading every true hand, kept to measure
-# what honesty costs; `heximax-notrade` plays the no-trade table at an offer
-# budget of zero.
-register_preset("heximax", Entrant("heximax", kind="heximax", depth=2, width=6, max_offers=3))
+# what honesty costs; `heximax-notrade` plays the no-trade table with the
+# trade switch off.
+register_preset("heximax", Entrant("heximax", kind="heximax", depth=2, width=6))
 register_preset(
     "heximax-omni",
-    Entrant("heximax-omni", kind="heximax", depth=2, width=6, max_offers=3, mode="omniscient"),
+    Entrant("heximax-omni", kind="heximax", depth=2, width=6, mode="omniscient"),
 )
 register_preset(
     "heximax-notrade",
-    Entrant("heximax-notrade", kind="heximax", depth=2, width=6, max_offers=0, mode="notrade"),
+    Entrant("heximax-notrade", kind="heximax", depth=2, width=6, max_trades=0, mode="notrade"),
 )
 
 # `hexset.tuning.entrant_for(evaluator="heximax-trading"/"heximax-notrade")`

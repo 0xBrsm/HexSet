@@ -29,9 +29,9 @@ from hexset.board.topology import build as build_topology
 from hexset.bots import SearchBot, greedy
 from hexset.cards import DevCard
 from hexset.economy import COSTS, Purchase
-from hexset.evaluate import Evaluator, Weights
+from hexset.bots.evaluate import Evaluator, Weights
 from hexset.game import Phase, imagine, is_over, propose_trade, roll_dice, start, to_move
-from heximax import (
+from hexset.bots.heximax import (
     MODES,
     NO_TRADE_WEIGHTS,
     TRADING_WEIGHTS,

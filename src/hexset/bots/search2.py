@@ -5,17 +5,45 @@ import random
 from dataclasses import dataclass, field
 from typing import Protocol, Sequence
 
-from ..actions import Action, ActionType, apply, legal_actions, within_offer_budget
+from ..actions import Action, ActionType, apply, legal_actions
 from .evaluate import Evaluator
+from ..board.terrain import NUM_RESOURCES
 from ..game import ROLL_ODDS, Game, imagine, is_over, roll_dice, to_move
 from ..play import Stuck
-from ..trading import Offer, execute as execute_trade, responders
+from ..state import copy_state
+from ..trading import NO_VALUATION, Bundle, exchange
+from ..view import View
 
 
 class Bot(Protocol):
-    """Anything that can pick an action. The network will implement this too."""
+    """Anything that can pick an action, and what it brings to a trade.
+
+    `choose` is the whole of the old protocol and still the only required
+    method. The other two are the trade mechanic's seam
+    (`hexset.trading`), and both have a default that means "this seat never
+    trades", so an existing bot keeps working untouched:
+
+    * `valuation(view)` -- the public vector this seat advertises, five
+      numbers in [-1, 1], positive for "I want more of this". Default: all
+      zeros, which no bundle can clear a positive surplus against.
+    * `accepts(view, received, counterparty)` -- this seat's private
+      judgement of one concrete exchange, `received` signed and positive
+      towards this seat. Default: False.
+
+    Both are handed the engine's information-set `View` for that seat and
+    nothing else, so neither can be a function of anything the seat may not
+    know. The defaults are applied by `hexset.trading.published`/`judged`
+    rather than by inheritance, so they hold for a bot that satisfies this
+    protocol structurally.
+    """
 
     def choose(self, game: Game) -> Action: ...
+
+    def valuation(self, view: View) -> tuple[float, ...]:
+        return NO_VALUATION
+
+    def accepts(self, view: View, received: Bundle, counterparty: int) -> bool:
+        return False
 
 
 def own(vector: Sequence[float], seat: int) -> float:
@@ -54,6 +82,10 @@ def options_for(game: Game) -> list[Action]:
 
 @dataclass
 class RandomBot:
+    """Uniform over the legal actions. Never advertises, never trades: the
+    trade mechanic has no random baseline to offer, and a seat that
+    publishes nothing simply does not participate (`Bot`'s defaults)."""
+
     rng: random.Random = field(default_factory=random.Random)
 
     def choose(self, game: Game) -> Action:
@@ -89,13 +121,13 @@ class SearchBot:
     width: int | None = 6
     rng: random.Random = field(default_factory=random.Random)
     stance: str = "relative"
-    partner_choice: bool = False
-    # How many offers this bot will propose in a turn, below whatever the engine
-    # allows. `None` spends the engine's whole budget. Kept here rather than in
-    # the engine because a cap every seat receives cannot be duelled against
-    # itself: only a bot that declines an action its opponent still has can say
-    # what the action was worth.
-    max_offers: int | None = None
+    # The trade off switch. `0` publishes nothing and refuses everything, so
+    # this seat never trades; anything else (including the `None` default)
+    # trades. Not a budget -- the engine has no cap (`hexset.trading`) -- and
+    # kept on the bot rather than on the engine because a knob every seat
+    # receives cannot be duelled against itself: only a bot that declines
+    # what its opponent still has can say what it was worth.
+    max_trades: int | None = None
 
     def __post_init__(self) -> None:
         if self.stance not in STANCES:
@@ -115,41 +147,76 @@ class SearchBot:
         return self.evaluator.evaluate(game.state(seat, hidden=False), seat)
 
     def choose(self, game: Game) -> Action:
-        options = within_offer_budget(game, options_for(game), self.max_offers)
+        options = options_for(game)
         if len(options) == 1:
-            return self._addressed(game, options[0], to_move(game))
+            return options[0]
         # Only the seat to move may count its own hidden cards, and it stays the
         # perspective for the whole search: deeper nodes are still this seat's
         # reasoning about the game, not somebody else's.
         seat = to_move(game)
         candidates = self._beam(game, options, seat, seat)
-        best = max(
+        return max(
             candidates,
             key=lambda a: self._rank(self._after(game, a, self.depth, seat), seat),
         )
-        return self._addressed(game, best, seat)
 
-    def _addressed(self, game: Game, action: Action, seat: int) -> Action:
-        """Name who the proposer would rather have take the offer, best first.
+    # -- trading (`hexset.trading`) -----------------------------------------
 
-        Only worth computing when more than one player could cover it. The
-        search valued the offer under the engine's neutral order, so ordering it
-        afterwards can only improve on what was searched, never contradict it.
+    def valuation(self, view: View) -> tuple[float, ...]:
+        """`+1` at the card worth most to gain, `-1` at the one worth least
+        to keep, `0` elsewhere.
+
+        This is the one-for-one swap this bot's own evaluation picks --
+        exactly what its enumerate-and-score offer logic settled on before
+        trading became an event -- expressed as a vector. The give side is
+        drawn only from cards actually held, since offering what you do not
+        have was never a move; if the hand is empty there is nothing to
+        advertise. Scored on the seat's own row under its configured stance,
+        the same reading every other decision this bot makes uses.
         """
-        if not self.partner_choice or action.type is not ActionType.PROPOSE_TRADE:
-            return action
-        offer = Offer(proposer=seat, give=action.give, want=action.want)
-        # true state: search2 is a sanctioned true-state reader.
-        willing = responders(game.state(seat, hidden=False), offer)
-        if len(willing) < 2:
-            return action
+        if self.max_trades == 0:
+            return NO_VALUATION
+        seat = view.perspective
+        state = view.state
+        hand = state.hands[seat]
+        base = self._rank(self.evaluator.evaluate(state, seat), seat)
 
-        def value(responder: int) -> float:
-            child = imagine(game, self.rng)
-            execute_trade(child.state(seat, hidden=False), offer, responder)
-            return self._rank(self._leaf(child, seat), seat)
+        def moved(delta: int, resource: int) -> float:
+            after = copy_state(state)
+            after.hands[seat][resource] += delta
+            after.bank[resource] -= delta
+            return self._rank(self.evaluator.evaluate(after, seat), seat) - base
 
-        return action._replace(ask=tuple(sorted(willing, key=value, reverse=True)))
+        wanted = max(range(NUM_RESOURCES), key=lambda r: (moved(1, r), -r))
+        held = [r for r in range(NUM_RESOURCES) if hand[r] > 0]
+        if not held:
+            return NO_VALUATION
+        given = min(held, key=lambda r: (-moved(-1, r), r))
+        if given == wanted:
+            return NO_VALUATION
+        out = [0.0] * NUM_RESOURCES
+        out[wanted] = 1.0
+        out[given] = -1.0
+        return tuple(out)
+
+    def accepts(self, view: View, received: Bundle, counterparty: int) -> bool:
+        """Take the exchange iff the imagined post-trade position scores
+        better under this bot's stance.
+
+        The bot's existing answer to "is this trade good for me", unchanged:
+        score the state the exchange leads to with the max^n vector under
+        `stance`, which under `relative` already prices who got stronger.
+        Strictly better, never equal -- the engine's termination argument
+        rests on it (`hexset.trading.trade_event`).
+        """
+        if self.max_trades == 0:
+            return False
+        seat = view.perspective
+        state = view.state
+        before = self._rank(self.evaluator.evaluate(state, seat), seat)
+        after = copy_state(state)
+        exchange(after, seat, counterparty, received)
+        return self._rank(self.evaluator.evaluate(after, seat), seat) > before
 
     def _beam(
         self, game: Game, options: list[Action], mover: int, knower: int
@@ -203,8 +270,7 @@ def greedy(
     evaluator: Evaluator,
     rng: random.Random | None = None,
     stance: str = "relative",
-    partner_choice: bool = False,
-    max_offers: int | None = None,
+    max_trades: int | None = None,
 ) -> SearchBot:
     """One ply: take the action with the best position after it.
 
@@ -217,6 +283,5 @@ def greedy(
         width=None,
         rng=rng or random.Random(),
         stance=stance,
-        partner_choice=partner_choice,
-        max_offers=max_offers,
+        max_trades=max_trades,
     )

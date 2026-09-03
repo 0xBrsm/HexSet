@@ -44,7 +44,7 @@ _SEAT_INDEX = {color: i for i, color in enumerate(Color)}
 
 
 class DevCatanPlayer(Player):
-    """`--players=DC:<entrant>`, e.g. `DC:search2-offers3` or `DC:network:<path>`.
+    """`--players=DC:<entrant>`, e.g. `DC:search2-notrade` or `DC:network:<path>`.
 
     catanatron's own CLI splits `--players` on every `:` and passes each piece
     as a separate positional argument, so an entrant spec that itself contains
@@ -53,7 +53,7 @@ class DevCatanPlayer(Player):
     catanatron's: `parse_cli_string` has no way to know which colons are
     structural and which belong to the payload.
 
-    Player-to-player trading is forced off (`max_offers=0`) regardless of
+    Player-to-player trading is forced off (`max_trades=0`) regardless of
     what the entrant spec would otherwise use: catanatron never generates
     `OFFER_TRADE` as a playable action (see `state.py`), so there is nothing
     for a proposal to resolve to.
@@ -61,7 +61,7 @@ class DevCatanPlayer(Player):
 
     def __init__(self, color, *entrant_parts: str):
         super().__init__(color)
-        self.entrant_spec = ":".join(entrant_parts) if entrant_parts else "search2-offers3"
+        self.entrant_spec = ":".join(entrant_parts) if entrant_parts else "search2-notrade"
         self.fallbacks = 0
         self.decisions = 0
         self._mapping = None
@@ -116,7 +116,7 @@ class DevCatanPlayer(Player):
             )
 
         if self._bot is None:
-            entrant = replace(entrant_from_name(self.entrant_spec), max_offers=0)
+            entrant = replace(entrant_from_name(self.entrant_spec), max_trades=0)
             self._bot = spawn(entrant, self._mapping.board, self._rng)
 
         action = self._bot.choose(our_game)

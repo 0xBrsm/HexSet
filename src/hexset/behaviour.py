@@ -20,9 +20,9 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Iterable, Sequence
 
-from .actions import ActionType, apply
+from .actions import ActionType
 from .game import start, to_move
-from .record import Record, actions_of, board_of
+from .record import Record, advance, board_of, steps
 
 # The card plays worth counting, and the names they are reported under.
 TRACKED: dict[ActionType, str] = {
@@ -72,11 +72,11 @@ def walk(record: Record, game: int) -> Walk | None:
     total = max(1, len(record.actions))
     plays: list[Play] = []
 
-    for step, action in enumerate(actions_of(record)):
+    for step, (action, trades) in enumerate(steps(record)):
         name = TRACKED.get(action.type)
         if name is not None:
             plays.append(Play(to_move(live), name, step / total))
-        apply(live, action)
+        advance(live, action, trades)
 
     return Walk(
         game=game,

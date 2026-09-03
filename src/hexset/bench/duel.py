@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-import heximax  # noqa: F401 -- registers the heximax presets with hexset.arena
+import hexset.bots  # noqa: F401 -- registers the heximax presets with hexset.arena
 from hexset.arena import NETWORK
 from hexset.game import MAX_TURNS
 

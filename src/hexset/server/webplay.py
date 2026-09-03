@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from typing import Sequence
 
 from hexset.actions import (
     YEAR_OF_PLENTY_PAIRS,
@@ -51,11 +52,11 @@ from hexset.game import Game, Phase, is_over, to_move
 from hexset.ledger import PublicLedger
 from hexset.roads import road_lengths
 from hexset.state import MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS, GameState, copy_state
-from hexset.trading import responders as offer_responders
+from hexset.trading import Bundle, Trade, apply_trades
 from hexset.victory import public_victory_points, victory_points
 
 from .journal import Journal
-from .rules import fair_legal_actions, is_legal
+from .rules import is_legal
 from .seating import locked_of, settle, snapshot
 
 RESOURCE_NAMES: tuple[str, ...] = tuple(r.name.title() for r in Resource)
@@ -172,18 +173,55 @@ def board_layout(board: Board, size: float = 60.0) -> dict:
     }
 
 
+# --- Trading -------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PostedValuation:
+    """A seat's published valuation vector, as the trade mechanic's seam.
+
+    What a person (or an LLM) at a HexSet table brings to a trade: five
+    numbers in [-1, 1] set through `PUT /api/games/<code>/valuation`, and
+    nothing else. `accepts` is unconditionally True, and that is the whole
+    of the interface on purpose -- the engine only ever asks the gate about
+    a bundle whose *public* surplus is already strictly positive for this
+    seat (`hexset.trading.trade_event`), so the vector a seat posts is
+    exactly the statement it is making. A richer human interface -- a
+    per-exchange confirm, a per-opponent rule -- is deferred by the trading
+    design, not approximated here.
+    """
+
+    vector: tuple[float, ...]
+
+    def valuation(self, view) -> tuple[float, ...]:
+        del view
+        return self.vector
+
+    def accepts(self, view, received: Bundle, counterparty: int) -> bool:
+        del view, received, counterparty
+        return True
+
+
+def _checked_valuation(vector: Sequence[float]) -> tuple[float, ...]:
+    """One published vector, validated for the wire: `NUM_RESOURCES` numbers
+    in [-1, 1]. Rejected rather than clamped -- a client that sent 5 meant
+    something, and quietly turning it into 1 would hide the bug."""
+    try:
+        out = tuple(float(x) for x in vector)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"a valuation must be {NUM_RESOURCES} numbers") from exc
+    if len(out) != NUM_RESOURCES:
+        raise ValueError(f"a valuation is {NUM_RESOURCES} numbers, got {len(out)}")
+    if any(x < -1.0 or x > 1.0 or x != x for x in out):
+        raise ValueError("every valuation must be between -1 and 1")
+    return out
+
+
 # --- Wire format for actions --------------------------------------------------
 
 
 def action_to_wire(action: Action) -> dict:
-    return {
-        "type": action.type.name,
-        "a": action.a,
-        "b": action.b,
-        "give": list(action.give),
-        "want": list(action.want),
-        "ask": list(action.ask),
-    }
+    return {"type": action.type.name, "a": action.a, "b": action.b}
 
 
 def wire_to_action(data: dict) -> Action:
@@ -192,14 +230,7 @@ def wire_to_action(data: dict) -> Action:
     except (KeyError, TypeError) as exc:
         raise ValueError(f"unknown action type {data.get('type')!r}") from exc
     try:
-        return Action(
-            type=kind,
-            a=int(data.get("a", 0)),
-            b=int(data.get("b", 0)),
-            give=tuple(int(x) for x in data.get("give", ())),
-            want=tuple(int(x) for x in data.get("want", ())),
-            ask=tuple(int(x) for x in data.get("ask", ())),
-        )
+        return Action(type=kind, a=int(data.get("a", 0)), b=int(data.get("b", 0)))
     except (TypeError, ValueError) as exc:
         raise ValueError(f"malformed action payload: {data!r}") from exc
 
@@ -361,10 +392,10 @@ class _Event:
     before: _Snapshot
     after: _Snapshot
     last_roll: int | None
-    # Whether an offer was still open once this action had been applied. What
-    # separates a proposal nobody was even eligible to cover (concluded on the
-    # spot, no responses ever coming) from one still waiting on them.
-    offer_open: bool
+    # The exchanges the engine cleared inside this action -- the trade event
+    # runs on the way into the main phase (`hexset.trading`), so a roll or a
+    # robber move can carry several. Empty for everything else.
+    trades: tuple[Trade, ...] = ()
 
 
 def _who(seat: int, labels: dict[int, str]) -> str:
@@ -466,10 +497,25 @@ def _describe(
         r0, r1 = YEAR_OF_PLENTY_PAIRS[action.a]
         return f"{who} played Year of Plenty for {RESOURCE_NAMES[r0]} and {RESOURCE_NAMES[r1]}."
 
-    if kind is ActionType.PROPOSE_TRADE:
-        return f"{who} offered {_bundle_text(action.give)} for {_bundle_text(action.want)}."
-
     return f"{who} played {kind.name}."
+
+
+def _trade_lines(event: _Event, labels: dict[int, str]) -> list[str]:
+    """One sentence per exchange the engine cleared inside this action.
+
+    Fully public: both hands, both bundles, both seats. A trade is an
+    announced exchange at a real table, and the ledger already certifies
+    every card that moved, so there is nothing here to redact per reader.
+    """
+    out = []
+    for trade in event.trades:
+        got = tuple(max(0, n) for n in trade.received)
+        gave = tuple(max(0, -n) for n in trade.received)
+        out.append(
+            f"{_who(trade.a, labels)} traded {_bundle_text(gave)} "
+            f"to {_who(trade.b, labels)} for {_bundle_text(got)}."
+        )
+    return out
 
 
 def render_log(
@@ -498,17 +544,16 @@ def render_log(
     line to join something older (a second seven in the same round starts a
     fresh discard line rather than swelling the first).
 
-    PROPOSE_TRADE is held back differently: buffered until the offer
-    concludes, then written as "accepted" naming who took it, or as a uniform
-    "Everyone declined." that never says who was asked or how many (see the
-    DECLINE_TRADE branch). END_TURN writes nothing at all.
+    Trades are not actions and so are not events of their own: the engine
+    clears them inside the roll or the robber move that opened the main
+    phase, and `_trade_lines` writes one public sentence per exchange
+    straight after that action's own line. END_TURN writes nothing at all.
 
     Tab-separated, matching every other line: the client splits on the first
     tab for the round-number column.
     """
     lines: list[str] = []
     run: dict | None = None
-    trade: str | None = None
 
     def emit(round_num: int, text: str, continuing: bool) -> None:
         # A run is exactly one line, rewritten in place as it grows, so
@@ -590,39 +635,9 @@ def render_log(
             # not information.
             continue
 
-        if kind is ActionType.PROPOSE_TRADE:
-            line = _describe(event, board, labels, viewer)
-            if event.offer_open:
-                trade = line
-            else:
-                # propose_trade() found nobody eligible and concluded the
-                # offer immediately, with no ACCEPT_TRADE/DECLINE_TRADE ever
-                # coming — logged the same as the "everyone who was asked
-                # said no" case below, for the same reason: see there.
-                lines.append(f"{round_num}\t{line} Everyone declined.")
-            continue
-
-        if kind is ActionType.ACCEPT_TRADE and trade is not None:
-            lines.append(f"{round_num}\t{trade} {who} accepted.")
-            trade = None
-            continue
-
-        if kind is ActionType.DECLINE_TRADE and trade is not None:
-            if not event.offer_open:
-                # Only who's *eligible* to cover an offer is ever asked
-                # (`hexset.game.propose_trade`'s own `responders`/`willing`),
-                # in ask order, one at a time, stopping at the first accept
-                # — so naming each individual decliner, or even just their
-                # count, would tell a reader exactly how many opponents held
-                # what was wanted before the queue ran out. HexSet hands are
-                # private, so every "nobody took it" offer reads identically
-                # regardless of how many were actually asked, or whether any
-                # were: "Everyone declined." every time, full stop.
-                lines.append(f"{round_num}\t{trade} Everyone declined.")
-                trade = None
-            continue
-
         lines.append(f"{round_num}\t{_describe(event, board, labels, viewer)}")
+        for line in _trade_lines(event, labels):
+            lines.append(f"{round_num}\t{line}")
 
     return lines
 
@@ -708,6 +723,40 @@ class GameSession:
     # right after a qualifying human action, cleared by anything else. See
     # _apply and undo_last_build.
     _undo: _UndoPoint | None = field(default=None, repr=False)
+    # Seat -> whatever brings that seat to a trade (`hexset.trading`): an
+    # embedded bot's own `valuation`/`accepts` for a bot seat, a
+    # `PostedValuation` for a seat a person is playing, nothing at all for
+    # an empty one. Kept here rather than on `Game` directly because a seat
+    # can change hands mid-game (`api.Tables.swap_bot`), and `set_trader` is
+    # the one place that rewrites the engine's tuple.
+    traders: dict[int, object] = field(default_factory=dict, repr=False)
+
+    def set_trader(self, seat: int, trader: object | None) -> None:
+        """Seat (or unseat) what plays `seat`'s side of a trade."""
+        if trader is None:
+            self.traders.pop(seat, None)
+        else:
+            self.traders[seat] = trader
+        self.game.traders = tuple(
+            self.traders.get(s) for s in range(self.game.num_players)
+        )
+
+    def valuation_of(self, seat: int) -> tuple[float, ...]:
+        """What `seat` has published, all-zero if it has published nothing."""
+        return tuple(self.game.valuations[seat])
+
+    def publish(self, seat: int, vector: Sequence[float]) -> None:
+        """`PUT /api/games/<code>/valuation`: `seat` sets its own vector.
+
+        Takes effect at the next trade event, which is the next time the
+        main phase opens (`hexset.trading`) -- publishing does not move any
+        cards by itself. Written straight onto `game.valuations` as well, so
+        every viewer sees it immediately rather than only after the seat's
+        next turn.
+        """
+        posted = PostedValuation(_checked_valuation(vector))
+        self.set_trader(seat, posted)
+        self.game.valuations[seat] = posted.vector
 
     def __post_init__(self) -> None:
         # Written here rather than on the first action because the header's
@@ -778,7 +827,11 @@ class GameSession:
         # true state: `num_players` is a fixed, public board property.
         return self.game.turns // self.game.state(0, hidden=False).num_players + 1
 
-    def restore(self, steps: list[tuple[int, Action]], journal: Journal | None = None) -> None:
+    def restore(
+        self,
+        steps: list[tuple[int, Action, tuple[Trade, ...]]],
+        journal: Journal | None = None,
+    ) -> None:
         """Re-apply a journalled game's actions, bringing this session up to
         where it left off (see `hexset.server.journal.replayable`).
 
@@ -793,12 +846,12 @@ class GameSession:
         """
         if self.journal is not None:
             raise ValueError("restore would rewrite the journal it is reading")
-        for actor, action in steps:
+        for actor, action, trades in steps:
             if not is_legal(self.game, action, legal_actions(self.game)):
                 raise ResumeError(
                     f"step {self._steps}: {action} is not legal in {self.game.phase.name}"
                 )
-            self._apply(actor, action)
+            self._apply(actor, action, replay=trades)
         self.journal = journal
         if journal is not None:
             journal.reopened(at_step=self._steps)
@@ -808,7 +861,7 @@ class GameSession:
         which is also what a seat that isn't theirs, or no seat at all, gets."""
         if is_over(self.game) or viewer is None or to_move(self.game) != viewer:
             return []
-        return [action_to_wire(a) for a in fair_legal_actions(self.game)]
+        return [action_to_wire(a) for a in legal_actions(self.game)]
 
     def submit(self, seat: int, wire: dict) -> None:
         """Play `wire` as `seat`. The seat is the caller's to prove (it comes
@@ -830,7 +883,9 @@ class GameSession:
             raise ValueError(f"{action} is not a legal action right now")
         self._apply(seat, action)
 
-    def _apply(self, actor: int, action: Action) -> None:
+    def _apply(
+        self, actor: int, action: Action, replay: tuple[Trade, ...] | None = None
+    ) -> None:
         # Captured before apply(), not after: end_turn() increments
         # game.turns (and so self.round, derived from it), so the line for
         # the END_TURN action itself would otherwise be prefixed with the
@@ -861,7 +916,20 @@ class GameSession:
             else None
         )
         seating_before = snapshot(self.game)
-        apply(self.game, action)
+        trades_before = len(self.game.trades)
+        if replay is None:
+            apply(self.game, action)
+        else:
+            # Replaying a journalled game: the seats that published the
+            # vectors this game traded on are not here, so the engine's own
+            # event would clear a different set (usually none). The recorded
+            # exchanges are re-executed instead -- see `trading.apply_trades`.
+            live, self.game.traders = self.game.traders, None
+            try:
+                apply(self.game, action)
+            finally:
+                self.game.traders = live
+            apply_trades(self.game, replay)
         # `hexset.game` deals the setup snake from seat 0 and rotates turns
         # `(p + 1) % n`; this table starts the snake at its creator and
         # retires seats nobody claimed. See `hexset.server.seating`.
@@ -876,7 +944,7 @@ class GameSession:
                 before=before,
                 after=_snapshot(self.game),
                 last_roll=self.game.last_roll,
-                offer_open=self.game.offer is not None,
+                trades=tuple(self.game.trades[trades_before:]),
             )
         )
 
@@ -889,6 +957,7 @@ class GameSession:
                 action=action,
                 before_hands=before.hands,
                 before_held=before.held,
+                trades=tuple(self.game.trades[trades_before:]),
             )
         self._steps += 1
 
@@ -959,30 +1028,22 @@ class GameSession:
         return f"{round_num}\t{who} wins with {points} points."
 
     def _public_mover(self, viewer: int | None) -> int:
-        """Whose move it is, as `viewer` may be told.
+        """Whose move it is. Plain `to_move` now that no phase hands the
+        decision to a seat chosen by what it holds.
 
-        Everywhere but `TRADE_RESPOND` this is just `to_move`. During
-        `TRADE_RESPOND` it is not: `game.pending_responders` is
-        `trading.responders(...)`, the seats that **can cover the offer**, so
-        publishing its head tells every poller — the token-free observer
-        included — exactly who is holding the wanted card and who was skipped.
-        That is a hand's composition, on the wire, for free; the offer block
-        already omits `responders` for precisely this reason
-        (`hexset.server.rules`, and PR #2 defect 3).
-
-        A responder is told their own seat, because they have to act on it.
-        Everyone else is told the **proposer**, which is public — the offer
-        block names them — and which is also the seat the phase is really
-        about. The alternative, `None`, would break every client's "am I on
-        move?" test and read as "the game is over".
+        This used to filter `TRADE_RESPOND`, where `to_move` was the head of
+        the engine's eligibility list and publishing it told every poller who
+        held the wanted card. There is no such phase any more: trading is one
+        engine event, not a decision anybody is asked for (`hexset.trading`),
+        so the filter has nothing left to hide. `viewer` is kept in the
+        signature because the caller is per-viewer and a future filter would
+        land here.
         """
+        del viewer
         game = self.game
         if is_over(game):
             return game.current_player
-        mover = to_move(game)
-        if game.phase is not Phase.TRADE_RESPOND or game.offer is None:
-            return mover
-        return mover if viewer == mover else game.offer.proposer
+        return to_move(game)
 
     def state_view(self, viewer: int | None = None) -> dict:
         """The whole game as `viewer` is allowed to see it.
@@ -1035,32 +1096,8 @@ class GameSession:
                 entry["dev_cards"] = dict(zip(DEV_CARD_NAMES, holdings(state, p)))
             players.append(entry)
 
-        offer = None
-        if game.offer is not None:
-            offer = {
-                "proposer": game.offer.proposer,
-                "give": list(game.offer.give),
-                "want": list(game.offer.want),
-                # Deliberately no `responders`: `game.pending_responders` is
-                # exactly who's eligible to cover the offer, in ask order —
-                # sending it live, before anyone has actually responded,
-                # would leak the same hidden hand information the log fix
-                # (see render_log) exists to hide, just earlier and over a
-                # different channel.
-            }
-            # Who has already declined — the proposer's own information
-            # only (see `record.py:build_record`'s identical filtering): a
-            # responder must not condition on an earlier decline.
-            if viewer is not None and viewer == game.offer.proposer:
-                declined = set(offer_responders(state, game.offer)) - set(game.pending_responders)
-                offer["answered"] = sorted(declined)
-
         return {
             "phase": game.phase.name,
-            # Not filtered, and does not need to be: during TRADE_RESPOND
-            # `game.current_player` is still the *proposer* (the turn is
-            # theirs; only the decision moved), and the offer block names the
-            # proposer anyway. It is `to_move` that says who was asked.
             "current_player": game.current_player,
             "to_move": None if over else self._public_mover(viewer),
             "seat": viewer,
@@ -1093,7 +1130,20 @@ class GameSession:
             if viewer is not None
             else {},
             "players": players,
-            "offer": offer,
+            # The trade mechanic, in full and public to everyone
+            # (`hexset.trading`): what every seat has advertised each
+            # resource is worth to it, and what the engine cleared this
+            # turn. Both are things a table hears, so neither is filtered.
+            "valuations": [list(v) for v in game.valuations],
+            "trades": [
+                {
+                    "a": t.a,
+                    "b": t.b,
+                    "gave": [max(0, -n) for n in t.received],
+                    "got": [max(0, n) for n in t.received],
+                }
+                for t in game.trades
+            ],
             "legal_actions": self.legal_wire_actions(viewer),
             "log": self.log_for(viewer),
         }

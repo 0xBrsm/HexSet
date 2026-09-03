@@ -149,6 +149,15 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self) -> None:  # noqa: N802
+        self._with_body("POST")
+
+    def do_PUT(self) -> None:  # noqa: N802
+        # `PUT /api/games/<CODE>/valuation` is the only one, and it is a PUT
+        # rather than a POST because it sets a value rather than taking a
+        # turn: sending it twice leaves the same vector posted.
+        self._with_body("PUT")
+
+    def _with_body(self, method: str) -> None:
         if not self.path.startswith("/api/"):
             self.send_error(404)
             return
@@ -162,7 +171,7 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(payload, dict):
             self._json({"error": "body must be a JSON object"}, status=400)
             return
-        self._serve("POST", payload)
+        self._serve(method, payload)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -182,13 +191,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--port", type=int, default=8770)
     parser.add_argument("--seed", type=int, default=None, help="Board/RNG seed.")
     parser.add_argument(
-        "--max-offers",
-        type=int,
-        default=1,
-        help=(
-            "Trade-offer budget every bot seat is held to, overriding whatever "
-            "each checkpoint trained under (default: 1)."
-        ),
+        "--no-trade",
+        action="store_true",
+        help="Switch trading off for every bot seat (max_trades=0).",
     )
     parser.add_argument("--device", default="cpu", help="Inference device (default: cpu).")
     parser.add_argument("--no-browser", action="store_true", help="Do not auto-open a browser tab.")
@@ -227,7 +232,7 @@ def main(argv: list[str] | None = None) -> None:
 
     config = Config(
         device=args.device,
-        max_offers=args.max_offers,
+        max_trades=0 if args.no_trade else None,
         games_dir=args.games_dir,
         seed=args.seed,
         default_bots=[args.checkpoint] * (MAX_SEATS - 1) if args.checkpoint else None,

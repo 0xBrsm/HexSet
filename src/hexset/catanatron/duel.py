@@ -9,7 +9,7 @@ and the formula is right there.
 
 Usage, matching catanatron's own `--players` syntax:
 
-    python -m hexset.catanatron.duel --players=DC:search2-offers3,AB:2,AB:2,AB:2 \\
+    python -m hexset.catanatron.duel --players=DC:search2-notrade,AB:2,AB:2,AB:2 \\
         --num=400 --workers=8
 
 `main()` re-execs itself with `PYTHONHASHSEED=0` pinned before anything else
@@ -220,7 +220,7 @@ def main() -> None:
     )
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--players", required=True, help="catanatron --players syntax, e.g. DC:search2-offers3,AB:2,AB:2,AB:2")
+    parser.add_argument("--players", required=True, help="catanatron --players syntax, e.g. DC:search2-notrade,AB:2,AB:2,AB:2")
     parser.add_argument("--num", type=int, default=100)
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--seed", type=int, default=0)

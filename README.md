@@ -137,6 +137,21 @@ gate with `pytest -m slow`. **Any change under `src/hexset/` or
 `-k choices_are_byte_identical`) before it merges** — those hashes are the
 only thing standing between "refactored" and "changed what the bot does."
 
+`tests/web/test_page.py` loads the page in a real browser — it deals a game,
+works the seat panel's model pickers, composes a trade in the negotiation
+panel and answers a pending offer, and fails on any console error. It needs
+Chromium and is marked `slow`, so it is skipped by a default run and by any
+checkout without the browser installed:
+
+```
+pip install playwright && python -m playwright install chromium
+pytest -m slow tests/web/test_page.py
+```
+
+**Any change to `src/hexset/server/static/index.html` must run it.** Every
+other check on the frontend reads that file as text or drives the API with a
+script; this is the only one that executes the page.
+
 ## Adding an opponent
 
 Drop a `.onnx` file into `models/` (or wherever `HEXSET_UI_MODELS_DIR`

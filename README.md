@@ -121,10 +121,13 @@ code change is a `git pull` + `docker compose restart`, not a rebuild. It
 runs unprivileged on a read-only filesystem with no Linux capabilities.
 
 Then open the printed URL (or the mapped port, `8770` by default under
-compose). Opponents come from `model_options()` in
-`src/hexset/server/api.py`: `heximax` and `search2` (handcrafted, no
-checkpoint needed) plus one entry per `*.onnx` file found in the models
-directory.
+compose). That deals a game and lands you on the board — there is no lobby
+and no front page. The address you end up at is the game: send it to someone
+and they sit down at the same table, and any seat still open can be given to
+a bot from the player list on the right. Opponents come from
+`model_options()` in `src/hexset/server/api.py`: `heximax` and `search2`
+(handcrafted, no checkpoint needed) plus one entry per `*.onnx` file found in
+the models directory.
 
 Tests are `pip install -e ".[test,server,clients,catanatron]" && pytest`.
 

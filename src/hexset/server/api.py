@@ -18,6 +18,11 @@ random seat and every other seat open. Opening `/<id>` in a browser, or
 calling `join` with it, claims a random still-open seat and hands back a
 token.
 
+A still-open seat can also be given to a bot from the board itself
+(`POST /api/bot`, see `Tables.seat_bot`) right up until the setup snake
+retires it — the same request that swaps one bot for another, because with no
+lobby the player list is the only place a table says who else is playing.
+
 That token, not the request's source or a cookie, is the identity here. It
 names one seat at one game, it is the only way to act on that seat, and it is
 what `state` reads to decide whose hand to show. There are no accounts and
@@ -749,23 +754,70 @@ class Tables:
         table.session.player_names[seat] = name
         return table.view(seat)
 
-    def swap_bot(self, table: Table, seat: int, model: str) -> dict:
-        """Re-seat one bot mid-game — models can be swapped at any point, not
-        just between games. Rebuilding from `model_options()` (rather than
-        accepting a spec) keeps this the same chokepoint: a request names a
-        bot, it never hands one a path. Stops that seat's embedded runner
-        thread and starts a fresh one on the new spec — the old bot's own
+    def seat_bot(self, table: Table, viewer: int, seat: int, model: str) -> dict:
+        """Put a bot on `seat`: a fresh one where nobody is sitting, or a
+        different one in place of the bot already there.
+
+        Both halves are the same request because, with no lobby to pick a
+        lineup in, the player list on the board is the only place a table
+        decides who else is playing — filling an open seat and changing your
+        mind about a bot already in one are the same gesture there. An open
+        seat can be filled right up until the setup snake retires it (see
+        `Table._settle_locks`), and a bot can be swapped at any point in the
+        game, not just between games.
+
+        Rebuilding from `model_options()` (rather than accepting a spec)
+        keeps this the same chokepoint: a request names a bot, it never hands
+        one a path. A seat that already held a bot has that runner thread
+        stopped and a fresh one started on the new spec — the old bot's own
         in-flight decision, if any, still lands (it was already submitted
-        through `/api/action` like any other move), but nothing further
-        comes from it."""
-        if not 0 <= seat < len(table.seats) or table.seats[seat].kind is not SeatKind.BOT:
-            raise ApiError(f"seat {seat} has no bot to swap")
+        through `/api/action` like any other move), but nothing further comes
+        from it.
+
+        A person's seat is never taken over, and a retired seat is never
+        revived: both refuse.
+
+        `viewer` is the seat that *asked* — whose game this answers with —
+        and is not `seat`. Answering as `seat` instead was a hidden-hand
+        leak: the response is built for one viewer (see `Table.view`), so a
+        view of the bot's seat handed back that bot's whole hand to whoever
+        touched its picker, and left their client believing it was sitting
+        somewhere it was not.
+        """
+        if not 0 <= seat < len(table.seats):
+            raise ApiError(f"there is no seat {seat} at this game")
+        kind = table.seats[seat].kind
+        if kind is SeatKind.PLAYER:
+            raise ApiError(f"seat {seat} belongs to a player")
+        # Before the open/retired test, not after: the window a seat has left
+        # only advances when somebody asks (see `_settle_locks`), and this is
+        # exactly such a request.
+        table._settle_locks()
+        if kind is SeatKind.EMPTY and seat in locked_of(table.session.game):
+            raise ApiError(f"seat {seat} has been retired from this game")
         try:
             spec = model_options()[model]
         except KeyError:
             raise ApiError(f"unknown model: {model}") from None
-        table.seats[seat].name = model
-        table.seats[seat].spec = spec
+
+        if kind is SeatKind.EMPTY:
+            token = secrets.token_urlsafe(18)
+            table.seats[seat] = Seat(kind=SeatKind.BOT, name=model, spec=spec, token=token)
+            # A seat only counts as playable once the session agrees it is
+            # claimed — `GameSession.apply_human_action` refuses a seat that
+            # is not, and the runner about to start plays through exactly
+            # that route.
+            table.session.claimed_seats.add(seat)
+            # Somebody arriving keeps a currently-waiting door open one more
+            # window, whichever seat they took — the same rule, and the same
+            # reasoning, as a person's `Table.join`.
+            if table.blocked_since is not None:
+                table.blocked_since = (
+                    None if to_move(table.session.game) == seat else time.monotonic()
+                )
+        else:
+            table.seats[seat].name = model
+            table.seats[seat].spec = spec
         table.session.bot_names[seat] = model
         table.session.bot_specs[seat] = spec
         if table.session.journal is not None:
@@ -791,7 +843,7 @@ class Tables:
         table.runners.append((new_runner, new_thread))
         new_thread.start()
 
-        return table.view(seat)
+        return table.view(viewer)
 
     def set_valuation(self, table: Table, seat: int, vector) -> dict:
         """`PUT /api/games/<CODE>/valuation`: this seat publishes its vector.
@@ -902,7 +954,9 @@ class Tables:
         if method == "POST" and path == "/api/name":
             return self.rename(table, seat, str(payload.get("name", "")))
         if method == "POST" and path == "/api/bot":
-            return self.swap_bot(table, int(payload.get("seat", -1)), str(payload.get("model", "")))
+            return self.seat_bot(
+                table, seat, int(payload.get("seat", -1)), str(payload.get("model", ""))
+            )
         if method == "PUT" and path == f"/api/games/{table.code}/valuation":
             return self.set_valuation(table, seat, payload.get("valuation"))
         raise ApiError(f"no such endpoint: {method} {path}", status=404)

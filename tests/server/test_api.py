@@ -418,10 +418,54 @@ def test_a_bot_can_be_swapped_but_a_persons_seat_cannot():
 
     data = registry.handle("POST", "/api/bot", {"seat": bot_seat, "model": "search2"}, token)
     assert data["seats"][bot_seat]["name"] == "search2"
+    # Answered as the seat that asked, never as the seat that was touched:
+    # every response here is built for one viewer, so answering as the bot
+    # would hand its whole hand back to whoever changed its picker.
+    assert data["seat"] == mine_seat
+    revealed = {p["seat"] for p in data["players"] if "hand" in p}
+    assert revealed == {mine_seat}
 
     with pytest.raises(ApiError) as caught:
         registry.handle("POST", "/api/bot", {"seat": mine_seat, "model": "search2"}, token)
-    assert "no bot to swap" in str(caught.value)
+    assert "belongs to a player" in str(caught.value)
+
+
+def test_an_open_seat_can_be_given_a_bot_from_the_table():
+    """The lobby is gone, so the player list on the board is where a table
+    decides who else is playing: the same request that swaps one bot for
+    another fills a seat nobody has taken."""
+    registry = tables()
+    code, token = deal(registry, bots=[])
+    table = registry.get(code)
+    mine_seat = registry.by_token(token)[1]
+    open_seat = next(i for i, s in enumerate(table.seats) if s.kind is SeatKind.EMPTY)
+
+    data = registry.handle("POST", "/api/bot", {"seat": open_seat, "model": "search2"}, token)
+
+    assert data["seats"][open_seat]["kind"] == "bot"
+    assert data["seats"][open_seat]["name"] == "search2"
+    # Claimed as far as the session is concerned, or the runner that was just
+    # started could not play the seat it was given.
+    assert set(data["claimed_seats"]) == {mine_seat, open_seat}
+    assert data["seat"] == mine_seat
+    assert table.seats[open_seat].token is not None
+    assert any(runner.seat == open_seat for runner, _ in table.runners)
+
+
+def test_a_retired_seat_cannot_be_given_a_bot():
+    """A seat the setup snake waited out is out of the game for good — see
+    `hexset.server.seating.lock_seat`. Nothing revives it, a bot included."""
+    registry = tables()
+    code, token = deal(registry, bots=[])
+    table = registry.get(code)
+    # Retired here rather than waited out — the grace window that does it for
+    # real has its own test above.
+    retired = empty_seats(table)[0]
+    lock_seat(table.session.game, retired)
+
+    with pytest.raises(ApiError) as caught:
+        registry.handle("POST", "/api/bot", {"seat": retired, "model": "search2"}, token)
+    assert "retired" in str(caught.value)
 
 
 def test_renaming_a_seat_reaches_the_log_as_well_as_the_seat_list():

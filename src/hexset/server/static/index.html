@@ -371,26 +371,18 @@
     display: none; flex-direction: column;
   }
   #log-sheet.show { display: flex; }
-  /* The lobby covers everything until the game is dealt — above the log
-     sheet, since there is no game to have a log of yet. */
-  #lobby {
+  /* Covers everything until the board is up — above the log sheet, since
+     there is no game to have a log of yet. Nothing is asked for here and
+     nothing is chosen: it is the half-second the game is being dealt in,
+     and the one screen a bad code ends on. */
+  #splash {
     position: fixed; inset: 0; z-index: 60; background: var(--bg);
     display: none; flex-direction: column; align-items: center; justify-content: center;
     gap: 1.1rem; padding: 1.5rem; text-align: center;
   }
-  #lobby.show { display: flex; }
-  #lobby h1 { margin: 0; font-size: 1.4rem; }
-  #lobby .hint { color: var(--muted); max-width: 30rem; line-height: 1.5; margin: 0; }
-  .lobby-row { display: flex; gap: 0.6rem; flex-wrap: wrap; justify-content: center; }
-  #landing { display: flex; flex-direction: column; gap: 0.6rem; }
-  #lobby input, #lobby select {
-    font: inherit; padding: 0.4rem 0.6rem; border-radius: 6px;
-    border: 1px solid var(--border); background: #232733; color: var(--ink);
-  }
-  #lobby input { width: 12rem; }
-  /* The one field somebody types a code they read off another screen into —
-     upper-cased as they go so it matches what they are looking at. */
-  #landing-code { text-transform: uppercase; letter-spacing: 0.15rem; }
+  #splash.show { display: flex; }
+  #splash h1 { margin: 0; font-size: 1.4rem; }
+  #splash .hint { color: var(--muted); max-width: 30rem; line-height: 1.5; margin: 0; }
   #log-full {
     flex: 1 1 auto; overflow-y: auto; padding: 0.8rem 1rem;
     font-size: 0.95rem; line-height: 1.5; color: #a8b0bd;
@@ -619,33 +611,16 @@
     <svg viewBox="0 0 512 512"><use href="#icon-restart"></use></svg>
   </button>
 </header>
-<!-- Shown from first paint until either a game is dealt/joined (the front
-     page) or, briefly, while /<code> is trying to join/observe one — there is
-     no separate roster-and-start screen any more, a game is dealt and live
-     the instant it exists (see api.py's module docstring). Once entered
-     (enterGame), this never comes back. -->
-<div id="lobby" class="show">
-  <h1 id="lobby-title">HexSet</h1>
-  <p class="hint" id="lobby-hint"></p>
-  <!-- The front page only: your name, how many local bots to seat, and the
-       way in to somebody else's game. Hidden the moment we have a code. -->
-  <div id="landing">
-    <input id="lobby-name" maxlength="40" placeholder="Your name" autocomplete="off">
-    <div class="lobby-row">
-      <select id="landing-bots" title="Local bots to seat">
-        <option value="0" selected>No bots — open game</option>
-        <option value="1">1 bot</option>
-        <option value="2">2 bots</option>
-        <option value="3">3 bots</option>
-      </select>
-      <button id="landing-deal" class="primary">Deal a game</button>
-    </div>
-    <div class="lobby-row">
-      <input id="landing-code" maxlength="6" placeholder="Join a code" autocomplete="off">
-      <button id="landing-join">Join</button>
-    </div>
-  </div>
-  <p class="hint" id="lobby-error"></p>
+<!-- Shown from first paint until the board is up: while / is dealing a game
+     and moving to its address, or while /<code> is joining one. There is no
+     front page and no roster screen — a game is dealt and live the instant
+     it exists (see api.py's module docstring), its code is the URL, and
+     anyone who opens that URL sits down at it. Once entered (enterGame),
+     this never comes back; the only thing it ever stays up for is a code
+     with no game behind it. -->
+<div id="splash" class="show">
+  <h1 id="splash-title">HexSet</h1>
+  <p class="hint" id="splash-hint">Dealing a game...</p>
 </div>
 <div id="log-sheet">
   <header>
@@ -799,7 +774,6 @@ let tradeSide = "give";    // "give" | "want" — which side the picker row is c
 let yopPicks = [];         // 0, 1, or 2 resource indices, "year-of-plenty" mode only
 let monopolyPick = null;   // selected resource index, "monopoly" mode only
 let modelNames = [];       // GET /api/models, in MODEL_OPTIONS order
-let currentBotModels = []; // this game's (or the next one's) 3 non-human-seat picks, ascending seat order
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -924,14 +898,12 @@ async function loadBoard() {
   drawBoard();
 }
 
-// Fetches MODEL_OPTIONS' names and seeds currentBotModels the first time
-// only, so a mid-game swap (see swapBot) survives a re-render.
+// Fetches MODEL_OPTIONS' names — the opponents every seat picker offers.
+// Which one is on a seat is the seat's own business (state.seats), never a
+// preference remembered on this side.
 async function loadModels() {
   const {models} = await getJSON("/api/models");
   modelNames = models;
-  if (!currentBotModels.length) {
-    currentBotModels = [0, 1, 2].map((i) => modelNames[i % modelNames.length]);
-  }
 }
 
 // The one place that turns a seat number into what a human reads, so the
@@ -947,8 +919,12 @@ function seatLabel(seat) {
   if (seatInfo && seatInfo.kind === "empty") {
     return state?.locked?.includes(seat) ? "locked seat" : "open seat";
   }
-  const p = state?.players.find((p) => p.seat === seat);
-  return (p && p.name) || `Player ${seat + 1}`;
+  // A bot's own name is its model; a person's is whatever they registered, or
+  // their seat number. Read off the seat, not off the player entry, whose
+  // `name` is the log's label and says "player" for anyone unnamed — fine in
+  // a log line, indistinguishable from a real name here.
+  if (seatInfo && seatInfo.name) return seatInfo.name;
+  return `Player ${seat + 1}`;
 }
 
 // Same label, but seat-number-first — "Player 2 (search2)" — for the spots
@@ -959,11 +935,12 @@ function seatFullLabel(seat) {
   return `Player ${seat + 1} (${seatLabel(seat)})`;
 }
 
-// Re-seats one live seat's bot without restarting the game. `slot` is that
-// seat's position among the non-human seats (ascending), so the choice also
-// updates currentBotModels — the next New game remembers it.
-async function swapBot(seat, slot, model) {
-  currentBotModels[slot] = model;
+// Puts a bot on one seat, live, without restarting the game: a fresh one on
+// a seat nobody has taken, or a different one in place of the bot already
+// there. One request for both, because with no lobby this player list is
+// where a table decides who else is playing — see api.Tables.seat_bot.
+async function seatBot(seat, model) {
+  if (!model) return;
   if (inFlight) return;
   inFlight = true;
   try {
@@ -972,7 +949,7 @@ async function swapBot(seat, slot, model) {
       state = data;
       render();
     } else {
-      showNotice(data.error || "Could not switch that bot.");
+      showNotice(data.error || "Could not seat that bot.");
     }
   } finally {
     inFlight = false;
@@ -1300,9 +1277,14 @@ function sendAction(action) {
 // A new game is a new table, and a new table is a new address: dealing in
 // place would leave everyone else at this code sitting at a game that had
 // silently become somebody else's.
+//
+// This table's bots come across — deal again against the same opponents —
+// and nothing else does. The people who were here are not re-seated: their
+// seats are open at the new address, and the new address is the invitation.
 function newGame() {
   return blocking(async () => {
-    const {ok, data} = await postJSON("/api/games", {bots: currentBotModels, name: playerName()});
+    const bots = state.seats.filter((s) => s.kind === "bot").map((s) => s.name);
+    const {ok, data} = await postJSON("/api/games", {bots});
     if (!ok) { showNotice(data.error || "Could not deal a new game."); return; }
     rememberToken(data.code, data.token);
     location.href = `/${data.code}`;
@@ -1422,8 +1404,14 @@ function handColHeader(iconId, text) {
 
 function renderPlayers() {
   const container = document.getElementById("players");
+  // This list is rebuilt from scratch, and it is rebuilt every 1.5 seconds
+  // while somebody else is on move (see pollWhileWaiting) — which is exactly
+  // when an open seat is most likely to be getting a bot picked for it. An
+  // open picker is inside this container, so a rebuild would close it out
+  // from under the click. The stats it would have refreshed can wait for the
+  // tick after the choice is made.
+  if (container.contains(document.activeElement)) return;
   container.innerHTML = "";
-  let slot = 0;
   for (const p of state.players) {
     const color = SEAT_COLORS[p.seat];
     const row = html("div", {class: `player-row${state.to_move === p.seat ? " active" : ""}`});
@@ -1433,19 +1421,42 @@ function renderPlayers() {
     row.appendChild(swatch);
 
     const nameEl = html("div", {class: "player-name"});
-    if (p.human) {
+    // What a seat *is* comes from state.seats, not from the player entry:
+    // every game deals all MAX_SEATS seats whether or not anybody is in them
+    // (see api.py's module docstring), so state.players has a row for an open
+    // seat too, indistinguishable by its own fields from an unnamed person's.
+    const kind = state.seats[p.seat] && state.seats[p.seat].kind;
+    if (kind === "player") {
       // A person's seat, mine or somebody else's: a name, not a bot picker.
       // There is nothing to swap — the seat belongs to whoever is in it.
+      // The name comes off the seat rather than off p.name, which is the
+      // *log's* label and falls back to the literal word "player" for anyone
+      // who never gave one (webplay.seat_labels) — that fallback is right in
+      // a log line and wrong here, where it would read as somebody's name
+      // and hide "you".
       nameEl.classList.add("player-name-plain");
-      nameEl.textContent = p.seat === state.seat ? (p.name || "you") : (p.name || `Player ${p.seat + 1}`);
+      const given = state.seats[p.seat].name;
+      nameEl.textContent = p.seat === state.seat ? (given || "you") : (given || `Player ${p.seat + 1}`);
+    } else if (state.locked.includes(p.seat)) {
+      // Retired: the setup snake reached it, waited it out and moved on for
+      // good. Nothing can be done with it, so it reads as text rather than
+      // as a picker that would only ever refuse.
+      nameEl.classList.add("player-name-plain");
+      nameEl.textContent = "locked seat";
     } else {
-      // The picker *is* the player line: changing this seat's bot mid-game
-      // goes straight through swapBot, no separate "apply" step.
-      const mySlot = slot++;
+      // The picker *is* the player line, for a seat with a bot on it and an
+      // open one alike: choosing a model seats it (or re-seats it) straight
+      // through seatBot, no separate "apply" step. This is the only place a
+      // table chooses its opponents now that there is no lobby to choose
+      // them in — an open seat's blank first option is the state it is
+      // already in, waiting for whoever opens the URL.
       const select = html("select", {});
+      if (!p.bot) select.appendChild(html("option", {value: ""}, "open seat"));
       for (const name of modelNames) select.appendChild(html("option", {value: name}, name));
-      select.value = p.bot || currentBotModels[mySlot] || modelNames[0];
-      select.addEventListener("change", () => swapBot(p.seat, mySlot, select.value));
+      select.value = p.bot || "";
+      // Blurred first, so the render that follows the answer is not the one
+      // the guard at the top of this function skips.
+      select.addEventListener("change", () => { select.blur(); seatBot(p.seat, select.value); });
       nameEl.appendChild(select);
     }
     row.appendChild(nameEl);
@@ -2377,80 +2388,63 @@ document.addEventListener("keydown", (e) => {
   setLogOpen(false);
 });
 
-// --- The lobby ----------------------------------------------------------
+// --- The splash ---------------------------------------------------------
 //
-// Everything up to the deal: the code to share, who has sat down so far, and
-// the one button that turns a row of seats into a game. It polls, because the
-// only thing that changes here is somebody else arriving.
+// The only screen that is not the board, and nothing is decided on it: it
+// covers the deal or the join, and stays up only for a code with no game
+// behind it.
 
-const lobbyEl = document.getElementById("lobby");
-const nameInput = document.getElementById("lobby-name");
+const splashEl = document.getElementById("splash");
 
-function playerName() {
-  return nameInput.value.trim() || null;
-}
-
-function setLobbyOpen(open) {
-  lobbyEl.classList.toggle("show", open);
-}
-
-function lobbyError(text) {
-  document.getElementById("lobby-error").textContent = text || "";
+function splashSays(title, hint) {
+  document.getElementById("splash-title").textContent = title;
+  document.getElementById("splash-hint").textContent = hint;
 }
 
 // The one-way door: the board needs a dealt game to lay out, so it is loaded
-// here rather than at boot, and the lobby never comes back. Works the same
+// here rather than at boot, and the splash never comes back. Works the same
 // for a seated player or a token-free observer (state.seat is null for the
 // latter — nothing downstream needs telling apart the two explicitly, since
 // every "is it my turn"/"is this my seat" check already reads state.seat).
 async function enterGame() {
   await loadBoard();
-  setLobbyOpen(false);
+  splashEl.classList.remove("show");
   render();
   pollWhileWaiting();
 }
 
-// --- The front page -----------------------------------------------------
-
-async function dealGame() {
-  const bots = Number(document.getElementById("landing-bots").value);
-  const body = {bots: currentBotModels.slice(0, bots)};
-  if (playerName()) body.name = playerName();
-  const {ok, data} = await postJSON("/api/games", body);
-  if (!ok) { lobbyError(data.error || "Could not deal a game."); return; }
-  rememberToken(data.code, data.token);
-  location.href = `/${data.code}`;
-}
-
-// Nothing is checked here: a code either has a game behind it or it doesn't,
-// and that is the server's answer to give (see boot, where this lands).
-function joinByCode() {
-  const code = document.getElementById("landing-code").value.trim().toUpperCase();
-  if (code) location.href = `/${code}`;
-}
-
-document.getElementById("landing-deal").addEventListener("click", dealGame);
-document.getElementById("landing-join").addEventListener("click", joinByCode);
-document.getElementById("landing-code").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") joinByCode();
-});
-
 // --- Boot ---------------------------------------------------------------
 //
-// A game is live and dealt from the moment it exists — no lobby to wait
-// through. Three ways in, one end state: a seat, or (failing that) a
-// read-only look at the game. The front page deals a game and moves to its
-// address; a code we already hold a token for reads state directly; a code
-// we don't is joined, claiming a random open seat — and if there is none
-// left (or none ever existed), falls back to observing rather than a dead
-// end (enterObserving tells the two apart itself, by whether that request
-// also errors).
+// The address is the game. Opening / deals one and moves to its address;
+// opening that address sits you down at it, and so does opening it on
+// anybody else's screen. There is nothing in between — no front page, no
+// lobby, no code to type in, because the code is already in the URL bar
+// and the URL is the whole invitation.
+//
+// Three ways in from here, one end state: a seat, or (failing that) a
+// read-only look at the game. A code we already hold a token for reads
+// state directly; a code we don't is joined, claiming a random open seat —
+// and if there is none left (or none ever existed), falls back to observing
+// rather than a dead end (enterObserving tells the two apart itself, by
+// whether that request also errors).
+
+// The front door. `replace`, not `href`: the dealt game's address takes the
+// place of / in history, so Back leaves the site instead of landing on the
+// front door again and dealing a second game nobody asked for.
+async function dealAndGo() {
+  const {ok, data} = await postJSON("/api/games", {});
+  if (!ok) {
+    splashSays("HexSet", data.error || "Could not deal a game.");
+    return;
+  }
+  rememberToken(data.code, data.token);
+  location.replace(`/${data.code}`);
+}
 
 async function enterObserving(code) {
   const view = await getJSON(`/api/table/${code}`);
   if (view.error) {
-    document.getElementById("lobby-title").textContent = "No such game";
-    document.getElementById("lobby-hint").textContent = view.error;
+    splashSays("No such game", view.error);
     return;
   }
   state = view;
@@ -2458,11 +2452,12 @@ async function enterObserving(code) {
 }
 
 (async function boot() {
+  // Before the first await, so the splash is never briefly telling somebody
+  // arriving at a shared link that a game is being dealt for them.
+  if (tableCode) splashSays("HexSet", "Sitting down...");
   await loadModels();
-  document.getElementById("landing").style.display = tableCode ? "none" : "";
   if (!tableCode) {
-    document.getElementById("lobby-hint").textContent =
-      "Play the bots on your own, or leave seats open and share the code you get.";
+    await dealAndGo();
     return;
   }
 
@@ -2483,7 +2478,7 @@ async function enterObserving(code) {
     return;
   }
 
-  const {ok, data} = await postJSON("/api/join", {code: tableCode, name: playerName()});
+  const {ok, data} = await postJSON("/api/join", {code: tableCode});
   if (ok) {
     rememberToken(tableCode, data.token);
     state = data;

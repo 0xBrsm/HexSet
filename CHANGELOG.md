@@ -11,6 +11,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The browser board seats a bot from the player list: an open seat's picker
+  offers every model alongside the seat's current state, and choosing one
+  fills the seat for the rest of the game. `POST /api/bot` (`Tables.seat_bot`,
+  formerly `swap_bot`) now takes an empty seat as well as one with a bot on
+  it, refusing a person's seat and a retired one.
 - **Trading is one event a turn.** `hexset.trading.trade_event` clears deals
   for the current player after the roll and the robber and before any build
   is served: a one-for-one exchange executes when both seats' public
@@ -116,6 +121,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `POST /api/bot` answered with the *target* seat's view rather than the
+  caller's, so changing a bot's picker handed that bot's whole hand back to
+  whoever touched it and left the client believing it was sitting at the
+  bot's seat. It answers as the seat that asked.
+- The browser's player list decided bot-picker-or-name on a `human` field no
+  response has ever carried, so every row rendered as a bot picker —
+  a person's seat and an open one included. Row kind now comes from
+  `seats[].kind`, and a name from `seats[].name` rather than from the log's
+  own label (which reads "player" for anyone unnamed, hiding "you").
 - `hexset.server.api.spawn_bot` imported `.onnxbot` from `hexset.server`,
   where the module no longer lives after the one-distribution restructure
   moved it to `hexset.clients.onnxbot`. Any `.onnx` model picked in the web
@@ -136,6 +150,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **The browser board has no front page.** Opening `/` deals a game and
+  moves to its address; that address is the whole invitation — everyone who
+  opens it sits down at the same table, and the last open seat can be given
+  to a bot from the player list. The deal/join/name/code-entry screen is
+  gone, and with it the browser's own name field (`POST /api/name` is
+  unchanged for API and MCP clients).
 - ONNX record contract `"4"` → `"5"`: the four `offer_*` fields and
   `pair_mask` are gone, `valuations` (`players × 5` floats) is added, and a
   graph no longer needs a `pair_index` output. Contracts 2, 3 and 4 are

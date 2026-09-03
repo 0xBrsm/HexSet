@@ -11,12 +11,15 @@ An `ApiError` carries its own status, so even the error mapping is a one-liner.
 
 ## Codes in the URL, tokens in the header
 
-`GET /` is the front page, where a game is dealt — immediately playable, no
-lobby to wait through. `GET /<CODE>` is that game: the same HTML, which reads
-the code out of its own URL and either claims an open seat or, if there isn't
-one, renders read-only as an observer. Both are just the file — the server
-does not resolve the code, because a code that does not exist (or a game that
-is full) should say so in the page rather than as a raw 404.
+The address is the game, and there is no page in front of it. `GET /` deals
+one and moves to its address; `GET /<CODE>` is that game — the same HTML,
+which reads the code out of its own URL and either claims an open seat or, if
+there isn't one, renders read-only as an observer. Sharing the URL is the
+whole invitation: everyone who opens it lands at the same table, and an open
+seat that nobody takes can be given to a bot from the board itself (see
+`api.Tables.seat_bot`). Both paths are just the file — the server does not
+resolve the code, because a code that does not exist (or a game that is full)
+should say so in the page rather than as a raw 404.
 
 Identity is the token `api.py` mints, sent back on `X-HexSet-Token` and kept in
 the browser's localStorage. It replaced a cookie, which could not survive the

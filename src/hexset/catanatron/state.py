@@ -218,6 +218,17 @@ def translate(catanatron_game, mapping: BoardMapping, rng: random.Random) -> tup
         # valuation vector per seat unconditionally, so it must be sized to
         # `n` rather than left at `Game.valuations`'s empty default.
         valuations=[(0.0,) * NUM_RESOURCES for _ in range(n)],
+        # Same sizing requirement as `valuations`, for the same reason:
+        # `Game.published_post_roll`/`published_end_turn` (PI correction
+        # "two publish points, not one") default to an empty list, and
+        # `end_turn`/`enter_main` index them by seat unconditionally --
+        # reached whenever a bot doing lookahead (`search2`, `heximax`)
+        # simulates a `ROLL` or `END_TURN` action through this bridge's own
+        # `Game`, trading or not. `True` (nothing due) throughout, matching
+        # a fresh `start()` before setup completes: this bridge never seats
+        # gates, so `publish_due` is never acted on here regardless.
+        published_post_roll=[True] * n,
+        published_end_turn=[True] * n,
     )
 
     if phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):

@@ -197,30 +197,43 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `hexset.gym`'s auto-played opponents and the server's embedded bots all
   publish this way now. `CONTRACT_VERSION` stamps `"5"` (it stayed `"4"`
   after `RECORD_FIELDS` had already changed).
-- **A seat publishes once a turn, not after every action, and the turn's
-  first trade event runs lazily.** `Game.publish_due(seat)`: true exactly
-  once per seat per turn, while `seat` is the current player, the phase is
-  `MAIN`, and this turn's first event has not run yet.
-  `hexset.arena.play`, `hexset.record.record_game`, `hexset.bench.aivat`,
-  `hexset.gym`'s auto-played opponents and the server's embedded bots call
-  `hexset.trading.publish_valuation` only when this is true, at the
-  post-roll/robber point, instead of after every action (measured at 8.4x
-  collection cost in a batched collector for an event that can only ever
-  observe two publishes a turn). `enter_main` no longer runs the turn's
-  first event directly — it sets `Game.event_pending`, and the event runs
-  the first time the current player's own `hexset.actions.legal_actions`,
-  `Game.state(seat)` at `hidden=True`, or `Game.publish` is reached,
-  whichever comes first (a `hidden=False` read of the true state does not
-  trigger it — that path is for reading state for a reason unrelated to
-  this seat's own turn), so a driver that publishes before it ever observes
-  the game trades on the vector it just published, and a seat that never
-  publishes (an idle human) still gets its event on whatever is already
-  standing. Every event after the first one in a turn is unaffected. A
-  human still publishes whenever it likes through
-  `PUT /api/games/<code>/valuation`, `publish_due` or not.
+- **A seat publishes at two engine-defined points a turn, not after every
+  action, and the turn's first trade event runs lazily.**
+  `Game.publish_due(seat)` is true at either of two independent points, each
+  tracked by its own per-seat flag: **post-roll** (`published_post_roll`) —
+  `seat` is the current player, the phase is `MAIN`, and it has not
+  published since its own roll/robber resolution this turn — and
+  **post-end-turn** (`published_end_turn`) — `seat`'s own `END_TURN` has been
+  applied and it has not published since, whether or not it is still the
+  current player (it never is, by the time this is checked). Both fire once
+  for every seat, together, the instant setup completes, so round one has a
+  vector to trade on. A single post-roll publish point was tried first and
+  measured trades/turn collapsing from 0.254 to 0.017: every other seat read
+  a pre-build vector for the rest of the round and the exact private gate
+  correctly refused what it proposed. `hexset.arena.play`,
+  `hexset.record.record_game`, `hexset.bench.aivat`, `hexset.gym`'s
+  auto-played opponents and the server's embedded bots call
+  `hexset.trading.publish_valuation` only when `publish_due` is true, at
+  both points, instead of after every action (a single point still measured
+  8.4x collection cost in a batched collector for the "after every action"
+  alternative). `enter_main` no longer runs the turn's first event directly
+  — it sets `Game.event_pending`, and the event runs the first time the
+  current player's own `hexset.actions.legal_actions`, `Game.state(seat)` at
+  `hidden=True`, or `Game.publish` is reached, whichever comes first (a
+  `hidden=False` read of the true state does not trigger it — that path is
+  for reading state for a reason unrelated to this seat's own turn), so a
+  driver that publishes before it ever observes the game trades on the
+  vector it just published, and a seat that never publishes (an idle human)
+  still gets its event on whatever is already standing. Every event after
+  the first one in a turn is unaffected. A human still publishes whenever it
+  likes through `PUT /api/games/<code>/valuation`, `publish_due` or not — in
+  practice, before ending its turn.
   `hexset.record.record_game` attributes a lazily-triggered first event to
   the *previous* action's step (the roll or robber resolution), matching
-  what `hexset.record.advance` already replays there.
+  what `hexset.record.advance` already replays there; the post-end-turn and
+  post-setup publishes are attributed to the step that just applied, though
+  neither can produce a trade in practice (a publish for a seat that is not
+  the current player never fires an event).
   `hexset.clients.botclient.LocalSearchBrain` now hands an embedded
   `NetworkBot` the live `Game` at construction rather than waiting for its
   first `choose()` call, so `publish_due`-gated publishing before a seat's

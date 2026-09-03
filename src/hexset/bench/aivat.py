@@ -63,7 +63,7 @@ from hexset.actions import Action, ActionType, apply, victim_of
 from hexset.arena import MAX_ACTIONS, entrant_from_name, load_checkpoint, seat_of, spawn
 from hexset.board.board import Board, random_base_board
 from hexset.encoding import encode
-from hexset.game import ROLL_ODDS, Game, imagine, is_over, roll_dice, start, to_move
+from hexset.game import ROLL_ODDS, Game, Phase, imagine, is_over, roll_dice, start, to_move
 from hexset.mcts import draws_hidden
 from hexset.trading import publish_valuation
 from hexset.victory import WINNING_POINTS, victory_points
@@ -395,10 +395,10 @@ def instrumented(
         seat = to_move(game)
         bot = lineup[seat]
         # A line-for-line twin of `arena.play`: the acting seat publishes
-        # once a turn, when the engine says it is due (`Game.publish_due`),
-        # not after every action, so this replay's vectors match a real
-        # duel's bit-for-bit rather than staying at whatever they were when
-        # the game started.
+        # at the engine's two publish points (`Game.publish_due`, the PI
+        # correction "two publish points, not one"), not after every
+        # action, so this replay's vectors match a real duel's bit-for-bit
+        # rather than staying at whatever they were when the game started.
         if game.publish_due(seat):
             publish_valuation(game, seat, bot)
         action = bot.choose(game)
@@ -407,6 +407,15 @@ def instrumented(
         outcomes = chance_outcomes(game, action, aux) if term in terms else []
         apply(game, action)
         actions += 1
+        if action.type is ActionType.END_TURN:
+            # (b): `seat` just stopped being the current player.
+            if game.publish_due(seat):
+                publish_valuation(game, seat, bot)
+        elif action.type is ActionType.SETUP_ROAD and game.phase is Phase.ROLL:
+            # (c): that road completed setup -- every seat is due at once.
+            for other_seat, other_bot in enumerate(lineup):
+                if game.publish_due(other_seat):
+                    publish_valuation(game, other_seat, other_bot)
         if len(outcomes) > 1:
             keys, probabilities, children = zip(*outcomes)
             values = valuer.margins(list(children))

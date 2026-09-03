@@ -891,16 +891,22 @@ def test_the_event_never_fires_twice_for_one_turn():
 
 
 def test_publish_due_is_true_once_per_turn_for_the_current_player_in_main():
+    """The post-roll half of `publish_due` (PI correction "two publish
+    points, not one"): armed by `published_post_roll`, independently of
+    `event_pending` -- the two are consumed by different things now
+    (`publish` vs. `run_pending_event`). `a_game()` never advances through
+    setup, so `published_end_turn` stays all-`True` (nothing due there)
+    throughout, isolating this test to the post-roll flag alone."""
     game = a_game()
     game.gates = tuple(Trader() for _ in range(4))
-    game.event_pending = True
+    game.published_post_roll[0] = False
     assert game.publish_due(0) is True
     assert game.publish_due(1) is False  # not the current player
     game.phase = Phase.ROLL
     assert game.publish_due(0) is False  # not MAIN
     game.phase = Phase.MAIN
-    game.event_pending = False
-    assert game.publish_due(0) is False  # already fired this turn
+    game.published_post_roll[0] = True
+    assert game.publish_due(0) is False  # already published this turn
 
 
 def test_a_game_with_nobody_seated_simply_does_not_trade():
@@ -1023,3 +1029,174 @@ def test_an_event_never_outruns_the_cards_on_the_table():
     ]
     done = run(game, traders)
     assert 0 < len(done) <= cards
+
+
+# --- two publish points (PI correction "two publish points, not one") --------
+
+
+def _run_setup(players: int = 4, seed: int = 0):
+    """A real game driven through the setup snake with a real board, so the
+    post-setup arming point (`_advance_setup`) and the "never during setup"
+    half of the truth table are exercised against actual phase transitions
+    rather than `a_game()`'s fast-forward past them. Asserts nobody is ever
+    due mid-setup along the way."""
+    from hexset.game import legal_initial_roads, place_initial_road, place_initial_settlement
+    from hexset.state import can_place_settlement
+
+    rng = random.Random(seed)
+    game = start(random_base_board(rng), players, rng)
+    while game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
+        assert all(not game.publish_due(s) for s in range(players))
+        if game.phase is Phase.SETUP_SETTLEMENT:
+            vertex = next(
+                v
+                for v in range(game._state.board.topology.num_vertices)
+                if can_place_settlement(game._state, game.current_player, v, connected=False)
+            )
+            place_initial_settlement(game, vertex)
+        else:
+            place_initial_road(game, legal_initial_roads(game)[0])
+    return game
+
+
+def test_publish_due_arms_for_every_seat_the_instant_setup_completes():
+    """(c): nothing is due during setup; the moment the last road completes
+    it, every seat becomes due at once (`published_end_turn`, arming what
+    round one trades on), and publishing clears it seat by seat."""
+    players = 4
+    game = _run_setup(players)
+    assert game.phase is Phase.ROLL
+    assert all(game.publish_due(s) for s in range(players))
+    for seat in range(players):
+        game.publish(seat, vector())
+        assert game.publish_due(seat) is False
+    assert not any(game.publish_due(s) for s in range(players))
+
+
+def test_publish_due_post_roll_true_then_false_after_publish():
+    """(a): the post-roll point, unchanged in effect -- due only for the
+    current player, only in `MAIN`, only until it publishes."""
+    players = 4
+    game = _run_setup(players)
+    for seat in range(players):
+        game.publish(seat, vector())  # clear the post-setup point first
+    seat = game.current_player
+    assert game.phase is Phase.ROLL
+    assert game.publish_due(seat) is False  # not MAIN yet
+    roll_dice(game, 8)
+    assert game.phase is Phase.MAIN
+    assert game.publish_due(seat) is True
+    for other in range(players):
+        if other != seat:
+            assert game.publish_due(other) is False
+    game.publish(seat, vector())
+    assert game.publish_due(seat) is False  # published; never twice this turn
+    # A later MAIN observation does not resurrect it.
+    legal_actions(game)
+    assert game.publish_due(seat) is False
+
+
+def test_publish_due_post_end_turn_true_then_false_after_publish():
+    """(b): armed the instant `END_TURN` is applied, for the seat that just
+    stopped being current, and cleared only by that seat's own publish --
+    which the new current player's own decisions do not touch."""
+    players = 4
+    game = _run_setup(players)
+    for seat in range(players):
+        game.publish(seat, vector())
+    seat = game.current_player
+    roll_dice(game, 8)
+    game.publish(seat, vector())  # clear the post-roll point
+    assert game.publish_due(seat) is False
+    end_turn(game)
+    assert game.current_player != seat
+    assert game.publish_due(seat) is True  # due even though no longer current
+    assert game.publish_due(game.current_player) is False  # the new seat's own turn hasn't rolled
+    game.publish(seat, vector())
+    assert game.publish_due(seat) is False
+
+
+def test_publish_due_never_true_twice_for_the_same_occurrence():
+    """Publishing more than once mid-occurrence (a human republishing
+    through the endpoint) does not un-clear a flag it already cleared, and
+    nothing re-arms either flag except its own trigger point."""
+    players = 4
+    game = _run_setup(players)
+    for seat in range(players):
+        game.publish(seat, vector())
+    seat = game.current_player
+    roll_dice(game, 8)
+    game.publish(seat, vector(wood=0.2))
+    game.publish(seat, vector(wood=-0.2))  # republish, still within the same turn
+    assert game.publish_due(seat) is False
+    end_turn(game)
+    game.publish(seat, vector(wood=0.3))
+    game.publish(seat, vector(wood=-0.3))
+    assert game.publish_due(seat) is False
+
+
+def test_an_imagined_game_carries_both_publish_flags():
+    """`imagine` copies `published_post_roll`/`published_end_turn`
+    independently, the same as `event_pending` -- a chain of simulated
+    turns keeps arming and consuming both the way a real game does, and the
+    copies are independent, not aliased."""
+    game = _run_setup(4)
+    game.published_post_roll[0] = False
+    game.published_end_turn[1] = False
+    child = imagine(game, random.Random(1))
+    assert child.published_post_roll[0] is False
+    assert child.published_end_turn[1] is False
+    child.published_post_roll[0] = True
+    child.published_end_turn[1] = True
+    assert game.published_post_roll[0] is False
+    assert game.published_end_turn[1] is False
+
+
+def test_arena_publishes_exactly_twice_per_seat_per_turn_plus_once_post_setup(
+    monkeypatch,
+):
+    """The registered readout's own precondition: with no discards or robber
+    resolutions to add extra actions (every roll forced to 8), a driver
+    calls `publish_valuation` exactly `2 * turns_taken + 1` times a seat --
+    once post-setup, and post-roll/post-end-turn for each of its turns."""
+    from collections import Counter
+
+    from hexset import arena
+
+    calls: list[int] = []
+    original = arena.publish_valuation
+
+    def counting(game, seat, bot):
+        calls.append(seat)
+        original(game, seat, bot)
+
+    monkeypatch.setattr(arena, "publish_valuation", counting)
+
+    class QuickTurnBot:
+        def valuation(self, view):
+            return vector()
+
+        def choose(self, game):
+            options = legal_actions(game)
+            for action in options:
+                if action.type is ActionType.ROLL:
+                    return action
+            for action in options:
+                if action.type is ActionType.END_TURN:
+                    return action
+            return options[0]
+
+    players = 4
+    board = random_base_board(random.Random(3))
+    play_rng = random.Random(9)
+    play_rng.randint = lambda a, b: 4  # every roll is 8: no discard, no robber
+    bots = [QuickTurnBot() for _ in range(players)]
+    turns_to_play = 8  # two laps of four seats
+    setup_actions = 4 * players  # settlement + road, twice around
+    turn_actions = 2 * turns_to_play  # ROLL, END_TURN, nothing else
+    game = arena.play(bots, board, play_rng, action_cap=setup_actions + turn_actions)
+
+    assert game.turns == turns_to_play
+    counts = Counter(calls)
+    assert counts == {seat: 5 for seat in range(players)}  # 1 post-setup + 2 * 2 turns each
+    assert len(calls) == players + 2 * turns_to_play

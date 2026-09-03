@@ -120,6 +120,38 @@ class Game:
     # every imagined copy's `gates` is, so a copy's own `legal_actions`
     # call never re-runs a live event with the copy's stand-in gates.
     event_pending: bool = False
+    # Two per-seat publish obligations (PI correction "two publish points,
+    # not one", `agents/reference/trading-design.md`): `publish_due` is
+    # true whenever either is outstanding. `published_post_roll[seat]` is
+    # `False` (due) from `enter_main` -- the seat's own roll/robber
+    # resolution -- until that seat next calls `publish` while it is still
+    # the current player in `MAIN`; that publish is what the rest of this
+    # turn's events see as "what I advertise this turn". A single post-roll
+    # publish (2026-09-03's first correction) left every *other* seat
+    # reading a pre-build vector for the whole round, so the exact private
+    # gate refused what it proposed and trades/turn collapsed from 0.254 to
+    # 0.017 -- the finding this second flag exists to fix.
+    #
+    # `published_end_turn[seat]` is `False` (due) from the moment `seat`'s
+    # own `END_TURN` is applied -- it is no longer the current player, but
+    # its post-build hand is exactly what everyone else reads for the
+    # coming round -- until it next publishes (at any phase, current
+    # player or not; `publish` clears whichever of the two flags is
+    # currently outstanding for the publishing seat). `start` also arms
+    # this for every unlocked seat the instant setup completes
+    # (`_advance_setup`), so round one has a vector to trade on at all
+    # instead of starting from the all-zero resting value for a full lap of
+    # the table.
+    #
+    # Both default to `True` (nothing due) so a seat is never due mid-setup,
+    # before its first `enter_main`, or between publishing and its next
+    # arming point -- each flag re-arms only at its one engine-defined
+    # trigger and is consumed only by `publish`, so `publish_due` is never
+    # true twice running for the same occurrence of either point. `imagine`
+    # copies both, the same as `event_pending`, so a chain of simulated
+    # turns keeps arming and consuming them the way a real game does.
+    published_post_roll: list[bool] = field(default_factory=list)
+    published_end_turn: list[bool] = field(default_factory=list)
     # Who answers a private gate, one per seat -- the driver's own bots
     # (`arena.play`), the gym's opponents, the server's seated players, or a
     # search's stand-in for the whole table. Gate-only: publishing a
@@ -227,23 +259,37 @@ class Game:
     def publish_due(self, seat: int) -> bool:
         """Whether `seat` should publish its valuation right now.
 
-        True exactly once per seat per turn: while `seat` is the current
-        player, the phase is `MAIN`, and this turn's first trade event has
-        not yet run (`event_pending`). A driver checks this before calling
-        `hexset.trading.publish_valuation` so a seat publishes once, at the
-        engine-defined post-roll/robber point, rather than after every
-        action -- the PI amendment that replaced "publish after every
-        action", which measured 8.4x collection cost for an event that can
-        only ever observe two publishes a turn
-        (`agents/reference/trading-design.md`). A human seat is unaffected:
-        it publishes whenever it likes through the server's endpoint,
-        `publish_due` or not.
+        True at two engine-defined points a turn (PI correction "two
+        publish points, not one", `agents/reference/trading-design.md`),
+        checked independently and combined with `or`:
+
+        - **Post-roll**: `seat` is the current player, the phase is
+          `MAIN`, and it has not yet published since its own `enter_main`
+          this turn (`published_post_roll[seat]`) -- the original point,
+          unchanged: right after the seat's own roll/robber resolution,
+          before this turn's first trade event.
+        - **Post-end-turn**: `seat` has not yet published since its own
+          `END_TURN` was applied (`published_end_turn[seat]`), whether or
+          not it is still the current player -- it never is, by the time
+          this is checked, since ending a turn moves `current_player` on.
+          This flag is also what `_advance_setup` arms for every unlocked
+          seat the instant setup completes, so round one has something to
+          trade on.
+
+        A driver checks this before calling
+        `hexset.trading.publish_valuation` so a seat publishes exactly
+        twice a turn (once post-setup, for every seat, before turn one)
+        rather than after every action -- the PI amendment that replaced
+        "publish after every action", which measured 8.4x collection cost
+        for an event that can only ever observe two publishes a turn. A
+        human seat is unaffected: it publishes whenever it likes through
+        the server's endpoint, `publish_due` or not.
         """
         return (
             seat == self.current_player
             and self.phase is Phase.MAIN
-            and self.event_pending
-        )
+            and not self.published_post_roll[seat]
+        ) or not self.published_end_turn[seat]
 
     def publish(self, seat: int, vector: Sequence[float]) -> None:
         """Set `seat`'s public valuation vector (`hexset.trading`).
@@ -265,8 +311,20 @@ class Game:
         *after* the new vector is recorded -- so a driver that publishes
         before it ever observes the game trades on the vector it just
         published, not the one standing from its last turn.
+
+        Also clears whichever of `publish_due`'s two flags is currently
+        outstanding for `seat` -- the post-roll one only while `seat` is
+        the current player in `MAIN` (the one occasion it applies), the
+        post-end-turn one unconditionally (it is due exactly when `seat`
+        is *not* the current player, or is every seat at once right after
+        setup). Both are no-ops when already satisfied, so a seat that
+        publishes more than once a turn (a human, through the endpoint)
+        never un-clears one it already cleared.
         """
         self.valuations[seat] = checked_valuation(vector, seat)
+        if seat == self.current_player and self.phase is Phase.MAIN:
+            self.published_post_roll[seat] = True
+        self.published_end_turn[seat] = True
         if seat == self.current_player:
             run_pending_event(self)
 
@@ -299,6 +357,11 @@ def start(
         discard_quota=[0] * num_players,
         # All-zero: a seat trades only after it has published something.
         valuations=[(0.0,) * NUM_RESOURCES for _ in range(num_players)],
+        # Nothing due yet: neither point exists before setup completes
+        # (`_advance_setup` arms `published_end_turn` for every seat the
+        # instant it does).
+        published_post_roll=[True] * num_players,
+        published_end_turn=[True] * num_players,
     )
 
 
@@ -340,6 +403,8 @@ def imagine(
         gate_budget=game.gate_budget,
         bundle_order=game.bundle_order,
         event_pending=game.event_pending,
+        published_post_roll=game.published_post_roll[:],
+        published_end_turn=game.published_end_turn[:],
         locked=game.locked,
     )
 
@@ -375,6 +440,14 @@ def _advance_setup(game: Game) -> None:
         # moving the snake off it first, so this is never a locked seat.
         game.current_player = queue[0]
         game.phase = Phase.ROLL
+        # (c): setup is over -- arm the post-end-turn publish point for
+        # every seat still at the table, once, so round one has a vector
+        # from each of them to trade on rather than the all-zero resting
+        # value for a full lap. A locked seat is left alone (`True`,
+        # nothing due): it never publishes and never trades.
+        game.published_end_turn = [
+            s in game.locked for s in range(game._state.num_players)
+        ]
 
 
 def _next_unlocked(game: Game, after: int) -> int:
@@ -744,6 +817,11 @@ def enter_main(game: Game) -> None:
     """
     game.phase = Phase.MAIN
     game.event_pending = True
+    # (a): arm the post-roll publish point for the seat whose roll/robber
+    # just resolved -- `publish_due` and `event_pending` are consumed
+    # independently now (PI correction "two publish points, not one"), so
+    # this needs its own arming here rather than reading `event_pending`.
+    game.published_post_roll[game.current_player] = False
 
 
 def end_turn(game: Game) -> None:
@@ -756,6 +834,12 @@ def end_turn(game: Game) -> None:
     # Free roads with nowhere legal to go are simply lost.
     game.free_roads = 0
     game.turns += 1
+    # (b): the seat whose turn this was is about to stop being the current
+    # player, but its post-build hand is what everyone else reads for the
+    # coming round -- arm its publish point now, while it is still easy to
+    # name, rather than trying to reconstruct "whoever just ended a turn"
+    # from outside.
+    game.published_end_turn[game.current_player] = False
     if game.turns >= MAX_TURNS:
         game.phase = Phase.GAME_OVER
         return

@@ -29,10 +29,10 @@ from math import sqrt
 from multiprocessing import Pool
 from typing import TYPE_CHECKING, Callable, Sequence
 
-from .actions import apply
+from .actions import ActionType, apply
 from .board.board import Board, random_base_board
 from .board.topology import Topology
-from .game import Game, is_over, start, to_move
+from .game import Game, Phase, is_over, start, to_move
 from .placement import PlacementBot
 from .trading import GATE_BUDGET, publish_valuation
 from .victory import victory_points
@@ -441,17 +441,23 @@ def play(
     Seating a bot also seats its private gate: `game.gates` is the lineup
     itself, so the engine's one trade event a turn (`hexset.trading`) asks
     each seat's own `accepts` rather than this loop having to remember to
-    run anything. Publishing is this loop's own job, not the event's, and
-    once a turn, not after every action: right when it is that seat's turn
-    to decide and `game.publish_due(seat)` says so (the engine-defined
-    post-roll/robber point, before the turn's first trade event -- the PI
-    amendment "publish points and the event trigger",
-    `agents/reference/trading-design.md`), it is asked for its current
-    vector and the answer is recorded (`hexset.trading.publish_valuation`),
-    so the vector every trade event this turn reads is the one this seat's
-    turn stands behind. A bot that defines neither `valuation` nor
-    `accepts` never trades, which is how `RandomBot` and any external bot
-    that predates the mechanic behave.
+    run anything. Publishing is this loop's own job, not the event's, at
+    the two engine-defined points `game.publish_due(seat)` names (PI
+    correction "two publish points, not one",
+    `agents/reference/trading-design.md`) rather than after every action:
+    post-roll/robber, checked before that seat's own decision the same way
+    as always, and post-end-turn, checked for that same seat again right
+    after its `END_TURN` is applied -- it is no longer `to_move` by then,
+    so nothing later in this loop would otherwise ask it. Setup's own
+    post-completion point arms every seat at once
+    (`Game.published_end_turn`'s docstring); the check right after a
+    completing `SETUP_ROAD` catches all of them in the same step. Whichever
+    point fires, the seat is asked for its current vector and the answer is
+    recorded (`hexset.trading.publish_valuation`), so the vector every
+    trade event reads is the one that seat's own turn -- or its
+    just-finished one -- stands behind. A bot that defines neither
+    `valuation` nor `accepts` never trades, which is how `RandomBot` and
+    any external bot that predates the mechanic behave.
 
     `gate_budget`/`order` set `game.gate_budget`/`game.bundle_order` once,
     at construction, so a duel can run the registered gate-budget ablation
@@ -469,8 +475,20 @@ def play(
         bot = bots[seat]
         if game.publish_due(seat):
             publish_valuation(game, seat, bot)
-        apply(game, bot.choose(game))
+        action = bot.choose(game)
+        apply(game, action)
         actions += 1
+        if action.type is ActionType.END_TURN:
+            # (b): `seat` just stopped being the current player; its
+            # post-build hand is what everyone else reads for the coming
+            # round.
+            if game.publish_due(seat):
+                publish_valuation(game, seat, bot)
+        elif action.type is ActionType.SETUP_ROAD and game.phase is Phase.ROLL:
+            # (c): that road completed setup -- every seat is due at once.
+            for other_seat, other_bot in enumerate(bots):
+                if game.publish_due(other_seat):
+                    publish_valuation(game, other_seat, other_bot)
     return game
 
 

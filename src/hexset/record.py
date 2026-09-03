@@ -31,7 +31,7 @@ from .board.ports import Port
 from .board.terrain import Resource, Terrain
 from .board.topology import build as build_topology
 from .bots import Bot
-from .game import Game, is_over, start, to_move
+from .game import Game, Phase, is_over, start, to_move
 from .trading import Trade, apply_trades, publish_valuation
 
 
@@ -106,13 +106,13 @@ def record_game(
     """Play one game and record it. Each bot is seated at its own index.
 
     The bots are seated as the game's `gates` too, and each one publishes
-    once a turn, exactly as `arena.play` does both (`Game.publish_due`, the
-    PI amendment "publish points and the event trigger"), so a recorded
-    game trades the way a played one does -- and the exchanges the engine
-    cleared are written down, because nothing in the action list implies
-    them.
+    at the two engine-defined points `Game.publish_due` names (PI
+    correction "two publish points, not one"), exactly as `arena.play`
+    does, so a recorded game trades the way a played one does -- and the
+    exchanges the engine cleared are written down, because nothing in the
+    action list implies them.
 
-    A publish can itself fire this turn's *first* trade event
+    A post-roll publish can itself fire this turn's *first* trade event
     (`Game.event_pending`), before the seat due to publish has even chosen
     its action -- reached, in this loop, right after `to_move` names that
     seat and before `choose`. Those trades are attributed to the
@@ -123,25 +123,49 @@ def record_game(
     that action's own `apply`. Recording them under the *next* step instead
     would replay them after that step's action applies, which can leave a
     build the trade was meant to fund looking unaffordable on replay.
+
+    The post-end-turn and post-setup publishes are checked *after* `apply`
+    and attributed the same way, to the step that was just appended
+    (`len(actions) - 1`, evaluated once the append below has run): a
+    publish for a seat that is no longer the current player never fires an
+    event (`Game.publish` only calls `run_pending_event` for the current
+    player), and neither does one made mid-`ROLL` at the moment setup
+    completes (`run_pending_event` no-ops outside `MAIN`), so in practice
+    these two never produce a trade to attribute -- the diff is kept
+    anyway, for the same reason the post-roll one is: nothing here should
+    have to be revisited if that ever changes.
     """
     game = start(board, len(bots), random.Random(seed))
     game.gates = tuple(bots)
     actions: list[tuple[int, int, int]] = []
     trades: list[tuple[int, int, int, tuple[int, ...]]] = []
+
+    def _publish(seat: int, bot: Bot, *, step: int) -> None:
+        before = len(game.trades)
+        publish_valuation(game, seat, bot)
+        for trade in game.trades[before:]:
+            trades.append((step, trade.a, trade.b, tuple(trade.received)))
+
     while not is_over(game) and len(actions) < action_cap:
         seat = to_move(game)
         bot = bots[seat]
         if game.publish_due(seat):
-            before = len(game.trades)
-            publish_valuation(game, seat, bot)
-            for trade in game.trades[before:]:
-                trades.append((len(actions) - 1, trade.a, trade.b, tuple(trade.received)))
+            _publish(seat, bot, step=len(actions) - 1)
         before = len(game.trades)
         action = bot.choose(game)
         apply(game, action)
         for trade in game.trades[before:]:
             trades.append((len(actions), trade.a, trade.b, tuple(trade.received)))
         actions.append((int(action.type), action.a, action.b))
+        if action.type is ActionType.END_TURN:
+            # (b): `seat` just stopped being the current player.
+            if game.publish_due(seat):
+                _publish(seat, bot, step=len(actions) - 1)
+        elif action.type is ActionType.SETUP_ROAD and game.phase is Phase.ROLL:
+            # (c): that road completed setup -- every seat is due at once.
+            for other_seat, other_bot in enumerate(bots):
+                if game.publish_due(other_seat):
+                    _publish(other_seat, other_bot, step=len(actions) - 1)
 
     return Record(
         num_players=len(bots),

@@ -141,14 +141,30 @@ a fixed point in the engine's own code any more; it runs lazily, the first
 time anything reaches the current player's own `legal_actions(game)`,
 `game.state(seat)`, or `Game.publish` — whichever comes first
 (`Game.event_pending`, the PI amendment "publish points and the event
-trigger" in `agents/reference/trading-design.md`). `Game.publish_due(seat)`
-is the engine's own answer to "should I publish right now?": true exactly
-once per seat per turn, while `seat` is the current player, the phase is
-`MAIN`, and this turn's first event has not fired yet. Every event after the
+trigger" in `agents/reference/trading-design.md`). Every event after the
 first one in a turn (after every subsequent MAIN action) runs
 unconditionally, on whatever is currently published — publishing more often
-than once a turn does not break anything, it is simply extra work a driver
-does not need to do.
+than the engine asks for does not break anything, it is simply extra work a
+driver does not need to do.
+
+`Game.publish_due(seat)` is the engine's own answer to "should I publish
+right now?", and it is true at **two** points a turn (PI correction "two
+publish points, not one"): right after `seat`'s own roll or robber
+resolution, while it is still the current player in `MAIN` and has not
+published since (`Game.published_post_roll`) — the point above, unchanged —
+and again right after `seat`'s own `END_TURN` is applied, once it is no
+longer the current player (`Game.published_end_turn`). The second point
+exists because the first one alone leaves every other seat reading a
+pre-build vector for the whole round: a seat that builds after its post-roll
+publish changes its hand without ever saying so, so the exact private gate
+correctly refuses whatever the stale vector proposed, and the table barely
+trades. Publishing again right after ending the turn is what lets the
+*coming* round's events read that seat's post-build hand. Both points also
+fire once for every seat, together, the instant setup completes, so round
+one starts with something to trade on. A driver publishes exactly twice a
+seat per turn (plus once per seat, post-setup), checking `publish_due`
+before each of its own turn's `legal_actions`/`state` reads and again right
+after applying its own `END_TURN`.
 
 A checkpoint served embedded (`hexset.clients.onnxbot.NetworkBot`) trades off
 the same `value` head this contract already declares: `valuation` is
@@ -158,7 +174,7 @@ delta between the seat's hand and that hand holding one more card of `r`, and
 over the current one — the derivation `hexnet.policy.DerivedTrader` trains
 under, reimplemented here against the wire record instead of a live forward
 (`hexset.trading.VALUE_SCALE` is the pinned constant both cite). Published
-once a turn, when `Game.publish_due(seat)` says so, same as any other seat
+at both of `Game.publish_due(seat)`'s points, same as any other seat
 (`hexset.trading.publish_valuation`), so it lands in `game.valuations` and
 this record's `valuations` field before the table's next trade event.
 `max_trades=0` in the metadata is still the explicit off switch — a seat with
@@ -174,7 +190,13 @@ value set before the current player's own `GET /api/state` (or any other
 read of the game while it is that seat's turn) is what the turn's first
 event sees; a value set later only takes effect from the next observation or
 the next turn's event onward, since the first event already ran on whatever
-was standing before it. A seat that never calls it at all keeps trading on
+was standing before it. The practical advice is simple regardless of the
+engine's own bookkeeping: **set it before you end your turn.** A human who
+builds and then ends the turn without republishing leaves the rest of the
+table reading a pre-build vector for the whole round — the same staleness
+`published_end_turn` exists to fix for a bot seat — so the vector that
+matters for everyone else's decisions this round is whichever one stood
+right before `END_TURN`. A seat that never calls it at all keeps trading on
 whatever it last set — all-zero, and so never a party to a clearing deal,
 until it sets something.
 

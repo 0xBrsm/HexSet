@@ -740,20 +740,32 @@ class Tables:
         game = table.session.game
         if table.seats[seat].kind is SeatKind.BOT and game.publish_due(seat):
             # The one driver that acts on a seat's behalf rather than at its
-            # own request: once a turn, when the engine says this seat is
-            # due (`Game.publish_due`), an embedded bot is asked for its
-            # current vector and it is recorded, exactly as `arena.play`'s
-            # loop does it for every seat -- the PI amendment "publish
-            # points and the event trigger". Checked, and published if due,
-            # *before* `submit` below, which validates the action through
-            # `legal_actions` and so would otherwise consume the turn's
-            # pending event on the engine's standing vector first. A human
-            # seat is unaffected -- it publishes only through
-            # `PUT .../valuation`, never tied to its own actions.
+            # own request: once due (`Game.publish_due`'s post-roll point),
+            # an embedded bot is asked for its current vector and it is
+            # recorded, exactly as `arena.play`'s loop does it for every
+            # seat. Checked, and published if due, *before* `submit` below,
+            # which validates the action through `legal_actions` and so
+            # would otherwise consume the turn's pending event on the
+            # engine's standing vector first. A human seat is unaffected --
+            # it publishes only through `PUT .../valuation`, never tied to
+            # its own actions.
             trader = table.session.traders.get(seat)
             if trader is not None:
                 publish_valuation(game, seat, trader)
         table.session.submit(seat, wire)
+        # The action just submitted can itself have ended `seat`'s turn or
+        # completed the game's setup -- both arm a publish obligation
+        # (`Game.publish_due`'s post-end-turn point, PI correction "two
+        # publish points, not one") for a bot seat that is not necessarily
+        # `seat` and is not about to call `act` again on its own to be
+        # asked. Sweep every bot seat rather than singling one out: at most
+        # one is due after an ordinary action, but every seat is due at
+        # once right after setup completes.
+        for s, seated in enumerate(table.seats):
+            if seated.kind is SeatKind.BOT and game.publish_due(s):
+                trader = table.session.traders.get(s)
+                if trader is not None:
+                    publish_valuation(game, s, trader)
         return table.view(seat)
 
     def undo(self, table: Table, seat: int) -> dict:

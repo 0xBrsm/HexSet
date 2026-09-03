@@ -89,10 +89,10 @@ class HexSetEnv(Env):
     The learner's seat publishes no valuation vector, so it never trades;
     the opponent seats trade with each other and with the learner's cards
     only through what their own bots advertise and accept, each publishing
-    right after its own auto-played action (`_auto_play_opponents`).
-    `info["view"]` carries `hexset.view.View`, the seat's full information-set
-    object (`known`/`unknown`/`sample`), for a caller that wants more than
-    the encoder's arrays.
+    at its two engine-defined points (`Game.publish_due`,
+    `_publish_due_opponents`). `info["view"]` carries `hexset.view.View`,
+    the seat's full information-set object (`known`/`unknown`/`sample`),
+    for a caller that wants more than the encoder's arrays.
     """
 
     metadata = {"render_modes": ["ansi", "human"]}
@@ -176,8 +176,8 @@ class HexSetEnv(Env):
         # The opponents bring their own trading to the table: their
         # `accepts` is what the engine's one trade event a turn asks
         # (`hexset.trading`); their `valuation` is published by
-        # `_auto_play_opponents`, right after each one's own action. The
-        # learner seat has no bot, so it publishes nothing and never trades
+        # `_publish_due_opponents` at each one's two engine-defined points.
+        # The learner seat has no bot, so it publishes nothing and never trades
         # -- the deferred half of the mechanic's interface, not an omission
         # here.
         self._aec._game.gates = tuple(
@@ -241,6 +241,10 @@ class HexSetEnv(Env):
     def _auto_play_opponents(self) -> None:
         aec = self._aec
         learner = agent_name(self._learner_seat)
+        # Catches whatever the most recent action already armed -- the
+        # learner's own step (called from `step`, right before this),
+        # or nothing new the first time this runs from `reset`.
+        self._publish_due_opponents()
         while True:
             if aec.terminations[learner] or aec.truncations[learner]:
                 return
@@ -249,18 +253,27 @@ class HexSetEnv(Env):
             agent = aec.agent_selection
             if aec.terminations[agent] or aec.truncations[agent]:
                 aec.step(None)
+                self._publish_due_opponents()
                 continue
             seat = aec.possible_agents.index(agent)
             bot = self._bots[seat]
-            # Once a turn, exactly like `arena.play`'s loop: only when the
-            # engine says this seat is due (`Game.publish_due`, the
-            # post-roll/robber point, before the turn's first trade event --
-            # the PI amendment "publish points and the event trigger"), not
-            # after every action.
-            if aec._game.publish_due(seat):
-                publish_valuation(aec._game, seat, bot)
             action = bot.choose(aec._game)
             aec.step(action)
+            self._publish_due_opponents()
+
+    def _publish_due_opponents(self) -> None:
+        """Publish every opponent seat currently due (`Game.publish_due`,
+        the PI correction "two publish points, not one"): the post-roll
+        point for whichever seat is about to act, the post-end-turn point
+        for whichever seat just ended its turn, and -- all at once, the
+        first time this runs after setup completes -- the post-setup point
+        for every seat. The learner is never a key of `self._bots`
+        (`__init__`'s note: it publishes no valuation vector, so it never
+        trades), so it is never asked here."""
+        game = self._aec._game
+        for seat, bot in self._bots.items():
+            if game.publish_due(seat):
+                publish_valuation(game, seat, bot)
 
     def _observe_learner(self) -> tuple[Any, dict[str, Any]]:
         learner = agent_name(self._learner_seat)

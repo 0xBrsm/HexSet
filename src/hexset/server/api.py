@@ -44,9 +44,15 @@ obvious and both are load-bearing:
 
 Every seat's **valuation vector** is public, and so is the turn's trade log:
 those are what a table hears (`hexset.trading`), and `PUT
-/api/games/<CODE>/valuation` is how a seat sets its own. Nothing else about
-trading is on the wire, because nothing else exists -- there is no offer to
-address, accept or decline.
+/api/games/<CODE>/valuation` is how a seat sets its own -- unchanged by, and
+independent of, everything below. `POST /api/games/<CODE>/trade` lets a seat
+compose a bundle against any counterparty whose public vector already wants
+it (`hexset.game.Game.execute_trade`,
+`docs/negotiation-interface.md`), on its own turn against anyone or during
+another seat's turn against that seat only; `pending` in the per-viewer state
+is a snapshot of what the current player's own trade event found against a
+confirm-mode seat, and `.../trade/confirm`/`.../trade/decline` answer one of
+those.
 
 The `action_mask`/`options` on `GET /api/record` are the engine's own
 `legal_actions`, and so is what an embedded bot searches: one list for every
@@ -92,6 +98,7 @@ from .webplay import (
     ResumeError,
     action_to_wire,
     board_layout,
+    bundle_from_wire,
 )
 
 # The opponents that are not files. Everything else in the picker is a path to
@@ -341,9 +348,12 @@ class Table:
         remaining = max(0.0, self.seat_grace - (time.monotonic() - self.blocked_since))
         return {"seat": to_move(game), "seconds_remaining": round(remaining, 1)}
 
-    def join(self, name: str | None) -> tuple[int, str]:
+    def join(self, name: str | None, *, confirm: bool = False) -> tuple[int, str]:
         """Seats a person (or an external bot process) at a random still-open,
-        still-unlocked seat, returning it and their token."""
+        still-unlocked seat, returning it and their token. `confirm` opts this
+        seat into confirm-mode trading at seat-up (PI ratification decision 3,
+        `docs/negotiation-interface.md`) -- a later change of heart needs a
+        fresh seat, not a flag flipped mid-game."""
         self._settle_locks()
         candidates = [
             i
@@ -357,6 +367,8 @@ class Table:
         clean = clean_name(name)
         self.seats[index] = Seat(kind=SeatKind.PLAYER, name=clean, token=token)
         self.session.claim(index, clean)
+        if confirm:
+            self.session.confirm_seats.add(index)
         # Arrival at the game keeps a currently-waiting door open one more
         # window, even if this join filled a different seat than the one the
         # snake is blocked on — see the module docstring.
@@ -527,6 +539,7 @@ class Tables:
         bots: list[str] | None = None,
         name: str | None = None,
         seat_grace: float | None = None,
+        confirm: bool = False,
     ) -> tuple[Table, str]:
         """A new game, dealt immediately: the creator at a random seat, any
         named bots seated (and tokened) alongside them, everything else
@@ -535,6 +548,8 @@ class Tables:
         (`--checkpoint`'s pin) or, absent that, no bots at all; a caller
         wanting the table filled says so explicitly, there is no automatic
         mixed lineup any more (see `Config.default_bots`'s own docstring).
+        `confirm` opts the creator's own seat into confirm-mode trading (see
+        `Table.join`).
         """
         if bots is None:
             bots = list(self.config.default_bots or [])
@@ -563,6 +578,8 @@ class Tables:
             )
 
         session = build_session(code, seats, self.config, first=creator_seat)
+        if confirm:
+            session.confirm_seats.add(creator_seat)
         table = Table(
             code=code,
             seats=seats,
@@ -813,15 +830,68 @@ class Tables:
     def set_valuation(self, table: Table, seat: int, vector) -> dict:
         """`PUT /api/games/<CODE>/valuation`: this seat publishes its vector.
 
-        The one trading endpoint there is, and the whole of the mechanic's
-        API surface (`hexset.trading`): five numbers in [-1, 1], positive
-        for "I want more of this". It may be set at any time, takes effect
-        at the next trade event, and is public to the whole table the moment
-        it lands -- `state_view`'s `valuations` block carries every seat's.
+        The advertisement half of the mechanic (`hexset.trading`): five
+        numbers in [-1, 1], positive for "I want more of this". It may be
+        set at any time, takes effect at the next trade event, and is public
+        to the whole table the moment it lands -- `state_view`'s
+        `valuations` block carries every seat's. Independent of, and
+        unchanged by, `trade`/`trade/confirm`/`trade/decline` below
+        (`docs/negotiation-interface.md`, PI ratification decision 1): a
+        submitted bundle never updates this seat's standing vector.
         """
         if vector is None:
             raise ApiError("send a `valuation` of five numbers between -1 and 1")
         table.session.publish(seat, vector)
+        return table.view(seat)
+
+    def trade(self, table: Table, seat: int, payload: dict) -> dict:
+        """`POST /api/games/<CODE>/trade`: `seat` proposes a bundle to
+        `counterparty` (`docs/negotiation-interface.md` §2). `give`/`receive`
+        are named amounts (`{"Wood": 2}`); `hexset.game.Game.execute_trade`
+        raises `ValueError` -- turned into a 400 by `handle`'s caller like any
+        other -- for a bundle either side can't cover, a counterparty whose
+        public vector doesn't already want it, a seat that is neither the
+        proposer nor the current player, or a counterparty gate that declines.
+        """
+        table._settle_locks()
+        counterparty = payload.get("counterparty")
+        if not isinstance(counterparty, int):
+            raise ApiError("send a `counterparty` seat")
+        bundle = bundle_from_wire(payload.get("give") or {}, payload.get("receive") or {})
+        table.session.game.execute_trade(seat, counterparty, bundle)
+        return table.view(seat)
+
+    def _pending_of(self, table: Table, seat: int) -> list:
+        """`seat`'s own filtered slice of `game.pending`, in the same order
+        `state_view`'s `pending` block lists them -- what a confirm/decline
+        call's `index` counts into (`docs/negotiation-interface.md` §2)."""
+        return [t for t in table.session.game.pending if t.a == seat]
+
+    def confirm_trade(self, table: Table, seat: int, payload: dict) -> dict:
+        """`POST /api/games/<CODE>/trade/confirm`: execute `seat`'s pending
+        offer at `index` exactly as the table found it (its own `(a, b,
+        received)`), then drop it from `game.pending` -- confirming a stale
+        entry against hands that already moved fails `execute_trade`'s own
+        checks the same way a fresh proposal would."""
+        table._settle_locks()
+        index = payload.get("index")
+        mine = self._pending_of(table, seat)
+        if not isinstance(index, int) or not 0 <= index < len(mine):
+            raise ApiError("no pending offer at that index", status=404)
+        trade = mine[index]
+        table.session.game.execute_trade(trade.a, trade.b, trade.received)
+        table.session.game.pending.remove(trade)
+        return table.view(seat)
+
+    def decline_trade(self, table: Table, seat: int, payload: dict) -> dict:
+        """`POST /api/games/<CODE>/trade/decline`: drop `seat`'s pending offer
+        at `index`. No cards move."""
+        table._settle_locks()
+        index = payload.get("index")
+        mine = self._pending_of(table, seat)
+        if not isinstance(index, int) or not 0 <= index < len(mine):
+            raise ApiError("no pending offer at that index", status=404)
+        table.session.game.pending.remove(mine[index])
         return table.view(seat)
 
     def record(self, table: Table, seat: int) -> dict:
@@ -879,13 +949,16 @@ class Tables:
                 bots=payload.get("bots"),
                 name=payload.get("name"),
                 seat_grace=payload.get("seat_grace"),
+                confirm=bool(payload.get("confirm", False)),
             )
             return {"token": new_token, **table.view(table.seat_of(new_token))}
 
         if method == "POST" and path == "/api/join":
             table = self.get(str(payload.get("code", "")))
             with table.lock:
-                seat, new_token = table.join(payload.get("name"))
+                seat, new_token = table.join(
+                    payload.get("name"), confirm=bool(payload.get("confirm", False))
+                )
                 return {"token": new_token, **table.view(seat)}
 
         # Everything past here acts on a seat, so it needs the token that names
@@ -922,4 +995,10 @@ class Tables:
             return self.swap_bot(table, int(payload.get("seat", -1)), str(payload.get("model", "")))
         if method == "PUT" and path == f"/api/games/{table.code}/valuation":
             return self.set_valuation(table, seat, payload.get("valuation"))
+        if method == "POST" and path == f"/api/games/{table.code}/trade":
+            return self.trade(table, seat, payload)
+        if method == "POST" and path == f"/api/games/{table.code}/trade/confirm":
+            return self.confirm_trade(table, seat, payload)
+        if method == "POST" and path == f"/api/games/{table.code}/trade/decline":
+            return self.decline_trade(table, seat, payload)
         raise ApiError(f"no such endpoint: {method} {path}", status=404)

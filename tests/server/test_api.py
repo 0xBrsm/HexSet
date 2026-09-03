@@ -30,9 +30,11 @@ from hexset.server.api import (
     new_code,
     resume_session,
 )
-from hexset.game import is_over, to_move
+from hexset.board.terrain import Resource
+from hexset.game import Phase, is_over, to_move
 from hexset.server.seating import lock_seat
 from hexset.server.webplay import action_to_wire
+from hexset.trading import Trade
 from conftest import new_tables
 
 SOLO = ["search2", "search2", "search2"]
@@ -881,3 +883,223 @@ def test_a_published_valuation_clears_a_trade_and_it_shows_in_the_view():
     assert {trade["a"], trade["b"]} == {seat, other}
     assert state.hands[seat][Resource.ORE] == 1
     assert state.hands[other][Resource.WOOD] == 1
+
+
+# --- The negotiation interface (docs/negotiation-interface.md) -----------------
+
+
+def _stocked_pair(table, seat, other, *, seat_has, other_has):
+    """Empties every hand, then gives `seat`/`other` exactly one of the named
+    resource -- the fixture every trade-endpoint test below starts from."""
+    game = table.session.game
+    game.phase = Phase.MAIN
+    game.current_player = seat
+    state = game.state(seat, hidden=False)
+    for hand in state.hands:
+        hand[:] = [0, 0, 0, 0, 0]
+    state.hands[seat][Resource[seat_has.upper()]] = 1
+    state.hands[other][Resource[other_has.upper()]] = 1
+    return state
+
+
+def test_post_trade_executes_a_manual_bundle_on_the_proposers_own_turn():
+    registry = tables()
+    code, token = deal(registry)
+    table = registry.get(code)
+    seat = table.seat_of(token)
+    other = next(s for s in range(table.session.game.num_players) if s != seat)
+    _stocked_pair(table, seat, other, seat_has="wood", other_has="ore")
+    table.session.publish(other, [1.0, 0, 0, 0, -1.0])  # wants wood, gives ore
+
+    view = registry.handle(
+        "POST",
+        f"/api/games/{code}/trade",
+        {"counterparty": other, "give": {"Wood": 1}, "receive": {"Ore": 1}},
+        token,
+    )
+    assert view["trades"][-1] == {"a": seat, "b": other, "gave": [1, 0, 0, 0, 0], "got": [0, 0, 0, 0, 1]}
+
+
+def test_post_trade_wrong_turn_is_refused():
+    registry = tables()
+    code, token = deal(registry)
+    table = registry.get(code)
+    seat = table.seat_of(token)
+    others = [s for s in range(table.session.game.num_players) if s != seat]
+    other, bystander = others[0], others[1]
+    _stocked_pair(table, seat, other, seat_has="wood", other_has="ore")
+    table.session.game.current_player = bystander
+    table.session.publish(other, [1.0, 0, 0, 0, -1.0])
+
+    with pytest.raises(ApiError, match="neither seat"):
+        registry.handle(
+            "POST",
+            f"/api/games/{code}/trade",
+            {"counterparty": other, "give": {"Wood": 1}, "receive": {"Ore": 1}},
+            token,
+        )
+
+
+def test_post_trade_unaffordable_is_refused():
+    registry = tables()
+    code, token = deal(registry)
+    table = registry.get(code)
+    seat = table.seat_of(token)
+    other = next(s for s in range(table.session.game.num_players) if s != seat)
+    _stocked_pair(table, seat, other, seat_has="wood", other_has="ore")
+    table.session.publish(other, [1.0, 0, 0, 0, -1.0])
+
+    with pytest.raises(ApiError, match="cannot cover"):
+        registry.handle(
+            "POST",
+            f"/api/games/{code}/trade",
+            # Two wood, but the seat holds only one.
+            {"counterparty": other, "give": {"Wood": 2}, "receive": {"Ore": 1}},
+            token,
+        )
+
+
+def test_post_trade_not_clearing_is_refused():
+    """The counterparty hasn't advertised wanting it -- no public surplus,
+    no clear, whatever the proposer offers."""
+    registry = tables()
+    code, token = deal(registry)
+    table = registry.get(code)
+    seat = table.seat_of(token)
+    other = next(s for s in range(table.session.game.num_players) if s != seat)
+    _stocked_pair(table, seat, other, seat_has="wood", other_has="ore")
+
+    with pytest.raises(ApiError, match="not advertised wanting"):
+        registry.handle(
+            "POST",
+            f"/api/games/{code}/trade",
+            {"counterparty": other, "give": {"Wood": 1}, "receive": {"Ore": 1}},
+            token,
+        )
+
+
+def test_post_trade_bot_declined_is_refused():
+    registry = tables()
+    code, token = deal(registry)
+    table = registry.get(code)
+    seat = table.seat_of(token)
+    other = next(s for s in range(table.session.game.num_players) if s != seat)
+    _stocked_pair(table, seat, other, seat_has="wood", other_has="ore")
+    table.session.confirm_seats.add(other)
+    table.session.publish(other, [1.0, 0, 0, 0, -1.0])  # PendingGate: always declines
+
+    with pytest.raises(ApiError, match="declined"):
+        registry.handle(
+            "POST",
+            f"/api/games/{code}/trade",
+            {"counterparty": other, "give": {"Wood": 1}, "receive": {"Ore": 1}},
+            token,
+        )
+    # Declining still records the candidate -- confirm-mode's whole point.
+    assert table.session.game.pending == [Trade(other, seat, (1, 0, 0, 0, -1))]
+
+
+def test_post_trade_during_a_bots_turn_names_only_that_bot():
+    """A seat may also propose during another seat's turn, naming only that
+    seat as counterparty (`docs/negotiation-interface.md` §2)."""
+    registry = tables()
+    code, token = deal(registry)
+    table = registry.get(code)
+    seat = table.seat_of(token)
+    other = next(s for s in range(table.session.game.num_players) if s != seat)
+    _stocked_pair(table, seat, other, seat_has="wood", other_has="ore")
+    table.session.game.current_player = other
+    table.session.publish(other, [1.0, 0, 0, 0, -1.0])
+
+    view = registry.handle(
+        "POST",
+        f"/api/games/{code}/trade",
+        {"counterparty": other, "give": {"Wood": 1}, "receive": {"Ore": 1}},
+        token,
+    )
+    assert view["trades"][-1]["a"] == seat and view["trades"][-1]["b"] == other
+
+
+def test_pending_appears_during_a_bots_turn_and_expires_at_end_turn():
+    """The common case (`docs/negotiation-interface.md` §3): a confirm-mode
+    human sees a candidate the table's own trade event found against it
+    while a bot has the turn, and it expires once that bot ends its turn."""
+    registry = tables()
+    code, token = deal(registry)
+    table = registry.get(code)
+    seat = table.seat_of(token)
+    bot = next(s for s in range(table.session.game.num_players) if s != seat)
+    # bot holds ore and wants wood; the human (seat) holds wood and wants ore.
+    state = _stocked_pair(table, bot, seat, seat_has="ore", other_has="wood")
+    table.session.confirm_seats.add(seat)
+    registry.handle(
+        "PUT", f"/api/games/{code}/valuation", {"valuation": [-1.0, 0, 0, 0, 1.0]}, token
+    )
+    table.session.publish(bot, [1.0, 0, 0, 0, -1.0])  # bot wants wood, gives ore
+
+    game = table.session.game
+    from hexset.trading import trade_event
+
+    trade_event(
+        game,
+        lambda s, view, received, other_seat: table.session.game.gates[s].accepts(
+            view, received, other_seat
+        ),
+    )
+    view = table.view(seat)
+    assert view["pending"] == [{"counterparty": bot, "gave": [1, 0, 0, 0, 0], "got": [0, 0, 0, 0, 1]}]
+    assert state.hands[seat][Resource.WOOD] == 1, "a PendingGate must never itself move cards"
+
+    from hexset.game import end_turn
+
+    end_turn(game)
+    assert table.view(seat)["pending"] == []
+
+
+def test_confirm_trade_executes_the_pending_offer_and_drops_it():
+    registry = tables()
+    code, token = deal(registry)
+    table = registry.get(code)
+    seat = table.seat_of(token)
+    bot = next(s for s in range(table.session.game.num_players) if s != seat)
+    # The human (seat) receives ore, gives wood -- the pending entry as
+    # `PendingGate` would have recorded it.
+    table.session.game.pending.append(Trade(seat, bot, (-1, 0, 0, 0, 1)))
+    state = _stocked_pair(table, bot, seat, seat_has="ore", other_has="wood")
+    table.session.publish(bot, [1.0, 0, 0, 0, -1.0])  # bot wants wood, gives ore
+
+    view = registry.handle(
+        "POST", f"/api/games/{code}/trade/confirm", {"index": 0}, token
+    )
+    assert view["pending"] == []
+    assert state.hands[seat][Resource.ORE] == 1
+    assert state.hands[bot][Resource.WOOD] == 1
+
+
+def test_decline_trade_drops_the_pending_offer_without_moving_cards():
+    registry = tables()
+    code, token = deal(registry)
+    table = registry.get(code)
+    seat = table.seat_of(token)
+    bot = next(s for s in range(table.session.game.num_players) if s != seat)
+    table.session.game.pending.append(Trade(seat, bot, (-1, 0, 0, 0, 1)))
+    state = _stocked_pair(table, bot, seat, seat_has="ore", other_has="wood")
+
+    view = registry.handle(
+        "POST", f"/api/games/{code}/trade/decline", {"index": 0}, token
+    )
+    assert view["pending"] == []
+    assert state.hands[seat][Resource.WOOD] == 1
+    assert state.hands[bot][Resource.ORE] == 1
+
+
+def test_confirm_trade_refuses_an_index_the_seat_does_not_own():
+    registry = tables()
+    code, token = deal(registry)
+    table = registry.get(code)
+    seat = table.seat_of(token)
+    bot = next(s for s in range(table.session.game.num_players) if s != seat)
+    table.session.game.pending.append(Trade(bot, seat, (1, 0, 0, 0, -1)))
+
+    with pytest.raises(ApiError, match="no pending offer"):
+        registry.handle("POST", f"/api/games/{code}/trade/confirm", {"index": 0}, token)

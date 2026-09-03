@@ -70,10 +70,13 @@ from .victory import award_points
 # the 23-input record; `"3"` contract 2 plus the four live-offer record
 # fields (trading design part 1); `"4"` contract 3 plus the two
 # public-knowledge ledger fields (`agents/reference/trading-design.md` §7.2)
-# -- same outputs, two more inputs. Lives here, not in `hexnet.export_onnx`,
-# because it names *this record's* shape and only incidentally the graph's --
-# bump it again only if `RECORD_FIELDS` or the export's output tuple changes.
-CONTRACT_VERSION = "4"
+# -- same outputs, two more inputs; `"5"` replaces the four `offer_*`
+# fields with `valuations`, one vector per seat (`agents/reference/
+# trading-design.md` §8, the one-event trade mechanic) -- contracts 2-4
+# refused. Lives here, not in `hexnet.export_onnx`, because it names *this
+# record's* shape and only incidentally the graph's -- bump it again only if
+# `RECORD_FIELDS` or the export's output tuple changes.
+CONTRACT_VERSION = "5"
 
 # Every field name in the record, in the order the plan's table lists them
 # (board, then position, then information set, then legality).

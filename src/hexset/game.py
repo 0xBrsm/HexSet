@@ -4,7 +4,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 
 from .board.board import MAX_ROLL, MIN_ROLL, Board, pips
 from .board.terrain import NUM_RESOURCES, TERRAIN_RESOURCE, Resource
@@ -20,7 +20,7 @@ from .devcards import (
 from .economy import Purchase, bank_trade, distribute, pay
 from .ledger import PublicLedger
 from .robber import discard, discard_count, move_robber, steal
-from .trading import Trade, judged, published, trade_event
+from .trading import Trade, checked_valuation, judged, trade_event
 from .state import (
     NO_OWNER,
     GameState,
@@ -72,8 +72,9 @@ class Game:
     # Every seat's public valuation vector (`hexset.trading`): what each
     # resource is worth to that seat right now, in [-1, 1], positive for
     # "I want more". All-zero at `start()` -- a seat trades only once it has
-    # published -- and refreshed by the engine at every trade event from
-    # whatever `traders` supplies.
+    # published -- and written only by `publish`, at whichever driver is
+    # stepping the game for that seat's own decisions. `trade_event` reads
+    # this and never writes it.
     valuations: list[tuple[float, ...]] = field(default_factory=list)
     # This turn's executed trades and their count, cleared by `end_turn` the
     # way the offer counter was. `trades_made` is the recorded statistic;
@@ -83,11 +84,13 @@ class Game:
     trades: list[Trade] = field(default_factory=list)
     trades_made: int = 0
     max_trades: int | None = None
-    # Who publishes a valuation and answers a gate, one per seat -- the
-    # driver's own bots (`arena.play`), the gym's opponents, the server's
-    # seated players, or a search's stand-in for the whole table. `None`
-    # means nobody trades, which is what a bare `start()` game does until a
-    # driver seats somebody.
+    # Who answers a private gate, one per seat -- the driver's own bots
+    # (`arena.play`), the gym's opponents, the server's seated players, or a
+    # search's stand-in for the whole table. Gate-only: publishing a
+    # valuation is a separate act (`publish`, called by the driver at that
+    # seat's own decisions), not something `trade_event` asks this object
+    # for any more. `None` means nobody trades, which is what a bare
+    # `start()` game does until a driver seats somebody.
     #
     # **`imagine` deliberately does not copy this**, so a hypothetical never
     # trades. Two reasons, one of principle and one of cost. Principle: a
@@ -100,7 +103,7 @@ class Game:
     # have already agreed improves them. A bot's trading judgement is
     # exercised for real, at every event, through `accepts`; the tree plans
     # the position that judgement hands it.
-    traders: tuple[object, ...] | None = None
+    gates: tuple[object, ...] | None = None
     # Seats retired from the game: skipped by the setup snake, skipped by
     # turn rotation, never `to_move`, never asked for a trade. Empty for every
     # game this module deals unless a caller retires a seat with `lock_seat`,
@@ -160,6 +163,21 @@ class Game:
         the engine.
         """
         self._state = state
+
+    def publish(self, seat: int, vector: Sequence[float]) -> None:
+        """Set `seat`'s public valuation vector (`hexset.trading`).
+
+        The driver's job, not the engine's own: called right after `seat`'s
+        own decision (`hexset.trading.publish_valuation` is the usual way
+        in), never from inside `trade_event`, which only reads
+        `game.valuations` -- calling a seat's `valuation` fresh at event
+        time was tried and cost one forward per seat per lane per turn in a
+        batched collector, the whole of what this split avoids. Validates
+        length and range (`hexset.trading.checked_valuation`) and records
+        nothing else: no ledger entry, no trade, just the number a seat is
+        currently standing behind.
+        """
+        self.valuations[seat] = checked_valuation(vector, seat)
 
 
 def start(
@@ -548,17 +566,19 @@ def enter_main(game: Game) -> None:
     robber have resolved and before any build action is served, which is the
     order the mechanic is specified in (`hexset.trading`).
 
-    A game whose `traders` is `None` -- a bare `start()` with nobody seated --
-    simply does not trade.
+    A game whose `gates` is `None` -- a bare `start()` with nobody seated --
+    simply does not trade. The vectors `trade_event` reads (`game.valuations`)
+    are not this function's concern: whichever driver stepped the acting
+    seat to this point already published them (`Game.publish`, usually via
+    `hexset.trading.publish_valuation`) as part of that seat's own decision.
     """
     game.phase = Phase.MAIN
-    traders = game.traders
-    if traders is None:
+    gates = game.gates
+    if gates is None:
         return
     trade_event(
         game,
-        lambda seat, view: published(traders[seat], view),
-        lambda seat, view, received, other: judged(traders[seat], view, received, other),
+        lambda seat, view, received, other: judged(gates[seat], view, received, other),
     )
 
 

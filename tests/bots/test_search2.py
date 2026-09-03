@@ -28,6 +28,7 @@ from hexset.actions import apply
 from hexset.arena import PRESETS, Entrant, spawn
 from hexset.board.board import random_base_board
 from hexset.game import is_over, start, to_move
+from hexset.trading import publish_valuation
 
 CENSUS_FIXTURE = Path(__file__).parent / "fixtures" / "search2_census.json"
 
@@ -48,8 +49,9 @@ def _census_game(entrant: Entrant, seed: int, players: int = 4) -> str:
     builds the board and starts the game, each seat's bot gets its own rng
     deterministic per seat, and the hash covers the full `(seat, action)`
     trace rather than just the outcome. The bots are seated as the game's
-    `traders` too, exactly as `arena.play` seats them, so the census covers
-    what they trade as well as what they choose.
+    `gates` too, and each publishes right after its own action, exactly as
+    `arena.play` does both, so the census covers what they trade as well as
+    what they choose.
     """
     rng = random.Random(seed)
     board = random_base_board(rng)
@@ -58,7 +60,7 @@ def _census_game(entrant: Entrant, seed: int, players: int = 4) -> str:
         spawn(entrant, board, random.Random(f"{seed}:{seat}"))
         for seat in range(players)
     ]
-    game.traders = tuple(bots)
+    game.gates = tuple(bots)
     trace = []
     moves = 0
     while not is_over(game):
@@ -66,6 +68,7 @@ def _census_game(entrant: Entrant, seed: int, players: int = 4) -> str:
         action = bots[seat].choose(game)
         cleared = len(game.trades)
         apply(game, action)
+        publish_valuation(game, seat, bots[seat])
         trace.append(
             (
                 seat,

@@ -11,7 +11,7 @@ nothing about a game lives there.
 
 ## A game, an ID, a seat
 
-A game has a unique ID — a six-character code (`ABCDEF` — see `new_code`),
+A game has a unique ID — a six-character code (`abcdef` — see `new_code`),
 the only thing anyone needs to find it. There is no lobby: `POST /api/games`
 deals a full `MAX_SEATS`-seat game immediately, with the creator seated at one
 random seat and every other seat open. Opening `/<id>` in a browser, or
@@ -49,7 +49,7 @@ obvious and both are load-bearing:
 
 Every seat's **valuation vector** is public, and so is the turn's trade log:
 those are what a table hears (`hexset.trading`), and `PUT
-/api/games/<CODE>/valuation` is how a seat sets its own. Nothing else about
+/api/games/<code>/valuation` is how a seat sets its own. Nothing else about
 trading is on the wire, because nothing else exists -- there is no offer to
 address, accept or decline.
 
@@ -124,12 +124,18 @@ MODELS_DIR = Path(os.environ.get("HEXSET_UI_MODELS_DIR", REPO_ROOT / "models"))
 # renumbering the engine's own idea of how many seats there are.
 MAX_SEATS = 4
 
-# Digits and uppercase letters, minus the pairs that get misread aloud or
-# retyped wrong: 0/O, 1/I/L. 31 characters, so 31**6 is about 887 million
+# Digits and lowercase letters, minus the pairs that get misread aloud or
+# retyped wrong: 0/o, 1/i/l. 31 characters, so 31**6 is about 887 million
 # codes — far more than enough, since a code only has to be unique among the
 # games alive right now, not every one ever played, and `new_code` re-rolls
 # on the collisions that do happen.
-CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
+#
+# Lowercase because the code is only ever seen as a URL, and a URL that is
+# read aloud, typed on a phone or pasted into a chat reads better without
+# the shift key. Case is not part of the identity either way: every lookup
+# normalises (see `Tables.get`), so a code typed in capitals still opens its
+# game.
+CODE_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz"
 CODE_LENGTH = 6
 
 # The cap every client already enforces (mcp.py, index.html) on a display
@@ -618,7 +624,7 @@ class Tables:
             thread.start()
 
     def get(self, code: str) -> Table:
-        code = code.upper()
+        code = code.lower()
         with self._registry_lock:
             # Every lookup, not just `create`: a box that deals one game and
             # is then only ever read would otherwise never reap anything.
@@ -846,7 +852,7 @@ class Tables:
         return table.view(viewer)
 
     def set_valuation(self, table: Table, seat: int, vector) -> dict:
-        """`PUT /api/games/<CODE>/valuation`: this seat publishes its vector.
+        """`PUT /api/games/<code>/valuation`: this seat publishes its vector.
 
         The one trading endpoint there is, and the whole of the mechanic's
         API surface (`hexset.trading`): five numbers in [-1, 1], positive

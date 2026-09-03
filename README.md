@@ -193,7 +193,7 @@ which is also what makes the legal-action list honest for every seat, since
 no remaining action's legality depends on another seat's hand. A bot brings
 its two methods (`Bot.valuation(view)`, `Bot.accepts(view, bundle,
 counterparty)`, both defaulting to "never trades"); a person sets their
-vector with `PUT /api/games/<CODE>/valuation` and sees every seat's vector
+vector with `PUT /api/games/<code>/valuation` and sees every seat's vector
 and the turn's trade log beside the board. `max_trades=0` is the off switch
 for the no-trade referents (`search2-notrade`, `heximax-notrade`).
 

@@ -59,13 +59,16 @@ def empty_seats(table) -> list[int]:
 # --- Codes --------------------------------------------------------------------
 
 
-def test_a_code_is_six_unambiguous_characters():
+def test_a_code_is_six_unambiguous_lowercase_characters():
     code = new_code(set())
     assert len(code) == CODE_LENGTH
     assert set(code) <= set(CODE_ALPHABET)
+    # A code is only ever seen as a URL, so it is lowercase throughout.
+    assert code == code.lower()
     # The pairs that get misread aloud or retyped wrong are not in the alphabet
-    # at all, so a code can never contain one.
-    assert not set("01OIL") & set(CODE_ALPHABET)
+    # at all, so a code can never contain one — in either case.
+    assert not set("01oil") & set(CODE_ALPHABET)
+    assert not set("01OIL") & set(CODE_ALPHABET.upper())
 
 
 def test_new_code_never_returns_one_already_in_use():
@@ -172,9 +175,12 @@ def test_joining_by_code_takes_a_random_open_seat():
 
 
 def test_a_code_is_matched_case_insensitively():
+    """Codes are minted lowercase, so the case that has to keep working is
+    the one somebody's phone capitalised on the way into the address bar."""
     registry = tables()
     code, _ = deal(registry, bots=["search2"])
-    data = registry.handle("POST", "/api/join", {"code": code.lower()}, None)
+    assert code == code.lower()
+    data = registry.handle("POST", "/api/join", {"code": code.upper()}, None)
     assert 0 <= data["seat"] < MAX_SEATS
 
 
@@ -611,6 +617,20 @@ def test_resuming_appends_to_the_same_file_rather_than_starting_another(tmp_path
     seam = [e for e in events if e["kind"] == "reopened"]
     assert len(seam) == 1
     assert seam[0]["at_step"] == len(journal.replayable(events))
+
+
+def test_a_game_journalled_under_a_capitalised_code_still_resumes(tmp_path):
+    """Codes used to be minted in capitals. A game journalled back then is
+    addressed by the lowercase code now, and `journal.resumable` matching
+    without regard to case is what keeps it findable."""
+    config = Config(games_dir=str(tmp_path), seed=99)
+    seats = [player("Ada"), bot_seat(), bot_seat(), bot_seat()]
+    session = build_session("ABC123", seats, config, first=0)
+    drive(session, 8, random.Random(4))
+
+    assert journal.resumable(str(tmp_path), "abc123") == session.journal.path
+    assert journal.resumable(str(tmp_path), "ABC123") == session.journal.path
+    assert journal.resumable(str(tmp_path), "abc124") is None
 
 
 def test_a_game_played_out_is_not_handed_back(tmp_path):

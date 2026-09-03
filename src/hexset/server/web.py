@@ -12,7 +12,7 @@ An `ApiError` carries its own status, so even the error mapping is a one-liner.
 ## Codes in the URL, tokens in the header
 
 The address is the game, and there is no page in front of it. `GET /` deals
-one and moves to its address; `GET /<CODE>` is that game — the same HTML,
+one and moves to its address; `GET /<code>` is that game — the same HTML,
 which reads the code out of its own URL and either claims an open seat or, if
 there isn't one, renders read-only as an observer. Sharing the URL is the
 whole invitation: everyone who opens it lands at the same table, and an open
@@ -77,13 +77,13 @@ def is_code(path: str) -> bool:
     of them in `CODE_ALPHABET` — as opposed to a typo or a missing asset.
     """
     code = path.lstrip("/")
-    return len(code) == CODE_LENGTH and all(c in CODE_ALPHABET for c in code.upper())
+    return len(code) == CODE_LENGTH and all(c in CODE_ALPHABET for c in code.lower())
 
 
 def looks_like_a_code_attempt(path: str) -> bool:
     """Six characters — the length of a real code — even one using a
     character `CODE_ALPHABET` deliberately excludes as too easily confused
-    with another (0/O, 1/I/L). `is_code` above still decides what actually
+    with another (0/o, 1/i/l). `is_code` above still decides what actually
     opens a table once the page loads and asks the API; this only decides
     that a path this shape belongs on that page rather than getting a bare
     404, the way `/favicon` (the wrong length for a code at all) still does.
@@ -155,7 +155,7 @@ class Handler(BaseHTTPRequestHandler):
         self._with_body("POST")
 
     def do_PUT(self) -> None:  # noqa: N802
-        # `PUT /api/games/<CODE>/valuation` is the only one, and it is a PUT
+        # `PUT /api/games/<code>/valuation` is the only one, and it is a PUT
         # rather than a POST because it sets a value rather than taking a
         # turn: sending it twice leaves the same vector posted.
         self._with_body("PUT")

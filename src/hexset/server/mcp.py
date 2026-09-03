@@ -117,7 +117,7 @@ def _new_game(opponents: list[str] | None = None, name: str | None = None) -> di
 def _join(code: str, name: str | None = None) -> dict:
     if not isinstance(code, str) or not code.strip():
         raise ToolError("code must be a game's six-character code")
-    body: dict = {"code": code.strip().upper()}
+    body: dict = {"code": code.strip().lower()}
     if name:
         body["name"] = str(name).strip()[:40]
     return _seat(_request_ok("POST", "/api/join", body))

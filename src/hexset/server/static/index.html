@@ -842,7 +842,7 @@ function resourceCardTile(name, {extraClasses = [], title} = {}) {
 // reopening the tab tomorrow — sits back down rather than joining twice.
 
 // The code in our own URL: "/A1B2C3" -> "A1B2C3", "" on the front page.
-const tableCode = location.pathname.replace(/^\/+|\/+$/g, "").toUpperCase();
+const tableCode = location.pathname.replace(/^\/+|\/+$/g, "").toLowerCase();
 
 function tokenFor(code) {
   try { return localStorage.getItem(`hexset.token.${code}`); } catch { return null; }

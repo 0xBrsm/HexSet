@@ -11,6 +11,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Game codes are lowercase (`abcdef`), since a code is only ever seen as a
+  URL. Lookups normalise, so a code capitalised on the way into an address
+  bar still opens its game, and a game journalled under a capitalised code
+  still resumes.
 - The browser board seats a bot from the player list: an open seat's picker
   offers every model alongside the seat's current state, and choosing one
   fills the seat for the rest of the game. `POST /api/bot` (`Tables.seat_bot`,

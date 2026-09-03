@@ -27,12 +27,9 @@ seat's view of the game is engine functionality, reached through
 * `evaluate` -- `hexset.bots.evaluate.Evaluator`'s term set read through the
   view (`HonestEvaluator`), with progress zeroed where the piece supply is
   exhausted, and two weight profiles (`TRADING_WEIGHTS`, a trading table,
-  and `NO_TRADE_WEIGHTS`, a no-trade table). Reaches the shared evaluator by
-  `from ..evaluate import ...` (the sibling `hexset.bots.evaluate`), not
-  through the `hexset.evaluate` compat shim -- see that shim's own docstring
-  for why the distinction matters here specifically. Duplicates rather than
-  imports `hexset.bots.evaluate`'s term functions (see the duplication note
-  in `evaluate.py`'s own module docstring); not merged, on purpose, for now.
+  and `NO_TRADE_WEIGHTS`, a no-trade table). Duplicates rather than imports
+  `hexset.bots.evaluate`'s term functions (see the duplication note in
+  `evaluate.py`'s own module docstring); not merged, on purpose, for now.
 * `search`   -- max^n over `HonestEvaluator` with a node budget and
   iterative deepening (`Heximax`), opponents expanded from determinized
   samples of the belief (PIMC over `k` worlds), and every hidden draw

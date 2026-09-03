@@ -17,9 +17,9 @@ all now that trading is one engine event rather than an action language
 Cost: leaf evaluations per move are capped by `max_nodes`
 (`DEFAULT_MAX_NODES`, 600). The mirror table is
 `agents/scripts/heximax_cost.py` -- three four-seat games an arm, board
-seeds 0/1/2, every seat the same preset, `search2-offers3` at heximax's own
-three-offer budget as the control, arms interleaved seed by seed. Two rules
-for reading it, both learned the hard way in the structural pass:
+seeds 0/1/2, every seat the same preset, `search2` as the control, arms
+interleaved seed by seed. Two rules for reading it, both learned the hard way
+in the structural pass:
 
 * **On an idle box, and paired.** heximax's per-move cost inflates faster
   than `search2`'s under contention, so identical code reads 2.6x idle and

@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""A second evaluation, kept for comparison. `hexset.evaluate` is the default.
+"""A second evaluation, kept for comparison. `hexset.bots.evaluate` is the
+default.
 
 The term set is reimplemented from the design used by catanatron's value
 function, described rather than copied — it is GPLv3 and this project needs to

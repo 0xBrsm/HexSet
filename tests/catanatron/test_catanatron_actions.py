@@ -2,9 +2,8 @@
 """Every dev-catan legal action, at many real positions, must resolve to a
 real catanatron playable_action.
 
-`PLAY_KNIGHT` and `PROPOSE_TRADE` are excluded deliberately: the first is
-resolved across two catanatron decisions rather than one (see `player.py`),
-the second is out of scope entirely (see `state.py`). Both are covered by
+`PLAY_KNIGHT` is excluded deliberately: it is resolved across two catanatron
+decisions rather than one (see `player.py`) and is covered by
 `test_player.py` instead, end to end.
 """
 
@@ -21,7 +20,7 @@ import pytest
 # real distribution.
 pytest.importorskip("catanatron.game")
 
-from hexset.actions import ActionType as OurActionType, legal_actions, within_offer_budget
+from hexset.actions import ActionType as OurActionType, legal_actions
 
 from catanatron.game import Game as CatanatronGame
 from catanatron.models.map import BASE_MAP_TEMPLATE, CatanMap
@@ -31,7 +30,7 @@ from hexset.catanatron.actions import to_catanatron
 from hexset.catanatron.board import translate_board
 from hexset.catanatron.state import translate
 
-EXCLUDED = {OurActionType.PLAY_KNIGHT, OurActionType.PROPOSE_TRADE}
+EXCLUDED = {OurActionType.PLAY_KNIGHT}
 
 # dev-catan's engine does not enforce the physical piece limit (15 roads / 5
 # settlements / 4 cities per player) that real Catan and catanatron both do
@@ -101,7 +100,7 @@ def test_every_legal_action_resolves(seed):
         if game.winning_color() is not None:
             break
         our_game, seats = translate(game, mapping, rng)
-        options = within_offer_budget(our_game, legal_actions(our_game), 0)
+        options = legal_actions(our_game)
         for action in options:
             if action.type in EXCLUDED:
                 continue

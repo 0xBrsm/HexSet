@@ -20,12 +20,11 @@ from hexset.clients.botclient import (  # noqa: E402
     BotRunner,
     LocalTransport,
     RecordBrain,
-    _within_offer_budget,
 )
 
 from conftest import new_tables  # noqa: E402
 
-STUB4 = Path(__file__).parent / "fixtures" / "stub-contract4.onnx"
+STUB5 = Path(__file__).parent / "fixtures" / "stub-contract5.onnx"
 DEV_CONTRACT2 = Path(__file__).parent / "fixtures" / "dev-contract2.onnx"
 
 
@@ -46,7 +45,7 @@ def test_a_record_brain_joins_and_plays_its_own_seat():
     joined = transport.post("/api/join", "", {"code": code, "name": "Bot"})
     token, seat = joined["token"], joined["seat"]
 
-    brain = RecordBrain.load(str(STUB4))
+    brain = RecordBrain.load(str(STUB5))
     runner = BotRunner(seat=seat, token=token, transport=transport, brain=brain)
 
     played = 0
@@ -82,13 +81,24 @@ def test_a_record_brain_is_refused_the_seat_of_a_game_it_is_not_on():
     assert "error" in transport.get("/api/record", "not-a-token")
 
 
-def test_a_search_flagged_checkpoint_is_refused_as_an_external_bot():
+def test_a_search_flagged_checkpoint_is_refused_as_an_external_bot(tmp_path):
     """A search needs the true game state to simulate forward, which no
-    external client may have. `dev-contract2.onnx` really does ask for one
-    (`search=mcts` in its metadata), so this is the real refusal, not a
-    contrived one — and it must be refused for *that*, not for its contract."""
+    external client may have, so a checkpoint asking for one is refused.
+
+    Built here by stamping `search=mcts` onto the contract-5 stub rather than
+    using `dev-contract2.onnx`, which really does ask for a search but is now
+    refused one step earlier for its contract — the two checks are ordered
+    and this one is about the second."""
+    import onnx
+
+    model = onnx.load(str(STUB5))
+    entry = model.metadata_props.add()
+    entry.key, entry.value = "search", "mcts"
+    searched = tmp_path / "searched.onnx"
+    onnx.save(model, str(searched))
+
     with pytest.raises(ValueError) as caught:
-        RecordBrain.load(str(DEV_CONTRACT2))
+        RecordBrain.load(str(searched))
     message = str(caught.value)
     assert "asks to be searched" in message
     assert "declares contract=" not in message  # not the contract check
@@ -105,19 +115,3 @@ def test_the_runner_stops_when_the_game_is_over():
 
     runner = BotRunner(seat=0, token=token, transport=LocalTransport(registry), brain=None)
     assert runner.run_once() is False
-
-
-def test_the_offer_budget_is_read_off_the_wire_not_off_a_live_game():
-    """`_within_offer_budget` is `actions.within_offer_budget` without a
-    `Game` — the external bot has none. Same rule: trim proposals once the
-    budget is spent, unless that would leave nothing legal at all."""
-    from hexset.actions import Action, ActionType
-
-    offer = Action(ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 1, 0, 0, 0))
-    end = Action(ActionType.END_TURN)
-
-    assert _within_offer_budget([offer, end], 0, 1) == [offer, end]
-    assert _within_offer_budget([offer, end], 1, 1) == [end]
-    assert _within_offer_budget([offer, end], 5, None) == [offer, end]
-    # Never leaves a seat with nothing to play.
-    assert _within_offer_budget([offer], 1, 1) == [offer]

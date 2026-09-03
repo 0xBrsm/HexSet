@@ -27,7 +27,7 @@ import random
 from hexset.actions import apply
 from hexset.arena import PRESETS, spawn
 from hexset.board.board import random_base_board
-from hexset.board.terrain import Resource
+from hexset.board.terrain import NUM_RESOURCES, Resource
 from hexset.game import (
     Phase,
     end_turn,
@@ -37,13 +37,12 @@ from hexset.game import (
     place_initial_road,
     place_initial_settlement,
     players_owing_discards,
-    propose_trade,
     roll_dice,
     start,
     to_move,
 )
 from hexset.state import can_place_settlement
-from hexset.trading import bundle
+from hexset.trading import trade_event
 from helpers import clear_hand, give
 
 
@@ -178,47 +177,29 @@ def test_to_move_never_returns_a_locked_seat():
     assert 1 not in seen
 
 
-# --- trade offers ------------------------------------------------------
+# --- trading ------------------------------------------------------------
 
 
-def test_trade_offer_skips_a_locked_responder():
+def test_a_locked_seat_is_never_a_trade_counterparty():
+    """`lock_seat` used to have to reach into a standing offer. Trading is one
+    engine event now (`hexset.trading`), and the event skips a retired seat
+    outright -- one check, in the candidate enumeration, rather than a
+    correction applied afterwards."""
     game = a_trade_ready_game()
     give(game._state, 0, Resource.WOOD, 2)
     give(game._state, 1, Resource.ORE, 1)
     give(game._state, 2, Resource.ORE, 1)
     lock_seat(game, 1)
 
-    propose_trade(game, bundle(wood=2), bundle(ore=1))
-
-    assert game.pending_responders == [2]
-
-
-def test_locking_the_head_responder_drops_it_from_the_offer():
-    game = a_trade_ready_game()
-    give(game._state, 0, Resource.WOOD, 2)
-    give(game._state, 1, Resource.ORE, 1)
-    give(game._state, 2, Resource.ORE, 1)
-    propose_trade(game, bundle(wood=2), bundle(ore=1), ask=(1, 2))
-    assert game.pending_responders == [1, 2]
-
-    lock_seat(game, 1)
-
-    assert game.pending_responders == [2]
-    assert game.phase is Phase.TRADE_RESPOND
-
-
-def test_locking_the_last_responder_ends_the_offer():
-    game = a_trade_ready_game()
-    give(game._state, 0, Resource.WOOD, 2)
-    give(game._state, 1, Resource.ORE, 1)
-    propose_trade(game, bundle(wood=2), bundle(ore=1))
-    assert game.pending_responders == [1]
-
-    lock_seat(game, 1)
-
-    assert game.phase is Phase.MAIN
-    assert game.offer is None
-    assert game.pending_responders == []
+    keen = tuple(1.0 if r == Resource.ORE else -1.0 for r in range(NUM_RESOURCES))
+    theirs = tuple(-v for v in keen)
+    done = trade_event(
+        game,
+        lambda seat, view: keen if seat == 0 else theirs,
+        lambda seat, view, received, other: True,
+    )
+    assert done
+    assert all(trade.b == 2 for trade in done)
 
 
 # --- imagine ------------------------------------------------------------
@@ -248,21 +229,24 @@ def test_imagine_without_any_lock_carries_an_empty_one():
 
 # --- byte identity for an unlocked game -------------------------------------
 
-# Computed at `b1763e6` (this branch's base, before `Game.locked` existed) by
-# playing five seeded 4-player games with `PRESETS["greedy"]` in every seat
-# and hashing the full `(seat, action)` trace -- the same method
+# Five seeded 4-player games with `PRESETS["greedy"]` in every seat, hashing
+# the full `(seat, action)` trace -- the same method
 # `test_heximax.test_choices_are_byte_identical_to_the_recorded_census` uses,
 # borrowed here because no locking test may change what an unlocked game
-# does: not the decision order, not the rng draws, not who moves next. A
-# change to `hexset.game` that flips even one of these hashes has changed
-# something about default play, which every requirement for this change
-# forbids.
+# does: not the decision order, not the rng draws, not who moves next.
+#
+# Re-baselined once, deliberately, for the one-event trade mechanic: no
+# trader is seated here so no trade clears, but `greedy` used to search the
+# engine's offer sample and no longer has one. Stubbing
+# `actions._offer_actions` to `[]` on the previous tree reproduces every
+# hash below exactly, which is the attribution -- nothing else about
+# default play moved.
 BYTE_IDENTITY_TRACES = {
-    "200": "bf55b52e75832cf5ec7e1555a403e1ac19857e64dd6531bfa76857599806b44d",
-    "201": "1776ab375483782d00c8b587785d5b52005ef74cdd3a8b47e111b478c60258db",
-    "202": "291805f82d65c8deeca519a3105571c0ef3a0019af549947fbf38db0dc528ba7",
-    "203": "64d4dea5e3348c831a348eba6bbebd3efe2c2bf8dc321c2c9a1f879f031cb08f",
-    "204": "c3d81461909f6e0c7098f20499d55b3b450de184ee9f8f741846477873f62a6b",
+    "200": "30fa921491d50d986f19a74b6e1c3e1c8c46520c38f7633d2cc6ff4a87e43907",
+    "201": "d54ae271a2401f4f731ddba681864a836c700a83101003722ea92362ecb443c7",
+    "202": "8376e8e82e5aaa9a0bdaa702cfb8b82a51792b7d841972a0f262d73d4d2a0c92",
+    "203": "14556d51e147e1148874c311bd2c8ac9b12668a3664bd04c6530fba2030152eb",
+    "204": "58636144cc3a1ff546865912ec58c4d0f09e35e1017f9221ca2b86804a73b930",
 }
 
 
@@ -279,17 +263,7 @@ def _played_trace(seed: int, players: int = 4) -> str:
     while game.phase is not Phase.GAME_OVER:
         seat = to_move(game)
         action = bots[seat].choose(game)
-        trace.append(
-            (
-                seat,
-                int(action.type),
-                action.a,
-                action.b,
-                list(action.give),
-                list(action.want),
-                list(action.ask),
-            )
-        )
+        trace.append((seat, int(action.type), action.a, action.b))
         apply(game, action)
         moves += 1
         if moves > 60000:

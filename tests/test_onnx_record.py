@@ -92,14 +92,11 @@ def test_record_from_game_accepts_precomputed_options():
         assert np.array_equal(recomputed[name], passed_through[name])
 
 
-def test_the_record_carries_the_offer_and_filters_answered_to_the_proposer():
-    """Board-seat order in the record; the answered block is the proposer's
-    information alone (`encoding._offer_parts`'s rule, applied record-side
-    where every other information-set filter lives)."""
-    from hexset.board.terrain import Resource
-    from hexset.game import Phase, decline_trade, propose_trade
-    from hexset.state import NO_OWNER
-    from hexset.trading import bundle
+def test_the_record_carries_every_published_valuation_in_board_seat_order():
+    """Board-seat order in the record, like every other field --
+    `RecordEncoder` rotates it. Unfiltered: the vectors are public, which is
+    what replaced the live-offer block's per-perspective filtering."""
+    from hexset.game import Phase
 
     rng = random.Random(9)
     game = start(random_base_board(rng), 4, rng)
@@ -111,29 +108,17 @@ def test_the_record_carries_the_offer_and_filters_answered_to_the_proposer():
     space = space_for(game)
 
     row = record_from_game(game, game.current_player, space)
-    assert int(row["offer_proposer"]) == NO_OWNER
-    assert not row["offer_give"].any()
-    assert not row["offer_want"].any()
-    assert not row["offer_answered"].any()
+    assert row["valuations"].shape == (4, 5)
+    assert not row["valuations"].any()
 
-    proposer = game.current_player
-    others = [s for s in range(4) if s != proposer]
-    game._state.hands[proposer][Resource.WOOD] = 2
-    for s in others:
-        game._state.hands[s][Resource.ORE] = 1
-    propose_trade(game, bundle(wood=2), bundle(ore=1), ask=tuple(others))
-    first = to_move(game)
-    decline_trade(game, first)
-
-    responder_row = record_from_game(game, to_move(game), space)
-    assert responder_row["offer_give"][Resource.WOOD] == 2
-    assert responder_row["offer_want"][Resource.ORE] == 1
-    assert int(responder_row["offer_proposer"]) == proposer
-    assert not responder_row["offer_answered"].any()
-
-    proposer_row = record_from_game(game, proposer, space)
-    assert proposer_row["offer_answered"][first] == 1
-    assert proposer_row["offer_answered"].sum() == 1
+    for seat in range(4):
+        game.valuations[seat] = tuple(
+            0.25 * (seat + 1) if r == seat else 0.0 for r in range(5)
+        )
+    for perspective in range(4):
+        seen = record_from_game(game, perspective, space)["valuations"]
+        for seat in range(4):
+            assert seen[seat] == pytest.approx(game.valuations[seat])
 
 
 def test_the_record_carries_the_ledger_in_board_seat_order():

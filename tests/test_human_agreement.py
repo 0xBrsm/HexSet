@@ -22,7 +22,7 @@ from hexset.actions import Action, ActionType, apply, legal_actions
 from hexset.arena import PRESETS, spawn
 from hexset.board.board import random_base_board
 from hexset.game import Phase, start, to_move
-from hexset.record import Record, actions_of, board_fields, board_of, record_game
+from hexset.record import Record, advance, board_fields, board_of, record_game, steps
 
 # Torch is never imported here. `hexset.bench.human_agreement` keeps it inside
 # `main`, and the scoring core is duck-typed on `hexset.mcts.Evaluator`, so every
@@ -104,7 +104,7 @@ def a_two_action_record() -> tuple[Record, tuple[Action, Action]]:
             (int(first.type), first.a, first.b),
             (int(second.type), second.a, second.b),
         ),
-        offers=(),
+        trades=(),
         winner=None,
         turns=0,
         **board_fields(board),
@@ -200,11 +200,11 @@ def test_a_bucket_carries_its_own_null_and_not_the_aggregate_s():
     """Stratification is pointless if every stratum quotes one baseline."""
     scored = [
         a_decision(2, kind=ActionType.ROLL),
-        a_decision(32, kind=ActionType.PROPOSE_TRADE),
+        a_decision(32, kind=ActionType.BANK_TRADE),
     ]
     blocks = grouped(scored, lambda d: ActionType(d.kind).name)
     assert blocks["ROLL"]["log_loss_null"] == pytest.approx(math.log(2))
-    assert blocks["PROPOSE_TRADE"]["log_loss_null"] == pytest.approx(math.log(32))
+    assert blocks["BANK_TRADE"]["log_loss_null"] == pytest.approx(math.log(32))
 
 
 # ---------------------------------------------------------------------------
@@ -242,42 +242,22 @@ def test_off_seat_decisions_are_skipped_and_counted():
 
 
 # ---------------------------------------------------------------------------
-# Proposals: the sample that is not the whole legal set
+# The option key
 
 
-def test_the_option_key_ignores_the_responder_order_the_policy_does_not_choose():
-    give, want = (1, 0, 0, 0, 0), (0, 1, 0, 0, 0)
-    plain = Action(ActionType.PROPOSE_TRADE, give=give, want=want)
-    ordered = Action(ActionType.PROPOSE_TRADE, give=give, want=want, ask=(2, 1))
-    assert plain != ordered
-    assert option_key(plain) == option_key(ordered)
+def test_the_option_key_is_the_whole_action():
+    """An `Action` is exactly its type and two operands now that a trade
+    offer is not one, so `option_key` is the identity on it -- kept as a
+    function because every comparison in the module goes through one place."""
+    action = Action(ActionType.BANK_TRADE, 0, 4)
+    assert option_key(action) == (int(ActionType.BANK_TRADE), 0, 4)
+    assert option_key(action) != option_key(Action(ActionType.BANK_TRADE, 0, 3))
 
 
-def test_a_recorded_offer_that_names_a_responder_order_still_matches():
-    """`greedy-partner` records a real `ask`, and `_offer_actions` enumerates
-    none. Comparing whole actions would file every one of its proposals as
-    unrepresentable, which is the most common decision type in the corpus."""
-    records = some_records(2, bot="greedy-partner")
-    assert any(offer[3] for record in records for offer in record.offers)
-
-    scored, tally = score(records, Peaked(), batch=32)
-    proposals = [d for d in scored if d.kind == int(ActionType.PROPOSE_TRADE)]
-    assert proposals
-    assert tally.unrepresented_by_kind.get("PROPOSE_TRADE", 0) == 0
 
 
-def test_an_offer_outside_the_budget_is_counted_rather_than_scored():
-    """`within_offer_budget` is what the network is shown, so a proposal the
-    budget forbids is not a decision the policy could have made. It has to be
-    excluded and named, not silently scored against an option set it is not in."""
-    records = some_records(2)
-    wide, wide_tally = score(records, Peaked(), max_offers=None, batch=32)
-    none, none_tally = score(records, Peaked(), max_offers=0, batch=32)
 
-    assert any(d.kind == int(ActionType.PROPOSE_TRADE) for d in wide)
-    assert not any(d.kind == int(ActionType.PROPOSE_TRADE) for d in none)
-    assert none_tally.unrepresented_by_kind["PROPOSE_TRADE"] > 0
-    assert none_tally.unrepresented > wide_tally.unrepresented
+
 
 
 # ---------------------------------------------------------------------------
@@ -344,9 +324,9 @@ def test_snapshotting_a_position_does_not_disturb_the_replay():
 
     walked = []
     game = start(board_of(record), record.num_players, random.Random(record.seed))
-    for action in actions_of(record):
+    for action, trades in steps(record):
         walked.append((to_move(game), game.phase.name, len(legal_actions(game))))
-        apply(game, action)
+        advance(game, action, trades)
 
     seen = []
     for item in positions(record, 0, Tally()):

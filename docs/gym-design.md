@@ -301,3 +301,32 @@ this design, both mechanical necessities rather than design changes:
   and skips exactly that precondition rather than weakening the audit or
   patching `hexset.trading`/`hexset.game`'s schema unreviewed; flagged for
   the PI to triage separately.
+
+## Amended by the one-event trade mechanic (2026-09-03)
+
+Both deviations above are gone, and neither needed fixing: the thing each
+worked around no longer exists. `hexset.trading` replaced the offer protocol
+with one engine event a turn, so there are no trade actions at all.
+
+- **The flat-`Discrete` gap is closed.** Every action now decodes exactly
+  from its index, so `HexSetAEC.step` is the plain "decode the index, apply
+  the action" §2 asked for. The interim random-offer fill is deleted.
+- **The `_offer_parts` leak is closed by deletion.** The offer block, whose
+  "who has answered" part re-derived responder eligibility from the live
+  true state, is replaced by every seat's public valuation vector — public by
+  construction, and a function of nothing hidden. `tests/gym/test_honesty.py`
+  no longer skips anything, which was the point of recording the gap rather
+  than weakening the audit.
+- **One mask, not two.** §4's "build the mask the honest way, never from the
+  raw `legal_actions` sampler" was about the offer sample, the only branch
+  that read opponents' hands. `action_mask` is now `legal_actions` itself,
+  and `tests/gym/test_aec_mask.py` pins the property directly: permuting
+  every opponent's hidden cards does not move the mover's option list.
+- **Observations gain the valuation block**, as this design anticipated:
+  `globals` loses 18 offer features and a phase (`TRADE_RESPOND`) and gains
+  `players * NUM_RESOURCES`, 86 → 87 at four players.
+- **The learner does not trade.** `HexSetEnv` supplies its opponents'
+  `valuation`/`accepts` to the engine; the learner seat publishes nothing, so
+  it never trades. Giving a learner a way to publish is the deferred half of
+  the mechanic's interface (the trading design defers the human/LLM surface),
+  not an omission here.

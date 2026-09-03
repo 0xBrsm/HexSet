@@ -4,7 +4,7 @@ import random
 
 import numpy as np
 
-from hexset.actions import build_space, within_offer_budget
+from hexset.actions import build_space
 from hexset.server.rules import options_for
 from hexset.board.board import random_base_board
 from hexset.game import start, to_move
@@ -46,7 +46,7 @@ def test_record_hides_an_opponents_exact_hand_and_dev_composition():
     space = build_space(
         topology.num_vertices, topology.num_edges, topology.num_hexes, state.num_players
     )
-    options = tuple(within_offer_budget(game, options_for(game), None))
+    options = tuple(options_for(game))
     before = record_from_game(game, seat, space, options)
 
     _redistribute(state.hands[opponent])

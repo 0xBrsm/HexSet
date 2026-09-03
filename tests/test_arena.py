@@ -129,13 +129,10 @@ def test_a_checkpoint_path_names_an_entrant_wherever_a_preset_would():
     assert pickle.loads(pickle.dumps(lineup)) == lineup
 
 
-def test_a_network_entrant_leaves_its_offer_budget_to_the_checkpoint():
-    """`None` here means what it trained under, not the engine's eight.
-
-    Scoring a policy on a horizon it never played is the mistake this default
-    exists to make hard, so it is pinned here rather than left to `netbot`.
-    """
-    assert entrant_from_name("network:/tmp/latest.pt").max_offers is None
+def test_a_network_entrant_trades_unless_the_spec_says_otherwise():
+    """`None` is the engine's default: trading on. `@0` is the off switch."""
+    assert entrant_from_name("network:/tmp/latest.pt").max_trades is None
+    assert entrant_from_name("network:/tmp/latest.pt@0").max_trades == 0
 
 
 def test_an_mcts_entrant_names_its_simulation_and_wave_budgets():
@@ -268,21 +265,21 @@ def test_too_few_point_samples_say_nothing_either_way():
 def test_a_network_spec_can_self_impose_an_offer_budget():
     """`network:<path>@<offers>`, mirroring `mcts:<path>@<simulations>`.
 
-    The budget exists so a duel can price the policy's proposing behaviour
-    against itself; without a suffix a network entrant keeps `max_offers=None`,
-    which means the budget its checkpoint trained under rather than the engine's
-    whole cap.
+    The switch exists so a duel can price trading against itself; without a
+    suffix a network entrant trades (`max_trades=None`), and `@0` is the one
+    meaningful value -- the engine has no trade budget to tune, only an off
+    switch.
     """
     from hexset.arena import entrant_from_name
 
     plain = entrant_from_name("network:/tmp/x.pt")
-    assert plain.max_offers is None
+    assert plain.max_trades is None
     assert plain.name == "network"
     assert plain.weights == "/tmp/x.pt"
 
-    capped = entrant_from_name("network:/tmp/x.pt@1")
-    assert capped.max_offers == 1
-    assert capped.name == "network-offers1"
+    capped = entrant_from_name("network:/tmp/x.pt@0")
+    assert capped.max_trades == 0
+    assert capped.name == "network-trades0"
     assert capped.weights == "/tmp/x.pt"
 
 

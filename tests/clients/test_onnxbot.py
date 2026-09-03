@@ -7,19 +7,19 @@ import pytest
 
 pytest.importorskip("onnxruntime", reason="hexset.clients.onnxbot needs onnxruntime installed")
 
-from hexset.actions import legal_actions, within_offer_budget  # noqa: E402
+from hexset.actions import legal_actions  # noqa: E402
 from hexset.server.rules import options_for  # noqa: E402
 from hexset.board.board import random_base_board  # noqa: E402
 from hexset.game import start, to_move  # noqa: E402
 from hexset.clients.onnxbot import load, network_bot  # noqa: E402
 from conftest import step_randomly  # noqa: E402
 
-FIXTURE_V2 = Path(__file__).parent / "fixtures" / "stub-contract4.onnx"
+FIXTURE_V2 = Path(__file__).parent / "fixtures" / "stub-contract5.onnx"
 
 
 @pytest.fixture
 def checkpoint_v2():
-    """`stub-contract4.onnx`: a record-contract stub for a 4-player base
+    """`stub-contract5.onnx`: a record-contract stub for a 4-player base
     board — uniform-over-legal prior, zero value, no learned weights (see
     `tests/fixtures/build_stub.py`). This is the only policy `onnxbot`
     serves: contract 1 (and the `encoding_v1`-based policy that read it) was
@@ -123,17 +123,17 @@ def test_a_checkpoint_dropped_in_with_the_same_name_is_not_served_stale(
 
 
 def test_the_offer_budget_defaults_from_the_checkpoint_unless_overridden(checkpoint_v2):
-    """`stub-contract4.onnx` declares no `max_offers` at all (an empty
+    """`stub-contract5.onnx` declares no `max_trades` at all (an empty
     metadata value, same as a checkpoint that never set one), so the default
     is `None` — no budget — unless a caller overrides it."""
     path, board = checkpoint_v2
-    assert network_bot(path, board).max_offers is None
-    assert network_bot(path, board, max_offers=8).max_offers == 8
+    assert network_bot(path, board).max_trades is None
+    assert network_bot(path, board, max_trades=8).max_trades == 8
 
 
 def test_the_budget_is_honoured_exactly_as_the_search_bot_honours_it(checkpoint_v2):
     path, board = checkpoint_v2
-    bot = network_bot(path, board, max_offers=3)
+    bot = network_bot(path, board)
     rng = random.Random(11)
     game = start(board, 4, rng)
 
@@ -142,7 +142,7 @@ def test_the_budget_is_honoured_exactly_as_the_search_bot_honours_it(checkpoint_
     for _ in range(600):
         if game.won_by is not None:
             break
-        allowed = within_offer_budget(game, legal_actions(game), 3)
+        allowed = legal_actions(game)
         action = bot.choose(game)
         assert action in allowed
         apply(game, action)
@@ -164,27 +164,3 @@ def test_scoring_is_greedy_so_a_position_answers_the_same_way_twice(checkpoint_v
         step_randomly(game, rng)
     assert to_move(game) is not None
     assert bot.choose(game) == bot.choose(game)
-
-
-def test_the_prior_covers_every_offer_rather_than_one_arbitrary_one(checkpoint_v2):
-    from hexset.actions import ActionType
-    from hexset.mcts import Leaf
-    from hexset.clients.onnxbot import searcher
-
-    path, board = checkpoint_v2
-    search = searcher(path, board, rng=random.Random(0))
-    rng = random.Random(11)
-    game = start(board, 4, rng)
-    for _ in range(400):
-        options = within_offer_budget(game, legal_actions(game), 3)
-        offers = [o for o in options if o.type is ActionType.PROPOSE_TRADE]
-        if len(offers) > 1:
-            break
-        step_randomly(game, rng)
-    else:
-        pytest.skip("no position offering more than one trade turned up")
-
-    seat = to_move(game)
-    (prior, _), = search.evaluator.evaluate([Leaf(game, seat, tuple(options))])
-    weights = [prior[options.index(offer)] for offer in offers]
-    assert all(w > 0 for w in weights)

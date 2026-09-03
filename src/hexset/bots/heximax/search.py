@@ -99,10 +99,12 @@ EXACT_ROLL_PLIES = 2
 # seeds 100..104, every seat the same preset -- as the mean of
 # `|Eval(hand + one r) - Eval(hand)|` under `TRADING_WEIGHTS` and the
 # `relative` stance, over every resource at every position the mover
-# reaches. Trade-free deliberately: the games that fix the scale must not
-# themselves depend on it. `test_marginal_scale_is_the_recorded_mean`
-# recomputes it from those same games and pins it to 1e-9.
-MARGINAL_SCALE = 1.0
+# reaches (9280 marginals). Trade-free deliberately: the games that fix the
+# scale must not themselves depend on it, and `max_trades=0` makes them
+# independent of this constant by construction.
+# `test_marginal_scale_is_the_recorded_mean` recomputes it from those same
+# games and pins it to 1e-9.
+MARGINAL_SCALE = 0.10231140469178995
 
 
 class _Exhausted(Exception):

@@ -1,9 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""`action_mask` must equal `hexset.server.rules.fair_legal_actions`'s sample
--- never `hexset.actions.legal_actions`'s own, which reads opponents' true
-hands to decide which `PROPOSE_TRADE` pairs they could cover
-(`hexset.server.rules`'s module docstring). Checked over 50 random positions,
-per `docs/gym-design.md` §5.
+"""`action_mask` must equal `hexset.actions.legal_actions`, checked over 50
+random positions, per `docs/gym-design.md` §5.
+
+This used to have to check the mask against a *second*, honest enumeration
+(`server.rules.fair_legal_actions`), because the engine's own
+`PROPOSE_TRADE` sample read every opponent's true hand to decide which
+`want` anyone could cover. Trading is no longer an action
+(`hexset.trading`), so no action's legality depends on another seat's hand,
+there is only one list, and the gap the second enumeration existed to close
+is gone by construction rather than by patching.
 """
 
 from __future__ import annotations
@@ -16,19 +21,18 @@ import pytest
 pytest.importorskip("pettingzoo")
 pytest.importorskip("gymnasium")
 
-from hexset.actions import ActionType, legal_actions  # noqa: E402
+from hexset.actions import legal_actions  # noqa: E402
 from hexset.gym.aec import HexSetAEC  # noqa: E402
-from hexset.server.rules import fair_legal_actions  # noqa: E402
 
 
 def _expected_mask(env: HexSetAEC) -> np.ndarray:
     mask = np.zeros(env._space.size, dtype=np.int8)
-    for action in fair_legal_actions(env._game):
+    for action in legal_actions(env._game):
         mask[env._space.index(action)] = 1
     return mask
 
 
-def test_mask_matches_fair_legal_actions_over_fifty_positions():
+def test_mask_matches_legal_actions_over_fifty_positions():
     env = HexSetAEC()
     rng = random.Random(0)
     checked = 0
@@ -54,42 +58,47 @@ def test_mask_matches_fair_legal_actions_over_fifty_positions():
             steps += 1
 
 
-def test_mask_never_reflects_the_omniscient_propose_trade_sample():
-    """The honest sample can be *wider* than the omniscient one for
-    `PROPOSE_TRADE` -- `fair_legal_actions` offers "proposing is available"
-    whenever the mover holds anything, regardless of whether any opponent
-    could currently cover it, while `legal_actions` skips pairs nobody could
-    cover. The one bit the flat space carries must come from the honest
-    sample even when the two disagree, so this drives until they actually do
-    and checks the direction of the disagreement rather than only their
-    intersection."""
+def test_no_action_legality_depends_on_another_seats_hand():
+    """The property the second enumeration used to enforce, stated directly:
+    permuting every opponent's hidden cards cannot change what the mover may
+    do. Driven over real positions rather than asserted about the source."""
     env = HexSetAEC()
     rng = random.Random(1)
-    propose_trade_slot = env._space.offsets[ActionType.PROPOSE_TRADE]
-    for seed in range(30):
+    for seed in range(5):
         env.reset(seed=seed)
         steps = 0
-        while env.agents and steps < 500:
+        while env.agents and steps < 300:
             agent = env.agent_selection
             if env.terminations[agent] or env.truncations[agent]:
                 env.step(None)
                 continue
-
             game = env._game
-            omniscient_has_trade = any(a.type is ActionType.PROPOSE_TRADE for a in legal_actions(game))
-            honest_has_trade = any(a.type is ActionType.PROPOSE_TRADE for a in fair_legal_actions(game))
+            mover = env.possible_agents.index(agent)
+            before = list(legal_actions(game))
+
+            state = game.state(mover, hidden=False)
+            keep = [hand[:] for hand in state.hands]
+            pool = [
+                card
+                for seat, hand in enumerate(state.hands)
+                if seat != mover
+                for card, n in enumerate(hand)
+                for _ in range(n)
+            ]
+            rng.shuffle(pool)
+            cursor = 0
+            for seat, hand in enumerate(state.hands):
+                if seat == mover:
+                    continue
+                size = sum(hand)
+                redealt = [0] * len(hand)
+                for card in pool[cursor : cursor + size]:
+                    redealt[card] += 1
+                cursor += size
+                state.hands[seat] = redealt
+            assert list(legal_actions(game)) == before
+            state.hands[:] = keep
+
             observed = env.observe(agent)["action_mask"]
-            observed_has_trade = bool(observed[propose_trade_slot])
-
-            assert observed_has_trade == honest_has_trade
-            if honest_has_trade and not omniscient_has_trade:
-                # Found the disagreement this test exists to exercise; the
-                # assertion above already confirmed the mask took the honest
-                # side of it.
-                return
-
-            legal = np.flatnonzero(observed)
-            env.step(int(rng.choice(legal)))
+            env.step(int(rng.choice(np.flatnonzero(observed))))
             steps += 1
-
-    pytest.skip("no position in this sample separated the honest and omniscient samples")

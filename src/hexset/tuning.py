@@ -122,7 +122,7 @@ def entrant_for(
     resolvable once the `heximax` package has registered them -- see
     `register_heximax_evaluator`) this is a `kind="heximax"` bot in the
     matching mode, `weights` reaching the evaluator via the factory `heximax`
-    registered with `hexset.arena`; the offer budget follows the mode the way
+    registered with `hexset.arena`; the trade switch follows the mode the way
     `heximax.heximax`'s own `BY_MODE` does, since a fit has to compare bots
     that are heximax in every way but the vector under test. Otherwise it is
     the plain greedy/search entrant the harness always built.
@@ -138,7 +138,7 @@ def entrant_for(
             depth=depth,
             width=width,
             stance=stance,
-            max_offers=0 if mode == "notrade" else 3,
+            max_trades=0 if mode == "notrade" else None,
         )
     kind = "greedy" if depth <= 1 else "search"
     return Entrant(

@@ -14,13 +14,11 @@ from hexset.actions import (
     legal_actions,
     legal_mask,
     space_for,
-    _offer_actions,
 )
 from hexset.board.board import random_base_board
 from hexset.economy import expected_total, total_in_play
 from hexset.game import Phase, is_over, start
 from hexset.play import play_random_game, step_randomly
-from hexset.trading import Offer, responders
 from hexset.victory import WINNING_POINTS, victory_points
 
 
@@ -148,36 +146,13 @@ def test_a_live_game_always_offers_something():
         step_randomly(game, rng)
 
 
-def test_fast_offer_enumeration_matches_responder_rules():
-    rng = random.Random(19)
-    game = a_game(players=4, seed=19)
-    game.phase = Phase.MAIN
-
-    for _ in range(100):
-        game.current_player = rng.randrange(game._state.num_players)
-        game.offers_made = rng.randrange(10)
-        game._state.hands = [
-            [rng.randrange(4) for _ in range(5)]
-            for _ in range(game._state.num_players)
-        ]
-
-        expected = []
-        player = game.current_player
-        if game.offers_made < 8:
-            for given in range(5):
-                if not game._state.hands[player][given]:
-                    continue
-                for wanted in range(5):
-                    if wanted == given:
-                        continue
-                    give = tuple(int(r == given) for r in range(5))
-                    want = tuple(int(r == wanted) for r in range(5))
-                    if responders(game._state, Offer(player, give, want)):
-                        expected.append(
-                            Action(ActionType.PROPOSE_TRADE, give=give, want=want)
-                        )
-
-        assert _offer_actions(game) == expected
+def test_every_action_survives_a_round_trip_through_its_index():
+    """The offer slot was the one lossy entry in the flat space (an offer is
+    ten numbers and was never in an index). With trading an engine event
+    rather than an action, `decode` is exactly `index`'s inverse."""
+    space = space_for(a_game())
+    for index in range(space.size):
+        assert space.index(space.decode(index)) == index
 
 
 def test_free_roads_are_placed_before_the_turn_can_end():

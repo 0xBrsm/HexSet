@@ -130,18 +130,10 @@ def test_wire_round_trips_across_a_played_out_game():
     assert steps > 50  # sanity: the loop actually exercised many phases
 
 def test_action_to_wire_uses_json_friendly_types():
-    action = Action(
-        ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 1, 0, 0, 0), ask=(2, 3)
-    )
-    wire = action_to_wire(action)
-    assert wire == {
-        "type": "PROPOSE_TRADE",
-        "a": 0,
-        "b": 0,
-        "give": [1, 0, 0, 0, 0],
-        "want": [0, 1, 0, 0, 0],
-        "ask": [2, 3],
-    }
+    wire = action_to_wire(Action(ActionType.BANK_TRADE, 0, 4))
+    assert wire == {"type": "BANK_TRADE", "a": 0, "b": 4}
+    assert wire_to_action(wire) == Action(ActionType.BANK_TRADE, 0, 4)
+
 
 def test_wire_to_action_rejects_an_unknown_type():
     with pytest.raises(ValueError):
@@ -185,43 +177,30 @@ def test_session_rejects_an_action_from_a_seat_that_has_not_claimed_it():
     with pytest.raises(ValueError):
         session.submit(other, legal_for_mover)
 
-def test_legal_wire_actions_offers_every_held_resource_regardless_of_who_could_cover_it():
-    """HexSet hands are private: no client — human, LLM, or bot — must be
-    able to learn what an opponent holds by noticing that proposing to
-    trade for it is or isn't offered. `hexset.actions.legal_actions`'s
-    own PROPOSE_TRADE sample filters to pairs some opponent could currently
-    cover — correct for a search that already sees the true state, but
-    exactly the leak a wire-facing payload must not repeat. See
-    `webplay.fair_legal_actions`/`_proposable_options`."""
-    from hexset.board.terrain import Resource
-
+def test_legal_wire_actions_never_depend_on_an_opponents_hand():
+    """HexSet hands are private: no client -- human, LLM, or bot -- must be
+    able to learn what an opponent holds from what it is offered. The one
+    place that could was the engine's `PROPOSE_TRADE` sample, which filtered
+    to pairs some opponent could cover; trading is no longer an action, so
+    this holds by construction and is checked by emptying every other hand
+    and finding the option list unmoved."""
     game = a_game(seed=19)
     game.phase = Phase.MAIN
     game.current_player = 0
     state = game._state
-    state.bank[Resource.WOOD] -= 1
-    state.hands[0][Resource.WOOD] += 1
-    # No opponent holds anything at all: under the omniscient sample this
-    # give would offer zero PROPOSE_TRADE wants. The public-info version
-    # must still offer all four regardless.
+    session = a_session(game, {0})
+    before = session.legal_wire_actions(0)
+
     for seat in range(1, state.num_players):
         for r in range(len(state.hands[seat])):
             state.hands[seat][r] = 0
 
-    session = a_session(game, {0})
-    proposals = [a for a in session.legal_wire_actions(0) if a["type"] == "PROPOSE_TRADE"]
-    wanted_for_wood = {
-        r for a in proposals if a["give"][Resource.WOOD] == 1
-        for r, n in enumerate(a["want"]) if n
-    }
+    assert session.legal_wire_actions(0) == before
 
-    assert wanted_for_wood == {r for r in range(len(state.hands[0])) if r != Resource.WOOD}
 
-def test_nothing_is_proposable_before_the_roll():
-    """Trading is a Main-phase act. Offering pairs in Roll made the hand
-    clickable and opened the trade modal on a turn where the bank half of it
-    could not be there — BANK_TRADE only exists in Main — so a port the human
-    could plainly afford showed up dimmed."""
+def test_only_bank_trading_exists_and_only_in_the_main_phase():
+    """Trading with the bank is a Main-phase act; trading with a player is
+    not an act at all any more (`hexset.trading`)."""
     from hexset.board.terrain import Resource
 
     game = a_game(seed=19)
@@ -236,27 +215,6 @@ def test_nothing_is_proposable_before_the_roll():
     assert "BANK_TRADE" not in kinds
     assert "ROLL" in kinds
 
-def test_an_explicit_ask_is_honoured():
-    from hexset.board.terrain import Resource
-
-    game = a_game(seed=8)
-    game.phase = Phase.MAIN
-    game.current_player = 0
-    state = game._state
-
-    state.bank[Resource.WOOD] -= 1
-    state.hands[0][Resource.WOOD] += 1
-    for seat in (1, 2, 3):
-        state.bank[Resource.ORE] -= 1
-        state.hands[seat][Resource.ORE] += 1
-
-    session = a_session(game, {0})
-    offer = Action(
-        ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1), ask=(3, 2, 1)
-    )
-    session.submit(0, action_to_wire(offer))
-
-    assert game.pending_responders == [3, 2, 1]
 
 # --- Log summarizing: builds and trades collapse into one entry -----------
 
@@ -313,110 +271,8 @@ def test_list_with_counts_pluralises_repeats_but_not_singles():
     assert _list_with_counts(["road", "road", "city"]) == "2 roads and a city"
     assert _list_with_counts(["road"]) == "a road"
 
-def test_a_trade_that_gets_accepted_summarizes_into_one_line():
-    """The proposal and the eventual outcome fold into one entry, only
-    reaching `log` once the offer concludes — see GameSession._log_action.
-    A decline along the way (seat 1, below) must NOT be individually named:
-    only who's eligible to cover an offer is ever asked, so naming a
-    decliner would tell a human they hold the wanted resource — hidden
-    information a real board never gives up."""
-    from hexset.board.terrain import Resource
 
-    game = a_game(seed=13)
-    game.phase = Phase.MAIN
-    game.current_player = 0
-    state = game._state
 
-    state.bank[Resource.WOOD] -= 1
-    state.hands[0][Resource.WOOD] += 1
-    for seat in (1, 2):
-        state.bank[Resource.ORE] -= 1
-        state.hands[seat][Resource.ORE] += 1
-
-    session = a_session(game, {0})
-    offer = Action(
-        ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1), ask=(1, 2)
-    )
-    session.submit(0, action_to_wire(offer))
-    assert session.log_for(0) == []  # held back until the offer concludes
-
-    session._apply(1, Action(ActionType.DECLINE_TRADE))
-    assert session.log_for(0) == []  # still pending — seat 2 hasn't answered yet
-
-    session._apply(2, Action(ActionType.ACCEPT_TRADE))
-
-    assert len(session.log_for(0)) == 1
-    text = session.log_for(0)[0]
-    assert "offered" in text and "accepted" in text
-    assert "Player 3" in text  # seat 2, who actually accepted
-    # Not "declined": seat 1's decline never gets named — see the docstring.
-    assert "declined" not in text
-    assert "Player 2" not in text  # the decliner isn't named at all
-
-def test_a_trade_nobody_can_cover_is_still_legal_and_reads_as_declined():
-    """propose_trade() concludes an uncoverable offer on the spot — no
-    DECLINE_TRADE/ACCEPT_TRADE is ever coming to flush a held-back buffer,
-    so this must not wait for one. And it must be reachable through
-    submit itself, not just a direct _apply: legal_actions()
-    only *samples* coverable (give, want) pairs (see its PROPOSE_TRADE
-    enumerator's own docstring), but a proposal nobody can cover is still a
-    legal move — see is_legal's docstring for why it's checked against
-    can_propose instead of sample membership."""
-    from hexset.board.terrain import Resource
-
-    game = a_game(seed=14)
-    game.phase = Phase.MAIN
-    game.current_player = 0
-    state = game._state
-    state.bank[Resource.WOOD] -= 1
-    state.hands[0][Resource.WOOD] += 1
-    # Nobody else holds any ore, so nobody is eligible to respond.
-
-    session = a_session(game, {0})
-    offer = Action(ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1))
-    # The server must actually have offered this — see the module docstring's
-    # "never build an action the engine did not offer" rule the frontend
-    # leans on — not merely tolerate it when submitted directly.
-    assert action_to_wire(offer) in session.legal_wire_actions(0)
-    session.submit(0, action_to_wire(offer))
-
-    assert len(session.log_for(0)) == 1
-    assert "offered" in session.log_for(0)[0]
-    assert "declined" in session.log_for(0)[0]
-    # Deliberately not "nobody could cover it": that would state opponent
-    # hand contents as fact. HexSet hands are private.
-    assert "cover" not in session.log_for(0)[0].lower()
-
-def test_a_trade_everyone_declines_summarizes_into_one_line():
-    """Reads as a single generic 'Everyone declined.' — not one line per
-    decliner and not a count — regardless of how many opponents were
-    actually asked, so it can't be distinguished from an offer nobody was
-    eligible to take at all (see test_a_trade_nobody_can_cover...)."""
-    from hexset.board.terrain import Resource
-
-    game = a_game(seed=15)
-    game.phase = Phase.MAIN
-    game.current_player = 0
-    state = game._state
-    state.bank[Resource.WOOD] -= 1
-    state.hands[0][Resource.WOOD] += 1
-    for seat in (1, 2):
-        state.bank[Resource.ORE] -= 1
-        state.hands[seat][Resource.ORE] += 1
-
-    session = a_session(game, {0})
-    offer = Action(
-        ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1), ask=(1, 2)
-    )
-    session.submit(0, action_to_wire(offer))
-    session._apply(1, Action(ActionType.DECLINE_TRADE))
-    assert session.log_for(0) == []
-
-    session._apply(2, Action(ActionType.DECLINE_TRADE))
-
-    assert len(session.log_for(0)) == 1
-    assert session.log_for(0)[0].count("declined") == 1  # "Everyone declined.", not one per seat
-    assert "Player 2" not in session.log_for(0)[0] and "Player 3" not in session.log_for(0)[0]
 
 def _discard_all(session: GameSession, seat: int) -> None:
     """Run every DISCARD the engine asks `seat` for, one at a time."""
@@ -683,59 +539,7 @@ def test_state_view_carries_the_public_ledger_for_every_seat():
     assert players[other]["unknown"] == 0
     assert "hand" not in players[other]
 
-def test_state_view_does_not_expose_who_is_eligible_to_respond_to_an_offer():
-    """`game.pending_responders` is exactly who's eligible to cover the open
-    offer, in ask order — sending it to the client before anyone has
-    actually responded would leak the same hidden hand information the log
-    (see _log_action's "Everyone declined." handling) is built to hide,
-    just earlier and over a different channel."""
-    from hexset.board.terrain import Resource
 
-    game = a_game(seed=18)
-    game.phase = Phase.MAIN
-    game.current_player = 0
-    state = game._state
-    state.bank[Resource.WOOD] -= 1
-    state.hands[0][Resource.WOOD] += 1
-    for seat in (1, 2):
-        state.bank[Resource.ORE] -= 1
-        state.hands[seat][Resource.ORE] += 1
-
-    session = a_session(game, {0})
-    offer = Action(ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1))
-    session.submit(0, action_to_wire(offer))
-    assert game.pending_responders  # the offer really is pending on someone
-
-    view = session.state_view(0)
-    assert "responders" not in view["offer"]
-
-def test_state_view_offer_answered_is_the_proposers_own_information_only():
-    """`offer_answered`'s wire counterpart: filtered exactly the way
-    `record.py:build_record` filters it — all-zero (absent, here) unless
-    `viewer == offer.proposer`, since a responder must not condition on an
-    earlier decline."""
-    from hexset.board.terrain import Resource
-
-    game = a_game(seed=18)
-    game.phase = Phase.MAIN
-    game.current_player = 0
-    state = game._state
-    state.bank[Resource.WOOD] -= 1
-    state.hands[0][Resource.WOOD] += 1
-    for seat in (1, 2):
-        state.bank[Resource.ORE] -= 1
-        state.hands[seat][Resource.ORE] += 1
-
-    session = a_session(game, {0, 1, 2})
-    offer = Action(
-        ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1), ask=(1, 2)
-    )
-    session.submit(0, action_to_wire(offer))
-    session._apply(1, Action(ActionType.DECLINE_TRADE))
-
-    assert session.state_view(0)["offer"]["answered"] == [1]
-    assert "answered" not in session.state_view(2)["offer"]
-    assert "answered" not in session.state_view(None)["offer"]
 
 def test_state_view_reports_locked_seats():
     from hexset.server.seating import lock_seat
@@ -930,65 +734,20 @@ def test_an_undone_placement_is_written_down_not_erased(tmp_path):
     assert events[2]["back_to"] == 0  # everything from step 0 did not happen
 
 
-def test_to_move_does_not_reveal_who_can_cover_an_offer():
-    """PR #2 defect 3. `to_move` during `TRADE_RESPOND` is
-    `pending_responders[0]`, and `pending_responders` is
-    `trading.responders(...)` -- the seats that *can cover the offer*. Sending
-    it to every poller says which seats hold the wanted card and which were
-    skipped: a hand's composition, on the wire, to bystanders and to the
-    token-free observer, at exactly the moment the offer block is careful to
-    omit `responders` and the log is careful to say a uniform "Everyone
-    declined."
-
-    Rigged so only seat 2 holds ore: seat 0 offers wood for ore, so seat 2 is
-    the only responder, and a leak is unambiguous rather than probabilistic.
-    """
-    from hexset.board.terrain import Resource
-
-    game = a_game(seed=18)
-    game.phase = Phase.MAIN
-    game.current_player = 0
-    state = game._state
-    for hand in state.hands:
-        hand[Resource.ORE] = 0
-    state.hands[0][Resource.WOOD] += 1
-    state.hands[2][Resource.ORE] = 1
-
-    session = a_session(game, {0, 1, 2, 3})
-    offer = Action(ActionType.PROPOSE_TRADE, give=(1, 0, 0, 0, 0), want=(0, 0, 0, 0, 1))
-    session.submit(0, action_to_wire(offer))
-    assert game.phase is Phase.TRADE_RESPOND
-    assert game.pending_responders == [2]
-
-    # The one seat actually being asked is told so -- it has to act.
-    assert session.state_view(2)["to_move"] == 2
-
-    # Nobody else is. They are told the proposer, which the offer block
-    # already names, so no client loses its "am I on move?" test.
-    for viewer in (0, 1, 3, None):
-        view = session.state_view(viewer)
-        assert view["to_move"] == 0, viewer
-        assert view["to_move"] != 2, viewer
-
-    # And `current_player` was never the leak: during TRADE_RESPOND the turn
-    # is still the proposer's, only the decision moved.
-    assert session.state_view(None)["current_player"] == 0
 
 
-def test_to_move_is_unfiltered_in_every_phase_but_trade_respond():
-    """The filter is narrow on purpose. Discarding also hands the decision to
-    somebody other than the current player, but who owes a discard is public
-    (hand sizes are, and `discard_quota` is served), so filtering there would
-    cost every client its turn indicator for nothing."""
-    from hexset.board.terrain import Resource
-
+def test_to_move_is_never_filtered():
+    """It used to be, in `TRADE_RESPOND`: `to_move` there was the head of the
+    engine's eligibility list, so publishing it told every poller who held
+    the wanted card. There is no such phase any more (`hexset.trading`).
+    Discarding also hands the decision to somebody other than the current
+    player, and is not filtered either, because who owes a discard is public
+    -- hand sizes are, and `discard_quota` is served."""
     game = a_game(seed=31)
     session = a_session(game, {0, 1, 2, 3})
     for _ in range(40):
         if is_over(game):
             break
-        if game.phase is Phase.TRADE_RESPOND:
-            continue
         seat = to_move(game)
         for viewer in (None, 0, 1, 2, 3):
             assert session.state_view(viewer)["to_move"] == seat, (game.phase, viewer)
@@ -1000,4 +759,40 @@ def test_to_move_is_unfiltered_in_every_phase_but_trade_respond():
     game.discard_quota = [0, 0, 4, 0]
     assert to_move(game) == 2
     for viewer in (None, 0, 1, 2, 3):
-        assert session.state_view(viewer)["to_move"] == 2, viewer
+        assert session.state_view(viewer)["to_move"] == 2
+
+
+def test_the_trade_log_and_the_valuations_ride_in_the_state_view():
+    """The two public halves of the mechanic (`hexset.trading`): what every
+    seat advertised, and what the engine cleared this turn. Neither is
+    filtered per viewer -- both are things a table hears."""
+    from hexset.board.terrain import Resource
+    from hexset.game import roll_dice
+    from hexset.server.webplay import PostedValuation
+
+    game = a_game(seed=13)
+    game.phase = Phase.ROLL
+    game.current_player = 0
+    state = game._state
+    for hand in state.hands:
+        hand[:] = [0, 0, 0, 0, 0]
+    state.hands[0][Resource.WOOD] = 1
+    state.hands[1][Resource.ORE] = 1
+
+    session = a_session(game, {0, 1})
+    wants_ore = [0.0] * 5
+    wants_ore[Resource.ORE] = 1.0
+    wants_ore[Resource.WOOD] = -1.0
+    session.publish(0, wants_ore)
+    session.set_trader(1, PostedValuation(tuple(-v for v in wants_ore)))
+
+    roll_dice(game, 8)
+
+    for viewer in (None, 0, 1, 2, 3):
+        view = session.state_view(viewer)
+        assert view["valuations"][0] == wants_ore
+        assert len(view["trades"]) == 1
+        assert view["trades"][0]["a"] == 0 and view["trades"][0]["b"] == 1
+        assert view["trades"][0]["got"][Resource.ORE] == 1
+        assert view["trades"][0]["gave"][Resource.WOOD] == 1
+

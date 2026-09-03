@@ -373,102 +373,57 @@ def _set_hand(game, player: int, resource, n: int) -> None:
     game.ledger.seats[player].known[resource] = n
 
 
-def _offer_game(seed: int = 5):
-    """A standing offer: the mover gives 2 wood for 1 ore, everyone else
-    stocked to be eligible, asked in fixed seat order after the mover."""
-    from hexset.board.terrain import Resource
-    from hexset.game import propose_trade
-    from hexset.trading import bundle
-
-    game = _main_phase_game(seed)
-    proposer = game.current_player
-    others = [s for s in range(4) if s != proposer]
-    _set_hand(game, proposer, Resource.WOOD, 2)
-    _set_hand(game, proposer, Resource.ORE, 0)
-    for s in others:
-        _set_hand(game, s, Resource.ORE, 1)
-    propose_trade(game, bundle(wood=2), bundle(ore=1), ask=tuple(others))
-    return game, proposer, others
-
-
 def _ledger_width(players: int = 4) -> int:
     return (players - 1) * (NUM_RESOURCES + 1)
 
 
-def _offer_tail(obs, players: int = 4):
-    """give(5), want(5), proposer(4), answered(4) — 18 globals, no longer the
-    very tail now that the ledger block (`_ledger_tail`) sits after it."""
-    width = 2 * NUM_RESOURCES + 2 * players
+def _valuation_tail(obs, players: int = 4):
+    """Every seat's published vector, seat-relative -- `players *
+    NUM_RESOURCES` globals, sitting just before the ledger block."""
+    width = players * NUM_RESOURCES
     ledger_width = _ledger_width(players)
     tail = obs.globals[-(width + ledger_width) : -ledger_width]
-    return tail[:5], tail[5:10], tail[10:14], tail[14:18]
+    return [tail[i * NUM_RESOURCES : (i + 1) * NUM_RESOURCES] for i in range(players)]
 
 
-def test_the_offer_block_is_zero_when_no_offer_stands():
+def test_the_valuation_block_is_zero_before_anybody_publishes():
     game = _main_phase_game()
-    assert game.offer is None
     for perspective in range(4):
-        for part in _offer_tail(encode(game, perspective)):
-            assert not part.any()
+        for row in _valuation_tail(encode(game, perspective)):
+            assert not row.any()
 
 
-def test_a_responder_sees_the_terms_and_the_proposer():
-    from hexset.board.terrain import Resource
-    from hexset.game import to_move
-
-    game, proposer, _ = _offer_game()
-    responder = to_move(game)
-    give, want, proposer_hot, answered = _offer_tail(encode(game, responder))
-
-    assert give[Resource.WOOD] == pytest.approx(2 / 10.0)
-    assert give.sum() == pytest.approx(2 / 10.0)
-    assert want[Resource.ORE] == pytest.approx(1 / 10.0)
-    assert want.sum() == pytest.approx(1 / 10.0)
-    assert proposer_hot[_seat(proposer, responder, 4)] == 1.0
-    assert proposer_hot.sum() == 1.0
-    assert not answered.any()
-
-
-def test_a_responder_does_not_see_earlier_declines():
-    from hexset.game import decline_trade, to_move
-
-    game, _, _ = _offer_game()
-    decline_trade(game, to_move(game))
-    _, _, _, answered = _offer_tail(encode(game, to_move(game)))
-    assert not answered.any()
-
-
-def test_the_proposer_sees_who_has_declined():
-    from hexset.game import decline_trade, to_move
-
-    game, proposer, _ = _offer_game()
-    first = to_move(game)
-    _, _, proposer_hot, answered = _offer_tail(encode(game, proposer))
-    assert proposer_hot[0] == 1.0  # the proposer is seat 0 to itself
-    assert not answered.any()
-
-    decline_trade(game, first)
-    _, _, _, answered = _offer_tail(encode(game, proposer))
-    assert answered[_seat(first, proposer, 4)] == 1.0
-    assert answered.sum() == 1.0
-
-
-def test_the_offer_block_clears_when_the_offer_resolves():
-    from hexset.game import accept_trade, to_move
-
-    game, _, _ = _offer_game()
-    accept_trade(game, to_move(game))
-    assert game.offer is None
+def test_every_seat_reads_every_published_vector_seat_relative():
+    """The vectors are public -- what a table hears -- so nothing here is
+    filtered by perspective; only the seat order rotates."""
+    game = _main_phase_game()
+    for seat in range(4):
+        game.valuations[seat] = tuple(
+            (seat + 1) / 10.0 if r == seat % NUM_RESOURCES else 0.0
+            for r in range(NUM_RESOURCES)
+        )
     for perspective in range(4):
-        for part in _offer_tail(encode(game, perspective)):
-            assert not part.any()
+        rows = _valuation_tail(encode(game, perspective))
+        for seat in range(4):
+            assert rows[_seat(seat, perspective, 4)] == pytest.approx(
+                np.asarray(game.valuations[seat], dtype=np.float32)
+            )
 
 
-def test_batched_offer_encoding_matches_the_canonical_path():
-    from hexset.game import decline_trade, to_move
+def test_a_negative_valuation_survives_unscaled():
+    """Vectors are already in [-1, 1], so unlike hands they are not divided
+    by anything on the way into the observation."""
+    game = _main_phase_game()
+    game.valuations[game.current_player] = (-1.0, 0.0, 0.0, 0.0, 1.0)
+    rows = _valuation_tail(encode(game, game.current_player))
+    assert rows[0][0] == pytest.approx(-1.0)
+    assert rows[0][4] == pytest.approx(1.0)
 
-    game, proposer, _ = _offer_game()
-    decline_trade(game, to_move(game))
+
+def test_batched_valuation_encoding_matches_the_canonical_path():
+    game = _main_phase_game()
+    for seat in range(4):
+        game.valuations[seat] = tuple(0.1 * (seat + 1) for _ in range(NUM_RESOURCES))
     games = [game] * 4
     perspectives = list(range(4))
     fast = encode_batch(games, perspectives)
@@ -490,9 +445,17 @@ def _ledger_tail(obs, players: int = 4):
     return known, unknown
 
 
-def test_global_features_widened_by_the_ledger():
-    assert global_features(4) == 86
-    assert global_features(3) == 60 + 2 * (5 + 1)
+def test_global_features_counts_the_valuation_and_ledger_blocks():
+    """87 at four players: the 18-float live-offer block is gone and
+    `Phase` lost a member with it (`TRADE_RESPOND`), replaced by every
+    seat's public valuation vector at `players * NUM_RESOURCES`."""
+    assert global_features(4) == 87
+    assert global_features(4) - global_features(3) == (
+        # one more seat shows up in: opponent hand size, opponent dev count,
+        # knights, public points, the two holder one-hots, the valuation
+        # block, and the ledger block.
+        1 + 1 + 1 + 1 + 2 + NUM_RESOURCES + (NUM_RESOURCES + 1)
+    )
 
 
 def test_the_ledger_block_is_zero_at_game_start():

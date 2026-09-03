@@ -10,9 +10,9 @@ one such pair, which is the leak the regression guards against.
 
 from __future__ import annotations
 
-import functools
 import hashlib
 import json
+import math
 import random
 from dataclasses import replace
 from pathlib import Path
@@ -26,24 +26,25 @@ from hexset.board.coords import Hex
 from hexset.board.maps import islands
 from hexset.board.terrain import NUM_RESOURCES, Resource, Terrain
 from hexset.board.topology import build as build_topology
-from hexset.bots import SearchBot, greedy
+from hexset.bots import SearchBot
 from hexset.cards import DevCard
 from hexset.economy import COSTS, Purchase
 from hexset.bots.evaluate import Evaluator, Weights
-from hexset.game import Phase, imagine, is_over, propose_trade, roll_dice, start, to_move
+from hexset.game import Phase, imagine, is_over, roll_dice, start, to_move
 from hexset.bots.heximax import (
     MODES,
     NO_TRADE_WEIGHTS,
     TRADING_WEIGHTS,
-    Belief,
     Heximax,
     HonestEvaluator,
+    View,
     heximax,
 )
+from hexset.bots.heximax.search import MARGINAL_SCALE
 from hexset.ledger import SeatLedger
 from hexset.mcts import draws_hidden
 from hexset.play import step_randomly
-from hexset.trading import Offer, bundle, can_propose, well_formed
+from hexset.trading import NO_VALUATION, bundle, one_for_one
 from hexset.state import (
     MAX_CITIES,
     MAX_SETTLEMENTS,
@@ -55,10 +56,14 @@ from hexset.state import (
 from hexset.victory import victory_points
 from helpers import clear_hand, give, independent_vertices, mini_board
 
-# The seed at which `search2` is pinned to read the two indistinguishable
-# worlds of `test_heximax_cannot_tell_ledger_consistent_worlds_apart`
-# differently. Found by `_first_seed_where_search2_differs`; pinned so the
-# test documents a specific leak rather than hunting for one every run.
+# The seed the pair of indistinguishable worlds below is built at. It used
+# to be the seed at which `search2`'s *chosen action* differed between them
+# (found by `_first_seed_where_search2_differs`); no seed in 0..1199 does any
+# more, because the leak that reached the choice was the engine's offer
+# sample -- `_offer_actions` read every opponent's hand to decide which
+# `want` anyone could cover -- and trading is no longer an action. What
+# `search2` still does is read those hands at its own leaves, which is what
+# `test_search2_can_tell_the_same_two_worlds_apart` now pins.
 SEARCH2_LEAK_SEED = 2
 
 
@@ -141,11 +146,20 @@ def a_bot(game, seed: int = 0, **overrides) -> Heximax:
 
 # --- the behaviour-preservation gate -----------------------------------------
 
-# The recorded census is keyed to the tree at `ecb5252` (HEAD of
-# `feat/heximax-p2` before this pass's optimizations). Regenerate it
-# deliberately, never by hand, with `pytest tests/test_heximax.py -k
-# choices_are_byte_identical --write-census` -- see `conftest.py`.
-CENSUS_FIXTURE = Path(__file__).parent / "fixtures" / "heximax_census_ecb5252.json"
+# Re-baselined for the one-event trade mechanic (the trading design's §8):
+# trading games change by construction, and the no-trade games changed too,
+# which the registration did not predict. The reason, established by
+# stubbing `actions._offer_actions` to `[]` on the old tree and reproducing
+# every hash below exactly: `heximax-notrade` suppressed *proposing* and
+# *accepting*, but `Heximax._options_in` handed the engine's offer sample
+# to every node of the tree regardless, so the no-trade referent still
+# searched hypothetical offers. The offer sample's removal is the whole of
+# the difference; nothing else in the mechanic moves a no-trade game.
+#
+# Regenerate deliberately, never by hand, with `pytest
+# tests/bots/heximax/test_heximax.py -k choices_are_byte_identical
+# --write-census` -- see `conftest.py`.
+CENSUS_FIXTURE = Path(__file__).parent / "fixtures" / "heximax_census.json"
 
 # preset -> seeds. `heximax` gets the full 20-game census the design's
 # robustness sweep never runs at four seats and all three presets; the other
@@ -176,23 +190,23 @@ def _census_game(preset: str, seed: int, players: int = 4) -> str:
         spawn(PRESETS[preset], board, random.Random(f"{seed}:{seat}"))
         for seat in range(players)
     ]
+    game.traders = tuple(bots)
     trace = []
     moves = 0
     while not is_over(game):
         seat = to_move(game)
         action = bots[seat].choose(game)
+        cleared = len(game.trades)
+        apply(game, action)
         trace.append(
             (
                 seat,
                 int(action.type),
                 action.a,
                 action.b,
-                list(action.give),
-                list(action.want),
-                list(action.ask),
+                [(t.a, t.b, t.received) for t in game.trades[cleared:]],
             )
         )
-        apply(game, action)
         moves += 1
         if moves > 60000:
             raise AssertionError(f"{preset} seed {seed} did not finish")
@@ -329,63 +343,32 @@ def test_heximax_cannot_tell_ledger_consistent_worlds_apart(seed):
 
 
 def test_search2_can_tell_the_same_two_worlds_apart():
-    """The leak the regression above guards against, pinned to one seed.
+    """The leak the regression above guards against, pinned at the leaf.
 
-    `search2` reads every seat's true hand, so on the pinned pair its move
-    depends on which hidden cards the opponents hold.
+    `search2` scores a position with `evaluate.Evaluator` on the true state
+    (`SearchBot._from_state`, a sanctioned true-state read by design -- it is
+    the project's perfect-information referent). So on a pair of worlds the
+    public record cannot tell apart, its leaf values still differ, while
+    `HonestEvaluator`'s -- read through the same seat's `View` -- cannot.
+
+    Pinned at the leaf rather than at the chosen action: the leak that used
+    to reach the *choice* was the engine's offer sample (see
+    `SEARCH2_LEAK_SEED`), and with trading no longer an action no seed in
+    0..1199 makes `search2` play differently between these two worlds.
     """
     worlds = two_worlds_the_record_cannot_tell_apart(SEARCH2_LEAK_SEED)
     assert worlds is not None
     one, two = worlds
     assert _record_says_the_same(one, two)
-    assert _search2_choice(one, SEARCH2_LEAK_SEED) != _search2_choice(
-        two, SEARCH2_LEAK_SEED
+
+    seat = to_move(one)
+    cheat = Evaluator(one._state.board)
+    assert cheat.evaluate(one._state, seat) != cheat.evaluate(two._state, seat)
+
+    honest = HonestEvaluator(one._state.board)
+    assert honest.evaluate_game(one, seat) == pytest.approx(
+        honest.evaluate_game(two, seat)
     )
-
-
-def a_response_with_another_seat_pending(seed: int, swapped: bool):
-    """heximax (seat 0) is asked first; exactly one other seat is also pending.
-
-    Seats 2 and 3 each hold one card the record cannot type -- a wood and a
-    sheep between them. `swapped` says which holds which. The bank, every
-    hand size and every `known` entry are identical either way, so the two
-    positions are one information set for seat 0. The engine's
-    `pending_responders`, built from the true hands, differ: only the seat
-    that truly holds the wanted wood is pending.
-    """
-    game = after_setup(seed)
-    for p in range(4):
-        set_known_hand(game, p, [0] * NUM_RESOURCES)
-    set_known_hand(game, 0, [1, 0, 0, 0, 0])
-    set_known_hand(game, 1, [0, 0, 0, 0, 1])
-    wood_holder, sheep_holder = (3, 2) if swapped else (2, 3)
-    give_unknown(game, wood_holder, Resource.WOOD, 1)
-    give_unknown(game, sheep_holder, Resource.SHEEP, 1)
-    game.current_player = 1
-    game.phase = Phase.MAIN
-    propose_trade(game, bundle(ore=1), bundle(wood=1), ask=(0,))
-    assert game.phase is Phase.TRADE_RESPOND
-    assert to_move(game) == 0
-    assert len(game.pending_responders) == 2
-    return game
-
-
-@pytest.mark.parametrize("seed", range(4))
-def test_who_else_could_cover_an_offer_is_hidden_from_the_responder(seed):
-    """`pending_responders` is the engine's true eligibility list. Under the
-    rules a decline reveals nothing, so from the responder's seat the other
-    pending seats' coverage is hidden, and the belief may not read it."""
-    one = a_response_with_another_seat_pending(seed, swapped=False)
-    two = a_response_with_another_seat_pending(seed, swapped=True)
-    assert _record_says_the_same(one, two)
-    assert one.pending_responders != two.pending_responders
-
-    for seat in (2, 3):
-        assert Belief.from_game(one, 0).expected_hand(seat) == pytest.approx(
-            Belief.from_game(two, 0).expected_hand(seat)
-        )
-    for k in (1, 4):
-        assert a_bot(one, seed, k=k).choose(one) == a_bot(two, seed, k=k).choose(two)
 
 
 # --- belief -------------------------------------------------------------------
@@ -412,7 +395,7 @@ def test_a_sample_keeps_every_public_count(seed):
     rng = random.Random(seed)
     for game in _positions(seed, 30):
         seat = to_move(game)
-        belief = Belief.from_game(game, seat)
+        belief = View.from_game(game, seat)
         assert all(n >= 0 for n in belief.pool)
         for p in range(game._state.num_players):
             assert sum(belief.expected_hand(p)) == pytest.approx(sum(game._state.hands[p]))
@@ -442,7 +425,7 @@ def test_the_expected_hand_is_known_plus_the_pool_share():
     give_unknown(game, 1, Resource.WOOD, 1)
     give_unknown(game, 2, Resource.ORE, 1)
 
-    belief = Belief.from_game(game, 0)
+    belief = View.from_game(game, 0)
     # Two hidden cards, one wood and one ore, shared between seats 1 and 2.
     assert belief.pool == [1, 0, 0, 0, 1]
     assert belief.expected_hand(1) == pytest.approx([0.5, 1.0, 0.0, 0.0, 0.5])
@@ -460,7 +443,7 @@ def test_p_holds_is_exact_for_one_card_and_certain_for_certified_cards():
     give_unknown(game, 1, Resource.WOOD, 1)
     give_unknown(game, 2, Resource.ORE, 1)
 
-    belief = Belief.from_game(game, 0)
+    belief = View.from_game(game, 0)
     assert belief.p_holds(1, (0, 1, 0, 0, 0)) == 1.0
     assert belief.p_holds(1, (1, 0, 0, 0, 0)) == pytest.approx(0.5)
     assert belief.p_holds(1, (0, 0, 1, 0, 0)) == 0.0
@@ -470,39 +453,25 @@ def test_p_holds_is_exact_for_one_card_and_certain_for_certified_cards():
     assert 0.3 < estimate < 0.7
 
 
-def test_an_open_offer_certifies_the_proposers_side_and_nothing_else():
-    """A proposer only offers what it holds, and the offer is announced, so
-    `give` is public. Who else can cover `want` is not: the engine's
-    `pending_responders` is built from the true hands, and a decline reveals
-    nothing, so the belief about the other pending seats must be the plain
-    ledger reading."""
+def test_certify_adds_a_lower_bound_the_ledger_does_not_carry():
+    """`View`'s `certify` hook survives the offer protocol that motivated it:
+    a caller that knows a seat holds something says so, and nothing else
+    about that seat moves."""
     game = after_setup(2)
     for p in range(4):
         set_known_hand(game, p, [0] * NUM_RESOURCES)
-    give_unknown(game, 1, Resource.ORE, 1)  # the proposer's hidden ore
-    give_unknown(game, 2, Resource.WOOD, 1)  # another responder's hidden wood
-    set_known_hand(game, 0, [1, 0, 0, 0, 0])
-    game.current_player = 1
-    game.phase = Phase.MAIN
-    propose_trade(game, bundle(ore=1), bundle(wood=1), ask=(0,))
-    assert game.phase is Phase.TRADE_RESPOND
-    assert to_move(game) == 0
-    assert len(game.pending_responders) == 2
+    give_unknown(game, 1, Resource.ORE, 1)
+    give_unknown(game, 2, Resource.WOOD, 1)
 
-    belief = Belief.from_game(game, 0)
-    assert belief.known[1] == [0, 0, 0, 0, 1]  # `give` certified
-    other = next(p for p in game.pending_responders if p != 0)
-    assert belief.known[other] == game.ledger.seats[other].known  # `want` not
-    assert belief.unknown[other] == game.ledger.seats[other].unknown == 1
-    # ...so the reading of `other` is what the ledger plus the announced
-    # `give` alone support: the same belief built with only that certified.
-    plain = Belief(game._state, game.ledger, 0, certify=[(1, bundle(ore=1))])
-    assert belief.known == plain.known and belief.unknown == plain.unknown
-    assert belief.expected_hand(other) == pytest.approx(plain.expected_hand(other))
-    assert belief.p_holds(other, bundle(wood=1)) == plain.p_holds(other, bundle(wood=1))
+    plain = View(game._state, game.ledger, 0)
+    told = View(game._state, game.ledger, 0, certify=[(1, bundle(ore=1))])
+    assert plain.known[1] == [0, 0, 0, 0, 0]
+    assert told.known[1] == [0, 0, 0, 0, 1]
+    assert told.unknown[1] == 0
+    assert told.known[2] == plain.known[2]
+    assert told.unknown[2] == plain.unknown[2] == 1
     for seed in range(5):
-        sampled = belief.sample(random.Random(seed))
-        assert sampled.hands[1][Resource.ORE] >= 1
+        assert told.sample(random.Random(seed)).hands[1][Resource.ORE] >= 1
 
 
 def test_a_desynced_fixture_does_not_break_the_belief():
@@ -513,7 +482,7 @@ def test_a_desynced_fixture_does_not_break_the_belief():
     give(game._state, 1, Resource.ORE, 5)
     game.ledger.seats[1] = SeatLedger(known=[3, 3, 0, 0, 0], unknown=0)
     game._state.hands[2] = [6, 6, 6, 6, 6]  # conjured from nowhere
-    belief = Belief.from_game(game, 0)
+    belief = View.from_game(game, 0)
     assert all(n >= 0 for n in belief.pool)
     assert sum(belief.expected_hand(1)) == pytest.approx(5)
     assert sum(belief.expected_hand(2)) == pytest.approx(30)
@@ -524,7 +493,7 @@ def test_a_desynced_fixture_does_not_break_the_belief():
 
 def test_omniscient_belief_is_the_truth():
     game = after_setup(4)
-    belief = Belief.from_game(game, 0, omniscient=True)
+    belief = View.from_game(game, 0, omniscient=True)
     for p in range(4):
         assert belief.expected_hand(p) == game._state.hands[p]
     sampled = belief.sample(random.Random(0))
@@ -550,7 +519,7 @@ def test_the_belief_cache_is_exact_against_from_game_on_random_tree_nodes(omnisc
         for game in _positions(seed, 25):
             for seat in range(game._state.num_players):
                 cached = evaluator.belief_from_game(game, seat)
-                fresh = Belief.from_game(game, seat, omniscient=omniscient)
+                fresh = View.from_game(game, seat, omniscient=omniscient)
                 assert cached.known == fresh.known
                 assert cached.unknown == fresh.unknown
                 assert cached.pool == fresh.pool
@@ -640,7 +609,7 @@ def test_the_evaluate_memo_is_exact_against_a_fresh_computation(omniscient):
                 belief = evaluator.belief_from_game(game, seat)
                 memoized = evaluator.evaluate(game._state, seat, belief)
                 fresh_evaluator = HonestEvaluator(board, omniscient=omniscient)
-                fresh_belief = Belief.from_game(game, seat, omniscient=omniscient)
+                fresh_belief = View.from_game(game, seat, omniscient=omniscient)
                 fresh = fresh_evaluator.evaluate(game._state, seat, fresh_belief)
                 assert memoized == pytest.approx(fresh)
                 checked += 1
@@ -737,12 +706,7 @@ def test_deepening_stops_where_the_budget_says():
     rng = random.Random(13)
     while (
         game.phase is not Phase.MAIN
-        # At least 4 non-trade options: P2's adapter replaces every
-        # `PROPOSE_TRADE` in `legal_actions` with its own (possibly empty)
-        # candidates, so a position that only clears 4 by counting the
-        # engine's one-for-one trade sample can collapse to a single
-        # option (END_TURN) once that sample is gone.
-        or len([a for a in legal_actions(game) if a.type is not ActionType.PROPOSE_TRADE]) < 4
+        or len(legal_actions(game)) < 4
         or any(draws_hidden(game, a) for a in legal_actions(game))
     ):
         step_randomly(game, rng)
@@ -760,53 +724,45 @@ def test_deepening_stops_where_the_budget_says():
     assert deep.nodes > shallow.nodes
 
 
-def test_a_no_trade_bot_never_proposes_and_always_declines():
+def test_a_no_trade_bot_publishes_nothing_and_refuses_everything():
+    """`max_trades=0` is the whole of the no-trade referent: nothing is
+    advertised, so no bundle it is party to can have positive public
+    surplus, and the gate refuses anyway."""
     game = a_game(seed=14)
     board = game._state.board
     quiet = heximax(board, random.Random(0), mode="notrade", max_nodes=64)
-    assert quiet.max_offers == 0
-    talkers = [greedy(Evaluator(board), random.Random(s), max_offers=3) for s in (1, 2, 3)]
+    assert quiet.max_trades == 0
+    view = game.state(0)
+    assert quiet.valuation(view) == NO_VALUATION
+    assert quiet.accepts(view, one_for_one(0, 4), 1) is False
+
+    talkers = [a_bot(game, s, max_nodes=64) for s in (1, 2, 3)]
     bots = [quiet, *talkers]
-    asked = 0
+    game.traders = tuple(bots)
     moves = 0
     while not is_over(game) and moves < 20000:
-        seat = to_move(game)
-        action = bots[seat].choose(game)
-        if seat == 0:
-            assert action.type is not ActionType.PROPOSE_TRADE
-            assert action.type is not ActionType.ACCEPT_TRADE
-            if game.phase is Phase.TRADE_RESPOND:
-                asked += 1
-                assert action.type is ActionType.DECLINE_TRADE
-        apply(game, action)
+        apply(game, bots[to_move(game)].choose(game))
         moves += 1
     assert is_over(game)
-    assert asked > 0, "the table never asked seat 0 anything"
+    assert all(t.a != 0 and t.b != 0 for t in game.trades)
 
 
-def test_a_trading_bot_does_propose():
+def test_a_trading_bot_publishes_a_vector_and_trades():
     game = a_game(seed=15)
     bots = [a_bot(game, s, max_nodes=200) for s in range(4)]
-    proposed = 0
-    for _ in range(600):
-        if is_over(game):
-            break
-        action = bots[to_move(game)].choose(game)
-        proposed += action.type is ActionType.PROPOSE_TRADE
-        apply(game, action)
-    assert proposed > 0
+    game.traders = tuple(bots)
+    published = bots[0].valuation(game.state(0))
+    assert len(published) == NUM_RESOURCES
+    assert all(-1.0 <= v <= 1.0 for v in published)
 
-
-def test_offers_stay_within_the_bots_own_budget():
-    game = a_game(seed=16)
-    bots = [a_bot(game, s, max_offers=2, max_nodes=200) for s in range(4)]
-    peak = 0
-    for _ in range(1500):
-        if is_over(game):
-            break
+    traded = 0
+    moves = 0
+    while not is_over(game) and moves < 20000:
+        cleared = len(game.trades)
         apply(game, bots[to_move(game)].choose(game))
-        peak = max(peak, game.offers_made)
-    assert peak == 2
+        traded += len(game.trades[cleared:])
+        moves += 1
+    assert traded > 0
 
 
 @pytest.mark.parametrize("players", [2, 3, 4])
@@ -875,7 +831,7 @@ def test_a_discard_gives_up_the_card_worth_least():
     chosen = bot.choose(game)
     assert chosen.type is ActionType.DISCARD
     losses = {
-        r: bot.marginal_loss(game, seat, r)
+        r: bot._marginal_loss(game.state(seat), r)
         for r in range(NUM_RESOURCES)
         if game._state.hands[seat][r]
     }
@@ -910,7 +866,7 @@ def test_a_steal_is_valued_as_the_expectation_over_the_victims_belief():
     game.phase = Phase.ROBBER
     action = steal_action(game, thief, victim)
 
-    belief = Belief.from_game(game, thief)
+    belief = View.from_game(game, thief)
     assert belief.expected_hand(victim) == pytest.approx([0.5, 0, 0, 0, 0.5])
 
     bot = a_bot(game, 22, depth=1)
@@ -962,21 +918,51 @@ def test_an_unknown_stance_or_mode_is_refused():
         heximax(game._state.board, random.Random(0), mode="clairvoyant")
 
 
-# --- trade valuation ------------------------------------------------------------
+# --- trading (`hexset.trading`) ------------------------------------------------
 
 
 def test_marginal_values_read_the_hand_they_are_given():
     game = after_setup(25)
     set_known_hand(game, 0, [0, 0, 0, 2, 2])  # one ore short of a city
     bot = a_bot(game, 25)
-    gains = [bot.marginal_gain(game, 0, r) for r in range(NUM_RESOURCES)]
+    view = game.state(0)
+    gains = [bot._marginal_gain(view, r) for r in range(NUM_RESOURCES)]
     assert gains[Resource.ORE] == max(gains)
-    assert bot.marginal_loss(game, 0, Resource.ORE) > 0
+    assert bot._marginal_loss(view, Resource.ORE) > 0
     # Nothing held, nothing to lose.
-    assert bot.marginal_loss(game, 0, Resource.WOOD) == 0.0
+    assert bot._marginal_loss(view, Resource.WOOD) == 0.0
 
 
-def test_a_bundle_delta_depends_on_who_the_counterparty_is():
+def test_the_published_vector_is_the_squashed_marginal():
+    game = after_setup(25)
+    set_known_hand(game, 0, [0, 0, 0, 2, 2])
+    bot = a_bot(game, 25)
+    view = game.state(0)
+    published = bot.valuation(view)
+    assert len(published) == NUM_RESOURCES
+    assert all(-1.0 <= v <= 1.0 for v in published)
+    for r in range(NUM_RESOURCES):
+        assert published[r] == pytest.approx(
+            math.tanh(bot._marginal_gain(view, r) / MARGINAL_SCALE)
+        )
+    # Ordering is what the clearing rule reads, and `tanh` preserves it.
+    assert published[Resource.ORE] == max(published)
+
+
+def test_every_seat_publishes_on_one_common_scale():
+    """Not a per-decision rescaling: the clearing rule compares two seats'
+    surpluses, so a seat with small marginals must publish small numbers
+    rather than being stretched to fill the range."""
+    game = after_setup(25)
+    set_known_hand(game, 0, [0, 0, 0, 2, 2])
+    set_known_hand(game, 1, [1, 1, 1, 1, 1])
+    bot = a_bot(game, 25)
+    keen = bot.valuation(game.state(0))
+    calm = bot.valuation(game.state(1))
+    assert max(keen) != pytest.approx(max(calm))
+
+
+def test_a_gate_read_depends_on_who_the_counterparty_is():
     game = after_setup(26)
     for p in range(4):
         set_known_hand(game, p, [0] * NUM_RESOURCES)
@@ -984,28 +970,39 @@ def test_a_bundle_delta_depends_on_who_the_counterparty_is():
     set_known_hand(game, 1, [0, 0, 0, 2, 3])  # a city in hand already
     set_known_hand(game, 2, [0, 0, 0, 0, 1])
     bot = a_bot(game, 26)
-    give_bundle, want_bundle = (1, 0, 0, 0, 0), (0, 0, 0, 0, 1)
-    feeding_the_leader = bot.bundle_delta(game, 0, give_bundle, want_bundle, 1)
-    feeding_a_trailer = bot.bundle_delta(game, 0, give_bundle, want_bundle, 2)
+    view = game.state(0)
+    received = one_for_one(int(Resource.WOOD), int(Resource.ORE))
+    feeding_the_leader = bot._delta(view, 0, 0, received, 1, bot._rank)
+    feeding_a_trailer = bot._delta(view, 0, 0, received, 2, bot._rank)
     assert feeding_the_leader != pytest.approx(feeding_a_trailer)
 
 
-def _omniscient_truth_delta(bot, game, seat, give, want, counterparty):
-    """`bundle_delta`'s value computed the only way an omniscient seat could
+def test_the_gate_is_strict():
+    """Ties do not clear: the engine's termination argument rests on the
+    acting seat's own valuation strictly increasing at every step."""
+    game = after_setup(26)
+    bot = a_bot(game, 26)
+    view = game.state(0)
+    nothing = tuple([0] * NUM_RESOURCES)
+    assert bot.accepts(view, nothing, 1) is False
+
+
+def _omniscient_truth_delta(bot, game, seat, received, counterparty):
+    """`_delta`'s value computed the only way an omniscient seat could
     honestly compute it: evaluate the real position, move both hands exactly,
     evaluate again. Under omniscience every hand is read verbatim, so there is
     no belief to approximate through and this is not an estimate."""
     evaluator = bot.evaluator
 
-    def read(state):
-        belief = Belief(state, game.ledger, seat, omniscient=True)
-        return bot._rank(evaluator.evaluate(state, seat, belief), seat)
+    def read(state, row):
+        belief = View(state, game.ledger, seat, omniscient=True)
+        return bot._rank(evaluator.evaluate(state, seat, belief), row)
 
     after = copy_state(game._state)
     for r in range(NUM_RESOURCES):
-        after.hands[seat][r] += want[r] - give[r]
-        after.hands[counterparty][r] += give[r] - want[r]
-    return read(after) - read(game._state)
+        after.hands[seat][r] += received[r]
+        after.hands[counterparty][r] -= received[r]
+    return read(after, seat) - read(game._state, seat)
 
 
 def test_an_omniscient_trade_read_moves_the_counterpartys_real_cards():
@@ -1022,51 +1019,20 @@ def test_an_omniscient_trade_read_moves_the_counterpartys_real_cards():
     set_known_hand(game, 1, [0, 0, 2, 1, 1])
     set_known_hand(game, 2, [1, 1, 1, 0, 0])
     bot = a_bot(game, 26, mode="omniscient")
-    give, want = (1, 0, 0, 0, 0), (0, 0, 1, 0, 0)
+    received = one_for_one(int(Resource.WOOD), int(Resource.SHEEP))
+    view = View.from_game(game, 0, omniscient=True)
     for counterparty in (1, 2):
-        assert bot.bundle_delta(game, 0, give, want, counterparty) == pytest.approx(
-            _omniscient_truth_delta(bot, game, 0, give, want, counterparty)
+        assert bot._delta(view, 0, 0, received, counterparty, bot._rank) == pytest.approx(
+            _omniscient_truth_delta(bot, game, 0, received, counterparty)
         )
 
 
-def test_an_omniscient_partner_read_moves_the_partners_real_cards():
-    """The same, read from a row that is not the knower's own -- what
-    `score_proposal`'s `willing` gate and `rank_partners` ask: would this trade
-    help *them*? Folding the partner's hand into one total makes every trade
-    look ruinous for the partner, so an omniscient bot's `willing` gate never
-    fires and it stops proposing."""
-    game = after_setup(26)
-    for p in range(4):
-        set_known_hand(game, p, [0] * NUM_RESOURCES)
-    set_known_hand(game, 0, [2, 1, 0, 0, 0])
-    set_known_hand(game, 1, [0, 0, 2, 1, 1])
-    bot = a_bot(game, 26, mode="omniscient")
-    give, want = (1, 0, 0, 0, 0), (0, 0, 1, 0, 0)
-    # seat 1 gives `want` and receives `give` from seat 0; read from seat 1's
-    # row, through omniscient seat 0's (perfect) information.
-    theirs = bot._partner_delta(game, 0, 1, want, give, 0, bot._rank)
-    evaluator = bot.evaluator
-
-    def read(state):
-        belief = Belief(state, game.ledger, 0, omniscient=True)
-        return bot._rank(evaluator.evaluate(state, 0, belief), 1)
-
-    after = copy_state(game._state)
-    for r in range(NUM_RESOURCES):
-        after.hands[1][r] += give[r] - want[r]
-        after.hands[0][r] += want[r] - give[r]
-    assert theirs == pytest.approx(read(after) - read(game._state))
-
-
-def test_an_honest_trade_read_is_unchanged_by_the_exact_partner_move():
-    """The counterpart guarantee: honesty is not weakened by the fix. An honest
-    seat's `bundle_delta` reads the counterparty through `expected_hand`, which
-    depends only on the ledger's `known`/`unknown` and the shared pool, so it
-    must be identical whatever the counterparty's real cards are."""
-    give, want = (1, 0, 0, 0, 0), (0, 0, 1, 0, 0)
-    # Seats 1 and 3 each hold three untyped cards; swapping their real
-    # compositions leaves the bank, both hand sizes and both ledger rows
-    # identical, so the public record cannot tell the two worlds apart.
+def test_an_honest_trade_read_is_unchanged_by_the_partners_real_cards():
+    """Honesty, stated as an invariant: an honest seat's gate reads the
+    counterparty through `expected_hand`, which depends only on the ledger's
+    `known`/`unknown` and the shared pool, so it must be identical whatever
+    the counterparty's real cards are."""
+    received = one_for_one(int(Resource.WOOD), int(Resource.SHEEP))
     values = []
     for one, three in (([3, 0, 0, 0, 0], [0, 0, 1, 1, 1]), ([0, 0, 1, 1, 1], [3, 0, 0, 0, 0])):
         game = after_setup(26)
@@ -1080,7 +1046,7 @@ def test_an_honest_trade_read_is_unchanged_by_the_exact_partner_move():
             game.ledger.seats[seat] = SeatLedger()
             game.ledger.seats[seat].unknown = 3
         bot = a_bot(game, 26)
-        values.append(bot.bundle_delta(game, 0, give, want, 1))
+        values.append(bot._delta(game.state(0), 0, 0, received, 1, bot._rank))
     assert values[0] == pytest.approx(values[1])
 
 
@@ -1097,12 +1063,9 @@ EXISTING_PRESETS = (
     "greedy-tiered",
     "search2-tiered",
     "greedy-relative",
-    "greedy-partner",
     "greedy-paranoid",
-    "greedy-offers1",
-    "greedy-offers2",
-    "greedy-offers3",
-    "search2-offers3",
+    "greedy-notrade",
+    "search2-notrade",
     "search2-relative",
     "random-placement",
     "greedy-placement",
@@ -1119,10 +1082,10 @@ def test_the_heximax_presets_spawn_with_their_documented_modes():
         assert bot.placement
         assert bot.depth == 2 and bot.width == 6
 
-    assert (honest.mode, honest.max_offers, honest.evaluator.omniscient) == ("honest", 3, False)
+    assert (honest.mode, honest.max_trades, honest.evaluator.omniscient) == ("honest", None, False)
     assert honest.evaluator.weights == TRADING_WEIGHTS
-    assert (omni.mode, omni.max_offers, omni.evaluator.omniscient) == ("omniscient", 3, True)
-    assert (quiet.mode, quiet.max_offers, quiet.evaluator.omniscient) == ("notrade", 0, False)
+    assert (omni.mode, omni.max_trades, omni.evaluator.omniscient) == ("omniscient", None, True)
+    assert (quiet.mode, quiet.max_trades, quiet.evaluator.omniscient) == ("notrade", 0, False)
     assert quiet.evaluator.weights == NO_TRADE_WEIGHTS
 
 
@@ -1131,328 +1094,87 @@ def test_existing_presets_are_untouched_and_still_spawn():
     assert Entrant("x") == Entrant("x", mode="honest")
     assert Entrant("x").k == 1
     assert PRESETS["search2"] == Entrant("search2", kind="search", depth=2, width=6)
-    assert PRESETS["heximax"] == Entrant("heximax", kind="heximax", depth=2, width=6, max_offers=3)
+    assert PRESETS["heximax"] == Entrant("heximax", kind="heximax", depth=2, width=6)
     board = random_base_board(random.Random(0))
     for name in EXISTING_PRESETS:
         assert spawn(PRESETS[name], board, random.Random(0)) is not None
 
 
-def test_entrant_margin_knobs_default_unchanged_and_reach_the_spawned_bot():
-    """`Entrant.accept_margin`/`propose_margin` (P3's margin-grid harness gap)
-    default to `heximax()`'s own defaults, so every existing preset spawns a
-    bot byte-identical to before this field existed -- `PRESETS["heximax"] ==
-    Entrant("heximax", ...)` above already pins that by equality. A
-    non-default value on the `Entrant` reaches the built `Heximax`, which is
-    all `_spawn`'s `kind == "heximax"` branch is responsible for; nothing
-    reads these fields for any other `kind`.
-    """
-    assert Entrant("x", kind="heximax").accept_margin == 0.0
-    assert Entrant("x", kind="heximax").propose_margin == 0.0
-    board = random_base_board(random.Random(0))
-    bot = spawn(replace(PRESETS["heximax"], accept_margin=0.2), board, random.Random(0))
-    assert bot.accept_margin == 0.2
-    assert bot.propose_margin == 0.0
-    bot = spawn(replace(PRESETS["heximax"], propose_margin=0.4), board, random.Random(0))
-    assert bot.propose_margin == 0.4
-    assert bot.accept_margin == 0.0
+# --- the published scale -------------------------------------------------------
+
+MARGINAL_SCALE_SEEDS = range(100, 105)
 
 
-# --- trade adapter (P2) --------------------------------------------------------
-
-CENSUS_GAMES = 20
-CENSUS_MAX_NODES = 64
-
-
-def _play_and_census(seed: int):
-    """Play one seeded four-`heximax`-seat game to completion, checking every
-    `PROPOSE_TRADE` heximax emits, as it is chosen, for legality and shape.
-
-    Returns `(multi, one_for_one, accepted)` for this one game.
-    """
-    game = a_game(seed)
-    bots = [
-        heximax(game._state.board, random.Random(seed * 97 + s), max_nodes=CENSUS_MAX_NODES)
-        for s in range(4)
-    ]
-    multi = one_for_one = accepted = 0
-    moves = 0
-    while not is_over(game) and moves < 8000:
-        seat = to_move(game)
-        action = bots[seat].choose(game)
-        if action.type is ActionType.PROPOSE_TRADE:
-            offer = Offer(proposer=seat, give=action.give, want=action.want)
-            assert well_formed(offer)
-            assert can_propose(game._state, offer)
-            assert not any(g and w for g, w in zip(action.give, action.want))
-            assert sum(action.give) <= 2 and sum(action.want) <= 2
-            if sum(action.give) > 1 or sum(action.want) > 1:
-                multi += 1
-            else:
-                one_for_one += 1
-        elif action.type is ActionType.ACCEPT_TRADE:
-            accepted += 1
-        apply(game, action)
-        moves += 1
-    assert is_over(game), f"seed {seed} did not finish in {moves} moves"
-    return multi, one_for_one, accepted
+def _recomputed_marginal_scale() -> float:
+    """`MARGINAL_SCALE`, recomputed exactly as its comment describes it: the
+    mean of `|Eval(hand + one r) - Eval(hand)|` under `TRADING_WEIGHTS` and
+    the `relative` stance, over every resource at every position the mover
+    reaches in the trade-free census games."""
+    total = 0.0
+    count = 0
+    for seed in MARGINAL_SCALE_SEEDS:
+        rng = random.Random(seed)
+        board = random_base_board(rng)
+        game = start(board, 4, rng)
+        bots = [
+            spawn(PRESETS["heximax-notrade"], board, random.Random(f"{seed}:{seat}"))
+            for seat in range(4)
+        ]
+        game.traders = tuple(bots)
+        meter = Heximax(HonestEvaluator(board, TRADING_WEIGHTS))
+        while not is_over(game):
+            seat = to_move(game)
+            view = game.state(seat)
+            for r in range(NUM_RESOURCES):
+                total += abs(meter._marginal_gain(view, r))
+                count += 1
+            meter.evaluator._walk_cache.clear()
+            meter.evaluator._belief_cache.clear()
+            meter.evaluator._evaluate_cache.clear()
+            apply(game, bots[seat].choose(game))
+    return total / count
 
 
-@functools.lru_cache(maxsize=1)
-def _trade_census():
-    """The 20-game census, run once and cached: both gate tests below read
-    the same run rather than paying for it twice."""
-    per_game = tuple(_play_and_census(seed) for seed in range(CENSUS_GAMES))
-    totals = tuple(sum(column) for column in zip(*per_game))
-    return per_game, totals
+def test_marginal_scale_is_the_recorded_mean():
+    """The constant every seat's published vector is squashed onto is pinned
+    to the computation its own comment states, not to a number someone typed.
+
+    The games it is measured over are `heximax-notrade`'s, which never trade,
+    so they cannot depend on the constant they define -- that is what makes
+    this reproducible rather than circular."""
+    assert _recomputed_marginal_scale() == pytest.approx(MARGINAL_SCALE, abs=1e-9)
 
 
-def test_every_proposal_is_legal_and_shaped_right_over_twenty_games():
-    """Every `PROPOSE_TRADE` heximax emits, over 20 seeded four-`heximax`-seat
-    games (`CENSUS_MAX_NODES = 64`), is `well_formed`, passes `can_propose`
-    against the state at the moment it was chosen, never repeats a resource
-    on both sides, and never exceeds two cards a side -- checked inline, as
-    each proposal is chosen, inside `_play_and_census`.
-    """
-    _trade_census()
+# --- honesty of the source ------------------------------------------------------
 
 
-def test_multi_card_and_one_for_one_proposals_both_occur_over_twenty_games():
-    """Measured on this run (seeds 0-19, `CENSUS_MAX_NODES = 64`, four
-    `heximax` seats, `functools.lru_cache`d with the legality test above so
-    the games are only played once): 32 multi-card proposals against 112
-    one-for-one ones -- a 22.2% multi-card share of 144 total -- and 65
-    accepted trades across the 20 games, 3.25 a game. Both shapes occur in
-    every run this was measured on; the exact counts drift with any change
-    to the valuation, the search, or `CENSUS_MAX_NODES`, but the qualitative
-    claim this test gates -- neither shape disappears -- does not. The
-    volume itself is low relative to the engine's naive one-for-one sample
-    it replaced: `score_proposal`'s crisp `willing` gate only credits an
-    opponent when accepting is a genuine gain for them under `relative`,
-    which a table that also improves the proposer's own position often
-    fails on the same trade (see `heximax.py`'s module docstring, "Cost").
-
-    Review F: those exact counts lived only in this docstring, not in an
-    assertion, so a real regression in trade shape (say, the multi-card
-    share dropping to near zero, or every proposal turning multi-card)
-    would not have failed this test. Bounds below are deliberately wide --
-    several times the measured values in either direction -- so a future,
-    intentional tuning change (a different weight profile, a different
-    `propose_margin`) does not turn this into a brittle pin, but a real
-    collapse of one shape or a wildly skewed share does trip it.
-    """
-    _per_game, (total_multi, total_one_for_one, total_accepted) = _trade_census()
-    assert total_multi > 0, "no multi-card proposal was ever emitted"
-    assert total_one_for_one > 0, "one-for-one proposals stopped occurring"
-    assert total_accepted > 0
-    share = total_multi / (total_multi + total_one_for_one)
-    assert 0.05 <= share <= 0.60, f"multi-card share {share:.3f} outside the expected band"
-    accepted_per_game = total_accepted / CENSUS_GAMES
-    assert 1.0 <= accepted_per_game <= 8.0, (
-        f"{accepted_per_game:.2f} accepted trades/game outside the expected band"
-    )
-
-
-def test_accept_rule_takes_a_clearly_positive_offer():
-    """A city-completing ore for a wood I have no use for: clearly worth it."""
-    game = after_setup(30)
-    for p in range(4):
-        set_known_hand(game, p, list(bundle()))
-    set_known_hand(game, 0, list(bundle(wood=1, ore=2, wheat=2)))  # 1 ore short of a city
-    set_known_hand(game, 1, list(bundle(ore=3)))
-    game.current_player = 1
-    game.phase = Phase.MAIN
-    bot = a_bot(game, 30)
-    offer = Offer(proposer=1, give=bundle(ore=1), want=bundle(wood=1))
-    assert bot.accept_rule(game, 0, offer, 0.0)
-
-
-def test_accept_rule_declines_a_clearly_negative_offer():
-    """Giving up the ore that completes a city outright, for a useless sheep."""
-    game = after_setup(31)
-    for p in range(4):
-        set_known_hand(game, p, list(bundle()))
-    set_known_hand(game, 0, list(bundle(ore=3, wheat=2)))  # a city ready to build
-    set_known_hand(game, 1, list(bundle(sheep=1)))
-    game.current_player = 1
-    game.phase = Phase.MAIN
-    bot = a_bot(game, 31)
-    offer = Offer(proposer=1, give=bundle(sheep=1), want=bundle(ore=1))
-    assert not bot.accept_rule(game, 0, offer, 0.0)
-
-
-def test_accept_rule_declines_a_leader_denial_case():
-    """Helps me a little, helps the runaway leader a lot -- declined under
-    `relative`. Seat 1 already has three cities and is one ore short of a
-    fourth; I hold that ore and would receive a wood I have some use for
-    (there is no other seat mid-purchase to route it to). The same trade
-    read with a trailing seat as the counterparty (no cities, nothing
-    in progress) costs the leader-denial term nothing extra, and is read
-    as less negative -- the counterparty-dependence `bundle_delta`'s own
-    docstring promises under `relative`."""
-    board = mini_board()
-    spots = independent_vertices(board, 4)
-
-    def a_table(proposer: int):
-        game = start(board, 4, random.Random(0))
-        game.phase = Phase.MAIN
-        game.current_player = proposer
-        for v in spots[:3]:
-            place_settlement(game._state, 1, v, connected=False)
-            upgrade_to_city(game._state, 1, v)
-        for p in range(4):
-            set_known_hand(game, p, list(bundle()))
-        set_known_hand(game, 1, list(bundle(wood=1, ore=2, wheat=2)))  # 1 ore short of a 4th city
-        set_known_hand(game, 2, list(bundle(wood=1)))
-        set_known_hand(game, 0, list(bundle(ore=1)))
-        return game
-
-    leader_game = a_table(proposer=1)
-    trailing_game = a_table(proposer=2)
-    leader_bot = a_bot(leader_game, 32)
-    trailing_bot = a_bot(trailing_game, 32)
-    leader_offer = Offer(proposer=1, give=bundle(wood=1), want=bundle(ore=1))
-    trailing_offer = Offer(proposer=2, give=bundle(wood=1), want=bundle(ore=1))
-
-    leader_delta = leader_bot.bundle_delta(
-        leader_game, 0, leader_offer.want, leader_offer.give, leader_offer.proposer
-    )
-    trailing_delta = trailing_bot.bundle_delta(
-        trailing_game, 0, trailing_offer.want, trailing_offer.give, trailing_offer.proposer
-    )
-    assert leader_delta < trailing_delta
-    assert not leader_bot.accept_rule(leader_game, 0, leader_offer, 0.0)
-
-
-def test_rank_partners_asks_first_whoever_it_helps_least():
-    """Seat 1 is one ore short of a city (giving up ore costs it dearly);
-    seat 2 is stacked five ore deep (giving up one costs it almost
-    nothing). Both truly hold ore, so both are eligible; seat 1, whom the
-    trade helps least (hurts most), is asked first."""
-
-    def a_table(swapped: bool):
-        game = after_setup(40, players=3)
-        for p in range(3):
-            set_known_hand(game, p, list(bundle()))
-        set_known_hand(game, 0, list(bundle(wood=2)))
-        set_known_hand(game, 1, list(bundle(ore=2, wheat=2)))
-        set_known_hand(game, 2, list(bundle(ore=5)))
-        game.current_player = 0
-        game.phase = Phase.MAIN
-        # One untyped card each for seats 1 and 2 -- which true resource it
-        # is differs, but the ledger (known/unknown) is identical either way.
-        a, b = (Resource.SHEEP, Resource.BRICK) if not swapped else (Resource.BRICK, Resource.SHEEP)
-        give_unknown(game, 1, a, 1)
-        give_unknown(game, 2, b, 1)
-        return game
-
-    give, want = bundle(wood=1), bundle(ore=1)
-    one = a_table(swapped=False)
-    two = a_table(swapped=True)
-    assert _record_says_the_same(one, two)
-    bot_one = a_bot(one, 40)
-    bot_two = a_bot(two, 40)
-    order = bot_one.rank_partners(one, 0, give, want)
-    assert order == (1, 2)
-    assert bot_two.rank_partners(two, 0, give, want) == order
-
-
-def test_counter_of_returns_a_valid_bundle_from_my_surplus_or_none():
-    game = after_setup(33)
-    for p in range(4):
-        set_known_hand(game, p, list(bundle()))
-    set_known_hand(game, 0, list(bundle(wood=3, brick=2)))
-    game.current_player = 1
-    game.phase = Phase.MAIN
-    bot = a_bot(game, 33)
-    standing = Offer(proposer=1, give=bundle(ore=1), want=bundle(wheat=2))
-
-    result = bot.counter_of(game, 0, standing)
-    assert result is not None
-    give, want = result
-    assert result in bot.candidate_bundles(game, 0)
-    counter = Offer(proposer=0, give=give, want=want)
-    assert well_formed(counter)
-    assert can_propose(game._state, counter)
-
-    clear_hand(game._state, 0)
-    assert bot.counter_of(game, 0, standing) is None
-
-
-def test_proposals_are_among_the_root_options_at_a_main_phase_position():
-    """A real four-`heximax`-seat game (seed 0, `max_nodes=64` -- the census
-    configuration) reaches a MAIN-phase decision where the search itself
-    chooses a MULTI-CARD `PROPOSE_TRADE`: proof the adapter's candidates are
-    actually among the root options during play, not merely present unused.
-    `choose` can only return an action `root_options` offered -- most
-    MAIN-phase positions score every candidate at or below `propose_margin`
-    (the crisp `willing` gate is strict), so this walks a real game to the
-    first one that does not, rather than asserting it of an arbitrary
-    position.
-
-    Review F: the earlier version of this test only checked for *any*
-    `PROPOSE_TRADE`, which P1's engine-sample one-for-one offer (already
-    present in `legal_actions`, `_root_options`'s "seen" union before P2's
-    filter/replace) would also satisfy -- so it passed unchanged with the P2
-    adapter reverted to P1's shape, proving nothing about the adapter
-    specifically. A one-for-one offer is not proof of anything P2-specific;
-    a *multi-card* one is, since P1's engine sample -- and the P1-shaped
-    `_root_options` this test would see with the adapter disabled -- can
-    never produce one (`trading-design.md` §1, "one-for-one offers only").
-    Verified by temporarily reverting `_root_options` to the P1 shape
-    (dropping the `propose_actions` extension) and re-running this test: it
-    fails with "heximax never chose a multi-card trade in this game", exactly
-    because no multi-card candidate ever reaches `root_options` without the
-    adapter. Re-enabled before this commit.
-    """
-    game = a_game(0)
-    bots = [heximax(game._state.board, random.Random(97 * s), max_nodes=64) for s in range(4)]
-    found = False
-    moves = 0
-    while not is_over(game) and moves < 2000:
-        seat = to_move(game)
-        action = bots[seat].choose(game)
-        if action.type is ActionType.PROPOSE_TRADE and (
-            sum(action.give) > 1 or sum(action.want) > 1
-        ):
-            found = True
-            break
-        apply(game, action)
-        moves += 1
-    assert found, "heximax never chose a multi-card trade in this game"
-
-
-def test_heximax_source_never_calls_responders_or_reads_pending_responders():
-    """`game.pending_responders` is the engine's true-hand eligibility list
-    and `trading.responders` is built from it (`bots.SearchBot._addressed`
-    uses both) -- both are off limits to an honest bot. The one line that
-    names `pending_responders` is the comment on `View.from_game` (moved
-    from `hexset.bots.heximax.belief.Belief.from_game` into the engine at
-    `hexset.view` in P0 of the trading-design registration) explaining why.
+def test_heximax_reads_the_true_state_only_where_it_says_so():
+    """Every `hidden=False` in heximax's own package carries a `# true state:`
+    comment saying why, and there are no other routes to the raw state: the
+    field is engine-private (`Game._state`), `game.state(seat)` is the honest
+    view, and `View.from_game(..., omniscient=True)` is the one omniscient
+    construction, reached only from `omniscient` mode.
 
     heximax is a package (`hexset.bots.heximax`, split by concern into
-    `evaluate`/`search`/`trade`/`presets`, plus the engine's own
-    `hexset.view`), not the single file this test was first written
-    against, so the source under test is every one of those modules
-    concatenated -- the invariant is about the package as a whole, not
-    about which file a line happens to live in now. The deprecated
-    top-level `heximax` shim is one import line and is not itself part of
-    the source this checks.
+    `evaluate`/`search`/`presets`), so the source under test is those
+    modules concatenated -- the invariant is about the package, not about
+    which file a line lives in.
     """
     import inspect
 
-    # Plain, unambiguous: `hexset.bots.__init__` re-exports none of
-    # `search2`/`evaluate`/`heximax`'s own names (the package's own rule --
-    # see its module docstring), so this dotted import names the submodule
-    # and nothing else, regardless of import order.
     import hexset.bots.heximax as heximax_pkg
-    import hexset.view as view
-    from hexset.bots.heximax import evaluate, presets, search, trade
+    from hexset.bots.heximax import evaluate, presets, search
 
-    source = "\n".join(
-        inspect.getsource(module)
-        for module in (heximax_pkg, view, evaluate, search, trade, presets)
-    )
-    assert "responders(" not in source
-    mentions = [line for line in source.splitlines() if "pending_responders" in line]
-    assert len(mentions) == 1
-    assert "is the engine's" in mentions[0]
+    lines: list[str] = []
+    for module in (heximax_pkg, evaluate, search, presets):
+        lines.extend(inspect.getsource(module).splitlines())
+
+    for i, line in enumerate(lines):
+        if "hidden=False" not in line or line.lstrip().startswith("#"):
+            continue
+        window = "\n".join(lines[max(0, i - 14) : i + 1])
+        assert "true state:" in window, f"unexplained true-state read: {line.strip()}"
+
+    source = "\n".join(lines)
+    assert "._state" not in source
+    assert source.count("omniscient=self.omniscient") <= 2

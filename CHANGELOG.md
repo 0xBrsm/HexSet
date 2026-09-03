@@ -1,8 +1,8 @@
 # Changelog
 
-All notable changes to HexSet are recorded here — the `hexset` engine
-(`hexset.bench`, `hexset.server`, `hexset.clients` included) and the
-`heximax` bot, both shipped from `src/` as one distribution.
+All notable changes to HexSet are recorded here — the `hexset` engine, its
+bots (`hexset.bots`), `hexset.bench`, `hexset.server`, `hexset.clients` and
+`hexset.gym`, shipped from `src/` as one distribution.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -11,6 +11,25 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Trading is one event a turn.** `hexset.trading.trade_event` clears deals
+  for the current player after the roll and the robber and before any build
+  is served: a one-for-one exchange executes when both seats' public
+  valuation vectors say it helps them *and* both seats' private gates
+  accept, best deal first, repeatedly, until nothing clears. No budget and
+  no cap — the gate must be strictly positive and is re-asked after every
+  exchange.
+- `Game.valuations` — every seat's public vector, five floats in `[-1, 1]`,
+  all-zero until something publishes; `Game.trades` and `Game.trades_made`
+  for the turn's exchanges; `Game.max_trades` (`0` off, `None` unbounded);
+  `Game.traders`, the per-seat objects the engine asks. `Game.num_players`.
+- `hexset.bots.Bot.valuation(view)` and
+  `Bot.accepts(view, received, counterparty)`, both defaulting to "this seat
+  never trades", so a bot written before the mechanic keeps working.
+- `PUT /api/games/<CODE>/valuation` sets the calling seat's vector; every
+  seat's `valuations` and the turn's `trades` ride in the game view and in
+  `GET /api/record`. The browser client gains five per-resource toggles and
+  a read-out of both.
+- Presets `search2-notrade` and `greedy-notrade`.
 - `hexset.gym` (`pip install -e ".[gym]"`): `HexSetAEC`, a PettingZoo
   `AECEnv` with one agent per seat and an honest `action_mask`; `HexSetEnv`,
   a single-agent Gymnasium `Env` (registered as `HexSet-v0`) with one
@@ -106,6 +125,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- ONNX record contract `"4"` → `"5"`: the four `offer_*` fields and
+  `pair_mask` are gone, `valuations` (`players × 5` floats) is added, and a
+  graph no longer needs a `pair_index` output. Contracts 2, 3 and 4 are
+  refused by name.
+- Flat action space 553 → 550, and `globals` 86 → 87 at four players.
+- `Entrant.max_offers`, `SearchBot.max_offers`, `Heximax.max_offers` and the
+  `max_offers` checkpoint metadata key are all `max_trades`; `network:<path>@0`
+  replaces `@<offers>`. `hexset.server.web`'s `--max-offers` is `--no-trade`.
+- `Record.offers` → `Record.trades`, with `hexset.record.steps`/`advance`
+  replaying them; the server journal records a step's trades the same way.
+- `hexset.server.rules` keeps only `options_for` and `is_legal`: with no
+  trade action, `hexset.actions.legal_actions` is the honest list for every
+  seat.
+
 - **`Game.state` is now a method, not a field.** `game.state(seat, *,
   hidden=True)` is the access path: `hidden=True` (the default) returns
   `seat`'s information-set `View` (`hexset.view`, moved from
@@ -166,6 +199,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Removed
 
+- **The offer protocol.** `Phase.TRADE_RESPOND`, `propose_trade`/
+  `accept_trade`/`decline_trade`, `Offer`, `Game.offer`/`.pending_responders`/
+  `.offers_made`/`.offered`, `MAX_OFFERS_PER_TURN`, `trading.responders`/
+  `well_formed`/`can_propose`/`can_accept`, `actions._offer_actions`,
+  `within_offer_budget`, `Action.give`/`.want`/`.ask`, `pair_index`/
+  `pair_mask`/`NUM_PAIRS`, `server.rules.fair_legal_actions`/
+  `proposable_options`, `SearchBot.partner_choice` and the `greedy-partner`,
+  `greedy-offers1`/`2`/`3` and `search2-offers3` presets.
+- The `heximax` top-level compatibility package (`import heximax` —
+  use `hexset.bots.heximax`), the `hexset.evaluate` shim (use
+  `hexset.bots.evaluate`), and the `Belief` alias for `hexset.view.View`.
 - ONNX contract 1 is no longer served. `onnxbot` refuses a contract-1 or
   contract-unspecified checkpoint by name; the server serves contracts 2, 3
   and 4 only. `encoding_v1.py` and `OnnxPolicy` are deleted.

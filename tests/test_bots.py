@@ -12,18 +12,16 @@ from hexset.bots import RandomBot, SearchBot, greedy, own, paranoid, relative
 from hexset.cards import DevCard
 from hexset.bots.evaluate import Evaluator
 from hexset.game import (
-    MAX_OFFERS_PER_TURN,
     ROLL_ODDS,
     Phase,
     imagine,
     is_over,
-    propose_trade,
     roll_dice,
     start,
     to_move,
 )
-from hexset.state import place_settlement, upgrade_to_city
-from hexset.trading import bundle
+from hexset.state import copy_state, place_settlement, upgrade_to_city
+from hexset.trading import NO_VALUATION, one_for_one
 from hexset.victory import victory_points
 from helpers import clear_hand, give, independent_vertices, mini_board
 
@@ -219,11 +217,13 @@ def test_a_relative_bot_still_takes_a_winning_build():
     assert chosen == Action(ActionType.BUILD_CITY, vertex)
 
 
-def a_trade_that_wins_the_game_for_the_proposer():
-    """Player 0 is nine points and one ore short of a winning city, and asks.
+def a_trade_that_wins_the_game_for_the_counterparty():
+    """Player 0 is nine points and one ore short of a winning city.
 
-    The offer is good for player 1 in isolation — it moves their hand closer to
-    a settlement — and fatal in context, because taking it ends the game.
+    The exchange is good for player 1 in isolation -- it moves their hand
+    closer to a settlement -- and fatal in context, because it ends the game
+    in somebody else's favour. This is the whole of what the private gate
+    exists for (`hexset.trading`): the public vectors would advertise it.
     """
     board = mini_board()
     game = start(board, 4, random.Random(0))
@@ -247,24 +247,66 @@ def a_trade_that_wins_the_game_for_the_proposer():
     give(game._state, 1, Resource.ORE, 1)
     give(game._state, 1, Resource.BRICK, 1)
     give(game._state, 1, Resource.WHEAT, 1)
-
-    propose_trade(game, bundle(wood=1), bundle(ore=1))
-    assert game.pending_responders == [1]
     return game
 
 
-def test_a_relative_bot_will_not_trade_the_leader_into_a_win():
-    game = a_trade_that_wins_the_game_for_the_proposer()
-    evaluator = Evaluator(game._state.board)
+def test_the_gate_takes_a_good_exchange_and_refuses_a_bad_one():
+    game = a_trade_that_wins_the_game_for_the_counterparty()
+    bot = SearchBot(Evaluator(game._state.board), depth=2, width=6, rng=random.Random(0))
+    # Seat 0 is one ore short of a city: the ore is worth more than the wood.
+    wanted = one_for_one(int(Resource.WOOD), int(Resource.ORE))
+    assert bot.accepts(game.state(0), wanted, 1) is True
+    assert bot.accepts(game.state(0), tuple(-n for n in wanted), 1) is False
 
-    def responds_with(stance: str) -> ActionType:
-        bot = SearchBot(
-            evaluator, depth=2, width=6, rng=random.Random(0), stance=stance
-        )
-        return bot.choose(game).type
 
-    assert responds_with("own") is ActionType.ACCEPT_TRADE
-    assert responds_with("relative") is ActionType.DECLINE_TRADE
+def test_the_gate_prices_who_gets_stronger():
+    """Where partner-dependence lives: the exchange's "after" includes the
+    counterparty's new hand, so under a stance that can tell opponents apart
+    the same bundle is worth different amounts depending on who is across
+    the table. Nothing about the bundle says this -- the after-state does.
+    """
+    game = a_trade_that_wins_the_game_for_the_counterparty()
+    clear_hand(game._state, 2)
+    give(game._state, 2, Resource.ORE, 1)
+    give(game._state, 2, Resource.SHEEP, 3)
+    bot = SearchBot(
+        Evaluator(game._state.board), depth=2, width=6,
+        rng=random.Random(0), stance="paranoid",
+    )
+    wanted = one_for_one(int(Resource.WOOD), int(Resource.ORE))
+    view = game.state(0)
+
+    def value(counterparty: int) -> float:
+        after = copy_state(view.state)
+        for r, n in enumerate(wanted):
+            after.hands[0][r] += n
+            after.hands[counterparty][r] -= n
+        return paranoid(bot.evaluator.evaluate(after, 0), 0)
+
+    assert value(1) != pytest.approx(value(2))
+
+
+def test_a_bot_that_never_trades_publishes_nothing_and_refuses_everything():
+    game = a_trade_that_wins_the_game_for_the_counterparty()
+    quiet = greedy(Evaluator(game._state.board), random.Random(0), max_trades=0)
+    assert quiet.valuation(game.state(1)) == NO_VALUATION
+    assert quiet.accepts(game.state(1), one_for_one(4, 0), 0) is False
+
+
+def test_the_published_vector_names_one_want_and_one_give():
+    game = a_trade_that_wins_the_game_for_the_counterparty()
+    bot = greedy(Evaluator(game._state.board), random.Random(0))
+    published = bot.valuation(game.state(0))
+    assert sorted(published) == [-1.0, 0.0, 0.0, 0.0, 1.0]
+    # The give side can only be a card actually held.
+    assert game._state.hands[0][published.index(-1.0)] > 0
+
+
+def test_a_seat_with_an_empty_hand_advertises_nothing():
+    game = a_trade_that_wins_the_game_for_the_counterparty()
+    clear_hand(game._state, 2)
+    bot = greedy(Evaluator(game._state.board), random.Random(0))
+    assert bot.valuation(game.state(2)) == NO_VALUATION
 
 
 def test_only_subtracting_the_max_can_tell_opponents_apart():
@@ -280,76 +322,6 @@ def test_only_subtracting_the_max_can_tell_opponents_apart():
 
     assert relative(feed_the_leader, 0) == pytest.approx(relative(feed_a_trailer, 0))
     assert paranoid(feed_a_trailer, 0) > paranoid(feed_the_leader, 0)
-
-
-def a_table_where_one_seat_is_far_ahead():
-    """Seats 1 and 3 can both cover the same offer. Seat 1 has eight points."""
-    board = mini_board()
-    game = start(board, 4, random.Random(0))
-    game.phase = Phase.MAIN
-    game.current_player = 0
-
-    spots = independent_vertices(board, 6)
-    for vertex in spots[:4]:
-        place_settlement(game._state, 1, vertex, connected=False)
-        upgrade_to_city(game._state, 1, vertex)
-    place_settlement(game._state, 3, spots[4], connected=False)
-
-    for player in range(4):
-        clear_hand(game._state, player)
-    give(game._state, 0, Resource.WOOD, 2)
-    give(game._state, 1, Resource.ORE, 1)
-    give(game._state, 3, Resource.ORE, 1)
-    return game, board
-
-
-def test_a_choosing_proposer_asks_the_player_it_costs_least_to_feed():
-    game, board = a_table_where_one_seat_is_far_ahead()
-    action = Action(
-        ActionType.PROPOSE_TRADE, give=bundle(wood=2), want=bundle(ore=1)
-    )
-    bot = greedy(
-        Evaluator(board), random.Random(0), stance="paranoid", partner_choice=True
-    )
-    assert bot._addressed(game, action, 0).ask == (3, 1)
-
-
-def test_a_proposer_that_does_not_choose_names_nobody():
-    game, board = a_table_where_one_seat_is_far_ahead()
-    action = Action(
-        ActionType.PROPOSE_TRADE, give=bundle(wood=2), want=bundle(ore=1)
-    )
-    plain = greedy(Evaluator(board), random.Random(0), stance="paranoid")
-    assert plain._addressed(game, action, 0).ask == ()
-
-
-def _offers_per_turn(max_offers: int | None, actions: int = 1200) -> int:
-    """Most offers any one turn saw, with every seat sharing the same budget."""
-    game = a_game(seed=3)
-    bots = [
-        greedy(Evaluator(game._state.board), random.Random(seat), max_offers=max_offers)
-        for seat in range(4)
-    ]
-    peak = 0
-    for _ in range(actions):
-        if is_over(game):
-            break
-        apply(game, bots[to_move(game)].choose(game))
-        peak = max(peak, game.offers_made)
-    return peak
-
-
-def test_a_bot_can_hold_itself_below_the_engines_offer_cap():
-    """The cap has to be the bot's own, not the engine's.
-
-    An engine-wide limit lands on both entrants, and a duel cannot see a
-    capability everyone receives. So this pins that the budget is spent by the
-    bot while `MAX_OFFERS_PER_TURN` still permits more, which is the only
-    arrangement that can measure what the extra offers are worth.
-    """
-    assert MAX_OFFERS_PER_TURN > 2
-    assert _offers_per_turn(2) == 2
-    assert _offers_per_turn(None) > 2
 
 
 def test_the_same_seed_plays_the_same_game():

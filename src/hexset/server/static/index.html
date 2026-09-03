@@ -336,6 +336,20 @@
      hugs the two board edges instead of running a column up the left one.
      Placed by name, so this holds whatever order renderPieceSupply happens
      to build the three tiles in. */
+  #trading { margin-top: 10px; font-size: 12px; }
+  #trading h4 { margin: 0 0 4px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; opacity: .65; }
+  .val-row { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+  .val-row .val-name { width: 46px; opacity: .8; }
+  .val-row button {
+    width: 26px; padding: 2px 0; font-size: 11px; line-height: 1;
+    border-radius: 6px; cursor: pointer;
+  }
+  .val-row button.on { background: var(--accent); color: #fff; }
+  .val-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+  .val-table th, .val-table td { padding: 1px 3px; text-align: right; font-variant-numeric: tabular-nums; }
+  .val-table th:first-child, .val-table td:first-child { text-align: left; }
+  .val-table th { opacity: .6; font-weight: 500; }
+  #trading .trade-line { opacity: .8; margin-top: 2px; }
   #piece-supply {
     position: absolute; left: 16px; bottom: 16px; display: grid; gap: 6px;
     grid-template-columns: repeat(2, 34px);
@@ -697,6 +711,7 @@
     <div id="play-area">
       <div id="players"></div>
       <div id="hand"></div>
+      <div id="trading"></div>
       <div id="notice"></div>
     </div>
     <div id="log"></div>
@@ -878,6 +893,15 @@ function authHeaders(extra) {
 async function getJSON(path) {
   const res = await fetch(path, {headers: authHeaders()});
   return res.json();
+}
+
+async function putJSON(path, body) {
+  const res = await fetch(path, {
+    method: "PUT",
+    headers: authHeaders({"Content-Type": "application/json"}),
+    body: JSON.stringify(body || {}),
+  });
+  return {ok: res.ok, data: await res.json()};
 }
 
 async function postJSON(path, body) {
@@ -1324,6 +1348,7 @@ function render() {
   renderStatus();
   renderPlayers();
   renderHand();
+  renderTrading();
   renderBoardDynamic();
   renderPieceSupply();
   renderBoardButtons();
@@ -1577,6 +1602,70 @@ function renderHand() {
 // this can't drift from what can_place_settlement/_road/_city actually
 // enforce; built counts are just what's already on the board in this seat's
 // colour.
+// The whole human interface to trading (`hexset.trading`): five per-resource
+// toggles that PUT this seat's valuation vector, plus what everyone else has
+// published and what the engine cleared this turn. Deliberately minimal --
+// there is nothing to propose, accept or decline, and the richer negotiation
+// surface is deferred by the trading design. A trade takes effect at the next
+// trade event, which is the next time a main phase opens.
+async function setValuation(index, value) {
+  const vector = (state.valuations[state.seat] || [0, 0, 0, 0, 0]).slice();
+  vector[index] = vector[index] === value ? 0 : value;
+  const {ok, data} = await putJSON(`/api/games/${state.code || tableCode}/valuation`, {valuation: vector});
+  if (!ok) { showNotice(data.error || "could not set that valuation"); return; }
+  state = data;
+  render();
+}
+
+function renderTrading() {
+  const container = document.getElementById("trading");
+  container.innerHTML = "";
+  if (!state.valuations || state.seat === null || state.seat === undefined) return;
+
+  container.appendChild(html("h4", {}, "What I want / would give"));
+  const mine = state.valuations[state.seat] || [0, 0, 0, 0, 0];
+  board.resources.forEach((name, index) => {
+    const row = html("div", {class: "val-row"});
+    row.appendChild(html("div", {class: "val-name"}, name));
+    for (const [label, value] of [["\u2212", -1], ["0", 0], ["+", 1]]) {
+      const on = value === 0 ? mine[index] === 0 : mine[index] === value;
+      const button = html("button", {class: on ? "on" : "", title: `${name}: ${label}`}, label);
+      button.addEventListener("click", () => setValuation(index, value));
+      row.appendChild(button);
+    }
+    container.appendChild(row);
+  });
+
+  const table = html("table", {class: "val-table"});
+  const head = html("tr", {});
+  head.appendChild(html("th", {}, "Seat"));
+  for (const name of board.resources) head.appendChild(html("th", {}, name.slice(0, 2)));
+  table.appendChild(head);
+  state.valuations.forEach((vector, seat) => {
+    const row = html("tr", {});
+    row.appendChild(html("td", {}, seat === state.seat ? "you" : `P${seat + 1}`));
+    for (const v of vector) row.appendChild(html("td", {}, v ? v.toFixed(2) : "\u00b7"));
+    table.appendChild(row);
+  });
+  container.appendChild(table);
+
+  container.appendChild(html("h4", {style: "margin-top:8px"}, "Trades this turn"));
+  if (!state.trades || !state.trades.length) {
+    container.appendChild(html("div", {class: "trade-line"}, "none"));
+  } else {
+    for (const trade of state.trades) {
+      container.appendChild(html("div", {class: "trade-line"},
+        `P${trade.a + 1} gave ${bundleText(trade.gave)} to P${trade.b + 1} for ${bundleText(trade.got)}`));
+    }
+  }
+}
+
+function bundleText(counts) {
+  const parts = [];
+  counts.forEach((n, index) => { if (n) parts.push(`${n} ${board.resources[index]}`); });
+  return parts.join(", ") || "nothing";
+}
+
 function renderPieceSupply() {
   const container = document.getElementById("piece-supply");
   container.innerHTML = "";

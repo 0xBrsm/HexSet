@@ -28,7 +28,7 @@ from hexset.catanatron.duel import _ensure_pythonhashseed_zero, provenance, run_
 
 
 def test_sharded_duel_matches_single_process_semantics():
-    result = run_duel("DC:search2-offers3,R,R,R", num_games=8, workers=4, seed=1)
+    result = run_duel("DC:search2-notrade,R,R,R", num_games=8, workers=4, seed=1)
     assert result.games == 8
     assert sum(result.wins.values()) == 8  # every game has exactly one winner
     dc_color = next(iter(result.labels))
@@ -38,7 +38,7 @@ def test_sharded_duel_matches_single_process_semantics():
 
 
 def test_shards_are_capped_at_the_requested_game_count_even_when_uneven():
-    result = run_duel("DC:search2-offers3,R,R,R", num_games=5, workers=4, seed=2)
+    result = run_duel("DC:search2-notrade,R,R,R", num_games=5, workers=4, seed=2)
     assert result.games == 5
     assert sum(result.wins.values()) == 5
 
@@ -50,7 +50,7 @@ def test_hashseed_already_pinned_does_not_reexec():
         calls.append((path, argv, env))
 
     reexecd = _ensure_pythonhashseed_zero(
-        argv=["duel.py", "--players=DC:search2-offers3,R,R,R"],
+        argv=["duel.py", "--players=DC:search2-notrade,R,R,R"],
         env={"PYTHONHASHSEED": "0", "OTHER": "kept"},
         execve=fake_execve,
     )
@@ -66,7 +66,7 @@ def test_hashseed_unpinned_reexecs_with_the_module_form_and_seed_zero(ambient):
     def fake_execve(path, argv, env):
         calls.append((path, argv, env))
 
-    argv = ["/some/path/duel.py", "--players=DC:search2-offers3,R,R,R", "--num=8"]
+    argv = ["/some/path/duel.py", "--players=DC:search2-notrade,R,R,R", "--num=8"]
     env = {**ambient, "OTHER": "kept"}
 
     reexecd = _ensure_pythonhashseed_zero(argv=argv, env=env, execve=fake_execve)

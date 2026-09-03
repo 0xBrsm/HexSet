@@ -288,22 +288,27 @@ def test_a_tree_that_draws_no_hidden_card_searches_exactly_as_it_did_before():
     that consumed a draw in a different order could reproduce one and not the
     other.
 
-    Re-pinned 2026-08-30 for a *rules* change, not a search change: an offer
-    is now put to the table in a random order drawn from the game's RNG
-    (`game.propose_trade`), so every imagined game in the tree consumes draws
-    it did not before. Values at `33c6032` were `[39, 3, 3, 2, 3, 3, 5, 9, 29]`
-    and `0.2094563824951179`. The search code between the two pins is
-    unchanged; anything that moves these numbers from here on is the search.
+    Re-pinned twice for *rules* changes, never for a search change. 2026-08-30:
+    an offer was put to the table in a random order drawn from the game's RNG,
+    so every imagined game consumed draws it had not before
+    (`[39, 3, 3, 2, 3, 3, 5, 9, 29]` / `0.2094563824951179` at `33c6032`
+    became `[39, 3, 2, 2, 2, 2, 6, 9, 31]` / `0.18477324009849416`). Now:
+    trading is one engine event and no longer an action, and the first main
+    phase after setup had only the offer sample to branch on -- one option
+    left, which is no tree at all. The position is therefore driven forward
+    to the first main phase with six real options, and the numbers re-pinned
+    there. The search code across all three pins is unchanged; anything that
+    moves these numbers from here on is the search.
     """
     game = after_setup()
-    while game.phase is not Phase.MAIN:
+    while game.phase is not Phase.MAIN or len(legal_actions(game)) < 6:
         apply(game, legal_actions(game)[0])
 
     rng = random.Random(5)
     _, _, visits = NoHiddenDraw(Anchor(), simulations=96, wave=8, rng=rng).run(game)
 
-    assert [int(v) for v in visits] == [39, 3, 2, 2, 2, 2, 6, 9, 31]
-    assert rng.random() == 0.18477324009849416
+    assert [int(v) for v in visits] == [9, 2, 2, 71, 2, 10]
+    assert rng.random() == 0.34074053550422223
 
 
 def test_a_setup_tree_searches_exactly_as_it_did_before():

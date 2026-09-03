@@ -21,8 +21,8 @@ Two independent parts make up the contract:
 | --- | --- | --- |
 | `players` | table size the graph was traced for | required |
 | `num_hexes` / `num_vertices` / `num_edges` | board-shape fingerprint; a mismatched board fails the load rather than running on meaningless input | required |
-| `contract` | which graph shape below applies: `2`, `3` or `4` for the record shape | refused if absent — see below |
-| `max_offers` | trade-offer budget the run trained under | engine's cap |
+| `contract` | which graph shape below applies: `5`, the record shape | refused if absent — see below |
+| `max_trades` | `0` to switch trading off for this checkpoint | trading on |
 | `search` | `mcts` to search over the model's own priors; anything else plays one forward pass | none |
 | `simulations` | descents per decision, when `search=mcts` (clamped to 4096) | 128 |
 | `wave` | leaves batched per expansion, when `search=mcts` (clamped to 256) | 16 |
@@ -37,23 +37,23 @@ fact about the machine serving the game, not the checkpoint.
 
 **The `contract` number is assigned by the exporter, not by this repo.**
 `hexset.export_onnx._CONTRACT_VERSION` is the one definition; `hexset.server`
-reads it and never writes it. The record shape has three numbers because it
-grew twice: `2` is the original 23 fields, `3` adds the four live-offer
-fields, `4` adds the two public-knowledge ledger fields. A graph declares the
-fields it wants and is fed exactly those, so all three load and play off the
-one record the engine builds — a checkpoint does not have to be re-exported
-to keep working. An unknown number is refused at load with the number named,
+reads it and never writes it. A graph declares the fields it wants and is fed
+exactly those, so a graph that predates a field this record has gained still
+loads and plays. An unknown number is refused at load with the number named,
 rather than failing later on its first move with a missing-input error.
 
-**Contract 1 is no longer served.** It was the original shape — the engine
-encoded the position into feature tensors itself, and the graph was a bare
-policy/value head, masked and softmaxed in Python. The owner dropped it
-2026-09-02 (`docs/engine-divergence-2026-09-02.md`, B5): a `contract=1` file,
-or one with no `contract` key at all, is refused at load exactly like a
-future unknown number, naming the contract found and the numbers this server
-still serves (`2, 3, 4`).
+**Only contract 5 is served.** 2, 3 and 4 are the offer protocol's
+contracts — 3 added four live-offer fields, 4 the two public-knowledge ledger
+fields, and all three declare a `pair_mask` input and a `pair_index` output
+for the one-for-one give/want heads. Trading is now one engine event with no
+actions at all (see §4), so those graphs describe a game this engine does not
+play: there is no honest way to feed them, and they are refused by name.
+Contract 1 — the original shape, where the engine encoded the position into
+feature tensors and the graph was a bare policy/value head masked in Python —
+went the same way on 2026-09-02
+(`docs/engine-divergence-2026-09-02.md`, B5).
 
-## 2. The graph — the record contracts (`2`, `3`, `4`)
+## 2. The graph — the record contract (`5`)
 
 The engine builds a **record**: the position stated in the rules' own terms,
 already filtered to what the perspective seat may legally know. The graph
@@ -89,49 +89,51 @@ Leading batch axis `B` on every tensor.
 | `hand_totals` | `(B, players)` | int64 |
 | `own_dev` | `(B, NUM_DEV_CARDS)` | int64 |
 | `dev_totals` | `(B, players)` | int64 |
-| `offer_give` | `(B, NUM_RESOURCES)` | int64 |
-| `offer_want` | `(B, NUM_RESOURCES)` | int64 |
-| `offer_proposer` | `(B,)` | int64 |
-| `offer_answered` | `(B, players)` | int64 |
+| `valuations` | `(B, players, NUM_RESOURCES)` | float32 |
 | `ledger_known` | `(B, players, NUM_RESOURCES)` | int64 |
 | `ledger_unknown` | `(B, players)` | int64 |
 | `action_mask` | `(B, space.size)` | bool |
-| `pair_mask` | `(B, NUM_PAIRS)` | bool |
 
 **Outputs:**
 
 | Name | Shape | Note |
 | --- | --- | --- |
 | `action_index` | `(B,)` int64 | argmax over the masked distribution |
-| `pair_index` | `(B,)` int64 | argmax over the masked off-diagonal offers |
 | `prior` | `(B, space.size)` | normalised over legal actions, zero elsewhere |
-| `pair_prior` | `(B, NUM_PAIRS)` | normalised over legal offers |
 | `value` | `(B, players)` | board-seat order, already un-rotated |
 
-`NetworkBot` reads `action_index`/`pair_index`; searches read
-`prior`/`pair_prior`/`value`. One graph serves both.
+`NetworkBot` reads `action_index`; searches read `prior`/`value`. One graph
+serves both.
 
 **The engine drift this section used to list is gone.** This server no longer
 carries its own copy of the engine: it depends on the `hexset` package (now
 one distribution together with the gym, see the CHANGELOG's "one
-distribution" entry), so the `offered` re-proposal filter and the RNG-drawn
-trade-responder order are simply what this server plays now, exactly as
-dev-HexNet does. See
+distribution" entry), so what it plays is exactly what dev-HexNet plays. See
 [`engine-divergence-2026-09-02.md`](engine-divergence-2026-09-02.md) for the
 full account of what the copy held and how each difference was resolved.
 
-**One difference remains, deliberately, and it is not tensor-shaped.** The
-`action_mask`/`pair_mask` a checkpoint is served here are built over the
-*honest* trade sample (`hexset.server.rules.fair_legal_actions`): every
-one-for-one offer the mover's own hand affords, with no filter for whether
-some opponent could cover it. The engine's own `legal_actions` filters by
-opponents' true hands, and dev-HexNet's training record uses that. So a
-checkpoint served here sees `want` slots it never saw enabled in training.
-This is on purpose — the alternative tells a human, on every turn, exactly
-what is in a specific opponent's hand — and it now applies to *every* seat,
-embedded bots included, rather than only to the ones on the wire. The cost
-has not been measured; the audit document asks the PI for a before/after
-duel.
+**The one mask difference that used to remain is gone too.** The
+`action_mask` served here was built over an *honest* trade sample, because
+the engine's own `legal_actions` filtered the offer sample by opponents'
+true hands and telling a human that would give away a specific opponent's
+hand. There is no offer sample: trading is not an action, no remaining
+action's legality depends on another seat's hand, and there is now one list,
+`hexset.actions.legal_actions`, for every seat.
+
+## 3. Trading
+
+A checkpoint does not act to trade. Every seat holds a **public valuation
+vector** — `valuations` above, five floats in `[-1, 1]` per seat in
+board-seat order, positive for "I want more of this" — and once a turn, after
+the roll and the robber and before any build is served, the engine clears
+exchanges between the current player and each other seat: one card for one
+card, executed when both sides' vectors say it helps them and both sides'
+private gates accept, best deal first, until nothing clears.
+
+A graph publishes nothing yet: a network seat's vector stays all-zero, so a
+served checkpoint never trades — but the table does, and the record it is fed
+carries every seat's vector and hands that a trade has moved. `max_trades=0`
+in the metadata is the explicit off switch.
 
 ## What is never part of this contract
 

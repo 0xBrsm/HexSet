@@ -113,13 +113,15 @@ def test_a_negative_victory_point_coefficient_is_refused():
 
 
 def test_fitted_weights_are_usable_by_the_evaluator():
-    # Ten games, not four: below that the fit is under-determined enough that
-    # the victory-point coefficient can come out negative and the rescale
-    # refuses. The floor rises with the term count — six sufficed until
-    # `scarce` made it ten terms, and eight still fails. This is a plumbing
+    # Twenty games, not four: below that the fit is under-determined enough
+    # that the victory-point coefficient can come out negative and the
+    # rescale refuses. The floor rises with the term count — six sufficed
+    # until `scarce` made it ten terms — and with whatever the recording bots
+    # actually do, which is why it moved from ten to twenty when trading
+    # stopped being an action (sixteen still fails). This is a plumbing
     # check, not a claim that the fit is any good — see the recorded result
     # that these weights lose every game.
-    samples = build(some_records(10), stride=20)
+    samples = build(some_records(20), stride=20)
     weights = fit(samples, epochs=100).weights()
     assert isinstance(weights, Weights)
     assert weights.victory_point == 1.0

@@ -104,6 +104,10 @@ def a_two_action_record() -> tuple[Record, tuple[Action, Action]]:
             (int(first.type), first.a, first.b),
             (int(second.type), second.a, second.b),
         ),
+        # This record is never replayed (`score` only walks its actions), so
+        # an empty chance stream is fine -- unlike `record_game`'s own
+        # records, which always carry a real one.
+        chance=(),
         trades=(),
         winner=None,
         turns=0,

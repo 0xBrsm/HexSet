@@ -66,6 +66,7 @@ from dataclasses import dataclass, field
 from hexset.actions import Action, ActionType, apply, legal_actions, victim_of
 from hexset.board.board import Board
 from hexset.board.terrain import NUM_RESOURCES
+from hexset.chance import Forced, Live
 from ..evaluate import hand_shifted
 from ..search2 import STANCES, options_for
 from hexset.game import ROLL_ODDS, Game, Phase, imagine, is_over, roll_dice, to_move
@@ -119,23 +120,6 @@ MARGINAL_SCALE = 0.006413829636547007
 
 class _Exhausted(Exception):
     """The leaf budget ran out mid-search; the caller falls back."""
-
-
-class _Forced:
-    """A stand-in for the game's RNG that makes `robber.steal` take one card.
-
-    `steal` draws `randrange(total)` and walks the hand in resource order, so
-    returning the index of the first card of the wanted resource makes the
-    draw deterministic. Nothing else on the steal path consults the RNG.
-    """
-
-    __slots__ = ("index",)
-
-    def __init__(self, index: int) -> None:
-        self.index = index
-
-    def randrange(self, _stop: int) -> int:
-        return self.index
 
 
 class _ShiftedBelief:
@@ -732,9 +716,9 @@ class Heximax:
                     continue
                 hand[donor] -= 1
                 hand[resource] += 1
-            child.rng = _Forced(sum(hand[:resource]))  # type: ignore[assignment]
+            child.chance = Forced(resource)
             apply(child, action)
-            child.rng = self.rng
+            child.chance = Live(self.rng)
             children.append((weight, child))
         if not children:
             return [(1.0, self._plain_child(game, action))]

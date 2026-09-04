@@ -28,7 +28,9 @@ from hexset.actions import apply
 from hexset.arena import MAX_ACTIONS, Entrant, base_name, seat_of, spawn
 from hexset.board.board import random_base_board
 from hexset.board.terrain import NUM_RESOURCES
+from hexset.chance import Live, Recording
 from hexset.game import Phase, is_over, start, to_move
+from hexset.record import Record, board_fields
 from hexset.trading import publish_valuation
 from hexset.victory import victory_points
 
@@ -90,8 +92,10 @@ def _play_census(
     index: int,
     seed: int,
     action_cap: int,
-) -> tuple[list[TradeRecord], int | None, int]:
-    """Play one game, returning its trades plus (winning entrant, turns).
+    keep_record: bool = False,
+) -> tuple[list[TradeRecord], int | None, int, tuple[int, ...], Record | None]:
+    """Play one game, returning its trades plus (winning entrant, turns,
+    points, record).
 
     Instrumentation reads only the hands (the raw array) for bookkeeping
     snapshots, through `game.state(0, hidden=False)` -- the sanctioned
@@ -105,6 +109,18 @@ def _play_census(
     detected as a length delta against a per-turn counter, checked both
     before and after `apply()` each iteration to catch a burst that fires
     and then gets cleared inside one loop pass.
+
+    `keep_record=True` additionally tracks the action list and the chance
+    stream (`hexset.chance.Recording`) and returns a `hexset.record.Record`
+    of this exact game -- a separate, parallel tally from `harvest`'s own
+    per-trade rows above: `harvest` is delayed by up to one loop iteration
+    for a trade an `apply()` call itself triggered (harmless for its
+    turn/phase bookkeeping, since a trade never crosses a turn boundary) but
+    a `Record`'s trades must be attributed to the exact step they cleared
+    inside for `replay` to reapply them in the right place
+    (`hexset.record.record_game`'s own docstring on why), so this keeps its
+    own `before`/`after` `game.trades` bookkeeping around `publish_valuation`
+    and `apply` instead of reusing `harvest`'s.
     """
     seats = len(entrants)
     pair, half = divmod(index, 2)
@@ -119,11 +135,16 @@ def _play_census(
         lineup[seat] = spawn(entrant, board, random.Random(f"{seed}:{pair}:{e}"))
         names[seat] = base_name(entrant.name)
 
-    game = start(board, seats, random.Random(f"{seed}:{pair}:game"))
+    game_seed = f"{seed}:{pair}:game"
+    rng = random.Random(game_seed)
+    chance = Recording(Live(rng)) if keep_record else None
+    game = start(board, seats, rng, chance=chance)
     game.gates = tuple(lineup)
     game.max_trades = None
 
     records: list[TradeRecord] = []
+    action_log: list[tuple[int, int, int]] = []
+    record_trades: list[tuple[int, int, int, tuple[int, ...]]] = []
     baseline = [tuple(h) for h in game.state(0, hidden=False).hands]
     seen_this_turn = 0
 
@@ -179,11 +200,26 @@ def _play_census(
         seat = to_move(game)
         bot = lineup[seat]
         if game.publish_due(seat):
+            if keep_record:
+                before = len(game.trades)
             publish_valuation(game, seat, bot)
+            if keep_record:
+                for trade in game.trades[before:]:
+                    record_trades.append(
+                        (len(action_log) - 1, trade.a, trade.b, tuple(trade.received))
+                    )
         harvest(game.turns, game.phase)
+        if keep_record:
+            before = len(game.trades)
         action = bot.choose(game)
         harvest(game.turns, game.phase)
         apply(game, action)
+        if keep_record:
+            for trade in game.trades[before:]:
+                record_trades.append(
+                    (len(action_log), trade.a, trade.b, tuple(trade.received))
+                )
+            action_log.append((int(action.type), action.a, action.b))
         actions += 1
         if len(game.trades) < seen_this_turn:
             seen_this_turn = 0
@@ -196,14 +232,27 @@ def _play_census(
         victory_points(game.state(seats_taken[e], hidden=False), seats_taken[e])
         for e in range(seats)
     )
-    return records, winner, game.turns, points
+    game_record = None
+    if keep_record:
+        game_record = Record(
+            num_players=seats,
+            seed=game_seed,
+            first=game.first,
+            actions=tuple(action_log),
+            chance=tuple(chance.events),
+            trades=tuple(record_trades),
+            winner=game.won_by,
+            turns=game.turns,
+            **board_fields(board),
+        )
+    return records, winner, game.turns, points, game_record
 
 
 def _play_one(
-    job: tuple[tuple[Entrant, ...], int, int, int]
-) -> tuple[list[TradeRecord], int | None, int, tuple[int, ...]]:
-    entrants, index, seed, action_cap = job
-    return _play_census(entrants, index, seed, action_cap)
+    job: tuple[tuple[Entrant, ...], int, int, int, bool]
+) -> tuple[list[TradeRecord], int | None, int, tuple[int, ...], Record | None]:
+    entrants, index, seed, action_cap, keep_record = job
+    return _play_census(entrants, index, seed, action_cap, keep_record)
 
 
 @dataclass
@@ -216,6 +265,9 @@ class CensusResult:
     # Tournament.points`'s own convention, so a lineup's win rate and its VP
     # margin can be read off the same record.
     points: list[tuple[int, ...]] = field(default_factory=list)
+    # One `Record` per game, in the same order as `winners`/`turns`/`points`
+    # -- only when `run_census(records=True)` asked for them.
+    records: list[Record] = field(default_factory=list)
 
     def to_json(self) -> dict:
         return {
@@ -234,13 +286,20 @@ def run_census(
     seed: int = 0,
     workers: int = 1,
     action_cap: int = MAX_ACTIONS,
+    records: bool = False,
 ) -> CensusResult:
     """Play `games` games (a multiple of 4, road_sweep's antithetic rotation)
-    and return every trade that cleared."""
+    and return every trade that cleared.
+
+    `records=True` additionally has every game build a `hexset.record.Record`
+    of itself (`_play_census`'s `keep_record`), collected into
+    `CensusResult.records` -- the games a `--records` file holds are exactly
+    the games this census counted, since both come from the one job.
+    """
     seats = len(entrants)
     if games % seats:
         raise ValueError(f"{games} games does not divide evenly over {seats} seats")
-    jobs = [(tuple(entrants), i, seed, action_cap) for i in range(games)]
+    jobs = [(tuple(entrants), i, seed, action_cap, records) for i in range(games)]
     if workers > 1:
         with Pool(min(workers, MAX_WORKERS)) as pool:
             outcomes = pool.map(_play_one, jobs, chunksize=1)
@@ -248,11 +307,13 @@ def run_census(
         outcomes = [_play_one(job) for job in jobs]
 
     result = CensusResult(games=games)
-    for records, winner, turns, points in outcomes:
-        result.trades.extend(records)
+    for trade_rows, winner, turns, points, game_record in outcomes:
+        result.trades.extend(trade_rows)
         result.winners.append(winner)
         result.turns.append(turns)
         result.points.append(points)
+        if game_record is not None:
+            result.records.append(game_record)
     return result
 
 
@@ -440,7 +501,20 @@ def main(argv: Sequence[str] | None = None) -> None:
         default=None,
         help="directory of hexset.server.journal .jsonl files to census instead of playing games",
     )
+    parser.add_argument(
+        "--records",
+        default=None,
+        help="append every game played as a v2 record (hexset.record.Record) "
+        "here. Not available with --from-journals -- convert those with "
+        "hexset.record.from_journal instead.",
+    )
     args = parser.parse_args(argv)
+
+    if args.records and args.from_journals is not None:
+        print("--records plays fresh games; it has nothing to add to --from-journals "
+              "(convert those files with hexset.record.from_journal instead)",
+              file=sys.stderr)
+        return
 
     if args.from_journals is not None:
         directory = args.from_journals
@@ -460,11 +534,23 @@ def main(argv: Sequence[str] | None = None) -> None:
         from hexset.arena import lineup_from_names
 
         entrants = lineup_from_names(args.bots)
-        result = run_census(entrants, args.games, seed=args.seed, workers=args.workers)
+        result = run_census(
+            entrants,
+            args.games,
+            seed=args.seed,
+            workers=args.workers,
+            records=bool(args.records),
+        )
         entrant_names = sorted({base_name(e.name) for e in entrants})
         summaries = summarize(result, entrant_names)
 
     print(table(summaries))
+    if args.records:
+        from hexset.record import write
+
+        Path(args.records).parent.mkdir(parents=True, exist_ok=True)
+        written = write(args.records, result.records)
+        print(f"appended {written} records to {args.records}")
     if args.out:
         payload = {
             "census": result.to_json(),

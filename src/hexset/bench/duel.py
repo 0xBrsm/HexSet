@@ -171,6 +171,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="really write nothing, for a throwaway probe",
     )
+    p.add_argument(
+        "--records",
+        default=None,
+        help="append every game played as a v2 record (hexset.record.Record) "
+        "here. Arena path only (--workers > 1): `train.versus` "
+        "(--workers 1) plays through hexnet's own batched collector, which "
+        "returns a verdict and no per-game history to record.",
+    )
     args = p.parse_args(argv)
 
     if args.threads:
@@ -217,6 +225,15 @@ def main(argv: list[str] | None = None) -> int:
 
     label_a = args.label_a or Path(args.a).stem
     label_b = args.label_b or Path(args.b).stem
+
+    if args.records and args.workers <= 1:
+        print(
+            "--records needs the arena path (--workers > 1): `train.versus` "
+            "(--workers 1) returns a verdict only, with no per-game history "
+            "to record.",
+            file=sys.stderr,
+        )
+        return 2
 
     if args.workers > 1:
         result = _via_arena(args, label_a, label_b, geometry)
@@ -314,8 +331,21 @@ def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY)
     lineup = sides(lineup_from_names(names), label_a, label_b, mine)
 
     started = time.monotonic()
-    tournament = compete(lineup, args.games, seed=args.duel_seed, workers=args.workers)
+    tournament = compete(
+        lineup,
+        args.games,
+        seed=args.duel_seed,
+        workers=args.workers,
+        records=bool(args.records),
+    )
     seconds = time.monotonic() - started
+
+    if args.records:
+        from hexset.record import write
+
+        Path(args.records).parent.mkdir(parents=True, exist_ok=True)
+        written = write(args.records, tournament.records)
+        print(f"appended {written} records to {args.records}", file=sys.stderr)
 
     grouped = pooled(tournament.standings, tournament.games)
     wins = grouped[0].wins

@@ -32,6 +32,7 @@ import random
 
 from hexset.board.terrain import NUM_RESOURCES, Resource
 from hexset.cards import DevCard, NUM_DEV_CARDS
+from hexset.chance import Live
 from hexset.game import Game, Phase, to_move
 from hexset.ledger import PublicLedger, SeatLedger
 from hexset.robber import DISCARD_THRESHOLD
@@ -232,6 +233,12 @@ def translate(catanatron_game, mapping: BoardMapping, rng: random.Random) -> tup
     game = Game(
         _state=state,
         rng=rng,
+        # This bridge never lets `game` itself resolve a chance event --
+        # catanatron owns the roll/steal/deck it is translating from, and
+        # `Game.chance`'s docstring on why `imagine` never inherits a real
+        # game's chance source applies here too: `Live(rng)` is the same
+        # inert default `hexset.game.start` would build from this `rng`.
+        chance=Live(rng),
         ledger=ledger,
         phase=phase,
         current_player=turn_seat,

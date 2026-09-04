@@ -48,6 +48,11 @@ if TYPE_CHECKING:
     # would deadlock that cycle on whichever of the two is cold-started
     # first. See `hexset.bots.heximax`'s own docstring for the full cycle.
     from .bots import Bot
+    # Same reasoning, the other direction: `hexset.record` imports
+    # `MAX_ACTIONS` from this module at load time, so a module-level import
+    # here would be the same cycle in reverse. `_play_one` imports it for
+    # real, locally, only when `--records` actually asks for one.
+    from .record import Record
 
 Z_95 = 1.959964
 
@@ -419,6 +424,12 @@ class Tournament:
     # this is the raw sequence a caller needs to ask a finer question of it —
     # e.g. whether length moves with a parameter, which a mean cannot answer.
     turns: tuple[int, ...] = ()
+    # One `Record` per game, in the same order as `winners`/`points`/`turns`
+    # -- only when `compete(records=True)` asked for them (empty otherwise,
+    # never partially filled). `hexset.bench.duel`'s `--records` is the
+    # caller: every game a duel counts toward its verdict is also what a
+    # `--records` file holds, because both come from the same job.
+    records: tuple["Record", ...] = ()
 
     def seat_balance(self, z: float = Z_95) -> list[tuple[int, int, tuple[float, float]]]:
         decided = sum(self.seat_wins)
@@ -475,18 +486,22 @@ def play(
 
 
 def _play_one(
-    job: tuple[tuple[Entrant, ...], int, int, int, bool],
-) -> tuple[int | None, int | None, int, tuple[int, ...]]:
-    """Play game `index`. Returns (winning entrant, winning seat, turns, points).
+    job: tuple[tuple[Entrant, ...], int, int, int, bool, bool],
+) -> tuple[int | None, int | None, int, tuple[int, ...], "Record | None"]:
+    """Play game `index`. Returns (winning entrant, winning seat, turns,
+    points, record).
 
     Points are in entrant rather than seat order, so they can be compared
-    across games that rotated the lineup differently.
+    across games that rotated the lineup differently. `record` is a
+    `hexset.record.Record` of the game just played when the job's `records`
+    flag is set, `None` otherwise -- never partially built, so a caller that
+    never asked for one never pays the extra bookkeeping either.
 
     Module level and taking only picklable arguments, so a pool can call it.
     Every random stream is derived from the seed and the game index, so a game
     plays identically whichever worker draws it and however many there are.
     """
-    entrants, index, seed, action_cap, antithetic = job
+    entrants, index, seed, action_cap, antithetic, records = job
     seats = len(entrants)
     # Antithetic pairing: the board comes from the pair, the rotation from the
     # position within it, so the two halves of a pair are the same board played
@@ -521,12 +536,13 @@ def _play_one(
             entrant, board, random.Random(f"{seed}:{board_index}:{e}")
         )
 
-    game = play(
-        lineup,
-        board,
-        random.Random(f"{seed}:{board_index}:game"),
-        action_cap=action_cap,
-    )
+    game_seed = f"{seed}:{board_index}:game"
+    rng = random.Random(game_seed)
+    record = None
+    if records:
+        game, record = _play_and_record(lineup, board, rng, action_cap, game_seed)
+    else:
+        game = play(lineup, board, rng, action_cap=action_cap)
     # true state: the verdict's own victory points include hidden
     # victory-point dev cards, so the final score is read off the truth.
     points = tuple(
@@ -534,8 +550,61 @@ def _play_one(
         for e in range(seats)
     )
     if game.won_by is None:
-        return None, None, game.turns, points
-    return seats_taken.index(game.won_by), game.won_by, game.turns, points
+        return None, None, game.turns, points, record
+    return seats_taken.index(game.won_by), game.won_by, game.turns, points, record
+
+
+def _play_and_record(
+    lineup: list[Bot],
+    board: Board,
+    rng: random.Random,
+    action_cap: int,
+    seed: str,
+) -> tuple[Game, "Record"]:
+    """`play`'s own loop, with the bookkeeping `hexset.record.record_game`
+    uses to build a `Record` alongside it -- the two are kept in step
+    deliberately: `--records` must record exactly the game `play` would have
+    played, not an approximation of it, so this is not `play` calling out to
+    a separate recorder but the same loop instrumented in place.
+    """
+    from .chance import Live, Recording
+    from .record import Record, board_fields
+
+    chance = Recording(Live(rng))
+    game = start(board, len(lineup), rng, chance=chance)
+    game.gates = tuple(lineup)
+    game.max_trades = None
+    actions: list[tuple[int, int, int]] = []
+    trades: list[tuple[int, int, int, tuple[int, ...]]] = []
+    steps_taken = 0
+    while not is_over(game) and steps_taken < action_cap:
+        seat = to_move(game)
+        bot = lineup[seat]
+        if game.publish_due(seat):
+            before = len(game.trades)
+            publish_valuation(game, seat, bot)
+            for trade in game.trades[before:]:
+                trades.append((len(actions) - 1, trade.a, trade.b, tuple(trade.received)))
+        before = len(game.trades)
+        action = bot.choose(game)
+        apply(game, action)
+        for trade in game.trades[before:]:
+            trades.append((len(actions), trade.a, trade.b, tuple(trade.received)))
+        actions.append((int(action.type), action.a, action.b))
+        steps_taken += 1
+
+    record = Record(
+        num_players=len(lineup),
+        seed=seed,
+        first=game.first,
+        actions=tuple(actions),
+        chance=tuple(chance.events),
+        trades=tuple(trades),
+        winner=game.won_by,
+        turns=game.turns,
+        **board_fields(board),
+    )
+    return game, record
 
 
 def compete(
@@ -546,6 +615,7 @@ def compete(
     action_cap: int = MAX_ACTIONS,
     workers: int = 1,
     antithetic: bool = True,
+    records: bool = False,
 ) -> Tournament:
     """Run `games` games, rotating the lineup so every entrant sits every seat.
 
@@ -554,6 +624,13 @@ def compete(
 
     `workers` only changes the wall clock. Results are identical at any worker
     count, which is the property that makes a parallel run quotable.
+
+    `records=True` has every job build a `hexset.record.Record` of its own
+    game alongside the verdict (`_play_and_record`), returned as
+    `Tournament.records` in the same order as `winners`/`points`/`turns` --
+    the games a `--records` file holds are exactly the games the verdict
+    counted, because both come from the one job. Off by default: the extra
+    bookkeeping is skipped entirely, not merely discarded, when nobody asks.
     """
     seats = len(entrants)
     if seats < 2:
@@ -562,7 +639,7 @@ def compete(
         raise ValueError(f"{games} games does not divide evenly over {seats} seats")
 
     lineup = tuple(entrants)
-    jobs = [(lineup, i, seed, action_cap, antithetic) for i in range(games)]
+    jobs = [(lineup, i, seed, action_cap, antithetic, records) for i in range(games)]
     started = time.perf_counter()
     if workers > 1:
         with Pool(workers) as pool:
@@ -573,7 +650,7 @@ def compete(
 
     wins = [0] * seats
     seat_wins = [0] * seats
-    for winner, seat, _, _ in outcomes:
+    for winner, seat, _, _, _ in outcomes:
         if winner is not None:
             wins[winner] += 1
             seat_wins[seat] += 1
@@ -584,13 +661,14 @@ def compete(
             for e, entrant in enumerate(lineup)
         ),
         games=games,
-        unfinished=sum(1 for winner, _, _, _ in outcomes if winner is None),
-        mean_turns=statistics.mean(t for _, _, t, _ in outcomes) if outcomes else 0.0,
+        unfinished=sum(1 for winner, _, _, _, _ in outcomes if winner is None),
+        mean_turns=statistics.mean(t for _, _, t, _, _ in outcomes) if outcomes else 0.0,
         seconds=elapsed,
         seat_wins=tuple(seat_wins),
-        winners=tuple(winner for winner, _, _, _ in outcomes),
-        points=tuple(row for _, _, _, row in outcomes),
-        turns=tuple(t for _, _, t, _ in outcomes),
+        winners=tuple(winner for winner, _, _, _, _ in outcomes),
+        points=tuple(row for _, _, _, row, _ in outcomes),
+        turns=tuple(t for _, _, t, _, _ in outcomes),
+        records=tuple(r for _, _, _, _, r in outcomes) if records else (),
     )
 
 

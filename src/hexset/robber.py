@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
-import random
-
 from .board.terrain import Resource
+from .chance import Chance
 from .state import NO_OWNER, GameState
 
 DISCARD_THRESHOLD = 7
@@ -38,22 +37,18 @@ def move_robber(state: GameState, target: int) -> None:
 
 
 def steal(
-    state: GameState, thief: int, victim: int, rng: random.Random
+    state: GameState, thief: int, victim: int, chance: Chance
 ) -> Resource | None:
-    """Take one card at random, so the chance of each resource follows the hand."""
+    """Take one card at random, so the chance of each resource follows the
+    hand -- `chance.steal` decides which, `Chance.steal`'s docstring on why
+    an empty hand consumes no event."""
     hand = state.hands[victim]
-    total = sum(hand)
-    if total == 0:
+    resource = chance.steal(hand)
+    if resource is None:
         return None
-
-    pick = rng.randrange(total)
-    for resource, count in enumerate(hand):
-        if pick < count:
-            hand[resource] -= 1
-            state.hands[thief][resource] += 1
-            return Resource(resource)
-        pick -= count
-    raise AssertionError("unreachable")
+    hand[resource] -= 1
+    state.hands[thief][resource] += 1
+    return Resource(resource)
 
 
 def discard_count(state: GameState, player: int) -> int:
@@ -78,10 +73,17 @@ def discard(
         state.bank[resource] += count
 
 
-def random_discard(state: GameState, player: int, rng: random.Random) -> list[int]:
-    cards = [0] * len(state.hands[player])
-    for _ in range(discard_count(state, player)):
-        pool = [r for r, n in enumerate(state.hands[player]) if n > cards[r]]
-        cards[rng.choice(pool)] += 1
+def random_discard(state: GameState, player: int, chance: Chance) -> list[int]:
+    """Discard for a seat that does not choose its own cards. Currently
+    unreached -- every driver in this repo resolves a discard one card at a
+    time through `submit_discard`/`discard_one` (the seat's own choice) --
+    but a driver that wants a seat to discard at random still has this, and
+    it goes through `chance.discard` like every other draw."""
+    hand = state.hands[player]
+    n = discard_count(state, player)
+    picks = chance.discard(hand, n)
+    cards = [0] * len(hand)
+    for resource in picks:
+        cards[resource] += 1
     discard(state, player, cards)
     return cards

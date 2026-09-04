@@ -239,12 +239,19 @@ def test_imagine_without_any_lock_carries_an_empty_one():
 # `actions._offer_actions` to `[]` on the previous tree reproduces every
 # hash below exactly, which is the attribution -- nothing else about
 # default play moved.
+#
+# Re-baselined a second time, 2026-09-04, for the hand-term redesign
+# (`hexset.bots.evaluate.hand_terms`): `greedy` scores with the same
+# `Weights` these traces were recorded under, so replacing three of its
+# terms necessarily moves what it plays. Behaviour-changing by design and
+# gated on strength instead (`docs/readouts/hand-valuation/`); the previous
+# baseline was 30fa9214/d54ae271/8376e8e8/14556d51/58636144.
 BYTE_IDENTITY_TRACES = {
-    "200": "30fa921491d50d986f19a74b6e1c3e1c8c46520c38f7633d2cc6ff4a87e43907",
-    "201": "d54ae271a2401f4f731ddba681864a836c700a83101003722ea92362ecb443c7",
-    "202": "8376e8e82e5aaa9a0bdaa702cfb8b82a51792b7d841972a0f262d73d4d2a0c92",
-    "203": "14556d51e147e1148874c311bd2c8ac9b12668a3664bd04c6530fba2030152eb",
-    "204": "58636144cc3a1ff546865912ec58c4d0f09e35e1017f9221ca2b86804a73b930",
+    "200": "911661c5f1a74a69ac896825d0cbe4ed45f742d2263c758271f2f64f673583fe",
+    "201": "93dc97d12c977a04ef6c93b8769a51dc7c3019976dbcae4bbfe3654b96795489",
+    "202": "50dc0e52ffdaf5765213d7023aaeed1a71585d834d9444c35ed5e159f63bbe3c",
+    "203": "4d48c154530c314881878e8a5baa7b328ccc6a131033cae0473e47e190cd666c",
+    "204": "eb86251439dd2496d3f26c8f708e19abbdb8744906d351eec649d32fe9a6756c",
 }
 
 

@@ -29,6 +29,7 @@ from hexset.server.api import (
     build_session,
     new_code,
     resume_session,
+    model_options,
 )
 from hexset.board.terrain import Resource
 from hexset.game import Phase, is_over, to_move
@@ -175,7 +176,10 @@ def test_an_unknown_model_is_refused_by_name():
 
 def test_models_lists_what_the_bots_argument_accepts():
     registry = tables()
-    assert "search2" in registry.handle("GET", "/api/models", {}, None)["models"]
+    models = registry.handle("GET", "/api/models", {}, None)["models"]
+    assert "search2" not in models and models[0] == "heximax"
+    # Seatable by name all the same: the training mix and these tests use it.
+    assert "search2" in model_options()
 
 
 # --- Joining ------------------------------------------------------------------

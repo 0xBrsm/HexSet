@@ -132,6 +132,9 @@ from .webplay import (
 # below for the one that is registered only where its extra is installed.
 HANDCRAFTED = "heximax"
 HANDCRAFTED_ENTRANTS = ("heximax", "catanatron", "search2")
+# What the board offers. `search2` stays seatable by name (API clients, tests,
+# the training mix) but is no longer on the board's picker.
+LISTED_ENTRANTS = ("heximax", "catanatron")
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 MODELS_DIR = Path(os.environ.get("HEXSET_UI_MODELS_DIR", REPO_ROOT / "models"))
@@ -248,6 +251,12 @@ def model_options() -> dict[str, str]:
     for path in sorted(MODELS_DIR.glob("*.onnx")):
         options[path.stem] = str(path)
     return options
+
+
+def listed_models() -> list[str]:
+    """`GET /api/models`: what the board's picker offers — `LISTED_ENTRANTS`
+    then every checkpoint; `search2` is seatable by name but not listed."""
+    return [name for name in model_options() if name not in set(HANDCRAFTED_ENTRANTS) - set(LISTED_ENTRANTS)]
 
 
 def wait_query(query: str) -> tuple[int | None, float]:
@@ -1109,7 +1118,7 @@ class Tables:
         """
         path, _, query = path.partition("?")
         if method == "GET" and path == "/api/models":
-            return {"models": list(model_options())}
+            return {"models": listed_models()}
 
         # The reads that need no token, and the whole of what "every game is
         # public" means: `GET /api/table/<code>` is the game as a spectator

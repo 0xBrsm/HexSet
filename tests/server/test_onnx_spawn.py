@@ -86,12 +86,10 @@ def test_a_network_seats_first_action_publishes_a_nonzero_valuation(monkeypatch,
     table = registry.get(data["code"])
     seat = next(i for i, s in enumerate(table.seats) if s.name == "valued")
 
-    for i, (runner, thread) in enumerate(table.runners):
-        if runner.seat == seat:
-            runner.stop.set()
-            thread.join(timeout=2.0)
-            del table.runners[i]
-            break
+    # The runner may be parked on the table's long poll; `stop_runners` is
+    # what wakes it (a version bump) and joins it -- a bare `stop.set()` left
+    # it alive past the test.
+    table.stop_runners()
 
     game = table.session.game
     bot = table.session.traders[seat]

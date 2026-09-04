@@ -380,10 +380,13 @@ class Table:
         for runner, _ in self.runners:
             runner.stop.set()
         # A runner parked on a long poll cannot see `stop` until something
-        # wakes it, and its `run` loop checks `stop` before acting again.
+        # wakes it, and its `run` loop checks `stop` before acting again. One
+        # mid-decision finishes that decision first -- a network's first
+        # forward on a loaded box can take several seconds -- so the join
+        # waits long enough for that rather than leaving the thread behind.
         self.bump()
         for _, thread in self.runners:
-            thread.join(timeout=2.0)
+            thread.join(timeout=15.0)
         self.runners.clear()
 
     def close(self) -> None:

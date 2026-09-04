@@ -34,6 +34,7 @@ the background while the browser works. The same drive against three
 
 from __future__ import annotations
 
+import random
 import threading
 import time
 
@@ -49,10 +50,6 @@ from hexset.server.webplay import PendingGate  # noqa: E402
 from hexset.trading import NO_VALUATION  # noqa: E402
 
 pytestmark = pytest.mark.slow
-
-# The page polls every 1.5 s while it isn't the reader's move (`index.html`'s
-# pollWhileWaiting). "Across two polls" below means this, twice, plus slack.
-POLL_SECONDS = 1.5
 
 BOT = "search2"
 
@@ -96,9 +93,14 @@ class Page:
     """One browser page, with everything it said to the console kept.
 
     A console error is a failed render, and a failed render on this page is
-    not cosmetic: `render()` runs inside the poll timer's own callback, so an
-    exception there stops the polling that is the only thing keeping the board
-    current. Which is why every test here ends by asserting the log is empty.
+    not cosmetic: `render()` runs inside the watch loop itself (`settle`), so
+    an exception there stops the reads that are the only thing keeping the
+    board current. Which is why every test here ends by asserting the log is
+    empty.
+
+    `polls` counts every answered read of the table. Those are no longer on a
+    timer: `settle` parks on `?after=<version>` and the server answers when
+    the table moves, so a count here is a count of *changes seen*.
     """
 
     def __init__(self, page):
@@ -138,9 +140,15 @@ class Page:
 
 def open_page(browser, url: str) -> Page:
     """A fresh browser at `url`. Opening `/` deals a game and moves to its
-    address; opening a code goes to that game."""
+    address; opening a code goes to that game.
+
+    Not `networkidle`: the page keeps one read of the table open at all times
+    while it is somebody else's move (`settle`), so the network is never idle
+    and never will be. What "loaded" means here is the state the page waits
+    for below, which is what it always actually meant.
+    """
     page = Page(browser.new_page(viewport={"width": 1400, "height": 950}))
-    page.page.goto(url, wait_until="networkidle")
+    page.page.goto(url, wait_until="domcontentloaded")
     page.wait_for("typeof state !== 'undefined' && state && state.seats")
     page.page.wait_for_selector("#players .player-row")
     return page
@@ -157,8 +165,14 @@ def seat_bots(page: Page, model: str = BOT) -> None:
     Driven off `state.seats`, not off the pickers: a bot seat keeps its
     picker (that is how a bot is swapped), so "no pickers left" is never
     true and counting them would loop forever.
+
+    Highest seat first, so seat 0 is filled last. Nothing at a table moves
+    while seat 0 is open (`api.Table._settle_locks` holds the snake at
+    `setup_step == 0`), and once it is filled the snake runs at the speed of
+    whatever is sitting there -- which, for a bot, is immediately, retiring
+    every open seat it reaches on the way.
     """
-    for seat, entry in enumerate(page.state(".seats")):
+    for seat, entry in reversed(list(enumerate(page.state(".seats")))):
         if entry["kind"] != "empty":
             continue
         row = page.page.locator("#players .player-row").nth(seat)
@@ -306,7 +320,9 @@ def test_a_seat_line_says_who_is_in_it(live, browser):
     _, url = live
     page = open_page(browser, url)
     mine = page.state(".seat")
-    page.page.locator("#players select").first.select_option(BOT)
+    # The last open seat, not the first: seat 0 is what starts a table (see
+    # `seat_bots`), and a table that has started retires the seats still open.
+    page.page.locator("#players select").last.select_option(BOT)
     page.page.wait_for_timeout(600)
 
     rows = page.page.locator("#players .player-row")
@@ -332,9 +348,10 @@ def test_an_empty_seat_is_retired_on_sight_with_no_countdown(live, browser):
     The snake reaching an empty seat retires it there and then."""
     _, url = live
     page = open_page(browser, url)
-    page.page.locator("#players select").first.select_option(BOT)
-    page.page.wait_for_timeout(600)
+    # Freshly dealt, nothing is retired: a table with every seat open is a
+    # table nobody has been passed over at yet.
     assert page.state(".locked") == []
+    page.page.locator("#players select").first.select_option(BOT)
 
     started = time.monotonic()
     deadline = started + 90
@@ -367,7 +384,7 @@ def test_an_empty_seat_is_retired_on_sight_with_no_countdown(live, browser):
                 page.click_first(".clickable-edge")
         page.page.wait_for_timeout(250)
     assert not page.state(".phase").startswith("SETUP"), "setup did not finish"
-    page.page.wait_for_timeout(1600)  # one poll after the phase turned
+    page.page.wait_for_timeout(400)  # one render after the phase turned
     locked = page.state(".locked")
     assert page.page.locator("#players .player-row").count() == 4 - len(locked)
     assert "locked seat" not in page.page.inner_text("#players")
@@ -444,35 +461,89 @@ def test_your_own_row_is_your_name_and_you_can_change_it(live, browser):
     assert page.console == [] and watcher.console == []
 
 
-def test_an_open_picker_survives_the_polls_that_used_to_close_it(live, browser):
-    """`render()` rebuilt `#players` wholesale on every poll -- 1.5 s while
-    it is not your move -- replacing the open `<select>` under the cursor. A
-    picker you cannot use: it shut about a second after it opened, every
-    time. The rebuild is skipped while the container holds focus."""
+def test_an_open_picker_survives_the_reads_that_used_to_close_it(live, browser, monkeypatch):
+    """`render()` rebuilt `#players` wholesale on every read of the table --
+    and there is one of those every time anything at it changes -- replacing
+    the open `<select>` under the cursor. A picker you cannot use: it shut
+    about a second after it opened, every time. The rebuild is skipped while
+    the container holds focus.
+
+    Seat 0 is left open on purpose, which holds the snake there (see
+    `seat_bots`): the page is then permanently waiting on somebody else, so
+    the reads it parks on are the test's to trigger rather than a window to
+    be caught in. The reader is pinned to the last seat so seat 0 is one it
+    could have picked a bot for -- the very case the open picker is for.
+    """
+    monkeypatch.setattr(random.SystemRandom, "randrange", lambda self, n: n - 1)
+    tables, url = live
+    page = open_page(browser, url)
+    mine = page.state(".seat")
+    for seat in (2, 1):
+        row = page.page.locator("#players .player-row").nth(seat)
+        row.locator("select").select_option(BOT)
+        page.page.wait_for_function(f"() => state.seats[{seat}].kind === 'bot'", timeout=15000)
+    assert mine == 3 and page.state(".to_move") == 0
+
+    table = tables.get(code_of(page))
+    picker = page.page.locator("#players select").first
+    picker.focus()
+    before = page.polls
+
+    # Two real changes at the table, from a seat that is not this page's.
+    for vector in ([1.0, 0, 0, 0, -1.0], [-1.0, 0, 0, 0, 1.0]):
+        tables.handle(
+            "PUT",
+            f"/api/games/{table.code}/valuation",
+            {"valuation": vector},
+            table.seats[2].token,
+        )
+        page.page.wait_for_timeout(400)
+
+    # Both reached the page, and it is really still the same element focused.
+    assert page.polls - before >= 2, f"only {page.polls - before} reads arrived"
+    assert page.page.evaluate(
+        "() => document.activeElement === document.querySelectorAll('#players select')[0]"
+    )
+    assert page.page.locator("#players select").count() >= 1
+    assert page.console == []
+
+
+# --- Pacing --------------------------------------------------------------------
+
+
+def test_a_table_of_bots_plays_setup_at_its_own_speed(live, browser):
+    """Three `heximax` seats, and the clock is out of it.
+
+    Every bot action used to land on a one-second boundary: the runner slept
+    `poll_interval` after each of its own moves, and the page waited 1.5 s
+    before asking again. A setup phase of twelve bot placements took the best
+    part of twenty seconds against a search costing under a tenth of one.
+
+    Measured the way it is felt: the wall time this page spends waiting on
+    somebody else during setup, with the reader's own placements left out of
+    it. `heximax` rather than the `search2` the rest of this file uses --
+    this is the lineup the owner actually plays, and the one the pacing was
+    reported against.
+    """
     _, url = live
     page = open_page(browser, url)
-    seat_bots(page)
-    place_setup(page)
+    seat_bots(page, "heximax")
 
-    checked = []
+    waited = 0.0
+    deadline = time.monotonic() + 180
+    while page.state(".phase").startswith("SETUP") and time.monotonic() < deadline:
+        mark = time.monotonic()
+        if page.state(".to_move") == page.state(".seat"):
+            if not page.click_first(".clickable-vertex"):
+                page.click_first(".clickable-edge")
+            page.page.wait_for_timeout(50)
+        else:
+            page.page.wait_for_timeout(50)
+            waited += time.monotonic() - mark
 
-    def while_a_bot_thinks(_played):
-        if checked:
-            return
-        picker = page.page.locator("#players select").first
-        picker.focus()
-        before = page.polls
-        page.page.wait_for_timeout(POLL_SECONDS * 3 * 1000)
-        # Really polling, and really still the same element with focus.
-        assert page.polls - before >= 2, f"only {page.polls - before} polls in the window"
-        assert page.page.evaluate(
-            "() => document.activeElement === document.querySelectorAll('#players select')[0]"
-        )
-        picker.blur()
-        checked.append(True)
-
-    play_turns(page, 3, timeout=300, each=while_a_bot_thinks)
-    assert checked, "never reached a bot's turn to poll through"
+    # The page's own state, reached without a reload: nothing here refreshes.
+    assert not page.state(".phase").startswith("SETUP"), "setup did not finish"
+    assert waited < 3.0, f"spent {waited:.1f}s waiting on the bots"
     assert page.console == []
 
 
@@ -516,7 +587,7 @@ def test_a_person_is_offered_no_way_to_trade_and_the_bots_still_do(live, browser
         return [line for line in page.state(".log") if " to Player " in line]
 
     played = play_turns(page, 15, timeout=1500)
-    assert played >= 15, played
+    assert played >= 15 or page.state(".game_over"), played
 
     # Nothing on the page to trade with.
     assert page.page.locator("input[type=range]").count() == 0
@@ -572,7 +643,7 @@ def test_watching_a_full_game_is_omniscient(live, browser):
     code = code_of(player)
 
     watcher = Page(browser.new_context().new_page())
-    watcher.page.goto(f"{url}/{code}", wait_until="networkidle")
+    watcher.page.goto(f"{url}/{code}", wait_until="domcontentloaded")
     watcher.wait_for("typeof state !== 'undefined' && state && state.seats")
     watcher.page.wait_for_selector("#players .player-row")
 
@@ -606,7 +677,7 @@ def test_watching_a_full_game_is_omniscient(live, browser):
 def test_a_code_with_no_game_behind_it_says_so(live, browser):
     _, url = live
     page = Page(browser.new_page(viewport={"width": 1400, "height": 950}))
-    page.page.goto(f"{url}/zzzzzz", wait_until="networkidle")
+    page.page.goto(f"{url}/zzzzzz", wait_until="domcontentloaded")
     page.page.wait_for_function(
         "() => document.getElementById('phase').textContent.trim() !== 'Loading...'",
         timeout=15000,

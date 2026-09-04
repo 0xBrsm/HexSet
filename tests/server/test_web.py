@@ -182,6 +182,37 @@ def test_a_game_is_dealt_and_played_over_http(live_server):
     assert len(data["log"]) >= 1
 
 
+def test_a_query_string_reaches_the_api_over_http(live_server):
+    """`after`/`wait` are parsed by `Tables.handle`, so the one thing the
+    transport owes them is arriving with the path intact — and a parked read
+    on a threading server must not stall anybody else's."""
+    import time
+
+    _, base = live_server
+    client, data = seated(base, bots=[])
+    version = data["version"]
+
+    started = time.monotonic()
+    status, waited = client.get(f"/api/state?after={version}&wait=0.4")
+    assert status == 200
+    assert waited["version"] == version
+    assert time.monotonic() - started > 0.3
+
+    parked: list = []
+    reader = threading.Thread(
+        target=lambda: parked.append(client.get(f"/api/state?after={version}&wait=3"))
+    )
+    reader.start()
+    time.sleep(0.2)
+    # Somebody else's request, answered while that one is still parked.
+    other = Client(base)
+    assert other.get(f"/api/table/{data['code']}")[0] == 200
+    action = action_to_wire(legal_actions(live_server[0].tables.get(data["code"]).session.game)[0])
+    client.post("/api/action", {"action": action})
+    reader.join(timeout=10)
+    assert parked and parked[0][1]["version"] > version
+
+
 def test_an_api_refusal_arrives_as_its_own_status_and_not_a_dropped_connection(live_server):
     """Every `ApiError` carries the status to answer with, so the browser gets
     a message rather than a network failure."""

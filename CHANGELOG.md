@@ -11,6 +11,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **A read can wait for the next change instead of asking again.** `GET
+  /api/state` and `GET /api/table/<code>` accept `?after=<version>&wait=<seconds>`
+  and hold the request until the table has moved past the version the caller
+  already has, up to 25 seconds; every view now carries its own `version`.
+  A request without `after` answers immediately, exactly as before.
+  `python -m hexset.clients.botclient --poll-interval` is now the longest one
+  of those waits rather than a sleep between moves, and defaults to 10 seconds.
 - **The browser board is the pre-tables UI again**, rebuilt from `f6856d7`
   onto the current server rather than carried forward through the lobby
   rework. Loading the page puts you in a game — the one you were last at if
@@ -216,6 +223,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   candidates.
 ### Fixed
 
+- **Bots played one action a second, whatever they were actually thinking.**
+  Every bot seat submitted a move and then slept a full second before looking
+  at the board again, and the page waited 1.5 s between reads on top of that
+  — so a search costing under a tenth of a second landed on a one-second
+  boundary and a table of three bots crawled. Nothing is paced by a clock any
+  more: a bot plays its whole turn back to back and then waits for the table
+  to change, and the page is told the moment it does. Three `heximax` seats
+  now finish the setup phase in under a second, where the same lineup took
+  the better part of twenty.
 - Seats retired during setup no longer show in the player list once the match is under way.
 - **A new game always gave the creator the first turn, even seated away from
   Player 1.** The setup snake started wherever `POST /api/games` happened to
@@ -312,6 +328,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **A table now starts the instant seat 0 is filled.** An open seat the setup
+  snake reaches is retired on sight, as it always was, but with bots playing
+  at their own speed "on sight" is immediate rather than a second away. Fill
+  seat 0 last when picking opponents from the player list: nothing at a table
+  moves while that seat is open, and everything moves as soon as it is not.
 - **The web page offers a person no way to trade with another seat.** The
   advertisement controls, the negotiation panel and the pending-offer cards
   are gone from the browser; the bank/port modal a resource card opens is

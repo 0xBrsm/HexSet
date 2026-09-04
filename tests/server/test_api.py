@@ -938,6 +938,88 @@ def test_closing_a_registry_stops_every_runner():
     assert not registry._tables
 
 
+# --- Wake on change -----------------------------------------------------------
+#
+# A read may name the version it is already showing (`after`) and how long it
+# will wait for a newer one (`wait`). Nothing here uses bots: a runner would
+# be changing the table underneath the very waits these pin.
+
+
+def test_every_view_carries_the_version_it_was_built_at():
+    registry = tables()
+    code, token = deal(registry, bots=[])
+    seated = registry.handle("GET", "/api/state", {}, token)
+    public = registry.handle("GET", f"/api/table/{code}", {}, None)
+    assert isinstance(seated["version"], int)
+    assert public["version"] >= seated["version"]
+
+
+def test_a_read_answers_at_once_when_the_table_has_already_moved_on():
+    registry = tables()
+    _, token = deal(registry, bots=[])
+    before = registry.handle("GET", "/api/state", {}, token)["version"]
+    started = time.monotonic()
+    view = registry.handle("GET", f"/api/state?after={before - 1}&wait=5", {}, token)
+    assert time.monotonic() - started < 0.5
+    assert view["version"] >= before
+
+
+def test_a_read_waits_out_its_wait_when_nothing_changes():
+    registry = tables()
+    _, token = deal(registry, bots=[])
+    current = registry.handle("GET", "/api/state", {}, token)["version"]
+    started = time.monotonic()
+    view = registry.handle("GET", f"/api/state?after={current}&wait=0.3", {}, token)
+    assert 0.25 < time.monotonic() - started < 3.0
+    assert view["version"] == current
+
+
+def test_a_move_at_the_table_wakes_a_waiting_read():
+    """The whole point: a change reaches a reader when it happens, not when
+    that reader's next timer goes off."""
+    registry = tables()
+    _, token = deal(registry, bots=[])
+    current = registry.handle("GET", "/api/state", {}, token)["version"]
+    answered: list[tuple[float, dict]] = []
+
+    def wait() -> None:
+        view = registry.handle("GET", f"/api/state?after={current}&wait=20", {}, token)
+        answered.append((time.monotonic(), view))
+
+    reader = threading.Thread(target=wait)
+    reader.start()
+    time.sleep(0.2)  # long enough that the reader is certainly parked
+    assert not answered, "the read answered before anything changed"
+
+    acted = registry.handle("GET", "/api/state", {}, token)["legal_actions"][0]
+    registry.handle("POST", "/api/action", {"action": acted}, token)
+    woke = time.monotonic()
+    reader.join(timeout=10)
+    assert answered, "the read was still parked after a move at its table"
+    when, view = answered[0]
+    assert when - woke < 2.0
+    assert view["version"] > current
+
+
+def test_a_read_that_names_no_version_never_waits():
+    """Every client that predates this asks exactly as it always did."""
+    registry = tables()
+    _, token = deal(registry, bots=[])
+    started = time.monotonic()
+    registry.handle("GET", "/api/state", {}, token)
+    assert time.monotonic() - started < 0.5
+
+
+def test_a_waiting_read_is_capped_at_the_servers_own_ceiling():
+    """A client cannot park a server thread for as long as it likes."""
+    import hexset.server.api as api
+
+    assert api.wait_query("after=3&wait=600") == (3, api.MAX_WAIT_SECONDS)
+    assert api.wait_query("") == (None, 0.0)
+    with pytest.raises(ApiError):
+        api.wait_query("after=soon")
+
+
 # --- Trading (`hexset.trading`) -----------------------------------------------
 
 

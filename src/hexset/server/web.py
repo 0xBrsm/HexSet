@@ -125,6 +125,11 @@ class Handler(BaseHTTPRequestHandler):
             )
         except ApiError as error:
             self._json({"error": str(error)}, status=error.status)
+        except (BrokenPipeError, ConnectionResetError):
+            # A read the page parked on and then navigated away from. There
+            # is nobody left to answer, and the traceback socketserver would
+            # print for it says nothing about this server.
+            pass
         except Exception as error:
             # Anything the API did not expect — a checkpoint that will not
             # load, a bug. Left in the log in full, but answered rather than

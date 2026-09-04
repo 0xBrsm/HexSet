@@ -30,10 +30,11 @@ docstring) — what varies is only *how* a client decides its move, and
   running it in-process is free and `LocalSearchBrain` already covers every
   shape `api.spawn_bot` can hand back.
 
-Either way, `BotRunner` is the same loop: poll, and when it's this seat's
-turn, ask the brain to decide and submit exactly what it returns. No
-cascade, no server-side "run the bot for me" endpoint — the board simply
-advances on the submitted action, the same as any other seat's move.
+Either way, `BotRunner` is the same loop: act for as long as the move is
+this seat's, and otherwise park on `/api/state?after=<version>` until the
+table changes. No cascade, no server-side "run the bot for me" endpoint —
+the board simply advances on the submitted action, the same as any other
+seat's move.
 """
 
 from __future__ import annotations
@@ -117,6 +118,10 @@ class LocalTransport:
     that skips the network hop (see the module docstring)."""
 
     tables: object  # api.Tables, typed loosely to avoid a hard api.py import cycle
+
+    # `path` carries its query string here exactly as `web.py` hands one over,
+    # and `Tables.handle` is what splits it — so `?after=`/`?wait=` mean the
+    # same thing in-process as they do on the wire.
 
     def get(self, path: str, token: str) -> dict:
         return self._call("GET", path, token, {})
@@ -258,52 +263,90 @@ class LocalSearchBrain:
         return action_to_wire(self.bot.choose(self.game))
 
 
-# --- The runner: poll, decide when it's this seat's turn, submit -----------
+# --- The runner: act while the move is this seat's, wait otherwise ---------
+
+
+# How long a runner waits before trying again after an error. A timer is
+# the right answer for exactly this one case: nothing at the table has to
+# change for a failed request to start working again.
+ERROR_BACKOFF = 1.0
 
 
 @dataclass
 class BotRunner:
     """One seat, driven by one brain, from outside the session — a bot plays
-    exactly the way a human's client does: poll `/api/state`, and once it's
-    this seat's turn, submit one action through `/api/action`. No cascade:
-    the board advances on that submitted action like any other, and the
-    next poll (this runner's, or anyone else's watching the game) sees it."""
+    exactly the way a human's client does: read `/api/state`, and while it's
+    this seat's turn, submit its actions through `/api/action`. No cascade:
+    the board advances on each submitted action like any other.
+
+    Nothing here is paced by a clock. A turn's actions go out back to back,
+    and between turns the runner parks on `/api/state?after=<version>` until
+    the table actually changes — a bot that thinks for 30 ms used to wait a
+    full second per action anyway, which was the whole of what made a table
+    of bots feel slow.
+
+    `poll_interval` is the longest one of those parked reads may wait before
+    it answers and the loop asks again; the server caps it in its own turn
+    (`api.MAX_WAIT_SECONDS`).
+    """
 
     seat: int
     token: str
     transport: Transport
     brain: Brain
-    poll_interval: float = 1.0
+    poll_interval: float = 10.0
     stop: threading.Event = field(default_factory=threading.Event)
 
-    def run_once(self) -> bool:
-        """One iteration. Returns `False` once the game is over, so a caller
-        driving this in a loop knows to stop."""
-        view = self.transport.get("/api/state", self.token)
+    def _state(self, query: str = "") -> dict:
+        view = self.transport.get(f"/api/state{query}", self.token)
         if "error" in view:
             raise RuntimeError(view["error"])
+        return view
+
+    def run_once(self) -> bool:
+        """One pass: every action this seat has to play right now, then a
+        wait for somebody else's move. Returns `False` once the game is
+        over, so a caller driving this in a loop knows to stop.
+
+        `stop` is checked before each decision, so a runner woken by a table
+        closing (`api.Table.stop_runners`) never gets one more move in."""
+        view = self._state()
+        while (
+            not self.stop.is_set()
+            and not view.get("game_over")
+            and view.get("to_move") == self.seat
+        ):
+            wire = self.brain.decide(self.transport, self.token, self.seat)
+            result = self.transport.post("/api/action", self.token, {"action": wire})
+            if "error" in result:
+                raise RuntimeError(result["error"])
+            view = self._state()
         if view.get("game_over"):
             return False
-        if view.get("to_move") != self.seat:
-            return True
-        wire = self.brain.decide(self.transport, self.token, self.seat)
-        result = self.transport.post("/api/action", self.token, {"action": wire})
-        if "error" in result:
-            raise RuntimeError(result["error"])
+        if not self.stop.is_set():
+            self._wait_for_change(view.get("version"))
         return True
+
+    def _wait_for_change(self, after: int | None) -> None:
+        """Parks until the table moves past `after`. A view with no version
+        to name can only be waited out on a timer."""
+        if after is None:
+            self.stop.wait(self.poll_interval)
+        else:
+            self._state(f"?after={after}&wait={self.poll_interval}")
 
     def run(self) -> None:
         """The loop `web.py` (embedded) or `__main__` (external) hands to a
-        thread. Every error is logged and retried after `poll_interval`
+        thread. Every error is logged and retried after `ERROR_BACKOFF`
         rather than killing the loop — a transient network hiccup, or one
         bad decision, shouldn't take a bot seat out of a long game."""
         while not self.stop.is_set():
             try:
                 if not self.run_once():
                     return
-            except Exception as error:  # noqa: BLE001 — one bad poll must not kill the runner
+            except Exception as error:  # noqa: BLE001 — one bad read must not kill the runner
                 print(f"botclient seat {self.seat}: {error}", file=sys.stderr)
-            self.stop.wait(self.poll_interval)
+                self.stop.wait(ERROR_BACKOFF)
 
 
 def _main(argv: list[str] | None = None) -> None:
@@ -317,7 +360,12 @@ def _main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--name", default=None, help="Display name for this seat.")
     parser.add_argument("--device", default="cpu")
-    parser.add_argument("--poll-interval", type=float, default=1.0)
+    parser.add_argument(
+        "--poll-interval",
+        type=float,
+        default=10.0,
+        help="Longest a parked read waits for the table to change (seconds).",
+    )
     args = parser.parse_args(argv)
 
     transport = HttpTransport(args.url.rstrip("/"))

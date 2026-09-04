@@ -653,6 +653,30 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   contract-unspecified checkpoint by name; the server serves contracts 2, 3
   and 4 only. `encoding_v1.py` and `OnnxPolicy` are deleted.
 
+### Changed
+
+- **heximax's default stance is `win`, not `relative`.** Where `relative`
+  reads the search's per-seat score vector as "my score minus the table's
+  mean" (`hexset.bots.search2.relative`), `win` (`hexset.bots.search2.win`)
+  reads it as `softmax(vector / WIN_TEMPERATURE)[seat]` — the seat's own win
+  probability, which is what the game actually pays. `WIN_TEMPERATURE`
+  (2.4766) is fitted by maximum likelihood against 4,463 turn-level samples
+  from 48 `heximax`×4 games under the shipped mechanic, labelling the
+  eventual winner (mean log loss 1.107, vs. 1.386 for the uniform baseline).
+  At the table this changes what heximax targets: it robs the leader with
+  the robber/knight two thirds of the time rather than half (66.9% vs.
+  48.4% of steals), feeds the leader less through trades (43.2% vs. 46.3%
+  of its trade sides go to the current leader), and beats a `relative`-
+  stance heximax head-to-head 53.2% [50.7, 55.7] over a 1,536-game power run
+  at an equal terminal-VP margin (a first, 384-game read was null, 53.1%
+  [48.1, 58.1] — the effect needed the larger run to clear). `search2` is
+  unchanged and stays the project's frozen, held-out referent, still
+  `relative`. `MARGINAL_SCALE` — the unit heximax's published trade
+  valuation is squashed onto — is refit for the new default over the same
+  protocol (five trade-free `heximax-notrade` census games, seeds 100..104):
+  0.10231140469178995 (9,280 marginals, `relative`) →
+  0.006413829636547007 (10,000 marginals, `win`).
+
 ## 0.13.0
 
 ### Added

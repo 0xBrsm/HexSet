@@ -338,6 +338,54 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **`HonestEvaluator.progress_toward`'s inner sum is a list comprehension,
+  not a generator expression**, over the identical operands in the
+  identical order (`sum([min(hand[r], n) for r, n in needed]) / total`) —
+  bit-identical to the generator it replaces (CPython 3.12's `sum` is
+  Neumaier-compensated, so only the same values in the same order are safe
+  here), just without a generator's per-item frame-switch overhead on
+  `needed`'s two or three pairs. Behaviour-neutral: the byte-identical
+  choice census (`test_choices_are_byte_identical_to_the_recorded_census`,
+  both `heximax` and `search2`) is unchanged. Measured with
+  `hexset.bench.profile_heximax` (3 games, seed 100, single process):
+  `heximax` 42,695,282 -> 38,238,671 function calls over the 3 games (-10.4%);
+  `heximax-notrade` 20,192,176 -> 18,685,520 (-7.5%). Wall-clock ms/decision
+  moved within this box's cross-run noise (shared with a GPU training run);
+  the call-count drop is the reliable signal.
+- **`HonestEvaluator.belief_for`'s cache key is cheaper to build, on a hit
+  or a miss.** `map(tuple, state.hands)` in place of a generator expression
+  over the same hands in the same order, list comprehensions in place of
+  generator expressions for each seat's ledger `known`/`unknown`, and a
+  fast path that returns `()` for `certify` outright rather than draining
+  an empty generator to discover it is empty (`certify` is `()` at both of
+  this method's call sites today). Same key value, same cache semantics,
+  same `View.__init__` fields covered (board occupancy and the robber
+  included, per the method's own exactness argument) — only the
+  construction is cheaper. Behaviour-neutral: the byte-identical choice
+  census is unchanged. Measured with `hexset.bench.profile_heximax` (3
+  games, seed 100, single process), cumulative with the `progress_toward`
+  change above: `heximax` mean ms/decision 8.998 -> 8.315 (-7.6%), 6.260s
+  -> 5.753s/game (-8.1%); `heximax-notrade` mean ms/decision 7.105 -> 6.679
+  (-6.0%), 2.678s -> 2.532s/game (-5.5%).
+- **`Heximax._marginal_gain`/`_marginal_loss`/`_delta` clone only what a
+  marginal/delta check actually touches.** A new `_thin_copy` (heximax's
+  own, alongside `copy_state`, not a change to it) copies `hands` and,
+  where the caller mutates it, `bank`; the board, deck, dev cards, knight
+  counts and (for `_delta`) the bank are shared with the real live game
+  state these checks read `view.state` from, never copied, since none of
+  these three methods ever mutates them. Safe only because nothing
+  downstream reads `.state` back off a `belief_for` cache hit for one of
+  these calls (`_thin_copy`'s own docstring records the invariant this
+  depends on for the next person to touch this path). Byte-identical
+  choice census and the full non-slow suite (881 passed) both unchanged.
+  Measured with `hexset.bench.profile_heximax` (3 games, seed 100, single
+  process, before/after run back-to-back to isolate the change from this
+  box's own load swings): `heximax` mean ms/decision 8.865 -> 8.388
+  (-5.4%), 5.970s -> 5.688s/game (-4.7%); `heximax-notrade` mean
+  ms/decision 6.930 -> 6.776 (-2.2%), 2.624s -> 2.563s/game (-2.3%) — a
+  smaller win than the other two changes above, since these three methods
+  fire only during the real game-level trade event, never inside the
+  search's own lookahead.
 - **The player list's picker gains a third option, "none".** Choosing it
   closes that seat outright (`POST /api/close`) — the explicit gesture that
   replaces the setup snake retiring an open seat on sight. A closed seat

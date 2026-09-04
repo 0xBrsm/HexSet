@@ -11,6 +11,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`hexset.bench.road_sweep`**: heximax-vs-heximax duels across a grid of
+  challenger `road`/`card` evaluation weights, recording roads, settlements,
+  cities and VP per seat alongside the win rate `hexset.bench.ablate` already
+  tracked. `docs/readouts/heximax-road-sweep/` has the first sweep.
 - **`hexset.bench.profile_heximax`**: plays N complete four-seat games under
   `cProfile` for one preset, reporting ms/decision (mean/p50/p95) and the top
   functions by cumulative and total time. `docs/readouts/heximax-profile/`

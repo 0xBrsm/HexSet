@@ -171,6 +171,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `--from-journals` runs the same census over `hexset.server.journal`
   files instead of playing fresh games. Torch-free; a network entrant's
   trades census the same way once `hexnet.netbot` registers it.
+- **`hexset.bench.trade_lab`.** Lifts the one-event trade mechanic out of a
+  played game for a static ablation: `bank` plays and records heximax×4
+  games, and `census` replays each to every point a trade event fires,
+  respawning the same bots to re-derive the published vectors, then clears
+  every position under four selection rules — the shipped maximin-public
+  surplus rule, and three private-gain rules (actor, egalitarian, nash) that
+  skip the public-vector filter — reporting trades-per-event, bundle shape,
+  surplus split, bystander win-probability damage and rule disagreement.
+  Torch-free, multiprocessed like `hexset.bench.trade_census`.
 
 ### Fixed
 

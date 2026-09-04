@@ -161,9 +161,14 @@ class Entrant:
     # since the two evaluations do not share a term set — that is the point of
     # keeping both.
     evaluator: str = "default"
-    # How the per-seat vector is read: see `hexset.bots.STANCES`. Defaults to
-    # the stance that wins; `greedy-own` reproduces the plain max^n baseline.
-    stance: str = "relative"
+    # How the per-seat vector is read: see `hexset.bots.STANCES`. `None`
+    # means "the bot's own default" -- resolved at spawn time in `_spawn`,
+    # below, since different `kind`s ship different defaults (`"relative"`
+    # for `greedy`/`search`; `kind="heximax"` resolves through
+    # `bots.heximax.presets._spawn`, which lets `heximax()`'s own default
+    # (`"win"`) apply). `greedy-own` reproduces the plain max^n baseline by
+    # passing `"own"` explicitly.
+    stance: str | None = None
     # Whether the opening settlements come from the fitted placement prior
     # rather than from whatever this entrant would otherwise do. Orthogonal to
     # `kind`, so any entrant can be duelled against itself with only the eight
@@ -295,11 +300,15 @@ def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
     else:
         evaluator = _evaluators()[entrant.evaluator](board, entrant.weights)
 
+    # `greedy`/`search` (`SearchBot`, which `greedy` also builds) both default
+    # to `"relative"` on their own constructors, so `None` here resolves to
+    # that -- byte-identical to the old hardcoded `Entrant` default.
+    stance = entrant.stance if entrant.stance is not None else "relative"
     if entrant.kind == "greedy":
         return greedy(
             evaluator,
             rng,
-            stance=entrant.stance,
+            stance=stance,
             max_trades=max_trades,
         )
     if entrant.kind == "search":
@@ -308,7 +317,7 @@ def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
             depth=entrant.depth,
             width=entrant.width,
             rng=rng,
-            stance=entrant.stance,
+            stance=stance,
             max_trades=max_trades,
         )
     raise ValueError(f"unknown bot kind: {entrant.kind}")

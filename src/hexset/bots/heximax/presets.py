@@ -24,17 +24,23 @@ from .search import Heximax, heximax
 
 
 def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Heximax:
-    return heximax(
-        board,
-        rng,
+    # `entrant.stance` is `None` unless a caller asked for something else --
+    # `hexset.arena.Entrant`'s own field default -- so `stance` is left out of
+    # this call entirely in that case, and `heximax()`'s own default (`"win"`)
+    # applies. That is the bot stating its own default once, rather than this
+    # module restating it (see the presets below, which used to pass
+    # `stance="win"` explicitly for exactly that reason).
+    kwargs: dict = dict(
         mode=entrant.mode,
         depth=entrant.depth,
         width=entrant.width,
         max_trades=entrant.max_trades,
-        stance=entrant.stance,
         k=entrant.k,
         weights=entrant.weights,
     )
+    if entrant.stance is not None:
+        kwargs["stance"] = entrant.stance
+    return heximax(board, rng, **kwargs)
 
 
 register_entrant_kind("heximax", _spawn)
@@ -46,27 +52,22 @@ register_entrant_kind("heximax", _spawn)
 # what honesty costs; `heximax-notrade` plays the no-trade table with the
 # trade switch off.
 #
-# `stance="win"` is passed explicitly on all three, not left to `Entrant`'s
-# own field default (`"relative"`, the right default for `greedy`/`search2`,
-# which this module's `_spawn` would otherwise pass straight through
-# regardless of what `Heximax`/`heximax()` themselves default to) --
-# `agents/reference/heximax.md`, "Registration 2026-09-04: the objective --
-# a win-probability stance against the relative-VP stance" and its post-data
-# note, ratifying `win` as heximax's default.
-register_preset(
-    "heximax", Entrant("heximax", kind="heximax", depth=2, width=6, stance="win")
-)
+# None of the three passes `stance` -- `Entrant`'s own field default is
+# `None`, which `_spawn` above leaves out of the `heximax()` call, so
+# `heximax()`'s own default (`"win"`) applies. `agents/reference/heximax.md`,
+# "Registration 2026-09-04: the objective -- a win-probability stance against
+# the relative-VP stance" and its post-data note, ratifying `win` as
+# heximax's default; stated once, on the bot, rather than on every preset
+# that spawns it.
+register_preset("heximax", Entrant("heximax", kind="heximax", depth=2, width=6))
 register_preset(
     "heximax-omni",
-    Entrant(
-        "heximax-omni", kind="heximax", depth=2, width=6, mode="omniscient", stance="win"
-    ),
+    Entrant("heximax-omni", kind="heximax", depth=2, width=6, mode="omniscient"),
 )
 register_preset(
     "heximax-notrade",
     Entrant(
         "heximax-notrade", kind="heximax", depth=2, width=6, max_trades=0, mode="notrade",
-        stance="win",
     ),
 )
 

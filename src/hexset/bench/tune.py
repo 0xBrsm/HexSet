@@ -39,8 +39,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workers", type=int, default=default_workers())
     parser.add_argument(
         "--stance",
-        default="relative",
-        help="how a seat reads the per-seat vector; weights are fitted for one",
+        default=None,
+        help=(
+            "how a seat reads the per-seat vector; weights are fitted for one. "
+            "Defaults to the bot's own default (\"win\" for a heximax evaluator, "
+            "\"relative\" otherwise)"
+        ),
     )
     parser.add_argument(
         "--evaluator",

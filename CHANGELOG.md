@@ -35,6 +35,24 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   files instead of playing fresh games. Torch-free; a network entrant's
   trades census the same way once `hexnet.netbot` registers it.
 
+### Fixed
+
+- **`hexset.arena.Entrant.stance` now defers to the bot's own default
+  instead of hardcoding `"relative"`.** Every constructor of a heximax
+  entrant besides its three presets (`hexset.tuning.entrant_for`/`duel`/
+  `climb`/`confirm`, `hexset.bench.tune --stance`, `hexset.bench.
+  road_sweep`'s challenger/baseline) still spawned heximax at `relative`
+  rather than `win`, silently disagreeing with the presets that had to
+  override it explicitly. `Entrant.stance` is now `None` by default,
+  resolved at spawn time to each kind's own default (`"win"` for
+  `heximax`, `"relative"` for `greedy`/`search`) — stated once, on the
+  bot, instead of on every caller.
+- **`hexset.catanatron.duel`/`.player` now register the bot presets.**
+  Neither module imported `hexset.bots`, so `PRESETS["heximax*"]` was
+  missing in the bridge's worker processes and `--players=DC:heximax-
+  notrade,...` raised `KeyError: 'heximax-notrade'`. `hexset.catanatron.
+  player` now imports `hexset.bots` at module scope.
+
 ### Changed
 
 - `search2` is off the board's model picker; it stays seatable by name for API clients, tests and the training mix.

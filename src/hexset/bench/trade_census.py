@@ -237,6 +237,7 @@ def _play_census(
         game_record = Record(
             num_players=seats,
             seed=game_seed,
+            first=game.first,
             actions=tuple(action_log),
             chance=tuple(chance.events),
             trades=tuple(record_trades),

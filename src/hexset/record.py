@@ -84,6 +84,17 @@ class Record:
     # string here rather than giving up the seed check for every game it
     # records.
     seed: int | str | None = None
+    # The setup snake's start seat (`hexset.game.start`'s own `first`
+    # argument, and its `Game.first` field). Defaults to 0, matching every
+    # caller that never chooses it (`record_game`, `arena`'s and
+    # `trade_census`'s own recording paths never pass `first` either), so an
+    # existing record is unaffected. `replay` passes it back to `start` --
+    # without it, a record whose game opened the snake anywhere but seat 0
+    # (a server-journalled game with a rotated deal, in particular) would
+    # replay a different setup order than the one actually played, and every
+    # action from the second setup placement on would fail the "is this
+    # legal" check for the wrong reason.
+    first: int = 0
     # Trades, sparse by step: `(step, a, b, received)` for every exchange the
     # engine cleared inside the action at `step`, `received` signed towards
     # `a`. Trading is not an action (`hexset.trading`), so it cannot ride in
@@ -182,6 +193,7 @@ def record_game(
     return Record(
         num_players=len(bots),
         seed=seed,
+        first=game.first,
         actions=tuple(actions),
         chance=tuple(recording.events),
         trades=tuple(trades),
@@ -296,7 +308,9 @@ def replay(record: Record) -> Game:
     else:
         chance = _SeedChecked(scripted, Live(random.Random(record.seed)))
         rng = random.Random(record.seed)
-    game = start(board_of(record), record.num_players, rng, chance=chance)
+    game = start(
+        board_of(record), record.num_players, rng, first=record.first, chance=chance
+    )
     for step, (action, trades) in enumerate(steps(record)):
         if action not in legal_actions(game):
             raise ReplayError(
@@ -346,6 +360,7 @@ def from_json(line: str) -> Record:
         winner=raw["winner"],
         turns=raw["turns"],
         seed=raw.get("seed"),
+        first=raw.get("first", 0),
     )
 
 
@@ -363,7 +378,11 @@ def from_journal(path) -> Record:
     discard is never a chance event on this path: the journal's own
     `Phase.DISCARD` actions are always a seat's explicit, one-card-at-a-time
     choice (`hexset.game.submit_discard`/`discard_one`), never
-    `chance.discard`.
+    `chance.discard`. The header's own `first` (the setup snake's start
+    seat, needed on resume for the same reason -- `Journal.start`'s
+    docstring) is read here too, not assumed 0: a journal dealt with a
+    rotated snake would otherwise replay a different setup order than the
+    one actually played.
 
     `path` must reach a game with a `result` line (`Journal.finish`) -- an
     abandoned, resultless journal has no `winner`/`turns` to record and is
@@ -422,6 +441,7 @@ def from_journal(path) -> Record:
         winner=result["winner"],
         turns=result["turns"],
         seed=header.get("seed"),
+        first=header.get("first", 0),
     )
 
 

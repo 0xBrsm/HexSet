@@ -596,6 +596,7 @@ def _play_and_record(
     record = Record(
         num_players=len(lineup),
         seed=seed,
+        first=game.first,
         actions=tuple(actions),
         chance=tuple(chance.events),
         trades=tuple(trades),

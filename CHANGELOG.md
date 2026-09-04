@@ -89,7 +89,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   from `chance` alone. `to_json` writes `"version": 2`; `from_json` refuses
   a version-1 line by name rather than misreading it. The only version-1
   file this project shipped, the trade-lab bank, is re-emitted as version 2
-  by re-running `record_game`/`write` — no format migration needed.
+  by re-running `record_game`/`write` — no format migration needed. `Record`
+  also gains `first` (`Game`'s own new field, set by `start`): the setup
+  snake's start seat, so `replay` reopens the same snake a game with a
+  rotated deal actually played rather than assuming seat 0.
 - `search2` is off the board's model picker; it stays seatable by name for API clients, tests and the training mix.
 - **The Catanatron adapter's translation tables now run both ways.**
   `hexset.catanatron.names`, `.board`, `.state` and `.actions` express each

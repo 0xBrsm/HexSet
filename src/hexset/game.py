@@ -182,6 +182,17 @@ class Game:
     # that only a still-empty seat ever does -- belongs in the engine, which
     # is why `lock_seat` places no restriction on which seat or when.
     locked: frozenset[int] = field(default_factory=frozenset)
+    # The seat `start()` opened the setup snake at (its own `first` argument,
+    # `start=0` the default). Read-only after `start`: nothing in this module
+    # writes it again, since the snake's start doesn't move once the table is
+    # dealt. Exists as its own field, not derived from `setup_queue[0]`
+    # (which happens to equal it, since the queue is built from `first` and
+    # never mutated), because `hexset.record.Record` needs to carry it
+    # explicitly to rebuild the same snake on replay -- `setup_queue` is not
+    # itself part of a record, so there is nothing to derive it from once a
+    # game is reconstructed from one. `imagine` copies it for the same
+    # reason it copies `setup_queue`: a hypothetical is still the same table.
+    first: int = 0
 
     def state(self, seat: int, *, hidden: bool = True) -> GameState | View:
         """The access path to this game's state (P0,
@@ -370,6 +381,7 @@ def start(
         discard_quota=[0] * num_players,
         # All-zero: a seat trades only after it has published something.
         valuations=[(0.0,) * NUM_RESOURCES for _ in range(num_players)],
+        first=first,
     )
 
 
@@ -421,6 +433,7 @@ def imagine(
         event_pending=game.event_pending,
         awaiting_publish=game.awaiting_publish,
         locked=game.locked,
+        first=game.first,
     )
 
 

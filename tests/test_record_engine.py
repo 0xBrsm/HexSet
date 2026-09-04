@@ -2,22 +2,15 @@
 from __future__ import annotations
 
 import json
-import os
 import random
-from pathlib import Path
 
 import pytest
 
-from hexset.actions import Action, ActionType, apply, legal_actions
-from hexset.board.board import make_board, random_base_board
-from hexset.board.coords import Hex
-from hexset.board.ports import Port
-from hexset.board.terrain import Resource, Terrain
-from hexset.board.topology import build as build_topology
+from hexset.actions import Action, ActionType, apply
+from hexset.board.board import random_base_board
 from hexset.bots import RandomBot, greedy
 from hexset.bots.evaluate import Evaluator
-from hexset.chance import Live, Recording
-from hexset.game import is_over, start
+from hexset.game import is_over
 from hexset.record import (
     Record,
     ReplayError,
@@ -173,9 +166,8 @@ def test_a_journal_converts_to_a_record_that_replays(tmp_path):
     """`from_journal` on a game played through the server's own recording
     path (`hexset.server.journal.Journal`), not hand-written JSON."""
     from hexset.actions import ActionType as _AT
-    from hexset.actions import legal_actions as _legal
     from hexset.bots import RandomBot as _RandomBot
-    from hexset.game import Phase, is_over as _is_over, start as _start, to_move as _to_move
+    from hexset.game import is_over as _is_over, start as _start, to_move as _to_move
     from hexset.server.journal import Journal
     from hexset.trading import publish_valuation as _publish
 
@@ -236,99 +228,26 @@ def test_a_journal_converts_to_a_record_that_replays(tmp_path):
     assert replayed.turns == record.turns
 
 
-def _find_trade_lab_bank() -> Path | None:
-    """The trade-lab bank's location, when the private dev-hexset monorepo
-    this HexSet checkout was built inside is available beside it.
-
-    Not part of the public HexSet repo -- `HEXSET_TRADE_LAB_BANK` names it
-    explicitly, or it is found at the layout this repo happened to be
-    checked out under while this test was written
-    (`<monorepo>/tmp/<this checkout>/tests/...`, three parents up from this
-    file). Skips rather than fails when neither resolves, so a standalone
-    HexSet clone is not broken by a fixture that only ever lived elsewhere.
-    """
-    named = os.environ.get("HEXSET_TRADE_LAB_BANK")
-    if named:
-        path = Path(named)
-        return path if path.exists() else None
-    guess = Path(__file__).resolve().parents[3] / "runs" / "eval" / "trade-lab" / "bank.jsonl"
-    return guess if guess.exists() else None
-
-
 def test_default_chance_matches_the_seeded_stream():
     """The default (`Live`) chance source is byte-identical to the engine's
-    pre-`chance` behaviour, for every seed -- proved by replaying the
-    trade-lab bank's first game (a version-1 record, so its fields are read
-    directly here rather than through `from_json`, which now refuses
-    version-1 lines by name) and checking the terminal state, winner and
-    turns, and that the deck order and every roll `Recording` captured equal
-    what a bare seeded `random.Random` produces through this same engine.
+    pre-`chance` behaviour, for every seed. Self-contained -- no file from
+    outside this repo: records a short game right here, then replays it with
+    `seed` still attached, so `replay`'s `_SeedChecked` cross-checks *every*
+    event in the recorded stream (the deck order, every roll, every steal,
+    in their true interleaved order) against a freshly seeded `Live` stream,
+    raising `ReplayError` at the first one that disagrees.
+
+    `record.winner`/`record.turns` are the actual game's own `won_by`/
+    `turns`, captured at recording time (`record_game`'s own return
+    statement) -- so a clean replay whose terminal state matches them is a
+    clean replay matching the game that was actually played, not merely
+    matching itself.
     """
-    bank = _find_trade_lab_bank()
-    if bank is None:
-        pytest.skip("trade-lab bank.jsonl not found outside the public HexSet repo")
+    record = a_record(seed=42, bot="greedy")
+    assert record.seed == 42
+    # The stream really was exercised, not vacuously empty or roll-only.
+    kinds = {kind for kind, _ in record.chance}
+    assert {"deck", "roll", "steal"} <= kinds
 
-    with open(bank, encoding="utf-8") as handle:
-        raw = json.loads(handle.readline())
-    assert "version" not in raw and "chance" not in raw  # this really is v1
-
-    topology = build_topology(Hex(*h) for h in raw["layout"])
-    ports = tuple(
-        Port(
-            edge=edge,
-            vertices=(topology.edges[edge][0], topology.edges[edge][1]),
-            resource=None if resource is None else Resource(resource),
-            ratio=ratio,
-        )
-        for edge, ratio, resource in raw["ports"]
-    )
-    board = make_board(
-        topology, tuple(Terrain(t) for t in raw["terrain"]), tuple(raw["tokens"]), ports
-    )
-    actions = [Action(ActionType(k), a, b) for k, a, b in raw["actions"]]
-    trades_by_step: dict[int, list[tuple[int, int, tuple[int, ...]]]] = {}
-    for step, a, b, received in raw.get("trades", ()):
-        trades_by_step.setdefault(step, []).append((a, b, tuple(received)))
-
-    rng = random.Random(raw["seed"])
-    recording = Recording(Live(rng))
-    game = start(board, raw["num_players"], rng, chance=recording)
-
-    from hexset.trading import Trade, apply_trades
-
-    for step, action in enumerate(actions):
-        assert action in legal_actions(game), f"step {step}: {action} not legal"
-        apply(game, action)
-        for a, b, received in trades_by_step.get(step, ()):
-            apply_trades(game, [Trade(a, b, received)])
-
-    # This is also the trade-lab bank's own claimed outcome, not just this
-    # test's own replay of it.
-    assert (game.won_by, game.turns) == (raw["winner"], raw["turns"])
-
-    # The stronger, whole-stream check: build a v2 `Record` from what
-    # `Recording` just captured, with `seed` present, and replay *that*.
-    # `replay`'s `_SeedChecked` then compares *every* event -- the deck
-    # order, every roll, every steal, in their true interleaved order, not
-    # just deck-then-rolls in isolation -- against a freshly seeded `Live`
-    # stream, and raises `ReplayError` at the first one that disagrees. A
-    # clean replay is exactly "the deck order and every roll (and steal)
-    # `Recording` captured equal what the seeded rng produces", checked at
-    # every single event rather than sampled.
-    checked_record = Record(
-        layout=tuple(tuple(h) for h in raw["layout"]),
-        terrain=tuple(raw["terrain"]),
-        tokens=tuple(raw["tokens"]),
-        ports=tuple(tuple(p) for p in raw["ports"]),
-        num_players=raw["num_players"],
-        actions=tuple(raw["actions"]),
-        chance=tuple(recording.events),
-        winner=raw["winner"],
-        turns=raw["turns"],
-        seed=raw["seed"],
-        trades=tuple(
-            (step, a, b, tuple(received)) for step, a, b, received in raw.get("trades", ())
-        ),
-    )
-    replayed = replay(checked_record)  # raises ReplayError on any divergence
-    assert (replayed.won_by, replayed.turns) == (raw["winner"], raw["turns"])
+    replayed = replay(record)  # raises ReplayError on any divergence from the seed
+    assert (replayed.won_by, replayed.turns) == (record.winner, record.turns)

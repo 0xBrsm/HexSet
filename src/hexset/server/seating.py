@@ -3,18 +3,18 @@
 Both of the things in here are gym concerns rather than rules, which is why
 they live in the interface layer and not in `hexset.game`:
 
-*The snake starts at the creator.* `hexset.game.start` always deals the setup
-snake from seat 0 and, when setup ends, hands the first real turn to seat 0.
-That is right for a duel harness, where seat 0 is always occupied. It is wrong
-here: HexSet has no lobby any more, a game deals the instant somebody asks for
-one, and the creator lands on a *random* seat (`api.Tables.create`). A game
-has to be immediately playable by whoever just made it.
+*The snake starts at seat 0, not at the creator.* `api.Tables.create` passes
+`start_at` `first=0`, so turn order is seat order regardless of which random
+seat the creator was dealt. `api.Table._settle_locks`'s `setup_step == 0`
+carve-out is the one accommodation this needs: seat 0 isn't guaranteed
+occupied the instant a game exists the way the creator's own seat is, so it
+is held open rather than retired like any other empty seat the snake reaches.
 
-*An empty seat the snake reaches is retired on sight.* See
-`api.Table._settle_locks`, and its own note on why there is no waiting window
-in front of it. A locked seat leaves the setup snake and every later turn
-rotation, permanently — a claimed seat is never released, so a game's player
-count is fixed for good the moment setup finishes.
+*An empty seat the snake reaches is retired on sight* -- except seat 0's own
+opening placement, per the carve-out above. See `api.Table._settle_locks`. A
+locked seat leaves the setup snake and every later turn rotation permanently
+— a claimed seat is never released, so a game's player count is fixed for
+good the moment setup finishes.
 
 Both are implemented as a **correction applied after each action**, because
 `hexset.game` does not know about either. `settle` re-points the snake or the
@@ -133,8 +133,8 @@ def advance_setup(game: Game) -> None:
 
 def next_unlocked(game: Game, after: int) -> int:
     """The next seat past `after`, skipping retired ones. Always terminates:
-    `setup_queue[0]` — the creator's seat — is never retired, it was occupied
-    the instant the game was created."""
+    whichever seat the creator actually holds is never empty and so never
+    retired, whether or not that happens to be `setup_queue[0]`."""
     # true state: `num_players` is a fixed, public board property.
     n = game.state(after, hidden=False).num_players
     locked = locked_of(game)

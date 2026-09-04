@@ -322,7 +322,7 @@ def test_a_seat_line_says_who_is_in_it(live, browser):
             assert row.locator("select").count() == 1
             assert row.locator("select").input_value() == BOT
         else:
-            assert "open seat" in row.inner_text()
+            assert "empty" in row.inner_text()
     assert page.console == []
 
 

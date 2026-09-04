@@ -144,6 +144,10 @@
        respects the padding above, same as any other element would. */
     appearance: none; -webkit-appearance: none;
   }
+  /* An empty seat's picker reads "empty" in muted grey, same as any other
+     placeholder-shaped text; picking a model switches it back to normal
+     ink, same as any other seat's name (see renderPlayers' "unset" class). */
+  .player-name select.unset { color: var(--muted); }
   /* Your own row, on the same terms: a control standing in for the name,
      sized and weighted like the picker opposite it so the column reads as
      one thing. Flat until you touch it — a row of names should look like a
@@ -156,6 +160,10 @@
     text-overflow: ellipsis;
   }
   .player-name input:hover { border-color: var(--border); }
+  /* Unset, this reads "human" in normal ink, not the browser's own muted
+     placeholder grey -- the owner's own row is not "empty", it just has no
+     name yet. */
+  .player-name input::placeholder { color: var(--ink); opacity: 1; }
   .player-name input:focus {
     outline: none; border-color: var(--accent); background: #232733;
   }
@@ -918,7 +926,7 @@ function seatLabel(seat) {
   // fields tells it apart from a person who never gave a name.
   const info = state?.seats?.[seat];
   if (info && info.kind === "empty") {
-    return state?.locked?.includes(seat) ? "locked seat" : "open seat";
+    return state?.locked?.includes(seat) ? "locked seat" : "empty";
   }
   return (info && info.name) || `Player ${seat + 1}`;
 }
@@ -1585,9 +1593,10 @@ function renderPlayers() {
       // step. An empty seat stays open until somebody picks for it or
       // somebody opens the link, and setup retires it if neither happens.
       const select = html("select", {});
-      if (!p.bot) select.appendChild(html("option", {value: ""}, "open seat"));
+      if (!p.bot) select.appendChild(html("option", {value: ""}, "empty"));
       for (const name of modelNames) select.appendChild(html("option", {value: name}, name));
       select.value = p.bot || "";
+      select.classList.toggle("unset", !p.bot);
       select.addEventListener("change", () => { select.blur(); swapBot(p.seat, select.value); });
       nameEl.appendChild(select);
     }

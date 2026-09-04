@@ -320,23 +320,21 @@ class Table:
 
     def _settle_locks(self) -> None:
         """Must be called with `self.lock` held. Retires every empty seat the
-        setup snake has reached, on sight.
+        setup snake has reached, on sight -- except seat 0's own opening
+        placement (`game.setup_step == 0`), held open instead.
 
-        There is no waiting window, because there is nothing a window would
-        add. A turn only ever advances because the seat holding it says so,
-        so somebody expecting a friend simply does not finish their own
-        placement until that friend is in — the wait is a person deciding to
-        wait, not a timer counting down behind them. A window on top of that
-        could only ever retire a seat somebody was still holding the table
-        for.
-
-        No timer thread either, for the same reason: nothing here is
-        time-dependent any more. It runs at the top of every request that
-        touches the game (`view`, `join`, `Tables.act`, `Tables.seat_bot`),
-        which is exactly when the snake can have moved.
+        That one exception exists because turn order is seat order, seat 0
+        first (`Tables.create` deals `first=0`), while only the creator's
+        actual seat is guaranteed occupied the instant a game exists.
+        Without it, a creator dealt anywhere else would lose seat 0 to this
+        same retirement before they had seated anyone there. Every seat
+        after the first has already had a real move pace it here, which is
+        what makes retiring those on sight safe; seat 0 has not.
         """
         game = self.session.game
         while not is_over(game) and game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
+            if game.setup_step == 0:
+                return
             seat = to_move(game)
             if self.seats[seat].kind is not SeatKind.EMPTY or seat in locked_of(game):
                 return
@@ -431,10 +429,10 @@ def _seat_labels(seats: list[Seat]) -> tuple[dict[int, str], dict[int, str], dic
 
 
 def build_session(code: str, seats: list[Seat], config: Config, *, first: int) -> GameSession:
-    """A fresh `MAX_SEATS`-seat game, `first` the creator's own seat (see
-    `hexset.server.seating.start_at`). Every seat not already claimed here (an empty
-    one, or a named bot's) is simply left for `Table.join`/`lock_seat` to
-    resolve as the game itself unfolds."""
+    """A fresh `MAX_SEATS`-seat game, `first` the seat the setup snake opens
+    on -- `Tables.create` always passes `0`; `resume_session` passes back
+    whatever a journal recorded. Every seat not already claimed here is left
+    for `Table.join`/`lock_seat` to resolve as the game unfolds."""
     seed = config.seed
     # Always resolved to a concrete int, even when the caller left it to
     # chance, so the journal can name the seed a resumed game rebuilds its
@@ -550,6 +548,11 @@ class Tables:
         (`--checkpoint`'s pin) or, absent that, no bots at all; a caller
         wanting the table filled says so explicitly, there is no automatic
         mixed lineup any more (see `Config.default_bots`'s own docstring).
+
+        Turn order is seat order, seat 0 first, regardless of which seat the
+        creator landed on -- see `Table._settle_locks`'s `setup_step == 0`
+        carve-out, which is what keeps that safe.
+
         `confirm` opts the creator's own seat into confirm-mode trading (see
         `Table.join`). Defaults to `False` here -- this method's own
         default, kept the conservative one for any caller that isn't a
@@ -588,7 +591,7 @@ class Tables:
                 kind=SeatKind.BOT, name=entry, spec=options[entry], token=secrets.token_urlsafe(18)
             )
 
-        session = build_session(code, seats, self.config, first=creator_seat)
+        session = build_session(code, seats, self.config, first=0)
         if confirm:
             session.confirm_mode(creator_seat)
         table = Table(

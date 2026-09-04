@@ -12,6 +12,7 @@ suite runs anywhere the rest of the engine's tests do.
 from __future__ import annotations
 
 import json
+import random
 import threading
 import urllib.error
 import urllib.request
@@ -24,6 +25,15 @@ from hexset.server.web import TOKEN_HEADER, HexSetServer, is_code, looks_like_a_
 from hexset.server.webplay import action_to_wire
 
 SOLO = ["search2", "search2", "search2"]
+
+
+@pytest.fixture(autouse=True)
+def _creator_at_seat_zero(monkeypatch):
+    """Turn order is seat order from seat 0 (`Tables.create` always deals
+    `first=0`, see `hexset.server.seating`'s module docstring); this file's
+    tests treat the dealt token as the one that moves first, so pin the
+    creator to seat 0 for that determinism."""
+    monkeypatch.setattr(random.SystemRandom, "randrange", lambda self, n: 0)
 
 
 @pytest.fixture

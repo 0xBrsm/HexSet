@@ -653,6 +653,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   contract-unspecified checkpoint by name; the server serves contracts 2, 3
   and 4 only. `encoding_v1.py` and `OnnxPolicy` are deleted.
 
+### Changed
+
+- **heximax reads its evaluation as win probability.** Its default stance is
+  `win` (`hexset.bots.search2.win`): the per-seat score vector read as
+  `softmax(vector / WIN_TEMPERATURE)[seat]`, the seat's own chance of
+  winning, rather than `relative`'s own score minus the table mean. At the
+  table heximax now robs the leader two thirds of the time instead of half,
+  feeds the leader less through trades, and beats the `relative` reading
+  head-to-head at an equal terminal-VP margin. `WIN_TEMPERATURE` is fitted
+  against real game outcomes and pinned beside the stance; `MARGINAL_SCALE`,
+  the unit heximax's published trade valuation is squashed onto, is refit
+  for the new stance by its recorded protocol. `search2` is unchanged and
+  stays the frozen `relative` referent.
+
 ## 0.13.0
 
 ### Added

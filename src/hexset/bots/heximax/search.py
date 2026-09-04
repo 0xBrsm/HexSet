@@ -99,13 +99,22 @@ EXACT_ROLL_PLIES = 2
 # Computed once, over the trade-free census games -- `heximax-notrade`,
 # seeds 100..104, every seat the same preset -- as the mean of
 # `|Eval(hand + one r) - Eval(hand)|` under `TRADING_WEIGHTS` and the
-# `relative` stance, over every resource at every position the mover
-# reaches (9280 marginals). Trade-free deliberately: the games that fix the
-# scale must not themselves depend on it, and `max_trades=0` makes them
-# independent of this constant by construction.
-# `test_marginal_scale_is_the_recorded_mean` recomputes it from those same
-# games and pins it to 1e-9.
-MARGINAL_SCALE = 0.10231140469178995
+# bot's stance (`win`, since `agents/reference/heximax.md`'s "Registration
+# 2026-09-04: the objective -- a win-probability stance against the
+# relative-VP stance" made it the default), over every resource at every
+# position the mover reaches (10000 marginals; re-pinned from the prior
+# `relative`-stance figure of 0.10231140469178995 over 9280 marginals by
+# `tmp/win-stance/marginal_scale.py`, which reproduces the protocol exactly
+# -- `heximax-notrade` bots, now `win`-stance too, generate the
+# positions/choices; a separately built
+# `Heximax(HonestEvaluator(board, TRADING_WEIGHTS))` meter, reading its own
+# stance default, does the measuring). Trade-free deliberately: the games
+# that fix the scale must not themselves depend on it, and `max_trades=0`
+# makes them independent of this constant by construction.
+# `test_marginal_scale_is_the_recorded_mean` recomputed it from those same
+# games and pinned it to 1e-9 (removed by the `test/essential-cut` PR along
+# with most of the suite).
+MARGINAL_SCALE = 0.006413829636547007
 
 
 class _Exhausted(Exception):
@@ -250,7 +259,7 @@ class Heximax:
     max_nodes: int = DEFAULT_MAX_NODES
     k: int = 1
     rng: random.Random = field(default_factory=random.Random)
-    stance: str = "relative"
+    stance: str = "win"
     # The trade off switch (`hexset.bots.search2.SearchBot.max_trades`): `0`
     # publishes nothing and refuses everything. Not a budget -- the engine
     # has no cap.
@@ -455,11 +464,11 @@ class Heximax:
 
         The private gate of the mechanic: the public vectors say a deal is
         advertised, this says whether it is actually good, and it is read
-        under the bot's stance -- so under `relative` the counterparty's
-        gain is already priced in, which is what makes "not with the
-        leader" expressible without a partner term. Strict: an exchange
-        worth exactly nothing does not clear, which is what bounds the
-        event (`hexset.trading.trade_event`).
+        under the bot's stance -- so under `win` (the shipped default) or
+        `relative`, the counterparty's gain is already priced in, which is
+        what makes "not with the leader" expressible without a partner term.
+        Strict: an exchange worth exactly nothing does not clear, which is
+        what bounds the event (`hexset.trading.trade_event`).
         """
         if self.max_trades == 0:
             return False
@@ -858,7 +867,7 @@ BY_MODE: int = object()  # type: ignore[assignment]
 def heximax(
     board: Board, rng: random.Random | None = None, *, mode: str = "honest", depth: int = 2,
     width: int | None = 6, max_trades: int | None = BY_MODE,  # type: ignore[assignment]
-    max_nodes: int = DEFAULT_MAX_NODES, k: int = 1, stance: str = "relative",
+    max_nodes: int = DEFAULT_MAX_NODES, k: int = 1, stance: str = "win",
     placement: bool = True, exact_progress_samples: int = 0, weights: Weights | None = None,
 ) -> Heximax:
     """The three shipped configurations, by `mode`.

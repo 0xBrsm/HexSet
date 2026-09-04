@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass, field
 from typing import Protocol, Sequence
@@ -85,9 +86,34 @@ def paranoid(vector: Sequence[float], seat: int) -> float:
     return vector[seat] - max(others)
 
 
+# Fitted by maximum likelihood over 4,463 per-turn score-vector samples from
+# 48 `heximax`x4 games (stance `relative`, the shipped mechanic at fit time),
+# one sample per turn at the mover's first decision, labelling the eventual
+# winner, seed 40000: mean log loss 1.107 against the eventual winner, vs.
+# 1.386 for the uniform baseline. `agents/reference/heximax.md`, "Registration
+# 2026-09-04: the objective — a win-probability stance against the
+# relative-VP stance".
+WIN_TEMPERATURE = 2.476644394795811
+
+
+def win(vector: Sequence[float], seat: int) -> float:
+    """Softmax(vector / WIN_TEMPERATURE)[seat]: the seat's win probability.
+
+    This reads the vector as the seat's win probability, which is what the
+    game actually pays, rather than a margin over the table — at a
+    temperature fitted by maximum likelihood against real game outcomes (see
+    `WIN_TEMPERATURE`). Numerically stable: the max is subtracted before
+    exponentiating. `relative` remains search2's frozen stance.
+    """
+    scaled = [v / WIN_TEMPERATURE for v in vector]
+    m = max(scaled)
+    exps = [math.exp(s - m) for s in scaled]
+    return exps[seat] / sum(exps)
+
+
 # How a seat turns the per-seat vector into the one number it maximises. The
 # evaluation is unchanged; only the reading of it differs.
-STANCES = {"own": own, "relative": relative, "paranoid": paranoid}
+STANCES = {"own": own, "relative": relative, "paranoid": paranoid, "win": win}
 
 
 def options_for(game: Game) -> list[Action]:

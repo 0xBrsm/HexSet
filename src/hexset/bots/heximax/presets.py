@@ -45,14 +45,29 @@ register_entrant_kind("heximax", _spawn)
 # `heximax-omni` is the same bot reading every true hand, kept to measure
 # what honesty costs; `heximax-notrade` plays the no-trade table with the
 # trade switch off.
-register_preset("heximax", Entrant("heximax", kind="heximax", depth=2, width=6))
+#
+# `stance="win"` is passed explicitly on all three, not left to `Entrant`'s
+# own field default (`"relative"`, the right default for `greedy`/`search2`,
+# which this module's `_spawn` would otherwise pass straight through
+# regardless of what `Heximax`/`heximax()` themselves default to) --
+# `agents/reference/heximax.md`, "Registration 2026-09-04: the objective --
+# a win-probability stance against the relative-VP stance" and its post-data
+# note, ratifying `win` as heximax's default.
+register_preset(
+    "heximax", Entrant("heximax", kind="heximax", depth=2, width=6, stance="win")
+)
 register_preset(
     "heximax-omni",
-    Entrant("heximax-omni", kind="heximax", depth=2, width=6, mode="omniscient"),
+    Entrant(
+        "heximax-omni", kind="heximax", depth=2, width=6, mode="omniscient", stance="win"
+    ),
 )
 register_preset(
     "heximax-notrade",
-    Entrant("heximax-notrade", kind="heximax", depth=2, width=6, max_trades=0, mode="notrade"),
+    Entrant(
+        "heximax-notrade", kind="heximax", depth=2, width=6, max_trades=0, mode="notrade",
+        stance="win",
+    ),
 )
 
 # `hexset.tuning.entrant_for(evaluator="heximax-trading"/"heximax-notrade")`

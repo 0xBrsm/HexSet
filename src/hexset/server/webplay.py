@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Sequence
+from typing import Iterable, Sequence
 
 from hexset.actions import (
     YEAR_OF_PLENTY_PAIRS,
@@ -445,18 +445,23 @@ class _Event:
     trades: tuple[Trade, ...] = ()
 
 
+class SeatLabels(dict):
+    """Seat -> label, plus the seat's number among the seats still in the game:
+    a closed seat keeps no number, so the table reads Player 1, 2, 3."""
+
+    def __init__(self, labels: dict[int, str], locked: Iterable[int] = ()) -> None:
+        super().__init__(labels)
+        self.locked = frozenset(locked)
+
+    def number(self, seat: int) -> int:
+        return seat + 1 - sum(1 for s in self.locked if s < seat)
+
+
 def _who(seat: int, labels: dict[int, str]) -> str:
-    """"Player N (label)" — the label is whoever holds the seat, the player's
-    own registered name or the model name, the same one `state_view` already
-    puts on that seat (see `GameSession.seat_labels`). One form for every
-    seat, actor or bystander, rather than a special case for the reader that
-    the rest of the log has to match — and with several humans at a table,
-    "human" would no longer identify anyone anyway. Player numbers are
-    1-indexed for the log even though `seat` itself stays 0-indexed
-    everywhere else — "Player 0" reads as a bug to anyone who isn't a
-    programmer.
-    """
-    return f"Player {seat + 1} ({labels.get(seat, 'bot')})"
+    """"Player N (label)": N is the seat's number among the seats still in the
+    game when `labels` is a `SeatLabels`, else the 1-indexed seat."""
+    number = labels.number(seat) if isinstance(labels, SeatLabels) else seat + 1
+    return f"Player {number} ({labels.get(seat, 'bot')})"
 
 
 def _describe(
@@ -892,7 +897,7 @@ class GameSession:
             )
 
     @property
-    def seat_labels(self) -> dict[int, str]:
+    def seat_labels(self) -> SeatLabels:
         """Seat -> what to call whoever holds it, people and bots in one map.
 
         The log and the client both want a name per seat and neither cares
@@ -906,7 +911,7 @@ class GameSession:
         for seat in self.claimed_seats:
             if seat not in labels:
                 labels[seat] = self.player_names.get(seat) or "player"
-        return labels
+        return SeatLabels(labels, locked_of(self.game))
 
     def claim(self, seat: int, name: str | None) -> None:
         """A seat somebody just joined, after the deal — the one seat this

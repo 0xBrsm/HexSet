@@ -345,7 +345,7 @@ def test_an_empty_seat_holds_the_table_until_a_person_resolves_it(live, browser)
     """No on-sight retirement, no timer, no countdown: nobody moves during
     setup while any seat is still empty. Seating two of the three open seats
     leaves the table waiting on the third; closing it through the picker's
-    own "none" option is what lets setup run."""
+    own "closed" option is what lets setup run."""
     _, url = live
     page = open_page(browser, url)
     # Freshly dealt, nothing is locked: a table with every seat open is a
@@ -372,7 +372,7 @@ def test_an_empty_seat_holds_the_table_until_a_person_resolves_it(live, browser)
         f"() => (state.locked || []).includes({last_open})", timeout=15000
     )
     row = page.page.locator("#players .player-row").nth(last_open)
-    assert "locked seat" in row.inner_text()
+    assert "closed" in row.inner_text()
     assert row.locator("select").count() == 0
     assert page.console == []
 
@@ -383,7 +383,10 @@ def test_an_empty_seat_holds_the_table_until_a_person_resolves_it(live, browser)
     # in it and nobody ever will be, so the list shows only who is playing.
     page.page.wait_for_timeout(400)  # one render after the phase turned
     assert page.page.locator("#players .player-row").count() == 3
-    assert "locked seat" not in page.page.inner_text("#players")
+    assert "closed" not in page.page.inner_text("#players")
+    # Numbered among the seats still playing: three seats, Players 1 to 3.
+    body = page.page.inner_text("body")
+    assert "Player 4" not in body
     assert page.console == []
 
 

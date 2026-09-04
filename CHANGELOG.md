@@ -25,6 +25,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- A closed seat reads "closed" (the picker's option and the row), and players are numbered among the seats still in the game: close one and the table reads Player 1, 2, 3.
 - **`hexset.trading._candidates` skips a zero-valuation seat's enumeration.**
   A seat that has never published (`NO_VALUATION`, all zero) can never clear
   a trade as either party — `_rank_candidates_loop`/`_rank_candidates_

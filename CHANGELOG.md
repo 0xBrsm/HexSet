@@ -50,6 +50,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **The Docker image installs the `catanatron` extra**, pinned to the same
   commit as `pyproject.toml`, so a deployed table can seat the `catanatron`
   opponent. This restage needs a rebuild, not just a restart.
+- **`hexset.bench.trade_census` reads the true state through
+  `game.state(0, hidden=False)`** rather than `game._state` — the sanctioned
+  path `tests/test_view.py` pins, and (unlike `game.state(seat)`) not one of
+  the pending trade event's trigger points, so the instrumentation's
+  bookkeeping snapshots still fire nothing. No behaviour change: the two
+  return the same object.
 - A closed seat reads "closed" (the picker's option and the row), and players are numbered among the seats still in the game: close one and the table reads Player 1, 2, 3.
 - **`hexset.trading._candidates` skips a zero-valuation seat's enumeration.**
   A seat that has never published (`NO_VALUATION`, all zero) can never clear

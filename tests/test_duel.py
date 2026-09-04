@@ -125,9 +125,10 @@ def _fake_compete(seen: dict, points, turns=None, winners=None):
     those fields.
     """
 
-    def compete(lineup, games, *, seed, workers):
+    def compete(lineup, games, *, seed, workers, records=False):
         seen["lineup"] = [entrant.weights for entrant in lineup]
         seen["names"] = [entrant.name for entrant in lineup]
+        seen["records"] = records
         game_turns = tuple(turns) if turns is not None else tuple(80 for _ in range(games))
         game_winners = (
             tuple(winners) if winners is not None else tuple(0 for _ in range(games))
@@ -147,7 +148,7 @@ def _fake_compete(seen: dict, points, turns=None, winners=None):
 
 
 def _arena_args(**overrides):
-    base = dict(a=A, b=B, games=4, duel_seed=20_000, workers=2)
+    base = dict(a=A, b=B, games=4, duel_seed=20_000, workers=2, records=None)
     base.update(overrides)
     return SimpleNamespace(**base)
 

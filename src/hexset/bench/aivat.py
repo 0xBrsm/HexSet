@@ -62,6 +62,7 @@ import numpy as np
 from hexset.actions import Action, ActionType, apply, victim_of
 from hexset.arena import MAX_ACTIONS, entrant_from_name, load_checkpoint, seat_of, spawn
 from hexset.board.board import Board, random_base_board
+from hexset.chance import Forced, Live
 from hexset.encoding import encode
 from hexset.game import ROLL_ODDS, Game, imagine, is_over, roll_dice, start, to_move
 from hexset.mcts import draws_hidden
@@ -217,34 +218,21 @@ def chance_outcomes(
     # resolves the robber and so opens the main phase (`move_robber_to`
     # only *arms* that turn's first trade event, per this function's own
     # docstring -- it stays pending on `child`, unrun, matching the real
-    # game at this same point). `_Forced` stands in for the child's rng
-    # exactly as `hexset.bots.heximax` does it: `steal` draws
-    # `randrange(total)` and walks the hand in resource order, so returning
-    # the index of the first card of the wanted resource makes the draw
-    # deterministic, and nothing else on the path consults the rng.
+    # game at this same point). `chance.Forced` stands in for the child's
+    # chance source exactly as `hexset.bots.heximax` does it: returning the
+    # wanted resource directly makes the draw deterministic, and nothing
+    # else on the path consults `child.chance`.
     out = []
     for resource, count in enumerate(hand):
         if not count:
             continue
         child = imagine(game, rng, randomize_deck=False)
         child.gates = game.gates
-        child.rng = _Forced(sum(hand[:resource]))  # type: ignore[assignment]
+        child.chance = Forced(resource)
         apply(child, action)
-        child.rng = rng
+        child.chance = Live(rng)
         out.append((_outcome_key(child, action), count / total, child))
     return out
-
-
-class _Forced:
-    """A stand-in rng that makes `robber.steal` take one chosen card."""
-
-    __slots__ = ("index",)
-
-    def __init__(self, index: int) -> None:
-        self.index = index
-
-    def randrange(self, _stop: int) -> int:
-        return self.index
 
 
 def _moved(before: list[int], after: list[int]) -> int:

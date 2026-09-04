@@ -11,6 +11,28 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`hexset.chance`: one chance source for the whole engine.** `Game.chance`
+  answers `deck_order`, `roll`, `steal` and `discard` — every random draw
+  the engine makes, in place of reaching into `random.Random` directly.
+  `Live` is the default (byte-identical to every seed the engine has ever
+  played); `Scripted` replays a recorded event stream instead of drawing,
+  raising `ChanceMismatch`/`ChanceExhausted` (naming the event index) on
+  divergence; `Recording` wraps either and logs every outcome; `Forced`
+  pins one steal's resource for a counterfactual child
+  (`hexset.bench.aivat`, `hexset.bots.heximax.search`, replacing each
+  module's own `_Forced` stand-in-rng). `imagine` always hands its copy a
+  fresh `Live`, never the real game's `chance`, so a search can never drain
+  a replay's scripted stream or leak its own draws into one being recorded.
+- **`hexset.record.from_journal`.** Converts a `hexset.server.journal` file
+  into a `Record` directly — no seed, no re-running the engine to recover
+  the deck, rolls or steals, since the journal already spells them out.
+  The porting surface a v2 `Record` was built for.
+- **`--records <path>` on `hexset.bench.duel` (arena path, `--workers > 1`)
+  and `hexset.bench.trade_census`.** Appends every game played as a v2
+  record. On `duel`, the recorded games are exactly the games the verdict
+  counted (`arena.compete(records=True)` builds both from the same job);
+  unavailable with `--workers 1`, which plays through hexnet's own batched
+  collector and returns a verdict with no per-game history.
 - **Catanatron's bots can sit at a HexSet table.** `hexset.catanatron.bot.
   CatanatronBot` is a `hexset.arena` bot whose brain is a Catanatron `Player`,
   registered as the `catanatron` preset (Catanatron's own AlphaBeta player at
@@ -55,6 +77,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **`hexset.record.Record` is version 2: it carries its own chance.** A new
+  `chance` field (the deck order, every roll, every steal, every random
+  discard, as an explicit event stream) replaces depending on `seed` to
+  reproduce them from the engine's random draws — the tripwire the old
+  docstring warned about ("unreadable without the exact engine version"),
+  and the reason nothing outside this engine's own seeded stream could ever
+  become a `Record`. `seed` is now optional: present, `replay` uses it as
+  an extra check that `chance` is what that seed's stream actually
+  produced (`ReplayError` on divergence); absent, `replay` drives the game
+  from `chance` alone. `to_json` writes `"version": 2`; `from_json` refuses
+  a version-1 line by name rather than misreading it. The only version-1
+  file this project shipped, the trade-lab bank, is re-emitted as version 2
+  by re-running `record_game`/`write` — no format migration needed.
 - `search2` is off the board's model picker; it stays seatable by name for API clients, tests and the training mix.
 - **The Catanatron adapter's translation tables now run both ways.**
   `hexset.catanatron.names`, `.board`, `.state` and `.actions` express each

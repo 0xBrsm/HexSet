@@ -9,6 +9,7 @@ from helpers import give, mini_board
 
 from hexset.board.terrain import Resource
 from hexset.cards import DECK_SIZE, PLAYABLE, DevCard, make_deck
+from hexset.chance import Live
 from hexset.devcards import (
     buy,
     can_buy,
@@ -126,7 +127,7 @@ def test_knight_steals_from_a_chosen_victim():
     stack(state, 0, DevCard.KNIGHT)
     give(state, 1, Resource.ORE, 1)
 
-    stolen = play_knight(state, 0, 3, victim=1, rng=random.Random(0))
+    stolen = play_knight(state, 0, 3, victim=1, chance=Live(random.Random(0)))
 
     assert stolen == Resource.ORE
     assert state.hands[0][Resource.ORE] == 1

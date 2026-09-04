@@ -11,9 +11,19 @@ the same reason: a seed only reproduces a board for as long as the board
 generator is untouched. Hex coordinates go in too, so a Seafarers layout records
 exactly like the base board.
 
-Dice and steals are the one thing not stored. They come back from the seeded
-random stream, which means a change to how the engine draws randomness shows up
-as a replay mismatch rather than as quietly wrong training data.
+Version 2 (registered `agents/reference/game-records.md`, 2026-09-04): a
+record carries its own chance -- the shuffled deck, every roll, every steal,
+every random discard -- as an explicit event stream (`chance`), rather than
+depending on `seed` to reproduce them from the engine's random draws. That
+made a record unreadable across an engine change to how chance is resolved,
+and unbuildable at all for a game this engine never played (a colonist.io
+game, a Catanatron game, this project's own server journal). `seed` is now
+optional: present, `replay` uses it as an extra check that the recorded
+chance stream is what that seed would actually have produced
+(`ReplayError` on divergence); absent, `replay` drives the game purely from
+`chance`. Version 1 lines (no `chance`, `seed` required) are refused by
+`from_json` -- the only version-1 file this project has, the trade-lab bank,
+is re-emitted as version 2 by re-running `record_game`.
 """
 
 from __future__ import annotations
@@ -31,8 +41,12 @@ from .board.ports import Port
 from .board.terrain import Resource, Terrain
 from .board.topology import build as build_topology
 from .bots import Bot
+from .cards import DevCard, make_deck
+from .chance import Chance, ChanceError, Live, Recording, Scripted
 from .game import Game, is_over, start, to_move
 from .trading import Trade, apply_trades, publish_valuation
+
+VERSION = 2
 
 
 class ReplayError(RuntimeError):
@@ -46,10 +60,30 @@ class Record:
     tokens: tuple[int, ...]
     ports: tuple[tuple[int, int, int | None], ...]
     num_players: int
-    seed: int
     actions: tuple[tuple[int, int, int], ...]
+    # The chance stream, in the order the engine drew it: `("deck", card)`
+    # once per card (the shuffled development deck, bottom of the deck
+    # first -- `devcards.buy` pops the end), `("roll", n)` per dice roll,
+    # `("steal", resource)` per robber/knight steal that took a card,
+    # `("discard", resource)` per card a seat that does not choose its own
+    # discards gave up. This is what `replay` drives the game from
+    # (`chance.Scripted`) -- the porting surface: a converter (`from_journal`
+    # below; colonist.io's own converter lives in dev-HexNet's private
+    # `colonists/`) builds one of these from a game this engine never
+    # played, with no seed at all.
+    chance: tuple[tuple[str, int], ...]
     winner: int | None
     turns: int
+    # Optional: the seed the game was actually dealt with, when there was
+    # one. `replay` uses it only as an extra check -- that `chance` is what
+    # this seed's stream would have produced -- never as a dependency: a
+    # record with `seed=None` replays exactly as well. `str` as well as
+    # `int`, because `random.Random` accepts either and `hexset.arena`'s own
+    # per-game seed is a composite string (`f"{seed}:{board_index}:game"),
+    # not a bare int -- `arena.compete`'s own `--records` path stores that
+    # string here rather than giving up the seed check for every game it
+    # records.
+    seed: int | str | None = None
     # Trades, sparse by step: `(step, a, b, received)` for every exchange the
     # engine cleared inside the action at `step`, `received` signed towards
     # `a`. Trading is not an action (`hexset.trading`), so it cannot ride in
@@ -124,7 +158,9 @@ def record_game(
     would replay them after that step's action applies, which can leave a
     build the trade was meant to fund looking unaffordable on replay.
     """
-    game = start(board, len(bots), random.Random(seed))
+    rng = random.Random(seed)
+    recording = Recording(Live(rng))
+    game = start(board, len(bots), rng, chance=recording)
     game.gates = tuple(bots)
     actions: list[tuple[int, int, int]] = []
     trades: list[tuple[int, int, int, tuple[int, ...]]] = []
@@ -147,6 +183,7 @@ def record_game(
         num_players=len(bots),
         seed=seed,
         actions=tuple(actions),
+        chance=tuple(recording.events),
         trades=tuple(trades),
         winner=game.won_by,
         turns=game.turns,
@@ -192,15 +229,83 @@ def advance(game: Game, action: Action, trades: Sequence[Trade]) -> None:
     apply_trades(game, trades)
 
 
+class _SeedChecked(Chance):
+    """Drives replay from `record.chance` (`Scripted`) while cross-checking
+    every outcome against a `Live` source seeded the same way the game
+    originally was.
+
+    This is the tripwire `Record`'s pre-v2 docstring described -- "a change
+    to how the engine draws randomness shows up as a replay mismatch" --
+    kept as an explicit check now that the recorded stream, not the seed,
+    is what actually drives the replay. Only built when `record.seed` is
+    not `None`; a seedless record replays from `Scripted` alone.
+    """
+
+    def __init__(self, scripted: Scripted, seeded: Live) -> None:
+        self._scripted = scripted
+        self._seeded = seeded
+
+    def _check(self, kind: str, got, want) -> None:
+        if got != want:
+            raise ReplayError(
+                f"chance diverges at event {self._scripted.index - 1} ({kind}): "
+                f"recorded {got!r}, the seed would draw {want!r}"
+            )
+
+    def deck_order(self, deck: list[int]) -> list[int]:
+        got = self._scripted.deck_order(deck)
+        want = self._seeded.deck_order(make_deck(None))
+        self._check("deck", got, want)
+        return got
+
+    def roll(self) -> int:
+        got = self._scripted.roll()
+        want = self._seeded.roll()
+        self._check("roll", got, want)
+        return got
+
+    def steal(self, hand):
+        got = self._scripted.steal(hand)
+        want = self._seeded.steal(hand)
+        self._check("steal", got, want)
+        return got
+
+    def discard(self, hand, n: int) -> list[int]:
+        got = self._scripted.discard(hand, n)
+        want = self._seeded.discard(hand, n)
+        self._check("discard", got, want)
+        return got
+
+
 def replay(record: Record) -> Game:
-    """Re-play a record, checking it still describes the game it claims to."""
-    game = start(board_of(record), record.num_players, random.Random(record.seed))
+    """Re-play a record, checking it still describes the game it claims to.
+
+    Drives the game from `record.chance` (`chance.Scripted`), not from the
+    seed: a seedless record (`record.seed is None` -- the porting surface,
+    `from_journal` below) replays exactly the same way. When `record.seed`
+    *is* present, every scripted outcome is additionally checked against
+    what that seed's stream would have produced (`_SeedChecked`), and a
+    divergence raises `ReplayError` naming the event -- the tripwire the
+    pre-v2 `Record` relied on implicitly, kept as an explicit check instead
+    of a silent dependency.
+    """
+    scripted = Scripted(record.chance)
+    if record.seed is None:
+        chance: Chance = scripted
+        rng = random.Random()
+    else:
+        chance = _SeedChecked(scripted, Live(random.Random(record.seed)))
+        rng = random.Random(record.seed)
+    game = start(board_of(record), record.num_players, rng, chance=chance)
     for step, (action, trades) in enumerate(steps(record)):
         if action not in legal_actions(game):
             raise ReplayError(
                 f"step {step}: {action} is not legal in {game.phase.name}"
             )
-        advance(game, action, trades)
+        try:
+            advance(game, action, trades)
+        except ChanceError as error:
+            raise ReplayError(f"step {step}: {error}") from error
 
     if (game.won_by, game.turns) != (record.winner, record.turns):
         raise ReplayError(
@@ -211,25 +316,112 @@ def replay(record: Record) -> Game:
 
 
 def to_json(record: Record) -> str:
-    return json.dumps(asdict(record), separators=(",", ":"))
+    data = asdict(record)
+    data["version"] = VERSION
+    return json.dumps(data, separators=(",", ":"))
 
 
 def from_json(line: str) -> Record:
     raw = json.loads(line)
+    version = raw.get("version")
+    if version != VERSION:
+        raise ValueError(
+            f"record is version {version!r}, not {VERSION}: version 1 records "
+            "(no chance stream, a required seed) are refused -- see "
+            "agents/reference/game-records.md. Re-emit through "
+            "record_game/write."
+        )
     return Record(
         layout=tuple(tuple(h) for h in raw["layout"]),
         terrain=tuple(raw["terrain"]),
         tokens=tuple(raw["tokens"]),
         ports=tuple(tuple(p) for p in raw["ports"]),
         num_players=raw["num_players"],
-        seed=raw["seed"],
         actions=tuple(tuple(a) for a in raw["actions"]),
+        chance=tuple((kind, value) for kind, value in raw["chance"]),
         trades=tuple(
             (step, a, b, tuple(received))
             for step, a, b, received in raw.get("trades", ())
         ),
         winner=raw["winner"],
         turns=raw["turns"],
+        seed=raw.get("seed"),
+    )
+
+
+def from_journal(path) -> Record:
+    """Convert a server journal (`hexset.server.journal`) into a `Record` --
+    the porting surface `chance` was built for, proved on the one external
+    format this project owns.
+
+    The journal already spells out everything a `Record` needs to replay
+    without the engine's seed at all: the shuffled deck is the header's
+    `deck` (bottom of the deck first, matching `chance.Recording`'s own
+    convention), and every roll and every steal that took a card is on its
+    own action line (`Journal.action`'s `effects`) -- nothing here re-runs
+    the engine to recover what happened, unlike a v1 record's replay. A
+    discard is never a chance event on this path: the journal's own
+    `Phase.DISCARD` actions are always a seat's explicit, one-card-at-a-time
+    choice (`hexset.game.submit_discard`/`discard_one`), never
+    `chance.discard`.
+
+    `path` must reach a game with a `result` line (`Journal.finish`) -- an
+    abandoned, resultless journal has no `winner`/`turns` to record and is
+    refused. Import of `hexset.server.journal` is local to keep that
+    (server-only) module off this one's import graph for callers who never
+    convert one.
+    """
+    from .server import journal as game_journal
+
+    events = game_journal.read(path)
+    if not events or events[0].get("kind") != "game":
+        raise ValueError(f"not a journal (no header): {path}")
+    header = events[0]
+
+    steps: list[tuple[Action, tuple[Trade, ...], tuple[tuple[str, int], ...]]] = []
+    result: dict | None = None
+    for event in events[1:]:
+        kind = event.get("kind")
+        if kind == "action":
+            action = game_journal.action_of(event)
+            trades = game_journal.trades_of(event)
+            chance_events: list[tuple[str, int]] = []
+            if action.type is ActionType.ROLL:
+                chance_events.append(("roll", event["roll"]))
+            if action.type in (ActionType.MOVE_ROBBER, ActionType.PLAY_KNIGHT):
+                stole = event.get("stole")
+                if stole is not None and stole.get("resource") is not None:
+                    chance_events.append(("steal", int(Resource[stole["resource"]])))
+            steps.append((action, trades, tuple(chance_events)))
+        elif kind == "undo":
+            del steps[event["back_to"] :]
+        elif kind == "result":
+            result = event
+
+    if result is None:
+        raise ValueError(f"journal has no result line, cannot record: {path}")
+
+    deck = tuple(("deck", int(DevCard[name])) for name in header["deck"])
+    chance = deck + tuple(event for _, _, events in steps for event in events)
+    actions = tuple((int(action.type), action.a, action.b) for action, _, _ in steps)
+    trades = tuple(
+        (step, trade.a, trade.b, tuple(trade.received))
+        for step, (_, step_trades, _) in enumerate(steps)
+        for trade in step_trades
+    )
+
+    return Record(
+        layout=tuple(tuple(h) for h in header["layout"]),
+        terrain=tuple(header["terrain"]),
+        tokens=tuple(header["tokens"]),
+        ports=tuple(tuple(p) for p in header["ports"]),
+        num_players=header["num_players"],
+        actions=actions,
+        chance=chance,
+        trades=trades,
+        winner=result["winner"],
+        turns=result["turns"],
+        seed=header.get("seed"),
     )
 
 

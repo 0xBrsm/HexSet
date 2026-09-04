@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Sequence
 from .board.board import MAX_ROLL, MIN_ROLL, Board, pips
 from .board.terrain import NUM_RESOURCES, TERRAIN_RESOURCE, Resource
 from .cards import ROAD_BUILDING_ROADS, DevCard
+from .chance import Chance, Live
 from .devcards import buy as buy_dev_card
 from .devcards import (
     mature,
@@ -57,6 +58,15 @@ class Phase(IntEnum):
 class Game:
     _state: GameState
     rng: random.Random
+    # The one chance source (`hexset.chance`): every random draw the engine
+    # makes -- the shuffled deck, a roll, a steal, a discard -- goes through
+    # this, never through `rng` directly any more. `rng` itself stays: it is
+    # what `Live` (the default `chance`) draws from, and it is still handed
+    # to `imagine` to seed a search's own copy (`Chance` has no notion of
+    # "the same stream, advanced" -- a search needs an actual generator to
+    # branch from). Defaults to `Live(rng)`, so a caller that never heard of
+    # `chance` gets exactly today's behaviour.
+    chance: Chance
     ledger: PublicLedger
     phase: Phase = Phase.SETUP_SETTLEMENT
     current_player: int = 0
@@ -319,6 +329,7 @@ def start(
     rng: random.Random | None = None,
     *,
     first: int = 0,
+    chance: Chance | None = None,
 ) -> Game:
     """Start a game. `first` chooses which seat opens the setup snake and
     therefore takes the first real turn; `first=0` (the default) is today's
@@ -326,15 +337,33 @@ def start(
     upstreamed -- a gym seats its creator at a random index and still wants the
     snake's compensating property (whoever places first in round one places
     last in round two), which holds from any starting seat, not only seat 0.
+
+    `chance` defaults to `Live(rng)` -- draw from `rng` exactly as before
+    this module existed, so a caller that passes neither gets byte-identical
+    games for every seed (`tests/test_record_engine.py::
+    test_default_chance_matches_the_seeded_stream`). A caller that passes
+    its own `chance` (`record.replay`'s `Scripted`) drives the game from
+    that instead; `rng` is still stored on the `Game` (`imagine` still needs
+    an actual generator to branch a search from), it is simply not consulted
+    directly here any more.
+
+    The deck is built unshuffled (`new_game` with no `rng` of its own) and
+    then ordered by `chance.deck_order` -- the one call that must go through
+    `chance` rather than through `new_game`, so a `Scripted` game replays the
+    recorded shuffle instead of drawing a new one.
     """
     rng = rng or random.Random()
+    chance = chance or Live(rng)
     order = [(first + i) % num_players for i in range(num_players)]
     # Snake order: the last player to place first also places first in round two,
     # which is what compensates them for choosing last.
     queue = order + order[::-1]
+    state = new_game(board, num_players)
+    state.deck = chance.deck_order(state.deck)
     return Game(
-        _state=new_game(board, num_players, rng),
+        _state=state,
         rng=rng,
+        chance=chance,
         ledger=PublicLedger.new(num_players),
         setup_queue=queue,
         current_player=queue[0],
@@ -349,12 +378,22 @@ def imagine(
 ) -> Game:
     """A copy for hypothetical play, safe to mutate and to draw from.
 
-    Two things keep a search honest. It gets its own `rng`, so exploring
+    Three things keep a search honest. It gets its own `rng`, so exploring
     branches cannot disturb the real game's random stream and leave the result
     unreproducible. And the copied deck is shuffled by default, so a search that
     buys a development card cannot read the card the real deck is about to deal.
     A caller that cannot observe the deck before a later draw may defer that
     shuffle until the draw itself with `randomize_deck=False`.
+
+    And the copy's `chance` is always a fresh `Live(rng)` -- never
+    `game.chance` itself, whatever that is. A copy that inherited a
+    `Scripted` chance would drain events from the real game's recorded
+    stream as it searched, corrupting a replay in progress the moment
+    anything imagined from it drew; a copy that inherited a `Recording`
+    would log the search's own hypothetical draws into the real game's
+    record. `Live(rng)` sidesteps both: it draws from the copy's own `rng`,
+    already isolated from the real game for the same reason dice/steals
+    must be.
     """
     state = copy_state(game._state)
     if randomize_deck:
@@ -362,6 +401,7 @@ def imagine(
     return Game(
         _state=state,
         rng=rng,
+        chance=Live(rng),
         ledger=game.ledger.copy(),
         phase=game.phase,
         current_player=game.current_player,
@@ -503,7 +543,7 @@ def roll_dice(game: Game, roll: int | None = None) -> int:
     """Roll, or resolve a given roll so a search can enumerate the outcomes."""
     _require(game, Phase.ROLL)
     if roll is None:
-        roll = game.rng.randint(1, DICE) + game.rng.randint(1, DICE)
+        roll = game.chance.roll()
     game.last_roll = roll
 
     if roll == 7:
@@ -575,7 +615,7 @@ def move_robber_to(game: Game, target: int, victim: int | None = None) -> None:
     _require(game, Phase.ROBBER)
     move_robber(game._state, target)
     if victim is not None:
-        stolen = steal(game._state, game.current_player, victim, game.rng)
+        stolen = steal(game._state, game.current_player, victim, game.chance)
         _record_steal(game, game.current_player, victim, stolen)
     enter_main(game)
 
@@ -647,7 +687,7 @@ def play_knight_card(
     if game.phase not in (Phase.ROLL, Phase.MAIN):
         raise ValueError(f"cannot play a knight in {game.phase.name}")
     _spend_turn_card(game)
-    stolen = play_knight(game._state, game.current_player, target, victim, game.rng)
+    stolen = play_knight(game._state, game.current_player, target, victim, game.chance)
     if victim is not None:
         _record_steal(game, game.current_player, victim, stolen)
     update_largest_army(game._state)

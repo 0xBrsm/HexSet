@@ -10,6 +10,7 @@ from .cards import (
     YEAR_OF_PLENTY_RESOURCES,
     DevCard,
 )
+from .chance import Chance, Live
 from .economy import Purchase, can_afford, pay
 from .robber import move_robber, steal
 from .state import GameState, can_place_road, place_road
@@ -60,14 +61,14 @@ def play_knight(
     player: int,
     target: int,
     victim: int | None = None,
-    rng: random.Random | None = None,
+    chance: Chance | None = None,
 ) -> Resource | None:
     spend_card(state, player, DevCard.KNIGHT)
     state.knights_played[player] += 1
     move_robber(state, target)
     if victim is None:
         return None
-    return steal(state, player, victim, rng or random.Random())
+    return steal(state, player, victim, chance or Live(random.Random()))
 
 
 def play_road_building(state: GameState, player: int, edges: list[int]) -> None:

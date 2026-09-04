@@ -1,0 +1,12 @@
+{
+  "games": 200,
+  "seed": 424242,
+  "wall_seconds": 613.9,
+  "mean_seconds_per_game": 3.0695820932567583,
+  "mean_trades_per_turn": 0.0015854141894569957,
+  "mean_trades_per_turn_per_game": 0.0018701938691248361,
+  "total_turns": 17661,
+  "total_trades": 28,
+  "mean_ms_per_decision": 4.182632218724166,
+  "decisions": 64718
+}

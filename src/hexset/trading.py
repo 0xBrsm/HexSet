@@ -237,7 +237,12 @@ def _hand_multisets(hand: Sequence[int]):
     yield from walk(0)
 
 
-def _candidates(state: GameState, me: int, locked: frozenset[int]):
+def _candidates(
+    state: GameState,
+    me: int,
+    locked: frozenset[int],
+    vectors: Sequence[Sequence[float]] | None = None,
+):
     """`(counterparty, bundle)` for every coverable exchange `me` could
     propose: any nonempty multiset given and any nonempty multiset received,
     the two sides on disjoint resource sets, both coverable from the true
@@ -253,12 +258,28 @@ def _candidates(state: GameState, me: int, locked: frozenset[int]):
     `numpy` batch, by size) without this function needing to order or
     pre-materialise anything for a hand fertile enough to advertise many
     bundles.
+
+    `vectors`, when given, is `game.valuations`: a seat published nothing
+    (`NO_VALUATION`, all zero) can never clear a trade in either role, since
+    `mine = dot(v_me, b)` and `theirs = dot(v_them, -b)` are both exactly
+    zero for every candidate `_rank_candidates_loop`/`_rank_candidates_
+    vectorized` would go on to filter out anyway (`mine <= 0.0` / `theirs <=
+    0.0`) -- so a zero vector on `me` or on a given `them` is checked here,
+    before either side's hand is even walked, purely to skip the wasted
+    enumeration; the set of candidates this yields when it does run is
+    unchanged (a caller that omits `vectors` gets the old, unfiltered
+    enumeration, for tests that exercise bundle enumeration on its own
+    terms).
     """
+    if vectors is not None and not any(vectors[me]):
+        return
     give_options = list(_hand_multisets(state.hands[me]))
     if not give_options:
         return
     for them in range(state.num_players):
         if them == me or them in locked:
+            continue
+        if vectors is not None and not any(vectors[them]):
             continue
         receive_options = list(_hand_multisets(state.hands[them]))
         for given in give_options:
@@ -504,7 +525,7 @@ def _best_clearing(
     to call `accepts_many` on.
     """
     state = game._state
-    candidates = list(_candidates(state, me, game.locked))
+    candidates = list(_candidates(state, me, game.locked, vectors))
     if not candidates:
         return None
 

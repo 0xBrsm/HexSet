@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Protocol, Sequence
 
 from ..actions import Action, ActionType, apply, legal_actions
-from .evaluate import Evaluator
+from .evaluate import Evaluator, hand_shifted
 from ..board.terrain import NUM_RESOURCES
 from ..game import ROLL_ODDS, Game, imagine, is_over, roll_dice, to_move
 from ..play import Stuck
@@ -231,8 +231,8 @@ class SearchBot:
         seat = view.perspective
         state = view.state
         before = self._rank(self.evaluator.evaluate(state, seat), seat)
-        after = copy_state(state)
-        exchange(after, seat, counterparty, received)
+        mirror = tuple(-n for n in received)
+        after = hand_shifted(state, {seat: received, counterparty: mirror})
         return self._rank(self.evaluator.evaluate(after, seat), seat) > before
 
     def _beam(

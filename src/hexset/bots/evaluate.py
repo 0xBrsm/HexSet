@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
-from typing import NamedTuple
+from dataclasses import dataclass, fields, replace
+from typing import Mapping, NamedTuple, Sequence
 
 from ..board.board import Board, pips, scarce_resources
 from ..board.ports import BASE_TRADE_RATIO
@@ -261,3 +261,22 @@ class Evaluator:
         return [
             self.score(state, p, knower=knower) for p in range(state.num_players)
         ]
+
+
+def hand_shifted(state: GameState, changes: Mapping[int, Sequence[int]]) -> GameState:
+    """`state` with `changes[seat]` added elementwise to that seat's hand, for
+    every seat named in `changes` -- everything else, including every other
+    seat's hand, shared by reference rather than copied.
+
+    A trade gate pricing a candidate exchange needs the position it would
+    lead to, but only two hands ever move -- the board, the bank, the deck
+    and every dev-card pile are exactly what they were. `state.copy_state`
+    does not know that and clones all of it; this shares it instead, so a
+    private gate can price a candidate without paying for a board it never
+    reads differently. Never mutates `state` itself, so the same `state` is
+    safe to keep pricing further candidates against.
+    """
+    hands = list(state.hands)
+    for seat, delta in changes.items():
+        hands[seat] = [h + d for h, d in zip(state.hands[seat], delta)]
+    return replace(state, hands=hands)

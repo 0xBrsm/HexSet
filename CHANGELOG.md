@@ -9,6 +9,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added
+
+- **`hexset.bench.trade_census`.** Plays a lineup through `hexset.arena`
+  (grouped seating, antithetic-paired boards, `road_sweep`'s convention) and
+  records every `hexset.trading.Trade` as it clears — turn, phase, both
+  seats' kinds, the signed 5-vector each way, each side's hand size the
+  instant before the trade, and each side's public surplus — then rolls it
+  up per bot: trades/turn, bundle-size distribution (1:1, 2:1, 3+:1, 2:2,
+  bulk), mean cards given/received, imbalance, the share of trades made
+  holding 8+ cards, and a bot-neutral value swing at the flat 4:1 bank rate.
+  `--from-journals` runs the same census over `hexset.server.journal`
+  files instead of playing fresh games. Torch-free; a network entrant's
+  trades census the same way once `hexnet.netbot` registers it.
+
 ### Changed
 
 - **`hexset.trading._candidates` skips a zero-valuation seat's enumeration.**

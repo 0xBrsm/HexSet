@@ -15,8 +15,8 @@
      rewriting them. -->
 <meta name="color-scheme" content="only dark">
 <title>HexSet</title>
-<!-- Inlined rather than a separate file: the server only ever routes "/" and
-     "/index.html" (see web.py's do_GET), so a plain /favicon.svg
+<!-- Inlined rather than a separate file: the server only ever routes "/",
+     "/index.html" and a game's own code (see web.py's do_GET), so a plain /favicon.svg
      request would 404. The same shape lives as a real file at docs/logo.svg
      for anywhere that can fetch a normal path (README, GitHub's own favicon
      probing). -->
@@ -112,10 +112,15 @@
     align-items: center; column-gap: 0.25rem; padding: 0.3rem 0.2rem; border-radius: 6px;
   }
   .player-row.active { background: color-mix(in srgb, var(--accent) 15%, var(--panel)); }
-  /* A seat nobody took — still open, or retired by the setup snake. Kept in
-     the list (the colours are the board's, and its pieces would be too) but
-     dimmed, so "occupied" and "not" are one glance apart. */
-  .player-row.seat-empty { opacity: 0.45; font-style: italic; }
+  /* Watching only: a row you can open, and the one that's open. The ring is
+     the seat's own colour, set inline — it names whose cards are below
+     without spending the accent, which belongs to no seat while watching. */
+  .player-row-openable { cursor: pointer; }
+  .player-row-open { box-shadow: inset 0 0 0 2px var(--open-ring); }
+  /* Standing in for the hand area while watching and no row is open — the
+     one place the page has to say what a click does, since a row that opens
+     looks like any other until you try it. */
+  .hand-hint { color: var(--muted); font-size: 0.82rem; padding: 0.3rem 0.2rem; }
   .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.35); }
   /* No fixed width any more — the name column itself (minmax(0, 1fr) above)
      is what sizes this, and shrinks first when the row's tight. Overflow is
@@ -138,6 +143,29 @@
        predict or match. This drops that native rendering so the box actually
        respects the padding above, same as any other element would. */
     appearance: none; -webkit-appearance: none;
+  }
+  /* An empty seat's picker reads "empty" in muted grey, same as any other
+     placeholder-shaped text; picking a model switches it back to normal
+     ink, same as any other seat's name (see renderPlayers' "unset" class). */
+  .player-name select.unset { color: var(--muted); }
+  /* Your own row, on the same terms: a control standing in for the name,
+     sized and weighted like the picker opposite it so the column reads as
+     one thing. Flat until you touch it — a row of names should look like a
+     row of names, not a form. */
+  .player-name input {
+    font: inherit; font-weight: 600; width: 100%; padding: 0.1rem 0.25rem; border-radius: 5px;
+    border: 1px solid transparent; background: transparent; color: var(--ink);
+    /* Same as the picker opposite it: a name too long for the column reads
+       as cut off rather than as a shorter name. */
+    text-overflow: ellipsis;
+  }
+  .player-name input:hover { border-color: var(--border); }
+  /* Unset, this reads "human" in normal ink, not the browser's own muted
+     placeholder grey -- the owner's own row is not "empty", it just has no
+     name yet. */
+  .player-name input::placeholder { color: var(--ink); opacity: 1; }
+  .player-name input:focus {
+    outline: none; border-color: var(--accent); background: #232733;
   }
   .player-meta { color: var(--muted); font-size: 0.82rem; flex: 1; }
   .stat { display: inline-flex; align-items: center; gap: 0.12rem; color: var(--muted); font-size: 0.82rem; }
@@ -340,56 +368,6 @@
      hugs the two board edges instead of running a column up the left one.
      Placed by name, so this holds whatever order renderPieceSupply happens
      to build the three tiles in. */
-  #trading { margin-top: 10px; font-size: 12px; }
-  #trading h4 { margin: 0 0 4px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; opacity: .65; }
-  .val-row { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
-  .val-row .val-name { width: 46px; opacity: .8; }
-  .val-row button {
-    width: 26px; padding: 2px 0; font-size: 11px; line-height: 1;
-    border-radius: 6px; cursor: pointer;
-  }
-  .val-row button.on { background: var(--accent); color: #fff; }
-  .val-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
-  .val-table th, .val-table td { padding: 1px 3px; text-align: right; font-variant-numeric: tabular-nums; }
-  .val-table th:first-child, .val-table td:first-child { text-align: left; }
-  .val-table th { opacity: .6; font-weight: 500; }
-  #trading .trade-line { opacity: .8; margin-top: 2px; }
-  /* The negotiation panel (docs/negotiation-interface.md §3): one block per
-     counterparty with a nonzero vector, its wants/gives as clickable chips
-     composing a draft bundle, a live clears/affordable indicator, then
-     Clear/Propose. Pending offers (confirm mode) render above it as plain
-     Accept/Decline cards. */
-  #negotiation { margin-top: 10px; font-size: 12px; }
-  #negotiation h4 { margin: 8px 0 4px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; opacity: .65; }
-  #negotiation h4:first-child { margin-top: 0; }
-  .pending-offer {
-    display: flex; align-items: center; justify-content: space-between; gap: 6px;
-    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
-    padding: 4px 8px; margin-bottom: 4px;
-  }
-  .pending-offer button { padding: 2px 8px; border-radius: 6px; cursor: pointer; }
-  .pending-accept { background: var(--accent); color: #fff; border: none; }
-  .pending-decline { background: transparent; border: 1px solid var(--border); color: inherit; }
-  .negotiate-panel {
-    border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
-    margin-bottom: 6px;
-  }
-  .negotiate-panel.negotiate-readonly { opacity: .5; }
-  .negotiate-seat { font-weight: 600; margin-bottom: 4px; }
-  .negotiate-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-  .negotiate-chip { width: 24px; height: 24px; cursor: pointer; }
-  .negotiate-chip svg { width: 14px; height: 14px; }
-  .negotiate-panel.negotiate-readonly .negotiate-chip { cursor: default; }
-  .chip-want { box-shadow: inset 0 0 0 2px #3cb371; }
-  .chip-give { box-shadow: inset 0 0 0 2px #d9534f; }
-  .negotiate-summary { margin-top: 4px; opacity: .85; }
-  .negotiate-indicator { margin-top: 2px; font-weight: 600; opacity: .7; }
-  .negotiate-indicator.clears { color: #3cb371; opacity: 1; }
-  .negotiate-buttons { display: flex; gap: 6px; margin-top: 4px; }
-  .negotiate-buttons button { padding: 2px 10px; border-radius: 6px; cursor: pointer; }
-  .negotiate-clear { background: transparent; border: 1px solid var(--border); color: inherit; }
-  .negotiate-submit { background: var(--accent); color: #fff; border: none; }
-  .negotiate-submit:disabled { opacity: .4; cursor: not-allowed; }
   #piece-supply {
     position: absolute; left: 16px; bottom: 16px; display: grid; gap: 6px;
     grid-template-columns: repeat(2, 34px);
@@ -411,26 +389,6 @@
     display: none; flex-direction: column;
   }
   #log-sheet.show { display: flex; }
-  /* The lobby covers everything until the game is dealt — above the log
-     sheet, since there is no game to have a log of yet. */
-  #lobby {
-    position: fixed; inset: 0; z-index: 60; background: var(--bg);
-    display: none; flex-direction: column; align-items: center; justify-content: center;
-    gap: 1.1rem; padding: 1.5rem; text-align: center;
-  }
-  #lobby.show { display: flex; }
-  #lobby h1 { margin: 0; font-size: 1.4rem; }
-  #lobby .hint { color: var(--muted); max-width: 30rem; line-height: 1.5; margin: 0; }
-  .lobby-row { display: flex; gap: 0.6rem; flex-wrap: wrap; justify-content: center; }
-  #landing { display: flex; flex-direction: column; gap: 0.6rem; }
-  #lobby input, #lobby select {
-    font: inherit; padding: 0.4rem 0.6rem; border-radius: 6px;
-    border: 1px solid var(--border); background: #232733; color: var(--ink);
-  }
-  #lobby input { width: 12rem; }
-  /* The one field somebody types a code they read off another screen into —
-     upper-cased as they go so it matches what they are looking at. */
-  #landing-code { text-transform: uppercase; letter-spacing: 0.15rem; }
   #log-full {
     flex: 1 1 auto; overflow-y: auto; padding: 0.8rem 1rem;
     font-size: 0.95rem; line-height: 1.5; color: #a8b0bd;
@@ -513,7 +471,7 @@
   .trade-side .pick-row { margin: 0; justify-content: center; }
   .trade-side-label { font-size: 0.78rem; color: var(--muted); }
   .trade-arrow { flex: none; font-size: 1.3rem; line-height: 1; color: var(--muted); }
-  /* "propose" mode's give/want cards. Tapping one aims the picker row below
+  /* "trade" mode's give/want cards. Tapping one aims the picker row below
      (.trade-picker) at that side rather than opening anything: the one that's
      currently being chosen wears the accent, so the exchange doubles as the
      picker's own "which side am I editing" indicator. */
@@ -615,7 +573,7 @@
   <symbol id="icon-check" viewBox="0 0 512 512"><path d="M192.0,345.0 L103.0,256.0 L72.7,286.1 L192.0,405.3 L448.0,149.3 L417.9,119.2 Z"/></symbol>
   <!-- Paper-plane "send" arrow — scaled from Material Symbols' "send" glyph
        (Apache 2.0). The trade modal's "Offer to players" icon; icon-close
-       does double duty as both "Cancel" (propose) and "Decline" (respond). -->
+       is the way back out of a trade being built. -->
   <symbol id="icon-send" viewBox="0 0 512 512"><path d="M42.9,448.0 L490.7,256.0 L42.9,64.0 L42.7,213.3 L362.7,256.0 L42.7,298.7 Z"/></symbol>
   <!-- Two right-pointing triangles — redrawn solid from Tabler Icons'
        "player-track-next" (MIT), the standard "skip forward" glyph, doing
@@ -659,34 +617,6 @@
     <svg viewBox="0 0 512 512"><use href="#icon-restart"></use></svg>
   </button>
 </header>
-<!-- Shown from first paint until either a game is dealt/joined (the front
-     page) or, briefly, while /<code> is trying to join/observe one — there is
-     no separate roster-and-start screen any more, a game is dealt and live
-     the instant it exists (see api.py's module docstring). Once entered
-     (enterGame), this never comes back. -->
-<div id="lobby" class="show">
-  <h1 id="lobby-title">HexSet</h1>
-  <p class="hint" id="lobby-hint"></p>
-  <!-- The front page only: your name, how many local bots to seat, and the
-       way in to somebody else's game. Hidden the moment we have a code. -->
-  <div id="landing">
-    <input id="lobby-name" maxlength="40" placeholder="Your name" autocomplete="off">
-    <div class="lobby-row">
-      <select id="landing-bots" title="Local bots to seat">
-        <option value="0" selected>No bots — open game</option>
-        <option value="1">1 bot</option>
-        <option value="2">2 bots</option>
-        <option value="3">3 bots</option>
-      </select>
-      <button id="landing-deal" class="primary">Deal a game</button>
-    </div>
-    <div class="lobby-row">
-      <input id="landing-code" maxlength="6" placeholder="Join a code" autocomplete="off">
-      <button id="landing-join">Join</button>
-    </div>
-  </div>
-  <p class="hint" id="lobby-error"></p>
-</div>
 <div id="log-sheet">
   <header>
     <button id="close-log" class="icon-btn" title="Close" aria-label="Close game log">
@@ -751,8 +681,6 @@
     <div id="play-area">
       <div id="players"></div>
       <div id="hand"></div>
-      <div id="trading"></div>
-      <div id="negotiation"></div>
       <div id="notice"></div>
     </div>
     <div id="log"></div>
@@ -831,24 +759,17 @@ let hexById = {};
 let pendingRobberHex = null;  // when a hex has more than one victim option
 let knightArmed = false;   // Knight card clicked: the board is offering its robber targets — see renderHand
 let inFlight = false;
+let watchSeq = 0;          // bumping it retires the long poll already out — see settle
+let openSeat = null;       // watching only: whose cards the hand area shows — see renderPlayers
 let logSheetOpen = false;  // the full-history sheet is only drawn while it's up — see renderLog
 let modalMode = null;      // which decision the modal is showing, if any — see openModal
 let modalDrag = {x: 0, y: 0};  // #modal-inner offset from center, dragged via #modal-head — see wireModalDrag
-let tradeGive = null;      // selected resource index, "propose" mode only
+let tradeGive = null;      // selected resource index, "trade" mode only
 let tradeWant = null;
-let tradeSide = "give";    // "give" | "want" — which side the picker row is currently choosing for, "propose" mode only
+let tradeSide = "give";    // "give" | "want" — which side the picker row is currently choosing for, "trade" mode only
 let yopPicks = [];         // 0, 1, or 2 resource indices, "year-of-plenty" mode only
 let monopolyPick = null;   // selected resource index, "monopoly" mode only
 let modelNames = [];       // GET /api/models, in MODEL_OPTIONS order
-let currentBotModels = []; // this game's (or the next one's) 3 non-human-seat picks, ascending seat order
-
-// The negotiation panel's draft bundles (`docs/negotiation-interface.md` §3):
-// counterparty seat -> {give: [count...], receive: [count...]}, client-side
-// only until Propose posts it. Reset whenever a different game's state
-// arrives (negotiationCode tracks which game the drafts belong to) — see
-// renderNegotiation.
-let draftBundles = {};
-let negotiationCode = null;
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -909,48 +830,51 @@ function resourceCardTile(name, {extraClasses = [], title} = {}) {
   return card;
 }
 
-// --- Identity ------------------------------------------------------------
+// --- Who we are --------------------------------------------------------
 //
-// A token names one seat at one table (see api.py), so it is stored per code
-// rather than one per browser: the same tab can hold a seat at two tables and
-// come back to either. Kept in localStorage so a reload — or a phone
-// reopening the tab tomorrow — sits back down rather than joining twice.
+// One seat at one game, named by a token the server mints and never stores.
+// Kept in localStorage so a reload — or coming back tomorrow — sits back
+// down rather than dealing a stranger's game, and keyed by code so one
+// browser can hold seats at more than one game at once.
+//
+// `lastCode` is the other half: the game a fresh visit to / resumes instead
+// of dealing a new one.
 
-// The code in our own URL: "/A1B2C3" -> "A1B2C3", "" on the front page.
-const tableCode = location.pathname.replace(/^\/+|\/+$/g, "").toUpperCase();
+const TOKEN_HEADER = "X-HexSet-Token";
+let tableCode = location.pathname.replace(/^\/+|\/+$/g, "").toLowerCase();
 
 function tokenFor(code) {
   try { return localStorage.getItem(`hexset.token.${code}`); } catch { return null; }
 }
 
-function rememberToken(code, token) {
-  try { localStorage.setItem(`hexset.token.${code}`, token); } catch { /* private mode */ }
+function rememberSeat(code, token) {
+  try {
+    localStorage.setItem(`hexset.token.${code}`, token);
+    localStorage.setItem("hexset.last", code);
+  } catch { /* private mode: this session still works, it just won't resume */ }
 }
 
-// Forgotten, not just unused, when the server no longer knows it: a token for
-// an evicted table would otherwise keep us out of that code forever, since
-// boot() reaches for a stored token before it ever tries to join.
-function forgetToken(code) {
-  try { localStorage.removeItem(`hexset.token.${code}`); } catch { /* private mode */ }
+function forgetSeat(code) {
+  try {
+    localStorage.removeItem(`hexset.token.${code}`);
+    if (localStorage.getItem("hexset.last") === code) localStorage.removeItem("hexset.last");
+  } catch { /* private mode */ }
+}
+
+function lastCode() {
+  try { return localStorage.getItem("hexset.last"); } catch { return null; }
 }
 
 function authHeaders(extra) {
   const token = tokenFor(tableCode);
-  return Object.assign({}, extra, token ? {"X-HexSet-Token": token} : {});
+  const headers = {...(extra || {})};
+  if (token) headers[TOKEN_HEADER] = token;
+  return headers;
 }
 
 async function getJSON(path) {
   const res = await fetch(path, {headers: authHeaders()});
   return res.json();
-}
-
-async function putJSON(path, body) {
-  const res = await fetch(path, {
-    method: "PUT",
-    headers: authHeaders({"Content-Type": "application/json"}),
-    body: JSON.stringify(body || {}),
-  });
-  return {ok: res.ok, data: await res.json()};
 }
 
 async function postJSON(path, body) {
@@ -965,13 +889,9 @@ async function postJSON(path, body) {
 // --- Loading -----------------------------------------------------------
 
 async function loadBoard() {
-  // By code, not by token: an observer has no token, and `/api/board` is
-  // seat-gated, so this used to 401 for exactly the reader the code-sharing
-  // flow exists for — leaving `board` an error object and the page dead at
-  // "Loading..." on the first `board.vertices` it reached. The layout is
-  // public (api.Tables.handle), and a seated player knows its own code too,
-  // so one route serves both.
-  board = await getJSON(`/api/table/${tableCode}/board`);
+  // The same layout either way — a board is public, and the seated route
+  // only exists because it is the one a token already reaches.
+  board = await getJSON(watching() ? `/api/table/${tableCode}/board` : "/api/board");
   vertexById = {};
   for (const v of board.vertices) vertexById[v.id] = v;
   hexById = {};
@@ -979,31 +899,36 @@ async function loadBoard() {
   drawBoard();
 }
 
-// Fetches MODEL_OPTIONS' names and seeds currentBotModels the first time
-// only, so a mid-game swap (see swapBot) survives a re-render.
+// The opponents every seat picker offers. Which one is on a seat is the
+// seat's own business (state.seats), never a preference remembered here.
 async function loadModels() {
   const {models} = await getJSON("/api/models");
   modelNames = models;
-  if (!currentBotModels.length) {
-    currentBotModels = [0, 1, 2].map((i) => modelNames[i % modelNames.length]);
-  }
 }
 
 // The one place that turns a seat number into what a human reads, so the
 // status line, the robber prompt and trade offers all agree. The player list
 // itself renders a bot seat as a <select>, not this — see renderPlayers.
+// Every game is public: the link is all it takes to open one, and a table
+// with no seat left still shows its board and its log to whoever follows it.
+// `state.seat` is null then — the server answers `GET /api/table/<code>`
+// for anyone, with no token and no hand revealed — and this is the one test
+// the seat-shaped parts of the page ask before assuming they have one.
+function watching() {
+  return state.seat === null || state.seat === undefined;
+}
+
 function seatLabel(seat) {
-  if (seat === state.seat) return "you";
-  // Every game now deals all MAX_SEATS seats from the start, claimed or
-  // not (see api.py's module docstring) — state.players has an entry for
-  // an open one too, indistinguishable from a claimed-but-unnamed human by
-  // its fields alone, so this checks state.seats' own kind instead.
-  const seatInfo = state?.seats?.[seat];
-  if (seatInfo && seatInfo.kind === "empty") {
-    return state?.locked?.includes(seat) ? "locked seat" : "open seat";
+  if (seat === state.seat) return "human";
+  // What a seat *is* comes from state.seats, not from the player entry:
+  // every game deals all four seats whether or not anybody is in them, so
+  // state.players has a row for an empty one too and nothing in its own
+  // fields tells it apart from a person who never gave a name.
+  const info = state?.seats?.[seat];
+  if (info && info.kind === "empty") {
+    return state?.locked?.includes(seat) ? "locked seat" : "empty";
   }
-  const p = state?.players.find((p) => p.seat === seat);
-  return (p && p.name) || `Player ${seat + 1}`;
+  return (info && info.name) || `Player ${seat + 1}`;
 }
 
 // Same label, but seat-number-first — "Player 2 (search2)" — for the spots
@@ -1014,16 +939,32 @@ function seatFullLabel(seat) {
   return `Player ${seat + 1} (${seatLabel(seat)})`;
 }
 
-// Re-seats one live seat's bot without restarting the game. The lineup slot
-// is that seat's position among the *bot* seats (ascending), read off
-// state.seats here rather than counted by the renderer: counting rows gave a
-// four-seat table four slots, and writing slot 3 grew currentBotModels to
-// four entries — one more than a table has room for beside the human — after
-// which every New game asked for five seats and was refused (400), which is
-// what "the New game button does nothing" was.
+// Your own name at this game, as everyone else's log and player list will
+// read it from here on (the server keeps one name per seat — see
+// api.Tables.rename). Trimmed and capped server-side, so a blank one simply
+// puts the seat back to unnamed rather than being refused.
+async function renameSelf(name) {
+  if (inFlight) return;
+  if ((name || "").trim() === (state.seats[state.seat].name || "")) return;
+  inFlight = true;
+  try {
+    const {ok, data} = await postJSON("/api/name", {name});
+    if (ok) {
+      state = data;
+      render();
+    } else {
+      showNotice(data.error || "Could not change that name.");
+    }
+  } finally {
+    inFlight = false;
+  }
+}
+
+// Puts a bot on one seat without restarting the game: a fresh one on a seat
+// nobody has taken, or a different one in place of the bot already there —
+// see api.Tables.seat_bot, which handles both.
 async function swapBot(seat, model) {
-  const slot = (state.seats || []).filter((s, i) => i < seat && s.kind === "bot").length;
-  if (slot < currentBotModels.length) currentBotModels[slot] = model;
+  if (!model) return;
   if (inFlight) return;
   inFlight = true;
   try {
@@ -1032,11 +973,134 @@ async function swapBot(seat, model) {
       state = data;
       render();
     } else {
-      showNotice(data.error || "Could not switch that bot.");
+      showNotice(data.error || "Could not seat that bot.");
     }
   } finally {
     inFlight = false;
   }
+}
+
+// The picker's own third option, alongside "empty" and every model name —
+// never a real model, so it can share the same <select> and change handler.
+const CLOSE_SEAT = "__close__";
+
+// Closes an open seat outright: no bot, no person, ever, for the rest of
+// this game — the third way an empty seat resolves (see api.Tables.close_seat)
+// besides seating a bot on it or somebody opening the link to take it.
+async function closeSeat(seat) {
+  if (inFlight) return;
+  inFlight = true;
+  try {
+    const {ok, data} = await postJSON("/api/close", {seat});
+    if (ok) {
+      state = data;
+      render();
+    } else {
+      showNotice(data.error || "Could not close that seat.");
+    }
+  } finally {
+    inFlight = false;
+  }
+}
+
+async function refreshState() {
+  state = await getJSON("/api/state");
+  render();
+}
+
+// --- Getting to a game -------------------------------------------------
+//
+// There is no page in front of the board. Opening the site puts you at a
+// game: the one you were last at, if it is still going, and a fresh one
+// otherwise. Either way the address bar ends up showing that game's code,
+// and that address is the whole of it — open it on another screen, or send
+// it to somebody, and you are at the same table.
+//
+// Nothing here is a lobby. A game is dealt live, with every seat but the
+// creator's empty, and who else is playing is decided on the board itself:
+// each empty seat's row carries a model picker (see renderPlayers), and a
+// person who opens the link takes one of the seats still open.
+
+// Moves the address bar to `code` without reloading, so the board that is
+// already drawn stays up. replaceState rather than pushState: the game we
+// came from is not somewhere Back should return to, and on a fresh visit
+// there is nothing behind us worth keeping either.
+function showCodeInUrl(code) {
+  tableCode = code;
+  history.replaceState(null, "", `/${code}`);
+}
+
+// Deals a game and sits us at it. Every other seat is left open — filling
+// them is a decision made at the table, not before it.
+async function dealGame() {
+  const {ok, data} = await postJSON("/api/games", {});
+  if (!ok) return null;
+  rememberSeat(data.code, data.token);
+  showCodeInUrl(data.code);
+  return data;
+}
+
+// Why the last attempt at a game came back with nothing at all — read by
+// init() to tell somebody handed a dead link what happened to it. A game
+// that exists but has no seat left is not this: that is watching, and it
+// works.
+let seatError = null;
+
+// The game named in the URL, or the last one we sat at. Returns its state
+// — seated if there is a seat to be had, watching if the table is full —
+// or null if there is no such game to be at: played out, evicted, or a code
+// with nothing behind it.
+//
+// A token this server has never heard of counts as no seat rather than no
+// game: a restart re-tokens bot seats and reopens every human one, so there
+// is no lost token to recover, and the right answer is to try for a seat
+// again from scratch.
+async function resumeGame(code) {
+  if (!code) return null;
+  tableCode = code;
+  if (tokenFor(code)) {
+    const view = await getJSON("/api/state");
+    if (!view.error) {
+      rememberSeat(code, tokenFor(code));
+      showCodeInUrl(code);
+      return view;
+    }
+    forgetSeat(code);
+  }
+  // No seat here, or not one of ours any more. Ask the table itself what it
+  // has before knocking: every game is public, so this one read answers both
+  // questions — whether the game exists at all, and whether a seat is left.
+  //
+  // Knocking first and reading the refusal is the same two outcomes and one
+  // request fewer for somebody who gets a seat, and it is what this did. But
+  // a full table is a *normal* arrival here, not an error — watching is what
+  // the link is for — and a refused POST is one the browser writes into the
+  // console as a failed request whatever the page then does with it. A page
+  // whose ordinary path logs an error has no clean console left to read a
+  // real one out of (`tests/web/test_page.py` asserts an empty one on every
+  // test for exactly that reason), so the read comes first.
+  const view = await getJSON(`/api/table/${code}`);
+  if (view.error) {
+    seatError = view.error;
+    return null;
+  }
+  const open = (view.seats || []).some(
+    (s) => s.kind === "empty" && !(view.locked || []).includes(s.seat)
+  );
+  if (open) {
+    // Still a race — somebody else can take the last seat between that read
+    // and this — and losing it lands on the view already in hand, which is
+    // the right answer anyway. A 409 in the console *there* is a genuinely
+    // unusual event rather than the way everyone arrives.
+    const {ok, data} = await postJSON("/api/join", {code});
+    if (ok) {
+      rememberSeat(code, data.token);
+      showCodeInUrl(code);
+      return data;
+    }
+  }
+  showCodeInUrl(code);
+  return view;
 }
 
 // --- Static board drawing ------------------------------------------------
@@ -1298,41 +1362,64 @@ function cancelRobberMove() {
 
 // --- Sending actions --------------------------------------------------
 
-// Nobody's turn is ever run on their behalf any more: a bot seat decides
-// and submits its own action from outside this page (an embedded runner
-// thread, or an external `python -m hexset.clients.botclient` process, both
-// through the same POST /api/action a browser uses — see botclient.py and
-// api.py's module docstrings). All this page does when it isn't our own
-// move is notice that something changed: poll, and render whatever the
-// game looks like now.
-
-// While it isn't our move there is nothing to submit and no request of
-// ours that will come back different — so this is the one place the client
-// polls. Stops the moment the turn is ours again (or the game ends), and
-// every entry point clears the previous timer, so there is never more than
-// one of these running.
-let waitTimer = null;
-
-// Where this page reads the game from. `/api/state` is the seat's own view
-// and needs the seat's token; an observer holds none and reads the table's
-// public one by code instead — the same shape, redacted for `viewer=None`
-// (webplay.state_view). Polling the seated route without a token answered 401
-// and the error body landed in `state`, which is where "state.players is not
-// iterable" came from a second after an observer's page finished loading.
-function stateUrl() {
-  return tokenFor(tableCode) ? "/api/state" : `/api/table/${tableCode}`;
+// Waiting for somebody else — a bot, or another person at this table.
+//
+// This used to be settle(), a loop of POST /api/advance that walked the bot
+// cascade one seat per request. Nothing advances a seat from here now: a bot
+// is a client like any other, running in the server and submitting its own
+// moves through the same route this browser posts to, and the seat next to
+// yours might be a person on their own phone. So the client's job is no
+// longer to drive the table, only to watch it.
+//
+// And it watches by asking the table to tell it, not by asking again every
+// second and a half: `after` is the version this page is showing, and the
+// server holds the request until the table passes it. A bot's move reaches
+// the board as fast as the bot played it, and an idle table costs one open
+// request rather than forty a minute.
+//
+// It never sets inFlight — the reader's own actions must never queue behind
+// a read that is deliberately sitting still — and it never applies a
+// response older than what is already on screen, which is the one thing a
+// request that can be seconds old has to guard against.
+//
+// A render per response, so whatever renderStatus() shows (see its "not our
+// turn" branch) is the truth as of that response rather than a guess dressed
+// up to look like progress. That was the point of the old per-seat request
+// too, and it survives the change.
+function settle() {
+  const mine = ++watchSeq;  // retires whatever loop was already running
+  // Watching, every move is somebody else's, so this never stops until the
+  // game does — that is the whole of what a spectator's page does.
+  if (state.game_over || (!watching() && state.to_move === state.seat)) return;
+  (async () => {
+    while (mine === watchSeq) {
+      // A seat reads its own view; a spectator has no token to read one
+      // with, and asks for the table's public view instead.
+      const route = watching() ? `/api/table/${tableCode}` : "/api/state";
+      let next = null;
+      try {
+        next = await getJSON(`${route}?after=${state.version}&wait=20`);
+      } catch (e) {
+        next = null;
+      }
+      if (mine !== watchSeq) return;
+      if (!next || next.error || next.version === undefined) {
+        // Never a tight loop, whatever the server said.
+        await new Promise((done) => setTimeout(done, 1500));
+        continue;
+      }
+      if (next.version >= state.version) {
+        state = next;
+        render();
+      }
+      if (state.game_over || (!watching() && state.to_move === state.seat)) return;
+    }
+  })();
 }
 
-function pollWhileWaiting() {
-  clearTimeout(waitTimer);
-  if (state.game_over || state.to_move === state.seat) return;
-  waitTimer = setTimeout(async () => {
-    if (inFlight) { pollWhileWaiting(); return; }
-    state = await getJSON(stateUrl());
-    render();
-    pollWhileWaiting();
-  }, 1500);
-}
+// Leaving the page retires the loop with it: a long poll outliving its own
+// document is a request nobody will ever read.
+window.addEventListener("pagehide", () => { watchSeq++; });
 
 // Every action that touches the server has the same shape: refuse to
 // overlap with one already running, dim the board while it's out, and
@@ -1357,25 +1444,25 @@ function sendAction(action) {
     pendingRobberHex = null;
     knightArmed = false;
     const {ok, data} = await postJSON("/api/action", {action});
-    // Only take the response's state when it succeeded: an error body has no
-    // game-state fields at all, and render() (below, unconditional so the
-    // pendingRobberHex/knightArmed reset above still shows) would throw
-    // dereferencing them off of it otherwise.
+    // Only take the response when it succeeded: an error body carries no
+    // game-state fields at all, and the render below would throw reading
+    // them off it.
     if (ok) state = data;
     showNotice(ok ? "" : (data.error || "That was not legal."));
     render();
-    if (ok) pollWhileWaiting();
+    if (ok) settle();
   });
 }
 
-// A new game is a new table, and a new table is a new address: dealing in
-// place would leave everyone else at this code sitting at a game that had
-// silently become somebody else's.
+// A new game is a new table with its own address, so this leaves this one
+// where it is — anyone still sitting here keeps playing it — and moves us to
+// the new one. Dealt with every other seat empty, the same as the front
+// door: who else is playing is chosen on the board afterwards.
 function newGame() {
   return blocking(async () => {
-    const {ok, data} = await postJSON("/api/games", {bots: currentBotModels, name: playerName()});
+    const {ok, data} = await postJSON("/api/games", {});
     if (!ok) { showNotice(data.error || "Could not deal a new game."); return; }
-    rememberToken(data.code, data.token);
+    rememberSeat(data.code, data.token);
     location.href = `/${data.code}`;
   });
 }
@@ -1404,13 +1491,13 @@ function render() {
   // rather than one fixed purple — every CSS rule that used to hardcode a
   // shade of #6d5ce8 now derives it from this custom property instead (see
   // the color-mix() rules on .clickable-vertex etc.). Set on every render
-  // rather than once, since a new game can seat the human differently. An
-  // observer has no seat and so no colour of their own: leave the stylesheet's
-  // own default standing rather than dereferencing SEAT_COLORS[null], which
-  // threw on the first render and took the whole page down with it.
-  if (state.seat !== null && state.seat !== undefined) {
-    document.documentElement.style.setProperty("--accent", SEAT_COLORS[state.seat].fill);
-  }
+  // rather than once, since a new game can seat the human differently.
+  //
+  // Watching rather than playing, there is no seat and so no colour of our
+  // own: it falls back to the stylesheet's own #6d5ce8, which belongs to no
+  // seat and highlights nothing anyone can click anyway.
+  document.documentElement.style.setProperty(
+    "--accent", watching() ? "#6d5ce8" : SEAT_COLORS[state.seat].fill);
   // Arming a Knight is purely client-side, so nothing else clears it: a new
   // state where playing one is no longer legal (it was played, the turn moved
   // on, the game ended) has to. legal_actions is empty whenever it isn't the
@@ -1422,8 +1509,6 @@ function render() {
   renderStatus();
   renderPlayers();
   renderHand();
-  renderTrading();
-  renderNegotiation();
   renderBoardDynamic();
   renderPieceSupply();
   renderBoardButtons();
@@ -1439,26 +1524,18 @@ function renderStatus() {
       : `PLAYER ${state.winner + 1} WINS`;
     return;
   }
-  // An open seat the setup snake is currently waiting on, counting down to
-  // locking it out for good (see api.Table._settle_locks) — takes over the
-  // phase line while it lasts, since nothing else can happen at the table
-  // until it resolves one way or the other.
-  if (state.waiting_for) {
-    const seconds = Math.ceil(state.waiting_for.seconds_remaining);
-    phaseEl.textContent = `SEAT ${state.waiting_for.seat + 1} OPEN — LOCKS IN ${seconds}S`;
+  // Nobody's decision while a seat is still empty (see api.Table.waiting_for)
+  // — the same reason state.to_move is null and no row shows the active
+  // highlight below.
+  if (state.waiting_for && state.waiting_for.length) {
+    phaseEl.textContent = "WAITING FOR SEATS";
     return;
   }
   // Somebody else's decision to make, so the phase underneath it is beside
-  // the point.
+  // the point. True as of the last poll rather than the last render — see
+  // settle() — which is as current as anything here gets.
   if (state.to_move !== state.seat) {
-    // Named when the seat is a person's, because that is a wait with no end
-    // this client can see: a bot's turn resolves whenever its own runner
-    // next polls, but another player's takes as long as they take (see
-    // pollWhileWaiting).
-    const mover = state.players[state.to_move];
-    phaseEl.textContent = mover && !mover.bot
-      ? `WAITING FOR ${seatLabel(state.to_move).toUpperCase()}`
-      : `PLAYER ${state.to_move + 1}'S TURN`;
+    phaseEl.textContent = `PLAYER ${state.to_move + 1}'S TURN`;
     return;
   }
   // The same move either way, so the same words either way — PHASE_LABELS
@@ -1473,18 +1550,15 @@ function renderStatus() {
 
 // One icon + (optional) number, for the player list's stat row — glyphs
 // throughout rather than "3 VP", "Longest road" as English text.
-// A double-digit value is wide enough, inside the player row's fixed-width
-// stat columns (see .player-row's grid-template-columns), to crowd right
-// into the next column's glyph if the icon-to-number gap stays put — .wide
-// shrinks that gap instead, so the extra digit eats padding that was
-// never doing much rather than eating the next stat's breathing room.
-function statClasses(value, extraClass) {
-  const wide = value !== undefined && String(value).length > 1 ? " wide" : "";
-  return `stat${extraClass ? ` ${extraClass}` : ""}${wide}`;
-}
-
 function statChip(iconId, value, extraClass, title) {
-  const chip = html("span", {class: statClasses(value, extraClass), title});
+  // A double-digit value is wide enough, inside the player row's fixed-width
+  // stat columns (see .player-row's grid-template-columns), to crowd right
+  // into the next column's glyph if the icon-to-number gap stays put — .wide
+  // shrinks that gap instead, so the extra digit eats padding that was
+  // never doing much rather than eating the next stat's breathing room.
+  const wide = value !== undefined && String(value).length > 1 ? " wide" : "";
+  const classes = `stat${extraClass ? ` ${extraClass}` : ""}${wide}`;
+  const chip = html("span", {class: classes, title});
   chip.appendChild(iconSvg(iconId, {cls: "stat-icon"}));
   if (value !== undefined) chip.appendChild(document.createTextNode(String(value)));
   return chip;
@@ -1500,134 +1574,131 @@ function handColHeader(iconId, text) {
   return header;
 }
 
-// One row per seat, built once and thereafter *updated*, never rebuilt.
-//
-// Every other panel on this page can be thrown away and redrawn on each poll
-// because nothing in it holds interaction state. This one can't: a bot seat's
-// row is a <select>, and replacing the element under an open dropdown closes
-// it. With the page polling every 1.5 s while it isn't your move, that is a
-// picker you cannot use — it shut about a second after it opened, every time.
-// So the row, its swatch, its name cell and its stat chips are all kept, and
-// each render writes only the values that changed.
-const playerRows = new Map();
-
-function playerRow(seat) {
-  let entry = playerRows.get(seat);
-  if (entry) return entry;
-  const row = html("div", {class: "player-row"});
-  const color = SEAT_COLORS[seat];
-  const swatch = html("div", {class: "swatch"});
-  swatch.style.background = color.fill;
-  swatch.style.borderColor = color.stroke;
-  row.appendChild(swatch);
-  const nameEl = html("div", {class: "player-name"});
-  row.appendChild(nameEl);
-  // Each chip is its own grid cell (see .player-row's
-  // grid-template-columns), appended straight onto the row rather than into
-  // a wrapping div — that's what lets every row share the same column
-  // tracks instead of each row sizing its own flex children. The dice chip
-  // is the one that isn't always shown: `hidden` rather than absent, so it
-  // occupies no track when a seat hasn't rolled and every other row's
-  // columns stay aligned either way.
-  const chips = new Map();
-  for (const [key, iconId, title] of [
-    ["points", "victory-point", "Victory points"],
-    ["cards", "card", "Resource cards"],
-    ["dev", "dev-card", "Development cards"],
-    // Route length and Knights played sit in every row, always — comparable
-    // seat to seat, tinted only for whoever actually holds the title right
-    // now (see statClasses' "held" class, gated in CSS on
-    // .stat.road.held/.stat.army.held).
-    ["road", "road", "Longest road"],
-    ["army", "knight", "Largest army"],
-    // Each seat's own last roll, not one global value — lets you compare
-    // who's been running hot or cold rather than only ever seeing whoever
-    // rolled most recently.
-    ["roll", "dice", "Last roll"],
-  ]) {
-    const chip = statChip(iconId, 0, "", title);
-    chips.set(key, chip);
-    row.appendChild(chip);
-  }
-  entry = {row, nameEl, chips, kind: null, select: null};
-  playerRows.set(seat, entry);
-  return entry;
-}
-
-function setChip(entry, key, value, extraClass) {
-  const chip = entry.chips.get(key);
-  chip.className = statClasses(value, extraClass);
-  chip.lastChild.nodeValue = String(value);
-}
-
-// A seat's line: a name for a person, a model picker for a bot, and what the
-// table decided about a seat nobody took. Which of the three it is comes from
-// `state.seats`, the server's own per-seat kind (api.Seat.public) — the
-// player rows themselves stopped carrying a `human` flag when the lobby went
-// away, so this branched on `undefined` and gave *every* seat a bot picker:
-// your own occupied seat, an open one, and a permanently locked one all drawn
-// identically, and none of them saying who was in it.
-function renderSeatName(entry, p) {
-  const kind = (state.seats && state.seats[p.seat] && state.seats[p.seat].kind)
-    || (p.bot ? "bot" : "player");
-  if (kind !== entry.kind) {
-    entry.nameEl.textContent = "";
-    entry.select = null;
-    entry.kind = kind;
-    if (kind === "bot") {
-      // The picker *is* the player line: changing this seat's bot mid-game
-      // goes straight through swapBot, no separate "apply" step.
-      const select = html("select", {});
-      for (const name of modelNames) select.appendChild(html("option", {value: name}, name));
-      select.addEventListener("change", () => swapBot(p.seat, select.value));
-      entry.nameEl.classList.remove("player-name-plain");
-      entry.nameEl.appendChild(select);
-      entry.select = select;
-    } else {
-      entry.nameEl.classList.add("player-name-plain");
-    }
-  }
-  entry.row.classList.toggle("seat-empty", kind === "empty");
-  if (kind === "bot") {
-    // Swapping a bot is a seated player's call — an observer holds no token
-    // and would only get a 403 out of it, so the control says so rather than
-    // offering a choice it cannot make. Written only when it changes:
-    // assigning `disabled` blurs the element, open picker and all.
-    const observing = state.seat === null || state.seat === undefined;
-    if (entry.select.disabled !== observing) entry.select.disabled = observing;
-    // Never while the picker is open. Writing .value to a <select> the user
-    // is looking into closes it just as surely as replacing the element does.
-    if (document.activeElement !== entry.select) {
-      entry.select.value = p.bot || entry.select.value || modelNames[0];
-    }
-    return;
-  }
-  // A person's seat, mine or somebody else's: a name, not a bot picker.
-  // There is nothing to swap — the seat belongs to whoever is in it. A seat
-  // nobody took says so instead ("open seat", or "locked seat" once the setup
-  // snake has retired it). All four readings are seatLabel's, so this row and
-  // the status line above it cannot disagree about who is where.
-  entry.nameEl.textContent = seatLabel(p.seat);
-}
-
 function renderPlayers() {
   const container = document.getElementById("players");
+  // Rebuilt whole, and rebuilt on every poll while somebody else is on move
+  // (see settle) — which is exactly when an empty seat is most likely to be
+  // getting a bot picked for it. An open picker lives inside this container,
+  // so a rebuild would close it out from under the click; the numbers it
+  // would have refreshed can wait for the tick after the choice.
+  if (container.contains(document.activeElement)) return;
+  container.innerHTML = "";
+  const setup = state.phase === "SETUP_SETTLEMENT" || state.phase === "SETUP_ROAD";
   for (const p of state.players) {
-    const entry = playerRow(p.seat);
-    if (entry.row.parentNode !== container) container.appendChild(entry.row);
-    entry.row.classList.toggle("active", state.to_move === p.seat);
-    renderSeatName(entry, p);
+    // A retired seat is shown as such while setup is still placing, so the
+    // table can see the snake pass it; once the match is under way the row
+    // goes, since there is nobody in it and never will be.
+    if (!setup && (state.locked || []).includes(p.seat)) continue;
+    const color = SEAT_COLORS[p.seat];
+    const row = html("div", {class: `player-row${state.to_move === p.seat ? " active" : ""}`});
+    const swatch = html("div", {class: "swatch"});
+    swatch.style.background = color.fill;
+    swatch.style.borderColor = color.stroke;
+    row.appendChild(swatch);
+
+    const nameEl = html("div", {class: "player-name"});
+    const kind = state.seats[p.seat] && state.seats[p.seat].kind;
+    if (watching()) {
+      // Nothing here is ours to change — seating a bot needs a seat's own
+      // token — so every row reads as text, empty ones included. What a row
+      // does instead is open: a spectator is told every hand at the table
+      // (see api.Tables.handle's public routes), and clicking a row picks
+      // which one the hand area below shows.
+      nameEl.classList.add("player-name-plain");
+      nameEl.textContent = seatLabel(p.seat);
+      if (p.hand !== undefined) {
+        row.classList.add("player-row-openable");
+        if (openSeat === p.seat) {
+          row.classList.add("player-row-open");
+          row.style.setProperty("--open-ring", color.fill);
+        }
+        // Clicking the open row again closes it, so there is always a way
+        // back to showing nobody's cards in particular.
+        row.addEventListener("click", () => {
+          openSeat = openSeat === p.seat ? null : p.seat;
+          render();
+        });
+      }
+    } else if (p.seat === state.seat) {
+      // Your own seat, and the one thing on this row you can change. It is an
+      // input for the same reason a bot seat is a <select>: the control *is*
+      // the player line, with nothing extra to click first.
+      //
+      // The poll rebuilds this whole list every 1.5s while somebody else is
+      // on move, which would take the caret with it mid-word — the guard at
+      // the top of renderPlayers is what stops that, since a focused input is
+      // inside this container.
+      const input = html("input", {
+        maxlength: "40", autocomplete: "off", spellcheck: "false",
+        placeholder: "human", title: "Your name at this game",
+      });
+      input.value = state.seats[p.seat].name || "";
+      input.addEventListener("change", () => renameSelf(input.value));
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter") input.blur(); });
+      nameEl.appendChild(input);
+    } else if (kind === "player") {
+      // Somebody else who opened this link. Their seat is theirs; there is
+      // nothing here to change about it.
+      nameEl.classList.add("player-name-plain");
+      nameEl.textContent = state.seats[p.seat].name || `Player ${p.seat + 1}`;
+    } else if (state.locked.includes(p.seat)) {
+      // Retired: somebody closed this seat outright rather than leave it
+      // sitting empty. A picker would only ever refuse, so it reads as text
+      // instead.
+      nameEl.classList.add("player-name-plain");
+      nameEl.textContent = "locked seat";
+    } else {
+      // The picker *is* the player line, and it is the only place a table
+      // says who else is playing: an empty seat starts blank and choosing a
+      // model seats that bot there, a seat that already has one swaps it.
+      // Either way it goes straight through swapBot, no separate "apply"
+      // step. An empty seat holds the whole table (see renderStatus) until
+      // somebody picks a bot for it, opens the link and takes it, or picks
+      // "none" to close it outright -- nothing here ever resolves itself.
+      const select = html("select", {});
+      if (!p.bot) {
+        select.appendChild(html("option", {value: ""}, "empty"));
+        select.appendChild(html("option", {value: CLOSE_SEAT}, "none"));
+      }
+      for (const name of modelNames) select.appendChild(html("option", {value: name}, name));
+      select.value = p.bot || "";
+      select.classList.toggle("unset", !p.bot);
+      select.addEventListener("change", () => {
+        select.blur();
+        if (select.value === CLOSE_SEAT) closeSeat(p.seat);
+        else swapBot(p.seat, select.value);
+      });
+      nameEl.appendChild(select);
+    }
+    row.appendChild(nameEl);
 
     const cards = p.hand !== undefined
       ? board.resources.map((r) => p.hand[r]).reduce((a, b) => a + b, 0)
       : p.hand_size;
-    setChip(entry, "points", p.victory_points, "");
-    setChip(entry, "cards", cards, "");
-    setChip(entry, "dev", p.dev_card_count, "");
-    setChip(entry, "road", p.road_length, `road${p.longest_road ? " held" : ""}`);
-    setChip(entry, "army", p.knights_played, `army${p.largest_army ? " held" : ""}`);
-    setChip(entry, "roll", p.last_roll || 0, "roll");
-    entry.chips.get("roll").hidden = !p.last_roll;
+    // Each chip is its own grid cell now (see .player-row's
+    // grid-template-columns), appended straight onto the row rather than
+    // into a wrapping div — that's what lets every row share the same
+    // column tracks instead of each row sizing its own flex children.
+    row.appendChild(statChip("victory-point", p.victory_points, "", "Victory points"));
+    row.appendChild(statChip("card", cards, "", "Resource cards"));
+    row.appendChild(statChip("dev-card", p.dev_card_count, "", "Development cards"));
+    // Route length and Knights played sit in every row, always — comparable
+    // seat to seat, tinted only for whoever actually holds the title right
+    // now (see statChip's "held" class, gated in CSS on
+    // .stat.road.held/.stat.army.held).
+    row.appendChild(
+      statChip("road", p.road_length, `road${p.longest_road ? " held" : ""}`, "Longest road")
+    );
+    row.appendChild(
+      statChip("knight", p.knights_played, `army${p.largest_army ? " held" : ""}`, "Largest army")
+    );
+    // Each seat's own last roll, not one global value — lets you compare
+    // who's been running hot or cold rather than only ever seeing whoever
+    // rolled most recently. It's the row's last (and only ever-absent)
+    // column, so leaving it out when a seat hasn't rolled yet still leaves
+    // every other row's columns aligned.
+    if (p.last_roll) row.appendChild(statChip("dice", p.last_roll, "roll", "Last roll"));
+    container.appendChild(row);
   }
 }
 
@@ -1673,10 +1744,20 @@ function devCardPlay(name, g) {
 
 // The human's own cards, kept in a fixed spot below the seat list (in actual
 // seat order) rather than tied to wherever their seat happens to fall.
+//
+// Watching, there is no own seat, and this shows whichever one was clicked in
+// the player list instead (openSeat) — nobody's until one is. The clicks that
+// make a card do something all come off `legal_actions`, which is empty for a
+// spectator, so every card here is inert without a check of its own.
 function renderHand() {
   const container = document.getElementById("hand");
   container.innerHTML = "";
-  const p = state.players.find((p) => p.seat === state.seat);
+  const seat = watching() ? openSeat : state.seat;
+  if (seat === null) {
+    container.appendChild(html("div", {class: "hand-hint"}, "Click a player to see their cards."));
+    return;
+  }
+  const p = state.players.find((p) => p.seat === seat);
   if (!p || p.hand === undefined) return;
 
   // What a click on a card does is decided by what's actually legal, which
@@ -1685,11 +1766,9 @@ function renderHand() {
   // GameSession.legal_wire_actions), so reading it is the whole test; there's
   // no separate game_over/to_move check to keep in sync with it.
   const g = groupActions(state.legal_actions);
-  // The same condition the old floating trade button gated its own
-  // visibility on: a bank trade is available right now. Trading with another
-  // player is not something a card click can do any more — it is one engine
-  // event a turn off the published valuation vectors (`hexset.trading`),
-  // and the sidebar's five toggles are the whole of the human's part in it.
+  // A card is clickable when there is a trade to make with it, which now
+  // means the bank or a port and nothing else: offers between seats left the
+  // engine with the one-event mechanic, so `bankTrade` is the whole of it.
   // Discarding is the other thing a resource card can do, but it happens in
   // the modal that DISCARD opens over the whole page (see syncModal), not
   // here — these cards aren't reachable while that's up.
@@ -1709,7 +1788,7 @@ function renderHand() {
     card.appendChild(html("div", {class: "count"}, String(n)));
     if (canTrade) {
       card.classList.add("hand-card-clickable");
-      card.addEventListener("click", () => openModal("propose", {give: idx}));
+      card.addEventListener("click", () => openModal("trade", {give: idx}));
     }
     resHand.appendChild(card);
   }
@@ -1745,255 +1824,13 @@ function renderHand() {
 // this can't drift from what can_place_settlement/_road/_city actually
 // enforce; built counts are just what's already on the board in this seat's
 // colour.
-// The advertisement half of trading (`hexset.trading`): five per-resource
-// toggles that PUT this seat's standing valuation vector, plus what everyone
-// else has published and what the engine cleared this turn. Toggling one of
-// these never itself proposes or answers anything -- it only changes what
-// the automatic event, or a manual bundle composed in the negotiation panel
-// below (renderNegotiation), reads as this seat's public consent. A trade
-// takes effect at the next trade event, which is the next time a main phase
-// opens (or, for a manual bundle, immediately -- see submitTrade).
-async function setValuation(index, value) {
-  const vector = (state.valuations[state.seat] || [0, 0, 0, 0, 0]).slice();
-  vector[index] = vector[index] === value ? 0 : value;
-  const {ok, data} = await putJSON(`/api/games/${state.code || tableCode}/valuation`, {valuation: vector});
-  if (!ok) { showNotice(data.error || "could not set that valuation"); return; }
-  state = data;
-  render();
-}
-
-function renderTrading() {
-  const container = document.getElementById("trading");
-  container.innerHTML = "";
-  if (!state.valuations || state.seat === null || state.seat === undefined) return;
-
-  container.appendChild(html("h4", {}, "What I want / would give"));
-  const mine = state.valuations[state.seat] || [0, 0, 0, 0, 0];
-  board.resources.forEach((name, index) => {
-    const row = html("div", {class: "val-row"});
-    row.appendChild(html("div", {class: "val-name"}, name));
-    for (const [label, value] of [["\u2212", -1], ["0", 0], ["+", 1]]) {
-      const on = value === 0 ? mine[index] === 0 : mine[index] === value;
-      const button = html("button", {class: on ? "on" : "", title: `${name}: ${label}`}, label);
-      button.addEventListener("click", () => setValuation(index, value));
-      row.appendChild(button);
-    }
-    container.appendChild(row);
-  });
-
-  const table = html("table", {class: "val-table"});
-  const head = html("tr", {});
-  head.appendChild(html("th", {}, "Seat"));
-  for (const name of board.resources) head.appendChild(html("th", {}, name.slice(0, 2)));
-  table.appendChild(head);
-  state.valuations.forEach((vector, seat) => {
-    const row = html("tr", {});
-    row.appendChild(html("td", {}, seat === state.seat ? "you" : `P${seat + 1}`));
-    for (const v of vector) row.appendChild(html("td", {}, v ? v.toFixed(2) : "\u00b7"));
-    table.appendChild(row);
-  });
-  container.appendChild(table);
-
-  container.appendChild(html("h4", {style: "margin-top:8px"}, "Trades this turn"));
-  if (!state.trades || !state.trades.length) {
-    container.appendChild(html("div", {class: "trade-line"}, "none"));
-  } else {
-    for (const trade of state.trades) {
-      container.appendChild(html("div", {class: "trade-line"},
-        `P${trade.a + 1} gave ${bundleText(trade.gave)} to P${trade.b + 1} for ${bundleText(trade.got)}`));
-    }
-  }
-}
-
-function bundleText(counts) {
-  const parts = [];
-  counts.forEach((n, index) => { if (n) parts.push(`${n} ${board.resources[index]}`); });
-  return parts.join(", ") || "nothing";
-}
-
-// --- The negotiation panel (`docs/negotiation-interface.md` §3) --------------
-//
-// Below the five-toggle advertisement panel above, and independent of it
-// (setValuation still just publishes a standing vector; composing a bundle
-// here never touches it). One block per counterparty with any nonzero
-// vector entry: their wants (positive) render as green-ringed chips, their
-// gives (negative) as red-ringed ones. Clicking a "want" chip adds one card
-// of that resource to the draft's give side (they want it, so I'd give it);
-// clicking a "give" chip adds to the receive side. `POST .../trade` is the
-// only round trip; clears/affordable are computed here from state already
-// on hand, exactly the formula `_best_clearing` runs server-side.
-
-function draftFor(seat) {
-  if (!draftBundles[seat]) draftBundles[seat] = {give: [0, 0, 0, 0, 0], receive: [0, 0, 0, 0, 0]};
-  return draftBundles[seat];
-}
-
-function clearDraft(seat) {
-  draftBundles[seat] = {give: [0, 0, 0, 0, 0], receive: [0, 0, 0, 0, 0]};
-  renderNegotiation();
-}
-
-// dot(vector, bundle) -- the same public-surplus formula `_best_clearing`
-// (hexset/trading.py) runs server-side, so "clears" here means the server
-// will not reject the bundle for a non-positive surplus on either side.
-// Pure functions, deliberately: no DOM, no `state` global, so a fixed
-// vector/hand can be checked directly (see test_ui_smoke.py).
-function surplus(vector, bundle) {
-  return vector.reduce((sum, v, index) => sum + v * bundle[index], 0);
-}
-
-function bundleClears(myVector, theirVector, bundle) {
-  const mine = surplus(myVector, bundle);
-  const theirs = surplus(theirVector, bundle.map((n) => -n));
-  return mine > 0 && theirs > 0;
-}
-
-// Each `give` count must not exceed my own hand; each `receive` count is
-// bounded by the counterparty's total hand size, not a per-resource figure
-// -- exact per-resource counts aren't visible cross-seat
-// (`docs/negotiation-interface.md` §3).
-function bundleAffordable(resourceNames, give, myHand, receiveTotal, counterpartyHandSize) {
-  return resourceNames.every((name, index) => give[index] <= (myHand[name] || 0))
-    && receiveTotal <= counterpartyHandSize;
-}
-
-async function submitTrade(counterparty) {
-  const draft = draftFor(counterparty);
-  const give = {}, receive = {};
-  board.resources.forEach((name, index) => {
-    if (draft.give[index]) give[name] = draft.give[index];
-    if (draft.receive[index]) receive[name] = draft.receive[index];
-  });
-  const {ok, data} = await postJSON(`/api/games/${state.code || tableCode}/trade`,
-    {counterparty, give, receive});
-  if (!ok) { showNotice(data.error || "that trade did not go through"); return; }
-  state = data;
-  clearDraft(counterparty);
-  render();
-}
-
-async function confirmPending(index) {
-  const {ok, data} = await postJSON(`/api/games/${state.code || tableCode}/trade/confirm`, {index});
-  if (!ok) { showNotice(data.error || "could not confirm that trade"); return; }
-  state = data;
-  render();
-}
-
-async function declinePending(index) {
-  const {ok, data} = await postJSON(`/api/games/${state.code || tableCode}/trade/decline`, {index});
-  if (!ok) { showNotice(data.error || "could not decline that trade"); return; }
-  state = data;
-  render();
-}
-
-function renderNegotiation() {
-  const container = document.getElementById("negotiation");
-  container.innerHTML = "";
-  if (!state.valuations || state.seat === null || state.seat === undefined) return;
-
-  // A different game entirely -- the drafts on hand describe hands and
-  // seats that no longer exist.
-  if (state.code !== negotiationCode) {
-    draftBundles = {};
-    negotiationCode = state.code;
-  }
-
-  if (state.pending && state.pending.length) {
-    container.appendChild(html("h4", {}, "Pending offers"));
-    state.pending.forEach((offer, index) => {
-      const row = html("div", {class: "pending-offer"});
-      row.appendChild(html("span", {},
-        `P${offer.counterparty + 1} offers ${bundleText(offer.got)} for ${bundleText(offer.gave)}`));
-      const buttons = html("div", {});
-      const accept = html("button", {class: "pending-accept"}, "Accept");
-      accept.addEventListener("click", () => confirmPending(index));
-      const decline = html("button", {class: "pending-decline"}, "Decline");
-      decline.addEventListener("click", () => declinePending(index));
-      buttons.appendChild(accept);
-      buttons.appendChild(decline);
-      row.appendChild(buttons);
-      container.appendChild(row);
-    });
-  }
-
-  container.appendChild(html("h4", {}, "Propose a trade"));
-  const myTurn = !state.game_over && state.to_move === state.seat;
-  const myHand = (state.players[state.seat] && state.players[state.seat].hand) || {};
-  let any = false;
-
-  state.valuations.forEach((vector, seat) => {
-    if (seat === state.seat) return;
-    if (!vector.some((v) => v !== 0)) return; // nothing advertised to compose against
-    any = true;
-
-    // Turn-timing rule (`docs/negotiation-interface.md` §2): on my own turn
-    // every panel is a proposer; otherwise only the current player's panel is.
-    const active = !state.game_over && (myTurn || state.to_move === seat);
-    const panel = html("div", {class: `negotiate-panel${active ? "" : " negotiate-readonly"}`});
-    panel.appendChild(html("div", {class: "negotiate-seat"}, `P${seat + 1}`));
-
-    const draft = draftFor(seat);
-    const chips = html("div", {class: "negotiate-chips"});
-    board.resources.forEach((name, index) => {
-      const v = vector[index];
-      if (v === 0) return;
-      const chip = resourceCardTile(name, {
-        extraClasses: ["negotiate-chip", v > 0 ? "chip-want" : "chip-give"],
-        title: `${name}: P${seat + 1} ${v > 0 ? "wants" : "would give"} this`,
-      });
-      if (active) {
-        chip.addEventListener("click", () => {
-          if (v > 0) draft.give[index] += 1; else draft.receive[index] += 1;
-          renderNegotiation();
-        });
-      }
-      chips.appendChild(chip);
-    });
-    panel.appendChild(chips);
-
-    const totalGive = draft.give.reduce((a, b) => a + b, 0);
-    const totalReceive = draft.receive.reduce((a, b) => a + b, 0);
-    if (totalGive || totalReceive) {
-      panel.appendChild(html("div", {class: "negotiate-summary"},
-        `give ${bundleText(draft.give)} / receive ${bundleText(draft.receive)}`));
-
-      const bundle = board.resources.map((_, index) => draft.receive[index] - draft.give[index]);
-      const clears = bundleClears(state.valuations[state.seat] || [0, 0, 0, 0, 0], vector, bundle);
-      const counterpartyHandSize = (state.players[seat] && state.players[seat].hand_size) || 0;
-      const affordable = bundleAffordable(board.resources, draft.give, myHand, totalReceive, counterpartyHandSize);
-
-      panel.appendChild(html("div", {class: `negotiate-indicator${clears ? " clears" : ""}`},
-        clears ? "clears" : "does not clear"));
-
-      const buttons = html("div", {class: "negotiate-buttons"});
-      const clearBtn = html("button", {class: "negotiate-clear"}, "Clear");
-      clearBtn.addEventListener("click", () => clearDraft(seat));
-      buttons.appendChild(clearBtn);
-
-      const submit = html("button", {class: "negotiate-submit"}, "Propose");
-      const reason = !active ? "not this seat's turn" : !affordable ? "not affordable"
-        : !clears ? "does not clear" : "";
-      submit.disabled = !!reason;
-      if (reason) submit.title = reason;
-      submit.addEventListener("click", () => submitTrade(seat));
-      buttons.appendChild(submit);
-      panel.appendChild(buttons);
-    }
-
-    container.appendChild(panel);
-  });
-
-  if (!any) container.appendChild(html("div", {class: "trade-line"}, "nobody has published a vector yet"));
-}
-
 function renderPieceSupply() {
   const container = document.getElementById("piece-supply");
   container.innerHTML = "";
+  // One seat's own pieces. Watching, there is no such seat, and a supply
+  // count for nobody would read as somebody's.
+  if (watching()) return;
   const seat = state.seat;
-  // What *this* seat has left to build with, so an observer — who has no
-  // seat, and so no supply of their own — gets nothing here rather than a
-  // dereference of SEAT_COLORS[null].
-  if (seat === null || seat === undefined) return;
   const color = SEAT_COLORS[seat];
   const roadsBuilt = state.edge_owner.filter((o) => o === seat).length;
   const settlementsBuilt = state.vertex_owner.filter(
@@ -2211,11 +2048,11 @@ function legalAction(type) {
 // close it. The other three are opened by a click and only ever closed by one.
 const MODAL_AUTO = new Set(["discard", "steal"]);
 
-// Modes Escape and a backdrop click may close. The one left out is the one
-// the game is actually waiting on: cards owed to the bank after a seven have
-// to be handed over. "steal" is here because closing it only backs out to
-// the hex list, not out of the move.
-const MODAL_DISMISSIBLE = new Set(["propose", "monopoly", "year-of-plenty", "steal"]);
+// Modes Escape and a backdrop click may close. The two left out are the two
+// the game is actually waiting on: an offer has to be answered, and cards owed
+// to the bank after a seven have to be handed over. "steal" is here because
+// closing it only backs out to the hex list, not out of the move.
+const MODAL_DISMISSIBLE = new Set(["trade", "monopoly", "year-of-plenty", "steal"]);
 
 // A right-column icon-only button. `label` is the tooltip/screen-reader text,
 // not shown — the whole column is glyphs.
@@ -2247,11 +2084,15 @@ function pickCard(resourceIdx, {selected, disabled, count, forceCount, title, on
   return card;
 }
 
-// Every trade the human sees reads the same way round and in the same words:
-// what leaves their hand on the left, what arrives on the right.
+// A trade reads the same way round wherever it appears: what leaves the
+// hand on the left, what arrives on the right. Both sides are the same
+// hand, which is why neither label says whose.
 const GIVE_LABEL = "Give";
 const GET_LABEL = "Get";
 
+// The "trade" mode's give/want row: the shape of the trade being built,
+// and the target of the picker below it. Each side shows its own current
+// card (or an empty slot before anything's chosen) and tapping either aims
 // the picker at that side.
 function tradeProposeRow() {
   const row = html("div", {class: "trade-exchange"});
@@ -2314,14 +2155,14 @@ function tradePicker(p) {
 }
 
 // The five modes, and what puts each one up:
-//   "propose"        clicking a resource card in hand (renderHand)
+//   "trade"          clicking a resource card in hand (renderHand)
 //   "monopoly"       clicking the Monopoly card in hand (devCardPlay)
 //   "year-of-plenty" clicking the Year of Plenty card in hand (devCardPlay)
 //   "discard"        cards owed to the bank after a seven (syncModal)
 //   "steal"          a robber hex with more than one victim (syncModal)
 function openModal(mode, {give = null} = {}) {
   modalMode = mode;
-  if (mode === "propose") {
+  if (mode === "trade") {
     // `give` pre-selects the resource clicked in the hand (see renderHand());
     // "want" always starts fresh regardless, since that choice hasn't been
     // made yet either way.
@@ -2351,11 +2192,11 @@ function closeModal() {
   document.getElementById("modal").classList.remove("show");
 }
 
-// Called every render(). The two MODAL_AUTO modes are conditions rather than
-// clicks — cards are owed, a hex with more than one neighbour has been
-// picked — so this is the single place that decides which of them (if any)
-// should be up, and closes whichever no longer should be. The click-driven
-// three are left alone entirely.
+// Called every render(). The three MODAL_AUTO modes are conditions rather
+// than clicks — an offer is waiting, cards are owed, a hex with more than one
+// neighbour has been picked — so this is the single place that decides which
+// of them (if any) should be up, and closes whichever no longer should be.
+// The click-driven three are left alone entirely.
 function syncModal() {
   const g = groupActions(state.legal_actions);
   const live = g.discard.length ? "discard"
@@ -2381,7 +2222,7 @@ function renderModal() {
   else if (modalMode === "steal") renderStealMode(g, title, body, actions);
   else if (modalMode === "monopoly") renderMonopolyMode(g, title, body, actions);
   else if (modalMode === "year-of-plenty") renderYearOfPlentyMode(g, title, body, actions);
-  else renderProposeMode(title, body, actions);
+  else renderTradeMode(title, body, actions);
 
   // A forced discard has nothing to put in the button column, and an empty
   // 96px gutter reads as a button that failed to render rather than as no
@@ -2523,19 +2364,19 @@ function renderYearOfPlentyMode(g, title, body, actions) {
   actions.appendChild(modalCancelButton());
 }
 
-function renderProposeMode(title, body, actions) {
-  title.textContent = "Trade with the bank";
+function renderTradeMode(title, body, actions) {
+  title.textContent = "Trade";
   const p = state.players.find((pl) => pl.seat === state.seat);
 
-  // Resolved before the body is built, not after: the picked pair decides
-  // what the preview's give side costs and which glyph the button carries
-  // (see the end of this function).
+  // Resolved before the body is built, not after: whether the picked pair
+  // lands on a real trade decides what the preview's give side costs and
+  // whether the button is reachable at all (see the end of this function).
   //
-  // The bank is the only counterparty a click can reach now. Trading with
-  // another player is not an action (`hexset.trading`): a seat publishes a
-  // valuation vector -- the five toggles in the sidebar -- and the engine
-  // clears the deals once a turn. So this modal lost its "offer to the
-  // other players" half rather than having it disabled.
+  // Found, never built. The client only ever echoes back a wire object the
+  // server itself offered — the one hard rule this whole page follows (see
+  // the module docstring) — so a pair with no matching BANK_TRADE among
+  // `legal_actions` is a pair that cannot be traded, and the button stays
+  // disabled rather than the client inventing an action for it.
   let bank = null;
   if (tradeGive !== null && tradeWant !== null) {
     bank = state.legal_actions.find(
@@ -2545,14 +2386,16 @@ function renderProposeMode(title, body, actions) {
 
   // The trade as it stands on top, the one picker row aimed at whichever
   // half is being chosen underneath. Both are drawn whatever's been picked
-  // so far, so nothing in here changes height between taps.
+  // so far, so nothing in here changes height between taps. What the give
+  // side actually costs is on the button (the rate under the glyph), since
+  // the row shows the shape of the trade and not its price.
   body.appendChild(tradeProposeRow());
   body.appendChild(tradePicker(p));
 
-  // Disabled until the trade it would send actually exists: this column is
-  // centered on its own axis, so a button appearing as the second half of
-  // the pair lands would shove the others off the position the finger was
-  // already heading for.
+  // Both buttons always, the trade one disabled until the pair lands on a
+  // real rate: this column is centered on its own axis, so a button
+  // appearing as the second half of the pair is picked would shove the
+  // other off the position the finger was already heading for.
   actions.appendChild(bankTradeButton(bank));
   actions.appendChild(modalCancelButton());
 }
@@ -2709,120 +2552,30 @@ document.addEventListener("keydown", (e) => {
   setLogOpen(false);
 });
 
-// --- The lobby ----------------------------------------------------------
-//
-// Everything up to the deal: the code to share, who has sat down so far, and
-// the one button that turns a row of seats into a game. It polls, because the
-// only thing that changes here is somebody else arriving.
-
-const lobbyEl = document.getElementById("lobby");
-const nameInput = document.getElementById("lobby-name");
-
-function playerName() {
-  return nameInput.value.trim() || null;
-}
-
-function setLobbyOpen(open) {
-  lobbyEl.classList.toggle("show", open);
-}
-
-function lobbyError(text) {
-  document.getElementById("lobby-error").textContent = text || "";
-}
-
-// The one-way door: the board needs a dealt game to lay out, so it is loaded
-// here rather than at boot, and the lobby never comes back. Works the same
-// for a seated player or a token-free observer (state.seat is null for the
-// latter — nothing downstream needs telling apart the two explicitly, since
-// every "is it my turn"/"is this my seat" check already reads state.seat).
-async function enterGame() {
-  await loadBoard();
-  setLobbyOpen(false);
-  render();
-  pollWhileWaiting();
-}
-
-// --- The front page -----------------------------------------------------
-
-async function dealGame() {
-  const bots = Number(document.getElementById("landing-bots").value);
-  const body = {bots: currentBotModels.slice(0, bots)};
-  if (playerName()) body.name = playerName();
-  const {ok, data} = await postJSON("/api/games", body);
-  if (!ok) { lobbyError(data.error || "Could not deal a game."); return; }
-  rememberToken(data.code, data.token);
-  location.href = `/${data.code}`;
-}
-
-// Nothing is checked here: a code either has a game behind it or it doesn't,
-// and that is the server's answer to give (see boot, where this lands).
-function joinByCode() {
-  const code = document.getElementById("landing-code").value.trim().toUpperCase();
-  if (code) location.href = `/${code}`;
-}
-
-document.getElementById("landing-deal").addEventListener("click", dealGame);
-document.getElementById("landing-join").addEventListener("click", joinByCode);
-document.getElementById("landing-code").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") joinByCode();
-});
-
-// --- Boot ---------------------------------------------------------------
-//
-// A game is live and dealt from the moment it exists — no lobby to wait
-// through. Three ways in, one end state: a seat, or (failing that) a
-// read-only look at the game. The front page deals a game and moves to its
-// address; a code we already hold a token for reads state directly; a code
-// we don't is joined, claiming a random open seat — and if there is none
-// left (or none ever existed), falls back to observing rather than a dead
-// end (enterObserving tells the two apart itself, by whether that request
-// also errors).
-
-async function enterObserving(code) {
-  const view = await getJSON(`/api/table/${code}`);
-  if (view.error) {
-    document.getElementById("lobby-title").textContent = "No such game";
-    document.getElementById("lobby-hint").textContent = view.error;
-    return;
-  }
-  state = view;
-  await enterGame();
-}
-
-(async function boot() {
+(async function init() {
   await loadModels();
-  document.getElementById("landing").style.display = tableCode ? "none" : "";
-  if (!tableCode) {
-    document.getElementById("lobby-hint").textContent =
-      "Play the bots on your own, or leave seats open and share the code you get.";
+  // A code in the URL is somebody handing us one specific table, and it is
+  // the only thing we try: dealing a different game instead would move the
+  // address out from under a link that was shared on purpose, and the two
+  // games would look identical afterwards. So a full or dead code says so
+  // and stops there. With no code, we resume the last game we sat at, and
+  // deal one if there isn't one.
+  const asked = tableCode;
+  if (asked) {
+    state = await resumeGame(asked);
+  } else {
+    state = await resumeGame(lastCode()) || await dealGame();
+  }
+  if (!state) {
+    document.getElementById("phase").textContent =
+      (seatError || "COULD NOT DEAL A GAME").toUpperCase();
     return;
   }
-
-  if (tokenFor(tableCode)) {
-    const first = await getJSON("/api/state");
-    if (first.error) {
-      // A token this server has never heard of — an old game, evicted or
-      // restarted out from under us (a restart re-tokens bot seats fresh but
-      // opens every human one back up — see api.Tables._reopen; there is no
-      // lost token to recover). Dropping it turns the next load into a clean
-      // join attempt instead of the same error forever.
-      forgetToken(tableCode);
-      location.reload();
-      return;
-    }
-    state = first;
-    await enterGame();
-    return;
-  }
-
-  const {ok, data} = await postJSON("/api/join", {code: tableCode, name: playerName()});
-  if (ok) {
-    rememberToken(tableCode, data.token);
-    state = data;
-    await enterGame();
-    return;
-  }
-  await enterObserving(tableCode);
+  // After the game, not alongside it: which board route to ask depends on
+  // whether we ended up with a seat at it.
+  await loadBoard();
+  render();
+  settle();
 })();
 </script>
 </body>

@@ -133,7 +133,7 @@ def _new_game(
 def _join(code: str, name: str | None = None, confirm: bool = False) -> dict:
     if not isinstance(code, str) or not code.strip():
         raise ToolError("code must be a game's six-character code")
-    body: dict = {"code": code.strip().upper()}
+    body: dict = {"code": code.strip().lower()}
     if name:
         body["name"] = str(name).strip()[:40]
     # Same reasoning as `_new_game` above.
@@ -241,9 +241,9 @@ _TOOLS: dict[str, tuple] = {
     "join": (
         _join,
         "Take a random open seat at an existing game by its six-character code. "
-        "Fails if every seat is taken or has locked out (see state()'s `locked` "
-        "and `waiting_for`) — an empty seat the game's setup has already played "
-        "past is retired for the rest of that game.",
+        "Fails if every seat is taken or has locked out (see state()'s `locked`) "
+        "— a seat somebody closed outright is retired for the rest of that "
+        "game, so join before that happens.",
         {
             "type": "object",
             "properties": {

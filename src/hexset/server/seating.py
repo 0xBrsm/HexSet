@@ -3,18 +3,17 @@
 Both of the things in here are gym concerns rather than rules, which is why
 they live in the interface layer and not in `hexset.game`:
 
-*The snake starts at the creator.* `hexset.game.start` always deals the setup
-snake from seat 0 and, when setup ends, hands the first real turn to seat 0.
-That is right for a duel harness, where seat 0 is always occupied. It is wrong
-here: HexSet has no lobby any more, a game deals the instant somebody asks for
-one, and the creator lands on a *random* seat (`api.Tables.create`). A game
-has to be immediately playable by whoever just made it.
+*The snake starts at seat 0, not at the creator.* `api.Tables.create` passes
+`start_at` `first=0`, so turn order is seat order regardless of which random
+seat the creator was dealt. Safe with no carve-out for seat 0: nobody moves
+at all while any seat is still empty (`api.Table.waiting_for`), so setup
+never reaches seat 0 before it has a real occupant.
 
-*An empty seat the snake reaches is waited out and then retired.* See
-`api.Table._settle_locks` for the grace window that decides when. A locked
-seat leaves the setup snake and every later turn rotation, permanently — a
-claimed seat is never released, so a game's player count is fixed for good the
-moment setup finishes.
+*A seat is retired only when somebody closes it outright* — never on sight,
+never on a timer. `POST /api/close` (`api.Tables.close_seat`) is the one way
+an empty seat locks; a locked seat leaves the setup snake and every later
+turn rotation permanently — a claimed seat is never released, so a game's
+player count is fixed for good the moment setup finishes.
 
 Both are implemented as a **correction applied after each action**, because
 `hexset.game` does not know about either. `settle` re-points the snake or the
@@ -133,8 +132,8 @@ def advance_setup(game: Game) -> None:
 
 def next_unlocked(game: Game, after: int) -> int:
     """The next seat past `after`, skipping retired ones. Always terminates:
-    `setup_queue[0]` — the creator's seat — is never retired, it was occupied
-    the instant the game was created."""
+    whichever seat the creator actually holds is never empty and so never
+    retired, whether or not that happens to be `setup_queue[0]`."""
     # true state: `num_players` is a fixed, public board property.
     n = game.state(after, hidden=False).num_players
     locked = locked_of(game)
@@ -146,8 +145,10 @@ def next_unlocked(game: Game, after: int) -> int:
 
 
 def lock_seat(game: Game, seat: int) -> None:
-    """Retire an empty seat the setup snake reached and waited out. A no-op if
-    `seat` is already retired — the caller does not have to track that."""
+    """Retire `seat` outright. A no-op if it is already retired — the caller
+    does not have to track that. `api.py` calls `hexset.game.lock_seat`
+    (the upstreamed primitive this mirrors) rather than this one; kept here
+    for the tests and callers that still drive this module directly."""
     if seat in locked_of(game):
         return
     game.locked = locked_of(game) | {seat}  # type: ignore[attr-defined]

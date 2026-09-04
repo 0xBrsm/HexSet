@@ -40,6 +40,17 @@ from conftest import new_tables
 SOLO = ["search2", "search2", "search2"]
 
 
+@pytest.fixture(autouse=True)
+def _creator_at_seat_zero(monkeypatch):
+    """Turn order is seat order from seat 0 now (`Tables.create` always
+    deals `first=0`, see `hexset.server.seating`'s module docstring), not
+    "whoever created the game" -- so most of this file's tests, which treat
+    the token `deal()`/`create()` hands back as the one that moves first,
+    pin the creator to seat 0 for that determinism. A test about the
+    creator landing elsewhere overrides this itself."""
+    monkeypatch.setattr(random.SystemRandom, "randrange", lambda self, n: 0)
+
+
 def tables(**config) -> Tables:
     """`conftest.new_tables`: a registry whose bot runner threads are stopped
     when the test ends (see that fixture for why a test may not just build
@@ -58,16 +69,28 @@ def empty_seats(table) -> list[int]:
     return [i for i, s in enumerate(table.seats) if s.kind is SeatKind.EMPTY]
 
 
+def close_remaining(registry: Tables, code: str, token: str) -> None:
+    """Closes every seat still empty at `code`'s table through the API
+    itself, releasing the hold (`Table.waiting_for`) without seating a bot
+    -- for a test whose point is something other than the hold."""
+    table = registry.get(code)
+    for seat in empty_seats(table):
+        registry.handle("POST", "/api/close", {"seat": seat}, token)
+
+
 # --- Codes --------------------------------------------------------------------
 
 
-def test_a_code_is_six_unambiguous_characters():
+def test_a_code_is_six_unambiguous_lowercase_characters():
     code = new_code(set())
     assert len(code) == CODE_LENGTH
     assert set(code) <= set(CODE_ALPHABET)
+    # A code is only ever seen as a URL, so it is lowercase throughout.
+    assert code == code.lower()
     # The pairs that get misread aloud or retyped wrong are not in the alphabet
-    # at all, so a code can never contain one.
-    assert not set("01OIL") & set(CODE_ALPHABET)
+    # at all, so a code can never contain one — in either case.
+    assert not set("01oil") & set(CODE_ALPHABET)
+    assert not set("01OIL") & set(CODE_ALPHABET.upper())
 
 
 def test_new_code_never_returns_one_already_in_use():
@@ -174,9 +197,12 @@ def test_joining_by_code_takes_a_random_open_seat():
 
 
 def test_a_code_is_matched_case_insensitively():
+    """Codes are minted lowercase, so the case that has to keep working is
+    the one somebody's phone capitalised on the way into the address bar."""
     registry = tables()
     code, _ = deal(registry, bots=["search2"])
-    data = registry.handle("POST", "/api/join", {"code": code.lower()}, None)
+    assert code == code.lower()
+    data = registry.handle("POST", "/api/join", {"code": code.upper()}, None)
     assert 0 <= data["seat"] < MAX_SEATS
 
 
@@ -237,66 +263,150 @@ def test_an_observer_can_read_a_game_without_a_token():
     assert data["legal_actions"] == []  # nothing is an observer's to play
 
 
-def test_an_observer_can_read_the_board_layout_without_a_token():
-    """The geometry the page needs before it can draw anything.
+def test_a_spectator_sees_every_hand_and_a_seat_still_sees_only_its_own():
+    """Watching is omniscient on purpose: a spectator is outside the game and
+    is shown all of it. A seat is inside it and is not — the same table, read
+    two ways, and the difference is the whole of what the token buys."""
+    registry = tables()
+    code, token = deal(registry, bots=["search2", "search2", "search2"])
+    mine = registry.by_token(token)[1]
 
-    `GET /api/board` is seat-gated, so an observer's page answered 401 where
-    its board should have been and died on the first `board.vertices` it
-    reached — a blank screen for exactly the reader a shared code exists for.
-    The board is public (`view(None)` above already ships every piece on it),
-    so this is the same bytes, addressed by code instead of by token."""
+    watched = registry.handle("GET", f"/api/table/{code}", {}, None)
+    seated = registry.handle("GET", "/api/state", {}, token)
+
+    assert {p["seat"] for p in watched["players"] if "hand" in p} == set(range(MAX_SEATS))
+    assert {p["seat"] for p in watched["players"] if "dev_cards" in p} == set(range(MAX_SEATS))
+    assert {p["seat"] for p in seated["players"] if "hand" in p} == {mine}
+
+
+def test_an_omniscient_view_cannot_be_built_for_a_seat():
+    """The guard is in `state_view` rather than trusted to the one caller:
+    a seat handed a view like this would be reading every opponent's hand
+    while still choosing its own moves."""
+    registry = tables()
+    code, _ = deal(registry)
+    table = registry.get(code)
+
+    with pytest.raises(ValueError):
+        table.view(0, omniscient=True)
+
+
+def test_an_observer_can_read_the_board_without_a_token():
+    """The layout a spectator's page is drawn on. Every game is public, so
+    the board behind one is too — and it is the same board the seats get,
+    since a board is public knowledge at the table anyway."""
     registry = tables()
     code, token = deal(registry, bots=["search2"])
 
     public = registry.handle("GET", f"/api/table/{code}/board", {}, None)
 
-    assert public["vertices"] and public["hexes"]
     assert public == registry.handle("GET", "/api/board", {}, token)
+    assert public["hexes"] and public["vertices"] and public["ports"]
+
+
+def test_the_public_routes_refuse_anything_but_a_game_and_its_board():
+    registry = tables()
+    code, _ = deal(registry)
+
+    with pytest.raises(ApiError) as caught:
+        registry.handle("GET", f"/api/table/{code}/record", {}, None)
+    assert caught.value.status == 404
 
 
 # --- The per-seat setup lock ---------------------------------------------------
 
 
-def test_a_creator_seated_anywhere_but_the_snakes_first_slot_still_plays():
-    """`first=` follows the creator's own (random) seat, not a hardcoded 0 —
-    otherwise a creator seated anywhere else would find it seat 0's turn,
-    seat 0 empty, and nothing able to ever advance."""
+def test_turn_order_is_seat_order_not_the_creators_seat(monkeypatch):
+    """Turn order is seat order, seat 0 first, regardless of which random
+    seat the creator was dealt (`Tables.create` always passes `first=0` —
+    the historical bug was starting the snake at the creator instead). No
+    carve-out for seat 0 needed: the table holds with every seat still empty
+    (`Table.waiting_for`), so nothing has a chance to move before seat 0 has
+    a real occupant either."""
+    monkeypatch.setattr(random.SystemRandom, "randrange", lambda self, n: 2)
     registry = tables()
     code, token = deal(registry, bots=[])
     session = registry.get(code).session
-    creator_seat = registry.handle("GET", "/api/state", {}, token)["seat"]
+    data = registry.handle("GET", "/api/state", {}, token)
 
-    assert to_move(session.game) == creator_seat
-    options = legal_actions(session.game)
-    assert options  # the creator really can act on their very first request
+    assert data["seat"] == 2
+    assert to_move(session.game) == 0
+    assert data["locked"] == []
+    assert data["to_move"] is None
+    assert data["waiting_for"] == [0, 1, 3]
 
 
-def test_settle_locks_needs_a_second_touch_before_it_locks():
-    """The first time _settle_locks finds the snake waiting on an empty seat
-    it only starts the window; a lock fires only once seat_grace has
-    actually elapsed since then (see Table._settle_locks's own docstring)."""
-    registry = tables(seat_grace=0.0)
+def test_holding_blocks_every_action_with_a_409_and_a_null_to_move():
+    """Nobody moves during setup while any seat is still empty — no on-sight
+    retirement, no timer. `to_move` reads `null` for everybody, and
+    `POST /api/action` is refused for whoever holds the token that would
+    otherwise move first."""
+    registry = tables()
     code, token = deal(registry, bots=[])
-    table = registry.get(code)
-    session = table.session
-    creator_seat = to_move(session.game)
+    session = registry.get(code).session
+
+    data = registry.handle("GET", "/api/state", {}, token)
+    assert data["to_move"] is None
+    assert set(data["waiting_for"]) == set(empty_seats(registry.get(code)))
 
     settlement = action_to_wire(
         next(a for a in legal_actions(session.game) if a.type is ActionType.SETUP_SETTLEMENT)
     )
-    registry.handle("POST", "/api/action", {"action": settlement}, token)
-    road = action_to_wire(
-        next(a for a in legal_actions(session.game) if a.type is ActionType.SETUP_ROAD)
-    )
-    registry.handle("POST", "/api/action", {"action": road}, token)
+    with pytest.raises(ApiError) as caught:
+        registry.handle("POST", "/api/action", {"action": settlement}, token)
+    assert caught.value.status == 409
+    assert "waiting for seats" in str(caught.value)
 
-    next_seat = to_move(session.game)
-    assert next_seat != creator_seat
-    assert next_seat not in session.game.locked  # the first touch only starts the window
 
-    table._settle_locks(now=time.monotonic() + 1)  # a second touch, past the (zero) grace
+def test_seating_the_last_empty_seat_releases_the_hold_and_play_starts_at_seat_0():
+    registry = tables()
+    code, token = deal(registry, bots=[])
+    table = registry.get(code)
+    remaining = empty_seats(table)
 
-    assert next_seat in session.game.locked
+    for seat in remaining[:-1]:
+        data = registry.handle("POST", "/api/bot", {"seat": seat, "model": "search2"}, token)
+        assert data["to_move"] is None, "the hold must not lift before the last seat resolves"
+
+    data = registry.handle("POST", "/api/bot", {"seat": remaining[-1], "model": "search2"}, token)
+    assert data["waiting_for"] == []
+    assert data["to_move"] == 0
+    assert to_move(table.session.game) == 0
+
+
+def test_close_locks_an_empty_seat_refuses_an_occupied_one_and_can_release_the_hold():
+    registry = tables()
+    code, token = deal(registry, bots=[])
+    table = registry.get(code)
+    remaining = empty_seats(table)
+
+    with pytest.raises(ApiError) as caught:
+        registry.handle("POST", "/api/close", {"seat": registry.by_token(token)[1]}, token)
+    assert "belongs to a player" in str(caught.value)
+
+    for seat in remaining[:-1]:
+        data = registry.handle("POST", "/api/close", {"seat": seat}, token)
+        assert seat in data["locked"]
+        assert data["to_move"] is None
+
+    data = registry.handle("POST", "/api/close", {"seat": remaining[-1]}, token)
+    assert set(data["locked"]) == set(remaining)
+    assert data["waiting_for"] == []
+    assert data["to_move"] == 0
+
+
+def test_a_person_joining_an_empty_seat_releases_the_hold_too():
+    registry = tables()
+    code, token = deal(registry, bots=[])
+    table = registry.get(code)
+    remaining = empty_seats(table)
+    for seat in remaining[:-1]:
+        registry.handle("POST", "/api/close", {"seat": seat}, token)
+
+    joined = registry.handle("POST", "/api/join", {"code": code}, None)
+    assert joined["seat"] == remaining[-1]
+    assert joined["waiting_for"] == []
+    assert joined["to_move"] == 0
 
 
 def test_a_locked_seat_stays_locked_but_the_rest_of_the_game_still_plays():
@@ -396,6 +506,7 @@ def test_another_seats_turn_is_not_this_ones_to_play():
     registry = tables()
     code, token = deal(registry, bots=[])
     other = registry.handle("POST", "/api/join", {"code": code}, None)["token"]
+    close_remaining(registry, code, token)
 
     session = registry.get(code).session
     waiting = other if to_move(session.game) == registry.by_token(token)[1] else token
@@ -437,16 +548,54 @@ def test_a_bot_can_be_swapped_but_a_persons_seat_cannot():
 
     data = registry.handle("POST", "/api/bot", {"seat": bot_seat, "model": "search2"}, token)
     assert data["seats"][bot_seat]["name"] == "search2"
-    # Answered to whoever asked, not to the seat that was swapped: this used
-    # to hand the caller the swapped bot's own view — its seat number, its
-    # hand, its legal actions — and the web page then believed it was that
-    # seat until its next poll.
+    # Answered as the seat that asked, never as the seat that was touched:
+    # every response here is built for one viewer, so answering as the bot
+    # would hand its whole hand back to whoever changed its picker.
     assert data["seat"] == mine_seat
-    assert [p["seat"] for p in data["players"] if "hand" in p] == [mine_seat]
+    revealed = {p["seat"] for p in data["players"] if "hand" in p}
+    assert revealed == {mine_seat}
 
     with pytest.raises(ApiError) as caught:
         registry.handle("POST", "/api/bot", {"seat": mine_seat, "model": "search2"}, token)
-    assert "no bot to swap" in str(caught.value)
+    assert "belongs to a player" in str(caught.value)
+
+
+def test_an_open_seat_can_be_given_a_bot_from_the_table():
+    """The lobby is gone, so the player list on the board is where a table
+    decides who else is playing: the same request that swaps one bot for
+    another fills a seat nobody has taken."""
+    registry = tables()
+    code, token = deal(registry, bots=[])
+    table = registry.get(code)
+    mine_seat = registry.by_token(token)[1]
+    open_seat = next(i for i, s in enumerate(table.seats) if s.kind is SeatKind.EMPTY)
+
+    data = registry.handle("POST", "/api/bot", {"seat": open_seat, "model": "search2"}, token)
+
+    assert data["seats"][open_seat]["kind"] == "bot"
+    assert data["seats"][open_seat]["name"] == "search2"
+    # Claimed as far as the session is concerned, or the runner that was just
+    # started could not play the seat it was given.
+    assert set(data["claimed_seats"]) == {mine_seat, open_seat}
+    assert data["seat"] == mine_seat
+    assert table.seats[open_seat].token is not None
+    assert any(runner.seat == open_seat for runner, _ in table.runners)
+
+
+def test_a_retired_seat_cannot_be_given_a_bot():
+    """A seat the setup snake waited out is out of the game for good — see
+    `hexset.server.seating.lock_seat`. Nothing revives it, a bot included."""
+    registry = tables()
+    code, token = deal(registry, bots=[])
+    table = registry.get(code)
+    # Retired here rather than waited out — the grace window that does it for
+    # real has its own test above.
+    retired = empty_seats(table)[0]
+    lock_seat(table.session.game, retired)
+
+    with pytest.raises(ApiError) as caught:
+        registry.handle("POST", "/api/bot", {"seat": retired, "model": "search2"}, token)
+    assert "retired" in str(caught.value)
 
 
 def test_renaming_a_seat_reaches_the_log_as_well_as_the_seat_list():
@@ -592,6 +741,20 @@ def test_resuming_appends_to_the_same_file_rather_than_starting_another(tmp_path
     seam = [e for e in events if e["kind"] == "reopened"]
     assert len(seam) == 1
     assert seam[0]["at_step"] == len(journal.replayable(events))
+
+
+def test_a_game_journalled_under_a_capitalised_code_still_resumes(tmp_path):
+    """Codes used to be minted in capitals. A game journalled back then is
+    addressed by the lowercase code now, and `journal.resumable` matching
+    without regard to case is what keeps it findable."""
+    config = Config(games_dir=str(tmp_path), seed=99)
+    seats = [player("Ada"), bot_seat(), bot_seat(), bot_seat()]
+    session = build_session("ABC123", seats, config, first=0)
+    drive(session, 8, random.Random(4))
+
+    assert journal.resumable(str(tmp_path), "abc123") == session.journal.path
+    assert journal.resumable(str(tmp_path), "ABC123") == session.journal.path
+    assert journal.resumable(str(tmp_path), "abc124") is None
 
 
 def test_a_game_played_out_is_not_handed_back(tmp_path):
@@ -834,6 +997,89 @@ def test_closing_a_registry_stops_every_runner():
 
     assert not [t for t in threading.enumerate() if t.name.startswith(f"bot-{code}")]
     assert not registry._tables
+
+
+# --- Wake on change -----------------------------------------------------------
+#
+# A read may name the version it is already showing (`after`) and how long it
+# will wait for a newer one (`wait`). Nothing here uses bots: a runner would
+# be changing the table underneath the very waits these pin.
+
+
+def test_every_view_carries_the_version_it_was_built_at():
+    registry = tables()
+    code, token = deal(registry, bots=[])
+    seated = registry.handle("GET", "/api/state", {}, token)
+    public = registry.handle("GET", f"/api/table/{code}", {}, None)
+    assert isinstance(seated["version"], int)
+    assert public["version"] >= seated["version"]
+
+
+def test_a_read_answers_at_once_when_the_table_has_already_moved_on():
+    registry = tables()
+    _, token = deal(registry, bots=[])
+    before = registry.handle("GET", "/api/state", {}, token)["version"]
+    started = time.monotonic()
+    view = registry.handle("GET", f"/api/state?after={before - 1}&wait=5", {}, token)
+    assert time.monotonic() - started < 0.5
+    assert view["version"] >= before
+
+
+def test_a_read_waits_out_its_wait_when_nothing_changes():
+    registry = tables()
+    _, token = deal(registry, bots=[])
+    current = registry.handle("GET", "/api/state", {}, token)["version"]
+    started = time.monotonic()
+    view = registry.handle("GET", f"/api/state?after={current}&wait=0.3", {}, token)
+    assert 0.25 < time.monotonic() - started < 3.0
+    assert view["version"] == current
+
+
+def test_a_move_at_the_table_wakes_a_waiting_read():
+    """The whole point: a change reaches a reader when it happens, not when
+    that reader's next timer goes off."""
+    registry = tables()
+    code, token = deal(registry, bots=[])
+    close_remaining(registry, code, token)  # release the hold; still no bots
+    current = registry.handle("GET", "/api/state", {}, token)["version"]
+    answered: list[tuple[float, dict]] = []
+
+    def wait() -> None:
+        view = registry.handle("GET", f"/api/state?after={current}&wait=20", {}, token)
+        answered.append((time.monotonic(), view))
+
+    reader = threading.Thread(target=wait)
+    reader.start()
+    time.sleep(0.2)  # long enough that the reader is certainly parked
+    assert not answered, "the read answered before anything changed"
+
+    acted = registry.handle("GET", "/api/state", {}, token)["legal_actions"][0]
+    registry.handle("POST", "/api/action", {"action": acted}, token)
+    woke = time.monotonic()
+    reader.join(timeout=10)
+    assert answered, "the read was still parked after a move at its table"
+    when, view = answered[0]
+    assert when - woke < 2.0
+    assert view["version"] > current
+
+
+def test_a_read_that_names_no_version_never_waits():
+    """Every client that predates this asks exactly as it always did."""
+    registry = tables()
+    _, token = deal(registry, bots=[])
+    started = time.monotonic()
+    registry.handle("GET", "/api/state", {}, token)
+    assert time.monotonic() - started < 0.5
+
+
+def test_a_waiting_read_is_capped_at_the_servers_own_ceiling():
+    """A client cannot park a server thread for as long as it likes."""
+    import hexset.server.api as api
+
+    assert api.wait_query("after=3&wait=600") == (3, api.MAX_WAIT_SECONDS)
+    assert api.wait_query("") == (None, 0.0)
+    with pytest.raises(ApiError):
+        api.wait_query("after=soon")
 
 
 # --- Trading (`hexset.trading`) -----------------------------------------------

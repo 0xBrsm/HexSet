@@ -37,6 +37,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `search2` is off the board's model picker; it stays seatable by name for API clients, tests and the training mix.
 - **The Catanatron adapter's translation tables now run both ways.**
   `hexset.catanatron.names`, `.board`, `.state` and `.actions` express each
   name, enum, coordinate and action correspondence once as a bijection and use

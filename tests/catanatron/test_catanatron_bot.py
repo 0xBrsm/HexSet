@@ -238,7 +238,7 @@ def test_the_picker_offers_catanatron_and_a_seat_takes_it():
 
     registry = new_tables()
     models = registry.handle("GET", "/api/models", {}, None)["models"]
-    assert models[:3] == ["heximax", "catanatron", "search2"]
+    assert models[:2] == ["heximax", "catanatron"]  # search2 left the picker in #45; seatable by name only
 
     data = registry.handle("POST", "/api/games", {"bots": []}, None)
     code, token = data["code"], data["token"]

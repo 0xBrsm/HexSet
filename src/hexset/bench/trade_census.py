@@ -93,9 +93,12 @@ def _play_census(
 ) -> tuple[list[TradeRecord], int | None, int]:
     """Play one game, returning its trades plus (winning entrant, turns).
 
-    Instrumentation reads only `game._state.hands` (the raw array) for
-    bookkeeping snapshots, never `game.state()`/`legal_actions()` -- those
-    are the calls that lazily trigger the pending trade event
+    Instrumentation reads only the hands (the raw array) for bookkeeping
+    snapshots, through `game.state(0, hidden=False)` -- the sanctioned
+    true-state path (`tests/test_view.py`), which returns the state itself and
+    is explicitly not one of the trigger points. Never `game.state(seat)` (the
+    seat's own view) or `legal_actions()`: those are the calls that lazily
+    trigger the pending trade event
     (`hexset.game.run_pending_event`), and calling them for our own
     purposes would fire an event before the bot whose turn it is ever asked
     for one. `game.trades` is cleared every `end_turn`, so new trades are
@@ -121,7 +124,7 @@ def _play_census(
     game.max_trades = None
 
     records: list[TradeRecord] = []
-    baseline = [tuple(h) for h in game._state.hands]
+    baseline = [tuple(h) for h in game.state(0, hidden=False).hands]
     seen_this_turn = 0
 
     def harvest(turn: int, phase: Phase) -> None:
@@ -169,7 +172,7 @@ def _play_census(
                 running[a][r] += received[r]
                 running[b][r] -= received[r]
         seen_this_turn = len(current)
-        baseline = [tuple(h) for h in game._state.hands]
+        baseline = [tuple(h) for h in game.state(0, hidden=False).hands]
 
     actions = 0
     while not is_over(game) and actions < action_cap:
@@ -184,7 +187,7 @@ def _play_census(
         actions += 1
         if len(game.trades) < seen_this_turn:
             seen_this_turn = 0
-        baseline = [tuple(h) for h in game._state.hands]
+        baseline = [tuple(h) for h in game.state(0, hidden=False).hands]
 
     winner = None if game.won_by is None else seats_taken.index(game.won_by)
     # true state: terminal points include hidden victory-point cards, the

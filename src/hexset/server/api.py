@@ -119,16 +119,19 @@ from .webplay import (
 # The opponents that are not files. Everything else in the picker is a path to
 # a checkpoint, and what it does is the checkpoint's business.
 #
-# Both are `hexset.arena` presets, built through `hexset.arena.spawn` so this
-# server seats the same bot the training repo duels — `heximax` is the honest
-# handcrafted search (it reads the public ledger, never a hidden hand) and is
-# the default embedded opponent; `search2` is the older depth-two bot every
-# ladder number on record was measured against, kept by name so a game can
-# still be played against it. `heximax` is registered as a preset by the
-# sibling `heximax` package (imported above for that side effect), not by
-# `hexset` itself -- see `heximax`'s "registration" section.
+# All three are `hexset.arena` presets, built through `hexset.arena.spawn` so
+# this server seats the same bot the training repo duels — `heximax` is the
+# honest handcrafted search (it reads the public ledger, never a hidden hand)
+# and is the default embedded opponent; `catanatron` is Catanatron's own
+# AlphaBeta player at depth two, sitting at a HexSet table through
+# `hexset.catanatron.bot`; `search2` is the older depth-two bot every ladder
+# number on record was measured against, kept by name so a game can still be
+# played against it. `heximax` is registered as a preset by the sibling
+# `heximax` package (imported above for that side effect), not by `hexset`
+# itself -- see `heximax`'s "registration" section, and `catanatron_seatable`
+# below for the one that is registered only where its extra is installed.
 HANDCRAFTED = "heximax"
-HANDCRAFTED_ENTRANTS = ("heximax", "search2")
+HANDCRAFTED_ENTRANTS = ("heximax", "catanatron", "search2")
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 MODELS_DIR = Path(os.environ.get("HEXSET_UI_MODELS_DIR", REPO_ROOT / "models"))
@@ -211,6 +214,22 @@ def clean_name(name: str | None) -> str | None:
     return name or None
 
 
+def catanatron_seatable() -> bool:
+    """Whether the `catanatron` opponent can be seated in this install.
+
+    Kept optional the way onnxruntime is: `import hexset` needs neither, and
+    an install without the `catanatron` extra simply has one fewer opponent in
+    the picker rather than an import error at start-up. Importing the adapter
+    is itself what registers the preset with `hexset.arena`, so this is called
+    before the picker is built and before a spec is spawned.
+    """
+    try:
+        import hexset.catanatron.bot  # noqa: F401 -- registers the preset
+    except ImportError:
+        return False
+    return True
+
+
 def model_options() -> dict[str, str]:
     """Display name -> entrant spec, for the per-seat model picker.
 
@@ -224,7 +243,8 @@ def model_options() -> dict[str, str]:
     handful of files is sub-millisecond, and the entire point of this function
     is that dropping a file in shows up without a restart.
     """
-    options = {name: name for name in HANDCRAFTED_ENTRANTS}
+    catanatron_seatable()  # registers its preset where the extra is installed
+    options = {name: name for name in HANDCRAFTED_ENTRANTS if name in PRESETS}
     for path in sorted(MODELS_DIR.glob("*.onnx")):
         options[path.stem] = str(path)
     return options
@@ -446,7 +466,7 @@ class Table:
 def spawn_bot(spec: str, board: Board, rng: random.Random, config: Config) -> Bot:
     """One spec (see `model_options()`) as a live bot on `board`.
 
-    Two cases, and no third: `search2` is the handcrafted opponent, and
+    Two cases, and no third: a preset name is a handcrafted opponent, and
     anything else is a path to a checkpoint. How a checkpoint wants to be
     played — a single forward pass, or a search over its own priors, and with
     what budget — is read out of the file itself by `onnxbot.spawn`, so this
@@ -456,6 +476,8 @@ def spawn_bot(spec: str, board: Board, rng: random.Random, config: Config) -> Bo
     bot plays its seat from outside the session, the same as any other
     client (see the module docstring).
     """
+    if spec not in PRESETS:
+        catanatron_seatable()  # a resumed game names a spec no picker built
     if spec in PRESETS:
         # `hexset.arena` is the training repo's own bot registry, and the one
         # `search2` every duel on record was played against — built here

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""Translates a catanatron `CatanMap` into a dev-catan `Board`.
+"""Translates a catanatron `CatanMap` into a dev-catan `Board`, and back.
 
 Both engines use the same cube coordinate system for hexes (confirmed by
 comparing `catanatron.models.coordinate_system.UNIT_VECTORS` against
@@ -28,6 +28,17 @@ of hex `h` is the same physical vertex as dev-catan's numbered corner of the
 same `h`, per this fixed table. It does not depend on which neighbouring
 tiles catanatron happened to register (land, water or port all carry `.nodes`
 and agree), so it is exact all the way to the map's outer edge.
+
+`catanatron_map` runs the same translation backwards, for a catanatron bot
+sitting at a hexset table (`bot.py`): it builds the `CatanMap` that
+`translate_board` would turn back into the given `Board`. Terrain and tokens go
+through `initialize_tiles`'s own parameters; ports need one extra step, because
+hexset spaces them evenly around the coast (`hexset.board.ports.place_ports`)
+rather than at the official positions, so the template's nine port coordinates
+are not where a hexset board's ports are. Every third-layer tile therefore
+starts as water and the ports are re-seated on the coastal edges the board
+actually has, which `PORT_DIRECTION_TO_NODEREFS`, read backwards, names a
+direction for.
 """
 
 from __future__ import annotations
@@ -37,12 +48,19 @@ from dataclasses import dataclass
 from hexset.board.board import Board, make_board
 from hexset.board.coords import Hex, neighbor
 from hexset.board.ports import GENERIC_RATIO, SPECIFIC_RATIO, Port as CatanPort
-from hexset.board.terrain import Resource, Terrain
+from hexset.board.terrain import TERRAIN_RESOURCE, Resource, Terrain
 from hexset.board.topology import build as build_topology
 
 from catanatron.models.enums import NodeRef
-from catanatron.models.map import CatanMap, PORT_DIRECTION_TO_NODEREFS
-from catanatron.models.tiles import Port as CatanatronPort
+from catanatron.models.map import (
+    BASE_MAP_TEMPLATE,
+    CatanMap,
+    PORT_DIRECTION_TO_NODEREFS,
+    initialize_tiles,
+)
+from catanatron.models.tiles import LandTile, Port as CatanatronPort, Water
+
+from .names import RESOURCE_INDEX, RESOURCE_NAMES
 
 # dev-catan's corner index for each catanatron NodeRef, derived from
 # `get_nodes_and_edges`'s sharing rules (see module docstring).
@@ -55,21 +73,30 @@ NODE_REF_TO_CORNER: dict[NodeRef, int] = {
     NodeRef.SOUTHEAST: 5,
 }
 
-_RESOURCE_TO_TERRAIN: dict[str | None, Terrain] = {
-    "WOOD": Terrain.FOREST,
-    "BRICK": Terrain.HILLS,
-    "SHEEP": Terrain.PASTURE,
-    "WHEAT": Terrain.FIELDS,
-    "ORE": Terrain.MOUNTAINS,
-    None: Terrain.DESERT,
+# What a hex pays, named each engine's way: catanatron names a land tile by its
+# resource (`None` for the desert), dev-catan by its terrain. Derived from
+# dev-catan's own `TERRAIN_RESOURCE` rather than spelled out again, so a new
+# terrain cannot drift out of step with it -- the two water-only terrains (SEA,
+# GOLD) pay no fixed resource and have no catanatron tile.
+RESOURCE_OF_TERRAIN: dict[Terrain, str | None] = {
+    Terrain.DESERT: None,
+    **{
+        terrain: RESOURCE_NAMES[resource]
+        for terrain, resource in TERRAIN_RESOURCE.items()
+        if resource is not None
+    },
 }
 
-_RESOURCE_NAME_TO_RESOURCE: dict[str, Resource] = {
-    "WOOD": Resource.WOOD,
-    "BRICK": Resource.BRICK,
-    "SHEEP": Resource.SHEEP,
-    "WHEAT": Resource.WHEAT,
-    "ORE": Resource.ORE,
+TERRAIN_OF_RESOURCE: dict[str | None, Terrain] = {
+    resource: terrain for terrain, resource in RESOURCE_OF_TERRAIN.items()
+}
+
+# Which two corners of a coastal water tile a port on that side is reachable
+# from, read backwards: a coastal edge's two node refs name the direction the
+# port faces, which is what a catanatron `Port` tile is built with.
+DIRECTION_OF_NODE_REFS = {
+    frozenset(refs): direction
+    for direction, refs in PORT_DIRECTION_TO_NODEREFS.items()
 }
 
 
@@ -84,9 +111,11 @@ class BoardMapping:
     The `_of` tables translate catanatron ids into dev-catan indices, for
     reading a catanatron `Game`'s state. `coord_of`/`node_of`/`catanatron_edge_of`
     go the other way, for turning a dev-catan `Action` back into one of
-    catanatron's `playable_actions`.
+    catanatron's `playable_actions` and for mirroring a dev-catan `GameState`
+    into a catanatron `State` (`state.to_catanatron`).
     """
 
+    catan_map: CatanMap
     board: Board
     hex_of: dict[tuple[int, int, int], int]
     vertex_of: dict[int, int]
@@ -126,7 +155,7 @@ def translate_board(catan_map: CatanMap) -> BoardMapping:
         edge_of[(min(a, b), max(a, b))] = our_edge_index
 
     terrain = tuple(
-        _RESOURCE_TO_TERRAIN[catan_map.land_tiles[coord].resource] for coord in
+        TERRAIN_OF_RESOURCE[catan_map.land_tiles[coord].resource] for coord in
         sorted(catan_map.land_tiles, key=lambda c: hex_of[c])
     )
     tokens = tuple(
@@ -148,9 +177,7 @@ def translate_board(catan_map: CatanMap) -> BoardMapping:
             continue
         ratio = SPECIFIC_RATIO if tile.resource is not None else GENERIC_RATIO
         resource = (
-            None
-            if tile.resource is None
-            else _RESOURCE_NAME_TO_RESOURCE[tile.resource]
+            None if tile.resource is None else Resource(RESOURCE_INDEX[tile.resource])
         )
         ports.append(
             CatanPort(edge=edge_index, vertices=(va, vb), resource=resource, ratio=ratio)
@@ -161,6 +188,7 @@ def translate_board(catan_map: CatanMap) -> BoardMapping:
     node_of = {v: n for n, v in vertex_of.items()}
     catanatron_edge_of = {i: pair for pair, i in edge_of.items()}
     return BoardMapping(
+        catan_map=catan_map,
         board=board,
         hex_of=hex_of,
         vertex_of=vertex_of,
@@ -169,3 +197,58 @@ def translate_board(catan_map: CatanMap) -> BoardMapping:
         node_of=node_of,
         catanatron_edge_of=catanatron_edge_of,
     )
+
+
+def catanatron_map(board: Board) -> CatanMap:
+    """The `CatanMap` `translate_board` turns back into `board` -- its inverse.
+
+    Exact for any board on the base 19-hex layout, ports included; a layout
+    catanatron has no template for is out of scope and says so.
+    """
+    topology = BASE_MAP_TEMPLATE.topology
+    land = [coord for coord, kind in topology.items() if kind is LandTile]
+    if len(land) != board.topology.num_hexes:
+        raise ValueError(f"no catanatron template for a {board.num_hexes}-hex board")
+    hex_of = {(h.q, h.r, h.s): i for i, h in enumerate(sorted(Hex(*c) for c in land))}
+    terrain = [board.terrain[hex_of[coord]] for coord in land]
+
+    # `initialize_tiles` pops each list from the end as it walks the template's
+    # topology in order, and asks for a number only where there is a resource,
+    # so both lists are per-land-tile in topology order and reversed.
+    tiles = initialize_tiles(
+        BASE_MAP_TEMPLATE,
+        shuffled_numbers_param=[
+            board.tokens[hex_of[coord]]
+            for coord, hex_terrain in zip(land, terrain)
+            if hex_terrain is not Terrain.DESERT
+        ][::-1],
+        shuffled_port_resources_param=[None] * len(BASE_MAP_TEMPLATE.port_resources),
+        shuffled_tile_resources_param=[RESOURCE_OF_TERRAIN[t] for t in terrain][::-1],
+        number_placement="random",
+    )
+
+    sea = {
+        coord: Water(tile.nodes, tile.edges)
+        for coord, tile in tiles.items()
+        if not isinstance(tile, LandTile)
+    }
+    tiles.update(sea)
+    node_of = translate_board(CatanMap.from_tiles(tiles)).node_of
+    for port_id, port in enumerate(board.ports):
+        nodes = {node_of[v] for v in port.vertices}
+        for coord, tile in sea.items():
+            refs = [ref for ref, node in tile.nodes.items() if node in nodes]
+            if len(refs) == 2:
+                break
+        else:
+            raise ValueError(f"port {port} is not on a coastal edge of the base map")
+        if not isinstance(tiles[coord], Water):
+            raise ValueError(f"two ports on the water tile at {coord}")
+        tiles[coord] = CatanatronPort(
+            port_id,
+            None if port.resource is None else RESOURCE_NAMES[port.resource],
+            DIRECTION_OF_NODE_REFS[frozenset(refs)],
+            tile.nodes,
+            tile.edges,
+        )
+    return CatanMap.from_tiles(tiles)

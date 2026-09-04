@@ -19,11 +19,22 @@ LABEL org.opencontainers.image.title="HexSet"
 LABEL org.opencontainers.image.source="https://github.com/0xBrsm/HexSet"
 
 # Kept in step with pyproject.toml's [project].dependencies plus the
-# `server`/`clients` extras by hand. A version bump belongs in both places or
-# `pip install -e .` and this image drift apart. The package itself is not
+# `server`/`clients`/`catanatron` extras by hand. A version bump belongs in
+# both places or `pip install -e .` and this image drift apart. The package itself is not
 # installed here: it is not on an index yet, so it arrives as the /app/src
 # bind mount below.
 RUN pip install --no-cache-dir "numpy>=1.26" "onnxruntime>=1.18"
+
+# The `catanatron` extra, so the picker's `catanatron` opponent
+# (`hexset.catanatron.bot`) can be seated here too. Pinned to the same commit
+# as pyproject.toml's extra — a git URL needs git to resolve, which is
+# installed and removed inside this one layer rather than left in the image.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && pip install --no-cache-dir \
+        "catanatron @ git+https://github.com/bcollazo/catanatron.git@d3f4ad05bb78d8b2309631d6d3cfa8fcb6fda816" \
+    && apt-get purge -y --auto-remove git \
+    && rm -rf /var/lib/apt/lists/*
 
 # Runs unprivileged. The uid is arbitrary and deliberately high enough not to
 # collide with a host account: it reads the bind-mounted source and models,

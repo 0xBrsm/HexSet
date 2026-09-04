@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""Snapshots a live catanatron `Game` into a dev-catan `Game`/`GameState`.
+"""Snapshots a live catanatron `Game` into a dev-catan `Game`/`GameState`, and back.
 
 Rebuilt fresh on every decision rather than mirrored incrementally: the two
 engines' turn machines differ in enough small ways (see `Phase`, below) that
@@ -13,22 +13,41 @@ during a normal turn -- it exists in the rules but no bundled player, ours
 included, can reach it without constructing an action outside
 `playable_actions`. `Phase.TRADE_RESPOND` is therefore unreachable here and
 `player.py` forces `max_trades=0` on every dev-catan entrant so our own bot
-never tries to propose one either.
+never tries to propose one either, and `bot.py`'s catanatron entrant declines
+every exchange for the same reason.
+
+`to_catanatron` is the mirror image, for a catanatron bot sitting at a dev-catan
+table (`bot.py`): the catanatron `Game` a catanatron `Player` would see at this
+decision, rebuilt fresh the same way and off the same tables. It writes the
+`State` fields directly rather than replaying a game into them, because
+`State.__init__` reseats the players at random and reseeds the global `random`
+module -- neither of which a mirror may do.
 """
 
 from __future__ import annotations
 
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 import random
 
 from hexset.board.terrain import NUM_RESOURCES, Resource
 from hexset.cards import DevCard, NUM_DEV_CARDS
-from hexset.game import Game, Phase
+from hexset.game import Game, Phase, to_move
 from hexset.ledger import PublicLedger, SeatLedger
+from hexset.robber import DISCARD_THRESHOLD
 from hexset.state import NO_OWNER, Building, GameState
+from hexset.victory import WINNING_POINTS
 
-from catanatron.models.enums import SETTLEMENT
-from catanatron.models.player import Color
+from catanatron.game import Game as CatanatronGame
+from catanatron.models.actions import generate_playable_actions
+from catanatron.models.board import (
+    STATIC_GRAPH,
+    Board as CatanatronBoard,
+    longest_acyclic_path,
+)
+from catanatron.models.enums import CITY, ROAD, SETTLEMENT, ActionPrompt
+from catanatron.models.player import Color, Player
+from catanatron.state import PLAYER_INITIAL_STATE, State
 from catanatron.state_functions import (
     get_largest_army,
     get_longest_road_color,
@@ -59,6 +78,16 @@ _PROMPT_TO_PHASE = {
     "MOVE_ROBBER": Phase.ROBBER,
     "DISCARD": Phase.DISCARD,
 }
+
+# The same table backwards, plus the one merge it is not a bijection over:
+# catanatron asks `PLAY_TURN` both before and after the roll and tells the two
+# apart by `HAS_ROLLED`, where dev-catan has a phase for each.
+_PHASE_TO_PROMPT = {phase: prompt for prompt, phase in _PROMPT_TO_PHASE.items()} | {
+    Phase.ROLL: "PLAY_TURN",
+    Phase.MAIN: "PLAY_TURN",
+}
+
+_SETUP = (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD)
 
 
 def _phase(catanatron_state, current_color) -> Phase:
@@ -229,3 +258,154 @@ def translate(catanatron_game, mapping: BoardMapping, rng: random.Random) -> tup
             game.last_settlement = mapping.vertex_of[last_node]
 
     return game, seats
+
+
+def _catanatron_board(state: GameState, mapping: BoardMapping, seats: Seating):
+    """catanatron's `Board` holding this position, caches and all.
+
+    The caches are what make this more than a transcription: `connected_
+    components` (a colour's road network, walked out to the enemy nodes that
+    close it) and `road_lengths` are maintained move by move there and
+    recomputed here from the position, through catanatron's own `dfs_walk` and
+    `longest_acyclic_path` so the answer is theirs, not a second one.
+    """
+    board = CatanatronBoard(mapping.catan_map)
+    for vertex, owner in enumerate(state.vertex_owner):
+        if owner == NO_OWNER:
+            continue
+        node = mapping.node_of[vertex]
+        kind = SETTLEMENT if state.vertex_building[vertex] == Building.SETTLEMENT else CITY
+        board.buildings[node] = (seats.color_of[owner], kind)
+        board.board_buildable_ids.discard(node)
+        board.board_buildable_ids.difference_update(STATIC_GRAPH.neighbors(node))
+    for edge, owner in enumerate(state.edge_owner):
+        if owner == NO_OWNER:
+            continue
+        a, b = mapping.catanatron_edge_of[edge]
+        board.roads[(a, b)] = board.roads[(b, a)] = seats.color_of[owner]
+    board.robber_coordinate = mapping.coord_of[state.robber]
+
+    for seat in range(state.num_players):
+        color = seats.color_of[seat]
+        seeds = {node for node, (c, _) in board.buildings.items() if c == color}
+        seeds.update(
+            node for edge, c in board.roads.items() if c == color
+            for node in edge if not board.is_enemy_node(node, color)
+        )
+        components: list[set[int]] = []
+        for seed in sorted(seeds):
+            if not any(seed in component for component in components):
+                components.append(board.dfs_walk(seed, color))
+        board.connected_components[color] = components
+        board.road_lengths[color] = max(
+            (len(longest_acyclic_path(board, c, color)) for c in components), default=0
+        )
+
+    # Who *holds* longest road is dev-catan's answer, not a recomputation:
+    # both engines award it to the incumbent on a tie, so only the position's
+    # own history can say who that is.
+    if state.longest_road_holder != NO_OWNER:
+        board.road_color = seats.color_of[state.longest_road_holder]
+        board.road_length = board.road_lengths[board.road_color]
+    return board
+
+
+def _player_state(game: Game, state: GameState, seats: Seating, board) -> dict:
+    """catanatron's flat per-seat feature dictionary for this position."""
+    out = {}
+    for seat in range(state.num_players):
+        color = seats.color_of[seat]
+        pieces = Counter(
+            state.vertex_building[v]
+            for v, owner in enumerate(state.vertex_owner)
+            if owner == seat
+        )
+        settlements, cities = pieces[Building.SETTLEMENT], pieces[Building.CITY]
+        values = dict(PLAYER_INITIAL_STATE)
+        for r, name in enumerate(RESOURCE_NAMES):
+            values[f"{name}_IN_HAND"] = state.hands[seat][r]
+        for card, name in DEV_CARD_NAMES.items():
+            matured = state.dev_cards[seat][card]
+            values[f"{name}_IN_HAND"] = matured + state.new_dev_cards[seat][card]
+            # `translate`'s reading of the same rule, inverted: catanatron's
+            # maturity is one boolean per type, so any matured copy sets it and
+            # a seat holding only fresh ones cannot play them.
+            if f"{name}_OWNED_AT_START" in values:
+                values[f"{name}_OWNED_AT_START"] = matured > 0
+        values["PLAYED_KNIGHT"] = state.knights_played[seat]
+        values["ROADS_AVAILABLE"] -= state.edge_owner.count(seat)
+        values["SETTLEMENTS_AVAILABLE"] -= settlements
+        values["CITIES_AVAILABLE"] -= cities
+        values["HAS_ROAD"] = state.longest_road_holder == seat
+        values["HAS_ARMY"] = state.largest_army_holder == seat
+        values["LONGEST_ROAD_LENGTH"] = board.road_lengths[color]
+        mine = seat == game.current_player
+        values["HAS_ROLLED"] = mine and game.phase not in (*_SETUP, Phase.ROLL)
+        values["HAS_PLAYED_DEVELOPMENT_CARD_IN_TURN"] = mine and game.dev_card_played
+        values["VICTORY_POINTS"] = (
+            settlements + 2 * cities + 2 * values["HAS_ROAD"] + 2 * values["HAS_ARMY"]
+        )
+        values["ACTUAL_VICTORY_POINTS"] = (
+            values["VICTORY_POINTS"] + values["VICTORY_POINT_IN_HAND"]
+        )
+        out.update({f"P{seat}_{field}": value for field, value in values.items()})
+    return out
+
+
+def to_catanatron(game: Game, mapping: BoardMapping, seats: Seating) -> CatanatronGame:
+    """`translate` backwards: the catanatron `Game` mirroring `game` right now."""
+    # true state: a catanatron `Player` reads the whole table, so this adapter
+    # reads the true state through the sanctioned path (`Game.state`'s
+    # docstring names it as one of the three callers) rather than a `View`.
+    state = game.state(0, hidden=False)
+    colors = tuple(seats.color_of[seat] for seat in range(state.num_players))
+
+    cstate = State([], None, initialize=False)
+    cstate.players = [Player(color) for color in colors]
+    cstate.colors = colors
+    cstate.color_to_index = {color: seat for seat, color in enumerate(colors)}
+    cstate.discard_limit = DISCARD_THRESHOLD
+    cstate.friendly_robber = False
+    cstate.board = _catanatron_board(state, mapping, seats)
+    cstate.player_state = _player_state(game, state, seats, cstate.board)
+    cstate.resource_freqdeck = list(state.bank)
+    cstate.development_listdeck = [DEV_CARD_NAMES[DevCard(c)] for c in state.deck]
+    cstate.action_records = []
+    cstate.num_turns = game.turns
+
+    cstate.buildings_by_color = {color: defaultdict(list) for color in colors}
+    for node, (color, kind) in cstate.board.buildings.items():
+        cstate.buildings_by_color[color][kind].append(node)
+    for edge, color in cstate.board.roads.items():
+        if edge[0] < edge[1]:
+            cstate.buildings_by_color[color][ROAD].append(edge)
+    if game.phase is Phase.SETUP_ROAD:
+        # `initial_road_possibilities` reads the *last* settlement in this
+        # list, which is the one dev-catan is holding in `last_settlement`;
+        # everywhere else the order is immaterial.
+        settlements = cstate.buildings_by_color[seats.color_of[game.current_player]][SETTLEMENT]
+        last = mapping.node_of[game.last_settlement]
+        settlements.remove(last)
+        settlements.append(last)
+
+    cstate.current_player_index = to_move(game)
+    cstate.current_turn_index = game.current_player
+    cstate.current_prompt = ActionPrompt[_PHASE_TO_PROMPT[game.phase]]
+    cstate.is_initial_build_phase = game.phase in _SETUP
+    cstate.is_discarding = game.phase is Phase.DISCARD
+    cstate.discard_counts = list(game.discard_quota)
+    cstate.is_moving_knight = game.phase is Phase.ROBBER
+    cstate.is_road_building = game.free_roads > 0
+    cstate.free_roads_available = game.free_roads
+    cstate.is_resolving_trade = False
+    cstate.current_trade = (0,) * 11
+    cstate.acceptees = tuple(False for _ in colors)
+
+    cgame = CatanatronGame([], initialize=False)
+    cgame.seed = 0
+    cgame.id = ""
+    cgame.vps_to_win = WINNING_POINTS
+    cgame.friendly_robber = False
+    cgame.state = cstate
+    cgame.playable_actions = generate_playable_actions(cstate)
+    return cgame

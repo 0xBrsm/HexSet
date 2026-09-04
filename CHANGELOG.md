@@ -11,6 +11,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Catanatron's bots can sit at a HexSet table.** `hexset.catanatron.bot.
+  CatanatronBot` is a `hexset.arena` bot whose brain is a Catanatron `Player`,
+  registered as the `catanatron` preset (Catanatron's own AlphaBeta player at
+  depth two, built exactly as `catanatron-play --players=AB:2` builds it) — so
+  it can be seated from the web picker, `POST /api/bot`, an arena lineup or the
+  gym, alongside `heximax` and `search2`. Each decision mirrors the live HexSet
+  position into a Catanatron `Game` (`hexset.catanatron.state.to_catanatron`,
+  on the map `hexset.catanatron.board.catanatron_map` builds from the HexSet
+  board) and translates the answer back. The seat never trades: Catanatron's
+  players have no notion of the one-event trade mechanic. The import of
+  `catanatron` is lazy, so an install without the `catanatron` extra simply has
+  one fewer opponent in the picker.
 - **`hexset.bench.trade_census`.** Plays a lineup through `hexset.arena`
   (grouped seating, antithetic-paired boards, `road_sweep`'s convention) and
   records every `hexset.trading.Trade` as it clears — turn, phase, both
@@ -25,6 +37,25 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **The Catanatron adapter's translation tables now run both ways.**
+  `hexset.catanatron.names`, `.board`, `.state` and `.actions` express each
+  name, enum, coordinate and action correspondence once as a bijection and use
+  it in both directions, rather than carrying a second copy for the new
+  direction: `board.catanatron_map` is `translate_board`'s inverse (ports
+  included — HexSet spaces them evenly around the coast, so each one is
+  re-seated on the coastal edge the board actually has),
+  `state.to_catanatron` is `state.translate`'s, and `actions.to_catanatron`
+  now answers `PLAY_KNIGHT` with whichever half of Catanatron's two-decision
+  split is on the table instead of raising for its caller to resolve.
+- **The Docker image installs the `catanatron` extra**, pinned to the same
+  commit as `pyproject.toml`, so a deployed table can seat the `catanatron`
+  opponent. This restage needs a rebuild, not just a restart.
+- **`hexset.bench.trade_census` reads the true state through
+  `game.state(0, hidden=False)`** rather than `game._state` — the sanctioned
+  path `tests/test_view.py` pins, and (unlike `game.state(seat)`) not one of
+  the pending trade event's trigger points, so the instrumentation's
+  bookkeeping snapshots still fire nothing. No behaviour change: the two
+  return the same object.
 - A closed seat reads "closed" (the picker's option and the row), and players are numbered among the seats still in the game: close one and the table reads Player 1, 2, 3.
 - **`hexset.trading._candidates` skips a zero-valuation seat's enumeration.**
   A seat that has never published (`NO_VALUATION`, all zero) can never clear

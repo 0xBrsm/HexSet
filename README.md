@@ -42,9 +42,12 @@ One distribution, `hexset`, ships from `src/`:
     `presets` — a handcrafted perfect-information-Monte-Carlo player
     that reads its own view of the game (`hexset.view`) rather than the
     true state, registered as a `hexset.arena` entrant on import).
-  - **`hexset.catanatron`** (`src/hexset/catanatron`) — an adapter that
-    seats `hexset` bots as players in [Catanatron](https://github.com/bcollazo/catanatron),
-    for sharded duels against Catanatron's own shipped bots.
+  - **`hexset.catanatron`** (`src/hexset/catanatron`) — a two-way adapter
+    between HexSet and [Catanatron](https://github.com/bcollazo/catanatron):
+    it seats `hexset` bots as players in Catanatron, for sharded duels
+    against Catanatron's own shipped bots, and seats Catanatron's bots at a
+    HexSet table (`hexset.catanatron.bot`, the `catanatron` preset — the
+    web picker, an arena lineup or the gym).
   - **`hexset.bench`** (`src/hexset/bench`) — the duel, throughput, and
     tuning scripts the engine is measured with.
   - **`hexset.server`** (`src/hexset/server`) — the gym's server half: a

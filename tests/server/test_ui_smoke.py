@@ -1,27 +1,31 @@
-"""A smoke test for the negotiation panel (`docs/negotiation-interface.md`
-§3), the frontend half of the negotiation interface.
+"""The served page offers a person no way to trade with another seat.
 
-No JS engine is available in this environment to execute `static/index.html`'s
-script the way a browser would (see the negotiation-interface PR's own notes),
-so this checks the served page's source instead of a rendered DOM: the panel
-markup and its render function exist, the pure surplus/affordability helpers
-are the functions `renderNegotiation` actually calls (so a future edit that
-inlines them back in would be caught), and the chip loop is wired to
-`state.valuations` -- the counterparty's own published vector, which is what
-turns into the wants/gives chips the design asks for.
+Withheld on the owner's instruction (2026-09-03): "no trading for humans at
+this point -- we need to build back up gradually". The API keeps every route
+(`PUT /api/games/<code>/valuation`, `POST .../trade`, `.../trade/confirm`,
+`.../trade/decline`, and the MCP tools) for an LLM or an API client; what
+goes is the browser's half of it. See the dated note in
+`docs/negotiation-interface.md`.
+
+Source-level, and deliberately so: this runs in the default suite in
+milliseconds, and its job is to catch a trading control *reappearing* on the
+page, which is a thing you can see in the file. What the page does once a
+browser has it -- that a human's hand never moves through a trade, that bots
+go on dealing with each other -- is `tests/web/test_page.py`, in Chromium,
+against a live game.
 """
 
 from __future__ import annotations
 
+import pathlib
 import re
 import threading
+import urllib.request
 
 import pytest
 
 from conftest import new_tables
 from hexset.server.web import HexSetServer
-
-SOLO = ["search2", "search2", "search2"]
 
 
 @pytest.fixture
@@ -38,79 +42,72 @@ def live_server():
 
 
 def _page() -> str:
-    import pathlib
-
     path = pathlib.Path(__file__).resolve().parents[2] / "src/hexset/server/static/index.html"
     return path.read_text()
 
 
-def test_the_served_page_carries_the_negotiation_panel(live_server):
-    import urllib.request
+# The frontend of the negotiation interface, by the names it had: the panel
+# itself, its render function, the pure helpers behind it, and the five
+# advertisement sliders that stood above it.
+GONE = (
+    'id="negotiation"',
+    "renderNegotiation",
+    "bundleClears",
+    "bundleAffordable",
+    "setValuation",
+    "renderAdvertisement",
+    "renderPending",
+)
 
+
+def test_the_served_page_has_no_trading_surface(live_server):
     _, base = live_server
     with urllib.request.urlopen(base) as response:
         page = response.read().decode("utf-8")
-    assert 'id="negotiation"' in page
-    assert "function renderNegotiation" in page
+    assert [name for name in GONE if name in page] == []
+    # No advertisement sliders, which is what the five controls were.
+    assert 'type="range"' not in page
 
 
-def test_the_panel_renders_counterparty_chips_from_the_published_vector():
+def test_the_page_calls_no_trading_route():
+    """The routes are still there; the page must simply never reach them.
+
+    Asserted over every path the page fetches rather than by searching for
+    literal strings, so a trading call reintroduced through a template or a
+    variable is caught the same as a hard-coded one.
+    """
     page = _page()
-    body = re.search(r"function renderNegotiation\(\) \{.*?\n\}\n", page, re.S).group(0)
+    paths = set(re.findall(r"""["'`](/api/[^"'`\s?]*)""", page))
+    assert paths == {
+        "/api/models",
+        "/api/board",
+        "/api/state",
+        "/api/games",
+        "/api/join",
+        "/api/action",
+        "/api/undo",
+        "/api/name",
+        "/api/bot",
+        # The two public reads, addressed by code: the game as a spectator
+        # sees it, and the layout it is drawn on.
+        "/api/table/${tableCode}",
+        "/api/table/${tableCode}/board",
+        "/api/table/${code}",
+    }, sorted(paths)
+    # Nothing in that set is a trading route, and there is no PUT at all --
+    # `PUT /api/games/<code>/valuation` is the only one the API has.
+    assert not [p for p in paths if "/trade" in p or p.endswith("/valuation")]
+    assert 'method: "PUT"' not in page
 
-    # One block per counterparty, read straight off the public valuations.
-    assert "state.valuations.forEach((vector, seat) => {" in body
-    # A chip per nonzero entry, coloured by its sign -- want (green) vs. give
-    # (red) -- and clicking one composes the draft bundle, not the standing
-    # advertisement (`setValuation` is untouched by this loop).
-    assert 'v > 0 ? "chip-want" : "chip-give"' in body
-    assert "resourceCardTile(name" in body
-    assert "draft.give[index] += 1" in body and "draft.receive[index] += 1" in body
 
-    # Turn-timing: every panel is a proposer on my own turn; only the current
-    # player's panel is active during someone else's.
-    assert "myTurn || state.to_move === seat" in body
-
-
-def test_clears_and_affordable_are_pure_functions_negotiation_calls():
-    """`bundleClears`/`bundleAffordable` take no DOM and no `state` global,
-    so they are checkable against fixed vectors/hands independent of a
-    browser (`docs/negotiation-interface.md` §6) -- asserted here by
-    checking their signatures and that `renderNegotiation` is the caller,
-    not an inlined copy of the same arithmetic."""
+def test_the_only_trade_the_page_offers_is_the_bank():
+    """The half of trading that survived the one-event mechanic, and the
+    owner's page keeps it: a resource card opens the bank/port route. It is
+    not a deal with another seat -- `BANK_TRADE` is an action against the
+    bank, taken by the seat itself -- so it stays."""
     page = _page()
-    assert re.search(r"function surplus\(vector, bundle\) \{", page)
-    assert re.search(r"function bundleClears\(myVector, theirVector, bundle\) \{", page)
-    assert re.search(
-        r"function bundleAffordable\(resourceNames, give, myHand, receiveTotal, counterpartyHandSize\) \{",
-        page,
-    )
-    body = re.search(r"function renderNegotiation\(\) \{.*?\n\}\n", page, re.S).group(0)
-    assert "bundleClears(state.valuations[state.seat]" in body
-    assert "bundleAffordable(board.resources, draft.give, myHand, totalReceive, counterpartyHandSize)" in body
-
-
-@pytest.mark.parametrize(
-    "my_vector,their_vector,bundle,expected",
-    [
-        # I give wood, receive ore; I want ore and would give wood -- and so
-        # does the counterparty from their own side. Both surpluses positive.
-        ([1.0, 0, 0, 0, -1.0], [-1.0, 0, 0, 0, 1.0], (1, 0, 0, 0, -1), True),
-        # The counterparty's own vector doesn't want this bundle -- no clear.
-        ([1.0, 0, 0, 0, -1.0], [0.0, 0, 0, 0, 0.0], (1, 0, 0, 0, -1), False),
-        # My own vector calls it a loss for me -- also no clear (this is a
-        # client-side convenience only; the server's hard rule is only on
-        # the counterparty's side, ratification decision 4).
-        ([-1.0, 0, 0, 0, 1.0], [-1.0, 0, 0, 0, 1.0], (1, 0, 0, 0, -1), False),
-    ],
-)
-def test_bundle_clears_matches_the_servers_public_surplus_formula(
-    my_vector, their_vector, bundle, expected
-):
-    """A hand computation of `dot(v, b) > 0` on both sides -- the same
-    arithmetic `bundleClears` runs and `hexset.trading._best_clearing` runs
-    server-side -- so this is the reference the JS is checked against
-    without needing to execute it (no JS engine in this environment)."""
-    mine = sum(v * b for v, b in zip(my_vector, bundle))
-    theirs = sum(v * -b for v, b in zip(their_vector, bundle))
-    assert (mine > 0 and theirs > 0) == expected
+    assert 'openModal("trade", {give: idx})' in page
+    assert 'a.type === "BANK_TRADE"' in page
+    # And nothing that would address another seat with an offer.
+    assert "PROPOSE_TRADE" not in page
+    assert "ACCEPT_TRADE" not in page

@@ -89,11 +89,9 @@ def new_tables(**config) -> Tables:
 
     `games_dir=""` rather than the default `None`: `None` means "wherever
     `HEXSET_UI_GAMES_DIR` points", and a test suite must not journal into a
-    real player's games directory. `seat_grace=0.0` makes the setup lock
-    deterministic (two touches, no wall clock).
+    real player's games directory.
     """
     config.setdefault("games_dir", "")
-    config.setdefault("seat_grace", 0.0)
     return track(Tables(Config(**config)))
 
 

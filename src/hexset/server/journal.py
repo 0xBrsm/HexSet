@@ -298,8 +298,8 @@ class Journal:
         self._emit({"kind": "seated", "at": _now(), "seat": seat, "name": name, "spec": spec})
 
     def locked(self, seat: int, *, at_step: int) -> None:
-        """The setup snake reached `seat` while it was still empty and waited
-        it out (see `api.Table._settle_locks`) — retired for the rest of the
+        """The setup snake reached `seat` while it was still empty (see
+        `api.Table._settle_locks`) — retired for the rest of the
         game. `resumable`'s reader (`locked_seats`) only needs to know *that*
         a seat locked, not when: see `hexset.server.seating`'s own note on why
         pre-seeding the whole set before replay reproduces the same snake
@@ -478,16 +478,22 @@ def resumable(directory: str | None, code: str) -> Path | None:
     unfinished one is a game the table already walked away from once — handing
     it back because a newer one happens to have ended would be reaching
     further into the past than anyone asked for.
+
+    Matched without regard to case, for the same reason `api.Tables.get`
+    normalises one: case is not part of a code's identity. It also means a
+    game journalled back when codes were written in capitals is still found
+    by the lowercase code that now addresses it.
     """
     if not directory:
         return None
+    wanted = code.lower()
     try:
         paths = sorted(Path(directory).glob("*.jsonl"), reverse=True)
     except OSError:
         return None
     for path in paths:
         header = header_of(path)
-        if header is None or header.get("code") != code:
+        if header is None or str(header.get("code") or "").lower() != wanted:
             continue
         return None if is_closed(read(path)) else path
     return None

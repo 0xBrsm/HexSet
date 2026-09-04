@@ -11,6 +11,57 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **The browser board is the pre-tables UI again**, rebuilt from `f6856d7`
+  onto the current server rather than carried forward through the lobby
+  rework. Loading the page puts you in a game — the one you were last at if
+  it is still going, a fresh one otherwise — and the address bar shows that
+  game's code. Every seat but the creator's starts empty, the creator's row
+  reads "human", and each other row is a model picker: choosing one seats
+  that bot, and a person who opens the link takes a seat instead. A link to a
+  game that is full or gone says so rather than dealing a different game
+  under the same address.
+- **Every game is public, and watching one is omniscient.** A link to a game
+  with no seat left opens it to watch: the board, the log, and every seat's
+  standing, updating as the game goes. A spectator is outside the game and is
+  shown all of it — every hand, every development card, every true
+  victory-point count, and a transcript that names the card bought, the card
+  stolen and the cards discarded. Clicking a player row shows that seat's
+  cards. Nothing is actionable, so the pickers, the board buttons and the
+  piece supply are simply absent, which is what says you are watching.
+  `GET /api/table/<code>/board` serves the layout that view is drawn on,
+  alongside the token-free `GET /api/table/<code>`.
+
+  **This route is not authenticated and cannot be** — holding the link is the
+  whole qualification, and everyone playing holds the link. A seat that opens
+  its own game's public view is reading every opponent's hand. Every route
+  that *acts* still answers a token and still gets its own seat's honest view
+  (`state_view` refuses `omniscient` alongside a seat outright), so nothing a
+  bot or a training run reads is affected; the exposure is to people, at a
+  table, who choose to look.
+- Your own row in the player list is your name: an input standing in for the
+  line, the way a bot seat's row is a picker. It reads "human" until you type
+  something, and what you type reaches the other players' lists and the log.
+  Blanking it puts the seat back to unnamed. (`POST /api/name`, unchanged.)
+- Player-to-player trading is gone from the browser with the offers that
+  backed it (`PROPOSE_TRADE`/`ACCEPT_TRADE`/`DECLINE_TRADE`, `TRADE_RESPOND`,
+  the view's `offer` block). The modal a resource card opens is the bank and
+  port route, which is unchanged.
+- An empty seat the setup snake reaches is retired on sight. The grace
+  window in front of that is gone, and with it `SEAT_GRACE_SECONDS`,
+  `Config.seat_grace`, `POST /api/games`'s `seat_grace`, `--seat-grace`,
+  `HEXSET_UI_SEAT_GRACE` and the view's `waiting_for` block. A turn only
+  advances because the seat holding it says so, so somebody expecting a
+  friend holds the table by not finishing their own placement — a timer
+  could only ever cut that short.
+- Game codes are lowercase (`abcdef`), since a code is only ever seen as a
+  URL. Lookups normalise, so a code capitalised on the way into an address
+  bar still opens its game, and a game journalled under a capitalised code
+  still resumes.
+- The browser board seats a bot from the player list: an open seat's picker
+  offers every model alongside the seat's current state, and choosing one
+  fills the seat for the rest of the game. `POST /api/bot` (`Tables.seat_bot`,
+  formerly `swap_bot`) now takes an empty seat as well as one with a bot on
+  it, refusing a person's seat and a retired one.
 - **`hexset.trading.NETWORK_GATE_ROWS`** (`32`): the most candidates a network
   gate's `accepts_many` will score in one batched forward, beside
   `VALUE_SCALE`. `hexset.clients.onnxbot.NetworkBot.accepts_many` now scores
@@ -165,6 +216,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   candidates.
 ### Fixed
 
+- Opening a full game's address logged a console error. The page asked for a
+  seat first and read the refusal as "watch this one instead"; arriving at a
+  full table is the ordinary way to reach a game you are not playing in, so
+  it reads `GET /api/table/<code>` first and only asks for a seat when one
+  is open.
+- Trades the engine cleared on a poll were never mentioned in the game log.
+  A turn's first trade event runs lazily, at whichever of the engine's
+  trigger points is reached first, which on the server is a poll rather than
+  an action — those exchanges reached `trades` in the state and the ledger
+  but no log line. They are attributed to the last action applied, matching
+  `hexset.record.record_game`.
+
 - **The seat panel could not tell an occupied seat from an open or a locked
   one.** Every seat's line was drawn as a bot model picker — your own, a
   seat nobody had taken, and one the setup snake had retired — because the
@@ -238,6 +301,28 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **The web page offers a person no way to trade with another seat.** The
+  advertisement controls, the negotiation panel and the pending-offer cards
+  are gone from the browser; the bank/port modal a resource card opens is
+  unchanged. Every route behind them is untouched and still answers an LLM
+  or API client: `PUT /api/games/<code>/valuation`, `POST
+  /api/games/<code>/trade`, `.../trade/confirm`, `.../trade/decline`, and
+  the MCP trading tools.
+- **A person's seat is gated when it sits down, not when it first
+  publishes.** `hexset.server.webplay.GameSession.confirm_mode(seat)`
+  installs a `PendingGate` over `hexset.trading.NO_VALUATION` at seat-up,
+  and `POST /api/games`/`POST /api/join` call it. The seat advertises
+  nothing and accepts nothing, and a seat whose vector is all-zero is
+  dropped when candidates are ranked, before any gate is asked — so no
+  exchange a person is party to can clear. Bot seats are unaffected and go
+  on trading with each other.
+
+- **The browser board has no front page.** Opening `/` deals a game and
+  moves to its address; that address is the whole invitation — everyone who
+  opens it sits down at the same table, and the last open seat can be given
+  to a bot from the player list. The deal/join/name/code-entry screen is
+  gone, and with it the browser's own name field (`POST /api/name` is
+  unchanged for API and MCP clients).
 - **Trade candidates are bundles, not one-for-one swaps.**
   `hexset.trading._candidates` now enumerates every signed bundle on
   disjoint resources, coverable from the true hands, rather than only

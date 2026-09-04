@@ -121,10 +121,46 @@ code change is a `git pull` + `docker compose restart`, not a rebuild. It
 runs unprivileged on a read-only filesystem with no Linux capabilities.
 
 Then open the printed URL (or the mapped port, `8770` by default under
-compose). Opponents come from `model_options()` in
-`src/hexset/server/api.py`: `heximax` and `search2` (handcrafted, no
-checkpoint needed) plus one entry per `*.onnx` file found in the models
-directory.
+compose). That deals a game and lands you on the board — there is no lobby,
+no front page and no code to type.
+
+**The address is the game.** Whatever the URL bar shows is the table you are
+at, and sending it to somebody is the whole invitation: they open it and sit
+down at the same table, at their own seat. Reloading keeps your seat; a link
+to a game that is over or gone says so rather than quietly dealing you a
+different one.
+
+**Every seat but yours starts open, and you fill them from the player list.**
+Each open seat's row is a model picker — choosing one seats that bot for the
+rest of the game — and a person who opens the link takes one instead.
+Opponents come from `model_options()` in `src/hexset/server/api.py`:
+`heximax` and `search2` (handcrafted, no checkpoint needed) plus one entry
+per `*.onnx` file found in the models directory. An open seat that the setup
+snake reaches is retired on sight, permanently: a turn only ever advances
+because the seat holding it said so, so a table waiting on a friend who never
+came is a table nobody can play at.
+
+**Your own row is your name.** It reads "human" until you type something;
+what you type is what everyone else's player list and the game log call you
+from then on, and blanking it puts the seat back to unnamed.
+
+**Every game is public, and watching one is omniscient.** A link to a game
+with every seat taken opens it to watch: the board draws, the log fills as
+the game goes, and clicking any player's row shows that seat's cards below.
+A spectator is outside the game and is shown all of it — every hand, every
+development card, every true victory-point count, and a transcript that names
+the card bought, the card stolen and the cards discarded. Nothing is
+actionable, so the pickers, the board buttons and the piece supply are simply
+absent. Be plain about the cost: `GET /api/table/<code>` is not
+authenticated and cannot be, since holding the link is the whole
+qualification — and everyone playing holds the link. Every route that *acts*
+still answers a seat token and still gets that seat's own honest view, so
+nothing a bot or a training run reads is affected.
+
+**The page offers a person no way to trade with another seat** (owner,
+2026-09-03 — withheld for now while the mechanic is built back up). The
+bank/port modal a resource card opens is unchanged. See
+[Trading](#trading).
 
 Tests are `pip install -e ".[test,server,clients,catanatron]" && pytest`.
 Default `pytest` (~5-10 minutes) skips tests marked `slow` — full-game
@@ -137,9 +173,10 @@ gate with `pytest -m slow`. **Any change under `src/hexset/` or
 `-k choices_are_byte_identical`) before it merges** — those hashes are the
 only thing standing between "refactored" and "changed what the bot does."
 
-`tests/web/test_page.py` loads the page in a real browser — it deals a game,
-works the seat panel's model pickers, composes a trade in the negotiation
-panel and answers a pending offer, and fails on any console error. It needs
+`tests/web/test_page.py` loads the page in a real browser — it deals a game
+from a fresh load, seats bots from the player list, renames its own row,
+plays fifteen turns through the page's own controls, opens the same address
+in a second browser to watch, and fails on any console error. It needs
 Chromium and is marked `slow`, so it is skipped by a default run and by any
 checkout without the browser installed:
 
@@ -230,8 +267,8 @@ keeps the legal-action list honest for every seat regardless. A bot brings
 its two methods (`Bot.valuation(view)`, `Bot.accepts(view, bundle,
 counterparty)`, both defaulting to "never trades").
 
-A human or LLM seat gets a **negotiation interface** on top of the same
-engine: `POST /api/games/<CODE>/trade` composes and submits any bundle a
+An LLM seat gets a **negotiation interface** on top of the same engine:
+`POST /api/games/<code>/trade` composes and submits any bundle a
 counterparty's own published vector already wants — on that seat's own turn
 against anyone, or during another seat's turn naming only that seat. The
 counterparty's public surplus is a hard rule (its own vector must call the
@@ -240,12 +277,18 @@ vector is never consulted — submitting is consent. A seat opted into
 **confirm mode** at seat-up never clears on its own: every candidate the
 table's own event finds against it lands in `pending` (`GET /api/state`,
 filtered to the seat it names) instead, answered with `POST
-.../trade/confirm` or `.../trade/decline`. The web UI's negotiation panel
-renders a counterparty's wants/gives as clickable chips composing the
-bundle; the five-toggle advertisement panel above it is unchanged and
-independent — publishing a vector is a standing statement, not a
-submission. Full interface, including the PI's ratified decisions on what
-was left open: [`docs/negotiation-interface.md`](docs/negotiation-interface.md).
+.../trade/confirm` or `.../trade/decline`. Full interface, including the PI's
+ratified decisions on what was left open:
+[`docs/negotiation-interface.md`](docs/negotiation-interface.md).
+
+**The web page offers a person none of this.** A human seat publishes no
+vector and is nobody's counterparty (`Table.join`'s `PendingGate` over a zero
+vector), and the page renders no advertisement toggles, no negotiation panel
+and no pending-offer cards — see the note dated 2026-09-03 in
+`docs/negotiation-interface.md`. The routes above are untouched and still
+answer an LLM or API client. Bots go on trading with each other through the
+engine event, and the board's trade log shows it.
+
 `max_trades=0` is the off switch for the no-trade referents
 (`search2-notrade`, `heximax-notrade`).
 

@@ -10,11 +10,11 @@ here: HexSet has no lobby any more, a game deals the instant somebody asks for
 one, and the creator lands on a *random* seat (`api.Tables.create`). A game
 has to be immediately playable by whoever just made it.
 
-*An empty seat the snake reaches is waited out and then retired.* See
-`api.Table._settle_locks` for the grace window that decides when. A locked
-seat leaves the setup snake and every later turn rotation, permanently — a
-claimed seat is never released, so a game's player count is fixed for good the
-moment setup finishes.
+*An empty seat the snake reaches is retired on sight.* See
+`api.Table._settle_locks`, and its own note on why there is no waiting window
+in front of it. A locked seat leaves the setup snake and every later turn
+rotation, permanently — a claimed seat is never released, so a game's player
+count is fixed for good the moment setup finishes.
 
 Both are implemented as a **correction applied after each action**, because
 `hexset.game` does not know about either. `settle` re-points the snake or the

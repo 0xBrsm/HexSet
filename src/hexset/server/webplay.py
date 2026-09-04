@@ -464,13 +464,21 @@ def _describe(
     board: Board,
     labels: dict[int, str],
     viewer: int | None,
+    *,
+    omniscient: bool = False,
 ) -> str:
     """One event as a sentence, told to `viewer`.
 
     `viewer` is the seat reading the log, and the only thing it changes is
     what stays hidden: a card bought, a card stolen. Everything else reads
     identically to everyone, including whoever wasn't at the table at all
-    (`viewer=None`), which is what a spectator or a replay gets.
+    (`viewer=None`), which is what a replay gets.
+
+    `omniscient` names every one of those instead — the card bought, the card
+    stolen, the cards discarded — for a reader outside the game entirely. It
+    is not a seat's view with more in it: a seat may never be told these
+    things about another seat, and nothing that acts on this game is ever
+    handed a log built this way (see `state_view`).
     """
     actor, action = event.actor, event.action
     before, after = event.before, event.after
@@ -508,7 +516,7 @@ def _describe(
 
     if kind is ActionType.BUY_DEV_CARD:
         gained = [c for c in range(NUM_DEV_CARDS) if before.held[actor][c] < after.held[actor][c]]
-        if actor == viewer and gained:
+        if (omniscient or actor == viewer) and gained:
             return f"{who} bought a {DEV_CARD_NAMES[gained[0]]}."
         return f"{who} bought a development card."
 
@@ -526,7 +534,7 @@ def _describe(
         # they took, the victim saw what left. To everyone else a steal is a
         # card, and which one is exactly the hidden-hand information the rest
         # of this module works to keep hidden.
-        if viewer in (actor, victim) and stolen:
+        if (omniscient or viewer in (actor, victim)) and stolen:
             resource = next(
                 RESOURCE_NAMES[r]
                 for r in range(NUM_RESOURCES)
@@ -570,6 +578,8 @@ def render_log(
     board: Board,
     labels: dict[int, str],
     viewer: int | None,
+    *,
+    omniscient: bool = False,
 ) -> list[str]:
     """Every event as the sidebar transcript `viewer` should see.
 
@@ -645,7 +655,7 @@ def render_log(
                 run = {"key": key, "counts": [0] * NUM_RESOURCES}
             run["counts"][action.a] += 1
             total = sum(run["counts"])
-            if actor == viewer:
+            if omniscient or actor == viewer:
                 # Same wording as the "collects" half of a roll line, since
                 # it's the same fact pointed the other way.
                 line = f"{who} discarded {_resource_counts(run['counts'])}."
@@ -682,7 +692,9 @@ def render_log(
             # not information.
             continue
 
-        lines.append(f"{round_num}\t{_describe(event, board, labels, viewer)}")
+        lines.append(
+            f"{round_num}\t{_describe(event, board, labels, viewer, omniscient=omniscient)}"
+        )
         for line in _trade_lines(event, labels):
             lines.append(f"{round_num}\t{line}")
 
@@ -774,7 +786,7 @@ class GameSession:
     # an embedded bot itself for a bot seat, a `PostedValuation` for a seat
     # a person is playing, nothing at all for an empty one. Kept here rather
     # than on `Game` directly because a seat can change hands mid-game
-    # (`api.Tables.swap_bot`), and `set_trader` is the one place that
+    # (`api.Tables.seat_bot`), and `set_trader` is the one place that
     # rewrites the engine's tuple.
     traders: dict[int, object] = field(default_factory=dict, repr=False)
     # Seats opted into confirm mode at seat-up (`POST /api/games`/`/api/join`'s
@@ -804,6 +816,40 @@ class GameSession:
     def valuation_of(self, seat: int) -> tuple[float, ...]:
         """What `seat` has published, all-zero if it has published nothing."""
         return tuple(self.game.valuations[seat])
+
+    def confirm_mode(self, seat: int) -> None:
+        """`seat` opted into confirm mode at seat-up: gate it now, on the
+        vector it has not published (`hexset.trading.NO_VALUATION`).
+
+        Installing the gate here rather than waiting for a first `publish`
+        is what makes "a person at the web page does not trade" a property
+        of sitting down, not of what the page happens to call. The page
+        offers no way to publish (owner, 2026-09-03 -- human trading
+        surfaces are withheld; `docs/negotiation-interface.md`), so without
+        this a human seat's gate stays `None` for the whole game and the
+        rule rests entirely on the vector.
+
+        Both halves say no, and either alone would be enough:
+
+        *The vector.* All-zero, so every bundle this seat is party to scores
+        a public surplus of exactly 0 on its side, and
+        `hexset.trading._best_clearing` keeps only candidates whose surplus
+        is *strictly* positive for both sides -- in either role, proposer or
+        counterparty. A zero-vector seat is dropped at ranking and its gate
+        is never even asked, which is the sense in which a human here is
+        simply not a counterparty.
+
+        *The gate.* `PendingGate` never clears on its own. Should this seat
+        ever publish (`PUT /api/games/<code>/valuation` is untouched, for an
+        LLM or an API client), what it advertises still cannot be taken
+        without an explicit `POST .../trade/confirm`.
+
+        Bots are unaffected: their own gates and vectors are seated by
+        `api.Tables._spawn_local_bots`/`seat_bot`, and they go on trading
+        with each other through the same engine event.
+        """
+        self.confirm_seats.add(seat)
+        self.set_trader(seat, PendingGate(self.game, seat, NO_VALUATION))
 
     def publish(self, seat: int, vector: Sequence[float]) -> None:
         """`PUT /api/games/<code>/valuation`: `seat` sets its own vector.
@@ -1112,7 +1158,7 @@ class GameSession:
             return game.current_player
         return to_move(game)
 
-    def state_view(self, viewer: int | None = None) -> dict:
+    def state_view(self, viewer: int | None = None, *, omniscient: bool = False) -> dict:
         """The whole game as `viewer` is allowed to see it.
 
         `viewer` is a seat at this table, or `None` for someone watching
@@ -1121,7 +1167,19 @@ class GameSession:
         the trade panel gets, and how the transcript redacts (see
         `render_log`). Everything else here is public and identical to every
         reader, which is why it is computed once regardless of who is asking.
+
+        `omniscient` drops the first and third of those: every hand, every
+        dev card, every true victory-point count, and a transcript that
+        redacts nothing. **It is only ever for a reader outside the game.**
+        `legal_actions` is empty for a viewer-less reader anyway, so a view
+        built this way cannot be played from — but nothing here checks that,
+        and handing one to a seat would put every opponent's hand in the hands
+        of somebody still choosing moves. `api.Tables.handle` passes it at
+        exactly one route, the token-free `GET /api/table/<code>`, and every
+        seated route leaves it alone.
         """
+        if omniscient and viewer is not None:
+            raise ValueError("an omniscient view belongs to no seat")
         labels = self.seat_labels
         game = self.game
         # A poll of the table is one of the engine's three event-trigger
@@ -1147,7 +1205,24 @@ class GameSession:
         # never on the current player, except through public fields).
         # `run_pending_event` does exactly the same triggering work with no
         # view built and no seat's hand touched.
+        #
+        # Whatever it clears is attributed to the last action applied, the
+        # way `hexset.record.record_game` already attributes a lazily
+        # triggered first event to the previous action's step. Without this
+        # the exchanges happen and are simply never told: `_apply` records
+        # an action's trades from inside itself (`self.game.trades[
+        # trades_before:]`), and a turn's *first* event no longer runs
+        # there -- it runs here, on whichever poll reaches the table first
+        # -- so every trade it cleared reached `state["trades"]` and the
+        # engine's own ledger but no `_Event`, and therefore no line in the
+        # transcript. Watching three bots deal with each other for sixteen
+        # turns, that was five exchanges in the state and none in the log.
+        traded_before = len(game.trades)
         run_pending_event(game)
+        cleared = game.trades[traded_before:]
+        if cleared and self.events:
+            last = self.events[-1]
+            last.trades = last.trades + tuple(cleared)
         # true state: the server's own omniscient observer view -- the
         # per-viewer filtering happens below, not here.
         state = game.state(0, hidden=False)
@@ -1157,7 +1232,7 @@ class GameSession:
         # visible on the board/in front of everyone, unlike hand contents.
         lengths = road_lengths(state)
         for p in range(state.num_players):
-            reveal = over or p == viewer
+            reveal = over or omniscient or p == viewer
             seat_ledger = game.ledger.seats[p]
             entry = {
                 "seat": p,
@@ -1253,15 +1328,20 @@ class GameSession:
             if viewer is not None
             else [],
             "legal_actions": self.legal_wire_actions(viewer),
-            "log": self.log_for(viewer),
+            "log": self.log_for(viewer, omniscient=omniscient),
         }
 
-    def log_for(self, viewer: int | None) -> list[str]:
+    def log_for(self, viewer: int | None, *, omniscient: bool = False) -> list[str]:
         """The sidebar transcript as `viewer` should see it, `None` for a
-        spectator, who is owed the least of anyone (see `render_log`)."""
+        reader with no seat, who is owed the least of anyone — or, with
+        `omniscient`, the most (see `render_log` and `state_view`)."""
         # true state: the board is public.
         lines = render_log(
-            self.events, self.game.state(0, hidden=False).board, self.seat_labels, viewer
+            self.events,
+            self.game.state(0, hidden=False).board,
+            self.seat_labels,
+            viewer,
+            omniscient=omniscient,
         )
         if is_over(self.game):
             # The round the final action fell in, not self.round: a game that

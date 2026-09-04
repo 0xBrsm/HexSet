@@ -11,12 +11,17 @@ nothing about a game lives there.
 
 ## A game, an ID, a seat
 
-A game has a unique ID — a six-character code (`ABCDEF` — see `new_code`),
+A game has a unique ID — a six-character code (`abcdef` — see `new_code`),
 the only thing anyone needs to find it. There is no lobby: `POST /api/games`
 deals a full `MAX_SEATS`-seat game immediately, with the creator seated at one
 random seat and every other seat open. Opening `/<id>` in a browser, or
 calling `join` with it, claims a random still-open seat and hands back a
 token.
+
+A still-open seat can also be given to a bot from the board itself
+(`POST /api/bot`, see `Tables.seat_bot`) right up until the setup snake
+retires it — the same request that swaps one bot for another, because with no
+lobby the player list is the only place a table says who else is playing.
 
 That token, not the request's source or a cookie, is the identity here. It
 names one seat at one game, it is the only way to act on that seat, and it is
@@ -30,12 +35,18 @@ reopened after one simply treats every non-bot seat as open again (see
 
 `MAX_SEATS` seats are dealt into the engine from the moment a game exists,
 whether or not anyone has claimed them yet — there is no "start" that
-renumbers a partial roster down to just the seats somebody's in. Instead, an
-empty seat the setup snake reaches gets a grace window (`Table._settle_locks`)
-before it locks out for good (see `hexset.server.seating.lock_seat`): a game that
-begins setup with two or three seats occupied stays that size for its whole
-duration, one seat's decision at a time rather than one cutoff for the table.
+renumbers a partial roster down to just the seats somebody's in. Instead, the
+setup snake retires an empty seat the moment it reaches one
+(`Table._settle_locks`, `hexset.server.seating.lock_seat`): a game that begins
+setup with two or three seats occupied stays that size for its whole duration,
+one seat's decision at a time rather than one cutoff for the table.
 `Table.join` only ever offers a seat that is both empty and unlocked.
+
+There is no waiting window in front of that, and deliberately so. A turn only
+ever advances because the seat holding it says so, so somebody expecting a
+friend just does not finish their own placement until that friend has sat
+down — the wait is a person choosing to wait, which a timer can only cut
+short.
 
 ## What a seat is told, and what it is not
 
@@ -44,8 +55,8 @@ obvious and both are load-bearing:
 
 Every seat's **valuation vector** is public, and so is the turn's trade log:
 those are what a table hears (`hexset.trading`), and `PUT
-/api/games/<CODE>/valuation` is how a seat sets its own -- unchanged by, and
-independent of, everything below. `POST /api/games/<CODE>/trade` lets a seat
+/api/games/<code>/valuation` is how a seat sets its own -- unchanged by, and
+independent of, everything below. `POST /api/games/<code>/trade` lets a seat
 compose a bundle against any counterparty whose public vector already wants
 it (`hexset.game.Game.execute_trade`,
 `docs/negotiation-interface.md`), on its own turn against anyone or during
@@ -127,25 +138,24 @@ MODELS_DIR = Path(os.environ.get("HEXSET_UI_MODELS_DIR", REPO_ROOT / "models"))
 # renumbering the engine's own idea of how many seats there are.
 MAX_SEATS = 4
 
-# Digits and uppercase letters, minus the pairs that get misread aloud or
-# retyped wrong: 0/O, 1/I/L. 31 characters, so 31**6 is about 887 million
+# Digits and lowercase letters, minus the pairs that get misread aloud or
+# retyped wrong: 0/o, 1/i/l. 31 characters, so 31**6 is about 887 million
 # codes — far more than enough, since a code only has to be unique among the
 # games alive right now, not every one ever played, and `new_code` re-rolls
 # on the collisions that do happen.
-CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
+#
+# Lowercase because the code is only ever seen as a URL, and a URL that is
+# read aloud, typed on a phone or pasted into a chat reads better without
+# the shift key. Case is not part of the identity either way: every lookup
+# normalises (see `Tables.get`), so a code typed in capitals still opens its
+# game.
+CODE_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz"
 CODE_LENGTH = 6
 
 # The cap every client already enforces (mcp.py, index.html) on a display
 # name, applied here too: those are conveniences, not the check, since a raw
 # POST to /api/games, /api/join or /api/name bypasses both of them.
 MAX_NAME_LENGTH = 40
-
-# How long an empty, unlocked seat the setup snake is waiting on stays open
-# before `Table._settle_locks` locks it out — per seat, not once for the
-# whole table (see the module docstring). Overridable per game (`POST
-# /api/games`'s `seat_grace`) and by `HEXSET_UI_SEAT_GRACE` (see `web.py`);
-# tests pass `0` for determinism.
-SEAT_GRACE_SECONDS = 120.0
 
 # How long a game survives with nobody touching it. An open browser or a bot
 # runner polls far more often than this; a closed tab or an abandoned game
@@ -229,7 +239,6 @@ class Config:
     # since filling the table is now an explicit choice, not the assumption a
     # lobby used to make on a caller's behalf.
     default_bots: list[str] | None = None
-    seat_grace: float = SEAT_GRACE_SECONDS
 
 
 class SeatKind(str, Enum):
@@ -266,12 +275,10 @@ class Table:
     """A row of seats, a code to reach them by, and the game they're playing
     — dealt the instant this exists, never gated behind a lobby.
 
-    `seat_grace`/`blocked_since` are `_settle_locks`'s own bookkeeping for the
-    per-seat setup-lock window (see the module docstring); nothing else here
-    reads them. `runners` is every embedded bot-client thread playing a seat
-    at this table (see `Tables._spawn_local_bots`) — `close` has to stop
-    those before the journal, or one could still be mid-decision when its
-    game is marked abandoned.
+    `runners` is every embedded bot-client thread playing a seat at this
+    table (see `Tables._spawn_local_bots`) — `close` has to stop those
+    before the journal, or one could still be mid-decision when its game is
+    marked abandoned.
     """
 
     code: str
@@ -279,8 +286,7 @@ class Table:
     config: Config
     session: GameSession
     layout: dict
-    seat_grace: float = SEAT_GRACE_SECONDS
-    blocked_since: float | None = None
+
     runners: list[tuple[BotRunner, threading.Thread]] = field(default_factory=list, repr=False)
     last_seen: float = field(default_factory=time.monotonic)
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -312,41 +318,31 @@ class Table:
         if self.session.journal is not None:
             self.session.journal.abandoned()
 
-    def _settle_locks(self, now: float | None = None) -> None:
-        """Must be called with `self.lock` held. Advances the per-seat grace
-        window: an empty, unlocked seat the setup snake is waiting on gets
-        locked once `seat_grace` seconds pass with nobody claiming it.
+    def _settle_locks(self) -> None:
+        """Must be called with `self.lock` held. Retires every empty seat the
+        setup snake has reached, on sight.
 
-        No timer thread — this runs lazily at the top of every request that
-        touches the game (`view`, `join`, `Tables.act`), so a game somebody
-        is actually polling ticks on schedule and one nobody is watching
-        simply doesn't, until `Tables._evict_stale` reaps it outright.
+        There is no waiting window, because there is nothing a window would
+        add. A turn only ever advances because the seat holding it says so,
+        so somebody expecting a friend simply does not finish their own
+        placement until that friend is in — the wait is a person deciding to
+        wait, not a timer counting down behind them. A window on top of that
+        could only ever retire a seat somebody was still holding the table
+        for.
+
+        No timer thread either, for the same reason: nothing here is
+        time-dependent any more. It runs at the top of every request that
+        touches the game (`view`, `join`, `Tables.act`, `Tables.seat_bot`),
+        which is exactly when the snake can have moved.
         """
-        now = time.monotonic() if now is None else now
         game = self.session.game
         while not is_over(game) and game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
             seat = to_move(game)
             if self.seats[seat].kind is not SeatKind.EMPTY or seat in locked_of(game):
-                self.blocked_since = None
-                return
-            if self.blocked_since is None:
-                self.blocked_since = now
-                return
-            if now - self.blocked_since < self.seat_grace:
                 return
             lock_seat(game, seat)
             if self.session.journal is not None:
                 self.session.journal.locked(seat, at_step=self.session._steps)
-            self.blocked_since = now  # the next empty seat gets its own full window
-
-    def _waiting_for(self) -> dict | None:
-        if self.blocked_since is None:
-            return None
-        game = self.session.game
-        if is_over(game) or game.phase not in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
-            return None
-        remaining = max(0.0, self.seat_grace - (time.monotonic() - self.blocked_since))
-        return {"seat": to_move(game), "seconds_remaining": round(remaining, 1)}
 
     def join(self, name: str | None, *, confirm: bool = False) -> tuple[int, str]:
         """Seats a person (or an external bot process) at a random still-open,
@@ -377,24 +373,22 @@ class Table:
         self.seats[index] = Seat(kind=SeatKind.PLAYER, name=clean, token=token)
         self.session.claim(index, clean)
         if confirm:
-            self.session.confirm_seats.add(index)
-        # Arrival at the game keeps a currently-waiting door open one more
-        # window, even if this join filled a different seat than the one the
-        # snake is blocked on — see the module docstring.
-        if self.blocked_since is not None:
-            game = self.session.game
-            self.blocked_since = None if to_move(game) == index else time.monotonic()
+            self.session.confirm_mode(index)
         return index, token
 
-    def view(self, viewer: int | None = None) -> dict:
-        """The whole game as `viewer` (a seat, or `None` for an observer) is
+    def view(self, viewer: int | None = None, *, omniscient: bool = False) -> dict:
+        """The whole game as `viewer` (a seat, or `None` for a spectator) is
         allowed to see it — reachable from the moment a game exists, since
-        there's no separate lobby shape any more."""
+        there's no separate lobby shape any more.
+
+        `omniscient` is for a spectator only, and `state_view` refuses it
+        alongside a seat rather than trusting the caller: it holds back
+        nothing at all, which is the right answer for somebody watching and
+        the wrong one for anybody playing."""
         self._settle_locks()
-        state = self.session.state_view(viewer)
+        state = self.session.state_view(viewer, omniscient=omniscient)
         state["code"] = self.code
         state["seats"] = [seat.public(i) for i, seat in enumerate(self.seats)]
-        state["waiting_for"] = self._waiting_for()
         return state
 
 
@@ -547,7 +541,6 @@ class Tables:
         self,
         bots: list[str] | None = None,
         name: str | None = None,
-        seat_grace: float | None = None,
         confirm: bool = False,
     ) -> tuple[Table, str]:
         """A new game, dealt immediately: the creator at a random seat, any
@@ -597,7 +590,7 @@ class Tables:
 
         session = build_session(code, seats, self.config, first=creator_seat)
         if confirm:
-            session.confirm_seats.add(creator_seat)
+            session.confirm_mode(creator_seat)
         table = Table(
             code=code,
             seats=seats,
@@ -605,7 +598,6 @@ class Tables:
             session=session,
             # true state: the board is public.
             layout=board_layout(session.game.state(0, hidden=False).board),
-            seat_grace=self.config.seat_grace if seat_grace is None else float(seat_grace),
         )
 
         # Registered *before* any bot runner thread starts: a runner's first
@@ -649,7 +641,7 @@ class Tables:
             thread.start()
 
     def get(self, code: str) -> Table:
-        code = code.upper()
+        code = code.lower()
         with self._registry_lock:
             # Every lookup, not just `create`: a box that deals one game and
             # is then only ever read would otherwise never reap anything.
@@ -695,7 +687,6 @@ class Tables:
             session=session,
             # true state: the board is public.
             layout=board_layout(session.game.state(0, hidden=False).board),
-            seat_grace=self.config.seat_grace,
         )
         self._tables[code] = table
         self._spawn_local_bots(table)
@@ -801,29 +792,63 @@ class Tables:
         table.session.player_names[seat] = name
         return table.view(seat)
 
-    def swap_bot(self, table: Table, viewer: int, seat: int, model: str) -> dict:
-        """Re-seat one bot mid-game — models can be swapped at any point, not
-        just between games. Rebuilding from `model_options()` (rather than
-        accepting a spec) keeps this the same chokepoint: a request names a
-        bot, it never hands one a path. Stops that seat's embedded runner
-        thread and starts a fresh one on the new spec — the old bot's own
-        in-flight decision, if any, still lands (it was already submitted
-        through `/api/action` like any other move), but nothing further
-        comes from it.
+    def seat_bot(self, table: Table, viewer: int, seat: int, model: str) -> dict:
+        """Put a bot on `seat`: a fresh one where nobody is sitting, or a
+        different one in place of the bot already there.
 
-        `viewer` is who asked and `seat` is who was swapped, and the two are
-        never the same seat. Answering with `view(seat)` handed the caller the
-        *swapped bot's* own view — its hand, its true victory points, its
-        legal actions — and the page believed it was that seat until its next
-        poll. Every other route here answers the caller, and so does this."""
-        if not 0 <= seat < len(table.seats) or table.seats[seat].kind is not SeatKind.BOT:
-            raise ApiError(f"seat {seat} has no bot to swap")
+        Both halves are the same request because, with no lobby to pick a
+        lineup in, the player list on the board is the only place a table
+        decides who else is playing — filling an open seat and changing your
+        mind about a bot already in one are the same gesture there. An open
+        seat can be filled right up until the setup snake retires it (see
+        `Table._settle_locks`), and a bot can be swapped at any point in the
+        game, not just between games.
+
+        Rebuilding from `model_options()` (rather than accepting a spec)
+        keeps this the same chokepoint: a request names a bot, it never hands
+        one a path. A seat that already held a bot has that runner thread
+        stopped and a fresh one started on the new spec — the old bot's own
+        in-flight decision, if any, still lands (it was already submitted
+        through `/api/action` like any other move), but nothing further comes
+        from it.
+
+        A person's seat is never taken over, and a retired seat is never
+        revived: both refuse.
+
+        `viewer` is the seat that *asked* — whose game this answers with —
+        and is not `seat`. Answering as `seat` instead was a hidden-hand
+        leak: the response is built for one viewer (see `Table.view`), so a
+        view of the bot's seat handed back that bot's whole hand to whoever
+        touched its picker, and left their client believing it was sitting
+        somewhere it was not.
+        """
+        if not 0 <= seat < len(table.seats):
+            raise ApiError(f"there is no seat {seat} at this game")
+        kind = table.seats[seat].kind
+        if kind is SeatKind.PLAYER:
+            raise ApiError(f"seat {seat} belongs to a player")
+        # Before the open/retired test, not after: the window a seat has left
+        # only advances when somebody asks (see `_settle_locks`), and this is
+        # exactly such a request.
+        table._settle_locks()
+        if kind is SeatKind.EMPTY and seat in locked_of(table.session.game):
+            raise ApiError(f"seat {seat} has been retired from this game")
         try:
             spec = model_options()[model]
         except KeyError:
             raise ApiError(f"unknown model: {model}") from None
-        table.seats[seat].name = model
-        table.seats[seat].spec = spec
+
+        if kind is SeatKind.EMPTY:
+            token = secrets.token_urlsafe(18)
+            table.seats[seat] = Seat(kind=SeatKind.BOT, name=model, spec=spec, token=token)
+            # A seat only counts as playable once the session agrees it is
+            # claimed — `GameSession.apply_human_action` refuses a seat that
+            # is not, and the runner about to start plays through exactly
+            # that route.
+            table.session.claimed_seats.add(seat)
+        else:
+            table.seats[seat].name = model
+            table.seats[seat].spec = spec
         table.session.bot_names[seat] = model
         table.session.bot_specs[seat] = spec
         if table.session.journal is not None:
@@ -852,7 +877,7 @@ class Tables:
         return table.view(viewer)
 
     def set_valuation(self, table: Table, seat: int, vector) -> dict:
-        """`PUT /api/games/<CODE>/valuation`: this seat publishes its vector.
+        """`PUT /api/games/<code>/valuation`: this seat publishes its vector.
 
         The advertisement half of the mechanic (`hexset.trading`): five
         numbers in [-1, 1], positive for "I want more of this". It may be
@@ -963,19 +988,34 @@ class Tables:
         if method == "GET" and path == "/api/models":
             return {"models": list(model_options())}
 
-        # The two reads that need no token: an observer's view of a game they
-        # haven't (or couldn't) join, and that game's board layout. The board
-        # is public — `view(None)` above already ships every piece standing on
-        # it — so gating the layout behind a seat token left an observer's page
-        # with a 401 where its geometry should be and nothing to draw
-        # (`index.html`'s `loadBoard`). `/api/board` stays as it is for a
-        # seated client; this is the same bytes by code instead of by token.
-        if method == "GET" and path.startswith("/api/table/") and path.endswith("/board"):
-            code = path[len("/api/table/") : -len("/board")]
-            return self.get(code).layout
-
+        # The reads that need no token, and the whole of what "every game is
+        # public" means: `GET /api/table/<code>` is the game as a spectator
+        # sees it and `.../board` is the layout that view is drawn on. A link
+        # is all either one takes.
+        #
+        # **A spectator sees everything** — every hand, every dev card, every
+        # true victory-point count, and a transcript that names the card
+        # bought, the card stolen and the cards discarded. That is the point
+        # of watching, and it is also the one place in this module where
+        # hidden information leaves it, so it is worth being plain about what
+        # follows: this route is not authenticated and cannot be, since
+        # holding the link is the whole qualification. Anyone playing at the
+        # table holds the link. A seat that opens its own game's public view
+        # is therefore reading every opponent's hand, and nothing here can
+        # tell that apart from a bystander doing the same.
+        #
+        # Every route that *acts* still answers a token and still gets its
+        # own seat's honest view (`state_view` refuses `omniscient` for a
+        # seat outright), so nothing a bot or a training run reads is
+        # affected. The exposure is to people, at a table, who choose to look.
         if method == "GET" and path.startswith("/api/table/"):
-            return self.get(path[len("/api/table/") :]).view(None)
+            code, _, tail = path[len("/api/table/") :].partition("/")
+            table = self.get(code)
+            if not tail:
+                return table.view(None, omniscient=True)
+            if tail == "board":
+                return table.layout
+            raise ApiError(f"no such endpoint: {method} {path}", status=404)
 
         if method == "POST" and path == "/api/games":
             # Wire-level default is confirm mode ON (`PendingGate`): a human
@@ -988,7 +1028,6 @@ class Tables:
             table, new_token = self.create(
                 bots=payload.get("bots"),
                 name=payload.get("name"),
-                seat_grace=payload.get("seat_grace"),
                 confirm=bool(payload.get("confirm", True)),
             )
             return {"token": new_token, **table.view(table.seat_of(new_token))}
@@ -1033,7 +1072,7 @@ class Tables:
         if method == "POST" and path == "/api/name":
             return self.rename(table, seat, str(payload.get("name", "")))
         if method == "POST" and path == "/api/bot":
-            return self.swap_bot(
+            return self.seat_bot(
                 table, seat, int(payload.get("seat", -1)), str(payload.get("model", ""))
             )
         if method == "PUT" and path == f"/api/games/{table.code}/valuation":

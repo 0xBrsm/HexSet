@@ -72,7 +72,7 @@ from hexset.game import ROLL_ODDS, Game, Phase, imagine, is_over, roll_dice, to_
 from hexset.ledger import PublicLedger
 from hexset.mcts import draws_hidden
 from hexset.placement import best as best_opening
-from hexset.state import GameState, copy_state
+from hexset.state import GameState
 from hexset.trading import NO_VALUATION, Bundle
 
 from hexset.view import View
@@ -490,7 +490,7 @@ class Heximax:
         seat = view.perspective
         state = view.state
         before = self._read_row(state, view.ledger, seat, seat, self._rank)
-        after = copy_state(state)
+        after = _thin_copy(state, copy_bank=True)
         after.hands[seat][resource] += 1
         if after.bank[resource] > 0:
             after.bank[resource] -= 1
@@ -505,7 +505,7 @@ class Heximax:
         if state.hands[seat][resource] < 1:
             return 0.0
         before = self._read_row(state, view.ledger, seat, seat, self._rank)
-        after = copy_state(state)
+        after = _thin_copy(state, copy_bank=True)
         after.hands[seat][resource] -= 1
         after.bank[resource] += 1
         ledger = view.ledger.copy()
@@ -586,7 +586,7 @@ class Heximax:
         """
         state = view.state
         before = self._read_row(state, view.ledger, knower, target, rank)
-        after = copy_state(state)
+        after = _thin_copy(state)
         gains = [max(0, n) for n in received]
         losses = [max(0, -n) for n in received]
         exact = self.omniscient
@@ -777,6 +777,54 @@ class Heximax:
                 best, best_rank = vector, rank
         assert best is not None
         return best
+
+
+def _thin_copy(state: GameState, *, copy_bank: bool = False) -> GameState:
+    """A `GameState` for a marginal/delta check: only `hands` (and, when
+    asked, `bank`) is really copied; the board, deck, dev cards, knight
+    counts and (unless asked) the bank are shared with `state` outright.
+
+    `_marginal_gain`/`_marginal_loss`/`_delta` -- the only callers -- each
+    touch nothing but a hand (`_move_hand`, or a direct `hands[seat][r] +=`)
+    and, for the two marginal checks, one bank slot; nothing here ever
+    touches `vertex_owner`/`vertex_building`/`edge_owner`/`deck`/
+    `dev_cards`/`new_dev_cards`/`knights_played` on the copy, so sharing
+    them costs nothing today and cannot make `after` diverge from `state`
+    on a field neither of them mutates. `copy_state` remains the one used
+    everywhere a real, fully independent `GameState` is needed (`imagine`'s
+    children, chiefly) -- this is narrower on purpose, for a caller that
+    knows exactly which one or two fields the check ahead will touch.
+
+    Safe only because nothing downstream reads `.state` off a `belief_for`
+    cache hit for one of these calls: `HonestEvaluator.evaluate`'s own
+    cache stores a plain list of scores, not a state reference, and
+    `belief_for`'s returned `View` is read here only through
+    `expected_hand`/`exact`/`unknown`/`_pool_cards`, all copied off `state`/
+    `ledger` in `View.__init__` already -- never through `View.state`
+    itself (`belief_for`'s own docstring is the one place that reads
+    `view.state` back out, and that `view` is always freshly built by the
+    caller, never a `belief_for` cache hit). `view.state` -- the *real*
+    live game state these three methods are called against, not `after` --
+    is exactly the object every shared field here is borrowed from, and it
+    keeps mutating for the rest of the game; borrow only fields this path
+    never reads back through a retained reference.
+    """
+    return GameState(
+        board=state.board,
+        num_players=state.num_players,
+        vertex_owner=state.vertex_owner,
+        vertex_building=state.vertex_building,
+        edge_owner=state.edge_owner,
+        robber=state.robber,
+        hands=[hand[:] for hand in state.hands],
+        bank=state.bank[:] if copy_bank else state.bank,
+        deck=state.deck,
+        dev_cards=state.dev_cards,
+        new_dev_cards=state.new_dev_cards,
+        knights_played=state.knights_played,
+        longest_road_holder=state.longest_road_holder,
+        largest_army_holder=state.largest_army_holder,
+    )
 
 
 def _put_on_top(deck: list[int], card: int) -> None:

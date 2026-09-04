@@ -1,12 +1,24 @@
-"""The page, in a real browser.
+"""The owner's page, in a real browser.
 
 Every check the web UI had before this file drove the API with a script or
-read `static/index.html` as text (`tests/server/test_ui_smoke.py` says so in
-its own docstring). Nothing ever loaded the page, so a frontend that threw on
-its first render, polled a route it had no token for, or rebuilt an open
-`<select>` out from under the cursor passed the suite and reached a player
-broken. This runs Chromium against a live `HexSetServer` and drives the page
-the way somebody at it would.
+read `static/index.html` as text. Nothing ever loaded the page, so a frontend
+that threw on its first render, polled a route it had no token for, or rebuilt
+an open `<select>` out from under the cursor passed the suite and reached a
+player broken. This runs Chromium against a live `HexSetServer` and drives the
+page the way somebody at it would.
+
+What it drives is `feat/ui`'s board: the address is the game, there is no
+front page and no lobby, every game is public, watching is omniscient, and a
+person's own row is their name. There is no landing screen to deal from --
+opening `/` deals -- and no bot-count picker, because seating three bots fills
+a table and a full table is one nobody can join. Opponents are chosen from the
+player list, which is where everything else about a seat already lives.
+
+There is also nothing here about trading, and that is the point of
+`test_a_person_is_offered_no_way_to_trade`: the human's half of the
+negotiation interface is withheld from the page (owner, 2026-09-03), the API
+keeps it, and the bots go on dealing with each other. The panel tests this
+file used to carry went with the panel.
 
 Marked `slow`, so the default run is unaffected, and skipped outright where
 Playwright's browser isn't installed. To run it::
@@ -16,13 +28,13 @@ Playwright's browser isn't installed. To run it::
 
 `search2` rather than the shipped `heximax` default at every bot seat: this is
 a test of the page, and search2 is the cheaper opponent to have thinking in
-the background while the browser works. The page's own default lineup is what
-`currentBotModels` holds, so overriding that one global before dealing is the
-whole difference.
+the background while the browser works. The same drive against three
+`heximax` is what the owner's own sanity check ran.
 """
 
 from __future__ import annotations
 
+import random
 import threading
 import time
 
@@ -34,24 +46,22 @@ from playwright.sync_api import sync_playwright  # noqa: E402
 
 from conftest import new_tables  # noqa: E402
 from hexset.server.web import HexSetServer  # noqa: E402
-from hexset.trading import Trade  # noqa: E402
+from hexset.server.webplay import PendingGate  # noqa: E402
+from hexset.trading import NO_VALUATION  # noqa: E402
 
 pytestmark = pytest.mark.slow
 
-# The page polls every 1.5 s while it isn't the reader's move (`index.html`'s
-# pollWhileWaiting). "Across two polls" below means this, twice, plus slack.
-POLL_SECONDS = 1.5
-
-WOOD, BRICK, SHEEP, WHEAT, ORE = range(5)
+BOT = "search2"
 
 
 @pytest.fixture
 def live():
     """A real server on a real port, plus the registry behind it.
 
-    `seat_grace=0.0` retires an empty seat on the second touch instead of
-    after two minutes, which is what makes a game with open seats playable
-    inside a test at all.
+    No `seat_grace`, and no on-sight retirement either: nobody moves during
+    setup while any seat is still empty (`api.Table.waiting_for`), so a test
+    that leaves a seat open has to resolve it itself -- fill it (`seat_bots`),
+    join it, or close it (`POST /api/close`) -- before the table plays.
     """
     tables = new_tables()
     server = HexSetServer(("127.0.0.1", 0), tables)
@@ -82,9 +92,14 @@ class Page:
     """One browser page, with everything it said to the console kept.
 
     A console error is a failed render, and a failed render on this page is
-    not cosmetic: `render()` runs inside the poll timer's own callback, so an
-    exception there stops the polling that is the only thing keeping the board
-    current. Which is why every test here ends by asserting the log is empty.
+    not cosmetic: `render()` runs inside the watch loop itself (`settle`), so
+    an exception there stops the reads that are the only thing keeping the
+    board current. Which is why every test here ends by asserting the log is
+    empty.
+
+    `polls` counts every answered read of the table. Those are no longer on a
+    timer: `settle` parks on `?after=<version>` and the server answers when
+    the table moves, so a count here is a count of *changes seen*.
     """
 
     def __init__(self, page):
@@ -111,120 +126,306 @@ class Page:
     def wait_for(self, expr: str, timeout: float = 30.0) -> None:
         self.page.wait_for_function(f"() => {expr}", timeout=timeout * 1000)
 
+    def click_first(self, selector: str) -> bool:
+        # dispatch_event, not click: a legal-road <line> can have a zero-width
+        # bounding box, which Playwright reads as invisible even though the
+        # page routes the click fine.
+        target = self.page.locator(selector)
+        if not target.count():
+            return False
+        target.first.dispatch_event("click")
+        return True
+
 
 def open_page(browser, url: str) -> Page:
+    """A fresh browser at `url`. Opening `/` deals a game and moves to its
+    address; opening a code goes to that game.
+
+    Not `networkidle`: the page keeps one read of the table open at all times
+    while it is somebody else's move (`settle`), so the network is never idle
+    and never will be. What "loaded" means here is the state the page waits
+    for below, which is what it always actually meant.
+    """
     page = Page(browser.new_page(viewport={"width": 1400, "height": 950}))
-    page.page.goto(url, wait_until="networkidle")
+    page.page.goto(url, wait_until="domcontentloaded")
+    page.wait_for("typeof state !== 'undefined' && state && state.seats")
+    page.page.wait_for_selector("#players .player-row")
     return page
 
 
-def deal(page: Page, bots: int) -> str:
-    """The front page's own deal button, with `bots` local opponents."""
-    page.page.evaluate("() => { currentBotModels = ['search2', 'search2', 'search2']; }")
-    page.page.select_option("#landing-bots", str(bots))
-    page.page.click("#landing-deal")
-    page.page.wait_for_url(lambda url: len(url.rstrip("/").rsplit("/", 1)[-1]) == 6)
-    page.wait_for("typeof state !== 'undefined' && state && state.seats")
-    # `state` is set a moment before the first render; wait for the render.
-    page.page.wait_for_selector("#players .player-row")
+def code_of(page: Page) -> str:
     return page.page.url.rstrip("/").rsplit("/", 1)[-1]
 
 
-def place_one_turn(page: Page) -> None:
-    """This seat's settlement and road for the turn the snake is on now."""
-    page.wait_for("state.to_move === state.seat", timeout=60)
-    for selector in (".clickable-vertex", ".clickable-edge"):
-        page.page.locator(selector).first.dispatch_event("click")
-        page.page.wait_for_timeout(600)
+def seat_bots(page: Page, model: str = BOT) -> None:
+    """Fill every open seat from the player list, which is the only place a
+    table chooses its opponents now that there is no lobby.
+
+    Driven off `state.seats`, not off the pickers: a bot seat keeps its
+    picker (that is how a bot is swapped), so "no pickers left" is never
+    true and counting them would loop forever.
+
+    Seat top-down, the natural gesture: order no longer matters, since
+    nothing at a table moves while any seat is still empty
+    (`api.Table.waiting_for`) -- once the last one is filled, setup runs at
+    the speed of whoever is sitting there.
+    """
+    for seat, entry in enumerate(page.state(".seats")):
+        if entry["kind"] != "empty":
+            continue
+        row = page.page.locator("#players .player-row").nth(seat)
+        row.locator("select").select_option(model)
+        page.page.wait_for_function(
+            f"() => state.seats[{seat}].kind === 'bot'", timeout=15000
+        )
 
 
-def place_setup(page: Page, timeout: float = 60.0) -> None:
+def answer_modal(page: Page) -> bool:
+    """The modals the game opens on its own: a discard owed to a seven, and
+    which seat to steal from. Anything else is dismissible and dismissed."""
+    if not page.page.evaluate("() => document.getElementById('modal').classList.contains('show')"):
+        return False
+    mode = page.page.evaluate("() => modalMode")
+    if mode == "discard":
+        cards = page.page.locator("#modal-body .pick-card:not(.disabled)")
+        if cards.count():
+            cards.first.click()
+            page.page.wait_for_timeout(300)
+            return True
+    elif mode == "steal":
+        options = page.page.locator(".steal-option")
+        if options.count():
+            options.first.click()
+            page.page.wait_for_timeout(300)
+            return True
+    page.page.keyboard.press("Escape")
+    page.page.wait_for_timeout(200)
+    return True
+
+
+def place_setup(page: Page, timeout: float = 180.0) -> None:
     """Click through this seat's own settlements and roads until setup ends."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if page.state(".phase") not in ("SETUP_SETTLEMENT", "SETUP_ROAD"):
             return
+        if answer_modal(page):
+            continue
         if page.state(".to_move") == page.state(".seat"):
-            for selector in (".clickable-vertex", ".clickable-edge"):
-                target = page.page.locator(selector)
-                if target.count():
-                    # dispatch_event, not click: a legal-road <line> can have a
-                    # zero-width bounding box, which Playwright reads as
-                    # invisible even though the page routes the click fine.
-                    target.first.dispatch_event("click")
-                    break
-        page.page.wait_for_timeout(400)
+            if not page.click_first(".clickable-vertex"):
+                page.click_first(".clickable-edge")
+        page.page.wait_for_timeout(350)
     raise AssertionError(f"setup did not finish: phase={page.state('.phase')}")
 
 
-def reach_main(page: Page) -> None:
-    """Roll this seat's dice and answer the robber if the roll was a seven.
+def play_turns(page: Page, turns: int, timeout: float = 900.0, each=None) -> int:
+    """Play `turns` of this seat's own turns through the page's controls.
 
-    Nobody owes a discard this early — every hand is a settlement or two's
-    worth — so a seven goes straight to placing the robber, and the steal
-    modal only opens when the chosen hex has more than one victim on it.
+    Roll, build whatever the board is offering, end the turn -- all of it by
+    clicking, never by posting to the API, which is the only way this says
+    anything about the page. `each` is called on every pass, for a check that
+    has to happen while a bot is on move.
     """
-    page.wait_for("state.to_move === state.seat && state.phase === 'ROLL'", timeout=90)
-    page.page.click("#roll-dice")
-    page.page.wait_for_timeout(800)
-    if page.state(".phase") == "ROBBER":
-        page.page.locator(".clickable-hex").first.dispatch_event("click")
-        page.page.wait_for_timeout(800)
-        victims = page.page.locator(".steal-option")
-        if victims.count():
-            victims.first.click()
-    page.wait_for("state.phase === 'MAIN' && state.to_move === state.seat", timeout=30)
+    played = 0
+    deadline = time.monotonic() + timeout
+    while played < turns and time.monotonic() < deadline:
+        if page.state(".game_over"):
+            return played
+        if answer_modal(page):
+            continue
+        if page.state(".to_move") != page.state(".seat"):
+            if each is not None:
+                each(played)
+            page.page.wait_for_timeout(400)
+            continue
+        phase = page.state(".phase")
+        if phase == "ROLL":
+            page.page.click("#roll-dice")
+            page.page.wait_for_timeout(600)
+        elif phase == "ROBBER":
+            page.click_first(".clickable-hex")
+            page.page.wait_for_timeout(600)
+        elif phase == "MAIN":
+            if page.click_first(".clickable-vertex") or page.click_first(".clickable-edge"):
+                page.page.wait_for_timeout(500)
+            end = page.page.locator("#end-turn")
+            if end.count() and end.is_visible():
+                end.click()
+                played += 1
+                page.page.wait_for_timeout(500)
+            else:
+                page.page.wait_for_timeout(400)
+        else:
+            page.page.wait_for_timeout(400)
+    return played
 
 
-def test_a_fresh_page_deals_a_game_and_says_nothing_to_the_console(live, browser):
+# --- The address is the game --------------------------------------------------
+
+
+def test_a_fresh_load_deals_a_game_at_its_own_address(live, browser):
+    """No front page, no lobby, no code to type: `/` deals and moves there."""
     _, url = live
     page = open_page(browser, url)
-    assert page.console == []
 
-    code = deal(page, 3)
-    assert len(code) == 6
+    assert len(code_of(page)) == 6
+    assert code_of(page) == page.state(".code")
     assert page.state(".seat") is not None
+    # Every seat but the creator's starts open -- filling them is a decision
+    # made at the table, not before it.
+    kinds = [s["kind"] for s in page.state(".seats")]
+    assert kinds.count("player") == 1
+    assert kinds.count("empty") == 3
     assert page.console == []
 
 
-def test_new_game_deals_another_table_after_a_bot_has_been_swapped(live, browser):
+def test_the_same_address_seats_a_second_person_at_the_same_table(live, browser):
+    """The address is the whole invitation."""
+    _, url = live
+    first = open_page(browser, url)
+    code = code_of(first)
+
+    second = open_page(browser, f"{url}/{code}")
+
+    assert code_of(second) == code
+    assert second.state(".seat") is not None
+    assert second.state(".seat") != first.state(".seat")
+    assert first.console == [] and second.console == []
+
+
+def test_the_player_list_is_where_a_table_picks_its_opponents(live, browser):
+    """There is no bot-count picker, because seating three bots fills the
+    table and a full table is one nobody can join. An open seat's picker
+    seats a bot on it, which is what `Tables.seat_bot` exists for."""
+    _, url = live
+    page = open_page(browser, url)
+    mine = page.state(".seat")
+
+    assert page.page.locator("#players select").count() == 3
+    seat_bots(page)
+
+    kinds = [s["kind"] for s in page.state(".seats")]
+    assert kinds.count("bot") == 3
+    assert kinds[mine] == "player"
+    assert [s["name"] for s in page.state(".seats") if s["kind"] == "bot"] == [BOT] * 3
+    assert page.console == []
+
+
+def test_a_seat_line_says_who_is_in_it(live, browser):
+    """The panel and the status line cannot disagree, because both read the
+    server's own per-seat kind. Every row used to be a bot picker -- your own
+    occupied seat, an open one, and a locked one all drawn identically."""
+    _, url = live
+    page = open_page(browser, url)
+    mine = page.state(".seat")
+    # Filling one of the three open seats still leaves two empty, and the
+    # table holds while any seat is (`api.Table.waiting_for`) -- so the other
+    # two stay exactly as open as before, whichever one is picked.
+    page.page.locator("#players select").last.select_option(BOT)
+    page.page.wait_for_timeout(600)
+
+    rows = page.page.locator("#players .player-row")
+    assert rows.count() == 4
+    for seat in range(4):
+        kind = page.state(f".seats[{seat}].kind")
+        row = rows.nth(seat)
+        if seat == mine:
+            # Your own row is your name: an input, not a label and not a picker.
+            assert row.locator("input").count() == 1
+            assert row.locator("input").get_attribute("placeholder") == "human"
+        elif kind == "bot":
+            assert row.locator("select").count() == 1
+            assert row.locator("select").input_value() == BOT
+        else:
+            assert "empty" in row.inner_text()
+    assert page.console == []
+
+
+def test_an_empty_seat_holds_the_table_until_a_person_resolves_it(live, browser):
+    """No on-sight retirement, no timer, no countdown: nobody moves during
+    setup while any seat is still empty. Seating two of the three open seats
+    leaves the table waiting on the third; closing it through the picker's
+    own "none" option is what lets setup run."""
+    _, url = live
+    page = open_page(browser, url)
+    # Freshly dealt, nothing is locked: a table with every seat open is a
+    # table nobody has resolved anything at yet.
+    assert page.state(".locked") == []
+
+    open_seats = [i for i, s in enumerate(page.state(".seats")) if s["kind"] == "empty"]
+    assert len(open_seats) == 3
+    for seat in open_seats[:2]:
+        row = page.page.locator("#players .player-row").nth(seat)
+        row.locator("select").select_option(BOT)
+        page.page.wait_for_function(f"() => state.seats[{seat}].kind === 'bot'", timeout=15000)
+
+    last_open = open_seats[2]
+    # One seat still open, so the whole table is still waiting on it --
+    # nobody's turn, not even the two bots just seated.
+    assert page.state(".to_move") is None
+    assert page.page.inner_text("#phase").strip() == "WAITING FOR SEATS"
+    assert page.console == []
+
+    row = page.page.locator("#players .player-row").nth(last_open)
+    row.locator("select").select_option("__close__")
+    page.page.wait_for_function(
+        f"() => (state.locked || []).includes({last_open})", timeout=15000
+    )
+    row = page.page.locator("#players .player-row").nth(last_open)
+    assert "locked seat" in row.inner_text()
+    assert row.locator("select").count() == 0
+    assert page.console == []
+
+    place_setup(page)
+    assert not page.state(".phase").startswith("SETUP"), "setup did not run once the hold released"
+
+    # Once the match is under way the closed seat's row is gone: nobody is
+    # in it and nobody ever will be, so the list shows only who is playing.
+    page.page.wait_for_timeout(400)  # one render after the phase turned
+    assert page.page.locator("#players .player-row").count() == 3
+    assert "locked seat" not in page.page.inner_text("#players")
+    assert page.console == []
+
+
+def test_new_game_deals_another_table(live, browser):
     """The reported symptom, in order: change a bot, then ask for a new game.
 
-    Swapping used to write the lineup slot the *renderer* had counted, and the
-    renderer gave every seat a picker — so a four-seat table wrote a fourth
+    Seating used to write the lineup slot the *renderer* had counted, and the
+    renderer gave every seat a picker -- so a four-seat table wrote a fourth
     lineup entry, and `POST /api/games` then asked for five seats and was
     refused. The button did nothing, visibly.
     """
     _, url = live
     page = open_page(browser, url)
-    first = deal(page, 3)
-
-    pickers = page.page.locator("#players select")
-    assert pickers.count() == 3, "only the bot seats are model pickers"
-    options = pickers.last.evaluate("e => Array.from(e.options).map(o => o.value)")
-    other = next(name for name in options if name != pickers.last.input_value())
-    pickers.last.select_option(other)
-    page.page.wait_for_timeout(1000)
-    assert page.page.evaluate("() => currentBotModels.length") == 3
+    first = code_of(page)
+    seat_bots(page)
 
     page.page.click("#new-game")
-    page.page.wait_for_url(lambda u: u.rstrip("/").rsplit("/", 1)[-1] != first)
-    page.wait_for("typeof state !== 'undefined' && state && state.seats")
-    assert page.page.inner_text("#notice") == ""
+    page.page.wait_for_function(
+        f"() => location.pathname.replace('/','') !== '{first}'", timeout=30000
+    )
+    page.page.wait_for_selector("#players .player-row")
+
+    second = code_of(page)
+    assert len(second) == 6 and second != first
+    assert page.state(".seat") is not None
+    assert [s["kind"] for s in page.state(".seats")].count("empty") == 3
     assert page.console == []
 
 
-def test_a_swap_answers_the_asking_seat_not_the_swapped_one(live, browser):
-    """A dropdown must not hand the page somebody else's view of the game."""
+def test_a_bot_seated_answers_the_asking_seat_not_the_seated_one(live, browser):
+    """A dropdown must not hand the page somebody else's view of the game.
+
+    `POST /api/bot` answered with the *target* seat's view, so touching a
+    bot's picker handed back that bot's entire hand and left the client
+    believing it sat at the bot's seat until its next poll.
+    """
     _, url = live
     page = open_page(browser, url)
-    deal(page, 3)
     mine = page.state(".seat")
 
-    picker = page.page.locator("#players select").last
-    options = picker.evaluate("e => Array.from(e.options).map(o => o.value)")
-    picker.select_option(next(n for n in options if n != picker.input_value()))
-    page.page.wait_for_timeout(1000)
+    page.page.locator("#players select").first.select_option(BOT)
+    page.page.wait_for_timeout(800)
 
     assert page.state(".seat") == mine
     revealed = [p["seat"] for p in page.state(".players") if "hand" in p]
@@ -232,184 +433,252 @@ def test_a_swap_answers_the_asking_seat_not_the_swapped_one(live, browser):
     assert page.console == []
 
 
-def test_an_open_picker_survives_the_polls_that_used_to_close_it(live, browser):
+def test_your_own_row_is_your_name_and_you_can_change_it(live, browser):
+    """The row that reads "human" is an input, for the same reason a bot
+    seat's row is a <select>: the control is the player line."""
     _, url = live
     page = open_page(browser, url)
-    deal(page, 3)
-    # The poll only runs while it isn't our move, which is the case the picker
-    # was unusable in: place this seat's own two pieces and the snake moves on
-    # to the bots, with the page polling every 1.5 s until it comes back.
-    place_one_turn(page)
-    page.wait_for("state.to_move !== state.seat", timeout=60)
+    mine = page.state(".seat")
+    seat_bots(page)
 
+    field = page.page.locator("#players .player-row").nth(mine).locator("input")
+    assert field.get_attribute("placeholder") == "human"
+    field.fill("brian")
+    field.press("Enter")
+    page.page.wait_for_function("() => state.seats[state.seat].name === 'brian'", timeout=15000)
+
+    # And it is what everyone else's list and the log call this seat from now on.
+    watcher = open_page(browser, f"{url}/{code_of(page)}")
+    assert watcher.state(f".seats[{mine}].name") == "brian"
+
+    # Blanking it puts the seat back to unnamed.
+    field.fill("")
+    field.press("Enter")
+    page.page.wait_for_function("() => !state.seats[state.seat].name", timeout=15000)
+    assert page.console == [] and watcher.console == []
+
+
+def test_an_open_picker_survives_the_reads_that_used_to_close_it(live, browser, monkeypatch):
+    """`render()` rebuilt `#players` wholesale on every read of the table --
+    and there is one of those every time anything at it changes -- replacing
+    the open `<select>` under the cursor. A picker you cannot use: it shut
+    about a second after it opened, every time. The rebuild is skipped while
+    the container holds focus.
+
+    Seat 0 is left open on purpose: leaving any seat empty holds the whole
+    table (`api.Table.waiting_for`), so the page is permanently waiting on
+    somebody else and the reads it parks on are the test's to trigger rather
+    than a window to be caught in. The reader is pinned to the last seat so
+    seat 0 is one it could have picked a bot for -- the very case the open
+    picker is for.
+    """
+    monkeypatch.setattr(random.SystemRandom, "randrange", lambda self, n: n - 1)
+    tables, url = live
+    page = open_page(browser, url)
+    mine = page.state(".seat")
+    for seat in (2, 1):
+        row = page.page.locator("#players .player-row").nth(seat)
+        row.locator("select").select_option(BOT)
+        page.page.wait_for_function(f"() => state.seats[{seat}].kind === 'bot'", timeout=15000)
+    assert mine == 3 and page.state(".to_move") is None
+
+    table = tables.get(code_of(page))
     picker = page.page.locator("#players select").first
-    picker.evaluate("e => { e.dataset.probe = 'kept'; e.focus(); }")
-    polls_before = page.polls
-    page.page.wait_for_timeout(int((2 * POLL_SECONDS + 1.0) * 1000))
+    picker.focus()
+    before = page.polls
 
-    assert page.polls - polls_before >= 2, "the page was not polling, so this proves nothing"
+    # Two real changes at the table, from a seat that is not this page's.
+    for vector in ([1.0, 0, 0, 0, -1.0], [-1.0, 0, 0, 0, 1.0]):
+        tables.handle(
+            "PUT",
+            f"/api/games/{table.code}/valuation",
+            {"valuation": vector},
+            table.seats[2].token,
+        )
+        page.page.wait_for_timeout(400)
+
+    # Both reached the page, and it is really still the same element focused.
+    assert page.polls - before >= 2, f"only {page.polls - before} reads arrived"
     assert page.page.evaluate(
-        "() => { const e = document.querySelector('#players select');"
-        " return !!(e && e.dataset.probe === 'kept' && document.activeElement === e); }"
-    ), "the poll replaced the open picker"
+        "() => document.activeElement === document.querySelectorAll('#players select')[0]"
+    )
+    assert page.page.locator("#players select").count() >= 1
     assert page.console == []
 
 
-def test_no_seat_reads_as_locked_while_somebody_is_in_it(live, browser):
-    """Every seat's line, against the server's own answer for that seat.
+# --- Pacing --------------------------------------------------------------------
 
-    A game dealt with open seats is the one that produces locked seats at all:
-    the setup snake reaches each one, waits it out, and retires it. What the
-    panel must never do is say that about a seat somebody is sitting in — nor,
-    as it did, draw all four identically and say nothing about any of them.
+
+def test_a_table_of_bots_plays_setup_at_its_own_speed(live, browser):
+    """Three `heximax` seats, and the clock is out of it.
+
+    Every bot action used to land on a one-second boundary: the runner slept
+    `poll_interval` after each of its own moves, and the page waited 1.5 s
+    before asking again. A setup phase of twelve bot placements took the best
+    part of twenty seconds against a search costing under a tenth of one.
+
+    Measured the way it is felt: the wall time this page spends waiting on
+    somebody else during setup, with the reader's own placements left out of
+    it. `heximax` rather than the `search2` the rest of this file uses --
+    this is the lineup the owner actually plays, and the one the pacing was
+    reported against.
     """
-    tables, url = live
+    _, url = live
     page = open_page(browser, url)
-    code = deal(page, 1)
-    place_setup(page)
+    seat_bots(page, "heximax")
 
-    api = tables.get(code).view(page.state(".seat"))
-    assert any(s["kind"] == "empty" for s in api["seats"]), "no open seat to retire"
-    assert api["locked"], "the snake retired nobody, so there is nothing to check"
+    waited = 0.0
+    deadline = time.monotonic() + 180
+    while page.state(".phase").startswith("SETUP") and time.monotonic() < deadline:
+        mark = time.monotonic()
+        if page.state(".to_move") == page.state(".seat"):
+            if not page.click_first(".clickable-vertex"):
+                page.click_first(".clickable-edge")
+            page.page.wait_for_timeout(50)
+        else:
+            page.page.wait_for_timeout(50)
+            waited += time.monotonic() - mark
 
-    rows = page.page.locator("#players .player-row")
-    assert rows.count() == len(api["seats"])
-    for seat, row in enumerate(api["seats"]):
-        line = rows.nth(seat).inner_text().lower()
-        occupied = row["kind"] != "empty"
-        assert ("locked" in line) == (seat in api["locked"]), (
-            f"seat {seat} ({row['kind']}) reads {line!r}, locked={api['locked']}"
-        )
-        if occupied:
-            assert "locked" not in line and "open seat" not in line
+    # The page's own state, reached without a reload: nothing here refreshes.
+    assert not page.state(".phase").startswith("SETUP"), "setup did not finish"
+    assert waited < 3.0, f"spent {waited:.1f}s waiting on the bots"
     assert page.console == []
 
 
-def _seed_a_clearing_position(tables, code, mine: int) -> int:
-    """Give this seat wood to spare and a bot next to it that wants wood.
+# --- No trading for a person ---------------------------------------------------
 
-    Hands and the counterparty's advertisement are set here rather than played
-    into existence: what is under test is the panel, and a bundle that clears
-    has to exist before the panel can be asked to compose one. `publish` is
-    the same call `PUT .../valuation` makes, so the bot's gate is the ordinary
-    `PostedValuation` a seat that never opted into confirm mode gets.
+
+def test_a_person_is_offered_no_way_to_trade_and_the_bots_still_do(live, browser):
+    """Withheld on the owner's instruction, 2026-09-03.
+
+    Nothing on the page advertises, proposes, confirms or declines; the
+    seat's own published vector stays all-zero; and a zero vector is dropped
+    at `hexset.trading._best_clearing`'s ranking before any gate is asked, in
+    either role -- so the human is not a counterparty and no exchange it is
+    party to can clear. The bots are untouched and go on dealing with each
+    other through the same engine event, which the transcript says out loud.
+
+    Fifteen turns, because a trade is a turn-scale event and one or two would
+    prove nothing either way.
+
+    What is *not* asserted here is that the bots did in fact clear a deal.
+    Whether a particular game throws up a clearing bundle belongs to the
+    deal and the engine, not to the page: observed runs of this same drive
+    range from seven exchanges over sixteen turns to none over forty. So the
+    condition this checks is the one that is actually a property of seating
+    -- the human's gate never accepts and advertises nothing, while every bot
+    seat has a gate of its own and has published something to be judged on --
+    and the transcript is checked for what it must never say. That the
+    mechanic clears deals at all is `tests/test_trading.py`'s job, on hands
+    it controls.
     """
-    table = tables.get(code)
-    with table.lock:
-        game = table.session.game
-        theirs = next(
-            i
-            for i, seat in enumerate(table.seats)
-            if seat.kind.value == "bot"
-        )
-        game._state.hands[mine] = [4, 0, 0, 0, 0]
-        game._state.hands[theirs] = [0, 4, 0, 0, 0]
-        # They want wood and would part with brick; I want brick and would
-        # part with wood. One wood for one brick clears for both of us.
-        table.session.publish(theirs, [1.0, -1.0, 0.0, 0.0, 0.0])
-    return theirs
-
-
-def _advertise(page: Page, wants: int, gives: int) -> None:
-    """Set this seat's own vector through the five-toggle panel."""
-    rows = page.page.locator("#trading .val-row")
-    rows.nth(wants).locator("button").nth(2).click()  # "+"
-    page.page.wait_for_timeout(400)
-    rows.nth(gives).locator("button").nth(0).click()  # "−"
-    page.page.wait_for_timeout(400)
-
-
-def test_the_panel_composes_and_proposes_a_trade(live, browser):
-    tables, url = live
+    _, url = live
     page = open_page(browser, url)
-    code = deal(page, 1)
-    place_setup(page)
-    reach_main(page)
-
     mine = page.state(".seat")
-    theirs = _seed_a_clearing_position(tables, code, mine)
-    _advertise(page, wants=BRICK, gives=WOOD)
-
-    panel = page.page.locator(".negotiate-panel").first
-    panel.wait_for(timeout=10_000)
-    # Their "wants" chip is wood, so clicking it offers one wood; their
-    # "gives" chip is brick, so clicking it asks for one brick.
-    panel.locator(".negotiate-chip.chip-want").first.click()
-    panel.locator(".negotiate-chip.chip-give").first.click()
-    assert panel.locator(".negotiate-indicator.clears").count() == 1
-
-    before = list(tables.get(code).session.game._state.hands[mine])
-    panel.locator(".negotiate-submit").click()
-    page.wait_for("state.trades.length > 0", timeout=15)
-
-    after = list(tables.get(code).session.game._state.hands[mine])
-    assert after[WOOD] == before[WOOD] - 1
-    assert after[BRICK] == before[BRICK] + 1
-    assert page.page.inner_text("#notice") == ""
-    assert theirs != mine
-    assert page.console == []
-
-
-def test_a_pending_offer_can_be_accepted_from_the_panel(live, browser):
-    """The confirm-mode human's half of the mechanic.
-
-    A human seat's gate is `PendingGate` by default now, so a bot's trade
-    event never clears against a person — it records the candidate and the
-    page has to be what answers it. The offer is placed on `game.pending`
-    directly, exactly as `PendingGate.accepts` places one, so the test does
-    not depend on which bundle a particular opponent's event happens to find.
-    """
-    tables, url = live
-    page = open_page(browser, url)
-    code = deal(page, 1)
+    seat_bots(page, "heximax")
     place_setup(page)
-    reach_main(page)
 
-    mine = page.state(".seat")
-    theirs = _seed_a_clearing_position(tables, code, mine)
-    table = tables.get(code)
-    with table.lock:
-        # Signed towards `a`: one brick in, one wood out.
-        table.session.game.pending.append(Trade(a=mine, b=theirs, received=(-1, 1, 0, 0, 0)))
-    _advertise(page, wants=BRICK, gives=WOOD)
+    def seat_to_seat_lines():
+        # The transcript, not `state.trades`: that block is the *current
+        # turn's* exchanges and is emptied by `end_turn`, so it says nothing
+        # about a deal two turns ago. The log keeps the whole game.
+        return [line for line in page.state(".log") if " to Player " in line]
 
-    accept = page.page.locator(".pending-offer .pending-accept").first
-    accept.wait_for(timeout=10_000)
-    before = list(table.session.game._state.hands[mine])
-    accept.click()
-    page.wait_for("state.pending.length === 0", timeout=15)
+    played = play_turns(page, 15, timeout=1500)
+    assert played >= 15 or page.state(".game_over"), played
 
-    after = list(table.session.game._state.hands[mine])
-    assert after[WOOD] == before[WOOD] - 1
-    assert after[BRICK] == before[BRICK] + 1
-    assert page.page.inner_text("#notice") == ""
+    # Nothing on the page to trade with.
+    assert page.page.locator("input[type=range]").count() == 0
+    assert page.page.locator("#negotiation").count() == 0
+    text = page.page.inner_text("body").lower()
+    for word in ("valuation", "advertis", "negotiat", "counterparty", "propose"):
+        assert word not in text, word
+
+    # This seat advertises nothing and holds nothing pending.
+    assert page.state(".valuations")[mine] == [0, 0, 0, 0, 0]
+    assert page.state(".pending") in ([], None)
+
+    # No exchange this seat was ever party to, over the whole transcript.
+    assert not [line for line in seat_to_seat_lines() if f"Player {mine + 1} " in line]
+
+    # The asymmetry, at the seats themselves rather than by what happened to
+    # clear: the human's gate never accepts and advertises nothing; every bot
+    # seat has its own gate and has published something to be judged on.
+    tables, _ = live
+    session = tables.get(code_of(page)).session
+    assert isinstance(session.traders[mine], PendingGate)
+    assert tuple(session.game.valuations[mine]) == NO_VALUATION
+    bots = [s for s in range(4) if s != mine and session.game.gates[s] is not None]
+    assert len(bots) == 3
+    assert all(tuple(session.game.valuations[s]) != NO_VALUATION for s in bots)
+
+    # Whatever the bots cleared, they cleared among themselves: every
+    # seat-to-seat line in the transcript names two other seats. (That such a
+    # line is written at all when a poll fires the event is
+    # `test_webplay.py::test_a_trade_a_poll_cleared_is_told_in_the_log`, on
+    # hands it controls -- not something to make a live game produce.)
+    assert all(f"Player {mine + 1} " not in line for line in seat_to_seat_lines())
     assert page.console == []
 
 
-def test_an_observer_without_a_seat_still_gets_a_board(live, browser):
-    """The code-sharing flow: a full game, opened by somebody with no seat.
+# --- Watching ------------------------------------------------------------------
 
-    `/api/board` and `/api/state` are both seat-gated, and an observer holds
-    no token for either, so the page used to 401 on its own geometry and die
-    on the first `board.vertices` it reached — a blank screen for every reader
-    a shared code was meant to reach.
+
+def test_watching_a_full_game_is_omniscient(live, browser):
+    """A link to a game with every seat taken opens it to watch, and a
+    spectator is outside the game, so they are shown all of it.
+
+    The exposure this is: `GET /api/table/<code>` is not authenticated and
+    cannot be, since holding the link is the whole qualification. Every route
+    that *acts* still answers a token and still gets its own seat's honest
+    view.
     """
     _, url = live
     player = open_page(browser, url)
-    code = deal(player, 3)
+    seat_bots(player)
+    place_setup(player)
+    play_turns(player, 2, timeout=300)
+    code = code_of(player)
 
-    watcher = open_page(browser, f"{url}/{code}")
-    watcher.wait_for("typeof state !== 'undefined' && state && state.players")
-    watcher.page.wait_for_timeout((2 * POLL_SECONDS + 1.0) * 1000)
+    watcher = Page(browser.new_context().new_page())
+    watcher.page.goto(f"{url}/{code}", wait_until="domcontentloaded")
+    watcher.wait_for("typeof state !== 'undefined' && state && state.seats")
+    watcher.page.wait_for_selector("#players .player-row")
 
     assert watcher.state(".seat") is None
-    assert watcher.page.locator("#players .player-row").count() == 4
-    assert watcher.page.locator("#board-svg polygon").count() > 0
-    assert watcher.page.inner_text("#phase") != "Loading..."
-    # No token, so nothing here is this reader's to change.
-    assert watcher.page.locator("#players select:not([disabled])").count() == 0
-    assert player.page.locator("#players select:not([disabled])").count() == 3
-    # The join it tries first is answered 409 on a full table, by design; the
-    # browser logs any 4xx as a console error, so that one is expected here
-    # and nothing else is.
-    assert [line for line in watcher.console if "409" not in line] == []
+    # Every hand, every dev card, every true victory-point count.
+    assert {p["seat"] for p in watcher.state(".players") if "hand" in p} == {0, 1, 2, 3}
+    assert {p["seat"] for p in watcher.state(".players") if "dev_cards" in p} == {0, 1, 2, 3}
+    # And a seat's own view is still only its own.
+    assert {p["seat"] for p in player.state(".players") if "hand" in p} == {player.state(".seat")}
+
+    # Nothing here is actionable, so the parts that only mean something to a
+    # seat are absent.
+    assert watcher.page.locator("#players select").count() == 0
+    assert watcher.page.locator("#players input").count() == 0
+    assert watcher.page.locator("#piece-supply").inner_text().strip() == ""
+    assert watcher.state(".legal_actions") == []
+
+    # A player row opens that seat's cards below, and closes again.
+    assert "Click a player" in watcher.page.inner_text("#hand")
+    watcher.page.locator("#players .player-row").first.click()
+    watcher.page.wait_for_timeout(400)
+    assert "Resource Cards" in watcher.page.inner_text("#hand")
+    watcher.page.locator("#players .player-row").first.click()
+    watcher.page.wait_for_timeout(400)
+    assert "Click a player" in watcher.page.inner_text("#hand")
+
+    assert watcher.console == [], watcher.console
+    assert player.console == []
+
+
+def test_a_code_with_no_game_behind_it_says_so(live, browser):
+    _, url = live
+    page = Page(browser.new_page(viewport={"width": 1400, "height": 950}))
+    page.page.goto(f"{url}/zzzzzz", wait_until="domcontentloaded")
+    page.page.wait_for_function(
+        "() => document.getElementById('phase').textContent.trim() !== 'Loading...'",
+        timeout=15000,
+    )
+    assert "zzzzzz" in page.page.url
+    assert page.page.locator("#players .player-row").count() == 0

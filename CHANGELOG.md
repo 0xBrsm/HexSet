@@ -41,6 +41,74 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`hexset.bench.road_sweep`**: heximax-vs-heximax duels across a grid of
+  challenger `road`/`card` evaluation weights, recording roads, settlements,
+  cities and VP per seat alongside the win rate `hexset.bench.ablate` already
+  tracked. `docs/readouts/heximax-road-sweep/` has the first sweep.
+- **`hexset.bench.profile_heximax`**: plays N complete four-seat games under
+  `cProfile` for one preset, reporting ms/decision (mean/p50/p95) and the top
+  functions by cumulative and total time. `docs/readouts/heximax-profile/`
+  has the first reading: real per-turn trade clearing, not anything inside
+  the search's lookahead, is the largest cost center in a heximax game.
+- **A read can wait for the next change instead of asking again.** `GET
+  /api/state` and `GET /api/table/<code>` accept `?after=<version>&wait=<seconds>`
+  and hold the request until the table has moved past the version the caller
+  already has, up to 25 seconds; every view now carries its own `version`.
+  A request without `after` answers immediately, exactly as before.
+  `python -m hexset.clients.botclient --poll-interval` is now the longest one
+  of those waits rather than a sleep between moves, and defaults to 10 seconds.
+- **The browser board is the pre-tables UI again**, rebuilt from `f6856d7`
+  onto the current server rather than carried forward through the lobby
+  rework. Loading the page puts you in a game — the one you were last at if
+  it is still going, a fresh one otherwise — and the address bar shows that
+  game's code. Every seat but the creator's starts empty, the creator's row
+  reads "human", and each other row is a model picker: choosing one seats
+  that bot, and a person who opens the link takes a seat instead. A link to a
+  game that is full or gone says so rather than dealing a different game
+  under the same address.
+- **Every game is public, and watching one is omniscient.** A link to a game
+  with no seat left opens it to watch: the board, the log, and every seat's
+  standing, updating as the game goes. A spectator is outside the game and is
+  shown all of it — every hand, every development card, every true
+  victory-point count, and a transcript that names the card bought, the card
+  stolen and the cards discarded. Clicking a player row shows that seat's
+  cards. Nothing is actionable, so the pickers, the board buttons and the
+  piece supply are simply absent, which is what says you are watching.
+  `GET /api/table/<code>/board` serves the layout that view is drawn on,
+  alongside the token-free `GET /api/table/<code>`.
+
+  **This route is not authenticated and cannot be** — holding the link is the
+  whole qualification, and everyone playing holds the link. A seat that opens
+  its own game's public view is reading every opponent's hand. Every route
+  that *acts* still answers a token and still gets its own seat's honest view
+  (`state_view` refuses `omniscient` alongside a seat outright), so nothing a
+  bot or a training run reads is affected; the exposure is to people, at a
+  table, who choose to look.
+- Your own row in the player list is your name: an input standing in for the
+  line, the way a bot seat's row is a picker. It reads "human" until you type
+  something, and what you type reaches the other players' lists and the log.
+  Blanking it puts the seat back to unnamed. (`POST /api/name`, unchanged.)
+- Player-to-player trading is gone from the browser with the offers that
+  backed it (`PROPOSE_TRADE`/`ACCEPT_TRADE`/`DECLINE_TRADE`, `TRADE_RESPOND`,
+  the view's `offer` block). The modal a resource card opens is the bank and
+  port route, which is unchanged.
+- Nobody moves during setup while any seat is still empty. The grace window
+  that used to hold a seat open for a fixed time is gone for good, and with
+  it `SEAT_GRACE_SECONDS`, `Config.seat_grace`, `POST /api/games`'s
+  `seat_grace`, `--seat-grace` and `HEXSET_UI_SEAT_GRACE` — a seat resolves
+  when a person opens the link and takes it, the creator picks a bot for it,
+  or the creator closes it outright (`POST /api/close`), never on a clock.
+  `to_move` is `null` and every view's `waiting_for` names the seats still
+  open until then; once none is, play starts from seat 0 at full speed.
+- Game codes are lowercase (`abcdef`), since a code is only ever seen as a
+  URL. Lookups normalise, so a code capitalised on the way into an address
+  bar still opens its game, and a game journalled under a capitalised code
+  still resumes.
+- The browser board seats a bot from the player list: an open seat's picker
+  offers every model alongside the seat's current state, and choosing one
+  fills the seat for the rest of the game. `POST /api/bot` (`Tables.seat_bot`,
+  formerly `swap_bot`) now takes an empty seat as well as one with a bot on
+  it, refusing a person's seat and a retired one.
 - **`hexset.trading.NETWORK_GATE_ROWS`** (`32`): the most candidates a network
   gate's `accepts_many` will score in one batched forward, beside
   `VALUE_SCALE`. `hexset.clients.onnxbot.NetworkBot.accepts_many` now scores
@@ -195,6 +263,38 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   candidates.
 ### Fixed
 
+- **Bots played one action a second, whatever they were actually thinking.**
+  Every bot seat submitted a move and then slept a full second before looking
+  at the board again, and the page waited 1.5 s between reads on top of that
+  — so a search costing under a tenth of a second landed on a one-second
+  boundary and a table of three bots crawled. Nothing is paced by a clock any
+  more: a bot plays its whole turn back to back and then waits for the table
+  to change, and the page is told the moment it does. Three `heximax` seats
+  now finish the setup phase in under a second, where the same lineup took
+  the better part of twenty.
+- Seats retired during setup no longer show in the player list once the match is under way.
+- **A new game always gave the creator the first turn, even seated away from
+  Player 1.** The setup snake started wherever `POST /api/games` happened to
+  land the creator's random seat instead of seat 0. It now always opens on
+  seat 0, whoever holds it, and the page highlights that seat as current;
+  seat 0 is held open rather than retired while it waits to be filled.
+- **An empty seat's picker read "open seat" in the same white as a chosen
+  bot's name.** It now reads "empty", in the same muted grey as a locked
+  seat, so an unfilled seat reads as unfilled at a glance; your own row's
+  "human" placeholder is styled to the normal name color instead of the
+  browser's own dimmer default.
+- Opening a full game's address logged a console error. The page asked for a
+  seat first and read the refusal as "watch this one instead"; arriving at a
+  full table is the ordinary way to reach a game you are not playing in, so
+  it reads `GET /api/table/<code>` first and only asks for a seat when one
+  is open.
+- Trades the engine cleared on a poll were never mentioned in the game log.
+  A turn's first trade event runs lazily, at whichever of the engine's
+  trigger points is reached first, which on the server is a poll rather than
+  an action — those exchanges reached `trades` in the state and the ledger
+  but no log line. They are attributed to the last action applied, matching
+  `hexset.record.record_game`.
+
 - **The seat panel could not tell an occupied seat from an open or a locked
   one.** Every seat's line was drawn as a bot model picker — your own, a
   seat nobody had taken, and one the setup snake had retired — because the
@@ -268,6 +368,82 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **`HonestEvaluator.progress_toward`'s inner sum is a list comprehension,
+  not a generator expression**, over the identical operands in the
+  identical order (`sum([min(hand[r], n) for r, n in needed]) / total`) —
+  bit-identical to the generator it replaces (CPython 3.12's `sum` is
+  Neumaier-compensated, so only the same values in the same order are safe
+  here), just without a generator's per-item frame-switch overhead on
+  `needed`'s two or three pairs. Behaviour-neutral: the byte-identical
+  choice census (`test_choices_are_byte_identical_to_the_recorded_census`,
+  both `heximax` and `search2`) is unchanged. Measured with
+  `hexset.bench.profile_heximax` (3 games, seed 100, single process):
+  `heximax` 42,695,282 -> 38,238,671 function calls over the 3 games (-10.4%);
+  `heximax-notrade` 20,192,176 -> 18,685,520 (-7.5%). Wall-clock ms/decision
+  moved within this box's cross-run noise (shared with a GPU training run);
+  the call-count drop is the reliable signal.
+- **`HonestEvaluator.belief_for`'s cache key is cheaper to build, on a hit
+  or a miss.** `map(tuple, state.hands)` in place of a generator expression
+  over the same hands in the same order, list comprehensions in place of
+  generator expressions for each seat's ledger `known`/`unknown`, and a
+  fast path that returns `()` for `certify` outright rather than draining
+  an empty generator to discover it is empty (`certify` is `()` at both of
+  this method's call sites today). Same key value, same cache semantics,
+  same `View.__init__` fields covered (board occupancy and the robber
+  included, per the method's own exactness argument) — only the
+  construction is cheaper. Behaviour-neutral: the byte-identical choice
+  census is unchanged. Measured with `hexset.bench.profile_heximax` (3
+  games, seed 100, single process), cumulative with the `progress_toward`
+  change above: `heximax` mean ms/decision 8.998 -> 8.315 (-7.6%), 6.260s
+  -> 5.753s/game (-8.1%); `heximax-notrade` mean ms/decision 7.105 -> 6.679
+  (-6.0%), 2.678s -> 2.532s/game (-5.5%).
+- **`Heximax._marginal_gain`/`_marginal_loss`/`_delta` clone only what a
+  marginal/delta check actually touches.** A new `_thin_copy` (heximax's
+  own, alongside `copy_state`, not a change to it) copies `hands` and,
+  where the caller mutates it, `bank`; the board, deck, dev cards, knight
+  counts and (for `_delta`) the bank are shared with the real live game
+  state these checks read `view.state` from, never copied, since none of
+  these three methods ever mutates them. Safe only because nothing
+  downstream reads `.state` back off a `belief_for` cache hit for one of
+  these calls (`_thin_copy`'s own docstring records the invariant this
+  depends on for the next person to touch this path). Byte-identical
+  choice census and the full non-slow suite (881 passed) both unchanged.
+  Measured with `hexset.bench.profile_heximax` (3 games, seed 100, single
+  process, before/after run back-to-back to isolate the change from this
+  box's own load swings): `heximax` mean ms/decision 8.865 -> 8.388
+  (-5.4%), 5.970s -> 5.688s/game (-4.7%); `heximax-notrade` mean
+  ms/decision 6.930 -> 6.776 (-2.2%), 2.624s -> 2.563s/game (-2.3%) — a
+  smaller win than the other two changes above, since these three methods
+  fire only during the real game-level trade event, never inside the
+  search's own lookahead.
+- **The player list's picker gains a third option, "none".** Choosing it
+  closes that seat outright (`POST /api/close`) — the explicit gesture that
+  replaces the setup snake retiring an open seat on sight. A closed seat
+  reads "locked seat" exactly as one the snake used to retire did, and its
+  row disappears once the match is under way. Any seated person may close
+  any other seat, the same permission as picking it a bot.
+- **The web page offers a person no way to trade with another seat.** The
+  advertisement controls, the negotiation panel and the pending-offer cards
+  are gone from the browser; the bank/port modal a resource card opens is
+  unchanged. Every route behind them is untouched and still answers an LLM
+  or API client: `PUT /api/games/<code>/valuation`, `POST
+  /api/games/<code>/trade`, `.../trade/confirm`, `.../trade/decline`, and
+  the MCP trading tools.
+- **A person's seat is gated when it sits down, not when it first
+  publishes.** `hexset.server.webplay.GameSession.confirm_mode(seat)`
+  installs a `PendingGate` over `hexset.trading.NO_VALUATION` at seat-up,
+  and `POST /api/games`/`POST /api/join` call it. The seat advertises
+  nothing and accepts nothing, and a seat whose vector is all-zero is
+  dropped when candidates are ranked, before any gate is asked — so no
+  exchange a person is party to can clear. Bot seats are unaffected and go
+  on trading with each other.
+
+- **The browser board has no front page.** Opening `/` deals a game and
+  moves to its address; that address is the whole invitation — everyone who
+  opens it sits down at the same table, and the last open seat can be given
+  to a bot from the player list. The deal/join/name/code-entry screen is
+  gone, and with it the browser's own name field (`POST /api/name` is
+  unchanged for API and MCP clients).
 - **Trade candidates are bundles, not one-for-one swaps.**
   `hexset.trading._candidates` now enumerates every signed bundle on
   disjoint resources, coverable from the true hands, rather than only

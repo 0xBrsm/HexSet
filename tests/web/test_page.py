@@ -358,6 +358,20 @@ def test_an_empty_seat_is_retired_on_sight_with_no_countdown(live, browser):
     assert "locks in" not in body
     assert page.console == []
 
+    # Once the match is under way the retired seat's row is gone: nobody is
+    # in it and nobody ever will be, so the list shows only who is playing.
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline and page.state(".phase").startswith("SETUP"):
+        if page.state(".to_move") == page.state(".seat"):
+            if not page.click_first(".clickable-vertex"):
+                page.click_first(".clickable-edge")
+        page.page.wait_for_timeout(250)
+    assert not page.state(".phase").startswith("SETUP"), "setup did not finish"
+    page.page.wait_for_timeout(1600)  # one poll after the phase turned
+    locked = page.state(".locked")
+    assert page.page.locator("#players .player-row").count() == 4 - len(locked)
+    assert "locked seat" not in page.page.inner_text("#players")
+
 
 def test_new_game_deals_another_table(live, browser):
     """The reported symptom, in order: change a bot, then ask for a new game.

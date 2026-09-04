@@ -1526,7 +1526,12 @@ function renderPlayers() {
   // would have refreshed can wait for the tick after the choice.
   if (container.contains(document.activeElement)) return;
   container.innerHTML = "";
+  const setup = state.phase === "SETUP_SETTLEMENT" || state.phase === "SETUP_ROAD";
   for (const p of state.players) {
+    // A retired seat is shown as such while setup is still placing, so the
+    // table can see the snake pass it; once the match is under way the row
+    // goes, since there is nobody in it and never will be.
+    if (!setup && (state.locked || []).includes(p.seat)) continue;
     const color = SEAT_COLORS[p.seat];
     const row = html("div", {class: `player-row${state.to_move === p.seat ? " active" : ""}`});
     const swatch = html("div", {class: "swatch"});

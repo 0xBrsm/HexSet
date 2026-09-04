@@ -216,6 +216,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   candidates.
 ### Fixed
 
+- Seats retired during setup no longer show in the player list once the match is under way.
 - **A new game always gave the creator the first turn, even seated away from
   Player 1.** The setup snake started wherever `POST /api/games` happened to
   land the creator's random seat instead of seat 0. It now always opens on

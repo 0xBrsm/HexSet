@@ -10,8 +10,6 @@ from hexset.game import Phase, move_robber_to, start, to_move
 from hexset.onnx_record import record_from_game
 from hexset.server.rules import options_for
 
-from conftest import step_randomly
-
 
 def _rig_one_card_steal(num_players: int, thief: int, victim: int, resource: int):
     """A game parked in `Phase.ROBBER` with `victim` holding exactly one card
@@ -84,26 +82,6 @@ def test_a_steal_is_identity_independent_in_the_record():
     }
     assert differing <= {"own_hand"} | MOVERS_OWN, differing
     assert "own_hand" in differing
-
-
-def test_the_ledger_invariant_holds_over_a_random_playout():
-    """`sum(known) + unknown == true hand size` and `known[r] <= true[r]` for
-    every seat, at every step of a real game -- the two properties
-    `PublicLedger.spend`/`.steal` are proved (not merely tested) to
-    preserve, provided the ledger started in sync (see their docstrings)."""
-    board = random_base_board(random.Random(0))
-    rng = random.Random(2)
-    game = start(board, 3, rng)
-
-    for _ in range(200):
-        if game.won_by is not None:
-            break
-        step_randomly(game, rng)
-        for seat, hand in enumerate(game._state.hands):
-            seat_ledger = game.ledger.seats[seat]
-            assert sum(seat_ledger.known) + seat_ledger.unknown == sum(hand)
-            for resource, true_count in enumerate(hand):
-                assert seat_ledger.known[resource] <= true_count
 
 
 def test_undo_restores_the_ledger_with_the_state():

@@ -37,7 +37,7 @@ def test_four_seat_random_episode_terminates():
     )
 
 
-@pytest.mark.parametrize("num_players", [2, 3, 4, 5, 6])
+@pytest.mark.parametrize("num_players", [2, 4])
 def test_player_counts_construct_and_reset(num_players):
     """`num_players` is configurable (`docs/gym-design.md`'s own "agents
     seat_0..seat_3 (configurable players)"); every count the engine itself

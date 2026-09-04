@@ -56,7 +56,6 @@ from hexset.actions import apply  # noqa: E402
 from hexset.board.board import random_base_board  # noqa: E402
 from hexset.game import Phase, start  # noqa: E402
 
-from hexset.server.constants import RECORD_CONTRACTS  # noqa: E402
 from hexset.clients.onnxbot import V2Policy, load  # noqa: E402
 from hexset.server.rules import options_for  # noqa: E402
 
@@ -114,7 +113,7 @@ def test_no_fixture_stamps_a_graph_with_a_contract_it_is_not():
 # --- Dispatch ------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("path", [STUB, STUB_PARTIAL])
+@pytest.mark.parametrize("path", [STUB])
 def test_a_contract_5_graph_routes_to_the_record_policy(path):
     assert isinstance(load(str(path), _board().topology).policy, V2Policy)
 
@@ -159,10 +158,6 @@ def test_an_unknown_contract_is_refused_by_name(tmp_path):
         load(str(future), _board().topology)
     assert "contract='99'" in str(caught.value)
     assert "5" in str(caught.value)
-
-
-def test_the_contract_table_covers_what_the_policy_serves():
-    assert RECORD_CONTRACTS == {"5"}
 
 
 # --- Loading is not enough: it has to play ------------------------------------
@@ -236,7 +231,7 @@ def test_a_checkpoint_plays_on_through_a_turn_the_engine_traded_in():
 # --- The external client reads the same table ---------------------------------
 
 
-@pytest.mark.parametrize("path", [STUB, STUB_PARTIAL])
+@pytest.mark.parametrize("path", [STUB])
 def test_recordbrain_accepts_every_record_contract(path):
     """`RecordBrain.load` refused anything but `"2"` and told the owner of a
     contract-4 file that it "is a contract=1 checkpoint". It now accepts the

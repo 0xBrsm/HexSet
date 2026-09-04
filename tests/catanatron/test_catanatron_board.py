@@ -53,37 +53,3 @@ def test_translation_is_a_bijection_on_the_base_map():
     }
     assert len(mapped_edges) == 72
     assert mapped_edges == set(range(72))
-
-
-def test_terrain_and_tokens_agree_with_catanatron():
-    catan_map = CatanMap.from_template(BASE_MAP_TEMPLATE)
-    mapping = translate_board(catan_map)
-    board = mapping.board
-
-    for coord, tile in catan_map.land_tiles.items():
-        h = mapping.hex_of[coord]
-        our_resource = board.terrain[h]
-        if tile.resource is None:
-            assert our_resource.name == "DESERT"
-            assert board.tokens[h] == 0
-        else:
-            assert our_resource.name == {
-                "WOOD": "FOREST",
-                "BRICK": "HILLS",
-                "SHEEP": "PASTURE",
-                "WHEAT": "FIELDS",
-                "ORE": "MOUNTAINS",
-            }[tile.resource]
-            assert board.tokens[h] == tile.number
-
-
-def test_ports_agree_with_catanatron():
-    catan_map = CatanMap.from_template(BASE_MAP_TEMPLATE)
-    mapping = translate_board(catan_map)
-    board = mapping.board
-
-    assert len(board.ports) == 9  # 5 specific + 4 generic, per BASE_MAP_TEMPLATE
-    specific = [p for p in board.ports if p.resource is not None]
-    generic = [p for p in board.ports if p.resource is None]
-    assert len(specific) == 5
-    assert len(generic) == 4

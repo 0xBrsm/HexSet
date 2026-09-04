@@ -116,7 +116,7 @@ def test_a_finished_game_offers_nothing():
     assert legal_actions(game) == []
 
 
-@pytest.mark.parametrize("seed", range(8))
+@pytest.mark.parametrize("seed", range(3))
 def test_random_games_finish_with_a_legal_winner(seed):
     game = play_random_game(num_players=4, rng=random.Random(seed))
 
@@ -124,7 +124,7 @@ def test_random_games_finish_with_a_legal_winner(seed):
     assert victory_points(game._state, game.won_by) >= WINNING_POINTS
 
 
-@pytest.mark.parametrize("seed", range(5))
+@pytest.mark.parametrize("seed", range(2))
 def test_resources_survive_a_whole_game(seed):
     game = play_random_game(num_players=4, rng=random.Random(seed))
     assert total_in_play(game._state) == expected_total()

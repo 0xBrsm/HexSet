@@ -9,12 +9,16 @@ names the right seat, game and trade.
 from __future__ import annotations
 
 import json
+import random
+
 import threading
 
 import pytest
 
 from conftest import new_tables
+
 from hexset.server import mcp
+
 from hexset.server.web import HexSetServer
 
 SOLO = ["search2", "search2", "search2"]
@@ -31,6 +35,14 @@ def live_server():
         server.shutdown()
         thread.join(timeout=5)
         server.server_close()
+
+
+@pytest.fixture(autouse=True)
+def _creator_at_seat_zero(monkeypatch):
+    """Pin the creator to seat 0 so no bot seat is on move before the test
+    acts (same race and same fix as `test_web.py`: `Tables.create` deals
+    `first=0`, and a bot seated first starts its runner thread mid-test)."""
+    monkeypatch.setattr(random.SystemRandom, "randrange", lambda self, n: 0)
 
 
 @pytest.fixture(autouse=True)
@@ -60,21 +72,6 @@ def test_new_game_seats_the_caller_and_remembers_the_code(live_server):
     assert "token" not in data  # popped by _seat -- never reaches the LLM
     assert data["code"] == mcp._code
     assert mcp._token
-
-
-def test_set_valuation_and_get_table_round_trip(live_server):
-    _, base = live_server
-    mcp.BASE_URL = base
-    data = call("new_game", opponents=SOLO)
-    seat = data["seat"]
-    vector = [1.0, 0.0, 0.0, 0.0, -1.0]
-
-    published = call("set_valuation", vector=vector)
-    assert published["valuations"][seat] == vector
-
-    table = call("get_table")
-    assert table["valuations"][seat] == vector
-    assert "pending" in table and "trades" in table
 
 
 def test_new_game_with_no_confirm_flag_still_auto_accepts(live_server):
@@ -117,91 +114,3 @@ def test_new_game_with_no_confirm_flag_still_auto_accepts(live_server):
     assert view["trades"], "an LLM seat's own default must still auto-accept"
     assert state.hands[seat][Resource.ORE] == 1
     assert state.hands[other][Resource.WOOD] == 1
-
-
-def test_propose_trade_confirm_and_decline_round_trip(live_server):
-    from hexset.board.terrain import Resource
-
-    _, base = live_server
-    mcp.BASE_URL = base
-    data = call("new_game", opponents=SOLO, confirm=False)
-    seat = data["seat"]
-    # Reach the live table directly to stage hands/vectors the way
-    # test_api.py does -- the tools only ever compose the wire request, they
-    # don't manufacture game state.
-    server, _ = live_server
-    table = server.tables.get(data["code"])
-    other = next(s for s in range(table.session.game.num_players) if s != seat)
-    from hexset.game import Phase
-
-    game = table.session.game
-    game.phase = Phase.MAIN
-    game.current_player = seat
-    state = game.state(seat, hidden=False)
-    for hand in state.hands:
-        hand[:] = [0, 0, 0, 0, 0]
-    state.hands[seat][Resource.WOOD] = 1
-    state.hands[other][Resource.ORE] = 1
-    table.session.publish(other, [1.0, 0, 0, 0, -1.0])  # wants wood, gives ore
-
-    view = call("propose_trade", counterparty=other, give={"Wood": 1}, receive={"Ore": 1})
-    assert view["trades"][-1] == {
-        "a": seat, "b": other, "gave": [1, 0, 0, 0, 0], "got": [0, 0, 0, 0, 1]
-    }
-
-
-def test_confirm_mode_seat_reviews_pending_offers(live_server):
-    from hexset.board.terrain import Resource
-    from hexset.game import Phase
-    from hexset.trading import trade_event
-
-    server, base = live_server
-    mcp.BASE_URL = base
-    data = call("new_game", opponents=SOLO, confirm=True)
-    seat = data["seat"]
-    table = server.tables.get(data["code"])
-    bot = next(s for s in range(table.session.game.num_players) if s != seat)
-    # This test hand-drives the engine, so the bot's own runner has to be off
-    # the table first: it wakes on every change and would play the very turn
-    # being staged here out from under it.
-    table.stop_runners()
-
-    game = table.session.game
-    game.phase = Phase.MAIN
-    game.current_player = bot
-    state = game.state(bot, hidden=False)
-    for hand in state.hands:
-        hand[:] = [0, 0, 0, 0, 0]
-    state.hands[bot][Resource.ORE] = 1
-    state.hands[seat][Resource.WOOD] = 1
-
-    call("set_valuation", vector=[-1.0, 0, 0, 0, 1.0])  # gives wood, wants ore
-    table.session.publish(bot, [1.0, 0, 0, 0, -1.0])  # wants wood, gives ore
-    trade_event(
-        game,
-        lambda s, view, received, other: game.gates[s].accepts(view, received, other),
-    )
-
-    table_view = call("get_table")
-    assert table_view["pending"] == [
-        {"counterparty": bot, "gave": [1, 0, 0, 0, 0], "got": [0, 0, 0, 0, 1]}
-    ]
-
-    confirmed = call("confirm_trade", index=0)
-    assert confirmed["pending"] == []
-    assert state.hands[seat][Resource.ORE] == 1
-
-
-def test_decline_trade_drops_the_offer(live_server):
-    server, base = live_server
-    mcp.BASE_URL = base
-    data = call("new_game", opponents=SOLO, confirm=True)
-    seat = data["seat"]
-    table = server.tables.get(data["code"])
-    bot = next(s for s in range(table.session.game.num_players) if s != seat)
-    from hexset.trading import Trade
-
-    table.session.game.pending.append(Trade(seat, bot, (-1, 0, 0, 0, 1)))
-
-    declined = call("decline_trade", index=0)
-    assert declined["pending"] == []

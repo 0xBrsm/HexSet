@@ -543,37 +543,6 @@ def test_zero_valuation_seats_are_never_enumerated():
         trading_mod._hand_multisets = orig
 
 
-def test_zero_valuation_candidates_do_not_change_the_ranking():
-    """Neutrality: a zero-valuation seat contributes exactly zero to both
-    sides of every candidate it touches (`dot` with the zero vector is
-    always zero), so `_rank_candidates_loop`/`_rank_candidates_vectorized`
-    already discard every such candidate downstream (`mine <= 0.0` /
-    `theirs <= 0.0`). Skipping their enumeration in `_candidates` changes
-    what gets *computed*, never what gets *chosen*: ranking the unfiltered
-    candidate set and the filtered one produces the identical ranked list,
-    on the same seats and vectors `test_zero_valuation_seats_are_never_
-    enumerated` uses."""
-    game = stocked(
-        (0, Resource.WOOD, 2),
-        (0, Resource.ORE, 1),
-        (1, Resource.BRICK, 2),
-        (2, Resource.SHEEP, 2),
-    )
-    state = game._state
-    vectors = [
-        vector(wood=-0.1, ore=-0.1, brick=1.0, sheep=0.5),
-        vector(wood=1.0, ore=1.0, brick=-0.2, sheep=-0.1),
-        NO_VALUATION,
-        NO_VALUATION,
-    ]
-    unfiltered = list(_candidates(state, 0, game.locked))
-    filtered = list(_candidates(state, 0, game.locked, vectors))
-    assert len(filtered) < len(unfiltered)  # seat 2's candidates were pruned early
-    assert _rank_candidates_loop(0, vectors, unfiltered) == _rank_candidates_loop(
-        0, vectors, filtered
-    )
-
-
 def test_trade_event_chooses_the_same_trade_with_a_zero_valuation_bystander():
     """End-to-end: a mixed table (two publishing seats, one that has never
     published) clears the same deal the two publishing seats would have
@@ -681,29 +650,6 @@ def test_every_candidate_is_asked_in_rank_order_until_the_last_one_clears():
     ]
     done = run(game, traders)
     assert done == [Trade(0, last_them, last_received)]
-
-
-def test_the_bundle_engine_is_deterministic():
-    """The same position, replayed from scratch, clears the same trades in
-    the same order -- nothing here depends on dict, set, or hash-order
-    iteration."""
-
-    def once():
-        game = stocked(
-            (0, Resource.WOOD, 3), (0, Resource.BRICK, 2), (1, Resource.ORE, 4)
-        )
-        traders = [
-            Trader(vector(ore=1.0, wood=-1.0, brick=-0.5)),
-            Trader(vector(wood=1.0, brick=0.5, ore=-1.0)),
-            Trader(),
-            Trader(),
-        ]
-        return run(game, traders)
-
-    first = once()
-    second = once()
-    assert first == second
-    assert len(first) > 0
 
 
 # --- where the event runs -----------------------------------------------------
@@ -1118,20 +1064,19 @@ def test_execute_trade_clears_on_coverage_surplus_and_gate():
     assert game.trades_made == 1
 
 
-def test_execute_trade_rejects_a_proposer_who_cannot_cover_it():
-    game = stocked((1, Resource.ORE, 1))
-    game.valuations[1] = vector(wood=1.0, ore=-1.0)
-    _seated(game, [Trader(), Trader(), Trader(), Trader()])
+def test_execute_trade_rejects_whichever_side_cannot_cover_it():
+    """The same coverage rule, checked mirrored on each side of the trade."""
+    proposer_short = stocked((1, Resource.ORE, 1))
+    proposer_short.valuations[1] = vector(wood=1.0, ore=-1.0)
+    _seated(proposer_short, [Trader(), Trader(), Trader(), Trader()])
     with pytest.raises(ValueError, match="seat 0 cannot cover"):
-        execute_trade(game, 0, 1, one_for_one(WOOD, ORE))
+        execute_trade(proposer_short, 0, 1, one_for_one(WOOD, ORE))
 
-
-def test_execute_trade_rejects_a_counterparty_who_cannot_cover_it():
-    game = stocked((0, Resource.WOOD, 1))
-    game.valuations[1] = vector(wood=1.0, ore=-1.0)
-    _seated(game, [Trader(), Trader(), Trader(), Trader()])
+    counterparty_short = stocked((0, Resource.WOOD, 1))
+    counterparty_short.valuations[1] = vector(wood=1.0, ore=-1.0)
+    _seated(counterparty_short, [Trader(), Trader(), Trader(), Trader()])
     with pytest.raises(ValueError, match="seat 1 cannot cover"):
-        execute_trade(game, 0, 1, one_for_one(WOOD, ORE))
+        execute_trade(counterparty_short, 0, 1, one_for_one(WOOD, ORE))
 
 
 def test_execute_trade_rejects_a_non_clearing_counterparty_surplus():

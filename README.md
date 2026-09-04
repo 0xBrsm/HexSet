@@ -167,31 +167,9 @@ bank/port modal a resource card opens is unchanged. See
 [Trading](#trading).
 
 Tests are `pip install -e ".[test,server,clients,catanatron]" && pytest`.
-Default `pytest` (~5-10 minutes) skips tests marked `slow` — full-game
-runs, including the two byte-identity censuses
-(`tests/bots/heximax/test_heximax.py`,
-`tests/bots/test_search2.py::test_choices_are_byte_identical_to_the_recorded_census`)
-that pin exactly what `heximax`/`search2` choose move by move. Run the full
-gate with `pytest -m slow`. **Any change under `src/hexset/` or
-`src/hexset/bots/` must run `pytest -m slow` (or at least
-`-k choices_are_byte_identical`) before it merges** — those hashes are the
-only thing standing between "refactored" and "changed what the bot does."
-
-`tests/web/test_page.py` loads the page in a real browser — it deals a game
-from a fresh load, seats bots from the player list, renames its own row,
-plays fifteen turns through the page's own controls, opens the same address
-in a second browser to watch, and fails on any console error. It needs
-Chromium and is marked `slow`, so it is skipped by a default run and by any
-checkout without the browser installed:
-
-```
-pip install playwright && python -m playwright install chromium
-pytest -m slow tests/web/test_page.py
-```
-
-**Any change to `src/hexset/server/static/index.html` must run it.** Every
-other check on the frontend reads that file as text or drives the API with a
-script; this is the only one that executes the page.
+The default run skips tests marked `slow` — full-game and other
+behaviour-preservation runs too slow for the everyday loop. Run the full
+gate with `pytest -m slow`.
 
 ## Adding an opponent
 

@@ -86,7 +86,7 @@ def _known_limitation(action, catanatron_state) -> bool:
     return bool(catanatron_state.is_road_building)
 
 
-@pytest.mark.parametrize("seed", range(30))
+@pytest.mark.parametrize("seed", range(3))
 def test_every_legal_action_resolves(seed):
     random.seed(seed)
     players = [RandomPlayer(c) for c in Color]

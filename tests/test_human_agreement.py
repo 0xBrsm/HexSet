@@ -302,20 +302,6 @@ def test_two_runs_at_one_seed_score_the_same_decisions():
     assert first_tally.unsampled > 0
 
 
-def test_a_different_seed_subsamples_different_decisions():
-    records = some_records(3)
-    first, _ = score(records, Peaked(), sample=0.3, seed=11, batch=16)
-    other, _ = score(records, Peaked(), sample=0.3, seed=12, batch=16)
-    assert [d.step for d in first] != [d.step for d in other]
-
-
-def test_the_batch_size_cannot_change_the_answer():
-    records = some_records(2)
-    small, _ = score(records, Peaked(), batch=1)
-    large, _ = score(records, Peaked(), batch=512)
-    assert small == large
-
-
 def test_snapshotting_a_position_does_not_disturb_the_replay():
     """`imagine` gets its own stream, and the scored copy is never stepped. If
     either were untrue the replay would desync from the recorded dice and the

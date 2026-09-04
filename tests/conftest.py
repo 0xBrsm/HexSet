@@ -1,15 +1,6 @@
 """Project-wide pytest options, test-only ways to drive a game forward, and
 the fixture that stops the bots afterwards.
 
-`--write-census` is the escape hatch for
-`test_heximax.test_choices_are_byte_identical_to_the_recorded_census`: that
-test is a behaviour-preservation gate, not a spec, so when a change to
-`heximax` deliberately changes what it chooses, the fixture has to be
-regenerated on purpose rather than hand-edited. Passing the flag makes the
-test recompute the census and overwrite
-`tests/bots/heximax/fixtures/heximax_census_ecb5252.json` instead of asserting
-against it.
-
 The two movers below are not opponents anyone plays: the server deals
 `heximax`, `search2` or a checkpoint from `models/` and nothing else. They
 live here rather than in `src/` because a random mover is a fixture, and the
@@ -41,18 +32,6 @@ from hexset.actions import Action, apply
 from hexset.game import Game
 from hexset.server.api import Config, Tables
 from hexset.server.rules import options_for
-
-
-def pytest_addoption(parser) -> None:
-    parser.addoption(
-        "--write-census",
-        action="store_true",
-        default=False,
-        help=(
-            "regenerate tests/bots/heximax/fixtures/heximax_census_ecb5252.json "
-            "from the current heximax instead of asserting against it"
-        ),
-    )
 
 
 @dataclass

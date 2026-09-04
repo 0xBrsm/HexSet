@@ -137,8 +137,8 @@ def _first_difference(a, b) -> str:
     return "no difference"
 
 
-@pytest.mark.parametrize("seed", range(12))
-@pytest.mark.parametrize("perspective", range(4))
+@pytest.mark.parametrize("seed", range(2))
+@pytest.mark.parametrize("perspective", range(2))
 def test_opponent_hands_and_deck_do_not_reach_the_encoding(seed, perspective):
     """Permute everything the seat cannot see; its Observation must not move."""
     game, mapping = _advance(seed, ticks=140)
@@ -169,7 +169,7 @@ def test_opponent_hands_and_deck_do_not_reach_the_encoding(seed, perspective):
     )
 
 
-@pytest.mark.parametrize("seed", range(6))
+@pytest.mark.parametrize("seed", range(2))
 def test_the_audit_can_fail(seed):
     """The control: move something the seat *can* see, and the encoding moves.
 

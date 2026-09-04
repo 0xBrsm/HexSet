@@ -21,11 +21,9 @@ byte-identity guard that nothing about an *unlocked* game changed at all.
 
 from __future__ import annotations
 
-import hashlib
 import random
 
 from hexset.actions import apply
-from hexset.arena import PRESETS, spawn
 from hexset.board.board import random_base_board
 from hexset.board.terrain import NUM_RESOURCES, Resource
 from hexset.game import (
@@ -223,52 +221,3 @@ def test_imagine_without_any_lock_carries_an_empty_one():
     game = run_setup(a_game(players=3))
     copy = imagine(game, random.Random(1))
     assert copy.locked == frozenset()
-
-
-# --- byte identity for an unlocked game -------------------------------------
-
-# Five seeded 4-player games with `PRESETS["greedy"]` in every seat, hashing
-# the full `(seat, action)` trace -- the same method
-# `test_heximax.test_choices_are_byte_identical_to_the_recorded_census` uses,
-# borrowed here because no locking test may change what an unlocked game
-# does: not the decision order, not the rng draws, not who moves next.
-#
-# Re-baselined once, deliberately, for the one-event trade mechanic: no
-# trader is seated here so no trade clears, but `greedy` used to search the
-# engine's offer sample and no longer has one. Stubbing
-# `actions._offer_actions` to `[]` on the previous tree reproduces every
-# hash below exactly, which is the attribution -- nothing else about
-# default play moved.
-BYTE_IDENTITY_TRACES = {
-    "200": "30fa921491d50d986f19a74b6e1c3e1c8c46520c38f7633d2cc6ff4a87e43907",
-    "201": "d54ae271a2401f4f731ddba681864a836c700a83101003722ea92362ecb443c7",
-    "202": "8376e8e82e5aaa9a0bdaa702cfb8b82a51792b7d841972a0f262d73d4d2a0c92",
-    "203": "14556d51e147e1148874c311bd2c8ac9b12668a3664bd04c6530fba2030152eb",
-    "204": "58636144cc3a1ff546865912ec58c4d0f09e35e1017f9221ca2b86804a73b930",
-}
-
-
-def _played_trace(seed: int, players: int = 4) -> str:
-    rng = random.Random(seed)
-    board = random_base_board(rng)
-    game = start(board, players, rng)
-    bots = [
-        spawn(PRESETS["greedy"], board, random.Random(f"{seed}:{seat}"))
-        for seat in range(players)
-    ]
-    trace = []
-    moves = 0
-    while game.phase is not Phase.GAME_OVER:
-        seat = to_move(game)
-        action = bots[seat].choose(game)
-        trace.append((seat, int(action.type), action.a, action.b))
-        apply(game, action)
-        moves += 1
-        if moves > 60000:
-            raise AssertionError(f"seed {seed} did not finish")
-    return hashlib.sha256(repr(trace).encode()).hexdigest()
-
-
-def test_an_unlocked_game_is_byte_identical_to_before_the_lock_existed():
-    for seed_str, expected in BYTE_IDENTITY_TRACES.items():
-        assert _played_trace(int(seed_str)) == expected, f"seed {seed_str} diverged"

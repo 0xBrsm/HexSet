@@ -140,6 +140,14 @@ def test_a_views_own_state_attribute_is_the_same_true_state():
 
 # -- (c) no `._state` outside the engine ------------------------------------
 
+# `x._state` for any `x` other than `self`. A module of its own may hold a
+# `_state` member and reach it as `self._state` -- `hexset.clients.botclient.
+# BotRunner._state` is the seat's own `GET /api/state` call, over the wire,
+# with no `Game` anywhere near it -- and a bare substring search called that
+# an offender. `self.game._state` is still caught: what is excluded is the
+# receiver being `self`, not the word appearing in the line.
+_PRIVATE_STATE_RE = re.compile(r"(?<!\bself)\._state\b")
+
 
 def test_no_bot_bench_server_or_client_module_reaches_into_game_state():
     offenders = []
@@ -148,7 +156,7 @@ def test_no_bot_bench_server_or_client_module_reaches_into_game_state():
         assert directory.is_dir(), f"expected a directory at {directory}"
         for path in directory.rglob("*.py"):
             text = path.read_text()
-            if "._state" in text:
+            if _PRIVATE_STATE_RE.search(text):
                 offenders.append(str(path.relative_to(SRC)))
     assert not offenders, (
         "these files read Game's private state directly instead of going "

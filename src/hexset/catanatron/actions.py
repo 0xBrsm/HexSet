@@ -9,10 +9,13 @@ constructed action that happens to be wrong would either be silently accepted
 indication of which translation was at fault. Searching means a missing match
 fails right here, at the boundary, with the actual mismatch visible.
 
-`PLAY_KNIGHT` is the one case not handled by a single lookup -- see
-`player.py`, which is what actually resolves it -- because dev-catan bundles
-"play the knight" and "move the robber" into one decision where catanatron
-asks them as two.
+`PLAY_KNIGHT` is the one case not handled by a single lookup, because dev-catan
+bundles "play the knight" and "move the robber" into one decision where
+catanatron asks them as two: it maps to whichever half catanatron is offering
+right now. `player.py` (our bot inside catanatron) plays the first half and
+replays its own choice into the second; `bot.py` (a catanatron bot at our
+table) lets catanatron take both halves and reassembles them into one
+`PLAY_KNIGHT`. Both directions match against the same two entries here.
 """
 
 from __future__ import annotations
@@ -103,10 +106,18 @@ def to_catanatron(
             f"BUILD_ROAD {wanted}",
         )
 
-    if kind is OurActionType.MOVE_ROBBER:
-        # true state: the bridge rebuilds `our_game` fresh from catanatron's
-        # own live state every decision (`state.py`), so this is the true,
-        # sanctioned read -- not an information-set one.
+    if kind in (OurActionType.MOVE_ROBBER, OurActionType.PLAY_KNIGHT):
+        # `PLAY_KNIGHT` is two catanatron decisions and one of ours (module
+        # docstring), so it maps to whichever half is on the table right now
+        # and otherwise resolves exactly as a bare robber move does.
+        knight = next(
+            (a for a in playable_actions if a.action_type is TheirActionType.PLAY_KNIGHT_CARD),
+            None,
+        )
+        if kind is OurActionType.PLAY_KNIGHT and knight is not None:
+            return knight
+        # true state: whichever direction this is translating for rebuilds the
+        # position fresh every decision, so this is the sanctioned read.
         num_players = our_game.state(0, hidden=False).num_players
         return move_robber(
             our_action.a, our_action.b, num_players, mapping, seats, playable_actions
@@ -151,9 +162,6 @@ def to_catanatron(
             lambda a: a.action_type is TheirActionType.DISCARD_RESOURCE and a.value == resource,
             f"DISCARD_RESOURCE {resource}",
         )
-
-    if kind is OurActionType.PLAY_KNIGHT:
-        raise ValueError("PLAY_KNIGHT is resolved in player.py, not here")
 
     raise NotImplementedError(
         f"{kind.name} is out of scope for this bridge (player-to-player trading; see state.py)"

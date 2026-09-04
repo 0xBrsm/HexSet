@@ -30,10 +30,9 @@ from dataclasses import replace
 from hexset.actions import ActionType as OurActionType
 from hexset.arena import entrant_from_name, spawn
 
-from catanatron.models.enums import ActionType as TheirActionType
 from catanatron.models.player import Color, Player
 
-from .actions import find, move_robber, to_catanatron
+from .actions import move_robber, to_catanatron
 from .board import translate_board
 from .state import translate
 
@@ -121,16 +120,18 @@ class DevCatanPlayer(Player):
 
         action = self._bot.choose(our_game)
 
-        if action.type is OurActionType.PLAY_KNIGHT:
-            self._pending_knight = (action.a, action.b)
-            return find(
-                playable_actions,
-                lambda a: a.action_type is TheirActionType.PLAY_KNIGHT_CARD,
-                "PLAY_KNIGHT_CARD",
-            )
-
         try:
-            return to_catanatron(action, our_game, self._mapping, seats, playable_actions)
+            their_action = to_catanatron(
+                action, our_game, self._mapping, seats, playable_actions
+            )
         except ValueError:
             self.fallbacks += 1
             return self._rng.choice(playable_actions)
+
+        if action.type is OurActionType.PLAY_KNIGHT:
+            # `to_catanatron` answered the first half (`PLAY_KNIGHT_CARD`); the
+            # second half is replayed above on the next decision. Recorded only
+            # once the first half is settled, so a fallback leaves nothing
+            # pending to replay into a robber prompt that never came.
+            self._pending_knight = (action.a, action.b)
+        return their_action

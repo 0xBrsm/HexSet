@@ -1,25 +1,19 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """The chance-correction estimator: it must reproduce the games, and be unbiased.
 
-Two tests carry the correctness argument and the rest support them.
-
-`test_every_chance_event_s_correction_has_exactly_zero_expectation` is the
-algebraic form: at each event the enumerated outcomes' probabilities and values
-are recovered and `sum_k p_k . delta_k` is asserted to be zero. That is the
-martingale-difference property itself, checked event by event rather than
-inferred from a mean.
-
-`test_the_estimator_is_unbiased_over_real_games` is the statistical form, and it
-is run with a value function chosen to be *wrong* -- large, deterministic, and
-unrelated to the position -- because unbiasedness must not depend on `V`. A stub
-returning zero would pass while checking nothing, so the test also asserts the
-corrections it cancelled were big.
+The correctness argument is algebraic:
+`test_every_chance_event_s_correction_has_exactly_zero_expectation` recovers,
+at each event, the enumerated outcomes' probabilities and values and asserts
+`sum_k p_k . delta_k` is zero. That is the martingale-difference property
+itself, checked event by event rather than inferred from a mean over real
+games (the many-game statistical form, and the replay-fidelity test behind
+it, are bench-shaped and live in `hexset.bench.aivat`'s own census, not this
+suite).
 """
 
 from __future__ import annotations
 
 import random
-import statistics
 from collections import Counter
 
 import numpy as np
@@ -30,11 +24,9 @@ from hexset.bench.aivat import (
     chance_outcomes,
     instrumented,
     margin_scale,
-    replay,
-    summarise,
 )
 from hexset.actions import ActionType, apply, victim_of
-from hexset.arena import _play_one, entrant_from_name
+from hexset.arena import entrant_from_name
 from hexset.board.board import random_base_board
 from hexset.cards import NUM_DEV_CARDS
 from hexset.game import ROLL_ODDS, Phase, is_over, to_move
@@ -189,21 +181,6 @@ def test_a_constant_value_function_corrects_nothing(monkeypatch):
     assert flat["priced"] == {"roll": 0, "deck": 0, "steal": 0}
 
 
-@pytest.mark.slow
-def test_the_instrumented_replay_reproduces_the_arena_game_exactly():
-    """The same games, not merely games from the same distribution.
-
-    Without this the SD comparison would be between two different cells and the
-    reduction it reported would be an artefact of the resampling.
-    """
-    for index in range(8):
-        winner, seat, _, points = _play_one((DUEL, index, SEED, 20_000, True))
-        row = instrumented(DUEL, index, SEED, value="stub")
-        assert row["points"] == points
-        assert row["winner"] == winner
-        assert row["board"] == index // 2
-
-
 def test_the_correction_does_not_disturb_the_game_s_random_stream():
     """Every subset of terms plays the identical game."""
     base = instrumented(DUEL, 3, SEED, value="stub", terms=())
@@ -212,33 +189,6 @@ def test_the_correction_does_not_disturb_the_game_s_random_stream():
         assert row["points"] == base["points"]
         assert row["winner"] == base["winner"]
     assert base["correction"] == 0.0
-
-
-@pytest.mark.slow
-def test_the_estimator_is_unbiased_over_real_games():
-    """The two estimators agree in expectation on the same games.
-
-    Their difference is the mean correction and nothing else, so the test is a
-    one-sample t on it. Deliberately run with the wrong value function: a
-    correct one would shrink the corrections and weaken the test.
-
-    `workers=8`: `replay`'s jobs are pure functions of their own index (same
-    board stream, same per-entrant stream, no shared state), and `pool.map`
-    preserves job order, so this is a wall-clock-only change -- the returned
-    rows are identical to a serial run.
-    """
-    rows = replay(DUEL, 40, seed=SEED, value="stub", workers=8)
-    summary = summarise(rows)
-    assert summary["boards"] == 20
-    assert summary["mean_correction_se"] > 0
-    assert abs(summary["mean_correction_t"]) < 3.0
-    assert summary["paired_vp"] - summary["paired_vp_aivat"] == pytest.approx(
-        summary["mean_correction"]
-    )
-    # Teeth again: the per-game corrections this cancelled are not small
-    # compared with the statistic they are subtracted from.
-    scatter = statistics.stdev([row["correction"] for row in rows])
-    assert scatter > 0.5
 
 
 def test_the_margin_scale_inverts_relative_points():

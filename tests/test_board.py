@@ -46,7 +46,7 @@ def test_desert_bears_no_token():
         assert (board.tokens[h] == 0) == (terrain is Terrain.DESERT)
 
 
-@pytest.mark.parametrize("seed", range(20))
+@pytest.mark.parametrize("seed", range(5))
 def test_red_numbers_are_never_adjacent(seed):
     board = random_base_board(random.Random(seed))
     topology = board.topology

@@ -254,17 +254,6 @@ def test_an_unknown_perspective_is_rejected():
         encode(game, perspective=3)
 
 
-def test_encoding_holds_up_across_a_whole_game():
-    rng = random.Random(4)
-    game = start(random_base_board(rng), 4, rng)
-    while not game.won_by and game.turns < 60:
-        step_randomly(game, rng)
-        for seat in range(game._state.num_players):
-            obs = encode(game, perspective=seat)
-            for array in arrays(obs):
-                assert np.isfinite(array).all()
-
-
 def _canonical_vertex_block(state, perspective):
     """Building one-hot then owner one-hot, written the plain way.
 

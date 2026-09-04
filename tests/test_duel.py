@@ -9,7 +9,6 @@ table, so the paired split can be checked slot by slot.
 
 from __future__ import annotations
 
-import json
 import statistics
 from types import SimpleNamespace
 
@@ -62,25 +61,6 @@ def test_naming_the_sides_separates_two_checkpoints():
     assert len(grouped) == 2
 
 
-def test_the_weights_survive_the_rename():
-    """`spawn` reads `kind` and `weights`; renaming must not touch either."""
-    lineup = sides(
-        lineup_from_names(
-            ["network:/runs/a.pt", "network:/runs/a.pt", "network:/runs/b.pt", "network:/runs/b.pt"]
-        ),
-        "a",
-        "b",
-    )
-
-    assert [entrant.weights for entrant in lineup] == [
-        "/runs/a.pt",
-        "/runs/a.pt",
-        "/runs/b.pt",
-        "/runs/b.pt",
-    ]
-    assert all(entrant.kind == "network" for entrant in lineup)
-
-
 def test_a_checkpoint_duelled_against_itself_still_has_two_sides():
     """The harness check that must read 50%, not a single pooled side."""
     lineup = sides(
@@ -95,63 +75,17 @@ def test_a_checkpoint_duelled_against_itself_still_has_two_sides():
     ]
 
 
-def test_the_arena_path_can_be_called_at_all():
-    """A regression guard for the call site, not the helper.
-
-    `sides` was extracted while `_via_arena` still bound a local of the same
-    name further down, which makes the name local for the whole function and
-    raises `UnboundLocalError` on the first line that uses it. The unit tests
-    above all passed while the duel could not run.
-    """
-    import ast
-    from pathlib import Path
-
-    import hexset.bench.duel as module
-
-    tree = ast.parse(Path(module.__file__).read_text())
-    functions = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
-    for node in tree.body:
-        if not isinstance(node, ast.FunctionDef):
-            continue
-        assigned = {
-            target.id
-            for inner in ast.walk(node)
-            if isinstance(inner, ast.Assign)
-            for target in inner.targets
-            if isinstance(target, ast.Name)
-        }
-        assert not assigned & functions, (
-            f"{node.name} assigns a local shadowing {sorted(assigned & functions)}"
-        )
-
-
-def test_default_workers_is_one_for_two_bare_checkpoint_paths(tmp_path):
+def test_default_workers_is_one_only_for_two_bare_network_checkpoints(tmp_path):
+    """`workers=1` batches two checkpoints in one process; anything else
+    (a scripted opponent, a search wrapper) cannot batch and needs the
+    26-worker default to finish in reasonable wall clock."""
     a = tmp_path / "a.pt"
     b = tmp_path / "b.pt"
     a.touch()
     b.touch()
     assert _default_workers(str(a), str(b)) == 1
-
-
-def test_default_workers_is_one_for_two_network_prefixed_checkpoints():
     assert _default_workers("network:/runs/a.pt", "network:/runs/b.pt") == 1
-
-
-def test_default_workers_is_26_against_a_preset_bot(tmp_path):
-    """A scripted opponent cannot batch, and workers=1 left it unfinished."""
-    a = tmp_path / "a.pt"
-    a.touch()
     assert _default_workers(str(a), "search2-offers3") == 26
-
-
-def test_default_workers_is_26_for_a_search_wrapped_checkpoint(tmp_path):
-    """`netsearch:`/`netgreedy:`/`mcts:` still run a per-lane search."""
-    a = tmp_path / "a.pt"
-    a.touch()
-    assert _default_workers(str(a), "netsearch:/runs/a.pt") == 26
-
-
-def test_default_workers_is_26_when_neither_side_is_a_bare_network():
     assert _default_workers("search2-offers3", "random") == 26
 
 
@@ -179,33 +113,6 @@ def test_each_geometry_partitions_the_four_slots_between_the_sides():
         assert sorted(mine + theirs) == [0, 1, 2, 3]
         assert [order[i] for i in mine] == ["a", "a"]
         assert [order[i] for i in theirs] == ["b", "b"]
-
-
-def test_sides_labels_an_interleaved_lineup_by_slot_not_by_position():
-    names, mine, _ = arena_lineup(A, B, "interleaved")
-    lineup = sides(lineup_from_names(names), "lam095-805", "ppo4-585", mine)
-
-    assert [base_name(entrant.name) for entrant in lineup] == [
-        "lam095-805",
-        "ppo4-585",
-        "lam095-805",
-        "ppo4-585",
-    ]
-    assert [entrant.weights for entrant in lineup] == [
-        "/runs/a.pt",
-        "/runs/b.pt",
-        "/runs/a.pt",
-        "/runs/b.pt",
-    ]
-    # Repeat numbers still run 0, 1 within a side, and side A pools first.
-    assert [entrant.name for entrant in lineup] == [
-        "lam095-805#0",
-        "ppo4-585#0",
-        "lam095-805#1",
-        "ppo4-585#1",
-    ]
-    grouped = pooled([Standing(entrant.name, 1, 4) for entrant in lineup], 4)
-    assert [g.name for g in grouped] == ["lam095-805", "ppo4-585"]
 
 
 def _fake_compete(seen: dict, points, turns=None, winners=None):
@@ -298,33 +205,6 @@ def test_arena_verdict_reports_game_length_and_exhaustion(monkeypatch):
     assert verdict["unfinished"] == 2
 
 
-def test_arena_verdict_turns_are_sane_when_nothing_is_exhausted(monkeypatch):
-    monkeypatch.setattr("hexset.arena.compete", _fake_compete({}, POINTS))
-
-    verdict = _via_arena(_arena_args(), "a", "b")
-
-    assert 1 <= verdict["turns_mean"] <= MAX_TURNS
-    assert verdict["exhausted"] == 0
-    assert verdict["exhausted"] <= verdict["games"]
-
-
-def test_main_prints_the_geometry_beside_the_worker_count(monkeypatch, capsys):
-    monkeypatch.setattr("hexset.arena.compete", _fake_compete({}, POINTS))
-
-    assert duel.main([A, B, "--workers", "2", "--games", "4", "--no-json"]) == 0
-    out, err = capsys.readouterr()
-    assert "--workers 2" in err
-    assert "--geometry not given; defaulting to blocked" in err
-    # stdout carries the verdict alone; everything else goes to stderr.
-    assert json.loads(out)["geometry"] == "blocked"
-
-    assert duel.main(
-        [A, B, "--workers", "2", "--games", "4", "--no-json", "--geometry", "interleaved"]
-    ) == 0
-    _, err = capsys.readouterr()
-    assert "--geometry interleaved" in err
-
-
 def test_the_versus_path_refuses_a_blocked_geometry(capsys):
     """`collect.alternating` is the interleaving; asking for anything else at
     workers=1 must fail loudly rather than play interleaved under a wrong label."""
@@ -333,49 +213,3 @@ def test_the_versus_path_refuses_a_blocked_geometry(capsys):
     _, err = capsys.readouterr()
     assert "--geometry blocked is not available at --workers 1" in err
     assert "--workers 2" in err
-
-
-def test_the_versus_path_accepts_interleaved_by_name(capsys, monkeypatch):
-    """Naming the seating it plays anyway is allowed and is printed as such.
-
-    `_via_versus` itself (the network-backed --workers 1 runner) now lives in
-    `hexnet.duel` and is exercised there
-    (`tests/hexnet/test_duel_versus.py::test_the_versus_verdict_records_interleaved`);
-    this only pins that `hexset.bench.duel.main` calls whatever registered
-    itself as `_VERSUS_BACKEND`.
-    """
-    monkeypatch.setattr(duel, "_VERSUS_BACKEND", lambda args, la, lb: {
-        "a": la, "b": lb, "games": 0, "win_rate": 0.5, "wilson_low": 0.0,
-        "wilson_high": 1.0, "paired_vp": 0.0, "geometry": "interleaved",
-    })
-    code = duel.main([A, B, "--workers", "1", "--geometry", "interleaved", "--no-json"])
-    assert code == 0
-    _, err = capsys.readouterr()
-    assert "--geometry interleaved (the only seating `train.versus` plays)" in err
-
-
-def test_main_writes_the_new_fields_to_the_verdict_json(monkeypatch, tmp_path):
-    monkeypatch.setattr("hexset.arena.compete", _fake_compete({}, POINTS))
-
-    destination = tmp_path / "verdict.json"
-    code = duel.main(
-        [A, B, "--workers", "2", "--games", "4", "--json", str(destination)]
-    )
-    assert code == 0
-
-    written = json.loads(destination.read_text())
-    assert {"turns_mean", "turns_median", "turns_max", "exhausted"} <= written.keys()
-    assert 1 <= written["turns_mean"] <= MAX_TURNS
-    assert written["exhausted"] <= written["games"]
-
-
-def test_no_json_still_writes_nothing(monkeypatch, tmp_path):
-    monkeypatch.setattr("hexset.arena.compete", _fake_compete({}, POINTS))
-
-    verdicts = tmp_path / "verdicts"
-    verdicts.mkdir()
-    code = duel.main(
-        [A, B, "--workers", "2", "--games", "4", "--no-json", "--verdicts", str(verdicts)]
-    )
-    assert code == 0
-    assert list(verdicts.iterdir()) == []

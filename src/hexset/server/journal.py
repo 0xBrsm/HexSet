@@ -196,8 +196,8 @@ class Journal:
         `human_seats` are the seats occupied at deal time (any kind — see
         `api.GameSession.claimed_seats`, the key name predates that) and
         `player_names` whatever they registered as — a seat missing from the
-        latter is one nobody named. A seat claiming in later, or a seat this
-        game's setup snake locks out, both show up as their own event kind
+        latter is one nobody named. A seat claiming in later, or a seat
+        somebody closes outright, both show up as their own event kind
         (`seated`, `locked`) rather than here.
         """
         # true state: the journal is the record of everything that
@@ -298,8 +298,8 @@ class Journal:
         self._emit({"kind": "seated", "at": _now(), "seat": seat, "name": name, "spec": spec})
 
     def locked(self, seat: int, *, at_step: int) -> None:
-        """The setup snake reached `seat` while it was still empty (see
-        `api.Table._settle_locks`) — retired for the rest of the
+        """`seat` was closed outright while it was still empty (see
+        `api.Tables.close_seat`) — retired for the rest of the
         game. `resumable`'s reader (`locked_seats`) only needs to know *that*
         a seat locked, not when: see `hexset.server.seating`'s own note on why
         pre-seeding the whole set before replay reproduces the same snake

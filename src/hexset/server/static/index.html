@@ -980,6 +980,29 @@ async function swapBot(seat, model) {
   }
 }
 
+// The picker's own third option, alongside "empty" and every model name —
+// never a real model, so it can share the same <select> and change handler.
+const CLOSE_SEAT = "__close__";
+
+// Closes an open seat outright: no bot, no person, ever, for the rest of
+// this game — the third way an empty seat resolves (see api.Tables.close_seat)
+// besides seating a bot on it or somebody opening the link to take it.
+async function closeSeat(seat) {
+  if (inFlight) return;
+  inFlight = true;
+  try {
+    const {ok, data} = await postJSON("/api/close", {seat});
+    if (ok) {
+      state = data;
+      render();
+    } else {
+      showNotice(data.error || "Could not close that seat.");
+    }
+  } finally {
+    inFlight = false;
+  }
+}
+
 async function refreshState() {
   state = await getJSON("/api/state");
   render();
@@ -1501,6 +1524,13 @@ function renderStatus() {
       : `PLAYER ${state.winner + 1} WINS`;
     return;
   }
+  // Nobody's decision while a seat is still empty (see api.Table.waiting_for)
+  // — the same reason state.to_move is null and no row shows the active
+  // highlight below.
+  if (state.waiting_for && state.waiting_for.length) {
+    phaseEl.textContent = "WAITING FOR SEATS";
+    return;
+  }
   // Somebody else's decision to make, so the phase underneath it is beside
   // the point. True as of the last poll rather than the last render — see
   // settle() — which is as current as anything here gets.
@@ -1612,9 +1642,9 @@ function renderPlayers() {
       nameEl.classList.add("player-name-plain");
       nameEl.textContent = state.seats[p.seat].name || `Player ${p.seat + 1}`;
     } else if (state.locked.includes(p.seat)) {
-      // Retired: setup reached this seat with nobody in it and it left the
-      // game there and then. A picker would only ever refuse, so it reads as
-      // text instead.
+      // Retired: somebody closed this seat outright rather than leave it
+      // sitting empty. A picker would only ever refuse, so it reads as text
+      // instead.
       nameEl.classList.add("player-name-plain");
       nameEl.textContent = "locked seat";
     } else {
@@ -1622,14 +1652,22 @@ function renderPlayers() {
       // says who else is playing: an empty seat starts blank and choosing a
       // model seats that bot there, a seat that already has one swaps it.
       // Either way it goes straight through swapBot, no separate "apply"
-      // step. An empty seat stays open until somebody picks for it or
-      // somebody opens the link, and setup retires it if neither happens.
+      // step. An empty seat holds the whole table (see renderStatus) until
+      // somebody picks a bot for it, opens the link and takes it, or picks
+      // "none" to close it outright -- nothing here ever resolves itself.
       const select = html("select", {});
-      if (!p.bot) select.appendChild(html("option", {value: ""}, "empty"));
+      if (!p.bot) {
+        select.appendChild(html("option", {value: ""}, "empty"));
+        select.appendChild(html("option", {value: CLOSE_SEAT}, "none"));
+      }
       for (const name of modelNames) select.appendChild(html("option", {value: name}, name));
       select.value = p.bot || "";
       select.classList.toggle("unset", !p.bot);
-      select.addEventListener("change", () => { select.blur(); swapBot(p.seat, select.value); });
+      select.addEventListener("change", () => {
+        select.blur();
+        if (select.value === CLOSE_SEAT) closeSeat(p.seat);
+        else swapBot(p.seat, select.value);
+      });
       nameEl.appendChild(select);
     }
     row.appendChild(nameEl);

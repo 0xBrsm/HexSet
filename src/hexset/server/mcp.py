@@ -242,8 +242,8 @@ _TOOLS: dict[str, tuple] = {
         _join,
         "Take a random open seat at an existing game by its six-character code. "
         "Fails if every seat is taken or has locked out (see state()'s `locked`) "
-        "— an empty seat the game's setup has already played past is retired "
-        "for the rest of that game, so join before setup reaches it.",
+        "— a seat somebody closed outright is retired for the rest of that "
+        "game, so join before that happens.",
         {
             "type": "object",
             "properties": {

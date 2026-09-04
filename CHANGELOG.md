@@ -53,13 +53,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   backed it (`PROPOSE_TRADE`/`ACCEPT_TRADE`/`DECLINE_TRADE`, `TRADE_RESPOND`,
   the view's `offer` block). The modal a resource card opens is the bank and
   port route, which is unchanged.
-- An empty seat the setup snake reaches is retired on sight. The grace
-  window in front of that is gone, and with it `SEAT_GRACE_SECONDS`,
-  `Config.seat_grace`, `POST /api/games`'s `seat_grace`, `--seat-grace`,
-  `HEXSET_UI_SEAT_GRACE` and the view's `waiting_for` block. A turn only
-  advances because the seat holding it says so, so somebody expecting a
-  friend holds the table by not finishing their own placement — a timer
-  could only ever cut that short.
+- Nobody moves during setup while any seat is still empty. The grace window
+  that used to hold a seat open for a fixed time is gone for good, and with
+  it `SEAT_GRACE_SECONDS`, `Config.seat_grace`, `POST /api/games`'s
+  `seat_grace`, `--seat-grace` and `HEXSET_UI_SEAT_GRACE` — a seat resolves
+  when a person opens the link and takes it, the creator picks a bot for it,
+  or the creator closes it outright (`POST /api/close`), never on a clock.
+  `to_move` is `null` and every view's `waiting_for` names the seats still
+  open until then; once none is, play starts from seat 0 at full speed.
 - Game codes are lowercase (`abcdef`), since a code is only ever seen as a
   URL. Lookups normalise, so a code capitalised on the way into an address
   bar still opens its game, and a game journalled under a capitalised code
@@ -328,11 +329,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- **A table now starts the instant seat 0 is filled.** An open seat the setup
-  snake reaches is retired on sight, as it always was, but with bots playing
-  at their own speed "on sight" is immediate rather than a second away. Fill
-  seat 0 last when picking opponents from the player list: nothing at a table
-  moves while that seat is open, and everything moves as soon as it is not.
+- **The player list's picker gains a third option, "none".** Choosing it
+  closes that seat outright (`POST /api/close`) — the explicit gesture that
+  replaces the setup snake retiring an open seat on sight. A closed seat
+  reads "locked seat" exactly as one the snake used to retire did, and its
+  row disappears once the match is under way. Any seated person may close
+  any other seat, the same permission as picking it a bot.
 - **The web page offers a person no way to trade with another seat.** The
   advertisement controls, the negotiation panel and the pending-offer cards
   are gone from the browser; the bank/port modal a resource card opens is

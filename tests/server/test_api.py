@@ -69,6 +69,15 @@ def empty_seats(table) -> list[int]:
     return [i for i, s in enumerate(table.seats) if s.kind is SeatKind.EMPTY]
 
 
+def close_remaining(registry: Tables, code: str, token: str) -> None:
+    """Closes every seat still empty at `code`'s table through the API
+    itself, releasing the hold (`Table.waiting_for`) without seating a bot
+    -- for a test whose point is something other than the hold."""
+    table = registry.get(code)
+    for seat in empty_seats(table):
+        registry.handle("POST", "/api/close", {"seat": seat}, token)
+
+
 # --- Codes --------------------------------------------------------------------
 
 
@@ -310,43 +319,94 @@ def test_the_public_routes_refuse_anything_but_a_game_and_its_board():
 def test_turn_order_is_seat_order_not_the_creators_seat(monkeypatch):
     """Turn order is seat order, seat 0 first, regardless of which random
     seat the creator was dealt (`Tables.create` always passes `first=0` —
-    the historical bug was starting the snake at the creator instead). Seat
-    0 does not lose its seat while it waits to be filled
-    (`Table._settle_locks`'s `setup_step == 0` carve-out)."""
+    the historical bug was starting the snake at the creator instead). No
+    carve-out for seat 0 needed: the table holds with every seat still empty
+    (`Table.waiting_for`), so nothing has a chance to move before seat 0 has
+    a real occupant either."""
     monkeypatch.setattr(random.SystemRandom, "randrange", lambda self, n: 2)
     registry = tables()
     code, token = deal(registry, bots=[])
     session = registry.get(code).session
-    creator_seat = registry.handle("GET", "/api/state", {}, token)["seat"]
+    data = registry.handle("GET", "/api/state", {}, token)
 
-    assert creator_seat == 2
+    assert data["seat"] == 2
     assert to_move(session.game) == 0
-    assert registry.handle("GET", "/api/state", {}, token)["locked"] == []
+    assert data["locked"] == []
+    assert data["to_move"] is None
+    assert data["waiting_for"] == [0, 1, 3]
 
 
-def test_an_empty_seat_the_snake_reaches_is_retired_on_sight():
-    """No waiting window: the creator holds the table simply by not
-    finishing their own placement, so the moment they do finish, an empty
-    seat next in the snake is out (see Table._settle_locks's docstring)."""
+def test_holding_blocks_every_action_with_a_409_and_a_null_to_move():
+    """Nobody moves during setup while any seat is still empty — no on-sight
+    retirement, no timer. `to_move` reads `null` for everybody, and
+    `POST /api/action` is refused for whoever holds the token that would
+    otherwise move first."""
     registry = tables()
     code, token = deal(registry, bots=[])
-    table = registry.get(code)
-    session = table.session
-    creator_seat = to_move(session.game)
+    session = registry.get(code).session
+
+    data = registry.handle("GET", "/api/state", {}, token)
+    assert data["to_move"] is None
+    assert set(data["waiting_for"]) == set(empty_seats(registry.get(code)))
 
     settlement = action_to_wire(
         next(a for a in legal_actions(session.game) if a.type is ActionType.SETUP_SETTLEMENT)
     )
-    registry.handle("POST", "/api/action", {"action": settlement}, token)
-    road = action_to_wire(
-        next(a for a in legal_actions(session.game) if a.type is ActionType.SETUP_ROAD)
-    )
-    data = registry.handle("POST", "/api/action", {"action": road}, token)
+    with pytest.raises(ApiError) as caught:
+        registry.handle("POST", "/api/action", {"action": settlement}, token)
+    assert caught.value.status == 409
+    assert "waiting for seats" in str(caught.value)
 
-    # Every other seat was empty, so finishing the first placement retires
-    # all three at once and hands the table straight back to the creator.
-    assert set(data["locked"]) == {s for s in range(MAX_SEATS) if s != creator_seat}
-    assert to_move(session.game) == creator_seat
+
+def test_seating_the_last_empty_seat_releases_the_hold_and_play_starts_at_seat_0():
+    registry = tables()
+    code, token = deal(registry, bots=[])
+    table = registry.get(code)
+    remaining = empty_seats(table)
+
+    for seat in remaining[:-1]:
+        data = registry.handle("POST", "/api/bot", {"seat": seat, "model": "search2"}, token)
+        assert data["to_move"] is None, "the hold must not lift before the last seat resolves"
+
+    data = registry.handle("POST", "/api/bot", {"seat": remaining[-1], "model": "search2"}, token)
+    assert data["waiting_for"] == []
+    assert data["to_move"] == 0
+    assert to_move(table.session.game) == 0
+
+
+def test_close_locks_an_empty_seat_refuses_an_occupied_one_and_can_release_the_hold():
+    registry = tables()
+    code, token = deal(registry, bots=[])
+    table = registry.get(code)
+    remaining = empty_seats(table)
+
+    with pytest.raises(ApiError) as caught:
+        registry.handle("POST", "/api/close", {"seat": registry.by_token(token)[1]}, token)
+    assert "belongs to a player" in str(caught.value)
+
+    for seat in remaining[:-1]:
+        data = registry.handle("POST", "/api/close", {"seat": seat}, token)
+        assert seat in data["locked"]
+        assert data["to_move"] is None
+
+    data = registry.handle("POST", "/api/close", {"seat": remaining[-1]}, token)
+    assert set(data["locked"]) == set(remaining)
+    assert data["waiting_for"] == []
+    assert data["to_move"] == 0
+
+
+def test_a_person_joining_an_empty_seat_releases_the_hold_too():
+    registry = tables()
+    code, token = deal(registry, bots=[])
+    table = registry.get(code)
+    remaining = empty_seats(table)
+    for seat in remaining[:-1]:
+        registry.handle("POST", "/api/close", {"seat": seat}, token)
+
+    joined = registry.handle("POST", "/api/join", {"code": code}, None)
+    assert joined["seat"] == remaining[-1]
+    assert joined["waiting_for"] == []
+    assert joined["to_move"] == 0
 
 
 def test_a_locked_seat_stays_locked_but_the_rest_of_the_game_still_plays():
@@ -446,6 +506,7 @@ def test_another_seats_turn_is_not_this_ones_to_play():
     registry = tables()
     code, token = deal(registry, bots=[])
     other = registry.handle("POST", "/api/join", {"code": code}, None)["token"]
+    close_remaining(registry, code, token)
 
     session = registry.get(code).session
     waiting = other if to_move(session.game) == registry.by_token(token)[1] else token
@@ -978,7 +1039,8 @@ def test_a_move_at_the_table_wakes_a_waiting_read():
     """The whole point: a change reaches a reader when it happens, not when
     that reader's next timer goes off."""
     registry = tables()
-    _, token = deal(registry, bots=[])
+    code, token = deal(registry, bots=[])
+    close_remaining(registry, code, token)  # release the hold; still no bots
     current = registry.handle("GET", "/api/state", {}, token)["version"]
     answered: list[tuple[float, dict]] = []
 

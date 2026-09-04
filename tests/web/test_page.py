@@ -58,11 +58,10 @@ BOT = "search2"
 def live():
     """A real server on a real port, plus the registry behind it.
 
-    No `seat_grace`: there is no grace window any more. An empty seat the
-    setup snake reaches is retired there and then, which is what makes a
-    table with open seats playable inside a test at all -- and playable for
-    somebody waiting on a friend who never came, which is what it is
-    actually for.
+    No `seat_grace`, and no on-sight retirement either: nobody moves during
+    setup while any seat is still empty (`api.Table.waiting_for`), so a test
+    that leaves a seat open has to resolve it itself -- fill it (`seat_bots`),
+    join it, or close it (`POST /api/close`) -- before the table plays.
     """
     tables = new_tables()
     server = HexSetServer(("127.0.0.1", 0), tables)
@@ -166,13 +165,12 @@ def seat_bots(page: Page, model: str = BOT) -> None:
     picker (that is how a bot is swapped), so "no pickers left" is never
     true and counting them would loop forever.
 
-    Highest seat first, so seat 0 is filled last. Nothing at a table moves
-    while seat 0 is open (`api.Table._settle_locks` holds the snake at
-    `setup_step == 0`), and once it is filled the snake runs at the speed of
-    whatever is sitting there -- which, for a bot, is immediately, retiring
-    every open seat it reaches on the way.
+    Seat top-down, the natural gesture: order no longer matters, since
+    nothing at a table moves while any seat is still empty
+    (`api.Table.waiting_for`) -- once the last one is filled, setup runs at
+    the speed of whoever is sitting there.
     """
-    for seat, entry in reversed(list(enumerate(page.state(".seats")))):
+    for seat, entry in enumerate(page.state(".seats")):
         if entry["kind"] != "empty":
             continue
         row = page.page.locator("#players .player-row").nth(seat)
@@ -316,12 +314,13 @@ def test_the_player_list_is_where_a_table_picks_its_opponents(live, browser):
 def test_a_seat_line_says_who_is_in_it(live, browser):
     """The panel and the status line cannot disagree, because both read the
     server's own per-seat kind. Every row used to be a bot picker -- your own
-    occupied seat, an open one, and a retired one all drawn identically."""
+    occupied seat, an open one, and a locked one all drawn identically."""
     _, url = live
     page = open_page(browser, url)
     mine = page.state(".seat")
-    # The last open seat, not the first: seat 0 is what starts a table (see
-    # `seat_bots`), and a table that has started retires the seats still open.
+    # Filling one of the three open seats still leaves two empty, and the
+    # table holds while any seat is (`api.Table.waiting_for`) -- so the other
+    # two stay exactly as open as before, whichever one is picked.
     page.page.locator("#players select").last.select_option(BOT)
     page.page.wait_for_timeout(600)
 
@@ -342,52 +341,50 @@ def test_a_seat_line_says_who_is_in_it(live, browser):
     assert page.console == []
 
 
-def test_an_empty_seat_is_retired_on_sight_with_no_countdown(live, browser):
-    """A turn only advances because the seat holding it said so, so a
-    countdown could only ever retire a seat somebody was still waiting on.
-    The snake reaching an empty seat retires it there and then."""
+def test_an_empty_seat_holds_the_table_until_a_person_resolves_it(live, browser):
+    """No on-sight retirement, no timer, no countdown: nobody moves during
+    setup while any seat is still empty. Seating two of the three open seats
+    leaves the table waiting on the third; closing it through the picker's
+    own "none" option is what lets setup run."""
     _, url = live
     page = open_page(browser, url)
-    # Freshly dealt, nothing is retired: a table with every seat open is a
-    # table nobody has been passed over at yet.
+    # Freshly dealt, nothing is locked: a table with every seat open is a
+    # table nobody has resolved anything at yet.
     assert page.state(".locked") == []
-    page.page.locator("#players select").first.select_option(BOT)
 
-    started = time.monotonic()
-    deadline = started + 90
-    while time.monotonic() < deadline and not page.state(".locked"):
-        if page.state(".to_move") == page.state(".seat") and page.state(".phase").startswith(
-            "SETUP"
-        ):
-            if not page.click_first(".clickable-vertex"):
-                page.click_first(".clickable-edge")
-        page.page.wait_for_timeout(250)
+    open_seats = [i for i, s in enumerate(page.state(".seats")) if s["kind"] == "empty"]
+    assert len(open_seats) == 3
+    for seat in open_seats[:2]:
+        row = page.page.locator("#players .player-row").nth(seat)
+        row.locator("select").select_option(BOT)
+        page.page.wait_for_function(f"() => state.seats[{seat}].kind === 'bot'", timeout=15000)
 
-    assert page.state(".locked"), "the snake reached an open seat and did not retire it"
-    # Immediately: inside one pass of the snake, not two minutes later.
-    assert time.monotonic() - started < 30
-    retired = page.state(".locked")[0]
-    row = page.page.locator("#players .player-row").nth(retired)
-    assert "locked seat" in row.inner_text()
-    assert row.locator("select").count() == 0
-    # Nothing anywhere counts down to it.
-    body = page.page.inner_text("body").lower()
-    assert "locks in" not in body
+    last_open = open_seats[2]
+    # One seat still open, so the whole table is still waiting on it --
+    # nobody's turn, not even the two bots just seated.
+    assert page.state(".to_move") is None
+    assert page.page.inner_text("#phase").strip() == "WAITING FOR SEATS"
     assert page.console == []
 
-    # Once the match is under way the retired seat's row is gone: nobody is
+    row = page.page.locator("#players .player-row").nth(last_open)
+    row.locator("select").select_option("__close__")
+    page.page.wait_for_function(
+        f"() => (state.locked || []).includes({last_open})", timeout=15000
+    )
+    row = page.page.locator("#players .player-row").nth(last_open)
+    assert "locked seat" in row.inner_text()
+    assert row.locator("select").count() == 0
+    assert page.console == []
+
+    place_setup(page)
+    assert not page.state(".phase").startswith("SETUP"), "setup did not run once the hold released"
+
+    # Once the match is under way the closed seat's row is gone: nobody is
     # in it and nobody ever will be, so the list shows only who is playing.
-    deadline = time.monotonic() + 90
-    while time.monotonic() < deadline and page.state(".phase").startswith("SETUP"):
-        if page.state(".to_move") == page.state(".seat"):
-            if not page.click_first(".clickable-vertex"):
-                page.click_first(".clickable-edge")
-        page.page.wait_for_timeout(250)
-    assert not page.state(".phase").startswith("SETUP"), "setup did not finish"
     page.page.wait_for_timeout(400)  # one render after the phase turned
-    locked = page.state(".locked")
-    assert page.page.locator("#players .player-row").count() == 4 - len(locked)
+    assert page.page.locator("#players .player-row").count() == 3
     assert "locked seat" not in page.page.inner_text("#players")
+    assert page.console == []
 
 
 def test_new_game_deals_another_table(live, browser):
@@ -468,11 +465,12 @@ def test_an_open_picker_survives_the_reads_that_used_to_close_it(live, browser, 
     about a second after it opened, every time. The rebuild is skipped while
     the container holds focus.
 
-    Seat 0 is left open on purpose, which holds the snake there (see
-    `seat_bots`): the page is then permanently waiting on somebody else, so
-    the reads it parks on are the test's to trigger rather than a window to
-    be caught in. The reader is pinned to the last seat so seat 0 is one it
-    could have picked a bot for -- the very case the open picker is for.
+    Seat 0 is left open on purpose: leaving any seat empty holds the whole
+    table (`api.Table.waiting_for`), so the page is permanently waiting on
+    somebody else and the reads it parks on are the test's to trigger rather
+    than a window to be caught in. The reader is pinned to the last seat so
+    seat 0 is one it could have picked a bot for -- the very case the open
+    picker is for.
     """
     monkeypatch.setattr(random.SystemRandom, "randrange", lambda self, n: n - 1)
     tables, url = live
@@ -482,7 +480,7 @@ def test_an_open_picker_survives_the_reads_that_used_to_close_it(live, browser, 
         row = page.page.locator("#players .player-row").nth(seat)
         row.locator("select").select_option(BOT)
         page.page.wait_for_function(f"() => state.seats[{seat}].kind === 'bot'", timeout=15000)
-    assert mine == 3 and page.state(".to_move") == 0
+    assert mine == 3 and page.state(".to_move") is None
 
     table = tables.get(code_of(page))
     picker = page.page.locator("#players select").first

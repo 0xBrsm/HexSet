@@ -190,6 +190,11 @@ def test_a_query_string_reaches_the_api_over_http(live_server):
 
     _, base = live_server
     client, data = seated(base, bots=[])
+    # Release the hold (`Table.waiting_for`) without seating a bot: this test
+    # is about the query string reaching the API, not about who else plays.
+    for seat in [s["seat"] for s in data["seats"] if s["kind"] == "empty"]:
+        status, data = client.post("/api/close", {"seat": seat})
+        assert status == 200
     version = data["version"]
 
     started = time.monotonic()

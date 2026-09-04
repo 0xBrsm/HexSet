@@ -100,12 +100,18 @@ EXACT_ROLL_PLIES = 2
 # seeds 100..104, every seat the same preset -- as the mean of
 # `|Eval(hand + one r) - Eval(hand)|` under `TRADING_WEIGHTS` and the
 # `relative` stance, over every resource at every position the mover
-# reaches (9280 marginals). Trade-free deliberately: the games that fix the
+# reaches (8110 marginals). Trade-free deliberately: the games that fix the
 # scale must not themselves depend on it, and `max_trades=0` makes them
 # independent of this constant by construction.
 # `test_marginal_scale_is_the_recorded_mean` recomputes it from those same
 # games and pins it to 1e-9.
-MARGINAL_SCALE = 0.10231140469178995
+#
+# Re-derived 2026-09-04 from the redesigned hand terms (`evaluate.hand_terms`),
+# which halved the mean one-card marginal: 0.10231140469178995 over 9280
+# marginals was the old trio's. Derived after the weights were fitted and
+# before the strength gates were run, so the gates read the shipped
+# configuration rather than the fit's.
+MARGINAL_SCALE = 0.0513359464196004
 
 
 class _Exhausted(Exception):

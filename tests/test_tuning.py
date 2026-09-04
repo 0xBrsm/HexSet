@@ -111,7 +111,7 @@ def test_the_climb_reports_each_step_as_it_goes():
 
 
 def test_weights_round_trip_through_their_source_form():
-    original = Weights(production=1.234, surplus_card=-0.5)
+    original = Weights(production=1.234, robber_risk=-0.5)
     restored = eval(as_source(original), {"Weights": Weights})
     for f in fields(Weights):
         assert getattr(restored, f.name) == pytest.approx(getattr(original, f.name))

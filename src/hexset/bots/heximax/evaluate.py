@@ -3,10 +3,11 @@
 
 `HonestEvaluator` scores every seat from one knower's information. Board
 terms are the existing evaluator's own `survey`, reused rather than copied
-since it reads only public state. The three hand terms (`progress`, `held`,
-`surplus_card`) are read on the true hand for the knower (or for everyone,
-when `omniscient`) and on `View.expected_hand` for everyone else; victory
-point cards count only for the knower. `TRADING_WEIGHTS` and
+since it reads only public state. The three hand terms (`evaluate.hand_terms`
+-- purchase progress, spare cards, robber exposure) are read on the true hand
+for the knower (or for everyone, when `omniscient`) and on
+`View.expected_hand` for everyone else; victory point cards count only for
+the knower. `TRADING_WEIGHTS` and
 `NO_TRADE_WEIGHTS` are the two shipped profiles `heximax()` picks between by
 mode -- see their own comments for provenance; `weights=` overrides either
 with a candidate vector, which is the hook `hexset.tuning` fits through.
@@ -18,19 +19,17 @@ import random
 from typing import Sequence
 
 from hexset.board.board import Board
-from hexset.economy import COSTS, Purchase
 from ..evaluate import (
-    PROGRESS_PURCHASES,
     ROLLS,
     WIN_SCORE,
     Evaluator,
     Survey,
     Weights,
+    hand_terms,
 )
 from hexset.game import Game
 from hexset.ledger import PublicLedger
-from hexset.robber import DISCARD_THRESHOLD
-from hexset.state import MAX_CITIES, MAX_SETTLEMENTS, Building, GameState
+from hexset.state import GameState
 from hexset.victory import WINNING_POINTS, award_points, card_points
 
 from hexset.view import View
@@ -50,24 +49,17 @@ NO_TRADE_WEIGHTS = Weights(
     production=2.785,
     diversity=0.358,
     scarce=0.91 * 2.785 / ROLLS,
-    progress=0.1371,
+    # The three hand terms are the redesign's, at the trading table's fitted
+    # values: they were refit under trading and this profile has not been
+    # refit since the pre-trading fit, so carrying its own stale numbers
+    # forward would mean the no-trade bot alone kept the cliff.
+    buy_progress=Weights.buy_progress,
     road=0.1237,
     knight=0.1026,
-    card=0.005406,
-    surplus_card=-0.3891,
+    spare_card=Weights.spare_card,
+    robber_risk=Weights.robber_risk,
     port=0.03063,
 )
-
-
-# `COSTS[purchase]` with the zero entries dropped, and its own divisor:
-# `progress_toward`'s inner loop, run three times per seat per leaf.
-_PROGRESS_COST: dict[Purchase, tuple[tuple[tuple[int, int], ...], int]] = {
-    purchase: (
-        tuple((r, n) for r, n in enumerate(COSTS[purchase]) if n),
-        sum(COSTS[purchase]),
-    )
-    for purchase in PROGRESS_PURCHASES
-}
 
 
 class HonestEvaluator:
@@ -75,15 +67,14 @@ class HonestEvaluator:
 
     Board terms are the existing evaluator's own `survey`, reused rather
     than copied since it reads only public state. The three hand terms
-    (`progress`, `held`, `surplus_card`) are read on the true hand for the
-    knower and on `View.expected_hand` for everyone else (or everyone,
-    when `omniscient`); victory-point cards count only for the knower.
-    `progress` on an expected hand is an approximation -- a maximum of
-    minimums, so the value on the mean differs from the mean of the values --
-    which `exact_progress_samples > 0` replaces with an average over that
-    many sampled hands. Supply-aware: progress toward a purchase whose piece
-    supply is exhausted is zero, so the maximum falls back to what can still
-    be built.
+    (`evaluate.hand_terms`) are read on the true hand for the knower and on
+    `View.expected_hand` for everyone else (or everyone, when `omniscient`);
+    victory-point cards count only for the knower. `buy_progress` on an
+    expected hand is an approximation -- a maximum of minimums, so the value
+    on the mean differs from the mean of the values -- which
+    `exact_progress_samples > 0` replaces with an average over that many
+    sampled hands. Supply- and board-aware: `hand_terms` prices only the
+    purchases `survey` says this seat can still make.
     """
 
     def __init__(
@@ -95,7 +86,7 @@ class HonestEvaluator:
         self.vector = self.inner.vector
         self.omniscient = omniscient
         self.exact_progress_samples = exact_progress_samples
-        self._walk_cache: dict[tuple, tuple[Survey, tuple[int, int]]] = {}
+        self._walk_cache: dict[tuple, Survey] = {}
         self._belief_cache: dict[tuple, View] = {}
         self._evaluate_cache: dict[tuple, list[float]] = {}
 
@@ -170,88 +161,77 @@ class HonestEvaluator:
         """
         return self.belief_for(game.state(perspective, hidden=False), game.ledger, perspective)
 
-    def _walk(self, state: GameState, seat: int) -> tuple[Survey, tuple[int, int]]:
-        """`(Evaluator.survey(state, seat), _pieces(state, seat))`, memoized
-        for the life of one `Heximax.choose()`.
+    def _walk(self, state: GameState, seat: int) -> Survey:
+        """`Evaluator.survey(state, seat)`, memoized for the life of one
+        `Heximax.choose()`.
 
-        Both are pure functions of the board occupancy (`survey` also of the
-        robber), so the key decides the value outright: caching changes
-        nothing about what `terms` reads, only how often it is recomputed.
-        92.4% of the calls in one decision repeat a key already seen -- the
-        k sampled worlds share the root's occupancy, and most tree nodes
-        move neither a vertex nor the robber. They share one key because
-        `terms` needs both and the key is the expensive part.
-        `Heximax.choose` clears the cache every decision.
+        A pure function of the board occupancy, the robber and the edges, so
+        the key decides the value outright: caching changes nothing about
+        what `terms` reads, only how often it is recomputed. The k sampled
+        worlds share the root's occupancy, and most tree nodes move neither
+        a vertex nor the robber. `Heximax.choose` clears the cache every
+        decision.
         """
-        key = (tuple(state.vertex_owner), tuple(state.vertex_building), state.robber, seat)
+        key = (
+            tuple(state.vertex_owner),
+            tuple(state.vertex_building),
+            tuple(state.edge_owner),
+            state.robber,
+            seat,
+        )
         cached = self._walk_cache.get(key)
         if cached is None:
-            cached = (self.inner.survey(state, seat), _pieces(state, seat))
+            cached = self.inner.survey(state, seat)
             self._walk_cache[key] = cached
         return cached
 
     def survey(self, state: GameState, seat: int) -> Survey:
-        """The board half of `_walk`."""
-        return self._walk(state, seat)[0]
+        """`_walk`, under the name the rest of the codebase knows it by."""
+        return self._walk(state, seat)
 
-    def progress_toward(
-        self, state: GameState, seat: int, hand: Sequence[float], purchase: Purchase,
-        pieces: tuple[int, int] | None = None,
-    ) -> float:
-        if purchase is Purchase.SETTLEMENT or purchase is Purchase.CITY:
-            settlements, cities = pieces if pieces is not None else self._walk(state, seat)[1]
-            if purchase is Purchase.SETTLEMENT and settlements >= MAX_SETTLEMENTS:
-                return 0.0
-            if purchase is Purchase.CITY and cities >= MAX_CITIES:
-                return 0.0
-        # `_PROGRESS_COST` is `COSTS[purchase]` with the zero entries dropped
-        # and the divisor kept alongside; this runs three times per seat per
-        # leaf. The `min`/`sum` pair stays: since 3.12 `sum` compensates its
-        # float error (Neumaier), so an accumulator loop here is a different
-        # number in the last bit -- which is enough to flip a near-tie. A
-        # list comprehension over the same operands in the same order feeds
-        # `sum` the identical values, so the result is bit-for-bit the same
-        # as the generator it replaces -- only the generator's per-item
-        # frame-switch overhead (needless for `needed`'s two or three pairs)
-        # is gone.
-        needed, total = _PROGRESS_COST[purchase]
-        return sum([min(hand[r], n) for r, n in needed]) / total
-
-    def progress(
+    def hand_terms(
         self, state: GameState, seat: int, hand: Sequence[float],
-        pieces: tuple[int, int] | None = None,
-    ) -> float:
-        # The vertex walk SETTLEMENT and CITY both need is done once -- here,
-        # or by `terms`, which has it from the same memoized `_walk`.
-        if pieces is None:
-            pieces = self._walk(state, seat)[1]
-        best = 0.0
-        for purchase in PROGRESS_PURCHASES:
-            toward = self.progress_toward(state, seat, hand, purchase, pieces)
-            if toward > best:
-                best = toward
-        return best
+        walk: Survey | None = None,
+    ) -> tuple[float, float, float]:
+        """`evaluate.hand_terms` for `hand`, on this seat's memoized board facts."""
+        return hand_terms(
+            hand,
+            self._walk(state, seat) if walk is None else walk,
+            num_players=state.num_players,
+            deck_left=len(state.deck),
+        )
 
-    def _progress_of(
+    def _hand_terms_of(
         self, state: GameState, seat: int, hand: Sequence[float], belief: View | None,
-        pieces: tuple[int, int] | None = None,
-    ) -> float:
+        walk: Survey | None = None,
+    ) -> tuple[float, float, float]:
+        """`hand_terms` on an estimated hand, optionally averaged over samples.
+
+        `buy_progress` is a maximum of minimums, so its value on the mean hand
+        is not the mean of its values; `exact_progress_samples > 0` draws that
+        many hands from the belief instead.
+        """
         if (
             belief is None
             or belief.exact(seat)
             or not self.exact_progress_samples
             or not belief.unknown[seat]
         ):
-            return self.progress(state, seat, hand, pieces)
+            return self.hand_terms(state, seat, hand, walk)
         rng = random.Random(seat)
         cards = belief._pool_cards()
-        total = 0.0
+        totals = [0.0, 0.0, 0.0]
         for _ in range(self.exact_progress_samples):
             counts = belief.known[seat][:]
             for r in rng.sample(cards, belief.unknown[seat]):
                 counts[r] += 1
-            total += self.progress(state, seat, counts, pieces)
-        return total / self.exact_progress_samples
+            for i, value in enumerate(self.hand_terms(state, seat, counts, walk)):
+                totals[i] += value
+        return (
+            totals[0] / self.exact_progress_samples,
+            totals[1] / self.exact_progress_samples,
+            totals[2] / self.exact_progress_samples,
+        )
 
     def terms(
         self, state: GameState, seat: int, hand: Sequence[float], *, knower: int | None = None,
@@ -263,21 +243,21 @@ class HonestEvaluator:
         and `View.expected_hand(seat)` otherwise -- `evaluate` decides
         which and passes it in, so this method itself never has to ask.
         """
-        walk, pieces = self._walk(state, seat)
-        held = sum(hand)
+        walk = self._walk(state, seat)
         points = walk.buildings + award_points(state, seat)
         if seat == knower:
             points += card_points(state, seat)
+        progress, spare, risk = self._hand_terms_of(state, seat, hand, belief, walk)
         return (
             points,
             walk.rate,
             walk.kinds,
             walk.scarce,
-            self._progress_of(state, seat, hand, belief, pieces),
-            state.edge_owner.count(seat),  # `list.count`: the same walk, in C
+            progress,
+            walk.roads,
             state.knights_played[seat],
-            held,
-            max(0, held - DISCARD_THRESHOLD),
+            spare,
+            risk,
             walk.port_gain,
         )
 
@@ -360,16 +340,3 @@ class HonestEvaluator:
         # occupancy and the robber too -- but reading it from the game is
         # what says so.
         return self.evaluate(game.state(seat, hidden=False), seat, belief)
-
-
-def _pieces(state: GameState, seat: int) -> tuple[int, int]:
-    """(settlements, cities) `seat` has on the board, in one walk."""
-    settlements = cities = 0
-    for vertex, owner in enumerate(state.vertex_owner):
-        if owner != seat:
-            continue
-        if state.vertex_building[vertex] == Building.SETTLEMENT:
-            settlements += 1
-        elif state.vertex_building[vertex] == Building.CITY:
-            cities += 1
-    return settlements, cities

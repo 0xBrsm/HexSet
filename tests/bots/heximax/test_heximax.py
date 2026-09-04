@@ -64,7 +64,14 @@ from helpers import clear_hand, give, independent_vertices, mini_board
 # `want` anyone could cover -- and trading is no longer an action. What
 # `search2` still does is read those hands at its own leaves, which is what
 # `test_search2_can_tell_the_same_two_worlds_apart` now pins.
-SEARCH2_LEAK_SEED = 2
+#
+# Was 2 until the hand terms were redesigned (`evaluate.hand_terms`), whose
+# leaf values happen to agree on seed 2's pair: with nothing buildable there,
+# `buy_progress` is zero for both worlds and the other two terms read the
+# hand at one flat bank rate, so a swap that keeps every hand size keeps the
+# score too. Not a leak closing -- 0, 1 and 3 through 6 all still separate
+# the worlds -- so the seed moves rather than the assertion.
+SEARCH2_LEAK_SEED = 3
 
 
 def a_game(seed: int = 0, players: int = 4):
@@ -540,7 +547,9 @@ def test_the_belief_cache_is_exact_against_from_game_on_random_tree_nodes(omnisc
 # --- evaluate -----------------------------------------------------------------
 
 
-def test_a_seat_with_no_settlements_left_has_no_settlement_progress():
+def test_a_seat_with_no_settlements_left_saves_for_something_else():
+    """The piece supply closes a purchase: a settlement hand stops scoring as
+    one, and `buy_progress` falls back to whatever the seat can still make."""
     board = mini_board()
     state = new_game(board, 2, random.Random(0))
     evaluator = HonestEvaluator(board)
@@ -549,12 +558,13 @@ def test_a_seat_with_no_settlements_left_has_no_settlement_progress():
     spots = independent_vertices(board, MAX_SETTLEMENTS)
     for vertex in spots[: MAX_SETTLEMENTS - 1]:
         place_settlement(state, 0, vertex, connected=False)
-    assert evaluator.progress_toward(state, 0, hand, Purchase.SETTLEMENT) == 1.0
-    assert evaluator.progress(state, 0, hand) == 1.0
+    # No roads, so no connected spot: the settlement is priced through the
+    # road that would open one, not as a settlement the seat could place.
+    before = evaluator.hand_terms(state, 0, hand)[0]
 
     place_settlement(state, 0, spots[-1], connected=False)
-    assert evaluator.progress_toward(state, 0, hand, Purchase.SETTLEMENT) == 0.0
-    assert evaluator.progress(state, 0, hand) < 1.0
+    after = evaluator.hand_terms(state, 0, hand)[0]
+    assert after < before
 
 
 def test_a_seat_with_no_cities_left_has_no_city_progress():
@@ -566,8 +576,13 @@ def test_a_seat_with_no_cities_left_has_no_city_progress():
     for vertex in spots:
         place_settlement(state, 0, vertex, connected=False)
         upgrade_to_city(state, 0, vertex)
-    assert evaluator.progress_toward(state, 0, hand, Purchase.CITY) == 0.0
-    assert evaluator.progress_toward(state, 1, hand, Purchase.CITY) == 1.0
+    # Seat 0 is out of cities and holds no settlement to upgrade; seat 1 has
+    # neither, so neither can score this hand as a city.
+    assert evaluator.hand_terms(state, 0, hand)[0] < 1.0
+    assert evaluator.hand_terms(state, 1, hand)[0] < 1.0
+    # Give seat 1 a settlement and the same hand is a whole city again.
+    place_settlement(state, 1, independent_vertices(board, MAX_CITIES + 1)[-1], connected=False)
+    assert evaluator.hand_terms(state, 1, hand)[0] == 1.0
 
 
 def test_the_honest_evaluator_agrees_with_the_evaluator_when_nothing_is_hidden():
@@ -623,9 +638,14 @@ def test_the_evaluate_memo_is_exact_against_a_fresh_computation(omniscient):
 
 
 def test_the_two_weight_profiles_differ_where_trading_changed_the_fit():
+    """The no-trade profile still carries its own pre-trading fit for the
+    board terms; the three hand terms are the redesign's in both, since only
+    the trading table has been refit since."""
     assert TRADING_WEIGHTS == Weights()
+    for term in ("buy_progress", "spare_card", "robber_risk"):
+        assert getattr(NO_TRADE_WEIGHTS, term) == getattr(TRADING_WEIGHTS, term)
     assert NO_TRADE_WEIGHTS.production < TRADING_WEIGHTS.production
-    assert NO_TRADE_WEIGHTS.progress > TRADING_WEIGHTS.progress
+    assert NO_TRADE_WEIGHTS.port > TRADING_WEIGHTS.port
     assert NO_TRADE_WEIGHTS.victory_point == 1.0
 
 
@@ -1058,6 +1078,79 @@ def test_an_honest_trade_read_is_unchanged_by_the_partners_real_cards():
         bot = a_bot(game, 26)
         values.append(bot._delta(game.state(0), 0, 0, received, 1, bot._rank))
     assert values[0] == pytest.approx(values[1])
+
+
+def test_the_incremental_gate_matches_the_clone_it_replaces_bit_for_bit():
+    """PR #41's contract, restated for the redesigned hand terms.
+
+    `_delta`'s fast path recomputes every seat's hand terms from the
+    post-trade pool without cloning the state; `_delta_reference` clones and
+    re-reads. The new terms are a function of the hand and board facts a
+    trade cannot move, so the two must agree exactly -- not approximately --
+    on every candidate, or the private gate is pricing a different position
+    from the one the search would score.
+    """
+    checked = nonzero = 0
+    for seed in (26, 31, 44):
+        game = after_setup(seed)
+        rng = random.Random(seed)
+        for _ in range(220):
+            options = legal_actions(game)
+            if not options or is_over(game):
+                break
+            apply(game, rng.choice(options))
+            if game.phase is not Phase.MAIN:
+                continue
+            seat = to_move(game)
+            bot = a_bot(game, seed)
+            view = game.state(seat)
+            for counterparty in range(game._state.num_players):
+                if counterparty == seat:
+                    continue
+                for give_r in range(NUM_RESOURCES):
+                    if not game._state.hands[seat][give_r]:
+                        continue
+                    for take_r in range(NUM_RESOURCES):
+                        if take_r == give_r or not game._state.hands[counterparty][take_r]:
+                            continue
+                        received = [0] * NUM_RESOURCES
+                        received[give_r] = -1
+                        received[take_r] = 1
+                        received = tuple(received)
+                        fast = bot._delta(view, seat, seat, received, counterparty, bot._rank)
+                        slow = bot._delta_reference(
+                            view, seat, seat, received, counterparty, bot._rank
+                        )
+                        assert fast == slow
+                        checked += 1
+                        nonzero += fast != 0.0
+    # A run that priced nothing, or priced everything at zero, would pass
+    # vacuously -- the equality is only worth anything over real candidates.
+    assert checked > 500
+    assert nonzero > 100
+
+
+def test_both_evaluators_read_the_same_hand_the_same_way():
+    """`Evaluator` and `HonestEvaluator` share one `hand_terms`, so a hand
+    scored through search2's path and through heximax's must give the
+    identical three numbers -- the property the trade gate's two call sites
+    rely on."""
+    rng = random.Random(5)
+    game = after_setup(5)
+    for _ in range(300):
+        options = legal_actions(game)
+        if not options or is_over(game):
+            break
+        apply(game, rng.choice(options))
+    state = game._state
+    plain = Evaluator(state.board)
+    honest = HonestEvaluator(state.board)
+    for seat in range(state.num_players):
+        walk = plain.survey(state, seat)
+        assert honest.survey(state, seat) == walk
+        assert plain.hand_terms(state, seat, walk) == honest.hand_terms(
+            state, seat, state.hands[seat]
+        )
 
 
 # --- presets ------------------------------------------------------------------

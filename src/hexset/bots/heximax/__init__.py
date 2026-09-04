@@ -25,11 +25,11 @@ seat's view of the game is engine functionality, reached through
 `Game.state(seat, hidden=True)`, not something a bot builds for itself.
 
 * `evaluate` -- `hexset.bots.evaluate.Evaluator`'s term set read through the
-  view (`HonestEvaluator`), with progress zeroed where the piece supply is
-  exhausted, and two weight profiles (`TRADING_WEIGHTS`, a trading table,
-  and `NO_TRADE_WEIGHTS`, a no-trade table). Duplicates rather than imports
-  `hexset.bots.evaluate`'s term functions (see the duplication note in
-  `evaluate.py`'s own module docstring); not merged, on purpose, for now.
+  view (`HonestEvaluator`), and two weight profiles (`TRADING_WEIGHTS`, a
+  trading table, and `NO_TRADE_WEIGHTS`, a no-trade table). The three hand
+  terms are `hexset.bots.evaluate.hand_terms` itself, shared rather than
+  duplicated, so the trade gate that recomputes them from a post-trade hand
+  gets bit-identically what the search would have scored.
 * `search`   -- max^n over `HonestEvaluator` with a node budget and
   iterative deepening (`Heximax`), opponents expanded from determinized
   samples of the belief (PIMC over `k` worlds), and every hidden draw

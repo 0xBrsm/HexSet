@@ -11,6 +11,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`hexset.bench.hand_valuation` and `hexset.bench.shipped_hand`.** The fit
+  grid and the two strength gates for the hand-term redesign, and the
+  instrument they run against: the pre-redesign hand terms, frozen, played
+  through the shipped search and trade gates as the entrant kinds and
+  presets `heximax-shipped-hand` and `search2-shipped-hand`. The frozen
+  bot reproduces all 20 recorded `heximax` census hashes exactly, so a gate
+  against "the weights that shipped" plays the bot that shipped.
+- **`Survey` carries the seat's board facts the hand terms need**:
+  settlements, cities, roads, legal settlement spots, and the cheapest trade
+  ratio per resource — all from the one walk that already computed
+  production, building points and the port gain. `HonestEvaluator._pieces`
+  is gone; its two counts come off the same walk.
+
 - **`hexset.bench.trade_census`.** Plays a lineup through `hexset.arena`
   (grouped seating, antithetic-paired boards, `road_sweep`'s convention) and
   records every `hexset.trading.Trade` as it clears — turn, phase, both
@@ -24,6 +37,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   trades census the same way once `hexnet.netbot` registers it.
 
 ### Changed
+
+- **A card is worth what it can buy, and the over-seven penalty prices the
+  robber.** `Weights.progress`/`card`/`surplus_card` are replaced by
+  `buy_progress`/`spare_card`/`robber_risk`, computed by one shared
+  `hexset.bots.evaluate.hand_terms` that both the plain evaluator and
+  heximax's belief-aware one call. `buy_progress` is how far the hand has
+  got towards the best purchase the *board* still leaves open to this seat —
+  a settlement only where a legal spot exists, a city only over a settlement,
+  a road only where no spot is open — each weighted by what that purchase is
+  worth. `spare_card` values every card the best purchase does not need at
+  the seat's own bank or port rate, so a surplus card is a quarter of a card
+  (a half behind a port) rather than 0.005 victory points. `robber_risk` is
+  the expected loss to a 7 — the chance of one before this seat plays again,
+  times the half-hand it would discard, times what those cards are worth —
+  continuous in hand size instead of a flat -0.389 per card over seven.
+  Behaviour-changing by design: the heximax choice census is re-recorded.
 
 - A closed seat reads "closed" (the picker's option and the row), and players are numbered among the seats still in the game: close one and the table reads Player 1, 2, 3.
 - **`hexset.trading._candidates` skips a zero-valuation seat's enumeration.**

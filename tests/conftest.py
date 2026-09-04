@@ -16,9 +16,9 @@ live here rather than in `src/` because a random mover is a fixture, and the
 package should not ship one to make its own tests convenient.
 
 `registry` is the one way a test should build a `Tables`. Every bot seat at
-every table starts a runner thread that polls once a second until its game
-ends, and a test that deals three bots and then asserts one thing leaves three
-of them running: PR #2's suite left 67 live `bot-*` threads behind
+every table starts a runner thread that lives until its game ends -- parked on
+a read of the table between turns -- and a test that deals three bots and then
+asserts one thing leaves three of them running: PR #2's suite left 67 live `bot-*` threads behind
 (`docs/engine-divergence-2026-09-02.md`, defect 5). Going through the fixture
 means teardown stops them.
 
@@ -89,11 +89,9 @@ def new_tables(**config) -> Tables:
 
     `games_dir=""` rather than the default `None`: `None` means "wherever
     `HEXSET_UI_GAMES_DIR` points", and a test suite must not journal into a
-    real player's games directory. `seat_grace=0.0` makes the setup lock
-    deterministic (two touches, no wall clock).
+    real player's games directory.
     """
     config.setdefault("games_dir", "")
-    config.setdefault("seat_grace", 0.0)
     return track(Tables(Config(**config)))
 
 

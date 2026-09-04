@@ -50,12 +50,12 @@ MAX_WORKERS = 8
 # cells that also raise `card` -- the hypothesis says a cheaper road and a
 # more valuable hand both push away from road-building.
 DEFAULT_CELLS: tuple[dict[str, float], ...] = (
-    {"road": 0.1209, "card": 0.005406},  # control: identical to baseline
-    {"road": 0.08, "card": 0.005406},
-    {"road": 0.04, "card": 0.005406},
-    {"road": 0.0, "card": 0.005406},
-    {"road": 0.04, "card": 0.02},
-    {"road": 0.0, "card": 0.02},
+    {"road": 0.1209},  # control: identical to baseline
+    {"road": 0.08},
+    {"road": 0.04},
+    {"road": 0.0},
+    {"road": 0.04, "spare_card": 0.02},
+    {"road": 0.0, "spare_card": 0.02},
 )
 
 
@@ -118,8 +118,17 @@ def run_cell(
     depth: int,
     width: int | None,
     workers: int,
+    baseline: Entrant | None = None,
+    challenger: Entrant | None = None,
 ) -> dict:
     """One challenger-vs-baseline cell: `games` games, `[c, c, b, b]` seats.
+
+    `challenger`/`baseline` name the two entrants outright, for a caller
+    playing something other than two heximax bots at different weights
+    (`hexset.bench.hand_valuation` plays the shipped hand valuation, which is
+    a different term set rather than a different vector, and plays search2 as
+    the baseline); left unset, both are the shipped heximax and
+    `challenger_weights` is the only difference between them.
 
     Grouped, not interleaved: `_play_one`'s antithetic pairing swaps seats by
     `seats // 2` between the two halves of a pair, which exchanges the seat
@@ -134,12 +143,15 @@ def run_cell(
     (byte-identical weights on both sides) at 44.3% instead of the expected
     ~50% for exactly this reason.
     """
-    challenger = Entrant(
-        "challenger", kind="heximax", depth=depth, width=width, weights=challenger_weights
-    )
-    baseline = Entrant(
-        "baseline", kind="heximax", depth=depth, width=width, weights=TRADING_WEIGHTS
-    )
+    if challenger is None:
+        challenger = Entrant(
+            "challenger", kind="heximax", depth=depth, width=width,
+            weights=challenger_weights,
+        )
+    if baseline is None:
+        baseline = Entrant(
+            "baseline", kind="heximax", depth=depth, width=width, weights=TRADING_WEIGHTS
+        )
     lineup = (challenger, challenger, baseline, baseline)
     challenger_seats = (0, 1)
     baseline_seats = (2, 3)
@@ -226,8 +238,8 @@ def main(argv: list[str] | None = None) -> int:
         "--cells",
         type=str,
         default=None,
-        help="path to a JSON file of [{road, card}, ...]; defaults to the "
-        "six-cell road/card sweep built into this script",
+        help="path to a JSON file of [{weight field: value, ...}, ...]; "
+        "defaults to the six-cell road sweep built into this script",
     )
     parser.add_argument("--json", action="store_true", help="emit machine-readable output")
     args = parser.parse_args(argv)
@@ -246,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
     started = time.perf_counter()
     rows = []
     for cell in cells:
-        weights = replace(TRADING_WEIGHTS, road=cell["road"], card=cell["card"])
+        weights = replace(TRADING_WEIGHTS, **cell)
         result = run_cell(
             weights,
             args.games,
@@ -255,14 +267,14 @@ def main(argv: list[str] | None = None) -> int:
             width=args.width,
             workers=args.workers,
         )
-        result["cell"] = {"road": cell["road"], "card": cell["card"]}
+        result["cell"] = dict(cell)
         rows.append(result)
         # Progress goes to stderr unconditionally -- a sweep runs long enough
         # that its own cadence matters, and `--json` still wants a clean
         # single document on stdout.
         low, high = result["interval_95"]
         print(
-            f"  road={cell['road']:<7} card={cell['card']:<7} "
+            "  " + " ".join(f"{k}={v:<8.4g}" for k, v in cell.items()) + " "
             f"win {result['wins']:>3}/{result['decided']} {result['win_rate']:6.1%} "
             f"[{low:.1%}, {high:.1%}]  "
             f"roads {result['challenger_roads_per_game']:.2f} vs "

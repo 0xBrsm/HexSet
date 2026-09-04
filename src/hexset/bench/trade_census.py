@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Sequence
 
 import hexset.bots  # noqa: F401 -- registers heximax presets with hexset.arena
+import hexset.bench.shipped_hand  # noqa: F401 -- and the frozen shipped hand valuation
 from hexset.actions import apply
 from hexset.arena import MAX_ACTIONS, Entrant, base_name, seat_of, spawn
 from hexset.board.board import random_base_board

@@ -25,7 +25,22 @@ pytest.importorskip("catanatron.game")
 from catanatron.game import Game as CatanatronGame
 from catanatron.models.map import BASE_MAP_TEMPLATE, CatanMap
 from catanatron.models.player import Color, RandomPlayer
+from hexset.arena import PRESETS
 from hexset.catanatron.player import DevCatanPlayer
+
+
+def test_importing_the_bridge_registers_the_heximax_presets():
+    """`hexset.catanatron.player` (and `.duel`, which imports it) used to
+    import neither `hexset.bots` nor anything that does, so a worker process
+    asking for `DC:heximax-notrade` raised a bare `KeyError` on the name --
+    `PRESETS` only gains "heximax"/"heximax-omni"/"heximax-notrade" as an
+    import-time side effect of importing `hexset.bots.heximax`. Importing
+    this module (done above, at collection time) is what this test is
+    actually checking survived; the assertion below just makes that explicit
+    rather than relying on the import above not raising.
+    """
+    assert "heximax-notrade" in PRESETS
+    assert "heximax" in PRESETS
 
 
 @pytest.mark.parametrize("seed", range(1))

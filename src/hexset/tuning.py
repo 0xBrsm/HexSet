@@ -113,7 +113,7 @@ def entrant_for(
     weights: Weights,
     depth: int,
     width: int | None,
-    stance: str = "relative",
+    stance: str | None = None,
     evaluator: str = "default",
 ) -> Entrant:
     """Build the entrant a fit plays with `weights`.
@@ -126,6 +126,10 @@ def entrant_for(
     `heximax.heximax`'s own `BY_MODE` does, since a fit has to compare bots
     that are heximax in every way but the vector under test. Otherwise it is
     the plain greedy/search entrant the harness always built.
+
+    `stance` defaults to `None`, meaning "the bot's own default" -- `"win"`
+    for a heximax evaluator, `"relative"` for greedy/search -- resolved at
+    spawn time by `hexset.arena`'s `Entrant.stance`, not restated here.
     """
     if evaluator in HEXIMAX_MODES:
         mode = HEXIMAX_MODES[evaluator]
@@ -161,13 +165,14 @@ def duel(
     depth: int,
     width: int | None,
     workers: int = 1,
-    stance: str = "relative",
+    stance: str | None = None,
     evaluator: str = "default",
 ) -> tuple[int, int]:
     """Play two of each, seats rotated. Returns (challenger wins, decided games).
 
     Both sides read the vector the same way. A stance is what the weights are
-    being fitted *for*, not one of the things under test.
+    being fitted *for*, not one of the things under test. `None` defers to
+    the bot's own default (see `entrant_for`).
     """
     a = entrant_for("challenger", challenger, depth, width, stance, evaluator)
     b = entrant_for("incumbent", incumbent, depth, width, stance, evaluator)
@@ -198,14 +203,15 @@ def climb(
     width: int | None = None,
     z: float = ACCEPT_Z,
     workers: int = 1,
-    stance: str = "relative",
+    stance: str | None = None,
     evaluator: str = "default",
     report: Callable[[Step], None] | None = None,
 ) -> tuple[Weights, list[Step]]:
     """Hill climb from `start`, returning the best weights and every step tried.
 
     `report` is called after each duel, because a real run takes long enough
-    that waiting for the return value is not useful.
+    that waiting for the return value is not useful. `stance` defaults to
+    `None` -- the bot's own default (see `entrant_for`).
     """
     rng = random.Random(seed)
     _seed_default_weights()
@@ -271,7 +277,7 @@ def confirm(
     depth: int = 1,
     width: int | None = None,
     workers: int = 1,
-    stance: str = "relative",
+    stance: str | None = None,
     evaluator: str = "default",
     z: float = Z_95,
 ) -> Confirmation:
@@ -282,6 +288,7 @@ def confirm(
     per-duel budget grows — the Wilson threshold moves with it. So a run that
     accepted a handful of candidates has very likely accepted noise, and the
     only way to tell is one honest high-budget duel at the end, judged at 95%.
+    `stance` defaults to `None` -- the bot's own default (see `entrant_for`).
     """
     _seed_default_weights()
     wins, decided = duel(

@@ -30,6 +30,18 @@ from dataclasses import replace
 from hexset.actions import ActionType as OurActionType
 from hexset.arena import entrant_from_name, spawn
 
+import hexset.bots  # noqa: F401 -- registers the bot presets ("heximax"/
+# "heximax-omni"/"heximax-notrade" among them) with `hexset.arena.PRESETS`
+# before `entrant_from_name`, below, ever looks one up. Neither this module
+# nor `hexset.catanatron.duel` imported it before, so a worker process asking
+# for `DC:heximax-notrade` got a bare `KeyError` on the name -- every other
+# entry point into an entrant by name (`hexset.bench.duel`, `hexset.server`)
+# imports `hexset.bots` itself or imports something that does; this bridge
+# was the one that didn't. A module-level import, so it runs once whichever
+# way a worker process comes to exist -- forked (inherits the parent's
+# already-imported module) or re-exec'd via `_ensure_pythonhashseed_zero`
+# (a fresh interpreter re-runs this import from scratch either way).
+
 from catanatron.models.player import Color, Player
 
 from .actions import move_robber, to_catanatron

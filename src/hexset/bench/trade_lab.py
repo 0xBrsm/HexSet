@@ -65,12 +65,13 @@ import hexset.bots  # noqa: F401 -- registers "heximax" with hexset.arena
 import hexset.game as _game_mod
 from hexset import trading
 from hexset.actions import apply
+from hexset.arena import MAX_ACTIONS, mean_interval
 from hexset.board.board import random_base_board
 from hexset.board.terrain import NUM_RESOURCES
 from hexset.bots.heximax import heximax
 from hexset.bots.heximax.search import Heximax, _thin_copy
-from hexset.game import Game, Phase, imagine, start, to_move
-from hexset.record import Record, ReplayError, actions_of, board_of, from_json, record_game, write
+from hexset.game import Game, Phase, imagine, is_over, start, to_move
+from hexset.record import Record, ReplayError, actions_of, board_of, from_json, read, record_game, write
 from hexset.trading import Bundle, publish_valuation
 from hexset.victory import victory_points
 
@@ -507,6 +508,31 @@ def run_census(bank_path: Path, workers: int) -> list[dict]:
 # Readouts
 
 
+QUANTILE_LEVELS: tuple[float, ...] = (0.10, 0.25, 0.50, 0.75, 0.90, 0.99)
+
+
+def _quantiles(values: Sequence[float], levels: Sequence[float] = QUANTILE_LEVELS) -> dict[str, float]:
+    """Linear-interpolated percentiles (numpy's default method), keyed
+    `"p10"`, `"p25"`, ... An empty `values` reports every level as `0.0`
+    rather than raising -- a rule with zero executed trades still owes a
+    row in the table."""
+    if not values:
+        return {f"p{int(round(level * 100))}": 0.0 for level in levels}
+    ordered = sorted(values)
+    n = len(ordered)
+    out: dict[str, float] = {}
+    for level in levels:
+        if n == 1:
+            out[f"p{int(round(level * 100))}"] = ordered[0]
+            continue
+        pos = level * (n - 1)
+        lo = int(pos)
+        hi = min(lo + 1, n - 1)
+        frac = pos - lo
+        out[f"p{int(round(level * 100))}"] = ordered[lo] + (ordered[hi] - ordered[lo]) * frac
+    return out
+
+
 def _bundle_shape(given: int, received: int) -> str:
     hi, lo = (given, received) if given >= received else (received, given)
     if hi == 1 and lo == 1:
@@ -555,6 +581,22 @@ def compute_readouts(all_positions: list[dict]) -> dict:
             if n_positions else 0.0
         )
 
+        # Phase 2A -- gain distribution. `min_gains` is the weaker side of
+        # each executed trade, the figure the verdict rule's "positive for
+        # both parties" test ultimately turns on.
+        min_gains = [min(t["actor_gain"], t["counterparty_gain"]) for t in trades]
+        gain_distribution = {
+            "actor_gain": _quantiles(actor_gains),
+            "counterparty_gain": _quantiles(cp_gains),
+            "min_gain": _quantiles(min_gains),
+            "share_min_gain_under_1e-4": (
+                sum(1 for g in min_gains if g < 1e-4) / n_trades if n_trades else 0.0
+            ),
+            "share_min_gain_under_1e-3": (
+                sum(1 for g in min_gains if g < 1e-3) / n_trades if n_trades else 0.0
+            ),
+        }
+
         out["rules"][rule] = {
             "n_trades": n_trades,
             "trades_per_event": trades_per_event,
@@ -570,6 +612,7 @@ def compute_readouts(all_positions: list[dict]) -> dict:
                 "share_lifts_leader": share_lifts_leader,
             },
             "mean_extra_candidates_from_dropping_public_filter": mean_extra_admitted,
+            "gain_distribution": gain_distribution,
         }
 
     disagreement: dict[str, float] = {}
@@ -631,6 +674,573 @@ def table_md(readouts: dict) -> str:
     for pair, share in readouts["rule_disagreement"].items():
         lines.append(f"| {pair} | {share*100:.1f}% |")
 
+    lines.append("\n## 5. Gain distribution (executed trades)\n")
+    lines.append(
+        "| rule | side | p10 | p25 | p50 | p75 | p90 | p99 |"
+    )
+    lines.append("|---|---|---|---|---|---|---|---|")
+    for rule in RULES:
+        gd = readouts["rules"][rule]["gain_distribution"]
+        for side in ("actor_gain", "counterparty_gain", "min_gain"):
+            q = gd[side]
+            lines.append(
+                f"| {rule} | {side} | {q['p10']:.5f} | {q['p25']:.5f} | {q['p50']:.5f} | "
+                f"{q['p75']:.5f} | {q['p90']:.5f} | {q['p99']:.5f} |"
+            )
+    lines.append("\n| rule | share min(gain) < 1e-4 | share min(gain) < 1e-3 |")
+    lines.append("|---|---|---|")
+    for rule in RULES:
+        gd = readouts["rules"][rule]["gain_distribution"]
+        lines.append(
+            f"| {rule} | {gd['share_min_gain_under_1e-4']*100:.1f}% | "
+            f"{gd['share_min_gain_under_1e-3']*100:.1f}% |"
+        )
+
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Strategic: is the honest gate a fixed point? One seat's gate is shaded and
+# the rest stay honest; measured against its own realised gain at tau=0, k=1.
+
+# Acceptance thresholds (`accept iff own gain > tau`), win probability. The
+# registration (`trade-lab.md`) names {0, 0.005, 0.01, 0.02, 0.05}; phase 2's
+# own brief supersedes that with these five, an order of magnitude finer,
+# because phase 1 found mean private gains of ~3e-4 -- the registration's
+# smallest nonzero tau (0.005) sits above nearly every gain in the bank and
+# would make every tau > 0 indistinguishable from "never accept". These five
+# straddle the observed distribution instead.
+STRATEGIC_TAUS: tuple[float, ...] = (0.0, 1e-4, 5e-4, 1e-3, 5e-3)
+# Exaggeration multipliers on the shaded seat's *reported* gain, selection-key
+# only -- its own acceptance still reads the true gain against tau=0. Tested
+# only under the two rules whose key reads a magnitude the exaggeration can
+# move (`egalitarian`'s min, `nash`'s product); `actor`'s key is already the
+# shaded seat's own claimed gain when it is the actor (exaggerating it always
+# looks better, a trivial result) and `maximin-public`'s key never reads a
+# private gain at all.
+STRATEGIC_KS: tuple[float, ...] = (1.5, 2.0)
+EXAGGERATION_RULES: tuple[str, ...] = ("egalitarian", "nash")
+
+# Arm labels this module writes and reads back; `"tau=0"` (tau=0, k=1) is the
+# honest baseline every other arm is a paired difference against.
+def _tau_label(tau: float) -> str:
+    return f"tau={tau:g}"
+
+
+def _k_label(k: float) -> str:
+    return f"k={k:g}"
+
+
+HONEST_ARM = _tau_label(0.0)
+
+
+def _shaded_pick(
+    rule: str, rows: Sequence[CandidateRow], me: int, shaded_seat: int, tau: float, k: float,
+) -> CandidateRow | None:
+    """The clearing candidate `rule` picks when `shaded_seat` plays a shaded
+    gate and every other seat is honest -- `None` if nothing clears.
+
+    `shaded_seat` is `me` (the actor) for every row in one position (the
+    actor is fixed for the whole event), or `them` for the subset of rows
+    that name it as counterparty; a row naming neither is fully honest.
+    Admission always reads the shaded seat's *true* gain against `tau`
+    (never `k`); `k` -- 1.0 outside the exaggeration arms -- only scales the
+    value fed to the selection key, mirroring `select`'s own tie-break
+    exactly but keyed on the reported figure instead of the true one.
+    """
+    admitted: list[tuple[CandidateRow, float, float]] = []
+    for r in rows:
+        if rule == "maximin-public" and not (r.pub_actor > 0 and r.pub_counterparty > 0):
+            continue
+        if shaded_seat == me:
+            admit = r.gain_actor > tau and r.gain_counterparty > 0
+            rep_actor, rep_cp = r.gain_actor * k, r.gain_counterparty
+        elif r.them == shaded_seat:
+            admit = r.gain_actor > 0 and r.gain_counterparty > tau
+            rep_actor, rep_cp = r.gain_actor, r.gain_counterparty * k
+        else:
+            admit = r.gain_actor > 0 and r.gain_counterparty > 0
+            rep_actor, rep_cp = r.gain_actor, r.gain_counterparty
+        if admit:
+            admitted.append((r, rep_actor, rep_cp))
+    if not admitted:
+        return None
+    if rule == "maximin-public":
+        key = lambda t: (
+            min(t[0].pub_actor, t[0].pub_counterparty), t[0].pub_actor,
+            t[0].pub_actor + t[0].pub_counterparty, _canonical(t[0]), -t[0].them,
+        )
+    elif rule == "actor":
+        key = lambda t: (t[1], t[1], _canonical(t[0]), -t[0].them)
+    elif rule == "egalitarian":
+        key = lambda t: (min(t[1], t[2]), t[1], _canonical(t[0]), -t[0].them)
+    elif rule == "nash":
+        key = lambda t: (t[1] * t[2], t[1], _canonical(t[0]), -t[0].them)
+    else:
+        raise ValueError(f"unknown rule: {rule}")
+    return max(admitted, key=key)[0]
+
+
+def _run_arm_on_position(
+    game0: Game, me: int, cards_cap: int, rule: str, shaded_seat: int, tau: float, k: float,
+) -> tuple[float, int]:
+    """Clear `rule` to exhaustion at `game0` with `shaded_seat` shaded by
+    `(tau, k)`. Returns (realised gain, trade count) for the shaded seat --
+    the honest evaluator's own reading of its true gain (`CandidateRow.
+    gain_actor`/`gain_counterparty`, never the exaggerated figure) summed
+    over every executed trade the shaded seat was a party to, 0 if none."""
+    work = imagine(game0, random.Random(0))
+    work.gates = game0.gates
+    work.event_pending = False
+
+    realised = 0.0
+    shaded_trades = 0
+    executed = 0
+    while executed < cards_cap:
+        rows = candidate_rows(work, me)
+        if not rows:
+            break
+        best = _shaded_pick(rule, rows, me, shaded_seat, tau, k)
+        if best is None:
+            break
+        them, bundle = best.them, best.bundle
+
+        state = work.state(0, hidden=False)
+        before_hands = [hand[:] for hand in state.hands]
+        trading.exchange(state, me, them, bundle)
+        work.ledger.apply_hand_diff(before_hands, state.hands)
+        work.trades.append(trading.Trade(me, them, bundle))
+        work.trades_made += 1
+        executed += 1
+
+        if shaded_seat == me:
+            realised += best.gain_actor
+            shaded_trades += 1
+        elif them == shaded_seat:
+            realised += best.gain_counterparty
+            shaded_trades += 1
+    return realised, shaded_trades
+
+
+def _arms_for_rule(rule: str) -> list[tuple[str, float, float]]:
+    """(label, tau, k) for every arm this rule is measured under."""
+    arms = [(_tau_label(tau), tau, 1.0) for tau in STRATEGIC_TAUS]
+    if rule in EXAGGERATION_RULES:
+        arms += [(_k_label(k), 0.0, k) for k in STRATEGIC_KS]
+    return arms
+
+
+def _run_strategic_on_position(pos: Position) -> dict | None:
+    """`{rule: {"qualifies": bool, "shaded_seat": int, "arms": {label: (realised, trades)}}}`
+    for one position, or `None` if `pos`'s designated seat is not a party to
+    any rule's honest clearing set (skipped -- shading a seat that was never
+    going to trade here measures nothing)."""
+    game0 = pos.game
+    me = game0.current_player
+    shaded_seat = pos.position_index % 4
+    state0 = game0.state(0, hidden=False)
+    cards_cap = sum(sum(hand) for hand in state0.hands)
+
+    rows0 = candidate_rows(game0, me)
+    out: dict[str, dict] = {}
+    any_qualifies = False
+    for rule in RULES:
+        clearing0 = clearing_set(rule, rows0)
+        # `me == shaded_seat` alone is enough (the actor is a party to every
+        # row); otherwise the seat must appear as `them` in at least one row
+        # this rule's own honest clearing set admits.
+        if me == shaded_seat:
+            # `me` participates in every row `candidate_rows(game0, me)`
+            # enumerates (it is always the actor's own candidate set), so
+            # any honestly-clearing row at all makes the actor a party.
+            qualifies = bool(clearing0)
+        else:
+            qualifies = any(r.them == shaded_seat for r in clearing0)
+        if not qualifies:
+            out[rule] = {"qualifies": False, "shaded_seat": shaded_seat, "arms": {}}
+            continue
+        any_qualifies = True
+        arms: dict[str, tuple[float, int]] = {}
+        for label, tau, k in _arms_for_rule(rule):
+            arms[label] = _run_arm_on_position(game0, me, cards_cap, rule, shaded_seat, tau, k)
+        out[rule] = {"qualifies": True, "shaded_seat": shaded_seat, "arms": arms}
+    if not any_qualifies:
+        return None
+    return out
+
+
+def _strategic_worker(job: tuple[list[str], int]) -> list[dict]:
+    lines, start_index = job
+    out = []
+    for offset, line in enumerate(lines):
+        record = from_json(line)
+        game_index = start_index + offset
+        for pos in positions(record, game_index=game_index):
+            row = _run_strategic_on_position(pos)
+            if row is not None:
+                out.append({"game": game_index, "position": pos.position_index, "rules": row})
+    return out
+
+
+def run_strategic(bank_path: Path, workers: int) -> list[dict]:
+    lines = [line for line in bank_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    jobs = _chunk_lines(lines, workers)
+    if not jobs:
+        return []
+    if workers > 1 and len(jobs) > 1:
+        with Pool(min(workers, MAX_WORKERS)) as pool:
+            chunks = pool.map(_strategic_worker, jobs, chunksize=1)
+    else:
+        chunks = [_strategic_worker(job) for job in jobs]
+    return [row for chunk in chunks for row in chunk]
+
+
+def _bootstrap_ci(
+    diffs: Sequence[float], resamples: int = 1000, seed: int = 1,
+) -> tuple[float, float, float]:
+    """(mean, 2.5th pct, 97.5th pct) of the mean of `diffs` under resampling
+    with replacement. `(0.0, 0.0, 0.0)` for an empty input -- no positions
+    qualified, nothing to report."""
+    if not diffs:
+        return 0.0, 0.0, 0.0
+    mean = statistics.mean(diffs)
+    if len(diffs) < 2:
+        return mean, mean, mean
+    rng = random.Random(seed)
+    n = len(diffs)
+    means = []
+    for _ in range(resamples):
+        sample = [diffs[rng.randrange(n)] for _ in range(n)]
+        means.append(statistics.mean(sample))
+    means.sort()
+    lo = means[int(0.025 * resamples)]
+    hi = means[min(int(0.975 * resamples), resamples - 1)]
+    return mean, lo, hi
+
+
+def compute_strategic_readouts(records: list[dict]) -> dict:
+    out: dict = {"n_positions_considered": len(records), "rules": {}}
+    for rule in RULES:
+        arm_labels = [label for label, _, _ in _arms_for_rule(rule)]
+        qualifying = [r["rules"][rule] for r in records if r["rules"][rule]["qualifies"]]
+        n_qualifying = len(qualifying)
+        arm_out: dict[str, dict] = {}
+        honest_realised = [q["arms"][HONEST_ARM][0] for q in qualifying]
+        for label in arm_labels:
+            realised = [q["arms"][label][0] for q in qualifying]
+            trades = [q["arms"][label][1] for q in qualifying]
+            mean_realised = statistics.mean(realised) if realised else 0.0
+            trades_per_event = statistics.mean(trades) if trades else 0.0
+            if label == HONEST_ARM:
+                arm_out[label] = {
+                    "mean_realised_gain": mean_realised,
+                    "trades_per_event": trades_per_event,
+                    "paired_diff_vs_honest": {"mean": 0.0, "ci_low": 0.0, "ci_high": 0.0},
+                    "deviation_pays": False,
+                }
+                continue
+            diffs = [r - h for r, h in zip(realised, honest_realised)]
+            d_mean, d_lo, d_hi = _bootstrap_ci(diffs)
+            arm_out[label] = {
+                "mean_realised_gain": mean_realised,
+                "trades_per_event": trades_per_event,
+                "paired_diff_vs_honest": {"mean": d_mean, "ci_low": d_lo, "ci_high": d_hi},
+                "deviation_pays": d_lo > 0.0,
+            }
+        out["rules"][rule] = {"n_qualifying": n_qualifying, "arms": arm_out}
+    return out
+
+
+def strategic_table_md(readouts: dict) -> str:
+    lines: list[str] = [f"Positions considered: {readouts['n_positions_considered']}\n"]
+    lines.append(
+        "| rule | arm | n qualifying | mean realised gain | trades/event | "
+        "paired diff vs honest | 95% CI | deviation pays |"
+    )
+    lines.append("|---|---|---|---|---|---|---|---|")
+    for rule in RULES:
+        r = readouts["rules"][rule]
+        for label, arm in r["arms"].items():
+            diff = arm["paired_diff_vs_honest"]
+            lines.append(
+                f"| {rule} | {label} | {r['n_qualifying']} | {arm['mean_realised_gain']:.6f} | "
+                f"{arm['trades_per_event']:.3f} | {diff['mean']:+.6f} | "
+                f"[{diff['ci_low']:+.6f}, {diff['ci_high']:+.6f}] | "
+                f"{'yes' if arm['deviation_pays'] else 'no'} |"
+            )
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Rollout judge: does the gate's claimed private gain track a realised change
+# in win probability, played out with the game's own bots from both sides of
+# a sampled trade?
+
+ROLLOUT_STRATA: tuple[tuple[str, object], ...] = (
+    ("1", lambda side: side == 1),
+    ("2", lambda side: side == 2),
+    ("≥3", lambda side: side >= 3),
+)
+
+
+def _stratum_of(max_side: int) -> str:
+    for label, pred in ROLLOUT_STRATA:
+        if pred(max_side):
+            return label
+    raise AssertionError(f"unreachable: max_side={max_side}")
+
+
+def _sample_rule_trades(all_positions: list[dict], rule: str, per_stratum: int, rng: random.Random) -> list[dict]:
+    """Up to `per_stratum` executed `rule` trades from each of the three
+    `ROLLOUT_STRATA`, each identified by (game, position, trade_index) --
+    `trade_index` is this trade's own position in that position's `rule`
+    trade list, since census.json does not number them itself. Fewer than
+    `per_stratum` in a stratum is not an error: every one available is
+    taken (the registration's own "if available")."""
+    pools: dict[str, list[dict]] = {label: [] for label, _ in ROLLOUT_STRATA}
+    for p in all_positions:
+        trades = p["rules"][rule]["trades"]
+        for trade_index, t in enumerate(trades):
+            pools[_stratum_of(t["max_side"])].append({**t, "trade_index": trade_index})
+    sampled: list[dict] = []
+    for label, _ in ROLLOUT_STRATA:
+        pool = pools[label]
+        k = min(per_stratum, len(pool))
+        sampled.extend(rng.sample(pool, k))
+    return sampled
+
+
+def _replay_rule_to_index(
+    game0: Game, me: int, rule: str, stop_after: int, cards_cap: int,
+) -> tuple[Game, list[CandidateRow]]:
+    """Clear `rule` honestly on a fresh working copy of `game0`, stopping
+    right after the `stop_after`-th executed trade (0-based, inclusive) --
+    "the trades the rule executed up to and including the sampled trade"
+    (`trade-lab.md`'s rollout judge). Deterministic and bit-identical to
+    `run_census`'s own per-position, per-rule loop (same `imagine(game0,
+    random.Random(0))`), which is what lets the caller check the replayed
+    trade against what census.json already recorded rather than trusting it
+    silently."""
+    work = imagine(game0, random.Random(0))
+    work.gates = game0.gates
+    work.event_pending = False
+    executed_rows: list[CandidateRow] = []
+    executed = 0
+    while executed <= stop_after and executed < cards_cap:
+        rows = candidate_rows(work, me)
+        if not rows:
+            break
+        clearing = clearing_set(rule, rows)
+        if not clearing:
+            break
+        best = select(rule, clearing)
+        them, bundle = best.them, best.bundle
+        state = work.state(0, hidden=False)
+        before_hands = [hand[:] for hand in state.hands]
+        trading.exchange(state, me, them, bundle)
+        work.ledger.apply_hand_diff(before_hands, state.hands)
+        work.trades.append(trading.Trade(me, them, bundle))
+        work.trades_made += 1
+        executed_rows.append(best)
+        executed += 1
+    return work, executed_rows
+
+
+def _continue_and_finish(game0: Game, board, seed: str, action_cap: int) -> int | None:
+    """Play `game0` to a winner (or `None`, capped at `action_cap`), seating
+    a fresh `heximax` at every seat -- the position's own current player
+    continues its own turn from wherever `game0` left off, and every trade
+    event after this one runs through the engine's own shipped mechanic
+    (`hexset.game.run_trade_event`, never a lab rule) since `work.gates` is
+    the freshly seated bots, not this module's interception. Mirrors
+    `hexset.arena.play`'s own loop exactly, starting from `game0` instead of
+    `start()`."""
+    rng = random.Random(seed)
+    work = imagine(game0, rng)
+    n = len(game0.valuations)
+    bots = [heximax(board, random.Random(f"{seed}:{seat}")) for seat in range(n)]
+    work.gates = tuple(bots)
+    work.max_trades = None
+    actions = 0
+    while not is_over(work) and actions < action_cap:
+        seat = to_move(work)
+        bot = bots[seat]
+        if work.publish_due(seat):
+            publish_valuation(work, seat, bot)
+        apply(work, bot.choose(work))
+        actions += 1
+    return work.won_by
+
+
+def _rollout_job(job: tuple) -> dict:
+    board, before_game, after_game, meta, playouts, action_cap = job
+
+    def winshares(game0: Game, tag: str) -> list[float]:
+        wins = [0, 0, 0, 0]
+        for i in range(playouts):
+            seed = f"{meta['game']}:{meta['position']}:{meta['rule']}:{meta['trade_index']}:{tag}:{i}"
+            winner = _continue_and_finish(game0, board, seed, action_cap)
+            if winner is not None:
+                wins[winner] += 1
+        return [w / playouts for w in wins]
+
+    before_ws = winshares(before_game, "before")
+    after_ws = winshares(after_game, "after")
+    delta = [after_ws[s] - before_ws[s] for s in range(4)]
+    actor, cp = meta["actor"], meta["counterparty"]
+    bystanders = [s for s in range(4) if s not in (actor, cp)]
+
+    out = dict(meta)
+    out["before_winshare"] = before_ws
+    out["after_winshare"] = after_ws
+    out["delta_actor"] = delta[actor]
+    out["delta_counterparty"] = delta[cp]
+    out["delta_bystanders"] = [delta[b] for b in bystanders]
+    return out
+
+
+def build_rollout_jobs(
+    bank_path: Path, census_path: Path, *, per_stratum: int = 100, playouts: int = 64,
+    action_cap: int = MAX_ACTIONS, sample_seed: int = 1,
+) -> tuple[list[tuple], dict[str, int]]:
+    """Reconstruct every sampled trade's two starting games (replay is cheap
+    -- no bot search runs here, only `candidate_rows`/`clearing_set`/`select`)
+    and package one playout job per (rule, sampled trade). Raises
+    `hexset.record.ReplayError` if a rule's own replayed trade sequence does
+    not reproduce what census.json recorded at that index -- the same
+    fidelity guarantee `positions()` already gives the bank itself."""
+    census = json.loads(census_path.read_text(encoding="utf-8"))
+    all_positions = census["positions"]
+    records = list(read(str(bank_path)))
+
+    rng = random.Random(sample_seed)
+    counts: dict[str, int] = {}
+    needed: dict[int, dict[int, list[dict]]] = {}
+    for rule in RULES:
+        sampled = _sample_rule_trades(all_positions, rule, per_stratum, rng)
+        counts[rule] = len(sampled)
+        for s in sampled:
+            needed.setdefault(s["game"], {}).setdefault(s["position"], []).append({**s, "rule": rule})
+
+    jobs: list[tuple] = []
+    for game_index, positions_needed in needed.items():
+        record = records[game_index]
+        board = board_of(record)
+        for pos in positions(record, game_index=game_index):
+            entries = positions_needed.get(pos.position_index)
+            if not entries:
+                continue
+            me = pos.game.current_player
+            state0 = pos.game.state(0, hidden=False)
+            cards_cap = sum(sum(hand) for hand in state0.hands)
+            before_job = imagine(pos.game, random.Random(0))
+            for entry in entries:
+                rule = entry["rule"]
+                trade_index = entry["trade_index"]
+                after_game, executed_rows = _replay_rule_to_index(pos.game, me, rule, trade_index, cards_cap)
+                if trade_index >= len(executed_rows):
+                    raise ReplayError(
+                        f"trade_lab rollouts: {rule} at game {game_index} position "
+                        f"{pos.position_index} executed only {len(executed_rows)} trades "
+                        f"replaying it, census.json recorded a trade at index {trade_index}"
+                    )
+                chosen = executed_rows[trade_index]
+                if list(chosen.bundle) != list(entry["bundle"]):
+                    raise ReplayError(
+                        f"trade_lab rollouts: {rule} at game {game_index} position "
+                        f"{pos.position_index} trade {trade_index} replayed bundle "
+                        f"{list(chosen.bundle)}, census.json recorded {entry['bundle']}"
+                    )
+                after_game.gates = None
+                meta = {
+                    "rule": rule, "game": game_index, "position": pos.position_index,
+                    "trade_index": trade_index, "turn": entry["turn"], "max_side": entry["max_side"],
+                    "actor": entry["actor"], "counterparty": entry["counterparty"],
+                    "actor_gain": entry["actor_gain"], "counterparty_gain": entry["counterparty_gain"],
+                }
+                jobs.append((board, before_job, after_game, meta, playouts, action_cap))
+    return jobs, counts
+
+
+def run_rollouts(
+    bank_path: Path, census_path: Path, workers: int, *, per_stratum: int = 100,
+    playouts: int = 64, action_cap: int = MAX_ACTIONS, sample_seed: int = 1,
+) -> dict:
+    jobs, counts = build_rollout_jobs(
+        bank_path, census_path, per_stratum=per_stratum, playouts=playouts,
+        action_cap=action_cap, sample_seed=sample_seed,
+    )
+    if workers > 1 and len(jobs) > 1:
+        with Pool(workers) as pool:
+            results = pool.map(_rollout_job, jobs, chunksize=1)
+    else:
+        results = [_rollout_job(job) for job in jobs]
+    return {"samples_per_rule": counts, "n_jobs": len(jobs), "playouts": playouts, "results": results}
+
+
+def compute_rollout_readouts(results: list[dict]) -> dict:
+    out: dict = {"rules": {}}
+    for rule in RULES:
+        rows = [r for r in results if r["rule"] == rule]
+        n = len(rows)
+        actor_deltas = [r["delta_actor"] for r in rows]
+        cp_deltas = [r["delta_counterparty"] for r in rows]
+        byst_deltas = [d for r in rows for d in r["delta_bystanders"]]
+        actor_est = mean_interval(actor_deltas)
+        cp_est = mean_interval(cp_deltas)
+        byst_est = mean_interval(byst_deltas)
+        sign_actor = (
+            sum(1 for r in rows if (r["actor_gain"] > 0) == (r["delta_actor"] > 0)) / n if n else 0.0
+        )
+        sign_cp = (
+            sum(1 for r in rows if (r["counterparty_gain"] > 0) == (r["delta_counterparty"] > 0)) / n
+            if n else 0.0
+        )
+        by_stratum: dict[str, dict] = {}
+        for label, pred in ROLLOUT_STRATA:
+            sub = [r for r in rows if pred(r["max_side"])]
+            by_stratum[label] = {
+                "n": len(sub),
+                "mean_delta_actor": statistics.mean(r["delta_actor"] for r in sub) if sub else 0.0,
+                "mean_delta_counterparty": statistics.mean(r["delta_counterparty"] for r in sub) if sub else 0.0,
+            }
+        out["rules"][rule] = {
+            "n_sampled": n,
+            "mean_delta_actor": actor_est.mean, "actor_ci": (actor_est.lower, actor_est.upper),
+            "mean_delta_counterparty": cp_est.mean, "counterparty_ci": (cp_est.lower, cp_est.upper),
+            "sign_agreement_actor": sign_actor, "sign_agreement_counterparty": sign_cp,
+            "mean_delta_bystander": byst_est.mean, "bystander_ci": (byst_est.lower, byst_est.upper),
+            "by_max_side_stratum": by_stratum,
+        }
+    return out
+
+
+def rollout_table_md(readouts: dict) -> str:
+    lines: list[str] = ["## Rollout judge\n"]
+    lines.append(
+        "| rule | n | mean Δ actor | 95% CI | mean Δ counterparty | 95% CI | "
+        "sign agree actor | sign agree cp | mean Δ bystander |"
+    )
+    lines.append("|---|---|---|---|---|---|---|---|---|")
+    for rule in RULES:
+        r = readouts["rules"][rule]
+        lines.append(
+            f"| {rule} | {r['n_sampled']} | {r['mean_delta_actor']:+.4f} | "
+            f"[{r['actor_ci'][0]:+.4f}, {r['actor_ci'][1]:+.4f}] | "
+            f"{r['mean_delta_counterparty']:+.4f} | "
+            f"[{r['counterparty_ci'][0]:+.4f}, {r['counterparty_ci'][1]:+.4f}] | "
+            f"{r['sign_agreement_actor']*100:.1f}% | {r['sign_agreement_counterparty']*100:.1f}% | "
+            f"{r['mean_delta_bystander']:+.4f} |"
+        )
+    lines.append("\n| rule | stratum | n | mean Δ actor | mean Δ counterparty |")
+    lines.append("|---|---|---|---|---|")
+    for rule in RULES:
+        for label, _ in ROLLOUT_STRATA:
+            s = readouts["rules"][rule]["by_max_side_stratum"][label]
+            lines.append(
+                f"| {rule} | {label} | {s['n']} | {s['mean_delta_actor']:+.4f} | "
+                f"{s['mean_delta_counterparty']:+.4f} |"
+            )
     return "\n".join(lines) + "\n"
 
 
@@ -653,6 +1263,25 @@ def main(argv: Sequence[str] | None = None) -> None:
     census_p.add_argument("--out", type=Path, default=Path("runs/eval/trade-lab/census.json"))
     census_p.add_argument("--workers", type=int, default=MAX_WORKERS)
 
+    strategic_p = sub.add_parser(
+        "strategic", help="one seat's gate shaded (tau-gate + exaggeration arms); is honesty a fixed point?"
+    )
+    strategic_p.add_argument("--bank", type=Path, default=Path("runs/eval/trade-lab/bank.jsonl"))
+    strategic_p.add_argument("--out", type=Path, default=Path("runs/eval/trade-lab/strategic.json"))
+    strategic_p.add_argument("--workers", type=int, default=MAX_WORKERS)
+
+    rollouts_p = sub.add_parser(
+        "rollouts", help="300 executed trades per rule, judged by playouts with the game's own bots"
+    )
+    rollouts_p.add_argument("--bank", type=Path, default=Path("runs/eval/trade-lab/bank.jsonl"))
+    rollouts_p.add_argument("--census", type=Path, default=Path("runs/eval/trade-lab/census.json"))
+    rollouts_p.add_argument("--out", type=Path, default=Path("runs/eval/trade-lab/rollouts.json"))
+    rollouts_p.add_argument("--per-stratum", type=int, default=100, help="sampled trades per max-side stratum, per rule")
+    rollouts_p.add_argument("--playouts", type=int, default=64, help="playouts per starting game (before/after)")
+    rollouts_p.add_argument("--action-cap", type=int, default=MAX_ACTIONS)
+    rollouts_p.add_argument("--sample-seed", type=int, default=1)
+    rollouts_p.add_argument("--workers", type=int, default=MAX_WORKERS)
+
     args = parser.parse_args(argv)
 
     if args.cmd == "bank":
@@ -673,6 +1302,46 @@ def main(argv: Sequence[str] | None = None) -> None:
             "readouts": readouts,
             "wall_time_seconds": wall,
             "positions": all_positions,
+        }, indent=2))
+        print(f"wrote {args.out}", file=sys.stderr)
+        return
+
+    if args.cmd == "strategic":
+        t0 = time.time()
+        records = run_strategic(args.bank, args.workers)
+        wall = time.time() - t0
+        readouts = compute_strategic_readouts(records)
+        print(f"{readouts['n_positions_considered']} positions considered, wall time {wall:.1f}s", file=sys.stderr)
+        print(strategic_table_md(readouts))
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(json.dumps({
+            "readouts": readouts,
+            "wall_time_seconds": wall,
+            "records": records,
+        }, indent=2))
+        print(f"wrote {args.out}", file=sys.stderr)
+        return
+
+    if args.cmd == "rollouts":
+        t0 = time.time()
+        payload = run_rollouts(
+            args.bank, args.census, args.workers, per_stratum=args.per_stratum,
+            playouts=args.playouts, action_cap=args.action_cap, sample_seed=args.sample_seed,
+        )
+        wall = time.time() - t0
+        readouts = compute_rollout_readouts(payload["results"])
+        print(
+            f"{payload['n_jobs']} sampled trades, {args.playouts} playouts each side, "
+            f"wall time {wall:.1f}s", file=sys.stderr,
+        )
+        print(rollout_table_md(readouts))
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(json.dumps({
+            "readouts": readouts,
+            "wall_time_seconds": wall,
+            "samples_per_rule": payload["samples_per_rule"],
+            "playouts": args.playouts,
+            "results": payload["results"],
         }, indent=2))
         print(f"wrote {args.out}", file=sys.stderr)
         return

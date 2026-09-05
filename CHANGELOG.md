@@ -179,7 +179,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   surplus rule, and three private-gain rules (actor, egalitarian, nash) that
   skip the public-vector filter — reporting trades-per-event, bundle shape,
   surplus split, bystander win-probability damage and rule disagreement.
-  Torch-free, multiprocessed like `hexset.bench.trade_census`.
+  Torch-free, multiprocessed like `hexset.bench.trade_census`. `census` also
+  reports the gain-distribution quantiles per rule; `strategic` shades one
+  rotating seat's gate (a `tau` acceptance threshold, and — for the two rules
+  that read magnitudes — a selection-key exaggeration) to check whether
+  honesty is a fixed point; `rollouts` judges 300 sampled executed trades per
+  rule by playing the position out both traded and untraded with fresh
+  `heximax` bots, comparing realised win-share swing against the gate's own
+  claimed gain.
 
 ### Fixed
 

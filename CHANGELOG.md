@@ -15,6 +15,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   resolution under paired chance (trade lab phase 3): a deal clears only when
   both private gains exceed about two points of win probability. Trades
   claiming less no longer clear.
+- A trade moves at most `hexset.trading.MAX_TRADE_CARDS` (3) cards on either
+  side -- the human corpus puts 99.1% of recorded trades at or under that.
+  `_candidates` never enumerates a bigger bundle (so neither does the
+  automatic event, the server's `trade/acceptable` preview, nor a pending
+  offer); a manually proposed `POST .../trade` bundle exceeding it is
+  refused with a `ValueError`, the same way an uncoverable one is.
 
 ### Added
 

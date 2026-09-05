@@ -297,9 +297,10 @@ _TOOLS: dict[str, tuple] = {
         _propose_trade,
         "Compose and submit a bundle against `counterparty`: on your own turn "
         "against anyone, or during another seat's turn against that seat only. "
-        "Fails (with a reason) unless the counterparty's own private gate "
-        "clears the trade floor on the exchange — your own gate is never "
-        "consulted, since proposing this is your consent. "
+        "At most 3 cards a side, given or received. Fails (with a reason) "
+        "unless the counterparty's own private gate clears the trade floor "
+        "on the exchange — your own gate is never consulted, since proposing "
+        "this is your consent. "
         "trade_acceptable() previews what a bot counterparty would take; "
         "a person or another LLM answers "
         "asynchronously instead, through their own get_table()'s `pending`.",

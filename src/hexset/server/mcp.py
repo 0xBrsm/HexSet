@@ -286,11 +286,11 @@ _TOOLS: dict[str, tuple] = {
         _trade_acceptable,
         "Your own preview of what propose_trade() would be accepted right now: "
         "every coverable bundle a bot counterparty's private gate already "
-        "prices above zero, grouped by counterparty and sorted by its gain, "
-        "descending, capped at 12 per counterparty. Read-only — computing this "
-        "moves nothing. A seat at the table who is not a bot never appears "
-        "here; propose_trade() against one instead and read its answer back "
-        "through get_table()'s `pending`.",
+        "clears the trade floor on, grouped by counterparty and sorted by "
+        "its gain, descending, capped at 12 per counterparty. Read-only — "
+        "computing this moves nothing. A seat at the table who is not a bot "
+        "never appears here; propose_trade() against one instead and read "
+        "its answer back through get_table()'s `pending`.",
         {"type": "object", "properties": {}},
     ),
     "propose_trade": (
@@ -298,9 +298,10 @@ _TOOLS: dict[str, tuple] = {
         "Compose and submit a bundle against `counterparty`: on your own turn "
         "against anyone, or during another seat's turn against that seat only. "
         "Fails (with a reason) unless the counterparty's own private gate "
-        "prices the exchange above zero — your own gate is never consulted, "
-        "since proposing this is your consent. trade_acceptable() previews "
-        "what a bot counterparty would take; a person or another LLM answers "
+        "clears the trade floor on the exchange — your own gate is never "
+        "consulted, since proposing this is your consent. "
+        "trade_acceptable() previews what a bot counterparty would take; "
+        "a person or another LLM answers "
         "asynchronously instead, through their own get_table()'s `pending`.",
         {
             "type": "object",

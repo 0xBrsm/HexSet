@@ -583,7 +583,6 @@ def build_road(game: Game, edge: int) -> None:
     place_road(game._state, game.current_player, edge)
     update_longest_road(game._state)
     _check_win(game)
-    run_trade_event(game)
 
 
 def build_settlement(game: Game, vertex: int) -> None:
@@ -596,7 +595,6 @@ def build_settlement(game: Game, vertex: int) -> None:
     # builder's own longest road that may change.
     update_longest_road(game._state)
     _check_win(game)
-    run_trade_event(game)
 
 
 def build_city(game: Game, vertex: int) -> None:
@@ -606,7 +604,6 @@ def build_city(game: Game, vertex: int) -> None:
     game.ledger.apply_hand_diff(before, game._state.hands)
     upgrade_to_city(game._state, game.current_player, vertex)
     _check_win(game)
-    run_trade_event(game)
 
 
 def buy_development_card(game: Game) -> DevCard:
@@ -615,7 +612,6 @@ def buy_development_card(game: Game) -> DevCard:
     card = buy_dev_card(game._state, game.current_player)
     game.ledger.apply_hand_diff(before, game._state.hands)
     _check_win(game)
-    run_trade_event(game)
     return card
 
 
@@ -661,10 +657,11 @@ def play_road_building_card(game: Game) -> None:
 
     Legal in `ROLL` as well as `MAIN` -- rulebook, Development Cards: "You may
     play a development card before rolling dice or at any time during the
-    Action phase," which names no exception for this card. `run_trade_event`
-    below no-ops itself outside `MAIN` (see its own docstring), so playing
-    this before rolling credits the two free roads without touching the
-    trade event. The free `build_road` calls resolve in `ROLL` before dice
+    Action phase," which names no exception for this card. The trade event
+    fires once a turn now, on the transition into `MAIN` (`enter_main`,
+    `move_robber_to`), not after any MAIN action -- so playing this before
+    rolling credits the two free roads without touching the trade event
+    either way. The free `build_road` calls resolve in `ROLL` before dice
     are drawn. Paid building remains MAIN-only.
     """
     if game.phase not in (Phase.ROLL, Phase.MAIN):
@@ -672,7 +669,6 @@ def play_road_building_card(game: Game) -> None:
     _spend_turn_card(game)
     spend_card(game._state, game.current_player, DevCard.ROAD_BUILDING)
     game.free_roads += ROAD_BUILDING_ROADS
-    run_trade_event(game)
 
 
 def play_year_of_plenty_card(game: Game, resources: list[Resource]) -> None:
@@ -683,7 +679,6 @@ def play_year_of_plenty_card(game: Game, resources: list[Resource]) -> None:
     before = _snapshot_hands(game)
     play_year_of_plenty(game._state, game.current_player, resources)
     game.ledger.apply_hand_diff(before, game._state.hands)
-    run_trade_event(game)
 
 
 def play_monopoly_card(game: Game, resource: Resource) -> int:
@@ -698,7 +693,6 @@ def play_monopoly_card(game: Game, resource: Resource) -> int:
     # seat at once -- the same `apply_hand_diff` every other public mutation
     # uses, not the hidden-identity path a steal needs.
     game.ledger.apply_hand_diff(before, game._state.hands)
-    run_trade_event(game)
     return taken
 
 
@@ -707,18 +701,17 @@ def trade_with_bank(game: Game, give: Resource, receive: Resource) -> None:
     before = _snapshot_hands(game)
     bank_trade(game._state, game.current_player, give, receive)
     game.ledger.apply_hand_diff(before, game._state.hands)
-    run_trade_event(game)
 
 
 def run_trade_event(game: Game) -> None:
-    """Clear this turn's trade event for the current player, if anybody is
-    seated to answer a gate.
+    """Clear this turn's one trade event for the current player, if anybody
+    is seated to answer a gate.
 
-    Called directly, unconditionally, after every MAIN action the current
-    player takes -- build, buy, a bank/port trade, a development card -- and
-    once more from `enter_main`, for the turn's first event (trade and build
-    interleave, rather than one event before the first build). The current
-    player's hand just changed, so a different bundle may now clear.
+    Called exactly once a turn: from `enter_main` (a non-seven roll) and
+    from `move_robber_to` (a seven or a knight, once the robber phase
+    resumes into `MAIN`) -- the two paths by which a turn transitions into
+    `MAIN`. No MAIN action calls this again; a build, a buy, a bank/port
+    trade or a development card no longer reopens the event mid-turn.
 
     A game whose `gates` is `None` -- a bare `start()` with nobody seated --
     simply does not trade.

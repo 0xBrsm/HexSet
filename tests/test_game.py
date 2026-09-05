@@ -258,7 +258,9 @@ def test_largest_army_is_awarded_before_the_robber_moves():
     assert game._state.largest_army_holder == 0
 
 
-# --- trade/build interleaving (owner review against the rulebook, 2026-09-03) -
+# --- the trade event fires once a turn, not interleaved with MAIN actions
+# --- (owner decision 2026-09-05, superseding the 2026-09-03 interleaving
+# --- review) -------------------------------------------------------------
 
 
 def _spy_on_trade_event(monkeypatch):
@@ -333,7 +335,11 @@ def _seated(game):
     ],
     ids=["build_road", "build_city", "buy_dev_card", "bank_trade", "monopoly", "road_building", "year_of_plenty"],
 )
-def test_trade_event_runs_again_after_every_main_action(monkeypatch, setup, act):
+def test_a_main_action_does_not_run_the_trade_event_again(monkeypatch, setup, act):
+    """The event fires exactly once a turn now, on the transition into
+    `MAIN` -- a build/buy/trade/dev-card action no longer reopens it
+    (`hexset.game.run_trade_event`'s own docstring; owner decision
+    2026-09-05)."""
     game = _seated(run_setup(a_game(players=3)))
     game.phase = Phase.MAIN
     setup(game)
@@ -341,15 +347,34 @@ def test_trade_event_runs_again_after_every_main_action(monkeypatch, setup, act)
 
     act(game)
 
-    assert calls == [Phase.MAIN]
+    assert calls == []
+
+
+def test_pending_offers_survive_a_main_action_later_in_the_same_turn():
+    """`game.pending` is a snapshot of *the* turn's one event
+    (`hexset.game.Game.pending`'s own docstring) -- a later MAIN action no
+    longer runs a second event that would wipe it (`hexset.trading.
+    trade_event`'s `game.pending = []` only runs at the start of a call, and
+    nothing calls `trade_event` again until the turn ends)."""
+    from hexset.trading import Trade, one_for_one
+
+    game = _seated(run_setup(a_game(players=3)))
+    game.phase = Phase.MAIN
+    clear_hand(game._state, 0)
+    give(game._state, 0, Resource.WOOD, 4)
+    game.pending.append(Trade(1, 0, one_for_one(Resource.WOOD, Resource.ORE)))
+
+    trade_with_bank(game, Resource.WOOD, Resource.ORE)
+
+    assert game.pending == [Trade(1, 0, one_for_one(Resource.WOOD, Resource.ORE))]
 
 
 def test_trade_event_runs_again_after_a_knight_in_main_but_not_in_roll(monkeypatch):
     """`play_knight_card` is the one action legal in both `ROLL` and `MAIN`
     (playing it before the roll, to move the robber pre-emptively). Either
     way it now resolves through the same robber phase a seven does
-    (`move_robber_to`), and the trade event interleaving only ever applies
-    once that phase resumes into `MAIN`, not `ROLL`."""
+    (`move_robber_to`), and the trade event only ever fires once that phase
+    resumes into `MAIN`, not `ROLL`."""
     game = _seated(run_setup(a_game(players=3)))
     game._state.dev_cards[0][DevCard.KNIGHT] = 2
     target = (game._state.robber + 1) % game._state.board.num_hexes

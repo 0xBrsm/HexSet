@@ -471,13 +471,12 @@ class _Event:
     after: _Snapshot
     last_roll: int | None
     # The exchanges the engine cleared inside this action (`hexset.trading`).
-    # The trade event runs on the way into the main phase and again after
-    # every MAIN action the current player takes (owner review against the
-    # rulebook, 2026-09-03: trade and build interleave), so any of those --
-    # not only the roll or robber move that enters MAIN -- can carry several.
-    # Empty for setup, discards, and every other seat's actions -- except a
-    # manual trade's own event (`action is None`), which is never empty:
-    # that is the entire reason it exists.
+    # The trade event now runs exactly once a turn, on the way into the main
+    # phase -- so only the roll or robber move that actually enters `MAIN`
+    # ever carries any (`hexset.game.run_trade_event`). Empty for setup,
+    # discards, every later MAIN action, and every other seat's actions --
+    # except a manual trade's own event (`action is None`), which is never
+    # empty: that is the entire reason it exists.
     trades: tuple[Trade, ...] = ()
 
 
@@ -1267,13 +1266,13 @@ class GameSession:
             raise ValueError("an omniscient view belongs to no seat")
         labels = self.seat_labels
         game = self.game
-        # A gate is a pure function of the position now, asked fresh at
-        # every trade event, and every event fires eagerly, inside whichever
-        # action caused it (`enter_main` for the turn's first one, each
-        # build/buy/trade/dev-card handler for the rest) -- so `_apply`'s own
-        # `self.game.trades[trades_before:]` bookkeeping already attributes
-        # every trade to the `_Event` it belongs to, and a poll of the table
-        # has nothing left to trigger here.
+        # A gate is a pure function of the position, asked fresh once a
+        # turn, and that one event fires eagerly, inside whichever action
+        # transitions the turn into `MAIN` (`enter_main` for a non-seven
+        # roll, `move_robber_to` once the robber phase resumes) -- so
+        # `_apply`'s own `self.game.trades[trades_before:]` bookkeeping
+        # already attributes every trade to the `_Event` it belongs to, and
+        # a poll of the table has nothing left to trigger here.
         # true state: the server's own omniscient observer view -- the
         # per-viewer filtering happens below, not here.
         state = game.state(0, hidden=False)

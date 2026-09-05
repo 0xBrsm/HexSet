@@ -400,7 +400,7 @@ class Heximax:
         `relative`, the counterparty's gain is already priced in, which is
         what makes "not with the leader" expressible without a partner term.
         This is the mechanic's private gate: `hexset.trading.trade_event`
-        clears the candidate both sides price above zero and
+        clears the candidate both sides clear `TRADE_FLOOR` on and
         `Game.trade_rule` ranks highest.
 
         One event asks this over every coverable candidate at once (a

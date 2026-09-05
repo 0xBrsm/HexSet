@@ -36,8 +36,8 @@ class Bot(Protocol):
       *gain* from every candidate in `received` at once: a signed float, in
       whatever unit this seat's value is, positive meaning it wants the
       trade. This is the mechanic's actual gate -- `hexset.trading.
-      trade_event` clears the candidate both sides price above zero and
-      `Game.trade_rule` ranks highest. Default: `+1.0`/`-1.0` from
+      trade_event` clears the candidate both sides clear `TRADE_FLOOR` on
+      and `Game.trade_rule` ranks highest. Default: `+1.0`/`-1.0` from
       `accepts_many`, for a bot that only ever has a boolean gate.
 
     All three are handed the engine's information-set `View` for that seat

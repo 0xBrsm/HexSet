@@ -74,43 +74,18 @@ def test_new_game_seats_the_caller_and_remembers_the_code(live_server):
     assert mcp._token
 
 
-def test_new_game_with_no_confirm_flag_still_auto_accepts(live_server):
+def test_new_game_with_no_confirm_flag_does_not_enter_confirm_mode(live_server):
     """The human-default flip (`POST /api/games`/`/api/join` now default to
     confirm mode when a request omits `confirm`, so nothing auto-clears
     against a human) must not reach MCP: `_new_game`/`_join` send `confirm`
-    explicitly on every call, so an LLM seat that asks for nothing keeps
-    auto-accepting on its own published vector, per PI ratification
-    decision 3."""
-    from hexset.board.terrain import Resource
-    from hexset.game import Phase, roll_dice
-
+    explicitly on every call, so an LLM seat that asks for nothing is not
+    opted into `PendingGate` the way a human's own seat-up route is, per PI
+    ratification decision 3. (Whether a non-confirm-mode seat auto-accepts
+    anything is server-side work still in flight, `agents/reference/
+    trading-final.md` item 5 -- there is no vector left to post.)"""
     server, base = live_server
     mcp.BASE_URL = base
     data = call("new_game", opponents=SOLO)  # no `confirm` kwarg at all
     seat = data["seat"]
     table = server.tables.get(data["code"])
     assert seat not in table.session.confirm_seats
-
-    game = table.session.game
-    other = next(s for s in range(game.num_players) if s != seat)
-    game.phase = Phase.ROLL
-    game.current_player = seat
-    state = game.state(seat, hidden=False)
-    for hand in state.hands:
-        hand[:] = [0, 0, 0, 0, 0]
-    state.hands[seat][Resource.WOOD] = 1
-    state.hands[other][Resource.ORE] = 1
-
-    wants_ore = [0.0, 0.0, 0.0, 0.0, 0.0]
-    wants_ore[Resource.ORE] = 1.0
-    wants_ore[Resource.WOOD] = -1.0
-    call("set_valuation", vector=wants_ore)
-    table.session.publish(other, [-v for v in wants_ore])
-
-    roll_dice(game, 8)
-    assert game.phase is Phase.MAIN
-
-    view = call("get_table")
-    assert view["trades"], "an LLM seat's own default must still auto-accept"
-    assert state.hands[seat][Resource.ORE] == 1
-    assert state.hands[other][Resource.WOOD] == 1

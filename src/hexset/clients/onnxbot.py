@@ -28,7 +28,6 @@ with no `contract` key at all, is refused by name at load.
 
 from __future__ import annotations
 
-import math
 import os
 import random
 from dataclasses import dataclass, field
@@ -39,7 +38,6 @@ import numpy as np
 import onnxruntime as ort
 
 from hexset.actions import Action, ActionSpace, build_space
-from hexset.board.terrain import NUM_RESOURCES
 from hexset.board.topology import Topology
 from hexset.game import Game, to_move
 from hexset.mcts import Search
@@ -48,7 +46,7 @@ from hexset.server.constants import RECORD_CONTRACTS
 from hexset.server.modelmeta import SearchConfig, search_config
 from hexset.server.rules import options_for
 from hexset.state import copy_state
-from hexset.trading import NETWORK_GATE_ROWS, NO_VALUATION, VALUE_SCALE
+from hexset.trading import NETWORK_GATE_ROWS
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from hexset.trading import Bundle
@@ -274,10 +272,14 @@ class NetworkBot:
     """A policy answering one position at a time.
 
     Trades off the same value head `choose` already reads, no new
-    parameters: `valuation`/`accepts` mirror dev-HexNet's
+    parameters: `accepts`/`accepts_many` mirror dev-HexNet's
     `hexnet.policy.DerivedTrader` exactly, reimplemented against the
-    record-contract wire shape instead of a live `torch` forward. See both
-    methods' own docstrings.
+    record-contract wire shape instead of a live `torch` forward. There is
+    no `gains_many` here -- `hexset.bots.search2.Bot`'s default derives one
+    from `accepts_many` (`+1.0`/`-1.0`), which is all a boolean value-head
+    gate can support; a magnitude-valued network gate is HexNet's own
+    concern (`agents/reference/trading-final.md`, item 6), not this
+    contract-5 wire adapter's. See both methods' own docstrings.
     """
 
     policy: V2Policy
@@ -297,36 +299,6 @@ class NetworkBot:
         self._seated = game
         seat = to_move(game)
         return self.policy.act_rows([(game, seat, tuple(options_for(game)))])[0]
-
-    def valuation(self, view: "View") -> tuple[float, ...]:
-        """What this seat advertises, derived from the value head.
-
-        `tanh(delta_V_r / VALUE_SCALE)` per resource: `delta_V_r` is the
-        value head's own-row delta between this seat's hand and that hand
-        holding one more card of `r`. One batched call over the hand plus
-        its `NUM_RESOURCES` imagined successors (`V2Policy.value_of`) rather
-        than six separate ones, mirroring `hexnet.policy.DerivedTrader.
-        valuation`'s one-forward fan-out.
-
-        Only the seat's own hand moves -- the extra card comes from another
-        seat, not the bank, so nothing else about the position changes. The
-        hand is read off `view.known[seat]`, exact for the perspective seat
-        by construction (`hexset.view.View`).
-        """
-        if self.max_trades == 0 or self._seated is None:
-            return NO_VALUATION
-        seat = view.perspective
-        hand = list(view.known[seat])
-        hands = [hand]
-        for resource in range(NUM_RESOURCES):
-            one_more = list(hand)
-            one_more[resource] += 1
-            hands.append(one_more)
-        values = self._own_values(seat, hands)
-        return tuple(
-            math.tanh((values[1 + r] - values[0]) / VALUE_SCALE)
-            for r in range(NUM_RESOURCES)
-        )
 
     def accepts(self, view: "View", received: "Bundle", counterparty: int) -> bool:
         """This seat's private gate: the value head on the concrete
@@ -354,38 +326,24 @@ class NetworkBot:
         counterparties: Sequence[int],
     ) -> list[bool]:
         """Batched `accepts`: one graph call over the hand plus the
-        post-trade successors of the top `NETWORK_GATE_ROWS` candidates,
-        instead of one call per candidate (`agents/reference/
-        trading-design.md`'s post-data note, "the collector cost gate fails
-        at 2.9-3.6x" -- an unbatched network gate asked one candidate at a
-        time against hundreds of clearing candidates was the entire excess
-        collection cost) and instead of scoring every candidate in that one
-        call ("gate re-run with batched gates: 3.0-3.3x, still failing" --
-        batching cut calls, not rows, and ~85% of events clear nothing, so a
-        batched ask over every candidate still pays for everything the
-        sequential ask would have stopped short of). Mirrors `valuation`'s
-        own one-forward fan-out (`_own_values` -> `V2Policy.value_of`, which
-        already falls back to one call per row when the graph's declared
-        batch axis is not dynamic) rather than `accepts`'s
-        one-candidate-at-a-time forward.
+        post-trade successors of the first `NETWORK_GATE_ROWS` candidates,
+        instead of one call per candidate.
 
-        `received` arrives in public-rank order: `trading._best_clearing`
-        ranks every coverable candidate by public surplus into `ranked`
-        before it ever asks a gate, then builds `receiveds = [received for
-        received, _them in ranked]` and calls `judged_many` (hence
-        `accepts_many`) over that list -- so `received[0]` is this event's
-        highest-ranked candidate, and the first `NETWORK_GATE_ROWS` entries
-        are its best-ranked prefix, not an arbitrary slice. Only that
-        prefix is scored; every candidate beyond it declines outright
-        (`hexset.trading.NETWORK_GATE_ROWS`'s docstring: clearing deals sit
-        near the top of the ranking, so this costs at most ~5% of
-        trades/turn). The engine still asks about every candidate -- only
-        this gate's own evaluation is bounded.
+        `received` arrives in whatever order `hexset.trading._candidates`
+        enumerated it -- there is no public-surplus pre-ranking any more
+        (`agents/reference/trading-final.md`, item 1), so the
+        `NETWORK_GATE_ROWS` prefix scored here is an arbitrary slice of the
+        candidate set, not a best-ranked one. It remains a stated cost
+        bound on this gate's own evaluation (`hexset.trading.
+        NETWORK_GATE_ROWS`'s docstring), not a claim about which candidates
+        it favours; every candidate beyond the prefix declines outright.
+        The engine still asks about every candidate -- only this gate's own
+        evaluation is bounded.
 
         `counterparties` is accepted for signature parity with
-        `hexset.bots.Bot.accepts_many` but not read, for the same reason
-        `accepts` does not read its own `counterparty`: the joint post-trade
-        hand is enough to judge.
+        `hexset.bots.search2.Bot.accepts_many` but not read, for the same
+        reason `accepts` does not read its own `counterparty`: the joint
+        post-trade hand is enough to judge.
         """
         del counterparties
         if self.max_trades == 0 or self._seated is None or not received:

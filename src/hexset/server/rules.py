@@ -8,9 +8,9 @@ players are one process, and a hand-composition leak at a table with a
 person at it.
 
 **There is nothing left to stand between.** Trading is no longer an action
-(`hexset.trading`): a seat publishes a valuation vector, the engine clears
-the deals, and no remaining action's legality depends on anybody else's
-hand. So `legal_actions` *is* the honest mask, for every seat, and
+(`hexset.trading`): a seat answers a private gate, the engine clears the
+deals, and no remaining action's legality depends on anybody else's hand.
+So `legal_actions` *is* the honest mask, for every seat, and
 `fair_legal_actions` is gone rather than reduced to an alias — one list, the
 engine's, with no second sample to drift from it.
 

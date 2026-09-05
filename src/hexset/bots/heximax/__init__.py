@@ -40,11 +40,11 @@ seat's view of the game is engine functionality, reached through
   `hexset.tuning`, as an import-time side effect of importing this package
   (and therefore of `import hexset.bots`, which imports this package).
 
-Trading is not an action and needs no adapter: `Heximax.valuation` publishes
-`tanh(marginal / MARGINAL_SCALE)` and `Heximax.accepts` gates on a strictly
-positive change in its own evaluation, and the engine's one trade event a
-turn does the rest (`hexset.trading`). `max_trades=0` publishes nothing and
-refuses everything.
+Trading is not an action and needs no adapter: `Heximax.gains_many` returns
+each candidate's win-probability delta under its own evaluation and
+`Heximax.accepts` gates on it being strictly positive, and the engine's one
+trade event a turn does the rest (`hexset.trading`). `max_trades=0` refuses
+everything.
 
 Instantiate through the `heximax(board, ...)` factory, not `Heximax(...)`
 directly, unless you are building a custom evaluator or weight vector by

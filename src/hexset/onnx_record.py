@@ -70,19 +70,20 @@ from .victory import award_points
 # the 23-input record; `"3"` contract 2 plus the four live-offer record
 # fields (trading design part 1); `"4"` contract 3 plus the two
 # public-knowledge ledger fields (`agents/reference/trading-design.md` §7.2)
-# -- same outputs, two more inputs; `"5"` replaces the four `offer_*`
-# fields with `valuations`, one vector per seat (`agents/reference/
-# trading-design.md` §8, the one-event trade mechanic) -- contracts 2-4
-# refused. `"6"` is the knight two-step fix: `PLAY_KNIGHT` dropped its
-# operands (it only spends the card now; the robber move is a separate
-# `MOVE_ROBBER` decision through the same `Phase.ROBBER` a seven enters), so
-# `RECORD_FIELDS` is unchanged but the flat `ActionSpace` shrinks -- a
-# checkpoint traced against the old, larger space would feed `action_mask`/
-# read `prior` at the wrong width, so this contract number changes too,
-# shared with the trading redesign in flight. Lives here, not in
-# `hexnet.export_onnx`, because it names *this record's* shape and only
-# incidentally the graph's -- bump it again only if `RECORD_FIELDS`, the
-# export's output tuple, or (as here) the action space itself changes.
+# -- same outputs, two more inputs; `"5"` replaced the four `offer_*` fields
+# with `valuations`, one vector per seat -- the one-event trade mechanic's
+# public layer. `"6"` carries two independent changes that happened to land
+# together: the trading redesign drops `valuations` outright
+# (`agents/reference/trading-final.md`, item 1: there is no public layer any
+# more, so nothing replaces it) *and* the knight two-step fix changes the
+# flat `ActionSpace`'s width (`PLAY_KNIGHT` dropped its operands -- it only
+# spends the card now; the robber move is a separate `MOVE_ROBBER` decision
+# through the same `Phase.ROBBER` a seven enters). `RECORD_FIELDS` shrinks by
+# one field and the action space shrinks independently of it, either change
+# alone would have forced this bump, and contracts 1-5 are refused the same
+# way. Lives here, not in `hexnet.export_onnx`, because it names *this
+# record's* shape and only incidentally the graph's -- bump it again only if
+# `RECORD_FIELDS`, the export's output tuple, or the action space changes.
 CONTRACT_VERSION = "6"
 
 # Every field name in the record, in the order the plan's table lists them
@@ -110,7 +111,6 @@ RECORD_FIELDS: tuple[str, ...] = (
     "hand_totals",
     "own_dev",
     "dev_totals",
-    "valuations",
     "ledger_known",
     "ledger_unknown",
     "action_mask",
@@ -144,7 +144,6 @@ def record_shapes(graph: StaticGraph, players: int, space: ActionSpace) -> dict[
         "hand_totals": (players,),
         "own_dev": (NUM_DEV_CARDS,),
         "dev_totals": (players,),
-        "valuations": (players, NUM_RESOURCES),
         "ledger_known": (players, NUM_RESOURCES),
         "ledger_unknown": (players,),
         "action_mask": (space.size,),
@@ -202,14 +201,6 @@ def record_from_game(
     )
     award = np.array([award_points(state, s) for s in range(players)], dtype=np.int64)
 
-    # Every seat's public valuation vector (`hexset.trading`), board-seat
-    # order like every other field -- `RecordEncoder` rotates it. Public in
-    # full: these are what the table has been told, so no filtering by
-    # perspective applies, unlike the live-offer block this replaces.
-    valuations = np.asarray(game.valuations, dtype=np.float32).reshape(
-        players, NUM_RESOURCES
-    )
-
     # The public-knowledge ledger (`hexset.ledger`), board-seat order like
     # every other field -- `RecordEncoder` rotates it and drops the
     # perspective seat's own entry (already exact via `own_hand` above).
@@ -242,7 +233,6 @@ def record_from_game(
         "hand_totals": hand_totals,
         "own_dev": own_dev,
         "dev_totals": dev_totals,
-        "valuations": valuations,
         "ledger_known": ledger_known,
         "ledger_unknown": ledger_unknown,
         "action_mask": mask,

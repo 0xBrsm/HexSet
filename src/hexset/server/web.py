@@ -153,9 +153,10 @@ class Handler(BaseHTTPRequestHandler):
         self._with_body("POST")
 
     def do_PUT(self) -> None:  # noqa: N802
-        # `PUT /api/games/<code>/valuation` is the only one, and it is a PUT
-        # rather than a POST because it sets a value rather than taking a
-        # turn: sending it twice leaves the same vector posted.
+        # No route answers PUT any more -- `PUT /api/games/<code>/valuation`
+        # was the only one, and it is gone with the public valuation layer
+        # (`agents/reference/trading-final.md`, item 1). Kept wired in case
+        # the human-trading surface work (item 5) wants a PUT route again.
         self._with_body("PUT")
 
     def _with_body(self, method: str) -> None:

@@ -249,11 +249,6 @@ def translate(catanatron_game, mapping: BoardMapping, rng: random.Random) -> tup
         ],
         free_roads=cstate.free_roads_available if cstate.is_road_building else 0,
         turns=cstate.num_turns,
-        # All-zero, matching `hexset.game.new_game`: trading is out of scope
-        # for this bridge (module docstring), but `hexset.encoding` reads one
-        # valuation vector per seat unconditionally, so it must be sized to
-        # `n` rather than left at `Game.valuations`'s empty default.
-        valuations=[(0.0,) * NUM_RESOURCES for _ in range(n)],
     )
 
     if phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):

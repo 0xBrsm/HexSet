@@ -8,11 +8,9 @@ from typing import Protocol, Sequence
 
 from ..actions import Action, ActionType, apply, legal_actions
 from .evaluate import Evaluator, hand_shifted
-from ..board.terrain import NUM_RESOURCES
 from ..game import ROLL_ODDS, Game, imagine, is_over, roll_dice, to_move
 from ..play import Stuck
-from ..state import copy_state
-from ..trading import NO_VALUATION, Bundle, exchange
+from ..trading import Bundle, exchange
 from ..view import View
 
 
@@ -25,35 +23,31 @@ class Bot(Protocol):
     trades" or "answer one candidate at a time", so an existing bot keeps
     working untouched:
 
-    * `valuation(view)` -- the public vector this seat advertises, five
-      numbers in [-1, 1], positive for "I want more of this". Default: all
-      zeros, which no bundle can clear a positive surplus against.
     * `accepts(view, received, counterparty)` -- this seat's private
       judgement of one concrete exchange, `received` signed and positive
       towards this seat. Default: False.
     * `accepts_many(view, received, counterparties)` -- this seat's private
       judgement of every candidate in `received` at once, in the same
-      order, so `hexset.trading.trade_event` can ask a seat's gate once per
-      event instead of once per candidate bundle
-      (`agents/reference/trading-design.md`'s post-data note, "the
-      collector cost gate fails at 2.9-3.6x": an unbatched network gate,
-      asked one candidate at a time against hundreds of clearing
-      candidates, was the entire excess collection cost). Default: loop
-      over `accepts`, so a bot that only ever answers one candidate at a
-      time is unaffected; a bot that can answer a whole batch in one
-      forward (`hexset.clients.onnxbot.NetworkBot`) overrides it.
+      order. Default: loop over `accepts`, so a bot that only ever answers
+      one candidate at a time is unaffected; a bot that can answer a whole
+      batch in one forward (`hexset.clients.onnxbot.NetworkBot`) overrides
+      it.
+    * `gains_many(view, received, counterparties)` -- this seat's private
+      *gain* from every candidate in `received` at once: a signed float, in
+      whatever unit this seat's value is, positive meaning it wants the
+      trade. This is the mechanic's actual gate -- `hexset.trading.
+      trade_event` clears the candidate both sides price above zero and
+      `Game.trade_rule` ranks highest. Default: `+1.0`/`-1.0` from
+      `accepts_many`, for a bot that only ever has a boolean gate.
 
     All three are handed the engine's information-set `View` for that seat
     and nothing else, so none can be a function of anything the seat may
-    not know. The defaults are applied by `hexset.trading.published`/
-    `judged`/`judged_many` rather than by inheritance, so they hold for a
-    bot that satisfies this protocol structurally.
+    not know. The defaults are applied by `hexset.trading.valued`/
+    `valued_many` rather than by inheritance, so they hold for a bot that
+    satisfies this protocol structurally.
     """
 
     def choose(self, game: Game) -> Action: ...
-
-    def valuation(self, view: View) -> tuple[float, ...]:
-        return NO_VALUATION
 
     def accepts(self, view: View, received: Bundle, counterparty: int) -> bool:
         return False
@@ -62,6 +56,12 @@ class Bot(Protocol):
         self, view: View, received: Sequence[Bundle], counterparties: Sequence[int]
     ) -> list[bool]:
         return [self.accepts(view, r, c) for r, c in zip(received, counterparties)]
+
+    def gains_many(
+        self, view: View, received: Sequence[Bundle], counterparties: Sequence[int]
+    ) -> list[float]:
+        verdicts = self.accepts_many(view, received, counterparties)
+        return [1.0 if ok else -1.0 for ok in verdicts]
 
 
 def own(vector: Sequence[float], seat: int) -> float:
@@ -205,61 +205,34 @@ class SearchBot:
 
     # -- trading (`hexset.trading`) -----------------------------------------
 
-    def valuation(self, view: View) -> tuple[float, ...]:
-        """`+1` at the card worth most to gain, `-1` at the one worth least
-        to keep, `0` elsewhere.
-
-        This is the one-for-one swap this bot's own evaluation picks --
-        exactly what its enumerate-and-score offer logic settled on before
-        trading became an event -- expressed as a vector. The give side is
-        drawn only from cards actually held, since offering what you do not
-        have was never a move; if the hand is empty there is nothing to
-        advertise. Scored on the seat's own row under its configured stance,
-        the same reading every other decision this bot makes uses.
+    def _gain(self, view: View, received: Bundle, counterparty: int) -> float:
+        """This seat's own evaluator delta from one candidate exchange:
+        `Eval(after) - Eval(before)`, scored under this bot's stance -- which
+        under `relative` already prices who got stronger. This is the private
+        gate the mechanic clears on; `accepts`/`gains_many` are both read off
+        it.
         """
-        if self.max_trades == 0:
-            return NO_VALUATION
-        seat = view.perspective
-        state = view.state
-        hand = state.hands[seat]
-        base = self._rank(self.evaluator.evaluate(state, seat), seat)
-
-        def moved(delta: int, resource: int) -> float:
-            after = copy_state(state)
-            after.hands[seat][resource] += delta
-            after.bank[resource] -= delta
-            return self._rank(self.evaluator.evaluate(after, seat), seat) - base
-
-        wanted = max(range(NUM_RESOURCES), key=lambda r: (moved(1, r), -r))
-        held = [r for r in range(NUM_RESOURCES) if hand[r] > 0]
-        if not held:
-            return NO_VALUATION
-        given = min(held, key=lambda r: (-moved(-1, r), r))
-        if given == wanted:
-            return NO_VALUATION
-        out = [0.0] * NUM_RESOURCES
-        out[wanted] = 1.0
-        out[given] = -1.0
-        return tuple(out)
-
-    def accepts(self, view: View, received: Bundle, counterparty: int) -> bool:
-        """Take the exchange iff the imagined post-trade position scores
-        better under this bot's stance.
-
-        The bot's existing answer to "is this trade good for me", unchanged:
-        score the state the exchange leads to with the max^n vector under
-        `stance`, which under `relative` already prices who got stronger.
-        Strictly better, never equal -- the engine's termination argument
-        rests on it (`hexset.trading.trade_event`).
-        """
-        if self.max_trades == 0:
-            return False
         seat = view.perspective
         state = view.state
         before = self._rank(self.evaluator.evaluate(state, seat), seat)
         mirror = tuple(-n for n in received)
         after = hand_shifted(state, {seat: received, counterparty: mirror})
-        return self._rank(self.evaluator.evaluate(after, seat), seat) > before
+        return self._rank(self.evaluator.evaluate(after, seat), seat) - before
+
+    def gains_many(
+        self, view: View, received: Sequence[Bundle], counterparties: Sequence[int]
+    ) -> list[float]:
+        if self.max_trades == 0:
+            return [-1.0] * len(received)
+        return [self._gain(view, r, c) for r, c in zip(received, counterparties)]
+
+    def accepts(self, view: View, received: Bundle, counterparty: int) -> bool:
+        """Take the exchange iff the imagined post-trade position scores
+        strictly better under this bot's stance -- `gains_many(...)[0] > 0`,
+        the engine's termination argument rests on strictness
+        (`hexset.trading.trade_event`).
+        """
+        return self.gains_many(view, [received], [counterparty])[0] > 0.0
 
     def _beam(
         self, game: Game, options: list[Action], mover: int, knower: int

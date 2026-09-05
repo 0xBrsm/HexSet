@@ -24,7 +24,6 @@ from hexset import encoding
 from hexset.actions import Action
 from hexset.arena import Entrant, entrant_from_name, spawn
 from hexset.bots import Bot
-from hexset.trading import publish_valuation
 
 from .aec import TOPOLOGY, HexSetAEC, agent_name
 
@@ -86,10 +85,10 @@ class HexSetEnv(Env):
 
     The action mask never rides in the observation -- it is always
     `info["action_mask"]`, and `action_masks()` is the `sb3-contrib` hook.
-    The learner's seat publishes no valuation vector, so it never trades;
-    the opponent seats trade with each other and with the learner's cards
-    only through what their own bots advertise and accept, each publishing
-    right after its own auto-played action (`_auto_play_opponents`).
+    The learner's seat has no gate seated for it, so it never trades; the
+    opponent seats trade with each other and with the learner's cards
+    only through their own bots' `gains_many`, asked fresh by the engine's
+    own trade event.
     `info["view"]` carries `hexset.view.View`, the seat's full information-set
     object (`known`/`unknown`/`sample`), for a caller that wants more than
     the encoder's arrays.
@@ -174,12 +173,11 @@ class HexSetEnv(Env):
             bot_rng = random.Random(episode_rng.randrange(2**31))
             self._bots[seat] = spawn(entrant, board, bot_rng)
         # The opponents bring their own trading to the table: their
-        # `accepts` is what the engine's one trade event a turn asks
-        # (`hexset.trading`); their `valuation` is published by
-        # `_auto_play_opponents`, right after each one's own action. The
-        # learner seat has no bot, so it publishes nothing and never trades
-        # -- the deferred half of the mechanic's interface, not an omission
-        # here.
+        # `gains_many` is what the engine's one trade event a turn asks
+        # (`hexset.trading`), fresh every time -- no publish step to run
+        # here. The learner seat has no bot, so `self._bots.get(seat)` is
+        # `None` for it and it never trades -- the deferred half of the
+        # mechanic's interface, not an omission here.
         self._aec._game.gates = tuple(
             self._bots.get(seat) for seat in range(self._aec.num_players)
         )
@@ -252,13 +250,6 @@ class HexSetEnv(Env):
                 continue
             seat = aec.possible_agents.index(agent)
             bot = self._bots[seat]
-            # Once a turn, exactly like `arena.play`'s loop: only when the
-            # engine says this seat is due (`Game.publish_due`, the
-            # post-roll/robber point, before the turn's first trade event --
-            # the PI amendment "publish points and the event trigger"), not
-            # after every action.
-            if aec._game.publish_due(seat):
-                publish_valuation(aec._game, seat, bot)
             action = bot.choose(aec._game)
             aec.step(action)
 

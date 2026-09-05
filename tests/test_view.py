@@ -167,18 +167,18 @@ def test_no_bot_bench_server_or_client_module_reaches_into_game_state():
 # -- (c2) the server never reads the current player's hidden view for
 # another viewer -----------------------------------------------------------
 
-# The regression this guards: `hexset.server.webplay.GameSession.state_view`
-# used to call `game.state(game.current_player)` -- `hidden=True` by
-# default, the current player's own information-set view -- as a side
-# effect of *any* viewer's poll, spectators included. That is one of the
-# engine's three event-trigger points, so it fired the turn's pending trade
-# event before a seat that publishes as part of its own decision (a bot)
-# ever got to publish (`agents/reference/trading-design.md`; the deploy
-# report that reproduced it: the served game never traded). The fix moved
-# the trigger to `hexset.game.run_pending_event(game)`, which does the same
-# triggering with no view built and no seat's hand read at all. This does
-# not forbid `game.state(0, hidden=False)` -- the server's own sanctioned
-# true-state path, `# true state:` at every call site -- only a `.state(...
+# The regression this used to guard: `hexset.server.webplay.GameSession.
+# state_view` used to call `game.state(game.current_player)` -- `hidden=True`
+# by default, the current player's own information-set view -- as a side
+# effect of *any* viewer's poll, spectators included, which used to be one
+# of the engine's lazy trade-event trigger points. That lazy machinery is
+# gone (a gate is a pure function of the position, asked fresh at every
+# event, which now fires eagerly inside whichever action causes it), so the
+# specific failure mode is gone with it -- this stays as a general hygiene
+# check: the server has no reason to build one seat's hidden view while
+# answering a different viewer's request. Does not forbid
+# `game.state(0, hidden=False)` -- the server's own sanctioned true-state
+# path, `# true state:` at every call site -- only a `.state(...
 # current_player ...)` call that is not `hidden=False`.
 _CURRENT_PLAYER_HIDDEN_STATE_RE = re.compile(r"\.state\(\s*[\w.]*current_player[^)]*\)")
 
@@ -192,9 +192,8 @@ def test_server_never_reads_the_current_players_hidden_view_for_another_viewer()
             if "hidden=False" not in match.group():
                 offenders.append(f"{path.relative_to(SRC)}: {match.group()}")
     assert not offenders, (
-        "the server must trigger the pending trade event through "
-        "hexset.game.run_pending_event(game), never by building the current "
-        f"player's own hidden view as a side effect of another viewer's poll: {offenders}"
+        "the server must never build the current player's own hidden view "
+        f"as a side effect of another viewer's poll: {offenders}"
     )
 
 

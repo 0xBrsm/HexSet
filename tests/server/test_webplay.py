@@ -28,11 +28,23 @@ from hexset.server.webplay import (
     RESOURCE_NAMES,
     GameSession,
     PendingGate,
-    PostedValuation,
     action_to_wire,
     bundle_from_wire,
     wire_to_action,
 )
+
+
+class _Wants:
+    """A gate that prices a candidate positively iff it hands this seat more
+    of `resource` than it had -- enough to clear a clean swap without also
+    pricing the reverse of it positively (see `tests/test_trading.py`'s
+    `wants` helper, which this mirrors for the server-side suite)."""
+
+    def __init__(self, resource: int):
+        self.resource = resource
+
+    def gains_many(self, view, received, counterparties):
+        return [1.0 if r[self.resource] > 0 else -1.0 for r in received]
 
 
 def a_game(players: int = 4, seed: int = 0):
@@ -346,10 +358,9 @@ def test_an_undone_placement_is_written_down_not_erased(tmp_path):
     assert events[2]["back_to"] == 0  # everything from step 0 did not happen
 
 
-def test_the_trade_log_and_the_valuations_ride_in_the_state_view():
-    """The two public halves of the mechanic (`hexset.trading`): what every
-    seat advertised, and what the engine cleared this turn. Neither is
-    filtered per viewer -- both are things a table hears."""
+def test_the_trade_log_rides_in_the_state_view():
+    """What the engine cleared this turn (`hexset.trading`) is public and
+    not filtered per viewer."""
     from hexset.board.terrain import Resource
     from hexset.game import roll_dice
 
@@ -363,17 +374,13 @@ def test_the_trade_log_and_the_valuations_ride_in_the_state_view():
     state.hands[1][Resource.ORE] = 1
 
     session = a_session(game, {0, 1})
-    wants_ore = [0.0] * 5
-    wants_ore[Resource.ORE] = 1.0
-    wants_ore[Resource.WOOD] = -1.0
-    session.publish(0, wants_ore)
-    session.publish(1, [-v for v in wants_ore])
+    session.set_trader(0, _Wants(Resource.ORE))
+    session.set_trader(1, _Wants(Resource.WOOD))
 
     roll_dice(game, 8)
 
     for viewer in (None, 0, 1, 2, 3):
         view = session.state_view(viewer)
-        assert view["valuations"][0] == wants_ore
         assert len(view["trades"]) == 1
         assert view["trades"][0]["a"] == 0 and view["trades"][0]["b"] == 1
         assert view["trades"][0]["got"][Resource.ORE] == 1
@@ -388,35 +395,27 @@ def test_bundle_from_wire_is_signed_towards_the_proposer():
     assert b[Resource.ORE] == 2
 
 
-def test_publish_installs_posted_valuation_by_default():
+def test_confirm_mode_installs_a_pending_gate():
     game = a_game(seed=3)
     session = a_session(game, {0})
-    session.publish(0, [0.5, 0, 0, 0, -0.5])
-    assert isinstance(game.gates[0], PostedValuation)
-    assert game.gates[0].accepts(None, (1, 0, 0, 0, -1), 1) is True
-
-
-def test_publish_installs_pending_gate_for_a_confirm_mode_seat():
-    game = a_game(seed=3)
-    session = a_session(game, {0})
-    session.confirm_seats.add(0)
-    session.publish(0, [0.5, 0, 0, 0, -0.5])
+    session.confirm_mode(0)
     assert isinstance(game.gates[0], PendingGate)
-    assert game.gates[0].valuation(None) == (0.5, 0, 0, 0, -0.5)
 
 
 def test_pending_gate_always_declines_and_records_the_candidate():
     game = a_game(seed=3)
-    gate = PendingGate(game, seat=1, vector=(0.0,) * 5)
-    accepted = gate.accepts(None, (1, 0, 0, 0, -1), 0)
-    assert accepted is False
+    gate = PendingGate(game, seat=1)
+    gains = gate.gains_many(None, [(1, 0, 0, 0, -1)], [0])
+    assert gains == [-1.0]
     assert game.pending == [Trade(1, 0, (1, 0, 0, 0, -1))]
 
 
-def test_pending_gate_records_nothing_when_the_other_side_declines_first():
-    """The short-circuit property: `_best_clearing` asks the acting seat's
-    own gate first, so a `PendingGate` sitting as the counterparty never
-    fires for a candidate the other side already refused."""
+def test_pending_gate_batches_every_candidate_the_actor_priced_above_zero():
+    """`_best_clearing` asks the acting seat's own gate once, over every
+    coverable candidate, and only asks a counterparty's gate over the
+    subset the actor priced above zero -- so a `PendingGate` sitting as the
+    counterparty can record several candidates from one event, not only
+    the first one another gate happened to accept."""
     from hexset.board.terrain import Resource
     from hexset.game import Phase
     from hexset.trading import trade_event
@@ -425,22 +424,25 @@ def test_pending_gate_records_nothing_when_the_other_side_declines_first():
     game.phase = Phase.MAIN
     game.current_player = 0
     game._state.hands[0][Resource.WOOD] = 1
+    game._state.hands[0][Resource.BRICK] = 1
     game._state.hands[1][Resource.ORE] = 1
 
-    class Declines:
-        def valuation(self, view):
-            return (1.0, 0, 0, 0, -1.0)  # wants ore, would give wood
+    class WantsOre:
+        """Prices every candidate that hands back some ore above zero --
+        several distinct bundles here, since giving wood, brick, or both
+        for ore all qualify."""
 
-        def accepts(self, view, received, counterparty):
-            return False
+        def gains_many(self, view, received, counterparties):
+            return [1.0 if r[Resource.ORE] > 0 else -1.0 for r in received]
 
-    pending_gate = PendingGate(game, seat=1, vector=(-1.0, 0, 0, 0, 1.0))
-    game.gates = (Declines(), pending_gate, PostedValuation((0.0,) * 5), PostedValuation((0.0,) * 5))
-    game.valuations[0] = (1.0, 0, 0, 0, -1.0)
-    game.valuations[1] = (-1.0, 0, 0, 0, 1.0)
+    pending_gate = PendingGate(game, seat=1)
+    game.gates = (WantsOre(), pending_gate, None, None)
 
-    trade_event(game, lambda seat, view, received, other: game.gates[seat].accepts(view, received, other))
-    assert game.pending == []
+    trade_event(game, lambda seat, view, received, other: -1.0)
+    assert len(game.pending) > 1
+    # Recorded from seat 1's own side (`PendingGate.seat`): it is always the
+    # one giving up its one ore here.
+    assert all(t.a == 1 and t.b == 0 and t.received[Resource.ORE] < 0 for t in game.pending)
 
 
 def test_execute_trade_reaches_the_session_and_moves_cards():
@@ -453,7 +455,7 @@ def test_execute_trade_reaches_the_session_and_moves_cards():
     game._state.hands[0][Resource.WOOD] = 1
     game._state.hands[1][Resource.ORE] = 1
     session = a_session(game, {0, 1})
-    session.publish(1, [1.0, 0, 0, 0, -1.0])  # seat 1 wants wood, gives ore
+    session.set_trader(1, _Wants(Resource.WOOD))  # seat 1 wants wood, gives ore
     received = [0, 0, 0, 0, 0]
     received[Resource.ORE] = 1
     received[Resource.WOOD] = -1
@@ -474,31 +476,19 @@ def test_state_view_pending_is_filtered_per_viewer():
     assert session.state_view(None)["pending"] == []
 
 
-def test_a_trade_a_poll_cleared_is_told_in_the_log():
-    """A turn's first trade event fires from `state_view`, not from inside
-    `_apply` -- so its exchanges have to be attributed to an action after
-    the fact, or the log never mentions them at all.
-
-    `_apply` reads an action's trades out of `game.trades` from inside
-    itself, which was the whole story back when `enter_main` ran the turn's
-    first event directly. It doesn't any more: the event is armed and runs
-    lazily, and on this server the first thing to reach it is whichever poll
-    lands next (`state_view` -> `run_pending_event`). Everything that event
-    cleared reached the state's own `trades` block and the engine's ledger,
-    and no `_Event` -- so `render_log` had nothing to describe. Three
-    `heximax` seats dealing with each other over sixteen turns in a browser:
-    seven exchanges in the state, none in the transcript.
-
-    Attributed to the last action applied, matching what
-    `hexset.record.record_game` already does with a lazily triggered first
-    event (the previous action's step).
+def test_a_trade_the_roll_cleared_is_told_in_the_log_immediately():
+    """The turn's first trade event fires eagerly, inside the ROLL action's
+    own `apply` (`enter_main`) -- so `_apply`'s own `self.game.trades[
+    trades_before:]` bookkeeping already attributes it to that action's
+    `_Event`, and the transcript has it without anything else polling the
+    table first.
     """
     from hexset.board.terrain import Resource
 
-    # This seed's roll is an 8, so the turn reaches MAIN and arms the event
-    # rather than stopping on the robber -- asserted below rather than left
-    # to the seed, so a change to the deal fails here instead of quietly
-    # testing nothing.
+    # This seed's roll is an 8, so the turn reaches MAIN rather than
+    # stopping on the robber -- asserted below rather than left to the
+    # seed, so a change to the deal fails here instead of quietly testing
+    # nothing.
     game = a_game(seed=2)
     game.phase = Phase.ROLL
     game.current_player = 0
@@ -508,21 +498,12 @@ def test_a_trade_a_poll_cleared_is_told_in_the_log():
     game._state.hands[1][Resource.ORE] = 1
 
     session = a_session(game, {0, 1})
-    wants_ore = [0.0] * 5
-    wants_ore[Resource.ORE] = 1.0
-    wants_ore[Resource.WOOD] = -1.0
-    session.publish(0, wants_ore)
-    session.publish(1, [-v for v in wants_ore])
+    session.set_trader(0, _Wants(Resource.ORE))
+    session.set_trader(1, _Wants(Resource.WOOD))
 
-    # Through the session, so there is a recorded event for the roll -- and
-    # the trade event it arms does not run inside it.
     session._apply(0, Action(ActionType.ROLL))
     assert game.phase is Phase.MAIN
-    assert session.events[-1].trades == ()
-    assert not any("traded" in line for line in session.log_for(None))
-
-    view = session.state_view(None)
-    assert len(view["trades"]) == 1
+    assert len(session.events[-1].trades) == 1
 
     line = next(line for line in session.log_for(None) if " to Player " in line)
     assert "traded" in line and "Ore" in line and "Wood" in line

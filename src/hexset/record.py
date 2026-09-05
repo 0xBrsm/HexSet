@@ -44,7 +44,7 @@ from .bots import Bot
 from .cards import DevCard, make_deck
 from .chance import Chance, ChanceError, Live, Recording, Scripted
 from .game import Game, is_over, start, to_move
-from .trading import Trade, apply_trades, publish_valuation
+from .trading import Trade, apply_trades
 
 VERSION = 2
 
@@ -150,24 +150,15 @@ def record_game(
 ) -> Record:
     """Play one game and record it. Each bot is seated at its own index.
 
-    The bots are seated as the game's `gates` too, and each one publishes
-    once a turn, exactly as `arena.play` does both (`Game.publish_due`, the
-    PI amendment "publish points and the event trigger"), so a recorded
-    game trades the way a played one does -- and the exchanges the engine
-    cleared are written down, because nothing in the action list implies
-    them.
-
-    A publish can itself fire this turn's *first* trade event
-    (`Game.event_pending`), before the seat due to publish has even chosen
-    its action -- reached, in this loop, right after `to_move` names that
-    seat and before `choose`. Those trades are attributed to the
-    *previous* action's step (`len(actions) - 1`), never the upcoming one:
-    they are still "the event on the way into `MAIN`" that `advance`
-    already knows how to replay -- `apply(the ROLL or ROBBER action);
-    apply_trades(...)` -- just fired lazily now instead of eagerly inside
-    that action's own `apply`. Recording them under the *next* step instead
-    would replay them after that step's action applies, which can leave a
-    build the trade was meant to fund looking unaffordable on replay.
+    The bots are seated as the game's `gates` too, and a gate is a pure
+    function of the position, asked fresh at every trade event -- there is
+    nothing this loop has to publish, so it trades the way `arena.play`
+    does: seat the gates and step the game. The turn's first trade event
+    fires eagerly, inside the ROLL or ROBBER action's own `apply` (via
+    `enter_main`), so its trades are already captured by the ordinary
+    before/after `game.trades` diff around `apply` below, attributed to
+    that action's own step -- exactly where `advance` already knows to
+    replay them (`apply(the action); apply_trades(...)`).
     """
     rng = random.Random(seed)
     recording = Recording(Live(rng))
@@ -178,11 +169,6 @@ def record_game(
     while not is_over(game) and len(actions) < action_cap:
         seat = to_move(game)
         bot = bots[seat]
-        if game.publish_due(seat):
-            before = len(game.trades)
-            publish_valuation(game, seat, bot)
-            for trade in game.trades[before:]:
-                trades.append((len(actions) - 1, trade.a, trade.b, tuple(trade.received)))
         before = len(game.trades)
         action = bot.choose(game)
         apply(game, action)
@@ -227,15 +213,12 @@ def advance(game: Game, action: Action, trades: Sequence[Trade]) -> None:
     """Apply one recorded step: the action, then the trades it cleared.
 
     A replayed game has no seated bots (`game.gates` stays `None`), so its
-    own trade event never fires -- `legal_actions`/`game.state`'s trigger is
-    a true no-op with no gates seated -- and the recorded exchanges are
-    re-executed here instead. Applying them immediately after `apply`
-    returns is exactly where they happened: `record_game` attributes a
-    turn's first event (fired lazily, at the first publish or observation
-    for the new current player, not eagerly inside `roll_dice`/
-    `move_robber_to` any more) to the *roll or robber* step it logically
-    belongs to, precisely so this ordering -- one action, then the trades
-    that followed it -- stays correct to replay.
+    own trade event never fires -- `run_trade_event`'s own no-op guard --
+    and the recorded exchanges are re-executed here instead. Applying them
+    immediately after `apply` returns is exactly where they happened: the
+    turn's first event fires eagerly, inside the roll or robber action's own
+    `apply` (`enter_main`), so `record_game` already attributes it to that
+    same step.
     """
     apply(game, action)
     apply_trades(game, trades)

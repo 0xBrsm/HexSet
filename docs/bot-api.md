@@ -48,13 +48,17 @@ fields, and all three declare a `pair_mask` input and a `pair_index` output
 for the one-for-one give/want heads. Trading is now one engine event with no
 actions at all (see §4), so those graphs describe a game this engine does not
 play: there is no honest way to feed them, and they are refused by name.
-Contract 5 is refused too now: the knight two-step fix (a knight is played,
-then the robber moves through the same phase a seven enters, rather than one
-action carrying both) dropped `PLAY_KNIGHT`'s operands, shrinking the flat
-`ActionSpace` a contract-5 graph's `action_mask`/`prior` were traced against.
-Contract 1 — the original shape, where the engine encoded the position into
-feature tensors and the graph was a bare policy/value head masked in Python —
-went the same way on 2026-09-02
+Contract 5 is refused too now, for two independent reasons that happened to
+land together: it declared a `valuations` field for the one-event mechanic's
+public valuation vector, and that public layer is gone outright
+(`agents/reference/trading-final.md`, item 1) rather than replaced; and the
+knight two-step fix (a knight is played, then the robber moves through the
+same phase a seven enters, rather than one action carrying both) dropped
+`PLAY_KNIGHT`'s operands, shrinking the flat `ActionSpace` a contract-5
+graph's `action_mask`/`prior` were traced against. Either change alone would
+have forced the bump. Contract 1 — the original shape, where the engine
+encoded the position into feature tensors and the graph was a bare
+policy/value head masked in Python — went the same way on 2026-09-02
 (`docs/engine-divergence-2026-09-02.md`, B5).
 
 ## 2. The graph — the record contract (`6`)
@@ -93,7 +97,6 @@ Leading batch axis `B` on every tensor.
 | `hand_totals` | `(B, players)` | int64 |
 | `own_dev` | `(B, NUM_DEV_CARDS)` | int64 |
 | `dev_totals` | `(B, players)` | int64 |
-| `valuations` | `(B, players, NUM_RESOURCES)` | float32 |
 | `ledger_known` | `(B, players, NUM_RESOURCES)` | int64 |
 | `ledger_unknown` | `(B, players)` | int64 |
 | `action_mask` | `(B, space.size)` | bool |
@@ -126,68 +129,50 @@ action's legality depends on another seat's hand, and there is now one list,
 
 ## 3. Trading
 
-A checkpoint does not act to trade. Every seat holds a **public valuation
-vector** — `valuations` above, five floats in `[-1, 1]` per seat in
-board-seat order, positive for "I want more of this" — and the engine clears
-exchanges between the current player and each other seat after the roll and
-the robber, and again after every MAIN action the current player takes
-(build, buy, a bank/port trade, a development card): any signed bundle on
-disjoint resources, each side bounded only by what that hand holds (not one
-card for one card — a candidate can give several resources and receive
-several back in the same exchange), executed when both sides' vectors say
-it helps them and both sides' private gates accept. Best deal first — the
-smaller of the two surpluses, highest; ties fall to the current player's own
-surplus, then the total, then a canonical order for determinism — until
-nothing clears.
+**Status, 2026-09-05: rewritten for the trading-final mechanic
+(`agents/reference/trading-final.md`); the human/LLM negotiation surface
+this section used to describe (`PUT .../valuation`, confirm mode's
+per-route default, `propose_trade`) is server-side work still in flight —
+see that document's item 5 for what changes there.**
 
-**When a seat's vector is read.** A turn's first trade event does not run at
-a fixed point in the engine's own code any more; it runs lazily, the first
-time anything reaches the current player's own `legal_actions(game)`,
-`game.state(seat)`, or `Game.publish` — whichever comes first
-(`Game.event_pending`, the PI amendment "publish points and the event
-trigger" in `agents/reference/trading-design.md`). `Game.publish_due(seat)`
-is the engine's own answer to "should I publish right now?": true exactly
-once per seat per turn, while `seat` is the current player, the phase is
-`MAIN`, and this turn's first event has not fired yet. Every event after the
-first one in a turn (after every subsequent MAIN action) runs
-unconditionally, on whatever is currently published — publishing more often
-than once a turn does not break anything, it is simply extra work a driver
-does not need to do.
+A checkpoint does not act to trade, and there is no public layer any more:
+nothing is advertised, and no vector rides in this record. Instead, every
+seat answers a private **gate** — `gains_many(view, received,
+counterparties) -> list[float]`, that seat's own gain from each candidate
+exchange, in whatever unit its value is, read through its own view. The
+engine enumerates every coverable candidate bundle between the current
+player and each other seat after the roll and the robber, and again after
+every MAIN action the current player takes (build, buy, a bank/port trade, a
+development card): any signed bundle on disjoint resources, each side
+bounded only by what that hand holds (not one card for one card — a
+candidate can give several resources and receive several back in the same
+exchange). It asks the current player's gate once over every candidate,
+keeps the strictly positive subset, asks each counterparty's gate once over
+its own accepted subset, keeps the strictly positive subset of *that*, and
+clears the one candidate `Game.trade_rule` ranks highest — the default,
+`"egalitarian"`, maximises the smaller of the two private gains; ties fall
+to the current player's own gain, then a canonical bundle order, then the
+lower counterparty seat, for determinism. Then it loops until nothing
+clears. A gate is a pure function of the current position, asked fresh
+every time — there is no publish step and no timing to get right.
 
-A checkpoint served embedded (`hexset.clients.onnxbot.NetworkBot`) trades off
-the same `value` head this contract already declares: `valuation` is
-`tanh(delta_V_r / VALUE_SCALE)` per resource, `delta_V_r` the head's own-row
-delta between the seat's hand and that hand holding one more card of `r`, and
-`accepts` is the head's strict preference for the concrete post-trade hand
-over the current one — the derivation `hexnet.policy.DerivedTrader` trains
-under, reimplemented here against the wire record instead of a live forward
-(`hexset.trading.VALUE_SCALE` is the pinned constant both cite). Published
-once a turn, when `Game.publish_due(seat)` says so, same as any other seat
-(`hexset.trading.publish_valuation`), so it lands in `game.valuations` and
-this record's `valuations` field before the table's next trade event.
-`max_trades=0` in the metadata is still the explicit off switch — a seat with
-it set publishes nothing and accepts nothing, exactly like a bot with no
-`valuation` method at all.
-
-**When a human should set theirs.** `PUT /api/games/<code>/valuation` is
-unconditional — a human seat may call it as often as it likes, `publish_due`
-or not, and the two are unrelated: a bot's driver *checks* `publish_due` so
-it does not do needless work, but nothing enforces the check, and a human
-client has no reason to. What matters is *when*, relative to the event: a
-value set before the current player's own `GET /api/state` (or any other
-read of the game while it is that seat's turn) is what the turn's first
-event sees; a value set later only takes effect from the next observation or
-the next turn's event onward, since the first event already ran on whatever
-was standing before it. A seat that never calls it at all keeps trading on
-whatever it last set — all-zero, and so never a party to a clearing deal,
-until it sets something.
+A checkpoint served embedded (`hexset.clients.onnxbot.NetworkBot`) trades
+off the same `value` head this contract already declares: `accepts` is the
+head's strict preference for the concrete post-trade hand over the current
+one — the derivation `hexnet.policy.DerivedTrader` trains under,
+reimplemented here against the wire record instead of a live forward — and
+`accepts_many` batches it over up to `NETWORK_GATE_ROWS` candidates in one
+graph call. There is no magnitude-valued `gains_many` here: `hexset.bots.
+search2.Bot`'s structural default derives one from `accepts_many`
+(`+1.0`/`-1.0`), which is all a boolean value-head gate can support; a
+magnitude-valued network gate is HexNet's own concern. `max_trades=0` in the
+metadata is still the explicit off switch — a seat with it set accepts
+nothing, exactly like a bot with no trading methods at all.
 
 A checkpoint served externally (`hexset.clients.botclient.RecordBrain`, the
-`python -m hexset.clients.botclient` peer) does not share this brain and does
-not trade: it reads `GET /api/record` for `action_index` alone and never
-calls `PUT /api/games/<code>/valuation`. That gap is pre-existing and is not
-this contract's concern — an external checkpoint that wants to trade can
-still publish through that route the same way a human client does.
+`python -m hexset.clients.botclient` peer) does not share this brain and
+does not trade at all: it reads `GET /api/record` for `action_index` alone
+and is never seated as a gate.
 
 **The negotiation interface (human and LLM seats).** Everything above is the
 automatic event; a human or LLM seat additionally gets `POST
@@ -195,29 +180,14 @@ automatic event; a human or LLM seat additionally gets `POST
 submit a bundle directly, bypassing the automatic candidate search — any
 bundle both sides can cover, not only what the event would have found. It is
 legal on the proposer's own turn against any seat, or during another seat's
-turn against that seat only, and still enforces the counterparty's public
-surplus as a hard rule and its private gate (`accepts`) exactly as the
-automatic event does; the proposer's own vector and gate are never
+turn against that seat only, and requires the counterparty's own gate to
+price the exchange strictly above zero; the proposer's own gate is never
 consulted, since submitting is its own consent. A checkpoint served through
 this contract is never itself a *proposer* here — nothing calls this route
 on a bot's behalf — but it is a valid **counterparty**: a person or an LLM
-may propose a bundle against a served checkpoint's own published vector at
-any time, and the checkpoint's `accepts` answers it exactly as it would an
-automatically-found candidate, because the call is the same. `GET
-/api/state`'s `pending` block and the confirm/decline routes exist only for
-a seat in confirm mode, which a `.onnx` checkpoint never is.
-
-**Confirm mode's default differs by seat-up route.** `POST
-/api/games`/`POST /api/join` — the web page's own seat-up — default a
-request that omits `confirm` to confirm mode *on*: nothing auto-clears
-against a human without an explicit `confirm: false` opting back out to
-auto-accept. `hexset.server.mcp`'s `new_game`/`join` tools keep the opposite
-default — `confirm` omitted means auto-accept, the same standing-consent
-gate a bot gets — since an LLM's own published vector already is its
-consent (opt-in per PI ratification decision 3,
-`docs/negotiation-interface.md`). A checkpoint served through this contract
-is seated neither way; the distinction is seat-up policy, not the contract
-above. Full interface: [`docs/negotiation-interface.md`](negotiation-interface.md).
+may propose a bundle against a served checkpoint at any time, and the
+checkpoint's gate answers it exactly as it would an automatically-found
+candidate, because the call is the same.
 
 ## What is never part of this contract
 

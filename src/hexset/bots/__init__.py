@@ -7,8 +7,8 @@ the `STANCES` a per-seat vector is read through) and `heximax`
 both build on the same handcrafted evaluation, `hexset.bots.evaluate`.
 
 `Bot` is the seam every driver and the engine share: `choose(game)`, plus
-`valuation(view)` and `accepts(view, received, counterparty)` for the trade
-mechanic (`hexset.trading`), both defaulting to "this seat never trades".
+`gains_many(view, received, counterparties)` for the trade mechanic
+(`hexset.trading`), defaulting to "this seat never trades".
 
 This module re-exports `search2`'s public names (so `from hexset.bots import
 SearchBot` keeps working exactly as it did when `bots.py` was a single file)

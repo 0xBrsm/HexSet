@@ -47,20 +47,14 @@ def test_spawn_bot_resolves_the_onnx_spec_without_a_module_not_found_error():
     assert action in legal_actions(game)
 
 
-def test_a_network_seats_first_action_publishes_a_nonzero_valuation(monkeypatch, tmp_path):
-    """The one-event trade mechanic (`hexset.trading`, `agents/reference/
-    trading-design.md` §8) has both halves wired end to end: `Tables.act`
-    already calls `publish_valuation` for any traded seat once it moves
-    (PR #18); this pins that an *ONNX* seat's `NetworkBot.valuation` is the
-    thing that answers, not the zero default a bot with no `valuation`
-    method gets (`hexset.trading.NO_VALUATION`).
-
-    `stub-contract6-valued.onnx` reads `own_hand` through fixed, distinct,
-    non-zero per-resource weights (`fixtures/build_stub.py --valued`), so
-    every one-card-more delta is that resource's own weight regardless of
-    the seat's actual hand -- unlike `stub-contract6.onnx`, whose value head
-    really is all zero and could never tell "published nothing" apart from
-    "published five honest zeros".
+def test_a_network_seat_plays_through_local_search_brain(monkeypatch, tmp_path):
+    """`LocalSearchBrain.decide` -- the same call an embedded bot runner
+    makes -- drives an ONNX seat's one decision without a live runner
+    thread. `stub-contract6-valued.onnx` (`fixtures/build_stub.py --valued`)
+    is used here rather than the all-zero stub only because it is the
+    fixture this suite already builds; nothing about its value head is
+    exercised by this test any more, now that there is no vector to
+    publish.
 
     The table is dealt with the network bot seated the normal way
     (`bots=["valued"]`, via a `MODELS_DIR` this test points at a tmp
@@ -68,8 +62,8 @@ def test_a_network_seats_first_action_publishes_a_nonzero_valuation(monkeypatch,
     bot seat -- stopped immediately below, because this repo's tests never
     wait on one (a background thread's timing has no place in an assertion,
     see `conftest.stop_bot_runners`). Its one decision is then driven by
-    hand through `LocalSearchBrain`/`Tables.act`, the identical two calls
-    the runner's own loop would have made, with none of the raciness.
+    hand through `LocalSearchBrain`/`Tables.act`, the identical call the
+    runner's own loop would have made, with none of the raciness.
     """
     import shutil
 
@@ -95,24 +89,12 @@ def test_a_network_seats_first_action_publishes_a_nonzero_valuation(monkeypatch,
     bot = table.session.traders[seat]
     # Park the game in MAIN with the network seat to move -- past setup, so
     # `legal_actions` offers more than one option and the stub's
-    # uniform-over-legal policy has an ordinary turn to choose from. Armed
-    # by hand rather than via `enter_main`/`roll_dice`, so both flags
-    # `enter_main` would have set are set explicitly too: `event_pending`
-    # and `awaiting_publish` (the latter is what makes `Game.publish_due
-    # (seat)` true for this seat's first decision -- decoupled from
-    # `event_pending` by the `publish_due`/`state_view` fix, see
-    # `Game.publish_due`'s docstring).
+    # uniform-over-legal policy has an ordinary turn to choose from.
     game.phase = Phase.MAIN
     game.current_player = seat
-    game.event_pending = True
-    game.awaiting_publish = True
-
-    assert all(v == 0.0 for v in table.session.game.valuations[seat])
 
     brain = LocalSearchBrain(bot=bot, game=game)
     token = table.seats[seat].token
     wire = brain.decide(LocalTransport(registry), token, seat)
     result = registry.handle("POST", "/api/action", {"action": wire}, token)
     assert "error" not in result
-
-    assert any(v != 0.0 for v in table.session.game.valuations[seat])

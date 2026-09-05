@@ -64,9 +64,10 @@ from hexset.server.webplay import action_to_wire
 # wire as-is (see its own docstring for why).
 _BOOL_FIELDS = frozenset({"action_mask"})
 
-# The one record field that is not an integer count: valuations are floats
-# in [-1, 1] (`hexset.trading`).
-_FLOAT_FIELDS = frozenset({"valuations"})
+# No record field is a float any more -- the public valuation block is gone
+# (`hexset.trading`) -- but `_to_input` keeps this set so a future non-integer
+# field has somewhere to be declared rather than silently cast to int64.
+_FLOAT_FIELDS: frozenset[str] = frozenset()
 
 # Fields `GET /api/record` sends alongside the record proper that are not
 # themselves graph inputs.
@@ -233,33 +234,22 @@ class LocalSearchBrain:
     game: object  # hexset.game.Game — typed loosely to avoid a game.py import cycle at module load
 
     def __post_init__(self) -> None:
-        # A `NetworkBot`'s `valuation`/`accepts` need the live `Game` to
+        # A `NetworkBot`'s `accepts`/`accepts_many` need the live `Game` to
         # build the hypothetical hands they score (`onnxbot.py`'s
         # `_own_values`), which it otherwise only learns from `choose`'s own
         # side effect (`NetworkBot._seated`) -- fine when `choose` always
-        # runs first, not when a driver may publish before a seat's very
-        # first decision of the game (`Game.publish_due`, checked in
-        # `decide` below, before `choose`). `LocalSearchBrain` already holds
-        # this seat's one live `Game` for its whole life -- one instance per
-        # bot-runner thread -- so handing it over now is not new
-        # information, only earlier than `choose` would have. A bot kind
-        # without this attribute (`search2`, an MCTS `Search`) is untouched.
+        # runs first, not when the engine's own trade event asks this
+        # seat's gate before it has ever chosen a move (the turn's first
+        # event, fired eagerly by `enter_main`). `LocalSearchBrain` already
+        # holds this seat's one live `Game` for its whole life -- one
+        # instance per bot-runner thread -- so handing it over now is not
+        # new information, only earlier than `choose` would have. A bot
+        # kind without this attribute (`search2`, an MCTS `Search`) is
+        # untouched.
         if getattr(self.bot, "_seated", "not-a-network-bot") is None:
             self.bot._seated = self.game
 
     def decide(self, transport: Transport, token: str, seat: int) -> dict:
-        # Checked and published, if due, *before* `choose` below -- not in
-        # `Tables.act` after the move is submitted. `choose` calls
-        # `hexset.actions.legal_actions` on this same live `game` to work
-        # out its move, which is itself one of the engine's three
-        # event-trigger points (`Game.event_pending`'s docstring) and would
-        # otherwise consume the turn's pending event on this seat's
-        # *standing* vector before `Tables.act`'s own check ever ran (the
-        # PI amendment "publish points and the event trigger").
-        if self.game.publish_due(seat):
-            from hexset.trading import publish_valuation  # avoids a hard game.py import cycle
-
-            publish_valuation(self.game, seat, self.bot)
         return action_to_wire(self.bot.choose(self.game))
 
 

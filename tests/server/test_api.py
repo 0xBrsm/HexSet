@@ -27,7 +27,7 @@ from hexset.server.api import (
 
 from hexset.game import is_over, to_move
 
-from hexset.server.webplay import action_to_wire
+from hexset.server.webplay import PendingGate, action_to_wire
 
 from conftest import new_tables
 
@@ -188,60 +188,15 @@ def test_the_option_list_does_not_move_when_opponents_hands_do():
     assert legal_actions(game) == before
 
 
-def test_a_published_valuation_clears_a_trade_and_it_shows_in_the_view():
-    """End to end, `confirm=False` (the opt-out, `PostedValuation`): a human
-    seat publishes, the engine's trade event clears an exchange on the way
-    into the main phase, and the game view reports it. The default --
-    `confirm` omitted entirely -- is covered by
-    `test_a_human_seat_defaults_to_confirm_mode_and_records_a_pending_candidate`
-    below, where the identical setup records a pending candidate instead."""
-    from hexset.board.terrain import Resource
-    from hexset.game import Phase, roll_dice
-
-    registry = tables()
-    code, token = deal(registry, confirm=False)
-    table = registry.get(code)
-    game = table.session.game
-    seat = table.seat_of(token)
-    other = next(s for s in range(game.num_players) if s != seat)
-
-    # Park the game in ROLL with the human to move, holding one wood, and the
-    # bot seat holding one ore. A non-seven roll opens the main phase, which
-    # is where the trade event runs.
-    game.phase = Phase.ROLL
-    game.current_player = seat
-    state = game.state(seat, hidden=False)
-    for hand in state.hands:
-        hand[:] = [0, 0, 0, 0, 0]
-    state.hands[seat][Resource.WOOD] = 1
-    state.hands[other][Resource.ORE] = 1
-
-    wants_ore = [0.0] * 5
-    wants_ore[Resource.ORE] = 1.0
-    wants_ore[Resource.WOOD] = -1.0
-    registry.handle("PUT", f"/api/games/{code}/valuation", {"valuation": wants_ore}, token)
-    # The bot seat wants the wood back; publishing on its behalf stands in
-    # for it so the exchange has two willing sides without depending on what
-    # a particular checkpoint would advertise.
-    table.session.publish(other, tuple(-v for v in wants_ore))
-
-    roll_dice(game, 8)
-    assert game.phase is Phase.MAIN
-
-    view = table.view(seat)
-    assert view["trades"], "the engine cleared nothing"
-    trade = view["trades"][0]
-    assert {trade["a"], trade["b"]} == {seat, other}
-    assert state.hands[seat][Resource.ORE] == 1
-    assert state.hands[other][Resource.WOOD] == 1
-
-
 def test_a_human_seat_defaults_to_confirm_mode_and_records_a_pending_candidate():
-    """The bug fix: `POST /api/games` with no `confirm` key at all -- exactly
-    what the web page's own seat-up sends -- must default a human seat to
-    `PendingGate`, not `PostedValuation`. Same setup as the opt-out test
-    above; the only difference is the missing `confirm` kwarg, and the
-    outcome flips from an executed trade to a recorded, unexecuted one."""
+    """`POST /api/games` with no `confirm` key at all -- exactly what the web
+    page's own seat-up sends -- defaults a human seat to `PendingGate`, so
+    an otherwise-clearing exchange is recorded, unexecuted, rather than
+    taken automatically. There is no vector to post any more (`PUT .../
+    valuation` and the `confirm=False` auto-accept path are next-task work,
+    `agents/reference/trading-final.md` item 5); this only exercises the
+    confirm-mode default itself.
+    """
     from hexset.board.terrain import Resource
     from hexset.game import Phase, roll_dice
 
@@ -252,6 +207,7 @@ def test_a_human_seat_defaults_to_confirm_mode_and_records_a_pending_candidate()
     seat = table.seat_of(token)
     other = next(s for s in range(game.num_players) if s != seat)
     assert seat in table.session.confirm_seats
+    assert isinstance(game.gates[seat], PendingGate)
 
     game.phase = Phase.ROLL
     game.current_player = seat
@@ -261,108 +217,11 @@ def test_a_human_seat_defaults_to_confirm_mode_and_records_a_pending_candidate()
     state.hands[seat][Resource.WOOD] = 1
     state.hands[other][Resource.ORE] = 1
 
-    wants_ore = [0.0] * 5
-    wants_ore[Resource.ORE] = 1.0
-    wants_ore[Resource.WOOD] = -1.0
-    registry.handle("PUT", f"/api/games/{code}/valuation", {"valuation": wants_ore}, token)
-    table.session.publish(other, tuple(-v for v in wants_ore))
-
     roll_dice(game, 8)
     assert game.phase is Phase.MAIN
 
     view = table.view(seat)
-    assert view["trades"] == [], "nothing may auto-clear against a human without confirm=false"
+    assert view["trades"] == [], "a PendingGate seat never auto-clears"
     assert view["pending"] == [{"counterparty": other, "gave": [1, 0, 0, 0, 0], "got": [0, 0, 0, 0, 1]}]
     assert state.hands[seat][Resource.WOOD] == 1, "a PendingGate must never itself move cards"
     assert state.hands[other][Resource.ORE] == 1
-
-
-class _StubBot:
-    """A minimal seated bot for `game.gates` -- `valuation`/`accepts` answer
-    a fixed vector, same shape as any real checkpoint `spawn_bot` would
-    build. Swapped in for `other`'s real embedded checkpoint so the test
-    below doesn't depend on what a particular one would advertise."""
-
-    def __init__(self, vec):
-        self.vec = vec
-
-    def valuation(self, view):
-        return self.vec
-
-    def accepts(self, view, received, counterparty):
-        return True
-
-
-def test_a_spectator_poll_before_the_bots_publish_does_not_spend_the_event():
-    """The regression a deploy report pinned down ("the served game never
-    trades"): `GameSession.state_view` -- behind both `GET /api/state` and
-    `GET /api/table/<CODE>` -- used to read the current player's own hidden
-    view on *every* call, for *any* viewer, which fired this turn's first
-    trade event before a bot seat ever got to publish -- and back then,
-    `publish_due` was defined off whether that event had run, so the
-    publish that should have followed the poll never happened, for that
-    turn or any after it. `publish_due` is now keyed off whether the seat
-    itself has published (`Game.publish_due`'s docstring): a spectator poll
-    can still fire the first event early, on the seat's own standing vector
-    (unaffected by this fix, `run_pending_event`'s own docstring), but the
-    seat's publish moments later still works, and reaches the turn's next
-    event -- every interleaved one after a MAIN action -- rather than being
-    silently dropped.
-
-    `confirm=False`: this test is about the publish/event race, not the
-    negotiation interface's confirm mode, so the human seat is opted out of
-    `PendingGate` the same way `test_a_published_valuation_clears_a_trade_...`
-    is -- otherwise the human's own gate would record a pending candidate
-    instead of clearing, and the assertion below would be testing the wrong
-    thing."""
-    from hexset.board.terrain import Resource
-    from hexset.game import Phase, roll_dice, run_trade_event
-
-    registry = tables()
-    code, token = deal(registry, confirm=False)
-    table = registry.get(code)
-    game = table.session.game
-    seat = table.seat_of(token)
-    other = next(s for s in range(game.num_players) if s != seat)
-
-    # Park the game in ROLL with the bot seat `other` to move next, holding
-    # one ore, and the human seat holding one wood.
-    game.phase = Phase.ROLL
-    game.current_player = other
-    state = game.state(seat, hidden=False)
-    for hand in state.hands:
-        hand[:] = [0, 0, 0, 0, 0]
-    state.hands[seat][Resource.WOOD] = 1
-    state.hands[other][Resource.ORE] = 1
-
-    wants_ore = [0.0] * 5
-    wants_ore[Resource.ORE] = 1.0
-    wants_ore[Resource.WOOD] = -1.0
-    registry.handle("PUT", f"/api/games/{code}/valuation", {"valuation": wants_ore}, token)
-    # `other`'s embedded runner thread holds its own checkpoint's gate;
-    # swapped for a controllable stub so this test doesn't depend on what a
-    # particular checkpoint would advertise.
-    table.session.set_trader(other, _StubBot(tuple(-v for v in wants_ore)))
-
-    roll_dice(game, 8)  # a non-seven roll opens MAIN for `other`
-    assert game.phase is Phase.MAIN
-
-    # A spectator polls before `other` has published anything this turn --
-    # exactly the race the regression reproduced. `other` has never
-    # published before, so its standing vector is all-zero and nothing
-    # clears -- but the poll must not spend `other`'s own publish.
-    watched = registry.handle("GET", f"/api/table/{code}", {}, None)
-    assert watched["trades"] == []
-    assert game.publish_due(other) is True, "the poll must not spend the seat's own publish"
-
-    # `other` now publishes, exactly as `LocalSearchBrain.decide` does before
-    # `choose`. The first event already ran (on the stale vector, above), so
-    # this alone does not yet trade -- but the fresh vector reaches the next
-    # event, e.g. after `other`'s next MAIN action.
-    table.session.publish(other, tuple(-v for v in wants_ore))
-    run_trade_event(game)
-
-    view = table.view(seat)
-    assert view["trades"], "the engine cleared nothing"
-    trade = view["trades"][0]
-    assert {trade["a"], trade["b"]} == {seat, other}

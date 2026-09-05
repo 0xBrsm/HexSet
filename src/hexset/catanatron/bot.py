@@ -21,8 +21,8 @@ differently; the cases, one line each:
   per-copy count: one matured copy plus one fresh is offered one play, not two.
 * Catanatron enforces piece caps hexset does not, likewise narrowing the offer.
 * Catanatron's players have no notion of the one-event trade mechanic, so this
-  seat defines neither `valuation` nor `accepts`, which `hexset.trading` reads
-  as never publishing and declining every exchange (`published`/`judged`).
+  seat defines neither `gains_many` nor `accepts`, which `hexset.trading`
+  reads as declining every exchange (`valued`/`valued_many`).
 """
 
 from __future__ import annotations

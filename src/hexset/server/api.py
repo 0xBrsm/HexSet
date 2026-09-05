@@ -56,17 +56,15 @@ waiting, never a clock doing it for them.
 Every response here is built for one viewer. Two of the filters are not
 obvious and both are load-bearing:
 
-Every seat's **valuation vector** is public, and so is the turn's trade log:
-those are what a table hears (`hexset.trading`), and `PUT
-/api/games/<code>/valuation` is how a seat sets its own -- unchanged by, and
-independent of, everything below. `POST /api/games/<code>/trade` lets a seat
-compose a bundle against any counterparty whose public vector already wants
-it (`hexset.game.Game.execute_trade`,
-`docs/negotiation-interface.md`), on its own turn against anyone or during
-another seat's turn against that seat only; `pending` in the per-viewer state
-is a snapshot of what the current player's own trade event found against a
-confirm-mode seat, and `.../trade/confirm`/`.../trade/decline` answer one of
-those.
+The turn's trade log is public to every viewer (`hexset.trading`; there is
+no public valuation layer any more -- a seat's gate is a private judgement,
+never advertised). `POST /api/games/<code>/trade` lets a seat compose a
+bundle against any counterparty whose own gate prices it above zero
+(`hexset.game.Game.execute_trade`, `docs/negotiation-interface.md`), on its
+own turn against anyone or during another seat's turn against that seat
+only; `pending` in the per-viewer state is a snapshot of what the current
+player's own trade event found against a confirm-mode seat, and
+`.../trade/confirm`/`.../trade/decline` answer one of those.
 
 The `action_mask`/`options` on `GET /api/record` are the engine's own
 `legal_actions`, and so is what an embedded bot searches: one list for every
@@ -103,7 +101,6 @@ from hexset.bots import Bot
 from hexset.clients.botclient import BotRunner, LocalSearchBrain, LocalTransport
 from hexset.game import is_over, lock_seat, to_move
 from hexset.onnx_record import record_from_game
-from hexset.trading import publish_valuation
 
 from . import journal
 from hexset.actions import legal_actions
@@ -857,22 +854,6 @@ class Tables:
         if waiting:
             names = ", ".join(str(s) for s in waiting)
             raise ApiError(f"waiting for seats: {names}", status=409)
-        game = table.session.game
-        if table.seats[seat].kind is SeatKind.BOT and game.publish_due(seat):
-            # The one driver that acts on a seat's behalf rather than at its
-            # own request: once a turn, when the engine says this seat is
-            # due (`Game.publish_due`), an embedded bot is asked for its
-            # current vector and it is recorded, exactly as `arena.play`'s
-            # loop does it for every seat -- the PI amendment "publish
-            # points and the event trigger". Checked, and published if due,
-            # *before* `submit` below, which validates the action through
-            # `legal_actions` and so would otherwise consume the turn's
-            # pending event on the engine's standing vector first. A human
-            # seat is unaffected -- it publishes only through
-            # `PUT .../valuation`, never tied to its own actions.
-            trader = table.session.traders.get(seat)
-            if trader is not None:
-                publish_valuation(game, seat, trader)
         table.session.submit(seat, wire)
         table.bump()
         return table.view(seat)
@@ -995,32 +976,14 @@ class Tables:
             table.bump()
         return table.view(viewer)
 
-    def set_valuation(self, table: Table, seat: int, vector) -> dict:
-        """`PUT /api/games/<code>/valuation`: this seat publishes its vector.
-
-        The advertisement half of the mechanic (`hexset.trading`): five
-        numbers in [-1, 1], positive for "I want more of this". It may be
-        set at any time, takes effect at the next trade event, and is public
-        to the whole table the moment it lands -- `state_view`'s
-        `valuations` block carries every seat's. Independent of, and
-        unchanged by, `trade`/`trade/confirm`/`trade/decline` below
-        (`docs/negotiation-interface.md`, PI ratification decision 1): a
-        submitted bundle never updates this seat's standing vector.
-        """
-        if vector is None:
-            raise ApiError("send a `valuation` of five numbers between -1 and 1")
-        table.session.publish(seat, vector)
-        table.bump()
-        return table.view(seat)
-
     def trade(self, table: Table, seat: int, payload: dict) -> dict:
         """`POST /api/games/<CODE>/trade`: `seat` proposes a bundle to
         `counterparty` (`docs/negotiation-interface.md` §2). `give`/`receive`
         are named amounts (`{"Wood": 2}`); `hexset.game.Game.execute_trade`
         raises `ValueError` -- turned into a 400 by `handle`'s caller like any
-        other -- for a bundle either side can't cover, a counterparty whose
-        public vector doesn't already want it, a seat that is neither the
-        proposer nor the current player, or a counterparty gate that declines.
+        other -- for a bundle either side can't cover, a seat that is neither
+        the proposer nor the current player, or a counterparty whose own
+        gate does not price this exchange above zero.
         """
         counterparty = payload.get("counterparty")
         if not isinstance(counterparty, int):
@@ -1221,8 +1184,6 @@ class Tables:
             )
         if method == "POST" and path == "/api/close":
             return self.close_seat(table, seat, int(payload.get("seat", -1)))
-        if method == "PUT" and path == f"/api/games/{table.code}/valuation":
-            return self.set_valuation(table, seat, payload.get("valuation"))
         if method == "POST" and path == f"/api/games/{table.code}/trade":
             return self.trade(table, seat, payload)
         if method == "POST" and path == f"/api/games/{table.code}/trade/confirm":

@@ -11,13 +11,12 @@ through `Game.state(seat, hidden=True)` (`game.py`); `hidden=False` returns
 the true `GameState` instead, and is the only sanctioned way to read it from
 outside the engine.
 
-It is also what the trade mechanic hands a seat: `Bot.valuation(view)` and
-`Bot.accepts(view, bundle, counterparty)` (`hexset.bots`) receive nothing
-else, so a published vector and a private gate are functions of the
-information set by construction. The `ledger` a view was built from rides
-along for exactly that reason -- pricing a hypothetical exchange means
-re-reading the position with the transfer certified, and the certification
-is a ledger operation.
+It is also what the trade mechanic hands a seat: `Bot.gains_many(view,
+received, counterparties)` (`hexset.bots.search2.Bot`) receives nothing
+else, so a private gate is a function of the information set by
+construction. The `ledger` a view was built from rides along for exactly
+that reason -- pricing a hypothetical exchange means re-reading the position
+with the transfer certified, and the certification is a ledger operation.
 
 Every opponent quantity `HonestEvaluator` (`bots/heximax/evaluate.py`)
 reads comes through a `View` -- never through `state.hands[opponent]` or

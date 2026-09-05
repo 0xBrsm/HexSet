@@ -366,62 +366,6 @@ def _ledger_width(players: int = 4) -> int:
     return (players - 1) * (NUM_RESOURCES + 1)
 
 
-def _valuation_tail(obs, players: int = 4):
-    """Every seat's published vector, seat-relative -- `players *
-    NUM_RESOURCES` globals, sitting just before the ledger block."""
-    width = players * NUM_RESOURCES
-    ledger_width = _ledger_width(players)
-    tail = obs.globals[-(width + ledger_width) : -ledger_width]
-    return [tail[i * NUM_RESOURCES : (i + 1) * NUM_RESOURCES] for i in range(players)]
-
-
-def test_the_valuation_block_is_zero_before_anybody_publishes():
-    game = _main_phase_game()
-    for perspective in range(4):
-        for row in _valuation_tail(encode(game, perspective)):
-            assert not row.any()
-
-
-def test_every_seat_reads_every_published_vector_seat_relative():
-    """The vectors are public -- what a table hears -- so nothing here is
-    filtered by perspective; only the seat order rotates."""
-    game = _main_phase_game()
-    for seat in range(4):
-        game.valuations[seat] = tuple(
-            (seat + 1) / 10.0 if r == seat % NUM_RESOURCES else 0.0
-            for r in range(NUM_RESOURCES)
-        )
-    for perspective in range(4):
-        rows = _valuation_tail(encode(game, perspective))
-        for seat in range(4):
-            assert rows[_seat(seat, perspective, 4)] == pytest.approx(
-                np.asarray(game.valuations[seat], dtype=np.float32)
-            )
-
-
-def test_a_negative_valuation_survives_unscaled():
-    """Vectors are already in [-1, 1], so unlike hands they are not divided
-    by anything on the way into the observation."""
-    game = _main_phase_game()
-    game.valuations[game.current_player] = (-1.0, 0.0, 0.0, 0.0, 1.0)
-    rows = _valuation_tail(encode(game, game.current_player))
-    assert rows[0][0] == pytest.approx(-1.0)
-    assert rows[0][4] == pytest.approx(1.0)
-
-
-def test_batched_valuation_encoding_matches_the_canonical_path():
-    game = _main_phase_game()
-    for seat in range(4):
-        game.valuations[seat] = tuple(0.1 * (seat + 1) for _ in range(NUM_RESOURCES))
-    games = [game] * 4
-    perspectives = list(range(4))
-    fast = encode_batch(games, perspectives)
-    for got, perspective in zip(fast, perspectives, strict=True):
-        want = encode(game, perspective)
-        assert np.array_equal(got.globals, want.globals)
-        assert got.globals.dtype == np.float32
-
-
 # --- the public-knowledge ledger (trading-design §7.2) ---
 
 
@@ -434,16 +378,16 @@ def _ledger_tail(obs, players: int = 4):
     return known, unknown
 
 
-def test_global_features_counts_the_valuation_and_ledger_blocks():
-    """87 at four players: the 18-float live-offer block is gone and
-    `Phase` lost a member with it (`TRADE_RESPOND`), replaced by every
-    seat's public valuation vector at `players * NUM_RESOURCES`."""
-    assert global_features(4) == 87
+def test_global_features_counts_the_ledger_block():
+    """67 at four players: the public valuation block is gone outright
+    (`agents/reference/trading-final.md`, item 1) rather than replaced, so
+    contract 6's globals are contract 5's less `players * NUM_RESOURCES`."""
+    assert global_features(4) == 67
     assert global_features(4) - global_features(3) == (
         # one more seat shows up in: opponent hand size, opponent dev count,
-        # knights, public points, the two holder one-hots, the valuation
-        # block, and the ledger block.
-        1 + 1 + 1 + 1 + 2 + NUM_RESOURCES + (NUM_RESOURCES + 1)
+        # knights, public points, the two holder one-hots, and the ledger
+        # block.
+        1 + 1 + 1 + 1 + 2 + (NUM_RESOURCES + 1)
     )
 
 

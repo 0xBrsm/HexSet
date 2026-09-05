@@ -21,7 +21,7 @@ from hexset.game import (
     to_move,
 )
 from hexset.state import place_settlement, upgrade_to_city
-from hexset.trading import NO_VALUATION, one_for_one
+from hexset.trading import one_for_one
 from hexset.victory import victory_points
 from helpers import clear_hand, give, independent_vertices, mini_board
 
@@ -162,24 +162,8 @@ def test_the_gate_takes_a_good_exchange_and_refuses_a_bad_one():
     assert bot.accepts(game.state(0), tuple(-n for n in wanted), 1) is False
 
 
-def test_a_bot_that_never_trades_publishes_nothing_and_refuses_everything():
+def test_a_bot_that_never_trades_refuses_everything():
     game = a_trade_that_wins_the_game_for_the_counterparty()
     quiet = greedy(Evaluator(game._state.board), random.Random(0), max_trades=0)
-    assert quiet.valuation(game.state(1)) == NO_VALUATION
     assert quiet.accepts(game.state(1), one_for_one(4, 0), 0) is False
-
-
-def test_the_published_vector_names_one_want_and_one_give():
-    game = a_trade_that_wins_the_game_for_the_counterparty()
-    bot = greedy(Evaluator(game._state.board), random.Random(0))
-    published = bot.valuation(game.state(0))
-    assert sorted(published) == [-1.0, 0.0, 0.0, 0.0, 1.0]
-    # The give side can only be a card actually held.
-    assert game._state.hands[0][published.index(-1.0)] > 0
-
-
-def test_a_seat_with_an_empty_hand_advertises_nothing():
-    game = a_trade_that_wins_the_game_for_the_counterparty()
-    clear_hand(game._state, 2)
-    bot = greedy(Evaluator(game._state.board), random.Random(0))
-    assert bot.valuation(game.state(2)) == NO_VALUATION
+    assert quiet.gains_many(game.state(1), [one_for_one(4, 0)], [0]) == [-1.0]

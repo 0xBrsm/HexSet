@@ -56,9 +56,17 @@ the outcome several times and average explicitly. One predicate, two callers.
 engine per ply against ~25 µs for a batched network evaluation, so a path of any
 depth would cost more to walk than to evaluate.
 
-**Terminal nodes are not evaluated.** A finished game has a known value, and it
-is `hexset.victory.relative_points` — the same quantity the value head is trained
-to predict, so the two are on one scale and a backup can mix them.
+**A terminal leaf is scored by the evaluator, not by the tree.** A finished
+game has a known value, but "known" depends on the scale the rest of the
+leaves are on: a value head trained against `hexset.victory.relative_points`
+wants that; a value head trained as a per-seat win probability (softmax over
+seats) wants a one-hot winner instead. The tree used to score every terminal
+itself with `relative_points`, which matched the first kind of head and
+silently mixed scales with the second — a backup cannot tell -1 relative
+points from a 0.0 win probability apart, so a fixed formula in the tree is
+only ever right for one evaluator. `Evaluator.terminal` puts the terminal
+value with the same evaluator that scores everything else, so a leaf and a
+terminal are always read on that evaluator's own scale.
 """
 
 from __future__ import annotations
@@ -101,6 +109,26 @@ class Evaluator(Protocol):
     def evaluate(
         self, leaves: Sequence[Leaf]
     ) -> Sequence[tuple[Sequence[float], Sequence[float]]]: ...
+
+    def terminal(self, game: Game) -> Sequence[float]:
+        """The per-seat value of a finished game, board-seat order.
+
+        Called in place of `evaluate` for a terminal leaf: a finished game has
+        no options and no prior to offer, only a value, and it has to be on
+        this evaluator's own scale or a backup mixes two of them (see the
+        module docstring). A `relative_points`-trained evaluator returns
+        `terminal_relative_points(game)` unchanged — every evaluator shipped
+        in this repo does exactly that, so adopting this method changes
+        nothing about their behaviour. A win-probability evaluator (a softmax
+        value head over seats) returns the one-hot winner instead.
+
+        Board-seat order, with no rotation of its own: this is the same frame
+        `evaluate`'s returned values are already in, after that method has
+        undone whatever seat-relative rotation the evaluator applies
+        internally (an encoder that reads a leaf mover-first, say). `Node.mover`
+        and `STANCE_ROWS` both index straight into this vector by board seat.
+        """
+        ...
 
 
 class _Chance:
@@ -279,9 +307,18 @@ STANCE_ROWS = {
 }
 
 
-def _relative(game: Game) -> tuple[float, ...]:
-    # true state: the search's own terminal readout needs the true victory
-    # points (including hidden VP cards), same as the arena's verdict.
+def terminal_relative_points(game: Game) -> tuple[float, ...]:
+    """A finished game's `relative_points`, board-seat order.
+
+    What `Search` scored every terminal leaf with itself before `Evaluator`
+    grew its own `terminal` method, and what every evaluator shipped in this
+    repo (`hexset.clients.onnxbot.LeafEvaluator`) returns from `terminal`
+    today — so exposed here, public, for an evaluator to call rather than
+    reimplement. A win-probability evaluator has no reason to call this; it
+    is a `relative_points`-shaped answer, not a probability.
+    """
+    # true state: a terminal readout needs the true victory points (including
+    # hidden VP cards), same as the arena's verdict.
     state = game.state(0, hidden=False)
     seats = state.num_players
     return relative_points(tuple(victory_points(state, seat) for seat in range(seats)))
@@ -294,6 +331,16 @@ class Search:
     terminal points over the ten that win a game, so they sit in about [-1, +1]
     and a constant near 1 is the right order; a constant tuned for a [0, 1] win
     probability would be twice as exploratory as intended.
+
+    `stance` is restricted to what the tree's own backup implements —
+    `own`, `relative`, `paranoid` (`STANCE_ROWS`'s keys) — not the wider
+    `hexset.bots.STANCES`. `"win"` reads a per-seat vector as a win
+    probability (`hexset.bots.search2.win`), which is a conversion the bots
+    apply to a vector a search has already finished producing, not something
+    the tree accumulates one backup at a time; `STANCE_ROWS`/`_backup` have no
+    incremental form of that softmax, so a stance outside the implemented set
+    is refused at construction rather than leaving `Node.ranked` silently at
+    zero.
     """
 
     def __init__(
@@ -316,8 +363,14 @@ class Search:
         # `heximax`'s own module docstring for the full cycle.
         from .bots import STANCES
 
-        if stance not in STANCES:
-            raise ValueError(f"unknown stance: {stance}")
+        if stance not in STANCE_ROWS:
+            raise ValueError(
+                f"stance {stance!r} not implemented by this tree's backup "
+                f"(only {sorted(STANCE_ROWS)} are); 'win' and any other "
+                "hexset.bots.STANCES member is the bots' own conversion of "
+                "the per-seat vector, applied after a search already has its "
+                "answer, not something this tree's backup accumulates"
+            )
         if simulations < 1 or wave < 1:
             raise ValueError("a search needs at least one simulation and one wave")
         self.evaluator = evaluator
@@ -351,7 +404,7 @@ class Search:
             ranked=np.zeros(len(options)),
         )
         if node.terminal:
-            node.value = _relative(game)
+            node.value = tuple(float(v) for v in self.evaluator.terminal(game))
             node.prior = np.zeros(0)
         return node
 

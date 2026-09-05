@@ -24,6 +24,7 @@ from hexset.mcts import (
     _drawn,
     draws_hidden,
     sampled_children,
+    terminal_relative_points,
     visit_policy,
 )
 
@@ -61,6 +62,9 @@ class Stub:
                 prior[self.favour % n] = 0.99
             out.append((prior, self.value))
         return out
+
+    def terminal(self, game):
+        return self.value
 
 
 def a_root(search: Search, game, stub: Stub) -> Node:
@@ -270,6 +274,17 @@ class Anchor:
             out.append((prior, value))
         return out
 
+    def terminal(self, game):
+        # The pinned trees below are shallow, but not too shallow to sample a
+        # roll edge all the way to a `GAME_OVER` child in ninety-six
+        # simulations -- this fires for real. `terminal_relative_points` is
+        # exactly what `Search` scored a terminal leaf with itself before
+        # `Evaluator.terminal` existed, so returning it here is what keeps
+        # both pins byte-identical across the change: the whole point of
+        # `test_a_tree_that_draws_no_hidden_card_searches_exactly_as_it_did_before`
+        # and `test_a_setup_tree_searches_exactly_as_it_did_before`.
+        return terminal_relative_points(game)
+
 
 class NoHiddenDraw(Search):
     """Every edge but the three that resolve a hidden card."""
@@ -381,6 +396,43 @@ def test_a_finished_game_has_nothing_to_search():
     assert visits.size == 0
     assert root.terminal and root.expanded
     assert stub.waves == []
+
+
+def test_a_finished_game_is_scored_by_the_evaluators_terminal():
+    """The defect this pins: the search used to score a terminal leaf itself
+    with `relative_points`, on whatever scale the rest of that evaluator's
+    leaves happened not to be. Now it asks the evaluator, the same way it
+    asks for every other leaf's value -- a marked vector `evaluate` would
+    never produce proves `terminal`, not `evaluate`, supplied it."""
+
+    class MarkedTerminal(Stub):
+        def terminal(self, game):
+            return (9.0, 8.0, 7.0, 6.0)
+
+    game = a_game()
+    game.phase = Phase.GAME_OVER
+    stub = MarkedTerminal()
+    search = Search(stub, simulations=16, rng=random.Random(1))
+    root, _, _ = search.run(game)
+    assert root.value == (9.0, 8.0, 7.0, 6.0)
+    # `evaluate` was never called for a leaf with no options to prior over.
+    assert stub.waves == []
+
+
+def test_shipped_evaluators_terminal_matches_relative_points():
+    """`hexset.mcts.terminal_relative_points` is what `Search` scored a
+    terminal leaf with itself before `Evaluator.terminal` existed. Every
+    evaluator shipped in this repo returns it unchanged, so adopting the
+    protocol changes nothing about their behaviour on a finished game.
+    `LeafEvaluator.terminal` never touches `self.policy`, so this needs no
+    loaded model -- only the optional `onnxruntime` import its module makes
+    at load time."""
+    pytest.importorskip("onnxruntime")
+    from hexset.clients.onnxbot import LeafEvaluator
+
+    game = a_game()
+    evaluator = LeafEvaluator(policy=None, space=None)
+    assert evaluator.terminal(game) == terminal_relative_points(game)
 
 
 def test_the_prior_decides_what_gets_tried_first():
@@ -506,6 +558,19 @@ def test_a_search_needs_a_known_stance_and_a_real_budget():
         Search(Stub(), simulations=0)
     with pytest.raises(ValueError, match="at least one"):
         Search(Stub(), wave=0)
+
+
+def test_a_search_refuses_the_bots_win_stance():
+    """`"win"` is a real `hexset.bots.STANCES` member -- the softmax
+    conversion `hexset.bots.search2.win` applies to a vector a search has
+    already finished producing -- but `STANCE_ROWS`/`_backup` never
+    implemented an incremental form of it, only `own`/`relative`/`paranoid`.
+    Building a tree with it used to construct fine and leave `Node.ranked`
+    silently at zero for the life of the search; it is refused here instead."""
+    assert "win" in STANCES
+    assert "win" not in STANCE_ROWS
+    with pytest.raises(ValueError, match="win"):
+        Search(Stub(), stance="win")
 
 
 def test_visit_counts_become_a_distribution():

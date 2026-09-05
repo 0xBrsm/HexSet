@@ -11,6 +11,31 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `hexset.mcts.Evaluator` gained a required `terminal(game) -> Sequence[float]`
+  method, called for a finished-game leaf in place of the search's own
+  `relative_points` formula — board-seat order, the same frame `evaluate`'s
+  returned values are already in. Anything implementing the protocol needs
+  it now; `hexset.clients.onnxbot.LeafEvaluator` implements it as the new
+  `hexset.mcts.terminal_relative_points`, byte-identical to today's
+  behaviour.
+
+### Fixed
+
+- A terminal leaf was scored by `Search` itself with `relative_points` — a
+  zero-sum points margin — while every other leaf came back from the
+  evaluator on that evaluator's own scale (a win-probability value head's
+  [0, 1], for instance), so a backup could mix two scales. Terminal leaves
+  now go through `Evaluator.terminal` like everything else.
+- `Search(..., stance="win")` built a tree whose `Node.ranked` never
+  accumulated — `STANCE_ROWS`/`_backup` only ever implemented
+  `own`/`relative`/`paranoid`, so PUCT's value term was silently zero under
+  `"win"`. `Search` now raises at construction for any stance outside that
+  implemented set; `"win"` is the bots' own conversion of the per-seat
+  vector (`hexset.bots.search2.win`), not something the tree's backup
+  computes.
+
+### Changed
+
 - `hexset.trading.TRADE_FLOOR` is `0.0197`, the trade gate's measured
   resolution under paired chance (trade lab phase 3): a deal clears only when
   both private gains exceed about two points of win probability. Trades

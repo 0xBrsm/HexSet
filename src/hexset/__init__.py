@@ -11,15 +11,20 @@ from typing import Any
 
 # `hexset`, `heximax`, `hexset.bench`, `hexset.server` and `hexset.clients`
 # are all one distribution now (`../../pyproject.toml`) -- see
-# `tests/test_versions.py`, which fails the moment this drifts from the
-# installed metadata.
+# `tests/test_versions.py`. Read `pyproject.toml` from the source tree first:
+# it's the one file a checkout always has current, whereas an editable
+# install's dist-info metadata is only regenerated on reinstall and silently
+# goes stale otherwise (this is what made the dunder read "0.26.0" for four
+# releases while the tree had moved on). Fall back to installed metadata
+# only when there's no source tree to read (a real wheel install, which
+# ships no `pyproject.toml`).
 try:
-    __version__ = metadata.version("hexset")
-except metadata.PackageNotFoundError:
+    with open(Path(__file__).resolve().parent.parent.parent / "pyproject.toml", "rb") as f:
+        __version__ = tomllib.load(f)["project"]["version"]
+except (OSError, KeyError, tomllib.TOMLDecodeError):
     try:
-        with open(Path(__file__).resolve().parent.parent.parent / "pyproject.toml", "rb") as f:
-            __version__ = tomllib.load(f)["project"]["version"]
-    except (OSError, KeyError, tomllib.TOMLDecodeError):
+        __version__ = metadata.version("hexset")
+    except metadata.PackageNotFoundError:
         __version__ = "0+unknown"
 
 

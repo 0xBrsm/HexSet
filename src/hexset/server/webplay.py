@@ -52,7 +52,15 @@ from hexset.game import Game, Phase, is_over, to_move
 from hexset.ledger import PublicLedger
 from hexset.roads import road_lengths
 from hexset.state import MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS, GameState, copy_state
-from hexset.trading import Bundle, Trade, apply_trades, valued_many
+from hexset.trading import (
+    RESPONSE_PASS,
+    Bundle,
+    Offer,
+    Response,
+    Trade,
+    apply_trades,
+    valued_many,
+)
 from hexset.victory import public_victory_points, victory_points
 
 from .journal import Journal
@@ -182,6 +190,16 @@ class PendingGate:
     records every candidate the table's automatic trade event found for it
     instead (`agents/reference/trading-final.md`, item 5).
 
+    `gains_many` (below) is this seat's surface for the automatic clearing
+    house (`hexset.trading.trade_event`/`_best_clearing`), unchanged by
+    anything here. `offer`/`respond`/`choose` (further below) are the same
+    seat's surface for the *trade round* instead -- the served table's own
+    protocol (`hexset.trading.trade_round`, `hexset.trading`'s module
+    docstring "The trade round") -- and are simpler precisely because the
+    round asks each of the three separately: nothing here has to
+    disambiguate which role a batched `gains_many` call was playing the way
+    the clearing-house method below still must.
+
     `gains_many` always returns a negative gain for every candidate it is
     asked about -- so nothing this seat is party to can ever clear on its
     own -- and its only side effect is appending each candidate to
@@ -260,6 +278,44 @@ class PendingGate:
         for r, c, gain_a in zip(received, counterparties, gains_a):
             self.game.pending.append(Trade(self.seat, c, r, gain_a=gain_a))
         return [-1.0] * len(received)
+
+    # -- the trade round (`hexset.trading.trade_round`, the served table's ---
+    # protocol -- see `hexset.trading`'s module docstring, "The trade round")
+
+    def offer(self, view, candidates):
+        """A human or LLM seat never auto-broadcasts: it composes an offer
+        through the modal/MCP, which is a separate server call
+        (`hexset.trading.Offer` built directly from what the seat submits),
+        not a `trade_round` step. `None` -- pass -- for every synchronous
+        round `trade_round` runs on this seat's turn until that call lands.
+        """
+        del view, candidates
+        return None
+
+    def respond(self, view, offer: Offer) -> Response:
+        """Record the broadcast `offer` to `game.pending` for this seat to
+        review (the same list `GameSession.pending_for` already reads,
+        top-N by the actor's own gain), and answer `PASS` for the round's
+        own purposes -- the same "never clears on its own" contract
+        `gains_many` above keeps for the clearing house. `trading-final.md`
+        item 5 / "the trade round" item 2: the round stays open for the
+        rest of this seat's turn to answer for real (accept or counter)
+        through `POST .../trade/confirm`/`.../decline` or their trade-round
+        successors; nothing here loses that offer, it is simply not
+        answered *yet*.
+        """
+        del view
+        self.game.pending.append(Trade(offer.actor, self.seat, offer.received))
+        return Response(self.seat, RESPONSE_PASS)
+
+    def choose(self, view, responses):
+        """A human or LLM actor never auto-executes: it picks (or declines)
+        through the modal/MCP, a separate server call, not a synchronous
+        `trade_round` step. `None` -- decline every response -- for every
+        round this seat's own gate is asked to judge automatically.
+        """
+        del view, responses
+        return None
 
 
 # --- Wire format for actions --------------------------------------------------

@@ -59,6 +59,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Road Building played before rolling now resolves its free road placements
+  before dice are drawn. Only free roads are legal during that resolution;
+  if no placement is possible, remaining credit expires and rolling resumes.
+  Paid building still requires MAIN, and pre-roll roads do not trigger trades.
+- Incremental record consumers (dataset features, behaviour and human
+  agreement) now share `record.open_record`, preserving recorded chance and
+  the setup start seat. Full replay rejects unused trailing chance events.
+
 - **`hexset.arena.Entrant.stance` now defers to the bot's own default
   instead of hardcoding `"relative"`.** Every constructor of a heximax
   entrant besides its three presets (`hexset.tuning.entrant_for`/`duel`/

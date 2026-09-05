@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import random
+from dataclasses import replace
 
 import pytest
 
@@ -91,6 +92,30 @@ def test_a_tampered_outcome_is_caught():
     record = a_record(seed=6)
     with pytest.raises(ReplayError, match="record says"):
         replay(Record(**{**record.__dict__, "turns": record.turns + 1}))
+
+
+def test_extra_chance_events_are_rejected():
+    record = a_record(seed=6)
+    with pytest.raises(ReplayError, match="unconsumed chance"):
+        replay(replace(record, chance=record.chance + (("roll", 6),)))
+
+
+def test_incremental_consumers_use_recorded_chance_without_a_seed():
+    from hexset.dataset import samples_from
+    from hexset.behaviour import walk
+    from hexset.bench.human_agreement import positions, Tally
+
+    seeded = a_record(seed=5)
+    seedless = replace(seeded, seed=None)
+    assert list(samples_from(seeded, 0)) == list(samples_from(seedless, 0))
+    assert walk(seeded, 0) == walk(seedless, 0)
+    a, b = Tally(), Tally()
+    pa = list(positions(seeded, 0, a))
+    pb = list(positions(seedless, 0, b))
+    assert a == b
+    assert [(p.step, p.seat, p.kind, p.leaf.options) for p in pa] == [
+        (p.step, p.seat, p.kind, p.leaf.options) for p in pb
+    ]
 
 
 def test_the_action_cap_bounds_a_record():

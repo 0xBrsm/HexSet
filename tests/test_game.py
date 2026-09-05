@@ -6,7 +6,7 @@ import random
 import pytest
 from helpers import clear_hand, give, independent_vertices, mini_board
 
-from hexset.actions import ActionType, legal_actions
+from hexset.actions import Action, ActionType, apply, legal_actions
 from hexset.board.board import random_base_board
 from hexset.board.terrain import Resource
 from hexset.board.topology import coastal_rings
@@ -395,6 +395,67 @@ def test_road_building_is_legal_before_the_roll():
     assert game.phase is Phase.ROLL  # playing the card does not itself roll
     assert game.free_roads == 2
     assert game.dev_card_played
+
+
+def test_preroll_roads_resolve_before_dice_without_spending_or_trading():
+    game = run_setup(a_game(players=2))
+    game._state.dev_cards[0][DevCard.ROAD_BUILDING] = 1
+    hands = [hand[:] for hand in game._state.hands]
+    bank = game._state.bank[:]
+    rng_state = game.rng.getstate()
+    apply(game, Action(ActionType.PLAY_ROAD_BUILDING))
+    for remaining in (2, 1):
+        options = legal_actions(game)
+        assert options and all(a.type is ActionType.BUILD_ROAD for a in options)
+        with pytest.raises(ValueError, match="free roads"):
+            roll_dice(game)
+        assert game.rng.getstate() == rng_state
+        apply(game, options[0])
+        assert game.free_roads == remaining - 1
+        assert game.phase is Phase.ROLL
+    assert game._state.hands == hands
+    assert game._state.bank == bank
+    assert game.trades == []
+    assert legal_actions(game) == [Action(ActionType.ROLL)]
+    roll_dice(game, roll=6)
+    assert game.phase is Phase.MAIN
+
+
+def test_unplaceable_preroll_roads_do_not_block_the_roll_or_carry_over():
+    game = run_setup(a_game(players=2))
+    game._state.dev_cards[0][DevCard.ROAD_BUILDING] = 1
+    game._state.edge_owner[:] = [1] * len(game._state.edge_owner)
+    apply(game, Action(ActionType.PLAY_ROAD_BUILDING))
+    assert legal_actions(game) == [Action(ActionType.ROLL)]
+    roll_dice(game, roll=6)
+    assert game.phase is Phase.MAIN
+    assert game.free_roads == 0
+
+
+def test_paid_road_is_still_rejected_before_the_roll():
+    game = run_setup(a_game(players=2))
+    fund(game._state, 0, Purchase.ROAD)
+    with pytest.raises(ValueError):
+        build_road(game, 0)
+
+
+def test_preroll_card_with_one_road_in_supply_resolves_one_then_rolls():
+    game = run_setup(a_game(players=2))
+    game._state.dev_cards[0][DevCard.ROAD_BUILDING] = 1
+    apply(game, Action(ActionType.PLAY_ROAD_BUILDING))
+    last = legal_actions(game)[0]
+    owners = game._state.edge_owner
+    for edge, owner in enumerate(owners):
+        if owners.count(0) == 14:
+            break
+        if owner == NO_OWNER and edge != last.a:
+            owners[edge] = 0
+    apply(game, last)
+    assert owners.count(0) == 15
+    assert game.free_roads == 1
+    assert legal_actions(game) == [Action(ActionType.ROLL)]
+    roll_dice(game, roll=6)
+    assert game.free_roads == 0
 
 
 def test_monopoly_is_legal_before_the_roll():

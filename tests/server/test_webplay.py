@@ -30,6 +30,8 @@ from hexset.server.webplay import (
     PendingGate,
     action_to_wire,
     bundle_from_wire,
+    round_bundle_from_wire,
+    signed_bundle_from_wire,
     wire_to_action,
 )
 
@@ -393,6 +395,28 @@ def test_bundle_from_wire_is_signed_towards_the_proposer():
     b = bundle_from_wire({"Wood": 1}, {"Ore": 2})
     assert b[Resource.WOOD] == -1
     assert b[Resource.ORE] == 2
+
+
+def test_round_bundle_from_wire_is_signed_towards_the_proposer():
+    from hexset.board.terrain import Resource
+
+    b = round_bundle_from_wire([1, 0, 0, 0, 0], [0, 0, 0, 0, 2])
+    assert b[Resource.WOOD] == -1
+    assert b[Resource.ORE] == 2
+
+
+def test_round_bundle_from_wire_refuses_a_shared_resource():
+    with pytest.raises(ValueError):
+        round_bundle_from_wire([1, 0, 0, 0, 0], [1, 0, 0, 0, 0])
+
+
+def test_round_bundle_from_wire_refuses_more_than_the_cap():
+    with pytest.raises(ValueError):
+        round_bundle_from_wire([1, 1, 1, 1, 0], [0, 0, 0, 0, 1])
+
+
+def test_signed_bundle_from_wire_round_trips():
+    assert signed_bundle_from_wire([-1, 0, 0, 0, 2]) == (-1, 0, 0, 0, 2)
 
 
 def test_confirm_mode_installs_a_pending_gate():

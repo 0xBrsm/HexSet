@@ -528,6 +528,15 @@ def build_session(code: str, seats: list[Seat], config: Config, *, first: int) -
     # cannot reconstruct, and a journalled game would fail to resume.
     board = random_base_board(random.Random(seed))
     game = start_at(board, MAX_SEATS, random.Random(seed), first=first)
+    # The automatic clearing house is off for every served table, for good
+    # -- the trade round (`GameSession.begin_round`) is this table's own
+    # trading protocol now, driven by the session itself rather than by
+    # `hexset.game.run_trade_event` (`agents/reference/trading-final.md`,
+    # "the trade round"). Set here, at the one place a served game's engine
+    # object is built, rather than left to `Config.max_trades` (which still
+    # governs a *bot's own* internal never-trade flag, a different thing --
+    # see `spawn_bot`).
+    game.max_trades = 0
     bot_names, bot_specs, player_names = _seat_labels(seats)
     claimed = {i for i, s in enumerate(seats) if s.kind is not SeatKind.EMPTY}
     return GameSession(

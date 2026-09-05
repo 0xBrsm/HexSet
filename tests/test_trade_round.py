@@ -23,6 +23,7 @@ from hexset.trading import (
     Response,
     Trade,
     bundle,
+    choose_and_execute,
     default_choose,
     default_offer,
     default_respond,
@@ -313,6 +314,44 @@ def test_trade_round_cap_blocks_an_over_cap_counter_even_if_both_gates_would_cle
     assert trade_round(game, gates) == []
     assert game._state.hands[1][ORE] == 5
     assert game._state.hands[0][WOOD] == 1
+
+
+# --- choose_and_execute: resolving a round assembled across more than one call ---
+
+
+def test_choose_and_execute_resolves_responses_collected_across_two_calls():
+    """A served table keeps a round open across a manual seat's late answer
+    (`hexset.server.webplay.GameSession`) rather than calling `trade_round`
+    itself, so it builds its own `responses` list one seat at a time --
+    exactly what this test does by hand -- and calls `choose_and_execute`
+    once enough of them are in, the same way `trade_round`'s own tail
+    would from one synchronous batch."""
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    actor_gate = Gate(lambda r, c: 5.0 if r[ORE] > 0 else -1.0)
+
+    # First call: only seat 2's (indifferent) answer is in hand yet -- no
+    # seat 1 response at all, so nothing can clear.
+    early = [Response(2, RESPONSE_PASS, None)]
+    assert choose_and_execute(game, (actor_gate, None, None, None), 0, early) is None
+    assert game.trades == []
+
+    # Second call: seat 1's real answer has since arrived and is appended to
+    # the same list -- this is the "late manual answer" shape.
+    responder_gate = Gate(lambda r, c: 3.0 if r[WOOD] > 0 else -1.0)
+    gates = (actor_gate, responder_gate, None, None)
+    later = early + [Response(1, RESPONSE_ACCEPT, bundle(wood=-1, ore=1))]
+
+    trade = choose_and_execute(game, gates, 0, later)
+
+    assert trade == Trade(0, 1, bundle(wood=-1, ore=1), gain_a=5.0, gain_b=3.0)
+    assert game.trades == [trade]
+    assert game._state.hands[0][ORE] == 1
+    assert game._state.hands[1][WOOD] == 1
+
+
+def test_choose_and_execute_returns_none_with_no_responses():
+    game = a_game()
+    assert choose_and_execute(game, (Gate(lambda r, c: 5.0), None, None, None), 0, []) is None
 
 
 # --- manual seats (`PendingGate`) --------------------------------------------

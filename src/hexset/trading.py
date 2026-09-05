@@ -758,6 +758,52 @@ def default_choose(
     return best_idx
 
 
+def choose_and_execute(
+    game: "Game", gates: Sequence[object], actor: int, responses: Sequence[Response]
+) -> Trade | None:
+    """The choice-and-execution half of a round (`trade_round`'s own tail,
+    factored out here so a caller that assembled its own `responses` --
+    across more than one call, not just one synchronous broadcast -- can
+    resolve a round the same way: a served table's session, which keeps a
+    round open across a manual seat's late answer (`hexset.server.webplay.
+    GameSession`, `agents/reference/trading-final.md`'s "the trade round").
+
+    `actor`'s own gate picks one response (`choose`/`default_choose`, the
+    same `getattr`-first, default-second dispatch every round method uses),
+    then the engine re-checks it fresh at the moment cards would actually
+    move (`_execute_round`), trusting neither side's report. `None` --
+    executing nothing -- wherever `trade_round` itself would return `[]`:
+    no responses, nothing clears `actor`'s own gate, or the chosen exchange
+    fails `_execute_round`'s re-check.
+
+    A manual (human/LLM) `actor`'s own gate is a `PendingGate`, whose
+    `choose` always declines (see its own docstring) -- so calling this
+    after every new response a round collects is always safe, whoever the
+    actor is: a bot may resolve here, a human never does, and picks
+    instead through its own explicit call (`GameSession.execute_round_choice`,
+    which goes through `execute_trade`'s consent-based checks instead of
+    this function's fresh-both-sides re-check).
+    """
+    if not responses:
+        return None
+    actor_gate = gates[actor]
+    if actor_gate is None:
+        return None
+    actor_view = game.state(actor)
+    choose_fn = getattr(actor_gate, "choose", None)
+    chosen = (
+        choose_fn(actor_view, responses)
+        if choose_fn is not None
+        else default_choose(actor_gate, actor_view, responses)
+    )
+    if chosen is None or not (0 <= chosen < len(responses)):
+        return None
+    response = responses[chosen]
+    if response.kind == RESPONSE_PASS or response.bundle is None:
+        return None
+    return _execute_round(game, gates, actor, response.seat, response.bundle)
+
+
 def _execute_round(
     game: "Game", gates: Sequence[object], actor: int, counterparty: int, received: Bundle
 ) -> Trade | None:
@@ -885,17 +931,5 @@ def trade_round(game: "Game", gates: Sequence[object]) -> list[Trade]:
     if not responses:
         return []
 
-    choose_fn = getattr(actor_gate, "choose", None)
-    chosen = (
-        choose_fn(actor_view, responses)
-        if choose_fn is not None
-        else default_choose(actor_gate, actor_view, responses)
-    )
-    if chosen is None or not (0 <= chosen < len(responses)):
-        return []
-    response = responses[chosen]
-    if response.kind == RESPONSE_PASS or response.bundle is None:
-        return []
-
-    trade = _execute_round(game, gates, me, response.seat, response.bundle)
+    trade = choose_and_execute(game, gates, me, responses)
     return [] if trade is None else [trade]

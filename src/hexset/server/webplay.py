@@ -52,7 +52,7 @@ from hexset.game import Game, Phase, is_over, to_move
 from hexset.ledger import PublicLedger
 from hexset.roads import road_lengths
 from hexset.state import MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS, GameState, copy_state
-from hexset.trading import Bundle, Trade, apply_trades
+from hexset.trading import Bundle, Trade, apply_trades, valued_many
 from hexset.victory import public_victory_points, victory_points
 
 from .journal import Journal
@@ -180,7 +180,7 @@ def board_layout(board: Board, size: float = 60.0) -> dict:
 class PendingGate:
     """A seat's gate under confirm mode: never clears on its own, and
     records every candidate the table's automatic trade event found for it
-    instead (`docs/negotiation-interface.md` §1).
+    instead (`agents/reference/trading-final.md`, item 5).
 
     `gains_many` always returns a negative gain for every candidate it is
     asked about -- so nothing this seat is party to can ever clear on its
@@ -194,6 +194,44 @@ class PendingGate:
     `game.pending` itself so that a later event's `game.pending = []` (see
     `trade_event`) is seen through the same reference, not one already left
     behind.
+
+    This gate is asked in two quite different shapes, and both record --
+    `_best_clearing` (`hexset.trading`) does not distinguish a `PendingGate`
+    from any other gate, so neither does this method:
+
+    * As the **counterparty** to a real actor: `_best_clearing` calls this
+      once per event with every candidate that one acting seat already
+      priced above zero, `counterparties` one seat repeated. `gain_a` on
+      each recorded `Trade` is that acting seat's own gain, recomputed by
+      asking its gate again over the mirrored bundle (the same call
+      `_best_clearing` already made to price it the first time, not
+      re-derived any other way) -- what `GameSession.pending_for` sorts by
+      and caps to the top 5 a viewer is ever shown, since a lenient bot
+      gate can price many candidates above zero in one event. Skipped --
+      `gain_a` stays the default `0.0` -- when `counterparties` is not in
+      fact uniform (see the next bullet, which this method cannot tell
+      apart from this one just by looking at one call), when no `gates` are
+      seated at all (this module's own bare-engine tests), or when the
+      acting seat's own gate is *also* a `PendingGate`: asking a recording
+      gate purely to estimate a number would append its own
+      (differently-perspectived) entries to `game.pending` as a side
+      effect, which real play never reaches (see the next bullet) but is
+      not worth relying on silently.
+    * As the **actor** itself, when this seat is the current player:
+      `_best_clearing` asks `me`'s gate once over *every* coverable
+      candidate (`hexset.trading._candidates`, uncapped, `counterparties`
+      here is `thems` -- one entry per candidate, not a single seat
+      repeated) before any counterparty is ever consulted. A `PendingGate`
+      prices every one of them at `-1.0`, so nothing downstream ever
+      clears and no counterparty's gate is asked for this event -- but the
+      candidates are still recorded here, against whichever seat each one
+      would have gone to. This is not bounded: `_candidates`, not this
+      class, decides how many that is, and a rich, spread-out hand
+      enumerates a great many (measured 2026-09-05: a hand of 8 of each
+      resource records ~100,000 candidates in one event, several seconds).
+      `pending_for`'s cap still holds for what a viewer is ever shown; the
+      enumeration cost itself is `hexset.trading`'s, inherited from before
+      this module's own change and not addressed by it.
     """
 
     game: "Game"
@@ -203,8 +241,26 @@ class PendingGate:
         self, view, received: Sequence[Bundle], counterparties: Sequence[int]
     ) -> list[float]:
         del view
-        for r, c in zip(received, counterparties):
-            self.game.pending.append(Trade(self.seat, c, r))
+        gains_a = [0.0] * len(received)
+        # A uniform `counterparties` is the shape `_best_clearing` calls this
+        # gate with when it sits as *counterparty* to one real actor; a
+        # per-candidate mix of seats means it is being asked as the *actor*
+        # instead (see the class docstring's second bullet), where "the
+        # acting seat's own gain" is not a meaningful number to compute --
+        # every one is already known to price at -1.0, that being this
+        # gate's own answer.
+        if received and self.game.gates is not None and counterparties.count(counterparties[0]) == len(
+            counterparties
+        ):
+            actor = counterparties[0]
+            trader = self.game.gates[actor]
+            if trader is not None and not isinstance(trader, PendingGate):
+                mirrors = [tuple(-n for n in r) for r in received]
+                gains_a = valued_many(
+                    trader, self.game.state(actor), mirrors, [self.seat] * len(received)
+                )
+        for r, c, gain_a in zip(received, counterparties, gains_a):
+            self.game.pending.append(Trade(self.seat, c, r, gain_a=gain_a))
         return [-1.0] * len(received)
 
 
@@ -400,11 +456,17 @@ class _Event:
     actually about (what a roll paid out, what a Monopoly swept). `before` is
     kept alongside it because every one of those is a *difference*, and the
     engine only keeps the current hand.
+
+    `action` is `None` for the one kind of event that is not a board action
+    at all: a manually executed trade (`GameSession.execute_manual_trade`,
+    `POST .../trade` or a confirmed pending offer) -- nothing about the
+    phase or the turn changed, only two hands, so there is nothing for
+    `_describe` to say and `render_log` skips straight to `_trade_lines`.
     """
 
     round_num: int
     actor: int
-    action: Action
+    action: Action | None
     before: _Snapshot
     after: _Snapshot
     last_roll: int | None
@@ -413,7 +475,9 @@ class _Event:
     # every MAIN action the current player takes (owner review against the
     # rulebook, 2026-09-03: trade and build interleave), so any of those --
     # not only the roll or robber move that enters MAIN -- can carry several.
-    # Empty for setup, discards, and every other seat's actions.
+    # Empty for setup, discards, and every other seat's actions -- except a
+    # manual trade's own event (`action is None`), which is never empty:
+    # that is the entire reason it exists.
     trades: tuple[Trade, ...] = ()
 
 
@@ -599,6 +663,15 @@ def render_log(
         lines.append(f"{round_num}\t{text}")
 
     for event in events:
+        if event.action is None:
+            # A manually executed trade (`GameSession.execute_manual_trade`):
+            # no board action happened, only the exchange itself -- and,
+            # like any other line that isn't a build/discard/bank-trade run,
+            # it ends whatever run was open.
+            run = None
+            for line in _trade_lines(event, labels):
+                lines.append(f"{event.round_num}\t{line}")
+            continue
         action, actor, round_num = event.action, event.actor, event.round_num
         kind = action.type
         who = _who(actor, labels)
@@ -762,25 +835,19 @@ class GameSession:
     # _apply and undo_last_build.
     _undo: _UndoPoint | None = field(default=None, repr=False)
     # Seat -> whatever answers that seat's private gate (`hexset.trading`):
-    # an embedded bot itself for a bot seat, a `PendingGate` for a person (or
-    # LLM) that opted into confirm mode, nothing at all for a claimed seat
-    # that did not. Kept here rather than on `Game` directly because a seat
-    # can change hands mid-game (`api.Tables.seat_bot`), and `set_trader` is
-    # the one place that rewrites the engine's tuple.
+    # an embedded bot itself for a bot seat, a `PendingGate` for every manual
+    # (human or LLM) seat, nothing at all for a claimed seat this session has
+    # not yet gated (a brief window at seat-up between `claim`/build_session
+    # and `confirm_mode`, below). Kept here rather than on `Game` directly
+    # because a seat can change hands mid-game (`api.Tables.seat_bot`), and
+    # `set_trader` is the one place that rewrites the engine's tuple.
     traders: dict[int, object] = field(default_factory=dict, repr=False)
-    # Seats opted into confirm mode at seat-up (`POST /api/games`/`/api/join`'s
-    # `confirm` flag) -- gated by `confirm_mode` below. Never populated for a
+    # Every seat `confirm_mode` has gated with a `PendingGate` -- which is to
+    # say, every manual seat this game has ever seated: `agents/reference/
+    # trading-final.md` item 5 ("human and LLM seats are direct gates") made
+    # this the *only* mode a manual seat gets, so there is no longer a flag
+    # controlling whether a claimed seat lands here. Never populated for a
     # bot seat; nothing reads it for one.
-    #
-    # PENDING (next task, `agents/reference/trading-final.md` item 5):
-    # `PendingGate` is now the only manual gate this module knows how to
-    # install, and a claimed seat that opts *out* of confirm mode gets no
-    # gate at all -- there is no more "post a standing vector and
-    # auto-accept" path (`PostedValuation` and `PUT .../valuation` are gone,
-    # forced by the engine change) to fall back to. Deciding what a
-    # non-confirm manual seat's gate should be -- `PendingGate`
-    # unconditionally for every manual seat, or something else -- is the
-    # human/LLM trading-surface work this note defers.
     confirm_seats: set[int] = field(default_factory=set)
 
     def set_trader(self, seat: int, trader: object | None) -> None:
@@ -794,21 +861,77 @@ class GameSession:
         )
 
     def confirm_mode(self, seat: int) -> None:
-        """`seat` opted into confirm mode at seat-up: gate it now with a
-        `PendingGate`, which never clears on its own and records every
-        candidate the table's automatic event finds against this seat to
-        `game.pending`, for the player (or LLM) to confirm or decline
-        through `POST .../trade/confirm`/`.../decline`.
+        """Gate `seat` with a `PendingGate`, which never clears on its own
+        and records every candidate the table's automatic event finds
+        against this seat to `game.pending`, for the player (or LLM) to
+        confirm or decline through `POST .../trade/confirm`/`.../decline`.
 
-        Installing the gate here, at seat-up, rather than waiting for
-        anything else is what makes "a person at the web page does not
-        trade automatically" a property of sitting down. Bots are
-        unaffected: their own gates are seated by
-        `api.Tables._spawn_local_bots`/`seat_bot`, and they go on trading
-        with each other through the same engine event.
+        Called unconditionally for every manual seat, right at seat-up
+        (`api.Tables.create`/`Table.join`) -- there is no other gate a
+        person or an LLM can get any more, and no flag left to ask for one.
+        Installing it here, at seat-up, rather than waiting for anything
+        else is what makes "a person at the web page does not trade
+        automatically" a property of sitting down. Bots are unaffected:
+        their own gates are seated by `api.Tables._spawn_local_bots`/
+        `seat_bot`, and they go on trading with each other through the same
+        engine event.
         """
         self.confirm_seats.add(seat)
         self.set_trader(seat, PendingGate(self.game, seat))
+
+    def pending_for(self, seat: int) -> list[Trade]:
+        """`seat`'s own pending offers, top 5 by the acting seat's own
+        gain, descending (`agents/reference/trading-final.md`, item 1) --
+        the single source both `state_view`'s `pending` block and
+        `api.Tables._pending_of` read, so a confirm/decline call's `index`
+        always counts into the same list a viewer was just shown. A
+        `PendingGate` can record more than 5 in one event (see its own
+        docstring); this is what actually bounds what a person is handed.
+        """
+        mine = [t for t in self.game.pending if t.a == seat]
+        return sorted(mine, key=lambda t: t.gain_a, reverse=True)[:5]
+
+    def execute_manual_trade(self, proposer: int, counterparty: int, bundle: Bundle) -> Trade:
+        """Runs `Game.execute_trade` for a bundle composed outside the
+        automatic event -- a proposal (`api.Tables.trade`) or a confirmed
+        pending offer (`api.Tables.confirm_trade`) -- and records it the two
+        ways an automatic clearing is recorded, so neither the sidebar log
+        nor a resumed game ever forgets it:
+
+        * One line in the log (`_trade_lines`, via an `_Event` with no
+          `action` of its own -- nothing about the phase or the turn
+          changed, only two hands, so there is nothing else to describe).
+        * One line in the journal (`Journal.manual_trade`), replayed by
+          `restore` as its own step (`journal.replayable` hands back an
+          `action`-less entry the same way) -- without this the trade still
+          happened in the live game but a server restart would silently
+          lose it, since resuming rebuilds hands purely from recorded
+          actions and *their* attached trades.
+
+        Also clears any pending take-back (`self._undo`): a manual trade
+        moves cards same as a build does, and an undo point captured before
+        it must not silently erase this trade along with whatever it was
+        actually asked to take back.
+        """
+        round_num = self.round
+        before = _snapshot(self.game)
+        trade = self.game.execute_trade(proposer, counterparty, bundle)
+        self.events.append(
+            _Event(
+                round_num=round_num,
+                actor=proposer,
+                action=None,
+                before=before,
+                after=_snapshot(self.game),
+                last_roll=self.game.last_roll,
+                trades=(trade,),
+            )
+        )
+        if self.journal is not None:
+            self.journal.manual_trade(self.game, step=self._steps, round_num=round_num, trade=trade)
+        self._steps += 1
+        self._undo = None
+        return trade
 
     def __post_init__(self) -> None:
         # Written here rather than on the first action because the header's
@@ -881,16 +1004,23 @@ class GameSession:
 
     def restore(
         self,
-        steps: list[tuple[int, Action, tuple[Trade, ...]]],
+        steps: list[tuple[int, Action | None, tuple[Trade, ...]]],
         journal: Journal | None = None,
     ) -> None:
         """Re-apply a journalled game's actions, bringing this session up to
         where it left off (see `hexset.server.journal.replayable`).
 
-        Every step goes through `_apply` like any other, so the sidebar log,
-        the per-seat rolls and the round numbering are rebuilt as a
-        consequence of replaying rather than being stored and restored — there
-        is one way this session reaches a state, and this is still it.
+        Every step with a real `action` goes through `_apply` like any
+        other, so the sidebar log, the per-seat rolls and the round
+        numbering are rebuilt as a consequence of replaying rather than
+        being stored and restored. A step with `action is None` is a
+        manually executed trade (`Journal.manual_trade`) replaying on its
+        own, not attached to any action -- there is nothing to check
+        against `legal_actions` (nothing about the phase or the turn moved),
+        so the recorded `Trade` is simply re-executed (`apply_trades`, not
+        `Game.execute_trade` -- replaying trusts the journal outright, the
+        same as an automatic clearing's own replay does) and logged the
+        same way `execute_manual_trade` logs a live one.
 
         `journal` is attached only once the replay is done: it is the file
         these steps were just read out of, and a session journalling as it
@@ -899,6 +1029,23 @@ class GameSession:
         if self.journal is not None:
             raise ValueError("restore would rewrite the journal it is reading")
         for actor, action, trades in steps:
+            if action is None:
+                round_num = self.round
+                before = _snapshot(self.game)
+                apply_trades(self.game, trades)
+                self.events.append(
+                    _Event(
+                        round_num=round_num,
+                        actor=actor,
+                        action=None,
+                        before=before,
+                        after=_snapshot(self.game),
+                        last_roll=self.game.last_roll,
+                        trades=trades,
+                    )
+                )
+                self._steps += 1
+                continue
             if not is_legal(self.game, action, legal_actions(self.game)):
                 raise ResumeError(
                     f"step {self._steps}: {action} is not legal in {self.game.phase.name}"
@@ -1215,16 +1362,17 @@ class GameSession:
             # the last trade event against a confirm-mode seat, filtered per
             # viewer -- only the seat named `a` (the one the offer is
             # standing against) ever sees an entry, since it names a private
-            # exchange nobody has agreed to yet (`docs/negotiation-interface.md`
-            # §2). Empty for a spectator (`viewer is None`).
+            # exchange nobody has agreed to yet (`agents/reference/
+            # trading-final.md`, item 1) -- and capped to the top 5 by the
+            # acting seat's own gain (`pending_for`). Empty for a spectator
+            # (`viewer is None`).
             "pending": [
                 {
                     "counterparty": t.b,
                     "gave": [max(0, -n) for n in t.received],
                     "got": [max(0, n) for n in t.received],
                 }
-                for t in game.pending
-                if t.a == viewer
+                for t in self.pending_for(viewer)
             ]
             if viewer is not None
             else [],

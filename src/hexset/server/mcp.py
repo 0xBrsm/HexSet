@@ -112,32 +112,21 @@ def _models() -> dict:
     return _request_ok("GET", "/api/models")
 
 
-def _new_game(
-    opponents: list[str] | None = None, name: str | None = None, confirm: bool = False
-) -> dict:
+def _new_game(opponents: list[str] | None = None, name: str | None = None) -> dict:
     body: dict = {}
     if opponents:
         body["bots"] = opponents
     if name:
         body["name"] = str(name).strip()[:40]
-    # Sent explicitly, every call, even when False: `POST /api/games` itself
-    # now defaults a request that *omits* `confirm` to confirm mode on (a
-    # human at the web page never sends this field, and nothing may
-    # auto-clear against a human). An LLM's own default is the opposite --
-    # opt-in, per PI ratification decision 3 -- so this tool must always
-    # state its choice rather than lean on the route's default.
-    body["confirm"] = bool(confirm)
     return _seat(_request_ok("POST", "/api/games", body))
 
 
-def _join(code: str, name: str | None = None, confirm: bool = False) -> dict:
+def _join(code: str, name: str | None = None) -> dict:
     if not isinstance(code, str) or not code.strip():
         raise ToolError("code must be a game's six-character code")
     body: dict = {"code": code.strip().lower()}
     if name:
         body["name"] = str(name).strip()[:40]
-    # Same reasoning as `_new_game` above.
-    body["confirm"] = bool(confirm)
     return _seat(_request_ok("POST", "/api/join", body))
 
 
@@ -169,17 +158,18 @@ def _undo() -> dict:
     return _request_ok("POST", "/api/undo")
 
 
-# --- The negotiation interface (docs/negotiation-interface.md §4) ------------
-
-
-def _set_valuation(vector: list) -> dict:
-    _seated()
-    return _request_ok("PUT", f"/api/games/{_code}/valuation", {"valuation": vector})
+# --- Trading (docs/bot-api.md §3; the human/LLM surface, `agents/reference/
+# trading-final.md` item 5) ---------------------------------------------------
 
 
 def _get_table() -> dict:
     _seated()
     return _request_ok("GET", "/api/state")
+
+
+def _trade_acceptable() -> dict:
+    _seated()
+    return _request_ok("GET", f"/api/games/{_code}/trade/acceptable")
 
 
 def _propose_trade(counterparty: int, give: dict | None = None, receive: dict | None = None) -> dict:
@@ -210,7 +200,10 @@ _TOOLS: dict[str, tuple] = {
         "Deal a new game, playable immediately: you at one random seat, any "
         "named opponents at others, everything else open for other people (or "
         "other bots) to join by the code this returns. There is no separate "
-        "start — the board is live from the first response.",
+        "start — the board is live from the first response. Your own seat's "
+        "gate is always `PendingGate` (see get_table()'s `pending`): nothing a "
+        "bot or another seat proposes against you ever clears on its own, "
+        "confirm_trade()/decline_trade() answer it.",
         {
             "type": "object",
             "properties": {
@@ -223,18 +216,6 @@ _TOOLS: dict[str, tuple] = {
                     ),
                 },
                 "name": {"type": "string", "description": "Your display name, up to 40 characters."},
-                "confirm": {
-                    "type": "boolean",
-                    "description": (
-                        "Opt your own seat into confirm mode: trades against you never "
-                        "clear on their own — each one lands in state()'s `pending` for "
-                        "you to confirm_trade()/decline_trade() instead. Off by default "
-                        "for this tool (an LLM's set_valuation() vector is its standing "
-                        "consent, the same as a bot's) -- unlike the web page's own "
-                        "seat-up, where confirm mode is the default. Fixed for the game "
-                        "once set."
-                    ),
-                },
             },
         },
     ),
@@ -243,16 +224,13 @@ _TOOLS: dict[str, tuple] = {
         "Take a random open seat at an existing game by its six-character code. "
         "Fails if every seat is taken or has locked out (see state()'s `locked`) "
         "— a seat somebody closed outright is retired for the rest of that "
-        "game, so join before that happens.",
+        "game, so join before that happens. Your seat is gated the same way "
+        "new_game()'s is — see its description.",
         {
             "type": "object",
             "properties": {
                 "code": {"type": "string", "description": "The game's six-character code."},
                 "name": {"type": "string", "description": "Your display name, up to 40 characters."},
-                "confirm": {
-                    "type": "boolean",
-                    "description": "Opt your own seat into confirm mode -- see new_game()'s.",
-                },
             },
             "required": ["code"],
         },
@@ -294,42 +272,36 @@ _TOOLS: dict[str, tuple] = {
         "cannot be undone.",
         {"type": "object", "properties": {}},
     ),
-    "set_valuation": (
-        _set_valuation,
-        "Publish your standing valuation: what each resource is worth to you right "
-        "now, five numbers in [-1, 1] (positive = you want more, negative = you'd "
-        "give it up, 0 = indifferent), in state()'s resource order. Takes effect at "
-        "the next trade event and is public to the whole table. Unless you joined "
-        "with confirm mode on, this is also your consent to trade — any bundle "
-        "another seat proposes (or the table's own automatic event clears) against "
-        "a vector you published will go through without asking you again.",
-        {
-            "type": "object",
-            "properties": {
-                "vector": {
-                    "type": "array",
-                    "items": {"type": "number"},
-                    "description": "Five numbers in [-1, 1], one per resource in order.",
-                }
-            },
-            "required": ["vector"],
-        },
-    ),
     "get_table": (
         _get_table,
-        "Everything the table has said about trading: every seat's published "
-        "`valuations`, this turn's cleared `trades`, and your own `pending` offers "
-        "(only meaningful in confirm mode) — alongside everything state() already "
-        "returns, since it's the same call.",
+        "Everything the table has said about trading: this turn's cleared "
+        "`trades`, and your own `pending` offers -- every candidate a bot's "
+        "trade event or another seat's propose_trade() found against you, "
+        "unexecuted until confirm_trade()/decline_trade() answers it (your "
+        "seat's gate never clears on its own, see new_game()) — alongside "
+        "everything state() already returns, since it's the same call.",
+        {"type": "object", "properties": {}},
+    ),
+    "trade_acceptable": (
+        _trade_acceptable,
+        "Your own preview of what propose_trade() would be accepted right now: "
+        "every coverable bundle a bot counterparty's private gate already "
+        "prices above zero, grouped by counterparty and sorted by its gain, "
+        "descending, capped at 12 per counterparty. Read-only — computing this "
+        "moves nothing. A seat at the table who is not a bot never appears "
+        "here; propose_trade() against one instead and read its answer back "
+        "through get_table()'s `pending`.",
         {"type": "object", "properties": {}},
     ),
     "propose_trade": (
         _propose_trade,
         "Compose and submit a bundle against `counterparty`: on your own turn "
         "against anyone, or during another seat's turn against that seat only. "
-        "Fails (with a reason) unless the counterparty's own published vector "
-        "already says the bundle helps it and its private judgement agrees — your "
-        "own vector is never consulted, since proposing this is your consent.",
+        "Fails (with a reason) unless the counterparty's own private gate "
+        "prices the exchange above zero — your own gate is never consulted, "
+        "since proposing this is your consent. trade_acceptable() previews "
+        "what a bot counterparty would take; a person or another LLM answers "
+        "asynchronously instead, through their own get_table()'s `pending`.",
         {
             "type": "object",
             "properties": {
@@ -348,8 +320,8 @@ _TOOLS: dict[str, tuple] = {
     ),
     "confirm_trade": (
         _confirm_trade,
-        "Execute one of your pending offers (get_table()'s `pending`, confirm mode "
-        "only) exactly as the table found it. May still fail if hands moved since.",
+        "Execute one of your pending offers (get_table()'s `pending`) exactly "
+        "as the table found it. May still fail if hands moved since.",
         {
             "type": "object",
             "properties": {"index": {"type": "integer", "description": "Index into your `pending`."}},
@@ -358,8 +330,7 @@ _TOOLS: dict[str, tuple] = {
     ),
     "decline_trade": (
         _decline_trade,
-        "Drop one of your pending offers (confirm mode only) without moving any "
-        "cards.",
+        "Drop one of your pending offers without moving any cards.",
         {
             "type": "object",
             "properties": {"index": {"type": "integer", "description": "Index into your `pending`."}},

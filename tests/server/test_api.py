@@ -17,6 +17,7 @@ from hexset.actions import legal_actions
 
 from hexset.server.api import (
     MAX_SEATS,
+    ApiError,
     Config,
     Seat,
     SeatKind,
@@ -188,14 +189,12 @@ def test_the_option_list_does_not_move_when_opponents_hands_do():
     assert legal_actions(game) == before
 
 
-def test_a_human_seat_defaults_to_confirm_mode_and_records_a_pending_candidate():
-    """`POST /api/games` with no `confirm` key at all -- exactly what the web
-    page's own seat-up sends -- defaults a human seat to `PendingGate`, so
-    an otherwise-clearing exchange is recorded, unexecuted, rather than
-    taken automatically. There is no vector to post any more (`PUT .../
-    valuation` and the `confirm=False` auto-accept path are next-task work,
-    `agents/reference/trading-final.md` item 5); this only exercises the
-    confirm-mode default itself.
+def test_a_human_seat_is_unconditionally_a_pending_gate_and_records_a_candidate():
+    """`POST /api/games` installs a `PendingGate` on the creator's seat --
+    there is no flag to ask for or opt out of any more (`agents/reference/
+    trading-final.md` item 5: human and LLM seats are direct gates,
+    unconditionally) -- so an otherwise-clearing exchange is recorded,
+    unexecuted, rather than taken automatically.
     """
     from hexset.board.terrain import Resource
     from hexset.game import Phase, roll_dice
@@ -225,3 +224,223 @@ def test_a_human_seat_defaults_to_confirm_mode_and_records_a_pending_candidate()
     assert view["pending"] == [{"counterparty": other, "gave": [1, 0, 0, 0, 0], "got": [0, 0, 0, 0, 1]}]
     assert state.hands[seat][Resource.WOOD] == 1, "a PendingGate must never itself move cards"
     assert state.hands[other][Resource.ORE] == 1
+
+
+class _Wants:
+    """A minimal gate: prices a candidate positively iff it hands this seat
+    more of `resource` than it had. Mirrors `test_webplay.py`'s own `_Wants`,
+    for this file's API-level trade tests."""
+
+    def __init__(self, resource):
+        self.resource = resource
+
+    def gains_many(self, view, received, counterparties):
+        return [1.0 if r[self.resource] > 0 else -1.0 for r in received]
+
+
+class _NeverWants:
+    """A gate that prices nothing above zero -- for pinning `POST .../trade`'s
+    400 when the counterparty's own gate declines."""
+
+    def gains_many(self, view, received, counterparties):
+        return [-1.0] * len(received)
+
+
+def _a_one_candidate_position(registry, code, token, *, actor_wants: int, actor_gives: int):
+    """A table where exactly one bundle is coverable: `actor` (a bot seat)
+    holds one `actor_gives` and wants `actor_wants`, the manual seat holds
+    one `actor_wants`, and everyone else's hand is empty. `actor`'s own gate
+    is overridden with `_Wants(actor_wants)`, deterministic regardless of
+    which bot preset seated it. Returns `(game, seat, actor)`."""
+    from hexset.game import Phase, roll_dice
+
+    table = registry.get(code)
+    game = table.session.game
+    seat = table.seat_of(token)  # manual, PendingGate
+    actor = next(s for s in range(game.num_players) if s != seat)
+    table.session.set_trader(actor, _Wants(actor_wants))
+
+    game.phase = Phase.ROLL
+    game.current_player = actor
+    state = game.state(actor, hidden=False)
+    for hand in state.hands:
+        hand[:] = [0, 0, 0, 0, 0]
+    state.hands[actor][actor_gives] = 1
+    state.hands[seat][actor_wants] = 1
+
+    roll_dice(game, 8)
+    assert game.phase is Phase.MAIN
+    return game, seat, actor
+
+
+def test_confirm_route_executes_exactly_the_recorded_pending_offer():
+    """A bot actor's own gate prices the exchange above zero first
+    (`hexset.trading._best_clearing` asks the acting seat before the
+    counterparty); the manual counterparty's `PendingGate` then records it
+    rather than clearing it, and `POST .../trade/confirm` executes exactly
+    that recorded `(a, b, received)` through `execute_trade`'s own
+    re-validation."""
+    from hexset.board.terrain import Resource
+
+    registry = tables()
+    code, token = deal(registry, bots=SOLO)
+    game, seat, actor = _a_one_candidate_position(
+        registry, code, token, actor_wants=Resource.ORE, actor_gives=Resource.WOOD
+    )
+    state = game._state
+
+    assert game.trades == [], "the counterparty is a PendingGate -- nothing auto-clears"
+    view = registry.get(code).view(seat)
+    assert view["pending"] == [{"counterparty": actor, "gave": [0, 0, 0, 0, 1], "got": [1, 0, 0, 0, 0]}]
+
+    data = registry.handle("POST", f"/api/games/{code}/trade/confirm", {"index": 0}, token)
+
+    assert data["pending"] == []
+    assert state.hands[seat][Resource.WOOD] == 1 and state.hands[seat][Resource.ORE] == 0
+    assert state.hands[actor][Resource.ORE] == 1 and state.hands[actor][Resource.WOOD] == 0
+    # Confirming executes it exactly the way a proposal does -- including
+    # showing up in the sidebar log, not just `state.trades`
+    # (`GameSession.execute_manual_trade`).
+    assert any("traded" in line for line in data["log"])
+
+
+def test_decline_route_drops_the_offer_and_moves_nothing():
+    """Declining is final -- the bot actor already moved on the instant its
+    trade event ran, there is no re-offering it -- and no cards move either
+    way."""
+    from hexset.board.terrain import Resource
+
+    registry = tables()
+    code, token = deal(registry, bots=SOLO)
+    game, seat, actor = _a_one_candidate_position(
+        registry, code, token, actor_wants=Resource.ORE, actor_gives=Resource.WOOD
+    )
+    state = game._state
+
+    data = registry.handle("POST", f"/api/games/{code}/trade/decline", {"index": 0}, token)
+
+    assert data["pending"] == []
+    assert game.pending == []
+    assert state.hands[seat][Resource.ORE] == 1 and state.hands[seat][Resource.WOOD] == 0
+    assert state.hands[actor][Resource.WOOD] == 1 and state.hands[actor][Resource.ORE] == 0
+
+
+def test_trade_acceptable_lists_only_bot_accepted_bundles_and_never_mutates():
+    """`GET .../trade/acceptable` is the actor's own preview: every bundle a
+    bot counterparty's gate already prices above zero, grouped by
+    counterparty -- and computing it must not touch the game at all."""
+    from hexset.board.terrain import Resource
+    from hexset.game import Phase
+
+    registry = tables()
+    code, token = deal(registry, bots=SOLO)
+    table = registry.get(code)
+    game = table.session.game
+    seat = table.seat_of(token)
+    others = [s for s in range(game.num_players) if s != seat]
+    # `seat` holds wood and wants ore; a candidate against either bot hands
+    # them wood in exchange for the ore they hold, so it is *their own*
+    # gain from *receiving wood* that decides whether they accept.
+    accepts, declines = others[0], others[1]
+    table.session.set_trader(accepts, _Wants(Resource.WOOD))
+    table.session.set_trader(declines, _NeverWants())
+
+    game.phase = Phase.MAIN
+    game.current_player = seat
+    state = game.state(seat, hidden=False)
+    for hand in state.hands:
+        hand[:] = [0, 0, 0, 0, 0]
+    state.hands[seat][Resource.WOOD] = 1
+    state.hands[accepts][Resource.ORE] = 1
+    state.hands[declines][Resource.ORE] = 1
+    before_hands = [hand[:] for hand in state.hands]
+    before_trades = len(game.trades)
+
+    data = registry.handle("GET", f"/api/games/{code}/trade/acceptable", {}, token)
+
+    assert [o["counterparty"] for o in data["offers"]] == [accepts]
+    deals = data["offers"][0]["deals"]
+    assert deals == [{"gave": [1, 0, 0, 0, 0], "got": [0, 0, 0, 0, 1], "gain": 1.0}]
+    # No engine mutation: same hands, no trade recorded, nothing pending.
+    assert state.hands == before_hands
+    assert len(game.trades) == before_trades
+    assert game.pending == []
+
+
+def test_trade_route_rejects_a_bundle_the_bots_gate_declines_with_400():
+    """`POST .../trade` re-validates through `execute_trade`: a bundle the
+    named counterparty's own gate prices at zero or less is refused with a
+    400 naming the reason, and nothing moves."""
+    from hexset.board.terrain import Resource
+    from hexset.game import Phase
+
+    registry = tables()
+    code, token = deal(registry, bots=SOLO)
+    table = registry.get(code)
+    game = table.session.game
+    seat = table.seat_of(token)
+    other = next(s for s in range(game.num_players) if s != seat)
+    table.session.set_trader(other, _NeverWants())
+
+    game.phase = Phase.MAIN
+    game.current_player = seat
+    state = game.state(seat, hidden=False)
+    for hand in state.hands:
+        hand[:] = [0, 0, 0, 0, 0]
+    state.hands[seat][Resource.WOOD] = 1
+    state.hands[other][Resource.ORE] = 1
+
+    with pytest.raises(ApiError) as excinfo:
+        registry.handle(
+            "POST",
+            f"/api/games/{code}/trade",
+            {"counterparty": other, "give": {"Wood": 1}, "receive": {"Ore": 1}},
+            token,
+        )
+    assert excinfo.value.status == 400
+    assert "does not want" in str(excinfo.value)
+    assert state.hands[seat][Resource.WOOD] == 1 and state.hands[other][Resource.ORE] == 1
+
+
+def test_a_proposed_trade_appears_in_the_log_and_the_journal(tmp_path):
+    """`POST .../trade` moves cards via `hexset.game.Game.execute_trade`, not
+    through `GameSession._apply` -- no board action happened, so it needs
+    its own way onto the sidebar log and into the journal
+    (`GameSession.execute_manual_trade`). Both are what a browser refresh
+    and a server restart actually read, not `state.trades` alone."""
+    from hexset.board.terrain import Resource
+    from hexset.game import Phase
+
+    registry = tables(games_dir=str(tmp_path))
+    code, token = deal(registry, bots=SOLO)
+    table = registry.get(code)
+    game = table.session.game
+    seat = table.seat_of(token)
+    other = next(s for s in range(game.num_players) if s != seat)
+    table.session.set_trader(other, _Wants(Resource.WOOD))
+
+    game.phase = Phase.MAIN
+    game.current_player = seat
+    state = game.state(seat, hidden=False)
+    for hand in state.hands:
+        hand[:] = [0, 0, 0, 0, 0]
+    state.hands[seat][Resource.WOOD] = 1
+    state.hands[other][Resource.ORE] = 1
+
+    data = registry.handle(
+        "POST",
+        f"/api/games/{code}/trade",
+        {"counterparty": other, "give": {"Wood": 1}, "receive": {"Ore": 1}},
+        token,
+    )
+
+    assert state.hands[seat][Resource.ORE] == 1 and state.hands[seat][Resource.WOOD] == 0
+    assert any("traded" in line for line in data["log"])
+    assert any(t["a"] == seat and t["b"] == other for t in data["trades"])
+
+    journal_files = list(tmp_path.glob("*.jsonl"))
+    assert len(journal_files) == 1
+    import json
+
+    lines = [json.loads(line) for line in journal_files[0].read_text().splitlines()]
+    assert any(e.get("kind") == "trade" for e in lines), "a manual trade must not vanish on resume"

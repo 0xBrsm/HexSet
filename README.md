@@ -32,8 +32,8 @@ One distribution, `hexset`, ships from `src/`:
     mode, and the Catanatron adapter when it hosts a Catanatron bot; every
     other outside caller that genuinely needs the true state says so with a
     `# true state: <why>` comment at the call site. It is also what the trade
-    mechanic hands a seat: `Bot.valuation(view)` and
-    `Bot.accepts(view, bundle, counterparty)` receive nothing else.
+    mechanic hands a seat: `Bot.gains_many(view, received, counterparties)`
+    receives nothing else.
   - **`hexset.bots`** (`src/hexset/bots`) — every heuristic bot, sharing the
     handcrafted evaluation at `hexset.bots.evaluate`: `search2`
     (`hexset.bots.search2`: `SearchBot`, `greedy`, `RandomBot`, the
@@ -209,7 +209,7 @@ Inference device is **not** read from metadata — it's a property of the host, 
 The human seat can also be driven by a script or an LLM, over either interface, as a peer to the browser rather than a replacement for it — both still go through the same `apply_human_action`/`legal_actions` path the browser does, so nothing sent this way skips validation.
 
 - **HTTP**: the same `/api/*` endpoints the frontend calls (`GET /api/state`, `POST /api/action`, etc. — see `web.py`). `POST /api/register {"name": "..."}` names the human side, in the journal header for a fresh game and immediately in `GET /api/state`'s `player_name` for one already in progress; optional, and works before a game is dealt or mid-game.
-- **MCP**: `python -m hexset.server.mcp`, run alongside an already-running `web.py` (`HEXSET_UI_BASE_URL`, default `http://127.0.0.1:8770`). It's a thin stdio client of that same HTTP API — one MCP connection is one `hexset_id` identity, same as one browser tab — exposing `register`, `models`, `new_game`, `join`, `board`, `state`, `act`, `undo`, and the negotiation interface's `set_valuation`, `get_table`, `propose_trade`, `confirm_trade`, `decline_trade` as tools. `act` takes an index into `state()`'s `legal_actions` and settles the whole bot cascade before returning, so one tool call is one full human turn, not one click. `new_game`/`join` take an optional `confirm` flag to opt the connecting seat into confirm-mode trading (see "Trading" below); left off, `set_valuation`'s vector is standing consent to trade, the same as a bot's. Hand-rolled against the MCP stdio wire format rather than built on the official SDK, which pulls in a compiled dependency (`pydantic`) this project otherwise has none of.
+- **MCP**: `python -m hexset.server.mcp`, run alongside an already-running `web.py` (`HEXSET_UI_BASE_URL`, default `http://127.0.0.1:8770`). It's a thin stdio client of that same HTTP API — one MCP connection is one `hexset_id` identity, same as one browser tab — exposing `register`, `models`, `new_game`, `join`, `board`, `state`, `act`, `undo`, and the trading surface's `get_table`, `trade_acceptable`, `propose_trade`, `confirm_trade`, `decline_trade` as tools. `act` takes an index into `state()`'s `legal_actions` and settles the whole bot cascade before returning, so one tool call is one full human turn, not one click. Every seat this connects — there is no `confirm` flag any more — is gated by `PendingGate` (see "Trading" below): nothing a bot's trade event or another seat's proposal finds against it ever clears on its own. Hand-rolled against the MCP stdio wire format rather than built on the official SDK, which pulls in a compiled dependency (`pydantic`) this project otherwise has none of.
 
 Any number of these seats — browser, HTTP script, MCP-connected LLM, or an embedded `.onnx` bot — can sit at the same table; the server does not distinguish who or what is behind a seat beyond the interface it came in on.
 
@@ -219,57 +219,50 @@ Trading is one event, not a language of actions, interleaved with the turn
 rather than sitting before it: it runs after the roll and the robber, and
 again after every MAIN action the current player takes (build, buy, a
 bank/port trade, a development card), never after ending the turn and never
-during setup, rolling, the robber or discard resolution. Every seat holds a
-public **valuation vector** — five numbers in `[-1, 1]`, positive for "I want
-more of this", negative for "I would give this up". A candidate is a
-**bundle** — any signed counts on disjoint resources, each side bounded only
-by what that hand holds, both sides coverable from the true hands — not a
-one-for-one swap; a 2-for-1 has to clear as one bundle, since no sequence of
-one-card steps can be relied on to reach it. A bundle is *advertised* when
-both sides' vectors say it helps them; it *clears* only when each seat's own
-private gate, its judgement of the position the exchange leads to, also
-says yes. Candidates are ranked by public surplus — cheap, a dot product per
-side — and the two private gates are asked in that rank order until one
-candidate clears both or candidates run out; there is no budget (a
-registered ablation measured a cap of 8/16/32 candidates against unbounded
-and found unbounded both the strongest arm and within cost — see
-`agents/reference/trading-design.md`'s post-data note "the gate budget goes
-away" — so the cap was deleted rather than tuned). Best deal first — the
-smaller of the two surpluses, highest; ties fall to the acting seat's own
-surplus (the rulebook lets the actor choose among equally fair deals), then
-the total, then a canonical order, for determinism — then again, and again,
-until nothing clears. There is no cap on trades themselves either: the gate
-must be strictly positive and is re-asked after every exchange, so the
-acting seat's own valuation strictly increases and the event ends on its
-own.
+during setup, rolling, the robber or discard resolution. There is no public
+layer — nothing is advertised. Every seat instead answers a private **gate**,
+`Bot.gains_many(view, received, counterparties) -> list[float]`: that seat's
+own gain from each candidate exchange, in whatever unit its value is, read
+through its own information set. A candidate is a **bundle** — any signed
+counts on disjoint resources, each side bounded only by what that hand holds,
+both sides coverable from the true hands — not a one-for-one swap; a 2-for-1
+has to clear as one bundle. The engine enumerates every coverable bundle
+between the current player and each other seat, asks the current player's
+gate once over all of them, keeps the strictly positive subset, asks each
+counterparty's gate once over its own accepted subset, keeps the strictly
+positive subset of *that*, and clears the one candidate `Game.trade_rule`
+ranks highest — `"egalitarian"` (the default) maximises the smaller of the
+two private gains; `"nash"` and `"actor"` remain selectable for lab
+comparisons. Ties fall to the acting seat's own gain, then a canonical
+bundle order, then the lower counterparty seat, for determinism. Then it
+loops, re-asking the gates fresh on the position the last trade left, until
+nothing clears — no budget, no cap, since the acting seat's own gain is
+strictly positive at every step and the state space is finite.
 
 The automatic event above is engine-driven and asks nobody a question: no
 trade action, no phase, nothing in the action space to mask — which is what
 keeps the legal-action list honest for every seat regardless. A bot brings
-its two methods (`Bot.valuation(view)`, `Bot.accepts(view, bundle,
-counterparty)`, both defaulting to "never trades").
+its own `gains_many`; one with only a boolean `accepts`/`accepts_many` is
+priced at `+1.0`/`-1.0` by a structural default, and one with none of the
+three never trades.
 
-An LLM seat gets a **negotiation interface** on top of the same engine:
-`POST /api/games/<code>/trade` composes and submits any bundle a
-counterparty's own published vector already wants — on that seat's own turn
-against anyone, or during another seat's turn naming only that seat. The
-counterparty's public surplus is a hard rule (its own vector must call the
-bundle a gain) and its private gate still decides, but the proposer's own
-vector is never consulted — submitting is consent. A seat opted into
-**confirm mode** at seat-up never clears on its own: every candidate the
-table's own event finds against it lands in `pending` (`GET /api/state`,
-filtered to the seat it names) instead, answered with `POST
-.../trade/confirm` or `.../trade/decline`. Full interface, including the PI's
-ratified decisions on what was left open:
-[`docs/negotiation-interface.md`](docs/negotiation-interface.md).
-
-**The web page offers a person none of this.** A human seat publishes no
-vector and is nobody's counterparty (`Table.join`'s `PendingGate` over a zero
-vector), and the page renders no advertisement toggles, no negotiation panel
-and no pending-offer cards — see the note dated 2026-09-03 in
-`docs/negotiation-interface.md`. The routes above are untouched and still
-answer an LLM or API client. Bots go on trading with each other through the
-engine event, and the board's trade log shows it.
+**Human and LLM seats are direct gates**, unconditionally, from the moment a
+seat is claimed (the web page's own seat-up, or `hexset.server.mcp`'s
+`new_game`/`join` — there is no flag to ask for anything else): a
+`PendingGate` never clears on its own, and every candidate a bot's event or
+another seat's proposal finds against it lands, unexecuted, in `pending`
+(`GET /api/state`, filtered to the seat it names, top 5 by the acting seat's
+own gain), answered with `POST /api/games/<code>/trade/confirm` or
+`.../decline`. As the seat on the move, `POST /api/games/<code>/trade`
+composes and submits any bundle a counterparty's own gate prices above zero
+— on that seat's own turn against anyone, or during another seat's turn
+naming only that seat — and `GET /api/games/<code>/trade/acceptable` is that
+seat's own read-only preview of what every bot counterparty would accept
+right now. The page wires all of this into the trade modal: a counterparty
+picker and the give/want cards for "Offer to players," the acceptable-deals
+list so a deal can be picked directly, and a pending-offers panel with
+Confirm/Decline. Full endpoint shapes: [`docs/bot-api.md`](docs/bot-api.md)
+§3; design history: [`docs/negotiation-interface.md`](docs/negotiation-interface.md).
 
 `max_trades=0` is the off switch for the no-trade referents
 (`search2-notrade`, `heximax-notrade`).
@@ -337,7 +330,7 @@ the encoder's arrays.
 - `src/hexset/server/rules.py` — what a served table needs beyond the engine's own `legal_actions`: naming an empty option list as the bug it is, and checking a submitted action against the list. It used to hold a second, honest enumeration, because the engine's offer sample read opponents' hands; trading is no longer an action, so there is one list for every seat.
 - `src/hexset/server/seating.py` — the setup snake starting at whoever created the game, and retiring a seat nobody claimed.
 - `src/hexset/clients/onnxbot.py` — the entire model boundary: the record contract, action-space indexing, masking, sampling, and search all live behind it, and `spawn(path, board)` is the only entry point anything else uses. Builds its record with `hexset.onnx_record.record_from_game` directly — the torch-free split that used to block that (`docs/engine-divergence-2026-09-02.md`, R1) has landed, so this package no longer carries its own copy. `botclient.py` is the other half: a bot plays its seat as a peer client of the API, embedded or external, never as a privileged writer. Only record contract `6` is served — 2, 3 and 4 are the offer protocol's contracts and describe a game this engine no longer plays; contract 1 was dropped 2026-09-02, see the divergence audit; contract 5 was dropped 2026-09-05 when the knight two-step fix shrank the flat action space.
-- `src/hexset/server/static/index.html` — the entire frontend: inline CSS, inline SVG icons, vanilla JS. No build step. Its advertisement panel is five per-resource toggles that `PUT` this seat's valuation vector, plus a read-out of every seat's vector and the turn's trades; below it, the negotiation panel composes and submits a bundle against a counterparty's published wants/gives (rendered as clickable chips) and shows any pending offers from confirm-mode seats to accept or decline (`docs/negotiation-interface.md`).
+- `src/hexset/server/static/index.html` — the entire frontend: inline CSS, inline SVG icons, vanilla JS. No build step. No advertisement UI of any kind (there is no public vector left to publish); its trade modal composes a bundle and offers it to a chosen counterparty, shows the acceptable-deals list (`GET .../trade/acceptable`) so one can be picked directly, and surfaces a pending-offers panel with Confirm/Decline the moment a bot's trade event finds something against this seat (`docs/bot-api.md` §3).
 - `models/` — drop `.onnx` files here.
 - `games/` — where every game is journalled: one JSON lines file per game, written as it is played, with nothing hidden (the dice, the deck order, every card drawn or stolen, every seat's hand after every action — see `src/hexset/server/journal.py`). On by default; `HEXSET_UI_GAMES_DIR` moves it, and setting that empty turns it off.
 

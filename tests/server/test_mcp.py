@@ -74,18 +74,18 @@ def test_new_game_seats_the_caller_and_remembers_the_code(live_server):
     assert mcp._token
 
 
-def test_new_game_with_no_confirm_flag_does_not_enter_confirm_mode(live_server):
-    """The human-default flip (`POST /api/games`/`/api/join` now default to
-    confirm mode when a request omits `confirm`, so nothing auto-clears
-    against a human) must not reach MCP: `_new_game`/`_join` send `confirm`
-    explicitly on every call, so an LLM seat that asks for nothing is not
-    opted into `PendingGate` the way a human's own seat-up route is, per PI
-    ratification decision 3. (Whether a non-confirm-mode seat auto-accepts
-    anything is server-side work still in flight, `agents/reference/
-    trading-final.md` item 5 -- there is no vector left to post.)"""
+def test_new_game_always_installs_a_pending_gate_for_the_llm_seat(live_server):
+    """Human and LLM seats are direct gates, unconditionally
+    (`agents/reference/trading-final.md`, item 5): there is no `confirm`
+    flag left anywhere on the wire, so an LLM's own seat lands in
+    `confirm_seats`/`PendingGate` the same as a human's at the web page,
+    with no argument required to ask for it."""
     server, base = live_server
     mcp.BASE_URL = base
-    data = call("new_game", opponents=SOLO)  # no `confirm` kwarg at all
+    data = call("new_game", opponents=SOLO)
     seat = data["seat"]
     table = server.tables.get(data["code"])
-    assert seat not in table.session.confirm_seats
+    assert seat in table.session.confirm_seats
+    from hexset.server.webplay import PendingGate
+
+    assert isinstance(table.session.game.gates[seat], PendingGate)

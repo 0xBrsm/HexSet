@@ -9,8 +9,33 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added
+
+- **The human/LLM trading surface.** `GET /api/games/<code>/trade/acceptable`
+  — the seat on the move's own read-only preview of every bundle a bot
+  counterparty's gate already accepts right now, grouped by counterparty and
+  sorted by its gain — joins the existing `POST .../trade`,
+  `.../trade/confirm` and `.../trade/decline`. The page wires all three into
+  the trade modal: a counterparty picker and the give/want cards for
+  "Offer to players," the acceptable-deals list (its 1-for-1 entries) so a
+  deal can be picked directly, and a pending-offers panel that surfaces on
+  its own once a bot's trade event finds something against this seat, with
+  Confirm/Decline. MCP gains matching `trade_acceptable`, `propose_trade`,
+  `confirm_trade` and `decline_trade` tools.
+
 ### Changed
 
+- **Every human or LLM seat is a direct gate, unconditionally.** Seat-up
+  installs `PendingGate` the instant a manual seat is claimed
+  (`POST /api/games`/`/api/join`, `hexset.server.mcp`'s `new_game`/`join`) —
+  there is no `confirm` flag on the wire any more to opt out of it, and no
+  other gate a person or an LLM can get.
+- **A seat's own `pending` offers are capped to the top 5 by the acting
+  seat's gain**, descending (`GameSession.pending_for`) — a lenient bot gate
+  can price a great many candidates above zero in one event, more than a
+  person can usefully be shown, and this is what both `GET /api/state`'s
+  `pending` block and `.../trade/confirm`/`.../decline`'s `index` now read
+  from, kept in exact agreement.
 - **A seat's gate returns how much a deal is worth to it, not a public
   advertisement.** `Bot.gains_many(view, received, counterparties) ->
   list[float]` replaces the published valuation vector as the trade
@@ -44,6 +69,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `hexset.onnx_record`'s record. A contract-5 (or earlier) checkpoint is
   refused at load by name, the same as every previous contract retirement.
 
+### Fixed
+
+- **A manually executed trade (`POST .../trade`, a confirmed pending offer)
+  now appears in the sidebar log and survives a server restart.** It moves
+  cards through `hexset.game.Game.execute_trade` directly, outside the
+  action that `GameSession`'s log and journal are built around, so it had
+  neither: `GameSession.execute_manual_trade` gives it its own log line
+  (`_trade_lines`, same as an automatically cleared trade) and its own
+  journal line (`Journal.manual_trade`, replayed by `GameSession.restore`
+  as its own step) — previously the cards moved live but a resumed game
+  silently forgot them, since resume rebuilds hands purely from recorded
+  actions and the trades attached to them.
+
 ### Removed
 
 - **The public layer.** `Game.valuations`, `Game.publish`/`publish_due`,
@@ -54,11 +92,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `hexset.game.run_pending_event`) that only ever existed to let a driver
   publish before an event ran on it.
 - **`PUT /api/games/<code>/valuation` and `PostedValuation`.** Forced by the
-  above: there is no vector left to post. A human/LLM seat's own trading
-  surface is next-task work (`agents/reference/trading-final.md`, item 5);
-  `PendingGate` (confirm mode) is unaffected and still records candidates to
-  `game.pending`, now from a batched `gains_many` call instead of one
-  `accepts` call per candidate.
+  above: there is no vector left to post.
+- **The `confirm` flag.** `POST /api/games`/`/api/join` and `hexset.server.
+  mcp`'s `new_game`/`join` no longer accept one: `PendingGate` is now the
+  only gate a manual seat can have, so there is nothing left to opt in or
+  out of. `hexset.server.mcp`'s `set_valuation` tool is gone with it — there
+  is no vector left to publish.
 
 ### Added
 

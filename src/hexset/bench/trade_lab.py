@@ -1300,6 +1300,29 @@ def _locate_judged_position(row: dict, record: Record) -> tuple[Position, Game]:
     return pos, traded0
 
 
+def _errored_row(row: dict, stream: int, error: str) -> dict:
+    """The row shape `_judge_stream` returns when nothing playable could
+    even be built for this (position, stream) -- the throwaway chance
+    script itself hit the same class of rare engine-level failure
+    `_ForkResult.error` guards a fork against (`_record_chance_script` has
+    no fork of its own to catch it in, since it runs before either fork
+    exists). Both sides are marked errored, uniformly with a fork-level
+    error's own shape, so a reader never has to special-case where in the
+    pipeline a row failed."""
+    empty = {"winner": None, "turns": -1, "actions": -1, "chance_exhausted": False, "chance_exhausted_at": None, "error": error}
+    return {
+        "pid": row["pid"], "game": row["game"], "position": row["position"], "turn": row["turn"],
+        "actor": row["actor"], "counterparty": row["counterparty"],
+        "n_historical_trades": row["n_historical_trades"], "bundle": row["bundle"],
+        "actor_gain": row["actor_gain"], "counterparty_gain": row["counterparty_gain"],
+        "stream": stream,
+        "untraded": dict(empty), "traded": dict(empty),
+        "win_actor_untraded": None, "win_actor_traded": None, "delta_actor": None,
+        "win_counterparty_untraded": None, "win_counterparty_traded": None, "delta_counterparty": None,
+        "win_bystanders_untraded": None, "win_bystanders_traded": None, "delta_bystanders": None,
+    }
+
+
 def _judge_stream(row: dict, pos: Position, traded0: Game, board, *, stream: int, cap: int) -> dict:
     """One (position, stream)'s paired result: the throwaway chance script,
     the untraded fork (this turn's event suppressed) and the traded fork
@@ -1310,7 +1333,10 @@ def _judge_stream(row: dict, pos: Position, traded0: Game, board, *, stream: int
     n = pos.game.num_players
     bystanders = [s for s in range(n) if s not in (actor, counterparty)]
 
-    events = _record_chance_script(pos.game, board, 90000 + 100 * pid + stream, cap)
+    try:
+        events = _record_chance_script(pos.game, board, 90000 + 100 * pid + stream, cap)
+    except Exception as exc:  # noqa: BLE001 -- see `_errored_row`'s own docstring
+        return _errored_row(row, stream, f"{type(exc).__name__}: {exc}")
 
     untraded = _play_fork_safely(
         pos.game, board,

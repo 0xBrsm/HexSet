@@ -349,8 +349,10 @@ class _Snapshot:
 # board covers them too. PLAY_ROAD_BUILDING itself is in here too, for the
 # instant right after the card is played but before either free road has
 # landed — the only way to give the card back once it's already spent
-# server-side (unlike a Knight, which the client never sends until a victim
-# is chosen, so it never needs a matching undo point).
+# server-side (unlike a Knight, which now resolves through the same forced
+# robber phase a seven does the instant it is played, and is no more
+# undoable than that: a seven's own robber move has never had an undo point
+# either).
 _UNDOABLE_BUILDS: frozenset[ActionType] = frozenset(
     {
         ActionType.SETUP_SETTLEMENT,
@@ -528,10 +530,12 @@ def _describe(
     if kind is ActionType.PLAY_ROAD_BUILDING:
         return f"{who} played Road Building."
 
-    if kind in (ActionType.MOVE_ROBBER, ActionType.PLAY_KNIGHT):
-        prefix = f"{who} played a Knight and " if kind is ActionType.PLAY_KNIGHT else f"{who} "
+    if kind is ActionType.PLAY_KNIGHT:
+        return f"{who} played a Knight."
+
+    if kind is ActionType.MOVE_ROBBER:
         victim = action.b if action.b < num_players else None
-        line = f"{prefix}moved the robber to {_hex_label(board, action.a)}"
+        line = f"{who} moved the robber to {_hex_label(board, action.a)}"
         if victim is None:
             return line + "."
         stolen = _hand_gains(before.hands[victim], after.hands[victim])

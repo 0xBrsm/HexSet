@@ -21,7 +21,7 @@ Two independent parts make up the contract:
 | --- | --- | --- |
 | `players` | table size the graph was traced for | required |
 | `num_hexes` / `num_vertices` / `num_edges` | board-shape fingerprint; a mismatched board fails the load rather than running on meaningless input | required |
-| `contract` | which graph shape below applies: `5`, the record shape | refused if absent — see below |
+| `contract` | which graph shape below applies: `6`, the record shape | refused if absent — see below |
 | `max_trades` | `0` to switch trading off for this checkpoint | trading on |
 | `search` | `mcts` to search over the model's own priors; anything else plays one forward pass | none |
 | `simulations` | descents per decision, when `search=mcts` (clamped to 4096) | 128 |
@@ -42,18 +42,22 @@ exactly those, so a graph that predates a field this record has gained still
 loads and plays. An unknown number is refused at load with the number named,
 rather than failing later on its first move with a missing-input error.
 
-**Only contract 5 is served.** 2, 3 and 4 are the offer protocol's
+**Only contract 6 is served.** 2, 3 and 4 are the offer protocol's
 contracts — 3 added four live-offer fields, 4 the two public-knowledge ledger
 fields, and all three declare a `pair_mask` input and a `pair_index` output
 for the one-for-one give/want heads. Trading is now one engine event with no
 actions at all (see §4), so those graphs describe a game this engine does not
 play: there is no honest way to feed them, and they are refused by name.
+Contract 5 is refused too now: the knight two-step fix (a knight is played,
+then the robber moves through the same phase a seven enters, rather than one
+action carrying both) dropped `PLAY_KNIGHT`'s operands, shrinking the flat
+`ActionSpace` a contract-5 graph's `action_mask`/`prior` were traced against.
 Contract 1 — the original shape, where the engine encoded the position into
 feature tensors and the graph was a bare policy/value head masked in Python —
 went the same way on 2026-09-02
 (`docs/engine-divergence-2026-09-02.md`, B5).
 
-## 2. The graph — the record contract (`5`)
+## 2. The graph — the record contract (`6`)
 
 The engine builds a **record**: the position stated in the rules' own terms,
 already filtered to what the perspective seat may legally know. The graph

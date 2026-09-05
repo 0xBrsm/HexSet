@@ -9,6 +9,14 @@ and 4 are no longer served. `docs/bot-api.md` is the current field list. The
 design below stands for everything else — it is why the record exists and how
 each remaining field is derived.
 
+**Status, 2026-09-05: contract bumped again, to 6.** The knight two-step fix
+(a knight is played, then the robber moves through the same phase a seven
+enters, rather than one action carrying both) drops `PLAY_KNIGHT`'s operands,
+shrinking the flat `ActionSpace` — `RECORD_FIELDS` and every field below are
+unchanged, only `action_mask`/`prior`'s width. Contract 5 is refused now for
+the same reason 2-4 are: a graph traced against the old, wider space would be
+fed the wrong shape.
+
 **Status, 2026-09-02: phases 1–5 landed; phase 6 (delete the v1 path) is
 done — the owner dropped contract 1 outright rather than gating it behind a
 parity duel, once it became clear no genuine checkpoint under `models/`

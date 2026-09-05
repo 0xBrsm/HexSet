@@ -244,11 +244,6 @@
      clickable-looking when clicking it wouldn't do anything. */
   .hand-card-clickable { cursor: pointer; border-color: rgba(255,255,255,0.5); }
   .hand-card-clickable:hover { border-color: var(--accent); }
-  /* The Knight card for as long as it's armed and the board is waiting for a
-     hex: the lit card is what says the highlighted hexes belong to it, and
-     clicking it again is one of the four ways back out (see
-     cancelRobberMove). */
-  .hand-card-armed { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
   /* White, not black: the board (#board-pane/var(--water)) is dark now too,
      so a light faint dot/line is what shows against it. */
   .vertex-dot { fill: #ffffff33; pointer-events: none; }
@@ -321,16 +316,6 @@
   /* Shared by the two corner buttons that carry a word: CANCEL, and BUY
      under its card. */
   .board-btn-label { font-size: 0.6rem; font-weight: 700; letter-spacing: 0.05em; line-height: 1; }
-  /* Top right is the second shared corner, on the same terms as the first:
-     the two never apply at once, so the spot just carries whichever does.
-     An armed Knight suppresses buying along with everything else (see
-     renderBoardButtons), leaving its own way out as the only thing this
-     corner can be showing. */
-  /* Above #modal's z-index:55 — reaching the hex list ends in the "Steal
-     from" modal, and this is the only way out of the Knight entirely rather
-     than one step back into that list (see renderStealMode), so it has to
-     stay clickable with the modal open, not just before/after it. */
-  #cancel-robber { top: 16px; bottom: auto; z-index: 60; }
   /* Stacked directly above the roll/end-turn spot, 8px clear of it — shown
      only in the instant right after the human's own build (see
      renderBoardButtons/state.can_undo), never alongside a robber move, so it
@@ -358,7 +343,7 @@
   .board-card-face svg { width: 30px; height: 30px; fill: var(--ink); display: block; }
   #buy-dev-card:hover .board-card-face { border-color: var(--accent); }
   /* Bottom left, the last free board corner (dice/end-turn share bottom
-     right, buy-dev-card/cancel-robber share top right) — how many of each
+     right, buy-dev-card has top right to itself) — how many of each
      piece the human has left to place, drawn as the same house/city marks
      the board itself uses, just small and in the human's own seat colour,
      with the hand's own .count badge for the number.
@@ -670,11 +655,6 @@
       </span>
       <span class="board-btn-label">BUY</span>
     </button>
-    <button id="cancel-robber" class="board-fab labeled" title="Cancel playing the Knight"
-            aria-label="Cancel playing the Knight">
-      <svg viewBox="0 0 512 512"><use href="#icon-close"></use></svg>
-      <span class="board-btn-label">CANCEL</span>
-    </button>
     <div id="piece-supply"></div>
   </div>
   <div id="sidebar">
@@ -757,7 +737,6 @@ let state = null;          // latest state_view()
 let vertexById = {};
 let hexById = {};
 let pendingRobberHex = null;  // when a hex has more than one victim option
-let knightArmed = false;   // Knight card clicked: the board is offering its robber targets — see renderHand
 let inFlight = false;
 let watchSeq = 0;          // bumping it retires the long poll already out — see settle
 let openSeat = null;       // watching only: whose cards the hand area shows — see renderPlayers
@@ -1297,22 +1276,21 @@ const PHASE_LABELS = {
 
 const VERTEX_TYPES = new Set(["SETUP_SETTLEMENT", "BUILD_SETTLEMENT", "BUILD_CITY"]);
 const EDGE_TYPES = new Set(["SETUP_ROAD", "BUILD_ROAD"]);
-// MOVE_ROBBER and PLAY_KNIGHT are the same move — put the robber somewhere
-// new, then rob one of that hex's neighbours — reached two different ways.
-// They get separate buckets here only so robberMove() below can tell which
-// way you came, because that is the sole thing the rest of the page needs.
-const SIMPLE_TYPES = new Set(["ROLL", "END_TURN", "BUY_DEV_CARD", "PLAY_ROAD_BUILDING"]);
+// PLAY_KNIGHT carries no operand any more (it only spends the card; the
+// engine hands the robber move itself to a MOVE_ROBBER decision in the same
+// Phase.ROBBER a seven enters), so it is a plain one-click card exactly like
+// Road Building rather than a board target.
+const SIMPLE_TYPES = new Set(["ROLL", "END_TURN", "BUY_DEV_CARD", "PLAY_ROAD_BUILDING", "PLAY_KNIGHT"]);
 
 function groupActions(actions) {
   const g = {
-    vertex: {}, edge: {}, robberByHex: {}, knightByHex: {}, simple: {},
+    vertex: {}, edge: {}, robberByHex: {}, simple: {},
     monopoly: [], yearOfPlenty: [], bankTrade: [], discard: [],
   };
   for (const a of actions) {
     if (VERTEX_TYPES.has(a.type)) (g.vertex[a.a] = g.vertex[a.a] || []).push(a);
     else if (EDGE_TYPES.has(a.type)) (g.edge[a.a] = g.edge[a.a] || []).push(a);
     else if (a.type === "MOVE_ROBBER") (g.robberByHex[a.a] = g.robberByHex[a.a] || []).push(a);
-    else if (a.type === "PLAY_KNIGHT") (g.knightByHex[a.a] = g.knightByHex[a.a] || []).push(a);
     else if (SIMPLE_TYPES.has(a.type)) g.simple[a.type] = a;
     else if (a.type === "PLAY_MONOPOLY") g.monopoly.push(a);
     else if (a.type === "PLAY_YEAR_OF_PLENTY") g.yearOfPlenty.push(a);
@@ -1322,49 +1300,16 @@ function groupActions(actions) {
   return g;
 }
 
-// The robber move, or null if none is pending — and the one place on this
-// page that knows there are two ways into it. Everything downstream (the
-// highlighted hexes, the exclusivity, the victim modal, the header, the
-// CANCEL corner) reads this rather than the two action types, because past
-// this function they are the same interaction:
-//
-//   forced  a seven was rolled, so the robber has to go somewhere
-//           (Phase.ROBBER). The targets are on the board the moment the
-//           state arrives, and only answering clears them. The engine offers
-//           no other action in that phase, so "a robber move owns the board"
-//           is already true here without the client enforcing anything.
-//   knight  the Knight card was clicked (Phase.ROLL or MAIN). The identical
-//           question, volunteered rather than imposed — so it can be taken
-//           back, and since the engine is still offering everything else
-//           meanwhile, the client is what has to hold the rest of the page
-//           down while it's open.
-//
-// Never both: MOVE_ROBBER belongs to Phase.ROBBER, PLAY_KNIGHT to ROLL and
-// MAIN, and render() disarms a Knight the moment playing one stops being
-// legal. Forced is checked first regardless, so a stale flag can't win.
+// The robber move, or null if none is pending. A knight now forces one
+// exactly the way a seven does -- playing it (devCardPlay) already sent the
+// PLAY_KNIGHT action and gotten a fresh Phase.ROBBER state back, so by the
+// time this is read there is only ever the one way in: MOVE_ROBBER targets,
+// already on the board, with nothing else legal until one is answered.
 function robberMove(g) {
   if (Object.keys(g.robberByHex).length) {
-    return {targets: g.robberByHex, source: "forced", cancellable: false};
-  }
-  if (knightArmed && Object.keys(g.knightByHex).length) {
-    return {targets: g.knightByHex, source: "knight", cancellable: true};
+    return {targets: g.robberByHex};
   }
   return null;
-}
-
-// Takes back a robber move that was volunteered rather than imposed — which
-// means a Knight, since a seven leaves nothing to take back. Puts the board,
-// the hand and the corner buttons back the way they were before the card was
-// clicked.
-//
-// Reachable four ways — the card itself, the CANCEL corner, a click on the
-// bare water, and Escape — because this is the only pending choice with no
-// modal standing in front of it, and the header is the one other thing
-// saying you're in it.
-function cancelRobberMove() {
-  knightArmed = false;
-  pendingRobberHex = null;
-  render();
 }
 
 // --- Sending actions --------------------------------------------------
@@ -1449,7 +1394,6 @@ function sendAction(action) {
     // Any half-made client-side choice is spent the moment an action goes
     // out: the state coming back is the one that decides what's open now.
     pendingRobberHex = null;
-    knightArmed = false;
     const {ok, data} = await postJSON("/api/action", {action});
     // Only take the response when it succeeded: an error body carries no
     // game-state fields at all, and the render below would throw reading
@@ -1505,14 +1449,6 @@ function render() {
   // seat and highlights nothing anyone can click anyway.
   document.documentElement.style.setProperty(
     "--accent", watching() ? "#6d5ce8" : SEAT_COLORS[state.seat].fill);
-  // Arming a Knight is purely client-side, so nothing else clears it: a new
-  // state where playing one is no longer legal (it was played, the turn moved
-  // on, the game ended) has to. legal_actions is empty whenever it isn't the
-  // human's decision, so this covers the turn case too.
-  if (knightArmed && !state.legal_actions.some((a) => a.type === "PLAY_KNIGHT")) {
-    knightArmed = false;
-    pendingRobberHex = null;
-  }
   renderStatus();
   renderPlayers();
   renderHand();
@@ -1545,14 +1481,7 @@ function renderStatus() {
     phaseEl.textContent = `PLAYER ${state.to_move + 1}'S TURN`;
     return;
   }
-  // The same move either way, so the same words either way — PHASE_LABELS
-  // already reads "PLACE ROBBER" for the forced one. A Knight is a phase the
-  // server knows nothing about, so it gets the prefix instead of a label of
-  // its own: it says a card is being spent and can still be taken back, which
-  // is the only part that differs.
-  phaseEl.textContent = knightArmed
-    ? `KNIGHT — ${PHASE_LABELS.ROBBER}`
-    : PHASE_LABELS[state.phase] || state.phase;
+  phaseEl.textContent = PHASE_LABELS[state.phase] || state.phase;
 }
 
 // One icon + (optional) number, for the player list's stat row — glyphs
@@ -1714,28 +1643,17 @@ function renderPlayers() {
 // "played" at all — it just counts). Playing a dev card is only ever done
 // this way now; nothing in the actions list plays one.
 //
-// Three shapes, by what the card still needs to know:
-//   - nothing (Road Building) — send it and let the board take the two roads
+// Two shapes, by what the card still needs to know:
+//   - nothing (Road Building, Knight) — send it and let the board take over:
+//     Road Building's two free roads, or the Knight's forced robber move
+//     (the same Phase.ROBBER a seven enters, once the card lands)
 //   - a resource (Monopoly, Year of Plenty) — open the modal that picks one
-//   - a hex (Knight) — arm the board, since a modal can't point at a tile
-// The first two are cancelled by closing the modal; the Knight, having none,
-// keeps its own four ways out (see cancelRobberMove).
+// Cancelled by closing the modal; a sent Knight or Road Building is as
+// final as a roll, so neither needs a way back out.
 function devCardPlay(name, g) {
-  // While a Knight is armed it is the only card that answers a click: the
-  // rest stand down with the board and the corner buttons (see
-  // renderBoardButtons), so a half-made choice can't be walked away from by
-  // quietly starting another one.
-  if (robberMove(g) && name !== "Knight") return null;
-  if (name === "Knight" && Object.keys(g.knightByHex).length) {
-    return {
-      title: knightArmed ? "Cancel Knight" : "Play Knight",
-      run: () => {
-        if (knightArmed) { cancelRobberMove(); return; }
-        knightArmed = true;
-        pendingRobberHex = null;
-        render();
-      },
-    };
+  if (robberMove(g)) return null;
+  if (name === "Knight" && g.simple.PLAY_KNIGHT) {
+    return {title: "Play Knight", run: () => sendAction(g.simple.PLAY_KNIGHT)};
   }
   if (name === "Road Building" && g.simple.PLAY_ROAD_BUILDING) {
     return {title: "Play Road Building", run: () => sendAction(g.simple.PLAY_ROAD_BUILDING)};
@@ -1811,10 +1729,6 @@ function renderHand() {
     const play = devCardPlay(c, g);
     const classes = ["card"];
     if (play) classes.push("hand-card-clickable");
-    // Only the Knight can be lit: it's the only card whose choice is made on
-    // the board rather than in a modal, so it's the only one with a state to
-    // show while the choice is still open.
-    if (c === "Knight" && knightArmed) classes.push("hand-card-armed");
     const card = html("div", {class: classes.join(" "), title: play ? play.title : `${c}: ${n}`});
     card.style.background = "var(--dev-card-bg)";
     card.appendChild(iconSvg(DEV_CARD_ICONS[c], {fill: DEV_CARD_INK}));
@@ -2015,9 +1929,9 @@ function renderBoardButtons() {
   const myTurn = !state.game_over && state.to_move === state.seat;
   // A robber move is the one choice the game asks for on the board rather
   // than in the modal, and it behaves like a modal mode all the same: nothing
-  // behind it is reachable until it's answered. When it came from a Knight,
-  // rolling and ending a turn are both still legal server-side and both would
-  // silently throw the choice away, so they come down with the rest.
+  // behind it is reachable until it's answered, whether Phase.ROBBER was
+  // entered off a seven or off a knight -- the engine offers nothing else
+  // in that phase either way, so the corners come down with everything else.
   const move = robberMove(groupActions(state.legal_actions));
   const offered = (type) => myTurn && !move && legalAction(type) !== null;
   // Not a legal_actions entry — undo is a session convenience, not a game
@@ -2026,10 +1940,6 @@ function renderBoardButtons() {
   showFab("roll-dice", offered("ROLL"));
   showFab("end-turn", offered("END_TURN"));
   showFab("buy-dev-card", offered("BUY_DEV_CARD"));
-  // Not an action at all, this one: it's the way back out of a robber move
-  // that was volunteered, which is the only kind there is a way back out of.
-  // It takes over the same corner BUY just gave up — see the CSS on the pair.
-  showFab("cancel-robber", Boolean(move && move.cancellable));
 }
 
 function showFab(id, on) {
@@ -2493,15 +2403,7 @@ document.getElementById("end-turn").addEventListener("click", () => {
   const action = legalAction("END_TURN");
   if (action) sendAction(action);
 });
-document.getElementById("cancel-robber").addEventListener("click", cancelRobberMove);
 document.getElementById("undo-build").addEventListener("click", undoBuild);
-// Clicking the water backs out of an armed Knight, the same way clicking a
-// modal's backdrop backs out of it. Only the bare <svg> reports itself as the
-// target — every hex, road and vertex is a filled child that would be the
-// target instead — so this fires on the empty sea and nothing else.
-document.getElementById("board-svg").addEventListener("click", (e) => {
-  if (e.target.id === "board-svg" && knightArmed) cancelRobberMove();
-});
 // Backdrop click closes the modes that are safe to walk away from — see
 // MODAL_DISMISSIBLE. The two it leaves alone are the two the game is waiting
 // on, and they'd reopen themselves via syncModal on the next render anyway.
@@ -2550,12 +2452,10 @@ function setLogOpen(open) {
 document.getElementById("open-log").addEventListener("click", () => setLogOpen(true));
 document.getElementById("close-log").addEventListener("click", () => setLogOpen(false));
 // Escape unwinds the innermost thing first: whichever modal mode can be
-// walked away from, then an armed Knight (the one open choice with no modal
-// to close, since its answer is a tile on the board), then the log sheet.
+// walked away from, then the log sheet.
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (MODAL_DISMISSIBLE.has(modalMode)) { closeModal(); return; }
-  if (knightArmed) { cancelRobberMove(); return; }
   setLogOpen(false);
 });
 

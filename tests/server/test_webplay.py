@@ -12,6 +12,8 @@ from hexset.actions import Action, ActionType, apply, legal_actions
 
 from hexset.board.board import random_base_board
 
+from hexset.cards import DevCard
+
 from conftest import RandomBot
 
 from hexset.game import Phase, is_over, to_move
@@ -110,6 +112,28 @@ def test_legal_wire_actions_never_depend_on_an_opponents_hand():
             state.hands[seat][r] = 0
 
     assert session.legal_wire_actions(0) == before
+
+
+def test_a_knight_resolves_through_the_session_like_a_seven():
+    """The knight two-step fix: the page now sends a bare `PLAY_KNIGHT` and
+    handles `Phase.ROBBER` exactly as it does after a seven, rather than
+    picking a target client-side first. Played through a session, `PLAY_KNIGHT`
+    carries no operand, enters `Phase.ROBBER`, and a `MOVE_ROBBER` there
+    resumes `MAIN` -- the browser pass (owed) should target this same flow."""
+    game = a_game(seed=7)
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    game._state.dev_cards[0][DevCard.KNIGHT] = 1
+    session = a_session(game, {0})
+
+    knight = next(a for a in legal_actions(game) if a.type is ActionType.PLAY_KNIGHT)
+    assert knight == Action(ActionType.PLAY_KNIGHT)
+    session.submit(0, action_to_wire(knight))
+    assert game.phase is Phase.ROBBER
+
+    move = next(a for a in legal_actions(game) if a.type is ActionType.MOVE_ROBBER)
+    session.submit(0, action_to_wire(move))
+    assert game.phase is Phase.MAIN
 
 
 def test_only_bank_trading_exists_and_only_in_the_main_phase():

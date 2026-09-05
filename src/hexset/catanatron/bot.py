@@ -15,8 +15,6 @@ differently; the cases, one line each:
 
 * Before the roll, catanatron's one `PLAY_TURN` prompt offers every dev card
   where hexset's `Phase.ROLL` offers only the roll and a knight; the rest drop.
-* `PLAY_KNIGHT` is one hexset decision and two catanatron ones, so the card is
-  played on the mirror and the robber prompt it raises decided too, as one.
 * While free roads are owed catanatron offers roads alone where hexset also
   allows building and trading -- a subset, taken as offered.
 * Catanatron's dev-card maturity is one boolean per type against hexset's
@@ -37,7 +35,6 @@ from hexset.arena import Entrant, register_entrant_kind, register_preset
 from hexset.board.board import Board
 from hexset.game import Game, to_move
 
-from catanatron.models.enums import ActionType as TheirActionType
 from catanatron.models.player import Color, Player
 from catanatron.players.minimax import AlphaBetaPlayer
 
@@ -83,10 +80,6 @@ class CatanatronBot:
 
         offered = self._offer(game, mirror)
         chosen = self._players[color].decide(mirror, mirror.playable_actions)
-        if chosen.action_type is TheirActionType.PLAY_KNIGHT_CARD:
-            mirror.execute(chosen)
-            offered = self._offer(game, mirror)
-            chosen = self._players[color].decide(mirror, mirror.playable_actions)
         return offered[chosen]
 
     def _offer(self, game: Game, mirror) -> dict:

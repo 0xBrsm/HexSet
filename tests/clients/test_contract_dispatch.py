@@ -11,18 +11,21 @@ contract number names exactly one graph shape, this repo reads it and never
 assigns it, and anything else is refused **by name** rather than routed to a
 guess.
 
-**Contract 5** is the only one served. 2, 3 and 4 are the offer protocol's
+**Contract 6** is the only one served. 2, 3 and 4 are the offer protocol's
 contracts — 3 added four live-offer fields, 4 the two ledger fields, and all
 three declare a `pair_mask` input and a `pair_index` output for the
 one-for-one give/want heads. Trading is now one engine event with no actions
 at all (`hexset.trading`), so those graphs describe a game this engine does
-not play: there is no honest way to feed them and they are refused.
+not play: there is no honest way to feed them and they are refused. 5 is
+refused too now: the knight two-step fix shrinks the flat `ActionSpace`
+(`PLAY_KNIGHT` dropped its operands), so a contract-5 graph's `action_mask`/
+`prior` are the wrong width for this engine's action space.
 
 Fixtures, and what each is:
 
-* `stub-contract5.onnx`, `stub-contract5-partial.onnx` — 25- and 23-input
+* `stub-contract6.onnx`, `stub-contract6-partial.onnx` — 25- and 23-input
   stubs (`fixtures/build_stub.py`). Real in shape, synthetic in weights: no
-  genuine contract-5 export exists on any box this repo runs on, because
+  genuine contract-6 export exists on any box this repo runs on, because
   producing one needs `hexset.export_onnx`, which needs torch. Stated plainly
   rather than papered over; `tests/test_onnx_record.py` pins the field names
   and shapes of every field against `hexset.onnx_record.RECORD_FIELDS`
@@ -60,8 +63,8 @@ from hexset.clients.onnxbot import V2Policy, load  # noqa: E402
 from hexset.server.rules import options_for  # noqa: E402
 
 FIXTURES = Path(__file__).parent / "fixtures"
-STUB = FIXTURES / "stub-contract5.onnx"
-STUB_PARTIAL = FIXTURES / "stub-contract5-partial.onnx"
+STUB = FIXTURES / "stub-contract6.onnx"
+STUB_PARTIAL = FIXTURES / "stub-contract6-partial.onnx"
 DEV_CONTRACT2 = FIXTURES / "dev-contract2.onnx"
 CONTRACT1 = FIXTURES / "tiny.onnx"
 
@@ -84,9 +87,9 @@ def _declared_inputs(path: Path) -> list[str]:
 
 
 def test_the_stub_fixtures_declare_the_full_and_the_partial_record():
-    assert _metadata(STUB)["contract"] == "5"
+    assert _metadata(STUB)["contract"] == "6"
     assert len(_declared_inputs(STUB)) == 25
-    assert _metadata(STUB_PARTIAL)["contract"] == "5"
+    assert _metadata(STUB_PARTIAL)["contract"] == "6"
     assert len(_declared_inputs(STUB_PARTIAL)) == 23
     assert set(_declared_inputs(STUB_PARTIAL)) < set(_declared_inputs(STUB))
 
@@ -114,7 +117,7 @@ def test_no_fixture_stamps_a_graph_with_a_contract_it_is_not():
 
 
 @pytest.mark.parametrize("path", [STUB])
-def test_a_contract_5_graph_routes_to_the_record_policy(path):
+def test_a_contract_6_graph_routes_to_the_record_policy(path):
     assert isinstance(load(str(path), _board().topology).policy, V2Policy)
 
 
@@ -127,13 +130,13 @@ def test_a_contract_1_export_is_refused_by_name():
     with pytest.raises(ValueError) as caught:
         load(str(CONTRACT1), _board().topology)
     assert "contract='1'" in str(caught.value)
-    assert "5" in str(caught.value)
+    assert "6" in str(caught.value)
 
 
 def test_an_offer_protocol_contract_is_refused_by_name():
     """A real contract-2 export, refused loudly rather than fed a record it
     does not declare. The graph asks for `offer_proposer` and `pair_mask`,
-    which a contract-5 record does not carry, and there is no honest way to
+    which a contract-6 record does not carry, and there is no honest way to
     supply them: the offer protocol they describe no longer exists."""
     with pytest.raises(ValueError) as caught:
         load(str(DEV_CONTRACT2), _board().topology)
@@ -157,7 +160,7 @@ def test_an_unknown_contract_is_refused_by_name(tmp_path):
     with pytest.raises(ValueError) as caught:
         load(str(future), _board().topology)
     assert "contract='99'" in str(caught.value)
-    assert "5" in str(caught.value)
+    assert "6" in str(caught.value)
 
 
 # --- Loading is not enough: it has to play ------------------------------------

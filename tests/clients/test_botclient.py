@@ -24,7 +24,7 @@ from hexset.clients.botclient import (  # noqa: E402
 
 from conftest import new_tables  # noqa: E402
 
-STUB5 = Path(__file__).parent / "fixtures" / "stub-contract5.onnx"
+STUB6 = Path(__file__).parent / "fixtures" / "stub-contract6.onnx"
 
 
 def _table_with_one_open_seat(registry):
@@ -59,7 +59,7 @@ def test_a_record_brain_joins_and_plays_its_own_seat():
         other = transport.post("/api/join", "", {"code": code})
         others[other["seat"]] = other["token"]
 
-    brain = RecordBrain.load(str(STUB5))
+    brain = RecordBrain.load(str(STUB6))
     # `poll_interval=0` because this test is the one moving the other seats:
     # a runner that parked waiting for them would be waiting on this loop.
     runner = BotRunner(
@@ -91,13 +91,13 @@ def test_a_search_flagged_checkpoint_is_refused_as_an_external_bot(tmp_path):
     """A search needs the true game state to simulate forward, which no
     external client may have, so a checkpoint asking for one is refused.
 
-    Built here by stamping `search=mcts` onto the contract-5 stub rather than
+    Built here by stamping `search=mcts` onto the contract-6 stub rather than
     using `dev-contract2.onnx`, which really does ask for a search but is now
     refused one step earlier for its contract — the two checks are ordered
     and this one is about the second."""
     import onnx
 
-    model = onnx.load(str(STUB5))
+    model = onnx.load(str(STUB6))
     entry = model.metadata_props.add()
     entry.key, entry.value = "search", "mcts"
     searched = tmp_path / "searched.onnx"

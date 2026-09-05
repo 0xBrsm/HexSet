@@ -122,7 +122,7 @@ def effects(
         if drawn:
             out["drew"] = DEV_CARD_NAMES[drawn[0]]
 
-    if action.type in (ActionType.MOVE_ROBBER, ActionType.PLAY_KNIGHT):
+    if action.type is ActionType.MOVE_ROBBER:
         victim = action.b if action.b < state.num_players else None
         if victim is not None:
             taken = [

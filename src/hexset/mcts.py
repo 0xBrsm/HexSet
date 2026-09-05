@@ -34,16 +34,18 @@ trade: the budget should be spent where the search finds it useful, and the
 frequencies of repeated simulations approximate the same distribution. A roll
 edge keeps one child per outcome actually drawn.
 
-Four transitions in this engine hide a draw, not one: `ROLL` hides the dice,
-`MOVE_ROBBER` and `PLAY_KNIGHT` hide the stolen card, and `BUY_DEV_CARD` hides
-the card off the deck. **All four are sampled per simulation.** The other three
-were cached children for the life of the tree until the afterstate audit found
-it, which made each such edge's `Q` one frozen steal or one frozen card
-rather than an expectation over them — and made
-the first draw decide the edge for every later visit. They differ from a roll
-only in when the outcome becomes visible: the dice can be drawn before the child
-exists, while these three resolve inside `apply`, so the draw is read back off
-the child that made it.
+Three transitions in this engine hide a draw, not one: `ROLL` hides the dice,
+`MOVE_ROBBER` hides the stolen card (whether the robber got there off a seven
+or off a knight — `PLAY_KNIGHT` itself never draws: it only spends the card,
+credits Largest Army and hands off to the same `MOVE_ROBBER` decision a seven
+enters), and `BUY_DEV_CARD` hides the card off the deck. **All three are
+sampled per simulation.** The other two were cached children for the life of
+the tree until the afterstate audit found it, which made each such edge's `Q`
+one frozen steal or one frozen card rather than an expectation over them —
+and made the first draw decide the edge for every later visit. They differ
+from a roll only in when the outcome becomes visible: the dice can be drawn
+before the child exists, while these two resolve inside `apply`, so the draw
+is read back off the child that made it.
 
 `draws_hidden` and `sampled_children` are public because the ranking probes need
 the same semantics without a tree: they visit each child once, so where the
@@ -119,19 +121,21 @@ class _Chance:
         self.outcomes: dict[int, Node] = {}
 
 
-HIDDEN_DRAW = frozenset(
-    {ActionType.MOVE_ROBBER, ActionType.PLAY_KNIGHT, ActionType.BUY_DEV_CARD}
-)
+HIDDEN_DRAW = frozenset({ActionType.MOVE_ROBBER, ActionType.BUY_DEV_CARD})
 
 
 def draws_hidden(game: Game, action: Action) -> bool:
     """Whether taking this action resolves hidden information.
 
-    A robber or knight that names nobody steals nothing, so its child is a pure
+    A robber move that names nobody steals nothing, so its child is a pure
     function of the action and it stays on the deterministic path. That is not
     only an optimisation: an edge that draws nothing has one outcome, and
     routing it through a chance slot would rebuild an identical child on every
-    visit for no change in what the edge learns.
+    visit for no change in what the edge learns. `PLAY_KNIGHT` is never in
+    `HIDDEN_DRAW` at all any more: it no longer names a target or victim, so
+    it never draws -- the knight's own child is always deterministic, and the
+    `MOVE_ROBBER` decision the resulting `Phase.ROBBER` offers next is where
+    this same check applies to the steal.
 
     Module-level and public because the search is not the only caller. The
     ranking probes (`benchmarks.rank`, `benchmarks.sibling`) have to make the

@@ -83,16 +83,18 @@ def _assert_invariant(game) -> None:
             )
 
 
-def _steal_action(game, thief: int, victim: int, kind=ActionType.MOVE_ROBBER):
-    """The `(hex, victim)` pair `move_robber_to`/`play_knight_card` want, for
-    a target hex that actually pairs `thief` moving the robber with `victim`
-    occupying it -- `victim_of` resolves the action's opaque victim slot the
-    same way `actions.apply` does."""
+def _steal_action(game, thief: int, victim: int):
+    """The hex `move_robber_to` wants for a `MOVE_ROBBER` that actually pairs
+    `thief` moving the robber with `victim` occupying it -- `victim_of`
+    resolves the action's opaque victim slot the same way `actions.apply`
+    does. The one way in whether `Phase.ROBBER` was entered off a seven or
+    off a knight (`play_knight_card`): `PLAY_KNIGHT` carries no operand of
+    its own any more."""
     game.current_player = thief
     for action in legal_actions(game):
-        if action.type is kind and victim_of(game, action.b) == victim:
+        if action.type is ActionType.MOVE_ROBBER and victim_of(game, action.b) == victim:
             return action.a
-    raise AssertionError(f"no {kind.name} pairs {thief} -> {victim} on this board")
+    raise AssertionError(f"no MOVE_ROBBER pairs {thief} -> {victim} on this board")
 
 
 def _ledger_block(obs, players: int = 4) -> np.ndarray:
@@ -184,6 +186,10 @@ def test_a_victimless_robber_move_touches_no_ledger():
 
 
 def test_a_knight_steal_updates_the_ledger_the_same_way_as_the_robber():
+    """`PLAY_KNIGHT` carries no target or victim any more -- it spends the
+    card and hands off to the same `Phase.ROBBER`/`MOVE_ROBBER` a seven
+    resolves through, so the steal itself is pinned there, not on the
+    knight action."""
     game = after_setup()
     game.phase = Phase.MAIN
     game.current_player = 0
@@ -191,10 +197,13 @@ def test_a_knight_steal_updates_the_ledger_the_same_way_as_the_robber():
     for player in range(game._state.num_players):
         _set_known_hand(game, player, [0] * NUM_RESOURCES)
     _set_known_hand(game, 1, [1, 1, 0, 0, 0])
-    target = _steal_action(game, thief=0, victim=1, kind=ActionType.PLAY_KNIGHT)
 
-    play_knight_card(game, target, 1)
+    play_knight_card(game)
+    assert game.phase is Phase.ROBBER
+    target = _steal_action(game, thief=0, victim=1)
+    move_robber_to(game, target, 1)
 
+    assert game.phase is Phase.MAIN
     assert game.ledger.seats[0].unknown == 1
     _assert_invariant(game)
 

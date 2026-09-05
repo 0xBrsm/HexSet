@@ -413,7 +413,7 @@ def from_journal(path) -> Record:
             chance_events: list[tuple[str, int]] = []
             if action.type is ActionType.ROLL:
                 chance_events.append(("roll", event["roll"]))
-            if action.type in (ActionType.MOVE_ROBBER, ActionType.PLAY_KNIGHT):
+            if action.type is ActionType.MOVE_ROBBER:
                 stole = event.get("stole")
                 if stole is not None and stole.get("resource") is not None:
                     chance_events.append(("steal", int(Resource[stole["resource"]])))

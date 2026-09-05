@@ -9,13 +9,15 @@ constructed action that happens to be wrong would either be silently accepted
 indication of which translation was at fault. Searching means a missing match
 fails right here, at the boundary, with the actual mismatch visible.
 
-`PLAY_KNIGHT` is the one case not handled by a single lookup, because dev-catan
-bundles "play the knight" and "move the robber" into one decision where
-catanatron asks them as two: it maps to whichever half catanatron is offering
-right now. `player.py` (our bot inside catanatron) plays the first half and
-replays its own choice into the second; `bot.py` (a catanatron bot at our
-table) lets catanatron take both halves and reassembles them into one
-`PLAY_KNIGHT`. Both directions match against the same two entries here.
+`PLAY_KNIGHT` used to be the one case not handled by a single lookup, because
+dev-catan bundled "play the knight" and "move the robber" into one decision
+where catanatron asks them as two. Since the owner's knight-two-step fix
+(`agents/reference/...`), dev-catan asks them as two decisions too --
+`PLAY_KNIGHT` first (spends the card, no operand), then a `MOVE_ROBBER`
+decision through the same `Phase.ROBBER` a seven enters -- so it maps
+one-to-one just like `PLAY_ROAD_BUILDING` and every other operand-less
+action, and `MOVE_ROBBER` maps through `move_robber` below exactly as it
+always has.
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ _NO_VALUE = {
     OurActionType.END_TURN: TheirActionType.END_TURN,
     OurActionType.BUY_DEV_CARD: TheirActionType.BUY_DEVELOPMENT_CARD,
     OurActionType.PLAY_ROAD_BUILDING: TheirActionType.PLAY_ROAD_BUILDING,
+    OurActionType.PLAY_KNIGHT: TheirActionType.PLAY_KNIGHT_CARD,
 }
 
 
@@ -106,16 +109,7 @@ def to_catanatron(
             f"BUILD_ROAD {wanted}",
         )
 
-    if kind in (OurActionType.MOVE_ROBBER, OurActionType.PLAY_KNIGHT):
-        # `PLAY_KNIGHT` is two catanatron decisions and one of ours (module
-        # docstring), so it maps to whichever half is on the table right now
-        # and otherwise resolves exactly as a bare robber move does.
-        knight = next(
-            (a for a in playable_actions if a.action_type is TheirActionType.PLAY_KNIGHT_CARD),
-            None,
-        )
-        if kind is OurActionType.PLAY_KNIGHT and knight is not None:
-            return knight
+    if kind is OurActionType.MOVE_ROBBER:
         # true state: whichever direction this is translating for rebuilds the
         # position fresh every decision, so this is the sanctioned read.
         num_players = our_game.state(0, hidden=False).num_players

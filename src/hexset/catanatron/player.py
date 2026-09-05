@@ -5,15 +5,9 @@ Registered via catanatron's own extension point (`--code`, see `register.py`)
 rather than by forking catanatron's source -- `register_cli_player` is the
 documented mechanism for exactly this.
 
-Two things need handling beyond a straight translate-decide-translate-back:
+One thing needs handling beyond a straight translate-decide-translate-back:
 
-`PLAY_KNIGHT` is one dev-catan decision (hex *and* victim together) but two
-catanatron ones (`PLAY_KNIGHT_CARD`, then a separate `MOVE_ROBBER` prompt).
-The bot is asked once, as it would be in dev-catan; the second catanatron
-decision replays the same choice rather than asking again, which is what
-makes the split invisible to the bot.
-
-And `to_catanatron` can fail for reasons documented in `actions.py`'s
+`to_catanatron` can fail for reasons documented in `actions.py`'s
 test suite -- real, confirmed differences between the two engines' rule sets
 (a piece cap dev-catan doesn't enforce, a stale flag in catanatron itself) --
 which should not crash a benchmark run over a rare position. Falling back to
@@ -27,7 +21,6 @@ from __future__ import annotations
 import random
 from dataclasses import replace
 
-from hexset.actions import ActionType as OurActionType
 from hexset.arena import entrant_from_name, spawn
 
 import hexset.bots  # noqa: F401 -- registers the bot presets ("heximax"/
@@ -44,7 +37,7 @@ import hexset.bots  # noqa: F401 -- registers the bot presets ("heximax"/
 
 from catanatron.models.player import Color, Player
 
-from .actions import move_robber, to_catanatron
+from .actions import to_catanatron
 from .board import translate_board
 from .state import translate
 
@@ -78,13 +71,11 @@ class DevCatanPlayer(Player):
         self._mapping = None
         self._bot = None
         self._rng = None
-        self._pending_knight: tuple[int, int] | None = None
 
     def reset_state(self) -> None:
         self._mapping = None
         self._bot = None
         self._rng = None
-        self._pending_knight = None
 
     def decide(self, game, playable_actions):
         self.decisions += 1
@@ -111,21 +102,6 @@ class DevCatanPlayer(Player):
 
         our_game, seats = translate(game, self._mapping, self._rng)
 
-        if self._pending_knight is not None:
-            hex_index, victim_seat = self._pending_knight
-            self._pending_knight = None
-            # true state: `our_game` is rebuilt fresh from catanatron's own
-            # live state every decision (`state.py`) -- the sanctioned read
-            # for this bridge, not an information-set one.
-            return move_robber(
-                hex_index,
-                victim_seat,
-                our_game.state(0, hidden=False).num_players,
-                self._mapping,
-                seats,
-                playable_actions,
-            )
-
         if self._bot is None:
             entrant = replace(entrant_from_name(self.entrant_spec), max_trades=0)
             self._bot = spawn(entrant, self._mapping.board, self._rng)
@@ -140,10 +116,4 @@ class DevCatanPlayer(Player):
             self.fallbacks += 1
             return self._rng.choice(playable_actions)
 
-        if action.type is OurActionType.PLAY_KNIGHT:
-            # `to_catanatron` answered the first half (`PLAY_KNIGHT_CARD`); the
-            # second half is replayed above on the next decision. Recorded only
-            # once the first half is settled, so a fallback leaves nothing
-            # pending to replay into a robber prompt that never came.
-            self._pending_knight = (action.a, action.b)
         return their_action

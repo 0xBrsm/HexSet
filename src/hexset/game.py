@@ -78,6 +78,15 @@ class Game:
     dev_card_played: bool = False
     discard_quota: list[int] = field(default_factory=list)
     free_roads: int = 0
+    # Which phase to resume once this turn's robber phase resolves: `MAIN`
+    # after a seven (`roll_dice`) or a knight played from `MAIN`, `ROLL` for a
+    # knight played before rolling (rulebook: playable "before rolling dice or
+    # at any time during the Action phase," same as any other card). Only
+    # meaningful while `phase is ROBBER`; `move_robber_to` reads it once to
+    # decide where to return and whether to fire the trade event directly,
+    # and `end_turn` resets it so no stale value survives into the next
+    # turn. `imagine` copies it like every other turn-scoped field.
+    resume_phase: Phase = Phase.MAIN
     turns: int = 0
     won_by: int | None = None
     # Every seat's public valuation vector (`hexset.trading`): what each
@@ -425,6 +434,7 @@ def imagine(
         dev_card_played=game.dev_card_played,
         discard_quota=game.discard_quota[:],
         free_roads=game.free_roads,
+        resume_phase=game.resume_phase,
         turns=game.turns,
         won_by=game.won_by,
         valuations=[tuple(v) for v in game.valuations],
@@ -574,6 +584,21 @@ def roll_dice(game: Game, roll: int | None = None) -> int:
             0 if p in game.locked else discard_count(game._state, p)
             for p in range(game._state.num_players)
         ]
+        # Arms the same way `enter_main` would, ahead of actually reaching
+        # `MAIN`: nothing reads `event_pending`/`awaiting_publish` while the
+        # phase is `DISCARD`/`ROBBER` (`run_pending_event` and `publish_due`
+        # both gate on `phase is MAIN`), so setting them here rather than
+        # once `move_robber_to` resumes into `MAIN` changes nothing about
+        # when the turn's first event actually fires -- it only records,
+        # before the detour, that this resumption is a fresh entry into
+        # `MAIN` rather than one that already happened earlier this turn
+        # (a knight played from `MAIN`, whose `event_pending` is already
+        # `False` by the time `move_robber_to` checks it, having been
+        # consumed by the `legal_actions` call that made the knight legal to
+        # choose in the first place).
+        game.resume_phase = Phase.MAIN
+        game.event_pending = True
+        game.awaiting_publish = True
         game.phase = Phase.DISCARD if any(game.discard_quota) else Phase.ROBBER
     else:
         before = _snapshot_hands(game)
@@ -630,12 +655,29 @@ def discard_one(game: Game, player: int, resource: Resource) -> None:
 
 
 def move_robber_to(game: Game, target: int, victim: int | None = None) -> None:
+    """Resolve the robber phase, entered either after a seven or after a
+    knight (`play_knight_card`) -- the same phase and the same move either
+    way, rulebook: a knight "acts like the dice roll of a 7."
+
+    Returns to `game.resume_phase` (`MAIN` after a seven, `MAIN` or `ROLL`
+    after a knight, depending on when it was played) and fires the trade
+    event directly, exactly once, when that resumption is not itself a
+    fresh entry into `MAIN` -- `game.event_pending` tells the two apart: a
+    seven leaves it armed (set above, in `roll_dice`, ahead of the detour) so
+    that this still-lazy first-of-the-turn event fires on the driver's own
+    schedule, the same as it always has; a knight played from `MAIN` finds
+    it already `False` (consumed by the `legal_actions` call that made the
+    knight choosable), so this resolves it exactly like any other in-`MAIN`
+    action (`build_road` and friends: mutate, then `run_trade_event`).
+    """
     _require(game, Phase.ROBBER)
     move_robber(game._state, target)
     if victim is not None:
         stolen = steal(game._state, game.current_player, victim, game.chance)
         _record_steal(game, game.current_player, victim, stolen)
-    enter_main(game)
+    game.phase = game.resume_phase
+    if game.phase is Phase.MAIN and not game.event_pending:
+        run_trade_event(game)
 
 
 def _check_win(game: Game) -> None:
@@ -720,22 +762,32 @@ def _spend_turn_card(game: Game) -> None:
     game.dev_card_played = True
 
 
-def play_knight_card(
-    game: Game, target: int, victim: int | None = None
-) -> Resource | None:
+def play_knight_card(game: Game) -> None:
+    """Play a knight (rulebook): allowed before rolling or in the Action
+    phase, same as every other card. Resolves in two steps now, the way the
+    rulebook itself sequences it and the way Catanatron already asks for it
+    as two separate decisions: this spends the card, credits Largest Army
+    and checks the win -- a knight that reaches the winning total ends the
+    game immediately, with **no robber move at all** (rulebook: the winner
+    is announced the instant their total crosses the threshold, and nothing
+    else about the position needs to change first). Only if the game is not
+    already over does the robber move happen, through the very same robber
+    phase a seven enters: `game.resume_phase` remembers which phase to
+    return to (`ROLL` or `MAIN`, whichever this was played from), and
+    `move_robber_to` resolves it from there -- no steal is recorded here,
+    and none is possible until that phase's own `MOVE_ROBBER` names a
+    victim.
+    """
     if game.phase not in (Phase.ROLL, Phase.MAIN):
         raise ValueError(f"cannot play a knight in {game.phase.name}")
     _spend_turn_card(game)
-    stolen = play_knight(game._state, game.current_player, target, victim, game.chance)
-    if victim is not None:
-        _record_steal(game, game.current_player, victim, stolen)
+    play_knight(game._state, game.current_player)
     update_largest_army(game._state)
     _check_win(game)
-    # `run_trade_event` no-ops itself when `game.phase` is `ROLL` (a knight
-    # played before rolling): this is the one action legal in both phases,
-    # and the interleaving only ever applies to `MAIN`.
-    run_trade_event(game)
-    return stolen
+    if game.phase is Phase.GAME_OVER:
+        return
+    game.resume_phase = game.phase
+    game.phase = Phase.ROBBER
 
 
 def play_road_building_card(game: Game) -> None:
@@ -925,6 +977,7 @@ def end_turn(game: Game) -> None:
     game.pending = []
     # Free roads with nowhere legal to go are simply lost.
     game.free_roads = 0
+    game.resume_phase = Phase.MAIN
     game.turns += 1
     if game.turns >= MAX_TURNS:
         game.phase = Phase.GAME_OVER

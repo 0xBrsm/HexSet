@@ -25,7 +25,7 @@ import pytest
 pytest.importorskip("catanatron.game")
 
 import hexset.bots  # noqa: F401 -- registers the "heximax" presets
-from hexset.actions import ActionType, apply, legal_actions
+from hexset.actions import Action, ActionType, apply, legal_actions
 from hexset.arena import entrant_from_name, spawn
 from hexset.board.board import random_base_board
 from hexset.game import Phase, is_over, start, to_move
@@ -139,9 +139,11 @@ def test_every_offered_action_maps_back_to_exactly_one_of_ours(positions):
     player: it offers HexSet's legal actions translated forwards, so the
     inverse is a dict lookup. What this pins is that the translation forwards
     is injective over that legal set -- two of our actions collapsing onto one
-    of catanatron's would silently drop a move -- with exactly one documented
-    exception, `PLAY_KNIGHT`, which catanatron asks as two decisions and so
-    offers as one `PLAY_KNIGHT_CARD` however many robber targets we have.
+    of catanatron's would silently drop a move. `PLAY_KNIGHT` used to be the
+    one documented exception here (catanatron asks it as two decisions, so it
+    offered one `PLAY_KNIGHT_CARD` however many robber targets we had); the
+    knight two-step fix drops its operand, so it maps one-to-one now exactly
+    like every other simple action, and no exception remains.
     """
     bot = CatanatronBot()
     checked = 0
@@ -158,18 +160,17 @@ def test_every_offered_action_maps_back_to_exactly_one_of_ours(positions):
         for their, our in offered.items():
             assert their in raw, "offered an action catanatron never had"
             assert our in ours
-
-        # The exception list, in full: the knights past the first, which all
-        # collapse onto the single `PLAY_KNIGHT_CARD` catanatron asks first.
-        knights = [a for a in ours if a.type is ActionType.PLAY_KNIGHT]
-        dropped = [a for a in ours if a not in offered.values()]
-        assert dropped == knights[1:] or (not knights and not dropped)
+        assert set(offered.values()) == set(ours), [a for a in ours if a not in offered.values()]
         checked += 1
     assert checked > 50
 
 
-def test_a_knight_is_reassembled_from_catanatrons_two_decisions():
-    """The one case where one HexSet action is two catanatron ones.
+def test_a_knight_resolves_as_two_separate_decisions():
+    """`PLAY_KNIGHT` no longer folds catanatron's two decisions into one: the
+    bridge is asked for a bare `PLAY_KNIGHT` (no operand), applying it enters
+    `Phase.ROBBER` on both sides, and the bridge is asked again for the
+    `MOVE_ROBBER` that follows -- the same one hexset decision either engine
+    would ask for after a seven.
 
     Reached by handing the seat a matured knight in `Phase.ROLL` -- the phase
     where HexSet offers the roll and the knight and nothing else, and
@@ -187,10 +188,18 @@ def test_a_knight_is_reassembled_from_catanatrons_two_decisions():
     state.dev_cards[game.current_player][DevCard.KNIGHT] = 1
     assert game.phase is Phase.ROLL
 
-    action = CatanatronBot().choose(game)
-    assert action.type is ActionType.PLAY_KNIGHT
+    bot = CatanatronBot()
+    action = bot.choose(game)
+    assert action == Action(ActionType.PLAY_KNIGHT)
     assert action in legal_actions(game)
-    assert action.a != state.robber
+
+    apply(game, action)
+    assert game.phase is Phase.ROBBER
+
+    move = bot.choose(game)
+    assert move.type is ActionType.MOVE_ROBBER
+    assert move in legal_actions(game)
+    assert move.a != state.robber
 
 
 @pytest.mark.slow

@@ -22,6 +22,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its own once a bot's trade event finds something against this seat, with
   Confirm/Decline. MCP gains matching `trade_acceptable`, `propose_trade`,
   `confirm_trade` and `decline_trade` tools.
+- **The trade lab's paired-chance judge** (`hexset.bench.trade_lab judge`,
+  phase 3 of the registered ablation). For a sampled pre-trade position,
+  one throwaway continuation records a chance script (dice, steals) and
+  both an untraded fork (the event suppressed for that turn only) and a
+  traded fork (the historical clearing applied outright) replay it, kind
+  by kind, so both see the same draws for as long as they can; a fork that
+  outruns or outgrows the script falls back to a fresh live source and is
+  counted. `trade_lab positions` samples the judged set (a MAIN-entry
+  event that cleared a trade) from a bank; `trade_lab phase3-readouts`
+  bins the judge's output by claimed gain, paired-bootstraps the realised
+  win-probability swing for the actor, the counterparty and bystanders,
+  fits a calibration slope, and reports the threshold the gate's claims
+  hold up above. Both the bank re-emission and the judge subcommand are
+  resumable and write progress as they go.
 
 ### Changed
 

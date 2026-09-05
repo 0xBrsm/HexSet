@@ -31,7 +31,7 @@ from .state import (
     place_settlement,
     upgrade_to_city,
 )
-from .victory import update_largest_army, update_longest_road, winner
+from .victory import WINNING_POINTS, update_largest_army, update_longest_road, victory_points
 
 if TYPE_CHECKING:
     from .view import View
@@ -634,9 +634,19 @@ def move_robber_to(game: Game, target: int, victim: int | None = None) -> None:
 
 
 def _check_win(game: Game) -> None:
-    won = winner(game._state)
-    if won is not None:
-        game.won_by = won
+    """Winning the Game (rulebook): "If you have 10 or more VPs at any point
+    during YOUR turn, the game ends immediately and you are the winner" --
+    scoped to whoever is on the move, not to whoever happens to be over the
+    threshold. `victory.winner` scans every seat and is right for a
+    state-only query (`tests/test_victory.py`), but a seat's own action can
+    move VPs it does not own: breaking an opponent's Longest Road can hand
+    the tile (and 2 VPs) to a *third*, off-turn seat who was already sitting
+    on 8. That seat does not win here -- only `game.current_player`'s own
+    total is checked, exactly as the rulebook scopes it. They still win the
+    moment their own turn's `_check_win` next runs, with nothing further
+    needing to happen, since nothing about their total changes in between."""
+    if victory_points(game._state, game.current_player) >= WINNING_POINTS:
+        game.won_by = game.current_player
         game.phase = Phase.GAME_OVER
 
 
@@ -717,8 +727,17 @@ def play_road_building_card(game: Game) -> None:
 
     Resolving the card this way keeps the action space flat: one entry for the
     card, rather than one per pair of edges.
+
+    Legal in `ROLL` as well as `MAIN` -- rulebook, Development Cards: "You may
+    play a development card before rolling dice or at any time during the
+    Action phase," which names no exception for this card. `run_trade_event`
+    below no-ops itself outside `MAIN` (see its own docstring), so playing
+    this before rolling credits the two free roads without touching the
+    trade event; they are placed afterwards with ordinary `build_road` calls,
+    which still require `MAIN`, same as any other build.
     """
-    _require(game, Phase.MAIN)
+    if game.phase not in (Phase.ROLL, Phase.MAIN):
+        raise ValueError(f"cannot play road building in {game.phase.name}")
     _spend_turn_card(game)
     spend_card(game._state, game.current_player, DevCard.ROAD_BUILDING)
     game.free_roads += ROAD_BUILDING_ROADS
@@ -726,7 +745,9 @@ def play_road_building_card(game: Game) -> None:
 
 
 def play_year_of_plenty_card(game: Game, resources: list[Resource]) -> None:
-    _require(game, Phase.MAIN)
+    """Legal in `ROLL` as well as `MAIN`; see `play_road_building_card`."""
+    if game.phase not in (Phase.ROLL, Phase.MAIN):
+        raise ValueError(f"cannot play year of plenty in {game.phase.name}")
     _spend_turn_card(game)
     before = _snapshot_hands(game)
     play_year_of_plenty(game._state, game.current_player, resources)
@@ -735,7 +756,9 @@ def play_year_of_plenty_card(game: Game, resources: list[Resource]) -> None:
 
 
 def play_monopoly_card(game: Game, resource: Resource) -> int:
-    _require(game, Phase.MAIN)
+    """Legal in `ROLL` as well as `MAIN`; see `play_road_building_card`."""
+    if game.phase not in (Phase.ROLL, Phase.MAIN):
+        raise ValueError(f"cannot play monopoly in {game.phase.name}")
     _spend_turn_card(game)
     before = _snapshot_hands(game)
     taken = play_monopoly(game._state, game.current_player, resource)

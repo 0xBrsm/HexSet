@@ -40,7 +40,7 @@ import onnxruntime as ort
 from hexset.actions import Action, ActionSpace, build_space
 from hexset.board.topology import Topology
 from hexset.game import Game, to_move
-from hexset.mcts import Search
+from hexset.mcts import Search, terminal_relative_points
 from hexset.onnx_record import record_from_game
 from hexset.server.constants import RECORD_CONTRACTS
 from hexset.server.modelmeta import SearchConfig, search_config
@@ -432,6 +432,14 @@ class LeafEvaluator:
             padded.extend([leaves[-1]] * (self.pad_to - count))
         rows = [(leaf.game, leaf.seat, leaf.options) for leaf in padded]
         return self.policy.score_rows(rows)[:count]
+
+    def terminal(self, game: Game) -> Sequence[float]:
+        """`hexset.mcts.Evaluator.terminal`: every graph this contract range
+        (`RECORD_CONTRACTS`) serves has a value head trained against
+        `relative_points`, the same quantity `Search` scored a terminal leaf
+        with itself before this method existed, so this returns exactly that
+        and a finished game's score is unchanged."""
+        return terminal_relative_points(game)
 
 
 def searcher(

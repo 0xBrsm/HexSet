@@ -28,21 +28,27 @@ new engine: for a sampled pre-event position, one throwaway continuation
 records a chance-event script (`hexset.chance.Recording(Live(...))`), and
 both the *untraded* continuation (the event suppressed for one turn only)
 and the *traded* continuation (the historical clearing applied outright)
-replay against that same `Scripted` script -- identical dice, steals and
-draws -- for up to `--cap` actions each. One stream is one such paired
-playout; several streams (`--streams`) per position substitute for the old
-design's many independent playouts a side, at a fraction of the cost,
-because the two forks of one stream differ only in the cards the historical
-trade moved, not in the dice either one draws. A fork that diverges from
-the throwaway script it was handed -- runs past its end (`ChanceExhausted`)
-or reaches a point where it wants a different *kind* of event next
-(`ChanceMismatch`; common well before either fork is long, since a
-different hand can change whether a knight is played before or after
-rolling) -- falls back to a freshly seeded `Live` for the remainder and is
-counted in the row (`_play_fork`'s own docstring has the disclosure: the
-registration names only exhaustion, this module treats both `ChanceError`
-subclasses the same way, since a mismatch ends the pairing exactly as a
-runout does).
+replay against that same script -- identical dice, steals and draws -- for
+up to `--cap` actions each. One stream is one such paired playout; several
+streams (`--streams`) per position substitute for the old design's many
+independent playouts a side, at a fraction of the cost, because the two
+forks of one stream differ only in the cards the historical trade moved,
+not in the dice either one draws.
+
+The script is replayed by *kind*, independently per kind
+(`_PairedChance`), not as one strictly-ordered sequence
+(`hexset.chance.Scripted`): the two forks' hands already differ (by the
+historical trade), so they diverge in *which* action comes next almost
+immediately -- whether a knight is played before or after rolling decides
+whether a steal or a roll comes first -- and a single ordered script
+would read that reordering as a divergence and end the pairing within the
+first turn or two, on nearly every stream, as this run's own smoke test
+found. Reading each kind from its own queue means the fork that has
+rolled five times so far gets the fifth recorded roll regardless of
+what fell between the fourth and fifth roll on the *other* fork's path.
+A fork that needs more of some kind than the throwaway script recorded
+(`ChanceExhausted`) falls back to a freshly seeded `Live` for the
+remainder and is counted in the row, per the registration.
 
 **Why a bank of records, not live games** (unchanged from phase 1, restated
 briefly): no bulk game records existed before this lab; `hexset.record`
@@ -85,7 +91,7 @@ from hexset.board.board import random_base_board
 from hexset.board.terrain import NUM_RESOURCES
 from hexset.bots.heximax import heximax
 from hexset.bots.heximax.search import Heximax, _thin_copy
-from hexset.chance import ChanceError, Live, Recording, Scripted
+from hexset.chance import Chance, ChanceExhausted, Live, Recording
 from hexset.game import Game, Phase, imagine, is_over, start, to_move
 from hexset.record import Record, ReplayError, actions_of, board_of, from_json, read, record_game, write
 from hexset.trading import Bundle, Trade
@@ -1035,14 +1041,101 @@ def sample_judged_positions(
 # Phase 3: the paired-chance judge.
 
 
-def _record_chance_script(game0: Game, board, seed_value: int, action_cap: int) -> tuple[tuple[str, int], ...]:
+class _PairedChance(Chance):
+    """Replays a recorded chance script by *kind*, independently per kind,
+    rather than as one strictly-ordered sequence (`hexset.chance.Scripted`).
+
+    This is what actually delivers "identical dice, steals and draws for
+    the traded and untraded games": the two forks of one stream start from
+    hands that already differ (by the one historical trade), so they all
+    but immediately diverge in *which* action they take next -- whether a
+    knight is played before or after rolling, in particular, decides
+    whether `chance.steal` or `chance.roll` comes first. A single ordered
+    script (`Scripted`) treats that reordering as a `ChanceMismatch` and
+    ends the pairing within the first turn or two, almost every stream, as
+    measured on this run's own smoke test. Reading each kind from its own
+    queue sidesteps that entirely: the fork that has rolled five times so
+    far gets the fifth recorded roll whether or not a steal happened to
+    fall between the fourth and fifth roll on the *other* fork's path.
+    Only true exhaustion -- a fork needs a sixth roll and the throwaway
+    script never recorded one -- raises, `ChanceExhausted`; there is no
+    `ChanceMismatch` left to raise, since a kind is never checked against
+    another kind's queue at all. `deck_order` is not implemented: nothing
+    mid-game reads it (`hexset.chance.deck_order` is only ever consulted
+    once, at `hexset.game.start`), and neither fork here is a fresh game.
+
+    **A recorded steal is only replayed when the current hand can actually
+    produce it.** `hexset.robber.steal` does not itself check that the
+    resource it is handed is held (`hand[resource] -= 1` with no floor),
+    by design -- a real `Chance.steal(hand)` always draws proportionally
+    to `hand`, so this can never come up on any other caller. But a
+    fork's victim hand is exactly the thing that has diverged from the
+    throwaway's own path by the time a steal fires (found on this run's
+    own smoke test, ~100 actions and ~46 turns in, on a position that ran
+    clean for 400+ actions under a live source): blindly replaying "took a
+    WOOD" against a hand holding no wood drives that count negative,
+    silently corrupting every accounting that reads `state.hands`
+    afterwards -- including the very cycle check whose assertion this
+    surfaced as. Treating a would-be-invalid steal as exhaustion (of this
+    kind, from here) reuses the fallback this class already has for the
+    same underlying reason a length exhaustion gets one: the script no
+    longer describes a state this fork can be in.
+    """
+
+    def __init__(self, events_by_kind: dict[str, list[int]]) -> None:
+        self._events = {kind: list(values) for kind, values in events_by_kind.items()}
+        self._index = {kind: 0 for kind in self._events}
+
+    def _next(self, kind: str) -> int:
+        values = self._events.get(kind, ())
+        i = self._index.get(kind, 0)
+        if i >= len(values):
+            raise ChanceExhausted(i, kind)
+        self._index[kind] = i + 1
+        return values[i]
+
+    def roll(self) -> int:
+        return self._next("roll")
+
+    def steal(self, hand: Sequence[int]) -> int | None:
+        if sum(hand) == 0:
+            return None
+        values = self._events.get("steal", ())
+        i = self._index.get("steal", 0)
+        if i >= len(values) or hand[values[i]] <= 0:
+            raise ChanceExhausted(i, "steal")
+        self._index["steal"] = i + 1
+        return values[i]
+
+    def discard(self, hand: Sequence[int], n: int) -> list[int]:
+        """As `steal` above: a recorded discard pick is only replayed while
+        the hand can still afford it, in case this kind is ever exercised
+        (heximax and search2 both choose their own discards explicitly,
+        never through `Chance.discard`, so this path is not reached by
+        this module's own bots today)."""
+        remaining = list(hand)
+        picks: list[int] = []
+        values = self._events.get("discard", ())
+        i = self._index.get("discard", 0)
+        for _ in range(n):
+            if i >= len(values) or remaining[values[i]] <= 0:
+                self._index["discard"] = i
+                raise ChanceExhausted(i, "discard")
+            remaining[values[i]] -= 1
+            picks.append(values[i])
+            i += 1
+        self._index["discard"] = i
+        return picks
+
+
+def _record_chance_script(game0: Game, board, seed_value: int, action_cap: int) -> dict[str, list[int]]:
     """A throwaway continuation from `game0`, seated with fresh heximax
     bots trading under the engine's own shipped rule, run for up to
     `action_cap` actions purely to log a chance-event script
-    (`hexset.chance.Recording(Live(...))`) long enough for both the
-    untraded and traded forks of this stream to draw from. The playout
-    itself -- who wins, what it does -- is discarded; only `.events`
-    survives.
+    (`hexset.chance.Recording(Live(...))`), grouped by kind (`_PairedChance`'s
+    own shape) -- long enough, kind for kind, for both the untraded and
+    traded forks of this stream to draw from. The playout itself -- who
+    wins, what it does -- is discarded; only the grouped events survive.
 
     `randomize_deck=False`: the throwaway (and both real forks, in
     `_play_fork`) must start from the *same* remaining deck order as the
@@ -1066,7 +1159,10 @@ def _record_chance_script(game0: Game, board, seed_value: int, action_cap: int) 
         seat = to_move(work)
         apply(work, bots[seat].choose(work))
         actions += 1
-    return tuple(recorder.events)
+    by_kind: dict[str, list[int]] = defaultdict(list)
+    for kind, value in recorder.events:
+        by_kind[kind].append(value)
+    return dict(by_kind)
 
 
 @dataclass
@@ -1076,40 +1172,39 @@ class _ForkResult:
     actions: int
     chance_exhausted: bool
     chance_exhausted_at: int | None
+    # Set when this fork raised something other than the chance divergence
+    # `_play_fork` already handles -- a long continuation (up to `--cap`
+    # actions, hundreds of positions, several streams each) can hit a rare
+    # engine-level invariant (`hexset.trading.trade_event`'s own
+    # position-revisit assertion is exactly the kind of thing its own
+    # docstring calls "a bug to surface", and at this volume "rare" is not
+    # "never"); recorded here rather than crashing the whole judge run,
+    # since one job failing is not a reason to lose every job that already
+    # finished. `winner`/`turns`/`actions` are `None`/`-1`/`-1` when this is
+    # set -- there is no result to read.
+    error: str | None = None
 
 
 def _play_fork(
-    game0: Game, board, *, seed: str, chance_events: tuple[tuple[str, int], ...],
+    game0: Game, board, *, seed: str, chance_by_kind: dict[str, list[int]],
     action_cap: int, suppress_current_turn: bool,
 ) -> _ForkResult:
     """Continue `game0` to a winner (or `None`, capped at `action_cap`),
     seating a fresh `heximax` at every seat and driving chance from
-    `chance_events` (`hexset.chance.Scripted`) rather than a live source --
-    the paired half of one stream. `suppress_current_turn` is the untraded
+    `chance_by_kind` (`_PairedChance`) rather than a live source -- the
+    paired half of one stream. `suppress_current_turn` is the untraded
     fork's own suppression: `max_trades=0` for the turn `game0` is
     mid-way through only, restored the moment `Game.turns` first advances
     past it (`hexset.game.end_turn`), so the rest of the game trades
     exactly as the engine would.
 
-    `ChanceExhausted` (the fork outlives the throwaway script that seeded
-    it) falls back to a freshly seeded `Live` for the remainder and is
-    counted, per the registration. In practice the untraded and traded
-    forks diverge in more than length: a different hand can change *which*
-    development card a bot plays and when (a knight before rolling asks
-    `chance.steal` where the throwaway's own path asked `chance.roll`
-    next), so `ChanceMismatch` -- not only `ChanceExhausted` -- is common
-    from the very first few actions on, not an edge case saved for a long
-    tail. Both are `ChanceError`, and this catches either the same way:
-    the pairing this stream bought ends the moment either fork's next
-    chance draw is not the script's next entry, whether that is because
-    the script ran out or because it holds a different kind next: falling
-    back to a freshly seeded `Live` and counting it is this module's own
-    reading of the registration for that reason, not a literal restriction
-    to exhaustion -- see the run's own report for the disclosure.
+    `ChanceExhausted` (this fork needs more of some kind than the
+    throwaway script recorded) falls back to a freshly seeded `Live` for
+    the remainder and is counted, per the registration.
     """
     rng = random.Random(seed)
     work = imagine(game0, rng, randomize_deck=False)
-    work.chance = Scripted(chance_events)
+    work.chance = _PairedChance(chance_by_kind)
     n = game0.num_players
     bots = [heximax(board, random.Random(f"{seed}:{s}")) for s in range(n)]
     work.gates = tuple(bots)
@@ -1129,23 +1224,24 @@ def _play_fork(
         action = bots[seat].choose(work)
         if chance_exhausted:
             # Already permanently on `Live` (which never raises
-            # `ChanceError`) -- nothing left to guard against.
+            # `ChanceExhausted`) -- nothing left to guard against.
             apply(work, action)
         else:
             # A checkpoint taken *before* applying: some action functions
             # mutate state ahead of their own chance draw (`move_robber_to`
-            # moves the robber, then steals), so a `ChanceError` partway
-            # through leaves `work` non-idempotent to retry in place --
-            # retrying the same `move_robber` a second time raises "the
-            # robber must move to a different hex". Falling back to this
-            # untouched clone instead of the mutated `work` sidesteps that
-            # for every action shape, not only the one this was found on.
+            # moves the robber, then steals), so a `ChanceExhausted`
+            # partway through leaves `work` non-idempotent to retry in
+            # place -- retrying the same `move_robber` a second time
+            # raises "the robber must move to a different hex". Falling
+            # back to this untouched clone instead of the mutated `work`
+            # sidesteps that for every action shape, not only the one this
+            # was found on.
             checkpoint = imagine(work, random.Random(0), randomize_deck=False)
             checkpoint.gates = work.gates
             checkpoint.chance = work.chance
             try:
                 apply(work, action)
-            except ChanceError:
+            except ChanceExhausted:
                 chance_exhausted = True
                 chance_exhausted_at = actions
                 work = checkpoint
@@ -1153,6 +1249,16 @@ def _play_fork(
                 apply(work, action)
         actions += 1
     return _ForkResult(work.won_by, work.turns, actions, chance_exhausted, chance_exhausted_at)
+
+
+def _play_fork_safely(*args, **kwargs) -> _ForkResult:
+    """`_play_fork`, guarded: see `_ForkResult.error`'s own docstring for
+    why one job's rare engine-level failure must not crash a run judging
+    thousands of them."""
+    try:
+        return _play_fork(*args, **kwargs)
+    except Exception as exc:  # noqa: BLE001 -- deliberately broad, see above
+        return _ForkResult(None, -1, -1, False, None, error=f"{type(exc).__name__}: {exc}")
 
 
 def _locate_judged_position(row: dict, record: Record) -> tuple[Position, Game]:
@@ -1206,14 +1312,14 @@ def _judge_stream(row: dict, pos: Position, traded0: Game, board, *, stream: int
 
     events = _record_chance_script(pos.game, board, 90000 + 100 * pid + stream, cap)
 
-    untraded = _play_fork(
+    untraded = _play_fork_safely(
         pos.game, board,
-        seed=f"phase3:{pid}:{stream}:untraded", chance_events=events,
+        seed=f"phase3:{pid}:{stream}:untraded", chance_by_kind=events,
         action_cap=cap, suppress_current_turn=True,
     )
-    traded = _play_fork(
+    traded = _play_fork_safely(
         traded0, board,
-        seed=f"phase3:{pid}:{stream}:traded", chance_events=events,
+        seed=f"phase3:{pid}:{stream}:traded", chance_by_kind=events,
         action_cap=cap, suppress_current_turn=False,
     )
 
@@ -1233,17 +1339,28 @@ def _judge_stream(row: dict, pos: Position, traded0: Game, board, *, stream: int
         "untraded": {
             "winner": untraded.winner, "turns": untraded.turns, "actions": untraded.actions,
             "chance_exhausted": untraded.chance_exhausted, "chance_exhausted_at": untraded.chance_exhausted_at,
+            "error": untraded.error,
         },
         "traded": {
             "winner": traded.winner, "turns": traded.turns, "actions": traded.actions,
             "chance_exhausted": traded.chance_exhausted, "chance_exhausted_at": traded.chance_exhausted_at,
+            "error": traded.error,
         },
-        "win_actor_untraded": win_actor_u, "win_actor_traded": win_actor_t,
-        "delta_actor": win_actor_t - win_actor_u,
-        "win_counterparty_untraded": win_cp_u, "win_counterparty_traded": win_cp_t,
-        "delta_counterparty": win_cp_t - win_cp_u,
-        "win_bystanders_untraded": win_byst_u, "win_bystanders_traded": win_byst_t,
-        "delta_bystanders": [t - u for t, u in zip(win_byst_t, win_byst_u)],
+        # `None` (not 0.0/1.0) whenever either fork errored -- an errored
+        # fork has no winner to compare, and silently reading its `None`
+        # winner as "nobody among actor/counterparty/bystanders won" would
+        # score it as a real, informative outcome instead of a missing one.
+        "win_actor_untraded": None if untraded.error else win_actor_u,
+        "win_actor_traded": None if traded.error else win_actor_t,
+        "delta_actor": None if (untraded.error or traded.error) else win_actor_t - win_actor_u,
+        "win_counterparty_untraded": None if untraded.error else win_cp_u,
+        "win_counterparty_traded": None if traded.error else win_cp_t,
+        "delta_counterparty": None if (untraded.error or traded.error) else win_cp_t - win_cp_u,
+        "win_bystanders_untraded": None if untraded.error else win_byst_u,
+        "win_bystanders_traded": None if traded.error else win_byst_t,
+        "delta_bystanders": (
+            None if (untraded.error or traded.error) else [t - u for t, u in zip(win_byst_t, win_byst_u)]
+        ),
     }
 
 
@@ -1277,6 +1394,22 @@ def _existing_pairs(out_path: Path) -> set[tuple[int, int]]:
             row = json.loads(line)
             done.add((row["pid"], row["stream"]))
     return done
+
+
+def _judge_progress_line(result: dict) -> str:
+    """One line per finished (position, stream). `delta_actor`/
+    `delta_counterparty` are `None` whenever either fork errored
+    (`_ForkResult.error`) -- printed as the fork's own error instead of a
+    number, so a crashed fork is visible in the progress stream, not just
+    in the output file."""
+    if result["delta_actor"] is None or result["delta_counterparty"] is None:
+        err = result["untraded"]["error"] or result["traded"]["error"]
+        return f"pid={result['pid']} stream={result['stream']} ERROR: {err}"
+    return (
+        f"pid={result['pid']} stream={result['stream']} "
+        f"delta_actor={result['delta_actor']:+.1f} "
+        f"delta_counterparty={result['delta_counterparty']:+.1f}"
+    )
 
 
 def run_judge(
@@ -1317,23 +1450,13 @@ def run_judge(
                 for result in results:
                     handle.write(json.dumps(result) + "\n")
                     handle.flush()
-                    print(
-                        f"pid={result['pid']} stream={result['stream']} "
-                        f"delta_actor={result['delta_actor']:+.1f} "
-                        f"delta_counterparty={result['delta_counterparty']:+.1f}",
-                        file=sys.stderr,
-                    )
+                    print(_judge_progress_line(result), file=sys.stderr)
         else:
             for job in jobs:
                 result = _judge_job(job)
                 handle.write(json.dumps(result) + "\n")
                 handle.flush()
-                print(
-                    f"pid={result['pid']} stream={result['stream']} "
-                    f"delta_actor={result['delta_actor']:+.1f} "
-                    f"delta_counterparty={result['delta_counterparty']:+.1f}",
-                    file=sys.stderr,
-                )
+                print(_judge_progress_line(result), file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -1369,13 +1492,19 @@ def _cluster_by_position(rows: list[dict]) -> dict[int, list[dict]]:
 
 def _position_means(rows: list[dict], field: str) -> dict[int, tuple[float, float]]:
     """`{pid: (mean claimed gain, mean of field over streams)}` -- one row
-    per position, the cluster unit every bootstrap below resamples."""
+    per position, the cluster unit every bootstrap below resamples. A
+    stream whose `field` is `None` (one of its forks errored, `_ForkResult.
+    error`) is dropped from the mean rather than treated as a real 0 --
+    when every stream at a position errored, the position itself is
+    dropped, since there is nothing to cluster."""
     by_pid = _cluster_by_position(rows)
     out = {}
     for pid, group in by_pid.items():
+        valid = [r[field] for r in group if r[field] is not None]
+        if not valid:
+            continue
         gain = group[0]["actor_gain"]
-        mean_field = statistics.mean(r[field] for r in group)
-        out[pid] = (gain, mean_field)
+        out[pid] = (gain, statistics.mean(valid))
     return out
 
 
@@ -1423,9 +1552,13 @@ def _bystander_field_rows(rows: list[dict]) -> list[dict]:
     """One row per (position, stream, bystander seat), `delta` the that
     seat's own win delta -- bystander deltas are per-seat lists in
     `phase3.jsonl`, flattened here so `_binned_readout` can treat "mean
-    bystander delta" the same way it treats actor/counterparty."""
+    bystander delta" the same way it treats actor/counterparty. A stream
+    with no bystander deltas at all (either fork errored) contributes no
+    rows."""
     out = []
     for r in rows:
+        if r["delta_bystanders"] is None:
+            continue
         for d in r["delta_bystanders"]:
             out.append({"pid": r["pid"], "actor_gain": r["actor_gain"], "delta": d})
     return out
@@ -1499,16 +1632,21 @@ def compute_phase3_readouts(rows: list[dict]) -> dict:
     readout3 = _calibration_slope(rows)
     tau, branch = _decide_tau(readout1)
 
+    errored = sum(1 for r in rows if r["untraded"]["error"] or r["traded"]["error"])
     chance_exhausted = sum(
-        1 for r in rows if r["untraded"]["chance_exhausted"] or r["traded"]["chance_exhausted"]
+        1 for r in rows
+        if not (r["untraded"]["error"] or r["traded"]["error"])
+        and (r["untraded"]["chance_exhausted"] or r["traded"]["chance_exhausted"])
     )
     capped = sum(
         1 for r in rows
-        if r["untraded"]["winner"] is None or r["traded"]["winner"] is None
+        if not (r["untraded"]["error"] or r["traded"]["error"])
+        and (r["untraded"]["winner"] is None or r["traded"]["winner"] is None)
     )
     return {
         "n_positions": n_positions,
         "n_rows": len(rows),
+        "share_errored": errored / len(rows) if rows else 0.0,
         "share_chance_exhausted": chance_exhausted / len(rows) if rows else 0.0,
         "share_capped": capped / len(rows) if rows else 0.0,
         "readout_1_actor": readout1,
@@ -1523,6 +1661,7 @@ def compute_phase3_readouts(rows: list[dict]) -> dict:
 def phase3_table_md(readouts: dict) -> str:
     lines = [
         f"Positions: {readouts['n_positions']}, rows: {readouts['n_rows']}, "
+        f"errored: {readouts['share_errored']*100:.1f}%, "
         f"chance-exhausted: {readouts['share_chance_exhausted']*100:.1f}%, "
         f"capped: {readouts['share_capped']*100:.1f}%\n",
     ]

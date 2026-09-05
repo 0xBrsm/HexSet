@@ -13,6 +13,7 @@ import pytest
 
 from hexset.bench.trade_lab import (
     RULES,
+    _PairedChance,
     _play_fork,
     _record_chance_script,
     _shaded_pick,
@@ -25,8 +26,9 @@ from hexset.bench.trade_lab import (
     select,
 )
 from hexset.board.terrain import Resource
+from hexset.chance import ChanceExhausted
 from hexset.game import Phase, start
-from hexset.record import read
+from hexset.record import board_of, read
 from hexset.trading import bundle
 from helpers import give, mini_board
 
@@ -147,7 +149,6 @@ def test_judge_position_suppresses_and_reproduces_the_trade(small_bank):
     pos = positions[0]
     row = _judged_row(pos)
     row["pid"] = 0
-    from hexset.record import board_of
 
     board = board_of(record)
     results = judge_position(row, record, board, streams=2, cap=20)
@@ -159,3 +160,62 @@ def test_judge_position_suppresses_and_reproduces_the_trade(small_bank):
         # Both halves ran to a winner or hit the cap -- never crashed.
         assert result["untraded"]["winner"] is None or isinstance(result["untraded"]["winner"], int)
         assert result["traded"]["winner"] is None or isinstance(result["traded"]["winner"], int)
+
+
+def test_paired_chance_reads_each_kind_independently():
+    """`_PairedChance` keeps one queue per kind: a fork that asks for
+    "steal" between two "roll"s does not consume from -- or desync -- the
+    roll queue, and an empty hand's steal costs no event at all."""
+    chance = _PairedChance({"roll": [7, 8, 9], "steal": [2, 3]})
+    assert chance.roll() == 7
+    assert chance.steal([0, 0, 1, 0, 0]) == 2  # hand holds resource 2
+    assert chance.roll() == 8
+    assert chance.steal([0, 0, 0, 1, 0]) == 3  # hand holds resource 3
+    assert chance.roll() == 9
+    with pytest.raises(ChanceExhausted):
+        chance.roll()
+    assert chance.steal([0, 0, 0, 0, 0]) is None
+
+
+def test_paired_chance_steal_exhausts_rather_than_corrupts_a_hand_it_does_not_fit():
+    """A recorded steal that names a resource the current hand does not
+    hold (the fork has diverged from the throwaway script's own path) is
+    treated as exhaustion of the "steal" kind, not replayed blindly --
+    replaying it anyway would drive that resource's count negative in
+    `hexset.robber.steal` (which does not itself floor it) and silently
+    corrupt every later reader of `state.hands`, which is what this run's
+    smoke test found driving the engine's own trade-cycle assertion."""
+    chance = _PairedChance({"steal": [2]})  # recorded: took resource 2
+    with pytest.raises(ChanceExhausted):
+        chance.steal([1, 0, 0, 0, 0])  # hand holds only resource 0
+
+
+def test_record_chance_script_groups_by_kind(small_bank):
+    records = list(read(str(small_bank)))
+    record = records[0]
+    positions = list(judged_positions(record, game_index=0))
+    if not positions:
+        pytest.skip("this bank's one game had no judged position to script from")
+    pos = positions[0]
+    board = board_of(record)
+    events = _record_chance_script(pos.game, board, 12345, 20)
+    assert "roll" in events and len(events["roll"]) >= 1
+    assert all(isinstance(v, int) for v in events.get("steal", []))
+
+
+def test_play_fork_is_deterministic_given_the_same_script(small_bank):
+    records = list(read(str(small_bank)))
+    record = records[0]
+    positions = list(judged_positions(record, game_index=0))
+    if not positions:
+        pytest.skip("this bank's one game had no judged position to fork from")
+    pos = positions[0]
+    board = board_of(record)
+    events = _record_chance_script(pos.game, board, 999, 20)
+    first = _play_fork(
+        pos.game, board, seed="det", chance_by_kind=events, action_cap=20, suppress_current_turn=True,
+    )
+    second = _play_fork(
+        pos.game, board, seed="det", chance_by_kind=events, action_cap=20, suppress_current_turn=True,
+    )
+    assert (first.winner, first.turns, first.actions) == (second.winner, second.turns, second.actions)

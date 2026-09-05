@@ -66,9 +66,9 @@ class Action(NamedTuple):
     index. Player-to-player trading used to be the exception -- an offer is
     ten numbers, so a propose action carried `give`/`want`/`ask` alongside
     its index -- and it is no longer an action at all. The engine clears
-    trades once a turn, and after every MAIN action, by asking each seat's
-    own private gate (`hexset.trading`) -- nothing about it rides in the
-    action space.
+    trades once a turn, on the transition into `MAIN`, by asking each
+    seat's own private gate (`hexset.trading`) -- nothing about it rides in
+    the action space.
     """
 
     type: ActionType

@@ -21,6 +21,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `hexset.__version__` tried installed package metadata before the source
+  tree's `pyproject.toml`, so an editable install with stale dist-info kept
+  reporting `0.26.0` for four releases after the tree moved on; it now reads
+  `pyproject.toml` from the tree first and only falls back to installed
+  metadata when there's no tree to read.
 - A terminal leaf was scored by `Search` itself with `relative_points` — a
   zero-sum points margin — while every other leaf came back from the
   evaluator on that evaluator's own scale (a win-probability value head's

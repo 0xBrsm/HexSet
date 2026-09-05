@@ -433,6 +433,33 @@ class Heximax:
         """
         return self.gains_many(view, [received], [counterparty])[0] > 0.0
 
+    def estimate_many(
+        self, view: View, candidates: Sequence[tuple[int, Bundle]]
+    ) -> list[float]:
+        """This seat's estimate of each `(counterparty, bundle)` candidate's
+        *counterparty*-side gain: `_delta`'s own `target != knower` shape
+        (`_delta_reference`) -- "`target`'s row after `target` receives
+        `received` from `counterparty`, read entirely through `knower`'s
+        own information" -- with `target` the candidate's counterparty and
+        `knower` this seat, so nothing here reaches a hidden hand any more
+        than `gains_many` does; it is this seat's own belief and its own
+        stance standing in for an opponent model it does not have.
+
+        Read by `hexset.trading.default_offer`/`default_respond` (the
+        trade round's seam, `hexset.trading`'s "the trade round") in place
+        of the acceptance model this bot does not have yet
+        (`agents/reference/trading-final.md`, "the trade round", item 6:
+        "until it exists, the bot's own value head evaluated from that
+        seat's frame on the ledger belief").
+        """
+        if self.max_trades == 0:
+            return [-1.0] * len(candidates)
+        seat = view.perspective
+        return [
+            self._delta(view, seat, them, tuple(-n for n in bundle), seat, self._rank)
+            for them, bundle in candidates
+        ]
+
     # -- the valuation the two above are built from --------------------------
 
     def _vector(self, state: GameState, ledger: PublicLedger, knower: int) -> list[float]:

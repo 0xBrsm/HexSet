@@ -25,6 +25,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **A candidate must clear a floor, not just be positive, to trade.**
+  `hexset.trading.TRADE_FLOOR` gates both sides of a deal — `trade_event`,
+  `execute_trade` and `GET .../trade/acceptable` all read the same
+  `clears_floor` predicate now, in place of a bare `> 0.0`. Ships at `0.0`
+  (unchanged behaviour) until the trade lab's paired-chance judge measures
+  the gate's real resolution.
 - **heximax answers a whole trade event's candidates in one pass.**
   `Heximax.gains_many` batches every candidate a trade event asks about into
   one vectorised evaluation (`HonestEvaluator.score_many` over a

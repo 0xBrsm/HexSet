@@ -14,23 +14,24 @@ Registered `agents/reference/trading-final.md`, superseding the shipped
 * Each seat's **gate** is `gains_many(view, receiveds, counterparties) ->
   list[float]`: that seat's own private gain, in whatever unit its value is,
   for each candidate at once, read through that seat's own information-set
-  `View`. A deal *clears* only when both sides' gain is strictly positive --
-  no seat's own gate can be forced into a trade it prices at zero or less.
-* Once a turn, after the roll and the robber, and again after every MAIN
-  action the current player takes, the engine enumerates every coverable
-  candidate exchange, asks the current player's gate once over all of them,
-  keeps the strictly positive subset, asks each counterparty's gate once
-  over its own accepted subset, keeps the strictly positive subset of
-  *that*, and clears the one candidate `Game.trade_rule` ranks highest --
-  `"egalitarian"` (the default): the smaller of the two private gains;
-  `"nash"`: their product; `"actor"`: the current player's own gain. Ties
-  break on the actor's own gain, then a canonical bundle order, then the
-  lower counterparty seat, for determinism only. Then it loops: the private
-  gates are re-evaluated on the position the last trade left, and clearing
-  continues until nothing clears. There is no budget: the acting seat's own
-  gain is strictly positive at every step, the state space is finite, so no
-  cycle is possible. `Game.max_trades` is an off switch (`0`), not a budget;
-  `None` is the unbounded default.
+  `View`. A deal *clears* only when both sides' gain exceeds `TRADE_FLOOR`
+  (τ) -- no seat's own gate can be forced into a trade it prices at or below
+  the floor.
+* Once a turn, after the roll and the robber, the engine enumerates every
+  coverable candidate exchange, asks the current player's gate once over all
+  of them, keeps the subset that clears the floor, asks each counterparty's
+  gate once over its own accepted subset, keeps the subset of *that* which
+  clears the floor, and clears the one candidate `Game.trade_rule` ranks
+  highest -- `"egalitarian"` (the default): the smaller of the two private
+  gains; `"nash"`: their product; `"actor"`: the current player's own gain.
+  Ties break on the actor's own gain, then a canonical bundle order, then
+  the lower counterparty seat, for determinism only. Then it loops: the
+  private gates are re-evaluated on the position the last trade left, and
+  clearing continues until nothing clears. There is no budget: the acting
+  seat's own gain exceeds the floor at every step -- strictly positive,
+  since `TRADE_FLOOR >= 0` -- the state space is finite, so no cycle is
+  possible. `Game.max_trades` is an off switch (`0`), not a budget; `None`
+  is the unbounded default.
 
 There are no trade actions -- no propose, respond, accept or decline -- so
 nothing here reads an opponent's hand on an actor's behalf and the action
@@ -74,6 +75,27 @@ Gate = Callable[[int, "View", Bundle, int], float]
 # `"egalitarian"` is the shipped default; `"nash"` and `"actor"` are lab-only
 # alternatives (`agents/reference/trading-final.md`, item 4).
 TRADE_RULES: tuple[str, ...] = ("egalitarian", "nash", "actor")
+
+# The clearing floor τ: a private gain must exceed this, on both sides, for
+# a candidate to be admitted at all -- `clears_floor` below is the one
+# predicate every admission point in the engine reads, so the floor is
+# applied in exactly one place. This is meant to be the gate's own measured
+# resolution under paired chance (the trade lab's phase 3,
+# `agents/reference/trading-final.md` item 4), not a chosen number: it ships
+# at `0.0` -- so nothing that cleared under the old strictly-positive rule
+# stops clearing -- until that measurement lands, at which point a
+# follow-up commit on this same branch sets the real value.
+TRADE_FLOOR: float = 0.0
+
+
+def clears_floor(gain: float) -> bool:
+    """Whether a private gain clears `TRADE_FLOOR` -- the one predicate
+    `trade_event` (both the acting seat's and each counterparty's subset),
+    `execute_trade` (the counterparty's gain) and the server's
+    `trade/acceptable` preview all read, so every admission point applies
+    the same rule."""
+    return gain > TRADE_FLOOR
+
 
 # How many of a trade event's candidates a network gate will score, at most,
 # in its one batched forward -- a network gate's own bound on its evaluation,
@@ -247,30 +269,30 @@ def trade_event(game: "Game", gate: Gate) -> list[Trade]:
     """Clear every deal the current player and one other seat both gain
     from.
 
-    Called by `hexset.game.run_trade_event`, once on the transition into
-    `Phase.MAIN` and again after every MAIN action the current player takes
-    -- so every driver (the arena's loop, the gym, the server, a search
-    stepping its own copy) gets it without having to remember to. Returns
-    the trades executed by *this* call, in the order they cleared, and
-    appends them to `game.trades`, which accumulates across every call
-    within the turn.
+    Called by `hexset.game.run_trade_event`, once a turn, on the transition
+    into `Phase.MAIN` -- so every driver (the arena's loop, the gym, the
+    server, a search stepping its own copy) gets it without having to
+    remember to. Returns the trades executed by *this* call, in the order
+    they cleared, and appends them to `game.trades`, which accumulates
+    across every call within the turn.
 
     Private gates are asked in two batches per counterparty considered: once
     for the acting seat over every coverable candidate, then once per
-    distinct counterparty over the acting seat's positive subset with it.
-    Among the candidates both sides price above zero, `game.trade_rule`
-    picks the winner (`_best_clearing`). No budget: the loop runs until
-    nothing clears.
+    distinct counterparty over the acting seat's subset that clears the
+    floor with it. Among the candidates both sides clear `TRADE_FLOOR` on,
+    `game.trade_rule` picks the winner (`_best_clearing`). No budget: the
+    loop runs until nothing clears.
 
     The single engine limit is the assertion below: an event never revisits
     a position (every seat's hand plus the public ledger). The acting seat's
-    own gain is strictly positive at every clearing, so a position that comes
-    back means a gate is broken (not strictly increasing in the acting
-    seat's own value), and that is a bug to surface rather than a knob to
-    tune. It is deliberately not a count of trades: a legitimate event of
-    one- and two-card exchanges can run longer than there are cards on the
-    table without ever repeating a position -- self-play against a network
-    gate does so in about one event in two hundred.
+    own gain exceeds the floor at every clearing -- strictly positive, since
+    `TRADE_FLOOR >= 0` -- so a position that comes back means a gate is
+    broken (not strictly increasing in the acting seat's own value), and
+    that is a bug to surface rather than a knob to tune. It is deliberately
+    not a count of trades: a legitimate event of one- and two-card exchanges
+    can run longer than there are cards on the table without ever repeating
+    a position -- self-play against a network gate does so in about one
+    event in two hundred.
     """
     # A snapshot of *this* event only: whatever a manual seat's `PendingGate`
     # recorded last event no longer describes hands that may have since
@@ -345,10 +367,11 @@ def execute_trade(game: "Game", proposer: int, counterparty: int, received: Bund
     1. **Coverage.** Both sides can actually pay their half, from the true
        hands (`holds`) -- the engine is the referee, exactly as it is for
        the automatic event.
-    2. **The counterparty's own gain.** Strictly positive, read through the
-       counterparty's own gate (`valued`) on its own view. The proposer's
-       own gate is never asked -- submitting a trade *is* the proposer's
-       consent, so a seat may compose a bundle its own gate would refuse.
+    2. **The counterparty's own gain.** Must exceed `TRADE_FLOOR`
+       (`clears_floor`), read through the counterparty's own gate (`valued`)
+       on its own view. The proposer's own gate is never asked -- submitting
+       a trade *is* the proposer's consent, so a seat may compose a bundle
+       its own gate would refuse.
 
     Also enforces the turn-timing rule: one of `proposer`/`counterparty`
     must be `game.current_player`, and the phase must be `Phase.MAIN` -- a
@@ -386,7 +409,7 @@ def execute_trade(game: "Game", proposer: int, counterparty: int, received: Bund
     trader = game.gates[counterparty] if game.gates is not None else None
     view = game.state(counterparty)
     gain = valued(trader, view, counterparty_received, proposer)
-    if gain <= 0.0:
+    if not clears_floor(gain):
         raise ValueError(f"seat {counterparty} does not want this exchange")
 
     before = [hand[:] for hand in state.hands]
@@ -408,15 +431,15 @@ def _best_clearing(
 
     Every coverable candidate is asked about, in two batches: `me`'s gate is
     asked once, over every candidate, via `valued_many`; then, only for the
-    candidates `me` priced above zero, each distinct counterparty's gate is
-    asked once, over its own accepted subset. There is no cheap pre-filter
-    left to rank candidates before a gate is asked -- the mechanic's one
-    approximation is the gate itself (`agents/reference/trading-theory.md`
-    §5) -- so every enumerated candidate costs one row in the acting seat's
-    one batched call.
+    candidates that clear `TRADE_FLOOR` for `me` (`clears_floor`), each
+    distinct counterparty's gate is asked once, over its own accepted
+    subset. There is no cheap pre-filter left to rank candidates before a
+    gate is asked -- the mechanic's one approximation is the gate itself
+    (`agents/reference/trading-theory.md` §5) -- so every enumerated
+    candidate costs one row in the acting seat's one batched call.
 
-    Among the candidates both sides price above zero, the winner is chosen
-    by `game.trade_rule`: `"egalitarian"` maximises the smaller of the two
+    Among the candidates that clear the floor on both sides, the winner is
+    chosen by `game.trade_rule`: `"egalitarian"` maximises the smaller of the two
     gains; `"nash"` maximises their product; `"actor"` maximises the acting
     seat's own gain. Ties break on the acting seat's own gain, then a
     canonical bundle order, then the lower counterparty seat -- purely for
@@ -445,13 +468,14 @@ def _best_clearing(
     thems = [them for them, _received in candidates]
     mine = ask(me, view(me), receiveds, thems)
 
-    # Group the candidates `me` priced above zero by counterparty, preserving
-    # order within each group -- exactly the candidates a sequential loop
-    # would have asked that counterparty about, just gathered into one call
-    # per counterparty instead of one call per candidate.
+    # Group the candidates that clear the floor for `me` by counterparty,
+    # preserving order within each group -- exactly the candidates a
+    # sequential loop would have asked that counterparty about, just
+    # gathered into one call per counterparty instead of one call per
+    # candidate.
     by_counterparty: dict[int, list[int]] = {}
     for i, gain in enumerate(mine):
-        if gain > 0.0:
+        if clears_floor(gain):
             by_counterparty.setdefault(thems[i], []).append(i)
     if not by_counterparty:
         return None
@@ -483,7 +507,7 @@ def _best_clearing(
         canonical = tuple(-n for n in receiveds[i])
         return (primary, gain_me, canonical, -thems[i])
 
-    cleared = [i for i, gain in theirs.items() if gain > 0.0]
+    cleared = [i for i, gain in theirs.items() if clears_floor(gain)]
     if not cleared:
         return None
     winner = max(cleared, key=key)

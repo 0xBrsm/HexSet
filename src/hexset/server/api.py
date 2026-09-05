@@ -59,7 +59,7 @@ obvious and both are load-bearing:
 The turn's trade log is public to every viewer (`hexset.trading`; there is
 no public valuation layer any more -- a seat's gate is a private judgement,
 never advertised). `POST /api/games/<code>/trade` lets a seat compose a
-bundle against any counterparty whose own gate prices it above zero
+bundle against any counterparty whose own gate clears `TRADE_FLOOR`
 (`hexset.game.Game.execute_trade`, `docs/bot-api.md` §3), on its own turn
 against anyone or during another seat's turn against that seat only;
 `GET .../trade/acceptable` is the same seat's own read-only preview of what
@@ -975,10 +975,10 @@ class Tables:
         the current player or, if `seat` itself is the current player,
         every other seat (the same turn-timing rule `execute_trade` itself
         enforces), asks that counterparty's own `gains_many` once, batched
-        over its whole candidate set, and keeps the strictly positive
-        subset. Sorted within a counterparty by that counterparty's own
-        gain, descending, capped at 12; counterparties themselves are
-        sorted the same way, by their best offer.
+        over its whole candidate set, and keeps the subset that clears
+        `TRADE_FLOOR` (`clears_floor`). Sorted within a counterparty by that
+        counterparty's own gain, descending, capped at 12; counterparties
+        themselves are sorted the same way, by their best offer.
 
         A manual (human or LLM) seat is never a counterparty here: its
         answer is asynchronous, through `state_view`'s `pending` block once
@@ -986,7 +986,7 @@ class Tables:
         enumeration (`agents/reference/trading-final.md`, item 5).
         """
         from hexset.game import Phase
-        from hexset.trading import Bundle, _candidates, valued_many
+        from hexset.trading import Bundle, _candidates, clears_floor, valued_many
 
         game = table.session.game
         if game.phase is not Phase.MAIN:
@@ -1019,7 +1019,7 @@ class Tables:
                         "gain": g,
                     }
                     for b, g in zip(bundles, gains)
-                    if g > 0.0
+                    if clears_floor(g)
                 ),
                 key=lambda d: d["gain"],
                 reverse=True,
@@ -1036,9 +1036,9 @@ class Tables:
         (over `hexset.game.Game.execute_trade`) raises `ValueError` -- turned
         into a 400 by `handle`'s caller like any other -- for a bundle
         either side can't cover, a seat that is neither the proposer nor the
-        current player, or a counterparty whose own gate does not price
-        this exchange above zero. On success it is in the sidebar log and
-        the journal exactly the way an automatically cleared trade is.
+        current player, or a counterparty whose own gate does not clear
+        `TRADE_FLOOR` on this exchange. On success it is in the sidebar log
+        and the journal exactly the way an automatically cleared trade is.
         """
         counterparty = payload.get("counterparty")
         if not isinstance(counterparty, int):

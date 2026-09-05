@@ -1,0 +1,7 @@
+500 games, 2776.9s (0.18 games/sec)
+  catanatron 3.3.0 @ d3f4ad05bb78 | PYTHONHASHSEED=0 | seed 7 | workers 8 | 8 shards of 63, seeds 7-14
+  0:DC:heximax-notrade          146/500 =  29.2% [25.4%, 33.3%]   avg VP 7.02
+  1:AB:2                        117/500 =  23.4% [19.9%, 27.3%]   avg VP 6.56
+  2:AB:2                        126/500 =  25.2% [21.6%, 29.2%]   avg VP 6.81
+  3:AB:2                        111/500 =  22.2% [18.8%, 26.0%]   avg VP 6.60
+hexset.bots pre-imported by run_ab2_duel.py (see module docstring)

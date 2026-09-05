@@ -94,8 +94,8 @@ def test_a_checkpoint_refuses_a_table_it_was_not_trained_for(checkpoint_v2):
         network_bot(path, board3).choose(start(board3, 3, random.Random(0)))
 
 
-# --- Trading: valuation/accepts off the value head, mirroring
-# `hexnet.policy.DerivedTrader` (`agents/reference/trading-design.md` §8) ---
+# --- Trading: `accepts` off the value head, mirroring
+# `hexnet.policy.DerivedTrader` ---
 
 
 @pytest.fixture
@@ -106,8 +106,8 @@ def checkpoint_valued():
     `fixtures/build_stub.py --valued`). Linear in the hand, so a one-card
     imagined successor's delta is exactly that resource's weight whatever the
     starting hand holds -- deterministic and non-degenerate enough to
-    exercise `NetworkBot.valuation`/`accepts` for real, without pretending
-    this is a trained network.
+    exercise `NetworkBot.accepts` for real, without pretending this is a
+    trained network.
     """
     board = random_base_board(random.Random(0))
     yield str(FIXTURE_VALUED), board
@@ -118,10 +118,10 @@ def checkpoint_valued():
 
 def _seated_at_main(path: str, board, seat: int = 0, hand=(1, 2, 0, 1, 3)):
     """A bot that has just chosen once at a `MAIN`-phase position with
-    `seat`'s hand pinned to `hand` -- `valuation`/`accepts` only ever answer
-    for the game `choose` last handed the bot (see `NetworkBot._seated`'s
+    `seat`'s hand pinned to `hand` -- `accepts` only ever answers for the
+    game `choose` last handed the bot (see `NetworkBot._seated`'s
     docstring), so every trading test needs one `choose` first, exactly as
-    the server's own `Tables.act` does before it ever asks for a vector.
+    the server's own `Tables.act` does before it ever asks the gate.
     """
     bot = network_bot(path, board)
     game = start(board, 4, random.Random(1))
@@ -130,20 +130,6 @@ def _seated_at_main(path: str, board, seat: int = 0, hand=(1, 2, 0, 1, 3)):
     game.state(seat, hidden=False).hands[seat] = list(hand)
     bot.choose(game)
     return bot, game
-
-
-def test_valuation_is_five_floats_in_range_and_deterministic(checkpoint_valued):
-    path, board = checkpoint_valued
-    bot, game = _seated_at_main(path, board)
-    seat = to_move(game)
-    view = game.state(seat)
-
-    first = bot.valuation(view)
-    second = bot.valuation(view)
-
-    assert len(first) == 5
-    assert all(-1.0 <= x <= 1.0 for x in first)
-    assert first == second
 
 
 def test_accepts_refuses_a_trade_with_zero_delta(checkpoint_valued):

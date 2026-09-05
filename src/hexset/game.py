@@ -461,21 +461,11 @@ def roll_dice(game: Game, roll: int | None = None) -> int:
             0 if p in game.locked else discard_count(game._state, p)
             for p in range(game._state.num_players)
         ]
-        # Arms the same way `enter_main` would, ahead of actually reaching
-        # `MAIN`: nothing reads `event_pending`/`awaiting_publish` while the
-        # phase is `DISCARD`/`ROBBER` (`run_pending_event` and `publish_due`
-        # both gate on `phase is MAIN`), so setting them here rather than
-        # once `move_robber_to` resumes into `MAIN` changes nothing about
-        # when the turn's first event actually fires -- it only records,
-        # before the detour, that this resumption is a fresh entry into
-        # `MAIN` rather than one that already happened earlier this turn
-        # (a knight played from `MAIN`, whose `event_pending` is already
-        # `False` by the time `move_robber_to` checks it, having been
-        # consumed by the `legal_actions` call that made the knight legal to
-        # choose in the first place).
+        # A seven always resumes into MAIN once discard/robber resolve --
+        # `move_robber_to` clears the turn's first trade event itself when
+        # it gets there, the same as `enter_main` would for a non-seven
+        # roll.
         game.resume_phase = Phase.MAIN
-        game.event_pending = True
-        game.awaiting_publish = True
         game.phase = Phase.DISCARD if any(game.discard_quota) else Phase.ROBBER
     else:
         before = _snapshot_hands(game)
@@ -537,15 +527,12 @@ def move_robber_to(game: Game, target: int, victim: int | None = None) -> None:
     way, rulebook: a knight "acts like the dice roll of a 7."
 
     Returns to `game.resume_phase` (`MAIN` after a seven, `MAIN` or `ROLL`
-    after a knight, depending on when it was played) and fires the trade
-    event directly, exactly once, when that resumption is not itself a
-    fresh entry into `MAIN` -- `game.event_pending` tells the two apart: a
-    seven leaves it armed (set above, in `roll_dice`, ahead of the detour) so
-    that this still-lazy first-of-the-turn event fires on the driver's own
-    schedule, the same as it always has; a knight played from `MAIN` finds
-    it already `False` (consumed by the `legal_actions` call that made the
-    knight choosable), so this resolves it exactly like any other in-`MAIN`
-    action (`build_road` and friends: mutate, then `run_trade_event`).
+    after a knight, depending on when it was played) and clears the trade
+    event immediately: a gate is a pure function of the position, asked
+    fresh every time, so there is nothing to defer. `run_trade_event`
+    no-ops itself outside `MAIN` (resuming into `ROLL`, a knight played
+    before rolling), so this is unconditional -- the same single call
+    `enter_main` makes for a non-seven roll.
     """
     _require(game, Phase.ROBBER)
     move_robber(game._state, target)
@@ -553,8 +540,7 @@ def move_robber_to(game: Game, target: int, victim: int | None = None) -> None:
         stolen = steal(game._state, game.current_player, victim, game.chance)
         _record_steal(game, game.current_player, victim, stolen)
     game.phase = game.resume_phase
-    if game.phase is Phase.MAIN and not game.event_pending:
-        run_trade_event(game)
+    run_trade_event(game)
 
 
 def _check_win(game: Game) -> None:

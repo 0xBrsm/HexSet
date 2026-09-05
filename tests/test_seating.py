@@ -189,11 +189,15 @@ def test_a_locked_seat_is_never_a_trade_counterparty():
     give(game._state, 2, Resource.ORE, 1)
     lock_seat(game, 1)
 
-    keen = tuple(1.0 if r == Resource.ORE else -1.0 for r in range(NUM_RESOURCES))
-    theirs = tuple(-v for v in keen)
-    for seat in range(game.num_players):
-        game.publish(seat, keen if seat == 0 else theirs)
-    done = trade_event(game, lambda seat, view, received, other: True)
+    # Seat 0 wants ore, everyone else wants wood back -- direction-aware, so
+    # the reverse of whichever trade clears never also prices positively
+    # (a blanket "always yes" gate would ping-pong forever between seat 0
+    # and seat 2 once the one ore has moved).
+    def gate(seat, view, received, other):
+        wanted = Resource.ORE if seat == 0 else Resource.WOOD
+        return 1.0 if received[wanted] > 0 else -1.0
+
+    done = trade_event(game, gate)
     assert done
     assert all(trade.b == 2 for trade in done)
 

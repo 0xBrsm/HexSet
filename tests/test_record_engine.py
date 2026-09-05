@@ -194,7 +194,6 @@ def test_a_journal_converts_to_a_record_that_replays(tmp_path):
     from hexset.bots import RandomBot as _RandomBot
     from hexset.game import is_over as _is_over, start as _start, to_move as _to_move
     from hexset.server.journal import Journal
-    from hexset.trading import publish_valuation as _publish
 
     board = random_base_board(random.Random(21))
     seed = 21
@@ -223,8 +222,6 @@ def test_a_journal_converts_to_a_record_that_replays(tmp_path):
     while not _is_over(game) and step < 400:
         seat = _to_move(game)
         bot = bots[seat]
-        if game.publish_due(seat):
-            _publish(game, seat, bot)
         before_hands = [hand[:] for hand in game.state(0, hidden=False).hands]
         before_held = [
             game.state(0, hidden=False).dev_cards[p][:] for p in range(4)

@@ -10,7 +10,6 @@ one such pair, which is the leak the regression guards against.
 
 from __future__ import annotations
 
-import math
 import random
 
 import pytest
@@ -30,10 +29,9 @@ from hexset.bots.heximax import (
     View,
     heximax,
 )
-from hexset.bots.heximax.search import MARGINAL_SCALE
 from hexset.ledger import SeatLedger
 from hexset.play import step_randomly
-from hexset.trading import NO_VALUATION, one_for_one, publish_valuation
+from hexset.trading import one_for_one
 from hexset.state import copy_state
 from helpers import clear_hand, give
 
@@ -317,17 +315,17 @@ def test_opponent_terms_read_the_expected_hand_not_the_true_one():
 # --- search -------------------------------------------------------------------
 
 
-def test_a_no_trade_bot_publishes_nothing_and_refuses_everything():
-    """`max_trades=0` is the whole of the no-trade referent: nothing is
-    advertised, so no bundle it is party to can have positive public
-    surplus, and the gate refuses anyway."""
+def test_a_no_trade_bot_refuses_everything():
+    """`max_trades=0` is the whole of the no-trade referent: the gate
+    prices every candidate below zero, so nothing it is party to ever
+    clears."""
     game = a_game(seed=14)
     board = game._state.board
     quiet = heximax(board, random.Random(0), mode="notrade", max_nodes=64)
     assert quiet.max_trades == 0
     view = game.state(0)
-    assert quiet.valuation(view) == NO_VALUATION
     assert quiet.accepts(view, one_for_one(0, 4), 1) is False
+    assert quiet.gains_many(view, [one_for_one(0, 4)], [1]) == [-1.0]
 
     talkers = [a_bot(game, s, max_nodes=64) for s in (1, 2, 3)]
     bots = [quiet, *talkers]
@@ -336,19 +334,15 @@ def test_a_no_trade_bot_publishes_nothing_and_refuses_everything():
     while not is_over(game) and moves < 20000:
         seat = to_move(game)
         apply(game, bots[seat].choose(game))
-        publish_valuation(game, seat, bots[seat])
         moves += 1
     assert is_over(game)
     assert all(t.a != 0 and t.b != 0 for t in game.trades)
 
 
-def test_a_trading_bot_publishes_a_vector_and_trades():
+def test_a_trading_bot_trades():
     game = a_game(seed=15)
     bots = [a_bot(game, s, max_nodes=200) for s in range(4)]
     game.gates = tuple(bots)
-    published = bots[0].valuation(game.state(0))
-    assert len(published) == NUM_RESOURCES
-    assert all(-1.0 <= v <= 1.0 for v in published)
 
     traded = 0
     moves = 0
@@ -356,7 +350,6 @@ def test_a_trading_bot_publishes_a_vector_and_trades():
         seat = to_move(game)
         cleared = len(game.trades)
         apply(game, bots[seat].choose(game))
-        publish_valuation(game, seat, bots[seat])
         traded += len(game.trades[cleared:])
         moves += 1
     assert traded > 0
@@ -379,35 +372,6 @@ def test_an_unknown_stance_or_mode_is_refused():
 
 
 # --- trading (`hexset.trading`) ------------------------------------------------
-
-
-def test_the_published_vector_is_the_squashed_marginal():
-    game = after_setup(25)
-    set_known_hand(game, 0, [0, 0, 0, 2, 2])
-    bot = a_bot(game, 25)
-    view = game.state(0)
-    published = bot.valuation(view)
-    assert len(published) == NUM_RESOURCES
-    assert all(-1.0 <= v <= 1.0 for v in published)
-    for r in range(NUM_RESOURCES):
-        assert published[r] == pytest.approx(
-            math.tanh(bot._marginal_gain(view, r) / MARGINAL_SCALE)
-        )
-    # Ordering is what the clearing rule reads, and `tanh` preserves it.
-    assert published[Resource.ORE] == max(published)
-
-
-def test_every_seat_publishes_on_one_common_scale():
-    """Not a per-decision rescaling: the clearing rule compares two seats'
-    surpluses, so a seat with small marginals must publish small numbers
-    rather than being stretched to fill the range."""
-    game = after_setup(25)
-    set_known_hand(game, 0, [0, 0, 0, 2, 2])
-    set_known_hand(game, 1, [1, 1, 1, 1, 1])
-    bot = a_bot(game, 25)
-    keen = bot.valuation(game.state(0))
-    calm = bot.valuation(game.state(1))
-    assert max(keen) != pytest.approx(max(calm))
 
 
 def test_the_gate_is_strict():

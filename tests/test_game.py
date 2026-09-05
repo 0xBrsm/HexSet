@@ -282,9 +282,9 @@ def _spy_on_trade_event(monkeypatch):
 
 def _seated(game):
     """The minimum for `run_trade_event` to reach `trade_event` rather than
-    short-circuiting on `gates is None`. An object with neither `valuation`
-    nor `accepts` trades nothing -- these tests count the *call*, not
-    whether anything clears."""
+    short-circuiting on `gates is None`. An object with no trading methods
+    at all trades nothing -- these tests count the *call*, not whether
+    anything clears."""
     n = game._state.num_players
     game.gates = tuple(object() for _ in range(n))
     return game
@@ -416,14 +416,13 @@ def test_trade_event_never_runs_during_discard_resolution(monkeypatch):
     assert calls == []  # finishing discards moves to ROBBER, not MAIN
 
     move_robber_to(game, (game._state.robber + 1) % game._state.board.num_hexes)
-    # `enter_main` only arms `event_pending` now -- it does not call
-    # `trade_event` itself any more (the PI amendment "publish points and
-    # the event trigger"). The event still runs exactly once, the first
-    # time anything observes the game for the current player.
+    # `enter_main` clears the turn's first trade event immediately, inside
+    # this same call -- there is no lazy trigger left to fire on a later
+    # observation.
     assert game.phase is Phase.MAIN
-    assert calls == []
+    assert calls == [Phase.MAIN]
     legal_actions(game)
-    assert calls == [Phase.MAIN]  # the one legitimate trigger: entering MAIN
+    assert calls == [Phase.MAIN]  # legal_actions triggers nothing of its own
 
 
 # --- every playable card before the roll, not only the knight (rulebook,

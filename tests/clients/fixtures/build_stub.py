@@ -13,13 +13,13 @@ phantom engine bug, so the mask is the only thing this graph reads.
 `--valued` breaks the "zero value" half of that on purpose: it reads
 `own_hand` through a fixed per-resource weight and broadcasts the result to
 every seat, so a caller that prices one more card of each resource against
-the current hand (`NetworkBot.valuation`/`accepts`, `agents/reference/
-trading-design.md` §8) sees five *different*, non-zero deltas instead of a
-graph that "has no opinion" by construction. Still deterministic and still
-legal-only over the policy heads -- only `value` moves. `--fixed-batch` pins
-every declared shape's batch axis to the literal `1` instead of the dynamic
-`B` symbol, which is what `V2Policy._batchable` has to detect and fall back
-from when a caller wants more than one row scored at once.
+the current hand (`NetworkBot.accepts`/`accepts_many`) sees five *different*,
+non-zero deltas instead of a graph that "has no opinion" by construction.
+Still deterministic and still legal-only over the policy heads -- only
+`value` moves. `--fixed-batch` pins every declared shape's batch axis to the
+literal `1` instead of the dynamic `B` symbol, which is what
+`V2Policy._batchable` has to detect and fall back from when a caller wants
+more than one row scored at once.
 
 Three files besides the plain stub, because each difference is the whole
 point of its fixture: a loader that feeds a graph every field it happens to
@@ -72,7 +72,6 @@ INPUTS = [
     ("hand_totals", TP.INT64, [B, PLAYERS]),
     ("own_dev", TP.INT64, [B, DEV]),
     ("dev_totals", TP.INT64, [B, PLAYERS]),
-    ("valuations", TP.FLOAT, [B, PLAYERS, RESOURCES]),
     ("ledger_known", TP.INT64, [B, PLAYERS, RESOURCES]),
     ("ledger_unknown", TP.INT64, [B, PLAYERS]),
     ("action_mask", TP.BOOL, [B, SPACE]),
@@ -126,9 +125,9 @@ normalise("action_mask", "prior", "action_index", "act")
 
 if VALUED:
     # Five distinct, fixed weights -- not all equal -- so five different
-    # imagined-successor deltas (`NetworkBot.valuation`) come out different
-    # from one another, and a plain sum (which a broadcast bug could still
-    # pass) would not. `players_ones` broadcasts the per-hand scalar to
+    # imagined-successor deltas (`NetworkBot.accepts`/`accepts_many`) come
+    # out different from one another, and a plain sum (which a broadcast
+    # bug could still pass) would not. `players_ones` broadcasts the per-hand scalar to
     # every seat's column: this stub has no notion of *whose* row is whose,
     # only that all four should move together, which is enough to exercise
     # the batching and the arithmetic without pretending to be a trained

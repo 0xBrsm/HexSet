@@ -17,13 +17,17 @@ three declare a `pair_mask` input and a `pair_index` output for the
 one-for-one give/want heads. Trading is now one engine event with no actions
 at all (`hexset.trading`), so those graphs describe a game this engine does
 not play: there is no honest way to feed them and they are refused. 5 is
-refused too now: the knight two-step fix shrinks the flat `ActionSpace`
-(`PLAY_KNIGHT` dropped its operands), so a contract-5 graph's `action_mask`/
-`prior` are the wrong width for this engine's action space.
+refused too now, for two independent reasons that happened to land together:
+it declared a `valuations` field for the one-event mechanic's public layer,
+which is gone outright rather than replaced (`agents/reference/
+trading-final.md`, item 1); and the knight two-step fix shrinks the flat
+`ActionSpace` (`PLAY_KNIGHT` dropped its operands), so a contract-5 graph's
+`action_mask`/`prior` are also the wrong width for this engine's action
+space.
 
 Fixtures, and what each is:
 
-* `stub-contract6.onnx`, `stub-contract6-partial.onnx` — 25- and 23-input
+* `stub-contract6.onnx`, `stub-contract6-partial.onnx` — 24- and 22-input
   stubs (`fixtures/build_stub.py`). Real in shape, synthetic in weights: no
   genuine contract-6 export exists on any box this repo runs on, because
   producing one needs `hexset.export_onnx`, which needs torch. Stated plainly
@@ -88,9 +92,9 @@ def _declared_inputs(path: Path) -> list[str]:
 
 def test_the_stub_fixtures_declare_the_full_and_the_partial_record():
     assert _metadata(STUB)["contract"] == "6"
-    assert len(_declared_inputs(STUB)) == 25
+    assert len(_declared_inputs(STUB)) == 24
     assert _metadata(STUB_PARTIAL)["contract"] == "6"
-    assert len(_declared_inputs(STUB_PARTIAL)) == 23
+    assert len(_declared_inputs(STUB_PARTIAL)) == 22
     assert set(_declared_inputs(STUB_PARTIAL)) < set(_declared_inputs(STUB))
 
 
@@ -108,7 +112,7 @@ def test_no_fixture_stamps_a_graph_with_a_contract_it_is_not():
     """The specific mistake PR #2 made: one number naming two graphs. The
     contract number belongs to `hexset.export_onnx._CONTRACT_VERSION`; this
     repo reads it and never assigns it."""
-    for path, declared in ((DEV_CONTRACT2, 23), (STUB, 25), (STUB_PARTIAL, 23)):
+    for path, declared in ((DEV_CONTRACT2, 23), (STUB, 24), (STUB_PARTIAL, 22)):
         assert len(_declared_inputs(path)) == declared
     assert _metadata(DEV_CONTRACT2)["contract"] != _metadata(STUB)["contract"]
 
@@ -166,7 +170,7 @@ def test_an_unknown_contract_is_refused_by_name(tmp_path):
 # --- Loading is not enough: it has to play ------------------------------------
 
 
-@pytest.mark.parametrize("path,expected_inputs", [(STUB, 25), (STUB_PARTIAL, 23)])
+@pytest.mark.parametrize("path,expected_inputs", [(STUB, 24), (STUB_PARTIAL, 22)])
 def test_a_record_contract_checkpoint_plays_legal_actions_from_every_phase(
     path, expected_inputs
 ):
@@ -193,13 +197,23 @@ def test_a_record_contract_checkpoint_plays_legal_actions_from_every_phase(
 
 
 def test_a_checkpoint_plays_on_through_a_turn_the_engine_traded_in():
-    """A network seat publishes no valuation of its own yet (that is HexNet's
-    side of the mechanic), so it never trades — but the *table* does, and the
-    record it is fed carries every seat's vector and hands that a trade has
-    moved. It has to keep playing through that."""
+    """A network seat has no gate seated here (that is HexNet's side of the
+    mechanic), so it never trades — but the *table* does, and the record it
+    is fed carries the hands a trade has moved. It has to keep playing
+    through that."""
     from hexset.clients.onnxbot import network_bot
     from hexset.game import roll_dice, to_move
-    from hexset.server.webplay import PostedValuation
+
+    class _Wants:
+        """Prices a candidate positively iff it hands this seat more of
+        `resource` than it had -- enough to clear a clean 1-for-1 swap
+        without also pricing the reverse of it positively."""
+
+        def __init__(self, resource: int):
+            self.resource = resource
+
+        def gains_many(self, view, received, counterparties):
+            return [1.0 if r[self.resource] > 0 else -1.0 for r in received]
 
     board = _board()
     bot = network_bot(str(STUB), board)
@@ -214,19 +228,14 @@ def test_a_checkpoint_plays_on_through_a_turn_the_engine_traded_in():
         hand[:] = [0, 0, 0, 0, 0]
     state.hands[mover][0] = 1
     state.hands[other][4] = 1
-    wants = (-1.0, 0.0, 0.0, 0.0, 1.0)
-    traders = [None] * 4
-    traders[mover] = PostedValuation(wants)
-    traders[other] = PostedValuation(tuple(-v for v in wants))
+    traders: list = [None] * 4
+    traders[mover] = _Wants(4)
+    traders[other] = _Wants(0)
     game.gates = tuple(traders)
-    game.publish(mover, wants)
-    game.publish(other, tuple(-v for v in wants))
 
+    # The turn's first trade event fires eagerly, inside `roll_dice`'s own
+    # `enter_main` call -- no separate observation is needed to trigger it.
     roll_dice(game, 8)
-    # The turn's first trade event runs lazily now, the first time anything
-    # observes the game for the current player (`Game.event_pending`) --
-    # rather than eagerly inside `roll_dice`'s own `enter_main` call.
-    game.state(mover)
     assert game.trades, "the engine cleared nothing to play on through"
     assert bot.choose(game) in options_for(game)
 
@@ -289,4 +298,4 @@ def test_the_record_matches_the_stubs_declared_input_shapes():
             expected = "tensor(int64)"
         assert declared.type == expected, declared.name
         checked += 1
-    assert checked == 25
+    assert checked == 24

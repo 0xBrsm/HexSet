@@ -17,9 +17,9 @@ that permutes nothing reachable cannot pass by accident.
 eligibility from the *live* true state rather than from a fact frozen at
 proposal time, so from a standing offer's proposer the observation moved
 under a counterfactual redeal. The offer block is gone with the offer
-protocol (`hexset.trading`), replaced by the seats' published valuation
-vectors, which are public by construction -- so the leak is closed by
-deletion, not by patching, and the exemption with it.
+protocol (`hexset.trading`): a seat trades by answering a private gate, and
+nothing about that gate rides in the observation at all any more -- so the
+leak is closed by deletion, not by patching, and the exemption with it.
 """
 
 from __future__ import annotations

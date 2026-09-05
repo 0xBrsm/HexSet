@@ -219,19 +219,17 @@ class PendingGate:
       not worth relying on silently.
     * As the **actor** itself, when this seat is the current player:
       `_best_clearing` asks `me`'s gate once over *every* coverable
-      candidate (`hexset.trading._candidates`, uncapped, `counterparties`
-      here is `thems` -- one entry per candidate, not a single seat
-      repeated) before any counterparty is ever consulted. A `PendingGate`
-      prices every one of them at `-1.0`, so nothing downstream ever
-      clears and no counterparty's gate is asked for this event -- but the
-      candidates are still recorded here, against whichever seat each one
-      would have gone to. This is not bounded: `_candidates`, not this
-      class, decides how many that is, and a rich, spread-out hand
-      enumerates a great many (measured 2026-09-05: a hand of 8 of each
-      resource records ~100,000 candidates in one event, several seconds).
-      `pending_for`'s cap still holds for what a viewer is ever shown; the
-      enumeration cost itself is `hexset.trading`'s, inherited from before
-      this module's own change and not addressed by it.
+      candidate (`hexset.trading._candidates`, `counterparties` here is
+      `thems` -- one entry per candidate, not a single seat repeated)
+      before any counterparty is ever consulted. A `PendingGate` prices
+      every one of them at `-1.0`, so nothing downstream ever clears and no
+      counterparty's gate is asked for this event -- but the candidates are
+      still recorded here, against whichever seat each one would have gone
+      to. `_candidates`, not this class, decides how many that is, but it
+      is now bounded by `hexset.trading.MAX_TRADE_CARDS`: at most 55
+      bundles a side over five resources, not the ~100,000 a rich,
+      spread-out hand could reach before that cap. `pending_for`'s cap
+      still holds for what a viewer is ever shown.
     """
 
     game: "Game"

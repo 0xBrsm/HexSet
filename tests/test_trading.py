@@ -16,6 +16,7 @@ from hexset.board.board import random_base_board
 from hexset.board.terrain import NUM_RESOURCES, Resource
 from hexset.game import Phase, enter_main, end_turn, imagine, start
 from hexset.trading import (
+    MAX_TRADE_CARDS,
     Trade,
     _best_clearing,
     _candidates,
@@ -163,6 +164,82 @@ def test_candidates_are_coverable_from_the_true_hands():
                 assert -received[r] <= state.hands[0][r]
             elif received[r] > 0:
                 assert received[r] <= state.hands[them][r]
+
+
+# --- the card cap (MAX_TRADE_CARDS) --------------------------------------------
+
+
+def _old_hand_multisets(hand):
+    """`_hand_multisets` before `MAX_TRADE_CARDS`: every multiset a hand can
+    cover, bounded only by what it holds -- kept here, uncapped, purely as
+    the brute-force reference the next test filters and compares against."""
+    resources = [r for r in range(NUM_RESOURCES) if hand[r] > 0]
+    counts = [0] * NUM_RESOURCES
+
+    def walk(idx):
+        if idx == len(resources):
+            if any(counts):
+                yield tuple(counts)
+            return
+        r = resources[idx]
+        for n in range(hand[r] + 1):
+            counts[r] = n
+            yield from walk(idx + 1)
+        counts[r] = 0
+
+    yield from walk(0)
+
+
+def _old_candidates(state, me, locked):
+    """`_candidates` before `MAX_TRADE_CARDS`, built on `_old_hand_multisets`
+    -- the same disjoint-sides, coverable-from-the-true-hands enumeration,
+    with no cap on either side's size."""
+    give_options = list(_old_hand_multisets(state.hands[me]))
+    for them in range(state.num_players):
+        if them == me or them in locked:
+            continue
+        receive_options = list(_old_hand_multisets(state.hands[them]))
+        for given in give_options:
+            for received in receive_options:
+                if any(g and r for g, r in zip(given, received)):
+                    continue
+                yield them, tuple(r - g for r, g in zip(received, given))
+
+
+def _sides(received) -> tuple[int, int]:
+    """A bundle's (given, received) card counts, unsigned."""
+    given = sum(-n for n in received if n < 0)
+    got = sum(n for n in received if n > 0)
+    return given, got
+
+
+def test_candidates_never_exceeds_the_card_cap_but_keeps_every_bundle_under_it():
+    """On a rich hand, `_candidates` never yields a bundle moving more than
+    `MAX_TRADE_CARDS` cards on either side, and yields exactly the bundles
+    the old, uncapped enumeration (`_old_candidates`) found at or under that
+    cap -- the cap prunes what it enumerates, it does not drop a bundle it
+    would otherwise still find."""
+    game = stocked(
+        (0, Resource.WOOD, 5),
+        (0, Resource.BRICK, 4),
+        (0, Resource.SHEEP, 2),
+        (1, Resource.WHEAT, 5),
+        (1, Resource.ORE, 4),
+    )
+    state = game._state
+    new = set(_candidates(state, 0, game.locked))
+    assert new, "a rich hand must still find candidates under the cap"
+    for _them, received in new:
+        given, got = _sides(received)
+        assert given <= MAX_TRADE_CARDS
+        assert got <= MAX_TRADE_CARDS
+
+    old_at_or_under_cap = {
+        (them, received)
+        for them, received in _old_candidates(state, 0, game.locked)
+        if all(n <= MAX_TRADE_CARDS for n in _sides(received))
+    }
+    assert new == old_at_or_under_cap
 
 
 # --- both gates strictly positive required -------------------------------------
@@ -691,6 +768,41 @@ def test_execute_trade_rejects_a_seat_trading_with_itself():
     _seated(game, [Trader(), Trader(), Trader(), Trader()])
     with pytest.raises(ValueError, match="itself"):
         execute_trade(game, 0, 0, one_for_one(WOOD, ORE))
+
+
+def test_execute_trade_refuses_a_bundle_exceeding_the_card_cap():
+    """A 4-for-1 (too much given) and a 1-for-4 (too much received) each
+    refuse with the cap's own error -- the same way `execute_trade` refuses
+    an uncoverable bundle -- before the counterparty's gate is ever asked."""
+    four_given = stocked((0, Resource.WOOD, 4), (1, Resource.ORE, 1))
+    _seated(four_given, [Trader(), Trader(lambda r, c: 1.0), Trader(), Trader()])
+    received = [0, 0, 0, 0, 0]
+    received[WOOD] = -4
+    received[ORE] = 1
+    with pytest.raises(ValueError, match="at most 3 cards a side"):
+        execute_trade(four_given, 0, 1, tuple(received))
+
+    four_received = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 4))
+    _seated(four_received, [Trader(), Trader(lambda r, c: 1.0), Trader(), Trader()])
+    received = [0, 0, 0, 0, 0]
+    received[WOOD] = -1
+    received[ORE] = 4
+    with pytest.raises(ValueError, match="at most 3 cards a side"):
+        execute_trade(four_received, 0, 1, tuple(received))
+
+
+def test_execute_trade_accepts_a_three_for_three_bundle_at_the_cap():
+    """Exactly `MAX_TRADE_CARDS` a side clears -- the cap refuses only what
+    exceeds it."""
+    game = stocked((0, Resource.WOOD, 3), (1, Resource.ORE, 3))
+    _seated(game, [Trader(), Trader(lambda r, c: 1.0), Trader(), Trader()])
+    received = [0, 0, 0, 0, 0]
+    received[ORE] = 3
+    received[WOOD] = -3
+    trade = execute_trade(game, 0, 1, tuple(received))
+    assert trade.received == tuple(received)
+    assert game._state.hands[0][ORE] == 3
+    assert game._state.hands[1][WOOD] == 3
 
 
 def test_execute_trade_bypasses_candidates_any_coverable_bundle_is_legal():

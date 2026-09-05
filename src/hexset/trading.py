@@ -40,10 +40,16 @@ coverage (`holds`) itself, which is a rules check, not information handed to
 a player.
 
 Candidate bundles are any signed bundle -- both sides nonempty, disjoint
-resource sets, each side bounded only by what that hand holds, no fixed cap
--- coverable from the true hands. `_candidates` enumerates bundles, not
-one-for-one swaps: a 2-for-1 does not arise as a sequence of 1-for-1 steps
-that each have to clear both gates on their own.
+resource sets, each side bounded by what that hand holds and by
+`MAX_TRADE_CARDS` -- coverable from the true hands. `_candidates` enumerates
+bundles, not one-for-one swaps: a 2-for-1 does not arise as a sequence of
+1-for-1 steps that each have to clear both gates on their own.
+
+A trade moves at most `MAX_TRADE_CARDS` cards on either side, a table rule
+applied to every seat alike (99.1% of the human corpus is at or under it):
+`_hand_multisets` is the one place the automatic event, the
+`trade/acceptable` preview and pending offers all draw from, and
+`execute_trade` enforces the same limit on a manually composed bundle.
 
 Every enumerated candidate is now put to the acting seat's gate -- there is
 no cheap public-surplus pre-filter left to skip a seat that would refuse
@@ -90,6 +96,15 @@ TRADE_RULES: tuple[str, ...] = ("egalitarian", "nash", "actor")
 # win-rate gain, 0.0197. A gate that claims less than this is claiming
 # something no outcome can verify, and the table does not honour it.
 TRADE_FLOOR: float = 0.0197
+
+# A trade moves at most this many cards on either side -- a table rule, not
+# a knob: the human corpus puts 99.1% of recorded trades at or under three
+# cards a side (`agents/reference/trading-final.md`). Read in one place,
+# `_hand_multisets`, which is what `_candidates` -- and so `trade_event`,
+# the server's `trade/acceptable` preview and pending offers -- all draw
+# from; `execute_trade` enforces the same limit again on a bundle composed
+# outside that enumeration.
+MAX_TRADE_CARDS = 3
 
 
 def clears_floor(gain: float) -> bool:
@@ -204,14 +219,15 @@ def one_for_one(given: int, wanted: int) -> Bundle:
 
 
 def _hand_multisets(hand: Sequence[int]):
-    """Every distinct nonempty multiset of cards this hand can cover, as
-    nonnegative counts by resource index.
+    """Every distinct nonempty multiset of cards this hand can cover, up to
+    `MAX_TRADE_CARDS` cards total, as nonnegative counts by resource index.
 
-    No cap: bounded only by what the hand holds. A generator, not a list:
-    `_candidates` below only ever needs to walk it, and a hand with several
-    resources in quantity can cover a real number of these, so building the
-    full list before anything is filtered would hold all of it in memory for
-    no reason.
+    Bounded both by what the hand holds and by `MAX_TRADE_CARDS` -- the
+    walk below prunes a branch the moment its running total would exceed
+    the cap, rather than generating every hand-coverable multiset and
+    filtering after, so a hand rich in several resources at quantity still
+    costs no more than the cap allows. A generator, not a list: `_candidates`
+    below only ever needs to walk it.
 
     Only resources actually held are walked, so a hand with one or two
     resource types never touches the combinations the other three could
@@ -220,26 +236,26 @@ def _hand_multisets(hand: Sequence[int]):
     resources = [r for r in range(NUM_RESOURCES) if hand[r] > 0]
     counts = [0] * NUM_RESOURCES
 
-    def walk(idx: int):
+    def walk(idx: int, remaining: int):
         if idx == len(resources):
             if any(counts):
                 yield tuple(counts)
             return
         r = resources[idx]
-        for n in range(hand[r] + 1):
+        for n in range(min(hand[r], remaining) + 1):
             counts[r] = n
-            yield from walk(idx + 1)
+            yield from walk(idx + 1, remaining - n)
         counts[r] = 0
 
-    yield from walk(0)
+    yield from walk(0, MAX_TRADE_CARDS)
 
 
 def _candidates(state: GameState, me: int, locked: frozenset[int]):
     """`(counterparty, bundle)` for every coverable exchange `me` could
     propose: any nonempty multiset given and any nonempty multiset received,
-    the two sides on disjoint resource sets, both coverable from the true
-    hands -- the engine is the referee, so no gate ever has to check this
-    itself.
+    each side at most `MAX_TRADE_CARDS` cards, the two sides on disjoint
+    resource sets, both coverable from the true hands -- the engine is the
+    referee, so no gate ever has to check this itself.
 
     A generator, deliberately: only resources actually held are walked. No
     filter runs before this -- there is no public vector left to check a
@@ -368,10 +384,13 @@ def execute_trade(game: "Game", proposer: int, counterparty: int, received: Bund
     Re-validates, in order, and raises `ValueError` naming the first check
     that fails:
 
-    1. **Coverage.** Both sides can actually pay their half, from the true
+    1. **The card cap.** Neither side moves more than `MAX_TRADE_CARDS`
+       cards -- the same limit `_hand_multisets`/`_candidates` enumerate
+       under, refused here the same way an uncoverable bundle is.
+    2. **Coverage.** Both sides can actually pay their half, from the true
        hands (`holds`) -- the engine is the referee, exactly as it is for
        the automatic event.
-    2. **The counterparty's own gain.** Must exceed `TRADE_FLOOR`
+    3. **The counterparty's own gain.** Must exceed `TRADE_FLOOR`
        (`clears_floor`), read through the counterparty's own gate (`valued`)
        on its own view. The proposer's own gate is never asked -- submitting
        a trade *is* the proposer's consent, so a seat may compose a bundle
@@ -403,9 +422,11 @@ def execute_trade(game: "Game", proposer: int, counterparty: int, received: Bund
     # receives -- are exactly what `counterparty` must give, the same cards
     # seen from the other side.
     give = [max(0, -n) for n in received]
+    take = [max(0, n) for n in received]
+    if sum(give) > MAX_TRADE_CARDS or sum(take) > MAX_TRADE_CARDS:
+        raise ValueError(f"a trade moves at most {MAX_TRADE_CARDS} cards a side")
     if not holds(state, proposer, give):
         raise ValueError(f"seat {proposer} cannot cover its side of this trade")
-    take = [max(0, n) for n in received]
     if not holds(state, counterparty, take):
         raise ValueError(f"seat {counterparty} cannot cover its side of this trade")
     counterparty_received = tuple(-n for n in received)

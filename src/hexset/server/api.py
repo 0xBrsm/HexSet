@@ -1035,10 +1035,12 @@ class Tables:
         are named amounts (`{"Wood": 2}`); `GameSession.execute_manual_trade`
         (over `hexset.game.Game.execute_trade`) raises `ValueError` -- turned
         into a 400 by `handle`'s caller like any other -- for a bundle
-        either side can't cover, a seat that is neither the proposer nor the
-        current player, or a counterparty whose own gate does not clear
-        `TRADE_FLOOR` on this exchange. On success it is in the sidebar log
-        and the journal exactly the way an automatically cleared trade is.
+        whose given or received side exceeds `hexset.trading.MAX_TRADE_CARDS`
+        (3) cards, either side can't cover, a seat that is neither the
+        proposer nor the current player, or a counterparty whose own gate
+        does not clear `TRADE_FLOOR` on this exchange. On success it is in
+        the sidebar log and the journal exactly the way an automatically
+        cleared trade is.
         """
         counterparty = payload.get("counterparty")
         if not isinstance(counterparty, int):

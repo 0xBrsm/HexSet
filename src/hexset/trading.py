@@ -56,6 +56,39 @@ no cheap public-surplus pre-filter left to skip a seat that would refuse
 everything (`agents/reference/trading-theory.md` §5-6): the one
 approximation this mechanic makes is the gate itself, and everything
 downstream of it is exact.
+
+## The trade round (the served table's protocol)
+
+Everything above -- `trade_event`/`_best_clearing`, fired once a turn from
+`hexset.game.enter_main`/`move_robber_to` -- is unchanged and stays the
+engine's own automatic clearing: what the arena, the bench, `record_game`
+and the gym all still play under, and what a self-play run's acceptance
+labels are drawn from (`agents/reference/trading-final.md`, "Training").
+
+`trade_round` (below) is a second, separate protocol for a *served* game
+(`hexset.server`) with a human, an LLM or a foreign bot at the table:
+propose-and-respond rather than exhaustive clearing, because a served
+table's seats answer through a wire, not through a synchronous function
+call. A session that wants it seats `game.max_trades = 0` -- the existing
+off switch, not a new flag -- so the automatic event no-ops itself on
+every `enter_main`/`move_robber_to`, and calls `trade_round(game, gates)`
+itself instead, as many times a turn as the acting seat wants: nothing
+here counts rounds or caps them, since the floor and the card cap already
+bound what one round can move. A game nobody serves never calls this at
+all and never notices it exists.
+
+One round: the current player's gate broadcasts one offer (`Bot.offer`,
+new); every other seated gate answers once (`Bot.respond`, new) --
+accept, counter, or pass; the actor's gate picks one answer to execute
+(`Bot.choose`, new) or declines them all. A gate that only has
+`gains_many` gets a sensible default for all three (`default_offer`/
+`default_respond`/`default_choose`), the same "structural, not by
+inheritance" convention `valued`/`valued_many` already give `accepts`/
+`accepts_many`; a gate with a real opponent model instead implements
+`estimate_many(view, candidates) -> list[float]` (heximax, search2), read
+by the defaults wherever they would otherwise have to guess a counterparty
+that has not answered yet with "this seat's own gain stands in for
+theirs."
 """
 
 from __future__ import annotations
@@ -537,3 +570,332 @@ def _best_clearing(
         return None
     winner = max(cleared, key=key)
     return thems[winner], receiveds[winner], mine[winner], theirs[winner]
+
+
+# ---------------------------------------------------------------------------
+# The trade round: the served table's protocol (see the module docstring,
+# "The trade round"). Everything above this line is the automatic clearing
+# house and is untouched by any of it.
+
+
+class Offer(NamedTuple):
+    """One seat's broadcast offer: `actor` proposes `received` (signed
+    positive towards `actor`, the same convention `_candidates` yields) to
+    every other seat at once."""
+
+    actor: int
+    received: Bundle
+
+
+# `Response.kind`'s legal values.
+RESPONSE_ACCEPT = "accept"
+RESPONSE_COUNTER = "counter"
+RESPONSE_PASS = "pass"
+
+
+class Response(NamedTuple):
+    """One seat's answer to an `Offer`.
+
+    `seat` is who answered. `bundle` is the exchange this response
+    proposes, `None` only for `"pass"` -- and, whichever kind it is,
+    **always signed towards the offer's own actor**, never towards `seat`:
+    for `"accept"` this is exactly `offer.received` echoed back; for
+    `"counter"` it is `seat`'s own preferred bundle, translated into the
+    actor's terms. One convention for both kinds is what lets `choose`/
+    `default_choose` price every non-`"pass"` response the same way,
+    without first working out which kind it is looking at.
+    """
+
+    seat: int
+    kind: str
+    bundle: Bundle | None = None
+
+
+def _belief_candidates(view: "View", me: int, counterparty: int) -> list[Bundle]:
+    """Every candidate `me` could counter `counterparty` with, using only
+    what `me` can actually know: `me`'s own hand exactly (`view.known[me]`,
+    exact since a `View` is always exact about its own perspective) and
+    `counterparty`'s hand from the ledger's certified lower bound
+    (`view.known[counterparty]`) -- never the true hand, which `me` may not
+    read. Mirrors `_candidates`' own enumeration shape (same disjoint-sides
+    rule, same `MAX_TRADE_CARDS` cap via `_hand_multisets`) over a per-seat
+    *known* count instead of `state.hands`, since a responding seat's
+    counter-offer is bounded by what it knows the actor holds, not by the
+    actor's true hand (`hexset.trading`'s "the trade round", item 2).
+    Bundles are signed towards `me`, the same convention `_candidates`
+    uses.
+    """
+    give_options = list(_hand_multisets(view.known[me]))
+    if not give_options:
+        return []
+    receive_options = list(_hand_multisets(view.known[counterparty]))
+    out: list[Bundle] = []
+    for given in give_options:
+        for received in receive_options:
+            if any(g and r for g, r in zip(given, received)):
+                continue  # the two sides must not share a resource
+            out.append(tuple(r - g for r, g in zip(received, given)))
+    return out
+
+
+def _estimate_many(
+    gate: object, view: "View", candidates: Sequence[tuple[int, Bundle]]
+) -> list[float]:
+    """`gate`'s best estimate of each `(counterparty, bundle)` candidate's
+    *counterparty*-side gain -- `gate.estimate_many(view, candidates)` when
+    the gate provides one (heximax, search2: read through this seat's own
+    belief or, for search2, the true state it is sanctioned to read -- see
+    each bot's own `estimate_many`), else this gate's own gain on every
+    candidate (`valued_many`), "so a plain gate offers what is best for
+    itself" (`hexset.trading`'s "the trade round", item 1). Never reaches a
+    hidden hand either way: the fallback reads only the gate's own
+    information, the same as `gains_many` always has.
+    """
+    fn = getattr(gate, "estimate_many", None)
+    if fn is not None:
+        return [float(x) for x in fn(view, list(candidates))]
+    receiveds = [b for _, b in candidates]
+    counterparties = [c for c, _ in candidates]
+    return valued_many(gate, view, receiveds, counterparties)
+
+
+def default_offer(
+    gate: object, view: "View", candidates: Sequence[tuple[int, Bundle]]
+) -> int | None:
+    """The default `offer(view, candidates) -> index | None` for a gate that
+    only has `gains_many`: the candidate maximising the actor's own gain
+    (`valued_many`) among those whose *estimated* counterparty gain clears
+    `TRADE_FLOOR` (`_estimate_many`, `clears_floor`) -- so a gate with a
+    real opponent model offers what it believes the table will actually
+    take, and a plain gate falls back to "what is best for itself" (its own
+    gain stands in for the estimate too). `None` when nothing clears the
+    estimate -- this seat passes rather than broadcasts. Ties break on the
+    actor's own gain again, then canonical bundle order, then the lower
+    counterparty seat -- the same purely-deterministic tie-break
+    `_best_clearing` uses, for the same reason (real-valued gains
+    essentially never tie in practice).
+    """
+    if not candidates:
+        return None
+    receiveds = [b for _, b in candidates]
+    thems = [c for c, _ in candidates]
+    own_gains = valued_many(gate, view, receiveds, thems)
+    estimates = _estimate_many(gate, view, candidates)
+    eligible = [i for i in range(len(candidates)) if clears_floor(estimates[i])]
+    if not eligible:
+        return None
+
+    def key(i: int) -> tuple:
+        canonical = tuple(-n for n in receiveds[i])
+        return (own_gains[i], canonical, -thems[i])
+
+    return max(eligible, key=key)
+
+
+def default_respond(gate: object, view: "View", offer: Offer) -> Response:
+    """The default `respond(view, offer) -> Response` for a gate that only
+    has `gains_many`: accept outright when this seat's own gain on the
+    offered exchange clears `TRADE_FLOOR`; else counter with the bundle
+    this seat can actually propose (`_belief_candidates`: its own hand
+    exactly, the actor's hand from the ledger's known lower bound)
+    maximising this seat's own gain among those whose *estimated* actor
+    gain clears the floor (`_estimate_many`); else pass. Ties among
+    counters break the same way `default_offer`'s do.
+    """
+    me = view.perspective
+    actor = offer.actor
+    received_for_me = tuple(-n for n in offer.received)
+    gain = valued(gate, view, received_for_me, actor)
+    if clears_floor(gain):
+        return Response(me, RESPONSE_ACCEPT, offer.received)
+
+    candidates = _belief_candidates(view, me, actor)
+    if candidates:
+        counterparties = [actor] * len(candidates)
+        own_gains = valued_many(gate, view, candidates, counterparties)
+        estimates = _estimate_many(gate, view, list(zip(counterparties, candidates)))
+        eligible = [i for i in range(len(candidates)) if clears_floor(estimates[i])]
+        if eligible:
+
+            def key(i: int) -> tuple:
+                canonical = tuple(-n for n in candidates[i])
+                return (own_gains[i], canonical)
+
+            best = max(eligible, key=key)
+            return Response(me, RESPONSE_COUNTER, tuple(-n for n in candidates[best]))
+
+    return Response(me, RESPONSE_PASS)
+
+
+def default_choose(
+    gate: object, view: "View", responses: Sequence[Response]
+) -> int | None:
+    """The default `choose(view, responses) -> index | None` for a gate
+    that only has `gains_many`: the acceptance or counter with the highest
+    own gain above `TRADE_FLOOR`, else `None`. Every non-`"pass"`
+    response's bundle is already signed towards this seat (`Response`'s own
+    convention), so this is one batched `valued_many` over them.
+    """
+    eligible = [
+        (i, r) for i, r in enumerate(responses)
+        if r.kind != RESPONSE_PASS and r.bundle is not None
+    ]
+    if not eligible:
+        return None
+    receiveds = [r.bundle for _, r in eligible]
+    counterparties = [r.seat for _, r in eligible]
+    gains = valued_many(gate, view, receiveds, counterparties)
+
+    best_idx: int | None = None
+    best_key: tuple | None = None
+    for (i, r), gain in zip(eligible, gains):
+        if not clears_floor(gain):
+            continue
+        canonical = tuple(-n for n in r.bundle)
+        key = (gain, canonical, -r.seat)
+        if best_key is None or key > best_key:
+            best_key, best_idx = key, i
+    return best_idx
+
+
+def _execute_round(
+    game: "Game", gates: Sequence[object], actor: int, counterparty: int, received: Bundle
+) -> Trade | None:
+    """Execute one round's chosen exchange, re-validating everything at the
+    moment cards actually move -- coverage both sides, the card cap, and
+    both sides' own gain read *fresh* through their own gate, never the
+    reported estimate an offer, a response or a choice was built from.
+
+    Unlike `execute_trade` (whose proposer is a human or LLM submitting a
+    bundle it composed itself -- consent, so its own gate is never asked),
+    both ends of a round are gates the engine itself asked to trade, and
+    either can misreport (a stale estimate, a gate that changed its mind
+    between answering and being chosen, an adversarial implementation) --
+    so neither report is trusted without a fresh check here, the same
+    "engine is the referee" property the clearing house has. Returns
+    `None`, executing nothing, on the first check that fails, rather than
+    raising: a round's chosen response failing here is an ordinary
+    "nothing happened", not a caller error the way a hand-composed
+    `execute_trade` bundle's failure is.
+    """
+    state = game._state
+    give = [max(0, -n) for n in received]
+    take = [max(0, n) for n in received]
+    if sum(give) > MAX_TRADE_CARDS or sum(take) > MAX_TRADE_CARDS:
+        return None
+    if not holds(state, actor, give) or not holds(state, counterparty, take):
+        return None
+
+    gain_a = valued(gates[actor], game.state(actor), received, counterparty)
+    if not clears_floor(gain_a):
+        return None
+    mirror = tuple(-n for n in received)
+    gain_b = valued(gates[counterparty], game.state(counterparty), mirror, actor)
+    if not clears_floor(gain_b):
+        return None
+
+    before = [hand[:] for hand in state.hands]
+    exchange(state, actor, counterparty, received)
+    game.ledger.apply_hand_diff(before, state.hands)
+    trade = Trade(actor, counterparty, received, gain_a=gain_a, gain_b=gain_b)
+    game.trades.append(trade)
+    game.trades_made += 1
+    return trade
+
+
+def trade_round(game: "Game", gates: Sequence[object]) -> list[Trade]:
+    """One live-table round: the current player's gate broadcasts one offer,
+    every other seated gate answers once, and the actor's gate picks one
+    answer to execute. See the module docstring, "The trade round", for how
+    this differs from -- and coexists with -- the automatic clearing house
+    (`trade_event`).
+
+    `gates` is a parameter, not read off `game.gates`: a served table's own
+    session already keeps its seat -> gate mapping (bots, `PendingGate`s)
+    and drives this explicitly, rather than through the engine's own
+    trade-event dispatch from `enter_main`/`move_robber_to`, so nothing
+    here assumes a `Game` is even seated with `gates` at all. A caller runs
+    this as many times a turn as the acting seat wants -- once per
+    broadcast, nothing here counts rounds or caps them.
+
+    Every method asked of a gate -- `offer`, `respond`, `choose` -- is read
+    with `getattr`, falling back to this module's own `default_offer`/
+    `default_respond`/`default_choose` for a gate that only has
+    `gains_many` (or less), the same "structural, not by inheritance"
+    convention `valued`/`valued_many` already give `accepts`/`accepts_many`.
+
+    A responding seat with no gate at all (`gates[seat] is None`) is
+    silently skipped, exactly as an unseated seat is invisible to the
+    clearing house; a locked seat is never asked, exactly as
+    `_candidates`/`trade_event` already never counterparty one.
+
+    Returns the one `Trade` executed, as a one-element list, or `[]` if:
+    the game is not in `Phase.MAIN`; the current player has no gate, no
+    coverable candidate, or its own gate passed on every one of them;
+    nobody else answered; the actor's own gate declined every answer; or
+    the chosen exchange failed the engine's fresh re-check at execution
+    (`_execute_round`) -- the same "engine is the referee" property the
+    clearing house has: neither side's own report is trusted at the moment
+    cards actually move.
+    """
+    from .game import Phase  # local: avoids a game/trading import cycle, as `execute_trade` does
+
+    if game.phase is not Phase.MAIN:
+        return []
+
+    state = game._state
+    me = game.current_player
+    if me in game.locked:
+        return []
+    actor_gate = gates[me]
+    if actor_gate is None:
+        return []
+
+    candidates = list(_candidates(state, me, game.locked))
+    if not candidates:
+        return []
+
+    actor_view = game.state(me)
+    offer_fn = getattr(actor_gate, "offer", None)
+    index = (
+        offer_fn(actor_view, candidates)
+        if offer_fn is not None
+        else default_offer(actor_gate, actor_view, candidates)
+    )
+    if index is None or not (0 <= index < len(candidates)):
+        return []
+    _them0, received0 = candidates[index]
+    offer = Offer(me, received0)
+
+    responses: list[Response] = []
+    for seat in range(state.num_players):
+        if seat == me or seat in game.locked:
+            continue
+        gate = gates[seat]
+        if gate is None:
+            continue
+        seat_view = game.state(seat)
+        respond_fn = getattr(gate, "respond", None)
+        response = (
+            respond_fn(seat_view, offer)
+            if respond_fn is not None
+            else default_respond(gate, seat_view, offer)
+        )
+        responses.append(response)
+    if not responses:
+        return []
+
+    choose_fn = getattr(actor_gate, "choose", None)
+    chosen = (
+        choose_fn(actor_view, responses)
+        if choose_fn is not None
+        else default_choose(actor_gate, actor_view, responses)
+    )
+    if chosen is None or not (0 <= chosen < len(responses)):
+        return []
+    response = responses[chosen]
+    if response.kind == RESPONSE_PASS or response.bundle is None:
+        return []
+
+    trade = _execute_round(game, gates, me, response.seat, response.bundle)
+    return [] if trade is None else [trade]

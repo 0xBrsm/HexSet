@@ -9,6 +9,25 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added
+
+- `hexset.trading.trade_round`: a second trading protocol, for a *served*
+  game only (`hexset.server`) -- propose-and-respond rather than the
+  engine's exhaustive clearing house (`trade_event`, unchanged and still
+  what a self-play run trains against). A session that wants it seats
+  `game.max_trades = 0` (the existing off switch) so the automatic event
+  no-ops itself, and calls `trade_round(game, gates)` itself, as many times
+  a turn as the acting seat wants -- nothing counts or caps rounds, the
+  floor and the card cap already bound what one moves. `Bot` gains four new
+  optional methods for it (`offer`, `respond`, `choose`, `estimate_many`),
+  each with a sensible default off a plain `gains_many`
+  (`hexset.trading.default_offer`/`default_respond`/`default_choose`), so
+  every existing bot plays a served table unchanged; heximax and search2
+  additionally implement `estimate_many` for real. `hexset.server.webplay.
+  PendingGate` gains the manual-seat side of the same three methods
+  (`offer`/`respond`/`choose`), recording a broadcast offer to
+  `game.pending` exactly as it already does for the clearing house.
+
 ### Changed
 
 - `hexset.mcts.Evaluator` gained a required `terminal(game) -> Sequence[float]`

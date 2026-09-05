@@ -200,8 +200,8 @@ def test_either_side_priced_at_zero_or_below_vetoes_the_deal(zeroed):
 
 
 def test_a_gain_at_or_below_the_floor_does_not_clear_but_above_it_does(monkeypatch):
-    """`TRADE_FLOOR` (`hexset.trading.TRADE_FLOOR`) ships at `0.0`, so a
-    nonzero floor is only exercised by monkeypatching it -- the same
+    """`TRADE_FLOOR` (`hexset.trading.TRADE_FLOOR`) is the measured 0.0197;
+    the floor is pinned at a round value by monkeypatching it -- the same
     admission point (`clears_floor`, read by `_best_clearing`'s "mine"
     subset) that a shipped measurement will later set for real."""
     monkeypatch.setattr(trading_mod, "TRADE_FLOOR", 1.0)

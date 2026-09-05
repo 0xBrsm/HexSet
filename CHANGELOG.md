@@ -9,6 +9,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Changed
+
+- `hexset.trading.TRADE_FLOOR` is `0.0197`, the trade gate's measured
+  resolution under paired chance (trade lab phase 3): a deal clears only when
+  both private gains exceed about two points of win probability. Trades
+  claiming less no longer clear.
+
 ### Added
 
 - **The human/LLM trading surface.** `GET /api/games/<code>/trade/acceptable`
@@ -22,6 +29,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its own once a bot's trade event finds something against this seat, with
   Confirm/Decline. MCP gains matching `trade_acceptable`, `propose_trade`,
   `confirm_trade` and `decline_trade` tools.
+- **The trade lab's paired-chance judge** (`hexset.bench.trade_lab judge`,
+  phase 3 of the registered ablation). For a sampled pre-trade position, a
+  chance script (dice, steals, discards) is drawn directly from a seeded
+  source, per kind, deep enough that both an untraded fork (the event
+  suppressed for that turn only) and a traded fork (the historical
+  clearing applied outright) can each draw from it independently all the
+  way to the action cap; a fork that still outgrows the script falls back
+  to a fresh live source and is counted. `trade_lab positions` samples the
+  judged set (a MAIN-entry event that cleared a trade) from a bank;
+  `trade_lab phase3-readouts` bins the judge's output by claimed gain,
+  paired-bootstraps the realised win-probability *and* points swing for
+  the actor, the counterparty and bystanders, fits a calibration slope,
+  reports the pooled actor interval and its half-width, and reports the
+  threshold the gate's claims hold up above (by points, the sensitive
+  readout at this gate's scale). Both the bank re-emission and the judge
+  subcommand are resumable and write progress as they go.
 
 ### Changed
 
@@ -171,6 +194,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `--from-journals` runs the same census over `hexset.server.journal`
   files instead of playing fresh games. Torch-free; a network entrant's
   trades census the same way once `hexnet.netbot` registers it.
+- **`hexset.bench.trade_lab`.** Lifts the one-event trade mechanic out of a
+  played game for a static ablation: `bank` plays and records heximax×4
+  games, and `census` replays each to every point a trade event fires,
+  respawning the same bots to re-derive the published vectors, then clears
+  every position under four selection rules — the shipped maximin-public
+  surplus rule, and three private-gain rules (actor, egalitarian, nash) that
+  skip the public-vector filter — reporting trades-per-event, bundle shape,
+  surplus split, bystander win-probability damage and rule disagreement.
+  Torch-free, multiprocessed like `hexset.bench.trade_census`. `census` also
+  reports the gain-distribution quantiles per rule; `strategic` shades one
+  rotating seat's gate (a `tau` acceptance threshold, and — for the two rules
+  that read magnitudes — a selection-key exaggeration) to check whether
+  honesty is a fixed point; `rollouts` judges 300 sampled executed trades per
+  rule by playing the position out both traded and untraded with fresh
+  `heximax` bots, comparing realised win-share swing against the gate's own
+  claimed gain.
 
 ### Fixed
 

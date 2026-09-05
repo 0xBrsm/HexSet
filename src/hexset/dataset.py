@@ -21,8 +21,8 @@ from dataclasses import dataclass
 from typing import Iterable, Iterator, Sequence
 
 from .bots.evaluate import Evaluator, Weights
-from .game import is_over, start
-from .record import Record, advance, board_of, steps
+from .game import is_over
+from .record import Record, advance, board_of, steps, open_record
 
 DEFAULT_STRIDE = 8
 
@@ -51,7 +51,7 @@ def samples_from(
         return
 
     evaluator = Evaluator(board_of(record), weights)
-    state_game = start(board_of(record), record.num_players, random.Random(record.seed))
+    state_game = open_record(record)
     total = len(record.actions)
 
     for step, (action, trades) in enumerate(steps(record)):

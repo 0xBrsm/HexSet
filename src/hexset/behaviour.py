@@ -15,14 +15,13 @@ so its figures are targets to notice divergence from, not ground truth to fit to
 
 from __future__ import annotations
 
-import random
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Iterable, Sequence
 
 from .actions import ActionType
-from .game import start, to_move
-from .record import Record, advance, board_of, steps
+from .game import to_move
+from .record import Record, advance, steps, open_record
 
 # The card plays worth counting, and the names they are reported under.
 TRACKED: dict[ActionType, str] = {
@@ -68,7 +67,7 @@ def walk(record: Record, game: int) -> Walk | None:
     if record.winner is None:
         return None
 
-    live = start(board_of(record), record.num_players, random.Random(record.seed))
+    live = open_record(record)
     total = max(1, len(record.actions))
     plays: list[Play] = []
 

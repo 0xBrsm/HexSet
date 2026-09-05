@@ -25,6 +25,7 @@ from .trading import Bundle, Trade, checked_valuation, execute_trade, judged, tr
 from .state import (
     NO_OWNER,
     GameState,
+    can_place_road,
     copy_state,
     new_game,
     place_road,
@@ -555,6 +556,10 @@ def place_initial_road(game: Game, edge: int) -> None:
 def roll_dice(game: Game, roll: int | None = None) -> int:
     """Roll, or resolve a given roll so a search can enumerate the outcomes."""
     _require(game, Phase.ROLL)
+    if pending_free_roads(game):
+        raise ValueError("place the remaining free roads before rolling")
+    # Unplaceable credit expires with the card's resolution.
+    game.free_roads = 0
     if roll is None:
         roll = game.chance.roll()
     game.last_roll = roll
@@ -650,9 +655,20 @@ def _check_win(game: Game) -> None:
         game.phase = Phase.GAME_OVER
 
 
+def pending_free_roads(game: Game) -> list[int]:
+    """Placeable roads still owed by a Road Building card."""
+    if game.free_roads <= 0:
+        return []
+    return [
+        edge for edge in range(game._state.board.topology.num_edges)
+        if can_place_road(game._state, game.current_player, edge)
+    ]
+
+
 def build_road(game: Game, edge: int) -> None:
     """Build a road, spending a free road from road building if one is owed."""
-    _require(game, Phase.MAIN)
+    if game.phase is not Phase.ROLL or game.free_roads <= 0:
+        _require(game, Phase.MAIN)
     before = _snapshot_hands(game)
     if game.free_roads > 0:
         game.free_roads -= 1
@@ -733,8 +749,8 @@ def play_road_building_card(game: Game) -> None:
     Action phase," which names no exception for this card. `run_trade_event`
     below no-ops itself outside `MAIN` (see its own docstring), so playing
     this before rolling credits the two free roads without touching the
-    trade event; they are placed afterwards with ordinary `build_road` calls,
-    which still require `MAIN`, same as any other build.
+    trade event. The free `build_road` calls resolve in `ROLL` before dice
+    are drawn. Paid building remains MAIN-only.
     """
     if game.phase not in (Phase.ROLL, Phase.MAIN):
         raise ValueError(f"cannot play road building in {game.phase.name}")

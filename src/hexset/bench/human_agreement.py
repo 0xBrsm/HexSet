@@ -96,9 +96,9 @@ from hexset.actions import (
     legal_actions,
 )
 from hexset.arena import Z_95, leaf_evaluator, load_checkpoint, wilson
-from hexset.game import imagine, is_over, start, to_move
+from hexset.game import imagine, is_over, to_move
 from hexset.mcts import Leaf
-from hexset.record import Record, advance, board_of, read as read_records, steps
+from hexset.record import Record, advance, board_of, open_record, read as read_records, steps
 
 PROGRESS_BUCKETS = 5
 
@@ -201,7 +201,7 @@ def positions(
     """Replay one record, yielding every non-trivial decision worth scoring.
 
     The loop is `hexset.dataset.samples_from`'s and `hexset.behaviour.walk`'s:
-    start from the board and seed the record carries, step `actions_of` in order,
+    start from the board and chance the record carries, step `actions_of` in order,
     and read the live game before each action rather than after. Legality is not
     rechecked -- `hexset.record.replay` is what verifies a record -- but a taken
     action that is not in the option set is still counted rather than dropped,
@@ -212,7 +212,7 @@ def positions(
     has moved on. `randomize_deck=False`: the copy is scored, never stepped, and
     reshuffling would put a different deck under an encoder that reads it.
     """
-    live = start(board_of(record), record.num_players, random.Random(record.seed))
+    live = open_record(record)
     scratch = random.Random(0)
     total = max(1, len(record.actions))
     tally.games += 1

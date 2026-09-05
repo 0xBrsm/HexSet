@@ -26,6 +26,7 @@ from .game import (
     play_knight_card,
     play_monopoly_card,
     play_road_building_card,
+    pending_free_roads,
     play_year_of_plenty_card,
     players_owing_discards,
     roll_dice,
@@ -265,6 +266,9 @@ def legal_actions(game: Game) -> list[Action]:
         return [Action(ActionType.SETUP_ROAD, e) for e in legal_initial_roads(game)]
 
     if game.phase is Phase.ROLL:
+        roads = pending_free_roads(game)
+        if roads:
+            return [Action(ActionType.BUILD_ROAD, edge) for edge in roads]
         # Production phase (rulebook): "You may play a development card
         # before rolling dice" -- every playable card, not only the knight,
         # so this reuses the same `_card_actions` MAIN uses below (it

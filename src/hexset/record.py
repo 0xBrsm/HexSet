@@ -289,6 +289,18 @@ class _SeedChecked(Chance):
         return got
 
 
+def open_record(record: Record) -> Game:
+    """Open a record at its initial position, preserving chance and first seat.
+
+    Incremental consumers must use this instead of reseeding a fresh game.
+    Use `steps`/`advance` to walk it, or `replay` for full validation.
+    """
+    scripted = Scripted(record.chance)
+    chance = scripted if record.seed is None else _SeedChecked(scripted, Live(random.Random(record.seed)))
+    return start(board_of(record), record.num_players, random.Random(record.seed),
+                 first=record.first, chance=chance)
+
+
 def replay(record: Record) -> Game:
     """Re-play a record, checking it still describes the game it claims to.
 
@@ -301,16 +313,7 @@ def replay(record: Record) -> Game:
     pre-v2 `Record` relied on implicitly, kept as an explicit check instead
     of a silent dependency.
     """
-    scripted = Scripted(record.chance)
-    if record.seed is None:
-        chance: Chance = scripted
-        rng = random.Random()
-    else:
-        chance = _SeedChecked(scripted, Live(random.Random(record.seed)))
-        rng = random.Random(record.seed)
-    game = start(
-        board_of(record), record.num_players, rng, first=record.first, chance=chance
-    )
+    game = open_record(record)
     for step, (action, trades) in enumerate(steps(record)):
         if action not in legal_actions(game):
             raise ReplayError(
@@ -321,6 +324,9 @@ def replay(record: Record) -> Game:
         except ChanceError as error:
             raise ReplayError(f"step {step}: {error}") from error
 
+    scripted = game.chance._scripted if isinstance(game.chance, _SeedChecked) else game.chance
+    if scripted.index != len(record.chance):
+        raise ReplayError(f"unconsumed chance events: {len(record.chance) - scripted.index}")
     if (game.won_by, game.turns) != (record.winner, record.turns):
         raise ReplayError(
             f"replay ended {game.won_by} after {game.turns} turns, "

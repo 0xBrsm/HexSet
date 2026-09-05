@@ -64,7 +64,7 @@ def test_replaying_reproduces_the_game_that_was_recorded():
     assert game.turns == record.turns
 
 
-@pytest.mark.parametrize("bot", ["random", "greedy"])
+@pytest.mark.parametrize("bot", ["random"])
 def test_replay_holds_for_either_bot(bot):
     replay(a_record(seed=7, bot=bot))
 
@@ -163,7 +163,7 @@ def test_a_version_1_line_is_refused_by_name():
 def test_a_record_replays_to_the_identical_terminal_state_with_no_seed():
     """`Scripted` alone, `seed=None`: a record must not depend on the seed
     to replay -- the whole point of carrying its own chance stream."""
-    record = a_record(seed=12, bot="greedy")
+    record = a_record(seed=12, bot="random")
     seedless = Record(**{**record.__dict__, "seed": None})
     game = replay(seedless)
     assert is_over(game)

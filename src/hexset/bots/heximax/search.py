@@ -63,11 +63,12 @@ import random
 from dataclasses import dataclass, field
 from typing import Sequence
 
+import numpy as np
+
 from hexset.actions import Action, ActionType, apply, legal_actions, victim_of
 from hexset.board.board import Board
 from hexset.board.terrain import NUM_RESOURCES
 from hexset.chance import Forced, Live
-from ..evaluate import hand_shifted
 from ..search2 import STANCES, options_for
 from hexset.game import ROLL_ODDS, Game, Phase, imagine, is_over, roll_dice, to_move
 from hexset.ledger import PublicLedger
@@ -401,14 +402,28 @@ class Heximax:
         This is the mechanic's private gate: `hexset.trading.trade_event`
         clears the candidate both sides price above zero and
         `Game.trade_rule` ranks highest.
+
+        One event asks this over every coverable candidate at once (a
+        typical event's 100-200), which is why this answers the whole batch
+        in one pass (`_delta_many`) rather than looping `_delta` -- a trade
+        candidate only ever moves two hands, so every candidate's post-trade
+        position differs from every other's only in `target`'s and its own
+        counterparty's hand (and, honest only, the shared residual pool the
+        rest of the table's `expected_hand` draws from); everything else
+        `HonestEvaluator.terms` reads -- the board terms, VP cards, points --
+        is the same real `state` for the whole event and is computed once
+        per seat (`HonestEvaluator.score_many`) instead of once per
+        candidate.
         """
         if self.max_trades == 0:
             return [-1.0] * len(received)
         seat = view.perspective
-        return [
-            self._delta(view, seat, seat, r, c, self._rank)
-            for r, c in zip(received, counterparties)
-        ]
+        if not self.omniscient and self.evaluator.exact_progress_samples:
+            return [
+                self._delta_scalar_honest(view, seat, r, c, self._rank)
+                for r, c in zip(received, counterparties)
+            ]
+        return self._delta_many(view, seat, seat, list(received), list(counterparties), self._rank)
 
     def accepts(self, view: View, received: Bundle, counterparty: int) -> bool:
         """Take this exchange iff it strictly improves my own evaluation --
@@ -457,42 +472,135 @@ class Heximax:
     ) -> float:
         """`target`'s row after `target` receives `received` from
         `counterparty`, less what it is now, read entirely through
-        `knower`'s own information.
-
-        No state clone, no ledger copy, no fresh `View`, for the one shape
-        every real caller uses (`target == knower`: `accepts`/`accepts_many`
-        only ever price the acting seat's own row). A trade only ever moves
-        two hands, so only `target`'s and `counterparty`'s hand-dependent
-        terms -- and the shared pool the rest of the table's `expected_hand`
-        draws from -- can move at all; `_after_trade_belief` derives them
-        from the event's own pre-trade belief (`belief_for`, already
-        memoized for the whole event) instead of rebuilding a `View` from a
-        cloned `GameState`/`PublicLedger`, and `score` is called fresh for
-        every seat on the result, reusing the same board terms (`_walk` is
-        keyed on board occupancy alone, untouched by a trade) and the same
-        weighted sum `evaluate` always used -- so this is exact wherever the
-        ledger is in sync with the hands it describes, which every position
-        `hexset.game` reaches on its own keeps true (`hexset.ledger`'s own
-        invariant). `target != knower` -- nothing in this repo calls `_delta`
-        that way -- falls back to the exact, clone-based reference path
-        rather than extend the fast path to a shape nothing exercises.
+        `knower`'s own information -- `_delta_many` with one candidate, for
+        the one shape every real caller uses (`target == knower`:
+        `accepts`/`accepts_many` only ever price the acting seat's own row).
+        `target != knower` -- nothing in this repo calls `_delta` that way --
+        falls back to the exact, clone-based reference path rather than
+        extend the fast path to a shape nothing exercises.
         """
         if target != knower:
             return self._delta_reference(view, knower, target, received, counterparty, rank)
+        if not self.omniscient and self.evaluator.exact_progress_samples:
+            return self._delta_scalar_honest(view, knower, received, counterparty, rank)
+        return self._delta_many(view, knower, target, [received], [counterparty], rank)[0]
 
+    def _delta_many(
+        self, view: View, knower: int, target: int, received: list[Bundle],
+        counterparties: list[int], rank,
+    ) -> list[float]:
+        """`_delta`, batched over every candidate at once: one shared
+        pre-trade row (`before`, unchanged by any candidate) and one
+        vectorised post-trade score (`HonestEvaluator.score_many`) over
+        every candidate's hands (`_post_trade_hands`), rather than a fresh
+        `score` per seat per candidate.
+
+        Exact wherever `_delta` was: a trade only ever moves two hands (and,
+        honest only, the shared residual pool the rest of the table's
+        `expected_hand` draws from), so `_post_trade_hands` builds exactly
+        the array `score_many` needs and nothing here revisits the board,
+        the ledger, or a candidate's coverage -- the engine already checked
+        that. `target == knower` throughout, same invariant as `_delta`.
+        """
+        state = view.state
+        ledger = view.ledger
+        before = rank(self._vector(state, ledger, knower), target)
+        if not received:
+            return []
+        hands = self._post_trade_hands(state, ledger, knower, target, received, counterparties)
+        after = self.evaluator.score_many(state, knower, hands)
+        return [rank(row, target) - before for row in after.tolist()]
+
+    def _post_trade_hands(
+        self, state: GameState, ledger: PublicLedger, knower: int, target: int,
+        received: list[Bundle], counterparties: list[int],
+    ) -> np.ndarray:
+        """`(candidates, seat, resource)`: every seat's hand after each
+        candidate trade, exact for `target` (and, when `omniscient`, for
+        everyone), `View.expected_hand`-equivalent otherwise.
+
+        Omniscient: `hand_shifted`, batched -- every seat's hand is
+        `state.hands[seat]` except `target`'s (add `received`) and that
+        row's own counterparty's (subtract it).
+
+        Honest: only `target`'s and each row's own counterparty's `known`
+        differ from the event's shared pre-trade belief (`belief_for`,
+        already memoized for the whole event), and only the shared residual
+        pool moves under them -- the same derivation `_after_trade_belief`
+        made per candidate, done here over every candidate at once.
+        `target`'s row is always exact (its `unknown` is zero by
+        construction, perspective and target being the same seat), so one
+        formula -- `known + share * pool`, `share` zero wherever `unknown`
+        is zero or the pool is empty -- reproduces `View.expected_hand` for
+        every seat without a separate exact/estimated branch.
+        """
+        n = len(received)
+        num_players = state.num_players
+        received_arr = np.array(received, dtype=np.float64)
+        counterparty_arr = np.array(counterparties, dtype=np.intp)
+        rows = np.arange(n)
+
+        if self.omniscient:
+            hands = np.broadcast_to(
+                np.array(state.hands, dtype=np.float64), (n, num_players, NUM_RESOURCES)
+            ).copy()
+            hands[rows, target, :] += received_arr
+            hands[rows, counterparty_arr, :] -= received_arr
+            return hands
+
+        belief0 = self.evaluator.belief_for(state, ledger, knower)
+        known0 = np.array(belief0.known, dtype=np.float64)
+        unknown0 = np.array(belief0.unknown, dtype=np.float64)
+        pool0 = np.array(belief0.pool, dtype=np.float64)
+        sizes0 = np.array(belief0.sizes, dtype=np.float64)
+
+        gains = np.maximum(received_arr, 0.0)
+        losses = np.maximum(-received_arr, 0.0)
+
+        known_target0 = known0[target]
+        new_known_target = known_target0 + gains - losses
+
+        known_cp0 = known0[counterparty_arr]
+        new_known_cp = known_cp0 + losses - np.minimum(gains, known_cp0)
+
+        moved = (new_known_target - known_target0) + (new_known_cp - known_cp0)
+        pool = np.maximum(0.0, pool0 - moved)
+        pool_size = pool.sum(axis=1)
+
+        new_size_cp = sizes0[counterparty_arr] - gains.sum(axis=1) + losses.sum(axis=1)
+        unknown_cp = new_size_cp - new_known_cp.sum(axis=1)
+
+        known = np.broadcast_to(known0, (n, num_players, NUM_RESOURCES)).copy()
+        unknown = np.broadcast_to(unknown0, (n, num_players)).copy()
+        known[rows, target, :] = new_known_target
+        unknown[rows, target] = 0.0
+        known[rows, counterparty_arr, :] = new_known_cp
+        unknown[rows, counterparty_arr] = unknown_cp
+
+        pool_size_safe = np.where(pool_size > 0.0, pool_size, 1.0)
+        share = np.where(
+            (unknown > 0.0) & (pool_size > 0.0)[:, None],
+            unknown / pool_size_safe[:, None],
+            0.0,
+        )
+        return known + share[:, :, None] * pool[:, None, :]
+
+    def _delta_scalar_honest(
+        self, view: View, knower: int, received: Bundle, counterparty: int, rank,
+    ) -> float:
+        """The exact, per-candidate honest computation `_delta_many` fast-
+        paths around whenever `HonestEvaluator.exact_progress_samples` is
+        nonzero: `_progress_of` then resamples a belief per non-exact seat,
+        which `_post_trade_hands`'s plain array has no belief left to
+        resample from. Nothing shipped sets it above zero -- `target ==
+        knower` throughout, same invariant as `_delta`.
+        """
+        target = knower
         state = view.state
         ledger = view.ledger
         before = rank(self._vector(state, ledger, knower), target)
         gains = [max(0, n) for n in received]
         losses = [max(0, -n) for n in received]
-
-        if self.omniscient:
-            after = hand_shifted(
-                state, {target: received, counterparty: tuple(-n for n in received)}
-            )
-            after_vector = self.evaluator.evaluate(after, knower)
-            return rank(after_vector, target) - before
-
         belief0 = self.evaluator.belief_for(state, ledger, knower)
         belief1 = _after_trade_belief(belief0, target, counterparty, gains, losses)
         after_vector = [

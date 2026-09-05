@@ -17,6 +17,8 @@ from __future__ import annotations
 import random
 from typing import Sequence
 
+import numpy as np
+
 from hexset.board.board import Board
 from hexset.economy import COSTS, Purchase
 from ..evaluate import (
@@ -292,6 +294,92 @@ class HonestEvaluator:
             total += weight * value
         if values[0] >= WINNING_POINTS:
             total += WIN_SCORE
+        return total
+
+    def score_many(self, state: GameState, knower: int, hands: np.ndarray) -> np.ndarray:
+        """`score`, over every row of `hands` at once: `(candidates, seat,
+        resource)` in, `(candidates, seat)` out.
+
+        `hands` is built by the caller (`Heximax._post_trade_hands`) from
+        whatever mixture of exact and `View.expected_hand` values each
+        seat's row calls for; this method never reads a belief itself, only
+        the array, so it has no opinion on where a row came from.
+
+        `terms` reads exactly three of its ten values off `hand` --
+        `progress`, `held`, `surplus_card` -- everything else (`points`,
+        `walk.rate/kinds/scarce/port_gain`, edge count, knights played) is a
+        pure function of `state` and `seat`, so it is computed once per
+        seat here (the same calls `terms` makes, `_walk` already memoized)
+        and broadcast over every candidate rather than repeated per row.
+        `progress`'s per-purchase min-sum (`progress_toward`) is the one
+        term worth vectorising in its own right: computed over the whole
+        resource axis at once, gated to zero over `SETTLEMENT`/`CITY` for a
+        seat whose piece supply is already exhausted, exactly as the scalar
+        gate does, then folded down with an elementwise max the same way
+        `progress`'s own loop folds down its per-purchase values. The
+        accumulation below follows `score`'s own term-by-term loop in the
+        same order, so a batch of one row agrees with `score` to
+        floating-point noise, not by construction -- `gains_many`'s own
+        caller is what checks that (`atol=1e-12` over real trade events),
+        not this method.
+
+        Silently wrong for a `HonestEvaluator` built with
+        `exact_progress_samples > 0`: that reads a belief's sampled hands
+        per non-exact seat, which this array has no belief to resample
+        from. Nothing in this repository sets it above zero; the one caller
+        that might (`Heximax._delta_scalar_honest`) is routed around this
+        method entirely rather than asked to fake a belief for it.
+        """
+        n = hands.shape[0]
+        num_players = state.num_players
+        vector = self.vector
+
+        points = np.empty(num_players)
+        rate = np.empty(num_players)
+        kinds = np.empty(num_players)
+        scarce = np.empty(num_players)
+        edge = np.empty(num_players)
+        knights = np.empty(num_players)
+        port = np.empty(num_players)
+        settle_gate = np.empty(num_players)
+        city_gate = np.empty(num_players)
+
+        for seat in range(num_players):
+            walk, (settlements, cities) = self._walk(state, seat)
+            pts = walk.buildings + award_points(state, seat)
+            if seat == knower:
+                pts += card_points(state, seat)
+            points[seat] = pts
+            rate[seat] = walk.rate
+            kinds[seat] = walk.kinds
+            scarce[seat] = walk.scarce
+            edge[seat] = state.edge_owner.count(seat)
+            knights[seat] = state.knights_played[seat]
+            port[seat] = walk.port_gain
+            settle_gate[seat] = 0.0 if settlements >= MAX_SETTLEMENTS else 1.0
+            city_gate[seat] = 0.0 if cities >= MAX_CITIES else 1.0
+
+        held = hands.sum(axis=2)
+        surplus = np.maximum(0.0, held - DISCARD_THRESHOLD)
+
+        progress = np.zeros((n, num_players))
+        gates = {Purchase.SETTLEMENT: settle_gate, Purchase.CITY: city_gate}
+        for purchase in PROGRESS_PURCHASES:
+            needed, total = _PROGRESS_COST[purchase]
+            toward = np.zeros((n, num_players))
+            for r, need in needed:
+                toward += np.minimum(hands[:, :, r], need)
+            toward /= total
+            gate = gates.get(purchase)
+            if gate is not None:
+                toward *= gate
+            np.maximum(progress, toward, out=progress)
+
+        values = (points, rate, kinds, scarce, progress, edge, knights, held, surplus, port)
+        total = np.zeros((n, num_players))
+        for weight, value in zip(vector, values):
+            total = total + weight * value
+        total = total + WIN_SCORE * (points >= WINNING_POINTS)
         return total
 
     def evaluate(

@@ -9,6 +9,57 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Changed
+
+- **A seat's gate returns how much a deal is worth to it, not a public
+  advertisement.** `Bot.gains_many(view, received, counterparties) ->
+  list[float]` replaces the published valuation vector as the trade
+  mechanic's whole interface: each candidate exchange is priced in that
+  seat's own value units, and a deal clears only when both sides price it
+  strictly above zero. heximax and search2 price it from their own
+  evaluators (win probability and the evaluator delta, respectively); a bot
+  with only a boolean `accepts`/`accepts_many` gate is priced at
+  `+1.0`/`-1.0` by a structural default, so nothing that traded before stops
+  trading now. `RandomBot` and every other seat with no trading surface at
+  all still never trades.
+- **The table clears the deal fairest to the party gaining less, not the
+  one with the biggest combined public surplus.** `Game.trade_rule`
+  (default `"egalitarian"`) selects among every candidate both gates price
+  above zero by the smaller of the two private gains; `"nash"` (their
+  product) and `"actor"` (the current player's own gain) remain selectable
+  for lab comparisons. Every coverable candidate now reaches the acting
+  seat's gate directly — there is no public-surplus pre-filter left to rank
+  candidates before a gate is asked.
+- **Nothing is published any more.** A gate is a pure function of the
+  current position, asked fresh at every trade event, so the engine clears
+  a turn's first event eagerly (inside `enter_main`) rather than waiting for
+  some later observation or publish to trigger it — every driver
+  (`hexset.arena`, `hexset.record`, `hexset.bench`, the gym, the server)
+  simplifies to "seat the gates and step the game."
+- **`hexset.bench.trade_census` records both sides' private gains instead of
+  a shared public surplus.** `TradeRecord.gain_a`/`gain_b`/`larger_gain`
+  replace `surplus_a`/`surplus_b`/`larger_surplus`.
+- The observation/record contract bumps to **6**: the 20-float public
+  valuation block is gone from both `hexset.encoding`'s global features and
+  `hexset.onnx_record`'s record. A contract-5 (or earlier) checkpoint is
+  refused at load by name, the same as every previous contract retirement.
+
+### Removed
+
+- **The public layer.** `Game.valuations`, `Game.publish`/`publish_due`,
+  `hexset.trading.publish_valuation`/`checked_valuation`/`NO_VALUATION`/
+  `VALUE_SCALE`, and `Bot.valuation` (the protocol method and every
+  implementation) are gone, along with the lazy first-event trigger
+  machinery (`Game.event_pending`/`awaiting_publish`,
+  `hexset.game.run_pending_event`) that only ever existed to let a driver
+  publish before an event ran on it.
+- **`PUT /api/games/<code>/valuation` and `PostedValuation`.** Forced by the
+  above: there is no vector left to post. A human/LLM seat's own trading
+  surface is next-task work (`agents/reference/trading-final.md`, item 5);
+  `PendingGate` (confirm mode) is unaffected and still records candidates to
+  `game.pending`, now from a batched `gains_many` call instead of one
+  `accepts` call per candidate.
+
 ### Added
 
 - **`hexset.chance`: one chance source for the whole engine.** `Game.chance`

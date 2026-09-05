@@ -48,11 +48,11 @@ from hexset.board.topology import Topology
 from hexset.cards import NUM_DEV_CARDS, DevCard
 from hexset.devcards import holdings
 from hexset.economy import trade_ratios
-from hexset.game import Game, Phase, is_over, run_pending_event, to_move
+from hexset.game import Game, Phase, is_over, to_move
 from hexset.ledger import PublicLedger
 from hexset.roads import road_lengths
 from hexset.state import MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS, GameState, copy_state
-from hexset.trading import NO_VALUATION, Bundle, Trade, apply_trades
+from hexset.trading import Bundle, Trade, apply_trades
 from hexset.victory import public_victory_points, victory_points
 
 from .journal import Journal
@@ -177,65 +177,35 @@ def board_layout(board: Board, size: float = 60.0) -> dict:
 
 
 @dataclass(frozen=True)
-class PostedValuation:
-    """A seat's published valuation vector, as the trade mechanic's seam.
-
-    What a person (or an LLM) at a HexSet table brings to a trade: five
-    numbers in [-1, 1] set through `PUT /api/games/<code>/valuation`, and
-    nothing else. `accepts` is unconditionally True, and that is the whole
-    of the interface on purpose -- the engine only ever asks the gate about
-    a bundle whose *public* surplus is already strictly positive for this
-    seat (`hexset.trading.trade_event`), so the vector a seat posts is
-    exactly the statement it is making. A richer human interface -- a
-    per-exchange confirm, a per-opponent rule -- is deferred by the trading
-    design, not approximated here.
-    """
-
-    vector: tuple[float, ...]
-
-    def valuation(self, view) -> tuple[float, ...]:
-        del view
-        return self.vector
-
-    def accepts(self, view, received: Bundle, counterparty: int) -> bool:
-        del view, received, counterparty
-        return True
-
-
-@dataclass(frozen=True)
 class PendingGate:
     """A seat's gate under confirm mode: never clears on its own, and
     records every candidate the table's automatic trade event found for it
     instead (`docs/negotiation-interface.md` §1).
 
-    Parallel to `PostedValuation` -- `valuation` is unchanged, so a
-    confirm-mode seat still advertises through the same five numbers -- but
-    `accepts` always returns `False`, and its only side effect is appending
-    the candidate to `game.pending` for the player (or LLM) to review
-    through `POST .../trade/confirm` or `.../decline`.
-
-    Because `_best_clearing` asks the acting seat's own gate before the
-    counterparty's and short-circuits on `False`, a candidate is only ever
-    recorded for a seat sitting as the *counterparty* once the other side's
-    own gate has already accepted that exact bundle -- nothing pending here
-    is speculative in the common case (a confirm-mode seat answering another
-    seat's trade event). Holds `game` rather than `game.pending` itself so
-    that a later event's `game.pending = []` (see `trade_event`) is seen
-    through the same reference, not one already left behind.
+    `gains_many` always returns a negative gain for every candidate it is
+    asked about -- so nothing this seat is party to can ever clear on its
+    own -- and its only side effect is appending each candidate to
+    `game.pending` for the player (or LLM) to review through
+    `POST .../trade/confirm` or `.../decline`. Batched now: a table's
+    automatic event asks this gate once over the whole subset it is
+    considering (`hexset.trading._best_clearing`), so one event can record
+    several candidates against this seat at once, not only the first one
+    another seat's own gate happened to accept. Holds `game` rather than
+    `game.pending` itself so that a later event's `game.pending = []` (see
+    `trade_event`) is seen through the same reference, not one already left
+    behind.
     """
 
     game: "Game"
     seat: int
-    vector: tuple[float, ...] = NO_VALUATION
 
-    def valuation(self, view) -> tuple[float, ...]:
+    def gains_many(
+        self, view, received: Sequence[Bundle], counterparties: Sequence[int]
+    ) -> list[float]:
         del view
-        return self.vector
-
-    def accepts(self, view, received: Bundle, counterparty: int) -> bool:
-        del view
-        self.game.pending.append(Trade(self.seat, counterparty, received))
-        return False
+        for r, c in zip(received, counterparties):
+            self.game.pending.append(Trade(self.seat, c, r))
+        return [-1.0] * len(received)
 
 
 # --- Wire format for actions --------------------------------------------------
@@ -792,24 +762,25 @@ class GameSession:
     # _apply and undo_last_build.
     _undo: _UndoPoint | None = field(default=None, repr=False)
     # Seat -> whatever answers that seat's private gate (`hexset.trading`):
-    # an embedded bot itself for a bot seat, a `PostedValuation` for a seat
-    # a person is playing, nothing at all for an empty one. Kept here rather
-    # than on `Game` directly because a seat can change hands mid-game
-    # (`api.Tables.seat_bot`), and `set_trader` is the one place that
-    # rewrites the engine's tuple.
+    # an embedded bot itself for a bot seat, a `PendingGate` for a person (or
+    # LLM) that opted into confirm mode, nothing at all for a claimed seat
+    # that did not. Kept here rather than on `Game` directly because a seat
+    # can change hands mid-game (`api.Tables.seat_bot`), and `set_trader` is
+    # the one place that rewrites the engine's tuple.
     traders: dict[int, object] = field(default_factory=dict, repr=False)
     # Seats opted into confirm mode at seat-up (`POST /api/games`/`/api/join`'s
-    # `confirm` flag). `publish` reads this to decide which gate a seat's own
-    # vector installs -- `PendingGate` here, `PostedValuation` otherwise.
-    # Never populated for a bot seat; nothing reads it for one.
+    # `confirm` flag) -- gated by `confirm_mode` below. Never populated for a
+    # bot seat; nothing reads it for one.
     #
-    # The *default*, when a request omits `confirm`, is transport-dependent
-    # by design: those two routes default it to `True` for a caller that
-    # says nothing -- a human's gate is the explicit submit, so nothing
-    # auto-clears against one without an opt-out (`Tables.create`/`join`'s
-    # docstrings, `api.py`). `hexset.server.mcp`'s `new_game`/`join` tools
-    # send `confirm` explicitly on every call instead, keeping an LLM seat's
-    # own default the opt-in one from PI ratification decision 3.
+    # PENDING (next task, `agents/reference/trading-final.md` item 5):
+    # `PendingGate` is now the only manual gate this module knows how to
+    # install, and a claimed seat that opts *out* of confirm mode gets no
+    # gate at all -- there is no more "post a standing vector and
+    # auto-accept" path (`PostedValuation` and `PUT .../valuation` are gone,
+    # forced by the engine change) to fall back to. Deciding what a
+    # non-confirm manual seat's gate should be -- `PendingGate`
+    # unconditionally for every manual seat, or something else -- is the
+    # human/LLM trading-surface work this note defers.
     confirm_seats: set[int] = field(default_factory=set)
 
     def set_trader(self, seat: int, trader: object | None) -> None:
@@ -822,63 +793,22 @@ class GameSession:
             self.traders.get(s) for s in range(self.game.num_players)
         )
 
-    def valuation_of(self, seat: int) -> tuple[float, ...]:
-        """What `seat` has published, all-zero if it has published nothing."""
-        return tuple(self.game.valuations[seat])
-
     def confirm_mode(self, seat: int) -> None:
-        """`seat` opted into confirm mode at seat-up: gate it now, on the
-        vector it has not published (`hexset.trading.NO_VALUATION`).
+        """`seat` opted into confirm mode at seat-up: gate it now with a
+        `PendingGate`, which never clears on its own and records every
+        candidate the table's automatic event finds against this seat to
+        `game.pending`, for the player (or LLM) to confirm or decline
+        through `POST .../trade/confirm`/`.../decline`.
 
-        Installing the gate here rather than waiting for a first `publish`
-        is what makes "a person at the web page does not trade" a property
-        of sitting down, not of what the page happens to call. The page
-        offers no way to publish (owner, 2026-09-03 -- human trading
-        surfaces are withheld; `docs/negotiation-interface.md`), so without
-        this a human seat's gate stays `None` for the whole game and the
-        rule rests entirely on the vector.
-
-        Both halves say no, and either alone would be enough:
-
-        *The vector.* All-zero, so every bundle this seat is party to scores
-        a public surplus of exactly 0 on its side, and
-        `hexset.trading._best_clearing` keeps only candidates whose surplus
-        is *strictly* positive for both sides -- in either role, proposer or
-        counterparty. A zero-vector seat is dropped at ranking and its gate
-        is never even asked, which is the sense in which a human here is
-        simply not a counterparty.
-
-        *The gate.* `PendingGate` never clears on its own. Should this seat
-        ever publish (`PUT /api/games/<code>/valuation` is untouched, for an
-        LLM or an API client), what it advertises still cannot be taken
-        without an explicit `POST .../trade/confirm`.
-
-        Bots are unaffected: their own gates and vectors are seated by
+        Installing the gate here, at seat-up, rather than waiting for
+        anything else is what makes "a person at the web page does not
+        trade automatically" a property of sitting down. Bots are
+        unaffected: their own gates are seated by
         `api.Tables._spawn_local_bots`/`seat_bot`, and they go on trading
         with each other through the same engine event.
         """
         self.confirm_seats.add(seat)
-        self.set_trader(seat, PendingGate(self.game, seat, NO_VALUATION))
-
-    def publish(self, seat: int, vector: Sequence[float]) -> None:
-        """`PUT /api/games/<code>/valuation`: `seat` sets its own vector.
-
-        Takes effect at the next trade event, which is the next time the
-        main phase opens (`hexset.trading`) -- publishing does not move any
-        cards by itself. `Game.publish` validates and records it; the
-        (checked) vector then becomes this seat's gate -- a `PostedValuation`,
-        unconditionally accepting once the engine's own public-surplus test
-        already says this seat wants the bundle, for most seats; a
-        `PendingGate` instead for a seat that opted into confirm mode at
-        seat-up (`confirm_seats`), which never clears on its own and records
-        the candidate to `game.pending` for this seat to confirm or decline.
-        """
-        self.game.publish(seat, vector)
-        vector = tuple(self.game.valuations[seat])
-        if seat in self.confirm_seats:
-            self.set_trader(seat, PendingGate(self.game, seat, vector))
-        else:
-            self.set_trader(seat, PostedValuation(vector))
+        self.set_trader(seat, PendingGate(self.game, seat))
 
     def __post_init__(self) -> None:
         # Written here rather than on the first action because the header's
@@ -1190,47 +1120,13 @@ class GameSession:
             raise ValueError("an omniscient view belongs to no seat")
         labels = self.seat_labels
         game = self.game
-        # A poll of the table is one of the engine's three event-trigger
-        # points (`Game.event_pending`'s docstring) -- fired here,
-        # deliberately, before `trades`/`valuations` below are read, rather
-        # than moments later inside `legal_wire_actions`, which would
-        # otherwise hand back a snapshot whose `trades` still predates the
-        # event it itself just caused to run. Observed regardless of
-        # `viewer`: `trades`/`valuations` are public to the whole table
-        # regardless of who asks (this function's own docstring, "computed
-        # once regardless of who is asking"), so whether the pending event
-        # has run cannot depend on it either -- an observer's own seat, or
-        # none at all, still deserves an up-to-date table.
-        #
-        # Calls `run_pending_event` directly rather than `game.state
-        # (game.current_player)` -- that used to be how this fired, and it
-        # was the regression: it built the *current player's own hidden
-        # information-set view* as a side effect of literally any viewer's
-        # poll, including a spectator's or an acting bot's own runner
-        # checking whose turn it is before that bot ever got to publish --
-        # a cross-seat view read this function must never make (this
-        # function's own docstring: what comes back depends on `viewer`,
-        # never on the current player, except through public fields).
-        # `run_pending_event` does exactly the same triggering work with no
-        # view built and no seat's hand touched.
-        #
-        # Whatever it clears is attributed to the last action applied, the
-        # way `hexset.record.record_game` already attributes a lazily
-        # triggered first event to the previous action's step. Without this
-        # the exchanges happen and are simply never told: `_apply` records
-        # an action's trades from inside itself (`self.game.trades[
-        # trades_before:]`), and a turn's *first* event no longer runs
-        # there -- it runs here, on whichever poll reaches the table first
-        # -- so every trade it cleared reached `state["trades"]` and the
-        # engine's own ledger but no `_Event`, and therefore no line in the
-        # transcript. Watching three bots deal with each other for sixteen
-        # turns, that was five exchanges in the state and none in the log.
-        traded_before = len(game.trades)
-        run_pending_event(game)
-        cleared = game.trades[traded_before:]
-        if cleared and self.events:
-            last = self.events[-1]
-            last.trades = last.trades + tuple(cleared)
+        # A gate is a pure function of the position now, asked fresh at
+        # every trade event, and every event fires eagerly, inside whichever
+        # action caused it (`enter_main` for the turn's first one, each
+        # build/buy/trade/dev-card handler for the rest) -- so `_apply`'s own
+        # `self.game.trades[trades_before:]` bookkeeping already attributes
+        # every trade to the `_Event` it belongs to, and a poll of the table
+        # has nothing left to trigger here.
         # true state: the server's own omniscient observer view -- the
         # per-viewer filtering happens below, not here.
         state = game.state(0, hidden=False)
@@ -1304,11 +1200,8 @@ class GameSession:
             if viewer is not None
             else {},
             "players": players,
-            # The trade mechanic, in full and public to everyone
-            # (`hexset.trading`): what every seat has advertised each
-            # resource is worth to it, and what the engine cleared this
-            # turn. Both are things a table hears, so neither is filtered.
-            "valuations": [list(v) for v in game.valuations],
+            # What the engine cleared this turn (`hexset.trading`): public
+            # to everyone, so it is not filtered.
             "trades": [
                 {
                     "a": t.a,

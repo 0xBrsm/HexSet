@@ -20,13 +20,15 @@ TOKEN_HEADER = "X-HexSet-Token"
 # argmaxes and un-rotates, and the caller only states the position
 # (`hexset.onnx_record.record_from_game`) and reads the answer back.
 #
-# 2, 3 and 4 are no longer served. They are the offer protocol's contracts:
-# 3 added the four live-offer fields, 4 the two public-ledger ones, and all
-# three declare a `pair_mask` input and a `pair_index` output for the
-# one-for-one give/want heads. Trading is now one engine event with no
-# actions at all (`hexset.trading`), so those graphs describe a game this
-# engine does not play -- there is no honest way to feed them, and refusing
-# by name beats guessing.
+# 2, 3 and 4 are the offer protocol's contracts: 3 added the four live-offer
+# fields, 4 the two public-ledger ones, and all three declare a `pair_mask`
+# input and a `pair_index` output for the one-for-one give/want heads.
+# Trading is now one engine event with no actions at all (`hexset.trading`),
+# so those graphs describe a game this engine does not play -- there is no
+# honest way to feed them, and refusing by name beats guessing. Contract 5
+# declared a `valuations` field for that mechanic's public layer; the public
+# layer is gone outright (`agents/reference/trading-final.md`, item 1)
+# rather than replaced, so contract 5 is refused the same way.
 #
 # 5 is no longer served either: the knight two-step fix shrinks the flat
 # `ActionSpace` (`PLAY_KNIGHT` dropped its operands), so a contract-5

@@ -127,7 +127,6 @@ def global_features(players: int) -> int:
         + 2 * (players + 1)  # longest road and largest army holders
         + NUM_PHASES
         + 3  # free roads, deck size, turn
-        + players * NUM_RESOURCES  # every seat's public valuation vector
         + (players - 1) * (NUM_RESOURCES + 1)  # ledger: known[5] + unknown per opponent
     )
 
@@ -317,29 +316,6 @@ def _encode_edges(state: GameState, perspective: int) -> np.ndarray:
     return _edge_rows(state.num_players, perspective)[owners]
 
 
-def _valuation_parts(game: Game, perspective: int) -> list[float]:
-    """Every seat's public valuation vector, in seat-relative order.
-
-    The trade mechanic's whole observation (`hexset.trading`): what each
-    seat has advertised each resource is worth to it, five floats already in
-    [-1, 1] and so unscaled. Public by construction -- the vectors are what
-    a table hears -- and always live, unlike the live-offer block this
-    replaces, which was zero except during the phase an offer stood in.
-
-    That block is gone rather than moved: it carried a genuine
-    information-set leak (its "who has answered" part re-derived responder
-    eligibility from the live true state, so from the proposer's seat the
-    observation moved under a counterfactual redeal of hidden hands), and
-    the protocol it described no longer exists.
-    """
-    players = game._state.num_players
-    parts: list[float] = []
-    for i in range(players):
-        seat = (perspective + i) % players
-        parts.extend(game.valuations[seat])
-    return parts
-
-
 def _ledger_parts(game: Game, perspective: int) -> list[float]:
     """Each opponent's reconstructed hand composition (`hexset.ledger`), in
     seat-relative order, own seat excluded — own hand is already exact
@@ -404,7 +380,6 @@ def _encode_globals(
     parts.append(len(state.deck) / DECK_SIZE)
     parts.append(min(game.turns / TURN_SCALE, 1.0))
 
-    parts.extend(_valuation_parts(game, perspective))
     parts.extend(_ledger_parts(game, perspective))
 
     return np.array(parts, dtype=np.float32)
@@ -483,19 +458,9 @@ def _encode_globals_batch(
     )
     append(turns, 1.0)
 
-    # `_valuation_parts` is the single source of the block's semantics,
+    # `_ledger_parts` is the single source of the ledger block's semantics,
     # reused per game rather than re-derived, so this fast path stays
     # byte-identical to the oracle by construction.
-    valuation_block = np.asarray(
-        [_valuation_parts(game, int(p)) for game, p in zip(games, perspectives)],
-        dtype=np.float64,
-    )
-    append(valuation_block, 1.0)
-
-    # Same reasoning as the valuation block just above: `_ledger_parts` is the
-    # single source of the ledger block's semantics, reused per game rather
-    # than re-derived, so this fast path stays byte-identical to the oracle
-    # by construction.
     ledger_block = np.asarray(
         [_ledger_parts(game, int(p)) for game, p in zip(games, perspectives)],
         dtype=np.float64,

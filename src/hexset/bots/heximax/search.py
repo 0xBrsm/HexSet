@@ -7,8 +7,8 @@ setup/discard shortcuts it resolves directly), iterative deepening
 (`_value`/`_after`/`_best_of`), roll expansion (`_over_dice`), and hidden-draw
 expansion (`draw_children`: a steal weighted over the victim's belief, a
 dev-card buy weighted over the unseen deck). It also carries the bot's whole
-trading surface -- `valuation` and `accepts`, and the marginal-value
-machinery they are built from -- which is two methods and no protocol at
+trading surface -- `gains_many` and `accepts`, and the `_delta` machinery
+they are built from -- which is two methods and no protocol at
 all now that trading is one engine event rather than an action language
 (`hexset.trading`). The offer adapter this file used to inherit from
 `heximax/trade.py` (candidate bundles, `score_proposal`, `accept_rule`,
@@ -59,9 +59,9 @@ in `agents/reference/heximax.md`.
 
 from __future__ import annotations
 
-import math
 import random
 from dataclasses import dataclass, field
+from typing import Sequence
 
 from hexset.actions import Action, ActionType, apply, legal_actions, victim_of
 from hexset.board.board import Board
@@ -74,7 +74,7 @@ from hexset.ledger import PublicLedger
 from hexset.mcts import draws_hidden
 from hexset.placement import best as best_opening
 from hexset.state import GameState
-from hexset.trading import NO_VALUATION, Bundle
+from hexset.trading import Bundle
 
 from hexset.view import View
 from .evaluate import NO_TRADE_WEIGHTS, TRADING_WEIGHTS, HonestEvaluator, Weights
@@ -89,33 +89,6 @@ DEFAULT_MAX_NODES = 600
 # eleven outcomes; deeper rolls are sampled once. At the default depth of two
 # every roll in the tree is exact.
 EXACT_ROLL_PLIES = 2
-
-# The common scale every seat's published valuation is squashed onto
-# (`Heximax.valuation`): the mean absolute one-card marginal of the shipped
-# profile. Fixed per evaluator rather than rescaled per decision, because
-# the clearing rule compares two seats' surpluses and they must be in the
-# same unit (the PI's ratification of decision 1,
-# `agents/reference/trading-design.md`).
-#
-# Computed once, over the trade-free census games -- `heximax-notrade`,
-# seeds 100..104, every seat the same preset -- as the mean of
-# `|Eval(hand + one r) - Eval(hand)|` under `TRADING_WEIGHTS` and the
-# bot's stance (`win`, since `agents/reference/heximax.md`'s "Registration
-# 2026-09-04: the objective -- a win-probability stance against the
-# relative-VP stance" made it the default), over every resource at every
-# position the mover reaches (10000 marginals; re-pinned from the prior
-# `relative`-stance figure of 0.10231140469178995 over 9280 marginals by
-# `tmp/win-stance/marginal_scale.py`, which reproduces the protocol exactly
-# -- `heximax-notrade` bots, now `win`-stance too, generate the
-# positions/choices; a separately built
-# `Heximax(HonestEvaluator(board, TRADING_WEIGHTS))` meter, reading its own
-# stance default, does the measuring). Trade-free deliberately: the games
-# that fix the scale must not themselves depend on it, and `max_trades=0`
-# makes them independent of this constant by construction.
-# `test_marginal_scale_is_the_recorded_mean` recomputed it from those same
-# games and pinned it to 1e-9 (removed by the `test/essential-cut` PR along
-# with most of the suite).
-MARGINAL_SCALE = 0.006413829636547007
 
 
 class _Exhausted(Exception):
@@ -418,46 +391,32 @@ class Heximax:
 
     # -- trading (`hexset.trading`) -----------------------------------------
 
-    def valuation(self, view: View) -> tuple[float, ...]:
-        """What each resource is worth to this seat now, in [-1, 1].
-
-        `tanh(marginal(r) / MARGINAL_SCALE)`, where `marginal(r)` is
-        `Eval(hand + one r) - Eval(hand)` read on this seat's own row under
-        its stance. The squash is not cosmetic: the clearing rule *compares*
-        two seats' surpluses, so every seat has to publish on one common
-        scale, and raw evaluation units have no ceiling to normalise
-        against. `MARGINAL_SCALE` is that shared unit, fixed per evaluator
-        and pinned beside its weights -- never a per-decision rescaling,
-        which would make one seat's "1.0" mean something different from
-        another's.
-
-        Read through the view alone, so it is a function of the information
-        set: the seat's own hand is exact there, every other seat's is the
-        ledger's reconstruction, and neither the bank nor the board is
-        private.
-        """
-        if self.max_trades == 0:
-            return NO_VALUATION
-        return tuple(
-            math.tanh(self._marginal_gain(view, r) / MARGINAL_SCALE)
-            for r in range(NUM_RESOURCES)
-        )
-
-    def accepts(self, view: View, received: Bundle, counterparty: int) -> bool:
-        """Take this exchange iff it strictly improves my own evaluation.
-
-        The private gate of the mechanic: the public vectors say a deal is
-        advertised, this says whether it is actually good, and it is read
-        under the bot's stance -- so under `win` (the shipped default) or
+    def gains_many(
+        self, view: View, received: Sequence[Bundle], counterparties: Sequence[int]
+    ) -> list[float]:
+        """This seat's own win-probability gain from every candidate at
+        once, under its stance -- so under `win` (the shipped default) or
         `relative`, the counterparty's gain is already priced in, which is
         what makes "not with the leader" expressible without a partner term.
-        Strict: an exchange worth exactly nothing does not clear, which is
-        what bounds the event (`hexset.trading.trade_event`).
+        This is the mechanic's private gate: `hexset.trading.trade_event`
+        clears the candidate both sides price above zero and
+        `Game.trade_rule` ranks highest.
         """
         if self.max_trades == 0:
-            return False
+            return [-1.0] * len(received)
         seat = view.perspective
-        return self._delta(view, seat, seat, received, counterparty, self._rank) > 0.0
+        return [
+            self._delta(view, seat, seat, r, c, self._rank)
+            for r, c in zip(received, counterparties)
+        ]
+
+    def accepts(self, view: View, received: Bundle, counterparty: int) -> bool:
+        """Take this exchange iff it strictly improves my own evaluation --
+        `gains_many(...)[0] > 0`. Strict: an exchange worth exactly nothing
+        does not clear, which is what bounds the event
+        (`hexset.trading.trade_event`).
+        """
+        return self.gains_many(view, [received], [counterparty])[0] > 0.0
 
     # -- the valuation the two above are built from --------------------------
 
@@ -477,19 +436,6 @@ class Heximax:
         if vector is None:
             vector = self._vector(state, ledger, knower)
         return rank(vector, target)
-
-    def _marginal_gain(self, view: View, resource: int) -> float:
-        """Eval(hand + one `resource`) - Eval(hand), from this seat's reading."""
-        seat = view.perspective
-        state = view.state
-        before = self._read_row(state, view.ledger, seat, seat, self._rank)
-        after = _thin_copy(state, copy_bank=True)
-        after.hands[seat][resource] += 1
-        if after.bank[resource] > 0:
-            after.bank[resource] -= 1
-        ledger = view.ledger.copy()
-        ledger.receive(seat, resource, 1)
-        return self._read_row(after, ledger, seat, seat, self._rank) - before
 
     def _marginal_loss(self, view: View, resource: int) -> float:
         """Eval(hand) - Eval(hand less one `resource`); zero when none is held."""
@@ -777,7 +723,7 @@ def _thin_copy(state: GameState, *, copy_bank: bool = False) -> GameState:
     asked, `bank`) is really copied; the board, deck, dev cards, knight
     counts and (unless asked) the bank are shared with `state` outright.
 
-    `_marginal_gain`/`_marginal_loss`/`_delta` -- the only callers -- each
+    `_marginal_loss`/`_delta` -- the only callers -- each
     touch nothing but a hand (`_move_hand`, or a direct `hands[seat][r] +=`)
     and, for the two marginal checks, one bank slot; nothing here ever
     touches `vertex_owner`/`vertex_building`/`edge_owner`/`deck`/

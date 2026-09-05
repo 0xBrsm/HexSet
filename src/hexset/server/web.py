@@ -153,10 +153,13 @@ class Handler(BaseHTTPRequestHandler):
         self._with_body("POST")
 
     def do_PUT(self) -> None:  # noqa: N802
-        # No route answers PUT any more -- `PUT /api/games/<code>/valuation`
-        # was the only one, and it is gone with the public valuation layer
-        # (`agents/reference/trading-final.md`, item 1). Kept wired in case
-        # the human-trading surface work (item 5) wants a PUT route again.
+        # No route answers PUT -- `PUT /api/games/<code>/valuation` was the
+        # only one, and it is gone with the public valuation layer
+        # (`agents/reference/trading-final.md`, item 1). The human-trading
+        # surface that followed (item 5) added no PUT route back: every new
+        # endpoint is `GET`/`POST` (`api.py`'s `_seated`). Left wired anyway
+        # -- an unrecognised PUT still deserves `Tables.handle`'s own 404
+        # rather than a bare transport-level error.
         self._with_body("PUT")
 
     def _with_body(self, method: str) -> None:

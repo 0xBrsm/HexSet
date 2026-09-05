@@ -445,6 +445,68 @@ def test_pending_gate_batches_every_candidate_the_actor_priced_above_zero():
     assert all(t.a == 1 and t.b == 0 and t.received[Resource.ORE] < 0 for t in game.pending)
 
 
+def test_pending_gate_records_the_acting_seats_own_gain():
+    """A recorded `Trade`'s `gain_a` is the acting seat's own gain,
+    recomputed by asking its gate again over the mirrored bundle -- what
+    `GameSession.pending_for` sorts by. Skipped (defaults to `0.0`) when no
+    `gates` are seated at all -- see `test_pending_gate_always_declines_
+    and_records_the_candidate`, unaffected by this."""
+
+    class GivesGain:
+        def __init__(self, gain):
+            self.gain = gain
+
+        def gains_many(self, view, received, counterparties):
+            return [self.gain] * len(received)
+
+    game = a_game(seed=3)
+    game.gates = (GivesGain(0.7), None, None, None)
+    pending_gate = PendingGate(game, seat=1)
+
+    pending_gate.gains_many(None, [(1, 0, 0, 0, -1)], [0])
+
+    assert game.pending[-1].gain_a == 0.7
+
+
+def test_pending_gate_never_asks_a_pendinggate_actor_for_its_own_gain():
+    """An acting seat whose own gate is *also* a `PendingGate` is never
+    asked to estimate its gain -- that would append its own entries to
+    `game.pending` as a side effect of merely sorting. (Unreachable through
+    a real trade event, since a `PendingGate` actor's own gain is always
+    negative and `_best_clearing` never reaches a counterparty for it --
+    this pins the guard directly, not by relying on that.)"""
+    game = a_game(seed=3)
+    actor_gate = PendingGate(game, seat=0)
+    game.gates = (actor_gate, None, None, None)
+    counterparty_gate = PendingGate(game, seat=1)
+
+    before = len(game.pending)
+    counterparty_gate.gains_many(None, [(1, 0, 0, 0, -1)], [0])
+
+    # Exactly one entry recorded (the counterparty's own), the actor's
+    # `PendingGate` never itself invoked.
+    assert len(game.pending) == before + 1
+    assert game.pending[-1].gain_a == 0.0
+
+
+def test_pending_for_sorts_by_gain_descending_and_caps_at_five():
+    """`GameSession.pending_for` is the one place the top-5-by-gain cap
+    lives -- both `state_view`'s `pending` block and `api.Tables.
+    _pending_of` read it, so a confirm/decline's `index` always counts into
+    the same list a viewer was just shown."""
+    game = a_game(seed=3)
+    session = a_session(game, {1})
+    for i in range(7):
+        game.pending.append(Trade(1, 0, (i, 0, 0, 0, 0), gain_a=float(i)))
+    # A different seat's own entries never leak into this seat's list.
+    game.pending.append(Trade(2, 0, (9, 0, 0, 0, 0), gain_a=99.0))
+
+    top = session.pending_for(1)
+
+    assert len(top) == 5
+    assert [t.gain_a for t in top] == [6.0, 5.0, 4.0, 3.0, 2.0]
+
+
 def test_execute_trade_reaches_the_session_and_moves_cards():
     from hexset.board.terrain import Resource
     from hexset.game import Phase
@@ -511,3 +573,80 @@ def test_a_trade_the_roll_cleared_is_told_in_the_log_immediately():
     session.state_view(None)
     session.state_view(0)
     assert sum(" to Player " in line for line in session.log_for(None)) == 1
+
+
+def test_a_manually_executed_trade_appears_in_the_log():
+    """`POST .../trade`/`.../trade/confirm` (`GameSession.execute_manual_trade`)
+    bypasses the automatic event entirely, so there is no board action for
+    the trade to ride along with -- it gets its own `_Event` (`action is
+    None`) instead, and `render_log` still writes the same `_trade_lines`
+    sentence for it."""
+    from hexset.board.terrain import Resource
+    from hexset.game import Phase
+
+    game = a_game(seed=3)
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    game._state.hands[0][Resource.WOOD] = 1
+    game._state.hands[1][Resource.ORE] = 1
+    session = a_session(game, {0, 1})
+    session.set_trader(1, _Wants(Resource.WOOD))
+    received = [0, 0, 0, 0, 0]
+    received[Resource.ORE] = 1
+    received[Resource.WOOD] = -1
+
+    trade = session.execute_manual_trade(0, 1, tuple(received))
+
+    assert trade.received == tuple(received)
+    assert game._state.hands[0][Resource.ORE] == 1
+    assert game._state.hands[1][Resource.WOOD] == 1
+    line = next(line for line in session.log_for(None) if " to Player " in line)
+    assert "traded" in line and "Wood" in line and "Ore" in line
+    # Not folded into any build/discard/bank-trade run, and it clears
+    # `can_undo` -- a manual trade moves cards same as a build does, and a
+    # stale undo point must not silently erase it too.
+    assert session.state_view(0)["can_undo"] is False
+
+
+def test_a_manually_executed_trade_survives_journal_and_resume(tmp_path):
+    """A manual trade (`POST .../trade`, `.../trade/confirm`) is not folded
+    into any action's own journal line -- without its own line
+    (`Journal.manual_trade`, replayed by `replayable`/`GameSession.restore`
+    as an action-less step) a server restart would rebuild hands purely
+    from recorded actions and silently forget the cards it moved."""
+    from hexset.board.terrain import Resource
+    from hexset.game import Phase
+    from hexset.server.journal import replayable
+
+    game = a_game(seed=3)
+    session = a_session(game, {0, 1}, journal=open_journal(3, str(tmp_path)))
+    session.set_trader(1, _Wants(Resource.WOOD))
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    game._state.hands[0][Resource.WOOD] = 1
+    game._state.hands[1][Resource.ORE] = 1
+    received = [0, 0, 0, 0, 0]
+    received[Resource.ORE] = 1
+    received[Resource.WOOD] = -1
+
+    session.execute_manual_trade(0, 1, tuple(received))
+
+    events = journal_events(tmp_path)
+    assert any(e.get("kind") == "trade" for e in events)
+
+    resumed_game = a_game(seed=3)
+    resumed = a_session(resumed_game, {0, 1})
+    resumed_game.phase = Phase.MAIN
+    resumed_game.current_player = 0
+    resumed_game._state.hands[0][Resource.WOOD] = 1
+    resumed_game._state.hands[1][Resource.ORE] = 1
+
+    resumed.restore(replayable(events))
+
+    assert resumed_game._state.hands[0][Resource.ORE] == 1
+    assert resumed_game._state.hands[0][Resource.WOOD] == 0
+    assert resumed_game._state.hands[1][Resource.WOOD] == 1
+    assert resumed_game._state.hands[1][Resource.ORE] == 0
+    assert resumed._steps == session._steps == 1
+    line = next(line for line in resumed.log_for(None) if " to Player " in line)
+    assert "traded" in line

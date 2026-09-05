@@ -491,6 +491,43 @@
   .pick-card.selected { border-color: var(--accent); }
   .pick-card.disabled { opacity: 0.28; cursor: default; pointer-events: none; }
 
+  /* Trades another seat has already found against this one, unexecuted --
+     `state.pending`. Sits above everything else in the modal: it is the
+     table waiting on an answer, not something being composed. */
+  .pending-offers {
+    display: flex; flex-direction: column; gap: 0.5rem;
+    margin-bottom: 0.8rem; padding-bottom: 0.8rem; border-bottom: 1px solid var(--border);
+  }
+  .pending-offer { justify-content: space-between; margin: 0; padding-right: 0; }
+  .pending-offer-btn {
+    width: 32px; height: 32px; padding: 0; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .pending-offer-btn svg { width: 18px; height: 18px; fill: currentColor; }
+  /* `GET .../trade/acceptable`'s own preview -- only ever the 1-for-1 deals
+     among it, since clicking one fills the same single give/want cards the
+     bank composer below uses (see acceptableDealsSection). */
+  .acceptable-deals { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.7rem; }
+  .acceptable-deal {
+    display: flex; align-items: center; gap: 0.5rem; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 6px; padding: 0.25rem 0.5rem;
+  }
+  .acceptable-deal:hover { border-color: var(--accent); }
+  .acceptable-deal-label { font-size: 0.78rem; color: var(--muted); flex: 1 1 auto; }
+  /* Who "Offer to players" is aimed at -- a row of seats, the same swatch
+     the player list uses so a seat reads the same colour everywhere. */
+  .counterparty-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.4rem 0 0.6rem; }
+  .counterparty-btn {
+    display: flex; align-items: center; gap: 0.35rem; padding: 0.3rem 0.55rem;
+    border-radius: 6px; border: 1px solid var(--border); background: transparent;
+    color: inherit; font: inherit; cursor: pointer;
+  }
+  .counterparty-btn .swatch { width: 12px; height: 12px; }
+  .counterparty-btn.selected {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+
   /* Touch has no hover to fall back on, and the targets are only a few screen
      pixels wide once the board scales down to a phone. */
   .clickable-vertex:active { fill: color-mix(in srgb, var(--accent) 50%, white); }
@@ -746,6 +783,9 @@ let modalDrag = {x: 0, y: 0};  // #modal-inner offset from center, dragged via #
 let tradeGive = null;      // selected resource index, "trade" mode only
 let tradeWant = null;
 let tradeSide = "give";    // "give" | "want" — which side the picker row is currently choosing for, "trade" mode only
+let tradeCounterparty = null;   // seat picked for "Offer to players", "trade" mode only
+let acceptableOffers = null;    // last GET .../trade/acceptable result (offers[]), or null
+let acceptableOffersVersion = -1;  // state.version it was fetched for -- refetch only once that moves
 let yopPicks = [];         // 0, 1, or 2 resource indices, "year-of-plenty" mode only
 let monopolyPick = null;   // selected resource index, "monopoly" mode only
 let modelNames = [];       // GET /api/models, in MODEL_OPTIONS order
@@ -2071,6 +2111,33 @@ function tradePicker(p) {
   return wrap;
 }
 
+// The actor's own preview of `POST .../trade` (`GET .../trade/acceptable`,
+// `docs/bot-api.md` §3): every bundle a bot counterparty's own gate already
+// prices above zero right now. Meaningless off the human's own MAIN turn --
+// `execute_trade`'s turn-timing rule only lets a seat propose to *anyone* on
+// its own turn -- so this clears `acceptableOffers` rather than asking
+// otherwise. Re-fetched only once `state.version` has actually moved
+// (`acceptableOffersVersion`), since the trade modal calls this on every
+// poll while it's open.
+async function refreshAcceptableOffers() {
+  if (state.seat === null || state.phase !== "MAIN" || state.to_move !== state.seat) {
+    acceptableOffers = null;
+    return;
+  }
+  if (acceptableOffersVersion === state.version) return;
+  const fetchedVersion = state.version;
+  let data;
+  try {
+    data = await getJSON(`/api/games/${tableCode}/trade/acceptable`);
+  } catch {
+    return;
+  }
+  if (!data || !data.offers) return;
+  acceptableOffers = data.offers;
+  acceptableOffersVersion = fetchedVersion;
+  if (modalMode === "trade") renderModal();
+}
+
 // The five modes, and what puts each one up:
 //   "trade"          clicking a resource card in hand (renderHand)
 //   "monopoly"       clicking the Monopoly card in hand (devCardPlay)
@@ -2085,9 +2152,11 @@ function openModal(mode, {give = null} = {}) {
     // made yet either way.
     tradeGive = give;
     tradeWant = null;
+    tradeCounterparty = null;
     // Straight to the half that's still open: coming in from a card in hand
     // has already answered "give".
     tradeSide = give === null ? "give" : "want";
+    refreshAcceptableOffers();
   } else if (mode === "year-of-plenty") {
     yopPicks = [];
   } else if (mode === "monopoly") {
@@ -2124,6 +2193,18 @@ function syncModal() {
     else renderModal();
   } else if (MODAL_AUTO.has(modalMode)) {
     closeModal();
+  } else if (modalMode === null && (state.pending || []).length) {
+    // Somebody's trade event found something against this seat since the
+    // last poll (`state.pending`) -- surfaced the same way discard/steal
+    // are, but dismissible: declining costs nothing to walk away from (see
+    // MODAL_DISMISSIBLE), there's simply nothing forcing this one shut.
+    openModal("trade");
+  } else if (modalMode === "trade") {
+    // Already open, however it got that way -- keep its pending offers and
+    // acceptable-deals list current across every poll without resetting
+    // whatever give/want/counterparty is mid-composition.
+    refreshAcceptableOffers();
+    renderModal();
   }
 }
 
@@ -2281,39 +2362,206 @@ function renderYearOfPlentyMode(g, title, body, actions) {
   actions.appendChild(modalCancelButton());
 }
 
+// Every seat at the table besides this one, empty seats excluded -- who
+// "Offer to players" and the acceptable-deals list can ever name.
+function otherSeats() {
+  return state.players
+    .map((p) => p.seat)
+    .filter((seat) => seat !== state.seat && state.seats[seat] && state.seats[seat].kind !== "empty");
+}
+
+// A bundle as a row of card tiles -- one per resource actually in it, count
+// badges the same way a hand card gets one. Used for both `pending`'s
+// gave/got and an acceptable deal's.
+function bundleChips(counts) {
+  const row = html("div", {class: "pick-row"});
+  for (let r = 0; r < board.resources.length; r++) {
+    const n = counts[r];
+    if (!n) continue;
+    const card = resourceCardTile(board.resources[r], {});
+    if (n > 1) card.appendChild(html("div", {class: "count"}, String(n)));
+    row.appendChild(card);
+  }
+  return row;
+}
+
+// `state.pending`: what another seat's trade event already found against
+// this one, unexecuted (`docs/bot-api.md` §3). Confirm/decline answer the
+// route by the same `index` `state_view` listed it at -- nothing here
+// composes a bundle, it only ever echoes the one the table already found.
+function pendingOffersSection(pending) {
+  const wrap = html("div", {class: "pending-offers"});
+  pending.forEach((offer, index) => {
+    const row = html("div", {class: "trade-exchange pending-offer"});
+    row.appendChild(bundleChips(offer.gave));
+    row.appendChild(html("div", {class: "trade-arrow"}, "→"));
+    row.appendChild(bundleChips(offer.got));
+    const confirmBtn = html("button", {class: "pending-offer-btn", title: "Confirm"});
+    confirmBtn.appendChild(iconSvg("check"));
+    confirmBtn.addEventListener("click", () => answerPendingOffer(index, "confirm"));
+    const declineBtn = html("button", {class: "pending-offer-btn", title: "Decline"});
+    declineBtn.appendChild(iconSvg("close"));
+    declineBtn.addEventListener("click", () => answerPendingOffer(index, "decline"));
+    row.appendChild(confirmBtn);
+    row.appendChild(declineBtn);
+    wrap.appendChild(row);
+  });
+  return wrap;
+}
+
+function answerPendingOffer(index, kind) {
+  return blocking(async () => {
+    const {ok, data} = await postJSON(`/api/games/${tableCode}/trade/${kind}`, {index});
+    if (ok) state = data;
+    showNotice(ok ? "" : (data.error || "That offer isn't there any more."));
+    render();
+  });
+}
+
+// True for a bundle that is exactly one card, on one resource -- the only
+// shape `acceptableDealsSection` offers to fill into the single give/want
+// cards `tradeProposeRow`/`tradePicker` already build (see their own
+// comments): a bigger bundle from `_candidates` is still a deal a bot would
+// take, but there is no single-card slot to put it in, so it is left off
+// the list rather than shown as something clicking it can't actually do.
+function isOneForOne(counts) {
+  return counts.reduce((a, b) => a + b, 0) === 1;
+}
+
+// `GET .../trade/acceptable`'s own preview, only while it's the human's
+// turn (see refreshAcceptableOffers) -- every 1-for-1 bundle a bot
+// counterparty's own gate already prices above zero. Clicking one fills
+// give/want/counterparty for review rather than sending it outright, so a
+// slip doesn't send a card before the human meant it to.
+function acceptableDealsSection(offers) {
+  const wrap = html("div", {class: "acceptable-deals"});
+  wrap.appendChild(html("div", {class: "modal-note"}, "Deals on offer right now:"));
+  let any = false;
+  for (const offer of offers) {
+    for (const deal of offer.deals) {
+      if (!isOneForOne(deal.gave) || !isOneForOne(deal.got)) continue;
+      any = true;
+      const give = deal.gave.findIndex((n) => n > 0);
+      const got = deal.got.findIndex((n) => n > 0);
+      const row = html("div", {class: "acceptable-deal"});
+      row.appendChild(html("span", {class: "acceptable-deal-label"}, seatLabel(offer.counterparty)));
+      row.appendChild(pickCard(give, {}));
+      row.appendChild(html("span", {class: "trade-arrow"}, "→"));
+      row.appendChild(pickCard(got, {}));
+      row.addEventListener("click", () => {
+        tradeGive = give;
+        tradeWant = got;
+        tradeCounterparty = offer.counterparty;
+        tradeSide = "give";
+        renderModal();
+      });
+      wrap.appendChild(row);
+    }
+  }
+  return any ? wrap : null;
+}
+
+// Who "Offer to players" is aimed at -- every other seat at the table, the
+// same swatch the player list uses. Only shown on the human's own turn:
+// `execute_trade`'s turn-timing rule lets a seat propose to *anyone* only
+// then (during another seat's turn, only that seat may be named, which this
+// page does not build a separate composer for).
+function counterpartyPicker() {
+  const wrap = html("div", {class: "counterparty-row"});
+  for (const seat of otherSeats()) {
+    const btn = html("button", {
+      class: "counterparty-btn" + (tradeCounterparty === seat ? " selected" : ""),
+      type: "button",
+    });
+    const swatch = html("div", {class: "swatch"});
+    swatch.style.background = SEAT_COLORS[seat].fill;
+    btn.appendChild(swatch);
+    btn.appendChild(document.createTextNode(seatLabel(seat)));
+    btn.addEventListener("click", () => { tradeCounterparty = seat; renderModal(); });
+    wrap.appendChild(btn);
+  }
+  return wrap;
+}
+
+function sendPlayerTrade() {
+  return blocking(async () => {
+    const give = {[board.resources[tradeGive]]: 1};
+    const receive = {[board.resources[tradeWant]]: 1};
+    const {ok, data} = await postJSON(`/api/games/${tableCode}/trade`, {
+      counterparty: tradeCounterparty, give, receive,
+    });
+    if (ok) { state = data; closeModal(); }
+    showNotice(ok ? "" : (data.error || "That seat does not want this trade."));
+    render();
+    if (ok) settle();
+  });
+}
+
+// The "Offer to players" button: reachable once give, want and a
+// counterparty are all picked and the give side is still actually held --
+// hands move on every poll, so a card picked a few seconds ago can be gone
+// by the time this renders.
+function sendToPlayerButton(p) {
+  const btn = modalActionButton("send", "Offer to players");
+  const ready = tradeGive !== null && tradeWant !== null && tradeCounterparty !== null
+    && (p.hand[board.resources[tradeGive]] || 0) > 0;
+  if (ready) btn.addEventListener("click", sendPlayerTrade);
+  else btn.disabled = true;
+  return btn;
+}
+
 function renderTradeMode(title, body, actions) {
   title.textContent = "Trade";
   const p = state.players.find((pl) => pl.seat === state.seat);
+  const myTurn = state.phase === "MAIN" && state.to_move === state.seat;
 
-  // Resolved before the body is built, not after: whether the picked pair
-  // lands on a real trade decides what the preview's give side costs and
-  // whether the button is reachable at all (see the end of this function).
-  //
-  // Found, never built. The client only ever echoes back a wire object the
-  // server itself offered — the one hard rule this whole page follows (see
-  // the module docstring) — so a pair with no matching BANK_TRADE among
-  // `legal_actions` is a pair that cannot be traded, and the button stays
-  // disabled rather than the client inventing an action for it.
-  let bank = null;
-  if (tradeGive !== null && tradeWant !== null) {
-    bank = state.legal_actions.find(
-      (a) => a.type === "BANK_TRADE" && a.a === tradeGive && a.b === tradeWant
-    );
+  // What the table is waiting on this seat for sits above what this seat is
+  // building -- a pending offer is a decision already found, not one still
+  // being composed, and it's the only thing here that ever applies off this
+  // seat's own turn (a bundle can only ever be composed against anyone on
+  // the human's own turn, per `execute_trade`'s timing rule -- see
+  // counterpartyPicker's own comment).
+  if ((state.pending || []).length) body.appendChild(pendingOffersSection(state.pending));
+
+  if (myTurn) {
+    if (acceptableOffers && acceptableOffers.length) {
+      const deals = acceptableDealsSection(acceptableOffers);
+      if (deals) body.appendChild(deals);
+    }
+
+    // Resolved before the body is built, not after: whether the picked pair
+    // lands on a real trade decides what the preview's give side costs and
+    // whether the button is reachable at all (see the end of this
+    // function).
+    //
+    // Found, never built. The client only ever echoes back a wire object
+    // the server itself offered — the one hard rule this whole page
+    // follows (see the module docstring) — so a pair with no matching
+    // BANK_TRADE among `legal_actions` is a pair that cannot be traded, and
+    // the button stays disabled rather than the client inventing an action
+    // for it.
+    const bank = tradeGive !== null && tradeWant !== null
+      ? state.legal_actions.find((a) => a.type === "BANK_TRADE" && a.a === tradeGive && a.b === tradeWant)
+      : null;
+
+    // The trade as it stands on top, the one picker row aimed at whichever
+    // half is being chosen underneath. Both are drawn whatever's been
+    // picked so far, so nothing in here changes height between taps. What
+    // the give side actually costs is on the bank button (the rate under
+    // the glyph), since the row shows the shape of the trade and not its
+    // price.
+    body.appendChild(tradeProposeRow());
+    body.appendChild(counterpartyPicker());
+    body.appendChild(tradePicker(p));
+
+    // All three buttons always, the two trade ones disabled until they
+    // have what they need: this column is centered on its own axis, so a
+    // button appearing only once the pair (or the counterparty) lands
+    // would shove the others off the position the finger was already
+    // heading for.
+    actions.appendChild(bankTradeButton(bank));
+    actions.appendChild(sendToPlayerButton(p));
   }
-
-  // The trade as it stands on top, the one picker row aimed at whichever
-  // half is being chosen underneath. Both are drawn whatever's been picked
-  // so far, so nothing in here changes height between taps. What the give
-  // side actually costs is on the button (the rate under the glyph), since
-  // the row shows the shape of the trade and not its price.
-  body.appendChild(tradeProposeRow());
-  body.appendChild(tradePicker(p));
-
-  // Both buttons always, the trade one disabled until the pair lands on a
-  // real rate: this column is centered on its own axis, so a button
-  // appearing as the second half of the pair is picked would shove the
-  // other off the position the finger was already heading for.
-  actions.appendChild(bankTradeButton(bank));
   actions.appendChild(modalCancelButton());
 }
 

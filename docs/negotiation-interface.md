@@ -1,5 +1,66 @@
 # Negotiation interface for human and LLM seats (draft, PI to ratify)
 
+**Superseded, 2026-09-05 — shipped.** This design is built (`agents/
+reference/trading-final.md` item 5); `docs/bot-api.md` §3 is the endpoint
+reference from here on. What follows is the current shape, in brief, then
+the original draft below it kept as history rather than instructions —
+several of its particulars (a live public vector, an opt-out `confirm`
+flag) describe a design that was not, in the end, the one built.
+
+## As shipped
+
+**No public layer, so no gap to patch one into.** §1's premise — a manual
+seat's gate is a rubber stamp over its own published vector — does not
+apply: `Game.valuations`/`PostedValuation` and every vector are gone
+(`trading-final.md` item 1). A manual seat's gate is `hexset.server.
+webplay.PendingGate`, installed unconditionally the instant the seat is
+claimed (`GameSession.confirm_mode`, called from `api.Tables.create`/
+`Table.join`) — there is no `confirm` flag on the wire, for a person at the
+page or an LLM's `new_game`/`join` alike, and no other gate a manual seat
+can have. As counterparty, it never clears anything on its own; every
+candidate the real actor's own gate already priced above zero is recorded,
+unexecuted, to `Game.pending`, sorted by that actor's own gain and capped
+at 5 (`GameSession.pending_for`) for whichever seat it names.
+
+**Three routes**, all seat-token gated (exact shapes in `docs/bot-api.md`
+§3):
+
+- `POST /api/games/<code>/trade` — compose and submit a bundle against any
+  counterparty, on the proposer's own turn against anyone or during
+  another seat's turn against that seat only; the counterparty's gate must
+  price it above zero, the proposer's own gate is never asked.
+- `GET /api/games/<code>/trade/acceptable` — the actor's own read-only
+  preview: every bundle a bot counterparty's gate already accepts right
+  now, grouped by counterparty, no engine mutation. A manual counterparty
+  never appears here — its answer comes back asynchronously through its
+  own `pending`.
+- `POST /api/games/<code>/trade/confirm` / `.../decline` — execute or drop
+  one of this seat's own pending offers by index. Declining is final: the
+  bot that offered it has already played on by the time this seat ever saw
+  it.
+
+A trade executed through either of the two routes above moves cards
+outside the automatic event, with no board action to carry it, so it gets
+its own entry in the sidebar log and the journal
+(`GameSession.execute_manual_trade`, `Journal.manual_trade`) — without
+that it would still move the cards live but a resumed game would silently
+forget it, since resume rebuilds hands purely from recorded actions.
+
+**The page** wires the trade modal to all three: a counterparty picker and
+the give/want cards for "Offer to players," the acceptable-deals list
+(its 1-for-1 entries, since that's what the single give/want cards can
+hold) so a deal can be picked directly, and a pending-offers panel with
+Confirm/Decline that surfaces on its own once `state.pending` is non-empty.
+No advertisement panel, no vector chips, no live surplus indicator — there
+is no vector to read one from.
+
+**MCP** carries `propose_trade`, `trade_acceptable`, `confirm_trade` and
+`decline_trade` as thin wrappers over the same three routes, plus
+`get_table` for `pending`; `set_valuation` and the `confirm` argument on
+`new_game`/`join` are gone with the vector and the flag.
+
+---
+
 Drafted 2026-09-03 against `HexSet` `main` @ `954b688` (PR #15
 "one-event-trading" + three follow-ups through PR #19). Cites the shipped
 one-event mechanic only — later dev-hexset registration notes on bundle

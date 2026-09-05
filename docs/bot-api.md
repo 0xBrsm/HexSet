@@ -129,11 +129,11 @@ action's legality depends on another seat's hand, and there is now one list,
 
 ## 3. Trading
 
-**Status, 2026-09-05: rewritten for the trading-final mechanic
-(`agents/reference/trading-final.md`); the human/LLM negotiation surface
-this section used to describe (`PUT .../valuation`, confirm mode's
-per-route default, `propose_trade`) is server-side work still in flight —
-see that document's item 5 for what changes there.**
+**Status, 2026-09-05: complete for the trading-final mechanic
+(`agents/reference/trading-final.md`, item 5 — "human and LLM seats are
+direct gates"). Supersedes `docs/negotiation-interface.md`, whose design
+this finishes; see that document's own header for what changed between the
+draft and here.**
 
 A checkpoint does not act to trade, and there is no public layer any more:
 nothing is advertised, and no vector rides in this record. Instead, every
@@ -174,20 +174,58 @@ A checkpoint served externally (`hexset.clients.botclient.RecordBrain`, the
 does not trade at all: it reads `GET /api/record` for `action_index` alone
 and is never seated as a gate.
 
-**The negotiation interface (human and LLM seats).** Everything above is the
-automatic event; a human or LLM seat additionally gets `POST
-/api/games/<code>/trade` (`hexset.game.Game.execute_trade`) to compose and
-submit a bundle directly, bypassing the automatic candidate search — any
-bundle both sides can cover, not only what the event would have found. It is
-legal on the proposer's own turn against any seat, or during another seat's
-turn against that seat only, and requires the counterparty's own gate to
-price the exchange strictly above zero; the proposer's own gate is never
-consulted, since submitting is its own consent. A checkpoint served through
-this contract is never itself a *proposer* here — nothing calls this route
-on a bot's behalf — but it is a valid **counterparty**: a person or an LLM
-may propose a bundle against a served checkpoint at any time, and the
-checkpoint's gate answers it exactly as it would an automatically-found
-candidate, because the call is the same.
+**The negotiation interface (human and LLM seats).** Every manual seat —
+claimed at the web page or over `hexset.server.mcp` — is a direct gate,
+unconditionally: seat-up installs a `PendingGate` on it (`hexset.server.
+webplay.GameSession.confirm_mode`), and there is no other mode a person or
+an LLM can get any more. As **counterparty**, that means nothing a bot's
+automatic event or another seat's proposal finds against a manual seat ever
+clears on its own; the candidate is recorded instead, unexecuted, to
+`Game.pending`, and `GET /api/state`'s `pending` block lists this seat's own
+entries (only ever the ones naming it, never another seat's) as `{"counterparty":
+<seat>, "gave": [...], "got": [...]}` in `RESOURCE_NAMES` order. Three
+routes, all seat-token gated:
+
+- **`POST /api/games/<code>/trade`** — `{"counterparty": <seat>, "give":
+  {<resource>: <count>}, "receive": {<resource>: <count>}}`, named amounts.
+  Composes and submits a bundle directly (`hexset.game.Game.execute_trade`),
+  bypassing the automatic candidate search entirely — any bundle both sides
+  can cover, not only what the event would have found. Legal on the
+  proposer's own turn against any seat, or during another seat's turn
+  against that seat only; requires the counterparty's own gate to price the
+  exchange strictly above zero — the proposer's own gate is never
+  consulted, since submitting is its own consent. Returns the usual
+  `state()` view on success — its `log` names the trade too, and it
+  survives a server restart, the same as any other move
+  (`GameSession.execute_manual_trade`) — or a 400 (naming which check
+  failed: not affordable, wrong turn, or the counterparty's gate declined)
+  otherwise. A checkpoint served through this contract is never itself a
+  *proposer* here — nothing calls this route on a bot's behalf — but it is
+  a valid
+  **counterparty**: a person or an LLM may propose a bundle against a
+  served checkpoint at any time, and the checkpoint's gate answers it
+  exactly as it would an automatically-found candidate, because the call is
+  the same.
+- **`GET /api/games/<code>/trade/acceptable`** — the actor's own read-only
+  preview of what the route above would accept right now: every bundle a
+  bot counterparty's own gate already prices above zero, grouped by
+  counterparty (`{"offers": [{"counterparty": <seat>, "deals": [{"gave":
+  [...], "got": [...], "gain": <float>}, ...]}, ...]}`), sorted by that
+  counterparty's own gain descending, capped at 12 deals per counterparty.
+  Computing this makes no engine change at all. A manual counterparty is
+  never listed here — its answer is asynchronous, through its own `pending`
+  once something is actually proposed against it, not through this
+  enumeration.
+- **`POST /api/games/<code>/trade/confirm`** / **`.../trade/decline`** —
+  `{"index": <int into this seat's own `pending`>}`. Confirm executes that
+  entry's exact recorded `(a, b, received)` through `execute_trade`'s own
+  re-validation (a stale entry against hands that already moved fails the
+  same way a fresh proposal would) and logs it the same as a fresh
+  proposal; decline drops it, no cards move. Either way the offer is gone
+  afterward — declining is final, not "ask me again later": the bot that
+  made it has already played on by the time this seat ever saw it, so there
+  is nothing left to re-offer, only whatever the table's own next trade
+  event finds.
 
 ## What is never part of this contract
 

@@ -266,6 +266,34 @@ class Journal:
             event["trades"] = [[t.a, t.b, list(t.received)] for t in trades]
         self._emit(event)
 
+    def manual_trade(self, game: Game, *, step: int, round_num: int, trade: Trade) -> None:
+        """A bundle executed outside the automatic event -- a proposal
+        (`POST .../trade`) or a confirmed pending offer (`.../trade/
+        confirm`) -- landed here as its own line rather than folded into
+        some action's own (see `Journal.action`'s own `trades` field):
+        nothing about the phase or the turn changed when it cleared, only
+        two hands, so there is no action to attach it to.
+
+        Replayed by `replayable`/`GameSession.restore` as its own step: the
+        recorded `Trade` is re-executed directly (`hexset.trading.
+        apply_trades`), the same way an automatic clearing's own `trades`
+        are read back rather than recomputed (`trades_of`) -- a replay
+        trusts what the table found once, live, and does not re-ask any
+        gate to agree a second time.
+        """
+        # true state: the journal is the record of everything that
+        # happened, including outcomes no view would expose.
+        state = game.state(0, hidden=False)
+        self._emit(
+            {
+                "kind": "trade",
+                "step": step,
+                "round": round_num,
+                "trade": [trade.a, trade.b, list(trade.received)],
+                "hands": [hand[:] for hand in state.hands],
+            }
+        )
+
     def undo(self, game: Game, *, back_to: int) -> None:
         """The human took a placement back (see `webplay.undo_last_build`).
 
@@ -424,19 +452,27 @@ def trades_of(event: dict) -> tuple[Trade, ...]:
     return tuple(Trade(a, b, tuple(received)) for a, b, received in event.get("trades", ()))
 
 
-def replayable(events: list[dict]) -> list[tuple[int, Action, tuple[Trade, ...]]]:
+def replayable(events: list[dict]) -> list[tuple[int, Action | None, tuple[Trade, ...]]]:
     """Every (actor, action, trades) to re-apply, in order.
+
+    `action` is `None` for a `"trade"` line (`Journal.manual_trade`): a
+    manually executed trade replays as its own step, not attached to any
+    action, since none happened when it cleared live either
+    (`GameSession.restore`).
 
     Undo lines are honoured by dropping what they took back. The file is
     append-only — an undone placement is still written down, by design (see
     `Journal.undo`) — so replaying the lines as they come would build the
     board the human explicitly rejected.
     """
-    steps: list[tuple[int, Action, tuple[Trade, ...]]] = []
+    steps: list[tuple[int, Action | None, tuple[Trade, ...]]] = []
     for event in events:
         kind = event.get("kind")
         if kind == "action":
             steps.append((event["actor"], action_of(event), trades_of(event)))
+        elif kind == "trade":
+            a, b, received = event["trade"]
+            steps.append((a, None, (Trade(a, b, tuple(received)),)))
         elif kind == "undo":
             del steps[event["back_to"] :]
     return steps

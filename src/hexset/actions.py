@@ -108,7 +108,7 @@ class ActionSpace:
         raise ValueError(f"no action at index {index}")
 
     def _stride(self, kind: ActionType) -> int:
-        if kind in (ActionType.MOVE_ROBBER, ActionType.PLAY_KNIGHT):
+        if kind is ActionType.MOVE_ROBBER:
             # One slot per (hex, victim), with the last victim slot meaning
             # "nobody to rob".
             return self.num_players + 1
@@ -130,7 +130,11 @@ def build_space(num_vertices: int, num_edges: int, num_hexes: int, players: int)
         ActionType.BUILD_SETTLEMENT: num_vertices,
         ActionType.BUILD_CITY: num_vertices,
         ActionType.MOVE_ROBBER: robber,
-        ActionType.PLAY_KNIGHT: robber,
+        # Operand-less: playing a knight no longer names a target or victim
+        # (`hexset.game.play_knight_card`) -- it spends the card and enters
+        # the same robber phase a seven does, where `MOVE_ROBBER` names the
+        # hex and victim instead.
+        ActionType.PLAY_KNIGHT: 1,
         ActionType.PLAY_MONOPOLY: NUM_RESOURCES,
         ActionType.PLAY_YEAR_OF_PLENTY: len(YEAR_OF_PLENTY_PAIRS),
         ActionType.BANK_TRADE: NUM_RESOURCES * NUM_RESOURCES,
@@ -213,7 +217,7 @@ def _card_actions(game: Game) -> list[Action]:
 
     held = state.dev_cards[player]
     if held[DevCard.KNIGHT]:
-        out.extend(_robber_targets(game, ActionType.PLAY_KNIGHT))
+        out.append(Action(ActionType.PLAY_KNIGHT))
     if held[DevCard.ROAD_BUILDING]:
         out.append(Action(ActionType.PLAY_ROAD_BUILDING))
     if held[DevCard.MONOPOLY]:
@@ -339,7 +343,7 @@ def apply(game: Game, action: Action) -> None:
     elif kind is ActionType.MOVE_ROBBER:
         move_robber_to(game, action.a, victim_of(game, action.b))
     elif kind is ActionType.PLAY_KNIGHT:
-        play_knight_card(game, action.a, victim_of(game, action.b))
+        play_knight_card(game)
     elif kind is ActionType.PLAY_MONOPOLY:
         play_monopoly_card(game, Resource(action.a))
     elif kind is ActionType.PLAY_YEAR_OF_PLENTY:

@@ -13,13 +13,13 @@ from hexset.game import Phase, start, to_move  # noqa: E402
 from hexset.clients.onnxbot import network_bot  # noqa: E402
 from conftest import step_randomly  # noqa: E402
 
-FIXTURE_V2 = Path(__file__).parent / "fixtures" / "stub-contract5.onnx"
-FIXTURE_VALUED = Path(__file__).parent / "fixtures" / "stub-contract5-valued.onnx"
+FIXTURE_V2 = Path(__file__).parent / "fixtures" / "stub-contract6.onnx"
+FIXTURE_VALUED = Path(__file__).parent / "fixtures" / "stub-contract6-valued.onnx"
 
 
 @pytest.fixture
 def checkpoint_v2():
-    """`stub-contract5.onnx`: a record-contract stub for a 4-player base
+    """`stub-contract6.onnx`: a record-contract stub for a 4-player base
     board — uniform-over-legal prior, zero value, no learned weights (see
     `tests/fixtures/build_stub.py`). This is the only policy `onnxbot`
     serves: contract 1 (and the `encoding_v1`-based policy that read it) was
@@ -100,7 +100,7 @@ def test_a_checkpoint_refuses_a_table_it_was_not_trained_for(checkpoint_v2):
 
 @pytest.fixture
 def checkpoint_valued():
-    """`stub-contract5-valued.onnx`: same shape as `stub-contract5.onnx`, but
+    """`stub-contract6-valued.onnx`: same shape as `stub-contract6.onnx`, but
     `value` reads `own_hand` through five fixed, distinct, non-zero
     per-resource weights instead of being identically zero (see
     `fixtures/build_stub.py --valued`). Linear in the hand, so a one-card
@@ -161,7 +161,7 @@ def test_accepts_refuses_a_trade_with_zero_delta(checkpoint_valued):
 
 
 def test_accepts_takes_a_strictly_improving_exchange(checkpoint_valued):
-    """`stub-contract5-valued.onnx`'s weights are `[0.006, -0.011, 0.004,
+    """`stub-contract6-valued.onnx`'s weights are `[0.006, -0.011, 0.004,
     0.013, -0.008]`: giving up resource 1 (the most negative weight) for
     resource 3 (the most positive) strictly increases the linear value, so
     the private gate must say yes -- the mirror image of the zero-delta

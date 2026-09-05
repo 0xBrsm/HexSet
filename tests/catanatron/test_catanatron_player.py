@@ -4,9 +4,12 @@
 This is the test the earlier ones were building towards -- `search2-notrade`
 (no torch, so it runs anywhere) driven entirely through the bridge, against
 catanatron's own bots, for whole games rather than isolated decisions. It is
-also what actually exercises PLAY_KNIGHT's two-step resolution, which none of
-the earlier tests could: that path only exists once a real bot, not a random
-one probing every legal option, chooses to play a knight.
+also what actually exercises a knight played for real: `PLAY_KNIGHT` maps
+one-to-one onto catanatron's `PLAY_KNIGHT_CARD` (`actions.py`), and the
+`MOVE_ROBBER` decision that follows resolves on the bridge's own next
+`decide()` call, translated fresh from catanatron's own post-knight state --
+that path only exists once a real bot, not a random one probing every legal
+option, chooses to play a knight.
 """
 
 import random

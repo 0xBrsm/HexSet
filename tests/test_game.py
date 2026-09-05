@@ -179,9 +179,12 @@ def test_only_one_development_card_per_turn():
     game.phase = Phase.MAIN
     game._state.dev_cards[0][DevCard.KNIGHT] = 2
 
-    play_knight_card(game, (game._state.robber + 1) % game._state.board.num_hexes)
+    play_knight_card(game)
+    move_robber_to(game, (game._state.robber + 1) % game._state.board.num_hexes)
+    assert game.phase is Phase.MAIN
+
     with pytest.raises(ValueError):
-        play_knight_card(game, (game._state.robber + 2) % game._state.board.num_hexes)
+        play_knight_card(game)
 
 
 def test_ending_a_turn_matures_cards_and_passes_play():
@@ -222,6 +225,37 @@ def test_reaching_ten_points_ends_the_game():
 
     assert game.phase is Phase.GAME_OVER
     assert game.won_by == 0
+
+
+def test_a_knight_that_wins_the_game_ends_it_at_once_with_no_robber_move():
+    """Owner decision, 2026-09-05: playing a knight follows the rulebook's own
+    sequence -- the card is spent, Largest Army updated and the win checked,
+    *then* the robber moves. A knight that wins the game ends it the instant
+    the total crosses the threshold, with no robber move and no `Phase.ROBBER`
+    at all, exactly as a build or a bought card already does."""
+    game = run_setup(a_game(players=2))
+    game.phase = Phase.MAIN
+    game._state.dev_cards[0][DevCard.VICTORY_POINT] = 7
+    game._state.dev_cards[0][DevCard.KNIGHT] = 1
+    game._state.knights_played[0] = 2  # one more play takes Largest Army
+
+    play_knight_card(game)
+
+    assert game.phase is Phase.GAME_OVER
+    assert game.won_by == 0
+    assert game._state.largest_army_holder == 0
+
+
+def test_largest_army_is_awarded_before_the_robber_moves():
+    game = run_setup(a_game(players=2))
+    game.phase = Phase.MAIN
+    game._state.dev_cards[0][DevCard.KNIGHT] = 1
+    game._state.knights_played[0] = 2  # one more play takes Largest Army
+
+    play_knight_card(game)
+
+    assert game.phase is Phase.ROBBER
+    assert game._state.largest_army_holder == 0
 
 
 # --- trade/build interleaving (owner review against the rulebook, 2026-09-03) -
@@ -312,8 +346,10 @@ def test_trade_event_runs_again_after_every_main_action(monkeypatch, setup, act)
 
 def test_trade_event_runs_again_after_a_knight_in_main_but_not_in_roll(monkeypatch):
     """`play_knight_card` is the one action legal in both `ROLL` and `MAIN`
-    (playing it before the roll, to move the robber pre-emptively). The
-    interleaving only ever applies to `MAIN`."""
+    (playing it before the roll, to move the robber pre-emptively). Either
+    way it now resolves through the same robber phase a seven does
+    (`move_robber_to`), and the trade event interleaving only ever applies
+    once that phase resumes into `MAIN`, not `ROLL`."""
     game = _seated(run_setup(a_game(players=3)))
     game._state.dev_cards[0][DevCard.KNIGHT] = 2
     target = (game._state.robber + 1) % game._state.board.num_hexes
@@ -321,12 +357,20 @@ def test_trade_event_runs_again_after_a_knight_in_main_but_not_in_roll(monkeypat
 
     game.phase = Phase.ROLL
     calls = _spy_on_trade_event(monkeypatch)
-    play_knight_card(game, target)
+    play_knight_card(game)
+    assert game.phase is Phase.ROBBER
+    assert calls == []
+    move_robber_to(game, target)
+    assert game.phase is Phase.ROLL
     assert calls == []
 
     game.dev_card_played = False
     game.phase = Phase.MAIN
-    play_knight_card(game, other_target)
+    play_knight_card(game)
+    assert game.phase is Phase.ROBBER
+    assert calls == []
+    move_robber_to(game, other_target)
+    assert game.phase is Phase.MAIN
     assert calls == [Phase.MAIN]
 
 
@@ -491,7 +535,9 @@ def test_only_one_card_total_across_roll_and_main():
     game._state.dev_cards[0][DevCard.KNIGHT] = 1
     game._state.dev_cards[0][DevCard.MONOPOLY] = 1
 
-    play_knight_card(game, (game._state.robber + 1) % game._state.board.num_hexes)
+    play_knight_card(game)
+    move_robber_to(game, (game._state.robber + 1) % game._state.board.num_hexes)
+    assert game.phase is Phase.ROLL
     roll_dice(game, roll=6)  # deterministic: a producing roll, never the seven
 
     with pytest.raises(ValueError):

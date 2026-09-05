@@ -16,7 +16,7 @@ TOKEN_HEADER = "X-HexSet-Token"
 
 
 # Which graph shape an ONNX checkpoint's `contract` metadata value names.
-# Contract 5 is "record in, decision out" -- the graph masks, normalises,
+# Contract 6 is "record in, decision out" -- the graph masks, normalises,
 # argmaxes and un-rotates, and the caller only states the position
 # (`hexset.onnx_record.record_from_game`) and reads the answer back.
 #
@@ -27,6 +27,11 @@ TOKEN_HEADER = "X-HexSet-Token"
 # actions at all (`hexset.trading`), so those graphs describe a game this
 # engine does not play -- there is no honest way to feed them, and refusing
 # by name beats guessing.
+#
+# 5 is no longer served either: the knight two-step fix shrinks the flat
+# `ActionSpace` (`PLAY_KNIGHT` dropped its operands), so a contract-5
+# checkpoint's `action_mask`/`prior` are the wrong width for this engine's
+# action space now (`hexset.onnx_record.CONTRACT_VERSION`'s own comment).
 #
 # The numbers are `hexset.export_onnx._CONTRACT_VERSION`'s, and only its. PR #2
 # re-stamped the 29-field record as `"2"` in this repo while dev-HexNet was
@@ -40,4 +45,4 @@ TOKEN_HEADER = "X-HexSet-Token"
 # (`docs/engine-divergence-2026-09-02.md`, B5). A file with no `contract`
 # key at all is refused by name at load, same as any other unknown
 # contract.
-RECORD_CONTRACTS = frozenset({"5"})
+RECORD_CONTRACTS = frozenset({"6"})

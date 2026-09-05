@@ -25,7 +25,9 @@ each of them is load-bearing:
 *Every chance event sits behind an explicit action* (`afterstate-audit.md`), so
 there is a state at which the distribution can be enumerated and a copy played
 forward. `ROLL` carries 2d6; `BUY_DEV_CARD` carries the deck draw;
-`MOVE_ROBBER` and `PLAY_KNIGHT` carry the steal.
+`MOVE_ROBBER` carries the steal, whether the robber got there off a seven or
+off a knight -- `PLAY_KNIGHT` itself never draws any more: it only spends the
+card and hands off to the same `MOVE_ROBBER` decision a seven enters.
 
 *Every one of those distributions is known to an evaluator holding the full
 state* -- 11 weighted dice outcomes, the remaining deck as a multiset, the
@@ -79,13 +81,15 @@ TERMS = ("roll", "deck", "steal")
 # Below this a correction is float noise from `V(o) - sum p.V`, not a signal.
 _NEGLIGIBLE = 1e-12
 
-# The four transitions that embed a draw; see `hexset.mcts.draws_hidden`.
+# The three transitions that embed a draw; see `hexset.mcts.draws_hidden`.
+# `PLAY_KNIGHT` is deliberately not here: it never draws any more, whether or
+# not it wins the game outright, and the `MOVE_ROBBER` decision the resulting
+# `Phase.ROBBER` offers next is where this same correction applies instead.
 CHANCE_ACTIONS = frozenset(
     {
         ActionType.ROLL,
         ActionType.BUY_DEV_CARD,
         ActionType.MOVE_ROBBER,
-        ActionType.PLAY_KNIGHT,
     }
 )
 

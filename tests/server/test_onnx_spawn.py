@@ -23,8 +23,8 @@ from hexset.game import Phase  # noqa: E402
 from hexset.server.api import Config, spawn_bot  # noqa: E402
 from conftest import new_tables  # noqa: E402
 
-FIXTURE = Path(__file__).parent.parent / "clients" / "fixtures" / "stub-contract5.onnx"
-VALUED_FIXTURE = Path(__file__).parent.parent / "clients" / "fixtures" / "stub-contract5-valued.onnx"
+FIXTURE = Path(__file__).parent.parent / "clients" / "fixtures" / "stub-contract6.onnx"
+VALUED_FIXTURE = Path(__file__).parent.parent / "clients" / "fixtures" / "stub-contract6-valued.onnx"
 
 
 def test_spawn_bot_resolves_the_onnx_spec_without_a_module_not_found_error():
@@ -32,7 +32,7 @@ def test_spawn_bot_resolves_the_onnx_spec_without_a_module_not_found_error():
     docstring: the module boundary keeps onnxruntime out of every caller that
     never seats a checkpoint). Before the fix this raised `ModuleNotFoundError:
     No module named 'hexset.server.onnxbot'` for any `.onnx` spec -- any
-    model picked in the web UI. `stub-contract5.onnx` is the only contract the
+    model picked in the web UI. `stub-contract6.onnx` is the only contract the
     server still serves (`hexset.server.constants.RECORD_CONTRACTS`), built by
     `tests/clients/fixtures/build_stub.py`: uniform-over-legal prior, zero
     value, no learned weights.
@@ -55,10 +55,10 @@ def test_a_network_seats_first_action_publishes_a_nonzero_valuation(monkeypatch,
     thing that answers, not the zero default a bot with no `valuation`
     method gets (`hexset.trading.NO_VALUATION`).
 
-    `stub-contract5-valued.onnx` reads `own_hand` through fixed, distinct,
+    `stub-contract6-valued.onnx` reads `own_hand` through fixed, distinct,
     non-zero per-resource weights (`fixtures/build_stub.py --valued`), so
     every one-card-more delta is that resource's own weight regardless of
-    the seat's actual hand -- unlike `stub-contract5.onnx`, whose value head
+    the seat's actual hand -- unlike `stub-contract6.onnx`, whose value head
     really is all zero and could never tell "published nothing" apart from
     "published five honest zeros".
 

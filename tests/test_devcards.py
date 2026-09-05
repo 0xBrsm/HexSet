@@ -9,7 +9,6 @@ from helpers import give, mini_board
 
 from hexset.board.terrain import Resource
 from hexset.cards import DECK_SIZE, PLAYABLE, DevCard, make_deck
-from hexset.chance import Live
 from hexset.devcards import (
     buy,
     can_buy,
@@ -22,6 +21,7 @@ from hexset.devcards import (
     play_year_of_plenty,
 )
 from hexset.economy import COSTS, Purchase, expected_total, total_in_play
+from hexset.robber import move_robber
 from hexset.state import new_game, place_settlement
 
 
@@ -110,36 +110,26 @@ def test_victory_point_cards_are_never_playable():
     assert not can_play(state, 0, DevCard.VICTORY_POINT)
 
 
-def test_knight_moves_the_robber_and_counts_toward_an_army():
+def test_knight_spends_the_card_and_counts_toward_an_army():
+    """`play_knight` no longer takes a target or victim -- moving the robber
+    and stealing happen afterwards, through the same robber phase a seven
+    uses (`hexset.game.play_knight_card`/`move_robber_to`)."""
     state = a_game()
     stack(state, 0, DevCard.KNIGHT)
-    target = 3
 
-    play_knight(state, 0, target)
+    play_knight(state, 0)
 
-    assert state.robber == target
     assert state.knights_played[0] == 1
     assert state.dev_cards[0][DevCard.KNIGHT] == 0
 
 
-def test_knight_steals_from_a_chosen_victim():
-    state = a_game()
-    stack(state, 0, DevCard.KNIGHT)
-    give(state, 1, Resource.ORE, 1)
-
-    stolen = play_knight(state, 0, 3, victim=1, chance=Live(random.Random(0)))
-
-    assert stolen == Resource.ORE
-    assert state.hands[0][Resource.ORE] == 1
-    assert state.hands[1][Resource.ORE] == 0
-    assert total_in_play(state) == expected_total()
-
-
 def test_robber_must_actually_move():
+    """The invariant a knight used to enforce through `play_knight` -- it
+    now lives only in `hexset.robber.move_robber`, which both a seven and a
+    knight resolve through (`hexset.game.move_robber_to`)."""
     state = a_game()
-    stack(state, 0, DevCard.KNIGHT)
     with pytest.raises(ValueError):
-        play_knight(state, 0, state.robber)
+        move_robber(state, state.robber)
 
 
 def test_road_building_places_two_free_roads():

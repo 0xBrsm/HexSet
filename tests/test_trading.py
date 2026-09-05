@@ -693,8 +693,15 @@ def test_entering_main_from_a_roll_arms_the_event_rather_than_running_it():
 
 
 def test_entering_main_from_the_robber_arms_the_event_rather_than_running_it():
+    """Simulates arriving at `Phase.ROBBER` off a seven: `roll_dice` arms
+    `event_pending`/`awaiting_publish` and sets `resume_phase = MAIN` ahead of
+    the DISCARD/ROBBER detour (its own docstring), so this sets the same
+    three fields directly rather than driving a real roll to a seven."""
     game = a_game()
     game.phase = Phase.ROBBER
+    game.resume_phase = Phase.MAIN
+    game.event_pending = True
+    game.awaiting_publish = True
     give(game._state, 0, Resource.WOOD, 1)
     give(game._state, 1, Resource.ORE, 1)
     _seat_and_publish(

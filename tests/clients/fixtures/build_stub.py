@@ -1,9 +1,9 @@
 """Build a record-contract stub graph: right names, right shapes, no weights.
 
-    python build_stub.py 5              # 26 inputs -> stub-contract5.onnx
-    python build_stub.py 5 --partial    # a graph that declares only a subset
-    python build_stub.py 5 --valued     # value = a fixed linear read of own_hand
-    python build_stub.py 5 --valued --fixed-batch   # --valued with batch dim pinned to 1
+    python build_stub.py 6              # 25 inputs -> stub-contract6.onnx
+    python build_stub.py 6 --partial    # a graph that declares only a subset
+    python build_stub.py 6 --valued     # value = a fixed linear read of own_hand
+    python build_stub.py 6 --valued --fixed-batch   # --valued with batch dim pinned to 1
 
 Semantics are deliberately trivial and deliberately *legal*: uniform over the
 legal mask, first legal slot as the chosen action, zero value. A stub that
@@ -45,7 +45,7 @@ from onnx import TensorProto as TP
 from onnx import helper, numpy_helper
 
 NUM_HEXES, NUM_VERTICES, NUM_EDGES = 19, 54, 72
-PLAYERS, SPACE = 4, 550
+PLAYERS, SPACE = 4, 456
 RESOURCES, DEV = 5, 5
 FIXED_BATCH = "--fixed-batch" in sys.argv
 B = 1 if FIXED_BATCH else "B"
@@ -81,9 +81,9 @@ INPUTS = [
 # The `contract` metadata number is `hexset.export_onnx._CONTRACT_VERSION`'s.
 LEDGER_FIELDS = ("ledger_known", "ledger_unknown")
 
-CONTRACT = sys.argv[1] if len(sys.argv) > 1 else "5"
-if CONTRACT != "5":
-    raise SystemExit("contract must be 5")
+CONTRACT = sys.argv[1] if len(sys.argv) > 1 else "6"
+if CONTRACT != "6":
+    raise SystemExit("contract must be 6")
 PARTIAL = "--partial" in sys.argv
 VALUED = "--valued" in sys.argv
 if PARTIAL:

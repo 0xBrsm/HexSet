@@ -73,10 +73,17 @@ from .victory import award_points
 # -- same outputs, two more inputs; `"5"` replaces the four `offer_*`
 # fields with `valuations`, one vector per seat (`agents/reference/
 # trading-design.md` §8, the one-event trade mechanic) -- contracts 2-4
-# refused. Lives here, not in `hexnet.export_onnx`, because it names *this
-# record's* shape and only incidentally the graph's -- bump it again only if
-# `RECORD_FIELDS` or the export's output tuple changes.
-CONTRACT_VERSION = "5"
+# refused. `"6"` is the knight two-step fix: `PLAY_KNIGHT` dropped its
+# operands (it only spends the card now; the robber move is a separate
+# `MOVE_ROBBER` decision through the same `Phase.ROBBER` a seven enters), so
+# `RECORD_FIELDS` is unchanged but the flat `ActionSpace` shrinks -- a
+# checkpoint traced against the old, larger space would feed `action_mask`/
+# read `prior` at the wrong width, so this contract number changes too,
+# shared with the trading redesign in flight. Lives here, not in
+# `hexnet.export_onnx`, because it names *this record's* shape and only
+# incidentally the graph's -- bump it again only if `RECORD_FIELDS`, the
+# export's output tuple, or (as here) the action space itself changes.
+CONTRACT_VERSION = "6"
 
 # Every field name in the record, in the order the plan's table lists them
 # (board, then position, then information set, then legality).

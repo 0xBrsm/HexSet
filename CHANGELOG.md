@@ -113,6 +113,24 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Playing a Knight is now two actions: play the card, then move the
+  robber.** Previously one action carried a target hex and a victim
+  together; now you play the Knight, and the board then asks for the robber
+  move exactly the way it already does after rolling a seven — pick a hex,
+  then a victim if there's a choice. A Knight that wins the game ends it the
+  instant your total crosses the threshold, with no robber move at all. The
+  board page no longer arms a "cancel" state for the Knight — once played,
+  it resolves the same forced robber move a seven does.
+
+  Under the hood: `PLAY_KNIGHT` dropped its operands, so the ONNX action-space
+  contract bumps to `"6"` — shared with the trading redesign in flight, so a
+  checkpoint traced against contract `"5"` or older is refused by name rather
+  than fed a mismatched action space. The Catanatron adapter now maps the two
+  hexset decisions onto Catanatron's own `PLAY_KNIGHT_CARD`/`MOVE_ROBBER`
+  pair one-to-one, rather than folding them into one hexset action. Old
+  recorded games whose Knight actions carried a target/victim no longer
+  replay; the only such records this project shipped are the trade-lab bank,
+  re-emitted separately.
 - **`hexset.record.Record` is version 2: it carries its own chance.** A new
   `chance` field (the deck order, every roll, every steal, every random
   discard, as an explicit event stream) replaces depending on `seed` to

@@ -48,7 +48,7 @@ def test_every_action_round_trips():
         Action(ActionType.BUILD_SETTLEMENT, 53),
         Action(ActionType.BUILD_CITY, 0),
         Action(ActionType.MOVE_ROBBER, 18, 3),
-        Action(ActionType.PLAY_KNIGHT, 0, 4),
+        Action(ActionType.PLAY_KNIGHT),
         Action(ActionType.BANK_TRADE, 4, 0),
         Action(ActionType.PLAY_YEAR_OF_PLENTY, len(YEAR_OF_PLENTY_PAIRS) - 1),
         Action(ActionType.DISCARD, 2),
@@ -63,7 +63,10 @@ def test_the_space_grows_with_the_board():
     assert large.size > small.size
 
 
-def test_more_players_widen_only_the_robber_blocks():
+def test_more_players_widen_only_the_robber_block():
+    """`PLAY_KNIGHT` no longer widens with the table: it carries no operand
+    of its own any more (the knight two-step fix), so only `MOVE_ROBBER`'s
+    (hex, victim) block grows with the player count."""
     three = build_space(54, 72, 19, 3)
     four = build_space(54, 72, 19, 4)
     grew = [
@@ -71,7 +74,17 @@ def test_more_players_widen_only_the_robber_blocks():
         for kind in ActionType
         if four.sizes[kind] != three.sizes[kind]
     ]
-    assert grew == [ActionType.MOVE_ROBBER, ActionType.PLAY_KNIGHT]
+    assert grew == [ActionType.MOVE_ROBBER]
+
+
+def test_the_flat_action_space_size_is_pinned():
+    """The knight two-step fix shrinks the flat space from 550 to 456 for the
+    4-player base board (`PLAY_KNIGHT`'s block drops from `robber` (95) to 1):
+    pinned so a future change to the layout has to own the new number
+    deliberately."""
+    space = build_space(54, 72, 19, 4)
+    assert space.size == 456
+    assert space.sizes[ActionType.PLAY_KNIGHT] == 1
 
 
 def test_setup_offers_only_setup_actions():

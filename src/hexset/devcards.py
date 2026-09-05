@@ -1,8 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
-import random
-
 from .board.terrain import NUM_RESOURCES, Resource
 from .cards import (
     PLAYABLE,
@@ -10,9 +8,7 @@ from .cards import (
     YEAR_OF_PLENTY_RESOURCES,
     DevCard,
 )
-from .chance import Chance, Live
 from .economy import Purchase, can_afford, pay
-from .robber import move_robber, steal
 from .state import GameState, can_place_road, place_road
 
 
@@ -56,19 +52,16 @@ def spend_card(state: GameState, player: int, card: DevCard) -> None:
     state.dev_cards[player][card] -= 1
 
 
-def play_knight(
-    state: GameState,
-    player: int,
-    target: int,
-    victim: int | None = None,
-    chance: Chance | None = None,
-) -> Resource | None:
+def play_knight(state: GameState, player: int) -> None:
+    """Spend the card and credit this play towards Largest Army eligibility.
+
+    Moving the robber and stealing happen afterwards, through the same
+    robber phase a seven uses (`hexset.game.play_knight_card` sets the phase
+    to `Phase.ROBBER`; `hexset.game.move_robber_to` resolves it) -- the
+    knight itself no longer carries a target or victim.
+    """
     spend_card(state, player, DevCard.KNIGHT)
     state.knights_played[player] += 1
-    move_robber(state, target)
-    if victim is None:
-        return None
-    return steal(state, player, victim, chance or Live(random.Random()))
 
 
 def play_road_building(state: GameState, player: int, edges: list[int]) -> None:

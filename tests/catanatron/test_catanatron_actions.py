@@ -2,9 +2,12 @@
 """Every dev-catan legal action, at many real positions, must resolve to a
 real catanatron playable_action.
 
-`PLAY_KNIGHT` is excluded deliberately: it is resolved across two catanatron
-decisions rather than one (see `player.py`) and is covered by
-`test_player.py` instead, end to end.
+`PLAY_KNIGHT` used to be excluded deliberately here, resolved across two
+catanatron decisions rather than one. Since the owner's knight two-step fix
+it maps one-to-one just like every other operand-less action (`actions.py`'s
+`_NO_VALUE`), so it is exercised by this same round trip now; the two-step
+resolution end to end (`PLAY_KNIGHT_CARD` then `MOVE_ROBBER`) is still
+covered by `test_catanatron_player.py`/`test_catanatron_bot.py`.
 """
 
 import random
@@ -29,8 +32,6 @@ from catanatron.models.player import Color, RandomPlayer
 from hexset.catanatron.actions import to_catanatron
 from hexset.catanatron.board import translate_board
 from hexset.catanatron.state import translate
-
-EXCLUDED = {OurActionType.PLAY_KNIGHT}
 
 # dev-catan's engine does not enforce the physical piece limit (15 roads / 5
 # settlements / 4 cities per player) that real Catan and catanatron both do
@@ -102,8 +103,6 @@ def test_every_legal_action_resolves(seed):
         our_game, seats = translate(game, mapping, rng)
         options = legal_actions(our_game)
         for action in options:
-            if action.type in EXCLUDED:
-                continue
             try:
                 resolved = to_catanatron(action, our_game, mapping, seats, game.playable_actions)
             except ValueError:

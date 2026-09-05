@@ -234,6 +234,15 @@ def _candidates(state: GameState, me: int, locked: frozenset[int]):
                 yield them, tuple(r - g for r, g in zip(received, given))
 
 
+def _position_key(state: GameState, ledger) -> tuple:
+    """Everything a gate can read that a trade moves: every hand and every
+    seat's ledger row. The trade event's revisit check hashes this."""
+    return (
+        tuple(tuple(hand) for hand in state.hands),
+        tuple((tuple(row.known), row.unknown) for row in ledger.seats),
+    )
+
+
 def trade_event(game: "Game", gate: Gate) -> list[Trade]:
     """Clear every deal the current player and one other seat both gain
     from.
@@ -253,11 +262,15 @@ def trade_event(game: "Game", gate: Gate) -> list[Trade]:
     picks the winner (`_best_clearing`). No budget: the loop runs until
     nothing clears.
 
-    The single engine limit is the assertion below: an event cannot execute
-    more trades than there are cards on the table. It can only fire if a
-    gate is broken (a gate that is not strictly increasing in the acting
+    The single engine limit is the assertion below: an event never revisits
+    a position (every seat's hand plus the public ledger). The acting seat's
+    own gain is strictly positive at every clearing, so a position that comes
+    back means a gate is broken (not strictly increasing in the acting
     seat's own value), and that is a bug to surface rather than a knob to
-    tune.
+    tune. It is deliberately not a count of trades: a legitimate event of
+    one- and two-card exchanges can run longer than there are cards on the
+    table without ever repeating a position -- self-play against a network
+    gate does so in about one event in two hundred.
     """
     # A snapshot of *this* event only: whatever a manual seat's `PendingGate`
     # recorded last event no longer describes hands that may have since
@@ -277,13 +290,15 @@ def trade_event(game: "Game", gate: Gate) -> list[Trade]:
             views[seat] = got
         return got
 
-    # The assertion's ceiling, measured before anything moves: any exchange
-    # only moves cards between two hands, never creates or destroys one, so
-    # the total is fixed for the whole event regardless of bundle size.
-    cards = sum(sum(hand) for hand in state.hands)
-
     executed: list[Trade] = []
+    seen: set[tuple] = set()
     while game.max_trades is None or len(executed) < game.max_trades:
+        position = _position_key(state, game.ledger)
+        assert position not in seen, (
+            "a trade event revisited a position: a gate is not strictly "
+            "increasing in the acting seat's own value"
+        )
+        seen.add(position)
         views.clear()
         best = _best_clearing(game, me, gate, view)
         if best is None:
@@ -293,7 +308,6 @@ def trade_event(game: "Game", gate: Gate) -> list[Trade]:
         exchange(state, me, them, received)
         game.ledger.apply_hand_diff(before, state.hands)
         executed.append(Trade(me, them, received, gain_a=gain_me, gain_b=gain_them))
-        assert len(executed) <= cards, "a trade event outran the cards on the table"
 
     game.trades.extend(executed)
     game.trades_made += len(executed)

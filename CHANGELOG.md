@@ -79,6 +79,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `hexset.trading.trade_event`'s safety assertion checks that an event never
+  revisits a position (every hand plus the public ledger) instead of counting
+  trades against the cards on the table. A legitimate event of one- and
+  two-card exchanges can run longer than there are cards without repeating a
+  position; the old ceiling raised on such events in self-play.
 - **A manually executed trade (`POST .../trade`, a confirmed pending offer)
   now appears in the sidebar log and survives a server restart.** It moves
   cards through `hexset.game.Game.execute_trade` directly, outside the

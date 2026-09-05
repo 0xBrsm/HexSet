@@ -439,3 +439,78 @@ What it imports from `hexset`: `actions`, `arena`, `board.*`, `bots`, `cards`,
 `devcards`, `economy`, `game`, `ledger`, `mcts`, `roads`, `state`, `trading`,
 `victory` — and, through `arena.spawn`, `heximax`, `evaluate`, `placement`.
 All torch-free; verified by the suite running in a venv with no torch in it.
+
+---
+
+## 2026-09-05 — rules-conformance pass against the base-game rulebook
+
+Owner direction: "make sure all rules are followed exactly in the engine."
+This is a different audit from the one above — that one compared this
+engine against the now-deleted `hexset_ui` copy; this one compares it
+against the private transcription of the official rulebook
+(`rules/base-game.md`, base game only, Seafarers out of scope). Full audit
+table, fixes, and tests are on `fix/rules-conformance`. Two real
+divergences from the rulebook were found and fixed; the trading mechanic in
+`trading.py` (the one-event redesign) was left untouched, as directed, and
+is not part of this audit.
+
+**Fixed.**
+
+* **Every playable development card, not only the knight, is legal before
+  rolling** (rulebook, Production Phase). `actions.legal_actions`'s `ROLL`
+  branch offered only `PLAY_KNIGHT`; `game.play_road_building_card`/
+  `play_monopoly_card`/`play_year_of_plenty_card` each hard-required
+  `Phase.MAIN`. All four card plays now share the same phase check
+  `play_knight_card` already used (`ROLL` or `MAIN`), with "one a turn" and
+  "not one built this turn" unchanged (`Game.dev_card_played`, the
+  `dev_cards`/`new_dev_cards` split). `run_trade_event` already no-ops
+  outside `MAIN`, so nothing needed to change there. This was the
+  divergence flagged going into this pass (see the task brief that opened
+  it); the fix generalizes it from the knight to all four cards.
+* **A tile transfer during another seat's turn no longer wins the game on
+  behalf of a seat that is not on the move** (rulebook, "Winning the Game":
+  "at any point during YOUR turn"). `game._check_win` called
+  `victory.winner`, which scans every seat; a settlement that broke an
+  opponent's Longest Road could hand the tile straight to a third,
+  already-loaded seat and end the game for them mid-way through somebody
+  else's turn. `_check_win` now reads only `game.current_player`'s own
+  `victory_points`. `victory.winner` itself is unchanged — it is a
+  legitimate state-only "who is over the threshold" query
+  (`tests/test_victory.py`), just not what a turn-scoped win check should
+  call.
+* **Follow-up, same day: a seat that crosses 10 VP off-turn now wins at the
+  start of its own turn, not merely "not immediately."** Scoping the win
+  check to the mover (the fix directly above) has a corollary the rulebook
+  also states outright: "the first player to reach 10 or more VPs *on
+  their turn* wins" means the seat wins the moment its own turn begins, not
+  only after it next does something. `end_turn` now calls `_check_win`
+  again right after handing the turn to the new current player, so
+  `is_over(game)` is already true before that seat is ever asked for a
+  move. This is the one function every driver uses to end a turn — the
+  arena's `while not is_over(game)` loop, the gym, a search stepping its
+  own `imagine`d copy — so all of them get the corrected behaviour for
+  free; nothing needed changing in `imagine` itself; `arena.play`'s stop
+  condition needed no change either, since it already checks `is_over`
+  before requesting the next action.
+
+**Everything else on the checklist conforms as written.** Piece supply
+(15/5/4), building costs, the distance rule, road adjacency (including the
+"not through an opponent's building" case), bank 4:1 and port 3:1/2:1,
+the discard-on-seven threshold and rounding, the robber (must move, one
+random steal, no steal with nobody to rob), the production bank-shortage
+rule (single claimant takes the remainder, several claimants get nothing),
+one dev card a turn, the deck running out, all five card effects, Largest
+Army at 3 and Longest Road at 5 with their strict-beat transfer rule
+including ties, and the setup snake with second-settlement resources were
+all already correct — see the audit table in the PR/commit for the full
+rule-by-rule verdict and file:line citations. Dev-card play timing (this
+pass's first fix) and the win-check scope (its second) were the only two
+places where the code and the rulebook actually disagreed.
+
+**Left deliberately untouched, per the brief:** `trading.py`'s one-event
+player-trading mechanic (§8, PI-ratified redesign of the rulebook's
+player-to-player trade) — out of scope by direct instruction, not
+re-audited here. `hexset.state.gold_claims` and the `Terrain.GOLD` path
+exist in this tree but are Seafarers-only and unreachable from the base
+`BASE_TERRAIN` bag; also out of scope, not touched, not counted as either a
+conformance or a divergence.

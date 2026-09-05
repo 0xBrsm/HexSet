@@ -4,17 +4,19 @@ from __future__ import annotations
 import random
 
 import pytest
-from helpers import clear_hand, give
+from helpers import clear_hand, give, independent_vertices, mini_board
 
-from hexset.actions import legal_actions
+from hexset.actions import ActionType, legal_actions
 from hexset.board.board import random_base_board
 from hexset.board.terrain import Resource
+from hexset.board.topology import coastal_rings
 from hexset.cards import DevCard
 from hexset.economy import COSTS, Purchase, expected_total, total_in_play
 from hexset.game import (
     Phase,
     build_city,
     build_road,
+    build_settlement,
     buy_development_card,
     end_turn,
     legal_initial_roads,
@@ -31,7 +33,8 @@ from hexset.game import (
     submit_discard,
     trade_with_bank,
 )
-from hexset.state import NO_OWNER, can_place_settlement
+from hexset.state import NO_OWNER, Building, can_place_settlement
+from hexset.victory import WINNING_POINTS, update_longest_road, victory_points
 
 
 def a_game(players: int = 3, seed: int = 0):
@@ -377,3 +380,208 @@ def test_trade_event_never_runs_during_discard_resolution(monkeypatch):
     assert calls == []
     legal_actions(game)
     assert calls == [Phase.MAIN]  # the one legitimate trigger: entering MAIN
+
+
+# --- every playable card before the roll, not only the knight (rulebook,
+# --- Production Phase: "you may play one of them before rolling the dice") -
+
+
+def test_road_building_is_legal_before_the_roll():
+    game = run_setup(a_game(players=2))
+    game._state.dev_cards[0][DevCard.ROAD_BUILDING] = 1
+
+    play_road_building_card(game)
+
+    assert game.phase is Phase.ROLL  # playing the card does not itself roll
+    assert game.free_roads == 2
+    assert game.dev_card_played
+
+
+def test_monopoly_is_legal_before_the_roll():
+    game = run_setup(a_game(players=3))
+    for player in range(3):
+        clear_hand(game._state, player)  # setup's own opening resources would confound the count
+    game._state.dev_cards[0][DevCard.MONOPOLY] = 1
+    give(game._state, 1, Resource.SHEEP, 2)
+
+    taken = play_monopoly_card(game, Resource.SHEEP)
+
+    assert taken == 2
+    assert game.phase is Phase.ROLL
+    assert game.dev_card_played
+
+
+def test_year_of_plenty_is_legal_before_the_roll():
+    game = run_setup(a_game(players=2))
+    clear_hand(game._state, 0)  # setup's own opening resources would confound the count
+    game._state.dev_cards[0][DevCard.YEAR_OF_PLENTY] = 1
+
+    play_year_of_plenty_card(game, [Resource.ORE, Resource.ORE])
+
+    assert game._state.hands[0][Resource.ORE] == 2
+    assert game.phase is Phase.ROLL
+    assert game.dev_card_played
+
+
+def test_only_one_card_total_across_roll_and_main():
+    """One card a turn is a turn-wide allowance, not one per phase: playing
+    a knight before rolling must still block a second card afterwards."""
+    game = run_setup(a_game(players=2))
+    game._state.dev_cards[0][DevCard.KNIGHT] = 1
+    game._state.dev_cards[0][DevCard.MONOPOLY] = 1
+
+    play_knight_card(game, (game._state.robber + 1) % game._state.board.num_hexes)
+    roll_dice(game, roll=6)  # deterministic: a producing roll, never the seven
+
+    with pytest.raises(ValueError):
+        play_monopoly_card(game, Resource.ORE)
+
+
+def test_a_card_bought_this_turn_still_cannot_be_played_before_the_roll():
+    """Relaxing the phase requirement to `ROLL` must not relax "not one
+    built this turn": a card sitting in `new_dev_cards` (not yet matured)
+    stays unplayable regardless of which phase asks."""
+    game = run_setup(a_game(players=2))
+    game.phase = Phase.ROLL
+    game._state.new_dev_cards[0][DevCard.MONOPOLY] = 1
+
+    with pytest.raises(ValueError):
+        play_monopoly_card(game, Resource.ORE)
+
+
+def test_legal_actions_before_the_roll_offer_every_playable_card():
+    game = run_setup(a_game(players=2))
+    game._state.dev_cards[0][DevCard.ROAD_BUILDING] = 1
+    game._state.dev_cards[0][DevCard.MONOPOLY] = 1
+    game._state.dev_cards[0][DevCard.YEAR_OF_PLENTY] = 1
+
+    kinds = {a.type for a in legal_actions(game)}
+
+    assert ActionType.ROLL in kinds
+    assert ActionType.PLAY_ROAD_BUILDING in kinds
+    assert ActionType.PLAY_MONOPOLY in kinds
+    assert ActionType.PLAY_YEAR_OF_PLENTY in kinds
+    # Building, buying and trading stay Action-phase only.
+    assert ActionType.BUILD_ROAD not in kinds
+    assert ActionType.BUY_DEV_CARD not in kinds
+    assert ActionType.BANK_TRADE not in kinds
+
+
+# --- winning only on your own turn (rulebook, "Winning the Game": "If you
+# --- have 10 or more VPs at any point during YOUR turn") ------------------
+
+
+def test_a_tile_transfer_does_not_win_for_a_seat_off_the_move():
+    """Player 0's own settlement breaks player 1's Longest Road and hands the
+    tile to player 2, who is not on the move and was already sitting on 8
+    visible VP from cities. Player 2 must not win here -- only player 0's
+    own total is checked, since it is player 0's turn."""
+    game = start(mini_board(), 3, random.Random(0))
+    state = game._state
+    topology = state.board.topology
+    game.phase = Phase.MAIN
+    game.current_player = 0
+
+    # Player 1 holds Longest Road with a plain 5-road chain.
+    ring = coastal_rings(topology)[0]
+    p1_path = ring[0:5]
+    for e in p1_path:
+        state.edge_owner[e] = 1
+    update_longest_road(state)
+    assert state.longest_road_holder == 1
+
+    # The junction where player 0 is about to settle sits inside that chain
+    # and will split it into a 2-segment and a 3-segment piece.
+    shared = set(topology.edges[p1_path[1]]) & set(topology.edges[p1_path[2]])
+    break_vertex = shared.pop()
+
+    # Player 2's own, disjoint 6-road chain is already longer than either
+    # half of player 1's chain, so it takes the tile the instant it breaks.
+    p2_path = ring[10:16]
+    for e in p2_path:
+        state.edge_owner[e] = 2
+    cities = [v for v in independent_vertices(state.board, 6)
+              if v not in topology.vertex_neighbors[break_vertex] and v != break_vertex]
+    for v in cities[:4]:
+        state.vertex_owner[v] = 2
+        state.vertex_building[v] = Building.CITY
+    assert victory_points(state, 2) == 8  # four cities, tile not yet transferred
+
+    # Player 0 builds the breaking settlement for real, through the public
+    # API, so `_check_win` runs exactly as it would in a played game.
+    third_edge = next(e for e in topology.vertex_edges[break_vertex] if e not in p1_path)
+    state.edge_owner[third_edge] = 0
+    fund(state, 0, Purchase.SETTLEMENT)
+
+    build_settlement(game, break_vertex)
+
+    assert state.longest_road_holder == 2  # the tile did transfer
+    assert victory_points(state, 2) >= WINNING_POINTS  # player 2 is over 10 on paper
+    assert game.won_by is None  # but it is not their turn
+    assert game.phase is Phase.MAIN  # so the game keeps going
+
+
+def test_a_seat_that_crosses_ten_off_turn_wins_at_the_start_of_its_own_turn():
+    """Winning the Game (rulebook): "the first player to reach 10 or more
+    VPs on their turn wins" -- the FAQ reading is that this is announced at
+    the *start* of a seat's own turn, before it takes any action, not only
+    as a consequence of something it does itself. Player 1 crosses ten
+    off-turn here (a Longest Road transfer during player 0's turn, same
+    shape as the test above) and must not win then -- but must win the
+    instant `end_turn` hands play to them, before `to_move`/`legal_actions`
+    ever asks them for a move."""
+    game = start(mini_board(), 3, random.Random(0))
+    state = game._state
+    topology = state.board.topology
+    game.phase = Phase.MAIN
+    game.current_player = 0
+
+    # Player 2 holds Longest Road with a plain 5-road chain.
+    ring = coastal_rings(topology)[0]
+    p2_path = ring[0:5]
+    for e in p2_path:
+        state.edge_owner[e] = 2
+    update_longest_road(state)
+    assert state.longest_road_holder == 2
+
+    # The junction where player 0 is about to settle sits inside that chain
+    # and will split it into a 2-segment and a 3-segment piece.
+    shared = set(topology.edges[p2_path[1]]) & set(topology.edges[p2_path[2]])
+    break_vertex = shared.pop()
+
+    # Player 1 -- who takes the very next turn once player 0 ends theirs --
+    # holds a disjoint 6-road chain, already longer than either half of
+    # player 2's chain once it breaks, and sits at 9 VP from buildings
+    # alone (four cities and a settlement): one tile short of ten.
+    p1_path = ring[10:16]
+    for e in p1_path:
+        state.edge_owner[e] = 1
+    spots = [
+        v
+        for v in independent_vertices(state.board, 8)
+        if v not in topology.vertex_neighbors[break_vertex] and v != break_vertex
+    ]
+    for v in spots[:4]:
+        state.vertex_owner[v] = 1
+        state.vertex_building[v] = Building.CITY
+    state.vertex_owner[spots[4]] = 1
+    state.vertex_building[spots[4]] = Building.SETTLEMENT
+    assert victory_points(state, 1) == 9
+
+    # Player 0 builds the breaking settlement for real.
+    third_edge = next(e for e in topology.vertex_edges[break_vertex] if e not in p2_path)
+    state.edge_owner[third_edge] = 0
+    fund(state, 0, Purchase.SETTLEMENT)
+
+    build_settlement(game, break_vertex)
+
+    assert state.longest_road_holder == 1
+    assert victory_points(state, 1) >= WINNING_POINTS
+    assert game.won_by is None  # still player 0's turn
+    assert game.phase is Phase.MAIN
+
+    end_turn(game)
+
+    assert game.current_player == 1  # turn order hands play straight to them
+    assert game.won_by == 1  # ... and they win before taking any action
+    assert game.phase is Phase.GAME_OVER

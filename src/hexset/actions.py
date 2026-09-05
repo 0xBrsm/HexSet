@@ -265,10 +265,13 @@ def legal_actions(game: Game) -> list[Action]:
         return [Action(ActionType.SETUP_ROAD, e) for e in legal_initial_roads(game)]
 
     if game.phase is Phase.ROLL:
-        out = [Action(ActionType.ROLL)]
-        if not game.dev_card_played and state.dev_cards[player][DevCard.KNIGHT]:
-            out.extend(_robber_targets(game, ActionType.PLAY_KNIGHT))
-        return out
+        # Production phase (rulebook): "You may play a development card
+        # before rolling dice" -- every playable card, not only the knight,
+        # so this reuses the same `_card_actions` MAIN uses below (it
+        # already respects `dev_card_played` and "not one built this turn").
+        # Only the card-play actions are offered here: building, buying and
+        # trading are Action-phase activities and stay MAIN-only.
+        return [Action(ActionType.ROLL)] + _card_actions(game)
 
     if game.phase is Phase.DISCARD:
         owing = players_owing_discards(game)

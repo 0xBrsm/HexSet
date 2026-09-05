@@ -8,9 +8,9 @@ decision (mean/p50/p95), and the top functions by cumulative and total time.
 Saves the raw `.prof` to `--out` for `pstats`/`snakeviz` follow-up.
 
 Mirrors `hexset.arena.play`/`_play_one`'s own game loop (board per game index,
-one bot per seat, the publish-then-choose order) rather than importing `play`
-directly, so a decision's wall time can be timed individually -- `arena.play`
-only returns the finished `Game`.
+one bot per seat) rather than importing `play` directly, so a decision's
+wall time can be timed individually -- `arena.play` only returns the
+finished `Game`.
 """
 
 from __future__ import annotations
@@ -29,7 +29,6 @@ from hexset.actions import apply
 from hexset.arena import MAX_ACTIONS, entrant_from_name, spawn
 from hexset.board.board import random_base_board
 from hexset.game import is_over, start, to_move
-from hexset.trading import publish_valuation
 
 
 def play_one_game(preset: str, seed: str, *, action_cap: int = MAX_ACTIONS):
@@ -45,8 +44,6 @@ def play_one_game(preset: str, seed: str, *, action_cap: int = MAX_ACTIONS):
     while not is_over(game) and actions < action_cap:
         seat = to_move(game)
         bot = bots[seat]
-        if game.publish_due(seat):
-            publish_valuation(game, seat, bot)
         before = time.perf_counter()
         action = bot.choose(game)
         times.append(time.perf_counter() - before)

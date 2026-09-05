@@ -68,7 +68,6 @@ from hexset.chance import Forced, Live
 from hexset.encoding import encode
 from hexset.game import ROLL_ODDS, Game, imagine, is_over, roll_dice, start, to_move
 from hexset.mcts import draws_hidden
-from hexset.trading import publish_valuation
 from hexset.victory import WINNING_POINTS, victory_points
 
 # Which chance families the correction covers. Separable because they are not
@@ -156,25 +155,15 @@ def chance_outcomes(
     instrumented *replay* of a real game, not a bot's hypothetical, so its
     successors must clear the same trades the real one would.
 
-    Neither a roll's nor a steal's successor forces that event to run: it
-    stays pending on `child` exactly as it stays pending on the real
-    `game` at this same point in `instrumented`'s own loop (`roll_dice`/
-    `move_robber_to` only *arm* the turn's first event now,
-    `Game.event_pending` -- the PI amendment "publish points and the event
-    trigger" -- rather than running it eagerly), so a child and the real
+    A roll's or a steal's successor clears its own trade event as soon as
+    `roll_dice`/`move_robber_to` calls `enter_main` -- eagerly, synchronously,
+    the same way the real game's own successor will when `instrumented`'s
+    own loop later applies the equivalent action -- so a child and the real
     game it stands in for are read at the identical point relative to that
-    event -- both before it, consistently -- whether that read is
+    event: both with it already resolved, consistently, whether that read is
     `_outcome_key` below or a value function scoring `child` for the
-    correction. Forcing it on either one and not the other was tried and
-    was wrong twice over: forcing only the children left `_outcome_key`
-    unable to find the real game's (still pre-event) outcome among the
-    (post-event) enumerated ones, and forcing the real game too, right
-    after `apply`, consumed its `event_pending` before that seat's own
-    `Game.publish_due` check -- reached one loop iteration later -- ever
-    saw it, so the seat silently never got to publish that turn at all.
-    `Game.state`'s own docstring is what actually keeps a value function's
-    `hidden=False` read (`child.state(0, hidden=False)`, scoring, not a
-    decision) from firing anything: only `hidden=True` is a trigger.
+    correction. There is no lazy trigger left to keep them in sync
+    manually.
     """
     if action.type is ActionType.ROLL:
         out = []
@@ -386,13 +375,6 @@ def instrumented(
     while not is_over(game) and actions < action_cap:
         seat = to_move(game)
         bot = lineup[seat]
-        # A line-for-line twin of `arena.play`: the acting seat publishes
-        # once a turn, when the engine says it is due (`Game.publish_due`),
-        # not after every action, so this replay's vectors match a real
-        # duel's bit-for-bit rather than staying at whatever they were when
-        # the game started.
-        if game.publish_due(seat):
-            publish_valuation(game, seat, bot)
         action = bot.choose(game)
         chance = action.type in CHANCE_ACTIONS
         term = _term_of(action) if chance else ""

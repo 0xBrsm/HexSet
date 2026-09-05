@@ -34,7 +34,6 @@ from .board.board import Board, random_base_board
 from .board.topology import Topology
 from .game import Game, is_over, start, to_move
 from .placement import PlacementBot
-from .trading import publish_valuation
 from .victory import victory_points
 
 if TYPE_CHECKING:
@@ -179,8 +178,8 @@ class Entrant:
     # `kind`, so any entrant can be duelled against itself with only the eight
     # setup picks differing.
     placement: bool = False
-    # The trade off switch: `0` means this entrant publishes no valuation and
-    # refuses every exchange, so it never trades. Not a budget -- the engine
+    # The trade off switch: `0` means this entrant's gate refuses every
+    # exchange, so it never trades. Not a budget -- the engine
     # has no cap (`hexset.trading`) -- and self-imposed rather than engine-wide
     # so a duel can see what trading is worth: only a bot that declines what
     # its opponent still has can price it.
@@ -458,18 +457,12 @@ def play(
 
     Seating a bot also seats its private gate: `game.gates` is the lineup
     itself, so the engine's one trade event a turn (`hexset.trading`) asks
-    each seat's own `accepts` rather than this loop having to remember to
-    run anything. Publishing is this loop's own job, not the event's, and
-    once a turn, not after every action: right when it is that seat's turn
-    to decide and `game.publish_due(seat)` says so (the engine-defined
-    post-roll/robber point, before the turn's first trade event -- the PI
-    amendment "publish points and the event trigger",
-    `agents/reference/trading-design.md`), it is asked for its current
-    vector and the answer is recorded (`hexset.trading.publish_valuation`),
-    so the vector every trade event this turn reads is the one this seat's
-    turn stands behind. A bot that defines neither `valuation` nor
-    `accepts` never trades, which is how `RandomBot` and any external bot
-    that predates the mechanic behave.
+    each seat's own `gains_many` rather than this loop having to remember to
+    run anything -- a gate is a pure function of the position, asked fresh
+    at every event, so there is nothing for this loop to publish. A bot
+    that defines none of `gains_many`/`accepts_many`/`accepts` never
+    trades, which is how `RandomBot` and any external bot that predates the
+    mechanic behave.
     """
     game = start(board, len(bots), rng)
     game.gates = tuple(bots)
@@ -478,8 +471,6 @@ def play(
     while not is_over(game) and actions < action_cap:
         seat = to_move(game)
         bot = bots[seat]
-        if game.publish_due(seat):
-            publish_valuation(game, seat, bot)
         apply(game, bot.choose(game))
         actions += 1
     return game
@@ -580,11 +571,6 @@ def _play_and_record(
     while not is_over(game) and steps_taken < action_cap:
         seat = to_move(game)
         bot = lineup[seat]
-        if game.publish_due(seat):
-            before = len(game.trades)
-            publish_valuation(game, seat, bot)
-            for trade in game.trades[before:]:
-                trades.append((len(actions) - 1, trade.a, trade.b, tuple(trade.received)))
         before = len(game.trades)
         action = bot.choose(game)
         apply(game, action)

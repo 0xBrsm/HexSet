@@ -18,12 +18,12 @@ also decodes exactly from its index, so a random policy sampling the flat
 `Discrete` space needs no filling-in either -- the interim random-offer
 fill this environment carried is gone with the slot it filled.
 
-**Trading.** A seat trades by publishing a valuation vector and answering a
-gate, not by taking an action, and this environment gives its agents no way
-to publish: every seat's vector stays all-zero and nothing clears.
+**Trading.** A seat trades by answering a private gate (`gains_many`), not
+by taking an action, and this environment seats no gate for its own agents:
+`self._game.gates` stays `None` here, so nothing clears at all.
 `hexset.gym.HexSetEnv` seats real bots for the non-learner seats and does
-supply theirs. The learner's own vector is the deferred half of the
-mechanic's interface (the trading design defers the human/LLM surface), so
+supply theirs. The learner's own gate is the deferred half of the
+mechanic's interface (a human/LLM trading surface is server-side work), so
 it is not in the action space here.
 """
 

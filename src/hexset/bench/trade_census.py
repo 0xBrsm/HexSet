@@ -5,7 +5,7 @@ Plays N four-seat games for a lineup (grouped seating, antithetic-paired
 boards, exactly `hexset.bench.road_sweep`'s convention) and records each
 `hexset.trading.Trade` as it clears -- turn, phase, both seats' kinds, the
 signed 5-vector each way, each side's hand size just before the trade, and
-each side's public surplus, so bulk/imbalanced trading can be described
+each side's own private gain, so bulk/imbalanced trading can be described
 without guessing at it from win rates. `--from-journals` replays the same
 census over `hexset.server.journal` files instead of playing fresh games.
 """
@@ -31,7 +31,6 @@ from hexset.board.terrain import NUM_RESOURCES
 from hexset.chance import Live, Recording
 from hexset.game import Phase, is_over, start, to_move
 from hexset.record import Record, board_fields
-from hexset.trading import publish_valuation
 from hexset.victory import victory_points
 
 # Card price for the value yardstick: the flat 4:1 bank rate, so a swing is
@@ -61,7 +60,11 @@ class TradeRecord:
     each side's total card count the instant before this trade executed,
     reconstructed by replaying the turn's trades in order over a true
     pre-turn hand snapshot -- exact, not estimated, since a trade can only
-    move cards that both hands already held.
+    move cards that both hands already held. `gain_a`/`gain_b` are each
+    side's own private gain from the trade (`hexset.trading.Trade.gain_a`/
+    `gain_b`), in that seat's own value units -- there is no shared public
+    surplus any more (`agents/reference/trading-final.md`, item 1), so two
+    bots at one table need not be on the same scale for this to be read.
     """
 
     game: int
@@ -75,9 +78,9 @@ class TradeRecord:
     given_b: tuple[int, ...]
     hand_before_a: int
     hand_before_b: int
-    surplus_a: float
-    surplus_b: float
-    larger_surplus: str  # "a", "b", or "tie"
+    gain_a: float
+    gain_b: float
+    larger_gain: str  # "a", "b", or "tie"
 
 
 def _resource_split(received: Sequence[int]) -> tuple[tuple[int, ...], tuple[int, ...]]:
@@ -99,28 +102,20 @@ def _play_census(
 
     Instrumentation reads only the hands (the raw array) for bookkeeping
     snapshots, through `game.state(0, hidden=False)` -- the sanctioned
-    true-state path (`tests/test_view.py`), which returns the state itself and
-    is explicitly not one of the trigger points. Never `game.state(seat)` (the
-    seat's own view) or `legal_actions()`: those are the calls that lazily
-    trigger the pending trade event
-    (`hexset.game.run_pending_event`), and calling them for our own
-    purposes would fire an event before the bot whose turn it is ever asked
-    for one. `game.trades` is cleared every `end_turn`, so new trades are
-    detected as a length delta against a per-turn counter, checked both
-    before and after `apply()` each iteration to catch a burst that fires
-    and then gets cleared inside one loop pass.
+    true-state path (`tests/test_view.py`), which returns the state itself.
+    `game.trades` is cleared every `end_turn`, so new trades are detected as
+    a length delta against a per-turn counter, checked once per loop pass
+    (a gate is a pure function of the position now, so nothing but `apply`
+    itself can create a trade).
 
     `keep_record=True` additionally tracks the action list and the chance
     stream (`hexset.chance.Recording`) and returns a `hexset.record.Record`
     of this exact game -- a separate, parallel tally from `harvest`'s own
-    per-trade rows above: `harvest` is delayed by up to one loop iteration
-    for a trade an `apply()` call itself triggered (harmless for its
-    turn/phase bookkeeping, since a trade never crosses a turn boundary) but
-    a `Record`'s trades must be attributed to the exact step they cleared
-    inside for `replay` to reapply them in the right place
-    (`hexset.record.record_game`'s own docstring on why), so this keeps its
-    own `before`/`after` `game.trades` bookkeeping around `publish_valuation`
-    and `apply` instead of reusing `harvest`'s.
+    per-trade rows above, because a `Record`'s trades must be attributed to
+    the exact step they cleared inside for `replay` to reapply them in the
+    right place (`hexset.record.record_game`'s own docstring on why), so
+    this keeps its own `before`/`after` `game.trades` bookkeeping around
+    `apply` instead of reusing `harvest`'s.
     """
     seats = len(entrants)
     pair, half = divmod(index, 2)
@@ -157,17 +152,15 @@ def _play_census(
         if not new:
             return
         running = [list(h) for h in baseline]
-        vectors = game.valuations
         for trade in new:
             a, b, received = trade.a, trade.b, trade.received
             given_a, given_b = _resource_split(received)
             hand_before_a = sum(running[a])
             hand_before_b = sum(running[b])
-            surplus_a = sum(v * r for v, r in zip(vectors[a], received))
-            surplus_b = sum(v * -r for v, r in zip(vectors[b], received))
-            if surplus_a > surplus_b:
+            gain_a, gain_b = trade.gain_a, trade.gain_b
+            if gain_a > gain_b:
                 larger = "a"
-            elif surplus_b > surplus_a:
+            elif gain_b > gain_a:
                 larger = "b"
             else:
                 larger = "tie"
@@ -184,9 +177,9 @@ def _play_census(
                     given_b=given_b,
                     hand_before_a=hand_before_a,
                     hand_before_b=hand_before_b,
-                    surplus_a=surplus_a,
-                    surplus_b=surplus_b,
-                    larger_surplus=larger,
+                    gain_a=gain_a,
+                    gain_b=gain_b,
+                    larger_gain=larger,
                 )
             )
             for r in range(NUM_RESOURCES):
@@ -199,20 +192,10 @@ def _play_census(
     while not is_over(game) and actions < action_cap:
         seat = to_move(game)
         bot = lineup[seat]
-        if game.publish_due(seat):
-            if keep_record:
-                before = len(game.trades)
-            publish_valuation(game, seat, bot)
-            if keep_record:
-                for trade in game.trades[before:]:
-                    record_trades.append(
-                        (len(action_log) - 1, trade.a, trade.b, tuple(trade.received))
-                    )
         harvest(game.turns, game.phase)
         if keep_record:
             before = len(game.trades)
         action = bot.choose(game)
-        harvest(game.turns, game.phase)
         apply(game, action)
         if keep_record:
             for trade in game.trades[before:]:
@@ -351,7 +334,7 @@ class BotSummary:
 
 def summarize(result: CensusResult, entrant_names: Sequence[str]) -> dict[str, BotSummary]:
     """Per-bot-kind rollup. Each trade contributes one row per side, reoriented
-    to that side's own given/received/hand-before/surplus."""
+    to that side's own given/received/hand-before/gain."""
     turns_played: dict[str, int] = defaultdict(int)
     bundle_counts: dict[str, Counter] = defaultdict(Counter)
     bulk_hits: dict[str, int] = defaultdict(int)
@@ -480,9 +463,9 @@ def census_from_journal(path: Path) -> tuple[list[TradeRecord], dict[int, str]]:
                             given_b=given_b,
                             hand_before_a=tr.get("hand_before_a", 0),
                             hand_before_b=tr.get("hand_before_b", 0),
-                            surplus_a=tr.get("surplus_a", 0.0),
-                            surplus_b=tr.get("surplus_b", 0.0),
-                            larger_surplus=tr.get("larger_surplus", "tie"),
+                            gain_a=tr.get("gain_a", 0.0),
+                            gain_b=tr.get("gain_b", 0.0),
+                            larger_gain=tr.get("larger_gain", "tie"),
                         )
                     )
     return records, names

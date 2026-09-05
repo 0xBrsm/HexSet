@@ -5,7 +5,7 @@ name = "hexset"
 # `hexset.clients` all ship from here. See
 # `tests/test_versions.py`, which fails the moment `hexset.__version__`
 # drifts from this file.
-version = "0.27.0"
+version = "0.27.1"
 description = "HexSet — a numpy-only, information-set-honest hex-tile trading and building engine, a sample bot, a Catanatron adapter, and a browser/HTTP/MCP gym around them"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }

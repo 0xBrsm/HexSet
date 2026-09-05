@@ -24,10 +24,10 @@ output, no partial writes, a 20,000-action cap, six playouts a side too few
 to resolve a 3e-4 effect.
 
 **Phase 3** replaces the rollout judge with a paired-chance design on the
-new engine: for a sampled pre-event position, one throwaway continuation
-records a chance-event script (`hexset.chance.Recording(Live(...))`), and
-both the *untraded* continuation (the event suppressed for one turn only)
-and the *traded* continuation (the historical clearing applied outright)
+new engine: for a sampled pre-event position, a chance-event script is
+drawn directly from a seeded source (`_record_chance_script`), and both
+the *untraded* continuation (the event suppressed for one turn only) and
+the *traded* continuation (the historical clearing applied outright)
 replay against that same script -- identical dice, steals and draws -- for
 up to `--cap` actions each. One stream is one such paired playout; several
 streams (`--streams`) per position substitute for the old design's many
@@ -46,9 +46,20 @@ first turn or two, on nearly every stream, as this run's own smoke test
 found. Reading each kind from its own queue means the fork that has
 rolled five times so far gets the fifth recorded roll regardless of
 what fell between the fourth and fifth roll on the *other* fork's path.
-A fork that needs more of some kind than the throwaway script recorded
-(`ChanceExhausted`) falls back to a freshly seeded `Live` for the
-remainder and is counted in the row, per the registration.
+
+**Phase 3b** fixed a defect in the first cut (`phase3.jsonl`): the script
+used to come from recording one throwaway continuation's own trajectory,
+whose length (and so how much of each kind it happened to log) was bounded
+by that trajectory's own game-ending point -- typically well under `--cap`
+actions, since the captured position is already mid-to-late game. Both
+real forks then read from the same short queues and ran them dry within a
+few turns (median exhaustion at action 36 of 600, 88.9% of streams).
+`_record_chance_script` now draws `CHANCE_SCRIPT_EVENTS` (700) of each kind
+directly from the seeded source instead, independent of any trajectory's
+length; see its own docstring for the full diagnosis. A fork that still
+needs more of some kind than the script holds (`ChanceExhausted`, now rare)
+falls back to a freshly seeded `Live` for the remainder and is counted in
+the row, per the registration.
 
 **Why a bank of records, not live games** (unchanged from phase 1, restated
 briefly): no bulk game records existed before this lab; `hexset.record`
@@ -91,7 +102,8 @@ from hexset.board.board import random_base_board
 from hexset.board.terrain import NUM_RESOURCES
 from hexset.bots.heximax import heximax
 from hexset.bots.heximax.search import Heximax, _thin_copy
-from hexset.chance import Chance, ChanceExhausted, Live, Recording
+from hexset.cards import make_deck
+from hexset.chance import Chance, ChanceExhausted, Live
 from hexset.game import Game, Phase, imagine, is_over, start, to_move
 from hexset.record import Record, ReplayError, actions_of, board_of, from_json, read, record_game, write
 from hexset.trading import Bundle, Trade
@@ -1042,8 +1054,8 @@ def sample_judged_positions(
 
 
 class _PairedChance(Chance):
-    """Replays a recorded chance script by *kind*, independently per kind,
-    rather than as one strictly-ordered sequence (`hexset.chance.Scripted`).
+    """Replays a per-kind chance script, independently per kind, rather
+    than as one strictly-ordered sequence (`hexset.chance.Scripted`).
 
     This is what actually delivers "identical dice, steals and draws for
     the traded and untraded games": the two forks of one stream start from
@@ -1057,36 +1069,48 @@ class _PairedChance(Chance):
     queue sidesteps that entirely: the fork that has rolled five times so
     far gets the fifth recorded roll whether or not a steal happened to
     fall between the fourth and fifth roll on the *other* fork's path.
-    Only true exhaustion -- a fork needs a sixth roll and the throwaway
-    script never recorded one -- raises, `ChanceExhausted`; there is no
-    `ChanceMismatch` left to raise, since a kind is never checked against
-    another kind's queue at all. `deck_order` is not implemented: nothing
-    mid-game reads it (`hexset.chance.deck_order` is only ever consulted
-    once, at `hexset.game.start`), and neither fork here is a fresh game.
 
-    **A recorded steal is only replayed when the current hand can actually
-    produce it.** `hexset.robber.steal` does not itself check that the
-    resource it is handed is held (`hand[resource] -= 1` with no floor),
-    by design -- a real `Chance.steal(hand)` always draws proportionally
-    to `hand`, so this can never come up on any other caller. But a
-    fork's victim hand is exactly the thing that has diverged from the
-    throwaway's own path by the time a steal fires (found on this run's
-    own smoke test, ~100 actions and ~46 turns in, on a position that ran
-    clean for 400+ actions under a live source): blindly replaying "took a
-    WOOD" against a hand holding no wood drives that count negative,
-    silently corrupting every accounting that reads `state.hands`
-    afterwards -- including the very cycle check whose assertion this
-    surfaced as. Treating a would-be-invalid steal as exhaustion (of this
-    kind, from here) reuses the fallback this class already has for the
-    same underlying reason a length exhaustion gets one: the script no
-    longer describes a state this fork can be in.
+    **`roll` replays a resolved dice sum** (`_record_chance_script` draws
+    real `Live.roll()` values directly), so `_next` returns it unchanged.
+
+    **`steal` and `discard` replay a uniform variate, not a resolved card
+    index.** Phase 3's first cut (`phase3.jsonl`) recorded a resolved
+    index against the throwaway continuation's own hand at record time and
+    replayed it only when the fork's *current* hand could still produce
+    it, raising `ChanceExhausted` otherwise (the "steal exhausts rather
+    than corrupts" guard) -- a real fix for the corruption `hexset.robber.
+    steal` would otherwise silently commit (`hand[resource] -= 1` with no
+    floor), but it starved both forks early on almost every stream: a
+    resolved index drawn from one hand is a coin flip at best against a
+    hand that has already diverged by the one historical trade, so the
+    fork exhausted this kind within a few draws, not near the horizon. A
+    variate has no such dependency: `u in [0, 1)` is mapped onto *whatever
+    hand is actually held when the event is consumed* -- `int(u * total)`
+    walked against the hand's cumulative counts, exactly the proportional
+    walk `Live.steal` itself does with `rng.randrange(total)` in place of
+    `int(u * total)` -- so the same `u` always resolves to a card the
+    consuming hand actually holds, on both forks, whatever they each hold
+    at that point. `steal`/`discard` therefore never raise `ChanceExhausted`
+    for "the recorded value doesn't fit this hand" any more -- only true
+    length exhaustion (this kind's queue ran dry) does, and with `_record_
+    chance_script` now drawing hundreds of variates directly from the
+    seeded source rather than however many one throwaway trajectory
+    happened to use, that should be rare to the point of measurement, not
+    the common case phase 3's first cut found.
+
+    **`deck_order` replays one recorded permutation**, defensively: nothing
+    mid-game reads it today (`hexset.chance.deck_order` is only ever
+    consulted once, at `hexset.game.start`, and neither fork here is a
+    fresh game), but `_record_chance_script` records one anyway so this
+    class no longer inherits `Chance.deck_order`'s bare `NotImplementedError`
+    if that ever changes.
     """
 
-    def __init__(self, events_by_kind: dict[str, list[int]]) -> None:
+    def __init__(self, events_by_kind: dict[str, list[float]]) -> None:
         self._events = {kind: list(values) for kind, values in events_by_kind.items()}
         self._index = {kind: 0 for kind in self._events}
 
-    def _next(self, kind: str) -> int:
+    def _next(self, kind: str) -> float:
         values = self._events.get(kind, ())
         i = self._index.get(kind, 0)
         if i >= len(values):
@@ -1094,75 +1118,103 @@ class _PairedChance(Chance):
         self._index[kind] = i + 1
         return values[i]
 
+    def deck_order(self, deck: list[int]) -> list[int]:
+        order = self._events.get("deck")
+        if order is None or self._index.get("deck", 0) >= 1:
+            raise ChanceExhausted(self._index.get("deck", 0), "deck")
+        self._index["deck"] = 1
+        deck[:] = order[: len(deck)]
+        return deck
+
     def roll(self) -> int:
-        return self._next("roll")
+        return int(self._next("roll"))
 
     def steal(self, hand: Sequence[int]) -> int | None:
-        if sum(hand) == 0:
+        total = sum(hand)
+        if total == 0:
             return None
-        values = self._events.get("steal", ())
-        i = self._index.get("steal", 0)
-        if i >= len(values) or hand[values[i]] <= 0:
-            raise ChanceExhausted(i, "steal")
-        self._index["steal"] = i + 1
-        return values[i]
+        u = self._next("steal")
+        pick = min(int(u * total), total - 1)
+        for resource, count in enumerate(hand):
+            if pick < count:
+                return resource
+            pick -= count
+        raise AssertionError("unreachable")
 
     def discard(self, hand: Sequence[int], n: int) -> list[int]:
-        """As `steal` above: a recorded discard pick is only replayed while
-        the hand can still afford it, in case this kind is ever exercised
-        (heximax and search2 both choose their own discards explicitly,
-        never through `Chance.discard`, so this path is not reached by
-        this module's own bots today)."""
+        """As `steal` above: each of the `n` picks maps its own variate
+        onto the pool of resources the hand still holds *at that point in
+        the discard* (shrinking exactly as `Live.discard`'s own `pool`
+        does), so a multi-card discard's later picks see fewer options,
+        same as a live draw would."""
         remaining = list(hand)
         picks: list[int] = []
-        values = self._events.get("discard", ())
-        i = self._index.get("discard", 0)
         for _ in range(n):
-            if i >= len(values) or remaining[values[i]] <= 0:
-                self._index["discard"] = i
-                raise ChanceExhausted(i, "discard")
-            remaining[values[i]] -= 1
-            picks.append(values[i])
-            i += 1
-        self._index["discard"] = i
+            pool = [r for r, count in enumerate(remaining) if count > 0]
+            if not pool:
+                # Unreachable under the rulebook (a seat is only asked to
+                # discard up to half a hand it actually holds), kept as a
+                # guard rather than an `AssertionError` for the same reason
+                # `steal`'s length exhaustion is a `ChanceExhausted`, not a
+                # crash: one job's rare invariant miss should not be fatal.
+                raise ChanceExhausted(self._index.get("discard", 0), "discard")
+            u = self._next("discard")
+            idx = min(int(u * len(pool)), len(pool) - 1)
+            resource = pool[idx]
+            remaining[resource] -= 1
+            picks.append(resource)
         return picks
 
 
-def _record_chance_script(game0: Game, board, seed_value: int, action_cap: int) -> dict[str, list[int]]:
-    """A throwaway continuation from `game0`, seated with fresh heximax
-    bots trading under the engine's own shipped rule, run for up to
-    `action_cap` actions purely to log a chance-event script
-    (`hexset.chance.Recording(Live(...))`), grouped by kind (`_PairedChance`'s
-    own shape) -- long enough, kind for kind, for both the untraded and
-    traded forks of this stream to draw from. The playout itself -- who
-    wins, what it does -- is discarded; only the grouped events survive.
+#: Per-kind event count `_record_chance_script` draws -- at least 700 of
+#: each (the registration's own floor), generous past `--cap` (default
+#: 600) so both the traded and untraded forks of a stream can each draw up
+#: to the full horizon from the same queue without exhausting it.
+CHANCE_SCRIPT_EVENTS = 700
 
-    `randomize_deck=False`: the throwaway (and both real forks, in
-    `_play_fork`) must start from the *same* remaining deck order as the
-    captured position itself, not a freshly shuffled one -- `imagine`'s
-    default reshuffle exists to keep a bot's own tree search from peeking
-    at what it is about to draw, which is not a concern here and would
-    otherwise desync the two paired forks' future draws for no reason
-    (`hexset.chance.deck_order` is only ever consulted once, at
-    `hexset.game.start`; nothing mid-game reads it again).
+
+def _record_chance_script(seed_value: int, action_cap: int) -> dict[str, list[float]]:
+    """The per-(position, stream) chance script, drawn directly from a
+    seeded `Live` source -- not, as phase 3's first cut did, by recording
+    one throwaway continuation's own trajectory and grouping what it
+    happened to consume by kind.
+
+    **Why the first cut starved almost every stream (phase 3b's
+    diagnosis).** The throwaway ran `while not is_over(work) and actions <
+    action_cap`, seated with real bots continuing from the captured
+    position -- which is itself already well into a game. On this bank,
+    that trajectory typically reaches a winner (or exhausts its own
+    action budget with a checkmate-like run to 10 VP) in well under
+    `action_cap` actions, and *however many rolls/steals/discards that one
+    finished game happened to use* is all that ever got recorded --
+    frequently a few dozen, not the hundreds either real fork can need
+    over up to `action_cap` actions each. Both the traded and untraded
+    forks then started consuming from the same short queues from index 0
+    and ran them dry within the first few turns (measured: median
+    exhaustion at action 36 of a 600-action cap, 88.9% of streams). The
+    fix has no throwaway game in it at all: draw enough of each kind
+    directly, independent of how long any one trajectory happens to run.
+
+    `roll` draws real dice sums (`Live.roll()`) directly -- the resolved
+    value does not depend on hand state, so nothing is lost recording it
+    outright. `steal` and `discard` draw a uniform variate per event
+    instead (`rng.random()`): a resolved card index is only valid against
+    the hand it was drawn against, and the two forks' hands differ from
+    the moment they diverge (the historical trade) -- `_PairedChance`
+    maps each variate onto whichever hand is actually held when the event
+    is consumed, so the same script is valid on both forks regardless of
+    how their hands have diverged by then. `deck` draws one permutation
+    (`Live.deck_order`); see `_PairedChance.deck_order`'s own docstring for
+    why this is defensive rather than load-bearing today.
     """
-    chance_rng = random.Random(seed_value)
-    recorder = Recording(Live(chance_rng))
-    work = imagine(game0, random.Random(f"{seed_value}:throwaway"), randomize_deck=False)
-    work.chance = recorder
-    n = game0.num_players
-    bots = [heximax(board, random.Random(f"{seed_value}:throwaway:{s}")) for s in range(n)]
-    work.gates = tuple(bots)
-    work.max_trades = None
-    actions = 0
-    while not is_over(work) and actions < action_cap:
-        seat = to_move(work)
-        apply(work, bots[seat].choose(work))
-        actions += 1
-    by_kind: dict[str, list[int]] = defaultdict(list)
-    for kind, value in recorder.events:
-        by_kind[kind].append(value)
-    return dict(by_kind)
+    n_events = max(CHANCE_SCRIPT_EVENTS, action_cap + 100)
+    rng = random.Random(seed_value)
+    source = Live(rng)
+    rolls = [source.roll() for _ in range(n_events)]
+    steals = [rng.random() for _ in range(n_events)]
+    discards = [rng.random() for _ in range(n_events)]
+    deck = source.deck_order(make_deck())
+    return {"roll": rolls, "steal": steals, "discard": discards, "deck": deck}
 
 
 @dataclass
@@ -1170,6 +1222,8 @@ class _ForkResult:
     winner: int | None
     turns: int
     actions: int
+    points: list[int]
+    capped: bool
     chance_exhausted: bool
     chance_exhausted_at: int | None
     # Set when this fork raised something other than the chance divergence
@@ -1180,13 +1234,13 @@ class _ForkResult:
     # docstring calls "a bug to surface", and at this volume "rare" is not
     # "never"); recorded here rather than crashing the whole judge run,
     # since one job failing is not a reason to lose every job that already
-    # finished. `winner`/`turns`/`actions` are `None`/`-1`/`-1` when this is
-    # set -- there is no result to read.
+    # finished. `winner`/`turns`/`actions` are `None`/`-1`/`-1` and `points`
+    # is `[]` when this is set -- there is no result to read.
     error: str | None = None
 
 
 def _play_fork(
-    game0: Game, board, *, seed: str, chance_by_kind: dict[str, list[int]],
+    game0: Game, board, *, seed: str, chance_by_kind: dict[str, list[float]],
     action_cap: int, suppress_current_turn: bool,
 ) -> _ForkResult:
     """Continue `game0` to a winner (or `None`, capped at `action_cap`),
@@ -1198,9 +1252,10 @@ def _play_fork(
     past it (`hexset.game.end_turn`), so the rest of the game trades
     exactly as the engine would.
 
-    `ChanceExhausted` (this fork needs more of some kind than the
-    throwaway script recorded) falls back to a freshly seeded `Live` for
-    the remainder and is counted, per the registration.
+    `ChanceExhausted` (this fork needs more of some kind than the script
+    recorded) falls back to a freshly seeded `Live` for the remainder and
+    is counted, per the registration -- with the direct `_record_chance_
+    script` fix (phase 3b), this should be rare, not the common case.
     """
     rng = random.Random(seed)
     work = imagine(game0, rng, randomize_deck=False)
@@ -1248,7 +1303,9 @@ def _play_fork(
                 work.chance = Live(random.Random(f"{seed}:exhausted"))
                 apply(work, action)
         actions += 1
-    return _ForkResult(work.won_by, work.turns, actions, chance_exhausted, chance_exhausted_at)
+    capped = not is_over(work)
+    points = [victory_points(work.state(s, hidden=False), s) for s in range(n)]
+    return _ForkResult(work.won_by, work.turns, actions, points, capped, chance_exhausted, chance_exhausted_at)
 
 
 def _play_fork_safely(*args, **kwargs) -> _ForkResult:
@@ -1258,7 +1315,7 @@ def _play_fork_safely(*args, **kwargs) -> _ForkResult:
     try:
         return _play_fork(*args, **kwargs)
     except Exception as exc:  # noqa: BLE001 -- deliberately broad, see above
-        return _ForkResult(None, -1, -1, False, None, error=f"{type(exc).__name__}: {exc}")
+        return _ForkResult(None, -1, -1, [], False, False, None, error=f"{type(exc).__name__}: {exc}")
 
 
 def _locate_judged_position(row: dict, record: Record) -> tuple[Position, Game]:
@@ -1302,14 +1359,17 @@ def _locate_judged_position(row: dict, record: Record) -> tuple[Position, Game]:
 
 def _errored_row(row: dict, stream: int, error: str) -> dict:
     """The row shape `_judge_stream` returns when nothing playable could
-    even be built for this (position, stream) -- the throwaway chance
-    script itself hit the same class of rare engine-level failure
-    `_ForkResult.error` guards a fork against (`_record_chance_script` has
-    no fork of its own to catch it in, since it runs before either fork
-    exists). Both sides are marked errored, uniformly with a fork-level
-    error's own shape, so a reader never has to special-case where in the
-    pipeline a row failed."""
-    empty = {"winner": None, "turns": -1, "actions": -1, "chance_exhausted": False, "chance_exhausted_at": None, "error": error}
+    even be built for this (position, stream) -- the chance script itself
+    hit the same class of rare engine-level failure `_ForkResult.error`
+    guards a fork against (`_record_chance_script` has no fork of its own
+    to catch it in, since it runs before either fork exists). Both sides
+    are marked errored, uniformly with a fork-level error's own shape, so
+    a reader never has to special-case where in the pipeline a row
+    failed."""
+    empty = {
+        "winner": None, "turns": -1, "actions": -1, "points": [], "capped": False,
+        "chance_exhausted": False, "chance_exhausted_at": None, "error": error,
+    }
     return {
         "pid": row["pid"], "game": row["game"], "position": row["position"], "turn": row["turn"],
         "actor": row["actor"], "counterparty": row["counterparty"],
@@ -1320,13 +1380,15 @@ def _errored_row(row: dict, stream: int, error: str) -> dict:
         "win_actor_untraded": None, "win_actor_traded": None, "delta_actor": None,
         "win_counterparty_untraded": None, "win_counterparty_traded": None, "delta_counterparty": None,
         "win_bystanders_untraded": None, "win_bystanders_traded": None, "delta_bystanders": None,
+        "delta_actor_points": None, "delta_counterparty_points": None, "delta_bystanders_points": None,
     }
 
 
 def _judge_stream(row: dict, pos: Position, traded0: Game, board, *, stream: int, cap: int) -> dict:
-    """One (position, stream)'s paired result: the throwaway chance script,
-    the untraded fork (this turn's event suppressed) and the traded fork
-    (the historical clearing already applied to `traded0`), both driven by
+    """One (position, stream)'s paired result: the chance script (drawn
+    directly from a seeded source, `_record_chance_script`), the untraded
+    fork (this turn's event suppressed) and the traded fork (the
+    historical clearing already applied to `traded0`), both driven by
     that same script."""
     pid = row["pid"]
     actor, counterparty = row["actor"], row["counterparty"]
@@ -1334,7 +1396,7 @@ def _judge_stream(row: dict, pos: Position, traded0: Game, board, *, stream: int
     bystanders = [s for s in range(n) if s not in (actor, counterparty)]
 
     try:
-        events = _record_chance_script(pos.game, board, 90000 + 100 * pid + stream, cap)
+        events = _record_chance_script(90000 + 100 * pid + stream, cap)
     except Exception as exc:  # noqa: BLE001 -- see `_errored_row`'s own docstring
         return _errored_row(row, stream, f"{type(exc).__name__}: {exc}")
 
@@ -1355,6 +1417,7 @@ def _judge_stream(row: dict, pos: Position, traded0: Game, board, *, stream: int
     win_cp_t = 1.0 if traded.winner == counterparty else 0.0
     win_byst_u = [1.0 if untraded.winner == b else 0.0 for b in bystanders]
     win_byst_t = [1.0 if traded.winner == b else 0.0 for b in bystanders]
+    ok = not (untraded.error or traded.error)
 
     return {
         "pid": pid, "game": row["game"], "position": row["position"], "turn": row["turn"],
@@ -1364,11 +1427,13 @@ def _judge_stream(row: dict, pos: Position, traded0: Game, board, *, stream: int
         "stream": stream,
         "untraded": {
             "winner": untraded.winner, "turns": untraded.turns, "actions": untraded.actions,
+            "points": untraded.points, "capped": untraded.capped,
             "chance_exhausted": untraded.chance_exhausted, "chance_exhausted_at": untraded.chance_exhausted_at,
             "error": untraded.error,
         },
         "traded": {
             "winner": traded.winner, "turns": traded.turns, "actions": traded.actions,
+            "points": traded.points, "capped": traded.capped,
             "chance_exhausted": traded.chance_exhausted, "chance_exhausted_at": traded.chance_exhausted_at,
             "error": traded.error,
         },
@@ -1378,14 +1443,23 @@ def _judge_stream(row: dict, pos: Position, traded0: Game, board, *, stream: int
         # score it as a real, informative outcome instead of a missing one.
         "win_actor_untraded": None if untraded.error else win_actor_u,
         "win_actor_traded": None if traded.error else win_actor_t,
-        "delta_actor": None if (untraded.error or traded.error) else win_actor_t - win_actor_u,
+        "delta_actor": None if not ok else win_actor_t - win_actor_u,
         "win_counterparty_untraded": None if untraded.error else win_cp_u,
         "win_counterparty_traded": None if traded.error else win_cp_t,
-        "delta_counterparty": None if (untraded.error or traded.error) else win_cp_t - win_cp_u,
+        "delta_counterparty": None if not ok else win_cp_t - win_cp_u,
         "win_bystanders_untraded": None if untraded.error else win_byst_u,
         "win_bystanders_traded": None if traded.error else win_byst_t,
-        "delta_bystanders": (
-            None if (untraded.error or traded.error) else [t - u for t, u in zip(win_byst_t, win_byst_u)]
+        "delta_bystanders": None if not ok else [t - u for t, u in zip(win_byst_t, win_byst_u)],
+        # Points readouts (the registration's sensitive one -- realised gain
+        # in win probability is unmeasurable at the gate's own ~1e-4 scale
+        # by any feasible playout budget, but terminal points move on a
+        # continuous scale every stream, capped or not).
+        "delta_actor_points": None if not ok else traded.points[actor] - untraded.points[actor],
+        "delta_counterparty_points": (
+            None if not ok else traded.points[counterparty] - untraded.points[counterparty]
+        ),
+        "delta_bystanders_points": (
+            None if not ok else [traded.points[b] - untraded.points[b] for b in bystanders]
         ),
     }
 
@@ -1490,16 +1564,17 @@ def run_judge(
 #
 # The claim under test (`trading-final.md` item 4): "No threshold: tau = 0
 # until the paired-chance judge measures a gate's resolution, and then tau
-# is that measurement, never a chosen number." The bins below are phase 2's
-# own `STRATEGIC_TAUS` grid (the finest resolution phase 2 found reason to
-# use, straddling the observed gain distribution of ~1e-4 to ~6e-3); the
-# decision rule below is this module's own construction for turning that
-# grid into one number, since no exact rule text survived into this
-# module's registration section -- see the run's own report for the
-# disclosure.
+# is that measurement, never a chosen number." `GAIN_BINS` and the decision
+# rule below are `agents/reference/trade-lab.md`'s "Phase 3 registration"
+# section, verbatim: log-spaced bins on the actor's predicted gain, and tau
+# is the lower edge of the lowest bin whose realised actor gain in *points*
+# resolves positive (paired-bootstrap CI excluding zero), provided every
+# higher bin is also positive -- falling back, if no bin resolves, to the
+# instrument's own resolution (the half-width of the pooled win-rate
+# interval) rather than a chosen number.
 
 GAIN_BINS: tuple[tuple[float, float], ...] = (
-    (0.0, 1e-4), (1e-4, 5e-4), (5e-4, 1e-3), (1e-3, 5e-3), (5e-3, float("inf")),
+    (0.0, 1e-4), (1e-4, 3e-4), (3e-4, 1e-3), (1e-3, 3e-3), (3e-3, 1e-2), (1e-2, float("inf")),
 )
 
 
@@ -1574,18 +1649,19 @@ def _binned_readout(rows: list[dict], field: str) -> dict:
     return out
 
 
-def _bystander_field_rows(rows: list[dict]) -> list[dict]:
-    """One row per (position, stream, bystander seat), `delta` the that
-    seat's own win delta -- bystander deltas are per-seat lists in
+def _bystander_field_rows(rows: list[dict], field: str = "delta_bystanders") -> list[dict]:
+    """One row per (position, stream, bystander seat), `delta` that seat's
+    own delta in `field` (`delta_bystanders` for win rate, `delta_bystanders_
+    points` for points) -- bystander deltas are per-seat lists in
     `phase3.jsonl`, flattened here so `_binned_readout` can treat "mean
     bystander delta" the same way it treats actor/counterparty. A stream
     with no bystander deltas at all (either fork errored) contributes no
     rows."""
     out = []
     for r in rows:
-        if r["delta_bystanders"] is None:
+        if r[field] is None:
             continue
-        for d in r["delta_bystanders"]:
+        for d in r[field]:
             out.append({"pid": r["pid"], "actor_gain": r["actor_gain"], "delta": d})
     return out
 
@@ -1628,35 +1704,72 @@ def _calibration_slope(rows: list[dict]) -> dict:
     return {"n_positions": len(pairs), "slope": slope, "intercept": intercept, "ci_low": lo, "ci_high": hi}
 
 
-def _decide_tau(actor_readout: dict) -> tuple[str, str]:
-    """The pre-stated decision rule (see this section's own note on where
-    it comes from): scanning `GAIN_BINS` low to high, tau is the lower edge
-    of the first bin whose paired-bootstrap CI on mean realised Δ-win-actor
-    excludes zero and is positive (branch "resolved-at-bin", or
-    "resolved-at-zero" when that is already the lowest bin) -- the smallest
-    claimed gain above which the gate's own positive claim reliably
-    corresponds to a measured win-probability gain. If no bin resolves,
-    branch "unresolved": the judge does not support any tau, and none is
-    adopted.
+def _pooled_actor_interval(rows: list[dict]) -> dict:
+    """The pooled actor interval: one paired-bootstrap 95% CI over every
+    judged position together -- no gain binning -- in win rate and in
+    points, each with its half-width. This is the instrument's own
+    resolution: the registered decision rule's fallback tau, when no
+    `GAIN_BINS` bin resolves, is the win-rate half-width computed here.
+    """
+    out = {}
+    for label, field in (("win_rate", "delta_actor"), ("points", "delta_actor_points")):
+        means = _position_means(rows, field)
+        values = [v for _, v in means.values()]
+        mean, ci_lo, ci_hi = _cluster_bootstrap(values)
+        out[label] = {
+            "n_positions": len(values), "mean": mean, "ci_low": ci_lo, "ci_high": ci_hi,
+            "half_width": (ci_hi - ci_lo) / 2,
+        }
+    return out
+
+
+def _decide_tau(actor_points_readout: dict, pooled_win_rate_half_width: float) -> tuple[str, str]:
+    """The registered decision rule, `agents/reference/trade-lab.md`
+    "Phase 3 registration" verbatim: scanning `GAIN_BINS` low to high, tau
+    is the lower edge of the lowest bin whose paired-bootstrap CI on mean
+    realised actor gain *in points* excludes zero and is positive,
+    provided every higher bin is also positive (branch "resolved-at-bin",
+    or "resolved-at-zero" when that is already the lowest bin) -- the
+    smallest claimed gain above which the gate's own positive claim
+    reliably corresponds to a measured, non-reversing points gain. "Every
+    higher bin also positive" is read as mean > 0 (not itself required to
+    resolve its own CI) -- the registration's own text distinguishes "is
+    positive with an interval excluding zero" (the candidate bin's own
+    bar) from the plain "is also positive" it asks of every bin above it.
+
+    If no bin resolves this way, branch "unresolved": tau is set to the
+    instrument's own resolution -- `pooled_win_rate_half_width`, the half-
+    width of the pooled interval on realised win-rate gain (`_pooled_
+    actor_interval`) -- per the registration's stated fallback, not a
+    chosen number.
     """
     labels = [_bin_label(lo, hi) for lo, hi in GAIN_BINS]
-    for i, (lo, hi) in enumerate(GAIN_BINS):
-        label = labels[i]
-        if actor_readout[label]["resolved_positive"]:
+    n = len(labels)
+    for i in range(n):
+        candidate = actor_points_readout[labels[i]]
+        if not candidate["resolved_positive"]:
+            continue
+        higher_positive = all(actor_points_readout[labels[j]]["mean"] > 0.0 for j in range(i + 1, n))
+        if higher_positive:
             branch = "resolved-at-zero" if i == 0 else "resolved-at-bin"
+            lo = GAIN_BINS[i][0]
             return f"{lo:g}", branch
-    return "unresolved", "unresolved"
+    return f"{pooled_win_rate_half_width:g}", "unresolved-instrument-resolution"
 
 
 def compute_phase3_readouts(rows: list[dict]) -> dict:
     n_positions = len(_cluster_by_position(rows))
-    readout1 = _binned_readout(rows, "delta_actor")
-    readout2 = {
-        "counterparty": _binned_readout(rows, "delta_counterparty"),
-        "bystanders": _binned_readout(_bystander_field_rows(rows), "delta"),
-    }
+    readout1_win_rate = _binned_readout(rows, "delta_actor")
+    readout1_points = _binned_readout(rows, "delta_actor_points")
+    readout2_counterparty_win_rate = _binned_readout(rows, "delta_counterparty")
+    readout2_counterparty_points = _binned_readout(rows, "delta_counterparty_points")
+    readout2_bystanders_win_rate = _binned_readout(_bystander_field_rows(rows, "delta_bystanders"), "delta")
+    readout2_bystanders_points = _binned_readout(
+        _bystander_field_rows(rows, "delta_bystanders_points"), "delta"
+    )
     readout3 = _calibration_slope(rows)
-    tau, branch = _decide_tau(readout1)
+    pooled = _pooled_actor_interval(rows)
+    tau, branch = _decide_tau(readout1_points, pooled["win_rate"]["half_width"])
 
     errored = sum(1 for r in rows if r["untraded"]["error"] or r["traded"]["error"])
     chance_exhausted = sum(
@@ -1667,7 +1780,7 @@ def compute_phase3_readouts(rows: list[dict]) -> dict:
     capped = sum(
         1 for r in rows
         if not (r["untraded"]["error"] or r["traded"]["error"])
-        and (r["untraded"]["winner"] is None or r["traded"]["winner"] is None)
+        and (r["untraded"]["capped"] or r["traded"]["capped"])
     )
     return {
         "n_positions": n_positions,
@@ -1675,10 +1788,14 @@ def compute_phase3_readouts(rows: list[dict]) -> dict:
         "share_errored": errored / len(rows) if rows else 0.0,
         "share_chance_exhausted": chance_exhausted / len(rows) if rows else 0.0,
         "share_capped": capped / len(rows) if rows else 0.0,
-        "readout_1_actor": readout1,
-        "readout_2_counterparty": readout2["counterparty"],
-        "readout_2_bystanders": readout2["bystanders"],
+        "readout_1_actor_win_rate": readout1_win_rate,
+        "readout_1_actor_points": readout1_points,
+        "readout_2_counterparty_win_rate": readout2_counterparty_win_rate,
+        "readout_2_counterparty_points": readout2_counterparty_points,
+        "readout_2_bystanders_win_rate": readout2_bystanders_win_rate,
+        "readout_2_bystanders_points": readout2_bystanders_points,
         "readout_3_calibration": readout3,
+        "pooled_actor_interval": pooled,
         "tau": tau,
         "tau_branch": branch,
     }
@@ -1692,8 +1809,8 @@ def phase3_table_md(readouts: dict) -> str:
         f"capped: {readouts['share_capped']*100:.1f}%\n",
     ]
 
-    def bin_table(title: str, binned: dict) -> list[str]:
-        out = [f"## {title}\n", "| gain bin | n | mean Δwin | 95% CI | resolved |", "|---|---|---|---|---|"]
+    def bin_table(title: str, binned: dict, unit: str) -> list[str]:
+        out = [f"## {title}\n", f"| gain bin | n | mean Δ{unit} | 95% CI | resolved |", "|---|---|---|---|---|"]
         for label, b in binned.items():
             out.append(
                 f"| {label} | {b['n_positions']} | {b['mean']:+.4f} | "
@@ -1702,9 +1819,12 @@ def phase3_table_md(readouts: dict) -> str:
         out.append("")
         return out
 
-    lines += bin_table("Readout 1: actor", readouts["readout_1_actor"])
-    lines += bin_table("Readout 2a: counterparty", readouts["readout_2_counterparty"])
-    lines += bin_table("Readout 2b: bystanders", readouts["readout_2_bystanders"])
+    lines += bin_table("Readout 1: actor (win rate)", readouts["readout_1_actor_win_rate"], "win")
+    lines += bin_table("Readout 1: actor (points)", readouts["readout_1_actor_points"], "pts")
+    lines += bin_table("Readout 2a: counterparty (win rate)", readouts["readout_2_counterparty_win_rate"], "win")
+    lines += bin_table("Readout 2a: counterparty (points)", readouts["readout_2_counterparty_points"], "pts")
+    lines += bin_table("Readout 2b: bystanders (win rate)", readouts["readout_2_bystanders_win_rate"], "win")
+    lines += bin_table("Readout 2b: bystanders (points)", readouts["readout_2_bystanders_points"], "pts")
 
     c = readouts["readout_3_calibration"]
     lines.append("## Readout 3: calibration slope\n")
@@ -1712,6 +1832,16 @@ def phase3_table_md(readouts: dict) -> str:
         f"n={c['n_positions']}, slope={c['slope']:+.4f} "
         f"[{c['ci_low']:+.4f}, {c['ci_high']:+.4f}], intercept={c['intercept']:+.4f}\n"
     )
+
+    pooled = readouts["pooled_actor_interval"]
+    lines.append("## Pooled actor interval (no gain binning)\n")
+    for label, unit in (("win_rate", "win rate"), ("points", "points")):
+        p = pooled[label]
+        lines.append(
+            f"- {unit}: n={p['n_positions']}, mean={p['mean']:+.4f} "
+            f"[{p['ci_low']:+.4f}, {p['ci_high']:+.4f}], half-width={p['half_width']:.4f}"
+        )
+    lines.append("")
 
     lines.append(f"**tau = {readouts['tau']}** (branch: {readouts['tau_branch']})\n")
     return "\n".join(lines) + "\n"

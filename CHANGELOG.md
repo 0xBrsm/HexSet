@@ -25,6 +25,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **heximax answers a whole trade event's candidates in one pass.**
+  `Heximax.gains_many` batches every candidate a trade event asks about into
+  one vectorised evaluation (`HonestEvaluator.score_many` over a
+  `(candidates, seat, resource)` hand array) instead of re-scoring all four
+  seats per candidate in pure Python; `_delta` is now `gains_many` with one
+  row. Trades are unchanged — verified byte-identical over recorded games —
+  and heximax×4 games run about 2.8x faster (9.5s/game -> 3.4s/game, 16-game
+  `compete`).
 - **Every human or LLM seat is a direct gate, unconditionally.** Seat-up
   installs `PendingGate` the instant a manual seat is claimed
   (`POST /api/games`/`/api/join`, `hexset.server.mcp`'s `new_game`/`join`) —

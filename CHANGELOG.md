@@ -9,6 +9,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Changed
+
+- `hexset.trading.TRADE_FLOOR` is `0.0197`, the trade gate's measured
+  resolution under paired chance (trade lab phase 3): a deal clears only when
+  both private gains exceed about two points of win probability. Trades
+  claiming less no longer clear.
+
 ### Added
 
 - **The human/LLM trading surface.** `GET /api/games/<code>/trade/acceptable`

@@ -79,13 +79,17 @@ TRADE_RULES: tuple[str, ...] = ("egalitarian", "nash", "actor")
 # The clearing floor τ: a private gain must exceed this, on both sides, for
 # a candidate to be admitted at all -- `clears_floor` below is the one
 # predicate every admission point in the engine reads, so the floor is
-# applied in exactly one place. This is meant to be the gate's own measured
-# resolution under paired chance (the trade lab's phase 3,
-# `agents/reference/trading-final.md` item 4), not a chosen number: it ships
-# at `0.0` -- so nothing that cleared under the old strictly-positive rule
-# stops clearing -- until that measurement lands, at which point a
-# follow-up commit on this same branch sets the real value.
-TRADE_FLOOR: float = 0.0
+# applied in exactly one place. Not a chosen number: it is the gate's
+# measured resolution under paired chance (the trade lab's phase 3,
+# `agents/reference/trading-final.md` item 4). 300 bank positions x 8 paired
+# chance streams, each played traded and untraded to a 600-action cap by
+# four heximax seats under identical dice, steals and draws; no bin of
+# claimed gain showed a realised gain distinguishable from zero, so by the
+# registered rule the floor is the instrument's own resolution -- the
+# half-width of the pooled 95% interval on the acting seat's realised
+# win-rate gain, 0.0197. A gate that claims less than this is claiming
+# something no outcome can verify, and the table does not honour it.
+TRADE_FLOOR: float = 0.0197
 
 
 def clears_floor(gain: float) -> bool:

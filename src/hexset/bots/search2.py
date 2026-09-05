@@ -18,8 +18,9 @@ class Bot(Protocol):
     """Anything that can pick an action, and what it brings to a trade.
 
     `choose` is the whole of the old protocol and still the only required
-    method. The other three are the trade mechanic's seam
-    (`hexset.trading`), and all have a default that means "this seat never
+    method. The next three are the clearing house's seam
+    (`hexset.trading.trade_event`, fired from `hexset.game.enter_main`/
+    `move_robber_to`), and all have a default that means "this seat never
     trades" or "answer one candidate at a time", so an existing bot keeps
     working untouched:
 
@@ -35,9 +36,9 @@ class Bot(Protocol):
     * `gains_many(view, received, counterparties)` -- this seat's private
       *gain* from every candidate in `received` at once: a signed float, in
       whatever unit this seat's value is, positive meaning it wants the
-      trade. This is the mechanic's actual gate -- `hexset.trading.
-      trade_event` clears the candidate both sides clear `TRADE_FLOOR` on
-      and `Game.trade_rule` ranks highest. Default: `+1.0`/`-1.0` from
+      trade. This is the clearing house's actual gate -- `trade_event`
+      clears the candidate both sides clear `TRADE_FLOOR` on and
+      `Game.trade_rule` ranks highest. Default: `+1.0`/`-1.0` from
       `accepts_many`, for a bot that only ever has a boolean gate.
 
     All three are handed the engine's information-set `View` for that seat
@@ -45,6 +46,29 @@ class Bot(Protocol):
     not know. The defaults are applied by `hexset.trading.valued`/
     `valued_many` rather than by inheritance, so they hold for a bot that
     satisfies this protocol structurally.
+
+    The last four are the *trade round*'s seam instead
+    (`hexset.trading.trade_round`, the served table's protocol -- see
+    `hexset.trading`'s module docstring, "The trade round"). All four have
+    a default too (`hexset.trading.default_offer`/`default_respond`/
+    `default_choose`, applied the same structural way as the three above),
+    so any bot that only ever implemented `gains_many` already plays a
+    served table without changing a line:
+
+    * `offer(view, candidates) -> index | None` -- broadcast the candidate
+      at this index (`candidates` is `(counterparty, bundle)`, the same
+      shape `hexset.trading._candidates` yields), or pass (`None`).
+    * `respond(view, offer) -> Response` -- this seat's answer to another
+      seat's broadcast `Offer`: accept, counter, or pass
+      (`hexset.trading.Response`).
+    * `choose(view, responses) -> index | None` -- as the actor, execute the
+      response at this index, or decline every one of them (`None`).
+    * `estimate_many(view, candidates) -> list[float]` -- this seat's best
+      guess at *another* seat's gain from each candidate, used by
+      `default_offer`/`default_respond` to judge a candidate before the
+      other side has actually answered. No default: a gate with none of
+      this uses its own gain as the estimate instead (`hexset.trading.
+      _estimate_many`), "so a plain gate offers what is best for itself."
     """
 
     def choose(self, game: Game) -> Action: ...
@@ -205,19 +229,37 @@ class SearchBot:
 
     # -- trading (`hexset.trading`) -----------------------------------------
 
+    def _delta_for(
+        self, view: View, seat: int, target: int, received: Bundle, counterparty: int
+    ) -> float:
+        """`target`'s own evaluator delta from `seat` and `counterparty`
+        exchanging `received` (signed towards `seat`): `Eval(after) -
+        Eval(before)` on `target`'s row, scored under this bot's stance --
+        read from the true state, since search2 is the project's own
+        held-out perfect-information referent (`SearchBot.choose`'s own
+        comment on `_from_state`).
+
+        `target == seat` is `_gain`'s own shape (this seat's private gain,
+        the clearing house's gate); `target == counterparty` is
+        `estimate_many`'s (a guess at the *other* side's gain, the trade
+        round's `default_offer`/`default_respond` seam) -- one formula for
+        both, since nothing about reading a row from the true state differs
+        between them.
+        """
+        state = view.state
+        before = self._rank(self.evaluator.evaluate(state, target), target)
+        mirror = tuple(-n for n in received)
+        after = hand_shifted(state, {seat: received, counterparty: mirror})
+        return self._rank(self.evaluator.evaluate(after, target), target) - before
+
     def _gain(self, view: View, received: Bundle, counterparty: int) -> float:
-        """This seat's own evaluator delta from one candidate exchange:
-        `Eval(after) - Eval(before)`, scored under this bot's stance -- which
-        under `relative` already prices who got stronger. This is the private
-        gate the mechanic clears on; `accepts`/`gains_many` are both read off
+        """This seat's own evaluator delta from one candidate exchange --
+        `_delta_for` with `target == seat`. This is the private gate the
+        clearing house clears on; `accepts`/`gains_many` are both read off
         it.
         """
         seat = view.perspective
-        state = view.state
-        before = self._rank(self.evaluator.evaluate(state, seat), seat)
-        mirror = tuple(-n for n in received)
-        after = hand_shifted(state, {seat: received, counterparty: mirror})
-        return self._rank(self.evaluator.evaluate(after, seat), seat) - before
+        return self._delta_for(view, seat, seat, received, counterparty)
 
     def gains_many(
         self, view: View, received: Sequence[Bundle], counterparties: Sequence[int]
@@ -233,6 +275,25 @@ class SearchBot:
         (`hexset.trading.trade_event`).
         """
         return self.gains_many(view, [received], [counterparty])[0] > 0.0
+
+    def estimate_many(
+        self, view: View, candidates: Sequence[tuple[int, Bundle]]
+    ) -> list[float]:
+        """This seat's estimate of each `(counterparty, bundle)` candidate's
+        *counterparty*-side gain -- `_delta_for` with `target == them`, read
+        from the true state exactly as `_gain` reads this seat's own row
+        (search2's own perfect-information licence). Read by
+        `hexset.trading.default_offer`/`default_respond` (the trade
+        round's seam, `hexset.trading`'s "the trade round") wherever a bot
+        would otherwise have to guess an unanswered counterparty's gain
+        from its own.
+        """
+        if self.max_trades == 0:
+            return [-1.0] * len(candidates)
+        seat = view.perspective
+        return [
+            self._delta_for(view, seat, them, bundle, them) for them, bundle in candidates
+        ]
 
     def _beam(
         self, game: Game, options: list[Action], mover: int, knower: int

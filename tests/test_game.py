@@ -519,3 +519,69 @@ def test_a_tile_transfer_does_not_win_for_a_seat_off_the_move():
     assert victory_points(state, 2) >= WINNING_POINTS  # player 2 is over 10 on paper
     assert game.won_by is None  # but it is not their turn
     assert game.phase is Phase.MAIN  # so the game keeps going
+
+
+def test_a_seat_that_crosses_ten_off_turn_wins_at_the_start_of_its_own_turn():
+    """Winning the Game (rulebook): "the first player to reach 10 or more
+    VPs on their turn wins" -- the FAQ reading is that this is announced at
+    the *start* of a seat's own turn, before it takes any action, not only
+    as a consequence of something it does itself. Player 1 crosses ten
+    off-turn here (a Longest Road transfer during player 0's turn, same
+    shape as the test above) and must not win then -- but must win the
+    instant `end_turn` hands play to them, before `to_move`/`legal_actions`
+    ever asks them for a move."""
+    game = start(mini_board(), 3, random.Random(0))
+    state = game._state
+    topology = state.board.topology
+    game.phase = Phase.MAIN
+    game.current_player = 0
+
+    # Player 2 holds Longest Road with a plain 5-road chain.
+    ring = coastal_rings(topology)[0]
+    p2_path = ring[0:5]
+    for e in p2_path:
+        state.edge_owner[e] = 2
+    update_longest_road(state)
+    assert state.longest_road_holder == 2
+
+    # The junction where player 0 is about to settle sits inside that chain
+    # and will split it into a 2-segment and a 3-segment piece.
+    shared = set(topology.edges[p2_path[1]]) & set(topology.edges[p2_path[2]])
+    break_vertex = shared.pop()
+
+    # Player 1 -- who takes the very next turn once player 0 ends theirs --
+    # holds a disjoint 6-road chain, already longer than either half of
+    # player 2's chain once it breaks, and sits at 9 VP from buildings
+    # alone (four cities and a settlement): one tile short of ten.
+    p1_path = ring[10:16]
+    for e in p1_path:
+        state.edge_owner[e] = 1
+    spots = [
+        v
+        for v in independent_vertices(state.board, 8)
+        if v not in topology.vertex_neighbors[break_vertex] and v != break_vertex
+    ]
+    for v in spots[:4]:
+        state.vertex_owner[v] = 1
+        state.vertex_building[v] = Building.CITY
+    state.vertex_owner[spots[4]] = 1
+    state.vertex_building[spots[4]] = Building.SETTLEMENT
+    assert victory_points(state, 1) == 9
+
+    # Player 0 builds the breaking settlement for real.
+    third_edge = next(e for e in topology.vertex_edges[break_vertex] if e not in p2_path)
+    state.edge_owner[third_edge] = 0
+    fund(state, 0, Purchase.SETTLEMENT)
+
+    build_settlement(game, break_vertex)
+
+    assert state.longest_road_holder == 1
+    assert victory_points(state, 1) >= WINNING_POINTS
+    assert game.won_by is None  # still player 0's turn
+    assert game.phase is Phase.MAIN
+
+    end_turn(game)
+
+    assert game.current_player == 1  # turn order hands play straight to them
+    assert game.won_by == 1  # ... and they win before taking any action
+    assert game.phase is Phase.GAME_OVER

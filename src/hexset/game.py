@@ -915,6 +915,20 @@ def end_turn(game: Game) -> None:
         return
     game.current_player = _next_unlocked(game, game.current_player)
     game.phase = Phase.ROLL
+    # Winning the Game (rulebook): "the first player to reach 10 or more VPs
+    # ... on their turn ... wins" -- the FAQ reading is that this is
+    # announced at the start of a seat's own turn, not only after an action
+    # of theirs. `_check_win` (see its own docstring) already scopes a win
+    # to `game.current_player`, which this just made the new seat; a seat
+    # that crossed 10 off-turn (a Longest Road/Largest Army tile transfer
+    # during someone else's turn) therefore wins here, before it is ever
+    # asked for an action -- nothing about its total needs to change for
+    # that to become true, so there is nothing to wait for. Every driver
+    # that steps a game (`arena.play`'s `while not is_over(game)`, a
+    # search's own `imagine`d copy calling this same function) sees
+    # `Phase.GAME_OVER` on the very next check, before requesting a move
+    # from the new current player.
+    _check_win(game)
 
 
 def is_over(game: Game) -> bool:

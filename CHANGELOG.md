@@ -91,6 +91,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Longest Road and handed the tile to a *third*, already-loaded seat could
   end the game on that seat's behalf mid-way through somebody else's turn.
   The check now reads only `game.current_player`'s own total.
+- **A seat that crosses 10 VP off-turn now wins the instant its own turn
+  begins.** Follow-up to the fix above: scoping the win check to the mover
+  means a seat that gained a tile transfer on someone else's turn no longer
+  wins right then, but the rulebook ("on their turn") still means they win
+  as soon as it *is* their turn, before taking any action. `end_turn` now
+  re-runs `_check_win` for the new current player immediately after handing
+  them the turn, so `is_over(game)` is already true — and no action is
+  ever requested from them — the moment play reaches them. Every driver
+  that ends a turn through `hexset.game.end_turn` (the arena, the gym, a
+  search stepping its own `imagine`d copy) gets this for free, since it is
+  the one function that does so.
 
 ### Changed
 

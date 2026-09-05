@@ -478,6 +478,20 @@ is not part of this audit.
   legitimate state-only "who is over the threshold" query
   (`tests/test_victory.py`), just not what a turn-scoped win check should
   call.
+* **Follow-up, same day: a seat that crosses 10 VP off-turn now wins at the
+  start of its own turn, not merely "not immediately."** Scoping the win
+  check to the mover (the fix directly above) has a corollary the rulebook
+  also states outright: "the first player to reach 10 or more VPs *on
+  their turn* wins" means the seat wins the moment its own turn begins, not
+  only after it next does something. `end_turn` now calls `_check_win`
+  again right after handing the turn to the new current player, so
+  `is_over(game)` is already true before that seat is ever asked for a
+  move. This is the one function every driver uses to end a turn — the
+  arena's `while not is_over(game)` loop, the gym, a search stepping its
+  own `imagine`d copy — so all of them get the corrected behaviour for
+  free; nothing needed changing in `imagine` itself; `arena.play`'s stop
+  condition needed no change either, since it already checks `is_over`
+  before requesting the next action.
 
 **Everything else on the checklist conforms as written.** Piece supply
 (15/5/4), building costs, the distance rule, road adjacency (including the

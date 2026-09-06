@@ -391,14 +391,15 @@
   }
   #modal.show { display: flex; }
   /* Row of two, no seam between them: scrollable content on the left, a
-     docked column of icon-only action buttons on the right. What lands in
-     that column is the mode's business — accept/decline for an incoming
-     offer, cancel plus send-or-ship for one being built, a lone cancel for
-     the dismissible card modes, and nothing at all for a forced discard,
-     where the column hides itself rather than sit empty. */
+     docked column of action buttons — glyph over word, see .modal-btn-cap —
+     on the right. What lands in that column is the mode's business:
+     accept/counter/pass for an incoming offer, bank-or-port plus offer plus
+     cancel for one being built, a lone cancel for the dismissible card
+     modes, and nothing at all for a forced discard, where the column hides
+     itself rather than sit empty. */
   #modal-inner {
     background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
-    max-width: 420px; width: 100%; max-height: 85vh;
+    max-width: 470px; width: 100%; max-height: 85vh;
     display: flex; overflow: hidden;
   }
   #modal-main {
@@ -416,72 +417,113 @@
      the whole time, visibly aren't: the two columns read as misaligned. */
   #modal-body { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; }
   #modal-actions {
-    flex: none; width: 96px; padding: 1rem 0.7rem; display: flex;
+    flex: none; width: 108px; padding: 1rem 0.6rem; display: flex;
     flex-direction: column; justify-content: center; align-items: center; gap: 0.6rem;
   }
+  /* Wide enough for the longest caption ("Decline all") to sit inside its own
+     button rather than spilling past the edges of it, and the same width for
+     every button so the column reads as one stack. */
   #modal-actions button {
-    width: 56px; height: 56px; padding: 0; border-radius: 12px;
-    display: flex; align-items: center; justify-content: center;
-  }
-  #modal-actions button {
-    flex-direction: column; gap: 2px;
+    width: 84px; min-height: 56px; padding: 0.35rem 0.2rem; border-radius: 12px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
   }
   #modal-actions button svg { width: 26px; height: 26px; fill: currentColor; }
-  /* The rate under the bank/port glyph. Shown rather than left to a tooltip
-     because touch has no hover, and what a bank trade costs is the whole
-     reason you'd pick it over offering the pair to the table. */
-  .modal-btn-rate { font-size: 0.58rem; font-weight: 700; line-height: 1; letter-spacing: 0.02em; }
+  /* The word under every button in the column. A glyph alone cannot tell
+     Pass from Cancel from Decline all — the same X does all three, in three
+     different modes — and touch has no hover to fall back on, so the caption
+     is drawn rather than left to a title attribute. Always present, an
+     &nbsp; where a button has nothing to say, so the glyphs above stay on
+     one baseline down the column. */
+  .modal-btn-cap { font-size: 0.55rem; font-weight: 700; line-height: 1.1; letter-spacing: 0.02em; text-align: center; }
   .pick-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.3rem 0 0.7rem; }
-  .modal-note { font-size: 0.85rem; color: var(--muted); margin-top: 0.4rem; }
+  .modal-note { font-size: 0.85rem; color: var(--muted); margin: 0.4rem 0 0.7rem; }
   /* The robber's victims are seats, not resources, so they get plain buttons
      with the same colour swatch the player list uses rather than card tiles —
      stacked, because a seat's name is far too wide to sit five to a row. */
   .steal-row { display: flex; flex-direction: column; gap: 0.35rem; margin: 0.3rem 0 0.2rem; }
   .steal-option { display: flex; align-items: center; gap: 0.5rem; text-align: left; }
-  /* The "Give → Get" summary — one side's cards, an arrow, the other side's,
-     each captioned with a single word rather than a full sentence. Used both
-     for reading an incoming offer and for building one, and always the same
-     way round: what leaves the human's hand on the left, what arrives on the
-     right, whoever started the trade (see GIVE_LABEL/GET_LABEL). */
-  .trade-exchange {
+  /* A trade nobody is editing: only the cards actually in it, what leaves
+     this hand on the left and what arrives on the right, whichever seat
+     proposed it (see GIVE_LABEL/GET_LABEL). Reading a two-card offer used to
+     mean picking two lit tiles out of ten dimmed ones — every resource was
+     always drawn, on both sides — so the thing being read is now the only
+     thing drawn. The editable rows below are still all five: those reflow
+     under the cursor between clicks if they aren't. */
+  .trade-line {
     display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
-    gap: 0.6rem; margin: 0.2rem 0 0.9rem;
-    /* Nudges the centered pair left of dead-center: unverified without a
-       screenshot (see the commit this landed in), a direct response to
-       "too far right", not a recalculation — revert this one declaration
-       if it's wrong instead of re-deriving the geometry. */
-    padding-right: 2.5rem;
+    gap: 0.55rem; margin: 0.5rem 0;
   }
-  .trade-side { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; }
-  .trade-side .pick-row { margin: 0; justify-content: center; }
-  .trade-side-label { font-size: 0.78rem; color: var(--muted); }
+  .trade-line .pick-row { margin: 0; gap: 0.25rem; }
   .trade-arrow { flex: none; font-size: 1.3rem; line-height: 1; color: var(--muted); }
-  /* "trade" mode: two rows of all five resources, Give above Get. A tap adds
-     one of that card to that side (a tap at the most it can take wraps back
-     to none); a resource on one side is dimmed on the other. */
+  /* The offer a counter is a reply to, kept on screen above the reply being
+     built. Countering used to replace the offer with an editable copy of
+     itself, which is exactly the moment you most want to see what you were
+     sent. */
+  .trade-quote {
+    border-left: 2px solid var(--border); padding: 0.1rem 0 0.1rem 0.6rem; margin: 0.2rem 0 0.6rem;
+  }
+  .trade-quote .trade-line { margin: 0.25rem 0 0; justify-content: flex-start; }
+  .trade-quote-who { font-size: 0.78rem; color: var(--muted); }
+  /* The two editable rows, Give above Get: all five resources, a tap adds one
+     of that card to that side, and the "-" under a card that is in the trade
+     takes one back off. No wrap-round at the ceiling any more — a tap that
+     used to silently empty the pile now does nothing, and the ceiling itself
+     is named in the line above the rows (see dealSummary). */
   .trade-row { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; margin-bottom: 0.4rem; }
-  .trade-row .pick-row { margin: 0; justify-content: center; }
-  .trade-row-label { font-size: 0.78rem; color: var(--muted); }
+  .trade-row .pick-row { margin: 0; justify-content: center; align-items: flex-start; }
+  .trade-row-label {
+    font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em; color: var(--muted);
+  }
+  /* Card over its own minus button. The button keeps its space when there is
+     nothing to subtract (visibility, not display) so the row of cards doesn't
+     lift and drop as counts come and go. */
+  .pick-stack { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; }
+  .pick-minus {
+    width: 34px; height: 18px; padding: 0; border-radius: 4px; line-height: 1;
+    font-size: 0.8rem; font-weight: 700;
+  }
+  .pick-minus.hidden { visibility: hidden; }
   /* Reuses .card's own size/shape (see the hand section) so a tile in the
      modal looks exactly like the card it represents — just selectable and
      dimmable on top of that. Every mode that picks a resource uses these:
-     trade give/want, discard, Monopoly, Year of Plenty. */
+     trade give/get, discard, Monopoly, Year of Plenty. */
   .pick-card { cursor: pointer; border: 2px solid transparent; }
   .pick-card.selected { border-color: var(--accent); }
   .pick-card.disabled { opacity: 0.28; cursor: default; pointer-events: none; }
-
   .pending-offer-btn {
     width: 32px; height: 32px; padding: 0; border-radius: 8px;
     display: flex; align-items: center; justify-content: center; flex: none;
   }
   .pending-offer-btn svg { width: 18px; height: 18px; fill: currentColor; }
-  /* Answers to the human's own open offer, one row a seat: who, what they
-     take (or counter with), and a button to take that deal. */
-  .responses { display: flex; flex-direction: column; gap: 0.4rem; margin: 0.4rem 0 0.6rem; }
-  .response-row { display: flex; align-items: center; gap: 0.5rem; }
-  .response-row .swatch { width: 12px; height: 12px; flex: none; }
-  .response-row .pick-row { margin: 0; gap: 0.2rem; }
-  .response-kind { font-size: 0.78rem; color: var(--muted); flex: 1 1 auto; }
+  /* Answers to the human's own open offer: one block a seat, the seat and
+     its Take button on the first line and the deal itself indented under it.
+     Two lines rather than one because a seat name, a three-card counter and
+     a button do not fit across a phone — laid out in one row they either
+     wrapped (one answer two lines tall beside its single-line neighbours) or
+     pushed the Take buttons off the edge of the modal, where they could not
+     be pressed at all. Stacked, every answer is the same shape at every
+     width and the buttons line up down the right edge on their own. */
+  .responses { display: flex; flex-direction: column; margin: 0.5rem 0 0.2rem; }
+  .responses-label {
+    font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em;
+    color: var(--muted); margin-bottom: 0.3rem;
+  }
+  .response { margin-bottom: 0.55rem; }
+  .response-top { display: flex; align-items: center; gap: 0.4rem; }
+  .response-who {
+    flex: 1 1 auto; min-width: 0; font-size: 0.82rem;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .response-top .swatch { width: 12px; height: 12px; flex: none; }
+  /* Indented to the name above it, and scrollable rather than wrapping: a
+     counter is at most three cards a side, which fits everywhere the modal
+     itself does, but a hand of chips must never be what widens the modal. */
+  .response-deal {
+    display: flex; align-items: center; gap: 0.35rem; margin: 0.25rem 0 0 1.1rem;
+    overflow-x: auto;
+  }
+  .response-deal .pick-row { margin: 0; gap: 0.2rem; flex-wrap: nowrap; }
+  .response-kind { font-size: 0.8rem; color: var(--muted); }
   /* Touch has no hover to fall back on, and the targets are only a few screen
      pixels wide once the board scales down to a phone. */
   .clickable-vertex:active { fill: color-mix(in srgb, var(--accent) 50%, white); }
@@ -606,7 +648,7 @@
 <!-- The one modal every choice that isn't a place on the board goes
      through — six modes, listed with what opens each above openModal().
      Layout is the same for all of them: the mode's own body on the left,
-     a docked column of icon-only buttons on the right (renderModal). -->
+     a docked column of captioned buttons on the right (renderModal). -->
 <div id="modal">
   <div id="modal-inner">
     <div id="modal-main">
@@ -1979,13 +2021,22 @@ const MODAL_AUTO = new Set(["discard", "steal"]);
 // closing it only backs out to the hex list, not out of the move.
 const MODAL_DISMISSIBLE = new Set(["trade", "monopoly", "year-of-plenty", "steal"]);
 
-// A right-column icon-only button. `label` is the tooltip/screen-reader text,
-// not shown — the whole column is glyphs.
-function modalActionButton(icon, label, {primary = true} = {}) {
+// A right-column button: a glyph over a word. `label` is the full
+// tooltip/screen-reader sentence, `caption` the word drawn under the glyph —
+// which every button in the column has, because the column reuses three
+// glyphs across four modes and they do not mean the same thing twice. The
+// same X is Cancel while composing, Pass on somebody's offer and Decline all
+// on your own; the same paper plane is Offer and Send counter. Without the
+// word the column is a guess.
+function modalActionButton(icon, label, {primary = true, caption = ""} = {}) {
   const attrs = {title: label, "aria-label": label};
   if (primary) attrs.class = "primary";
   const btn = html("button", attrs);
   btn.appendChild(iconSvg(icon));
+  // Non-breaking space, not "": a captionless button has to keep the caption's
+  // height or its glyph sits lower than its neighbours' (see the bank button,
+  // whose second line is its rate).
+  btn.appendChild(html("span", {class: "modal-btn-cap"}, caption || "\u00a0"));
   return btn;
 }
 
@@ -2011,39 +2062,88 @@ function pickCard(resourceIdx, {selected, disabled, count, forceCount, title, on
 
 // A trade reads the same way round wherever it appears: what leaves the
 // hand on the left, what arrives on the right.
-const GIVE_LABEL = "Give";
-const GET_LABEL = "Get";
+const GIVE_LABEL = "YOU GIVE";
+const GET_LABEL = "YOU GET";
 
-// One side of the trade: all five resources with count badges, always the
-// same five tiles whatever is shown, so the modal never changes shape.
-// Editable, a tap adds one (bounded by the hand for "give", by
-// MAX_TRADE_CARDS a side for both) and wraps to none at the bound; a
-// resource on the other side is dimmed. Read-only, the cards not in the
-// trade are dimmed and nothing is clickable.
-function tradeRow(p, which, label, {editable}) {
+// The most of one resource this seat can put on the give side. Two ceilings
+// meet here and the composer has to allow the higher of them, or a route out
+// of the modal becomes unreachable:
+//
+//   MAX_TRADE_CARDS   the table rule on a trade between seats
+//   trade_ratios[r]   what the bank (4) or this seat's best port (3, or 2 for
+//                     the one resource a specific port serves) charges
+//
+// Capping the row at MAX_TRADE_CARDS alone is what made bank trades lie: the
+// give side could never show more than three cards, so a 4:1 sale drew as
+// "1 Wood" (whatever count you left it on) and took four. Whichever ceiling
+// the composition actually ends up under is decided by which button lights
+// up, not by what the row will let you count to.
+function giveCeiling(p, r) {
+  const name = board.resources[r];
+  const held = p.hand ? p.hand[name] || 0 : 0;
+  const ratio = (state.trade_ratios || {})[name] || BANK_RATE;
+  return Math.min(held, Math.max(MAX_TRADE_CARDS, ratio));
+}
+
+// One side of the trade, editable: all five resources, always, so the row
+// doesn't reflow under the cursor between clicks. A tap adds one of that
+// card to this side, up to its ceiling and then no further — it used to wrap
+// back to none there, which reads as a misclick rather than as a limit. The
+// "-" under a card takes one back off, and keeps its space when there is
+// nothing to take so the cards don't lift and drop. A resource already on the
+// other side is dimmed: the two halves of a trade are disjoint (see
+// `round_bundle_from_wire`).
+function tradeRow(p, which, label) {
   const mine = which === "give" ? tradeGive : tradeWant;
   const other = which === "give" ? tradeWant : tradeGive;
-  const total = mine.reduce((a, b) => a + b, 0);
   const wrap = html("div", {class: "trade-row"});
   wrap.appendChild(html("div", {class: "trade-row-label"}, label));
   const row = html("div", {class: "pick-row"});
   for (let r = 0; r < board.resources.length; r++) {
-    const held = p.hand ? p.hand[board.resources[r]] || 0 : 0;
-    const limit = which === "give" ? Math.min(held, MAX_TRADE_CARDS) : MAX_TRADE_CARDS;
-    row.appendChild(pickCard(r, {
+    const ceiling = which === "give" ? giveCeiling(p, r) : MAX_TRADE_CARDS;
+    const stack = html("div", {class: "pick-stack"});
+    stack.appendChild(pickCard(r, {
       selected: mine[r] > 0,
-      disabled: editable ? (other[r] > 0 || limit === 0) : mine[r] === 0,
+      disabled: other[r] > 0 || ceiling === 0,
       count: mine[r],
       forceCount: true,
-      onClick: editable ? () => {
-        if (mine[r] >= limit || total >= MAX_TRADE_CARDS) mine[r] = 0;
-        else mine[r] += 1;
-        renderModal();
-      } : undefined,
+      title: mine[r] < ceiling ? `Add a ${board.resources[r]}` : board.resources[r],
+      onClick: () => {
+        if (mine[r] < ceiling) { mine[r] += 1; renderModal(); }
+      },
     }));
+    const minus = html("button", {
+      class: mine[r] > 0 ? "pick-minus" : "pick-minus hidden",
+      title: `One fewer ${board.resources[r]}`,
+      "aria-label": `One fewer ${board.resources[r]}`,
+    }, "\u2212");
+    minus.addEventListener("click", () => { mine[r] -= 1; renderModal(); });
+    stack.appendChild(minus);
+    row.appendChild(stack);
   }
   wrap.appendChild(row);
   return wrap;
+}
+
+// A trade nobody is editing: the cards in it and nothing else. `give`/`want`
+// are plain nonnegative counts from this seat's side.
+function tradeLine(give, want) {
+  const line = html("div", {class: "trade-line"});
+  line.appendChild(bundleChips(give));
+  line.appendChild(html("span", {class: "trade-arrow"}, "\u2192"));
+  line.appendChild(bundleChips(want));
+  return line;
+}
+
+// `[2, 0, 0, 0, 1]` -> "2 Wood and 1 Ore"; nothing picked -> "nothing".
+function bundleWords(counts) {
+  const parts = [];
+  for (let r = 0; r < board.resources.length; r++) {
+    if (counts[r]) parts.push(`${counts[r]} ${board.resources[r]}`);
+  }
+  if (!parts.length) return "nothing";
+  if (parts.length === 1) return parts[0];
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }
 
 function resetComposer() {
@@ -2107,7 +2207,7 @@ function syncModal() {
     else renderModal();
   } else if (MODAL_AUTO.has(modalMode)) {
     closeModal();
-  } else if (modalMode === null && ((state.pending || []).length || state.round)) {
+  } else if (modalMode === null && ((state.pending || []).length || state.trade_round)) {
     // An offer to answer, or this seat's own round still open (a reload
     // mid-negotiation) -- put the trade modal up on its own.
     openModal("trade");
@@ -2116,7 +2216,7 @@ function syncModal() {
     // what is mid-composition -- and close once there is nothing left to
     // show: the offer answered, the round over, the turn moved on.
     const myTurn = state.phase === "MAIN" && state.to_move === state.seat;
-    if (!(state.pending || []).length && !state.round && !myTurn) closeModal();
+    if (!(state.pending || []).length && !state.trade_round && !myTurn) closeModal();
     else renderModal();
   }
 }
@@ -2192,7 +2292,7 @@ function renderStealMode(g, title, body, actions) {
   }
   body.appendChild(row);
 
-  const cancel = modalActionButton("close", "Back to the hexes", {primary: false});
+  const cancel = modalActionButton("close", "Back to the hexes", {primary: false, caption: "Back"});
   cancel.addEventListener("click", closeModal);
   actions.appendChild(cancel);
 }
@@ -2216,7 +2316,7 @@ function renderMonopolyMode(g, title, body, actions) {
   body.appendChild(row);
   if (monopolyPick !== null) {
     const a = g.monopoly.find((a) => a.a === monopolyPick);
-    const btn = modalActionButton("check", "Confirm");
+    const btn = modalActionButton("check", "Confirm", {caption: "Confirm"});
     btn.addEventListener("click", () => { monopolyPick = null; closeModal(); sendAction(a); });
     actions.appendChild(btn);
   }
@@ -2268,7 +2368,7 @@ function renderYearOfPlentyMode(g, title, body, actions) {
   body.appendChild(row);
   if (yopPicks.length === 2) {
     const a = yopAction(g, board.resources[yopPicks[0]], board.resources[yopPicks[1]]);
-    const btn = modalActionButton("check", "Confirm");
+    const btn = modalActionButton("check", "Confirm", {caption: "Confirm"});
     btn.addEventListener("click", () => { yopPicks = []; closeModal(); sendAction(a); });
     actions.appendChild(btn);
   }
@@ -2325,104 +2425,209 @@ function postRound(path, body) {
   });
 }
 
-// Every answer to this seat's own open offer, one row a seat: who, accepts
-// or counters (the counter's cards, from this seat's side), a button to take
-// that deal.
+// Every answer to this seat's own open offer, one row a seat: who, what the
+// deal is from this seat's side, and a button to take it. An accept has no
+// cards of its own to show — it is the offer above, unchanged — so its row
+// says so in words rather than repeating the same two piles a third time.
 function responsesSection(round) {
   const wrap = html("div", {class: "responses"});
+  wrap.appendChild(html("div", {class: "responses-label"}, "ANSWERS"));
   for (const r of round.responses) {
-    const row = html("div", {class: "response-row"});
-    row.appendChild(seatSwatch(r.seat));
-    row.appendChild(html("span", {class: "response-kind"},
-      `${seatLabel(r.seat)} ${r.kind === "accept" ? "accepts" : "counters"}`));
-    if (r.kind === "counter") row.appendChild(bundleChips(r.bundle.map((n) => Math.max(0, -n))));
-    if (r.kind === "counter") row.appendChild(html("span", {class: "trade-arrow"}, "→"));
-    if (r.kind === "counter") row.appendChild(bundleChips(r.bundle.map((n) => Math.max(0, n))));
-    row.appendChild(smallButton("check", "Take this deal", () => postRound("/trade/round/choose", {seat: r.seat, bundle: r.bundle})));
-    wrap.appendChild(row);
+    const block = html("div", {class: "response"});
+    const top = html("div", {class: "response-top"});
+    top.appendChild(seatSwatch(r.seat));
+    top.appendChild(html("div", {class: "response-who"}, seatFullLabel(r.seat)));
+    top.appendChild(smallButton("check", `Trade with ${seatFullLabel(r.seat)}`,
+      () => postRound("/trade/round/choose", {seat: r.seat, bundle: r.bundle})));
+    block.appendChild(top);
+
+    const deal = html("div", {class: "response-deal"});
+    if (r.kind === "counter") {
+      deal.appendChild(bundleChips(r.bundle.map((n) => Math.max(0, -n))));
+      deal.appendChild(html("span", {class: "trade-arrow"}, "\u2192"));
+      deal.appendChild(bundleChips(r.bundle.map((n) => Math.max(0, n))));
+    } else {
+      deal.appendChild(html("span", {class: "response-kind"}, "takes it as offered"));
+    }
+    block.appendChild(deal);
+    wrap.appendChild(block);
   }
   return wrap;
+}
+
+// Whether the give side is actually in this hand. Checked here as well as
+// server-side because the answer is also what the note line says out loud —
+// "you do not hold that much" is more use than a refused request.
+function handCovers(p, give) {
+  return give.every((n, r) => n <= (p.hand[board.resources[r]] || 0));
 }
 
 function composerReady(p) {
   const gives = tradeGive.reduce((a, b) => a + b, 0);
   const gets = tradeWant.reduce((a, b) => a + b, 0);
-  const covered = tradeGive.every((n, r) => n <= (p.hand[board.resources[r]] || 0));
-  return gives > 0 && gets > 0 && covered;
+  return gives > 0 && gets > 0 && handCovers(p, tradeGive);
 }
 
-// One layout, four states. The two Give/Get rows are always drawn, from this
-// seat's side; what changes is whether they are editable, the line above
-// them, and the button column:
-//   compose   my turn, nothing open   -- rows editable; bank/port, offer, cancel
-//   round     my offer is out         -- rows show it; each answer has a take button; decline all
-//   offer     another seat's offer    -- rows show it; accept, counter, pass
-//   counter   editing a reply         -- rows editable; send counter, back
+// A trade between seats moves at most MAX_TRADE_CARDS a side (hexset.trading),
+// which the give row deliberately lets you exceed — the bank's own rate can be
+// 4 (see giveCeiling). So the offer button has its own check, and the note
+// line says which of the two ceilings the current pile is over.
+function offerableToPlayers() {
+  return tradeGive.reduce((a, b) => a + b, 0) <= MAX_TRADE_CARDS
+    && tradeWant.reduce((a, b) => a + b, 0) <= MAX_TRADE_CARDS;
+}
+
+// The line above the rows while composing. One sentence that names the deal
+// as it stands and, when a route out is shut, why — an empty composer, a hand
+// that can't cover it, a pile too big for the table's rule, or a turn that
+// isn't yours. The buttons alone can only go grey; this is where the reason
+// lives.
+function dealSummary(p, myTurn) {
+  const gives = tradeGive.reduce((a, b) => a + b, 0);
+  const gets = tradeWant.reduce((a, b) => a + b, 0);
+  if (!gives && !gets) return "Tap a card to give, and a card to get.";
+  if (!gives) return "Pick what you are giving.";
+  if (!gets) return "Pick what you want back.";
+  const deal = `${bundleWords(tradeGive)} \u2192 ${bundleWords(tradeWant)}.`;
+  if (!handCovers(p, tradeGive)) return `${deal} You do not hold that much.`;
+  if (!myTurn) return `${deal} You can only trade on your own turn.`;
+  if (!offerableToPlayers()) {
+    return `${deal} Too many cards to offer a player — the bank will still take it at its rate.`;
+  }
+  return deal;
+}
+
+// One layout, four states. Every state draws the same three things in the
+// same order — a line saying what is happening, the trade itself, and the
+// buttons that answer it — and differs only in whether the trade is a
+// read-only line or the two editable rows:
+//
+//   compose   my turn, nothing open   editable; bank/port, offer, cancel
+//   round     my offer is out         a line, plus every answer with a Take
+//   offer     another seat's offer    a line; accept, counter, pass
+//   counter   editing a reply         their offer quoted, my reply editable
+//
+// The read-only states used to draw the editable rows greyed out — ten tiles
+// with two of them lit — which is why they now draw a line of just the cards
+// in the trade instead.
 function renderTradeMode(title, body, actions) {
   title.textContent = "Trade";
   const p = state.players.find((pl) => pl.seat === state.seat);
   const myTurn = state.phase === "MAIN" && state.to_move === state.seat;
+  // A counter half-written against an offer that is no longer standing —
+  // the actor took a different deal, or their turn simply ended while the
+  // reply sat here — is a reply with nowhere to go. Dropped before the mode
+  // is read, so the modal falls back to whatever the table is actually
+  // doing rather than staying on a dead offer.
+  if (counterOf && !(state.pending || []).some((o) => o.actor === counterOf.actor)) {
+    resetComposer();
+  }
   const offer = (state.pending || [])[0] || null;
-  const mode = counterOf ? "counter" : offer ? "offer" : state.round ? "round" : "compose";
-
-  if (mode === "offer") loadComposer(offer.bundle.map((n) => -n));
-  if (mode === "round") loadComposer(state.round.offer.bundle);
-
-  const note = mode === "offer" ? `${seatLabel(offer.actor)} offers:`
-    : mode === "counter" ? `Your counter to ${seatLabel(counterOf.actor)}:`
-    : mode === "round" ? (state.round.responses.length ? "Your offer -- take a deal, or decline them all:"
-      : (state.round.awaiting || []).length ? `Your offer -- waiting for ${state.round.awaiting.map(seatLabel).join(", ")}…`
-      : "Your offer -- nobody accepted.")
-    : "Tap cards to give and to get.";
-  body.appendChild(html("div", {class: "modal-note"}, note));
-  const editable = mode === "compose" || mode === "counter";
-  body.appendChild(tradeRow(p, "give", GIVE_LABEL, {editable}));
-  body.appendChild(tradeRow(p, "want", GET_LABEL, {editable}));
-  if (mode === "round" && state.round.responses.length) body.appendChild(responsesSection(state.round));
+  const round = state.trade_round;
+  const mode = counterOf ? "counter" : offer ? "offer" : round ? "round" : "compose";
+  const note = (text) => body.appendChild(html("div", {class: "modal-note"}, text));
 
   if (mode === "compose") {
-    // A bank/port trade is one resource for one: the single give and single
-    // get, at the rate the button shows. Found among legal_actions, never
-    // invented here.
+    note(dealSummary(p, myTurn));
+    body.appendChild(tradeRow(p, "give", GIVE_LABEL));
+    body.appendChild(tradeRow(p, "want", GET_LABEL));
+
+    // A bank/port trade is `ratio` of one resource for one of another, at the
+    // rate this seat's ports set (`state.trade_ratios`). The composition has
+    // to *be* that trade for the button to fire — the give pile is what
+    // leaves the hand, so a button that took four cards off a row reading
+    // "1 Wood" was the UI telling one story and the engine doing another.
     const give = tradeGive.findIndex((n) => n > 0);
     const want = tradeWant.findIndex((n) => n > 0);
     const oneEach = tradeGive.filter((n) => n > 0).length === 1 && tradeWant.filter((n) => n > 0).length === 1;
-    const bank = oneEach
+    const atRate = oneEach && give >= 0 && want >= 0
+      && tradeGive[give] === state.trade_ratios[board.resources[give]]
+      && tradeWant[want] === 1;
+    const bank = atRate
       ? state.legal_actions.find((a) => a.type === "BANK_TRADE" && a.a === give && a.b === want)
       : null;
     actions.appendChild(bankTradeButton(bank, give));
-    const send = modalActionButton("send", "Offer to players");
-    if (myTurn && composerReady(p)) send.addEventListener("click", () => postRound("/trade/round", {give: tradeGive, want: tradeWant}));
-    else send.disabled = true;
-    actions.appendChild(send);
-    actions.appendChild(modalCancelButton());
-  } else if (mode === "round") {
-    const decline = modalActionButton("close", "Decline all offers", {primary: false});
-    decline.addEventListener("click", () => postRound("/trade/round/choose", {decline: true}));
-    actions.appendChild(decline);
-  } else if (mode === "offer") {
-    const accept = modalActionButton("check", "Accept");
-    accept.addEventListener("click", () => answerOffer(offer, "accept"));
-    actions.appendChild(accept);
-    const counter = modalActionButton("send", "Counter", {primary: false});
-    counter.addEventListener("click", () => { counterOf = offer; renderModal(); });
-    actions.appendChild(counter);
-    const pass = modalActionButton("close", "Pass", {primary: false});
-    pass.addEventListener("click", () => answerOffer(offer, "pass"));
-    actions.appendChild(pass);
-  } else {
-    const send = modalActionButton("send", "Send counter");
-    if (composerReady(p)) {
-      // signed towards the actor: what they get is what I give
-      send.addEventListener("click", () => answerOffer(counterOf, "counter", tradeGive.map((g, r) => g - tradeWant[r])));
+
+    const send = modalActionButton("send", "Offer this to every other player", {caption: "Offer"});
+    if (myTurn && composerReady(p) && offerableToPlayers()) {
+      send.addEventListener("click", () => postRound("/trade/round", {give: tradeGive, want: tradeWant}));
     } else {
       send.disabled = true;
     }
     actions.appendChild(send);
-    const back = modalActionButton("undo", "Back to the offer", {primary: false});
-    back.addEventListener("click", () => { counterOf = null; renderModal(); });
-    actions.appendChild(back);
+    actions.appendChild(modalCancelButton());
+    return;
   }
+
+  if (mode === "round") {
+    const signed = round.offer.bundle;
+    note(round.responses.length ? "Your offer — take a deal, or turn them all down:"
+      : (round.awaiting || []).length ? `Your offer — waiting on ${round.awaiting.map(seatFullLabel).join(", ")}…`
+      : "Your offer — nobody wants it.");
+    body.appendChild(tradeLine(signed.map((n) => Math.max(0, -n)), signed.map((n) => Math.max(0, n))));
+    if (round.responses.length) body.appendChild(responsesSection(round));
+
+    const decline = modalActionButton("close", "Turn every answer down and close the round",
+      {primary: false, caption: round.responses.length ? "Decline all" : "Close"});
+    decline.addEventListener("click", () => postRound("/trade/round/choose", {decline: true}));
+    actions.appendChild(decline);
+    return;
+  }
+
+  if (mode === "offer") {
+    // Signed towards the actor, so from this seat what they take is what
+    // leaves this hand.
+    const give = offer.bundle.map((n) => Math.max(0, n));
+    const want = offer.bundle.map((n) => Math.max(0, -n));
+    note(`${seatFullLabel(offer.actor)} offers:`);
+    body.appendChild(tradeLine(give, want));
+    const covered = handCovers(p, give);
+    if (!covered) note("You do not hold what they are asking for.");
+
+    const accept = modalActionButton("check", "Take this trade", {caption: "Accept"});
+    if (covered) accept.addEventListener("click", () => answerOffer(offer, "accept"));
+    else accept.disabled = true;
+    actions.appendChild(accept);
+    const counter = modalActionButton("send", "Reply with a different trade",
+      {primary: false, caption: "Counter"});
+    counter.addEventListener("click", () => {
+      // Start from their own offer, from this seat's side: countering is
+      // almost always an edit of what you were sent, not a fresh trade.
+      counterOf = offer;
+      loadComposer(offer.bundle.map((n) => -n));
+      renderModal();
+    });
+    actions.appendChild(counter);
+    const pass = modalActionButton("close", "Turn this offer down", {primary: false, caption: "Pass"});
+    pass.addEventListener("click", () => answerOffer(offer, "pass"));
+    actions.appendChild(pass);
+    return;
+  }
+
+  // counter: their offer stays on screen, quoted, above the reply being
+  // built. It used to be replaced by an editable copy of itself — so the one
+  // thing you were answering vanished the moment you started answering it.
+  const theirGive = counterOf.bundle.map((n) => Math.max(0, n));
+  const theirWant = counterOf.bundle.map((n) => Math.max(0, -n));
+  const quote = html("div", {class: "trade-quote"});
+  quote.appendChild(html("div", {class: "trade-quote-who"}, `${seatFullLabel(counterOf.actor)} offered`));
+  quote.appendChild(tradeLine(theirGive, theirWant));
+  body.appendChild(quote);
+  note(dealSummary(p, true));
+  body.appendChild(tradeRow(p, "give", GIVE_LABEL));
+  body.appendChild(tradeRow(p, "want", GET_LABEL));
+
+  const send = modalActionButton("send", "Send this back as your counter", {caption: "Send"});
+  if (composerReady(p) && offerableToPlayers()) {
+    // signed towards the actor: what they get is what I give
+    send.addEventListener("click", () => answerOffer(counterOf, "counter", tradeGive.map((g, r) => g - tradeWant[r])));
+  } else {
+    send.disabled = true;
+  }
+  actions.appendChild(send);
+  const back = modalActionButton("undo", "Back to their offer", {primary: false, caption: "Back"});
+  back.addEventListener("click", () => { counterOf = null; renderModal(); });
+  actions.appendChild(back);
 }
 
 // The bank's own rate, which is the worst one available; anything cheaper is
@@ -2447,12 +2652,10 @@ function bankTradeButton(action, give) {
   const ratio = give < 0 ? null : state.trade_ratios[board.resources[give]];
   const viaPort = ratio !== null && ratio < BANK_RATE;
   const label = ratio === null
-    ? "Trade with the bank"
-    : `Trade ${ratio} for 1 with ${viaPort ? `your ${ratio}:1 port` : "the bank"}`;
-  const btn = modalActionButton(viaPort ? "ship" : "bank", label);
-  // Non-breaking space, not "": the rate line has to keep its height or the
-  // glyph above it shifts when the first give is picked.
-  btn.appendChild(html("span", {class: "modal-btn-rate"}, ratio === null ? "\u00a0" : `${ratio}:1`));
+    ? "Trade with the bank — pick one resource to give and one to get"
+    : `Give ${ratio} ${board.resources[give]} for 1, ${viaPort ? `through your ${ratio}:1 port` : "to the bank"}`;
+  const btn = modalActionButton(viaPort ? "ship" : "bank", label,
+    {caption: ratio === null ? "Bank" : `${ratio}:1`});
   if (action) btn.addEventListener("click", () => { closeModal(); sendAction(action); });
   else btn.disabled = true;
   return btn;
@@ -2461,7 +2664,7 @@ function bankTradeButton(action, give) {
 // The shared way out of every dismissible mode — the same thing Escape and a
 // backdrop click do (see the boot wiring), just as a button you can see.
 function modalCancelButton() {
-  const btn = modalActionButton("close", "Cancel", {primary: false});
+  const btn = modalActionButton("close", "Cancel", {primary: false, caption: "Cancel"});
   btn.addEventListener("click", closeModal);
   return btn;
 }

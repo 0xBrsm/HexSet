@@ -23,13 +23,28 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `.../trade/round/answer` is a seat's accept, counter or pass;
   `.../trade/round/choose` is the actor's pick or decline. A bot actor's
   turn holds (`trade_wait`, `to_move` null) until every person at the table
-  has answered its offer. The page's trade modal composes multi-card offers
-  on two rows (Give / Get), shows every answer with a take-it button, and
-  answers incoming offers with Accept / Counter / Pass; the bank/port trade
-  keeps its button. MCP tools `offer_trade`, `answer_trade`, `choose_trade`.
-  Bot offers, answers and picks come from `hexset.trading.default_offer`/
-  `default_respond`/`default_pick` (own gain, and the estimated gain of the
-  other side) unless a bot implements `offer`/`respond`/`pick` itself.
+  has answered its offer. MCP tools `offer_trade`, `answer_trade`,
+  `choose_trade`. Bot offers, answers and picks come from
+  `hexset.trading.default_offer`/`default_respond`/`default_pick` (own gain,
+  and the estimated gain of the other side) unless a bot implements
+  `offer`/`respond`/`pick` itself.
+- The page's trade modal, in one shape for all four of its states. A trade
+  being built is two rows of five cards, Give over Get, each card stepped up
+  by a tap and back down by the `-` under it; a trade being read -- an offer
+  from another seat, your own open one, or any answer to it -- is a line of
+  just the cards in it. A sentence above the cards names the deal as it
+  stands and, when a route out is shut, why. Each button in the right-hand
+  column carries the word for what it does, so Cancel, Pass and Decline all
+  are no longer the same unlabelled X. Countering keeps the offer you were
+  sent on screen, quoted above the reply you are building, and starts that
+  reply from it. Seats are named as the rest of the page names them, so a
+  table of three `search2` bots reads as Player 2, Player 3 and Player 4.
+- The give side of the composer counts up to the bank's own rate, not to
+  `MAX_TRADE_CARDS`. A 4:1 sale could not be drawn at all before, so the
+  bank button fired on whatever the row happened to show and took four
+  cards for it; it is now offered only when the cards on the table *are*
+  the rate, and the offer-to-players button only when both sides are within
+  the table's three-card rule.
 - `hexset.trading.execute_agreed`: one execution path for every agreed
   exchange, asking a bot side's gate fresh and taking a manual side's
   submission as its consent; `execute_trade` and the round's own execution
@@ -204,6 +219,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   names only the lowest-numbered owing seat. It now shows the phase to any
   seat with a `discard_quota` entry left to clear. The modal itself needed
   no change: it opens off `state.legal_actions`, which now answers per seat.
+- `hexset.trading.default_respond` countered with exchanges it would then
+  refuse: a candidate was admitted on the *actor's* estimated gain alone,
+  with the responder's own gain used only to rank what was already in. When
+  the actor took such a deal, `execute_agreed`'s fresh ask of that same gate
+  turned it down. A counter now has to clear the floor on both sides, like
+  every other admitted exchange.
+- A seat's view carried two keys named `round` -- the lap number every log
+  line is tagged with, and the open trade round -- so only the second
+  survived and the lap number never reached a client. The board's log pane,
+  which filters on it, showed nothing at all. The open round is
+  `trade_round` now; `round` is the lap number again.
 - `hexset.__version__` tried installed package metadata before the source
   tree's `pyproject.toml`, so an editable install with stale dist-info kept
   reporting `0.26.0` for four releases after the tree moved on; it now reads

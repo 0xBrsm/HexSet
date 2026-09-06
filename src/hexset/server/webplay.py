@@ -1143,13 +1143,15 @@ class GameSession:
         which kind of player it belongs to, so the two sources are merged
         here rather than at each of the half-dozen call sites. A claimed
         seat with no bot label falls back to its own registered name, or
-        plain "player" if it never gave one: every seat gets a label, so
-        `_who` never has to invent one.
+        "human" if it never gave one -- lowercase, matching the bot names
+        (search2, heximax) and the client's own label for its seat (see
+        seatLabel in index.html): every seat gets a label, so `_who` never
+        has to invent one.
         """
         labels = dict(self.bot_names)
         for seat in self.claimed_seats:
             if seat not in labels:
-                labels[seat] = self.player_names.get(seat) or "player"
+                labels[seat] = self.player_names.get(seat) or "human"
         return SeatLabels(labels, locked_of(self.game))
 
     def claim(self, seat: int, name: str | None) -> None:

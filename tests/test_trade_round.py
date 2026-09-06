@@ -169,6 +169,27 @@ def test_default_respond_counters_with_its_best_estimate_clearing_bundle():
     assert response.bundle[SHEEP] == -1
 
 
+def test_default_respond_never_counters_with_a_deal_it_would_refuse():
+    """The actor's estimated gain clears on both counter-candidates, but
+    seat 1's own gain clears on neither -- so it passes rather than
+    countering. A counter it would not itself honour is a deal that fails
+    at `execute_agreed`, which asks the responder's gate again and applies
+    the same floor, in an error the actor could do nothing about."""
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    give(game._state, 0, Resource.SHEEP, 2)
+    game.ledger.receive(0, Resource.SHEEP, 2)
+    offer = Offer(actor=0, received=bundle(wood=-1, ore=1))
+
+    gate = Gate(
+        lambda received, counterparty: -1.0,  # wants nothing on offer
+        lambda counterparty, received: 1.0,  # but thinks the actor wants it all
+    )
+
+    response = default_respond(gate, game.state(1), offer)
+
+    assert response == Response(1, RESPONSE_PASS, None)
+
+
 def test_default_respond_passes_when_nothing_clears():
     game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
     offer = Offer(actor=0, received=bundle(wood=-1, ore=1))

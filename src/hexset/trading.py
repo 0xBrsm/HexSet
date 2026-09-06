@@ -720,6 +720,14 @@ def default_respond(gate: object, view: "View", offer: Offer) -> Response:
     maximising this seat's own gain among those whose *estimated* actor
     gain clears the floor (`_estimate_many`); else pass. Ties among
     counters break the same way `default_offer`'s do.
+
+    A counter has to clear the floor on *this* seat's own gain as well as
+    on the actor's estimated one. Own gain used to rank the candidates
+    without admitting them, so a gate could counter with an exchange it
+    would then refuse: `execute_agreed` asks the responder's gate again
+    when the actor takes the deal, and that fresh ask applies the same
+    floor. The seat that answered "counter" was the one saying no, in an
+    error the actor could do nothing about.
     """
     me = view.perspective
     actor = offer.actor
@@ -733,7 +741,11 @@ def default_respond(gate: object, view: "View", offer: Offer) -> Response:
         counterparties = [actor] * len(candidates)
         own_gains = valued_many(gate, view, candidates, counterparties)
         estimates = _estimate_many(gate, view, list(zip(counterparties, candidates)))
-        eligible = [i for i in range(len(candidates)) if clears_floor(estimates[i])]
+        eligible = [
+            i
+            for i in range(len(candidates))
+            if clears_floor(estimates[i]) and clears_floor(own_gains[i])
+        ]
         if eligible:
 
             def key(i: int) -> tuple:

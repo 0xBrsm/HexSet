@@ -470,14 +470,6 @@
   .pick-card.selected { border-color: var(--accent); }
   .pick-card.disabled { opacity: 0.28; cursor: default; pointer-events: none; }
 
-  /* Trades another seat has already found against this one, unexecuted --
-     `state.pending`. Sits above everything else in the modal: it is the
-     table waiting on an answer, not something being composed. */
-  .pending-offers {
-    display: flex; flex-direction: column; gap: 0.5rem;
-    margin-bottom: 0.8rem; padding-bottom: 0.8rem; border-bottom: 1px solid var(--border);
-  }
-  .pending-offer { justify-content: space-between; margin: 0; padding-right: 0; }
   .pending-offer-btn {
     width: 32px; height: 32px; padding: 0; border-radius: 8px;
     display: flex; align-items: center; justify-content: center; flex: none;
@@ -488,6 +480,7 @@
   .responses { display: flex; flex-direction: column; gap: 0.4rem; margin: 0.4rem 0 0.6rem; }
   .response-row { display: flex; align-items: center; gap: 0.5rem; }
   .response-row .swatch { width: 12px; height: 12px; flex: none; }
+  .response-row .pick-row { margin: 0; gap: 0.2rem; }
   .response-kind { font-size: 0.78rem; color: var(--muted); flex: 1 1 auto; }
   /* Touch has no hover to fall back on, and the targets are only a few screen
      pixels wide once the board scales down to a phone. */
@@ -2021,11 +2014,13 @@ function pickCard(resourceIdx, {selected, disabled, count, forceCount, title, on
 const GIVE_LABEL = "Give";
 const GET_LABEL = "Get";
 
-// One side of the composer: all five resources, count badges, a tap adds
-// one (bounded by the hand for "give", by MAX_TRADE_CARDS a side for both)
-// and wraps to none at the bound. A resource already on the other side is
-// dimmed: a trade gives and gets different resources.
-function tradeComposerRow(p, which, label) {
+// One side of the trade: all five resources with count badges, always the
+// same five tiles whatever is shown, so the modal never changes shape.
+// Editable, a tap adds one (bounded by the hand for "give", by
+// MAX_TRADE_CARDS a side for both) and wraps to none at the bound; a
+// resource on the other side is dimmed. Read-only, the cards not in the
+// trade are dimmed and nothing is clickable.
+function tradeRow(p, which, label, {editable}) {
   const mine = which === "give" ? tradeGive : tradeWant;
   const other = which === "give" ? tradeWant : tradeGive;
   const total = mine.reduce((a, b) => a + b, 0);
@@ -2037,14 +2032,14 @@ function tradeComposerRow(p, which, label) {
     const limit = which === "give" ? Math.min(held, MAX_TRADE_CARDS) : MAX_TRADE_CARDS;
     row.appendChild(pickCard(r, {
       selected: mine[r] > 0,
-      disabled: other[r] > 0 || (limit === 0),
+      disabled: editable ? (other[r] > 0 || limit === 0) : mine[r] === 0,
       count: mine[r],
       forceCount: true,
-      onClick: () => {
+      onClick: editable ? () => {
         if (mine[r] >= limit || total >= MAX_TRADE_CARDS) mine[r] = 0;
         else mine[r] += 1;
         renderModal();
-      },
+      } : undefined,
     }));
   }
   wrap.appendChild(row);
@@ -2118,8 +2113,11 @@ function syncModal() {
     openModal("trade");
   } else if (modalMode === "trade") {
     // Keep offers and answers current across every poll without resetting
-    // what is mid-composition.
-    renderModal();
+    // what is mid-composition -- and close once there is nothing left to
+    // show: the offer answered, the round over, the turn moved on.
+    const myTurn = state.phase === "MAIN" && state.to_move === state.seat;
+    if (!(state.pending || []).length && !state.round && !myTurn) closeModal();
+    else renderModal();
   }
 }
 
@@ -2291,16 +2289,6 @@ function bundleChips(counts) {
   return row;
 }
 
-// Give → Get from this seat's point of view, for a signed bundle where
-// positive is what this seat gets.
-function exchangeRow(signed, extraClass) {
-  const row = html("div", {class: "trade-exchange" + (extraClass ? " " + extraClass : "")});
-  row.appendChild(bundleChips(signed.map((n) => Math.max(0, -n))));
-  row.appendChild(html("div", {class: "trade-arrow"}, "→"));
-  row.appendChild(bundleChips(signed.map((n) => Math.max(0, n))));
-  return row;
-}
-
 function seatSwatch(seat) {
   const swatch = html("div", {class: "swatch"});
   swatch.style.background = SEAT_COLORS[seat].fill;
@@ -2315,29 +2303,6 @@ function smallButton(icon, label, onClick) {
   return btn;
 }
 
-// `state.pending`: offers other seats have broadcast to this one, each
-// signed towards its actor -- mirrored here so the row reads from this seat's
-// side. Accept, counter (loads the composer to edit), or pass.
-function pendingOffersSection(pending) {
-  const wrap = html("div", {class: "pending-offers"});
-  for (const offer of pending) {
-    const mine = offer.bundle.map((n) => -n);
-    const head = html("div", {class: "response-row"});
-    head.appendChild(seatSwatch(offer.actor));
-    head.appendChild(html("span", {class: "response-kind"}, `${seatLabel(offer.actor)} offers`));
-    head.appendChild(smallButton("check", "Accept", () => answerOffer(offer, "accept")));
-    head.appendChild(smallButton("send", "Counter", () => {
-      counterOf = offer;
-      loadComposer(mine);
-      renderModal();
-    }));
-    head.appendChild(smallButton("close", "Pass", () => answerOffer(offer, "pass")));
-    wrap.appendChild(head);
-    wrap.appendChild(exchangeRow(mine, "pending-offer"));
-  }
-  return wrap;
-}
-
 function answerOffer(offer, kind, bundle) {
   return blocking(async () => {
     const body = {actor: offer.actor, received: offer.bundle, kind};
@@ -2350,33 +2315,6 @@ function answerOffer(offer, kind, bundle) {
   });
 }
 
-// This seat's own open round: the offer as broadcast, every accept/counter
-// so far with a button to take it, and who is still to answer.
-function roundSection(round) {
-  const wrap = html("div", {class: "responses"});
-  wrap.appendChild(html("div", {class: "modal-note"}, "Your offer:"));
-  wrap.appendChild(exchangeRow(round.offer.bundle));
-  for (const r of round.responses) {
-    const row = html("div", {class: "response-row"});
-    row.appendChild(seatSwatch(r.seat));
-    row.appendChild(html("span", {class: "response-kind"},
-      `${seatLabel(r.seat)} ${r.kind === "accept" ? "accepts" : "counters"}`));
-    row.appendChild(smallButton("check", "Take this deal", () => chooseResponse(r)));
-    wrap.appendChild(row);
-    if (r.kind === "counter") wrap.appendChild(exchangeRow(r.bundle));
-  }
-  if (!round.responses.length) wrap.appendChild(html("div", {class: "modal-note"}, "Nobody has accepted."));
-  if (round.awaiting && round.awaiting.length) {
-    wrap.appendChild(html("div", {class: "modal-note"},
-      `Waiting for ${round.awaiting.map(seatLabel).join(", ")}…`));
-  }
-  return wrap;
-}
-
-function chooseResponse(r) {
-  return postRound("/trade/round/choose", {seat: r.seat, bundle: r.bundle});
-}
-
 function postRound(path, body) {
   return blocking(async () => {
     const {ok, data} = await postJSON(`/api/games/${tableCode}${path}`, body);
@@ -2387,6 +2325,25 @@ function postRound(path, body) {
   });
 }
 
+// Every answer to this seat's own open offer, one row a seat: who, accepts
+// or counters (the counter's cards, from this seat's side), a button to take
+// that deal.
+function responsesSection(round) {
+  const wrap = html("div", {class: "responses"});
+  for (const r of round.responses) {
+    const row = html("div", {class: "response-row"});
+    row.appendChild(seatSwatch(r.seat));
+    row.appendChild(html("span", {class: "response-kind"},
+      `${seatLabel(r.seat)} ${r.kind === "accept" ? "accepts" : "counters"}`));
+    if (r.kind === "counter") row.appendChild(bundleChips(r.bundle.map((n) => Math.max(0, -n))));
+    if (r.kind === "counter") row.appendChild(html("span", {class: "trade-arrow"}, "→"));
+    if (r.kind === "counter") row.appendChild(bundleChips(r.bundle.map((n) => Math.max(0, n))));
+    row.appendChild(smallButton("check", "Take this deal", () => postRound("/trade/round/choose", {seat: r.seat, bundle: r.bundle})));
+    wrap.appendChild(row);
+  }
+  return wrap;
+}
+
 function composerReady(p) {
   const gives = tradeGive.reduce((a, b) => a + b, 0);
   const gets = tradeWant.reduce((a, b) => a + b, 0);
@@ -2394,56 +2351,39 @@ function composerReady(p) {
   return gives > 0 && gets > 0 && covered;
 }
 
-// "Offer to players" broadcasts the composer to every other seat -- or,
-// while an incoming offer is being countered, sends the composer back as
-// the counter to that offer instead.
-function sendOfferButton(p) {
-  const countering = counterOf !== null;
-  const btn = modalActionButton("send", countering ? "Send counter" : "Offer to players");
-  const myTurn = state.phase === "MAIN" && state.to_move === state.seat;
-  if (composerReady(p) && (countering || myTurn)) {
-    btn.addEventListener("click", () => {
-      if (countering) {
-        // signed towards the actor: what they get is what I give
-        const bundle = tradeGive.map((g, r) => g - tradeWant[r]);
-        return answerOffer(counterOf, "counter", bundle);
-      }
-      return postRound("/trade/round", {give: tradeGive, want: tradeWant});
-    });
-  } else {
-    btn.disabled = true;
-  }
-  return btn;
-}
-
+// One layout, four states. The two Give/Get rows are always drawn, from this
+// seat's side; what changes is whether they are editable, the line above
+// them, and the button column:
+//   compose   my turn, nothing open   -- rows editable; bank/port, offer, cancel
+//   round     my offer is out         -- rows show it; each answer has a take button; decline all
+//   offer     another seat's offer    -- rows show it; accept, counter, pass
+//   counter   editing a reply         -- rows editable; send counter, back
 function renderTradeMode(title, body, actions) {
-  title.textContent = counterOf ? "Counter" : "Trade";
+  title.textContent = "Trade";
   const p = state.players.find((pl) => pl.seat === state.seat);
   const myTurn = state.phase === "MAIN" && state.to_move === state.seat;
-  const pending = state.pending || [];
+  const offer = (state.pending || [])[0] || null;
+  const mode = counterOf ? "counter" : offer ? "offer" : state.round ? "round" : "compose";
 
-  // What the table is waiting on this seat for sits above what it is
-  // building: offers to answer, then this seat's own open round.
-  if (pending.length && !counterOf) body.appendChild(pendingOffersSection(pending));
-  if (state.round) body.appendChild(roundSection(state.round));
+  if (mode === "offer") loadComposer(offer.bundle.map((n) => -n));
+  if (mode === "round") loadComposer(state.round.offer.bundle);
 
-  // The composer: on this seat's own turn with no round open (an offer),
-  // or while countering an incoming one (any time). While a round is open
-  // the answers are the decision; decline them to compose another offer.
-  const composing = (myTurn && !state.round) || counterOf !== null;
-  if (composing) {
-    if (counterOf) {
-      body.appendChild(html("div", {class: "modal-note"},
-        `Countering ${seatLabel(counterOf.actor)}'s offer -- edit what you give and get.`));
-    }
-    body.appendChild(tradeComposerRow(p, "give", GIVE_LABEL));
-    body.appendChild(tradeComposerRow(p, "want", GET_LABEL));
-  }
+  const note = mode === "offer" ? `${seatLabel(offer.actor)} offers:`
+    : mode === "counter" ? `Your counter to ${seatLabel(counterOf.actor)}:`
+    : mode === "round" ? (state.round.responses.length ? "Your offer -- take a deal, or decline them all:"
+      : (state.round.awaiting || []).length ? `Your offer -- waiting for ${state.round.awaiting.map(seatLabel).join(", ")}…`
+      : "Your offer -- nobody accepted.")
+    : "Tap cards to give and to get.";
+  body.appendChild(html("div", {class: "modal-note"}, note));
+  const editable = mode === "compose" || mode === "counter";
+  body.appendChild(tradeRow(p, "give", GIVE_LABEL, {editable}));
+  body.appendChild(tradeRow(p, "want", GET_LABEL, {editable}));
+  if (mode === "round" && state.round.responses.length) body.appendChild(responsesSection(state.round));
 
-  if (myTurn && !counterOf && !state.round) {
-    // A bank/port trade is one resource for one: the composer's single
-    // give and single get, at the rate the bank button shows. Found among
-    // legal_actions, never invented here.
+  if (mode === "compose") {
+    // A bank/port trade is one resource for one: the single give and single
+    // get, at the rate the button shows. Found among legal_actions, never
+    // invented here.
     const give = tradeGive.findIndex((n) => n > 0);
     const want = tradeWant.findIndex((n) => n > 0);
     const oneEach = tradeGive.filter((n) => n > 0).length === 1 && tradeWant.filter((n) => n > 0).length === 1;
@@ -2451,19 +2391,37 @@ function renderTradeMode(title, body, actions) {
       ? state.legal_actions.find((a) => a.type === "BANK_TRADE" && a.a === give && a.b === want)
       : null;
     actions.appendChild(bankTradeButton(bank, give));
-  }
-  if (composing) actions.appendChild(sendOfferButton(p));
-  if (state.round) {
+    const send = modalActionButton("send", "Offer to players");
+    if (myTurn && composerReady(p)) send.addEventListener("click", () => postRound("/trade/round", {give: tradeGive, want: tradeWant}));
+    else send.disabled = true;
+    actions.appendChild(send);
+    actions.appendChild(modalCancelButton());
+  } else if (mode === "round") {
     const decline = modalActionButton("close", "Decline all offers", {primary: false});
     decline.addEventListener("click", () => postRound("/trade/round/choose", {decline: true}));
     actions.appendChild(decline);
-  }
-  if (counterOf) {
+  } else if (mode === "offer") {
+    const accept = modalActionButton("check", "Accept");
+    accept.addEventListener("click", () => answerOffer(offer, "accept"));
+    actions.appendChild(accept);
+    const counter = modalActionButton("send", "Counter", {primary: false});
+    counter.addEventListener("click", () => { counterOf = offer; renderModal(); });
+    actions.appendChild(counter);
+    const pass = modalActionButton("close", "Pass", {primary: false});
+    pass.addEventListener("click", () => answerOffer(offer, "pass"));
+    actions.appendChild(pass);
+  } else {
+    const send = modalActionButton("send", "Send counter");
+    if (composerReady(p)) {
+      // signed towards the actor: what they get is what I give
+      send.addEventListener("click", () => answerOffer(counterOf, "counter", tradeGive.map((g, r) => g - tradeWant[r])));
+    } else {
+      send.disabled = true;
+    }
+    actions.appendChild(send);
     const back = modalActionButton("undo", "Back to the offer", {primary: false});
-    back.addEventListener("click", () => { resetComposer(); renderModal(); });
+    back.addEventListener("click", () => { counterOf = null; renderModal(); });
     actions.appendChild(back);
-  } else if (!pending.length && !state.round) {
-    actions.appendChild(modalCancelButton());
   }
 }
 

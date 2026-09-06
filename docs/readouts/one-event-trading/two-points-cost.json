@@ -1,0 +1,222 @@
+{
+  "heximax": {
+    "by_phase_moves": {
+      "DISCARD": 55,
+      "MAIN": 545,
+      "ROBBER": 46,
+      "ROLL": 304,
+      "SETUP_ROAD": 24,
+      "SETUP_SETTLEMENT": 24
+    },
+    "calls_per_move": 16985.986973947896,
+    "calls_total": 16952015,
+    "games": 3,
+    "moves": 998,
+    "ms_per_move": 6.8994051040073705,
+    "ms_total": 6885.606293799356,
+    "per_game": [
+      {
+        "board_seed": 0,
+        "by_phase_moves": {
+          "DISCARD": 23,
+          "MAIN": 190,
+          "ROBBER": 13,
+          "ROLL": 105,
+          "SETUP_ROAD": 8,
+          "SETUP_SETTLEMENT": 8
+        },
+        "calls_per_move": 17535.28242074928,
+        "calls_total": 6084743,
+        "moves": 347,
+        "ms_per_move": 6.476772585091978,
+        "ms_total": 2247.4400870269164,
+        "publish_calls": 193,
+        "turns": 94
+      },
+      {
+        "board_seed": 1,
+        "by_phase_moves": {
+          "DISCARD": 8,
+          "MAIN": 134,
+          "ROBBER": 17,
+          "ROLL": 83,
+          "SETUP_ROAD": 8,
+          "SETUP_SETTLEMENT": 8
+        },
+        "calls_per_move": 14255.891472868218,
+        "calls_total": 3678020,
+        "moves": 258,
+        "ms_per_move": 6.991518405085618,
+        "ms_total": 1803.8117485120893,
+        "publish_calls": 149,
+        "turns": 72
+      },
+      {
+        "board_seed": 2,
+        "by_phase_moves": {
+          "DISCARD": 24,
+          "MAIN": 221,
+          "ROBBER": 16,
+          "ROLL": 116,
+          "SETUP_ROAD": 8,
+          "SETUP_SETTLEMENT": 8
+        },
+        "calls_per_move": 18293.262086513994,
+        "calls_total": 7189252,
+        "moves": 393,
+        "ms_per_move": 7.212097858168829,
+        "ms_total": 2834.35445826035,
+        "publish_calls": 219,
+        "turns": 107
+      }
+    ],
+    "publish_calls_per_turn": 2.0549450549450547,
+    "publish_calls_total": 561,
+    "turns_total": 273
+  },
+  "loadavg": "19.16 13.66 9.37 6/2097 755529",
+  "protocol": "Readout (v), two-publish-points PR: the mirror cost table (three four-seat games an arm, board seeds 0/1/2, every seat the same preset, arms interleaved -- read sequentially here but timed with the same sys.setprofile call counting the prior readout used -- seated as the game's own gates, publishing gated by Game.publish_due at both engine points exactly as hexset.arena.play does it now), plus publish-calls-per-turn (expect ~2/seat/turn) and the trades-per-turn distribution over the lineup readout (iii) plays, seed 42000.",
+  "ratio_calls_per_move": 0.8799158939373196,
+  "ratio_ms_per_move": 1.2831633104535967,
+  "ratio_noise_check": {
+    "note": "3 back-to-back single-process passes, same board seeds/rng, box not idle (another agent's full pytest run shared the machine throughout). calls_per_move is a deterministic count (fixed seeds, no timing) and is identical across all 3 passes; only ms_per_move carries timing noise.",
+    "ratio_calls_per_move_per_pass": [
+      0.8799158939373196,
+      0.8799158939373196,
+      0.8799158939373196
+    ],
+    "ratio_ms_per_move_per_pass": [
+      1.2831633104535967,
+      1.4634327819870478,
+      1.4733580998040314
+    ]
+  },
+  "reading": "The design's ceiling is <=2x search2 per move.",
+  "search2": {
+    "by_phase_moves": {
+      "DISCARD": 80,
+      "MAIN": 649,
+      "ROBBER": 54,
+      "ROLL": 335,
+      "SETUP_ROAD": 24,
+      "SETUP_SETTLEMENT": 24
+    },
+    "calls_per_move": 19304.10291595197,
+    "calls_total": 22508584,
+    "games": 3,
+    "moves": 1166,
+    "ms_per_move": 5.376872178155124,
+    "ms_total": 6269.432959728874,
+    "per_game": [
+      {
+        "board_seed": 0,
+        "by_phase_moves": {
+          "DISCARD": 8,
+          "MAIN": 188,
+          "ROBBER": 15,
+          "ROLL": 94,
+          "SETUP_ROAD": 8,
+          "SETUP_SETTLEMENT": 8
+        },
+        "calls_per_move": 20727.61370716511,
+        "calls_total": 6653564,
+        "moves": 321,
+        "ms_per_move": 5.303605854934853,
+        "ms_total": 1702.4574794340879,
+        "publish_calls": 187,
+        "turns": 91
+      },
+      {
+        "board_seed": 1,
+        "by_phase_moves": {
+          "DISCARD": 38,
+          "MAIN": 243,
+          "ROBBER": 19,
+          "ROLL": 121,
+          "SETUP_ROAD": 8,
+          "SETUP_SETTLEMENT": 8
+        },
+        "calls_per_move": 22548.90389016018,
+        "calls_total": 9853871,
+        "moves": 437,
+        "ms_per_move": 5.591447557028579,
+        "ms_total": 2443.462582421489,
+        "publish_calls": 233,
+        "turns": 114
+      },
+      {
+        "board_seed": 2,
+        "by_phase_moves": {
+          "DISCARD": 34,
+          "MAIN": 218,
+          "ROBBER": 20,
+          "ROLL": 120,
+          "SETUP_ROAD": 8,
+          "SETUP_SETTLEMENT": 8
+        },
+        "calls_per_move": 14708.698529411764,
+        "calls_total": 6001149,
+        "moves": 408,
+        "ms_per_move": 5.20468847517965,
+        "ms_total": 2123.5128978732973,
+        "publish_calls": 237,
+        "turns": 116
+      }
+    ],
+    "publish_calls_per_turn": 2.046728971962617,
+    "publish_calls_total": 657,
+    "turns_total": 321
+  },
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "trades_per_turn": {
+    "duel_seed": 42000,
+    "games": 6,
+    "lineup": [
+      "heximax#0",
+      "heximax#1",
+      "search2#0",
+      "search2#1"
+    ],
+    "per_game": {
+      "0": {
+        "trades": 6,
+        "turns": 122
+      },
+      "1": {
+        "trades": 7,
+        "turns": 126
+      },
+      "2": {
+        "trades": 5,
+        "turns": 105
+      },
+      "3": {
+        "trades": 2,
+        "turns": 69
+      },
+      "4": {
+        "trades": 5,
+        "turns": 83
+      },
+      "5": {
+        "trades": 4,
+        "turns": 114
+      }
+    },
+    "supplementary_40_games": {
+      "duel_seed": 42000,
+      "games": 40,
+      "note": "A larger sample than the 6-game protocol above, run to check the 6-game estimate was not a small-sample fluke: 0.0414, consistent with the 6-game reading of 0.0468 -- the recovery genuinely stops well short of the unbounded gate-budget ablation's 0.254, not by chance.",
+      "total_trades": 153,
+      "total_turns": 3696,
+      "trades_per_turn": 0.041396103896103896
+    },
+    "total_trades": 29,
+    "total_turns": 619,
+    "trades_per_turn": 0.046849757673667204
+  }
+}

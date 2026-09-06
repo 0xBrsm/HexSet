@@ -1590,7 +1590,14 @@ class GameSession:
             # the offer, every accept/counter so far (`bundle` signed towards
             # the actor, echoed back by `.../trade/round/choose`), and the
             # manual seats still to answer.
-            "round": (
+            #
+            # `trade_round`, not `round`: this dict already carries a `round`
+            # — the lap number the log lines are tagged with — and two keys of
+            # one name in one literal silently keep the second. That is what
+            # happened: the lap number never reached a client, so the sidebar
+            # log's current-round filter matched nothing and the log read
+            # empty from the day the trade round landed.
+            "trade_round": (
                 {
                     "offer": {"actor": self.open_round.offer.actor, "bundle": list(self.open_round.offer.received)},
                     "responses": [

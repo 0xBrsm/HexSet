@@ -165,7 +165,7 @@ seat-token gated:
 - **`POST /api/games/<code>/trade/round`** -- `{"give": [5 ints], "want":
   [5 ints]}`, unsigned counts. The current player's broadcast; 409 off its
   turn or outside MAIN, 400 for a bundle it cannot cover. Bots answer
-  synchronously. The view's `round` block carries the offer, the accepts
+  synchronously. The view's `trade_round` block carries the offer, the accepts
   and counters so far (`responses`, each `{"seat", "kind", "bundle"}`), and
   the manual seats still to answer (`awaiting`).
 - **`POST .../trade/round/answer`** -- `{"actor", "received", "kind":

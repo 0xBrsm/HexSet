@@ -67,17 +67,35 @@ def test_human_offer_collects_bot_answers_and_a_pick_executes_one():
 
     data = registry.handle("POST", f"/api/games/{code}/trade/round",
                            {"give": [1, 0, 0, 0, 0], "want": [0, 0, 0, 0, 1]}, token)
-    assert data["round"]["offer"] == {"actor": human, "bundle": WOOD_FOR_ORE}
-    assert data["round"]["responses"] == [{"seat": bot, "kind": "accept", "bundle": WOOD_FOR_ORE}]
-    assert data["round"]["awaiting"] == []
+    assert data["trade_round"]["offer"] == {"actor": human, "bundle": WOOD_FOR_ORE}
+    assert data["trade_round"]["responses"] == [{"seat": bot, "kind": "accept", "bundle": WOOD_FOR_ORE}]
+    assert data["trade_round"]["awaiting"] == []
     assert table.session.game.trades == [], "a person's pick is explicit"
 
     data = registry.handle("POST", f"/api/games/{code}/trade/round/choose",
                            {"seat": bot, "bundle": WOOD_FOR_ORE}, token)
     assert (data["trades"][0]["a"], data["trades"][0]["b"]) == (human, bot)
     assert state.hands[human][Resource.ORE] == 1 and state.hands[bot][Resource.WOOD] == 1
-    assert data["round"] is None
+    assert data["trade_round"] is None
     assert any("traded" in line for line in data["log"])
+
+
+def test_the_view_keeps_the_lap_number_and_the_open_round_apart():
+    """`round` is the lap number every log line is tagged with; the open
+    trade round is `trade_round`. They shared the one key once, so the lap
+    number never reached a client and the page's current-round log filter
+    matched nothing."""
+    registry, table, code, token, human, bot = _table(actor_is_human=True, other_gate=_Wants(Resource.WOOD))
+
+    view = table.view(human)
+    assert isinstance(view["round"], int)
+    assert view["trade_round"] is None
+    assert all(line.split("\t")[0].isdigit() for line in view["log"])
+
+    data = registry.handle("POST", f"/api/games/{code}/trade/round",
+                           {"give": [1, 0, 0, 0, 0], "want": [0, 0, 0, 0, 1]}, token)
+    assert isinstance(data["round"], int)
+    assert data["trade_round"]["offer"]["actor"] == human
 
 
 def test_bot_offer_holds_the_bots_turn_until_the_human_answers():

@@ -972,7 +972,7 @@ class Tables:
         (`round_bundle_from_wire`) -- to every other seat. Only on `seat`'s
         own turn in MAIN, and only while `seat` holds `give`. Bots answer at
         once; a manual seat's answer lands later through
-        `.../trade/round/answer`. Returns the seat's view: its `round` block
+        `.../trade/round/answer`. Returns the seat's view: its `trade_round` block
         carries the answers so far and who is still to answer."""
         game = table.session.game
         if game.phase is not Phase.MAIN:

@@ -454,7 +454,7 @@
     gap: 0.55rem; margin: 0.5rem 0;
   }
   .trade-line .pick-row { margin: 0; gap: 0.25rem; }
-  .trade-arrow { flex: none; font-size: 1.3rem; line-height: 1; color: var(--muted); }
+  .trade-arrow { flex: none; font-size: 0.85rem; font-style: italic; line-height: 1; color: var(--muted); }
   /* The offer a counter is a reply to, kept on screen above the reply being
      built. Countering used to replace the offer with an editable copy of
      itself, which is exactly the moment you most want to see what you were
@@ -490,6 +490,10 @@
   .pick-card { cursor: pointer; border: 2px solid transparent; }
   .pick-card.selected { border-color: var(--accent); }
   .pick-card.disabled { opacity: 0.28; cursor: default; pointer-events: none; }
+  /* A card asked for or piled up past what the hand actually holds — shaded
+     in place instead of spelling it out below the row, so which resource is
+     short is obvious without reading a sentence. */
+  .card.shortfall { opacity: 0.4; }
   .pending-offer-btn {
     width: 32px; height: 32px; padding: 0; border-radius: 8px;
     display: flex; align-items: center; justify-content: center; flex: none;
@@ -2047,11 +2051,12 @@ function modalActionButton(icon, label, {primary = true, caption = ""} = {}) {
 // everywhere else in the app — but `forceCount` shows it starting at 1 too,
 // for the one mode (Year of Plenty) where two single picks of different
 // resources would otherwise look identically "just selected".
-function pickCard(resourceIdx, {selected, disabled, count, forceCount, title, onClick} = {}) {
+function pickCard(resourceIdx, {selected, disabled, shortfall, count, forceCount, title, onClick} = {}) {
   const name = board.resources[resourceIdx];
   const classes = ["pick-card"];
   if (selected) classes.push("selected");
   if (disabled) classes.push("disabled");
+  if (shortfall) classes.push("shortfall");
   const card = resourceCardTile(name, {extraClasses: classes, title});
   if (count !== undefined && count > (forceCount ? 0 : 1)) {
     card.appendChild(html("div", {class: "count"}, String(count)));
@@ -2101,13 +2106,20 @@ function tradeRow(p, which, label) {
   const row = html("div", {class: "pick-row"});
   for (let r = 0; r < board.resources.length; r++) {
     const ceiling = which === "give" ? giveCeiling(p, r) : MAX_TRADE_CARDS;
+    // A give side loaded from someone else's ask (countering) can start
+    // above what the hand actually holds — shaded rather than left to a
+    // sentence below the rows to explain.
+    const held = p.hand ? (p.hand[board.resources[r]] || 0) : 0;
+    const shortfall = which === "give" && mine[r] > held;
     const stack = html("div", {class: "pick-stack"});
     stack.appendChild(pickCard(r, {
       selected: mine[r] > 0,
       disabled: other[r] > 0 || ceiling === 0,
+      shortfall,
       count: mine[r],
       forceCount: true,
-      title: mine[r] < ceiling ? `Add a ${board.resources[r]}` : board.resources[r],
+      title: shortfall ? `You only hold ${held} ${board.resources[r]}`
+        : mine[r] < ceiling ? `Add a ${board.resources[r]}` : board.resources[r],
       onClick: () => {
         if (mine[r] < ceiling) { mine[r] += 1; renderModal(); }
       },
@@ -2125,13 +2137,17 @@ function tradeRow(p, which, label) {
   return wrap;
 }
 
-// A trade nobody is editing: the cards in it and nothing else. `give`/`want`
-// are plain nonnegative counts from this seat's side.
-function tradeLine(give, want) {
+// A trade nobody is editing: the cards in it and nothing else. Always the
+// giving side first and the wanting side second, whoever's deal it is — so
+// it reads as "[left] for [right]" the way the sentence naming whose offer
+// this is expects. `leftShortfall`/`rightShortfall`, if given, mark which of
+// that side's resources this seat doesn't hold enough of, shaded in place of
+// a sentence explaining the same thing below the row.
+function tradeLine(left, right, {leftShortfall, rightShortfall} = {}) {
   const line = html("div", {class: "trade-line"});
-  line.appendChild(bundleChips(give));
-  line.appendChild(html("span", {class: "trade-arrow"}, "\u2192"));
-  line.appendChild(bundleChips(want));
+  line.appendChild(bundleChips(left, {shortfall: leftShortfall}));
+  line.appendChild(html("span", {class: "trade-arrow"}, "for"));
+  line.appendChild(bundleChips(right, {shortfall: rightShortfall}));
   return line;
 }
 
@@ -2376,13 +2392,15 @@ function renderYearOfPlentyMode(g, title, body, actions) {
 }
 
 // A bundle as a row of card tiles, one per resource in it, count badges as a
-// hand card gets them.
-function bundleChips(counts) {
+// hand card gets them. `shortfall[r]`, if given, shades that resource's tile
+// to mark it short of the hand instead of saying so in a sentence.
+function bundleChips(counts, {shortfall} = {}) {
   const row = html("div", {class: "pick-row"});
   for (let r = 0; r < board.resources.length; r++) {
     const n = counts[r];
     if (!n) continue;
-    const card = resourceCardTile(board.resources[r], {});
+    const extraClasses = shortfall && shortfall[r] ? ["shortfall"] : [];
+    const card = resourceCardTile(board.resources[r], {extraClasses});
     if (n > 1) card.appendChild(html("div", {class: "count"}, String(n)));
     row.appendChild(card);
   }
@@ -2444,7 +2462,7 @@ function responsesSection(round) {
     const deal = html("div", {class: "response-deal"});
     if (r.kind === "counter") {
       deal.appendChild(bundleChips(r.bundle.map((n) => Math.max(0, -n))));
-      deal.appendChild(html("span", {class: "trade-arrow"}, "\u2192"));
+      deal.appendChild(html("span", {class: "trade-arrow"}, "for"));
       deal.appendChild(bundleChips(r.bundle.map((n) => Math.max(0, n))));
     } else {
       deal.appendChild(html("span", {class: "response-kind"}, "takes it as offered"));
@@ -2456,8 +2474,8 @@ function responsesSection(round) {
 }
 
 // Whether the give side is actually in this hand. Checked here as well as
-// server-side because the answer is also what the note line says out loud —
-// "you do not hold that much" is more use than a refused request.
+// server-side because the answer is also what shades the short cards in the
+// give row, rather than the composer refusing the request silently.
 function handCovers(p, give) {
   return give.every((n, r) => n <= (p.hand[board.resources[r]] || 0));
 }
@@ -2488,8 +2506,7 @@ function dealSummary(p, myTurn) {
   if (!gives && !gets) return "Tap a card to give, and a card to get.";
   if (!gives) return "Pick what you are giving.";
   if (!gets) return "Pick what you want back.";
-  const deal = `${bundleWords(tradeGive)} \u2192 ${bundleWords(tradeWant)}.`;
-  if (!handCovers(p, tradeGive)) return `${deal} You do not hold that much.`;
+  const deal = `${bundleWords(tradeGive)} for ${bundleWords(tradeWant)}.`;
   if (!myTurn) return `${deal} You can only trade on your own turn.`;
   if (!offerableToPlayers()) {
     return `${deal} Too many cards to offer a player — the bank will still take it at its rate.`;
@@ -2576,13 +2593,16 @@ function renderTradeMode(title, body, actions) {
 
   if (mode === "offer") {
     // Signed towards the actor, so from this seat what they take is what
-    // leaves this hand.
-    const give = offer.bundle.map((n) => Math.max(0, n));
-    const want = offer.bundle.map((n) => Math.max(0, -n));
+    // leaves this hand, and what they give is what lands in it.
+    const iGive = offer.bundle.map((n) => Math.max(0, n));
+    const iGet = offer.bundle.map((n) => Math.max(0, -n));
     note(`${seatFullLabel(offer.actor)} offers:`);
-    body.appendChild(tradeLine(give, want));
-    const covered = handCovers(p, give);
-    if (!covered) note("You do not hold what they are asking for.");
+    const covered = handCovers(p, iGive);
+    const shortfall = iGive.map((n, r) => n > (p.hand[board.resources[r]] || 0));
+    // The sentence names the actor, so the line has to read as their deal —
+    // their give first, their want second — which is this seat's get and
+    // give in reverse.
+    body.appendChild(tradeLine(iGet, iGive, {rightShortfall: shortfall}));
 
     const accept = modalActionButton("check", "Take this trade", {caption: "Accept"});
     if (covered) accept.addEventListener("click", () => answerOffer(offer, "accept"));
@@ -2607,8 +2627,11 @@ function renderTradeMode(title, body, actions) {
   // counter: their offer stays on screen, quoted, above the reply being
   // built. It used to be replaced by an editable copy of itself — so the one
   // thing you were answering vanished the moment you started answering it.
-  const theirGive = counterOf.bundle.map((n) => Math.max(0, n));
-  const theirWant = counterOf.bundle.map((n) => Math.max(0, -n));
+  // Signed towards the actor, same as the "offer" mode above: their give is
+  // what leaves this hand's opposite (this seat's get), their want is what
+  // leaves this hand (this seat's give).
+  const theirGive = counterOf.bundle.map((n) => Math.max(0, -n));
+  const theirWant = counterOf.bundle.map((n) => Math.max(0, n));
   const quote = html("div", {class: "trade-quote"});
   quote.appendChild(html("div", {class: "trade-quote-who"}, `${seatFullLabel(counterOf.actor)} offered`));
   quote.appendChild(tradeLine(theirGive, theirWant));

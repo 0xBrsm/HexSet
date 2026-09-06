@@ -24,7 +24,7 @@ from hexset.trading import (
     Trade,
     bundle,
     choose_and_execute,
-    default_choose,
+    default_pick,
     default_offer,
     default_respond,
 )
@@ -179,10 +179,10 @@ def test_default_respond_passes_when_nothing_clears():
     assert response == Response(1, RESPONSE_PASS, None)
 
 
-# --- default_choose ----------------------------------------------------------
+# --- default_pick ----------------------------------------------------------
 
 
-def test_default_choose_picks_the_response_with_the_highest_clearing_gain():
+def test_default_pick_picks_the_response_with_the_highest_clearing_gain():
     game = a_game()
     responses = [
         Response(1, RESPONSE_ACCEPT, bundle(wood=-1, ore=1)),
@@ -191,17 +191,17 @@ def test_default_choose_picks_the_response_with_the_highest_clearing_gain():
     ]
     gate = Gate(lambda received, counterparty: {1: 2.0, 2: 9.0}.get(counterparty, -1.0))
 
-    chosen = default_choose(gate, game.state(0), responses)
+    chosen = default_pick(gate, game.state(0), responses)
 
     assert chosen == 1  # seat 2's counter (9.0) beats seat 1's accept (2.0)
 
 
-def test_default_choose_returns_none_when_nothing_clears():
+def test_default_pick_returns_none_when_nothing_clears():
     game = a_game()
     responses = [Response(1, RESPONSE_ACCEPT, bundle(wood=-1, ore=1))]
     gate = Gate(lambda received, counterparty: -1.0)
 
-    assert default_choose(gate, game.state(0), responses) is None
+    assert default_pick(gate, game.state(0), responses) is None
 
 
 # --- trade_round: end to end ---------------------------------------------------

@@ -167,25 +167,23 @@ def _get_table() -> dict:
     return _request_ok("GET", "/api/state")
 
 
-def _trade_acceptable() -> dict:
+def _offer_trade(give: list, want: list) -> dict:
     _seated()
-    return _request_ok("GET", f"/api/games/{_code}/trade/acceptable")
+    return _request_ok("POST", f"/api/games/{_code}/trade/round", {"give": give, "want": want})
 
 
-def _propose_trade(counterparty: int, give: dict | None = None, receive: dict | None = None) -> dict:
+def _answer_trade(actor: int, received: list, kind: str, bundle: list | None = None) -> dict:
     _seated()
-    body = {"counterparty": counterparty, "give": give or {}, "receive": receive or {}}
-    return _request_ok("POST", f"/api/games/{_code}/trade", body)
+    body = {"actor": actor, "received": received, "kind": kind}
+    if bundle is not None:
+        body["bundle"] = bundle
+    return _request_ok("POST", f"/api/games/{_code}/trade/round/answer", body)
 
 
-def _confirm_trade(index: int) -> dict:
+def _choose_trade(seat: int | None = None, bundle: list | None = None, decline: bool = False) -> dict:
     _seated()
-    return _request_ok("POST", f"/api/games/{_code}/trade/confirm", {"index": index})
-
-
-def _decline_trade(index: int) -> dict:
-    _seated()
-    return _request_ok("POST", f"/api/games/{_code}/trade/decline", {"index": index})
+    body = {"decline": True} if decline else {"seat": seat, "bundle": bundle}
+    return _request_ok("POST", f"/api/games/{_code}/trade/round/choose", body)
 
 
 # name -> (handler, description, JSON Schema for `arguments`)
@@ -200,10 +198,9 @@ _TOOLS: dict[str, tuple] = {
         "Deal a new game, playable immediately: you at one random seat, any "
         "named opponents at others, everything else open for other people (or "
         "other bots) to join by the code this returns. There is no separate "
-        "start — the board is live from the first response. Your own seat's "
-        "gate is always `PendingGate` (see get_table()'s `pending`): nothing a "
-        "bot or another seat proposes against you ever clears on its own, "
-        "confirm_trade()/decline_trade() answer it.",
+        "start — the board is live from the first response. Nothing is ever "
+        "traded on your behalf: offers to you wait in get_table()'s `pending` "
+        "for answer_trade().",
         {
             "type": "object",
             "properties": {
@@ -274,69 +271,60 @@ _TOOLS: dict[str, tuple] = {
     ),
     "get_table": (
         _get_table,
-        "Everything the table has said about trading: this turn's cleared "
-        "`trades`, and your own `pending` offers -- every candidate a bot's "
-        "trade event or another seat's propose_trade() found against you, "
-        "unexecuted until confirm_trade()/decline_trade() answers it (your "
-        "seat's gate never clears on its own, see new_game()) — alongside "
-        "everything state() already returns, since it's the same call.",
+        "Everything the table has said about trading, alongside state(): this "
+        "turn's `trades`; `pending` -- offers broadcast to you, unanswered "
+        "(`actor`, and `bundle` signed towards the actor: positive counts are "
+        "what the actor gets from you, negative what you get); `round` -- your "
+        "own open offer with every accept/counter so far and who is still to "
+        "answer; `trade_wait` -- seats a bot's offer is waiting on (the bot's "
+        "turn holds until they answer). Bundles are 5 signed counts in the "
+        "board's resource order (Wood, Brick, Sheep, Wheat, Ore).",
         {"type": "object", "properties": {}},
     ),
-    "trade_acceptable": (
-        _trade_acceptable,
-        "Your own preview of what propose_trade() would be accepted right now: "
-        "every coverable bundle a bot counterparty's private gate already "
-        "clears the trade floor on, grouped by counterparty and sorted by "
-        "its gain, descending, capped at 12 per counterparty. Read-only — "
-        "computing this moves nothing. A seat at the table who is not a bot "
-        "never appears here; propose_trade() against one instead and read "
-        "its answer back through get_table()'s `pending`.",
-        {"type": "object", "properties": {}},
-    ),
-    "propose_trade": (
-        _propose_trade,
-        "Compose and submit a bundle against `counterparty`: on your own turn "
-        "against anyone, or during another seat's turn against that seat only. "
-        "At most 3 cards a side, given or received. Fails (with a reason) "
-        "unless the counterparty's own private gate clears the trade floor "
-        "on the exchange — your own gate is never consulted, since proposing "
-        "this is your consent. "
-        "trade_acceptable() previews what a bot counterparty would take; "
-        "a person or another LLM answers "
-        "asynchronously instead, through their own get_table()'s `pending`.",
+    "offer_trade": (
+        _offer_trade,
+        "On your own turn in MAIN, broadcast one offer to every other seat: "
+        "`give` and `want` are 5 unsigned counts in resource order, 1-3 cards a "
+        "side on different resources. Bots answer at once (accept, counter or "
+        "pass); read the answers in get_table()'s `round`, then choose_trade().",
         {
             "type": "object",
             "properties": {
-                "counterparty": {"type": "integer", "description": "The seat to trade with."},
-                "give": {
-                    "type": "object",
-                    "description": "Resource name -> count you give, e.g. {\"Wood\": 2}.",
-                },
-                "receive": {
-                    "type": "object",
-                    "description": "Resource name -> count you receive.",
-                },
+                "give": {"type": "array", "items": {"type": "integer"}, "description": "5 counts you give."},
+                "want": {"type": "array", "items": {"type": "integer"}, "description": "5 counts you want."},
             },
-            "required": ["counterparty"],
+            "required": ["give", "want"],
         },
     ),
-    "confirm_trade": (
-        _confirm_trade,
-        "Execute one of your pending offers (get_table()'s `pending`) exactly "
-        "as the table found it. May still fail if hands moved since.",
+    "answer_trade": (
+        _answer_trade,
+        "Answer an offer in get_table()'s `pending`: echo its `actor` and "
+        "`received` exactly, with kind `accept`, `counter` (then `bundle` is "
+        "your counter, signed towards the actor like `received`) or `pass`. A "
+        "bot actor picks among the answers as soon as everyone has answered.",
         {
             "type": "object",
-            "properties": {"index": {"type": "integer", "description": "Index into your `pending`."}},
-            "required": ["index"],
+            "properties": {
+                "actor": {"type": "integer"},
+                "received": {"type": "array", "items": {"type": "integer"}},
+                "kind": {"type": "string", "enum": ["accept", "counter", "pass"]},
+                "bundle": {"type": "array", "items": {"type": "integer"}},
+            },
+            "required": ["actor", "received", "kind"],
         },
     ),
-    "decline_trade": (
-        _decline_trade,
-        "Drop one of your pending offers without moving any cards.",
+    "choose_trade": (
+        _choose_trade,
+        "Execute one answer to your own open offer -- `seat` and its `bundle` "
+        "exactly as get_table()'s `round.responses` lists them -- or "
+        "`decline: true` to close the round with nothing traded.",
         {
             "type": "object",
-            "properties": {"index": {"type": "integer", "description": "Index into your `pending`."}},
-            "required": ["index"],
+            "properties": {
+                "seat": {"type": "integer"},
+                "bundle": {"type": "array", "items": {"type": "integer"}},
+                "decline": {"type": "boolean"},
+            },
         },
     ),
 }

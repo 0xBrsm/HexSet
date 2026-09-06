@@ -17,6 +17,36 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The trade round is now the served table's protocol end to end
+  (`docs/bot-api.md` §3). `POST /api/games/<code>/trade/round` broadcasts
+  the current player's offer (1-3 cards a side) to every seat;
+  `.../trade/round/answer` is a seat's accept, counter or pass;
+  `.../trade/round/choose` is the actor's pick or decline. A bot actor's
+  turn holds (`trade_wait`, `to_move` null) until every person at the table
+  has answered its offer. The page's trade modal composes multi-card offers
+  on two rows (Give / Get), shows every answer with a take-it button, and
+  answers incoming offers with Accept / Counter / Pass; the bank/port trade
+  keeps its button. MCP tools `offer_trade`, `answer_trade`, `choose_trade`.
+  Bot offers, answers and picks come from `hexset.trading.default_offer`/
+  `default_respond`/`default_pick` (own gain, and the estimated gain of the
+  other side) unless a bot implements `offer`/`respond`/`pick` itself.
+- `hexset.trading.execute_agreed`: one execution path for every agreed
+  exchange, asking a bot side's gate fresh and taking a manual side's
+  submission as its consent; `execute_trade` and the round's own execution
+  are both built on it.
+
+### Removed
+
+- `POST .../trade`, `GET .../trade/acceptable`, `POST .../trade/confirm`
+  and `.../trade/decline` (the one-to-one proposal routes), the MCP tools
+  over them, `webplay.bundle_from_wire`, and `docs/negotiation-interface.md`.
+  `PendingGate` no longer records clearing-house candidates.
+
+### Changed
+
+- The trade round's third gate method is `pick(view, responses)`, not
+  `choose` -- which is every bot's action picker and collided with it.
+
 - `hexset.trading.trade_round`: a second trading protocol, for a *served*
   game only (`hexset.server`) -- propose-and-respond rather than the
   engine's exhaustive clearing house (`trade_event`, unchanged and still
@@ -25,13 +55,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   no-ops itself, and calls `trade_round(game, gates)` itself, as many times
   a turn as the acting seat wants -- nothing counts or caps rounds, the
   floor and the card cap already bound what one moves. `Bot` gains four new
-  optional methods for it (`offer`, `respond`, `choose`, `estimate_many`),
+  optional methods for it (`offer`, `respond`, `pick`, `estimate_many`),
   each with a sensible default off a plain `gains_many`
-  (`hexset.trading.default_offer`/`default_respond`/`default_choose`), so
+  (`hexset.trading.default_offer`/`default_respond`/`default_pick`), so
   every existing bot plays a served table unchanged; heximax and search2
   additionally implement `estimate_many` for real. `hexset.server.webplay.
   PendingGate` gains the manual-seat side of the same three methods
-  (`offer`/`respond`/`choose`), recording a broadcast offer to
+  (`offer`/`respond`/`pick`), recording a broadcast offer to
   `game.pending` exactly as it already does for the clearing house.
 - `hexset.fitting` fits the evaluation weights *and* the win temperature in
   one solve: a conditional logit over the four seats of a recorded position,

@@ -80,9 +80,9 @@ all and never notices it exists.
 One round: the current player's gate broadcasts one offer (`Bot.offer`,
 new); every other seated gate answers once (`Bot.respond`, new) --
 accept, counter, or pass; the actor's gate picks one answer to execute
-(`Bot.choose`, new) or declines them all. A gate that only has
+(`Bot.pick`, new) or declines them all. A gate that only has
 `gains_many` gets a sensible default for all three (`default_offer`/
-`default_respond`/`default_choose`), the same "structural, not by
+`default_respond`/`default_pick`), the same "structural, not by
 inheritance" convention `valued`/`valued_many` already give `accepts`/
 `accepts_many`; a gate with a real opponent model instead implements
 `estimate_many(view, candidates) -> list[float]` (heximax, search2), read
@@ -408,75 +408,94 @@ def apply_trades(game: "Game", trades: Sequence[Trade]) -> None:
         game.trades_made += 1
 
 
-def execute_trade(game: "Game", proposer: int, counterparty: int, received: Bundle) -> Trade:
-    """A manually composed exchange between `proposer` and `counterparty`,
-    signed positive towards `proposer` -- the negotiation interface's one
-    engine entry point for a bundle that was never enumerated by
-    `_candidates`.
-
-    Re-validates, in order, and raises `ValueError` naming the first check
-    that fails:
-
-    1. **The card cap.** Neither side moves more than `MAX_TRADE_CARDS`
-       cards -- the same limit `_hand_multisets`/`_candidates` enumerate
-       under, refused here the same way an uncoverable bundle is.
-    2. **Coverage.** Both sides can actually pay their half, from the true
-       hands (`holds`) -- the engine is the referee, exactly as it is for
-       the automatic event.
-    3. **The counterparty's own gain.** Must exceed `TRADE_FLOOR`
-       (`clears_floor`), read through the counterparty's own gate (`valued`)
-       on its own view. The proposer's own gate is never asked -- submitting
-       a trade *is* the proposer's consent, so a seat may compose a bundle
-       its own gate would refuse.
-
-    Also enforces the turn-timing rule: one of `proposer`/`counterparty`
-    must be `game.current_player`, and the phase must be `Phase.MAIN` -- a
-    seat proposes on its own turn to anyone, or during another seat's turn
-    naming only that seat.
-
-    On success, moves the cards (`exchange`), certifies the diff on the
-    ledger, appends to `game.trades` -- the same two calls `trade_event`
-    makes for an automatic clearing -- and returns the `Trade`.
+def _validate_exchange(game: "Game", actor: int, counterparty: int, received: Bundle) -> None:
+    """The referee's checks on an exchange between `actor` and `counterparty`
+    (`received` signed towards `actor`), before any gate is asked: the two
+    seats differ, the phase is `Phase.MAIN`, one of the two is the current
+    player (a seat trades on its own turn with anyone, or on another seat's
+    turn with that seat only), neither side moves more than
+    `MAX_TRADE_CARDS`, and both sides can cover their half from the true
+    hands (`holds`). Raises `ValueError` naming the first check that fails.
     """
     from .game import Phase  # local: avoids a game/trading import cycle
 
-    if proposer == counterparty:
+    if actor == counterparty:
         raise ValueError("a seat cannot trade with itself")
     if game.phase is not Phase.MAIN:
         raise ValueError(f"trading is only open in {Phase.MAIN.name}, not {game.phase.name}")
-    if game.current_player not in (proposer, counterparty):
-        raise ValueError(
-            f"neither seat {proposer} nor {counterparty} is the current player"
-        )
-
+    if game.current_player not in (actor, counterparty):
+        raise ValueError(f"neither seat {actor} nor {counterparty} is the current player")
     state = game._state
-    # `received` is signed towards `proposer`: its negative entries are what
-    # `proposer` must give, and its positive entries -- what `proposer`
-    # receives -- are exactly what `counterparty` must give, the same cards
-    # seen from the other side.
     give = [max(0, -n) for n in received]
     take = [max(0, n) for n in received]
     if sum(give) > MAX_TRADE_CARDS or sum(take) > MAX_TRADE_CARDS:
         raise ValueError(f"a trade moves at most {MAX_TRADE_CARDS} cards a side")
-    if not holds(state, proposer, give):
-        raise ValueError(f"seat {proposer} cannot cover its side of this trade")
+    if not holds(state, actor, give):
+        raise ValueError(f"seat {actor} cannot cover its side of this trade")
     if not holds(state, counterparty, take):
         raise ValueError(f"seat {counterparty} cannot cover its side of this trade")
-    counterparty_received = tuple(-n for n in received)
 
-    trader = game.gates[counterparty] if game.gates is not None else None
-    view = game.state(counterparty)
-    gain = valued(trader, view, counterparty_received, proposer)
-    if not clears_floor(gain):
-        raise ValueError(f"seat {counterparty} does not want this exchange")
 
+def execute_agreed(
+    game: "Game",
+    actor: int,
+    counterparty: int,
+    received: Bundle,
+    *,
+    ask_actor: bool,
+    ask_counterparty: bool,
+) -> Trade:
+    """Execute one exchange between `actor` and `counterparty` (`received`
+    signed towards `actor`) that was agreed outside the clearing house --
+    a trade round's chosen response, or a bundle a seat composed by hand.
+
+    `_validate_exchange` runs first. Then each side whose flag is set has
+    its own gate (`game.gates`) asked fresh, on its own view, and the trade
+    is refused (`ValueError`) unless that gain clears `TRADE_FLOOR`. A
+    side whose flag is clear is a seat whose consent is the submission
+    itself -- a person or an LLM that composed, accepted or countered
+    through the server -- and its gate (a `PendingGate`, which never
+    clears) is not asked. On success the cards move (`exchange`), the
+    ledger certifies the diff, and the `Trade` is appended to `game.trades`
+    -- the same two calls `trade_event` makes for an automatic clearing.
+    """
+    _validate_exchange(game, actor, counterparty, received)
+    gates = game.gates
+    gain_a = 0.0
+    gain_b = 0.0
+    if ask_actor:
+        trader = gates[actor] if gates is not None else None
+        gain_a = valued(trader, game.state(actor), received, counterparty)
+        if not clears_floor(gain_a):
+            raise ValueError(f"seat {actor} does not want this exchange")
+    if ask_counterparty:
+        trader = gates[counterparty] if gates is not None else None
+        mirror = tuple(-n for n in received)
+        gain_b = valued(trader, game.state(counterparty), mirror, actor)
+        if not clears_floor(gain_b):
+            raise ValueError(f"seat {counterparty} does not want this exchange")
+
+    state = game._state
     before = [hand[:] for hand in state.hands]
-    exchange(state, proposer, counterparty, received)
+    exchange(state, actor, counterparty, received)
     game.ledger.apply_hand_diff(before, state.hands)
-    trade = Trade(proposer, counterparty, received, gain_b=gain)
+    trade = Trade(actor, counterparty, received, gain_a=gain_a, gain_b=gain_b)
     game.trades.append(trade)
     game.trades_made += 1
     return trade
+
+
+def execute_trade(game: "Game", proposer: int, counterparty: int, received: Bundle) -> Trade:
+    """A bundle `proposer` composed by hand and put to a bot `counterparty`:
+    `execute_agreed` with only the counterparty's gate asked -- submitting
+    the bundle is the proposer's own consent, so a seat may propose an
+    exchange its own gate would refuse. Raises `ValueError` naming the
+    first check that fails (`_validate_exchange`, then the counterparty's
+    gain against `TRADE_FLOOR`).
+    """
+    return execute_agreed(
+        game, proposer, counterparty, received, ask_actor=False, ask_counterparty=True
+    )
 
 
 def _best_clearing(
@@ -601,8 +620,8 @@ class Response(NamedTuple):
     **always signed towards the offer's own actor**, never towards `seat`:
     for `"accept"` this is exactly `offer.received` echoed back; for
     `"counter"` it is `seat`'s own preferred bundle, translated into the
-    actor's terms. One convention for both kinds is what lets `choose`/
-    `default_choose` price every non-`"pass"` response the same way,
+    actor's terms. One convention for both kinds is what lets `pick`/
+    `default_pick` price every non-`"pass"` response the same way,
     without first working out which kind it is looking at.
     """
 
@@ -727,10 +746,10 @@ def default_respond(gate: object, view: "View", offer: Offer) -> Response:
     return Response(me, RESPONSE_PASS)
 
 
-def default_choose(
+def default_pick(
     gate: object, view: "View", responses: Sequence[Response]
 ) -> int | None:
-    """The default `choose(view, responses) -> index | None` for a gate
+    """The default `pick(view, responses) -> index | None` for a gate
     that only has `gains_many`: the acceptance or counter with the highest
     own gain above `TRADE_FLOOR`, else `None`. Every non-`"pass"`
     response's bundle is already signed towards this seat (`Response`'s own
@@ -768,7 +787,7 @@ def choose_and_execute(
     round open across a manual seat's late answer (`hexset.server.webplay.
     GameSession`, `agents/reference/trading-final.md`'s "the trade round").
 
-    `actor`'s own gate picks one response (`choose`/`default_choose`, the
+    `actor`'s own gate picks one response (`pick`/`default_pick`, the
     same `getattr`-first, default-second dispatch every round method uses),
     then the engine re-checks it fresh at the moment cards would actually
     move (`_execute_round`), trusting neither side's report. `None` --
@@ -777,7 +796,7 @@ def choose_and_execute(
     fails `_execute_round`'s re-check.
 
     A manual (human/LLM) `actor`'s own gate is a `PendingGate`, whose
-    `choose` always declines (see its own docstring) -- so calling this
+    `pick` always declines (see its own docstring) -- so calling this
     after every new response a round collects is always safe, whoever the
     actor is: a bot may resolve here, a human never does, and picks
     instead through its own explicit call (`GameSession.execute_round_choice`,
@@ -790,11 +809,11 @@ def choose_and_execute(
     if actor_gate is None:
         return None
     actor_view = game.state(actor)
-    choose_fn = getattr(actor_gate, "choose", None)
+    choose_fn = getattr(actor_gate, "pick", None)
     chosen = (
         choose_fn(actor_view, responses)
         if choose_fn is not None
-        else default_choose(actor_gate, actor_view, responses)
+        else default_pick(actor_gate, actor_view, responses)
     )
     if chosen is None or not (0 <= chosen < len(responses)):
         return None
@@ -807,46 +826,26 @@ def choose_and_execute(
 def _execute_round(
     game: "Game", gates: Sequence[object], actor: int, counterparty: int, received: Bundle
 ) -> Trade | None:
-    """Execute one round's chosen exchange, re-validating everything at the
-    moment cards actually move -- coverage both sides, the card cap, and
-    both sides' own gain read *fresh* through their own gate, never the
-    reported estimate an offer, a response or a choice was built from.
-
-    Unlike `execute_trade` (whose proposer is a human or LLM submitting a
-    bundle it composed itself -- consent, so its own gate is never asked),
-    both ends of a round are gates the engine itself asked to trade, and
-    either can misreport (a stale estimate, a gate that changed its mind
-    between answering and being chosen, an adversarial implementation) --
-    so neither report is trusted without a fresh check here, the same
-    "engine is the referee" property the clearing house has. Returns
-    `None`, executing nothing, on the first check that fails, rather than
-    raising: a round's chosen response failing here is an ordinary
-    "nothing happened", not a caller error the way a hand-composed
-    `execute_trade` bundle's failure is.
+    """Execute one round's chosen exchange between two bot gates: both
+    sides re-asked fresh at the moment cards actually move
+    (`execute_agreed` with both flags set), trusting neither the offer nor
+    the response it was built from -- a stale estimate, a gate that changed
+    its mind, an adversarial implementation. `None`, executing nothing, on
+    the first check that fails: a round coming to nothing is an ordinary
+    outcome, not a caller error the way a hand-composed bundle's failure
+    is. `gates` is the caller's seat -> gate mapping, installed on the game
+    for the duration of the call.
     """
-    state = game._state
-    give = [max(0, -n) for n in received]
-    take = [max(0, n) for n in received]
-    if sum(give) > MAX_TRADE_CARDS or sum(take) > MAX_TRADE_CARDS:
+    had = game.gates
+    game.gates = tuple(gates)
+    try:
+        return execute_agreed(
+            game, actor, counterparty, received, ask_actor=True, ask_counterparty=True
+        )
+    except ValueError:
         return None
-    if not holds(state, actor, give) or not holds(state, counterparty, take):
-        return None
-
-    gain_a = valued(gates[actor], game.state(actor), received, counterparty)
-    if not clears_floor(gain_a):
-        return None
-    mirror = tuple(-n for n in received)
-    gain_b = valued(gates[counterparty], game.state(counterparty), mirror, actor)
-    if not clears_floor(gain_b):
-        return None
-
-    before = [hand[:] for hand in state.hands]
-    exchange(state, actor, counterparty, received)
-    game.ledger.apply_hand_diff(before, state.hands)
-    trade = Trade(actor, counterparty, received, gain_a=gain_a, gain_b=gain_b)
-    game.trades.append(trade)
-    game.trades_made += 1
-    return trade
+    finally:
+        game.gates = had
 
 
 def trade_round(game: "Game", gates: Sequence[object]) -> list[Trade]:
@@ -864,9 +863,9 @@ def trade_round(game: "Game", gates: Sequence[object]) -> list[Trade]:
     this as many times a turn as the acting seat wants -- once per
     broadcast, nothing here counts rounds or caps them.
 
-    Every method asked of a gate -- `offer`, `respond`, `choose` -- is read
+    Every method asked of a gate -- `offer`, `respond`, `pick` -- is read
     with `getattr`, falling back to this module's own `default_offer`/
-    `default_respond`/`default_choose` for a gate that only has
+    `default_respond`/`default_pick` for a gate that only has
     `gains_many` (or less), the same "structural, not by inheritance"
     convention `valued`/`valued_many` already give `accepts`/`accepts_many`.
 

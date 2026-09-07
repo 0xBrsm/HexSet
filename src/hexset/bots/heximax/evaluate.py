@@ -111,15 +111,20 @@ NO_TRADE_WEIGHTS = Weights(
     production=2.785,
     diversity=0.358,
     scarce=0.91 * 2.785 / ROLLS,
-    # The three hand terms are the redesign's, at the trading table's fitted
-    # values: they were refit under trading and this profile has not been
-    # refit since the pre-trading fit, so carrying its own stale numbers
-    # forward would mean the no-trade bot alone kept the cliff.
+    # The three hand terms are the redesign's, then swept by play on the
+    # no-trade table (`hexset.bench.weight_sweep --profile notrade`,
+    # 2026-09-07, `docs/readouts/heximax-fit/sweep-notrade.json`): the same
+    # rings as the trading profile, 1,024 paired games a cell against the
+    # incumbent. Two moves cleared the bar -- `robber_risk` -0.15 -> -0.30
+    # (53.2% [50.2, 56.3]; zero reads 37.8%) and `spare_card` 0.15 -> 0.1065
+    # (53.1% [50.1, 56.2]; x1.41 reads 39.6%) -- and the swept vector
+    # confirmed 52.9% [51.1, 54.7] over 3,072 fresh boards against the start.
+    # The six other terms held at every ring value.
     buy_progress=Weights.buy_progress,
     road=0.1237,
     knight=0.1026,
-    spare_card=Weights.spare_card,
-    robber_risk=Weights.robber_risk,
+    spare_card=0.1065,
+    robber_risk=-0.30,
     port=0.03063,
 )
 

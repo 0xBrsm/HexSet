@@ -39,11 +39,11 @@ def test_weights_are_what_the_score_is_built_from():
         production=0.0,
         diversity=0.0,
         scarce=0.0,
-        progress=0.0,
+        buy_progress=0.0,
         road=0.0,
         knight=0.0,
-        card=0.0,
-        surplus_card=0.0,
+        spare_card=0.0,
+        robber_risk=0.0,
         port=0.0,
     )
     assert Evaluator(board, silent).score(state, 0) == 0.0

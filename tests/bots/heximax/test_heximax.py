@@ -453,6 +453,58 @@ def test_an_honest_trade_read_is_unchanged_by_the_partners_real_cards():
     assert values[0] == pytest.approx(values[1])
 
 
+def test_the_vectorised_gate_matches_the_clone_it_replaces_bit_for_bit():
+    """`_delta`'s fast path prices a candidate by recomputing every seat's
+    hand terms from the post-trade pool (`HonestEvaluator.score_many`);
+    `_delta_reference` clones the state and re-reads it the slow way.
+
+    Worth pinning rather than trusting: `score_many` is a hand-written
+    transposition of `hand_terms` onto the candidate axis, and the hand terms
+    put a `PURCHASE_VALUE`-weighted argmax in the middle of it whose tie-break
+    has to match the scalar loop's strictly-greater test exactly. Pick a
+    different winner there and `best_cost` changes with it, which silently
+    moves `spare_card` on a subset of hands -- the private gate would then be
+    pricing a position the search would never score.
+    """
+    worst = 0.0
+    checked = nonzero = 0
+    for seed in (26, 31, 44):
+        game = after_setup(seed)
+        rng = random.Random(seed)
+        bot = a_bot(game, seed)
+        for _ in range(120):
+            options = legal_actions(game)
+            if not options or is_over(game):
+                break
+            apply(game, rng.choice(options))
+            if game.phase is not Phase.MAIN:
+                continue
+            seat = to_move(game)
+            view = game.state(seat)
+            for counterparty in range(game._state.num_players):
+                if counterparty == seat:
+                    continue
+                for give_r in range(NUM_RESOURCES):
+                    if not game._state.hands[seat][give_r]:
+                        continue
+                    for take_r in range(NUM_RESOURCES):
+                        if take_r == give_r or not game._state.hands[counterparty][take_r]:
+                            continue
+                        received = one_for_one(give_r, take_r)
+                        fast = bot._delta(view, seat, seat, received, counterparty, bot._rank)
+                        slow = bot._delta_reference(
+                            view, seat, seat, received, counterparty, bot._rank
+                        )
+                        worst = max(worst, abs(fast - slow))
+                        checked += 1
+                        nonzero += fast != 0.0
+    # A run that priced nothing, or priced everything at zero, would pass
+    # vacuously -- the equality is only worth anything over real candidates.
+    assert checked > 500
+    assert nonzero > 100
+    assert worst == 0.0
+
+
 # --- presets ------------------------------------------------------------------
 
 

@@ -13,8 +13,14 @@ import json
 import sys
 import time
 
+from dataclasses import replace
+
+# Imported for its side effect: `hexset.bots.heximax` registers the
+# `heximax-trading`/`heximax-notrade` evaluator names with `hexset.tuning`
+# at import time, so without this they are not resolvable here.
+import hexset.bots.heximax  # noqa: F401
 from hexset.bench.throughput import default_workers, environment
-from hexset.tuning import ACCEPT_Z, Step, as_source, climb, confirm
+from hexset.tuning import ACCEPT_Z, WEIGHTS, Step, as_source, climb, confirm
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -49,8 +55,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--evaluator",
         default="default",
-        choices=("default", "tiered"),
-        help="which evaluation to fit; the two do not share a term set",
+        choices=("default", "tiered", "heximax-trading", "heximax-notrade"),
+        help="which evaluation to fit; they do not share a term set. The two "
+        "heximax names fit the max^n bot itself, through its own `win` stance, "
+        "rather than the one-ply bot the shipped vector was fitted for",
+    )
+    parser.add_argument(
+        "--start",
+        default=None,
+        help="JSON dict of weight overrides to start the climb from, applied "
+        "over the evaluator's own profile; for resuming from a vector settled "
+        "elsewhere instead of the shipped defaults",
+    )
+    parser.add_argument(
+        "--pin",
+        action="append",
+        default=[],
+        metavar="TERM",
+        help="a weight the climb must not move, repeatable. Use for a term "
+        "that is derived rather than free: `scarce` is `0.91 * production / "
+        "ROLLS` from the opening fit, and must be recomputed from the fitted "
+        "`production` afterwards rather than fitted independently",
     )
     parser.add_argument(
         "--confirm",
@@ -63,6 +88,13 @@ def main(argv: list[str] | None = None) -> int:
 
     started = time.perf_counter()
 
+    start = None
+    if args.start:
+        from hexset.tuning import _seed_default_weights
+
+        _seed_default_weights()
+        start = replace(WEIGHTS[args.evaluator](), **json.loads(args.start))
+
     def show(step: Step) -> None:
         mark = "accept" if step.accepted else "  keep"
         print(
@@ -72,6 +104,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     best, history = climb(
+        start=start,
         rounds=args.rounds,
         games=args.games,
         sigma=args.sigma,
@@ -83,6 +116,7 @@ def main(argv: list[str] | None = None) -> int:
         width=args.width if args.depth > 1 else None,
         stance=args.stance,
         evaluator=args.evaluator,
+        pinned=tuple(args.pin),
         report=None if args.json else show,
     )
     accepted = sum(1 for step in history if step.accepted)
@@ -93,6 +127,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  confirming over {args.confirm} games...", flush=True)
         check = confirm(
             best,
+            # Against where this climb actually started, not the shipped
+            # profile: `confirm` is the test of whether the climb gained
+            # anything, and with `--start` those are different vectors.
+            start,
             games=args.confirm,
             depth=args.depth,
             width=args.width if args.depth > 1 else None,

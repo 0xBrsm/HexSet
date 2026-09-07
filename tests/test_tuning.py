@@ -26,6 +26,18 @@ def test_the_anchor_is_never_tuned():
     assert set(names) | {ANCHOR} == {f.name for f in fields(Weights)}
 
 
+def test_a_pinned_term_is_never_moved_by_a_step():
+    """`scarce` is derived from `production`, not free to be fitted against
+    the engine, so a climb has to be able to hold it still."""
+    assert "scarce" not in tunable(Weights(), ("scarce",))
+    start = Weights()
+    rng = random.Random(0)
+    for _ in range(500):
+        candidate = perturb(start, rng, sigma=0.9, count=3, pinned=("scarce",))
+        assert candidate.scarce == start.scarce
+        assert getattr(candidate, ANCHOR) == getattr(start, ANCHOR)
+
+
 # --- heximax fits ---------------------------------------------------------
 #
 # P3's harness gap (`agents/reference/heximax.md` §7): before this, a

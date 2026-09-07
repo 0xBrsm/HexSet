@@ -84,13 +84,33 @@ def register_heximax_evaluator(name: str, mode: str, weights: Callable[[], Weigh
     HEXIMAX_MODES[name] = mode
 
 
-def tunable(weights: Weights | TieredWeights) -> tuple[str, ...]:
-    """Every weight the climb may move — that is, all but the pinned anchor."""
-    return tuple(f.name for f in fields(type(weights)) if f.name != ANCHOR)
+def tunable(
+    weights: Weights | TieredWeights, pinned: tuple[str, ...] = ()
+) -> tuple[str, ...]:
+    """Every weight the climb may move -- all but the anchor and `pinned`.
+
+    `pinned` is for a term that is not free to be fitted against the engine
+    even though it is a field here. `evaluate.Weights.scarce` is the case
+    this exists for: it is derived from the opening fit as
+    `FITTED_SCARCE = 0.91 * production / ROLLS`, and its own comment says the
+    derivation is there "so it follows a refit of `production` instead of
+    silently meaning something else afterwards". A climb that moved it
+    independently would break that, and `test_evaluate.py`'s
+    `test_the_scarcity_default_is_the_fitted_value_and_cannot_drift_from_it`
+    would fail on adoption. Pin it and recompute it from the fitted
+    `production` instead.
+    """
+    held = {ANCHOR, *pinned}
+    return tuple(f.name for f in fields(type(weights)) if f.name not in held)
 
 
 def perturb(
-    weights: Weights, rng: random.Random, *, sigma: float, count: int
+    weights: Weights,
+    rng: random.Random,
+    *,
+    sigma: float,
+    count: int,
+    pinned: tuple[str, ...] = (),
 ) -> Weights:
     """Jitter `count` weights.
 
@@ -99,7 +119,7 @@ def perturb(
     by the weight keeps the tiered evaluation's magnitude hierarchy intact,
     since a relative step cannot move a term out of its tier.
     """
-    names = tunable(weights)
+    names = tunable(weights, pinned)
     changes = {}
     for name in rng.sample(names, min(count, len(names))):
         current = getattr(weights, name)
@@ -205,13 +225,15 @@ def climb(
     workers: int = 1,
     stance: str | None = None,
     evaluator: str = "default",
+    pinned: tuple[str, ...] = (),
     report: Callable[[Step], None] | None = None,
 ) -> tuple[Weights, list[Step]]:
     """Hill climb from `start`, returning the best weights and every step tried.
 
     `report` is called after each duel, because a real run takes long enough
     that waiting for the return value is not useful. `stance` defaults to
-    `None` -- the bot's own default (see `entrant_for`).
+    `None` -- the bot's own default (see `entrant_for`). `pinned` names terms
+    the climb must not move (see `tunable`).
     """
     rng = random.Random(seed)
     _seed_default_weights()
@@ -219,7 +241,9 @@ def climb(
     history: list[Step] = []
 
     for round_index in range(rounds):
-        challenger = perturb(incumbent, rng, sigma=sigma, count=count)
+        challenger = perturb(
+            incumbent, rng, sigma=sigma, count=count, pinned=pinned
+        )
         wins, decided = duel(
             challenger,
             incumbent,

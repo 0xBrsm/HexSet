@@ -213,6 +213,103 @@ cannot say -- the no-trade referent rose six points -- and the fixed
 opponent that can (Catanatron, previous 32.5%) is owed after the bridge
 image is rebuilt on this engine. Recorded, not adjudicated here.
 
+## The play sweep (`sweep-trading.json`, `sweep-notrade.json`) -- what actually moved
+
+Registration: "tune the weights by play, then new-vs-old and Catanatron"
+(dev-HexNet `heximax.md`, 2026-09-07 evening). `hexset.bench.weight_sweep`:
+one free term at a time, rung at ×0, ×0.5, ×2 of the incumbent and then
+×0.71, ×1.41, each cell 1,024 paired games against the incumbent on
+identical boards (grouped `[c, c, b, b]`, antithetic swaps), a move only
+when the best cell's Wilson lower bound clears 50%. `scarce` moves with
+production. 96 minutes for the trading profile and 128 for the no-trade one (the latter sharing the box) on 30 workers.
+
+**Trading profile** (start `TRADING_WEIGHTS`, seed 98000): sixteen rings,
+one move.
+
+| term | shipped | ×0 | ×0.5 | ×2 | verdict |
+|---|---|---|---|---|---|
+| production | 7.067 | 44.8% | 50.7% | 49.8% | holds |
+| buy_progress | 0.45 | **23.6%** | 40.8% | 46.4% | holds (a peak) |
+| robber_risk | −0.15 | 36.8% | 43.8% | **54.2% [51.1, 57.2]** | **→ −0.30** |
+| spare_card | 0.15 | 46.7% | 49.0% | **21.3%** | holds |
+| road | 0.1209 | 45.0% | 50.1% | 40.4% | holds |
+| diversity | 0.358 | 47.9% | 49.5% | 48.0% | holds |
+| port | 0.0074 | 51.0% | 51.5% | 51.6% | holds (inert) |
+| knight | 0.1041 | 49.0% | 49.6% | 48.2% | holds (inert) |
+
+Second ring (×0.71, ×1.41): nothing moved; robber_risk is flat from −0.21 to
+−0.42. **Confirm, swept vs start, 3,072 fresh boards (seed 598000): 1,613 =
+52.5% [50.7%, 54.3%]. Adopted** into `TRADING_WEIGHTS`; `search2` keeps the
+bare default as the frozen referent.
+
+**No-trade profile** (start `NO_TRADE_WEIGHTS`, seed 88000): two moves.
+robber_risk −0.15 → −0.30 (53.2% [50.2, 56.3]; zero 37.8%), and on the
+second ring spare_card 0.15 → 0.1065 (53.1% [50.1, 56.2]; ×1.41 reads
+39.6%). The six other terms held. **Confirm: 1,625 / 3,072 = 52.9% [51.1%,
+54.7%]. Adopted** into `NO_TRADE_WEIGHTS`.
+
+Reading. The play sweep and the likelihood fit disagree on exactly the
+terms the duel said they would: play wants *more* robber fear (the fit said
++0.25, play says −0.30, and zeroing the term costs 13 points either table),
+and play keeps `buy_progress` at 0.45 where the fit wanted 1.65 (doubling
+it to 0.9 already loses 3.6 points). Four terms -- production, diversity,
+port, knight -- are inert within a point and a half of 50% at half and
+double their value: at depth 2 the search barely leans on them, which is the
+review's collinearity point seen from the play side. "Optimal" here means
+settled at the resolution 1,024 paired games buy, about a point and a half.
+
+## New vs old heximax (`new-vs-old-heximax.json`)
+
+New = this branch at the adopted trading weights; old = the pre-redesign
+bot frozen in `hexset.bench.shipped_hand` (old three hand terms, old
+weights). 1,536 games, grouped, seed 99000.
+
+| pairing | result |
+|---|---|
+| trading off both sides | **965 / 1,536 = 62.8% [60.4%, 65.2%]**, roads 8.83 vs 10.06 a game |
+| trading on both sides | **cannot be played**: the engine's trade-event invariant fires ("a trade event revisited a position: a gate is not strictly increasing in the acting seat's own value") |
+
+The trading-on failure is the old gate's hole expressed as an engine
+assertion rather than a score: the pre-redesign gate priced a card at
+0.005 VP and being over seven at −0.39, so at a table with the new bot the
+clearing cycles. The 384/384 the hand-valuation readout recorded for this
+pairing predates the trade-event revisit check (HexSet #61). The
+position-ranking read stands at 62.8%, with power, and the old bot's road
+spam (10.1 a game) is gone from the new one (8.8).
+
+## New vs Catanatron (`heximax-omni-s*.txt`, `heximax-notrade-s*.txt`)
+
+Three `AB:2`, 500 games a seed, seeds 7 and 8, `PYTHONHASHSEED=0`,
+catanatron `3.3.0 @ d3f4ad05bb78`, run in `hexset:local` against this
+branch's `src`. The bridge forces trading off, so `heximax-notrade` plays
+`NO_TRADE_WEIGHTS` and `heximax-omni` plays `TRADING_WEIGHTS` with every
+hand visible.
+
+| arm | seed 7 | seed 8 | pooled n = 1,000 | previous (2026-09-04) |
+|---|---|---|---|---|
+| `heximax-omni` | 220/500 = 44.0% | 214/500 = 42.8% | **434/1,000 = 43.4% [40.4%, 46.5%]** | 35.00% [32.11, 38.01] |
+| `heximax-notrade` | 238/500 = 47.6% | 235/500 = 47.0% | **473/1,000 = 47.3% [44.2%, 50.4%]** | 32.50% [29.67, 35.47] |
+
+Fair-share bar (lower bound > 25%) cleared by both arms with room, and both
+are well above the previous intervals: **+14.8 points for the honest
+no-trade bot, +8.4 for the omniscient one**, with the two seeds agreeing to
+within a point in each arm. Against a fixed opponent that shares none of our
+weights, the branch's heximax is the strongest handcrafted bot this project
+has fielded: nearly half the games at a four-seat table against three
+`AB:2`, where a fair share is a quarter. Honest now beats omniscient here
+(47.3% vs 43.4%) -- the omniscient arm plays `TRADING_WEIGHTS`, fitted for a
+table with trading, on a bridge that forces trading off, so it is the
+no-trade profile's sweep that the honest arm is showing.
+
+## What ships
+
+`TRADING_WEIGHTS`: the shipped vector with `robber_risk = -0.30`.
+`NO_TRADE_WEIGHTS`: `robber_risk = -0.30`, `spare_card = 0.1065`. The
+anchor-term change (`expected_card_points`). The temperature is unchanged at
+2.4766: not load-bearing for play, mis-calibrated as a probability by about a
+fifth (the likelihood puts it at 1.75 free, 3.04 with the weights held), and
+that belongs to whatever consumes probabilities as magnitudes.
+
 ## Amendment: the temperature alone (`fit-trading-a-calibrated.json`, `duel-trading-a-calibrated.json`)
 
 Stated after the duel above and before it ran: hold the shipped weights and

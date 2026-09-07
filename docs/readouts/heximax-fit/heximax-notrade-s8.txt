@@ -1,0 +1,7 @@
+[provenance] catanatron 3.3.0 @ d3f4ad05bb78 | PYTHONHASHSEED=0
+500 games, 623.6s (0.80 games/sec)
+  catanatron 3.3.0 @ d3f4ad05bb78 | PYTHONHASHSEED=0 | seed 8 | workers 30 | 30 shards of 17, seeds 8-37
+  0:DC:heximax-notrade          235/500 =  47.0% [42.7%, 51.4%]   avg VP 7.94
+  1:AB:2                         95/500 =  19.0% [15.8%, 22.7%]   avg VP 6.39
+  2:AB:2                         82/500 =  16.4% [13.4%, 19.9%]   avg VP 6.34
+  3:AB:2                         88/500 =  17.6% [14.5%, 21.2%]   avg VP 6.37

@@ -1,0 +1,32 @@
+{
+  "a": "heximax",
+  "b": "search2",
+  "a_path": "heximax",
+  "b_path": "search2",
+  "games": 800,
+  "duel_seed": 42000,
+  "workers": 30,
+  "seconds": 587.1767662409693,
+  "via": "arena.compete",
+  "geometry": "blocked",
+  "unfinished": 0,
+  "wins": 441,
+  "win_rate": 0.55125,
+  "wilson_low": 0.5166215540124866,
+  "wilson_high": 0.5853886111687412,
+  "paired_vp": -0.1925,
+  "paired_vp_low": -0.3648909523091266,
+  "paired_vp_high": -0.020109047690873405,
+  "turns_mean": 79.935,
+  "turns_median": 79.0,
+  "turns_max": 158,
+  "exhausted": 0,
+  "environment": {
+    "commit": "6dc1afb",
+    "dirty": "true",
+    "python": "3.12.14",
+    "platform": "Linux-6.18.33.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "machine": "x86_64"
+  },
+  "previous": "66.38% [63.03, 69.56]"
+}

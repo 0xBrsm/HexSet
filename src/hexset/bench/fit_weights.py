@@ -35,7 +35,7 @@ import numpy as np
 
 from hexset.bench.throughput import default_workers, environment
 from hexset.bots.evaluate import TERM_NAMES
-from hexset.bots.heximax.evaluate import TRADING_WEIGHTS
+from hexset.bots.heximax.evaluate import NO_TRADE_WEIGHTS, TRADING_WEIGHTS
 from hexset.bots.search2 import WIN_TEMPERATURE
 from hexset.dataset import ChoiceSet, samples_from, split_by_game
 from hexset.fitting import (
@@ -118,6 +118,11 @@ def main(argv: list[str] | None = None) -> int:
         "--variants", default=",".join(VARIANTS),
         help=f"comma-separated subset of {', '.join(VARIANTS)}",
     )
+    parser.add_argument(
+        "--profile", choices=("trading", "notrade"), default="trading",
+        help="which shipped profile the incumbent row reads: `TRADING_WEIGHTS` "
+        "for heximax records, `NO_TRADE_WEIGHTS` for heximax-notrade records",
+    )
     parser.add_argument("--bootstrap", type=int, default=0, help="block-bootstrap replicates by game")
     parser.add_argument("--workers", type=int, default=default_workers())
     parser.add_argument("--out", default=None)
@@ -144,8 +149,9 @@ def main(argv: list[str] | None = None) -> int:
     test_y = labels_of(test)
     seats = train_base.shape[1]
 
+    incumbent = TRADING_WEIGHTS if args.profile == "trading" else NO_TRADE_WEIGHTS
     standard = Design.standard()
-    shipped = incumbent_beta(standard, TRADING_WEIGHTS, WIN_TEMPERATURE)
+    shipped = incumbent_beta(standard, incumbent, WIN_TEMPERATURE)
     report: dict = {
         "environment": environment(),
         "settings": vars(args),
@@ -161,7 +167,8 @@ def main(argv: list[str] | None = None) -> int:
         },
         "uniform_loss": uniform_loss(seats),
         "incumbent": {
-            "weights": {name: getattr(TRADING_WEIGHTS, name) for name in TERM_NAMES},
+            "profile": args.profile,
+            "weights": {name: getattr(incumbent, name) for name in TERM_NAMES},
             "temperature": WIN_TEMPERATURE,
             "train_loss": log_loss(standard.matrix_from(train_base), labels_of(train), shipped),
             "test_loss": log_loss(standard.matrix_from(test_base), test_y, shipped),

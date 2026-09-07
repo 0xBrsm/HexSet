@@ -1,0 +1,32 @@
+{
+  "amendment": "shipped weights held, T fitted alone (calibration only)",
+  "records": "/workspaces/dev-hexset/tmp/heximax-fit/records-a.jsonl",
+  "choice_sets": 411700,
+  "train_games": 4000,
+  "test_games": 1000,
+  "incumbent": {
+    "temperature": 2.476644394795811,
+    "train_loss": 1.2065963979216725,
+    "test_loss": 1.2222689736950854
+  },
+  "variants": {
+    "calibrated": {
+      "weights": {
+        "victory_point": 1.0,
+        "production": 7.067,
+        "diversity": 0.358,
+        "scarce": 0.1786,
+        "buy_progress": 0.45,
+        "road": 0.1209,
+        "knight": 0.1041,
+        "spare_card": 0.15,
+        "robber_risk": -0.15,
+        "port": 0.007373
+      },
+      "temperature": 3.0414248800705703,
+      "extras": {},
+      "train_loss": 1.1995334132640318,
+      "test_loss": 1.2123049917039987
+    }
+  }
+}

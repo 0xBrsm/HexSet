@@ -110,8 +110,11 @@ from hexset.trading import Bundle, Trade
 from hexset.victory import victory_points
 
 # The machine this runs on is shared; see `hexset.bench.trade_census`'s own
-# `MAX_WORKERS` for the convention this mirrors.
-MAX_WORKERS = 8
+# `MAX_WORKERS` for the convention this mirrors. The ceiling was 8 for that
+# reason; the PI allocated a 32-core box to the phase-3 re-measurement
+# outright on 2026-09-06, so it is raised here to match
+# `hexset.bench.hand_valuation.MAX_WORKERS`.
+MAX_WORKERS = 30
 
 # The engine's own selectable rules (`hexset.trading.TRADE_RULES`), in the
 # order this module has always reported them. `maximin-public` is gone with
@@ -1855,7 +1858,30 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    bank_p = sub.add_parser("bank", help="play and record heximax x4 games")
+    # Every stage that plays or replays reads `hexset.trading.TRADE_FLOOR`
+    # through `clears_floor`, which looks the global up per call, so setting
+    # it once before the `Pool` reaches the forked workers too.
+    #
+    # Re-deriving the floor needs this. The judge measures the win-rate gain
+    # of trades that *cleared*, and under the shipped 0.0197 a heximax bank
+    # clears almost none -- which is the floor doing its job, not a fault. So
+    # a bank played under the live floor cannot be used to re-derive it: the
+    # positions the judge would need are the ones the floor removed. Play the
+    # bank at `--floor 0`, as it was when the floor was first measured
+    # (`16e8275` shipped 0.0 until that measurement landed), and the
+    # circularity is gone.
+    floored = argparse.ArgumentParser(add_help=False)
+    floored.add_argument(
+        "--floor",
+        type=float,
+        default=None,
+        help="override `hexset.trading.TRADE_FLOOR` for this run; use 0 to "
+        "re-derive the floor without conditioning on the one in force",
+    )
+
+    bank_p = sub.add_parser(
+        "bank", parents=[floored], help="play and record heximax x4 games"
+    )
     bank_p.add_argument("--games", type=int, default=60)
     bank_p.add_argument("--seed", type=int, default=70000)
     bank_p.add_argument("--out", type=Path, default=Path("runs/eval/trade-lab/bank-c6.jsonl"))
@@ -1874,7 +1900,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     strategic_p.add_argument("--workers", type=int, default=MAX_WORKERS)
 
     positions_p = sub.add_parser(
-        "positions", help="the phase-3 judged position set: sample and write phase3-positions.jsonl"
+        "positions", parents=[floored],
+        help="the phase-3 judged position set: sample and write phase3-positions.jsonl",
     )
     positions_p.add_argument("--bank", type=Path, default=Path("runs/eval/trade-lab/bank-c6.jsonl"))
     positions_p.add_argument("--out", type=Path, default=Path("runs/eval/trade-lab/phase3-positions.jsonl"))
@@ -1883,7 +1910,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     positions_p.add_argument("--sample-seed", type=int, default=SAMPLE_SEED)
     positions_p.add_argument("--workers", type=int, default=MAX_WORKERS)
 
-    judge_p = sub.add_parser("judge", help="the paired-chance judge (phase 3)")
+    judge_p = sub.add_parser(
+        "judge", parents=[floored], help="the paired-chance judge (phase 3)"
+    )
     judge_p.add_argument("--positions", type=Path, default=Path("runs/eval/trade-lab/phase3-positions.jsonl"))
     judge_p.add_argument("--bank", type=Path, default=Path("runs/eval/trade-lab/bank-c6.jsonl"))
     judge_p.add_argument("--out", type=Path, default=Path("runs/eval/trade-lab/phase3.jsonl"))
@@ -1896,6 +1925,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     readouts_p.add_argument("--out", type=Path, default=Path("runs/eval/trade-lab/phase3-readouts.json"))
 
     args = parser.parse_args(argv)
+
+    if getattr(args, "floor", None) is not None:
+        from hexset import trading
+
+        trading.TRADE_FLOOR = args.floor
+        print(f"TRADE_FLOOR set to {args.floor}", file=sys.stderr)
 
     if args.cmd == "bank":
         t0 = time.time()

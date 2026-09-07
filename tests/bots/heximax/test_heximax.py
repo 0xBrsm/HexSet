@@ -502,7 +502,13 @@ def test_the_vectorised_gate_matches_the_clone_it_replaces_bit_for_bit():
     # vacuously -- the equality is only worth anything over real candidates.
     assert checked > 500
     assert nonzero > 100
-    assert worst == 0.0
+    # To floating-point noise, not bit for bit: `score_many` sums a hand's
+    # bank value with numpy's pairwise reduction where the scalar loop adds
+    # left to right, so the two agree exactly only for weight values that
+    # happen to round alike -- the shipped -0.15 did, the swept -0.30 differs
+    # by one ulp. `score_many`'s own docstring states the contract as
+    # `gains_many`'s caller checks it, at 1e-12; that is what is pinned here.
+    assert worst <= 1e-12
 
 
 # --- presets ------------------------------------------------------------------

@@ -88,8 +88,17 @@ _PURCHASE_COSTS = np.array(
 )
 
 
-# Today's fit, made under trading (`evaluate.Weights`' own docstring).
-TRADING_WEIGHTS = Weights()
+# `evaluate.Weights` (the one-ply fit, `evaluate.Weights`' own docstring)
+# with the one term the play sweep moved. `hexset.bench.weight_sweep`,
+# 2026-09-07 (`docs/readouts/heximax-fit/sweep-trading.json`): every free
+# term rung at x0, x0.5, x2 and then x0.71, x1.41 of its value against the
+# incumbent on 1,024 paired boards; only `robber_risk` cleared the bar
+# (-0.15 -> -0.30: 54.2% [51.1, 57.2]; zero reads 36.8%), and the swept
+# vector confirmed 52.5% [50.7, 54.3] over 3,072 fresh boards against the
+# start. The other seven terms sit within a point and a half of their best
+# ring value, which is the resolution 1,024 paired games buy. search2 keeps
+# the bare default: it is the frozen referent.
+TRADING_WEIGHTS = Weights(robber_risk=-0.30)
 
 # The fit that preceded the trading refit, recovered from git: `87d9095`
 # (parent of `1dd9045`, "refit the weights for trading"), `src/catan/evaluate.py`.

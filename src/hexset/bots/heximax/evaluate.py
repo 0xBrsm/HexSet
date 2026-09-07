@@ -6,11 +6,12 @@ terms are the existing evaluator's own `survey`, reused rather than copied
 since it reads only public state. The three hand terms (`evaluate.hand_terms`
 -- purchase progress, spare cards, robber exposure) are read on the true hand
 for the knower (or for everyone, when `omniscient`) and on
-`View.expected_hand` for everyone else; victory point cards count only for
-the knower. `TRADING_WEIGHTS` and
-`NO_TRADE_WEIGHTS` are the two shipped profiles `heximax()` picks between by
-mode -- see their own comments for provenance; `weights=` overrides either
-with a candidate vector, which is the hook `hexset.tuning` fits through.
+`View.expected_hand` for everyone else; victory point cards are exact for
+the knower and an expectation over the unseen pool for everyone else
+(`expected_card_points`). `TRADING_WEIGHTS` and `NO_TRADE_WEIGHTS` are the
+two shipped profiles `heximax()` picks between by mode -- see their own
+comments for provenance; `weights=` overrides either with a candidate
+vector, which is how `hexset.fitting`'s result is played before adoption.
 """
 
 from __future__ import annotations
@@ -34,6 +35,8 @@ from ..evaluate import (
     seven_before_next_turn,
 )
 from hexset.board.terrain import NUM_RESOURCES
+from hexset.cards import DECK_COMPOSITION, DevCard
+from hexset.devcards import holdings
 from hexset.economy import COSTS
 from hexset.game import Game
 from hexset.robber import DISCARD_THRESHOLD
@@ -42,6 +45,35 @@ from hexset.state import GameState
 from hexset.victory import WINNING_POINTS, award_points, card_points
 
 from hexset.view import View
+
+# Victory-point cards in the deck. None is ever revealed before its holder
+# wins, so every one not in the knower's own hand is in the unseen pool.
+VP_CARDS = DECK_COMPOSITION[DevCard.VICTORY_POINT]
+
+
+def expected_card_points(state: GameState, seat: int, knower: int | None) -> float:
+    """Victory-point cards `seat` is expected to hold, from `knower`'s information.
+
+    The knower's own VP cards are exact (`card_points`); an opponent's are
+    hidden until it wins, so its row gets the number of development cards it
+    holds -- public -- times the share of the *unseen* pool that is a VP
+    card. The unseen pool is the deck plus every development hand the knower
+    cannot see, and every VP card outside the knower's own hand is in it.
+
+    Without this the anchor term (`points`) means one thing in the knower's
+    row and another in every other row: a seat holding three development
+    cards is on average most of a point ahead of one holding none, and an
+    evaluator that scores that seat at zero for them ranks the table wrong
+    in exactly the term whose weight is pinned to one.
+    """
+    held = sum(holdings(state, seat))
+    if not held:
+        return 0.0
+    unseen_vp = VP_CARDS - (card_points(state, knower) if knower is not None else 0)
+    unseen = len(state.deck) + sum(
+        sum(holdings(state, s)) for s in range(state.num_players) if s != knower
+    )
+    return held * unseen_vp / unseen if unseen else 0.0
 
 
 # `hand_terms`' purchases in the order it considers them, so `score_many`'s
@@ -90,7 +122,8 @@ class HonestEvaluator:
     than copied since it reads only public state. The three hand terms
     (`evaluate.hand_terms`) are read on the true hand for the knower and on
     `View.expected_hand` for everyone else (or everyone, when `omniscient`);
-    victory-point cards count only for the knower. `buy_progress` on an
+    victory-point cards are exact for the knower (and for everyone, when
+    `omniscient`) and `expected_card_points` otherwise. `buy_progress` on an
     expected hand is an approximation -- a maximum of minimums, so the value
     on the mean differs from the mean of the values -- which
     `exact_progress_samples > 0` replaces with an average over that many
@@ -266,8 +299,10 @@ class HonestEvaluator:
         """
         walk = self._walk(state, seat)
         points = walk.buildings + award_points(state, seat)
-        if seat == knower:
+        if self.omniscient or seat == knower:
             points += card_points(state, seat)
+        else:
+            points += expected_card_points(state, seat, knower)
         progress, spare, risk = self._hand_terms_of(state, seat, hand, belief, walk)
         return (
             points,
@@ -356,8 +391,10 @@ class HonestEvaluator:
         for seat in range(num_players):
             walk = self._walk(state, seat)
             pts = walk.buildings + award_points(state, seat)
-            if seat == knower:
+            if self.omniscient or seat == knower:
                 pts += card_points(state, seat)
+            else:
+                pts += expected_card_points(state, seat, knower)
             points[seat] = pts
             rate[seat] = walk.rate
             kinds[seat] = walk.kinds
@@ -417,12 +454,12 @@ class HonestEvaluator:
         Memoized for the life of one `Heximax.choose()`, exactly: the key
         names every input `terms`/`score` read besides `hand`/`belief` --
         board occupancy and the robber (`survey`), road and knight counts,
-        the longest-road/largest-army holders, the knower's own development
-        cards (the only seat `card_points` scores) -- plus every seat's hand
-        and the belief's `signature()`, which is `expected_hand`'s only
-        input. A hit is byte-identical to recomputing, whether the belief
-        came from `belief_for`, a fresh `View.from_game`, or the untyped
-        fallback above.
+        the longest-road/largest-army holders, every seat's development-card
+        holdings and the deck size (`card_points`/`expected_card_points`) --
+        plus every seat's hand and the belief's `signature()`, which is
+        `expected_hand`'s only input. A hit is byte-identical to
+        recomputing, whether the belief came from `belief_for`, a fresh
+        `View.from_game`, or the untyped fallback above.
         """
         if belief is None and knower is not None and not self.omniscient:
             belief = View(
@@ -437,8 +474,11 @@ class HonestEvaluator:
             state.longest_road_holder,
             state.largest_army_holder,
             knower,
-            tuple(state.dev_cards[knower]) if knower is not None else None,
-            tuple(state.new_dev_cards[knower]) if knower is not None else None,
+            tuple(
+                tuple(map(sum, zip(held, fresh)))
+                for held, fresh in zip(state.dev_cards, state.new_dev_cards)
+            ),
+            len(state.deck),
             tuple(tuple(hand) for hand in state.hands),
             None if belief is None else belief.signature(),
         )
@@ -454,6 +494,40 @@ class HonestEvaluator:
             out.append(self.score(state, seat, hand, knower=knower, belief=belief))
         self._evaluate_cache[key] = out
         return list(out)
+
+    def rows(
+        self, state: GameState, knower: int, belief: View | None = None,
+    ) -> list[tuple[float, ...]]:
+        """`terms` for every seat from `knower`'s information -- the per-seat
+        feature rows `evaluate` dots with the weights, before the dot.
+
+        What `hexset.fitting` regresses on: the same model the search scores,
+        term for term and read through the same belief, so a fitted vector
+        drops straight into `Weights` with nothing lost in translation. Not
+        memoized -- the fit replays recorded games once, it never revisits a
+        position the way a search does.
+        """
+        if belief is None and not self.omniscient:
+            belief = View(
+                state, PublicLedger.new(state.num_players), knower, omniscient=False
+            )
+        out = []
+        for seat in range(state.num_players):
+            if self.omniscient or seat == knower or belief is None:
+                hand: Sequence[float] = state.hands[seat]
+            else:
+                hand = belief.expected_hand(seat)
+            out.append(self.terms(state, seat, hand, knower=knower, belief=belief))
+        return out
+
+    def rows_game(self, game: Game, knower: int) -> list[tuple[float, ...]]:
+        """`rows`, with the belief built from `game`'s own ledger."""
+        belief = self.belief_from_game(game, knower)
+        # true state: the same object `evaluate_game` reads for the same
+        # reason -- `View.__init__` enforces honesty through
+        # `known`/`unknown`, and `rows` reads an opponent's hand only through
+        # `belief.expected_hand`.
+        return self.rows(game.state(knower, hidden=False), knower, belief)
 
     def evaluate_game(self, game: Game, seat: int) -> list[float]:
         """`evaluate`, building the belief from `game`'s own ledger. The leaf call.

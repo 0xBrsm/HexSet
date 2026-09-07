@@ -69,7 +69,7 @@ from hexset.actions import Action, ActionType, apply, legal_actions, victim_of
 from hexset.board.board import Board
 from hexset.board.terrain import NUM_RESOURCES
 from hexset.chance import Forced, Live
-from ..search2 import STANCES, options_for
+from ..search2 import STANCES, options_for, win_at
 from hexset.game import ROLL_ODDS, Game, Phase, imagine, is_over, roll_dice, to_move
 from hexset.ledger import PublicLedger
 from hexset.mcts import draws_hidden
@@ -225,6 +225,11 @@ class Heximax:
     placement: bool = True
     mode: str = "honest"
     exact_roll_plies: int = EXACT_ROLL_PLIES
+    # `win` stance only: the temperature the per-seat vector is read at,
+    # `None` meaning `search2.WIN_TEMPERATURE`. A fitted vector and its
+    # temperature are identified jointly (`hexset.fitting`), so a candidate
+    # has to carry its own for a duel against the incumbent to mean anything.
+    temperature: float | None = None
 
     def __post_init__(self) -> None:
         if self.stance not in STANCES:
@@ -232,6 +237,11 @@ class Heximax:
         if self.k < 1:
             raise ValueError("k must be at least one world")
         self._rank = STANCES[self.stance]
+        if self.temperature is not None:
+            if self.stance != "win":
+                raise ValueError("temperature applies to the win stance only")
+            temperature = self.temperature
+            self._rank = lambda vector, seat: win_at(vector, seat, temperature)
         self._spent = 0
         self._budget = self.max_nodes
         self.depth_reached = 0
@@ -934,6 +944,7 @@ def heximax(
     width: int | None = 6, max_trades: int | None = BY_MODE,  # type: ignore[assignment]
     max_nodes: int = DEFAULT_MAX_NODES, k: int = 1, stance: str = "win",
     placement: bool = True, exact_progress_samples: int = 0, weights: Weights | None = None,
+    temperature: float | None = None,
 ) -> Heximax:
     """The three shipped configurations, by `mode`.
 
@@ -944,10 +955,12 @@ def heximax(
     is taken as given.
 
     `weights` overrides the mode's own profile (`TRADING_WEIGHTS` or
-    `NO_TRADE_WEIGHTS`) with the given vector, leaving everything else about
-    the mode -- the trade switch, `omniscient` -- unchanged. This is the hook
-    `hexset.tuning` fits through: a candidate and the incumbent are otherwise
-    identical heximax bots, differing only in this vector.
+    `NO_TRADE_WEIGHTS`) with the given vector, and `temperature` the `win`
+    stance's `search2.WIN_TEMPERATURE`, leaving everything else about the
+    mode -- the trade switch, `omniscient` -- unchanged. This is how a fit
+    (`hexset.fitting`) is played before adoption: a candidate and the
+    incumbent are otherwise identical heximax bots, differing only in the
+    vector and the temperature it was fitted with.
     """
     if mode not in MODES:
         raise ValueError(f"unknown heximax mode: {mode}")
@@ -972,4 +985,5 @@ def heximax(
         max_trades=max_trades,
         placement=placement,
         mode=mode,
+        temperature=temperature,
     )

@@ -558,3 +558,76 @@ def test_heximax_reads_the_true_state_only_where_it_says_so():
     source = "\n".join(lines)
     assert "._state" not in source
     assert source.count("omniscient=self.omniscient") <= 2
+
+
+# --- hidden victory points and the fitted temperature --------------------------
+
+
+def test_an_opponents_development_cards_are_worth_their_expected_victory_points():
+    """The anchor term means the same thing in every row: the knower's own VP
+    cards are exact, an opponent's are its held count times the VP share of
+    the unseen pool, and the omniscient reader sees the truth for everyone."""
+    from hexset.bots.heximax.evaluate import VP_CARDS, HonestEvaluator, expected_card_points
+    from hexset.cards import DevCard
+
+    game = after_setup(3)
+    for p in range(4):
+        set_known_hand(game, p, [0] * NUM_RESOURCES)
+    state = game._state
+    # Seat 1 holds two knights and a VP card, seat 2 one knight; all drawn
+    # from the deck, so the unseen pool shrinks by the same three cards.
+    state.dev_cards[1][DevCard.KNIGHT] = 2
+    state.new_dev_cards[1][DevCard.VICTORY_POINT] = 1
+    state.dev_cards[2][DevCard.KNIGHT] = 1
+    del state.deck[:4]
+
+    unseen_from_0 = len(state.deck) + 3 + 1
+    assert expected_card_points(state, 1, 0) == pytest.approx(3 * VP_CARDS / unseen_from_0)
+    assert expected_card_points(state, 2, 0) == pytest.approx(1 * VP_CARDS / unseen_from_0)
+    assert expected_card_points(state, 0, 1) == 0.0
+    # Seat 1 knows its own VP card, so the pool it reads has one VP card fewer
+    # and excludes its own three cards.
+    assert expected_card_points(state, 2, 1) == pytest.approx(
+        (VP_CARDS - 1) / (len(state.deck) + 1)
+    )
+
+    honest = HonestEvaluator(state.board)
+    plain = Evaluator(state.board)
+    rows = honest.rows_game(game, 0)
+    truth = [plain.terms(state, p, knower=p) for p in range(4)]
+    assert rows[0][0] == truth[0][0]
+    assert rows[1][0] == pytest.approx(truth[1][0] - 1 + 3 * VP_CARDS / unseen_from_0)
+    own = honest.rows_game(game, 1)
+    assert own[1][0] == truth[1][0]  # exact for the knower: the real VP card counts
+    omni = HonestEvaluator(state.board, omniscient=True).rows_game(game, 0)
+    assert [row[0] for row in omni] == pytest.approx([row[0] for row in truth])
+    # `evaluate` is `rows` dotted with the weights, so the two cannot drift.
+    scored = honest.evaluate_game(game, 0)
+    assert scored == pytest.approx(
+        [sum(w * v for w, v in zip(honest.vector, row)) for row in rows]
+    )
+
+
+def test_a_candidate_temperature_travels_with_the_entrant():
+    from hexset.arena import Entrant
+    from hexset.bots.search2 import WIN_TEMPERATURE, win, win_at
+
+    vector = [4.0, 6.0, 5.0, 3.0]
+    assert win(vector, 1) == pytest.approx(win_at(vector, 1, WIN_TEMPERATURE))
+    assert win_at(vector, 1, 0.5) > win(vector, 1) > win_at(vector, 1, 50.0)
+
+    board = random_base_board(random.Random(0))
+    bot = spawn(
+        Entrant("hot", kind="heximax", depth=2, width=6, temperature=0.5),
+        board, random.Random(0),
+    )
+    assert bot.temperature == 0.5
+    assert bot._rank(vector, 1) == pytest.approx(win_at(vector, 1, 0.5))
+    default = spawn(PRESETS["heximax"], board, random.Random(0))
+    assert default.temperature is None
+    assert default._rank(vector, 1) == pytest.approx(win(vector, 1))
+    with pytest.raises(ValueError):
+        spawn(
+            Entrant("bad", kind="heximax", depth=2, width=6, stance="relative", temperature=1.0),
+            board, random.Random(0),
+        )

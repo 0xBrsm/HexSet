@@ -199,6 +199,10 @@ class Entrant:
     # resolution over 400 games; `k = 1` ships and the field stays for anyone
     # who wants to re-open the question, not for a preset to vary.
     k: int = 1
+    # `kind="heximax"` only, `win` stance: the temperature the vector is read
+    # at, `None` meaning the bot's own constant. A fitted `weights` and its
+    # temperature are identified jointly, so a candidate carries both.
+    temperature: float | None = None
 
     def renamed(self, name: str) -> Entrant:
         return replace(self, name=name)

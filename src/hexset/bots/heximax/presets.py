@@ -34,6 +34,7 @@ def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Heximax:
         max_trades=entrant.max_trades,
         k=entrant.k,
         weights=entrant.weights,
+        temperature=entrant.temperature,
     )
     if entrant.stance is not None:
         kwargs["stance"] = entrant.stance

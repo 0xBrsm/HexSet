@@ -27,6 +27,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   PendingGate` gains the manual-seat side of the same three methods
   (`offer`/`respond`/`choose`), recording a broadcast offer to
   `game.pending` exactly as it already does for the clearing house.
+- `hexset.fitting` fits the evaluation weights *and* the win temperature in
+  one solve: a conditional logit over the four seats of a recorded position,
+  labelled with the eventual winner, coefficients `w / T`, cluster-robust by
+  game with an optional block bootstrap. `hexset.dataset` builds its choice
+  sets by replaying records honestly through `HonestEvaluator.rows_game`
+  (new: the per-seat term rows before the dot). `hexset.bench.fit_weights`
+  fits several designs from one records file and scores each by held-out
+  log loss beside the shipped pair; `hexset.bench.fit_duel` plays a fitted
+  pair against the shipped heximax, paired.
+- `Heximax.temperature` (also `heximax(temperature=...)` and
+  `Entrant.temperature`) reads the `win` stance at a given temperature
+  instead of `search2.WIN_TEMPERATURE`, so a candidate pair can sit at a
+  table with the incumbent; `search2.win_at` is the stance at any
+  temperature.
 
 ### Removed
 
@@ -37,6 +51,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- heximax's honest evaluator values an opponent's development cards at
+  their expected victory points -- held count times the VP share of the
+  unseen pool (`hexset.bots.heximax.evaluate.expected_card_points`) -- where
+  it used to count VP cards for the knower alone; the omniscient evaluator
+  now counts every seat's real VP cards. Play-neutral against `search2` and
+  the honest bot on 800 identical boards; the anchor term now means the
+  same thing in every seat's row.
 - `hexset.mcts.Evaluator` gained a required `terminal(game) -> Sequence[float]`
   method, called for a finished-game leaf in place of the search's own
   `relative_points` formula — board-seat order, the same frame `evaluate`'s

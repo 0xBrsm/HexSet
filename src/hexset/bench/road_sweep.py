@@ -8,7 +8,7 @@ into roads whenever it can -- more than a human would. This plays a
 challenger heximax (a modified `Weights`) against the intact baseline
 heximax, on identical boards with seats mirrored, exactly the way
 `hexset.bench.ablate` plays a zeroed term against the full vector -- except
-this also records what `ablate`/`hexset.tuning.duel` throw away: roads,
+this also records what `ablate`'s own duel throws away: roads,
 settlements and cities per seat, and game length, not just who won.
 
 Depth 2, width 6 (the `heximax` preset), honest mode, trading on -- the
@@ -67,7 +67,7 @@ def _play_one(
 
     Board and rotation derivation is `hexset.arena._play_one`'s, verbatim --
     same seed string keys, same antithetic pairing over the 4-seat lineup --
-    so a cell here plays the identical boards `hexset.tuning.duel` would at
+    so a cell here plays the identical boards `hexset.arena.compete` would at
     the same `seed`. What is added is the per-seat build census `compete`
     does not keep: `hexset.arena.Tournament` only carries points and turns.
     """

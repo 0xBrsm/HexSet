@@ -20,8 +20,43 @@ import time
 from dataclasses import fields, replace
 
 from hexset.bench.throughput import default_workers, environment
-from hexset.arena import Z_95, wilson
-from hexset.tuning import WEIGHTS, duel
+from hexset.arena import Entrant, Z_95, compete, wilson
+from hexset.bots.evaluate import Weights as DefaultWeights
+from hexset.evaluate_tiered import Weights as TieredWeights
+
+# Which evaluation each `--evaluator` name builds. Position-level weight
+# fitting now lives in `hexset.fitting`; this only needs the two greedy/
+# search profiles to zero a term against.
+WEIGHTS: dict[str, type] = {"default": DefaultWeights, "tiered": TieredWeights}
+
+
+def _entrant_for(
+    name: str, weights, depth: int, width: int | None, evaluator: str
+) -> Entrant:
+    kind = "greedy" if depth <= 1 else "search"
+    return Entrant(
+        name=name, kind=kind, weights=weights, depth=depth, width=width,
+        evaluator=evaluator,
+    )
+
+
+def _duel(
+    challenger,
+    incumbent,
+    games: int,
+    *,
+    seed: int,
+    depth: int,
+    width: int | None,
+    workers: int,
+    evaluator: str,
+) -> tuple[int, int]:
+    """Play two of each, seats rotated. Returns (challenger wins, decided games)."""
+    a = _entrant_for("challenger", challenger, depth, width, evaluator)
+    b = _entrant_for("incumbent", incumbent, depth, width, evaluator)
+    result = compete([a, b, a, b], games, seed=seed, workers=workers)
+    wins = sum(s.wins for s in result.standings if s.name == "challenger")
+    return wins, result.games - result.unfinished
 
 
 def ablate(
@@ -35,7 +70,7 @@ def ablate(
     evaluator: str = "default",
 ) -> tuple[int, int]:
     full = WEIGHTS[evaluator]()
-    return duel(
+    return _duel(
         replace(full, **{term: 0.0}),
         full,
         games,

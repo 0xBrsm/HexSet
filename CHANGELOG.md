@@ -28,6 +28,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`offer`/`respond`/`choose`), recording a broadcast offer to
   `game.pending` exactly as it already does for the clearing house.
 
+### Removed
+
+- `hexset.tuning`, `hexset.bench.tune`, `hexset.bench.win_temperature` and
+  `hexset.bench.learn_weights`, the hill-climb weight fitter and its
+  supporting scripts -- superseded by the position-level likelihood fit in
+  `hexset.fitting`, which weights are now fitted against.
+
 ### Changed
 
 - `hexset.mcts.Evaluator` gained a required `terminal(game) -> Sequence[float]`

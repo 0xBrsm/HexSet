@@ -131,10 +131,11 @@ def hand_terms(
 class Weights:
     """Scoring weights in units of victory points.
 
-    Fitted by `hexset.tuning`, not guessed, and refitted once trading existed:
-    60 hill-climb rounds at 400 games a duel, confirmed over 2000 games at
-    56.2% (95% CI 54.1-58.4%) against the pre-trading values. Fitted for the
-    one-ply bot; the deeper search has not been refitted.
+    Fitted against recorded outcomes (`hexset.fitting`), not guessed, and
+    refitted once trading existed: 60 hill-climb rounds at 400 games a duel,
+    confirmed over 2000 games at 56.2% (95% CI 54.1-58.4%) against the
+    pre-trading values. Fitted for the one-ply bot; the deeper search has not
+    been refitted.
 
     `victory_point` is pinned at 1.0 because scaling every weight alike cannot
     change which position the search prefers, so the unit has to come from

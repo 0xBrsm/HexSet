@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""Preset registration: importing `heximax` makes it spawnable and fittable.
+"""Preset registration: importing `heximax` makes it spawnable.
 
-`hexset.arena` and `hexset.tuning` know heximax only by name, the same way
-they know the network-backed kinds `hexnet.netbot` provides -- neither
-imports this package, so importing `heximax` (directly, or via anything that
-does: `hexset.bench.duel`, `hexset.server`) is what makes the "heximax" entrant
-kind spawnable and the "heximax-trading"/"heximax-notrade" evaluator names
-fittable. A process that never imports `heximax` gets a plain
+`hexset.arena` knows heximax only by name, the same way it knows the
+network-backed kinds `hexnet.netbot` provides -- it does not import this
+package, so importing `heximax` (directly, or via anything that does:
+`hexset.bench.duel`, `hexset.server`) is what makes the "heximax" entrant
+kind spawnable. A process that never imports `heximax` gets a plain
 "unknown"/`KeyError` on the name rather than this module's numpy and
 `hexset.mcts` imports forced on it.
 """
@@ -17,9 +16,7 @@ import random
 
 from hexset.arena import Entrant, register_entrant_kind, register_preset
 from hexset.board.board import Board
-from hexset.tuning import register_heximax_evaluator
 
-from .evaluate import NO_TRADE_WEIGHTS, TRADING_WEIGHTS
 from .search import Heximax, heximax
 
 
@@ -70,11 +67,3 @@ register_preset(
         "heximax-notrade", kind="heximax", depth=2, width=6, max_trades=0, mode="notrade",
     ),
 )
-
-# `hexset.tuning.entrant_for(evaluator="heximax-trading"/"heximax-notrade")`
-# climbs from these starting points -- `heximax-trading` shares
-# `evaluate.Weights` with "default" (`HonestEvaluator` wraps the same
-# `Evaluator`) but starts from heximax's own `TRADING_WEIGHTS` rather than
-# the bare default, and `heximax-notrade` starts from `NO_TRADE_WEIGHTS`.
-register_heximax_evaluator("heximax-trading", "honest", lambda: TRADING_WEIGHTS)
-register_heximax_evaluator("heximax-notrade", "notrade", lambda: NO_TRADE_WEIGHTS)

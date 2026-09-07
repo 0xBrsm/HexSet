@@ -24,6 +24,7 @@ from hexset import encoding
 from hexset.actions import Action
 from hexset.arena import Entrant, entrant_from_name, spawn
 from hexset.bots import Bot
+from hexset.game import is_over, may_act, to_move
 
 from .aec import TOPOLOGY, HexSetAEC, agent_name
 
@@ -77,8 +78,10 @@ class HexSetEnv(Env):
 
     `opponents`: one `hexset.arena` preset name (or `<kind>:<checkpoint>`
     spec, see `hexset.arena.entrant_from_name`) per non-learner seat.
-    `reward`/`flatten` mirror `HexSetAEC`'s and this class's own `flatten`
-    option: `flatten=True` (default) concatenates the four encoder arrays
+    `reward`/`discard_order` are `HexSetAEC`'s, passed straight through
+    (`discard_order` decides which of the seats owing a seven's discards is
+    asked next -- see that class's docstring).
+    `flatten=True` (default) concatenates the four encoder arrays
     into one `Box`, matching what `sb3-contrib`'s `MaskablePPO` and most
     single-agent RL code expect (and `CatanatronEnv`'s own default "vector"
     representation); `flatten=False` returns the dict of arrays.
@@ -102,6 +105,7 @@ class HexSetEnv(Env):
         opponents: Sequence[str] = DEFAULT_OPPONENTS,
         *,
         reward: str = "terminal",
+        discard_order: str = "random",
         flatten: bool = True,
         render_mode: str | None = None,
     ) -> None:
@@ -112,7 +116,12 @@ class HexSetEnv(Env):
         if isinstance(learner_seat, int) and not 0 <= learner_seat < num_players:
             raise ValueError(f"learner_seat {learner_seat} out of range for {num_players} players")
 
-        self._aec = HexSetAEC(num_players=num_players, reward=reward, render_mode=render_mode)
+        self._aec = HexSetAEC(
+            num_players=num_players,
+            reward=reward,
+            discard_order=discard_order,
+            render_mode=render_mode,
+        )
         self.learner_seat_config = learner_seat
         self.opponent_names: tuple[str, ...] = tuple(opponents)
         self._entrants: list[Entrant] = [entrant_from_name(name) for name in opponents]
@@ -199,11 +208,12 @@ class HexSetEnv(Env):
             # -- every engine check of this kind runs before any state
             # mutation (`hexset.game`'s handlers all `_require` the phase, or
             # equivalent, as their first line), so nothing here needs to be
-            # undone. `IndexError` alongside `ValueError`: `actions.apply`'s
-            # own `DISCARD` dispatch indexes `players_owing_discards(game)[0]`
-            # with no phase guard of its own, so a `DISCARD` action decoded
-            # outside `Phase.DISCARD` raises `IndexError` rather than
-            # `ValueError` for the same "not legal right now" reason.
+            # undone. `IndexError` is still caught alongside `ValueError`
+            # defensively -- `HexSetAEC.step` now dispatches the acting seat
+            # with the action, so a `DISCARD` decoded outside `Phase.DISCARD`
+            # reaches `game.discard_one`'s own `_require` and raises
+            # `ValueError` rather than indexing an empty owing list, but the
+            # engine is free to grow another such edge.
             # Rejected as a harmless no-op rather than crashing the episode: a
             # caller is expected to act through `action_masks()`/
             # `info["action_mask"]` (`gymnasium.spaces.Discrete.sample(mask)`,
@@ -237,6 +247,25 @@ class HexSetEnv(Env):
     # -- internals ------------------------------------------------------
 
     def _auto_play_opponents(self) -> None:
+        """Play every non-learner decision until the learner is entitled to one.
+
+        "Entitled", not "is `to_move`": during a seven's discards several
+        seats owe at once and none of them waits on another
+        (`hexset.game.may_act`), so the learner is handed control the moment
+        it owes cards rather than after every lower-numbered bot seat has
+        cleared its own quota. The round is order-invariant, so the bots lose
+        nothing by going second.
+
+        The bot seats are then driven in `to_move` order, which is not this
+        wrapper asserting an order: `hexset.bots.Bot.choose(game)` takes the
+        position and nothing else, so a bot answers for the seat
+        `hexset.actions.legal_actions(game)` answers for -- the engine's own
+        serialization. Asking seat 3's bot while `to_move` names seat 0 would
+        hand back a card out of seat 0's hand. `HexSetAEC.select_agent` is the
+        supported way to say so; a caller wanting a different order among bot
+        seats needs a seat-aware `Bot`, which is not this environment's to
+        invent.
+        """
         aec = self._aec
         learner = agent_name(self._learner_seat)
         while True:
@@ -244,13 +273,19 @@ class HexSetEnv(Env):
                 return
             if aec.agent_selection == learner:
                 return
+            game = aec._game
+            if not is_over(game) and may_act(game, self._learner_seat):
+                aec.select_agent(learner)
+                return
             agent = aec.agent_selection
             if aec.terminations[agent] or aec.truncations[agent]:
                 aec.step(None)
                 continue
-            seat = aec.possible_agents.index(agent)
+            seat = to_move(game)
+            if agent != agent_name(seat):
+                aec.select_agent(agent_name(seat))
             bot = self._bots[seat]
-            action = bot.choose(aec._game)
+            action = bot.choose(game)
             aec.step(action)
 
     def _observe_learner(self) -> tuple[Any, dict[str, Any]]:

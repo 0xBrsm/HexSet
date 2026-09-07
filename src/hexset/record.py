@@ -24,6 +24,16 @@ chance stream is what that seed would actually have produced
 `chance`. Version 1 lines (no `chance`, `seed` required) are refused by
 `from_json` -- the only version-1 file this project has, the trade-lab bank,
 is re-emitted as version 2 by re-running `record_game`.
+
+`actors` joins `trades` and `first` as a field added inside version 2 rather
+than by bumping it: it defaults to empty, an older file without it reads and
+replays exactly as before, and bumping would refuse every record already
+written. It names who took a step where the position cannot say -- a seven's
+discards, which the engine serves simultaneously -- so a real table's discard
+order round-trips instead of being flattened into ascending seat order. A
+reader older than the field will drop it and replay such a record in the
+engine's own order, which reaches the same position but is not the same
+history.
 """
 
 from __future__ import annotations
@@ -43,7 +53,7 @@ from .board.topology import build as build_topology
 from .bots import Bot
 from .cards import DevCard, make_deck
 from .chance import Chance, ChanceError, Live, Recording, Scripted
-from .game import Game, is_over, start, to_move
+from .game import Game, is_over, may_act, start, to_move
 from .trading import Trade, apply_trades
 
 VERSION = 2
@@ -102,6 +112,21 @@ class Record:
     # it depends on what the seated bots published and accepted. Recording
     # it is therefore what makes a record replayable at all.
     trades: tuple[tuple[int, int, int, tuple[int, ...]], ...] = ()
+    # Who took the action, sparse by step: `(step, seat)`. Only recorded for
+    # the steps where the position does not already say -- in practice the
+    # `Phase.DISCARD` ones. A seven's discards are simultaneous: every seat
+    # over the limit owes cards at the same instant and any of them may pay
+    # first (`hexset.game.may_act`), so "whose action was this" is a fact
+    # about the game that happened, not something `to_move` can recover.
+    # Without it a record could only ever replay a discard round in ascending
+    # seat order, and a real table's order -- a server journal's, a
+    # colonist.io log's -- could not be round-tripped at all.
+    #
+    # Absent (`()`) for every record written before this field existed and
+    # for every game whose discards did happen in the engine's own order;
+    # `replay` then falls back to `to_move` exactly as it always did, so no
+    # stored record changes meaning.
+    actors: tuple[tuple[int, int], ...] = ()
 
     @property
     def decided(self) -> bool:
@@ -195,21 +220,43 @@ def actions_of(record: Record) -> Iterator[Action]:
         yield Action(ActionType(kind), a, b)
 
 
-def steps(record: Record) -> Iterator[tuple[Action, tuple[Trade, ...]]]:
-    """Each action with the trades the engine cleared inside it.
+def moves(record: Record) -> Iterator[tuple[int | None, Action, tuple[Trade, ...]]]:
+    """Each step as `(actor, action, trades)`: who took it, what they took,
+    and the trades the engine cleared inside it.
 
     Everything that walks a record goes through here, so the reconstruction
     lives in one place and cannot drift between replaying, featurising and
-    behaviour analysis.
+    behaviour analysis. `actor` is `None` for every step the record does not
+    name one for (see `Record.actors`), which means "whoever the position
+    says" -- `hexset.game.to_move`.
+
+    Shaped `(actor, action, trades)` to match `hexset.server.journal.steps`,
+    the other replayable stream in this package.
     """
     by_step: dict[int, list[Trade]] = {}
     for step, a, b, received in record.trades:
         by_step.setdefault(step, []).append(Trade(a, b, tuple(received)))
+    actors = dict(record.actors)
     for step, action in enumerate(actions_of(record)):
-        yield action, tuple(by_step.get(step, ()))
+        yield actors.get(step), action, tuple(by_step.get(step, ()))
 
 
-def advance(game: Game, action: Action, trades: Sequence[Trade]) -> None:
+def steps(record: Record) -> Iterator[tuple[Action, tuple[Trade, ...]]]:
+    """`moves` without the actor, for a caller that never needed it.
+
+    Kept because it is what every consumer of a record outside this package
+    already unpacks. A caller that replays the record with `advance` wants
+    `moves` instead: a record whose discard round did not happen in ascending
+    seat order (`Record.actors`) cannot be re-applied without knowing whose
+    each discard was.
+    """
+    for _, action, trades in moves(record):
+        yield action, trades
+
+
+def advance(
+    game: Game, action: Action, trades: Sequence[Trade], seat: int | None = None
+) -> None:
     """Apply one recorded step: the action, then the trades it cleared.
 
     A replayed game has no seated bots (`game.gates` stays `None`), so its
@@ -219,8 +266,13 @@ def advance(game: Game, action: Action, trades: Sequence[Trade]) -> None:
     turn's first event fires eagerly, inside the roll or robber action's own
     `apply` (`enter_main`), so `record_game` already attributes it to that
     same step.
+
+    `seat` is the recorded actor (`moves`), passed on to
+    `hexset.actions.apply`, which only ever reads it for a `DISCARD`. `None`
+    -- the historical call -- resolves as it always did, to the lowest-indexed
+    seat still owing.
     """
-    apply(game, action)
+    apply(game, action, seat)
     apply_trades(game, trades)
 
 
@@ -295,15 +347,30 @@ def replay(record: Record) -> Game:
     divergence raises `ReplayError` naming the event -- the tripwire the
     pre-v2 `Record` relied on implicitly, kept as an explicit check instead
     of a silent dependency.
+
+    Legality is checked against the seat that actually took the action, not
+    against `to_move`. The two differ only in `Phase.DISCARD`, where several
+    seats owe cards at once and any of them may pay first: a record that names
+    its actors (`Record.actors` -- a server journal converted by
+    `from_journal`, a colonist.io log) therefore round-trips its true discard
+    order instead of being refused for not being in ascending seat order. A
+    record that names none replays exactly as before, since `may_act` is
+    always true of `to_move` and `legal_actions(game, to_move(game))` is
+    `legal_actions(game)`.
     """
     game = open_record(record)
-    for step, (action, trades) in enumerate(steps(record)):
-        if action not in legal_actions(game):
+    for step, (actor, action, trades) in enumerate(moves(record)):
+        seat = to_move(game) if actor is None else actor
+        if not may_act(game, seat):
             raise ReplayError(
-                f"step {step}: {action} is not legal in {game.phase.name}"
+                f"step {step}: seat {seat} may not act in {game.phase.name}"
+            )
+        if action not in legal_actions(game, seat):
+            raise ReplayError(
+                f"step {step}: {action} is not legal for seat {seat} in {game.phase.name}"
             )
         try:
-            advance(game, action, trades)
+            advance(game, action, trades, seat)
         except ChanceError as error:
             raise ReplayError(f"step {step}: {error}") from error
 
@@ -346,6 +413,7 @@ def from_json(line: str) -> Record:
             (step, a, b, tuple(received))
             for step, a, b, received in raw.get("trades", ())
         ),
+        actors=tuple((step, seat) for step, seat in raw.get("actors", ())),
         winner=raw["winner"],
         turns=raw["turns"],
         seed=raw.get("seed"),
@@ -367,7 +435,14 @@ def from_journal(path) -> Record:
     discard is never a chance event on this path: the journal's own
     `Phase.DISCARD` actions are always a seat's explicit, one-card-at-a-time
     choice (`hexset.game.submit_discard`/`discard_one`), never
-    `chance.discard`. The header's own `first` (the setup snake's start
+    `chance.discard`. It is also the one action whose actor the journal has
+    to be believed about rather than recomputed: the server serves a seven's
+    discards simultaneously (`hexset.game.may_act`), so a journalled round can
+    have any interleaving of the owing seats and its own `actor` field is the
+    only record of which. Every `Phase.DISCARD` step's actor is carried across
+    into `Record.actors` for that reason; every other action belongs to
+    `to_move` by construction and is left out, keeping the field empty for the
+    overwhelming majority of games. The header's own `first` (the setup snake's start
     seat, needed on resume for the same reason -- `Journal.start`'s
     docstring) is read here too, not assumed 0: a journal dealt with a
     rotated snake would otherwise replay a different setup order than the
@@ -386,13 +461,14 @@ def from_journal(path) -> Record:
         raise ValueError(f"not a journal (no header): {path}")
     header = events[0]
 
-    steps: list[tuple[Action, tuple[Trade, ...], tuple[tuple[str, int], ...]]] = []
+    steps: list[tuple[Action, tuple[Trade, ...], tuple[tuple[str, int], ...], int]] = []
     result: dict | None = None
     for event in events[1:]:
         kind = event.get("kind")
         if kind == "action":
             action = game_journal.action_of(event)
             trades = game_journal.trades_of(event)
+            actor = event["actor"]
             chance_events: list[tuple[str, int]] = []
             if action.type is ActionType.ROLL:
                 chance_events.append(("roll", event["roll"]))
@@ -400,7 +476,7 @@ def from_journal(path) -> Record:
                 stole = event.get("stole")
                 if stole is not None and stole.get("resource") is not None:
                     chance_events.append(("steal", int(Resource[stole["resource"]])))
-            steps.append((action, trades, tuple(chance_events)))
+            steps.append((action, trades, tuple(chance_events), actor))
         elif kind == "undo":
             del steps[event["back_to"] :]
         elif kind == "result":
@@ -410,12 +486,17 @@ def from_journal(path) -> Record:
         raise ValueError(f"journal has no result line, cannot record: {path}")
 
     deck = tuple(("deck", int(DevCard[name])) for name in header["deck"])
-    chance = deck + tuple(event for _, _, events in steps for event in events)
-    actions = tuple((int(action.type), action.a, action.b) for action, _, _ in steps)
+    chance = deck + tuple(event for _, _, events, _ in steps for event in events)
+    actions = tuple((int(action.type), action.a, action.b) for action, _, _, _ in steps)
     trades = tuple(
         (step, trade.a, trade.b, tuple(trade.received))
-        for step, (_, step_trades, _) in enumerate(steps)
+        for step, (_, step_trades, _, _) in enumerate(steps)
         for trade in step_trades
+    )
+    actors = tuple(
+        (step, actor)
+        for step, (action, _, _, actor) in enumerate(steps)
+        if action.type is ActionType.DISCARD
     )
 
     return Record(
@@ -427,6 +508,7 @@ def from_journal(path) -> Record:
         actions=actions,
         chance=chance,
         trades=trades,
+        actors=actors,
         winner=result["winner"],
         turns=result["turns"],
         seed=header.get("seed"),

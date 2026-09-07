@@ -104,9 +104,43 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `seat`, so a discard resolves against the seat that submitted it instead
   of `players_owing_discards(game)[0]`; and `GameSession.submit`/
   `legal_wire_actions` and `Tables.record` ask `may_act`. `to_move` itself
-  is unchanged — a discard round is order-invariant, so the arena, the
-  PettingZoo AEC environment and a bot runner go on resolving it one seat at
-  a time (see `docs/gym-design.md` §2).
+  is unchanged — it stays the single-seat answer for the callers that want
+  one (the arena, a bot runner) — but the environment and the replay layer
+  no longer take it for an ordering (next entry).
+- The gym and the record layer still served a seven's discards in ascending
+  seat order after the server stopped, so the same round was legal at a live
+  table and refused offline. `hexset.gym.aec.HexSetAEC` no longer hardcodes
+  `agent_selection` to `players_owing_discards(game)[0]` during
+  `Phase.DISCARD`: it keeps PettingZoo's one-active-agent-per-`step()`
+  contract but chooses *among* the owing seats, by a new `discard_order`
+  (`"random"`, the default, drawn from a stream seeded off `reset(seed)`
+  alone; `"seat"` for the old ascending order) or by the caller through the
+  new `HexSetAEC.select_agent(agent)`, which accepts any seat `may_act`
+  allows. `step()` dispatches the acting seat with the action
+  (`apply(game, action, seat)`) and `observe` builds the mask from
+  `legal_actions(game, seat)`, so a round resolves against whoever is
+  actually acting. `hexset.gym.env.HexSetEnv` passes `discard_order` through
+  and hands the learner control the moment it *owes* cards rather than after
+  every lower-numbered bot seat has cleared its quota. Ascending order was
+  not merely arbitrary: under it seat 0 never observed another seat's
+  discard before choosing its own and the last owing seat always observed
+  all of them, an asymmetry no table has and every self-play corpus taught.
+  `docs/gym-design.md` §2 is rewritten to match.
+- `hexset.record` could not express, and so could not replay, a discard
+  round that did not happen in ascending seat order — a real server-journalled
+  game's, or a converted colonist.io game's. `Record` gains `actors`, sparse
+  `(step, seat)` pairs naming who took a step where the position cannot say
+  (in practice the `Phase.DISCARD` ones), defaulting to empty so every record
+  already written reads and replays unchanged; `replay` checks each action
+  with `may_act(game, actor)`/`legal_actions(game, actor)` instead of against
+  `to_move`; `advance` takes the actor and passes it to `apply`; a new
+  `moves(record)` yields `(actor, action, trades)` and `steps(record)` keeps
+  its two-tuple shape for existing callers. `from_journal` carries the
+  journal's own `actor` across for every discard, so a simultaneous round
+  served by `hexset.server` now round-trips exactly. `hexset.dataset`,
+  `hexset.behaviour` and `hexset.bench.human_agreement` replay through
+  `moves` so a named actor is honoured rather than silently re-applied to
+  the lowest owing seat.
 - The player-facing transcript wrote each seat's discard line as that seat's
   submission landed, so a simultaneous round was reported as a sequence and
   half of it was shown to the table while the other half was still choosing.

@@ -28,7 +28,7 @@ from typing import Iterable, Iterator, Sequence
 
 from .bots.heximax.evaluate import HonestEvaluator
 from .game import Phase, is_over, to_move
-from .record import Record, advance, board_of, open_record, steps
+from .record import Record, advance, board_of, moves, open_record
 
 DEFAULT_STRIDE = 8
 
@@ -74,7 +74,7 @@ def samples_from(
     total = len(record.actions)
     seats = range(record.num_players) if knowers is None else knowers
 
-    for step, (action, trades) in enumerate(steps(record)):
+    for step, (actor, action, trades) in enumerate(moves(record)):
         if (
             step % stride == 0
             and state_game.phase is Phase.MAIN
@@ -91,7 +91,11 @@ def samples_from(
                     turn=state_game.turns,
                     progress=step / total,
                 )
-        advance(state_game, action, trades)
+        # `actor` (`hexset.record.moves`) rather than the position's own
+        # answer: a recorded seven's discards can be in any order, and
+        # re-applying one against the wrong seat would take a card out of the
+        # wrong hand.
+        advance(state_game, action, trades, actor)
 
 
 def build(

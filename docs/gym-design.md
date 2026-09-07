@@ -37,16 +37,14 @@ current at this read (pettingzoo 1.27.0, gymnasium 1.3.0, 2026-09-02).
 
 ## 2. AEC semantics
 
-Agents are seats: `agent_selection = f"seat_{to_move(game)}"`, four agents
-for the standard board (`possible_agents = ["seat_0".."seat_3"]`). `to_move`
-already resolves to a single seat in every phase, including the two that
-hand the decision to someone other than the current player — discard-on-seven
-and `TRADE_RESPOND` (`game.py:320-334`) — so AEC's one-agent-active
-abstraction needs no special-casing for those phases; the engine already
-serializes them. (Discard-on-seven is not *actually* a turn at a live table,
-and the server no longer treats it as one; this environment still resolves it
-one seat at a time, on purpose — see "`Phase.DISCARD` stays serialized here"
-below for why that is sound rather than merely convenient.)
+Agents are seats: four agents for the standard board (`possible_agents =
+["seat_0".."seat_3"]`), and `agent_selection` names the one seat entitled to
+act next. In every phase but one that is `f"seat_{to_move(game)}"`, including
+`TRADE_RESPOND`, which hands the decision to someone other than the current
+player but still to exactly one of them (`game.py:320-334`). The exception is
+discard-on-seven, where the engine's single-seat answer is a serialization
+the rules do not ask for and the environment does not impose one either — see
+"`Phase.DISCARD`: any owing seat, in any order" below.
 
 **`observe(agent)`** returns
 `{"observation": {"hexes", "vertices", "edges", "globals"}, "action_mask": ...}`,
@@ -70,8 +68,12 @@ must come from the table's honest sample, not `actions.legal_actions` raw —
 see §4, this is a real, previously-shipped bug class.
 
 **`step(action)`** decodes the flat index with `space.decode(index)`
-(`actions.py:117-131`), calls `apply(game, action)`, then advances
-`agent_selection` to the new `to_move(game)`. Catan ends for the whole table
+(`actions.py:117-131`), calls `apply(game, action, seat)` for the seat
+`agent_selection` names, then advances `agent_selection` to whoever is
+entitled next (`_next_agent`, below). The seat is dispatched with the action
+rather than recovered from the position because `DISCARD` is the one action
+whose actor the position does not fix; every other action ignores it
+(`actions.apply`'s own docstring). Catan ends for the whole table
 at once, so on the step that ends the game every agent's `terminations`/
 `truncations`/`rewards` entry is set together, not just the acting agent's —
 `terminations[a] = True` for all `a` when `game.won_by is not None`
@@ -89,31 +91,65 @@ per-seat value signal instead of win/loss.
 mirroring the pattern `arena._play_one` already uses to seed a board
 (`arena.py:501`).
 
-**`Phase.DISCARD` stays serialized here, deliberately** (added after the
-fact, when the live server stopped serializing it). Discarding on a seven is
-not a turn: every seat over the limit discards at the same instant, and
+**`Phase.DISCARD`: any owing seat, in any order.** Discarding on a seven is
+not a turn: every seat over the limit discards at the same instant, bounded
+only by its own hand and its own `discard_quota` entry, and
 `hexset.game.to_move`'s answer during that phase — the lowest-indexed seat
-still owing — is a serialization the rules do not ask for. It is a *sound*
-one, though, and that is why nothing in this section changes. A discard reads
-and writes exactly one seat's hand, that seat's own `discard_quota` entry and
-the bank; no seat's discard can make another's legal or illegal (quotas are
-fixed at the roll, `game.py`'s `roll_dice`, and do not shrink as hands do),
-and a chosen discard draws no chance event, so every interleaving of a
-round's discards reaches the same position. AEC's one-active-agent-per-`step`
-contract therefore costs this environment nothing: it resolves the round in
-seat order, `agent_selection` keeps tracking `to_move` 1:1, and the flat
-action space is untouched (`ActionType.DISCARD` still carries only a
-resource, so every index in the `(553,)` mask means what it always did and no
-checkpoint is invalidated).
+still owing — is a serialization the rules do not ask for. The live server
+stopped imposing it (`hexset.game.may_act`, true for *every* owing seat, plus
+the optional `seat` on `hexset.actions.legal_actions`/`legal_mask`/`apply`);
+this environment does not impose it either. Live play and the gym now permit
+the same set of orders.
 
-What the live server needed instead is a second question, `hexset.game.
-may_act(game, seat)` — true for *every* seat still owing a discard, and
-`seat == to_move(game)` in every other phase — plus an optional `seat`
-argument on `hexset.actions.legal_actions`/`legal_mask`/`apply` so a discard
-resolves against the seat that submitted it. Passing no `seat` is exactly the
-old behaviour, which is what this environment, `hexset.arena` and
-`hexset.clients.botclient` all do. A self-play or training loop that *wants*
-the parallel form can ask for it per seat; nothing here needs to.
+This section used to argue the opposite — that since a discard round is
+order-invariant, serializing it in the gym "costs nothing". The
+order-invariance is real and is what makes any of this safe: a discard reads
+and writes exactly one seat's hand, that seat's own quota and the bank; no
+seat's discard can make another's legal or illegal (quotas are fixed at the
+roll, `game.py`'s `roll_dice`, and do not shrink as hands do); and a chosen
+discard draws no chance event, so every interleaving of a round reaches the
+same position (`tests/test_actions.py::test_a_discard_round_is_order_invariant`).
+What it does *not* make free is always picking the same seat first. Under
+ascending order seat 0 never observes another seat's completed discard before
+choosing its own and the last owing seat always observes all of them — an
+asymmetry the seats do not have at a table, taught to a policy by every
+self-play corpus this environment produces. Serializing was also the one
+concrete thing standing between `hexset.record` and replaying a real table's
+discard order (§2's sibling change, `Record.actors`).
+
+The reconciliation with AEC, whose contract is exactly one active agent per
+`step()`: **keep the contract, drop the hardcoded choice.** `agent_selection`
+still names one agent and `step()` still resolves one action, so nothing
+about the PettingZoo API changes — what changes is that the seat it names
+during a discard round is chosen among the owing seats rather than fixed at
+`min`. Three ways, in precedence order:
+
+| | who acts next during a discard round |
+|---|---|
+| `select_agent(agent)` | the caller says, for any seat `may_act` allows; `ValueError` otherwise. This is the AEC-shaped hook for a caller that owns the order — a replay of a recorded table (`hexset.record.moves`), a test, a training loop sampling orders itself. |
+| `discard_order="random"` (default) | drawn uniformly from `players_owing_discards(game)` each time a seat is named, from a stream seeded off `reset(seed)` alone (`random.Random(f"discard-order:{seed}")`) and never shared with the game's rng — so a fixed seed still deals a fixed board *and* a fixed discard order, and a self-play corpus carries no seat-order bias. |
+| `discard_order="seat"` | the ascending order this environment used to hardcode, which is `to_move`'s own answer, for a caller that wants the old stream back. |
+
+`observe(agent)` keeps the PettingZoo convention — the mask is all zeros for
+every agent but `agent_selection` — and now builds the selected agent's mask
+from `legal_actions(game, seat)` rather than the bare call, since during a
+round the two answer for different hands. The flat action space is untouched:
+`ActionType.DISCARD` still carries only a resource, every index in the
+`(553,)` mask means what it always did, no checkpoint is invalidated. Nothing
+is added to the observation either — the seat about to act already reads its
+own quota and hand.
+
+`HexSetEnv` (§3) inherits all of this and adds one wrinkle of its own, in
+`_auto_play_opponents`: the learner is handed control the moment it *owes*
+cards (`may_act`), not after every lower-numbered bot seat has cleared its
+quota, so the learner is never queued behind a seat index. The bot seats are
+then driven in `to_move` order — not this wrapper asserting an order, but the
+`hexset.bots.Bot` protocol, whose `choose(game)` takes the position and
+nothing else and therefore answers for the seat bare `legal_actions(game)`
+answers for. Asking seat 3's bot while `to_move` names seat 0 would hand back
+a card out of seat 0's hand. A caller wanting arbitrary order among *bot*
+seats needs a seat-aware `Bot`; inventing one is not this environment's job,
+and the round is order-invariant, so the bots lose nothing by going second.
 
 Information leakage was checked rather than assumed: `hexset.encoding` gives
 another seat only its hand *total* and `hexset.ledger`'s public-knowledge
@@ -158,6 +194,10 @@ model survives that change regardless of what the actions become.
   training against a threat model it will never face at the actual table.
   `search2` fills the last seat as the shipped tree-search baseline
   (`arena.py:243`).
+- `discard_order: str = "random"` — passed straight through to the wrapped
+  `HexSetAEC` (§2's table). Same reasoning as `learner_seat="rotate"`: an
+  ordering that is not in the rules should not be baked into what the learner
+  sees.
 
 `step(action)` applies the learner's action, then auto-plays every
 non-learner turn in a loop that is `arena.play`'s loop
@@ -244,6 +284,14 @@ test that permutes nothing reachable cannot pass by accident.
 - One full 4-seat random-agent AEC episode reaches `is_over` (either a
   winner or `MAX_TURNS` exhaustion) inside a generous step budget, with no
   exception and no seat ever asked to act with an empty `action_mask`.
+- Discard order (§2): a round driven through `HexSetAEC` with
+  `select_agent` in ascending order and in reverse order reaches the same
+  hands, bank, quotas and phase; `select_agent` refuses a seat owing
+  nothing; a `HexSetEnv` learner owing cards is handed control without
+  waiting for a lower-numbered bot seat; `discard_order="seat"` reproduces
+  `to_move` exactly and `"random"` is reproducible from `reset(seed)` while
+  not always naming the lowest owing seat.
+  (`tests/gym/test_discard_order.py`.)
 
 ## 6. Not in scope
 

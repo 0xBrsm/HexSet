@@ -43,7 +43,10 @@ already resolves to a single seat in every phase, including the two that
 hand the decision to someone other than the current player — discard-on-seven
 and `TRADE_RESPOND` (`game.py:320-334`) — so AEC's one-agent-active
 abstraction needs no special-casing for those phases; the engine already
-serializes them.
+serializes them. (Discard-on-seven is not *actually* a turn at a live table,
+and the server no longer treats it as one; this environment still resolves it
+one seat at a time, on purpose — see "`Phase.DISCARD` stays serialized here"
+below for why that is sound rather than merely convenient.)
 
 **`observe(agent)`** returns
 `{"observation": {"hexes", "vertices", "edges", "globals"}, "action_mask": ...}`,
@@ -85,6 +88,45 @@ per-seat value signal instead of win/loss.
 **`reset(seed)`** → `start(random_base_board(random.Random(seed)), 4, rng)`,
 mirroring the pattern `arena._play_one` already uses to seed a board
 (`arena.py:501`).
+
+**`Phase.DISCARD` stays serialized here, deliberately** (added after the
+fact, when the live server stopped serializing it). Discarding on a seven is
+not a turn: every seat over the limit discards at the same instant, and
+`hexset.game.to_move`'s answer during that phase — the lowest-indexed seat
+still owing — is a serialization the rules do not ask for. It is a *sound*
+one, though, and that is why nothing in this section changes. A discard reads
+and writes exactly one seat's hand, that seat's own `discard_quota` entry and
+the bank; no seat's discard can make another's legal or illegal (quotas are
+fixed at the roll, `game.py`'s `roll_dice`, and do not shrink as hands do),
+and a chosen discard draws no chance event, so every interleaving of a
+round's discards reaches the same position. AEC's one-active-agent-per-`step`
+contract therefore costs this environment nothing: it resolves the round in
+seat order, `agent_selection` keeps tracking `to_move` 1:1, and the flat
+action space is untouched (`ActionType.DISCARD` still carries only a
+resource, so every index in the `(553,)` mask means what it always did and no
+checkpoint is invalidated).
+
+What the live server needed instead is a second question, `hexset.game.
+may_act(game, seat)` — true for *every* seat still owing a discard, and
+`seat == to_move(game)` in every other phase — plus an optional `seat`
+argument on `hexset.actions.legal_actions`/`legal_mask`/`apply` so a discard
+resolves against the seat that submitted it. Passing no `seat` is exactly the
+old behaviour, which is what this environment, `hexset.arena` and
+`hexset.clients.botclient` all do. A self-play or training loop that *wants*
+the parallel form can ask for it per seat; nothing here needs to.
+
+Information leakage was checked rather than assumed: `hexset.encoding` gives
+another seat only its hand *total* and `hexset.ledger`'s public-knowledge
+`known`/`unknown` block, and a discard is a public event by the rules (the
+cards are named to the table and the hand size is visible), so a seat's
+completed discard becoming visible to a seat that has not yet discarded
+reveals nothing that was ever hidden — only that it happened first, which
+hand sizes give away in any implementation. The ledger is therefore updated
+per discard as before; deferring it would break the invariant `sum(known) +
+unknown == the seat's true hand size` that `hexset.ledger` holds at every
+step. The ordering *is* suppressed where it would otherwise be asserted as
+fact: `hexset.server.webplay.render_log` holds a round's discard lines back
+until every owing seat has cleared its quota.
 
 **`TRADE_RESPOND`**: because `game.py`'s `propose_trade`/`accept_trade`/
 `decline_trade` (`game.py:485-566`) already pop `pending_responders` one seat

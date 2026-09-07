@@ -480,16 +480,54 @@ def players_owing_discards(game: Game) -> list[int]:
 
 
 def to_move(game: Game) -> int:
-    """Whose decision the legal actions belong to.
+    """Whose decision the legal actions belong to, when exactly one seat is
+    wanted.
 
     Usually the player whose turn it is, but one phase hands the decision to
     somebody else: discarding on a seven is decided by whoever owes cards.
+
+    **Discarding is not a turn.** `Phase.DISCARD` is the one phase where
+    several seats are entitled to act at the same instant: every seat over
+    the limit discards simultaneously, each bounded only by its own hand and
+    its own `discard_quota` entry, and no seat's discard can make another's
+    legal or illegal. `current_player` (whoever rolled) does not change while
+    it resolves. This function still answers with a single seat -- the
+    lowest-indexed one still owing -- because most callers want exactly one
+    decision at a time and are correct with any of them: the arena loop
+    (`hexset.arena`), the PettingZoo AEC environment (`hexset.gym.aec`, whose
+    contract is one active agent per `step`) and a bot runner
+    (`hexset.clients.botclient`) all serialize an order-invariant round
+    rather than needing it parallel, so `to_move` stays a total function and
+    those layers stay untouched.
+
+    A live table cannot: seat 3 must be able to discard without waiting on
+    seat 0. `may_act` -- not this -- is the question a server asks before
+    accepting an action, and `hexset.actions.legal_actions`/`apply` take the
+    seat that is acting rather than assuming it.
     """
     if game.phase is Phase.DISCARD:
         owing = players_owing_discards(game)
         if owing:
             return owing[0]
     return game.current_player
+
+
+def may_act(game: Game, seat: int) -> bool:
+    """Whether `seat` may act right now -- true for every seat still owing a
+    discard, so a discard round resolves in whatever order the seats answer
+    in, and equivalent to `seat == to_move(game)` everywhere else.
+
+    See `to_move` for why the two differ only here. Nothing about the game
+    state depends on the order: a discard reads and writes one seat's own
+    hand, its own quota and the bank, so any interleaving of a round's
+    discards reaches the same position (only `chance` is shared, and a
+    chosen discard draws no chance event).
+    """
+    if game.phase is Phase.DISCARD:
+        owing = players_owing_discards(game)
+        if owing:
+            return seat in owing
+    return seat == to_move(game)
 
 
 def _finish_discards(game: Game) -> None:

@@ -16,8 +16,16 @@ from hexset.actions import (
     space_for,
 )
 from hexset.board.board import random_base_board
+from hexset.board.terrain import NUM_RESOURCES, Resource
 from hexset.economy import expected_total, total_in_play
-from hexset.game import Phase, is_over, start
+from hexset.game import (
+    Phase,
+    is_over,
+    may_act,
+    players_owing_discards,
+    start,
+    to_move,
+)
 from hexset.play import play_random_game, step_randomly
 from hexset.victory import WINNING_POINTS, victory_points
 
@@ -191,3 +199,102 @@ def test_a_stranded_free_road_does_not_deadlock():
     game._state.edge_owner = [0] * len(game._state.edge_owner)
     kinds = {a.type for a in legal_actions(game)}
     assert ActionType.END_TURN in kinds
+
+
+# --- a seven's discards are simultaneous ------------------------------------
+#
+# Not a turn: every seat over the limit discards at the same instant, each
+# bounded only by its own hand and its own quota (see `hexset.game.to_move`).
+# `to_move` still names one of them, because the arena, the AEC environment
+# and a bot runner all want a single actor and any of them will do; the seat
+# argument below is what a live table uses instead.
+
+
+def a_game_owing(seed: int = 7):
+    """A game parked in `Phase.DISCARD` with seats 0 and 3 both owing two
+    cards, and seat 1 (who rolled) owing none."""
+    game = a_game(seed=seed)
+    game.phase = Phase.DISCARD
+    game.current_player = 1
+    for seat in range(4):
+        game._state.hands[seat] = [0] * NUM_RESOURCES
+    game._state.hands[0] = [4, 0, 0, 0, 0]
+    game._state.hands[3] = [0, 0, 0, 0, 4]
+    game.discard_quota = [2, 0, 0, 2]
+    return game
+
+
+def test_every_owing_seat_may_discard_not_just_the_lowest():
+    game = a_game_owing()
+    assert players_owing_discards(game) == [0, 3]
+    assert may_act(game, 0) and may_act(game, 3)
+    assert not may_act(game, 1) and not may_act(game, 2)
+    # The single-actor answer is unchanged, for the callers that want one.
+    assert to_move(game) == 0
+
+
+def test_a_seat_is_offered_its_own_cards_not_the_lowest_owing_seats():
+    game = a_game_owing()
+    assert [a.a for a in legal_actions(game, 3)] == [Resource.ORE]
+    assert [a.a for a in legal_actions(game, 0)] == [Resource.WOOD]
+    # No seat named: the engine's own serialization, the lowest owing seat.
+    assert [a.a for a in legal_actions(game)] == [Resource.WOOD]
+    # A seat that owes nothing has nothing to play, whoever else does.
+    assert legal_actions(game, 1) == []
+
+
+def test_a_higher_seat_discards_without_waiting_for_a_lower_one():
+    """The bug: seat 3 could not act until seat 0 had, and its discard landed
+    on seat 0's hand if it forced one through."""
+    game = a_game_owing()
+
+    apply(game, Action(ActionType.DISCARD, Resource.ORE), seat=3)
+
+    assert game.discard_quota == [2, 0, 0, 1]
+    assert game._state.hands[3][Resource.ORE] == 3
+    assert game._state.hands[0][Resource.WOOD] == 4  # untouched
+    assert game.phase is Phase.DISCARD
+
+
+def test_a_discard_round_is_order_invariant():
+    """Why the AEC environment may go on resolving this one seat at a time
+    (`docs/gym-design.md` §2): interleaved or serialized, the same position."""
+    def discard(game, seat):
+        apply(game, Action(ActionType.DISCARD, legal_actions(game, seat)[0].a), seat=seat)
+
+    interleaved = a_game_owing()
+    for seat in (3, 0, 3, 0):
+        discard(interleaved, seat)
+
+    serialized = a_game_owing()
+    for seat in (0, 0, 3, 3):
+        discard(serialized, seat)
+
+    assert interleaved._state.hands == serialized._state.hands
+    assert interleaved._state.bank == serialized._state.bank
+    assert interleaved.discard_quota == serialized.discard_quota == [0, 0, 0, 0]
+    # The round closing is what moves the phase on, not any one seat's turn.
+    assert interleaved.phase is serialized.phase is Phase.ROBBER
+    assert interleaved.current_player == 1
+
+
+def test_the_mask_answers_for_the_seat_it_is_asked_about():
+    game = a_game_owing()
+    space = space_for(game)
+    for seat in (0, 3):
+        mask = legal_mask(game, space, seat)
+        expected = {space.index(a) for a in legal_actions(game, seat)}
+        assert {i for i, ok in enumerate(mask) if ok} == expected
+    assert legal_mask(game, space) == legal_mask(game, space, 0)
+
+
+def test_naming_no_seat_is_exactly_the_old_behaviour():
+    """Every offline caller (arena, bots, `hexset.gym`) passes no seat, so
+    the whole of this change has to be invisible to them."""
+    game = a_game(seed=3)
+    rng = random.Random(3)
+    for _ in range(300):
+        if is_over(game):
+            break
+        assert legal_actions(game) == legal_actions(game, to_move(game))
+        step_randomly(game, rng)

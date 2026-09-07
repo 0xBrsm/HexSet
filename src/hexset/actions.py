@@ -20,6 +20,7 @@ from .game import (
     discard_one,
     end_turn,
     legal_initial_roads,
+    may_act,
     move_robber_to,
     place_initial_road,
     place_initial_settlement,
@@ -243,11 +244,24 @@ def _trade_actions(game: Game) -> list[Action]:
     ]
 
 
-def legal_actions(game: Game) -> list[Action]:
+def legal_actions(game: Game, seat: int | None = None) -> list[Action]:
+    """What may be played right now, optionally as a named `seat`.
+
+    `seat is None` asks for the engine's own single actor
+    (`hexset.game.to_move`) and is what every offline caller -- the arena, a
+    bot's search, the AEC environment -- uses. A live table passes the seat
+    that is actually asking, because `Phase.DISCARD` entitles several seats
+    to act at once (see `to_move`/`may_act`): seat 3's options there are its
+    own hand's, whether or not seat 0 has discarded yet. A seat that may not
+    act at all gets an empty list rather than somebody else's options.
+    """
     state = game._state
     player = game.current_player
 
     if game.phase is Phase.GAME_OVER:
+        return []
+
+    if seat is not None and not may_act(game, seat):
         return []
 
     if game.phase is Phase.SETUP_SETTLEMENT:
@@ -278,7 +292,13 @@ def legal_actions(game: Game) -> list[Action]:
             return []
         # One card at a time, so the space stays linear in resources rather
         # than combinatorial in hand size.
-        discarding = owing[0]
+        #
+        # `seat is None` means "whichever seat the engine would serialize to"
+        # -- `to_move`'s lowest-indexed owing seat. Any owing seat asking for
+        # itself gets its own hand's options instead, which is what makes the
+        # round simultaneous rather than queued (the `may_act` guard above
+        # has already refused a seat that owes nothing).
+        discarding = owing[0] if seat is None else seat
         return [
             Action(ActionType.DISCARD, r)
             for r in range(NUM_RESOURCES)
@@ -303,15 +323,27 @@ def legal_actions(game: Game) -> list[Action]:
     return out
 
 
-def legal_mask(game: Game, space: ActionSpace | None = None) -> list[bool]:
+def legal_mask(
+    game: Game, space: ActionSpace | None = None, seat: int | None = None
+) -> list[bool]:
     space = space or space_for(game)
     mask = [False] * space.size
-    for action in legal_actions(game):
+    for action in legal_actions(game, seat):
         mask[space.index(action)] = True
     return mask
 
 
-def apply(game: Game, action: Action) -> None:
+def apply(game: Game, action: Action, seat: int | None = None) -> None:
+    """Execute `action`, optionally on behalf of a named `seat`.
+
+    `seat` only ever names the discarding seat: `DISCARD` is the one action
+    whose actor is not fixed by the position (`Phase.DISCARD` owes cards from
+    several seats at once and takes them in any order), and the flat action
+    space has no operand left to carry it -- an `Action` is a type and two
+    ints, and `DISCARD`'s one operand is the resource. Every other action
+    belongs to `to_move` by construction and ignores this argument. `None`
+    keeps the historical behaviour: the lowest-indexed seat still owing.
+    """
     kind = action.type
     if kind is ActionType.ROLL:
         roll_dice(game)
@@ -343,7 +375,8 @@ def apply(game: Game, action: Action) -> None:
     elif kind is ActionType.BANK_TRADE:
         trade_with_bank(game, Resource(action.a), Resource(action.b))
     elif kind is ActionType.DISCARD:
-        discard_one(game, players_owing_discards(game)[0], Resource(action.a))
+        discarding = players_owing_discards(game)[0] if seat is None else seat
+        discard_one(game, discarding, Resource(action.a))
     else:
         raise ValueError(f"unhandled action {action}")
 

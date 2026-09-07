@@ -92,6 +92,34 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Discarding on a seven was served as if it were a turn. Every seat over the
+  limit discards at the same time, bounded only by its own hand and its own
+  `discard_quota` entry, but the server gated every submission on
+  `to_move(game) != seat` — always the lowest-numbered owing seat — so a
+  table with seats 0 and 3 both owing cards answered seat 3 with HTTP 409
+  "it is not your turn to act" until seat 0 had finished. `hexset.game`
+  gains `may_act(game, seat)` (true for *every* seat still owing a discard,
+  `seat == to_move(game)` in every other phase);
+  `hexset.actions.legal_actions`/`legal_mask`/`apply` take an optional
+  `seat`, so a discard resolves against the seat that submitted it instead
+  of `players_owing_discards(game)[0]`; and `GameSession.submit`/
+  `legal_wire_actions` and `Tables.record` ask `may_act`. `to_move` itself
+  is unchanged — a discard round is order-invariant, so the arena, the
+  PettingZoo AEC environment and a bot runner go on resolving it one seat at
+  a time (see `docs/gym-design.md` §2).
+- The player-facing transcript wrote each seat's discard line as that seat's
+  submission landed, so a simultaneous round was reported as a sequence and
+  half of it was shown to the table while the other half was still choosing.
+  `hexset.server.webplay.render_log` now holds a round's discards back —
+  one line per seat however many cards and however interleaved — and writes
+  them out together, in seat order, once no seat still owes any.
+  `hexset.server.journal` is unaffected and still writes every action the
+  instant it is applied: it is the crash-recovery log, not the transcript.
+- The web client's phase banner read "PLAYER 1'S TURN" to a seat that owed
+  cards to a seven, behind that seat's own discard modal — `state.to_move`
+  names only the lowest-numbered owing seat. It now shows the phase to any
+  seat with a `discard_quota` entry left to clear. The modal itself needed
+  no change: it opens off `state.legal_actions`, which now answers per seat.
 - `hexset.__version__` tried installed package metadata before the source
   tree's `pyproject.toml`, so an editable install with stale dist-info kept
   reporting `0.26.0` for four releases after the tree moved on; it now reads

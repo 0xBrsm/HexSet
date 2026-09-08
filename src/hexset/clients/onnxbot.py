@@ -38,8 +38,8 @@ import onnxruntime as ort
 
 from hexset.actions import Action, ActionSpace, build_space
 from hexset.board.topology import Topology
-from hexset.game import Game, to_move
-from hexset.mcts import Search, terminal_relative_points
+from hexset.game import Game, is_over, to_move
+from hexset.mcts import Search
 from hexset.onnx_record import record_from_game
 from hexset.server.constants import RECORD_CONTRACTS
 from hexset.server.modelmeta import SearchConfig, search_config
@@ -386,13 +386,20 @@ class NetworkBot:
         """Each hand's value on `seat`'s own row, `seat`'s hand swapped in
         turn and everything else about the live position held fixed.
 
-        Mirrors `hexn.policy.DerivedTrader._own_values`: `set_state` is the
-        engine's own sanctioned way to swap a hypothetical state in and back
-        out, the observation is built from the game (not the bare state) for
-        the same reason as there -- phase, turn count and every seat's
-        published vector all live on `Game`, not `GameState` -- and the
-        original is restored in a `finally` so a raised error still leaves
-        the live game exactly as `choose` left it.
+        `set_state` is the engine's own sanctioned way to swap a hypothetical
+        state in and back out, the observation is built from the game (not the
+        bare state) because phase, turn count and every seat's published
+        vector live on `Game`, not `GameState`, and the original is restored
+        in a `finally` so a raised error still leaves the live game exactly as
+        `choose` left it.
+
+        **This no longer mirrors `hexn.policy.DerivedTrader`.** That side moved
+        to `after_exchange`, which moves *both* hands and updates the
+        counterparty's ledger row; swapping only the acting seat's hand, as
+        here, is what it calls its earlier version. The gate on this side
+        therefore prices a candidate against a position the clearing house
+        would not actually produce. Porting it is a behaviour change to the
+        trade gate and wants its own change and its own evidence.
         """
         game = self._seated
         assert game is not None  # callers check this first
@@ -448,12 +455,27 @@ class LeafEvaluator:
         return self.policy.score_rows(rows)[:count]
 
     def terminal(self, game: Game) -> Sequence[float]:
-        """`hexset.mcts.Evaluator.terminal`: every graph this contract range
-        (`RECORD_CONTRACTS`) serves has a value head trained against
-        `relative_points`, the same quantity `Search` scored a terminal leaf
-        with itself before this method existed, so this returns exactly that
-        and a finished game's score is unchanged."""
-        return terminal_relative_points(game)
+        """`hexset.mcts.Evaluator.terminal`: the one-hot winner, board-seat
+        order.
+
+        `RECORD_CONTRACTS` is contract 6 alone, and a contract-6 value head is
+        trained on `hexn.rewards.win_loss` — a win probability, whether it came
+        from `hexn.ppo` or from `hexn.distill`, which was ported to the same
+        target. So every non-terminal leaf in a wave is scored on that scale,
+        and returning `terminal_relative_points` here would back a points
+        margin up the tree alongside them. `hexn.netbot.LeafEvaluator`, the
+        torch-side twin of this class, already returns the winner for exactly
+        this reason.
+
+        Raises if `game` has not finished: `Search` only calls this on a
+        terminal node, so a caller passing an unfinished game has a bug of its
+        own.
+        """
+        if not is_over(game):
+            raise ValueError("terminal() called on a game that has not finished")
+        players = game.state(0, hidden=False).num_players
+        winner = game.won_by
+        return tuple(1.0 if seat == winner else 0.0 for seat in range(players))
 
 
 def searcher(

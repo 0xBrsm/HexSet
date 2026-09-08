@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import IntEnum
 from itertools import combinations_with_replacement
+from collections.abc import Sequence
 from typing import NamedTuple
 
 from .board.terrain import NUM_RESOURCES, Resource
@@ -323,14 +324,20 @@ def legal_actions(game: Game, seat: int | None = None) -> list[Action]:
     return out
 
 
+def mask_of(space: ActionSpace, options: Sequence[Action]) -> list[bool]:
+    """The flat legality mask for options already enumerated -- what a
+    batched consumer stacks per decision without running `legal_actions` a
+    second time. `legal_mask` is this over `legal_actions(game)`."""
+    mask = [False] * space.size
+    for action in options:
+        mask[space.index(action)] = True
+    return mask
+
+
 def legal_mask(
     game: Game, space: ActionSpace | None = None, seat: int | None = None
 ) -> list[bool]:
-    space = space or space_for(game)
-    mask = [False] * space.size
-    for action in legal_actions(game, seat):
-        mask[space.index(action)] = True
-    return mask
+    return mask_of(space or space_for(game), legal_actions(game, seat))
 
 
 def apply(game: Game, action: Action, seat: int | None = None) -> None:

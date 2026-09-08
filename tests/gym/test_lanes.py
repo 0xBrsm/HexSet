@@ -191,3 +191,36 @@ def test_a_caster_routes_seats_and_seats_every_seats_gate():
         assert episode.trades, "the bots' gates cleared nothing"
         # Seat 0 refuses everything, so every exchange is between two bot seats.
         assert all({a, b} <= {1, 2, 3} for _, a, b, _ in episode.trades)
+
+
+def test_a_board_law_pairs_boards_by_index_and_a_cohort_re_arms_the_bound():
+    """`board(index)` is the board half of a paired evaluation: games `2k`
+    and `2k+1` share `deal_board(seed, 2k)` while each keeps its own dice.
+    `cohort(n)` deals `n` more games from where the counter stands without
+    rebuilding the environment, so its counters carry across cohorts."""
+    from hexset.arena import deal_board
+    from hexset.gym.lanes import LaneEnv
+
+    seed = 5
+    def law(index):
+        return deal_board(seed, index - index % 2)
+    env = LaneEnv(players=3, seed=seed, lanes=2, deal=4, board=law, bots={0: spawn}, action_cap=60)
+    first = env.drain()
+    assert sorted(e.index for e in first) == [0, 1, 2, 3]
+    # Games 2k and 2k+1 were dealt on one board; 2k and 2k+2 on different ones.
+    assert law(0).tokens == law(1).tokens and law(0).tokens != law(2).tokens
+    assert not env.running and env.games_started() == 4
+
+    env.cohort(2)
+    second = env.drain()
+    assert sorted(e.index for e in second) == [4, 5]
+    assert env.games_started() == 6 and env.games == 6
+
+
+def test_mask_of_is_legal_mask_over_the_options_in_hand():
+    from hexset.actions import legal_actions, legal_mask, mask_of, space_for
+    from hexset.arena import deal_game
+
+    game = deal_game(1, 0, 4)
+    space = space_for(game)
+    assert mask_of(space, legal_actions(game)) == legal_mask(game, space)

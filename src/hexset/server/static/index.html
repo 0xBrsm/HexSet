@@ -1584,7 +1584,7 @@ function renderStatus() {
   if (state.game_over) {
     phaseEl.textContent = state.winner === null
       ? "GAME OVER — NO WINNER"
-      : `PLAYER ${state.winner + 1} WINS`;
+      : `PLAYER ${playerNumber(state.winner)} WINS`;
     return;
   }
   // Nobody's decision while a seat is still empty (see api.Table.waiting_for)

@@ -34,8 +34,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   out of it is a plain glyph in that title row, so Cancel, Pass, Back and
   Decline all are the same X where the heading says which it is. A trade
   being built, offer or counter alike, is two rows of five cards, give over
-  get, "for" between them: a tap on a card adds one, a tap on its count
-  badge takes one back. A trade being read is a line of just the cards in
+  get, "for" between them: a tap on a card adds one of it, and the "−" that
+  appears under a card in the offer takes one back. A trade being read is a
+  line of just the cards in
   it, prefixed by the colour pip of the seat *giving* -- so left of "for" is
   always what that pip hands over, and a seat's accept mirrors the offer it
   answers. Your own open offer draws as an acceptance pane: your offer, a

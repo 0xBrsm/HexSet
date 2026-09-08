@@ -494,10 +494,17 @@
      with "for" between them already reads in that order — and so is the
      sentence that used to restate the pile below the rows. */
   .trade-compose {
-    display: flex; flex-direction: column; align-items: stretch; gap: 0.65rem; width: max-content;
+    display: flex; flex-direction: column; align-items: stretch; gap: 0.35rem; width: max-content;
   }
-  .trade-row { display: flex; gap: 0.3rem; }
-  .trade-for { text-align: center; font-size: 0.85rem; font-style: italic; line-height: 1; color: var(--muted); }
+  .trade-row { display: flex; align-items: flex-start; gap: 0.3rem; }
+  /* Asymmetric on purpose: 0.35rem under the top row's minus strip, 0.75rem
+     above the row below (the column gap plus this margin). At equal gaps the
+     word sits right under the strip it is not part of and too far from the
+     row it belongs between. */
+  .trade-for {
+    text-align: center; font-size: 0.85rem; font-style: italic; line-height: 1;
+    color: var(--muted); margin-bottom: 0.4rem;
+  }
   /* Reuses .card's own size/shape (see the hand section) so a tile in the
      modal looks exactly like the card it represents — just selectable and
      dimmable on top of that. Every mode that picks a resource uses these:
@@ -509,14 +516,19 @@
      in place instead of spelling it out below the row, so which resource is
      short is obvious without reading a sentence. */
   .card.shortfall { opacity: 0.4; }
-  /* In the composer the count badge is also how you take one back off: tap
-     the tile to add, tap its badge to subtract. That replaced a strip of
-     minus buttons under each row, which doubled the composer's height to
-     carry five controls that were blank most of the time. Clickable even on a
-     dimmed tile — a counter loaded from an ask this hand cannot cover is the
-     one place where subtracting is the only move left. */
-  .count-minus { cursor: pointer; }
-  .pick-card.disabled .count-minus { pointer-events: auto; }
+  /* Card over its own minus button, one stack a resource. The button is a
+     drawn control rather than a tap on the tile's own count badge: the badge
+     is a label everywhere else in the app, and made to subtract here it read
+     as a bug, not an affordance. It keeps its space when there is nothing to
+     subtract (visibility, not display) so the row of cards doesn't lift and
+     drop as counts come and go. */
+  .pick-stack { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; }
+  .pick-minus {
+    width: 34px; height: 18px; padding: 0; border-radius: 4px; line-height: 1;
+    font-size: 0.8rem; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .pick-minus.hidden { visibility: hidden; }
   /* The acceptance pane: this seat's own open offer, a rule, then every other
      seat in seat order — swatch, whatever it answered, and the check that
      takes that deal. One row a seat at a fixed height, all left-aligned, so
@@ -2131,10 +2143,12 @@ function composerRows(p) {
 // doesn't reflow under the cursor between clicks. A tap on a tile adds one of
 // that card to this side, up to its ceiling and then no further — it used to
 // wrap back to none there, which reads as a misclick rather than as a limit —
-// and a tap on that tile's own count badge takes one back off, in place of the
-// strip of minus buttons this row used to carry under it. A resource already
-// on the other side is dimmed: the two halves of a trade are disjoint (see
-// `round_bundle_from_wire`), as is one the hand doesn't hold at all.
+// and the "−" under a tile that is in the offer takes one back off. Drawn as
+// its own button, not as a tap on the count badge: the badge is a label
+// everywhere else in the app, so subtracting through it was a control nobody
+// could see. A resource already on the other side is dimmed: the two halves of
+// a trade are disjoint (see `round_bundle_from_wire`), as is one the hand
+// doesn't hold at all.
 function composerRow(p, which) {
   const mine = which === "give" ? tradeGive : tradeWant;
   const other = which === "give" ? tradeWant : tradeGive;
@@ -2147,7 +2161,8 @@ function composerRow(p, which) {
     // sentence below the rows to explain.
     const held = p.hand ? (p.hand[name] || 0) : 0;
     const shortfall = which === "give" && mine[r] > held;
-    const card = pickCard(r, {
+    const stack = html("div", {class: "pick-stack"});
+    stack.appendChild(pickCard(r, {
       selected: mine[r] > 0,
       disabled: other[r] > 0 || ceiling === 0,
       shortfall,
@@ -2158,22 +2173,17 @@ function composerRow(p, which) {
       onClick: () => {
         if (mine[r] < ceiling) { mine[r] += 1; renderModal(); }
       },
-    });
-    // The badge only exists once there is something to subtract, which is
-    // exactly when the subtract control should be there — so it is the badge,
-    // rather than a second control appearing beside it.
-    const badge = card.querySelector(".count");
-    if (badge) {
-      badge.classList.add("count-minus");
-      badge.setAttribute("title", `One fewer ${name}`);
-      badge.addEventListener("click", (e) => {
-        // Or the tile under it would count the same tap as an add.
-        e.stopPropagation();
-        mine[r] -= 1;
-        renderModal();
-      });
-    }
-    row.appendChild(card);
+    }));
+    // Hidden rather than absent when there is nothing to take off, so the
+    // tiles above stay on one baseline as counts come and go.
+    const minus = html("button", {
+      class: mine[r] > 0 ? "pick-minus" : "pick-minus hidden",
+      title: `One fewer ${name}`,
+      "aria-label": `One fewer ${name}`,
+    }, "\u2212");
+    minus.addEventListener("click", () => { mine[r] -= 1; renderModal(); });
+    stack.appendChild(minus);
+    row.appendChild(stack);
   }
   return row;
 }

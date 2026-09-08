@@ -32,7 +32,6 @@ from hexset.bots.heximax import (
 from hexset.ledger import SeatLedger
 from hexset.play import step_randomly
 from hexset.trading import one_for_one
-from hexset.state import copy_state
 from helpers import clear_hand, give
 
 # The seed the pair of indistinguishable worlds below is built at. It used
@@ -271,16 +270,6 @@ def test_a_desynced_fixture_does_not_break_the_belief():
     assert sum(sampled.hands[2]) == 30
 
 
-def test_omniscient_belief_is_the_truth():
-    game = after_setup(4)
-    belief = View.from_game(game, 0, omniscient=True)
-    for p in range(4):
-        assert belief.expected_hand(p) == game._state.hands[p]
-    sampled = belief.sample(random.Random(0))
-    assert sampled.hands == game._state.hands
-    assert sampled.dev_cards == game._state.dev_cards
-
-
 # --- evaluate -----------------------------------------------------------------
 
 
@@ -390,46 +379,6 @@ def test_the_gate_is_strict():
     assert bot.accepts(view, nothing, 1) is False
 
 
-def _omniscient_truth_delta(bot, game, seat, received, counterparty):
-    """`_delta`'s value computed the only way an omniscient seat could
-    honestly compute it: evaluate the real position, move both hands exactly,
-    evaluate again. Under omniscience every hand is read verbatim, so there is
-    no belief to approximate through and this is not an estimate."""
-    evaluator = bot.evaluator
-
-    def read(state, row):
-        belief = View(state, game.ledger, seat, omniscient=True)
-        return bot._rank(evaluator.evaluate(state, seat, belief), row)
-
-    after = copy_state(game._state)
-    for r in range(NUM_RESOURCES):
-        after.hands[seat][r] += received[r]
-        after.hands[counterparty][r] -= received[r]
-    return read(after, seat) - read(game._state, seat)
-
-
-def test_an_omniscient_trade_read_moves_the_counterpartys_real_cards():
-    """An omniscient seat reads every hand verbatim, so a trade valuation must
-    move the counterparty's cards *by resource*, not fold its hand into one
-    total the way the honest reading may (the honest evaluator never looks at
-    a non-knower's composition, so folding is invisible there -- under
-    omniscience it replaces the partner's real hand with an all-one-resource
-    fiction, which is not the position being priced)."""
-    game = after_setup(26)
-    for p in range(4):
-        set_known_hand(game, p, [0] * NUM_RESOURCES)
-    set_known_hand(game, 0, [2, 1, 0, 0, 0])
-    set_known_hand(game, 1, [0, 0, 2, 1, 1])
-    set_known_hand(game, 2, [1, 1, 1, 0, 0])
-    bot = a_bot(game, 26, mode="omniscient")
-    received = one_for_one(int(Resource.WOOD), int(Resource.SHEEP))
-    view = View.from_game(game, 0, omniscient=True)
-    for counterparty in (1, 2):
-        assert bot._delta(view, 0, 0, received, counterparty, bot._rank) == pytest.approx(
-            _omniscient_truth_delta(bot, game, 0, received, counterparty)
-        )
-
-
 def test_an_honest_trade_read_is_unchanged_by_the_partners_real_cards():
     """Honesty, stated as an invariant: an honest seat's gate reads the
     counterparty through `expected_hand`, which depends only on the ledger's
@@ -517,17 +466,15 @@ def test_the_vectorised_gate_matches_the_clone_it_replaces_bit_for_bit():
 def test_the_heximax_presets_spawn_with_their_documented_modes():
     board = random_base_board(random.Random(0))
     honest = spawn(PRESETS["heximax"], board, random.Random(0))
-    omni = spawn(PRESETS["heximax-omni"], board, random.Random(0))
     quiet = spawn(PRESETS["heximax-notrade"], board, random.Random(0))
-    for bot in (honest, omni, quiet):
+    for bot in (honest, quiet):
         assert isinstance(bot, Heximax)
         assert bot.placement
         assert bot.depth == 2 and bot.width == 6
 
-    assert (honest.mode, honest.max_trades, honest.evaluator.omniscient) == ("honest", None, False)
+    assert (honest.mode, honest.max_trades) == ("honest", None)
     assert honest.evaluator.weights == TRADING_WEIGHTS
-    assert (omni.mode, omni.max_trades, omni.evaluator.omniscient) == ("omniscient", None, True)
-    assert (quiet.mode, quiet.max_trades, quiet.evaluator.omniscient) == ("notrade", 0, False)
+    assert (quiet.mode, quiet.max_trades) == ("notrade", 0)
     assert quiet.evaluator.weights == NO_TRADE_WEIGHTS
 
 
@@ -538,8 +485,7 @@ def test_heximax_reads_the_true_state_only_where_it_says_so():
     """Every `hidden=False` in heximax's own package carries a `# true state:`
     comment saying why, and there are no other routes to the raw state: the
     field is engine-private (`Game._state`), `game.state(seat)` is the honest
-    view, and `View.from_game(..., omniscient=True)` is the one omniscient
-    construction, reached only from `omniscient` mode.
+    view, and `View` has no omniscient construction at all.
 
     heximax is a package (`hexset.bots.heximax`, split by concern into
     `evaluate`/`search`/`presets`), so the source under test is those
@@ -563,7 +509,7 @@ def test_heximax_reads_the_true_state_only_where_it_says_so():
 
     source = "\n".join(lines)
     assert "._state" not in source
-    assert source.count("omniscient=self.omniscient") <= 2
+    assert "omniscient" not in source
 
 
 # --- hidden victory points and the fitted temperature --------------------------
@@ -572,7 +518,7 @@ def test_heximax_reads_the_true_state_only_where_it_says_so():
 def test_an_opponents_development_cards_are_worth_their_expected_victory_points():
     """The anchor term means the same thing in every row: the knower's own VP
     cards are exact, an opponent's are its held count times the VP share of
-    the unseen pool, and the omniscient reader sees the truth for everyone."""
+    the unseen pool."""
     from hexset.bots.heximax.evaluate import VP_CARDS, HonestEvaluator, expected_card_points
     from hexset.cards import DevCard
 
@@ -605,8 +551,6 @@ def test_an_opponents_development_cards_are_worth_their_expected_victory_points(
     assert rows[1][0] == pytest.approx(truth[1][0] - 1 + 3 * VP_CARDS / unseen_from_0)
     own = honest.rows_game(game, 1)
     assert own[1][0] == truth[1][0]  # exact for the knower: the real VP card counts
-    omni = HonestEvaluator(state.board, omniscient=True).rows_game(game, 0)
-    assert [row[0] for row in omni] == pytest.approx([row[0] for row in truth])
     # `evaluate` is `rows` dotted with the weights, so the two cannot drift.
     scored = honest.evaluate_game(game, 0)
     assert scored == pytest.approx(

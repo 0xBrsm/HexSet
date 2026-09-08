@@ -101,8 +101,8 @@ def register_evaluator_provider(name: str, factory) -> None:
 def register_preset(name: str, entrant: "Entrant") -> None:
     """Register a named lineup shortcut (`PRESETS[name]`, resolved by
     `entrant_from_name`/`lineup_from_names`) for an entrant hexset does not
-    ship itself -- how `hexset.bots.heximax` makes "heximax",
-    "heximax-omni" and "heximax-notrade" resolvable by name once imported."""
+    ship itself -- how `hexset.bots.heximax` makes "heximax" and
+    "heximax-notrade" resolvable by name once imported."""
     PRESETS[name] = entrant
 
 
@@ -190,8 +190,7 @@ class Entrant:
     simulations: int = 128
     wave: int = 16
     # `kind="heximax"` only: which of `heximax.MODES` to build --
-    # `honest` (the referent), `omniscient` (the information price), or
-    # `notrade` (the no-trade weights, declining everything). Defaulted so
+    # `honest` (the referent) or `notrade` (the no-trade weights, declining everything). Defaulted so
     # every other entrant is unchanged.
     mode: str = "honest"
     # `kind="heximax"` only: determinized worlds searched per decision (PIMC).
@@ -272,7 +271,7 @@ PRESETS: dict[str, Entrant] = {
     # eight setup settlements from everything else.
     "random-placement": Entrant("random-placement", kind="random", placement=True),
     "greedy-placement": Entrant("greedy-placement", kind="greedy", placement=True),
-    # "heximax"/"heximax-omni"/"heximax-notrade" are not built in -- they are
+    # "heximax"/"heximax-notrade" are not built in -- they are
     # registered by `hexset.bots.heximax` at import time via `register_preset`
     # (see that package's "registration" section), the same way `hexn`
     # registers "network"/"mcts".

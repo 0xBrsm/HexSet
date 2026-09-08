@@ -117,7 +117,7 @@ class _ShiftedBelief:
     ledger has no other seat mid-desync.
     """
 
-    __slots__ = ("known", "unknown", "pool", "pool_size", "perspective", "omniscient")
+    __slots__ = ("known", "unknown", "pool", "pool_size", "perspective")
 
     def __init__(
         self,
@@ -126,17 +126,15 @@ class _ShiftedBelief:
         pool: list[int],
         pool_size: int,
         perspective: int,
-        omniscient: bool,
     ) -> None:
         self.known = known
         self.unknown = unknown
         self.pool = pool
         self.pool_size = pool_size
         self.perspective = perspective
-        self.omniscient = omniscient
 
     def exact(self, seat: int) -> bool:
-        return self.omniscient or seat == self.perspective
+        return seat == self.perspective
 
     def expected_hand(self, seat: int) -> list[float]:
         known = self.known[seat]
@@ -180,7 +178,7 @@ def _after_trade_belief(
     new_size_cp = belief0.sizes[counterparty] - sum(gains) + sum(losses)
     unknown[counterparty] = new_size_cp - sum(new_known_cp)
 
-    return _ShiftedBelief(known, unknown, pool, pool_size, target, belief0.omniscient)
+    return _ShiftedBelief(known, unknown, pool, pool_size, target)
 
 
 @dataclass
@@ -193,8 +191,7 @@ class Heximax:
     a ply that overruns is abandoned for the last completed one -- whatever
     the branching, no move costs more than `max_nodes` leaves. Opponents are
     expanded from `k` determinized worlds drawn from the belief at the root
-    (`View.sample`) and the root values averaged across them (PIMC); in
-    `omniscient` mode `k` is ignored and the true state is searched. Hidden
+    (`View.sample`) and the root values averaged across them (PIMC). Hidden
     draws are expectations, not one sample: a steal over the victim's
     expected composition, a dev-card buy over the unseen deck, each weighted
     by its probability. Rolls are exact eleven-way within `EXACT_ROLL_PLIES`
@@ -247,11 +244,6 @@ class Heximax:
         self.depth_reached = 0
 
     @property
-    def omniscient(self) -> bool:
-        """Whether this bot reads every seat's true hand (mode="omniscient")."""
-        return self.evaluator.omniscient
-
-    @property
     def nodes(self) -> int:
         """Leaf evaluations the last `choose` spent."""
         return self._spent
@@ -298,10 +290,8 @@ class Heximax:
         """The determinizations this decision is searched in.
 
         Each is an `imagine` copy whose hidden hands and cards are one draw
-        from the belief; in omniscient mode, one copy of the truth.
+        from the belief.
         """
-        if self.omniscient:
-            return [imagine(game, self.rng)]
         belief = game.state(seat)
         out = []
         for _ in range(self.k):
@@ -428,7 +418,7 @@ class Heximax:
         if self.max_trades == 0:
             return [-1.0] * len(received)
         seat = view.perspective
-        if not self.omniscient and self.evaluator.exact_progress_samples:
+        if self.evaluator.exact_progress_samples:
             return [
                 self._delta_scalar_honest(view, seat, r, c, self._rank)
                 for r, c in zip(received, counterparties)
@@ -518,7 +508,7 @@ class Heximax:
         """
         if target != knower:
             return self._delta_reference(view, knower, target, received, counterparty, rank)
-        if not self.omniscient and self.evaluator.exact_progress_samples:
+        if self.evaluator.exact_progress_samples:
             return self._delta_scalar_honest(view, knower, received, counterparty, rank)
         return self._delta_many(view, knower, target, [received], [counterparty], rank)[0]
 
@@ -553,14 +543,10 @@ class Heximax:
         received: list[Bundle], counterparties: list[int],
     ) -> np.ndarray:
         """`(candidates, seat, resource)`: every seat's hand after each
-        candidate trade, exact for `target` (and, when `omniscient`, for
-        everyone), `View.expected_hand`-equivalent otherwise.
+        candidate trade, exact for `target`, `View.expected_hand`-equivalent
+        otherwise.
 
-        Omniscient: `hand_shifted`, batched -- every seat's hand is
-        `state.hands[seat]` except `target`'s (add `received`) and that
-        row's own counterparty's (subtract it).
-
-        Honest: only `target`'s and each row's own counterparty's `known`
+        Only `target`'s and each row's own counterparty's `known`
         differ from the event's shared pre-trade belief (`belief_for`,
         already memoized for the whole event), and only the shared residual
         pool moves under them -- the same derivation `_after_trade_belief`
@@ -576,14 +562,6 @@ class Heximax:
         received_arr = np.array(received, dtype=np.float64)
         counterparty_arr = np.array(counterparties, dtype=np.intp)
         rows = np.arange(n)
-
-        if self.omniscient:
-            hands = np.broadcast_to(
-                np.array(state.hands, dtype=np.float64), (n, num_players, NUM_RESOURCES)
-            ).copy()
-            hands[rows, target, :] += received_arr
-            hands[rows, counterparty_arr, :] -= received_arr
-            return hands
 
         belief0 = self.evaluator.belief_for(state, ledger, knower)
         known0 = np.array(belief0.known, dtype=np.float64)
@@ -673,9 +651,8 @@ class Heximax:
         after = _thin_copy(state)
         gains = [max(0, n) for n in received]
         losses = [max(0, -n) for n in received]
-        exact = self.omniscient
-        self._move_hand(after, knower, target, gains=gains, losses=losses, exact=exact)
-        self._move_hand(after, knower, counterparty, gains=losses, losses=gains, exact=exact)
+        self._move_hand(after, knower, target, gains=gains, losses=losses)
+        self._move_hand(after, knower, counterparty, gains=losses, losses=gains)
         ledger = view.ledger.copy()
         for r in range(NUM_RESOURCES):
             if losses[r]:
@@ -689,7 +666,7 @@ class Heximax:
     @staticmethod
     def _move_hand(
         state: GameState, knower: int, seat: int, *,
-        gains: list[int], losses: list[int], exact: bool = False,
+        gains: list[int], losses: list[int],
     ) -> None:
         """`seat`'s hand after gaining `gains` and losing `losses`.
 
@@ -701,16 +678,9 @@ class Heximax:
         and the one thing it takes from `state.hands` is the *size* -- which
         the fold preserves and a per-resource move, clamped at zero when the
         seat cannot cover `losses`, would not.
-
-        `exact` forces the per-resource move for every seat, and the
-        omniscient bot passes it. Under omniscience the reasoning above is
-        void: `known` *is* `state.hands`, every row is scored on the real
-        cards, and folding would price an all-one-resource fiction whose
-        `progress`, `diversity` and `scarce` terms are nothing like the
-        position's.
         """
         hand = state.hands[seat]
-        if seat == knower or exact:
+        if seat == knower:
             for r in range(len(hand)):
                 hand[r] += gains[r] - losses[r]
                 if hand[r] < 0:
@@ -771,11 +741,7 @@ class Heximax:
         conditioning the determinization on the outcome rather than discarding
         it. Only cards the record has not certified are ever swapped.
         """
-        # `omniscient` can be True here, and `Game.state(seat, hidden=True)`
-        # is never omniscient -- so this builds the `View` directly rather
-        # than through `game.state(knower)`, same as `View.from_game` always
-        # did.
-        belief = View.from_game(game, knower, omniscient=self.omniscient)
+        belief = View.from_game(game, knower)
         if action.type is ActionType.BUY_DEV_CARD:
             odds = belief.deck_odds()
             children = []
@@ -933,7 +899,7 @@ def _donor(hand: list[int], known: list[int]) -> int | None:
     return None
 
 
-MODES = ("honest", "omniscient", "notrade")
+MODES = ("honest", "notrade")
 
 # Sentinel for `heximax(max_trades=...)`: "whatever the mode's own setting is".
 BY_MODE: int = object()  # type: ignore[assignment]
@@ -946,18 +912,17 @@ def heximax(
     placement: bool = True, exact_progress_samples: int = 0, weights: Weights | None = None,
     temperature: float | None = None,
 ) -> Heximax:
-    """The three shipped configurations, by `mode`.
+    """The two shipped configurations, by `mode`.
 
-    `honest` reads the ledger and the trading-table weights; `omniscient`
-    reads every true hand with the same weights; `notrade` is honest with the
-    no-trade weights. Left at `BY_MODE`, trading is on for the first two and
-    off (`max_trades=0`) for `notrade`; any explicit value, `None` included,
-    is taken as given.
+    `honest` reads the ledger and the trading-table weights; `notrade` is
+    honest with the no-trade weights. Left at `BY_MODE`, trading is on for
+    `honest` and off (`max_trades=0`) for `notrade`; any explicit value,
+    `None` included, is taken as given.
 
     `weights` overrides the mode's own profile (`TRADING_WEIGHTS` or
     `NO_TRADE_WEIGHTS`) with the given vector, and `temperature` the `win`
     stance's `search2.WIN_TEMPERATURE`, leaving everything else about the
-    mode -- the trade switch, `omniscient` -- unchanged. This is how a fit
+    mode -- the trade switch -- unchanged. This is how a fit
     (`hexset.fitting`) is played before adoption: a candidate and the
     incumbent are otherwise identical heximax bots, differing only in the
     vector and the temperature it was fitted with.
@@ -968,12 +933,7 @@ def heximax(
         max_trades = 0 if mode == "notrade" else None
     if weights is None:
         weights = NO_TRADE_WEIGHTS if mode == "notrade" else TRADING_WEIGHTS
-    evaluator = HonestEvaluator(
-        board,
-        weights,
-        omniscient=(mode == "omniscient"),
-        exact_progress_samples=exact_progress_samples,
-    )
+    evaluator = HonestEvaluator(board, weights, exact_progress_samples=exact_progress_samples)
     return Heximax(
         evaluator,
         depth=depth,

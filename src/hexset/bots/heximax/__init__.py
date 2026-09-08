@@ -15,8 +15,7 @@ to the design in `agents/reference/heximax.md`. It is **information-set
 honest by default**: every quantity about an opponent is read through the
 public ledger (`game.ledger`, `known[s]` + `unknown`) and the public counts,
 never through `state.hands[opponent]` or `state.dev_cards[opponent]`. Its own
-hand is exact. An `omniscient` mode keeps the old reading, so the price of
-honesty can be measured rather than assumed.
+hand is exact.
 
 A package, so a downstream copy takes the directory: `heximax/evaluate.py`,
 `heximax/search.py`, `heximax/presets.py`, one concern a file. The
@@ -35,7 +34,7 @@ seat's view of the game is engine functionality, reached through
   samples of the belief (PIMC over `k` worlds), and every hidden draw
   averaged over its distribution. See its module docstring for the leaf
   budget's cost accounting.
-* `presets`  -- registers "heximax"/"heximax-omni"/"heximax-notrade" with
+* `presets`  -- registers "heximax"/"heximax-notrade" with
   `hexset.arena`, as an import-time side effect of importing this package
   (and therefore of `import hexset.bots`, which imports this package).
 
@@ -47,12 +46,10 @@ everything.
 
 Instantiate through the `heximax(board, ...)` factory, not `Heximax(...)`
 directly, unless you are building a custom evaluator or weight vector by
-hand: `heximax(board, mode="honest")` is the shipped bot, `mode="omniscient"`
-reads every true hand at the same weights (the honest/omni dial this module
-exists to measure the cost of), and `mode="notrade"` plays the no-trade
-weight table with trading switched off. `weights=` overrides either mode's
-profile with a candidate vector while leaving the mode's other defaults (the
-trade switch, `omniscient`) unchanged -- the hook the position-level fit in
+hand: `heximax(board, mode="honest")` is the shipped bot and
+`mode="notrade"` plays the no-trade weight table with trading switched off.
+`weights=` overrides either mode's profile with a candidate vector while
+leaving the mode's other defaults (the trade switch) unchanged -- the hook the position-level fit in
 `hexset.fitting` uses to compare a candidate vector. Importing this package,
 or `hexset.bots` (which imports it), or anything that imports either,
 registers the three presets above with `hexset.arena`; a process that never
@@ -85,8 +82,7 @@ from hexset.view import View
 from .evaluate import NO_TRADE_WEIGHTS, TRADING_WEIGHTS, HonestEvaluator, Weights
 from .search import BY_MODE, DEFAULT_MAX_NODES, MODES, Heximax, heximax
 
-# Import-time side effect only: registers "heximax"/"heximax-omni"/
-# "heximax-notrade" with `hexset.arena`. See `presets`'s own docstring.
+# Import-time side effect only: registers "heximax"/"heximax-notrade" with `hexset.arena`. See `presets`'s own docstring.
 from . import presets  # noqa: F401
 
 __all__ = [

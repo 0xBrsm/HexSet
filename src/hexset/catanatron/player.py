@@ -24,7 +24,7 @@ from dataclasses import replace
 from hexset.arena import entrant_from_name, spawn
 
 import hexset.bots  # noqa: F401 -- registers the bot presets ("heximax"/
-# "heximax-omni"/"heximax-notrade" among them) with `hexset.arena.PRESETS`
+# "heximax-notrade" among them) with `hexset.arena.PRESETS`
 # before `entrant_from_name`, below, ever looks one up. Neither this module
 # nor `hexset.catanatron.duel` imported it before, so a worker process asking
 # for `DC:heximax-notrade` got a bare `KeyError` on the name -- every other

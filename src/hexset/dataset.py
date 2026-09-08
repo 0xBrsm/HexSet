@@ -11,8 +11,7 @@ drops straight back into the bot.
 
 Honest by default: the knower's row is exact and every other row is read
 through the ledger (`View.expected_hand`, `expected_card_points`), exactly as
-the deployed evaluator reads them. `omniscient=True` reads every row exact,
-which measures how much the honest reading attenuates the fit.
+the deployed evaluator reads them.
 
 Positions inside a game are heavily correlated -- consecutive samples differ
 by one build, and every choice set in a game shares one winner -- so a
@@ -57,7 +56,6 @@ def samples_from(
     game: int,
     *,
     stride: int = DEFAULT_STRIDE,
-    omniscient: bool = False,
     knowers: Sequence[int] | None = None,
 ) -> Iterator[ChoiceSet]:
     """Replay one record, reading every `stride`-th main-phase position.
@@ -69,7 +67,7 @@ def samples_from(
     if record.winner is None:
         return
 
-    evaluator = HonestEvaluator(board_of(record), omniscient=omniscient)
+    evaluator = HonestEvaluator(board_of(record))
     state_game = open_record(record)
     total = len(record.actions)
     seats = range(record.num_players) if knowers is None else knowers
@@ -102,11 +100,10 @@ def build(
     records: Iterable[Record],
     *,
     stride: int = DEFAULT_STRIDE,
-    omniscient: bool = False,
 ) -> list[ChoiceSet]:
     out: list[ChoiceSet] = []
     for game, record in enumerate(records):
-        out.extend(samples_from(record, game, stride=stride, omniscient=omniscient))
+        out.extend(samples_from(record, game, stride=stride))
     return out
 
 

@@ -36,7 +36,7 @@ def test_importing_the_bridge_registers_the_heximax_presets():
     """`hexset.catanatron.player` (and `.duel`, which imports it) used to
     import neither `hexset.bots` nor anything that does, so a worker process
     asking for `DC:heximax-notrade` raised a bare `KeyError` on the name --
-    `PRESETS` only gains "heximax"/"heximax-omni"/"heximax-notrade" as an
+    `PRESETS` only gains "heximax"/"heximax-notrade" as an
     import-time side effect of importing `hexset.bots.heximax`. Importing
     this module (done above, at collection time) is what this test is
     actually checking survived; the assertion below just makes that explicit

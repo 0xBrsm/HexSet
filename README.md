@@ -26,10 +26,10 @@ One distribution, `hexset`, ships from `src/`:
     set, `View`: known/unknown hands, expected hands, hold probabilities,
     `sample`. Reached through `game.state(seat, hidden=True)` (the default);
     `game.state(seat, hidden=False)` returns the true `GameState` instead,
-    the only sanctioned way to read it from outside the engine. Three
+    the only sanctioned way to read it from outside the engine. Two
     callers are sanctioned to do so: `hexset.bots.search2` (the project's
-    held-out perfect-information referent), heximax's own `omniscient`
-    mode, and the Catanatron adapter when it hosts a Catanatron bot; every
+    held-out perfect-information referent) and the Catanatron adapter when
+    it hosts a Catanatron bot; every
     other outside caller that genuinely needs the true state says so with a
     `# true state: <why>` comment at the call site. It is also what the trade
     mechanic hands a seat: `Bot.gains_many(view, received, counterparties)`
@@ -94,7 +94,7 @@ python -m hexset.bench.duel heximax search2 --games 400
 ```
 
 `a`/`b` are checkpoint paths or `hexset.arena` entrant names (`heximax`,
-`heximax-omni`, `search2`, `search2-notrade`, ...). Reports a Wilson interval,
+`heximax-notrade`, `search2`, `search2-notrade`, ...). Reports a Wilson interval,
 not a raw win count. See `python -m hexset.bench.duel --help` for the full
 flag set (workers, board/duel seeds, geometry).
 

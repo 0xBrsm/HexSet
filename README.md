@@ -63,7 +63,7 @@ One distribution, `hexset`, ships from `src/`:
     [Gym](#gym) below.
 
 Training — self-play, PPO, expert iteration — is not part of this repo. It
-lives in HexNet, the sibling package this gym plays exported checkpoints
+lives in HexN, the sibling package this gym plays exported checkpoints
 from; see [Adding an opponent](#adding-an-opponent) below.
 
 ## Install
@@ -177,11 +177,11 @@ Drop a `.onnx` file into `models/` (or wherever `HEXSET_UI_MODELS_DIR`
 points) and it shows up in the in-game picker — no restart, no code change.
 The filename's stem (minus `.onnx`) is what's shown in the dropdown.
 
-`.onnx` files aren't built here. HexNet's `export_onnx` converts a trained
+`.onnx` files aren't built here. HexN's `export_onnx` converts a trained
 `.pt` checkpoint:
 
 ```
-# from HexNet's src/, with torch + onnx + onnxruntime installed
+# from HexN's src/, with torch + onnx + onnxruntime installed
 python -m export_onnx --checkpoint runs/some-run/latest.pt --out latest.onnx
 ```
 

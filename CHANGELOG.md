@@ -11,6 +11,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- References to the sibling training package follow its rename from `hexnet` to `hexn`.
 - References to the private training repository follow its rename to
   `dev-HexN`.
 

@@ -57,10 +57,10 @@ if TYPE_CHECKING:
 Z_95 = 1.959964
 
 # Network-backed entrant kinds and evaluators are not implemented here: they
-# need torch and a trained checkpoint, which live in the `hexnet` package, and
-# hexset must never import hexnet. Instead `hexnet.netbot` registers factories
-# here at import time -- so any HexNet entry point (train, league, collect,
-# its duel wrapper) that imports `hexnet.netbot` makes "network"/"mcts"
+# need torch and a trained checkpoint, which live in the `hexn` package, and
+# hexset must never import hexn. Instead `hexn.netbot` registers factories
+# here at import time -- so any HexN entry point (train, league, collect,
+# its duel wrapper) that imports `hexn.netbot` makes "network"/"mcts"
 # entrants and the "network" evaluator spawnable, and a hexset-only process
 # that never imports it gets a clear error naming the package that provides
 # them rather than a silent `ImportError` on torch.
@@ -76,8 +76,8 @@ _NETWORK_EVALUATORS = frozenset({"network"})
 _HEXIMAX_KINDS = frozenset({"heximax"})
 
 _HEXNET_HINT = (
-    "is provided by the hexnet package; import hexnet.netbot (or an entry "
-    "point that does, such as hexnet.train/hexnet.league/hexnet.collect) "
+    "is provided by the hexn package; import hexn.netbot (or an entry "
+    "point that does, such as hexn.train/hexn.league/hexn.collect) "
     "before spawning it"
 )
 _HEXIMAX_HINT = "is provided by hexset.bots.heximax; import hexset.bots before spawning it"
@@ -107,15 +107,15 @@ def register_preset(name: str, entrant: "Entrant") -> None:
 
 
 def register_checkpoint_loader(loader) -> None:
-    """Register `hexnet.netbot.load`-shaped loader: `(path, topology, device)
+    """Register `hexn.netbot.load`-shaped loader: `(path, topology, device)
     -> Loaded`, an object with `.policy`, `.space` and `.max_trades`. Lets
-    a caller load a checkpoint without importing hexnet itself."""
+    a caller load a checkpoint without importing hexn itself."""
     global _CHECKPOINT_LOADER
     _CHECKPOINT_LOADER = loader
 
 
 def register_leaf_evaluator_factory(factory) -> None:
-    """Register a `hexnet.netbot.LeafEvaluator`-shaped factory:
+    """Register a `hexn.netbot.LeafEvaluator`-shaped factory:
     `(policy, space, pad_to=None) -> object` with an `evaluate(leaves)`
     method matching `hexset.mcts.Evaluator`."""
     global _LEAF_EVALUATOR_FACTORY
@@ -274,7 +274,7 @@ PRESETS: dict[str, Entrant] = {
     "greedy-placement": Entrant("greedy-placement", kind="greedy", placement=True),
     # "heximax"/"heximax-omni"/"heximax-notrade" are not built in -- they are
     # registered by `hexset.bots.heximax` at import time via `register_preset`
-    # (see that package's "registration" section), the same way `hexnet`
+    # (see that package's "registration" section), the same way `hexn`
     # registers "network"/"mcts".
 }
 

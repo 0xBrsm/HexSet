@@ -108,10 +108,10 @@ def relative_points(points: tuple[int, ...]) -> tuple[float, ...]:
     (`hexset.trading`). Horizon control belongs in what is measured, not in a
     discount factor that quietly changes the objective.
 
-    Lives here rather than in `hexset.mcts` or `hexnet.rewards` (both of which
+    Lives here rather than in `hexset.mcts` or `hexn.rewards` (both of which
     use it) because it is a pure function of terminal points and `WINNING_POINTS`
-    -- the engine side of the hexset/hexnet boundary, with nothing else pulled
-    in. `hexnet.rewards.relative_points` re-exports this definition rather than
+    -- the engine side of the hexset/hexn boundary, with nothing else pulled
+    in. `hexn.rewards.relative_points` re-exports this definition rather than
     keeping a second one, so this docstring's warning still travels with the
     one function anything trains against.
     """

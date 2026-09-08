@@ -8,18 +8,17 @@ into roads whenever it can -- more than a human would. This plays a
 challenger heximax (a modified `Weights`) against the intact baseline
 heximax, on identical boards with seats mirrored, exactly the way
 `hexset.bench.ablate` plays a zeroed term against the full vector -- except
-this also records what `ablate`'s own duel throws away: roads,
-settlements and cities per seat, and game length, not just who won.
+this also reports what `ablate`'s own duel throws away: the arena's per-seat
+build census (roads, settlements, cities) and game length, not just who won.
 
 Depth 2, width 6 (the `heximax` preset), honest mode, trading on -- the
 shipped configuration, unchanged except for the two weights under test.
 
 One four-seat lineup per game, `[challenger, challenger, baseline, baseline]`
 -- grouped, not interleaved; see `run_cell`'s docstring for why the grouping
-matters -- antithetic-paired the way `hexset.arena.compete` pairs a duel: the
-two seat pairs swap between the two halves of a board, cancelling most of the
-seat term, and `--games` must be a multiple of 4 for that rotation to
-complete. `--seed` fixes the board sequence, so every cell in a sweep (and
+matters -- played by `hexset.arena.compete`, whose antithetic pairing swaps the
+two seat pairs between the two halves of a board, cancelling most of the seat
+term. `--games` must be a multiple of 4 for that rotation to complete. `--seed` fixes the board sequence, so every cell in a sweep (and
 the control cell, which should read about 50%) sees the same boards.
 """
 
@@ -27,19 +26,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
 import statistics
 import sys
 import time
 from dataclasses import replace
-from multiprocessing import Pool
 
-from hexset.arena import MAX_ACTIONS, Entrant, Z_95, play, seat_of, spawn, wilson
+from hexset.arena import Entrant, Z_95, compete, wilson
 from hexset.bench.throughput import default_workers, environment
-from hexset.board.board import random_base_board
 from hexset.bots.heximax.evaluate import TRADING_WEIGHTS
-from hexset.state import city_count, road_count, settlement_count
-from hexset.victory import victory_points
 
 # The machine this sweep runs on is shared with other jobs; 8 is the ceiling
 # the owner set, not a suggestion to raise if idle.
@@ -57,57 +51,6 @@ DEFAULT_CELLS: tuple[dict[str, float], ...] = (
     {"road": 0.04, "spare_card": 0.02},
     {"road": 0.0, "spare_card": 0.02},
 )
-
-
-def _play_one(
-    job: tuple[tuple[Entrant, ...], int, int],
-) -> tuple[int | None, int, tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...]]:
-    """Play game `index`. Returns (winning entrant, turns, points, roads,
-    settlements, cities), each of the last four in entrant order.
-
-    Board and rotation derivation is `hexset.arena._play_one`'s, verbatim --
-    same seed string keys, same antithetic pairing over the 4-seat lineup --
-    so a cell here plays the identical boards `hexset.arena.compete` would at
-    the same `seed`. What is added is the per-seat build census `compete`
-    does not keep: `hexset.arena.Tournament` only carries points and turns.
-    """
-    entrants, index, seed = job
-    seats = len(entrants)
-    pair, half = divmod(index, 2)
-    board_index = pair
-    rotation = pair + half * (seats // 2)
-    board = random_base_board(random.Random(f"{seed}:{board_index}:board"))
-    seats_taken = [seat_of(e, rotation, seats) for e in range(seats)]
-
-    lineup: list = [None] * seats
-    for e, entrant in enumerate(entrants):
-        lineup[seats_taken[e]] = spawn(
-            entrant, board, random.Random(f"{seed}:{board_index}:{e}")
-        )
-
-    game = play(
-        lineup,
-        board,
-        random.Random(f"{seed}:{board_index}:game"),
-        action_cap=MAX_ACTIONS,
-    )
-
-    points = []
-    roads = []
-    settlements = []
-    cities = []
-    for e in range(seats):
-        seat = seats_taken[e]
-        # true state: the same reasoning as `hexset.arena._play_one` -- the
-        # terminal census includes hidden victory-point cards.
-        state = game.state(seat, hidden=False)
-        points.append(victory_points(state, seat))
-        roads.append(road_count(state, seat))
-        settlements.append(settlement_count(state, seat))
-        cities.append(city_count(state, seat))
-
-    winner = None if game.won_by is None else seats_taken.index(game.won_by)
-    return winner, game.turns, tuple(points), tuple(roads), tuple(settlements), tuple(cities)
 
 
 def run_cell(
@@ -130,8 +73,9 @@ def run_cell(
     the baseline); left unset, both are the shipped heximax and
     `challenger_weights` is the only difference between them.
 
-    Grouped, not interleaved: `_play_one`'s antithetic pairing swaps seats by
-    `seats // 2` between the two halves of a pair, which exchanges the seat
+    The games are `hexset.arena.compete`'s, and the grouping is nothing more
+    than the lineup handed to it: `compete`'s antithetic pairing swaps seats
+    by `seats // 2` between the two halves of a pair, which exchanges the seat
     *pairs* `{0, 1}` and `{2, 3}` -- exactly the two sides of a `[c, c, b, b]`
     lineup, per `hexset.arena._play_one`'s own docstring ("with an [a, a, b,
     b] lineup it exchanges the two sides' seat pairs exactly"). An
@@ -142,6 +86,11 @@ def run_cell(
     cancels. A first run with the interleaved lineup read the control cell
     (byte-identical weights on both sides) at 44.3% instead of the expected
     ~50% for exactly this reason.
+
+    The build census this cell reports -- roads, settlements and cities per
+    seat, which is what `ablate`'s bare win rate throws away -- is
+    `Tournament.roads`/`settlements`/`cities`, kept by the arena for every
+    game it plays.
     """
     if challenger is None:
         challenger = Entrant(
@@ -152,17 +101,16 @@ def run_cell(
         baseline = Entrant(
             "baseline", kind="heximax", depth=depth, width=width, weights=TRADING_WEIGHTS
         )
-    lineup = (challenger, challenger, baseline, baseline)
     challenger_seats = (0, 1)
     baseline_seats = (2, 3)
 
-    jobs = [(lineup, i, seed) for i in range(games)]
     started = time.perf_counter()
-    if workers > 1:
-        with Pool(workers) as pool:
-            outcomes = pool.map(_play_one, jobs, chunksize=1)
-    else:
-        outcomes = [_play_one(job) for job in jobs]
+    tournament = compete(
+        [challenger, challenger, baseline, baseline],
+        games,
+        seed=seed,
+        workers=workers,
+    )
     elapsed = time.perf_counter() - started
 
     wins = decided = 0
@@ -176,7 +124,14 @@ def run_cell(
     c_cities: list[int] = []
     b_cities: list[int] = []
     per_game = []
-    for winner, game_turns, points, roads, settlements, cities in outcomes:
+    for winner, game_turns, points, roads, settlements, cities in zip(
+        tournament.winners,
+        tournament.turns,
+        tournament.points,
+        tournament.roads,
+        tournament.settlements,
+        tournament.cities,
+    ):
         turns.append(game_turns)
         if winner is not None:
             decided += 1

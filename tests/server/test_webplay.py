@@ -210,6 +210,23 @@ def test_a_spectators_log_redacts_nothing_a_seats_log_would():
     assert watching == theirs
 
 
+def test_state_view_reveals_the_log_once_the_game_is_over():
+    """The redaction the test above checks holds only mid-game: once
+    `game_over`, a seat's own `state_view` owes it the same transcript the
+    spectator link already shows for this game (see `state_view`'s
+    docstring) -- nobody is left still choosing moves for a fuller log to
+    tip off."""
+    game = _owing_game(seed=22, seat=1, hand=[4, 4, 0, 0, 0])
+    session = a_session(game, {0, 1})
+
+    _discard_all(session, 1)
+    game.won_by = 0
+    game.phase = Phase.GAME_OVER
+
+    across = session.state_view(0)["log"][0]
+    assert any(r in across for r in RESOURCE_NAMES)
+
+
 def test_state_view_hides_opponent_hands_but_reveals_the_viewers():
     game = a_game(seed=8)
     seat = to_move(game)

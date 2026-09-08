@@ -1664,6 +1664,13 @@ class GameSession:
         of somebody still choosing moves. `api.Tables.handle` passes it at
         exactly one route, the token-free `GET /api/table/<code>`, and every
         seated route leaves it alone.
+
+        A finished game (`over`) gets the same two drops as `omniscient`,
+        seat or no seat: nobody is still choosing moves once `game_over` is
+        true, so the concern above no longer applies, and every seat's own
+        route reveals exactly what the spectator link already showed for
+        this game. The hand/dev-card/victory-point half of that has always
+        followed `over` (see `reveal` below); the transcript now does too.
         """
         if omniscient and viewer is not None:
             raise ValueError("an omniscient view belongs to no seat")
@@ -1801,7 +1808,7 @@ class GameSession:
                 else None
             ),
             "legal_actions": self.legal_wire_actions(viewer),
-            "log": self.log_for(viewer, omniscient=omniscient),
+            "log": self.log_for(viewer, omniscient=omniscient or over),
         }
 
     def log_for(self, viewer: int | None, *, omniscient: bool = False) -> list[str]:

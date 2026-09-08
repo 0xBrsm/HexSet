@@ -15,7 +15,7 @@ SearchBot` keeps working exactly as it did when `bots.py` was a single file)
 and most of `heximax`'s (`Heximax`, `HonestEvaluator`, `Weights`,
 `TRADING_WEIGHTS`, `NO_TRADE_WEIGHTS`, `MODES`, `BY_MODE`). Importing
 `.heximax` here is what makes `import hexset.bots` register the "heximax"/
-"heximax-omni"/"heximax-notrade" presets and the "heximax-trading"/
+"heximax-notrade" presets and the "heximax-trading"/
 "heximax-notrade" evaluator names -- previously only an explicit `import
 heximax` did that; now any consumer of this package's bots gets it too, since
 the two live in the same package. See `heximax`'s own module docstring for

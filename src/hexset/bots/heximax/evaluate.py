@@ -5,8 +5,7 @@
 terms are the existing evaluator's own `survey`, reused rather than copied
 since it reads only public state. The three hand terms (`evaluate.hand_terms`
 -- purchase progress, spare cards, robber exposure) are read on the true hand
-for the knower (or for everyone, when `omniscient`) and on
-`View.expected_hand` for everyone else; victory point cards are exact for
+for the knower and on `View.expected_hand` for everyone else; victory point cards are exact for
 the knower and an expectation over the unseen pool for everyone else
 (`expected_card_points`). `TRADING_WEIGHTS` and `NO_TRADE_WEIGHTS` are the
 two shipped profiles `heximax()` picks between by mode -- see their own
@@ -135,9 +134,8 @@ class HonestEvaluator:
     Board terms are the existing evaluator's own `survey`, reused rather
     than copied since it reads only public state. The three hand terms
     (`evaluate.hand_terms`) are read on the true hand for the knower and on
-    `View.expected_hand` for everyone else (or everyone, when `omniscient`);
-    victory-point cards are exact for the knower (and for everyone, when
-    `omniscient`) and `expected_card_points` otherwise. `buy_progress` on an
+    `View.expected_hand` for everyone else; victory-point cards are exact
+    for the knower and `expected_card_points` otherwise. `buy_progress` on an
     expected hand is an approximation -- a maximum of minimums, so the value
     on the mean differs from the mean of the values -- which
     `exact_progress_samples > 0` replaces with an average over that many
@@ -146,13 +144,12 @@ class HonestEvaluator:
     """
 
     def __init__(
-        self, board: Board, weights: Weights | None = None, *, omniscient: bool = False,
+        self, board: Board, weights: Weights | None = None, *,
         exact_progress_samples: int = 0,
     ) -> None:
         self.inner = Evaluator(board, weights)
         self.weights = self.inner.weights
         self.vector = self.inner.vector
-        self.omniscient = omniscient
         self.exact_progress_samples = exact_progress_samples
         self._walk_cache: dict[tuple, Survey] = {}
         self._belief_cache: dict[tuple, View] = {}
@@ -175,7 +172,6 @@ class HonestEvaluator:
         the moment anything read `.state` off a cached view: the trade gate
         does exactly that (`Heximax._delta` reads `view.state`), so the key
         covers it rather than the caller having to remember not to.
-        (`omniscient` is fixed for this evaluator's life.)
 
         `sample` and `deck_odds` read `self.state` further still -- deck,
         dev cards, knights played -- which this key does not capture, so
@@ -207,9 +203,7 @@ class HonestEvaluator:
         )
         cached = self._belief_cache.get(key)
         if cached is None:
-            cached = View(
-                state, ledger, perspective, omniscient=self.omniscient, certify=certify
-            )
+            cached = View(state, ledger, perspective, certify=certify)
             self._belief_cache[key] = cached
         return cached
 
@@ -307,13 +301,13 @@ class HonestEvaluator:
     ) -> tuple[float, ...]:
         """The raw term values `score` weights, in `evaluate.TERM_NAMES` order.
 
-        `hand` is `state.hands[seat]` for the knower (or when `omniscient`)
-        and `View.expected_hand(seat)` otherwise -- `evaluate` decides
+        `hand` is `state.hands[seat]` for the knower and
+        `View.expected_hand(seat)` otherwise -- `evaluate` decides
         which and passes it in, so this method itself never has to ask.
         """
         walk = self._walk(state, seat)
         points = walk.buildings + award_points(state, seat)
-        if self.omniscient or seat == knower:
+        if seat == knower:
             points += card_points(state, seat)
         else:
             points += expected_card_points(state, seat, knower)
@@ -405,7 +399,7 @@ class HonestEvaluator:
         for seat in range(num_players):
             walk = self._walk(state, seat)
             pts = walk.buildings + award_points(state, seat)
-            if self.omniscient or seat == knower:
+            if seat == knower:
                 pts += card_points(state, seat)
             else:
                 pts += expected_card_points(state, seat, knower)
@@ -475,10 +469,8 @@ class HonestEvaluator:
         recomputing, whether the belief came from `belief_for`, a fresh
         `View.from_game`, or the untyped fallback above.
         """
-        if belief is None and knower is not None and not self.omniscient:
-            belief = View(
-                state, PublicLedger.new(state.num_players), knower, omniscient=False
-            )
+        if belief is None and knower is not None:
+            belief = View(state, PublicLedger.new(state.num_players), knower)
         key = (
             tuple(state.vertex_owner),
             tuple(state.vertex_building),
@@ -501,7 +493,7 @@ class HonestEvaluator:
             return list(cached)
         out = []
         for seat in range(state.num_players):
-            if self.omniscient or seat == knower or belief is None:
+            if seat == knower or belief is None:
                 hand: Sequence[float] = state.hands[seat]
             else:
                 hand = belief.expected_hand(seat)
@@ -521,13 +513,11 @@ class HonestEvaluator:
         memoized -- the fit replays recorded games once, it never revisits a
         position the way a search does.
         """
-        if belief is None and not self.omniscient:
-            belief = View(
-                state, PublicLedger.new(state.num_players), knower, omniscient=False
-            )
+        if belief is None:
+            belief = View(state, PublicLedger.new(state.num_players), knower)
         out = []
         for seat in range(state.num_players):
-            if self.omniscient or seat == knower or belief is None:
+            if seat == knower or belief is None:
                 hand: Sequence[float] = state.hands[seat]
             else:
                 hand = belief.expected_hand(seat)

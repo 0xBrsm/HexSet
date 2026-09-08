@@ -34,6 +34,7 @@ from .board.board import Board, random_base_board
 from .board.topology import Topology
 from .game import Game, is_over, start, to_move
 from .placement import PlacementBot
+from .state import city_count, road_count, settlement_count
 from .victory import victory_points
 
 if TYPE_CHECKING:
@@ -427,6 +428,15 @@ class Tournament:
     # this is the raw sequence a caller needs to ask a finer question of it —
     # e.g. whether length moves with a parameter, which a mean cannot answer.
     turns: tuple[int, ...] = ()
+    # Per game, in entrant order alongside `points`: what each entrant had
+    # standing on the board at the end. Roads are what a weight sweep reads to
+    # see *how* a vector won rather than only that it did, so the census is
+    # kept here rather than in a bench script's own copy of the play loop --
+    # counting three fields off a terminal state costs nothing next to the
+    # game that produced it.
+    roads: tuple[tuple[int, ...], ...] = ()
+    settlements: tuple[tuple[int, ...], ...] = ()
+    cities: tuple[tuple[int, ...], ...] = ()
     # One `Record` per game, in the same order as `winners`/`points`/`turns`
     # -- only when `compete(records=True)` asked for them (empty otherwise,
     # never partially filled). `hexset.bench.duel`'s `--records` is the
@@ -480,17 +490,33 @@ def play(
     return game
 
 
+@dataclass(frozen=True)
+class Outcome:
+    """One played game, as `_play_one` hands it back to `compete`.
+
+    Every per-seat field is in entrant rather than seat order, so it can be
+    compared across games that rotated the lineup differently.
+    """
+
+    winner: int | None
+    seat: int | None
+    turns: int
+    points: tuple[int, ...]
+    roads: tuple[int, ...]
+    settlements: tuple[int, ...]
+    cities: tuple[int, ...]
+    record: "Record | None"
+
+
 def _play_one(
     job: tuple[tuple[Entrant, ...], int, int, int, bool, bool],
-) -> tuple[int | None, int | None, int, tuple[int, ...], "Record | None"]:
-    """Play game `index`. Returns (winning entrant, winning seat, turns,
-    points, record).
+) -> Outcome:
+    """Play game `index` and return its `Outcome`.
 
-    Points are in entrant rather than seat order, so they can be compared
-    across games that rotated the lineup differently. `record` is a
-    `hexset.record.Record` of the game just played when the job's `records`
-    flag is set, `None` otherwise -- never partially built, so a caller that
-    never asked for one never pays the extra bookkeeping either.
+    `record` is a `hexset.record.Record` of the game just played when the
+    job's `records` flag is set, `None` otherwise -- never partially built,
+    so a caller that never asked for one never pays the extra bookkeeping
+    either.
 
     Module level and taking only picklable arguments, so a pool can call it.
     Every random stream is derived from the seed and the game index, so a game
@@ -539,14 +565,22 @@ def _play_one(
     else:
         game = play(lineup, board, rng, action_cap=action_cap)
     # true state: the verdict's own victory points include hidden
-    # victory-point dev cards, so the final score is read off the truth.
-    points = tuple(
-        victory_points(game.state(seats_taken[e], hidden=False), seats_taken[e])
-        for e in range(seats)
+    # victory-point dev cards, so the final score and the build census are
+    # both read off the truth rather than off one seat's view of it.
+    states = [game.state(seats_taken[e], hidden=False) for e in range(seats)]
+    won = None if game.won_by is None else seats_taken.index(game.won_by)
+    return Outcome(
+        winner=won,
+        seat=None if won is None else game.won_by,
+        turns=game.turns,
+        points=tuple(victory_points(s, seats_taken[e]) for e, s in enumerate(states)),
+        roads=tuple(road_count(s, seats_taken[e]) for e, s in enumerate(states)),
+        settlements=tuple(
+            settlement_count(s, seats_taken[e]) for e, s in enumerate(states)
+        ),
+        cities=tuple(city_count(s, seats_taken[e]) for e, s in enumerate(states)),
+        record=record,
     )
-    if game.won_by is None:
-        return None, None, game.turns, points, record
-    return seats_taken.index(game.won_by), game.won_by, game.turns, points, record
 
 
 def _play_and_record(
@@ -640,10 +674,10 @@ def compete(
 
     wins = [0] * seats
     seat_wins = [0] * seats
-    for winner, seat, _, _, _ in outcomes:
-        if winner is not None:
-            wins[winner] += 1
-            seat_wins[seat] += 1
+    for outcome in outcomes:
+        if outcome.winner is not None:
+            wins[outcome.winner] += 1
+            seat_wins[outcome.seat] += 1
 
     return Tournament(
         standings=tuple(
@@ -651,14 +685,17 @@ def compete(
             for e, entrant in enumerate(lineup)
         ),
         games=games,
-        unfinished=sum(1 for winner, _, _, _, _ in outcomes if winner is None),
-        mean_turns=statistics.mean(t for _, _, t, _, _ in outcomes) if outcomes else 0.0,
+        unfinished=sum(1 for o in outcomes if o.winner is None),
+        mean_turns=statistics.mean(o.turns for o in outcomes) if outcomes else 0.0,
         seconds=elapsed,
         seat_wins=tuple(seat_wins),
-        winners=tuple(winner for winner, _, _, _, _ in outcomes),
-        points=tuple(row for _, _, _, row, _ in outcomes),
-        turns=tuple(t for _, _, t, _, _ in outcomes),
-        records=tuple(r for _, _, _, _, r in outcomes) if records else (),
+        winners=tuple(o.winner for o in outcomes),
+        points=tuple(o.points for o in outcomes),
+        turns=tuple(o.turns for o in outcomes),
+        roads=tuple(o.roads for o in outcomes),
+        settlements=tuple(o.settlements for o in outcomes),
+        cities=tuple(o.cities for o in outcomes),
+        records=tuple(o.record for o in outcomes) if records else (),
     )
 
 

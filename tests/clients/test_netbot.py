@@ -248,8 +248,8 @@ def test_a_searched_runtime_free_policy_plays_and_gates_like_the_plain_bot(board
     # Each gate scores candidates in worlds drawn from its own belief; the
     # two answer identically once they draw the same worlds.
     def alike(ask):
-        search.gate.rng = random.Random(7)
-        plain.rng = random.Random(7)
+        search.gate.rng, search.gate._salt = random.Random(7), None
+        plain.rng, plain._salt = random.Random(7), None
         return ask(search) == ask(plain)
 
     assert alike(lambda bot: bot.gains_many(view, received, thems))
@@ -508,3 +508,25 @@ def test_a_responder_prices_what_the_actor_will_do_with_the_cards(board, monkeyp
 
     offer = Offer(0, (0, 0, 1, 0, -1))  # the actor asks for the sheep, offering an ore
     assert default_respond(responder, view, offer).kind == "pass"
+
+
+def test_the_gate_is_a_pure_function_of_the_ask(board):
+    """Asked twice about the same candidate at the same position, a gate
+    draws the same world and answers the same -- so a round's own gain and
+    its estimate of the other side, computed in two calls, are one
+    judgement rather than two draws. A different bot draws differently."""
+    from hexset.clients.netbot import NetworkBot
+    from hexset.trading import _candidates
+
+    space = stub_checkpoint(board).space
+    bot = NetworkBot(policy=HandValuePolicy(space), space=space, players=PLAYERS, rng=random.Random(3))
+    game = seated(bot, board)
+    seat = to_move(game)
+    view = game.state(seat)
+    candidates = list(_candidates(game.state(seat, hidden=False), seat, frozenset()))[:12]
+    received = [b for _, b in candidates]
+    thems = [c for c, _ in candidates]
+    first = bot.gains_many(view, received, thems)
+    bot.rng = random.Random(99)  # a later rng state must not move the answer
+    assert bot.gains_many(view, received, thems) == first
+    assert bot.estimate_many(view, candidates) == bot.estimate_many(view, candidates)

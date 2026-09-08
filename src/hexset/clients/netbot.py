@@ -103,6 +103,9 @@ class NetworkBot:
     # real deck order, and a knight's steal draws here rather than from the
     # live table's chance.
     rng: random.Random = field(default_factory=random.Random, repr=False, compare=False)
+    # Drawn once from `rng` when first needed: what makes this bot's worlds its
+    # own while keeping each candidate's world a pure function of the ask.
+    _salt: int | None = field(default=None, repr=False, compare=False)
     # The game `choose` was last handed (or `seat_at` seated), so a trade
     # event -- which runs inside the same `apply` this bot's own choice
     # already went through -- asks about the position it is actually seated
@@ -210,8 +213,13 @@ class NetworkBot:
         from this seat's own belief (`View.sample`), with the counterparty
         certified to hold what the candidate says it gives (an offer is
         evidence of the cards behind it); the same world, exchanged and not,
-        is what makes the pair paired. Worlds are `imagine`d copies -- their
-        own state, ledger and a fresh chance with the deck reshuffled -- so
+        is what makes the pair paired. The draw is seeded by the position and
+        the candidate (`_world_rng`), so `gains_many` and `estimate_many`
+        asked about the same candidate at the same position read the same
+        world -- a round's own gain and its estimate of the other side are
+        then one judgement, not two draws -- and the gate is a pure function
+        of what it was asked. Worlds are `imagine`d copies -- their own
+        state, ledger and a fresh chance with the deck reshuffled -- so
         nothing here touches the live table or reads its deck.
 
         Every candidate two cards or fewer a side (`_is_small`) is scored;
@@ -238,10 +246,11 @@ class NetworkBot:
                 view.state, view.ledger, seat,
                 certify=[(them, [max(0, n) for n in bundle])],
             )
-            sampled = certified.sample(self.rng)
-            before = imagine(game, self.rng, randomize_deck=True)
+            rng = self._world_rng(view, them, bundle)
+            sampled = certified.sample(rng)
+            before = imagine(game, rng, randomize_deck=True)
             before.set_state(sampled)
-            after = imagine(game, self.rng, randomize_deck=True)
+            after = imagine(game, rng, randomize_deck=True)
             state = copy_state(sampled)
             hands_before = [h[:] for h in state.hands]
             exchange(state, seat, them, bundle)
@@ -251,6 +260,17 @@ class NetworkBot:
             worlds.extend((before, after))
         values = self._continue(mover, seat, worlds)
         return {i: (values[row], values[row + 1]) for i, row in scored.items()}
+
+    def _world_rng(self, view: View, them: int, bundle: Bundle) -> random.Random:
+        """The draw behind one candidate's world: seeded by the information
+        set (`View.signature`, every hand size, the perspective), the
+        counterparty and the bundle, salted by this bot's own `rng` once at
+        construction, so two asks about the same candidate at the same
+        position agree and two bots draw different worlds."""
+        if self._salt is None:
+            self._salt = self.rng.getrandbits(64)
+        key = (self._salt, view.perspective, tuple(view.sizes), view.signature(), them, tuple(bundle))
+        return random.Random(hash(key))
 
     def _continue(
         self, mover: int, seat: int, worlds: Sequence[Game]

@@ -9,6 +9,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added
+
+- **`hexset.gym.lanes`: a lockstep multi-game environment.** `LaneEnv(players, seed, lanes, deal=..., action_cap=..., board=..., caster=..., bots=..., gates=...)` holds `lanes` games in flight and steps every one of them once per tick: `requests()` hands out one `Request` per live lane (lane, game index, seat, policy id, stream step, legal `options`, the live `Game` and the seat's information-set `view`), `step(actions)` applies one `Action` per request and returns the games that ended as `Episode`s -- decisions demultiplexed by seat with their index in the lane's action stream, the cleared-trade census `(step, a, b, received)`, and an `Outcome` carrying winner, per-seat terminal points, turns, actions, `truncated` and the trade count. Finished lanes refill on the spot. A `caster(index)` decides which policy id holds each seat as a pure function of the game index; ids listed in `bots` are played by a `hexset.bots` bot (one per board, `BoardBots`), and every seat -- bot or caller -- is seated as its own trade gate on `game.gates`, so the engine's trade event runs and a learner played through the gym can trade at last (`hexset.gym.aec` seats none). Numpy-free and gym-package-free: `import hexset.gym.lanes` needs neither `pettingzoo` nor `gymnasium`, which are now required only when `HexSetAEC`/`HexSetEnv` are actually reached.
+- **One game law.** `hexset.arena.deal_game(seed, index, players, board=..., chance=...)`, with `deal_board`, `board_key` and `game_key`, is where a run's `index`-th game comes from; `arena._play_one` and `LaneEnv` both call it, so a tournament and a collector playing index `i` of seed `s` play the same game rather than two games derived alike. `hexset.arena.play_game(game, bots, action_cap=...)` is `play`'s loop over a game somebody else dealt.
+
 ## 0.40.0
 
 ### Changed

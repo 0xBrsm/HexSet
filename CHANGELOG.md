@@ -9,6 +9,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.42.2
+
 ### Fixed
 
 - `hexset.record.from_journal` folds a round's executed trades (`Journal.manual_trade`, a journal step with no action) into the preceding action's trades and maps an undo's `back_to` through journal step numbers. A served game's record used to drop every accepted offer and diverge from the table's hands at the first one; `Journal.note` steps are skipped.

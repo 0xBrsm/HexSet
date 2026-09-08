@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import sys
 import urllib.error
 import urllib.request
@@ -43,6 +44,11 @@ from .constants import TOKEN_HEADER
 BASE_URL = os.environ.get("HEXSET_UI_BASE_URL", "http://127.0.0.1:8770").rstrip("/")
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_INFO = {"name": "hexset", "version": "0.1.0"}
+
+# Resource order every wire bundle (5 signed or unsigned ints) uses -- see
+# `catanatron/names.py`'s RESOURCE_NAMES, Title-cased as the wire's hand/bank
+# dicts spell them.
+RESOURCES = ("Wood", "Brick", "Sheep", "Wheat", "Ore")
 
 # The seat this connection is playing, set by new_game/join and sent on every
 # request after. A module global for the same reason the cookie jar it
@@ -54,6 +60,15 @@ _token: str | None = None
 # addressed by code (`api.py`), so it is remembered here the same way.
 _code: str | None = None
 
+# Where a seat's token/code are cached between processes, so an LLM can
+# resume a game the same way a human's browser does -- by holding onto the
+# token client-side, not because the server remembers anything (`api.py`'s
+# module docstring: a token "never touches disk", a restart "cannot hand a
+# lost token back to anyone"). One file, since one process is one seat.
+_SESSION_FILE = pathlib.Path(
+    os.environ.get("HEXSET_MCP_SESSION_FILE", os.path.expanduser("~/.cache/hexset-mcp/session.json"))
+)
+
 
 class ToolError(Exception):
     """Raised by a tool implementation to report the failure back to the
@@ -63,6 +78,12 @@ class ToolError(Exception):
 def _request(method: str, path: str, body: dict | None = None) -> dict:
     data = json.dumps(body).encode("utf-8") if body is not None else None
     request = urllib.request.Request(f"{BASE_URL}{path}", data=data, method=method)
+    # A real User-Agent, not urllib's default: a `BASE_URL` fronted by
+    # Cloudflare (or similar) treats the default one as bot traffic and
+    # returns a plain-text 403 instead of the JSON `web.py` would send,
+    # which breaks the `json.loads` below for reasons that have nothing
+    # to do with the game.
+    request.add_header("User-Agent", f"hexset-mcp/{SERVER_INFO['version']}")
     if data is not None:
         request.add_header("Content-Type", "application/json")
     if _token is not None:
@@ -105,7 +126,45 @@ def _seat(result: dict) -> dict:
     global _token, _code
     _token = result.pop("token")
     _code = result.get("code")
+    _save_session()
     return result
+
+
+def _save_session() -> None:
+    """Persists the current seat so a later process can resume it (see
+    `resume_game`) -- the same trick a human's browser plays by holding onto
+    the token client-side, since the server itself remembers nothing."""
+    try:
+        _SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _SESSION_FILE.write_text(json.dumps({"base_url": BASE_URL, "code": _code, "token": _token}))
+        _SESSION_FILE.chmod(0o600)
+    except OSError as error:
+        print(f"could not save session to {_SESSION_FILE}: {error}", file=sys.stderr)
+
+
+def _load_session() -> dict:
+    """Resumes the seat a previous process saved, if any -- called explicitly
+    from `resume_game()` rather than at import time, so tests (which reset
+    `_token`/`_code` per test via monkeypatch) aren't at the mercy of
+    whatever session file happens to sit on disk."""
+    try:
+        saved = json.loads(_SESSION_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
+        raise ToolError(f"no saved session at {_SESSION_FILE}")
+    if saved.get("base_url") != BASE_URL:
+        raise ToolError(
+            f"saved session is for {saved.get('base_url')!r}, not this server ({BASE_URL!r})"
+        )
+    if not saved.get("token"):
+        raise ToolError(f"no saved session at {_SESSION_FILE}")
+    global _token, _code
+    _token = saved["token"]
+    _code = saved.get("code")
+    return _state()
+
+
+def _resume_game() -> dict:
+    return _load_session()
 
 
 def _models() -> dict:
@@ -137,7 +196,7 @@ def _board() -> dict:
 
 def _state() -> dict:
     _seated()
-    return _request_ok("GET", "/api/state")
+    return _translate_trades(_request_ok("GET", "/api/state"))
 
 
 def _act(index: int) -> dict:
@@ -160,29 +219,123 @@ def _undo() -> dict:
 
 # --- Trading (docs/bot-api.md §3; the human/LLM surface, `agents/reference/
 # trading-final.md` item 5) ---------------------------------------------------
+#
+# The wire speaks in 5-count arrays, some unsigned and some signed towards
+# whichever seat proposed the trade (`hexset.trading`'s docstring on
+# `_validate_exchange`) -- easy to get backwards, and not worth an LLM
+# reasoning about at all. Everything below this line trades in named dicts
+# from each tool caller's own point of view (`you_give`/`you_receive`)
+# instead, and resolves an `index` against a fresh, *raw* state fetch the
+# same way `_act(index)` resolves one against `legal_actions` -- so nobody
+# has to hold a stale bundle across a round-trip either.
+
+
+def _named(counts: list[int]) -> dict[str, int]:
+    return {name: n for name, n in zip(RESOURCES, counts) if n}
+
+
+def _positional(counts: dict | None) -> list[int]:
+    counts = counts or {}
+    unknown = set(counts) - set(RESOURCES)
+    if unknown:
+        raise ToolError(f"not a resource name: {', '.join(sorted(unknown))}")
+    return [int(counts.get(name, 0)) for name in RESOURCES]
+
+
+def _actor_view(bundle: list[int]) -> tuple[dict, dict]:
+    """(gives, gets) for the seat a signed bundle is signed towards."""
+    return _named([max(0, -n) for n in bundle]), _named([max(0, n) for n in bundle])
+
+
+def _counterparty_view(bundle: list[int]) -> tuple[dict, dict]:
+    """(gives, gets) for the seat on the *other* side of a signed bundle --
+    one side's gives are the other's gets, so this is `_actor_view` swapped."""
+    actor_gives, actor_gets = _actor_view(bundle)
+    return actor_gets, actor_gives
+
+
+def _bundle_towards_actor(give: dict | None, receive: dict | None) -> list[int]:
+    """The inverse of `_counterparty_view`: builds a signed bundle from what
+    the *counterparty* (the tool caller) would give and receive."""
+    overlap = set(give or {}) & set(receive or {})
+    if overlap:
+        raise ToolError(f"can't both give and receive the same resource: {', '.join(sorted(overlap))}")
+    gives, receives = _positional(give), _positional(receive)
+    return [g - r for g, r in zip(gives, receives)]
+
+
+def _translate_trades(raw: dict) -> dict:
+    raw["trades"] = [
+        {"a": t["a"], "b": t["b"], "a_gave": _named(t["gave"]), "a_got": _named(t["got"])}
+        for t in raw.get("trades") or []
+    ]
+    raw["pending"] = [
+        {"actor": t["actor"], **dict(zip(("you_give", "you_receive"), _counterparty_view(t["bundle"])))}
+        for t in raw.get("pending") or []
+    ]
+    trade_round = raw.get("trade_round")
+    if trade_round is not None:
+        you_give, you_receive = _actor_view(trade_round["offer"]["bundle"])
+        raw["trade_round"] = {
+            "you_give": you_give,
+            "you_receive": you_receive,
+            "responses": [
+                {
+                    "seat": r["seat"],
+                    "kind": r["kind"],
+                    **dict(zip(("you_would_give", "you_would_receive"), _actor_view(r["bundle"]))),
+                }
+                for r in trade_round["responses"]
+            ],
+            "awaiting": trade_round["awaiting"],
+        }
+    return raw
 
 
 def _get_table() -> dict:
+    return _state()
+
+
+def _offer_trade(give: dict, want: dict) -> dict:
     _seated()
-    return _request_ok("GET", "/api/state")
+    body = {"give": _positional(give), "want": _positional(want)}
+    return _request_ok("POST", f"/api/games/{_code}/trade/round", body)
 
 
-def _offer_trade(give: list, want: list) -> dict:
+def _answer_trade(index: int, kind: str, give: dict | None = None, receive: dict | None = None) -> dict:
     _seated()
-    return _request_ok("POST", f"/api/games/{_code}/trade/round", {"give": give, "want": want})
-
-
-def _answer_trade(actor: int, received: list, kind: str, bundle: list | None = None) -> dict:
-    _seated()
-    body = {"actor": actor, "received": received, "kind": kind}
-    if bundle is not None:
-        body["bundle"] = bundle
+    raw = _request_ok("GET", "/api/state")
+    pending = raw.get("pending") or []
+    if not isinstance(index, int) or not (0 <= index < len(pending)):
+        raise ToolError(
+            f"index {index!r} out of range — get_table()'s pending has "
+            f"{len(pending)} offer(s) right now (0..{len(pending) - 1})"
+            if pending
+            else "index out of range — get_table()'s pending is empty; nobody has an open offer against you"
+        )
+    offer = pending[index]
+    body = {"actor": offer["actor"], "received": offer["bundle"], "kind": kind}
+    if kind == "counter":
+        body["bundle"] = _bundle_towards_actor(give, receive)
     return _request_ok("POST", f"/api/games/{_code}/trade/round/answer", body)
 
 
-def _choose_trade(seat: int | None = None, bundle: list | None = None, decline: bool = False) -> dict:
+def _choose_trade(index: int | None = None, decline: bool = False) -> dict:
     _seated()
-    body = {"decline": True} if decline else {"seat": seat, "bundle": bundle}
+    if decline:
+        return _request_ok("POST", f"/api/games/{_code}/trade/round/choose", {"decline": True})
+    raw = _request_ok("GET", "/api/state")
+    responses = ((raw.get("trade_round") or {}).get("responses")) or []
+    if not isinstance(index, int) or not (0 <= index < len(responses)):
+        raise ToolError(
+            f"index {index!r} out of range — get_table()'s trade_round.responses has "
+            f"{len(responses)} answer(s) right now (0..{len(responses) - 1})"
+            if responses
+            else "index out of range — get_table()'s trade_round.responses is empty; "
+            "nobody has answered your offer yet"
+        )
+    response = responses[index]
+    body = {"seat": response["seat"], "bundle": response["bundle"]}
     return _request_ok("POST", f"/api/games/{_code}/trade/round/choose", body)
 
 
@@ -272,60 +425,88 @@ _TOOLS: dict[str, tuple] = {
     "get_table": (
         _get_table,
         "Everything the table has said about trading, alongside state(): this "
-        "turn's `trades`; `pending` -- offers broadcast to you, unanswered "
-        "(`actor`, and `bundle` signed towards the actor: positive counts are "
-        "what the actor gets from you, negative what you get); `round` -- your "
-        "own open offer with every accept/counter so far and who is still to "
-        "answer; `trade_wait` -- seats a bot's offer is waiting on (the bot's "
-        "turn holds until they answer). Bundles are 5 signed counts in the "
-        "board's resource order (Wood, Brick, Sheep, Wheat, Ore).",
+        "turn's `trades` (each as `a`/`b` seats plus `a_gave`/`a_got`, named "
+        "resource -> count); `pending` -- offers broadcast to you, unanswered, "
+        "each as `actor` plus `you_give`/`you_receive` (what answering `accept` "
+        "would cost/pay you); `trade_round` -- your own open offer, only when "
+        "you're the one who broadcast it, as `you_give`/`you_receive` plus "
+        "`responses` (each `you_would_give`/`you_would_receive` if chosen) and "
+        "`awaiting`, the seats still to answer. Resource dicts omit zero counts. "
+        "Use a `pending`/`responses` list's index with answer_trade()/"
+        "choose_trade() -- never hand-build a trade from these dicts.",
         {"type": "object", "properties": {}},
     ),
     "offer_trade": (
         _offer_trade,
         "On your own turn in MAIN, broadcast one offer to every other seat: "
-        "`give` and `want` are 5 unsigned counts in resource order, 1-3 cards a "
-        "side on different resources. Bots answer at once (accept, counter or "
-        "pass); read the answers in get_table()'s `round`, then choose_trade().",
+        "`give` and `want` are named resource -> count, 1-3 cards a side on "
+        "different resources. Bots answer at once (accept, counter or pass); "
+        "read the answers in get_table()'s `trade_round`, then choose_trade().",
         {
             "type": "object",
             "properties": {
-                "give": {"type": "array", "items": {"type": "integer"}, "description": "5 counts you give."},
-                "want": {"type": "array", "items": {"type": "integer"}, "description": "5 counts you want."},
+                "give": {
+                    "type": "object",
+                    "additionalProperties": {"type": "integer"},
+                    "description": "Resource name -> count you give, e.g. {\"Wood\": 1}.",
+                },
+                "want": {
+                    "type": "object",
+                    "additionalProperties": {"type": "integer"},
+                    "description": "Resource name -> count you want.",
+                },
             },
             "required": ["give", "want"],
         },
     ),
     "answer_trade": (
         _answer_trade,
-        "Answer an offer in get_table()'s `pending`: echo its `actor` and "
-        "`received` exactly, with kind `accept`, `counter` (then `bundle` is "
-        "your counter, signed towards the actor like `received`) or `pass`. A "
-        "bot actor picks among the answers as soon as everyone has answered.",
+        "Answer one of get_table()'s `pending` offers by its index there. "
+        "`kind` is `accept` (its `you_give`/`you_receive` as offered), "
+        "`counter` (then pass your own `give`/`receive`, named resource -> "
+        "count, as the counter-offer) or `pass`. The actor picks among every "
+        "seat's answer once all have answered, via choose_trade() on their side.",
         {
             "type": "object",
             "properties": {
-                "actor": {"type": "integer"},
-                "received": {"type": "array", "items": {"type": "integer"}},
+                "index": {"type": "integer", "description": "Index into get_table()'s pending."},
                 "kind": {"type": "string", "enum": ["accept", "counter", "pass"]},
-                "bundle": {"type": "array", "items": {"type": "integer"}},
+                "give": {
+                    "type": "object",
+                    "additionalProperties": {"type": "integer"},
+                    "description": "Only for kind=counter: resource -> count you'd give.",
+                },
+                "receive": {
+                    "type": "object",
+                    "additionalProperties": {"type": "integer"},
+                    "description": "Only for kind=counter: resource -> count you'd receive.",
+                },
             },
-            "required": ["actor", "received", "kind"],
+            "required": ["index", "kind"],
         },
     ),
     "choose_trade": (
         _choose_trade,
-        "Execute one answer to your own open offer -- `seat` and its `bundle` "
-        "exactly as get_table()'s `round.responses` lists them -- or "
-        "`decline: true` to close the round with nothing traded.",
+        "Execute one answer to your own open offer, by its index into "
+        "get_table()'s `trade_round.responses` -- or `decline: true` to close "
+        "the round with nothing traded.",
         {
             "type": "object",
             "properties": {
-                "seat": {"type": "integer"},
-                "bundle": {"type": "array", "items": {"type": "integer"}},
+                "index": {"type": "integer", "description": "Index into trade_round.responses."},
                 "decline": {"type": "boolean"},
             },
         },
+    ),
+    "resume_game": (
+        _resume_game,
+        "Reclaim the seat this process (or an earlier run pointed at the same "
+        "server) last held, restored from a local cache file rather than the "
+        "server -- the same trick a human's browser plays by holding onto its "
+        "own session token, since the server itself forgets a seat's token the "
+        "moment nothing is holding it. Fails if nothing was saved here, or it "
+        "was saved for a different HEXSET_UI_BASE_URL than this process has now.",
+        {"type": "object", "properties": {}},
     ),
 }
 

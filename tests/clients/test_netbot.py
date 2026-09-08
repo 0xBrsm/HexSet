@@ -23,7 +23,7 @@ from dataclasses import dataclass
 import pytest
 from conftest import step_randomly
 
-from hexset.actions import ActionSpace, apply, build_space
+from hexset.actions import ActionSpace, ActionType, apply, build_space
 from hexset.board.board import random_base_board
 from hexset.clients.netbot import (
     bot_for,
@@ -367,3 +367,99 @@ def test_the_onnx_policy_satisfies_the_same_protocol():
         assert any(g != 0.0 for g in gains), "the valued stub is not a constant head"
     finally:
         _load_cached.cache_clear()
+
+
+# --- continuations: the gate prices what a seat can do, not what it holds ------
+
+
+@dataclass
+class BuildPolicy:
+    """A `Policy` that builds a settlement whenever it can and otherwise ends
+    the turn, and values a seat by its settlements alone -- so a trade that
+    leaves the build possible is worth exactly nothing and one that takes it
+    away is worth exactly one settlement. Closed form, no hand term, which is
+    what lets the test say "exactly zero" rather than "small"."""
+
+    space: ActionSpace
+
+    def act_rows(self, rows):
+        out = []
+        for _, _, options in rows:
+            builds = [a for a in options if a.type is ActionType.BUILD_SETTLEMENT]
+            ends = [a for a in options if a.type is ActionType.END_TURN]
+            out.append(builds[0] if builds else (ends[0] if ends else min(options, key=self.space.index)))
+        return out
+
+    def value_rows(self, rows):
+        return [self._value(game) for game, _ in rows]
+
+    def score_rows(self, rows):
+        return [([1.0 / len(options)] * len(options), self._value(game)) for game, _, options in rows]
+
+    def _value(self, game):
+        state = game.state(0, hidden=False)
+        return tuple(0.1 * state.vertex_owner.count(seat) for seat in range(state.num_players))
+
+
+def _position_with_a_settlement_in_hand(board):
+    """A MAIN position where seat 0 may build a settlement and holds exactly
+    the cards for one (1 wood, 1 brick, 1 sheep, 1 wheat); seat 1 holds
+    plenty of everything so any counter-bundle is coverable."""
+    for seed in range(2, 60):
+        game = start(board, PLAYERS, random.Random(seed))
+        for _ in range(80):
+            if game.phase is Phase.MAIN and to_move(game) == 0 and any(
+                a.type is ActionType.BUILD_SETTLEMENT for a in options_for(game)
+            ):
+                state = game.state(0, hidden=False)
+                state.hands[0] = [1, 1, 1, 1, 0]
+                state.hands[1] = [4, 4, 4, 4, 4]
+                return game
+            step_randomly(game, random.Random(seed))
+    raise AssertionError("no position with a settlement spot came up")
+
+
+def test_the_gate_prices_a_trade_by_what_it_leaves_the_seat_able_to_do(board):
+    from hexset.clients.netbot import CONTINUATION_PLIES, NetworkBot
+
+    space = stub_checkpoint(board).space
+    bot = NetworkBot(policy=BuildPolicy(space), space=space, players=PLAYERS, rng=random.Random(0))
+    game = _position_with_a_settlement_in_hand(board)
+    bot.seat_at(game)
+    view = game.state(0)
+    keeps = (1, 0, 0, 0, 1)      # +1 wood +1 ore: the settlement is still affordable
+    breaks = (2, 0, -1, 0, 0)    # +2 wood for the sheep: it is not
+    gains = bot.gains_many(view, [keeps, breaks], [1, 1])
+    assert gains[0] == pytest.approx(0.0), "a trade that leaves the build possible is worth nothing"
+    assert gains[1] == pytest.approx(-0.1), "a trade that takes the build away is worth minus the build"
+    assert CONTINUATION_PLIES >= 2
+    # The live game is untouched by the rollouts.
+    assert game.state(0, hidden=False).hands[0] == [1, 1, 1, 1, 0]
+
+
+def test_a_won_position_prices_every_trade_at_zero_or_below(board, monkeypatch):
+    """With the winning build in hand the position is worth 1.0 after best
+    play, before and after any trade that keeps the build; a trade that takes
+    it away is worth the difference; and the counterparty's row reads the
+    actor's win either way, so it is estimated to gain nothing. Nothing
+    clears, so `default_offer` broadcasts nothing."""
+    from hexset import game as game_mod
+    from hexset.clients.netbot import NetworkBot
+    from hexset.trading import _candidates, default_offer
+    from hexset.victory import victory_points
+
+    space = stub_checkpoint(board).space
+    bot = NetworkBot(policy=BuildPolicy(space), space=space, players=PLAYERS, rng=random.Random(0))
+    game = _position_with_a_settlement_in_hand(board)
+    state = game.state(0, hidden=False)
+    monkeypatch.setattr(game_mod, "WINNING_POINTS", victory_points(state, 0) + 1)
+    bot.seat_at(game)
+    view = game.state(0)
+    keeps, breaks = (1, 0, 0, 0, 1), (2, 0, -1, 0, 0)
+    gains = bot.gains_many(view, [keeps, breaks], [1, 1])
+    assert gains[0] == pytest.approx(0.0)
+    assert gains[1] < -0.5, "losing the winning build costs the win itself, not a settlement's worth"
+    estimates = bot.estimate_many(view, [(1, keeps), (1, breaks)])
+    assert estimates[0] == pytest.approx(0.0), "the partner gains nothing: the actor wins regardless"
+    candidates = list(_candidates(state, 0, frozenset()))
+    assert default_offer(bot, view, candidates) is None, "a won seat has nothing to offer"

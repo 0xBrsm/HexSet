@@ -19,13 +19,14 @@ one entry point a server needs.
 from __future__ import annotations
 
 import copy
+import random
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from hexset.actions import Action, ActionSpace
+from hexset.actions import Action, ActionSpace, ActionType, apply
 from hexset.clients.policy import Checkpoint, Policy
-from hexset.game import Game, is_over, to_move
+from hexset.game import Game, imagine, is_over, to_move
 from hexset.mcts import Search
 from hexset.server.rules import options_for
 from hexset.state import copy_state
@@ -98,6 +99,11 @@ class NetworkBot:
     # wired to the wrong seat would answer for somebody else's hand, and
     # that is the one failure the mechanic must never have quietly.
     seat: int | None = None
+    # Draws for the gate's imagined continuations (`_continue`): the deck a
+    # rolled-out position buys from is reshuffled so the gate never reads the
+    # real deck order, and a knight's steal draws here rather than from the
+    # live table's chance.
+    rng: random.Random = field(default_factory=random.Random, repr=False, compare=False)
     # The game `choose` was last handed (or `seat_at` seated), so a trade
     # event -- which runs inside the same `apply` this bot's own choice
     # already went through -- asks about the position it is actually seated
@@ -203,7 +209,21 @@ class NetworkBot:
         the engine enumerated them -- the stated cost bound on this gate's
         own evaluation, not a claim about which candidates it favours. A
         candidate `seat` cannot cover is never scored. One "before" row plus
-        one row per scored candidate is the whole fan-out, one forward.
+        one row per scored candidate is the whole fan-out.
+
+        **Continuations, not hands.** Each position -- the live one and every
+        post-trade one -- is valued after `seat`'s own best play from it
+        (`_continue`): the policy's greedy actions through the rest of the
+        turn, a game that ends reading as its one-hot winner. Two raw value
+        estimates of nearly identical hands differ by the head's noise, and a
+        gate that compared them offered noise: at a won position (the
+        winning settlement in hand) it priced a trade that gave the needed
+        card away at +0.006 and every candidate at zero or below only by
+        luck. After best play the won position is exactly 1.0 before and
+        after any trade that keeps the build, exactly lower after one that
+        does not, and a counterparty's row reads the actor's win either way,
+        so nobody offers or counters into it. The g4 game of 2026-09-08
+        19:47Z, round 19, is the case this was written for.
         """
         game = self._seated
         assert game is not None  # callers check this first
@@ -230,8 +250,57 @@ class NetworkBot:
             after.ledger = ledger
             scored[i] = len(rows)
             rows.append((after, seat))
-        values = self.policy.value_rows(rows)
+        values = self._continue(seat, [g for g, _ in rows])
         return values[0], {i: values[row] for i, row in scored.items()}
+
+    def _continue(self, seat: int, games: Sequence[Game]) -> list[tuple[float, ...]]:
+        """Each game's value vector after `seat`'s own best play from it.
+
+        Every game is imagined first (`hexset.game.imagine`: its own state,
+        ledger and a fresh `Live` chance with the deck reshuffled), so the
+        rollout can buy and steal without touching the live table's chance
+        or reading its deck. Then, in lockstep across all of them, the policy
+        picks `seat`'s next action wherever it is still `seat`'s turn
+        (`act_rows`, one batched forward a ply); an `END_TURN` pick stops
+        that game where it stands, a finished game stops as its winner, and
+        `CONTINUATION_PLIES` bounds the rest. What is left is valued in one
+        forward; a finished game is the one-hot winner, board-seat order,
+        exactly as `LeafEvaluator.terminal` reads it.
+        """
+        worlds = [imagine(g, self.rng, randomize_deck=True) for g in games]
+        live = [i for i, g in enumerate(worlds) if not is_over(g) and to_move(g) == seat]
+        for _ in range(CONTINUATION_PLIES):
+            if not live:
+                break
+            rows = [(worlds[i], seat, tuple(options_for(worlds[i]))) for i in live]
+            chosen = self.policy.act_rows(rows)
+            still: list[int] = []
+            for i, action in zip(live, chosen):
+                if action.type is ActionType.END_TURN:
+                    continue
+                apply(worlds[i], action)
+                g = worlds[i]
+                if not is_over(g) and to_move(g) == seat:
+                    still.append(i)
+            live = still
+        out: list[tuple[float, ...] | None] = [None] * len(worlds)
+        pending = []
+        for i, g in enumerate(worlds):
+            if is_over(g):
+                out[i] = tuple(1.0 if s == g.won_by else 0.0 for s in range(self.players))
+            else:
+                pending.append(i)
+        if pending:
+            values = self.policy.value_rows([(worlds[i], seat) for i in pending])
+            for i, v in zip(pending, values):
+                out[i] = tuple(v)
+        return out  # type: ignore[return-value]
+
+
+# How far a gate's imagined continuation may run: enough for a whole turn's
+# worth of builds and buys (a rich hand rarely takes more than a handful of
+# actions), bounded so a policy that never picks END_TURN cannot spin.
+CONTINUATION_PLIES = 8
 
 
 def _is_small(bundle: Bundle) -> bool:

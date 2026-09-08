@@ -87,6 +87,34 @@ def test_a_v2_search_over_a_learned_prior_plays_a_legal_action(checkpoint_v2):
         apply(game, action)
 
 
+def test_a_terminal_leaf_is_scored_on_the_win_probability_scale(checkpoint_v2):
+    """Contract-6 value heads are trained on `hexn.rewards.win_loss`, so every
+    non-terminal leaf in a wave is a win probability. A terminal leaf has to be
+    one too, or the search backs a points margin up the tree beside them."""
+    from hexset.clients.onnxbot import LeafEvaluator, load
+    from hexset.game import is_over
+
+    path, board = checkpoint_v2
+    loaded = load(path, board.topology)
+    evaluator = LeafEvaluator(policy=loaded.policy, space=loaded.space)
+
+    game = start(board, 4, random.Random(2))
+    with pytest.raises(ValueError, match="has not finished"):
+        evaluator.terminal(game)
+
+    rng = random.Random(2)
+    moves = 0
+    while not is_over(game) and moves < 20000:
+        step_randomly(game, rng)
+        moves += 1
+    assert is_over(game)
+
+    scores = evaluator.terminal(game)
+    assert len(scores) == 4
+    assert sorted(scores) == [0.0, 0.0, 0.0, 1.0]
+    assert scores[game.won_by] == 1.0
+
+
 def test_a_checkpoint_refuses_a_table_it_was_not_trained_for(checkpoint_v2):
     path, _ = checkpoint_v2
     board3 = random_base_board(random.Random(0))

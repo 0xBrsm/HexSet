@@ -45,7 +45,7 @@ from hexset.server.constants import RECORD_CONTRACTS
 from hexset.server.modelmeta import SearchConfig, search_config
 from hexset.server.rules import options_for
 from hexset.state import copy_state
-from hexset.trading import NETWORK_GATE_ROWS
+from hexset.trading import NETWORK_GATE_ROWS, exchange
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from hexset.trading import Bundle
@@ -286,14 +286,32 @@ class NetworkBot:
     """A policy answering one position at a time.
 
     Trades off the same value head `choose` already reads, no new
-    parameters: `accepts`/`accepts_many` mirror dev-HexN's
-    `hexn.policy.DerivedTrader` exactly, reimplemented against the
-    record-contract wire shape instead of a live `torch` forward. There is
-    no `gains_many` here -- `hexset.bots.search2.Bot`'s default derives one
-    from `accepts_many` (`+1.0`/`-1.0`), which is all a boolean value-head
-    gate can support; a magnitude-valued network gate is HexN's own
-    concern (`agents/reference/trading-final.md`, item 6), not this
-    contract-5 wire adapter's. See both methods' own docstrings.
+    parameters. The value head scores a candidate exchange from both
+    sides at once (`_score`): the live position and the position after
+    the cards move -- *both* hands, and the counterparty's ledger row, as a
+    real clearing would leave them -- each encoded from this seat's own
+    frame, so nothing here reads a hand this seat may not know. The head
+    answers with one win probability per seat, and that vector is the
+    whole gate:
+
+    * `gains_many` -- this seat's own row, after minus before: its private
+      gain in win probability, `hexset.trading.trade_event`'s gate and the
+      round's own-side reading.
+    * `estimate_many` -- the *counterparty's* row, after minus before: this
+      seat's estimate of what the exchange does to that seat's chances,
+      read by `hexset.trading.default_offer`/`default_respond` so a bot
+      offers, and counters with, the candidate best for itself among those
+      it believes the other seat gains from too (`agents/reference/
+      trading-final.md`, "the trade round", items 1-2). By construction
+      that prices the risk of handing an opponent win probability: a
+      bundle that lifts this seat's row a little and the counterparty's a
+      lot is a bad offer, and it reads as one.
+    * `accepts`/`accepts_many` -- `gains_many` thresholded at strictly
+      positive.
+
+    `trade_floor` is `0.0`: this gate's resolution has not been measured
+    (heximax's has, `hexset.bots.heximax.HEXIMAX_TRADE_FLOOR`); its gains
+    are in win probability, so a paired-chance measurement would replace it.
     """
 
     policy: V2Policy
@@ -319,109 +337,120 @@ class NetworkBot:
         seat = to_move(game)
         return self.policy.act_rows([(game, seat, tuple(options_for(game)))])[0]
 
-    def accepts(self, view: "View", received: "Bundle", counterparty: int) -> bool:
-        """This seat's private gate: the value head on the concrete
-        post-trade position, strictly preferred -- not the sum of the
-        marginals `valuation` published, the same distinction `hexn.
-        policy.DerivedTrader.accepts` draws, and for the same reason
-        (complementarity between resources lives in the joint hand, not in
-        five independent one-card deltas).
+    def gains_many(
+        self, view: View, received: Sequence[Bundle], counterparties: Sequence[int]
+    ) -> list[float]:
+        """This seat's own private gain from every candidate at once:
+        `V(after)[seat] - V(before)[seat]`, win probability, one forward.
+        `-1.0` for a candidate this seat cannot cover and for any past the
+        scored set (`_score`'s cap); nothing when nobody has seated this bot
+        (no `choose` has run) or trading is switched off.
         """
-        del counterparty  # the joint post-trade hand is enough; who sent it is not
-        if self.max_trades == 0 or self._seated is None:
-            return False
+        if self.max_trades == 0 or self._seated is None or not received:
+            return [-1.0] * len(received)
         seat = view.perspective
-        hand = list(view.known[seat])
-        after = [n + d for n, d in zip(hand, received)]
-        if any(n < 0 for n in after):
-            return False
-        before_value, after_value = self._own_values(seat, [hand, after])
-        return after_value > before_value
+        before, afters = self._score(seat, view, received, counterparties)
+        out = [-1.0] * len(received)
+        for i, after in afters.items():
+            out[i] = float(after[seat] - before[seat])
+        return out
+
+    def estimate_many(
+        self, view: View, candidates: Sequence[tuple[int, Bundle]]
+    ) -> list[float]:
+        """This seat's estimate of each `(counterparty, bundle)` candidate's
+        *counterparty*-side gain: `V(after)[them] - V(before)[them]` on the
+        same two positions `gains_many` scores, from this seat's own frame
+        -- its own belief about the other seat's chances, standing in for
+        the acceptance model the design names (`agents/reference/
+        trading-final.md`, "the trade round", item 1) until one exists.
+        """
+        if self.max_trades == 0 or self._seated is None or not candidates:
+            return [-1.0] * len(candidates)
+        seat = view.perspective
+        received = [b for _, b in candidates]
+        thems = [c for c, _ in candidates]
+        before, afters = self._score(seat, view, received, thems)
+        out = [-1.0] * len(candidates)
+        for i, after in afters.items():
+            them = thems[i]
+            out[i] = float(after[them] - before[them])
+        return out
+
+    def accepts(self, view: View, received: Bundle, counterparty: int) -> bool:
+        """`gains_many` for one candidate, thresholded at strictly positive
+        -- the engine's termination argument rests on the acting seat's own
+        gain strictly increasing at every step."""
+        return self.gains_many(view, [received], [counterparty])[0] > 0.0
 
     def accepts_many(
-        self,
-        view: "View",
-        received: Sequence["Bundle"],
-        counterparties: Sequence[int],
+        self, view: View, received: Sequence[Bundle], counterparties: Sequence[int]
     ) -> list[bool]:
-        """Batched `accepts`: one graph call over the hand plus the
-        post-trade successors of the first `NETWORK_GATE_ROWS` candidates,
-        instead of one call per candidate.
+        """`gains_many`, thresholded at strictly positive."""
+        return [gain > 0.0 for gain in self.gains_many(view, received, counterparties)]
 
-        `received` arrives in whatever order `hexset.trading._candidates`
-        enumerated it -- there is no public-surplus pre-ranking any more
-        (`agents/reference/trading-final.md`, item 1), so the
-        `NETWORK_GATE_ROWS` prefix scored here is an arbitrary slice of the
-        candidate set, not a best-ranked one. It remains a stated cost
-        bound on this gate's own evaluation (`hexset.trading.
-        NETWORK_GATE_ROWS`'s docstring), not a claim about which candidates
-        it favours; every candidate beyond the prefix declines outright.
-        The engine still asks about every candidate -- only this gate's own
-        evaluation is bounded.
+    def _score(
+        self, seat: int, view: View, received: Sequence[Bundle], counterparties: Sequence[int]
+    ) -> tuple[np.ndarray, dict[int, np.ndarray]]:
+        """The value vector of the live position and of each scored
+        candidate's post-trade position, both encoded from `seat`'s frame.
 
-        `counterparties` is accepted for signature parity with
-        `hexset.bots.search2.Bot.accepts_many` but not read, for the same
-        reason `accepts` does not read its own `counterparty`: the joint
-        post-trade hand is enough to judge.
-        """
-        del counterparties
-        if self.max_trades == 0 or self._seated is None or not received:
-            return [False] * len(received)
-        gated = received[:NETWORK_GATE_ROWS]
-        seat = view.perspective
-        hand = list(view.known[seat])
-        afters: list[list[int]] = []
-        valid: list[bool] = []
-        for wanted in gated:
-            after = [n + d for n, d in zip(hand, wanted)]
-            ok = all(n >= 0 for n in after)
-            valid.append(ok)
-            # An uncoverable candidate still needs a row so every position
-            # in `gated` lines up with one in `values` below; the hand
-            # itself is a safe, always-valid placeholder, and its result is
-            # discarded (`ok and ...`) rather than trusted.
-            afters.append(after if ok else hand)
-        values = self._own_values(seat, [hand] + afters)
-        before_value = values[0]
-        verdicts = [ok and values[1 + i] > before_value for i, ok in enumerate(valid)]
-        verdicts.extend([False] * (len(received) - len(gated)))
-        return verdicts
-
-    def _own_values(self, seat: int, hands: Sequence[Sequence[int]]) -> list[float]:
-        """Each hand's value on `seat`'s own row, `seat`'s hand swapped in
-        turn and everything else about the live position held fixed.
-
-        `set_state` is the engine's own sanctioned way to swap a hypothetical
-        state in and back out, the observation is built from the game (not the
-        bare state) because phase, turn count and every seat's published
-        vector live on `Game`, not `GameState`, and the original is restored
-        in a `finally` so a raised error still leaves the live game exactly as
+        The after-state is what a real clearing leaves: `hexset.trading.
+        exchange` moves both hands and `PublicLedger.apply_hand_diff`
+        certifies the diff, on copies the live game never keeps. `set_state`
+        and the ledger swap are the engine's sanctioned way to put a
+        hypothetical position under the encoder -- phase, turn count and the
+        rest live on `Game`, not `GameState` -- and both are restored in a
+        `finally`, so a raised error still leaves the live game exactly as
         `choose` left it.
 
-        **This no longer mirrors `hexn.policy.DerivedTrader`.** That side moved
-        to `after_exchange`, which moves *both* hands and updates the
-        counterparty's ledger row; swapping only the acting seat's hand, as
-        here, is what it calls its earlier version. The gate on this side
-        therefore prices a candidate against a position the clearing house
-        would not actually produce. Porting it is a behaviour change to the
-        trade gate and wants its own change and its own evidence.
+        Every candidate two cards or fewer a side (`_is_small`) is scored;
+        the rest fill whatever is left of `NETWORK_GATE_ROWS` in the order
+        the engine enumerated them -- the stated cost bound on this gate's
+        own evaluation, not a claim about which candidates it favours. A
+        candidate `seat` cannot cover is never scored. One "before" row plus
+        one row per scored candidate is the whole fan-out, one forward.
         """
         game = self._seated
         assert game is not None  # callers check this first
+        hand = list(view.known[seat])
+        small = [i for i, bundle in enumerate(received) if _is_small(bundle)]
+        rest = [i for i in range(len(received)) if not _is_small(received[i])]
+        order = (small + rest)[: max(NETWORK_GATE_ROWS, len(small))]
+
+        # true state: the engine is the referee for what a clearing leaves.
         original = game.state(seat, hidden=False)
+        original_ledger = game.ledger
+        records = [record_from_game(game, seat, self.space, options_for(game))]
+        rows: dict[int, int] = {}
         try:
-            records = []
-            for hand in hands:
+            for i in order:
+                bundle = received[i]
+                if any(n + d < 0 for n, d in zip(hand, bundle)):
+                    continue
                 state = copy_state(original)
-                state.hands[seat] = list(hand)
+                ledger = original_ledger.copy()
+                hands_before = [h[:] for h in state.hands]
+                exchange(state, seat, counterparties[i], bundle)
+                ledger.apply_hand_diff(hands_before, state.hands)
                 game.set_state(state)
-                records.append(
-                    record_from_game(game, seat, self.space, options_for(game))
-                )
+                game.ledger = ledger
+                rows[i] = len(records)
+                records.append(record_from_game(game, seat, self.space, options_for(game)))
         finally:
             game.set_state(original)
+            game.ledger = original_ledger
         values = self.policy.value_of(records)
-        return [float(row[seat]) for row in values]
+        return values[0], {i: values[row] for i, row in rows.items()}
+
+
+def _is_small(bundle: Bundle) -> bool:
+    """Both sides of `bundle` move at most two cards -- always scored,
+    uncapped, because two-for-one and two-for-two are the overwhelming
+    majority of what a table trades (mirrors `hexn.policy._is_small`)."""
+    give = sum(-n for n in bundle if n < 0)
+    take = sum(n for n in bundle if n > 0)
+    return give <= 2 and take <= 2
 
 
 @dataclass
@@ -485,7 +514,7 @@ class LeafEvaluator:
 
 class GatedSearch(Search):
     """`hexset.mcts.Search` over a checkpoint, with that checkpoint's own
-    trade gate.
+    trade gate -- `gains_many`, `estimate_many`, `accepts`, `accepts_many`.
 
     `Search` decides moves and nothing else: it has no `accepts`,
     `accepts_many` or `gains_many`, so `hexset.trading.valued_many` priced
@@ -513,6 +542,14 @@ class GatedSearch(Search):
         self, view: View, received: Sequence[Bundle], counterparties: Sequence[int]
     ) -> list[bool]:
         return self.gate.accepts_many(view, received, counterparties)
+
+    def gains_many(
+        self, view: View, received: Sequence[Bundle], counterparties: Sequence[int]
+    ) -> list[float]:
+        return self.gate.gains_many(view, received, counterparties)
+
+    def estimate_many(self, view: View, candidates: Sequence[tuple[int, Bundle]]) -> list[float]:
+        return self.gate.estimate_many(view, candidates)
 
 
 def searcher(

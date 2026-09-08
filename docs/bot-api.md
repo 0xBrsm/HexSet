@@ -147,8 +147,11 @@ receives.
 **Bots.** A bot's offer is the candidate maximising its own gain among
 those it estimates the counterparty accepts (`default_offer`: own gain via
 `gains_many`, the counterparty's via `estimate_many` -- heximax and search2
-evaluate the exchange from the other seat's frame; a gate without it uses
-its own gain as the estimate). A bot answers an offer by accepting when its
+evaluate the exchange from the other seat's frame; a network checkpoint
+scores the post-trade position once, both hands moved, and reads its own
+row for the gain and the counterparty's row for the estimate, so a bundle
+that hands an opponent win probability reads as the bad offer it is; a
+gate without an estimate uses its own gain in its place). A bot answers an offer by accepting when its
 own gain clears the floor, else countering with its best coverable bundle
 it estimates the actor accepts, else passing (`default_respond`); as actor
 it picks the answer with the highest own gain above the floor

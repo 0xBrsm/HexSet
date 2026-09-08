@@ -9,6 +9,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.40.0
+
+### Changed
+
+- **A network checkpoint's trade gate scores both sides of an exchange.** `hexset.clients.onnxbot.NetworkBot` (and the searched `GatedSearch`) now score the post-trade position with *both* hands moved and the counterparty's ledger row updated, as a real clearing leaves it, and read the value head's per-seat vector: `gains_many` is this seat's own row after minus before, in win probability (it used to answer +1/-1 off a swap of its own hand alone); `estimate_many`, new, is the counterparty's row after minus before -- this seat's own estimate of what the exchange does to the other seat's chances -- so `default_offer`/`default_respond` offer and counter with the candidate best for the bot among those it believes the other seat gains from too, as `agents/reference/trading-final.md`'s trade round specifies. Every candidate two cards or fewer a side is scored; the rest fill `NETWORK_GATE_ROWS`. Under a strict-positivity floor the old sign gate offered an arbitrary acceptable bundle nearly every turn (clio at the table, 2026-09-08); the magnitude ranks offers and the estimate prices the risk of lifting an opponent.
+
 ## 0.39.0
 
 ### Changed

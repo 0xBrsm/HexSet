@@ -409,6 +409,32 @@ def mean_interval(samples: Sequence[float], z: float = Z_95) -> Estimate:
 
 
 @dataclass(frozen=True)
+class ClearedTrade:
+    """One exchange the engine cleared, with what a `Record`'s own
+    `(step, a, b, received)` tuple deliberately does not carry.
+
+    A record holds what is needed to replay a game; a census needs to
+    describe a trade without replaying it -- when it happened, and both
+    sides' hands and private gains at the time. `a`/`b` are seats and
+    `received` is signed towards `a`, both as `hexset.trading.Trade` has
+    them. `hand_a`/`hand_b` are each side's total card count at the start of
+    the step this trade cleared inside: the last moment the engine's state
+    holds a hand rather than a hand mid-transaction.
+    """
+
+    step: int
+    turn: int
+    phase: str
+    a: int
+    b: int
+    received: tuple[int, ...]
+    hand_a: int
+    hand_b: int
+    gain_a: float
+    gain_b: float
+
+
+@dataclass(frozen=True)
 class Tournament:
     standings: tuple[Standing, ...]
     games: int
@@ -437,6 +463,15 @@ class Tournament:
     roads: tuple[tuple[int, ...], ...] = ()
     settlements: tuple[tuple[int, ...], ...] = ()
     cities: tuple[tuple[int, ...], ...] = ()
+    # Per game: which seat each entrant took, in entrant order. The rotation
+    # is what makes the standings fair, and a caller reading anything the
+    # engine reports by *seat* -- a cleared trade, say -- needs it to say
+    # which entrant that seat was.
+    seating: tuple[tuple[int, ...], ...] = ()
+    # Per game, every trade the engine cleared, in order. Filled only when
+    # `compete(records=True)` asked, alongside `records`: a `Record` is what
+    # replays a game, this is what describes it.
+    cleared: tuple[tuple[ClearedTrade, ...], ...] = ()
     # One `Record` per game, in the same order as `winners`/`points`/`turns`
     # -- only when `compete(records=True)` asked for them (empty otherwise,
     # never partially filled). `hexset.bench.duel`'s `--records` is the
@@ -494,17 +529,22 @@ def play(
 class Outcome:
     """One played game, as `_play_one` hands it back to `compete`.
 
-    Every per-seat field is in entrant rather than seat order, so it can be
-    compared across games that rotated the lineup differently.
+    `points`/`roads`/`settlements`/`cities` are in entrant rather than seat
+    order, so they can be compared across games that rotated the lineup
+    differently; `seating` is the rotation that produced them. The cleared
+    trades stay in seat order, because that is the order the engine reports
+    them in and `seating` is what turns one into the other.
     """
 
     winner: int | None
     seat: int | None
     turns: int
+    seating: tuple[int, ...]
     points: tuple[int, ...]
     roads: tuple[int, ...]
     settlements: tuple[int, ...]
     cities: tuple[int, ...]
+    cleared: tuple[ClearedTrade, ...]
     record: "Record | None"
 
 
@@ -516,7 +556,8 @@ def _play_one(
     `record` is a `hexset.record.Record` of the game just played when the
     job's `records` flag is set, `None` otherwise -- never partially built,
     so a caller that never asked for one never pays the extra bookkeeping
-    either.
+    either. The cleared-trade census rides along under the same flag, for
+    the same reason.
 
     Module level and taking only picklable arguments, so a pool can call it.
     Every random stream is derived from the seed and the game index, so a game
@@ -560,8 +601,11 @@ def _play_one(
     game_seed = f"{seed}:{board_index}:game"
     rng = random.Random(game_seed)
     record = None
+    cleared: tuple[ClearedTrade, ...] = ()
     if records:
-        game, record = _play_and_record(lineup, board, rng, action_cap, game_seed)
+        game, record, cleared = _play_and_record(
+            lineup, board, rng, action_cap, game_seed
+        )
     else:
         game = play(lineup, board, rng, action_cap=action_cap)
     # true state: the verdict's own victory points include hidden
@@ -573,12 +617,14 @@ def _play_one(
         winner=won,
         seat=None if won is None else game.won_by,
         turns=game.turns,
+        seating=tuple(seats_taken),
         points=tuple(victory_points(s, seats_taken[e]) for e, s in enumerate(states)),
         roads=tuple(road_count(s, seats_taken[e]) for e, s in enumerate(states)),
         settlements=tuple(
             settlement_count(s, seats_taken[e]) for e, s in enumerate(states)
         ),
         cities=tuple(city_count(s, seats_taken[e]) for e, s in enumerate(states)),
+        cleared=cleared,
         record=record,
     )
 
@@ -589,12 +635,19 @@ def _play_and_record(
     rng: random.Random,
     action_cap: int,
     seed: str,
-) -> tuple[Game, "Record"]:
+) -> tuple[Game, "Record", tuple[ClearedTrade, ...]]:
     """`play`'s own loop, with the bookkeeping `hexset.record.record_game`
     uses to build a `Record` alongside it -- the two are kept in step
     deliberately: `--records` must record exactly the game `play` would have
     played, not an approximation of it, so this is not `play` calling out to
     a separate recorder but the same loop instrumented in place.
+
+    The same pass builds the `ClearedTrade` census, off the one before/after
+    `game.trades` diff the record already takes. A census used to mean a
+    second copy of this loop in a bench script, which is how it came to
+    report each side's hand *after* the turn's trades under the name
+    `hand_before`: here the hand sizes are read once, off the true state, at
+    the top of the step the trade cleared inside.
     """
     from .chance import Live, Recording
     from .record import Record, board_fields
@@ -605,15 +658,39 @@ def _play_and_record(
     game.max_trades = None
     actions: list[tuple[int, int, int]] = []
     trades: list[tuple[int, int, int, tuple[int, ...]]] = []
+    cleared: list[ClearedTrade] = []
     steps_taken = 0
     while not is_over(game) and steps_taken < action_cap:
         seat = to_move(game)
         bot = lineup[seat]
         before = len(game.trades)
+        # true state: a census of who was flush cannot be read off one seat's
+        # view of the table.
+        hands = [sum(hand) for hand in game.state(0, hidden=False).hands]
+        turn, phase = game.turns, game.phase.name
         action = bot.choose(game)
         apply(game, action)
         for trade in game.trades[before:]:
             trades.append((len(actions), trade.a, trade.b, tuple(trade.received)))
+            cleared.append(
+                ClearedTrade(
+                    step=len(actions),
+                    turn=turn,
+                    phase=phase,
+                    a=trade.a,
+                    b=trade.b,
+                    received=tuple(trade.received),
+                    hand_a=hands[trade.a],
+                    hand_b=hands[trade.b],
+                    gain_a=trade.gain_a,
+                    gain_b=trade.gain_b,
+                )
+            )
+            # Several trades can clear inside one step; each later one sees
+            # the hands the earlier ones left behind.
+            moved = sum(trade.received)
+            hands[trade.a] += moved
+            hands[trade.b] -= moved
         actions.append((int(action.type), action.a, action.b))
         steps_taken += 1
 
@@ -628,7 +705,7 @@ def _play_and_record(
         turns=game.turns,
         **board_fields(board),
     )
-    return game, record
+    return game, record, tuple(cleared)
 
 
 def compete(
@@ -695,6 +772,8 @@ def compete(
         roads=tuple(o.roads for o in outcomes),
         settlements=tuple(o.settlements for o in outcomes),
         cities=tuple(o.cities for o in outcomes),
+        seating=tuple(o.seating for o in outcomes),
+        cleared=tuple(o.cleared for o in outcomes) if records else (),
         records=tuple(o.record for o in outcomes) if records else (),
     )
 

@@ -66,6 +66,17 @@ Training — self-play, PPO, expert iteration — is not part of this repo. It
 lives in HexN, the sibling package this gym plays exported checkpoints
 from; see [Adding an opponent](#adding-an-opponent) below.
 
+## What belongs here
+
+HexSet is the engine and the gym. Everything about a *position* is this
+package's job: the rules and what is legal, the information set and its
+encoding, the game loops (one game, or many in lockstep), seating and board
+pairing, records and replay, and every seat's trade judgement -- including
+how a network checkpoint judges an exchange (`hexset.clients`). A training
+project drives HexSet through these; it does not re-implement any of them
+for its own runtime. If you find yourself writing, outside this package,
+something a bot with no model would still need, it belongs in here.
+
 ## Install
 
 ```

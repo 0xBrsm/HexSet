@@ -10,7 +10,6 @@ import random
 
 import pytest
 
-import hexset.trading as trading_mod
 from hexset.actions import Action, ActionType
 from hexset.board.board import random_base_board
 from hexset.board.terrain import NUM_RESOURCES, Resource
@@ -55,8 +54,11 @@ class Trader:
     `gain(received, counterparty) -> float` decides what this seat prices
     every candidate it is asked about at; the default never trades. Every
     candidate asked is recorded to `asked`, in the order the batched call
-    received it.
+    received it. `trade_floor` is this gate's own clearing floor
+    (`hexset.trading.trade_floor_of`), `0.0` unless a test sets one.
     """
+
+    trade_floor = 0.0
 
     def __init__(self, gain=lambda received, counterparty: -1.0):
         self.gain = gain
@@ -276,19 +278,19 @@ def test_either_side_priced_at_zero_or_below_vetoes_the_deal(zeroed):
     assert run(game, traders) == []
 
 
-def test_a_gain_at_or_below_the_floor_does_not_clear_but_above_it_does(monkeypatch):
-    """`TRADE_FLOOR` (`hexset.trading.TRADE_FLOOR`) is the measured 0.0197;
-    the floor is pinned at a round value by monkeypatching it -- the same
-    admission point (`clears_floor`, read by `_best_clearing`'s "mine"
-    subset) that a shipped measurement will later set for real."""
-    monkeypatch.setattr(trading_mod, "TRADE_FLOOR", 1.0)
-
+def test_a_gain_at_or_below_the_floor_does_not_clear_but_above_it_does():
+    """The floor is the gate's own (`trade_floor`, `hexset.trading.
+    trade_floor_of`): the acting seat's gain is held to the acting seat's
+    floor at the one admission point (`clears_floor`, read by
+    `_best_clearing`'s "mine" subset)."""
     at_floor = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
     traders = [Trader(wants(ORE, 1.0)), Trader(wants(WOOD, 5.0)), Trader(), Trader()]
+    traders[0].trade_floor = 1.0
     assert run(at_floor, traders) == [], "a gain in (0, floor] must not clear"
 
     above_floor = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
     traders = [Trader(wants(ORE, 1.5)), Trader(wants(WOOD, 5.0)), Trader(), Trader()]
+    traders[0].trade_floor = 1.0
     done = run(above_floor, traders)
     assert len(done) == 1 and done[0].gain_a == 1.5
 
@@ -382,6 +384,8 @@ class _Fussy:
     """Only ever wants one more ore than it currently holds -- reads the
     live view, unlike `Trader`'s fixed-gain stub, so the gate genuinely
     stops saying yes once that ore has moved."""
+
+    trade_floor = 0.0
 
     def gains_many(self, view, received, counterparties):
         seat = view.perspective
@@ -551,6 +555,8 @@ class _AcceptsOnly:
     exercises the structural default chain: `accepts_many` loops over
     `accepts`, and `gains_many` maps that to +1.0/-1.0."""
 
+    trade_floor = 0.0
+
     def __init__(self):
         self.asked: list[tuple[tuple[int, ...], int]] = []
 
@@ -572,6 +578,31 @@ def test_valued_many_default_loops_over_accepts_in_order():
     assert many == [1.0, -1.0]
     assert trader.asked == list(zip(received, counterparties))
     assert valued(trader, view, received[0], counterparties[0]) == 1.0
+
+
+def test_each_seat_is_held_to_its_own_floor_and_no_floor_is_borrowed():
+    """Two seats, two floors: the same 1.0 gain clears for the seat whose
+    floor is 0.0 and is refused for the seat whose floor is 1.5 -- and the
+    refusal is the acting seat's, whichever side it sits on. A gate that
+    prices a candidate positive without declaring any floor is refused
+    loudly: there is no table default to judge it by."""
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    strict = Trader(wants(ORE, 1.0))
+    strict.trade_floor = 1.5
+    easy = Trader(wants(WOOD, 1.0))
+    assert run(game, [strict, easy, Trader(), Trader()]) == [], "the actor's own floor refuses its 1.0"
+
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    done = run(game, [Trader(wants(ORE, 1.0)), Trader(wants(WOOD, 1.0)), Trader(), Trader()])
+    assert len(done) == 1, "the same gains clear at floor 0.0"
+
+    class Undeclared:
+        def gains_many(self, view, received, counterparties):
+            return [1.0] * len(received)
+
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    with pytest.raises(TypeError, match="declares no trade_floor"):
+        run(game, [Undeclared(), Trader(wants(WOOD, 1.0)), Trader(), Trader()])
 
 
 def test_a_bot_with_no_trading_surface_never_trades():
@@ -713,13 +744,14 @@ def test_execute_trade_refuses_a_counterparty_priced_at_zero_or_below():
         execute_trade(game, 0, 1, one_for_one(WOOD, ORE))
 
 
-def test_execute_trade_refuses_a_counterparty_gain_under_a_nonzero_floor(monkeypatch):
-    """A gain that is positive but at or below `TRADE_FLOOR` still refuses --
-    the same `clears_floor` predicate `_best_clearing` reads, not a bare
-    `> 0.0` check."""
-    monkeypatch.setattr(trading_mod, "TRADE_FLOOR", 2.0)
+def test_execute_trade_refuses_a_counterparty_gain_under_a_nonzero_floor():
+    """A gain that is positive but at or below the counterparty's own floor
+    still refuses -- the same `clears_floor` predicate `_best_clearing`
+    reads, not a bare `> 0.0` check."""
     game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
-    _seated(game, [Trader(), Trader(lambda r, c: 1.0), Trader(), Trader()])
+    fussy = Trader(lambda r, c: 1.0)
+    fussy.trade_floor = 2.0
+    _seated(game, [Trader(), fussy, Trader(), Trader()])
     with pytest.raises(ValueError, match="does not want"):
         execute_trade(game, 0, 1, one_for_one(WOOD, ORE))
 

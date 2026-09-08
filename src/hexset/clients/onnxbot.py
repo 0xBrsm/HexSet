@@ -300,6 +300,11 @@ class NetworkBot:
     space: ActionSpace
     players: int
     max_trades: int | None = None
+    # This gate's clearing floor (`hexset.trading.trade_floor_of`): `accepts`
+    # is a strict value-head comparison and `gains_many` reads +1/-1 off it,
+    # so there is no resolution for a floor to express; strict positivity is
+    # the whole gate.
+    trade_floor: float = 0.0
     # The game `choose` was last handed, so a trade event -- which runs
     # inside the same `apply` this bot's own choice already went through --
     # asks about the position it is actually seated at. `None` only for a
@@ -495,6 +500,7 @@ class GatedSearch(Search):
     def __init__(self, evaluator, gate: NetworkBot, **kwargs) -> None:
         super().__init__(evaluator, **kwargs)
         self.gate = gate
+        self.trade_floor = gate.trade_floor
 
     def choose(self, game: Game) -> Action:
         self.gate._seated = game

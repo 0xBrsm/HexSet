@@ -61,6 +61,8 @@ class Gate:
     would.
     """
 
+    trade_floor = 0.0
+
     def __init__(self, gain_fn, estimate_fn=None):
         self.gain_fn = gain_fn
         self.gains_calls = 0
@@ -324,6 +326,8 @@ def test_trade_round_floor_blocks_execution_even_if_a_gate_misbehaves():
     actor_gate = Gate(lambda r, c: 5.0 if r[ORE] > 0 else -1.0)
 
     class Misbehaving:
+        trade_floor = 0.0
+
         def respond(self, view, offer):
             return Response(1, RESPONSE_ACCEPT, offer.received)
 
@@ -350,6 +354,8 @@ def test_trade_round_cap_blocks_an_over_cap_counter_even_if_both_gates_would_cle
     over_cap[ORE] = 4  # exceeds MAX_TRADE_CARDS on the actor's take side
 
     class OverCap:
+        trade_floor = 0.0
+
         def respond(self, view, offer):
             return Response(1, RESPONSE_COUNTER, tuple(over_cap))
 

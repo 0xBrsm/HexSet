@@ -41,6 +41,8 @@ class _Wants:
     pricing the reverse of it positively (see `tests/test_trading.py`'s
     `wants` helper, which this mirrors for the server-side suite)."""
 
+    trade_floor = 0.0
+
     def __init__(self, resource: int):
         self.resource = resource
 

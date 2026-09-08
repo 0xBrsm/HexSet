@@ -37,9 +37,15 @@ class Bot(Protocol):
       *gain* from every candidate in `received` at once: a signed float, in
       whatever unit this seat's value is, positive meaning it wants the
       trade. This is the clearing house's actual gate -- `trade_event`
-      clears the candidate both sides clear `TRADE_FLOOR` on and
+      clears the candidate both sides clear their own floor on and
       `Game.trade_rule` ranks highest. Default: `+1.0`/`-1.0` from
       `accepts_many`, for a bot that only ever has a boolean gate.
+    * `trade_floor` -- this gate's clearing floor τ, the measured resolution
+      of its own gains (`hexset.trading.trade_floor_of`). No default: a
+      gate that prices any candidate positive must declare one (`0.0` for
+      a boolean gate, whose +1/-1 has no resolution); a gate that only ever
+      declines is never asked for it. The floor is the gate's, not the
+      table's, and no other gate's measurement stands in for it.
 
     All three are handed the engine's information-set `View` for that seat
     and nothing else, so none can be a function of anything the seat may
@@ -70,6 +76,8 @@ class Bot(Protocol):
       this uses its own gain as the estimate instead (`hexset.trading.
       _estimate_many`), "so a plain gate offers what is best for itself."
     """
+
+    trade_floor: float
 
     def choose(self, game: Game) -> Action: ...
 
@@ -160,6 +168,9 @@ class RandomBot:
     publishes nothing simply does not participate (`Bot`'s defaults)."""
 
     rng: random.Random = field(default_factory=random.Random)
+    # Never prices anything positive, so never asked; declared for the
+    # protocol all the same.
+    trade_floor: float = 0.0
 
     def choose(self, game: Game) -> Action:
         return self.rng.choice(options_for(game))
@@ -194,6 +205,13 @@ class SearchBot:
     width: int | None = 6
     rng: random.Random = field(default_factory=random.Random)
     stance: str = "relative"
+    # This gate's clearing floor (`hexset.trading.trade_floor_of`). NOT
+    # measured: the trade lab's phase 3 measured heximax's gate, and this
+    # value is heximax's resolution carried over unchanged so search2 -- the
+    # frozen referent -- clears exactly what it cleared under the table-wide
+    # constant it replaced. In search2's own units (`relative`: victory
+    # points) it is near zero. A measurement of this gate would replace it.
+    trade_floor: float = 0.0197
     # The trade off switch. `0` publishes nothing and refuses everything, so
     # this seat never trades; anything else (including the `None` default)
     # trades. Not a budget -- the engine has no cap (`hexset.trading`) -- and

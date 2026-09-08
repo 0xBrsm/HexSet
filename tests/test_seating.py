@@ -196,6 +196,7 @@ def test_a_locked_seat_is_never_a_trade_counterparty():
         wanted = Resource.ORE if seat == 0 else Resource.WOOD
         return 1.0 if received[wanted] > 0 else -1.0
 
+    gate.trade_floor = 0.0  # a bare gate callable carries its own floor
     done = trade_event(game, gate)
     assert done
     assert all(trade.b == 2 for trade in done)

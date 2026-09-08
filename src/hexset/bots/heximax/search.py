@@ -181,6 +181,21 @@ def _after_trade_belief(
     return _ShiftedBelief(known, unknown, pool, pool_size, target)
 
 
+# heximax's clearing floor τ: this gate's measured resolution under paired
+# chance (the trade lab's phase 3, `agents/reference/trading-final.md` item 4
+# and its 2026-09-05 amendment). 300 bank positions x 8 paired chance
+# streams, each played traded and untraded to a 600-action cap by four
+# heximax seats under identical dice, steals and draws; no bin of claimed
+# gain showed a realised gain distinguishable from zero, so by the
+# registered rule the floor is the instrument's own resolution -- the
+# half-width of the pooled 95% interval on the acting seat's realised
+# win-rate gain, 0.0197. A gain heximax claims below this is a claim no
+# outcome can verify, and the table does not honour it. Measured on *this*
+# gate; it says nothing about any other bot's (`hexset.trading.
+# trade_floor_of`).
+HEXIMAX_TRADE_FLOOR: float = 0.0197
+
+
 @dataclass
 class Heximax:
     """Max^n over the honest evaluation, within a leaf budget.
@@ -219,6 +234,10 @@ class Heximax:
     # publishes nothing and refuses everything. Not a budget -- the engine
     # has no cap.
     max_trades: int | None = None
+    # This gate's clearing floor (`hexset.trading.trade_floor_of`): the
+    # measured `HEXIMAX_TRADE_FLOOR`, in the win-probability units the `win`
+    # stance's gains are read in.
+    trade_floor: float = HEXIMAX_TRADE_FLOOR
     placement: bool = True
     mode: str = "honest"
     exact_roll_plies: int = EXACT_ROLL_PLIES
@@ -400,7 +419,7 @@ class Heximax:
         `relative`, the counterparty's gain is already priced in, which is
         what makes "not with the leader" expressible without a partner term.
         This is the mechanic's private gate: `hexset.trading.trade_event`
-        clears the candidate both sides clear `TRADE_FLOOR` on and
+        clears the candidate both sides clear their own floor on and
         `Game.trade_rule` ranks highest.
 
         One event asks this over every coverable candidate at once (a

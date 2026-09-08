@@ -1517,7 +1517,16 @@ function renderStatus() {
   // Somebody else's decision to make, so the phase underneath it is beside
   // the point. True as of the last poll rather than the last render — see
   // settle() — which is as current as anything here gets.
-  if (state.to_move !== state.seat) {
+  //
+  // Owing cards to a seven is the exception, because it is not a decision
+  // anybody takes in turn: every seat over the limit discards at the same
+  // moment, state.to_move names only the lowest-numbered of them (see
+  // hexset.game.to_move/may_act), and this seat's own discard modal is up
+  // over the board right now. "PLAYER 1'S TURN" behind it would be telling
+  // this player to wait for something they are not waiting for. A spectator
+  // has no seat, so discard_quota[null] is undefined and this stays false.
+  const owing = state.phase === "DISCARD" && state.discard_quota[state.seat] > 0;
+  if (state.to_move !== state.seat && !owing) {
     phaseEl.textContent = `PLAYER ${state.to_move + 1}'S TURN`;
     return;
   }

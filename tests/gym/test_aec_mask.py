@@ -25,9 +25,17 @@ from hexset.actions import legal_actions  # noqa: E402
 from hexset.gym.aec import HexSetAEC  # noqa: E402
 
 
-def _expected_mask(env: HexSetAEC) -> np.ndarray:
+def _expected_mask(env: HexSetAEC, agent: str) -> np.ndarray:
+    """`legal_actions` for the seat that is about to act.
+
+    Named explicitly rather than left to `legal_actions`' own default: during
+    a seven's discards several seats may act at once and `agent_selection` is
+    any of them (`docs/gym-design.md` §2), so the bare call would answer for
+    the lowest-indexed owing seat, which need not be this one.
+    """
+    seat = env.possible_agents.index(agent)
     mask = np.zeros(env._space.size, dtype=np.int8)
-    for action in legal_actions(env._game):
+    for action in legal_actions(env._game, seat):
         mask[env._space.index(action)] = 1
     return mask
 
@@ -48,7 +56,7 @@ def test_mask_matches_legal_actions_over_fifty_positions():
                 continue
 
             observed = env.observe(agent)["action_mask"]
-            assert np.array_equal(observed, _expected_mask(env)), (
+            assert np.array_equal(observed, _expected_mask(env, agent)), (
                 f"mask mismatch at seed {seed - 1}, step {steps}"
             )
             checked += 1
@@ -74,7 +82,10 @@ def test_no_action_legality_depends_on_another_seats_hand():
                 continue
             game = env._game
             mover = env.possible_agents.index(agent)
-            before = list(legal_actions(game))
+            # For the mover, not for whoever the position would serialize to:
+            # during a discard round every owing seat may act and this one is
+            # not necessarily the lowest-indexed of them.
+            before = list(legal_actions(game, mover))
 
             state = game.state(mover, hidden=False)
             keep = [hand[:] for hand in state.hands]
@@ -96,7 +107,7 @@ def test_no_action_legality_depends_on_another_seats_hand():
                     redealt[card] += 1
                 cursor += size
                 state.hands[seat] = redealt
-            assert list(legal_actions(game)) == before
+            assert list(legal_actions(game, mover)) == before
             state.hands[:] = keep
 
             observed = env.observe(agent)["action_mask"]

@@ -444,3 +444,120 @@ def test_a_proposed_trade_appears_in_the_log_and_the_journal(tmp_path):
 
     lines = [json.loads(line) for line in journal_files[0].read_text().splitlines()]
     assert any(e.get("kind") == "trade" for e in lines), "a manual trade must not vanish on resume"
+
+
+# --- a seven's discards are simultaneous, so no seat waits on another ---------
+
+
+def _four_humans(registry: Tables) -> tuple[str, dict[int, str]]:
+    """A table with a person on every seat, as `(code, {seat: token})`."""
+    code, token = deal(registry, bots=[])
+    tokens = {registry.by_token(token)[1]: token}
+    while len(tokens) < MAX_SEATS:
+        data = registry.handle("POST", "/api/join", {"code": code}, None)
+        tokens[registry.by_token(data["token"])[1]] = data["token"]
+    return code, tokens
+
+
+def _owing_seats_zero_and_three(registry: Tables, code: str) -> None:
+    """Park the table in `Phase.DISCARD` with seats 0 and 3 each owing two
+    cards, and seat 1 -- who rolled the seven -- owing none."""
+    from hexset.board.terrain import NUM_RESOURCES, Resource
+    from hexset.game import Phase
+
+    game = registry.get(code).session.game
+    game.phase = Phase.DISCARD
+    game.current_player = 1
+    for hand in game._state.hands:
+        hand[:] = [0] * NUM_RESOURCES
+    game._state.hands[0][Resource.WOOD] = 4
+    game._state.hands[3][Resource.ORE] = 4
+    game.discard_quota = [2, 0, 0, 2]
+
+
+def test_a_higher_seat_discards_without_waiting_for_a_lower_one():
+    """The bug this file's carve-out exists for: discarding on a seven is not
+    a turn, but `POST /api/action` gated every submission on `to_move` -- the
+    lowest-numbered owing seat -- so seat 3 was refused until seat 0 had
+    finished, at a table where both were choosing at the same moment."""
+    from hexset.board.terrain import Resource
+    from hexset.game import Phase, players_owing_discards
+
+    registry = tables()
+    code, tokens = _four_humans(registry)
+    _owing_seats_zero_and_three(registry, code)
+    game = registry.get(code).session.game
+    assert players_owing_discards(game) == [0, 3]
+    assert to_move(game) == 0  # unchanged: still one seat, for callers that want one
+
+    registry.handle(
+        "POST", "/api/action", {"action": {"type": "DISCARD", "a": int(Resource.ORE)}}, tokens[3]
+    )
+
+    assert game._state.hands[3][Resource.ORE] == 3
+    assert game._state.hands[0][Resource.WOOD] == 4  # seat 0 has not moved
+    assert game.discard_quota == [2, 0, 0, 1]
+    assert game.phase is Phase.DISCARD
+
+
+def test_a_seat_owing_nothing_is_still_refused_during_a_discard_round():
+    """The carve-out is exactly the owing seats, not the whole table: seat 1
+    rolled the seven and owes nothing, so it has nothing to play."""
+    from hexset.board.terrain import Resource
+
+    registry = tables()
+    code, tokens = _four_humans(registry)
+    _owing_seats_zero_and_three(registry, code)
+
+    with pytest.raises(ApiError) as excinfo:
+        registry.handle(
+            "POST",
+            "/api/action",
+            {"action": {"type": "DISCARD", "a": int(Resource.ORE)}},
+            tokens[1],
+        )
+    assert "not your turn" in str(excinfo.value)
+
+
+def test_every_owing_seat_is_offered_its_own_cards_by_state_and_record():
+    """`/api/state`'s option list and `/api/record` both answer per seat: seat
+    3 is offered its own ore rather than seat 0's wood, and asking for the
+    record no longer 409s a seat that a lower-numbered one has not yet let
+    through."""
+    from hexset.board.terrain import Resource
+
+    registry = tables()
+    code, tokens = _four_humans(registry)
+    _owing_seats_zero_and_three(registry, code)
+
+    theirs = registry.handle("GET", "/api/state", {}, tokens[3])["legal_actions"]
+    lowest = registry.handle("GET", "/api/state", {}, tokens[0])["legal_actions"]
+    assert [a["a"] for a in theirs] == [int(Resource.ORE)]
+    assert [a["a"] for a in lowest] == [int(Resource.WOOD)]
+    assert registry.handle("GET", "/api/state", {}, tokens[1])["legal_actions"] == []
+
+    record = registry.handle("GET", "/api/record", {}, tokens[3])
+    assert [a["a"] for a in record["options"]] == [int(Resource.ORE)]
+
+
+def test_a_discard_round_resolves_in_whatever_order_the_seats_answer_in():
+    """Interleaved submissions from both owing seats close the round and hand
+    the robber to whoever rolled -- not to whichever seat discarded last."""
+    from hexset.board.terrain import Resource
+    from hexset.game import Phase
+
+    registry = tables()
+    code, tokens = _four_humans(registry)
+    _owing_seats_zero_and_three(registry, code)
+    game = registry.get(code).session.game
+
+    for seat, resource in ((3, Resource.ORE), (0, Resource.WOOD)) * 2:
+        registry.handle(
+            "POST", "/api/action", {"action": {"type": "DISCARD", "a": int(resource)}}, tokens[seat]
+        )
+
+    assert game.discard_quota == [0, 0, 0, 0]
+    assert game._state.hands[0][Resource.WOOD] == 2
+    assert game._state.hands[3][Resource.ORE] == 2
+    assert game.phase is Phase.ROBBER
+    assert game.current_player == 1

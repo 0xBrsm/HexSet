@@ -48,7 +48,7 @@ from hexset.board.topology import Topology
 from hexset.cards import NUM_DEV_CARDS, DevCard
 from hexset.devcards import holdings
 from hexset.economy import trade_ratios
-from hexset.game import Game, Phase, is_over, to_move
+from hexset.game import Game, Phase, is_over, may_act, players_owing_discards, to_move
 from hexset.ledger import PublicLedger
 from hexset.roads import road_lengths
 from hexset.state import MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS, GameState, copy_state
@@ -676,6 +676,7 @@ def render_log(
     viewer: int | None,
     *,
     omniscient: bool = False,
+    discards_open: bool = False,
 ) -> list[str]:
     """Every event as the sidebar transcript `viewer` should see.
 
@@ -684,18 +685,35 @@ def render_log(
     rather than appended to is also what makes undo trivial: dropping the
     events drops their lines, with no separate log to wind back.
 
-    Three kinds of action arrive as a burst of engine steps that a reader
+    Two kinds of action arrive as a burst of engine steps that a reader
     would only ever want as one sentence, and each collapses into a run
     rewritten in place as it grows:
 
       builds     one "placed/built ..." per actor per round
-      discards   one line per actor per discard, however many cards
       bank       consecutive trades of the same pair, summed
 
     Only ever one run is open at a time — anything that doesn't continue the
     current one clears it, so a run can never reach back across an intervening
-    line to join something older (a second seven in the same round starts a
-    fresh discard line rather than swelling the first).
+    line to join something older.
+
+    **Discards are held back until the whole round has resolved.** A seven's
+    discards are simultaneous, not a sequence of turns (see
+    `hexset.game.to_move`): every seat over the limit gives up cards at the
+    same instant, and the engine only resolves them one submission at a time
+    because a request is one submission. Writing each seat's line as its
+    submission landed said something that never happened — that seat 0
+    discarded and *then* seat 3 did — and told the table half a round while
+    the other half was still choosing. So the round's discards accumulate
+    here, one entry per seat however many cards and however interleaved, and
+    are written out together, in seat order, the moment it is over: on the
+    first event that follows it (nothing else can be played while cards are
+    owed, so any later action is proof the round closed), or at the end of
+    the fold if `discards_open` says no seat still owes. `discards_open` is
+    the caller's live `any(game.discard_quota)` — see `GameSession.log_for`,
+    which is where a mid-round read gets its answer from.
+
+    Redaction is unchanged and is still per reader: a seat sees the cards it
+    lost named, everyone else sees a count (`omniscient` names them all).
 
     Trades are not actions and so are not events of their own: the engine
     clears them inside the roll or the robber move that opened the main
@@ -707,6 +725,32 @@ def render_log(
     """
     lines: list[str] = []
     run: dict | None = None
+    # The open discard round: seat -> what it has given up so far, and the
+    # round number its lines will carry. Written to no reader until the round
+    # closes (see the docstring).
+    owed: dict[int, list[int]] = {}
+    owed_round = 0
+
+    def flush_discards() -> None:
+        # Seat order, the order the player list is already in — the order the
+        # submissions actually arrived in is exactly what a simultaneous
+        # round has no business reporting.
+        nonlocal owed
+        for actor in sorted(owed):
+            counts = owed[actor]
+            who = _who(actor, labels)
+            if omniscient or actor == viewer:
+                # Same wording as the "collects" half of a roll line, since
+                # it's the same fact pointed the other way.
+                text = f"{who} discarded {_resource_counts(counts)}."
+            else:
+                # Which resources went is the discarding seat's own line
+                # only. A collapsed line is exactly where a whole hand would
+                # leak at once.
+                total = sum(counts)
+                text = f"{who} discarded {total} card{'' if total == 1 else 's'}."
+            lines.append(f"{owed_round}\t{text}")
+        owed = {}
 
     def emit(round_num: int, text: str, continuing: bool) -> None:
         # A run is exactly one line, rewritten in place as it grows, so
@@ -716,6 +760,10 @@ def render_log(
         lines.append(f"{round_num}\t{text}")
 
     for event in events:
+        if owed and (event.action is None or event.action.type is not ActionType.DISCARD):
+            # Nothing else can be played while a seven's cards are still
+            # owed, so any other event is proof the round closed before it.
+            flush_discards()
         if event.action is None:
             # A manually executed trade (`GameSession.execute_manual_trade`):
             # no board action happened, only the exchange itself -- and,
@@ -749,24 +797,12 @@ def render_log(
             # `legal_actions` under Phase.DISCARD, which deliberately keeps
             # the action space linear in resources rather than combinatorial
             # in hand size), so one seven can cost a full hand half a dozen
-            # steps in a row — and for a bot every one of them said the same
-            # six words. They collapse to a single line.
-            #
-            # Which resources went is the discarding seat's own line only. A
-            # collapsed line is exactly where a whole hand would leak at once.
-            key = ("discard", actor, round_num)
-            continuing = run is not None and run["key"] == key
-            if not continuing:
-                run = {"key": key, "counts": [0] * NUM_RESOURCES}
-            run["counts"][action.a] += 1
-            total = sum(run["counts"])
-            if omniscient or actor == viewer:
-                # Same wording as the "collects" half of a roll line, since
-                # it's the same fact pointed the other way.
-                line = f"{who} discarded {_resource_counts(run['counts'])}."
-            else:
-                line = f"{who} discarded {total} card{'' if total == 1 else 's'}."
-            emit(round_num, line, continuing)
+            # steps in a row — and several seats can be spending those steps
+            # at once. Every one of them accumulates into the open round and
+            # says nothing until `flush_discards` writes the lot.
+            run = None  # a discard ends whatever build/bank run was open
+            owed_round = round_num
+            owed.setdefault(actor, [0] * NUM_RESOURCES)[action.a] += 1
             continue
 
         if kind is ActionType.BANK_TRADE:
@@ -803,6 +839,12 @@ def render_log(
         for line in _trade_lines(event, labels):
             lines.append(f"{round_num}\t{line}")
 
+    # A round that finished on the last event ever applied — every owing seat
+    # cleared its quota and nobody has moved the robber yet — is over all the
+    # same, and its lines are owed to the table now rather than at whatever
+    # the next action turns out to be.
+    if owed and not discards_open:
+        flush_discards()
     return lines
 
 
@@ -1099,7 +1141,7 @@ class GameSession:
                 )
                 self._steps += 1
                 continue
-            if not is_legal(self.game, action, legal_actions(self.game)):
+            if not is_legal(self.game, action, legal_actions(self.game, actor)):
                 raise ResumeError(
                     f"step {self._steps}: {action} is not legal in {self.game.phase.name}"
                 )
@@ -1110,10 +1152,15 @@ class GameSession:
 
     def legal_wire_actions(self, viewer: int | None) -> list[dict]:
         """What `viewer` may play right now — empty unless it is their turn,
-        which is also what a seat that isn't theirs, or no seat at all, gets."""
-        if is_over(self.game) or viewer is None or to_move(self.game) != viewer:
+        which is also what a seat that isn't theirs, or no seat at all, gets.
+
+        "Their turn" is `hexset.game.may_act`, not `to_move`: a seven's
+        discards are owed by several seats at once and none of them is
+        anybody's turn, so each owing seat is offered its own cards for as
+        long as it still owes some, whatever the others have done."""
+        if is_over(self.game) or viewer is None or not may_act(self.game, viewer):
             return []
-        return [action_to_wire(a) for a in legal_actions(self.game)]
+        return [action_to_wire(a) for a in legal_actions(self.game, viewer)]
 
     def submit(self, seat: int, wire: dict) -> None:
         """Play `wire` as `seat`. The seat is the caller's to prove (it comes
@@ -1127,10 +1174,14 @@ class GameSession:
             raise ValueError("the game is already over")
         if seat not in self.claimed_seats:
             raise ValueError(f"seat {seat} is not yours to play")
-        if to_move(self.game) != seat:
+        # `may_act`, not `to_move`: a seven's discards are simultaneous, so
+        # seat 3 submitting one while seat 0 still owes its own is not out of
+        # turn — there is no turn — and refusing it was this gate's one real
+        # bug (see `hexset.game.to_move`).
+        if not may_act(self.game, seat):
             raise ValueError("it is not your turn to act")
         action = wire_to_action(wire)
-        options = legal_actions(self.game)
+        options = legal_actions(self.game, seat)
         if not is_legal(self.game, action, options):
             raise ValueError(f"{action} is not a legal action right now")
         self._apply(seat, action)
@@ -1169,8 +1220,14 @@ class GameSession:
         )
         seating_before = snapshot(self.game)
         trades_before = len(self.game.trades)
+        # `seat=actor` matters for exactly one action type, DISCARD, whose
+        # actor the position does not fix (see `hexset.actions.apply`): the
+        # seat that submitted it is the seat that loses the card, even when a
+        # lower-numbered seat is still owing. It is also what makes a
+        # journalled game replay the discards back to the seats that actually
+        # made them, since the journal records the actor per step.
         if replay is None:
-            apply(self.game, action)
+            apply(self.game, action, seat=actor)
         else:
             # Replaying a journalled game: the seats that published the
             # vectors this game traded on are not here, so the engine's own
@@ -1178,7 +1235,7 @@ class GameSession:
             # exchanges are re-executed instead -- see `trading.apply_trades`.
             live, self.game.gates = self.game.gates, None
             try:
-                apply(self.game, action)
+                apply(self.game, action, seat=actor)
             finally:
                 self.game.gates = live
             apply_trades(self.game, replay)
@@ -1289,6 +1346,13 @@ class GameSession:
         so the filter has nothing left to hide. `viewer` is kept in the
         signature because the caller is per-viewer and a future filter would
         land here.
+
+        During `Phase.DISCARD` this is one owing seat out of possibly
+        several, and it is a label rather than a permission: what a client
+        may actually do comes off `legal_actions` (see
+        `legal_wire_actions`/`may_act`), which offers every owing seat its
+        own cards at once. `discard_quota` in the same view already says
+        exactly which seats the table is waiting on.
         """
         del viewer
         game = self.game
@@ -1436,7 +1500,15 @@ class GameSession:
     def log_for(self, viewer: int | None, *, omniscient: bool = False) -> list[str]:
         """The sidebar transcript as `viewer` should see it, `None` for a
         reader with no seat, who is owed the least of anyone — or, with
-        `omniscient`, the most (see `render_log` and `state_view`)."""
+        `omniscient`, the most (see `render_log` and `state_view`).
+
+        A discard round still in progress is told to nobody, spectator
+        included: `discards_open` carries the engine's own "somebody still
+        owes cards" to the fold, which holds that round's lines back until
+        it closes (see `render_log`). It is the live quota rather than
+        anything recorded per event because a round can also close without
+        an action — `hexset.game.lock_seat` zeroes a retired seat's quota —
+        and the reveal follows the round, not the last submission."""
         # true state: the board is public.
         lines = render_log(
             self.events,
@@ -1444,6 +1516,7 @@ class GameSession:
             self.seat_labels,
             viewer,
             omniscient=omniscient,
+            discards_open=bool(players_owing_discards(self.game)),
         )
         if is_over(self.game):
             # The round the final action fell in, not self.round: a game that

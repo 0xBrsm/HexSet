@@ -650,3 +650,124 @@ def test_a_manually_executed_trade_survives_journal_and_resume(tmp_path):
     assert resumed._steps == session._steps == 1
     line = next(line for line in resumed.log_for(None) if " to Player " in line)
     assert "traded" in line
+
+
+# --- a seven's discards are simultaneous, and the log says so ------------------
+
+
+def _two_owing(seed: int = 11) -> GameSession:
+    """A session parked in `Phase.DISCARD` with seats 0 and 3 each owing two
+    cards and seat 1, who rolled the seven, owing none."""
+    from hexset.board.terrain import NUM_RESOURCES, Resource
+
+    game = a_game(seed=seed)
+    game.phase = Phase.DISCARD
+    game.current_player = 1
+    for hand in game._state.hands:
+        hand[:] = [0] * NUM_RESOURCES
+    game._state.hands[0][Resource.WOOD] = 4
+    game._state.hands[3][Resource.ORE] = 4
+    game.discard_quota = [2, 0, 0, 2]
+    return a_session(game, {0, 1, 2, 3})
+
+
+def _discards(session: GameSession, seat: int | None, **kwargs) -> list[str]:
+    return [line for line in session.log_for(seat, **kwargs) if "discard" in line]
+
+
+def _discard_wire(resource) -> dict:
+    return {"type": "DISCARD", "a": int(resource)}
+
+
+def test_no_discard_is_logged_until_the_whole_round_has_resolved():
+    """A seven's discards happen at once, so reporting seat 3's the moment it
+    lands both tells a sequence that never happened and shows the table half a
+    round while the other half is still choosing. Nothing is said -- to a
+    seat, to the seat itself, or to a spectator -- until nobody still owes."""
+    from hexset.board.terrain import Resource
+
+    session = _two_owing()
+
+    session.submit(3, _discard_wire(Resource.ORE))
+    session.submit(3, _discard_wire(Resource.ORE))
+    # Seat 3 is done and owes nothing; seat 0 has not started. The round is
+    # still open, so it is still nobody's business.
+    assert session.game.discard_quota == [2, 0, 0, 0]
+    assert _discards(session, 3) == []
+    assert _discards(session, 0) == []
+    assert _discards(session, None) == []
+    assert _discards(session, None, omniscient=True) == []
+
+    session.submit(0, _discard_wire(Resource.WOOD))
+    assert _discards(session, 0) == []  # one card short, still open
+
+    session.submit(0, _discard_wire(Resource.WOOD))
+
+    lines = _discards(session, None, omniscient=True)
+    assert len(lines) == 2
+    # Seat order, not submission order: seat 3 finished first and is second.
+    assert "Player 1 " in lines[0] and "Player 4 " in lines[1]
+
+
+def test_the_revealed_round_is_still_redacted_per_reader():
+    """Holding the round back changes when the lines appear, not what each
+    reader is allowed to see in them (see `render_log`'s `omniscient`)."""
+    from hexset.board.terrain import Resource
+
+    session = _two_owing()
+    for seat, resource in ((3, Resource.ORE), (0, Resource.WOOD)) * 2:
+        session.submit(seat, _discard_wire(resource))
+
+    mine = next(line for line in _discards(session, 3) if "Player 4" in line)
+    across = next(line for line in _discards(session, 0) if "Player 4" in line)
+
+    assert "Ore" in mine
+    assert "discarded 2 cards" in across and not any(r in across for r in RESOURCE_NAMES)
+
+
+def test_a_round_closed_by_a_locked_seat_still_reveals_the_rest():
+    """A round can end without a discard: `lock_seat` zeroes a retired seat's
+    quota. The reveal follows the round, so what was already given up is
+    reported rather than sitting unwritten until the next action."""
+    from hexset.board.terrain import Resource
+    from hexset.game import lock_seat
+
+    session = _two_owing()
+    session.submit(3, _discard_wire(Resource.ORE))
+    session.submit(3, _discard_wire(Resource.ORE))
+    assert _discards(session, None, omniscient=True) == []
+
+    lock_seat(session.game, 0)
+
+    # Seat 3's line only: seat 0 retired owing two and never gave up a card.
+    # (`_who` numbers among the seats still in the game, so seat 3 reads as
+    # "Player 3" once seat 0 is gone -- that renumbering is `SeatLabels`' and
+    # is not what this test is about.)
+    lines = _discards(session, None, omniscient=True)
+    assert len(lines) == 1 and "2 Ore" in lines[0]
+
+
+def test_a_second_seven_starts_a_fresh_discard_line():
+    """The run this replaced could not reach back across an intervening line,
+    and neither can the held-back round: the robber move between two sevens
+    closes the first, so the second is its own set of lines."""
+    from hexset.board.terrain import Resource
+    from hexset.game import Phase
+
+    session = _two_owing()
+    for seat, resource in ((3, Resource.ORE), (0, Resource.WOOD)) * 2:
+        session.submit(seat, _discard_wire(resource))
+    assert session.game.phase is Phase.ROBBER
+    assert len(_discards(session, None, omniscient=True)) == 2
+
+    robber = next(a for a in legal_actions(session.game) if a.type is ActionType.MOVE_ROBBER)
+    session._apply(1, robber)
+
+    session.game.phase = Phase.DISCARD
+    session.game.discard_quota = [0, 0, 0, 2]
+    session.submit(3, _discard_wire(Resource.ORE))
+    session.submit(3, _discard_wire(Resource.ORE))
+
+    lines = _discards(session, None, omniscient=True)
+    assert len(lines) == 3  # two from the first seven, one from the second
+    assert "discarded 2" in lines[2]

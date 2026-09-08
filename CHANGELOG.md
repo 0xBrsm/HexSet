@@ -92,6 +92,68 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Discarding on a seven was served as if it were a turn. Every seat over the
+  limit discards at the same time, bounded only by its own hand and its own
+  `discard_quota` entry, but the server gated every submission on
+  `to_move(game) != seat` — always the lowest-numbered owing seat — so a
+  table with seats 0 and 3 both owing cards answered seat 3 with HTTP 409
+  "it is not your turn to act" until seat 0 had finished. `hexset.game`
+  gains `may_act(game, seat)` (true for *every* seat still owing a discard,
+  `seat == to_move(game)` in every other phase);
+  `hexset.actions.legal_actions`/`legal_mask`/`apply` take an optional
+  `seat`, so a discard resolves against the seat that submitted it instead
+  of `players_owing_discards(game)[0]`; and `GameSession.submit`/
+  `legal_wire_actions` and `Tables.record` ask `may_act`. `to_move` itself
+  is unchanged — it stays the single-seat answer for the callers that want
+  one (the arena, a bot runner) — but the environment and the replay layer
+  no longer take it for an ordering (next entry).
+- The gym and the record layer still served a seven's discards in ascending
+  seat order after the server stopped, so the same round was legal at a live
+  table and refused offline. `hexset.gym.aec.HexSetAEC` no longer hardcodes
+  `agent_selection` to `players_owing_discards(game)[0]` during
+  `Phase.DISCARD`: it keeps PettingZoo's one-active-agent-per-`step()`
+  contract but chooses *among* the owing seats, by a new `discard_order`
+  (`"random"`, the default, drawn from a stream seeded off `reset(seed)`
+  alone; `"seat"` for the old ascending order) or by the caller through the
+  new `HexSetAEC.select_agent(agent)`, which accepts any seat `may_act`
+  allows. `step()` dispatches the acting seat with the action
+  (`apply(game, action, seat)`) and `observe` builds the mask from
+  `legal_actions(game, seat)`, so a round resolves against whoever is
+  actually acting. `hexset.gym.env.HexSetEnv` passes `discard_order` through
+  and hands the learner control the moment it *owes* cards rather than after
+  every lower-numbered bot seat has cleared its quota. Ascending order was
+  not merely arbitrary: under it seat 0 never observed another seat's
+  discard before choosing its own and the last owing seat always observed
+  all of them, an asymmetry no table has and every self-play corpus taught.
+  `docs/gym-design.md` §2 is rewritten to match.
+- `hexset.record` could not express, and so could not replay, a discard
+  round that did not happen in ascending seat order — a real server-journalled
+  game's, or a converted colonist.io game's. `Record` gains `actors`, sparse
+  `(step, seat)` pairs naming who took a step where the position cannot say
+  (in practice the `Phase.DISCARD` ones), defaulting to empty so every record
+  already written reads and replays unchanged; `replay` checks each action
+  with `may_act(game, actor)`/`legal_actions(game, actor)` instead of against
+  `to_move`; `advance` takes the actor and passes it to `apply`; a new
+  `moves(record)` yields `(actor, action, trades)` and `steps(record)` keeps
+  its two-tuple shape for existing callers. `from_journal` carries the
+  journal's own `actor` across for every discard, so a simultaneous round
+  served by `hexset.server` now round-trips exactly. `hexset.dataset`,
+  `hexset.behaviour` and `hexset.bench.human_agreement` replay through
+  `moves` so a named actor is honoured rather than silently re-applied to
+  the lowest owing seat.
+- The player-facing transcript wrote each seat's discard line as that seat's
+  submission landed, so a simultaneous round was reported as a sequence and
+  half of it was shown to the table while the other half was still choosing.
+  `hexset.server.webplay.render_log` now holds a round's discards back —
+  one line per seat however many cards and however interleaved — and writes
+  them out together, in seat order, once no seat still owes any.
+  `hexset.server.journal` is unaffected and still writes every action the
+  instant it is applied: it is the crash-recovery log, not the transcript.
+- The web client's phase banner read "PLAYER 1'S TURN" to a seat that owed
+  cards to a seven, behind that seat's own discard modal — `state.to_move`
+  names only the lowest-numbered owing seat. It now shows the phase to any
+  seat with a `discard_quota` entry left to clear. The modal itself needed
+  no change: it opens off `state.legal_actions`, which now answers per seat.
 - `hexset.__version__` tried installed package metadata before the source
   tree's `pyproject.toml`, so an editable install with stale dist-info kept
   reporting `0.26.0` for four releases after the tree moved on; it now reads

@@ -715,3 +715,45 @@ def test_a_draw_count_below_one_is_refused_rather_than_returning_nothing():
             rng=random.Random(0),
             extra=random.Random(0),
         )
+
+
+def test_the_search_resolves_a_discard_round_one_owing_seat_at_a_time():
+    """`hexset.mcts` is deliberately unchanged by the simultaneous-discard
+    work (`docs/gym-design.md` §2).
+
+    It asks nothing of the seat-aware `legal_actions`/`apply` overloads: a
+    node's `mover` is `to_move(game)` and its options are `legal_actions(game)`,
+    so a discard round is expanded lowest-owing-seat first. Every owing seat
+    still gets its own decision node -- the round is simply serialized inside
+    the tree -- and the round is order-invariant
+    (`tests/test_actions.py::test_a_discard_round_is_order_invariant`), so the
+    positions the search reaches are the positions the game can reach. This
+    pins that, so a later change to `to_move` cannot quietly hand one seat's
+    cards to another inside a rollout.
+    """
+    game = a_game(seed=7)
+    game.phase = Phase.DISCARD
+    game.current_player = 1
+    state = game.state(0, hidden=False)
+    for seat in range(4):
+        clear_hand(state, seat)
+    give(state, 0, Resource.WOOD, 4)
+    give(state, 3, Resource.ORE, 4)
+    game.discard_quota = [2, 0, 0, 2]
+
+    search = Search(Stub(), simulations=4, wave=2, rng=random.Random(3))
+    root = search._node(game)
+    assert root.mover == 0
+    assert {a.a for a in root.options} == {Resource.WOOD}
+
+    # One card on, it is still seat 0's decision; seat 3's hand is untouched.
+    after_one = search._advance(root, 0, None)
+    child = search._node(after_one)
+    assert child.mover == 0
+    assert after_one._state.hands[3][Resource.ORE] == 4
+
+    # Seat 0 done, the round is seat 3's -- with seat 3's own cards.
+    after_two = search._advance(child, 0, None)
+    last = search._node(after_two)
+    assert last.mover == 3
+    assert {a.a for a in last.options} == {Resource.ORE}

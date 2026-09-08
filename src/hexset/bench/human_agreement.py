@@ -98,7 +98,7 @@ from hexset.actions import (
 from hexset.arena import Z_95, leaf_evaluator, load_checkpoint, wilson
 from hexset.game import imagine, is_over, to_move
 from hexset.mcts import Leaf
-from hexset.record import Record, advance, board_of, open_record, read as read_records, steps
+from hexset.record import Record, advance, board_of, moves, open_record, read as read_records
 
 PROGRESS_BUCKETS = 5
 
@@ -217,22 +217,25 @@ def positions(
     total = max(1, len(record.actions))
     tally.games += 1
 
-    for step, (action, trades) in enumerate(steps(record)):
+    for step, (actor, action, trades) in enumerate(moves(record)):
         if is_over(live):
             break
         tally.actions += 1
-        seat = to_move(live)
+        # The recorded actor where there is one (`hexset.record.moves`): a
+        # seven's discards are simultaneous, so `to_move` is only the engine's
+        # own serialization of them, not who actually played.
+        seat = to_move(live) if actor is None else actor
 
         if seats is not None and seat not in seats:
             tally.off_seat += 1
-            advance(live, action, trades)
+            advance(live, action, trades, seat)
             continue
         if sample < 1.0 and (rng or random).random() >= sample:
             tally.unsampled += 1
-            advance(live, action, trades)
+            advance(live, action, trades, seat)
             continue
 
-        options = tuple(legal_actions(live))
+        options = tuple(legal_actions(live, seat))
         tally.considered += 1
         if len(options) < 2:
             tally.trivial += 1
@@ -258,7 +261,7 @@ def positions(
                 tally.unrepresented_by_kind[name] = (
                     tally.unrepresented_by_kind.get(name, 0) + 1
                 )
-        advance(live, action, trades)
+        advance(live, action, trades, seat)
 
 
 def _check_space(record: Record, space: ActionSpace | None) -> None:

@@ -21,7 +21,7 @@ from typing import Iterable, Sequence
 
 from .actions import ActionType
 from .game import to_move
-from .record import Record, advance, steps, open_record
+from .record import Record, advance, moves, open_record
 
 # The card plays worth counting, and the names they are reported under.
 TRACKED: dict[ActionType, str] = {
@@ -71,11 +71,15 @@ def walk(record: Record, game: int) -> Walk | None:
     total = max(1, len(record.actions))
     plays: list[Play] = []
 
-    for step, (action, trades) in enumerate(steps(record)):
+    for step, (actor, action, trades) in enumerate(moves(record)):
+        # Who took it, as recorded, falling back to the position's own answer
+        # for a record that names no actor (`hexset.record.moves`). The two
+        # differ only in a seven's discards, which are simultaneous.
+        seat = to_move(live) if actor is None else actor
         name = TRACKED.get(action.type)
         if name is not None:
-            plays.append(Play(to_move(live), name, step / total))
-        advance(live, action, trades)
+            plays.append(Play(seat, name, step / total))
+        advance(live, action, trades, seat)
 
     return Walk(
         game=game,

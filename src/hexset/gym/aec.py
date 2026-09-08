@@ -2,9 +2,33 @@
 """`HexSetAEC`: a PettingZoo AEC environment around the HexSet engine.
 
 See `docs/gym-design.md` for the ratified design this implements. One agent
-per seat (`seat_0`..`seat_{n-1}`), `agent_selection` tracking
-`hexset.game.to_move`; `observe(agent)` never reads more than `agent`'s own
+per seat (`seat_0`..`seat_{n-1}`), `agent_selection` naming the one seat
+entitled to act next; `observe(agent)` never reads more than `agent`'s own
 information set.
+
+**Whose step it is.** `agent_selection` is `hexset.game.to_move` in every
+phase but one. `Phase.DISCARD` is not a turn: every seat over the limit owes
+its cards at the same instant and none of them waits on any other
+(`hexset.game.may_act`, and the live server that asks it). AEC still wants
+exactly one active agent per `step()`, so this environment picks one of the
+owing seats -- but it picks *among* them rather than always taking the
+lowest-indexed one, which is a fiction no table has. `discard_order`
+(§2 of `docs/gym-design.md`) says how:
+
+- `"random"` (default) draws uniformly from the seats still owing, from a
+  stream seeded off `reset(seed)` alone and never shared with the game's own
+  rng -- a fixed seed still deals a fixed game and now also a fixed discard
+  order.
+- `"seat"` is the ascending order this environment used to hardcode, kept
+  for a caller that wants the engine's own serialization back.
+- `select_agent(agent)` overrides either, for any seat `may_act` allows: a
+  caller replaying a real table's arrival order (`hexset.record`), or
+  driving an experiment, names the seat itself.
+
+Ascending-by-default was not merely arbitrary, it was biased: under it seat 0
+never observes another seat's discard before choosing its own and the last
+owing seat always observes all of them, so a self-play corpus taught the
+policy an ordering that a live table does not have.
 
 **Honesty.** Every observation array comes from `hexset.encoding.encode`,
 which is already information-set correct by construction (own hand and
@@ -42,10 +66,14 @@ from hexset.actions import Action, ActionSpace, apply, build_space, legal_action
 from hexset.board.board import random_base_board
 from hexset.board.maps import BASE_LAYOUT
 from hexset.board.topology import build as build_topology
-from hexset.game import Game, is_over, start, to_move
+from hexset.game import Game, Phase, is_over, may_act, players_owing_discards, start, to_move
 from hexset.victory import relative_points, victory_points
 
 REWARD_MODES = ("terminal", "relative_points")
+# How `agent_selection` picks one of the seats owing a discard. See the module
+# docstring: the round itself is order-invariant, so this decides only who is
+# asked first, never what position the round reaches.
+DISCARD_ORDERS = ("random", "seat")
 
 # The standard board's topology never varies with terrain, tokens, ports or
 # seed -- only `hexset.board.maps.BASE_LAYOUT`'s hex coordinates decide vertex
@@ -70,6 +98,11 @@ class HexSetAEC(AECEnv):
     Hitting `hexset.game.MAX_TURNS` ends the game with `won_by is None`; every
     agent's `truncations` entry is set (not `terminations`), reward 0,
     mirroring the arena's own `exhausted` outcome.
+
+    `discard_order="random"` (default) / `"seat"`: which of the seats owing a
+    seven's discards is named next, see the module docstring. Either way the
+    round reaches the same position -- `discard_order` decides who is asked
+    first, not what happens.
     """
 
     metadata = {"render_modes": ["ansi", "human"], "name": "hexset_v0", "is_parallelizable": False}
@@ -79,6 +112,7 @@ class HexSetAEC(AECEnv):
         num_players: int = 4,
         *,
         reward: str = "terminal",
+        discard_order: str = "random",
         render_mode: str | None = None,
     ) -> None:
         super().__init__()
@@ -86,9 +120,14 @@ class HexSetAEC(AECEnv):
             raise ValueError(f"unsupported player count: {num_players}")
         if reward not in REWARD_MODES:
             raise ValueError(f"unknown reward mode {reward!r}, expected one of {REWARD_MODES}")
+        if discard_order not in DISCARD_ORDERS:
+            raise ValueError(
+                f"unknown discard order {discard_order!r}, expected one of {DISCARD_ORDERS}"
+            )
 
         self.num_players = num_players
         self.reward_mode = reward
+        self.discard_order = discard_order
         self.render_mode = render_mode
 
         self.possible_agents: list[str] = [agent_name(s) for s in range(num_players)]
@@ -98,6 +137,10 @@ class HexSetAEC(AECEnv):
             TOPOLOGY.num_vertices, TOPOLOGY.num_edges, TOPOLOGY.num_hexes, num_players
         )
         self._game: Game | None = None
+        # Its own stream, seeded off `reset(seed)` and nothing else: drawing
+        # the discard order from the game's rng would deal a different board
+        # for the same seed the first time a seven landed.
+        self._discard_rng = random.Random("discard-order:None")
 
         self.rewards: dict[str, float] = {}
         self._cumulative_rewards: dict[str, float] = {}
@@ -149,6 +192,7 @@ class HexSetAEC(AECEnv):
         rng = random.Random(seed)
         board = random_base_board(rng)
         self._game = start(board, self.num_players, rng)
+        self._discard_rng = random.Random(f"discard-order:{seed}")
 
         self.agents = self.possible_agents[:]
         self.rewards = dict.fromkeys(self.agents, 0.0)
@@ -156,7 +200,27 @@ class HexSetAEC(AECEnv):
         self.terminations = dict.fromkeys(self.agents, False)
         self.truncations = dict.fromkeys(self.agents, False)
         self.infos = {a: {} for a in self.agents}
-        self.agent_selection = agent_name(to_move(self._game))
+        self.agent_selection = self._next_agent(self._game)
+
+    def select_agent(self, agent: str) -> None:
+        """Name the seat that will act on the next `step()`, when more than
+        one is entitled to.
+
+        Only `Phase.DISCARD` ever entitles more than one: every seat still
+        owing cards may act, in any order (`hexset.game.may_act`). This is how
+        a caller that knows the order it wants -- a record replaying a real
+        table's arrival order, a test, a training loop sampling orders itself
+        -- says so, instead of accepting `discard_order`'s answer. Refuses any
+        seat the engine would refuse, so it cannot be used to act out of turn.
+        """
+        game = self._game
+        assert game is not None, "select_agent() called before reset()"
+        if agent not in self.possible_agents:
+            raise ValueError(f"no such agent: {agent!r}")
+        seat = self.possible_agents.index(agent)
+        if not may_act(game, seat):
+            raise ValueError(f"{agent} may not act in {game.phase.name}")
+        self.agent_selection = agent
 
     def observe(self, agent: str) -> dict[str, Any]:
         game = self._game
@@ -166,10 +230,12 @@ class HexSetAEC(AECEnv):
 
         mask = np.zeros(self._space.size, dtype=np.int8)
         # Per PettingZoo convention (`pettingzoo.classic.tictactoe`), the mask
-        # is all zeros for every agent except the one currently to move --
-        # `legal_actions` only ever answers for `to_move(game)` anyway.
+        # is all zeros for every agent except the one about to act. It is that
+        # agent's *own* options: during a discard round `agent_selection` is
+        # any of the owing seats, not necessarily the one bare `legal_actions`
+        # would answer for, so the seat is passed explicitly.
         if agent == self.agent_selection:
-            for action in legal_actions(game):
+            for action in legal_actions(game, seat):
                 mask[self._space.index(action)] = 1
 
         return {
@@ -191,14 +257,20 @@ class HexSetAEC(AECEnv):
         game = self._game
         assert game is not None, "step() called before reset()"
 
+        seat = self.possible_agents.index(agent)
         decoded = action if isinstance(action, Action) else self._space.decode(int(action))
-        apply(game, decoded)
+        # The acting seat is dispatched with the action, not assumed from the
+        # position: a `DISCARD` resolves against whoever `agent_selection`
+        # names, which during a round is any owing seat. Every other action
+        # belongs to `to_move` by construction and ignores the argument
+        # (`hexset.actions.apply`).
+        apply(game, decoded, seat)
 
         self._clear_rewards()
         if is_over(game):
             self._finish_episode(game, agent)
         else:
-            self.agent_selection = agent_name(to_move(game))
+            self.agent_selection = self._next_agent(game)
         self._accumulate_rewards()
 
         if self.render_mode == "human":
@@ -217,6 +289,20 @@ class HexSetAEC(AECEnv):
         self._game = None
 
     # -- internals --------------------------------------------------------
+
+    def _next_agent(self, game: Game) -> str:
+        """Which single agent AEC hands the next `step()` to.
+
+        `to_move` everywhere except a seven's discards, where several seats
+        are entitled at once and this picks one of them per `discard_order`
+        rather than always the lowest-indexed. `to_move`'s own answer is that
+        lowest-indexed seat, so `"seat"` needs no separate branch.
+        """
+        if self.discard_order == "random" and game.phase is Phase.DISCARD:
+            owing = players_owing_discards(game)
+            if owing:
+                return agent_name(self._discard_rng.choice(owing))
+        return agent_name(to_move(game))
 
     def _finish_episode(self, game: Game, acted_agent: str) -> None:
         won = game.won_by
@@ -246,7 +332,9 @@ class HexSetAEC(AECEnv):
         self.agent_selection = self.possible_agents[(acted_seat + 1) % self.num_players]
 
     def _summary(self, game: Game) -> str:
-        lines = [f"turn {game.turns}, phase {game.phase.name}, to_move {agent_name(to_move(game))}"]
+        # The acting agent, not `to_move`: during a discard round they differ,
+        # and it is `agent_selection` that the next `step()` resolves against.
+        lines = [f"turn {game.turns}, phase {game.phase.name}, acting {self.agent_selection}"]
         if game.won_by is not None:
             lines.append(f"winner: {agent_name(game.won_by)}")
         for seat in range(self.num_players):

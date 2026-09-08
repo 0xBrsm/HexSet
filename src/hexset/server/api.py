@@ -102,7 +102,7 @@ from hexset.arena import PRESETS, spawn as spawn_entrant
 from hexset.board.board import Board, random_base_board
 from hexset.bots import Bot
 from hexset.clients.botclient import BotRunner, LocalSearchBrain, LocalTransport
-from hexset.game import is_over, lock_seat, to_move
+from hexset.game import is_over, lock_seat, may_act
 from hexset.onnx_record import record_from_game
 
 from . import journal
@@ -1104,9 +1104,12 @@ class Tables:
         `legal_wire_actions`'s own options are already the one fair
         option list every client gets, `hexset.actions.legal_actions`)."""
         game = table.session.game
-        if is_over(game) or to_move(game) != seat:
+        # `may_act`, not `to_move`, for the same reason `GameSession.submit`
+        # asks it: every seat owing cards to a seven may act at once, so a
+        # record is owed to each of them, not only to the lowest-numbered.
+        if is_over(game) or not may_act(game, seat):
             raise ApiError("it is not your turn to act", status=409)
-        options = legal_actions(game)
+        options = legal_actions(game, seat)
         # true state: the board and `num_players` are public.
         state = game.state(seat, hidden=False)
         topology = state.board.topology

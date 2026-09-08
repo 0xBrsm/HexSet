@@ -217,6 +217,23 @@ So a checkpoint exported with `search=mcts` and `simulations=256` is just `mcts2
 
 Inference device is **not** read from metadata — it's a property of the host, not the checkpoint, so it stays on `--device`.
 
+### Another runtime
+
+A `.onnx` file is one way to hold a model, not the only one. Everything about
+*playing* a checkpoint — the bot, its two-sided trade gate, the leaf
+evaluation, the PUCT search, and the arena's `network`/`mcts` entrant kinds —
+lives in `hexset.clients.netbot` and knows nothing about onnxruntime. A
+second runtime (a torch checkpoint, a remote inference service, a stub in a
+test) implements `hexset.clients.policy.Policy` — `act_rows`, `value_rows`,
+`score_rows`, all batched, all stated in live `(game, seat)` positions rather
+than encoded rows, all answering in board-seat order — and gets the rest for
+free: `bot_for(checkpoint)`, `evaluator_for(checkpoint)`,
+`searcher_for(checkpoint)`, and `register_entrants(loader)` to make the arena
+spawn it by name. Positions, not records, is the load-bearing choice: how a
+position becomes numbers is the runtime's own business, so a runtime is free
+to encode a whole batch its own way. `hexset.clients.onnxbot.V2Policy`
+satisfies the protocol structurally, inheriting nothing.
+
 ## Playing without a browser
 
 The human seat can also be driven by a script or an LLM, over either interface, as a peer to the browser rather than a replacement for it — both still go through the same `apply_human_action`/`legal_actions` path the browser does, so nothing sent this way skips validation.
@@ -386,7 +403,8 @@ the encoder's arrays.
 - `src/hexset/server/api.py` — tables, seats, join codes, seat tokens, the `/api/*` surface. `web.py` is the HTTP transport over it and also serves MCP (`POST /mcp`); `mcptools.py` is the tool layer that transport calls, in-process, the same way `webplay.py`'s `GameSession` is the human/browser-facing session: what a seat may see, the human-readable log, undo, and the wire encoding of an action.
 - `src/hexset/server/rules.py` — what a served table needs beyond the engine's own `legal_actions`: naming an empty option list as the bug it is, and checking a submitted action against the list. It used to hold a second, honest enumeration, because the engine's offer sample read opponents' hands; trading is no longer an action, so there is one list for every seat.
 - `src/hexset/server/seating.py` — the setup snake starting at whoever created the game, and retiring a seat nobody claimed.
-- `src/hexset/clients/onnxbot.py` — the entire model boundary: the record contract, action-space indexing, masking, sampling, and search all live behind it, and `spawn(path, board)` is the only entry point anything else uses. Builds its record with `hexset.onnx_record.record_from_game` directly — the torch-free split that used to block that has landed, so this package no longer carries its own copy. `botclient.py` is the other half: a bot plays its seat as a peer client of the API, embedded or external, never as a privileged writer. Only record contract `6` is served — 2, 3 and 4 are the offer protocol's contracts and describe a game this engine no longer plays; contract 1 was dropped 2026-09-02; contract 5 was dropped 2026-09-05 when the knight two-step fix shrank the flat action space.
+- `src/hexset/clients/policy.py` and `src/hexset/clients/netbot.py` — the model boundary, split by what varies. `policy.py` is the `Policy` protocol: `act_rows`/`value_rows`/`score_rows` over live `(game, seat)` positions. `netbot.py` is everything built on one — `NetworkBot` and its trade gate, `NetworkEvaluator`, `LeafEvaluator`, `GatedSearch`, and `register_entrants(loader)` for the arena's `network`/`mcts` kinds — and holds no runtime at all. See [Another runtime](#another-runtime).
+- `src/hexset/clients/onnxbot.py` — onnxruntime's half of that boundary: loading a `.onnx` file, checking what it declares, and answering `Policy` for it (`V2Policy`); `spawn(path, board)` is the only entry point anything else uses, and the `netbot` names it used to define are re-exported here. Builds its record with `hexset.onnx_record.record_from_game` directly — the torch-free split that used to block that has landed, so this package no longer carries its own copy. `botclient.py` is the other half: a bot plays its seat as a peer client of the API, embedded or external, never as a privileged writer. Only record contract `6` is served — 2, 3 and 4 are the offer protocol's contracts and describe a game this engine no longer plays; contract 1 was dropped 2026-09-02; contract 5 was dropped 2026-09-05 when the knight two-step fix shrank the flat action space.
 - `src/hexset/server/static/index.html` — the entire frontend: inline CSS, inline SVG icons, vanilla JS. No build step. No advertisement UI of any kind (there is no public vector left to publish); its trade modal composes a bundle and offers it to a chosen counterparty, shows the acceptable-deals list (`GET .../trade/acceptable`) so one can be picked directly, and surfaces a pending-offers panel with Confirm/Decline the moment a bot's trade event finds something against this seat (`docs/bot-api.md` §3).
 - `models/` — drop `.onnx` files here.
 - `games/` — where every game is journalled: one JSON lines file per game, written as it is played, with nothing hidden (the dice, the deck order, every card drawn or stolen, every seat's hand after every action — see `src/hexset/server/journal.py`). On by default; `HEXSET_UI_GAMES_DIR` moves it, and setting that empty turns it off.

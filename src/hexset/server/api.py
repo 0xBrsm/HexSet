@@ -1359,7 +1359,20 @@ class Tables:
     def _seated(
         self, table: Table, seat: int, method: str, path: str, payload: dict, token: str
     ) -> dict:
-        """The routes that act on one seat. Called with the table's lock held."""
+        """The routes that act on one seat. Called with the table's lock held.
+
+        Every route below but the three reads is a mutation, and none of
+        them survive `is_over`: a finished game has nothing left for a seat
+        to act on, so from here every seat is exactly what a spectator
+        already was (`GET /api/table/<code>`'s route, `state_view`'s
+        `omniscient or over` reveal) -- read-only, no name, no bot, no
+        seat, permanently. One gate here rather than one per method below
+        (`seat_bot`/`leave_seat` also refuse on their own, for callers that
+        reach them outside this dispatch) is what makes it every route at
+        once instead of whichever ones somebody remembered to check.
+        """
+        if method == "POST" and is_over(table.session.game):
+            raise ApiError("the game is already over", status=409)
         if method == "GET" and path == "/api/state":
             return table.view(seat)
         if method == "GET" and path == "/api/board":

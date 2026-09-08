@@ -11,8 +11,9 @@ through noise.
     python -m hexset.bench.duel /w/runs/ppo5/latest.pt /w/runs/ppo4/latest.pt \
         --games 400 --label-a ppo5 --label-b ppo4
 
-Every verdict names its seat geometry -- see `GEOMETRIES` -- because the two
-paths seat a 2v2 differently and the seating alone is worth ~0.35 VP.
+Every verdict names its seating -- a lineup pattern such as `aabb`, see
+`arena_lineup` -- because the two paths seat a 2v2 differently and the seating
+alone is worth ~0.35 VP.
 """
 
 from __future__ import annotations
@@ -45,35 +46,42 @@ def register_versus_backend(runner: Callable[[argparse.Namespace, str, str], dic
     global _VERSUS_BACKEND
     _VERSUS_BACKEND = runner
 
-# The two ways four seats hold two sides, and which lineup slots each side owns.
-# `arena._play_one` seats entrant `e` at `(e + rotation) % 4`, so `[a, a, b, b]`
-# gives every copy one same-side neighbour -- blocked -- and `[a, b, a, b]` puts
-# the copies opposite each other, each flanked by two opponents -- interleaved.
-# `collect.alternating` seats the versus path on same-parity seats, so
-# `--workers 1` has always played interleaved; `--workers >1` has always played
-# blocked. On identical boards and dice the seating alone moves `lam095-805`
-# vs `ppo4-585` from +0.08 to +0.43 VP (the harness-path check, addenda 6-8;
-# `runs/eval/harness-seat-geometry.json`), so a verdict that does
-# not record its geometry cannot be compared with one that does.
-GEOMETRIES: dict[str, tuple[str, list[int], list[int]]] = {
-    "blocked": ("aabb", [0, 1], [2, 3]),
-    "interleaved": ("abab", [0, 2], [1, 3]),
-}
-# What every recorded arena verdict played, and the only seating `train.versus`
-# can play. The arena default stays blocked so a default invocation reproduces
-# the record bit for bit.
-ARENA_GEOMETRY = "blocked"
-VERSUS_GEOMETRY = "interleaved"
+# A seating is a lineup, not a menu entry. `arena._play_one` seats entrant `e`
+# at `(e + rotation) % seats`, so `aabb` gives every copy one same-side
+# neighbour and `abab` puts the copies opposite each other, each flanked by two
+# opponents. `collect.alternating` seats the versus path on same-parity seats,
+# so `--workers 1` has always played `abab`; `--workers >1` has always played
+# `aabb`. On identical boards and dice the seating alone moves `lam095-805` vs
+# `ppo4-585` from +0.08 to +0.43 VP (the harness-path check, addenda 6-8;
+# `runs/eval/harness-seat-geometry.json`), so a verdict that does not record
+# its seating cannot be compared with one that does.
+ARENA_GEOMETRY = "aabb"
+VERSUS_GEOMETRY = "abab"
 
 
 def arena_lineup(a: str, b: str, geometry: str) -> tuple[list[str], list[int], list[int]]:
     """(entrant specs in lineup order, side-A slots, side-B slots) for a seating.
 
+    `geometry` is either a pattern of `a`/`b` letters, one per seat and any
+    length the arena can rotate (`aabb`, `abab`, `aab`, `aabbb`), or a
+    comma-separated lineup whose entries are `a`, `b`, or any entrant spec
+    the arena resolves -- which is how a duel gets run at a table that also
+    seats bots on neither side. Side A is every slot holding `a`, side B
+    every slot holding `b`.
+
     Slot lists index `Tournament.points`, which is in entrant order, so the
     paired split reads the right seats whichever order the lineup was built in.
     """
-    order, mine, theirs = GEOMETRIES[geometry]
-    return [a if slot == "a" else b for slot in order], list(mine), list(theirs)
+    slots = [s.strip() for s in geometry.split(",")] if "," in geometry else list(geometry)
+    mine = [i for i, slot in enumerate(slots) if slot == "a"]
+    theirs = [i for i, slot in enumerate(slots) if slot == "b"]
+    if not mine or not theirs:
+        raise ValueError(
+            f"seating {geometry!r} must hold at least one 'a' slot and one 'b' "
+            "slot -- those are the two sides the verdict is about"
+        )
+    specs = [a if slot == "a" else b if slot == "b" else slot for slot in slots]
+    return specs, mine, theirs
 
 
 def _is_bare_network(spec: str) -> bool:
@@ -131,16 +139,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument(
         "--geometry",
-        choices=sorted(GEOMETRIES),
         default=None,
-        help="how the four seats hold the two sides on the arena path "
-        f"(workers > 1). Default {ARENA_GEOMETRY!r}, the lineup `[a, a, b, b]` "
+        help="the seating, as a lineup rather than a named mode: a pattern of "
+        "`a`/`b` letters, one per seat and any length (`aabb`, `abab`, `aab`), "
+        "or a comma-separated lineup whose entries are `a`, `b`, or any entrant "
+        "spec -- `a,b,search2,random` duels two seats at a four-seat table. "
+        f"Side A is every slot holding `a`. Default {ARENA_GEOMETRY!r}, what "
         "every recorded arena verdict played, so a default invocation "
-        "reproduces the record exactly. 'interleaved' is `[a, b, a, b]`, each "
-        "copy flanked by two opponents -- the seating `train.versus` plays and "
-        "the only one it can play, so at workers=1 this may only name "
-        f"{VERSUS_GEOMETRY!r}. Same boards and dice, the seating alone moves a "
-        "pair by ~0.35 VP, and the verdict records which one it was",
+        f"reproduces the record exactly. {VERSUS_GEOMETRY!r} puts each copy "
+        "between two opponents -- the seating `train.versus` plays and the only "
+        f"one it can play, so at workers=1 this may only name {VERSUS_GEOMETRY!r}. "
+        "Same boards and dice, the seating alone moves a pair by ~0.35 VP, and "
+        "the verdict records which one it was",
     )
     p.add_argument(
         "--threads",
@@ -272,7 +282,7 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def sides(lineup: list, label_a: str, label_b: str, mine=(0, 1)) -> list:
+def sides(lineup: list, label_a: str, label_b: str, mine=(0, 1), theirs=(2, 3)) -> list:
     """Rename a two-sided lineup so the two sides are distinguishable.
 
     Every `network:` spec is named "network" whatever checkpoint it carries, so
@@ -282,9 +292,12 @@ def sides(lineup: list, label_a: str, label_b: str, mine=(0, 1)) -> list:
     entrants rather than only for the ones whose names happen to differ, and
     `spawn` reads `kind` and `weights`, never `name`.
 
-    `mine` is which slots side A holds -- `[0, 1]` blocked, `[0, 2]` interleaved
-    -- and every other slot is side B. Slot 0 is always side A, so `pooled`'s
-    first group is side A under either seating.
+    `mine`/`theirs` are the slots the two sides hold -- `[0, 1]`/`[2, 3]` for
+    `aabb`, `[0, 2]`/`[1, 3]` for `abab`. Any remaining slot is on neither
+    side and keeps the name its own entrant spec gave it, so a duel run at a
+    table with third-party bots pools into three groups and the paired split
+    still has exactly two to subtract. Slot 0 is always side A, so `pooled`'s
+    first group is side A under any seating.
     """
     side_a, side_b = label_a, label_b
     if side_a == side_b:
@@ -292,6 +305,9 @@ def sides(lineup: list, label_a: str, label_b: str, mine=(0, 1)) -> list:
     seen = {side_a: 0, side_b: 0}
     renamed = []
     for slot, entrant in enumerate(lineup):
+        if slot not in mine and slot not in theirs:
+            renamed.append(entrant)
+            continue
         label = side_a if slot in mine else side_b
         renamed.append(entrant.renamed(f"{label}#{seen[label]}"))
         seen[label] += 1
@@ -328,7 +344,13 @@ def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY)
     from hexset.arena import compete, lineup_from_names, pooled, wilson
 
     names, mine, theirs = arena_lineup(args.a, args.b, geometry)
-    lineup = sides(lineup_from_names(names), label_a, label_b, mine)
+    if args.games % len(names):
+        raise ValueError(
+            f"{args.games} games does not divide evenly over the {len(names)} "
+            f"seats of {geometry!r}: the arena rotates the lineup through every "
+            "seat and an incomplete rotation leaves the seat bias in the verdict"
+        )
+    lineup = sides(lineup_from_names(names), label_a, label_b, mine, theirs)
 
     started = time.monotonic()
     tournament = compete(

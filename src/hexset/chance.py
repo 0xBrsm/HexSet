@@ -15,10 +15,9 @@ without a seed, or ported in from a source (a journal, a colonist.io game)
 that never had one. `Recording` wraps either and logs every outcome, which
 is how `hexset.record.record_game` builds a `Record`'s `chance` stream.
 `Forced` stands in for one steal outcome only, for the counterfactual
-children `hexset.bench.aivat` and `hexset.bots.heximax.search` build to
-score what each possible stolen card would have led to -- the direct
-successor to the `_Forced` stand-in-rng each of those modules used to define
-for itself.
+child `hexset.bots.heximax.search` builds to score what each possible
+stolen card would have led to -- the direct successor to the `_Forced`
+stand-in-rng that module used to define for itself.
 """
 
 from __future__ import annotations
@@ -196,12 +195,12 @@ class Recording(Chance):
 class Forced(Chance):
     """A chance source that returns one fixed resource from `steal` and
     raises on everything else. The direct successor to the `_Forced`
-    stand-in-rng `hexset.bench.aivat` and `hexset.bots.heximax.search` each
-    used to define locally: both build a counterfactual child for one
-    possible steal outcome, apply the one action that consumes it, and put
-    the child's real chance source back -- nothing else on that path ever
-    drew, so a source that only knows how to answer `steal` is exactly as
-    much as either caller has ever needed."""
+    stand-in-rng `hexset.bots.heximax.search` used to define locally: it
+    builds a counterfactual child for one possible steal outcome, applies
+    the one action that consumes it, and puts the child's real chance
+    source back -- nothing else on that path ever drew, so a source that
+    only knows how to answer `steal` is exactly as much as the caller has
+    ever needed."""
 
     def __init__(self, resource: int) -> None:
         self.resource = resource

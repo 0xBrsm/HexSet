@@ -17,7 +17,7 @@ import pytest
 from hexset.bench import duel
 from hexset.bench.duel import (
     ARENA_GEOMETRY,
-    GEOMETRIES,
+    VERSUS_GEOMETRY,
     _default_workers,
     _via_arena,
     arena_lineup,
@@ -98,21 +98,43 @@ A, B = "network:/runs/a.pt", "network:/runs/b.pt"
 def test_the_default_arena_lineup_is_the_recorded_one():
     """`[a, a, b, b]` with sides on `[0, 1]` / `[2, 3]` is what every recorded
     arena verdict played; the default must keep reproducing it exactly."""
-    assert ARENA_GEOMETRY == "blocked"
+    assert ARENA_GEOMETRY == "aabb"
     assert arena_lineup(A, B, ARENA_GEOMETRY) == ([A, A, B, B], [0, 1], [2, 3])
 
 
 def test_the_interleaved_lineup_matches_the_seat_geometry_probe():
     """The lineup and slots `tmp/seat_geometry.py` used for the archived rows."""
-    assert arena_lineup(A, B, "interleaved") == ([A, B, A, B], [0, 2], [1, 3])
+    assert VERSUS_GEOMETRY == "abab"
+    assert arena_lineup(A, B, "abab") == ([A, B, A, B], [0, 2], [1, 3])
 
 
-def test_each_geometry_partitions_the_four_slots_between_the_sides():
-    for order, mine, theirs in GEOMETRIES.values():
-        assert len(order) == 4
-        assert sorted(mine + theirs) == [0, 1, 2, 3]
-        assert [order[i] for i in mine] == ["a", "a"]
-        assert [order[i] for i in theirs] == ["b", "b"]
+def test_a_seating_is_any_pattern_of_a_and_b_slots():
+    """Seating is a lineup, not a two-entry menu: a three-seat table and a
+    lopsided five-seat one are spelled the same way as the recorded pair."""
+    assert arena_lineup(A, B, "aab") == ([A, A, B], [0, 1], [2])
+    assert arena_lineup(A, B, "abbba") == ([A, B, B, B, A], [0, 4], [1, 2, 3])
+
+
+def test_a_comma_separated_seating_can_name_third_party_entrants():
+    """Two sides at a table that also seats bots on neither side; every slot
+    that is not `a` or `b` is its own entrant spec and belongs to no side."""
+    assert arena_lineup(A, B, "a,b,search2,random") == (
+        [A, B, "search2", "random"], [0], [1]
+    )
+
+
+def test_a_seating_with_only_one_side_is_refused():
+    with pytest.raises(ValueError):
+        arena_lineup(A, B, "aaaa")
+
+
+def test_third_party_slots_keep_their_own_names():
+    lineup = sides(
+        lineup_from_names([A, B, "search2", "random"]), "ppo6", "ppo4", [0], [1]
+    )
+    assert [base_name(entrant.name) for entrant in lineup] == [
+        "ppo6", "ppo4", "search2", "random",
+    ]
 
 
 def _fake_compete(seen: dict, points, turns=None, winners=None):
@@ -166,7 +188,7 @@ def test_arena_verdict_defaults_to_blocked_and_records_it(monkeypatch):
     verdict = _via_arena(_arena_args(), "a", "b")
 
     assert seen["lineup"] == ["/runs/a.pt", "/runs/a.pt", "/runs/b.pt", "/runs/b.pt"]
-    assert verdict["geometry"] == "blocked"
+    assert verdict["geometry"] == "aabb"
     assert verdict["via"] == "arena.compete"
     assert verdict["paired_vp"] == pytest.approx(2.5)
 
@@ -175,11 +197,11 @@ def test_arena_verdict_can_play_interleaved_and_says_so(monkeypatch):
     seen: dict = {}
     monkeypatch.setattr("hexset.arena.compete", _fake_compete(seen, POINTS))
 
-    verdict = _via_arena(_arena_args(), "a", "b", "interleaved")
+    verdict = _via_arena(_arena_args(), "a", "b", "abab")
 
     assert seen["lineup"] == ["/runs/a.pt", "/runs/b.pt", "/runs/a.pt", "/runs/b.pt"]
     assert seen["names"] == ["a#0", "b#0", "a#1", "b#1"]
-    assert verdict["geometry"] == "interleaved"
+    assert verdict["geometry"] == "abab"
     assert verdict["paired_vp"] == pytest.approx(3.5)
 
 
@@ -209,8 +231,8 @@ def test_arena_verdict_reports_game_length_and_exhaustion(monkeypatch):
 def test_the_versus_path_refuses_a_blocked_geometry(capsys):
     """`collect.alternating` is the interleaving; asking for anything else at
     workers=1 must fail loudly rather than play interleaved under a wrong label."""
-    code = duel.main([A, B, "--workers", "1", "--geometry", "blocked", "--no-json"])
+    code = duel.main([A, B, "--workers", "1", "--geometry", "aabb", "--no-json"])
     assert code == 2
     _, err = capsys.readouterr()
-    assert "--geometry blocked is not available at --workers 1" in err
+    assert "--geometry aabb is not available at --workers 1" in err
     assert "--workers 2" in err

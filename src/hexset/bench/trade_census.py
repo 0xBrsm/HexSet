@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Every executed trade, precisely: who, what, how lopsided, and who was flush.
 
-Plays N four-seat games for a lineup (grouped seating, antithetic-paired
-boards, exactly `hexset.bench.road_sweep`'s convention) and records each
-`hexset.trading.Trade` as it clears -- turn, phase, both seats' kinds, the
-signed 5-vector each way, each side's hand size just before the trade, and
-each side's own private gain, so bulk/imbalanced trading can be described
-without guessing at it from win rates. `--from-journals` replays the same
+Plays N games for a lineup through `hexset.arena.compete` (grouped seating,
+antithetic-paired boards, exactly `hexset.bench.road_sweep`'s convention) and
+rolls up the arena's own `ClearedTrade` census -- turn, phase, both seats'
+kinds, the signed 5-vector each way, each side's hand size at the top of the
+step, and each side's own private gain -- so bulk/imbalanced trading can be
+described without guessing at it from win rates. `--from-journals` replays the same
 census over `hexset.server.journal` files instead of playing fresh games.
 """
 
@@ -14,25 +14,17 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
 import statistics
 import sys
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
-from multiprocessing import Pool
 from pathlib import Path
 from typing import Sequence
 
 import hexset.bots  # noqa: F401 -- registers heximax presets with hexset.arena
 import hexset.bench.shipped_hand  # noqa: F401 -- and the frozen shipped hand valuation
-from hexset.actions import apply
-from hexset.arena import MAX_ACTIONS, Entrant, base_name, seat_of, spawn
-from hexset.board.board import random_base_board
-from hexset.board.terrain import NUM_RESOURCES
-from hexset.chance import Live, Recording
-from hexset.game import Phase, is_over, start, to_move
-from hexset.record import Record, board_fields
-from hexset.victory import victory_points
+from hexset.arena import MAX_ACTIONS, Entrant, base_name, compete
+from hexset.record import Record
 
 # Card price for the value yardstick: the flat 4:1 bank rate, so a swing is
 # comparable across bots with no bot's own valuation in it. Port-adjusted
@@ -91,154 +83,6 @@ def _resource_split(received: Sequence[int]) -> tuple[tuple[int, ...], tuple[int
     return given_a, given_b
 
 
-def _play_census(
-    entrants: Sequence[Entrant],
-    index: int,
-    seed: int,
-    action_cap: int,
-    keep_record: bool = False,
-) -> tuple[list[TradeRecord], int | None, int, tuple[int, ...], Record | None]:
-    """Play one game, returning its trades plus (winning entrant, turns,
-    points, record).
-
-    Instrumentation reads only the hands (the raw array) for bookkeeping
-    snapshots, through `game.state(0, hidden=False)` -- the sanctioned
-    true-state path (`tests/test_view.py`), which returns the state itself.
-    `game.trades` is cleared every `end_turn`, so new trades are detected as
-    a length delta against a per-turn counter, checked once per loop pass
-    (a gate is a pure function of the position now, so nothing but `apply`
-    itself can create a trade).
-
-    `keep_record=True` additionally tracks the action list and the chance
-    stream (`hexset.chance.Recording`) and returns a `hexset.record.Record`
-    of this exact game -- a separate, parallel tally from `harvest`'s own
-    per-trade rows above, because a `Record`'s trades must be attributed to
-    the exact step they cleared inside for `replay` to reapply them in the
-    right place (`hexset.record.record_game`'s own docstring on why), so
-    this keeps its own `before`/`after` `game.trades` bookkeeping around
-    `apply` instead of reusing `harvest`'s.
-    """
-    seats = len(entrants)
-    pair, half = divmod(index, 2)
-    board = random_base_board(random.Random(f"{seed}:{pair}:board"))
-    rotation = pair + half * (seats // 2)
-    seats_taken = [seat_of(e, rotation, seats) for e in range(seats)]
-
-    names = [None] * seats
-    lineup: list = [None] * seats
-    for e, entrant in enumerate(entrants):
-        seat = seats_taken[e]
-        lineup[seat] = spawn(entrant, board, random.Random(f"{seed}:{pair}:{e}"))
-        names[seat] = base_name(entrant.name)
-
-    game_seed = f"{seed}:{pair}:game"
-    rng = random.Random(game_seed)
-    chance = Recording(Live(rng)) if keep_record else None
-    game = start(board, seats, rng, chance=chance)
-    game.gates = tuple(lineup)
-    game.max_trades = None
-
-    records: list[TradeRecord] = []
-    action_log: list[tuple[int, int, int]] = []
-    record_trades: list[tuple[int, int, int, tuple[int, ...]]] = []
-    baseline = [tuple(h) for h in game.state(0, hidden=False).hands]
-    seen_this_turn = 0
-
-    def harvest(turn: int, phase: Phase) -> None:
-        nonlocal baseline, seen_this_turn
-        current = game.trades
-        if len(current) < seen_this_turn:
-            seen_this_turn = 0
-        new = current[seen_this_turn:]
-        if not new:
-            return
-        running = [list(h) for h in baseline]
-        for trade in new:
-            a, b, received = trade.a, trade.b, trade.received
-            given_a, given_b = _resource_split(received)
-            hand_before_a = sum(running[a])
-            hand_before_b = sum(running[b])
-            gain_a, gain_b = trade.gain_a, trade.gain_b
-            if gain_a > gain_b:
-                larger = "a"
-            elif gain_b > gain_a:
-                larger = "b"
-            else:
-                larger = "tie"
-            records.append(
-                TradeRecord(
-                    game=index,
-                    turn=turn,
-                    phase=phase.name,
-                    seat_a=a,
-                    seat_b=b,
-                    name_a=names[a],
-                    name_b=names[b],
-                    given_a=given_a,
-                    given_b=given_b,
-                    hand_before_a=hand_before_a,
-                    hand_before_b=hand_before_b,
-                    gain_a=gain_a,
-                    gain_b=gain_b,
-                    larger_gain=larger,
-                )
-            )
-            for r in range(NUM_RESOURCES):
-                running[a][r] += received[r]
-                running[b][r] -= received[r]
-        seen_this_turn = len(current)
-        baseline = [tuple(h) for h in game.state(0, hidden=False).hands]
-
-    actions = 0
-    while not is_over(game) and actions < action_cap:
-        seat = to_move(game)
-        bot = lineup[seat]
-        harvest(game.turns, game.phase)
-        if keep_record:
-            before = len(game.trades)
-        action = bot.choose(game)
-        apply(game, action)
-        if keep_record:
-            for trade in game.trades[before:]:
-                record_trades.append(
-                    (len(action_log), trade.a, trade.b, tuple(trade.received))
-                )
-            action_log.append((int(action.type), action.a, action.b))
-        actions += 1
-        if len(game.trades) < seen_this_turn:
-            seen_this_turn = 0
-        baseline = [tuple(h) for h in game.state(0, hidden=False).hands]
-
-    winner = None if game.won_by is None else seats_taken.index(game.won_by)
-    # true state: terminal points include hidden victory-point cards, the
-    # same reasoning as `hexset.arena._play_one`'s own verdict.
-    points = tuple(
-        victory_points(game.state(seats_taken[e], hidden=False), seats_taken[e])
-        for e in range(seats)
-    )
-    game_record = None
-    if keep_record:
-        game_record = Record(
-            num_players=seats,
-            seed=game_seed,
-            first=game.first,
-            actions=tuple(action_log),
-            chance=tuple(chance.events),
-            trades=tuple(record_trades),
-            winner=game.won_by,
-            turns=game.turns,
-            **board_fields(board),
-        )
-    return records, winner, game.turns, points, game_record
-
-
-def _play_one(
-    job: tuple[tuple[Entrant, ...], int, int, int, bool]
-) -> tuple[list[TradeRecord], int | None, int, tuple[int, ...], Record | None]:
-    entrants, index, seed, action_cap, keep_record = job
-    return _play_census(entrants, index, seed, action_cap, keep_record)
-
-
 @dataclass
 class CensusResult:
     games: int
@@ -272,32 +116,70 @@ def run_census(
     action_cap: int = MAX_ACTIONS,
     records: bool = False,
 ) -> CensusResult:
-    """Play `games` games (a multiple of 4, road_sweep's antithetic rotation)
-    and return every trade that cleared.
+    """Play `games` games (a multiple of the lineup) and return every trade
+    that cleared.
 
-    `records=True` additionally has every game build a `hexset.record.Record`
-    of itself (`_play_census`'s `keep_record`), collected into
-    `CensusResult.records` -- the games a `--records` file holds are exactly
-    the games this census counted, since both come from the one job.
+    The games are `hexset.arena.compete`'s, played with `records=True` so the
+    tournament carries its own `ClearedTrade` census: turn, phase, both
+    seats, the signed 5-vector, each side's hand at the top of the step and
+    each side's private gain. This function is the rollup from that into
+    `TradeRecord` rows -- which side gave what, under which bot's name --
+    not a second way of playing the game.
+
+    `records=True` additionally keeps the `hexset.record.Record` of every
+    game in `CensusResult.records`; the games a `--records` file holds are
+    exactly the games this census counted, since both come from the one job.
     """
-    seats = len(entrants)
-    if games % seats:
-        raise ValueError(f"{games} games does not divide evenly over {seats} seats")
-    jobs = [(tuple(entrants), i, seed, action_cap, records) for i in range(games)]
-    if workers > 1:
-        with Pool(min(workers, MAX_WORKERS)) as pool:
-            outcomes = pool.map(_play_one, jobs, chunksize=1)
-    else:
-        outcomes = [_play_one(job) for job in jobs]
+    tournament = compete(
+        list(entrants),
+        games,
+        seed=seed,
+        action_cap=action_cap,
+        workers=min(workers, MAX_WORKERS),
+        records=True,
+    )
 
     result = CensusResult(games=games)
-    for trade_rows, winner, turns, points, game_record in outcomes:
-        result.trades.extend(trade_rows)
-        result.winners.append(winner)
-        result.turns.append(turns)
-        result.points.append(points)
-        if game_record is not None:
-            result.records.append(game_record)
+    result.winners = list(tournament.winners)
+    result.turns = list(tournament.turns)
+    result.points = list(tournament.points)
+    if records:
+        result.records = list(tournament.records)
+
+    for index, (cleared, seating) in enumerate(
+        zip(tournament.cleared, tournament.seating)
+    ):
+        # `seating[e]` is the seat entrant `e` took this game; the engine
+        # reports a trade by seat, so invert it once per game.
+        names: dict[int, str] = {
+            seat: base_name(entrants[e].name) for e, seat in enumerate(seating)
+        }
+        for trade in cleared:
+            given_a, given_b = _resource_split(trade.received)
+            if trade.gain_a > trade.gain_b:
+                larger = "a"
+            elif trade.gain_b > trade.gain_a:
+                larger = "b"
+            else:
+                larger = "tie"
+            result.trades.append(
+                TradeRecord(
+                    game=index,
+                    turn=trade.turn,
+                    phase=trade.phase,
+                    seat_a=trade.a,
+                    seat_b=trade.b,
+                    name_a=names[trade.a],
+                    name_b=names[trade.b],
+                    given_a=given_a,
+                    given_b=given_b,
+                    hand_before_a=trade.hand_a,
+                    hand_before_b=trade.hand_b,
+                    gain_a=trade.gain_a,
+                    gain_b=trade.gain_b,
+                    larger_gain=larger,
+                )
+            )
     return result
 
 

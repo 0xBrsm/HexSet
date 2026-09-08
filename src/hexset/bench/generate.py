@@ -4,6 +4,11 @@
 Writes JSON lines, appending, so a run can be resumed or several runs pooled
 into one file. Records hold board and actions rather than features, so the same
 file can be re-encoded whenever the encoder changes.
+
+The games come from `hexset.arena.compete` with one entrant in every seat and
+`records=True`: a dataset is a tournament's own games, not a second play loop
+that has to be kept in step with it. `--games` must therefore be a multiple of
+`--players`, so the seat rotation completes and the dataset is not seat-biased.
 """
 
 from __future__ import annotations
@@ -11,28 +16,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import random
 import sys
 import time
-from multiprocessing import Pool
 
 from hexset.bench.throughput import default_workers, environment
-from hexset.arena import CHECKPOINT_KINDS, PRESETS, entrant_from_name, spawn
-from hexset.board.board import random_base_board
-from hexset.record import Record, record_game, write
-
-BOARD_SEED_OFFSET = 1_000_000
-
-
-def _record_one(job: tuple[int, str, int]) -> Record:
-    seed, bot, players = job
-    board = random_base_board(random.Random(BOARD_SEED_OFFSET + seed))
-    entrant = entrant_from_name(bot)
-    bots = [
-        spawn(entrant, board, random.Random(seed * 16 + seat))
-        for seat in range(players)
-    ]
-    return record_game(bots, board, seed)
+from hexset.arena import compete, entrant_from_name
+from hexset.record import write
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -49,16 +38,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
-    jobs = [(args.seed + i, args.bot, args.players) for i in range(args.games)]
+    if args.games % args.players:
+        parser.error(
+            f"--games must be a multiple of --players ({args.players}): the "
+            "arena rotates the lineup through every seat and an incomplete "
+            "rotation leaves the dataset seat-biased"
+        )
+
+    # One entrant in every seat, played through `hexset.arena.compete` -- the
+    # one loop in this package that plays a game -- with `records=True`, so a
+    # generated dataset is exactly what a tournament of the same bot played.
+    entrant = entrant_from_name(args.bot)
     started = time.perf_counter()
-    if args.workers > 1:
-        with Pool(args.workers) as pool:
-            records = pool.map(
-                _record_one, jobs, chunksize=max(1, args.games // (args.workers * 4))
-            )
-    else:
-        records = [_record_one(job) for job in jobs]
+    tournament = compete(
+        [entrant] * args.players,
+        args.games,
+        seed=args.seed,
+        workers=args.workers,
+        records=True,
+    )
     elapsed = time.perf_counter() - started
+    records = tournament.records
 
     written = write(args.out, records)
     decided = sum(1 for r in records if r.decided)

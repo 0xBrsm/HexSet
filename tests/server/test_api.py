@@ -131,6 +131,62 @@ def test_locked_seats_reads_closes_and_reopens_in_order():
     assert locked_seats(events) == frozenset({2, 3})
 
 
+def test_a_journalled_round_trade_replays_into_the_record(tmp_path):
+    """A round's executed trade is its own journal step with no action
+    (`Journal.manual_trade`). `from_journal` folds it into the preceding
+    action's trades, so a served game's record replays to the hands the
+    table actually held -- it used to drop them and diverge at the first
+    accepted offer."""
+    from dataclasses import replace
+
+    from hexset.game import Phase
+    from hexset.record import from_journal, replay
+
+    class _Wants:
+        trade_floor = 0.0
+
+        def __init__(self, resource: int):
+            self.resource = resource
+
+        def gains_many(self, view, received, counterparties):
+            return [1.0 if r[self.resource] > 0 else -1.0 for r in received]
+
+    config = Config(games_dir=str(tmp_path), seed=99)
+    seats = [player("Ada"), bot_seat(), bot_seat(), bot_seat()]
+    session = build_session("ABC123", seats, config, first=0)
+    drive(session, 16, random.Random(4))  # through setup, into play
+    game = session.game
+    if game.phase is not Phase.MAIN:
+        drive(session, 1, random.Random(5))
+    while game.phase is not Phase.MAIN or game.current_player != 0:
+        drive(session, 1, random.Random(6))
+    # Only journalled facts may shape the position: the exchange is chosen
+    # from what the two seats actually hold, never from a hand edited by hand.
+    state = game.state(0, hidden=False)
+    for _ in range(40):
+        gives = [r for r in range(5) if state.hands[0][r] > 0]
+        gets = [r for r in range(5) if state.hands[1][r] > 0 and r not in gives]
+        if gives and gets and game.phase is Phase.MAIN and game.current_player == 0:
+            break
+        drive(session, 1, random.Random(8))
+    assert gives and gets, "no coverable exchange came up"
+    session.confirm_mode(0)  # the person's consent is the submission, as at a served table
+    session.set_trader(1, _Wants(gives[0]))
+    received = [0, 0, 0, 0, 0]
+    received[gets[0]] = 1
+    received[gives[0]] = -1
+    session.open_round_for(0, tuple(received))
+    session.execute_round_choice(0, 1, tuple(received))
+    drive(session, 6, random.Random(7))
+    session.journal.finish(game)
+
+    path = next(tmp_path.glob("*.jsonl"))
+    record = replace(from_journal(path), seed=None)
+    assert len(record.trades) == 1
+    replayed = replay(record)
+    assert replayed.state(0, hidden=False).hands == game.state(0, hidden=False).hands
+
+
 def test_trade_round_lines_survive_a_restart(tmp_path):
     """The round's log lines are journalled as notes and put back at the
     same step on restore, so a restarted table's transcript reads as the

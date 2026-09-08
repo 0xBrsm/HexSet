@@ -448,6 +448,15 @@ def from_journal(path) -> Record:
     rotated snake would otherwise replay a different setup order than the
     one actually played.
 
+    A trade the table executed outside the automatic event -- a round's
+    accepted offer or counter (`Journal.manual_trade`, its own journal step
+    with no action) -- is folded into the preceding action's `trades`: a
+    `Record` applies a step's trades right after its action, and nothing
+    else happened between the two live either. Journal step numbers count
+    those trade steps, so an `undo`'s `back_to` is mapped through them
+    rather than indexing the action list directly. Round *notes*
+    (`Journal.note`) move nothing and are skipped.
+
     `path` must reach a game with a `result` line (`Journal.finish`) -- an
     abandoned, resultless journal has no `winner`/`turns` to record and is
     refused. Import of `hexset.server.journal` is local to keep that
@@ -461,7 +470,10 @@ def from_journal(path) -> Record:
         raise ValueError(f"not a journal (no header): {path}")
     header = events[0]
 
-    steps: list[tuple[Action, tuple[Trade, ...], tuple[tuple[str, int], ...], int]] = []
+    steps: list[list] = []  # [action, trades, chance_events, actor], mutable for a folded trade
+    # Journal step number -> index into `steps` of the action at or before it,
+    # so an undo's `back_to` (a journal step) can be applied to the action list.
+    at_step: dict[int, int] = {}
     result: dict | None = None
     for event in events[1:]:
         kind = event.get("kind")
@@ -476,9 +488,19 @@ def from_journal(path) -> Record:
                 stole = event.get("stole")
                 if stole is not None and stole.get("resource") is not None:
                     chance_events.append(("steal", int(Resource[stole["resource"]])))
-            steps.append((action, trades, tuple(chance_events), actor))
+            at_step[int(event["step"])] = len(steps)
+            steps.append([action, trades, tuple(chance_events), actor])
+        elif kind == "trade":
+            if not steps:
+                raise ValueError(f"journal executes a trade before any action: {path}")
+            a, b, received = event["trade"]
+            steps[-1][1] = tuple(steps[-1][1]) + (Trade(a, b, tuple(received)),)
+            at_step[int(event["step"])] = len(steps)  # an undo back to here keeps the action before
         elif kind == "undo":
-            del steps[event["back_to"] :]
+            back_to = int(event["back_to"])
+            cut = at_step.get(back_to, len(steps))
+            del steps[cut:]
+            at_step = {step: index for step, index in at_step.items() if index < cut}
         elif kind == "result":
             result = event
 

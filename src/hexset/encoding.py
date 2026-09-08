@@ -115,20 +115,57 @@ def edge_features(players: int) -> int:
     return players + 1
 
 
+def _global_blocks(players: int) -> list[tuple[str, int]]:
+    """Every block `_encode_globals` writes, in write order, named and sized.
+
+    The one list `global_features` and `global_columns` both read, so a
+    caller counting the vector's width and a caller naming a slice of it can
+    never drift apart the way a second, hand-copied offset table would.
+    """
+    return [
+        ("own_hand", NUM_RESOURCES),
+        ("opponent_hand_sizes", players - 1),
+        ("bank", NUM_RESOURCES),
+        ("own_dev_cards", NUM_DEV_CARDS),
+        ("opponent_dev_card_counts", players - 1),
+        ("knights_played", players),
+        ("victory_points", players),
+        ("longest_road_holder", players + 1),
+        ("largest_army_holder", players + 1),
+        ("phase", NUM_PHASES),
+        ("free_roads", 1),
+        ("deck_size", 1),
+        ("turn", 1),
+        # known[5] + unknown per opponent.
+        ("ledger", (players - 1) * (NUM_RESOURCES + 1)),
+    ]
+
+
 def global_features(players: int) -> int:
-    return (
-        NUM_RESOURCES  # own hand
-        + (players - 1)  # opponent hand sizes
-        + NUM_RESOURCES  # bank
-        + NUM_DEV_CARDS  # own development cards
-        + (players - 1)  # opponent development card counts
-        + players  # knights played
-        + players  # public victory points
-        + 2 * (players + 1)  # longest road and largest army holders
-        + NUM_PHASES
-        + 3  # free roads, deck size, turn
-        + (players - 1) * (NUM_RESOURCES + 1)  # ledger: known[5] + unknown per opponent
-    )
+    return sum(width for _, width in _global_blocks(players))
+
+
+def global_columns(players: int) -> dict[str, slice]:
+    """Name every block of `global_features(players)`, by where `_encode_globals`
+    writes it.
+
+    Each value is a `slice` into `Observation.globals` (or one row of
+    `encode_batch`'s globals) for that block, in the exact order `encode`
+    writes them: `own_hand`, `opponent_hand_sizes`, `bank`, `own_dev_cards`,
+    `opponent_dev_card_counts`, `knights_played`, `victory_points`,
+    `longest_road_holder`, `largest_army_holder`, `phase`, `free_roads`,
+    `deck_size`, `turn`, `ledger`. The slices tile the vector exactly --
+    contiguous, non-overlapping, covering every column -- so a caller reads
+    `obs.globals[global_columns(players)["victory_points"]]` by name instead
+    of counting offsets from these constants by hand, the way a migration
+    across encodings otherwise has to.
+    """
+    columns: dict[str, slice] = {}
+    offset = 0
+    for name, width in _global_blocks(players):
+        columns[name] = slice(offset, offset + width)
+        offset += width
+    return columns
 
 
 def _seat(seat: int, perspective: int, players: int) -> int:

@@ -913,6 +913,35 @@ function lastCode() {
   try { return localStorage.getItem("hexset.last"); } catch { return null; }
 }
 
+// One secret per browser, generated once and kept in localStorage the same
+// way a seat's token is -- but never sent as-is. What goes on the wire is
+// its sha256, purely to correlate this browser's games in the journal and
+// to reclaim a seat (POST /api/reclaim) if its token is ever gone (a server
+// restart). Not an account: a leaked secret can steal a seat, and that is
+// an accepted risk for this experiment rig (see api.py's module docstring).
+function clientSecret() {
+  try {
+    let secret = localStorage.getItem("hexset.secret");
+    if (!secret) {
+      const bytes = new Uint8Array(32);
+      crypto.getRandomValues(bytes);
+      secret = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+      localStorage.setItem("hexset.secret", secret);
+    }
+    return secret;
+  } catch {
+    return null; // private mode: this session still plays, it just can't reclaim later
+  }
+}
+
+async function clientInfo() {
+  const secret = clientSecret();
+  if (!secret) return {kind: "web"};
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
+  const id = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+  return {id, kind: "web"};
+}
+
 function authHeaders(extra) {
   const token = tokenFor(tableCode);
   const headers = {...(extra || {})};
@@ -1088,7 +1117,7 @@ function showCodeInUrl(code) {
 // Deals a game and sits us at it. Every other seat is left open — filling
 // them is a decision made at the table, not before it.
 async function dealGame() {
-  const {ok, data} = await postJSON("/api/games", {});
+  const {ok, data} = await postJSON("/api/games", {client: await clientInfo()});
   if (!ok) return null;
   rememberSeat(data.code, data.token);
   showCodeInUrl(data.code);
@@ -1147,7 +1176,7 @@ async function resumeGame(code) {
     // and this — and losing it lands on the view already in hand, which is
     // the right answer anyway. A 409 in the console *there* is a genuinely
     // unusual event rather than the way everyone arrives.
-    const {ok, data} = await postJSON("/api/join", {code});
+    const {ok, data} = await postJSON("/api/join", {code, client: await clientInfo()});
     if (ok) {
       rememberSeat(code, data.token);
       showCodeInUrl(code);
@@ -1480,7 +1509,7 @@ function sendAction(action) {
 // door: who else is playing is chosen on the board afterwards.
 function newGame() {
   return blocking(async () => {
-    const {ok, data} = await postJSON("/api/games", {});
+    const {ok, data} = await postJSON("/api/games", {client: await clientInfo()});
     if (!ok) { showNotice(data.error || "Could not deal a new game."); return; }
     rememberSeat(data.code, data.token);
     location.href = `/${data.code}`;

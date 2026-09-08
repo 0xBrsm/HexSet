@@ -9,6 +9,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.38.1
+
 ### Fixed
 
 - One trade event a turn, and one bot broadcast a turn. A knight played in MAIN re-enters MAIN after its robber move, and both the engine's `run_trade_event` and the served table's `begin_round` fired again there, so a bot traded or offered twice in one turn. `Game.trade_event_turn` and `GameSession._broadcast_turn` key the once-a-turn rule on `(turns, current_player)`.

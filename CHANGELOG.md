@@ -9,6 +9,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.41.0
+
 ### Added
 
 - `hexset.encoding.to_frame`/`from_frame`: the seat-frame rotation (perspective seat to slot 0, others in turn order behind it) as two pure, inverse functions, replacing the by-hand `(seat ± perspective) % players` arithmetic `_encode_globals`/`_ledger_parts` repeated inline. One named seam for a convention a training repo previously had to write out three times over.

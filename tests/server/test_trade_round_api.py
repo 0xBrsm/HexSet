@@ -16,6 +16,7 @@ import pytest
 from hexset.board.terrain import Resource
 from hexset.game import Phase
 from hexset.server.api import ApiError
+from hexset.server.seating import locked_of
 
 from conftest import new_tables
 
@@ -177,3 +178,26 @@ def test_the_old_one_to_one_routes_are_gone():
         with pytest.raises(ApiError) as excinfo:
             registry.handle(method, f"/api/games/{code}/{path}", {}, token)
         assert excinfo.value.status == 404
+
+
+def test_leave_refuses_the_round_s_own_actor():
+    """`leave_seat` must not strand a round nobody else can close: the
+    actor is the only seat `choose_trade` will act for."""
+    registry, table, code, token, human, bot = _table(actor_is_human=True, other_gate=_Wants(Resource.WOOD))
+    registry.handle("POST", f"/api/games/{code}/trade/round",
+                    {"give": [1, 0, 0, 0, 0], "want": [0, 0, 0, 0, 1]}, token)
+    with pytest.raises(ApiError) as excinfo:
+        registry.handle("POST", "/api/leave", {}, token)
+    assert "open trade round" in excinfo.value.args[0]
+    assert human not in locked_of(table.session.game)
+
+
+def test_leave_refuses_a_round_s_still_awaiting_manual_responder():
+    registry, table, code, token, human, bot = _table(actor_is_human=False, other_gate=_Wants(Resource.ORE))
+    table.session.begin_round()
+    assert human in table.session.open_round.awaiting
+
+    with pytest.raises(ApiError) as excinfo:
+        registry.handle("POST", "/api/leave", {}, token)
+    assert "open trade round" in excinfo.value.args[0]
+    assert human not in locked_of(table.session.game)

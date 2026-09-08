@@ -963,6 +963,31 @@ class Tables:
             table.bump()
         return table.view(viewer)
 
+    def leave_seat(self, table: Table, viewer: int) -> dict:
+        """`POST /api/leave`: retire your own seat for the rest of this game
+        -- the one case `close_seat` above refuses on purpose (it only ever
+        closes a seat nobody holds). `hexset.game.lock_seat`'s own docstring
+        already covers what retiring an occupied, currently-acting seat
+        does: nothing to its hand or pieces, only to whose turn comes next,
+        and permanently.
+
+        Refuses while a trade round is open naming you either as its actor
+        or as a seat it is still owed an answer from -- resolve it first
+        (`answer_trade`/`choose_trade`), so a round never outlives the one
+        seat that would have to close it.
+        """
+        if is_over(table.session.game):
+            raise ApiError("the game is already over")
+        round_ = table.session.open_round
+        if round_ is not None and (round_.offer.actor == viewer or viewer in round_.awaiting):
+            raise ApiError("resolve the open trade round first (answer_trade/choose_trade), then leave")
+        if viewer not in locked_of(table.session.game):
+            lock_seat(table.session.game, viewer)
+            if table.session.journal is not None:
+                table.session.journal.locked(viewer, at_step=table.session._steps)
+            table.bump()
+        return table.view(viewer)
+
     # --- the trade round (`hexset.trading`, "The trade round") --------------
 
     def open_round(self, table: Table, seat: int, payload: dict) -> dict:
@@ -1190,6 +1215,8 @@ class Tables:
             )
         if method == "POST" and path == "/api/close":
             return self.close_seat(table, seat, int(payload.get("seat", -1)))
+        if method == "POST" and path == "/api/leave":
+            return self.leave_seat(table, seat)
         if method == "POST" and path == f"/api/games/{table.code}/trade/round":
             return self.open_round(table, seat, payload)
         if method == "POST" and path == f"/api/games/{table.code}/trade/round/answer":

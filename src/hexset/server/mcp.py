@@ -171,32 +171,79 @@ def _models() -> dict:
     return _request_ok("GET", "/api/models")
 
 
+def _display_name(name: str | None) -> str:
+    """A claimed seat with no name of its own falls back to `webplay.py`'s
+    generic "human" label -- indistinguishable in the log/UI from an actual
+    person, which is exactly backwards for a seat only an LLM can hold.
+    `new_game`/`join` always send a name because of this: `name` if the LLM
+    gave one, "mcp" otherwise."""
+    return str(name).strip()[:40] if name else "mcp"
+
+
 def _new_game(opponents: list[str] | None = None, name: str | None = None) -> dict:
-    body: dict = {}
+    body: dict = {"name": _display_name(name)}
     if opponents:
         body["bots"] = opponents
-    if name:
-        body["name"] = str(name).strip()[:40]
     return _seat(_request_ok("POST", "/api/games", body))
 
 
 def _join(code: str, name: str | None = None) -> dict:
     if not isinstance(code, str) or not code.strip():
         raise ToolError("code must be a game's six-character code")
-    body: dict = {"code": code.strip().lower()}
-    if name:
-        body["name"] = str(name).strip()[:40]
+    body: dict = {"code": code.strip().lower(), "name": _display_name(name)}
     return _seat(_request_ok("POST", "/api/join", body))
+
+
+#  --- Board summary -----------------------------------------------------------
+#
+# `board()`'s `hexes` name a terrain (`FOREST`, not `Wood` -- `hexset.board.
+# terrain.Terrain`, a different enum from the resource it yields) and a dice
+# token, and nothing joins the two into what a placement decision actually
+# weighs: which resources a vertex touches and how likely each is to pay out.
+# Working that out by hand from raw hex/vertex adjacency for every placement
+# is exactly the kind of arithmetic an LLM does unreliably at the board's
+# full size -- so it's done once here instead, from data `/api/board`
+# already sends, no server round-trip or engine import added.
+
+# Ways to roll a token on 2d6 -- the standard settlement-value weight; 7 is
+# the robber's own roll and never labels a hex, so it never appears here.
+_PIPS = {2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1}
+
+# Terrain -> the resource it yields. DESERT/SEA/GOLD are left out (and so
+# read back as `None`): a desert and the sea pay nothing, and gold pays the
+# collecting seat's own choice, not a fixed one the tile could name.
+_TERRAIN_RESOURCE = {
+    "FOREST": "Wood",
+    "HILLS": "Brick",
+    "PASTURE": "Sheep",
+    "FIELDS": "Wheat",
+    "MOUNTAINS": "Ore",
+}
 
 
 def _board() -> dict:
     _seated()
-    return _request_ok("GET", "/api/board")
+    raw = _request_ok("GET", "/api/board")
+    by_vertex: dict[int, list[tuple[str, int]]] = {}
+    for hex_ in raw.get("hexes") or []:
+        resource = _TERRAIN_RESOURCE.get(hex_["terrain"])
+        pips = _PIPS.get(hex_["token"], 0)
+        hex_["resource"] = resource
+        hex_["pips"] = pips
+        if resource is None:
+            continue
+        for v in hex_["vertex_ids"]:
+            by_vertex.setdefault(v, []).append((resource, pips))
+    for vertex in raw.get("vertices") or []:
+        touching = by_vertex.get(vertex["id"], [])
+        vertex["pips"] = sum(pips for _, pips in touching)
+        vertex["resources"] = sorted({resource for resource, _ in touching})
+    return raw
 
 
 def _state() -> dict:
     _seated()
-    return _translate_trades(_request_ok("GET", "/api/state"))
+    return _translate_view(_request_ok("GET", "/api/state"))
 
 
 def _act(index: int) -> dict:
@@ -209,12 +256,17 @@ def _act(index: int) -> dict:
             if options
             else "index out of range — state()'s legal_actions is empty; it is not your turn"
         )
-    return _request_ok("POST", "/api/action", {"action": options[index]})
+    return _translate_view(_request_ok("POST", "/api/action", {"action": options[index]}))
 
 
 def _undo() -> dict:
     _seated()
-    return _request_ok("POST", "/api/undo")
+    return _translate_view(_request_ok("POST", "/api/undo"))
+
+
+def _leave_game() -> dict:
+    _seated()
+    return _translate_view(_request_ok("POST", "/api/leave"))
 
 
 # --- Trading (docs/bot-api.md §3; the human/LLM surface, `agents/reference/
@@ -292,6 +344,39 @@ def _translate_trades(raw: dict) -> dict:
     return raw
 
 
+# --- Legal actions still carrying a raw resource index ------------------------
+#
+# `action_to_wire` (`webplay.py`) is the one wire format both a browser and
+# an LLM read `legal_actions` through, so it stays positional there for
+# either client to replay verbatim (`wire_to_action` reads only `type`/`a`/
+# `b`, ignoring anything else) -- but three action types still spend a
+# resource as a bare index into RESOURCES the same way trades used to:
+# BANK_TRADE (`a`=give, `b`=want), PLAY_MONOPOLY and DISCARD (`a`=the
+# resource). PLAY_YEAR_OF_PLENTY's `a` indexes a *pair* of resources instead
+# (`hexset.actions.YEAR_OF_PLENTY_PAIRS`, mirrored below rather than
+# imported -- see this module's docstring on staying engine-free).
+
+_YEAR_OF_PLENTY_PAIRS = [(a, b) for a in range(len(RESOURCES)) for b in range(a, len(RESOURCES))]
+
+
+def _translate_action(action: dict) -> dict:
+    kind = action.get("type")
+    if kind in ("PLAY_MONOPOLY", "DISCARD"):
+        return {**action, "resource": RESOURCES[action["a"]]}
+    if kind == "BANK_TRADE":
+        return {**action, "give": RESOURCES[action["a"]], "want": RESOURCES[action["b"]]}
+    if kind == "PLAY_YEAR_OF_PLENTY":
+        pair = _YEAR_OF_PLENTY_PAIRS[action["a"]]
+        return {**action, "resources": [RESOURCES[r] for r in pair]}
+    return action
+
+
+def _translate_view(raw: dict) -> dict:
+    raw = _translate_trades(raw)
+    raw["legal_actions"] = [_translate_action(a) for a in raw.get("legal_actions") or []]
+    return raw
+
+
 def _get_table() -> dict:
     return _state()
 
@@ -299,7 +384,7 @@ def _get_table() -> dict:
 def _offer_trade(give: dict, want: dict) -> dict:
     _seated()
     body = {"give": _positional(give), "want": _positional(want)}
-    return _request_ok("POST", f"/api/games/{_code}/trade/round", body)
+    return _translate_view(_request_ok("POST", f"/api/games/{_code}/trade/round", body))
 
 
 def _answer_trade(index: int, kind: str, give: dict | None = None, receive: dict | None = None) -> dict:
@@ -317,13 +402,15 @@ def _answer_trade(index: int, kind: str, give: dict | None = None, receive: dict
     body = {"actor": offer["actor"], "received": offer["bundle"], "kind": kind}
     if kind == "counter":
         body["bundle"] = _bundle_towards_actor(give, receive)
-    return _request_ok("POST", f"/api/games/{_code}/trade/round/answer", body)
+    return _translate_view(_request_ok("POST", f"/api/games/{_code}/trade/round/answer", body))
 
 
 def _choose_trade(index: int | None = None, decline: bool = False) -> dict:
     _seated()
     if decline:
-        return _request_ok("POST", f"/api/games/{_code}/trade/round/choose", {"decline": True})
+        return _translate_view(
+            _request_ok("POST", f"/api/games/{_code}/trade/round/choose", {"decline": True})
+        )
     raw = _request_ok("GET", "/api/state")
     responses = ((raw.get("trade_round") or {}).get("responses")) or []
     if not isinstance(index, int) or not (0 <= index < len(responses)):
@@ -336,7 +423,7 @@ def _choose_trade(index: int | None = None, decline: bool = False) -> dict:
         )
     response = responses[index]
     body = {"seat": response["seat"], "bundle": response["bundle"]}
-    return _request_ok("POST", f"/api/games/{_code}/trade/round/choose", body)
+    return _translate_view(_request_ok("POST", f"/api/games/{_code}/trade/round/choose", body))
 
 
 # name -> (handler, description, JSON Schema for `arguments`)
@@ -389,7 +476,12 @@ _TOOLS: dict[str, tuple] = {
         _board,
         "The board's fixed layout: hex positions/terrain/numbers and vertex/edge "
         "adjacency. Unlike state(), this never changes once a game is dealt, so it "
-        "only needs reading once per game.",
+        "only needs reading once per game. Each hex also carries `resource` (its "
+        "terrain's payout, e.g. `FOREST` -> `Wood`; `null` for desert/sea/gold, "
+        "which pay nothing fixed) and `pips` (its 2d6 odds: 5 for a 6 or 8 down to "
+        "1 for a 2 or 12, 0 for none). Each vertex carries the same two, summed "
+        "and de-duplicated over every hex it touches -- `pips`/`resources` there "
+        "are the settlement-value numbers a placement decision actually turns on.",
         {"type": "object", "properties": {}},
     ),
     "state": (
@@ -400,7 +492,10 @@ _TOOLS: dict[str, tuple] = {
         "dev-card types are), the board's dynamic contents, and `legal_actions` "
         "— a 0-indexed list of the actions act() currently accepts, empty when "
         "it is not your turn. Poll this while another seat is thinking: nothing "
-        "plays a turn on your behalf, bot seats included.",
+        "plays a turn on your behalf, bot seats included. A legal_actions entry "
+        "that spends a resource names it too, alongside the raw `a`/`b` act() "
+        "replays: BANK_TRADE has `give`/`want`, PLAY_MONOPOLY/DISCARD have "
+        "`resource`, PLAY_YEAR_OF_PLENTY has `resources` (a 2-list).",
         {"type": "object", "properties": {}},
     ),
     "act": (
@@ -420,6 +515,16 @@ _TOOLS: dict[str, tuple] = {
         "Undo your own most recent build or bank trade, if state()'s can_undo is "
         "true. Anything else (another seat's move, a played development card) "
         "cannot be undone.",
+        {"type": "object", "properties": {}},
+    ),
+    "leave_game": (
+        _leave_game,
+        "Give up your seat for the rest of this game — permanent, and the only "
+        "way to do it (there is no re-join). Your pieces and hand stay on the "
+        "board exactly as they are; only your turn is skipped from now on, and "
+        "the game carries on without you. Refuses while a trade round is open "
+        "naming you as its actor or as a seat still owed an answer — resolve it "
+        "with answer_trade()/choose_trade() first.",
         {"type": "object", "properties": {}},
     ),
     "get_table": (

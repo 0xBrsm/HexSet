@@ -117,10 +117,10 @@ class Evaluator(Protocol):
         no options and no prior to offer, only a value, and it has to be on
         this evaluator's own scale or a backup mixes two of them (see the
         module docstring). A `relative_points`-trained evaluator returns
-        `terminal_relative_points(game)` unchanged — every evaluator shipped
-        in this repo does exactly that, so adopting this method changes
-        nothing about their behaviour. A win-probability evaluator (a softmax
-        value head over seats) returns the one-hot winner instead.
+        `terminal_relative_points(game)` unchanged. A win-probability
+        evaluator (a softmax value head over seats) returns the one-hot winner
+        instead — which is what `hexset.clients.onnxbot.LeafEvaluator` does,
+        its contract-6 head being trained on `hexn.rewards.win_loss`.
 
         Board-seat order, with no rotation of its own: this is the same frame
         `evaluate`'s returned values are already in, after that method has

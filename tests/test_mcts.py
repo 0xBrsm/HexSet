@@ -12,7 +12,7 @@ from hexset.actions import Action, ActionType, apply, legal_actions, victim_of
 from hexset.board.board import random_base_board
 from hexset.board.terrain import Resource
 from hexset.cards import DevCard
-from hexset.game import Phase, imagine, start
+from hexset.game import Phase, imagine, is_over, start
 from hexset.bots import STANCES
 from hexset.mcts import (
     HIDDEN_DRAW,
@@ -419,20 +419,37 @@ def test_a_finished_game_is_scored_by_the_evaluators_terminal():
     assert stub.waves == []
 
 
-def test_shipped_evaluators_terminal_matches_relative_points():
-    """`hexset.mcts.terminal_relative_points` is what `Search` scored a
-    terminal leaf with itself before `Evaluator.terminal` existed. Every
-    evaluator shipped in this repo returns it unchanged, so adopting the
-    protocol changes nothing about their behaviour on a finished game.
+def test_the_shipped_onnx_evaluator_scores_a_terminal_leaf_on_its_own_scale():
+    """`terminal_relative_points` is what `Search` scored a terminal leaf with
+    before `Evaluator.terminal` existed, and it remains the right answer for a
+    `relative_points`-trained evaluator. The one evaluator this repo ships is
+    not one: `RECORD_CONTRACTS` is contract 6 alone and a contract-6 value head
+    trains on `hexn.rewards.win_loss`, so it owes the one-hot winner. Mixing
+    the two scales in a single backup is what the protocol warns against.
+
     `LeafEvaluator.terminal` never touches `self.policy`, so this needs no
     loaded model -- only the optional `onnxruntime` import its module makes
     at load time."""
     pytest.importorskip("onnxruntime")
     from hexset.clients.onnxbot import LeafEvaluator
 
-    game = a_game()
     evaluator = LeafEvaluator(policy=None, space=None)
-    assert evaluator.terminal(game) == terminal_relative_points(game)
+    with pytest.raises(ValueError, match="has not finished"):
+        evaluator.terminal(a_game())
+
+    rng = random.Random(2)
+    game = a_game(seed=2)
+    moves = 0
+    while not is_over(game) and moves < 20000:
+        apply(game, rng.choice(legal_actions(game)))
+        moves += 1
+    assert is_over(game)
+
+    scores = evaluator.terminal(game)
+    assert sorted(scores) == [0.0, 0.0, 0.0, 1.0]
+    assert scores[game.won_by] == 1.0
+    # The two scales disagree on this position, which is the whole point.
+    assert tuple(scores) != tuple(terminal_relative_points(game))
 
 
 def test_the_prior_decides_what_gets_tried_first():

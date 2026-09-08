@@ -979,8 +979,11 @@ class Tables:
         decides who else is playing — filling an open seat and changing your
         mind about a bot already in one are the same gesture there. An open
         seat can be filled right up until somebody closes it (`close_seat`),
-        and a bot can be swapped at any point in the game, not just between
-        games.
+        and a bot can be swapped at any point during the game — but not
+        after it: once `is_over`, the seat that made every recorded move is
+        exactly the seat the journal/log/win banner still name, for good,
+        the same way `leave_seat` already refuses once there is no game left
+        to retire from.
 
         Rebuilding from `model_options()` (rather than accepting a spec)
         keeps this the same chokepoint: a request names a bot, it never hands
@@ -1000,6 +1003,8 @@ class Tables:
         touched its picker, and left their client believing it was sitting
         somewhere it was not.
         """
+        if is_over(table.session.game):
+            raise ApiError("the game is already over")
         if not 0 <= seat < len(table.seats):
             raise ApiError(f"there is no seat {seat} at this game")
         kind = table.seats[seat].kind

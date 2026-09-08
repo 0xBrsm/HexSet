@@ -21,8 +21,8 @@ turn rotation the moment `hexset.game` has moved it somewhere this table does
 not want it. The locked set rides on the `Game` as a plain attribute so every
 wire surface can read it, and `locked_of` tolerates its absence.
 
-The known limit, and it is why `docs/engine-divergence-2026-09-02.md` files
-change request R2 against dev-HexNet: `hexset.game.imagine` does not carry the
+The known limit, filed as change request R2 in the 2026-09-02 divergence
+audit: `hexset.game.imagine` does not carry the
 attribute, so a bot searching forward from this position simulates turns for a
 retired seat as though it still played. A retired seat holds nothing and
 builds nothing, so those are wasted plies rather than wrong ones, but it is a

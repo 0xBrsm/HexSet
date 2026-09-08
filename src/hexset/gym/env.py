@@ -72,8 +72,8 @@ class HexSetEnv(Env):
     """`gymnasium.Env` with one learner seat; the rest are `hexset.arena` bots.
 
     `learner_seat`: a fixed seat index, or `"rotate"` (default) to draw a new
-    one each `reset()` -- seat is not neutral (`docs/gym-design.md` §3 cites
-    the seat-geometry duel result), and always learning from seat 0 would
+    one each `reset()` -- seat is not neutral (the seat-geometry duel
+    result), and always learning from seat 0 would
     inherit that bias silently.
 
     `opponents`: one `hexset.arena` preset name (or `<kind>:<checkpoint>`

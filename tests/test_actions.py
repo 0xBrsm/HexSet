@@ -257,8 +257,8 @@ def test_a_higher_seat_discards_without_waiting_for_a_lower_one():
 
 
 def test_a_discard_round_is_order_invariant():
-    """Why the AEC environment may go on resolving this one seat at a time
-    (`docs/gym-design.md` §2): interleaved or serialized, the same position."""
+    """Why the AEC environment may go on resolving this one seat at a time:
+    interleaved or serialized, the same position."""
     def discard(game, seat):
         apply(game, Action(ActionType.DISCARD, legal_actions(game, seat)[0].a), seat=seat)
 

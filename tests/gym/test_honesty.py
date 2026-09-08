@@ -1,12 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""The honesty permutation test (`docs/gym-design.md` §4, a merge
-requirement, not optional): redeal every opponent's hidden hand and shuffle
+"""The honesty permutation test (a merge requirement, not optional): redeal every opponent's hidden hand and shuffle
 the unrevealed deck in the *true* state, composition-preserving, and assert
 `HexSetAEC.observe`'s observation does not move -- adapted from
 `tests/catanatron/test_catanatron_information_set.py`'s audit, for the
 native engine instead of a foreign one, driven through `Game.set_state`
-(`docs/gym-design.md`'s own instruction) rather than the private `_state`
-field.
+rather than the private `_state` field.
 
 The control (`test_the_audit_can_fail`) moves something the perspective seat
 *can* see -- its own hand -- and asserts the observation does move, so a test

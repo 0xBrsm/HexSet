@@ -262,7 +262,7 @@ right now. The page wires all of this into the trade modal: a counterparty
 picker and the give/want cards for "Offer to players," the acceptable-deals
 list so a deal can be picked directly, and a pending-offers panel with
 Confirm/Decline. Full endpoint shapes: [`docs/bot-api.md`](docs/bot-api.md)
-§3; design history: [`docs/negotiation-interface.md`](docs/negotiation-interface.md).
+§3.
 
 `max_trades=0` is the off switch for the no-trade referents
 (`search2-notrade`, `heximax-notrade`).
@@ -271,8 +271,9 @@ Confirm/Decline. Full endpoint shapes: [`docs/bot-api.md`](docs/bot-api.md)
 
 `pip install -e ".[gym]"` adds two training-facing entry points on top of the
 engine. This is its own extra — `import hexset` stays numpy-only; only
-`import hexset.gym` needs `pettingzoo`/`gymnasium`. Full design:
-[`docs/gym-design.md`](docs/gym-design.md).
+`import hexset.gym` needs `pettingzoo`/`gymnasium`. Both entry points document
+themselves: `hexset.gym.aec` and `hexset.gym.env` carry the design each one
+implements, down to why the mask is the honest one and why seat rotates.
 
 **`hexset.gym.HexSetAEC`** — a [PettingZoo](https://pettingzoo.farama.org/)
 `AECEnv`, one agent per seat (`seat_0`..`seat_{n-1}`). `observe(agent)`
@@ -325,11 +326,11 @@ the encoder's arrays.
 
 ## Layout
 
-- **The engine lives in this repo, under `src/hexset/`** (`actions`, `game`, `ledger`, `board`, `mcts`, `arena`, `tuning`, `catanatron`, `bench`, and the rest, plus `hexset.bots` — every heuristic bot: `search2` (`hexset.bots.search2`) and `heximax` (`hexset.bots.heximax`, files by concern), sharing `hexset.bots.evaluate` — see [`docs/engine-divergence-2026-09-02.md`](docs/engine-divergence-2026-09-02.md) for how heximax was first imported, with history, from the training repo, and for what this repo used to carry as its own copy before that). `hexset`, `hexset.bench`, `hexset.server` and `hexset.clients` are all one distribution (`hexset`) and one `pyproject.toml`; see the CHANGELOG's "one distribution" entry for what was renamed to get there.
+- **The engine lives in this repo, under `src/hexset/`** (`actions`, `game`, `ledger`, `board`, `mcts`, `arena`, `fitting`, `catanatron`, `bench`, and the rest, plus `hexset.bots` — every heuristic bot: `search2` (`hexset.bots.search2`) and `heximax` (`hexset.bots.heximax`, files by concern), sharing `hexset.bots.evaluate`). `hexset`, `hexset.bench`, `hexset.server` and `hexset.clients` are all one distribution (`hexset`) and one `pyproject.toml`; see the CHANGELOG's "one distribution" entry for what was renamed to get there.
 - `src/hexset/server/api.py` — tables, seats, join codes, seat tokens, the `/api/*` surface. `web.py` is the HTTP transport over it, `mcp.py` a stdio MCP client of the same routes, `webplay.py` the session: what a seat may see, the human-readable log, undo, and the wire encoding of an action.
 - `src/hexset/server/rules.py` — what a served table needs beyond the engine's own `legal_actions`: naming an empty option list as the bug it is, and checking a submitted action against the list. It used to hold a second, honest enumeration, because the engine's offer sample read opponents' hands; trading is no longer an action, so there is one list for every seat.
 - `src/hexset/server/seating.py` — the setup snake starting at whoever created the game, and retiring a seat nobody claimed.
-- `src/hexset/clients/onnxbot.py` — the entire model boundary: the record contract, action-space indexing, masking, sampling, and search all live behind it, and `spawn(path, board)` is the only entry point anything else uses. Builds its record with `hexset.onnx_record.record_from_game` directly — the torch-free split that used to block that (`docs/engine-divergence-2026-09-02.md`, R1) has landed, so this package no longer carries its own copy. `botclient.py` is the other half: a bot plays its seat as a peer client of the API, embedded or external, never as a privileged writer. Only record contract `6` is served — 2, 3 and 4 are the offer protocol's contracts and describe a game this engine no longer plays; contract 1 was dropped 2026-09-02, see the divergence audit; contract 5 was dropped 2026-09-05 when the knight two-step fix shrank the flat action space.
+- `src/hexset/clients/onnxbot.py` — the entire model boundary: the record contract, action-space indexing, masking, sampling, and search all live behind it, and `spawn(path, board)` is the only entry point anything else uses. Builds its record with `hexset.onnx_record.record_from_game` directly — the torch-free split that used to block that has landed, so this package no longer carries its own copy. `botclient.py` is the other half: a bot plays its seat as a peer client of the API, embedded or external, never as a privileged writer. Only record contract `6` is served — 2, 3 and 4 are the offer protocol's contracts and describe a game this engine no longer plays; contract 1 was dropped 2026-09-02; contract 5 was dropped 2026-09-05 when the knight two-step fix shrank the flat action space.
 - `src/hexset/server/static/index.html` — the entire frontend: inline CSS, inline SVG icons, vanilla JS. No build step. No advertisement UI of any kind (there is no public vector left to publish); its trade modal composes a bundle and offers it to a chosen counterparty, shows the acceptable-deals list (`GET .../trade/acceptable`) so one can be picked directly, and surfaces a pending-offers panel with Confirm/Decline the moment a bot's trade event finds something against this seat (`docs/bot-api.md` §3).
 - `models/` — drop `.onnx` files here.
 - `games/` — where every game is journalled: one JSON lines file per game, written as it is played, with nothing hidden (the dice, the deck order, every card drawn or stolen, every seat's hand after every action — see `src/hexset/server/journal.py`). On by default; `HEXSET_UI_GAMES_DIR` moves it, and setting that empty turns it off.

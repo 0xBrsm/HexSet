@@ -21,8 +21,7 @@ every record contract, and never learn which one they are holding.
 
 Contract 1 ("observation in, raw logits/give/want/value out", masked and
 decoded here in Python against the frozen `encoding_v1` feature layout) is no
-longer served — the owner dropped it 2026-09-02
-(`docs/engine-divergence-2026-09-02.md`, B5). A `contract=1` file, or one
+longer served — the owner dropped it 2026-09-02. A `contract=1` file, or one
 with no `contract` key at all, is refused by name at load.
 """
 
@@ -238,7 +237,7 @@ def _load_cached(path: str, topology: Topology, device: str, mtime_ns: int) -> L
         # about. Contract 1 (or no `contract` key at all) is refused here by
         # the same path as a genuinely unknown future contract — the owner
         # dropped it 2026-09-02, and there is no legacy path left to fall
-        # back to (`docs/engine-divergence-2026-09-02.md`, B5).
+        # back to.
         raise ValueError(
             f"{path} declares contract={contract!r}, which this server does not serve "
             f"(known: {', '.join(sorted(RECORD_CONTRACTS))})"

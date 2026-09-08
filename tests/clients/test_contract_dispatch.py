@@ -43,9 +43,8 @@ Fixtures, and what each is:
   longer served, as the one fixture that proves a real file is refused by
   name rather than by crashing somewhere downstream.
 * `tiny.onnx` — a real contract-1 export (no `contract` key at all). The
-  owner dropped contract 1 on 2026-09-02
-  (`docs/engine-divergence-2026-09-02.md`, B5); this pins that a
-  contract-less file is refused by name too, here and in `RecordBrain`.
+  owner dropped contract 1 on 2026-09-02; this pins that a contract-less
+  file is refused by name too, here and in `RecordBrain`.
 """
 
 from __future__ import annotations

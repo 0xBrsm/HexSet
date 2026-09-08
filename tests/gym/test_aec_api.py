@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """PettingZoo's own conformance suite against `HexSetAEC`, plus the one
-full-episode smoke test the design (`docs/gym-design.md` §5) calls for."""
+full-episode smoke test the ratified design calls for."""
 
 from __future__ import annotations
 
@@ -39,8 +39,7 @@ def test_four_seat_random_episode_terminates():
 
 @pytest.mark.parametrize("num_players", [2, 4])
 def test_player_counts_construct_and_reset(num_players):
-    """`num_players` is configurable (`docs/gym-design.md`'s own "agents
-    seat_0..seat_3 (configurable players)"); every count the engine itself
+    """`num_players` is configurable; every count the engine itself
     supports (`hexset.state.new_game`, 2..6) should too."""
     env = HexSetAEC(num_players=num_players)
     env.reset(seed=0)

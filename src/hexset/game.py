@@ -103,7 +103,7 @@ class Game:
     # Recomputed (cleared, then repopulated as `trade_event` runs) at the
     # start of every trade event and cleared again by `end_turn`, so nothing
     # pending survives a change of hands it was computed against (PI
-    # ratification, `docs/negotiation-interface.md`, decision 2). Not copied
+    # ratification 2026-09-02, decision 2). Not copied
     # by `imagine`, for the same reason `gates` is not: a hypothetical must
     # not leak a real seat's pending offers, and a search's own copy never
     # seats a `PendingGate` anyway.
@@ -149,7 +149,7 @@ class Game:
     # not exist, and documented the one place that made wrong: `imagine` did
     # not know to copy an attribute it never declared, so a search forward
     # from a table with a retired seat simulated turns for it anyway
-    # (`docs/engine-divergence-2026-09-02.md`, request R2). Declaring the
+    # (divergence audit 2026-09-02, request R2). Declaring the
     # field here and having `imagine` copy it (below) is the fix; nothing
     # else about `hexset.server.seating`'s policy -- *when* a seat retires, or
     # that only a still-empty seat ever does -- belongs in the engine, which
@@ -820,8 +820,7 @@ def lock_seat(game: Game, seat: int) -> None:
     From here on `seat` is skipped by the setup snake and by turn rotation,
     can never be `to_move`, and is never a counterparty in a trade event. This is the primitive `hexset.server.seating.lock_seat`
     (`ui:seating.py:148-154`) implemented as a post-apply correction because
-    `hexset.game` had no such field -- see `Game.locked`'s docstring and
-    `docs/engine-divergence-2026-09-02.md` request R2.
+    `hexset.game` had no such field -- see `Game.locked`'s docstring.
 
     It also matches that function's answer for what happens to a retired
     seat's pieces and hand: nothing. `lock_seat` never touches `game._state`.

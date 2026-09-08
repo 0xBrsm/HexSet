@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """`HexSetEnv`: Gymnasium conformance, determinism under a seed, and one full
-episode against `search2` opponents (`docs/gym-design.md` §5)."""
+episode against `search2` opponents."""
 
 from __future__ import annotations
 

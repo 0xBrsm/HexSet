@@ -33,7 +33,6 @@ These stubs are NOT genuine exports. `hexset.export_onnx` needs torch, which
 this repo does not install, so no real contract-5 file exists here to test
 against; the field names, shapes and dtypes below are pinned against
 `hexset.onnx_record.RECORD_FIELDS` by `tests/test_onnx_record.py`, torch-free.
-See `docs/engine-divergence-2026-09-02.md`, "Defect 1 in detail".
 """
 
 import pathlib

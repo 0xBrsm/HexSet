@@ -9,6 +9,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Changed
+
+- **The clearing floor belongs to the gate, not the table.** `hexset.trading.TRADE_FLOOR` is gone; every seat's gate declares its own `trade_floor`, read by `hexset.trading.trade_floor_of` at every admission point (`clears_floor(gain, gate)`; `trade_event`, `execute_agreed`, the round's `default_offer`/`default_respond`/`default_pick`). There is no engine default: a gate that prices a candidate positive without declaring one is refused with a `TypeError`; a gate that only ever declines is never asked. heximax carries the one measured value (`hexset.bots.heximax.HEXIMAX_TRADE_FLOOR = 0.0197`, the trade lab's phase 3); `search2` carries the same number unmeasured so the frozen referent clears what it cleared; a network checkpoint's boolean gate carries `0.0`. `hexset.bots.search2.Bot` names the attribute. Registered in `agents/reference/trading-final.md`'s 2026-09-05 amendment as open; now done.
+
 ## 0.38.1
 
 ### Fixed

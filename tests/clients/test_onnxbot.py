@@ -108,6 +108,7 @@ def test_a_searched_checkpoint_trades_through_its_own_value_head(checkpoint_v2):
     candidates = list(_candidates(game.state(seat, hidden=False), seat, frozenset()))
     received = [b for _, b in candidates]
     counterparties = [c for c, _ in candidates]
+    assert search.trade_floor == plain.trade_floor == 0.0  # a boolean gate has no resolution
     verdicts = search.accepts_many(game.state(seat), received, counterparties)
     assert len(verdicts) == len(candidates)
     assert verdicts == plain.accepts_many(game.state(seat), received, counterparties)

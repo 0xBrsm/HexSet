@@ -14,9 +14,11 @@ Registered `agents/reference/trading-final.md`, superseding the shipped
 * Each seat's **gate** is `gains_many(view, receiveds, counterparties) ->
   list[float]`: that seat's own private gain, in whatever unit its value is,
   for each candidate at once, read through that seat's own information-set
-  `View`. A deal *clears* only when both sides' gain exceeds `TRADE_FLOOR`
-  (τ) -- no seat's own gate can be forced into a trade it prices at or below
-  the floor.
+  `View`. A deal *clears* only when each side's gain exceeds that side's own
+  `trade_floor` (τ) -- no seat's own gate can be forced into a trade it
+  prices at or below its floor. The floor is the gate's, not the table's:
+  every gate declares its own measured resolution (`trade_floor_of`), and
+  there is no engine default.
 * Once a turn, after the roll and the robber, the engine enumerates every
   coverable candidate exchange, asks the current player's gate once over all
   of them, keeps the subset that clears the floor, asks each counterparty's
@@ -28,8 +30,8 @@ Registered `agents/reference/trading-final.md`, superseding the shipped
   the lower counterparty seat, for determinism only. Then it loops: the
   private gates are re-evaluated on the position the last trade left, and
   clearing continues until nothing clears. There is no budget: the acting
-  seat's own gain exceeds the floor at every step -- strictly positive,
-  since `TRADE_FLOOR >= 0` -- the state space is finite, so no cycle is
+  seat's own gain exceeds its floor at every step -- strictly positive,
+  since every floor is non-negative -- the state space is finite, so no cycle is
   possible. `Game.max_trades` is an off switch (`0`), not a budget; `None`
   is the unbounded default.
 
@@ -115,21 +117,6 @@ Gate = Callable[[int, "View", Bundle, int], float]
 # alternatives (`agents/reference/trading-final.md`, item 4).
 TRADE_RULES: tuple[str, ...] = ("egalitarian", "nash", "actor")
 
-# The clearing floor τ: a private gain must exceed this, on both sides, for
-# a candidate to be admitted at all -- `clears_floor` below is the one
-# predicate every admission point in the engine reads, so the floor is
-# applied in exactly one place. Not a chosen number: it is the gate's
-# measured resolution under paired chance (the trade lab's phase 3,
-# `agents/reference/trading-final.md` item 4). 300 bank positions x 8 paired
-# chance streams, each played traded and untraded to a 600-action cap by
-# four heximax seats under identical dice, steals and draws; no bin of
-# claimed gain showed a realised gain distinguishable from zero, so by the
-# registered rule the floor is the instrument's own resolution -- the
-# half-width of the pooled 95% interval on the acting seat's realised
-# win-rate gain, 0.0197. A gate that claims less than this is claiming
-# something no outcome can verify, and the table does not honour it.
-TRADE_FLOOR: float = 0.0197
-
 # A trade moves at most this many cards on either side -- a table rule, not
 # a knob: the human corpus puts 99.1% of recorded trades at or under three
 # cards a side (`agents/reference/trading-final.md`). Read in one place,
@@ -140,13 +127,43 @@ TRADE_FLOOR: float = 0.0197
 MAX_TRADE_CARDS = 3
 
 
-def clears_floor(gain: float) -> bool:
-    """Whether a private gain clears `TRADE_FLOOR` -- the one predicate
-    `trade_event` (both the acting seat's and each counterparty's subset),
-    `execute_trade` (the counterparty's gain) and the server's
-    `trade/acceptable` preview all read, so every admission point applies
-    the same rule."""
-    return gain > TRADE_FLOOR
+def trade_floor_of(gate: object) -> float:
+    """The clearing floor τ this gate's own gains are held to: its
+    `trade_floor`, the gate's measured resolution under paired chance
+    (the trade lab's phase 3, `agents/reference/trading-final.md` item 4 and
+    its 2026-09-05 amendment). A gain below a gate's own resolution is a
+    claim no outcome can verify, and the table does not honour it.
+
+    The floor is a property of the gate, not of the table: every seat's
+    gate declares its own (`hexset.bots.heximax.HEXIMAX_TRADE_FLOOR`, the
+    one measured so far; `0.0` for a boolean gate such as a network
+    checkpoint's, whose +1/-1 has no resolution to speak of), and there is
+    no engine default -- a gate that prices a candidate positive without
+    declaring one is refused loudly rather than judged by a number that was
+    measured on some other gate.
+    """
+    floor = getattr(gate, "trade_floor", None)
+    if floor is None:
+        raise TypeError(
+            f"{type(gate).__name__} declares no trade_floor: every seat's gate carries "
+            "its own measured clearing floor, and the table has no default"
+        )
+    if floor < 0.0:
+        raise ValueError(f"{type(gate).__name__}.trade_floor is negative")
+    return float(floor)
+
+
+def clears_floor(gain: float, gate: object) -> bool:
+    """Whether `gate`'s private gain clears `gate`'s own floor -- the one
+    predicate `trade_event` (both the acting seat's and each counterparty's
+    subset), `execute_agreed`, and the round's defaults all read, so every
+    admission point applies the same rule. A gain at or below zero never
+    clears -- every floor is non-negative -- so a gate that only ever
+    declines (a manual seat's `PendingGate`, a bot with no trading surface)
+    is never asked for a floor it has no use for."""
+    if gain <= 0.0:
+        return False
+    return gain > trade_floor_of(gate)
 
 
 # How many of a trade event's candidates a network gate will score, at most,
@@ -332,14 +349,14 @@ def trade_event(game: "Game", gate: Gate) -> list[Trade]:
     Private gates are asked in two batches per counterparty considered: once
     for the acting seat over every coverable candidate, then once per
     distinct counterparty over the acting seat's subset that clears the
-    floor with it. Among the candidates both sides clear `TRADE_FLOOR` on,
+    floor with it. Among the candidates both sides clear their own floor on,
     `game.trade_rule` picks the winner (`_best_clearing`). No budget: the
     loop runs until nothing clears.
 
     The single engine limit is the assertion below: an event never revisits
     a position (every seat's hand plus the public ledger). The acting seat's
-    own gain exceeds the floor at every clearing -- strictly positive, since
-    `TRADE_FLOOR >= 0` -- so a position that comes back means a gate is
+    own gain exceeds its floor at every clearing -- strictly positive, since
+    every floor is non-negative -- so a position that comes back means a gate is
     broken (not strictly increasing in the acting seat's own value), and
     that is a bug to surface rather than a knob to tune. It is deliberately
     not a count of trades: a legitimate event of one- and two-card exchanges
@@ -451,7 +468,7 @@ def execute_agreed(
 
     `_validate_exchange` runs first. Then each side whose flag is set has
     its own gate (`game.gates`) asked fresh, on its own view, and the trade
-    is refused (`ValueError`) unless that gain clears `TRADE_FLOOR`. A
+    is refused (`ValueError`) unless that gain clears that gate's own floor. A
     side whose flag is clear is a seat whose consent is the submission
     itself -- a person or an LLM that composed, accepted or countered
     through the server -- and its gate (a `PendingGate`, which never
@@ -466,13 +483,13 @@ def execute_agreed(
     if ask_actor:
         trader = gates[actor] if gates is not None else None
         gain_a = valued(trader, game.state(actor), received, counterparty)
-        if not clears_floor(gain_a):
+        if not clears_floor(gain_a, trader):
             raise ValueError(f"seat {actor} does not want this exchange")
     if ask_counterparty:
         trader = gates[counterparty] if gates is not None else None
         mirror = tuple(-n for n in received)
         gain_b = valued(trader, game.state(counterparty), mirror, actor)
-        if not clears_floor(gain_b):
+        if not clears_floor(gain_b, trader):
             raise ValueError(f"seat {counterparty} does not want this exchange")
 
     state = game._state
@@ -491,7 +508,7 @@ def execute_trade(game: "Game", proposer: int, counterparty: int, received: Bund
     the bundle is the proposer's own consent, so a seat may propose an
     exchange its own gate would refuse. Raises `ValueError` naming the
     first check that fails (`_validate_exchange`, then the counterparty's
-    gain against `TRADE_FLOOR`).
+    gain against its own floor).
     """
     return execute_agreed(
         game, proposer, counterparty, received, ask_actor=False, ask_counterparty=True
@@ -508,14 +525,14 @@ def _best_clearing(
 
     Every coverable candidate is asked about, in two batches: `me`'s gate is
     asked once, over every candidate, via `valued_many`; then, only for the
-    candidates that clear `TRADE_FLOOR` for `me` (`clears_floor`), each
+    candidates that clear `me`'s own floor (`clears_floor`), each
     distinct counterparty's gate is asked once, over its own accepted
     subset. There is no cheap pre-filter left to rank candidates before a
     gate is asked -- the mechanic's one approximation is the gate itself
     (`agents/reference/trading-theory.md` §5) -- so every enumerated
     candidate costs one row in the acting seat's one batched call.
 
-    Among the candidates that clear the floor on both sides, the winner is
+    Among the candidates that clear each side's own floor, the winner is
     chosen by `game.trade_rule`: `"egalitarian"` maximises the smaller of the two
     gains; `"nash"` maximises their product; `"actor"` maximises the acting
     seat's own gain. Ties break on the acting seat's own gain, then a
@@ -541,6 +558,12 @@ def _best_clearing(
             return valued_many(traders[seat], seat_view, receiveds, counterparties)
         return [gate(seat, seat_view, r, c) for r, c in zip(receiveds, counterparties)]
 
+    def gate_of(seat: int) -> object:
+        # Whose floor a gain is held to: the seated trader's, or -- for a
+        # direct caller with a bare `gate` callable and no `game.gates` --
+        # the callable's own `trade_floor`.
+        return traders[seat] if traders is not None else gate
+
     receiveds = [received for _them, received in candidates]
     thems = [them for them, _received in candidates]
     mine = ask(me, view(me), receiveds, thems)
@@ -552,7 +575,7 @@ def _best_clearing(
     # candidate.
     by_counterparty: dict[int, list[int]] = {}
     for i, gain in enumerate(mine):
-        if clears_floor(gain):
+        if clears_floor(gain, gate_of(me)):
             by_counterparty.setdefault(thems[i], []).append(i)
     if not by_counterparty:
         return None
@@ -584,7 +607,7 @@ def _best_clearing(
         canonical = tuple(-n for n in receiveds[i])
         return (primary, gain_me, canonical, -thems[i])
 
-    cleared = [i for i, gain in theirs.items() if clears_floor(gain)]
+    cleared = [i for i, gain in theirs.items() if clears_floor(gain, gate_of(thems[i]))]
     if not cleared:
         return None
     winner = max(cleared, key=key)
@@ -683,9 +706,10 @@ def default_offer(
 ) -> int | None:
     """The default `offer(view, candidates) -> index | None` for a gate that
     only has `gains_many`: the candidate maximising the actor's own gain
-    (`valued_many`) among those that clear `TRADE_FLOOR` on *both* readings
-    -- the actor's own gain and the *estimated* counterparty gain
-    (`_estimate_many`, `clears_floor`) -- so a gate with a real opponent
+    (`valued_many`) among those that clear the actor's own floor on *both*
+    readings -- its own gain and the *estimated* counterparty gain
+    (`_estimate_many`, `clears_floor`; the estimate is in the actor's own
+    units, so the actor's floor is the one that applies) -- so a gate with a real opponent
     model offers what it believes the table will actually take, and a plain
     gate falls back to "what is best for itself" (its own gain stands in
     for the estimate too). `None` when nothing clears both -- this seat
@@ -712,7 +736,7 @@ def default_offer(
     estimates = _estimate_many(gate, view, candidates)
     eligible = [
         i for i in range(len(candidates))
-        if clears_floor(estimates[i]) and clears_floor(own_gains[i])
+        if clears_floor(estimates[i], gate) and clears_floor(own_gains[i], gate)
     ]
     if not eligible:
         return None
@@ -727,7 +751,7 @@ def default_offer(
 def default_respond(gate: object, view: "View", offer: Offer) -> Response:
     """The default `respond(view, offer) -> Response` for a gate that only
     has `gains_many`: accept outright when this seat's own gain on the
-    offered exchange clears `TRADE_FLOOR`; else counter with the bundle
+    offered exchange clears its own floor; else counter with the bundle
     this seat can actually propose (`_belief_candidates`: its own hand
     exactly, the actor's hand from the ledger's known lower bound)
     maximising this seat's own gain among those whose *estimated* actor
@@ -750,7 +774,7 @@ def default_respond(gate: object, view: "View", offer: Offer) -> Response:
     # perspective's own hand, so the check costs nothing in information.
     covers = all(view.known[me][r] >= n for r, n in enumerate(offer.received) if n > 0)
     gain = valued(gate, view, received_for_me, actor)
-    if covers and clears_floor(gain):
+    if covers and clears_floor(gain, gate):
         return Response(me, RESPONSE_ACCEPT, offer.received)
 
     candidates = _belief_candidates(view, me, actor)
@@ -761,7 +785,7 @@ def default_respond(gate: object, view: "View", offer: Offer) -> Response:
         eligible = [
             i
             for i in range(len(candidates))
-            if clears_floor(estimates[i]) and clears_floor(own_gains[i])
+            if clears_floor(estimates[i], gate) and clears_floor(own_gains[i], gate)
         ]
         if eligible:
 
@@ -780,7 +804,7 @@ def default_pick(
 ) -> int | None:
     """The default `pick(view, responses) -> index | None` for a gate
     that only has `gains_many`: the acceptance or counter with the highest
-    own gain above `TRADE_FLOOR`, else `None`. Every non-`"pass"`
+    own gain above this gate's own floor, else `None`. Every non-`"pass"`
     response's bundle is already signed towards this seat (`Response`'s own
     convention), so this is one batched `valued_many` over them.
     """
@@ -797,7 +821,7 @@ def default_pick(
     best_idx: int | None = None
     best_key: tuple | None = None
     for (i, r), gain in zip(eligible, gains):
-        if not clears_floor(gain):
+        if not clears_floor(gain, gate):
             continue
         canonical = tuple(-n for n in r.bundle)
         key = (gain, canonical, -r.seat)

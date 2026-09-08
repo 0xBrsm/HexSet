@@ -328,15 +328,21 @@ def test_a_no_trade_bot_refuses_everything():
     assert all(t.a != 0 and t.b != 0 for t in game.trades)
 
 
-def test_a_trading_bot_trades(monkeypatch):
-    # The wiring, not the floor: under the measured `TRADE_FLOOR` (0.0197)
-    # heximax's claimed gains almost never clear, which is the floor doing
-    # its job. With the floor at zero a trading bot must still trade.
-    import hexset.trading as trading_mod
+def test_heximax_declares_its_measured_floor():
+    from hexset.bots.heximax import HEXIMAX_TRADE_FLOOR
 
-    monkeypatch.setattr(trading_mod, "TRADE_FLOOR", 0.0)
+    bot = a_bot(a_game(seed=15), 0)
+    assert bot.trade_floor == HEXIMAX_TRADE_FLOOR == 0.0197
+
+
+def test_a_trading_bot_trades():
+    # The wiring, not the floor: under its measured floor (0.0197) heximax's
+    # claimed gains almost never clear, which is the floor doing its job.
+    # With each bot's own floor at zero a trading bot must still trade.
     game = a_game(seed=15)
     bots = [a_bot(game, s, max_nodes=200) for s in range(4)]
+    for bot in bots:
+        bot.trade_floor = 0.0
     game.gates = tuple(bots)
 
     traded = 0

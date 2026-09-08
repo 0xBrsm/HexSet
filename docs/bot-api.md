@@ -137,8 +137,10 @@ One round: the current player broadcasts one offer to every other seat;
 each seat answers once -- accept, counter with a bundle it would take
 instead, or pass; the actor executes one answer or declines them all. A
 trade moves 1-3 cards a side on disjoint resources (`MAX_TRADE_CARDS`),
-and a bot side's own gate must clear `TRADE_FLOOR` at execution, re-asked
-fresh. Bundles on the wire are five signed counts in `RESOURCE_NAMES`
+and a bot side's own gate must clear its own `trade_floor` at execution,
+re-asked fresh. The floor is the gate's, not the table's: every bot declares
+its own measured resolution (`hexset.trading.trade_floor_of`), and there is
+no default. Bundles on the wire are five signed counts in `RESOURCE_NAMES`
 order, always signed towards the offer's actor: positive is what the actor
 receives.
 

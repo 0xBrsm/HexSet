@@ -208,6 +208,8 @@ def test_a_checkpoint_plays_on_through_a_turn_the_engine_traded_in():
         `resource` than it had -- enough to clear a clean 1-for-1 swap
         without also pricing the reverse of it positively."""
 
+        trade_floor = 0.0
+
         def __init__(self, resource: int):
             self.resource = resource
 

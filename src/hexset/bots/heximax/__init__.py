@@ -80,7 +80,7 @@ from __future__ import annotations
 
 from hexset.view import View
 from .evaluate import NO_TRADE_WEIGHTS, TRADING_WEIGHTS, HonestEvaluator, Weights
-from .search import BY_MODE, DEFAULT_MAX_NODES, MODES, Heximax, heximax
+from .search import BY_MODE, DEFAULT_MAX_NODES, HEXIMAX_TRADE_FLOOR, MODES, Heximax, heximax
 
 # Import-time side effect only: registers "heximax"/"heximax-notrade" with `hexset.arena`. See `presets`'s own docstring.
 from . import presets  # noqa: F401
@@ -88,6 +88,7 @@ from . import presets  # noqa: F401
 __all__ = [
     "BY_MODE",
     "DEFAULT_MAX_NODES",
+    "HEXIMAX_TRADE_FLOOR",
     "Heximax",
     "HonestEvaluator",
     "MODES",

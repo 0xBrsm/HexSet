@@ -24,6 +24,8 @@ WOOD_FOR_ORE = [-1, 0, 0, 0, 1]  # signed towards the actor: gives one wood, get
 
 
 class _Wants:
+    trade_floor = 0.0
+
     def __init__(self, resource: int):
         self.resource = resource
 
@@ -32,6 +34,8 @@ class _Wants:
 
 
 class _NeverWants:
+    trade_floor = 0.0
+
     def gains_many(self, view, received, counterparties):
         return [-1.0] * len(received)
 

@@ -9,6 +9,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.44.3
+
 ### Fixed
 
 - `hexset.trading.trade_event` ends at the first revisited position instead of asserting. The assertion assumed a gate is a strict function of the position; the network gate scores each candidate in a world drawn from its belief (0.44.0), and heximax samples worlds too, so a trade that changes the ledger changes the next draw and a reverse exchange can price positive without anything being broken. Self-play against a network checkpoint tripped it on hexn's distillation test.

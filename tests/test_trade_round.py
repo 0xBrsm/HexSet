@@ -118,6 +118,18 @@ def test_default_offer_falls_back_to_its_own_gain_as_the_estimate():
     assert default_offer(gate, game.state(0), candidates) == 0
 
 
+def test_default_offer_never_offers_a_deal_it_would_refuse():
+    """The table would take it (estimate clears) but this seat prices it
+    negative: no broadcast. `pick` and the engine's re-ask both apply the
+    actor's own floor, so an offer that failed it could only ever end in
+    the actor refusing its own accepted offer."""
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    candidates = list(candidates_of(game._state, 0, game.locked))
+    gate = Gate(lambda received, counterparty: -1.0, lambda counterparty, received: 1.0)
+
+    assert default_offer(gate, game.state(0), candidates) is None
+
+
 def test_default_offer_passes_when_no_estimate_clears():
     game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
     candidates = list(candidates_of(game._state, 0, game.locked))

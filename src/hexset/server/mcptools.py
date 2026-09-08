@@ -277,11 +277,17 @@ def _translate_trades(raw: dict) -> dict:
         raw["trade_round"] = {
             "you_give": you_give,
             "you_receive": you_receive,
+            # A pass carries no bundle: the seat is named so it is told
+            # apart from one still in `awaiting`, and nothing can be chosen.
             "responses": [
                 {
                     "seat": r["seat"],
                     "kind": r["kind"],
-                    **dict(zip(("you_would_give", "you_would_receive"), _actor_view(r["bundle"]))),
+                    **(
+                        dict(zip(("you_would_give", "you_would_receive"), _actor_view(r["bundle"])))
+                        if r["bundle"] is not None
+                        else {}
+                    ),
                 }
                 for r in trade_round["responses"]
             ],
@@ -384,6 +390,11 @@ def _choose_trade(
             "nobody has answered your offer yet"
         )
     response = responses[index]
+    if response.get("kind") == "pass" or response.get("bundle") is None:
+        raise ToolError(
+            f"index {index} is a pass -- seat {response['seat']} turned your offer down; "
+            "choose an accept or counter, or `decline: true`"
+        )
     body = {"seat": response["seat"], "bundle": response["bundle"]}
     return _translate_view(_call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/choose", body))
 
@@ -601,7 +612,8 @@ _TOOLS: dict[str, tuple] = {
         "each as `actor` plus `you_give`/`you_receive` (what answering `accept` "
         "would cost/pay you); `trade_round` -- your own open offer, only when "
         "you're the one who broadcast it, as `you_give`/`you_receive` plus "
-        "`responses` (each `you_would_give`/`you_would_receive` if chosen) and "
+        "`responses` (each an accept or counter with `you_would_give`/"
+        "`you_would_receive` if chosen, or a `pass` with neither) and "
         "`awaiting`, the seats still to answer. Resource dicts omit zero counts. "
         "Use a `pending`/`responses` list's index with answer_trade()/"
         "choose_trade() -- never hand-build a trade from these dicts.",

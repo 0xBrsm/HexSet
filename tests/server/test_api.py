@@ -121,6 +121,33 @@ def test_an_unfinished_game_comes_back_where_it_was_left(tmp_path):
     assert resumed.player_names == session.player_names
 
 
+def test_trade_round_lines_survive_a_restart(tmp_path):
+    """The round's log lines are journalled as notes and put back at the
+    same step on restore, so a restarted table's transcript reads as the
+    live one did."""
+    from hexset.board.terrain import Resource
+    from hexset.game import Phase
+
+    config = Config(games_dir=str(tmp_path), seed=99)
+    seats = [player("Ada"), bot_seat(), bot_seat(), bot_seat()]
+    session = build_session("ABC123", seats, config, first=0)
+    session.game.phase = Phase.MAIN
+    session.game.current_player = 0
+    session.game._state.hands[0][Resource.WOOD] = 2
+    received = [0, 0, 0, 0, 0]
+    received[Resource.WOOD] = -2
+    received[Resource.ORE] = 1
+    session.open_round_for(0, tuple(received))
+    session.decline_round(0)
+    log = session.log_for(0)
+    assert any("offers 2 Wood for 1 Ore." in line for line in log)
+
+    resumed = resume_session("ABC123", seats, config)
+
+    assert resumed is not None
+    assert resumed.log_for(0) == log
+
+
 def _a_position_where_no_opponent_holds_anything(mover: int = 0):
     """A `Game` in MAIN where the mover holds every resource and nobody else
     holds any -- the position that used to separate the two samples."""

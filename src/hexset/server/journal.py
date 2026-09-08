@@ -33,7 +33,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Sequence
+from typing import TYPE_CHECKING, Sequence
 
 from hexset.actions import Action, ActionType
 from hexset.board.board import Board
@@ -43,6 +43,9 @@ from hexset.devcards import holdings
 from hexset.game import Game
 from hexset.trading import Trade
 from hexset.victory import victory_points
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .webplay import RoundNote
 
 ENV_DIR = "HEXSET_UI_GAMES_DIR"
 DEFAULT_DIR = "games"
@@ -298,6 +301,26 @@ class Journal:
             }
         )
 
+    def note(self, *, step: int, round_num: int, note) -> None:
+        """One step of a trade round (`webplay.RoundNote`, via
+        `GameSession._note`): the offer, a seat's answer, the actor
+        declining, everyone having passed. Discrete -- every step its own
+        line, the way the record keeps every action -- while the transcript
+        a reader sees folds them (`webplay.render_log`). Nothing moved, so
+        no hands are written; `step` is the step this preceded, which is
+        where `notes_of`/`GameSession.restore` put it back."""
+        self._emit(
+            {
+                "kind": "note",
+                "step": step,
+                "round": round_num,
+                "note": note.kind,
+                "seat": note.seat,
+                "actor": note.actor,
+                "bundle": None if note.bundle is None else list(note.bundle),
+            }
+        )
+
     def undo(self, game: Game, *, back_to: int) -> None:
         """The human took a placement back (see `webplay.undo_last_build`).
 
@@ -483,6 +506,33 @@ def replayable(events: list[dict]) -> list[tuple[int, Action | None, tuple[Trade
         elif kind == "undo":
             del steps[event["back_to"] :]
     return steps
+
+
+def notes_of(events: list[dict]) -> dict[int, list[tuple[int, RoundNote]]]:
+    """The trade-round steps (`Journal.note`) as `(round, RoundNote)`,
+    keyed by the step each preceded, for `GameSession.restore`. An undo
+    drops the notes it took back the same way `replayable` drops the steps:
+    everything from `back_to` onwards did not happen."""
+    from .webplay import RoundNote  # local at run time: webplay imports this module
+
+    notes: dict[int, list[tuple[int, RoundNote]]] = {}
+    for event in events:
+        kind = event.get("kind")
+        if kind == "note":
+            bundle = event.get("bundle")
+            notes.setdefault(int(event["step"]), []).append(
+                (
+                    int(event["round"]),
+                    RoundNote(
+                        str(event["note"]), int(event["seat"]), int(event["actor"]),
+                        None if bundle is None else tuple(int(n) for n in bundle),
+                    ),
+                )
+            )
+        elif kind == "undo":
+            for step in [s for s in notes if s >= event["back_to"]]:
+                del notes[step]
+    return notes
 
 
 def seating(events: list[dict]) -> dict[int, tuple[str, str]]:

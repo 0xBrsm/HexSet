@@ -649,6 +649,7 @@ def resume_session(code: str, seats: list[Seat], config: Config) -> GameSession 
         session.restore(
             journal.replayable(events),
             journal.Journal(directory=str(path.parent), game_id=path.stem),
+            notes=journal.notes_of(events),
         )
     except (ResumeError, ValueError, KeyError) as error:
         # Kept rather than deleted: a journal that will not replay is the one

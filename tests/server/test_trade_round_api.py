@@ -69,7 +69,12 @@ def test_human_offer_collects_bot_answers_and_a_pick_executes_one():
     data = registry.handle("POST", f"/api/games/{code}/trade/round",
                            {"give": [1, 0, 0, 0, 0], "want": [0, 0, 0, 0, 1]}, token)
     assert data["trade_round"]["offer"] == {"actor": human, "bundle": WOOD_FOR_ORE}
-    assert data["trade_round"]["responses"] == [{"seat": bot, "kind": "accept", "bundle": WOOD_FOR_ORE}]
+    # Every bot's answer is in the round, a pass included (bundle null), so
+    # the actor can tell a seat that turned it down from one still to answer.
+    answers = {r["seat"]: r for r in data["trade_round"]["responses"]}
+    assert answers[bot] == {"seat": bot, "kind": "accept", "bundle": WOOD_FOR_ORE}
+    assert [answers[s]["kind"] for s in answers if s != bot] == ["pass", "pass"]
+    assert all(answers[s]["bundle"] is None for s in answers if s != bot)
     assert data["trade_round"]["awaiting"] == []
     assert table.session.game.trades == [], "a person's pick is explicit"
 

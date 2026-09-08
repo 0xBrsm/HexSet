@@ -9,6 +9,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.44.1
+
 ### Fixed
 
 - The network gate's world for a candidate is seeded by the ask -- the information set, the counterparty and the bundle, salted once per bot -- so `gains_many` and `estimate_many` about the same candidate read the same world and a round's own gain and its estimate of the other side are one judgement; the gate is a pure function of what it was asked.

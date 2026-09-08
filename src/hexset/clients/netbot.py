@@ -18,7 +18,6 @@ one entry point a server needs.
 
 from __future__ import annotations
 
-import copy
 import random
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -31,11 +30,11 @@ from hexset.mcts import Search
 from hexset.server.rules import options_for
 from hexset.state import copy_state
 from hexset.trading import NETWORK_GATE_ROWS, exchange
+from hexset.view import View
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from hexset.board.board import Board
     from hexset.trading import Bundle
-    from hexset.view import View
 
 
 def _check_players(game: Game, players: int) -> None:
@@ -144,9 +143,9 @@ class NetworkBot:
         if self.max_trades == 0 or self._seated is None or not received:
             return [-1.0] * len(received)
         seat = self._perspective(view)
-        before, afters = self._score(seat, view, received, counterparties)
+        pairs = self._score(seat, view, received, counterparties)
         out = [-1.0] * len(received)
-        for i, after in afters.items():
+        for i, (before, after) in pairs.items():
             out[i] = float(after[seat] - before[seat])
         return out
 
@@ -165,9 +164,9 @@ class NetworkBot:
         seat = self._perspective(view)
         received = [b for _, b in candidates]
         thems = [c for c, _ in candidates]
-        before, afters = self._score(seat, view, received, thems)
+        pairs = self._score(seat, view, received, thems)
         out = [-1.0] * len(candidates)
-        for i, after in afters.items():
+        for i, (before, after) in pairs.items():
             them = thems[i]
             out[i] = float(after[them] - before[them])
         return out
@@ -186,44 +185,39 @@ class NetworkBot:
 
     def _score(
         self, seat: int, view: View, received: Sequence[Bundle], counterparties: Sequence[int]
-    ) -> tuple[tuple[float, ...], dict[int, tuple[float, ...]]]:
-        """The value vector of the live position and of each scored
-        candidate's post-trade position, both read from `seat`'s frame.
+    ) -> dict[int, tuple[tuple[float, ...], tuple[float, ...]]]:
+        """For each scored candidate, the value vector of the position without
+        the trade and with it, both after the mover's best play from there,
+        both read from `seat`'s frame -- a paired reading, so a trade that
+        changes nothing a seat can do prices at exactly zero.
 
-        The after-state is what a real clearing leaves: `hexset.trading.
-        exchange` moves both hands and `PublicLedger.apply_hand_diff`
-        certifies the diff, on copies the live game never keeps. Each
-        candidate is handed to the policy as a *position* -- a shallow copy
-        of the seated game carrying that state and that ledger -- rather
-        than as an encoded row, so a runtime encodes however it likes and
-        the live game is never mutated at all: there is nothing to restore,
-        and a raised error leaves it exactly as `choose` left it. (The
-        `set_state`/ledger swap is still what puts a hypothetical position
-        together; it is done to the copy, which is the only reason the live
-        game can stay untouched. Everything else on `Game` -- phase, turn
-        count, the free-road counter -- rides along on the copy, which is
-        what the encoders read and what a fresh `Game` would not have.)
+        **Continuations, not hands.** Two raw value estimates of nearly
+        identical hands differ by the head's noise, and a gate that compared
+        them offered noise: at a won position (the winning settlement in
+        hand) it priced a trade at +0.006 that changed nothing. So every
+        position is valued after the *mover's* own best play from it
+        (`_continue`): the policy's greedy actions through the rest of the
+        turn, a finished game reading as its one-hot winner. The mover is
+        whoever is to move -- this seat when it is the actor asking about
+        its own offer, the actor when this seat is asked to respond -- so a
+        responder prices "what does the actor do with these cards" and a
+        counter into a seat that wins next action reads as that win for the
+        actor and zero for everyone else. The g4 game of 2026-09-08 19:47Z,
+        round 19, is the case this was written for.
+
+        **Honest worlds.** The rollout needs hands to act on, and this seat
+        may not read another's. Each candidate is scored in one world drawn
+        from this seat's own belief (`View.sample`), with the counterparty
+        certified to hold what the candidate says it gives (an offer is
+        evidence of the cards behind it); the same world, exchanged and not,
+        is what makes the pair paired. Worlds are `imagine`d copies -- their
+        own state, ledger and a fresh chance with the deck reshuffled -- so
+        nothing here touches the live table or reads its deck.
 
         Every candidate two cards or fewer a side (`_is_small`) is scored;
         the rest fill whatever is left of `NETWORK_GATE_ROWS` in the order
         the engine enumerated them -- the stated cost bound on this gate's
-        own evaluation, not a claim about which candidates it favours. A
-        candidate `seat` cannot cover is never scored. One "before" row plus
-        one row per scored candidate is the whole fan-out.
-
-        **Continuations, not hands.** Each position -- the live one and every
-        post-trade one -- is valued after `seat`'s own best play from it
-        (`_continue`): the policy's greedy actions through the rest of the
-        turn, a game that ends reading as its one-hot winner. Two raw value
-        estimates of nearly identical hands differ by the head's noise, and a
-        gate that compared them offered noise: at a won position (the
-        winning settlement in hand) it priced a trade that gave the needed
-        card away at +0.006 and every candidate at zero or below only by
-        luck. After best play the won position is exactly 1.0 before and
-        after any trade that keeps the build, exactly lower after one that
-        does not, and a counterparty's row reads the actor's win either way,
-        so nobody offers or counters into it. The g4 game of 2026-09-08
-        19:47Z, round 19, is the case this was written for.
+        own evaluation. A candidate `seat` cannot cover is never scored.
         """
         game = self._seated
         assert game is not None  # callers check this first
@@ -231,48 +225,54 @@ class NetworkBot:
         small = [i for i, bundle in enumerate(received) if _is_small(bundle)]
         rest = [i for i in range(len(received)) if not _is_small(received[i])]
         order = (small + rest)[: max(NETWORK_GATE_ROWS, len(small))]
+        mover = to_move(game)
 
-        # true state: the engine is the referee for what a clearing leaves.
-        original = game.state(seat, hidden=False)
-        rows: list[tuple[Game, int]] = [(game, seat)]
+        worlds: list[Game] = []
         scored: dict[int, int] = {}
         for i in order:
             bundle = received[i]
             if any(n + d < 0 for n, d in zip(hand, bundle)):
                 continue
-            state = copy_state(original)
-            ledger = game.ledger.copy()
+            them = counterparties[i]
+            certified = View(
+                view.state, view.ledger, seat,
+                certify=[(them, [max(0, n) for n in bundle])],
+            )
+            sampled = certified.sample(self.rng)
+            before = imagine(game, self.rng, randomize_deck=True)
+            before.set_state(sampled)
+            after = imagine(game, self.rng, randomize_deck=True)
+            state = copy_state(sampled)
             hands_before = [h[:] for h in state.hands]
-            exchange(state, seat, counterparties[i], bundle)
-            ledger.apply_hand_diff(hands_before, state.hands)
-            after = copy.copy(game)
+            exchange(state, seat, them, bundle)
             after.set_state(state)
-            after.ledger = ledger
-            scored[i] = len(rows)
-            rows.append((after, seat))
-        values = self._continue(seat, [g for g, _ in rows])
-        return values[0], {i: values[row] for i, row in scored.items()}
+            after.ledger.apply_hand_diff(hands_before, state.hands)
+            scored[i] = len(worlds)
+            worlds.extend((before, after))
+        values = self._continue(mover, seat, worlds)
+        return {i: (values[row], values[row + 1]) for i, row in scored.items()}
 
-    def _continue(self, seat: int, games: Sequence[Game]) -> list[tuple[float, ...]]:
-        """Each game's value vector after `seat`'s own best play from it.
+    def _continue(
+        self, mover: int, seat: int, worlds: Sequence[Game]
+    ) -> list[tuple[float, ...]]:
+        """Each world's value vector, from `seat`'s frame, after `mover`'s
+        best play from it.
 
-        Every game is imagined first (`hexset.game.imagine`: its own state,
-        ledger and a fresh `Live` chance with the deck reshuffled), so the
-        rollout can buy and steal without touching the live table's chance
-        or reading its deck. Then, in lockstep across all of them, the policy
-        picks `seat`'s next action wherever it is still `seat`'s turn
-        (`act_rows`, one batched forward a ply); an `END_TURN` pick stops
-        that game where it stands, a finished game stops as its winner, and
-        `CONTINUATION_PLIES` bounds the rest. What is left is valued in one
-        forward; a finished game is the one-hot winner, board-seat order,
-        exactly as `LeafEvaluator.terminal` reads it.
+        The worlds are already imagined copies (`_score`), safe to play on.
+        In lockstep across all of them, the policy picks `mover`'s next
+        action wherever it is still `mover`'s turn (`act_rows`, one batched
+        forward a ply) -- the bot's own policy standing in for whoever moves,
+        acting on the hand the world gives that seat; an `END_TURN` pick
+        stops that world where it stands, a finished world stops as its
+        winner, and `CONTINUATION_PLIES` bounds the rest. What is left is
+        valued in one forward; a finished world is the one-hot winner,
+        board-seat order, exactly as `LeafEvaluator.terminal` reads it.
         """
-        worlds = [imagine(g, self.rng, randomize_deck=True) for g in games]
-        live = [i for i, g in enumerate(worlds) if not is_over(g) and to_move(g) == seat]
+        live = [i for i, g in enumerate(worlds) if not is_over(g) and to_move(g) == mover]
         for _ in range(CONTINUATION_PLIES):
             if not live:
                 break
-            rows = [(worlds[i], seat, tuple(options_for(worlds[i]))) for i in live]
+            rows = [(worlds[i], mover, tuple(options_for(worlds[i]))) for i in live]
             chosen = self.policy.act_rows(rows)
             still: list[int] = []
             for i, action in zip(live, chosen):
@@ -280,7 +280,7 @@ class NetworkBot:
                     continue
                 apply(worlds[i], action)
                 g = worlds[i]
-                if not is_over(g) and to_move(g) == seat:
+                if not is_over(g) and to_move(g) == mover:
                     still.append(i)
             live = still
         out: list[tuple[float, ...] | None] = [None] * len(worlds)

@@ -244,11 +244,17 @@ def test_a_searched_runtime_free_policy_plays_and_gates_like_the_plain_bot(board
     thems = [c for c, _ in candidates]
 
     assert search.trade_floor == plain.trade_floor == 0.0
-    assert search.gains_many(view, received, thems) == plain.gains_many(view, received, thems)
-    assert search.accepts_many(view, received, thems) == plain.accepts_many(
-        view, received, thems
-    )
-    assert search.estimate_many(view, candidates) == plain.estimate_many(view, candidates)
+
+    # Each gate scores candidates in worlds drawn from its own belief; the
+    # two answer identically once they draw the same worlds.
+    def alike(ask):
+        search.gate.rng = random.Random(7)
+        plain.rng = random.Random(7)
+        return ask(search) == ask(plain)
+
+    assert alike(lambda bot: bot.gains_many(view, received, thems))
+    assert alike(lambda bot: bot.accepts_many(view, received, thems))
+    assert alike(lambda bot: bot.estimate_many(view, candidates))
 
     # The same policy as a leaf evaluation for the handcrafted search, one
     # vector per seat in board-seat order.
@@ -463,3 +469,42 @@ def test_a_won_position_prices_every_trade_at_zero_or_below(board, monkeypatch):
     assert estimates[0] == pytest.approx(0.0), "the partner gains nothing: the actor wins regardless"
     candidates = list(_candidates(state, 0, frozenset()))
     assert default_offer(bot, view, candidates) is None, "a won seat has nothing to offer"
+
+
+def test_a_responder_prices_what_the_actor_will_do_with_the_cards(board, monkeypatch):
+    """Asked about an exchange on the actor's turn, a responder's gate rolls
+    out the *actor's* best play from the post-trade hand it can see (the
+    ledger, plus what the offer certifies). Handing a seat the card that
+    completes its winning build reads as that seat's win: negative for the
+    responder, the win itself for the estimate of the actor's side -- so the
+    default response is a pass, never a counter into it."""
+    from hexset import game as game_mod
+    from hexset.clients.netbot import NetworkBot
+    from hexset.ledger import PublicLedger
+    from hexset.trading import Offer, default_respond
+    from hexset.victory import victory_points
+
+    space = stub_checkpoint(board).space
+    game = _position_with_a_settlement_in_hand(board)
+    state = game.state(0, hidden=False)
+    state.hands[0] = [1, 1, 0, 1, 1]  # one sheep short of the settlement, an ore to spare
+    state.hands[1] = [2, 2, 2, 2, 2]
+    # Everything about seat 0's hand is public knowledge, so the responder's
+    # belief is exact and the test is deterministic.
+    ledger = PublicLedger.new(state.num_players)
+    ledger.apply_hand_diff([[0] * 5 for _ in state.hands], state.hands)
+    game.ledger = ledger
+    monkeypatch.setattr(game_mod, "WINNING_POINTS", victory_points(state, 0) + 1)
+
+    responder = NetworkBot(policy=BuildPolicy(space), space=space, players=PLAYERS, seat=1, rng=random.Random(0))
+    responder.seat_at(game)
+    view = game.state(1)
+    gives_the_sheep = (0, 0, -1, 0, 1)  # seat 1 gives a sheep, gets an ore
+
+    own = responder.gains_many(view, [gives_the_sheep], [0])[0]
+    est = responder.estimate_many(view, [(0, gives_the_sheep)])[0]
+    assert own < 0, "helping the actor win costs the responder its own chances"
+    assert est > 0.5, "the actor's side reads as the win it completes"
+
+    offer = Offer(0, (0, 0, 1, 0, -1))  # the actor asks for the sheep, offering an ore
+    assert default_respond(responder, view, offer).kind == "pass"

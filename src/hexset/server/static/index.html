@@ -390,51 +390,84 @@
     display: none; align-items: center; justify-content: center; padding: 1rem;
   }
   #modal.show { display: flex; }
-  /* Row of two, no seam between them: scrollable content on the left, a
-     docked column of action buttons — glyph over word, see .modal-btn-cap —
-     on the right. What lands in that column is the mode's business:
-     accept/counter/pass for an incoming offer, bank-or-port plus offer plus
-     cancel for one being built, a lone cancel for the dismissible card
-     modes, and nothing at all for a forced discard, where the column hides
-     itself rather than sit empty. */
+  /* One width for every mode, sized to the widest trade state — the
+     acceptance pane, whose longest row is a swatch, a three-card counter a
+     side and the check that takes it — and no more. Fixed rather than
+     fitted: a modal that grew and shrank as a composition changed moved the
+     buttons out from under the thumb aiming at them. max-width keeps it
+     inside a phone narrower than that. */
   #modal-inner {
     background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
-    max-width: 470px; width: 100%; max-height: 85vh;
-    display: flex; overflow: hidden;
-  }
-  #modal-main {
-    flex: 1 1 auto; min-width: 0; padding: 1rem; overflow-y: auto;
-    display: flex; flex-direction: column;
+    width: 352px; max-width: 100%; max-height: 85vh;
+    display: flex; flex-direction: column; overflow: hidden;
   }
   /* Grab handle for wireModalDrag: cursor: move signals it, touch-action: none
-     stops touch scroll from fighting the drag on mobile. */
-  #modal-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; cursor: move; touch-action: none; }
+     stops touch scroll from fighting the drag on mobile. Full width, above
+     the body/actions row rather than inside the body's own column, so the
+     close glyph sits in the modal's top-right corner and not somewhere in
+     the middle of it. */
+  #modal-head {
+    flex: none; display: flex; align-items: center; justify-content: space-between;
+    gap: 0.5rem; padding: 0.85rem 0.8rem 0 1rem; cursor: move; touch-action: none;
+  }
+  /* The title names the state — Trade Offer, Trade Offer Received, Trade
+     Counteroffer, Trade Acceptance — which is what lets the close glyph go
+     wordless: what an X does here follows from what the modal is. */
   #modal-head h3 { margin: 0; font-size: 1.05rem; }
-  /* Vertically centers whatever's below the title (the exchange row, or the
-     pickers) in the space left over after it — without this, short content
-     (an incoming offer's just-one-row body) sits pinned to the top of the
-     box while #modal-actions' own buttons, centered on their own axis
-     the whole time, visibly aren't: the two columns read as misaligned. */
-  #modal-body { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; }
+  /* The one way out of a mode, and deliberately not a button to look at: no
+     chrome, no caption, no place in the action column. Its meaning is the
+     state's — Cancel while composing, Pass on somebody's offer, Back out of
+     a counter, Decline all on your own round — carried in title/aria-label.
+     Hidden outright in the one mode with no way out, a forced discard. */
+  #modal-close {
+    width: 20px; height: 20px; padding: 0; border: 0; border-radius: 0;
+    background: none; color: var(--ink); flex: none;
+    display: flex; align-items: center; justify-content: center; opacity: 0.7;
+  }
+  #modal-close:hover:not(:disabled) { background: none; opacity: 1; }
+  #modal-close svg { width: 16px; height: 16px; display: block; fill: currentColor; }
+  #modal-close[hidden] { display: none; }
+  /* Body beside the action column, each centred on the other: without this,
+     short content (an incoming offer's one row) sits pinned to the top of the
+     box while the buttons, centred on their own axis the whole time, visibly
+     aren't — the two columns read as misaligned. */
+  #modal-row { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; }
+  #modal-body {
+    flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 0.8rem 1rem 1.1rem;
+    display: flex; flex-direction: column; justify-content: center;
+    align-items: flex-start; gap: 1rem; width: 100%;
+  }
+  /* What lands in the column is the mode's business: Offer over Bank/Port
+     while composing, Accept over Counter on a received offer, Confirm for a
+     dev card — and nothing at all for a forced discard, an acceptance pane or
+     a counter being written, where it hides itself rather than sit empty
+     (those three carry their buttons inside their own rows instead). */
   #modal-actions {
-    flex: none; width: 108px; padding: 1rem 0.6rem; display: flex;
-    flex-direction: column; justify-content: center; align-items: center; gap: 0.6rem;
+    flex: none; padding: 0.6rem 0.8rem 1rem 0; display: flex;
+    flex-direction: column; justify-content: center; align-items: center; gap: 0.5rem;
   }
-  /* Wide enough for the longest caption ("Decline all") to sit inside its own
-     button rather than spilling past the edges of it, and the same width for
-     every button so the column reads as one stack. */
-  #modal-actions button {
-    width: 84px; min-height: 56px; padding: 0.35rem 0.2rem; border-radius: 12px;
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  /* One button size everywhere in the modal, icon only: a 44px square, the
+     smallest target a thumb lands on reliably. The word a glyph stands for
+     lives in title/aria-label rather than drawn under it — the four states
+     name themselves in the title row now, so a column of captions was
+     repeating the heading a second time. */
+  .modal-btn {
+    width: 44px; height: 44px; padding: 0; border-radius: 10px; flex: none;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
   }
-  #modal-actions button svg { width: 26px; height: 26px; fill: currentColor; }
-  /* The word under every button in the column. A glyph alone cannot tell
-     Pass from Cancel from Decline all — the same X does all three, in three
-     different modes — and touch has no hover to fall back on, so the caption
-     is drawn rather than left to a title attribute. Always present, an
-     &nbsp; where a button has nothing to say, so the glyphs above stay on
-     one baseline down the column. */
-  .modal-btn-cap { font-size: 0.55rem; font-weight: 700; line-height: 1.1; letter-spacing: 0.02em; text-align: center; }
+  .modal-btn svg { width: 22px; height: 22px; display: block; fill: currentColor; }
+  /* The bank/port square is the one button carrying something its glyph
+     cannot say: the rate this composition would go at — 4:1 to the bank, 3:1
+     or 2:1 through a port. A smaller glyph makes the room for it, so "give 2"
+     and "give 4" stop looking like the same button. */
+  .modal-btn.with-rate svg { width: 18px; height: 18px; }
+  .modal-btn-cap { font-size: 0.55rem; font-weight: 700; line-height: 1; letter-spacing: 0.02em; }
+  /* Holds a row's space where a button would be but isn't — a seat that has
+     not answered yet — so the checks down the pane stay on one x. */
+  .modal-btn-gap { width: 44px; height: 44px; flex: none; }
+  /* Pushes what follows to the right edge of its row: the quiet Accept on a
+     quoted offer, and Send under it at the same x. */
+  .modal-fill { flex: 1 1 auto; min-width: 0; }
   .pick-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.3rem 0 0.7rem; }
   .modal-note { font-size: 0.85rem; color: var(--muted); margin: 0.4rem 0 0.7rem; }
   /* The robber's victims are seats, not resources, so they get plain buttons
@@ -442,92 +475,73 @@
      stacked, because a seat's name is far too wide to sit five to a row. */
   .steal-row { display: flex; flex-direction: column; gap: 0.35rem; margin: 0.3rem 0 0.2rem; }
   .steal-option { display: flex; align-items: center; gap: 0.5rem; text-align: left; }
-  /* A trade nobody is editing: only the cards actually in it, what leaves
-     this hand on the left and what arrives on the right, whichever seat
-     proposed it (see GIVE_LABEL/GET_LABEL). Reading a two-card offer used to
-     mean picking two lit tiles out of ten dimmed ones — every resource was
-     always drawn, on both sides — so the thing being read is now the only
-     thing drawn. The editable rows below are still all five: those reflow
-     under the cursor between clicks if they aren't. */
-  .trade-line {
-    display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
-    gap: 0.55rem; margin: 0.5rem 0;
-  }
-  .trade-line .pick-row { margin: 0; gap: 0.25rem; }
+  /* A trade nobody is editing, read as "[left] for [right]": only the cards
+     actually in it. Which way round follows one convention everywhere in the
+     modal — the colour pip beside a line is the seat *giving*, so left of
+     "for" is what that seat hands over, and a seat's accept therefore mirrors
+     the offer it answers. Left-aligned, never centred: every line starts at
+     the same x whether it holds one card or three. `.small` is the 30x40
+     variant, for a line sharing its row with a swatch and a button. */
+  .trade-line { display: flex; align-items: center; gap: 0.55rem; }
+  .trade-line .pick-row { margin: 0; gap: 0.25rem; flex-wrap: nowrap; }
+  .trade-line.small .card { width: 30px; height: 40px; }
+  .trade-line.small .card svg { width: 18px; height: 18px; }
   .trade-arrow { flex: none; font-size: 0.85rem; font-style: italic; line-height: 1; color: var(--muted); }
-  /* The offer a counter is a reply to, kept on screen above the reply being
-     built. Countering used to replace the offer with an editable copy of
-     itself, which is exactly the moment you most want to see what you were
-     sent. */
-  .trade-quote {
-    border-left: 2px solid var(--border); padding: 0.1rem 0 0.1rem 0.6rem; margin: 0.2rem 0 0.6rem;
+  /* The composer, offers and counters alike: two rows of all five resources,
+     give over get, "for" centred across the rows' own width rather than the
+     modal's. All five always, so a row doesn't reflow under the cursor
+     between clicks. The YOU GIVE / YOU GET captions are gone — give over get
+     with "for" between them already reads in that order — and so is the
+     sentence that used to restate the pile below the rows. */
+  .trade-compose {
+    display: flex; flex-direction: column; align-items: stretch; gap: 0.65rem; width: max-content;
   }
-  .trade-quote .trade-line { margin: 0.25rem 0 0; justify-content: flex-start; }
-  .trade-quote-who { font-size: 0.78rem; color: var(--muted); }
-  /* The two editable rows, Give above Get: all five resources, a tap adds one
-     of that card to that side, and the "-" under a card that is in the trade
-     takes one back off. No wrap-round at the ceiling any more — a tap that
-     used to silently empty the pile now does nothing, and the ceiling itself
-     is named in the line above the rows (see dealSummary). */
-  .trade-row { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; margin-bottom: 0.4rem; }
-  .trade-row .pick-row { margin: 0; justify-content: center; align-items: flex-start; }
-  .trade-row-label {
-    font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em; color: var(--muted);
-  }
-  /* Card over its own minus button. The button keeps its space when there is
-     nothing to subtract (visibility, not display) so the row of cards doesn't
-     lift and drop as counts come and go. */
-  .pick-stack { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; }
-  .pick-minus {
-    width: 34px; height: 18px; padding: 0; border-radius: 4px; line-height: 1;
-    font-size: 0.8rem; font-weight: 700;
-  }
-  .pick-minus.hidden { visibility: hidden; }
+  .trade-row { display: flex; gap: 0.3rem; }
+  .trade-for { text-align: center; font-size: 0.85rem; font-style: italic; line-height: 1; color: var(--muted); }
   /* Reuses .card's own size/shape (see the hand section) so a tile in the
      modal looks exactly like the card it represents — just selectable and
      dimmable on top of that. Every mode that picks a resource uses these:
      trade give/get, discard, Monopoly, Year of Plenty. */
-  .pick-card { cursor: pointer; border: 2px solid transparent; }
-  .pick-card.selected { border-color: var(--accent); }
+  .pick-card { cursor: pointer; }
+  .pick-card.selected { border: 2px solid var(--accent); }
   .pick-card.disabled { opacity: 0.28; cursor: default; pointer-events: none; }
   /* A card asked for or piled up past what the hand actually holds — shaded
      in place instead of spelling it out below the row, so which resource is
      short is obvious without reading a sentence. */
   .card.shortfall { opacity: 0.4; }
-  .pending-offer-btn {
-    width: 32px; height: 32px; padding: 0; border-radius: 8px;
-    display: flex; align-items: center; justify-content: center; flex: none;
-  }
-  .pending-offer-btn svg { width: 18px; height: 18px; fill: currentColor; }
-  /* Answers to the human's own open offer: one block a seat, the seat and
-     its Take button on the first line and the deal itself indented under it.
-     Two lines rather than one because a seat name, a three-card counter and
-     a button do not fit across a phone — laid out in one row they either
-     wrapped (one answer two lines tall beside its single-line neighbours) or
-     pushed the Take buttons off the edge of the modal, where they could not
-     be pressed at all. Stacked, every answer is the same shape at every
-     width and the buttons line up down the right edge on their own. */
-  .responses { display: flex; flex-direction: column; margin: 0.5rem 0 0.2rem; }
-  .responses-label {
-    font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em;
-    color: var(--muted); margin-bottom: 0.3rem;
-  }
-  .response { margin-bottom: 0.55rem; }
-  .response-top { display: flex; align-items: center; gap: 0.4rem; }
-  .response-who {
-    flex: 1 1 auto; min-width: 0; font-size: 0.82rem;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
-  .response-top .swatch { width: 12px; height: 12px; flex: none; }
-  /* Indented to the name above it, and scrollable rather than wrapping: a
-     counter is at most three cards a side, which fits everywhere the modal
-     itself does, but a hand of chips must never be what widens the modal. */
-  .response-deal {
-    display: flex; align-items: center; gap: 0.35rem; margin: 0.25rem 0 0 1.1rem;
-    overflow-x: auto;
-  }
-  .response-deal .pick-row { margin: 0; gap: 0.2rem; flex-wrap: nowrap; }
-  .response-kind { font-size: 0.8rem; color: var(--muted); }
+  /* In the composer the count badge is also how you take one back off: tap
+     the tile to add, tap its badge to subtract. That replaced a strip of
+     minus buttons under each row, which doubled the composer's height to
+     carry five controls that were blank most of the time. Clickable even on a
+     dimmed tile — a counter loaded from an ask this hand cannot cover is the
+     one place where subtracting is the only move left. */
+  .count-minus { cursor: pointer; }
+  .pick-card.disabled .count-minus { pointer-events: auto; }
+  /* The acceptance pane: this seat's own open offer, a rule, then every other
+     seat in seat order — swatch, whatever it answered, and the check that
+     takes that deal. One row a seat at a fixed height, all left-aligned, so
+     the pane reads down the table instead of as blocks of different shapes;
+     a seat still to answer keeps its row, dims its swatch and says nothing,
+     which is exactly what is known about it. */
+  .pane { display: flex; flex-direction: column; gap: 0.3rem; align-self: stretch; }
+  .pane-row { display: flex; align-items: center; gap: 0.5rem; min-height: 44px; }
+  .pane-row.quiet { opacity: 0.35; }
+  .pane-row .trade-line { flex: 1 1 auto; min-width: 0; }
+  .pane-rule { border-top: 1px solid var(--border); align-self: stretch; }
+  /* Only inside the pane, where the rows above and below it are 0.3rem apart;
+     between a quoted offer and the reply to it the body's own 1rem gap is
+     already the separation. */
+  .pane > .pane-rule { margin: 0.2rem 0; }
+  /* A counter being written: their offer quoted on top with the quiet Accept
+     that takes it as it stands, a rule, then this seat's own reply with Send
+     at that Accept's x. The offer used to be replaced by an editable copy of
+     itself — so the one thing you were answering vanished the moment you
+     started answering it. */
+  .counter-row { display: flex; align-items: center; gap: 0.5rem; align-self: stretch; }
+  /* The colour pip that names a seat beside a trade line — smaller than the
+     player list's own swatch, which sits beside a name rather than a row of
+     cards. */
+  .seat-pip { width: 12px; height: 12px; flex: none; }
   /* Touch has no hover to fall back on, and the targets are only a few screen
      pixels wide once the board scales down to a phone. */
   .clickable-vertex:active { fill: color-mix(in srgb, var(--accent) 50%, white); }
@@ -651,17 +665,22 @@
 </div>
 <!-- The one modal every choice that isn't a place on the board goes
      through — six modes, listed with what opens each above openModal().
-     Layout is the same for all of them: the mode's own body on the left,
-     a docked column of captioned buttons on the right (renderModal). -->
+     Layout is the same for all of them: a title row naming the state, with
+     the mode's one way out as a plain glyph at its right; under it the
+     mode's own body, and beside that a column of icon buttons for whatever
+     the mode can do next (renderModal). -->
 <div id="modal">
   <div id="modal-inner">
-    <div id="modal-main">
-      <div id="modal-head">
-        <h3 id="modal-title"></h3>
-      </div>
-      <div id="modal-body"></div>
+    <div id="modal-head">
+      <h3 id="modal-title"></h3>
+      <button id="modal-close" hidden>
+        <svg viewBox="0 0 512 512"><use href="#icon-close"></use></svg>
+      </button>
     </div>
-    <div id="modal-actions"></div>
+    <div id="modal-row">
+      <div id="modal-body"></div>
+      <div id="modal-actions"></div>
+    </div>
   </div>
 </div>
 <div id="layout">
@@ -2025,23 +2044,34 @@ const MODAL_AUTO = new Set(["discard", "steal"]);
 // closing it only backs out to the hex list, not out of the move.
 const MODAL_DISMISSIBLE = new Set(["trade", "monopoly", "year-of-plenty", "steal"]);
 
-// A right-column button: a glyph over a word. `label` is the full
-// tooltip/screen-reader sentence, `caption` the word drawn under the glyph —
-// which every button in the column has, because the column reuses three
-// glyphs across four modes and they do not mean the same thing twice. The
-// same X is Cancel while composing, Pass on somebody's offer and Decline all
-// on your own; the same paper plane is Offer and Send counter. Without the
-// word the column is a guess.
-function modalActionButton(icon, label, {primary = true, caption = ""} = {}) {
-  const attrs = {title: label, "aria-label": label};
-  if (primary) attrs.class = "primary";
-  const btn = html("button", attrs);
+// One button size everywhere in the modal: a 44px square carrying a glyph
+// and nothing else. `label` is the full tooltip/screen-reader sentence — the
+// only place the word lives, now that the title row names the state the glyph
+// is answering (an X under "Trade Offer" is Cancel, under "Trade Offer
+// Received" it is Pass, and a caption saying so was the heading twice).
+// `sub` is the one exception, the bank/port square's rate: see bankTradeButton.
+function modalActionButton(icon, label, {primary = true, sub = ""} = {}) {
+  const classes = ["modal-btn"];
+  if (primary) classes.push("primary");
+  if (sub) classes.push("with-rate");
+  const btn = html("button", {title: label, "aria-label": label, class: classes.join(" ")});
   btn.appendChild(iconSvg(icon));
-  // Non-breaking space, not "": a captionless button has to keep the caption's
-  // height or its glyph sits lower than its neighbours' (see the bank button,
-  // whose second line is its rate).
-  btn.appendChild(html("span", {class: "modal-btn-cap"}, caption || "\u00a0"));
+  if (sub) btn.appendChild(html("span", {class: "modal-btn-cap"}, sub));
   return btn;
+}
+
+// The mode's one way out, drawn as a plain glyph at the top right of the
+// title row rather than as a button in the action column: an X is the same
+// shape in all four trade states and its meaning is the state's, which the
+// title already names. Called by every mode that has a way out; a mode that
+// doesn't (a forced discard) simply never calls it and the glyph stays
+// hidden — see renderModal, which hides it again before each render.
+function modalCloseGlyph(label, onClick) {
+  const btn = document.getElementById("modal-close");
+  btn.hidden = false;
+  btn.setAttribute("title", label);
+  btn.setAttribute("aria-label", label);
+  btn.onclick = onClick;
 }
 
 // One card tile — the same visual .card the hand section uses (via
@@ -2065,11 +2095,6 @@ function pickCard(resourceIdx, {selected, disabled, shortfall, count, forceCount
   return card;
 }
 
-// A trade reads the same way round wherever it appears: what leaves the
-// hand on the left, what arrives on the right.
-const GIVE_LABEL = "YOU GIVE";
-const GET_LABEL = "YOU GET";
-
 // The most of one resource this seat can put on the give side. Two ceilings
 // meet here and the composer has to allow the higher of them, or a route out
 // of the modal becomes unreachable:
@@ -2090,61 +2115,80 @@ function giveCeiling(p, r) {
   return Math.min(held, Math.max(MAX_TRADE_CARDS, ratio));
 }
 
+// The composer, and the same one whether an offer is being opened or a
+// counter written: give over get with "for" between them, centred across the
+// rows' own width rather than the modal's. No YOU GIVE / YOU GET captions —
+// two rows in that order, read through the word "for", say it already.
+function composerRows(p) {
+  const wrap = html("div", {class: "trade-compose"});
+  wrap.appendChild(composerRow(p, "give"));
+  wrap.appendChild(html("div", {class: "trade-for"}, "for"));
+  wrap.appendChild(composerRow(p, "want"));
+  return wrap;
+}
+
 // One side of the trade, editable: all five resources, always, so the row
-// doesn't reflow under the cursor between clicks. A tap adds one of that
-// card to this side, up to its ceiling and then no further — it used to wrap
-// back to none there, which reads as a misclick rather than as a limit. The
-// "-" under a card takes one back off, and keeps its space when there is
-// nothing to take so the cards don't lift and drop. A resource already on the
-// other side is dimmed: the two halves of a trade are disjoint (see
-// `round_bundle_from_wire`).
-function tradeRow(p, which, label) {
+// doesn't reflow under the cursor between clicks. A tap on a tile adds one of
+// that card to this side, up to its ceiling and then no further — it used to
+// wrap back to none there, which reads as a misclick rather than as a limit —
+// and a tap on that tile's own count badge takes one back off, in place of the
+// strip of minus buttons this row used to carry under it. A resource already
+// on the other side is dimmed: the two halves of a trade are disjoint (see
+// `round_bundle_from_wire`), as is one the hand doesn't hold at all.
+function composerRow(p, which) {
   const mine = which === "give" ? tradeGive : tradeWant;
   const other = which === "give" ? tradeWant : tradeGive;
-  const wrap = html("div", {class: "trade-row"});
-  wrap.appendChild(html("div", {class: "trade-row-label"}, label));
-  const row = html("div", {class: "pick-row"});
+  const row = html("div", {class: "trade-row"});
   for (let r = 0; r < board.resources.length; r++) {
+    const name = board.resources[r];
     const ceiling = which === "give" ? giveCeiling(p, r) : MAX_TRADE_CARDS;
     // A give side loaded from someone else's ask (countering) can start
     // above what the hand actually holds — shaded rather than left to a
     // sentence below the rows to explain.
-    const held = p.hand ? (p.hand[board.resources[r]] || 0) : 0;
+    const held = p.hand ? (p.hand[name] || 0) : 0;
     const shortfall = which === "give" && mine[r] > held;
-    const stack = html("div", {class: "pick-stack"});
-    stack.appendChild(pickCard(r, {
+    const card = pickCard(r, {
       selected: mine[r] > 0,
       disabled: other[r] > 0 || ceiling === 0,
       shortfall,
       count: mine[r],
       forceCount: true,
-      title: shortfall ? `You only hold ${held} ${board.resources[r]}`
-        : mine[r] < ceiling ? `Add a ${board.resources[r]}` : board.resources[r],
+      title: shortfall ? `You only hold ${held} ${name}`
+        : mine[r] < ceiling ? `Add a ${name}` : name,
       onClick: () => {
         if (mine[r] < ceiling) { mine[r] += 1; renderModal(); }
       },
-    }));
-    const minus = html("button", {
-      class: mine[r] > 0 ? "pick-minus" : "pick-minus hidden",
-      title: `One fewer ${board.resources[r]}`,
-      "aria-label": `One fewer ${board.resources[r]}`,
-    }, "\u2212");
-    minus.addEventListener("click", () => { mine[r] -= 1; renderModal(); });
-    stack.appendChild(minus);
-    row.appendChild(stack);
+    });
+    // The badge only exists once there is something to subtract, which is
+    // exactly when the subtract control should be there — so it is the badge,
+    // rather than a second control appearing beside it.
+    const badge = card.querySelector(".count");
+    if (badge) {
+      badge.classList.add("count-minus");
+      badge.setAttribute("title", `One fewer ${name}`);
+      badge.addEventListener("click", (e) => {
+        // Or the tile under it would count the same tap as an add.
+        e.stopPropagation();
+        mine[r] -= 1;
+        renderModal();
+      });
+    }
+    row.appendChild(card);
   }
-  wrap.appendChild(row);
-  return wrap;
+  return row;
 }
 
-// A trade nobody is editing: the cards in it and nothing else. Always the
-// giving side first and the wanting side second, whoever's deal it is — so
-// it reads as "[left] for [right]" the way the sentence naming whose offer
-// this is expects. `leftShortfall`/`rightShortfall`, if given, mark which of
-// that side's resources this seat doesn't hold enough of, shaded in place of
-// a sentence explaining the same thing below the row.
-function tradeLine(left, right, {leftShortfall, rightShortfall} = {}) {
-  const line = html("div", {class: "trade-line"});
+// A trade nobody is editing: the cards in it and nothing else, read as
+// "[left] for [right]". Whose deal it is comes from the colour pip beside the
+// line, and the pip is always the seat *giving* — so left of "for" is what
+// that seat hands over, which makes a seat's accept the mirror of the offer it
+// answers rather than a repeat of it. `leftShortfall`/`rightShortfall`, if
+// given, mark which of that side's resources this seat doesn't hold enough
+// of, shaded in place of a sentence explaining the same thing below the row.
+// `small` is the 30x40 tile, for a line that shares its row with a swatch and
+// a button (a pane row, a quoted offer).
+function tradeLine(left, right, {leftShortfall, rightShortfall, small} = {}) {
+  const line = html("div", {class: small ? "trade-line small" : "trade-line"});
   line.appendChild(bundleChips(left, {shortfall: leftShortfall}));
   line.appendChild(html("span", {class: "trade-arrow"}, "for"));
   line.appendChild(bundleChips(right, {shortfall: rightShortfall}));
@@ -2243,17 +2287,23 @@ function renderModal() {
   const actions = document.getElementById("modal-actions");
   body.innerHTML = "";
   actions.innerHTML = "";
+  // Hidden by default and put back by whichever mode has a way out (see
+  // modalCloseGlyph), so a mode that doesn't need to say anything about it
+  // doesn't have to.
+  const close = document.getElementById("modal-close");
+  close.hidden = true;
+  close.onclick = null;
   const g = groupActions(state.legal_actions);
 
   if (modalMode === "discard") renderDiscardMode(g, title, body);
-  else if (modalMode === "steal") renderStealMode(g, title, body, actions);
+  else if (modalMode === "steal") renderStealMode(g, title, body);
   else if (modalMode === "monopoly") renderMonopolyMode(g, title, body, actions);
   else if (modalMode === "year-of-plenty") renderYearOfPlentyMode(g, title, body, actions);
   else renderTradeMode(title, body, actions);
 
-  // A forced discard has nothing to put in the button column, and an empty
-  // 96px gutter reads as a button that failed to render rather than as no
-  // button at all.
+  // A forced discard, an acceptance pane and a counter being written all
+  // have nothing to put in the button column, and an empty gutter reads as a
+  // button that failed to render rather than as no button at all.
   actions.style.display = actions.children.length ? "" : "none";
 }
 
@@ -2287,10 +2337,11 @@ function renderDiscardMode(g, title, body) {
 // The second half of a robber move: the hex is already picked (it's the one
 // still highlighted behind this), and this is who to rob on it. Seats, not
 // resources, so plain buttons with the player list's own colour swatch.
-function renderStealMode(g, title, body, actions) {
+function renderStealMode(g, title, body) {
   const move = robberMove(g);
   const options = (move && move.targets[pendingRobberHex]) || [];
   title.textContent = "Steal from";
+  modalCloseGlyph("Back to the hexes", closeModal);
   const row = html("div", {class: "steal-row"});
   for (const a of options) {
     const btn = html("button", {class: "steal-option"});
@@ -2307,10 +2358,6 @@ function renderStealMode(g, title, body, actions) {
     row.appendChild(btn);
   }
   body.appendChild(row);
-
-  const cancel = modalActionButton("close", "Back to the hexes", {primary: false, caption: "Back"});
-  cancel.addEventListener("click", closeModal);
-  actions.appendChild(cancel);
 }
 
 // One tap picks, same as Monopoly's own single choice; a second, separate
@@ -2319,6 +2366,7 @@ function renderStealMode(g, title, body, actions) {
 // takes cards from other players gets a chance to back out first.
 function renderMonopolyMode(g, title, body, actions) {
   title.textContent = "Play Monopoly";
+  modalCloseGlyph("Cancel", closeModal);
   body.appendChild(html("div", {class: "modal-note"},
     "Take every card of one resource from every other player, then confirm."));
   const row = html("div", {class: "pick-row"});
@@ -2332,11 +2380,10 @@ function renderMonopolyMode(g, title, body, actions) {
   body.appendChild(row);
   if (monopolyPick !== null) {
     const a = g.monopoly.find((a) => a.a === monopolyPick);
-    const btn = modalActionButton("check", "Confirm", {caption: "Confirm"});
+    const btn = modalActionButton("check", "Confirm");
     btn.addEventListener("click", () => { monopolyPick = null; closeModal(); sendAction(a); });
     actions.appendChild(btn);
   }
-  actions.appendChild(modalCancelButton());
 }
 
 // The pair `g.yearOfPlenty` actually offers for two resource names, order
@@ -2359,6 +2406,7 @@ function yopAction(g, name0, name1) {
 // card leaves the bank.
 function renderYearOfPlentyMode(g, title, body, actions) {
   title.textContent = "Play Year of Plenty";
+  modalCloseGlyph("Cancel", closeModal);
   body.appendChild(html("div", {class: "modal-note"},
     "Take two cards from the bank — click a card, then click it again for a second, then confirm."));
   const row = html("div", {class: "pick-row"});
@@ -2384,11 +2432,10 @@ function renderYearOfPlentyMode(g, title, body, actions) {
   body.appendChild(row);
   if (yopPicks.length === 2) {
     const a = yopAction(g, board.resources[yopPicks[0]], board.resources[yopPicks[1]]);
-    const btn = modalActionButton("check", "Confirm", {caption: "Confirm"});
+    const btn = modalActionButton("check", "Confirm");
     btn.addEventListener("click", () => { yopPicks = []; closeModal(); sendAction(a); });
     actions.appendChild(btn);
   }
-  actions.appendChild(modalCancelButton());
 }
 
 // A bundle as a row of card tiles, one per resource in it, count badges as a
@@ -2414,11 +2461,19 @@ function seatSwatch(seat) {
   return swatch;
 }
 
-function smallButton(icon, label, onClick) {
-  const btn = html("button", {class: "pending-offer-btn", title: label, "aria-label": label});
-  btn.appendChild(iconSvg(icon));
-  btn.addEventListener("click", onClick);
-  return btn;
+// The colour pip that names the seat beside a trade line. Which seat that is
+// follows one convention throughout the modal: the pip is the seat *giving*,
+// so left of "for" is always what the pip hands over (see tradeLine).
+function seatPip(seat) {
+  const pip = seatSwatch(seat);
+  pip.classList.add("seat-pip");
+  return pip;
+}
+
+// A 44px square holding a row's place where a button would be but isn't —
+// a seat that has not answered yet — so the checks down a pane stay on one x.
+function buttonGap() {
+  return html("div", {class: "modal-btn-gap"});
 }
 
 function answerOffer(offer, kind, bundle) {
@@ -2443,32 +2498,53 @@ function postRound(path, body) {
   });
 }
 
-// Every answer to this seat's own open offer, one row a seat: who, what the
-// deal is from this seat's side, and a button to take it. An accept has no
-// cards of its own to show — it is the offer above, unchanged — so its row
-// says so in words rather than repeating the same two piles a third time.
-function responsesSection(round) {
-  const wrap = html("div", {class: "responses"});
-  wrap.appendChild(html("div", {class: "responses-label"}, "ANSWERS"));
-  for (const r of round.responses) {
-    const block = html("div", {class: "response"});
-    const top = html("div", {class: "response-top"});
-    top.appendChild(seatSwatch(r.seat));
-    top.appendChild(html("div", {class: "response-who"}, seatFullLabel(r.seat)));
-    top.appendChild(smallButton("check", `Trade with ${seatFullLabel(r.seat)}`,
-      () => postRound("/trade/round/choose", {seat: r.seat, bundle: r.bundle})));
-    block.appendChild(top);
+// The acceptance pane: this seat's own open offer on top, a rule, then one
+// row for every other seat in seat order — its colour pip, whatever it
+// answered, and the check that takes that deal. Read down, it is the table's
+// answer to one question, which is why every seat gets a row whether it has
+// answered or not: a seat still to answer dims its pip and says nothing,
+// exactly what is known about it, where a list of only the answers so far
+// left "who is left" to be worked out from the seats that aren't in it.
+//
+// Every line is drawn from the giving seat's own side (see tradeLine), so an
+// accept is our offer mirrored and a counter is what that seat would hand
+// over first — the pip beside a row and the cards left of "for" always agree.
+function acceptancePane(round) {
+  const wrap = html("div", {class: "pane"});
+  const signed = round.offer.bundle;   // positive is what this seat gets
+  const iGive = signed.map((n) => Math.max(0, -n));
+  const iGet = signed.map((n) => Math.max(0, n));
 
-    const deal = html("div", {class: "response-deal"});
-    if (r.kind === "counter") {
-      deal.appendChild(bundleChips(r.bundle.map((n) => Math.max(0, -n))));
-      deal.appendChild(html("span", {class: "trade-arrow"}, "for"));
-      deal.appendChild(bundleChips(r.bundle.map((n) => Math.max(0, n))));
-    } else {
-      deal.appendChild(html("span", {class: "response-kind"}, "takes it as offered"));
+  const ours = html("div", {class: "pane-row"});
+  ours.appendChild(seatPip(state.seat));
+  ours.appendChild(tradeLine(iGive, iGet, {small: true}));
+  wrap.appendChild(ours);
+  wrap.appendChild(html("div", {class: "pane-rule"}));
+
+  const seats = state.players.map((pl) => pl.seat).sort((a, b) => a - b);
+  for (const seat of seats) {
+    if (seat === state.seat) continue;
+    const answer = (round.responses || []).find((r) => r.seat === seat);
+    const row = html("div", {class: answer ? "pane-row" : "pane-row quiet"});
+    row.appendChild(seatPip(seat));
+    if (!answer) {
+      // No text and no chip: the dim pip and the empty row are the whole
+      // message, and a "waiting…" beside each of them was three copies of it.
+      row.appendChild(html("div", {class: "modal-fill"}));
+      row.appendChild(buttonGap());
+      wrap.appendChild(row);
+      continue;
     }
-    block.appendChild(deal);
-    wrap.appendChild(block);
+    // A counter's bundle is signed towards us the same way the offer is, so
+    // what that seat gives is what we get.
+    const theirGive = answer.kind === "counter" ? answer.bundle.map((n) => Math.max(0, n)) : iGet;
+    const theirWant = answer.kind === "counter" ? answer.bundle.map((n) => Math.max(0, -n)) : iGive;
+    row.appendChild(tradeLine(theirGive, theirWant, {small: true}));
+    const take = modalActionButton("check", `Trade with ${seatFullLabel(seat)}`);
+    take.addEventListener("click",
+      () => postRound("/trade/round/choose", {seat: answer.seat, bundle: answer.bundle}));
+    row.appendChild(take);
+    wrap.appendChild(row);
   }
   return wrap;
 }
@@ -2514,21 +2590,20 @@ function dealSummary(p, myTurn) {
   return deal;
 }
 
-// One layout, four states. Every state draws the same three things in the
-// same order — a line saying what is happening, the trade itself, and the
-// buttons that answer it — and differs only in whether the trade is a
-// read-only line or the two editable rows:
+// One layout, four states. Each names itself in the title row and puts its
+// one way out under the close glyph there; what differs below is only whether
+// the trade is a composer, a read-only line, or a pane of them:
 //
-//   compose   my turn, nothing open   editable; bank/port, offer, cancel
-//   round     my offer is out         a line, plus every answer with a Take
-//   offer     another seat's offer    a line; accept, counter, pass
-//   counter   editing a reply         their offer quoted, my reply editable
+//   compose   my turn, nothing open   Trade Offer          composer; Offer, Bank/Port
+//   round     my offer is out         Trade Acceptance     a pane, a check per answer
+//   offer     another seat's offer    Trade Offer Received a line; Accept, Counter
+//   counter   editing a reply         Trade Counteroffer   their line, then a composer
 //
 // The read-only states used to draw the editable rows greyed out — ten tiles
 // with two of them lit — which is why they now draw a line of just the cards
-// in the trade instead.
+// in the trade instead. Direction is one rule throughout: the colour pip is
+// the seat giving, so left of "for" is what that seat hands over.
 function renderTradeMode(title, body, actions) {
-  title.textContent = "Trade";
   const p = state.players.find((pl) => pl.seat === state.seat);
   const myTurn = state.phase === "MAIN" && state.to_move === state.seat;
   // A counter half-written against an offer that is no longer standing —
@@ -2542,12 +2617,27 @@ function renderTradeMode(title, body, actions) {
   const offer = (state.pending || [])[0] || null;
   const round = state.trade_round;
   const mode = counterOf ? "counter" : offer ? "offer" : round ? "round" : "compose";
-  const note = (text) => body.appendChild(html("div", {class: "modal-note"}, text));
 
   if (mode === "compose") {
-    note(dealSummary(p, myTurn));
-    body.appendChild(tradeRow(p, "give", GIVE_LABEL));
-    body.appendChild(tradeRow(p, "want", GET_LABEL));
+    title.textContent = "Trade Offer";
+    modalCloseGlyph("Cancel", closeModal);
+    body.appendChild(composerRows(p));
+
+    // Offer above Bank/Port: the table is what the composer is for, and the
+    // bank is the fallback when nobody at it wants the deal.
+    const ready = myTurn && composerReady(p) && offerableToPlayers();
+    // dealSummary is the reason a route out is shut — an empty composer, a
+    // hand that can't cover it, a pile over the table's rule, a turn that
+    // isn't yours. It used to be drawn as a sentence under the rows; now it
+    // is what the greyed-out button says when you ask it why.
+    const send = modalActionButton("send", ready ? "Offer this to every other player"
+      : dealSummary(p, myTurn));
+    if (ready) {
+      send.addEventListener("click", () => postRound("/trade/round", {give: tradeGive, want: tradeWant}));
+    } else {
+      send.disabled = true;
+    }
+    actions.appendChild(send);
 
     // A bank/port trade is `ratio` of one resource for one of another, at the
     // rate this seat's ports set (`state.trade_ratios`). The composition has
@@ -2564,30 +2654,16 @@ function renderTradeMode(title, body, actions) {
       ? state.legal_actions.find((a) => a.type === "BANK_TRADE" && a.a === give && a.b === want)
       : null;
     actions.appendChild(bankTradeButton(bank, give));
-
-    const send = modalActionButton("send", "Offer this to every other player", {caption: "Offer"});
-    if (myTurn && composerReady(p) && offerableToPlayers()) {
-      send.addEventListener("click", () => postRound("/trade/round", {give: tradeGive, want: tradeWant}));
-    } else {
-      send.disabled = true;
-    }
-    actions.appendChild(send);
-    actions.appendChild(modalCancelButton());
     return;
   }
 
   if (mode === "round") {
-    const signed = round.offer.bundle;
-    note(round.responses.length ? "Your offer — take a deal, or turn them all down:"
-      : (round.awaiting || []).length ? `Your offer — waiting on ${round.awaiting.map(seatFullLabel).join(", ")}…`
-      : "Your offer — nobody wants it.");
-    body.appendChild(tradeLine(signed.map((n) => Math.max(0, -n)), signed.map((n) => Math.max(0, n))));
-    if (round.responses.length) body.appendChild(responsesSection(round));
-
-    const decline = modalActionButton("close", "Turn every answer down and close the round",
-      {primary: false, caption: round.responses.length ? "Decline all" : "Close"});
-    decline.addEventListener("click", () => postRound("/trade/round/choose", {decline: true}));
-    actions.appendChild(decline);
+    // No action column: the checks live in the pane's own rows, one per
+    // answer, and turning the whole round down is the close glyph.
+    title.textContent = "Trade Acceptance";
+    modalCloseGlyph((round.responses || []).length ? "Turn every answer down and close the round"
+      : "Close the round", () => postRound("/trade/round/choose", {decline: true}));
+    body.appendChild(acceptancePane(round));
     return;
   }
 
@@ -2596,20 +2672,21 @@ function renderTradeMode(title, body, actions) {
     // leaves this hand, and what they give is what lands in it.
     const iGive = offer.bundle.map((n) => Math.max(0, n));
     const iGet = offer.bundle.map((n) => Math.max(0, -n));
-    note(`${seatFullLabel(offer.actor)} offers:`);
-    const covered = handCovers(p, iGive);
+    title.textContent = "Trade Offer Received";
+    modalCloseGlyph("Pass — turn this offer down", () => answerOffer(offer, "pass"));
+    const row = html("div", {class: "counter-row"});
+    row.appendChild(seatPip(offer.actor));
     const shortfall = iGive.map((n, r) => n > (p.hand[board.resources[r]] || 0));
-    // The sentence names the actor, so the line has to read as their deal —
-    // their give first, their want second — which is this seat's get and
-    // give in reverse.
-    body.appendChild(tradeLine(iGet, iGive, {rightShortfall: shortfall}));
+    // Their pip, so their deal: their give first, their want second — this
+    // seat's get and give in that order reversed.
+    row.appendChild(tradeLine(iGet, iGive, {rightShortfall: shortfall}));
+    body.appendChild(row);
 
-    const accept = modalActionButton("check", "Take this trade", {caption: "Accept"});
-    if (covered) accept.addEventListener("click", () => answerOffer(offer, "accept"));
+    const accept = modalActionButton("check", "Take this trade");
+    if (handCovers(p, iGive)) accept.addEventListener("click", () => answerOffer(offer, "accept"));
     else accept.disabled = true;
     actions.appendChild(accept);
-    const counter = modalActionButton("send", "Reply with a different trade",
-      {primary: false, caption: "Counter"});
+    const counter = modalActionButton("send", "Reply with a different trade", {primary: false});
     counter.addEventListener("click", () => {
       // Start from their own offer, from this seat's side: countering is
       // almost always an edit of what you were sent, not a fresh trade.
@@ -2618,39 +2695,45 @@ function renderTradeMode(title, body, actions) {
       renderModal();
     });
     actions.appendChild(counter);
-    const pass = modalActionButton("close", "Turn this offer down", {primary: false, caption: "Pass"});
-    pass.addEventListener("click", () => answerOffer(offer, "pass"));
-    actions.appendChild(pass);
     return;
   }
 
-  // counter: their offer stays on screen, quoted, above the reply being
-  // built. It used to be replaced by an editable copy of itself — so the one
-  // thing you were answering vanished the moment you started answering it.
-  // Signed towards the actor, same as the "offer" mode above: their give is
-  // what leaves this hand's opposite (this seat's get), their want is what
-  // leaves this hand (this seat's give).
+  // counter: their offer stays on screen above the reply being built. It used
+  // to be replaced by an editable copy of itself — so the one thing you were
+  // answering vanished the moment you started answering it. Signed towards the
+  // actor, same as the "offer" mode above: their give is what lands in this
+  // hand, their want is what leaves it. No action column here either — the
+  // quiet Accept that takes their offer as it stands belongs on their row, and
+  // Send belongs on the reply's, at the same x.
+  title.textContent = "Trade Counteroffer";
+  modalCloseGlyph("Back to their offer", () => { counterOf = null; renderModal(); });
   const theirGive = counterOf.bundle.map((n) => Math.max(0, -n));
   const theirWant = counterOf.bundle.map((n) => Math.max(0, n));
-  const quote = html("div", {class: "trade-quote"});
-  quote.appendChild(html("div", {class: "trade-quote-who"}, `${seatFullLabel(counterOf.actor)} offered`));
-  quote.appendChild(tradeLine(theirGive, theirWant));
-  body.appendChild(quote);
-  note(dealSummary(p, true));
-  body.appendChild(tradeRow(p, "give", GIVE_LABEL));
-  body.appendChild(tradeRow(p, "want", GET_LABEL));
+  const quoted = html("div", {class: "counter-row"});
+  quoted.appendChild(seatPip(counterOf.actor));
+  quoted.appendChild(tradeLine(theirGive, theirWant, {small: true}));
+  quoted.appendChild(html("div", {class: "modal-fill"}));
+  const asStands = modalActionButton("check", "Accept their offer as it stands", {primary: false});
+  if (handCovers(p, theirWant)) asStands.addEventListener("click", () => answerOffer(counterOf, "accept"));
+  else asStands.disabled = true;
+  quoted.appendChild(asStands);
+  body.appendChild(quoted);
+  body.appendChild(html("div", {class: "pane-rule"}));
 
-  const send = modalActionButton("send", "Send this back as your counter", {caption: "Send"});
-  if (composerReady(p) && offerableToPlayers()) {
+  const reply = html("div", {class: "counter-row"});
+  reply.appendChild(composerRows(p));
+  reply.appendChild(html("div", {class: "modal-fill"}));
+  const ready = composerReady(p) && offerableToPlayers();
+  const send = modalActionButton("send", ready ? "Send this back as your counter"
+    : dealSummary(p, true));
+  if (ready) {
     // signed towards the actor: what they get is what I give
     send.addEventListener("click", () => answerOffer(counterOf, "counter", tradeGive.map((g, r) => g - tradeWant[r])));
   } else {
     send.disabled = true;
   }
-  actions.appendChild(send);
-  const back = modalActionButton("undo", "Back to their offer", {primary: false, caption: "Back"});
-  back.addEventListener("click", () => { counterOf = null; renderModal(); });
-  actions.appendChild(back);
+  reply.appendChild(send);
+  body.appendChild(reply);
 }
 
 // The bank's own rate, which is the worst one available; anything cheaper is
@@ -2678,17 +2761,9 @@ function bankTradeButton(action, give) {
     ? "Trade with the bank — pick one resource to give and one to get"
     : `Give ${ratio} ${board.resources[give]} for 1, ${viaPort ? `through your ${ratio}:1 port` : "to the bank"}`;
   const btn = modalActionButton(viaPort ? "ship" : "bank", label,
-    {caption: ratio === null ? "Bank" : `${ratio}:1`});
+    {primary: false, sub: ratio === null ? "Bank" : `${ratio}:1`});
   if (action) btn.addEventListener("click", () => { closeModal(); sendAction(action); });
   else btn.disabled = true;
-  return btn;
-}
-
-// The shared way out of every dismissible mode — the same thing Escape and a
-// backdrop click do (see the boot wiring), just as a button you can see.
-function modalCancelButton() {
-  const btn = modalActionButton("close", "Cancel", {primary: false, caption: "Cancel"});
-  btn.addEventListener("click", closeModal);
   return btn;
 }
 
@@ -2761,6 +2836,9 @@ document.getElementById("modal").addEventListener("click", (e) => {
   let start = {x: 0, y: 0};
   let startDrag = {x: 0, y: 0};
   head.addEventListener("pointerdown", (e) => {
+    // The close glyph lives in the handle: a press on it is a press of it,
+    // not the start of a drag.
+    if (e.target.closest("#modal-close")) return;
     dragging = true;
     start = {x: e.clientX, y: e.clientY};
     startDrag = {...modalDrag};

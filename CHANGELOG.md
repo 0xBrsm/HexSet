@@ -28,23 +28,33 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `hexset.trading.default_offer`/`default_respond`/`default_pick` (own gain,
   and the estimated gain of the other side) unless a bot implements
   `offer`/`respond`/`pick` itself.
-- The page's trade modal, in one shape for all four of its states. A trade
-  being built is two rows of five cards, Give over Get, each card stepped up
-  by a tap and back down by the `-` under it; a trade being read -- an offer
-  from another seat, your own open one, or any answer to it -- is a line of
-  just the cards in it. A sentence above the cards names the deal as it
-  stands and, when a route out is shut, why. Each button in the right-hand
-  column carries the word for what it does, so Cancel, Pass and Decline all
-  are no longer the same unlabelled X. Countering keeps the offer you were
-  sent on screen, quoted above the reply you are building, and starts that
-  reply from it. Seats are named as the rest of the page names them, so a
-  table of three `search2` bots reads as Player 2, Player 3 and Player 4.
+- The page's trade modal, in one shape for all four of its states, at one
+  width in all of them. The title names the state -- Trade Offer, Trade
+  Offer Received, Trade Counteroffer, Trade Acceptance -- and the one way
+  out of it is a plain glyph in that title row, so Cancel, Pass, Back and
+  Decline all are the same X where the heading says which it is. A trade
+  being built, offer or counter alike, is two rows of five cards, give over
+  get, "for" between them: a tap on a card adds one, a tap on its count
+  badge takes one back. A trade being read is a line of just the cards in
+  it, prefixed by the colour pip of the seat *giving* -- so left of "for" is
+  always what that pip hands over, and a seat's accept mirrors the offer it
+  answers. Your own open offer draws as an acceptance pane: your offer, a
+  rule, then one row per seat in seat order with the check that takes that
+  deal, a seat still to answer left blank. Every button in the modal is one
+  44px icon square, its word in the tooltip; the bank/port square keeps its
+  rate. Countering keeps the offer you were sent on screen, quoted above the
+  reply you are building with a quiet Accept for taking it as it stands, and
+  starts that reply from it. Seats are named as the rest of the page names
+  them, so a table of three `search2` bots reads as Player 2, Player 3 and
+  Player 4.
 - The give side of the composer counts up to the bank's own rate, not to
   `MAX_TRADE_CARDS`. A 4:1 sale could not be drawn at all before, so the
   bank button fired on whatever the row happened to show and took four
   cards for it; it is now offered only when the cards on the table *are*
   the rate, and the offer-to-players button only when both sides are within
-  the table's three-card rule.
+  the table's three-card rule. Whichever of the two buttons is out of
+  reach says why in its own tooltip, in place of the sentence that used to
+  sit above the rows.
 - `hexset.trading.execute_agreed`: one execution path for every agreed
   exchange, asking a bot side's gate fresh and taking a manual side's
   submission as its consent; `execute_trade` and the round's own execution

@@ -183,8 +183,8 @@ seat-token gated:
 
 The round is one line of the log, rewritten as it goes: the offer, each
 accept or counter as it lands, and how it ended -- `Player 1 (Ada) offers 2
-Wood for 1 Ore. Player 3 (heximax) accepts. Player 1 (Ada) traded 2 Wood to
-Player 3 (heximax) for 1 Ore.`, or `... Player 1 (Ada) declines.`, or
+Wood for 1 Ore. Player 3 (heximax) accepts. Traded with Player 3 (heximax).`
+(the bundle is already on the line), or `... Player 1 (Ada) declines.`, or
 `... Everyone declines.` the moment every seat has passed. Passes are not
 written one by one. The record underneath is discrete: every step is its
 own journal line (`kind: "note"`) and comes back on a restart.

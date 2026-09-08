@@ -460,8 +460,39 @@ def test_the_trade_round_is_in_the_log_and_a_pass_is_an_answer():
     session.open_round_for(0, received)
     session.execute_round_choice(0, 1, received)
     line = session.log_for(None)[-1]
-    assert line.endswith("accepts. Player 1 (Ada) traded 1 Wood to Player 2 (bot) for 1 Ore.")
+    # The bundle is already on the line: the close names only who it was with.
+    assert line.endswith("offers 1 Wood for 1 Ore. Player 2 (bot) accepts. Traded with Player 2 (bot).")
     assert game._state.hands[0][Resource.ORE] == 1 and game._state.hands[1][Resource.WOOD] == 1
+
+
+def test_a_manual_seat_with_no_cards_passes_at_once():
+    """A person holding nothing can neither accept nor counter, so the
+    broadcast is not put to them: no `pending`, not `awaiting`, a pass on
+    the record -- and a table of such seats reads "Everyone declines."."""
+    from hexset.board.terrain import NUM_RESOURCES, Resource
+    from hexset.game import Phase
+
+    game = a_game(seed=3)
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    for seat in range(4):
+        game._state.hands[seat] = [0] * NUM_RESOURCES
+    game._state.hands[0][Resource.WOOD] = 1
+    game._state.hands[1][Resource.ORE] = 1
+    session = a_session(game, {0, 1, 2, 3}, player_names={0: "Ada"})
+    for seat in range(4):
+        session.confirm_mode(seat)
+    received = [0, 0, 0, 0, 0]
+    received[Resource.ORE] = 1
+    received[Resource.WOOD] = -1
+
+    session.open_round_for(0, tuple(received))
+
+    round_ = session.open_round
+    assert round_.awaiting == {1}, "only the seat that holds cards is asked"
+    assert {r.seat for r in round_.responses if r.kind == RESPONSE_PASS} == {2, 3}
+    assert [t.b for t in game.pending] == [1]
+    assert "Everyone declines" not in session.log_for(None)[-1]
 
 
 def test_a_round_everyone_passes_on_reads_everyone_declines_at_once():

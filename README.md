@@ -57,14 +57,26 @@ One distribution, `hexset`, ships from `src/`:
     bot as a peer client of the API (embedded or external) and the ONNX
     Runtime model boundary. No PyTorch, no GPU required to play.
   - **`hexset.gym`** (`src/hexset/gym`) — a training-loop-facing gym: a
-    PettingZoo `AECEnv` (`HexSetAEC`) and a single-agent Gymnasium `Env`
-    (`HexSetEnv`, registered as `HexSet-v0`) on top of the same engine and
-    the same honest `action_mask` sample as everything above. See
-    [Gym](#gym) below.
+    lockstep multi-game environment (`LaneEnv`), a PettingZoo `AECEnv`
+    (`HexSetAEC`) and a single-agent Gymnasium `Env` (`HexSetEnv`,
+    registered as `HexSet-v0`) on top of the same engine and the same
+    honest `action_mask` sample as everything above. See [Gym](#gym)
+    below.
 
 Training — self-play, PPO, expert iteration — is not part of this repo. It
 lives in HexN, the sibling package this gym plays exported checkpoints
 from; see [Adding an opponent](#adding-an-opponent) below.
+
+## What belongs here
+
+HexSet is the engine and the gym. Everything about a *position* is this
+package's job: the rules and what is legal, the information set and its
+encoding, the game loops (one game, or many in lockstep), seating and board
+pairing, records and replay, and every seat's trade judgement -- including
+how a network checkpoint judges an exchange (`hexset.clients`). A training
+project drives HexSet through these; it does not re-implement any of them
+for its own runtime. If you find yourself writing, outside this package,
+something a bot with no model would still need, it belongs in here.
 
 ## Install
 
@@ -83,7 +95,8 @@ Extras:
   external bot process with no server of its own).
 - `.[export]` — onnx + onnxruntime, for building `.onnx` checkpoints.
 - `.[catanatron]` — pulls in Catanatron itself, for `hexset.catanatron` duels.
-- `.[gym]` — pettingzoo + gymnasium, for `hexset.gym` (see [Gym](#gym) below).
+- `.[gym]` — pettingzoo + gymnasium, for `hexset.gym`'s `HexSetAEC`/`HexSetEnv`
+  (`hexset.gym.LaneEnv` needs neither; see [Gym](#gym) below).
 
 `pip install -e ".[server,catanatron,test]"` covers everything below.
 
@@ -288,11 +301,52 @@ Confirm/Decline. Full endpoint shapes: [`docs/bot-api.md`](docs/bot-api.md)
 
 ## Gym
 
-`pip install -e ".[gym]"` adds two training-facing entry points on top of the
-engine. This is its own extra — `import hexset` stays numpy-only; only
-`import hexset.gym` needs `pettingzoo`/`gymnasium`. Both entry points document
-themselves: `hexset.gym.aec` and `hexset.gym.env` carry the design each one
-implements, down to why the mask is the honest one and why seat rotates.
+`hexset.gym` is three training-facing entry points on top of the engine. Two
+of them implement third-party APIs and need `pip install -e ".[gym]"`; the
+third needs nothing beyond the engine. `import hexset` stays numpy-only, and
+only `HexSetAEC`/`HexSetEnv` need `pettingzoo`/`gymnasium`. All three document
+themselves: `hexset.gym.lanes`, `hexset.gym.aec` and `hexset.gym.env` carry the
+design each one implements, down to why the mask is the honest one and why
+seat rotates.
+
+**`hexset.gym.LaneEnv`** — a lockstep multi-game environment for a batched
+policy: `lanes` games in flight, every one of them stepped a single action per
+tick, so one forward pass serves the whole batch instead of paying the
+network's fixed dispatch toll per move. `requests()` hands out one `Request`
+per live lane — the seat to move, its legal `options`, its information-set
+`view` and the live `Game` — and `step(actions)` applies one `Action` to each
+and returns the games that ended, as `Episode`s carrying every decision filed
+under the seat that took it, the cleared-trade census, and an `Outcome` with
+both candidate rewards (winner and per-seat terminal points) plus whether the
+action cap truncated the game. Every game is
+`hexset.arena.deal_game(seed, index, players)`, the same law `compete` deals
+from, so a game is the same whichever lane draws it and however many lanes are
+in flight. A `caster(index)` seats policy ids; ids in `bots` are played by a
+`hexset.bots` bot, and **every** seat is seated as its own trade gate on
+`game.gates`, which is what lets a learner trade here and not in the two
+environments below:
+
+```python
+import random
+
+from hexset.arena import Entrant, spawn
+from hexset.gym import LaneEnv
+
+heximax = Entrant("heximax", "heximax")
+env = LaneEnv(
+    players=4,
+    seed=0,
+    lanes=64,
+    deal=256,
+    caster=lambda index: (0, 1, 1, 1),          # seat 0 is mine, the rest are bots
+    bots={1: lambda board: spawn(heximax, board, random.Random(0))},
+)
+episodes = []
+while env.running:
+    mine = [r for r in env.requests() if r.policy == 0]
+    # Unanswered lanes are played by their own bot, so only my seats are batched.
+    episodes.extend(env.step({r.lane: my_policy(r.view, r.options) for r in mine}))
+```
 
 **`hexset.gym.HexSetAEC`** — a [PettingZoo](https://pettingzoo.farama.org/)
 `AECEnv`, one agent per seat (`seat_0`..`seat_{n-1}`). `observe(agent)`

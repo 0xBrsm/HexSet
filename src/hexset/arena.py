@@ -149,6 +149,68 @@ def leaf_evaluator(policy, space, pad_to: int | None = None):
 MAX_ACTIONS = 20000
 
 
+# --- the game law -----------------------------------------------------------
+#
+# A run's `index`-th game is a pure function of `(seed, index)`: the board from
+# one key, every draw the engine makes from another. Two things depend on that
+# holding exactly -- a tournament fanned out over processes (`_play_one`, which
+# must play the same game whichever worker draws it) and a lockstep collector
+# (`hexset.gym.lanes`, which must play the same game whichever lane draws it and
+# however many lanes are in flight). It was written twice, once here and once in
+# the training package, kept in step by a comment; the four functions below are
+# the one copy both call, so "the same game" is a call and not a claim.
+
+
+def board_key(seed: int, index: int) -> str:
+    """The rng key the `index`-th game's board is drawn from."""
+    return f"{seed}:{index}:board"
+
+
+def game_key(seed: int, index: int) -> str:
+    """The rng key the `index`-th game's own draws come from.
+
+    Handed out as a string rather than a generator because it is also what a
+    `hexset.record.Record` stores as its seed -- a record names the stream it
+    replays.
+    """
+    return f"{seed}:{index}:game"
+
+
+def deal_board(seed: int, index: int) -> Board:
+    """The `index`-th game's board."""
+    return random_base_board(random.Random(board_key(seed, index)))
+
+
+def deal_game(
+    seed: int,
+    index: int,
+    players: int,
+    *,
+    board: Board | None = None,
+    chance: Callable[[random.Random], object] | None = None,
+) -> Game:
+    """The `index`-th game of run `seed`, started and ready for its first action.
+
+    `board` overrides the dealt one, which is how a caller pins every game to
+    one geometry (`compete`'s antithetic pairing deals the board for the pair
+    and passes it in here; so does a lane environment asked for a fixed board).
+
+    `chance` wraps the game's own generator before the game is started -- the
+    seam `_play_and_record` uses to record every draw. It takes the generator
+    rather than being one so that the wrapper is built on exactly the stream
+    the game would have used, which is what keeps a recorded game identical to
+    the unrecorded one.
+
+    Nothing is seated here: gates, `max_trades` and the loop are the caller's,
+    because the seating is what differs between a tournament and a collector
+    and the game is what must not.
+    """
+    if board is None:
+        board = deal_board(seed, index)
+    rng = random.Random(game_key(seed, index))
+    return start(board, players, rng, chance=None if chance is None else chance(rng))
+
+
 @dataclass(frozen=True)
 class Entrant:
     """What to build, not a built bot. Picklable, so it can cross a process."""
@@ -511,7 +573,21 @@ def play(
     trades, which is how `RandomBot` and any external bot that predates the
     mechanic behave.
     """
-    game = start(board, len(bots), rng)
+    return play_game(start(board, len(bots), rng), bots, action_cap=action_cap)
+
+
+def play_game(
+    game: Game,
+    bots: Sequence[Bot],
+    *,
+    action_cap: int = MAX_ACTIONS,
+) -> Game:
+    """`play`'s loop over a game somebody else dealt (`deal_game`).
+
+    Dealing a game and playing it are separate acts: a tournament deals from
+    `(seed, index)` and plays it here, while a lockstep environment deals from
+    the same law and steps the loop itself, one action per lane per tick.
+    """
     game.gates = tuple(bots)
     game.max_trades = None
     actions = 0
@@ -581,7 +657,7 @@ def _play_one(
         rotation = pair + half * (seats // 2)
     else:
         board_index = rotation = index
-    board = random_base_board(random.Random(f"{seed}:{board_index}:board"))
+    board = deal_board(seed, board_index)
     seats_taken = [seat_of(e, rotation, seats) for e in range(seats)]
 
     # Every stream keys off `board_index`, not `index`. Under antithetic the two
@@ -596,16 +672,18 @@ def _play_one(
             entrant, board, random.Random(f"{seed}:{board_index}:{e}")
         )
 
-    game_seed = f"{seed}:{board_index}:game"
-    rng = random.Random(game_seed)
     record = None
     cleared: tuple[ClearedTrade, ...] = ()
     if records:
         game, record, cleared = _play_and_record(
-            lineup, board, rng, action_cap, game_seed
+            lineup, board, seed, board_index, action_cap
         )
     else:
-        game = play(lineup, board, rng, action_cap=action_cap)
+        game = play_game(
+            deal_game(seed, board_index, seats, board=board),
+            lineup,
+            action_cap=action_cap,
+        )
     # true state: the verdict's own victory points include hidden
     # victory-point dev cards, so the final score and the build census are
     # both read off the truth rather than off one seat's view of it.
@@ -630,9 +708,9 @@ def _play_one(
 def _play_and_record(
     lineup: list[Bot],
     board: Board,
-    rng: random.Random,
+    seed: int,
+    index: int,
     action_cap: int,
-    seed: str,
 ) -> tuple[Game, "Record", tuple[ClearedTrade, ...]]:
     """`play`'s own loop, with the bookkeeping `hexset.record.record_game`
     uses to build a `Record` alongside it -- the two are kept in step
@@ -650,8 +728,14 @@ def _play_and_record(
     from .chance import Live, Recording
     from .record import Record, board_fields
 
-    chance = Recording(Live(rng))
-    game = start(board, len(lineup), rng, chance=chance)
+    game = deal_game(
+        seed,
+        index,
+        len(lineup),
+        board=board,
+        chance=lambda rng: Recording(Live(rng)),
+    )
+    chance = game.chance
     game.gates = tuple(lineup)
     game.max_trades = None
     actions: list[tuple[int, int, int]] = []
@@ -694,7 +778,7 @@ def _play_and_record(
 
     record = Record(
         num_players=len(lineup),
-        seed=seed,
+        seed=game_key(seed, index),
         first=game.first,
         actions=tuple(actions),
         chance=tuple(chance.events),

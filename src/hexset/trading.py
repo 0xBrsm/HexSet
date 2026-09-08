@@ -732,8 +732,12 @@ def default_respond(gate: object, view: "View", offer: Offer) -> Response:
     me = view.perspective
     actor = offer.actor
     received_for_me = tuple(-n for n in offer.received)
+    # An accept this seat cannot cover would only fail later, at the
+    # actor's `execute_round_choice`; `view.known[me]` is exact for the
+    # perspective's own hand, so the check costs nothing in information.
+    covers = all(view.known[me][r] >= n for r, n in enumerate(offer.received) if n > 0)
     gain = valued(gate, view, received_for_me, actor)
-    if clears_floor(gain):
+    if covers and clears_floor(gain):
         return Response(me, RESPONSE_ACCEPT, offer.received)
 
     candidates = _belief_candidates(view, me, actor)

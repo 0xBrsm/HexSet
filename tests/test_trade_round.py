@@ -139,6 +139,20 @@ def test_default_respond_accepts_when_its_own_gain_clears_the_floor():
     assert response == Response(1, RESPONSE_ACCEPT, offer.received)
 
 
+def test_default_respond_never_accepts_what_it_cannot_cover():
+    """Seat 1 holds sheep, not the ore the offer asks of it. However much
+    its gate likes the exchange, an accept it cannot cover would only fail
+    at the actor's `execute_round_choice` -- so it must not accept."""
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.SHEEP, 1))
+    offer = Offer(actor=0, received=bundle(wood=-1, ore=1))
+    gate = Gate(lambda received, counterparty: 1.0)
+
+    response = default_respond(gate, game.state(1), offer)
+
+    assert response.kind != RESPONSE_ACCEPT
+    assert response == Response(1, RESPONSE_PASS, None)
+
+
 def test_default_respond_counters_with_its_best_estimate_clearing_bundle():
     """Seat 1 refuses the offer outright, but can infer (from the ledger's
     certified lower bound on seat 0's hand) that the actor holds sheep --

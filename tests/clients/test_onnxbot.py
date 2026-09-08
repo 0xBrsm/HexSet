@@ -112,10 +112,50 @@ def test_a_searched_checkpoint_trades_through_its_own_value_head(checkpoint_v2):
     verdicts = search.accepts_many(game.state(seat), received, counterparties)
     assert len(verdicts) == len(candidates)
     assert verdicts == plain.accepts_many(game.state(seat), received, counterparties)
-    # What the clearing house and the round read: not -1 across the board.
+    # What the clearing house and the round read: the value head's own
+    # deltas, the same numbers the plain bot gives, not a sign.
     gains = valued_many(search, game.state(seat), received, counterparties)
-    assert set(gains) <= {1.0, -1.0}
-    assert gains == [1.0 if ok else -1.0 for ok in verdicts]
+    assert gains == plain.gains_many(game.state(seat), received, counterparties)
+    assert verdicts == [g > 0.0 for g in gains]
+    assert search.estimate_many(game.state(seat), candidates) == plain.estimate_many(game.state(seat), candidates)
+
+
+def test_the_network_gate_scores_both_sides_of_an_exchange(checkpoint_v2):
+    """`gains_many` is this seat's own row of the value head, after minus
+    before, on a position where *both* hands moved; `estimate_many` is the
+    counterparty's row on the same two positions. One float per candidate,
+    `-1.0` for one this seat cannot cover, and every candidate two cards or
+    fewer a side is scored however many there are. The stub's value head is
+    zero, so every scored delta is exactly zero here -- the shape and the
+    cover rule are what this pins; the numbers come from a real checkpoint."""
+    from hexset.clients.onnxbot import network_bot
+    from hexset.trading import _candidates
+
+    path, board = checkpoint_v2
+    bot = network_bot(path, board)
+    game = start(board, 4, random.Random(2))
+    for _ in range(40):
+        step_randomly(game, random.Random(2))
+    seat = to_move(game)
+    bot.choose(game)
+    view = game.state(seat)
+    candidates = list(_candidates(game.state(seat, hidden=False), seat, frozenset()))
+    received = [b for _, b in candidates]
+    thems = [c for c, _ in candidates]
+
+    gains = bot.gains_many(view, received, thems)
+    estimates = bot.estimate_many(view, candidates)
+    assert len(gains) == len(estimates) == len(candidates)
+    scored = [g for g in gains if g != -1.0]
+    assert scored and all(g == 0.0 for g in scored)
+    assert all(e == 0.0 for e in estimates if e != -1.0)
+
+    # A bundle this seat cannot cover is never scored.
+    hand = list(view.known[seat])
+    short = tuple(-(hand[r] + 1) if r == 0 else (1 if r == 1 else 0) for r in range(len(hand)))
+    assert bot.gains_many(view, [short], [thems[0]]) == [-1.0]
+    # The live game is left exactly as it was.
+    assert game.state(seat, hidden=False).hands[seat] == hand
 
 
 def test_a_terminal_leaf_is_scored_on_the_win_probability_scale(checkpoint_v2):

@@ -155,13 +155,13 @@ every time — there is no publish step and no timing to get right.
 A checkpoint served embedded (`hexset.clients.onnxbot.NetworkBot`) trades
 off the same `value` head this contract already declares: `accepts` is the
 head's strict preference for the concrete post-trade hand over the current
-one — the derivation `hexnet.policy.DerivedTrader` trains under,
+one — the derivation `hexn.policy.DerivedTrader` trains under,
 reimplemented here against the wire record instead of a live forward — and
 `accepts_many` batches it over up to `NETWORK_GATE_ROWS` candidates in one
 graph call. There is no magnitude-valued `gains_many` here: `hexset.bots.
 search2.Bot`'s structural default derives one from `accepts_many`
 (`+1.0`/`-1.0`), which is all a boolean value-head gate can support; a
-magnitude-valued network gate is HexNet's own concern. `max_trades=0` in the
+magnitude-valued network gate is HexN's own concern. `max_trades=0` in the
 metadata is still the explicit off switch — a seat with it set accepts
 nothing, exactly like a bot with no trading methods at all.
 

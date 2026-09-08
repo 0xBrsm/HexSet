@@ -35,7 +35,7 @@ def build_info() -> dict[str, Any]:
     read from whatever git repo contains this file -- None if that fails (a
     wheel install with no `.git` directory, or `git` unavailable), because a
     provenance field that is sometimes wrong is worse than one that is
-    sometimes absent. Consumers (e.g. HexNet's `hexnet.run.manifest`) stamp
+    sometimes absent. Consumers (e.g. HexN's `hexn.run.manifest`) stamp
     this into their own run records rather than reproducing the git call
     themselves, so there is exactly one place that knows how to ask.
     """

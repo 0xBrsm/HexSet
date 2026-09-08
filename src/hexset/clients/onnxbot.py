@@ -210,7 +210,7 @@ def _load_cached(path: str, topology: Topology, device: str, mtime_ns: int) -> L
     meta = session.get_modelmeta().custom_metadata_map
 
     players = int(meta["players"])
-    # The topology fingerprint `hexnet.export_onnx` embeds: a graph traced
+    # The topology fingerprint `hexn.export_onnx` embeds: a graph traced
     # for one board shape fails silently if fed another (wrong-shaped
     # inputs, or worse, right-shaped-but-meaningless ones) rather than
     # loudly the way `net.load_state_dict` fails on a shape mismatch today
@@ -272,11 +272,11 @@ class NetworkBot:
 
     Trades off the same value head `choose` already reads, no new
     parameters: `accepts`/`accepts_many` mirror dev-HexN's
-    `hexnet.policy.DerivedTrader` exactly, reimplemented against the
+    `hexn.policy.DerivedTrader` exactly, reimplemented against the
     record-contract wire shape instead of a live `torch` forward. There is
     no `gains_many` here -- `hexset.bots.search2.Bot`'s default derives one
     from `accepts_many` (`+1.0`/`-1.0`), which is all a boolean value-head
-    gate can support; a magnitude-valued network gate is HexNet's own
+    gate can support; a magnitude-valued network gate is HexN's own
     concern (`agents/reference/trading-final.md`, item 6), not this
     contract-5 wire adapter's. See both methods' own docstrings.
     """
@@ -302,7 +302,7 @@ class NetworkBot:
     def accepts(self, view: "View", received: "Bundle", counterparty: int) -> bool:
         """This seat's private gate: the value head on the concrete
         post-trade position, strictly preferred -- not the sum of the
-        marginals `valuation` published, the same distinction `hexnet.
+        marginals `valuation` published, the same distinction `hexn.
         policy.DerivedTrader.accepts` draws, and for the same reason
         (complementarity between resources lives in the joint hand, not in
         five independent one-card deltas).
@@ -371,7 +371,7 @@ class NetworkBot:
         """Each hand's value on `seat`'s own row, `seat`'s hand swapped in
         turn and everything else about the live position held fixed.
 
-        Mirrors `hexnet.policy.DerivedTrader._own_values`: `set_state` is the
+        Mirrors `hexn.policy.DerivedTrader._own_values`: `set_state` is the
         engine's own sanctioned way to swap a hypothetical state in and back
         out, the observation is built from the game (not the bare state) for
         the same reason as there -- phase, turn count and every seat's

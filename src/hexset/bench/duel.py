@@ -31,18 +31,18 @@ from hexset.arena import NETWORK
 from hexset.game import MAX_TURNS
 
 # The `--workers 1` path (bare checkpoints, network-vs-network) runs through
-# `hexnet.collect`/`hexnet.train`, which need torch -- so this module never
-# imports them itself. `hexnet.duel` registers the runner here at import,
-# which every HexNet entry point that wants this path pulls in; a hexset-only
+# `hexn.collect`/`hexn.train`, which need torch -- so this module never
+# imports them itself. `hexn.duel` registers the runner here at import,
+# which every HexN entry point that wants this path pulls in; a hexset-only
 # process gets a clear error naming the package instead of an ImportError deep
-# inside `hexnet.train`.
+# inside `hexn.train`.
 _VERSUS_BACKEND: Callable[[argparse.Namespace, str, str], dict] | None = None
 
 
 def register_versus_backend(runner: Callable[[argparse.Namespace, str, str], dict]) -> None:
-    """Register the network-backed `--workers 1` runner: `hexnet.duel` calls
-    this at import, wiring `_via_versus` (bare checkpoints, `hexnet.train.versus`)
-    back into this module without it importing torch or hexnet itself."""
+    """Register the network-backed `--workers 1` runner: `hexn.duel` calls
+    this at import, wiring `_via_versus` (bare checkpoints, `hexn.train.versus`)
+    back into this module without it importing torch or hexn itself."""
     global _VERSUS_BACKEND
     _VERSUS_BACKEND = runner
 
@@ -186,7 +186,7 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="append every game played as a v2 record (hexset.record.Record) "
         "here. Arena path only (--workers > 1): `train.versus` "
-        "(--workers 1) plays through hexnet's own batched collector, which "
+        "(--workers 1) plays through hexn's own batched collector, which "
         "returns a verdict and no per-game history to record.",
     )
     args = p.parse_args(argv)
@@ -251,8 +251,8 @@ def main(argv: list[str] | None = None) -> int:
         if _VERSUS_BACKEND is None:
             print(
                 "the --workers 1 path (bare checkpoints, network-vs-network) "
-                "needs the hexnet package: import hexnet.duel, or run "
-                "`python -m hexnet.duel` instead of `python -m hexset.bench.duel`, "
+                "needs the hexn package: import hexn.duel, or run "
+                "`python -m hexn.duel` instead of `python -m hexset.bench.duel`, "
                 "or pass --workers 2 or more to use the arena path instead.",
                 file=sys.stderr,
             )

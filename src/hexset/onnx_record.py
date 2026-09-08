@@ -14,17 +14,17 @@ own terms, already filtered to what the perspective seat may legally know**
 and hands that to the graph. Filtering stays here, on the engine side, where
 `test_record_is_information_set_correct`-style tests can pin it; everything
 downstream of the record (one-hot encoding, rotation, scaling) is mechanical
-and can safely live inside a traced graph instead -- `hexnet.export_onnx.
+and can safely live inside a traced graph instead -- `hexn.export_onnx.
 RecordEncoder` is that traced half: `record -> (hexes, vertices, edges,
 globals)`, the same four tensors `hexset.encoding.encode` produces and
-`HexNet` consumes.
+`HexN` consumes.
 
 **Everything in this module is numpy, and stays that way.** This is the
 contract module the gym and any other torch-free consumer build a request
 from, so `import hexset.onnx_record` must succeed with torch absent --
 `test_onnx_record_is_torch_free` pins it. The traced encoder that reads this
 record, and everything else that needs a model in hand, lives in
-`hexnet.export_onnx` instead.
+`hexn.export_onnx` instead.
 
 `record_from_game`/`record_batch` build the record from a live `Game`, for
 tests and for generating realistic export/parity samples, and this is also
@@ -81,14 +81,14 @@ from .victory import award_points
 # through the same `Phase.ROBBER` a seven enters). `RECORD_FIELDS` shrinks by
 # one field and the action space shrinks independently of it, either change
 # alone would have forced this bump, and contracts 1-5 are refused the same
-# way. Lives here, not in `hexnet.export_onnx`, because it names *this
+# way. Lives here, not in `hexn.export_onnx`, because it names *this
 # record's* shape and only incidentally the graph's -- bump it again only if
 # `RECORD_FIELDS`, the export's output tuple, or the action space changes.
 CONTRACT_VERSION = "6"
 
 # Every field name in the record, in the order the plan's table lists them
 # (board, then position, then information set, then legality).
-# `hexnet.export_onnx` reuses this order for the graph's input names.
+# `hexn.export_onnx` reuses this order for the graph's input names.
 RECORD_FIELDS: tuple[str, ...] = (
     "terrain",
     "token",
@@ -119,7 +119,7 @@ RECORD_FIELDS: tuple[str, ...] = (
 
 def record_shapes(graph: StaticGraph, players: int, space: ActionSpace) -> dict[str, tuple]:
     """Every input field's per-row shape, i.e. `RECORD_FIELDS` minus the batch
-    axis. `hexnet.export_onnx` extends this with its own output shapes for
+    axis. `hexn.export_onnx` extends this with its own output shapes for
     the sample inputs, the read-back check and the tests -- one table, not
     two, for the half both sides agree on."""
     return {

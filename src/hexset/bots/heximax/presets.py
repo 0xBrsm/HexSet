@@ -2,7 +2,7 @@
 """Preset registration: importing `heximax` makes it spawnable.
 
 `hexset.arena` knows heximax only by name, the same way it knows the
-network-backed kinds `hexnet.netbot` provides -- it does not import this
+network-backed kinds `hexn.netbot` provides -- it does not import this
 package, so importing `heximax` (directly, or via anything that does:
 `hexset.bench.duel`, `hexset.server`) is what makes the "heximax" entrant
 kind spawnable. A process that never imports `heximax` gets a plain

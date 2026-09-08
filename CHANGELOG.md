@@ -51,6 +51,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `hexset.arena.compete` is now the only thing in the package that plays a
+  game of HexSet: `hexset.bench.generate`, `road_sweep` (and the
+  `hand_valuation` and `weight_sweep` sweeps on top of it), `throughput` and
+  `trade_census` all play their games through it and read the `Tournament` it
+  returns, in place of five separate copies of the board seeding, the
+  antithetic pairing and the play loop. A tournament carries what those
+  copies existed to collect: per-seat roads, settlements and cities, the
+  seating each game used, and -- with `records=True` -- every trade the
+  engine cleared, with its turn, phase, both hands and both private gains.
+  A duel's seating is a lineup rather than one of two named geometries:
+  `--geometry` takes any pattern of `a`/`b` slots, or a comma-separated
+  lineup that can also seat entrants on neither side. `--games` must divide
+  by the number of seats wherever it did not have to before, and
+  `hexset.bench.throughput` reports games and turns rather than actions.
 - heximax's honest evaluator values an opponent's development cards at
   their expected victory points -- held count times the VP share of the
   unseen pool (`hexset.bots.heximax.evaluate.expected_card_points`) -- where

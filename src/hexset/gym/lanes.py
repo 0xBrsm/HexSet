@@ -264,7 +264,7 @@ class LaneEnv:
         *,
         deal: int | None = None,
         action_cap: int = MAX_ACTIONS,
-        board: Board | None = None,
+        board: Board | Callable[[int], Board | None] | None = None,
         caster: Callable[[int], Sequence[int]] | None = None,
         bots: Mapping[int, Callable[[Board], Bot]] | None = None,
         gates: Mapping[int, Callable[[Game, int], object]] | None = None,
@@ -287,7 +287,12 @@ class LaneEnv:
 
         `board` pins every game to one geometry, which a diagnostic wants and a
         training run does not: sharing a board across lanes costs the boards'
-        share of the variance.
+        share of the variance. Given as a callable it is a *board law*,
+        `board(index) -> Board | None`, the board for that game (`None` for
+        the default, `hexset.arena.deal_board(seed, index)`): how a paired
+        evaluation gives games `2k` and `2k+1` one board while each keeps its
+        own dice (`hexset.casting.paired` is the casting half of the same
+        pairing).
         """
         if players < 2:
             raise ValueError("a game needs at least two seats")
@@ -355,7 +360,8 @@ class LaneEnv:
         index = self._next
         self._next += self.stride
         cast = self._cast(index)
-        game = deal_game(self.seed, index, self.players, board=self.board)
+        board = self.board(index) if callable(self.board) else self.board
+        game = deal_game(self.seed, index, self.players, board=board)
         game.max_trades = self.max_trades
         game.gates = self._seat_gates(game, cast)
         return _Lane(
@@ -528,6 +534,20 @@ class LaneEnv:
     def pending(self) -> tuple[int, ...]:
         """Actions taken so far in each live lane's unfinished game."""
         return tuple(lane.actions for lane in self._lanes if lane is not None)
+
+    def cohort(self, games: int) -> None:
+        """Re-arm a bounded environment for `games` more games from where the
+        counter stands, refilling idle lanes. A training iteration wants a
+        fresh bounded cohort per call without rebuilding the environment
+        (and losing its counters); an environment built unbounded stays
+        unbounded and refuses this."""
+        if games < 1:
+            raise ValueError("a cohort needs at least one game")
+        if self._stop is None:
+            raise ValueError("an unbounded environment has no cohorts; build it with `deal`")
+        self._stop = self._next + games * self.stride
+        self._outstanding = None
+        self._lanes = [lane if lane is not None else self._fresh() for lane in self._lanes]
 
     def games_started(self) -> int:
         """How many games have been dealt out, finished or not.

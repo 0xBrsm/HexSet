@@ -136,6 +136,36 @@ def _seat(seat: int, perspective: int, players: int) -> int:
     return (seat - perspective) % players
 
 
+def to_frame(values: Sequence[float], seat: int) -> tuple[float, ...]:
+    """Board-order values rotated into `seat`'s perspective frame.
+
+    Slot `i` is board seat `(seat + i) % players`, so `seat` itself lands on
+    slot 0 and everyone else follows behind it in turn order -- the rotation
+    `encode` applies to every per-seat block, and the one a value or reward
+    vector produced in board-seat order needs before it lines up with a
+    perspective-frame observation. Getting the direction backwards still
+    type-checks and still trains, it just silently swaps whose number is
+    whose, which is why this is one function pinned by a round-trip test
+    rather than an inline expression written wherever a caller needs it.
+    """
+    players = len(values)
+    return tuple(values[(seat + i) % players] for i in range(players))
+
+
+def from_frame(values: Sequence[float], seat: int) -> tuple[float, ...]:
+    """The inverse of `to_frame`: a perspective-frame vector (slot 0 is
+    `seat`) restored to board-seat order.
+
+    `from_frame(to_frame(v, seat), seat) == tuple(v)` for every seat and
+    every player count -- this is what a value head's slot-0-is-mover output
+    has to pass through before it can be compared against board seats again.
+    """
+    players = len(values)
+    return tuple(
+        values[(board_seat - seat) % players] for board_seat in range(players)
+    )
+
+
 @dataclass(frozen=True)
 class _Template:
     """The part of an observation that no move can change.
@@ -327,8 +357,7 @@ def _ledger_parts(game: Game, perspective: int) -> list[float]:
     """
     players = game._state.num_players
     parts: list[float] = []
-    for i in range(1, players):
-        seat = (perspective + i) % players
+    for seat in to_frame(range(players), perspective)[1:]:
         seat_ledger = game.ledger.seats[seat]
         parts.extend(k / HAND_SCALE for k in seat_ledger.known)
         parts.append(seat_ledger.unknown / HAND_SCALE)
@@ -342,7 +371,7 @@ def _encode_globals(
 
     state = game._state
     players = state.num_players
-    seats = [(perspective + i) % players for i in range(players)]
+    seats = to_frame(range(players), perspective)
 
     parts: list[float] = []
     parts.extend(n / HAND_SCALE for n in state.hands[perspective])

@@ -19,8 +19,10 @@ from hexset.encoding import (
     edge_features,
     encode,
     encode_batch,
+    from_frame,
     global_features,
     static_graph,
+    to_frame,
     vertex_features,
 )
 from hexset.game import is_over, start
@@ -478,3 +480,60 @@ def test_batched_ledger_encoding_matches_the_canonical_path():
         want = encode(game, perspective)
         assert np.array_equal(got.globals, want.globals)
         assert got.globals.dtype == np.float32
+
+
+# --- seat-frame rotation: `to_frame`/`from_frame` -----------------------
+#
+# The convention "the perspective seat is slot 0, others follow in turn
+# order" used to be written by hand three times over in `hexn`
+# (`netbot._board_order`, `ppo.rotate`, `export_onnx._rotate_slot`), on top
+# of the one already implicit here in `encoding`. The two functions below
+# are copies of `hexn`'s exact formulas -- `_hexn_ppo_rotate` mirrors
+# `hexn.ppo.rotate`, `_hexn_netbot_board_order` mirrors
+# `hexn.netbot._board_order` -- so a change to `to_frame`/`from_frame` that
+# quietly altered the direction or the modulus fails here, even though
+# nothing in this repository imports hexn.
+
+
+def _hexn_ppo_rotate(rewards, seat):
+    """`hexn.ppo.rotate`'s exact formula: board order -> perspective frame."""
+    players = len(rewards)
+    return tuple(rewards[(seat + i) % players] for i in range(players))
+
+
+def _hexn_netbot_board_order(value, seat):
+    """`hexn.netbot._board_order`'s exact formula: perspective frame -> board order."""
+    players = len(value)
+    return tuple(
+        float(value[(board_seat - seat) % players]) for board_seat in range(players)
+    )
+
+
+@pytest.mark.parametrize("players", [3, 4])
+def test_to_frame_matches_the_arithmetic_hexn_uses(players):
+    values = [float(i) for i in range(players)]
+    for seat in range(players):
+        assert to_frame(values, seat) == _hexn_ppo_rotate(values, seat)
+
+
+@pytest.mark.parametrize("players", [3, 4])
+def test_from_frame_matches_the_arithmetic_hexn_uses(players):
+    values = [float(i) for i in range(players)]
+    for seat in range(players):
+        assert from_frame(values, seat) == _hexn_netbot_board_order(values, seat)
+
+
+@pytest.mark.parametrize("players", [3, 4])
+def test_to_frame_and_from_frame_round_trip_every_seat(players):
+    values = tuple(1.5 * i for i in range(players))
+    for seat in range(players):
+        assert from_frame(to_frame(values, seat), seat) == values
+        assert to_frame(from_frame(values, seat), seat) == values
+
+
+def test_to_frame_puts_the_seat_first():
+    assert to_frame([10.0, 20.0, 30.0], seat=1) == (20.0, 30.0, 10.0)
+
+
+def test_from_frame_undoes_that():
+    assert from_frame((20.0, 30.0, 10.0), seat=1) == (10.0, 20.0, 30.0)

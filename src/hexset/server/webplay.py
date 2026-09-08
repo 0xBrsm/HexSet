@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Iterable, Sequence
+from typing import Iterable, NamedTuple, Sequence
 
 from hexset.actions import (
     YEAR_OF_PLENTY_PAIRS,
@@ -54,7 +54,6 @@ from hexset.roads import road_lengths
 from hexset.state import MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS, GameState, copy_state
 from hexset.trading import (
     MAX_TRADE_CARDS,
-    RESPONSE_ACCEPT,
     RESPONSE_COUNTER,
     RESPONSE_PASS,
     Bundle,
@@ -469,11 +468,62 @@ class _Event:
     # except a manual trade's own event (`action is None`), which is never
     # empty: that is the entire reason it exists.
     trades: tuple[Trade, ...] = ()
-    # Public sentences about the trade round (`GameSession._note`): an offer
-    # broadcast, each seat's answer, the actor declining. Announced at a real
-    # table, so nothing here is redacted per reader. Only ever set on an
+    # One step of the trade round (`GameSession._note`): the offer, a seat's
+    # answer, the actor declining, everyone having passed. Discrete here and
+    # in the journal -- the record keeps every step -- and collapsed by
+    # `render_log` into the one line a reader wants. Announced at a real
+    # table, so nothing about it is redacted per reader. Only ever set on an
     # `action is None` event, never alongside `trades`.
-    notes: tuple[str, ...] = ()
+    note: RoundNote | None = None
+
+
+class RoundNote(NamedTuple):
+    """One step of a trade round, as the event record and the journal keep
+    it. `kind` is one of `ROUND_NOTE_KINDS`; `seat` is who did it (the
+    actor for `offer`/`decline`/`nobody`, the answering seat otherwise);
+    `actor` is the round's actor throughout; `bundle` is signed towards the
+    actor (`hexset.trading`'s convention) for `offer`/`accept`/`counter`
+    and `None` otherwise."""
+
+    kind: str
+    seat: int
+    actor: int
+    bundle: Bundle | None
+
+
+# offer: the actor's broadcast. accept/counter/pass: one seat's answer.
+# decline: the actor turned down what was on the table. nobody: every seat
+# asked has passed.
+ROUND_NOTE_KINDS = ("offer", "accept", "counter", "pass", "decline", "nobody")
+
+
+def _round_clause(note: RoundNote, labels: dict[int, str], *, standalone: bool) -> str | None:
+    """The sentence one round step adds to the round's line -- or, when the
+    round's line is no longer the last one written (`standalone`), a
+    sentence that names the offer it answers. `None` for a pass: a pass is
+    kept in the record and shown on the page, but the transcript says
+    nothing about it until everyone has passed (`nobody`) -- see
+    `render_log`."""
+    who = _who(note.seat, labels)
+    actor = _who(note.actor, labels)
+    if note.kind == "offer":
+        gave = tuple(max(0, -n) for n in note.bundle or ())
+        got = tuple(max(0, n) for n in note.bundle or ())
+        return f"{who} offers {_bundle_text(gave)} for {_bundle_text(got)}."
+    if note.kind == "accept":
+        return f"{who} accepts {actor}'s offer." if standalone else f"{who} accepts."
+    if note.kind == "counter" and note.bundle is not None:
+        # Signed towards the actor: positive is what the actor gets, so it
+        # is what the answering seat hands over.
+        gives = tuple(max(0, n) for n in note.bundle)
+        wants = tuple(max(0, -n) for n in note.bundle)
+        head = f"{who} counters {actor}'s offer with" if standalone else f"{who} counters with"
+        return f"{head} {_bundle_text(gives)} for {_bundle_text(wants)}."
+    if note.kind == "decline":
+        return f"{who} declines every answer." if standalone else f"{who} declines."
+    if note.kind == "nobody":
+        return f"Everyone declines {actor}'s offer." if standalone else "Everyone declines."
+    return None
 
 
 class SeatLabels(dict):
@@ -707,12 +757,43 @@ def render_log(
             # owed, so any other event is proof the round closed before it.
             flush_discards()
         if event.action is None:
-            # A manually executed trade (`GameSession._execute_round_trade`)
-            # or a trade-round note (`GameSession._note`): no board action
-            # happened -- and, like any other line that isn't a
-            # build/discard/bank-trade run, it ends whatever run was open.
+            # No board action happened: a trade-round step
+            # (`GameSession._note`) or a manually executed trade
+            # (`GameSession._execute_round_trade`). The round is one line,
+            # rewritten in place as it goes -- the offer, then each accept or
+            # counter as it lands, then how it ended: the trade the actor
+            # took, "declines." when it turned the answers down, or
+            # "Everyone declines." when every seat passed. Passes are not
+            # written one by one: the record and the page keep them, the
+            # transcript says only the one thing a reader wants to know.
+            # An answer that arrives after some other line has been written
+            # (the actor kept playing while a person made up their mind)
+            # stands alone and names the offer it answers.
+            if event.note is not None:
+                note = event.note
+                key = ("round", note.actor, event.round_num)
+                continuing = run is not None and run["key"] == key and note.kind != "offer"
+                clause = _round_clause(note, labels, standalone=not continuing and note.kind != "offer")
+                if clause is None:
+                    continue
+                if note.kind == "offer":
+                    run = {"key": key, "text": clause}
+                    emit(event.round_num, clause, False)
+                elif continuing:
+                    run["text"] = f"{run['text']} {clause}"
+                    emit(event.round_num, run["text"], True)
+                else:
+                    run = None
+                    lines.append(f"{event.round_num}\t{clause}")
+                continue
+            trade_lines = _trade_lines(event, labels)
+            key = ("round", event.actor, event.round_num)
+            if run is not None and run["key"] == key and len(trade_lines) == 1:
+                run["text"] = f"{run['text']} {trade_lines[0]}"
+                emit(event.round_num, run["text"], True)
+                continue
             run = None
-            for line in (*_trade_lines(event, labels), *event.notes):
+            for line in trade_lines:
                 lines.append(f"{event.round_num}\t{line}")
             continue
         action, actor, round_num = event.action, event.actor, event.round_num
@@ -986,9 +1067,7 @@ class GameSession:
         seat is `awaiting` and answers later through `answer_round`. The
         offer itself is the first line the log writes about the round."""
         game = self.game
-        gave = tuple(max(0, -n) for n in offer.received)
-        got = tuple(max(0, n) for n in offer.received)
-        self._note(offer.actor, f"{self._who(offer.actor)} offers {_bundle_text(gave)} for {_bundle_text(got)}.")
+        self._note(RoundNote("offer", offer.actor, offer.actor, offer.received))
         responses: list[Response] = []
         awaiting: set[int] = set()
         for seat in range(game.num_players):
@@ -1004,31 +1083,16 @@ class GameSession:
                 awaiting.add(seat)  # recorded to `game.pending`; answers through `answer_round`
             else:
                 responses.append(response)
-                self._note(seat, self._response_line(response))
+                self._note(RoundNote(response.kind, seat, offer.actor, response.bundle))
         self.open_round = _OpenRound(offer, responses, awaiting)
+        self._note_if_everyone_passed()
         self._resolve()
 
-    def _who(self, seat: int) -> str:
-        return _who(seat, self.seat_labels)
-
-    def _response_line(self, response: Response) -> str:
-        """One public sentence for an answer to the open offer."""
-        who = self._who(response.seat)
-        if response.kind == RESPONSE_ACCEPT:
-            return f"{who} accepts the offer."
-        if response.kind == RESPONSE_COUNTER and response.bundle is not None:
-            # Signed towards the actor: positive is what the actor gets, so
-            # it is what this seat hands over.
-            gives = tuple(max(0, n) for n in response.bundle)
-            wants = tuple(max(0, -n) for n in response.bundle)
-            return f"{who} counters with {_bundle_text(gives)} for {_bundle_text(wants)}."
-        return f"{who} passes."
-
-    def _note(self, actor: int, text: str, *, round_num: int | None = None) -> None:
-        """One public line about the trade round, in the log and the
+    def _note(self, note: RoundNote, *, round_num: int | None = None) -> None:
+        """One step of the trade round, into the event record and the
         journal. Not an action and not a trade: nothing on the board moved,
-        so the event carries the same snapshot before and after and
-        `render_log` writes the sentence as it stands. Journalled
+        so the event carries the same snapshot before and after, and
+        `render_log` folds the step into the round's one line. Journalled
         (`Journal.note`) so a restored session's log reads the same as the
         live one did (`restore`)."""
         if round_num is None:
@@ -1037,16 +1101,27 @@ class GameSession:
         self.events.append(
             _Event(
                 round_num=round_num,
-                actor=actor,
+                actor=note.seat,
                 action=None,
                 before=snapshot,
                 after=snapshot,
                 last_roll=self.game.last_roll,
-                notes=(text,),
+                note=note,
             )
         )
         if self.journal is not None:
-            self.journal.note(step=self._steps, round_num=round_num, actor=actor, text=text)
+            self.journal.note(step=self._steps, round_num=round_num, note=note)
+
+    def _note_if_everyone_passed(self) -> None:
+        """The round is answered in full and every answer was a pass: say
+        so once, the moment it is known -- a person's offer to a table of
+        bots reads "Everyone declines." at once, rather than after they
+        close a pane of passes."""
+        round_ = self.open_round
+        if round_ is None or round_.awaiting or not round_.responses:
+            return
+        if all(r.kind == RESPONSE_PASS for r in round_.responses):
+            self._note(RoundNote("nobody", round_.offer.actor, round_.offer.actor, None))
 
     def _resolve(self) -> Trade | None:
         """A bot actor's pick once every manual seat has answered: its gate's
@@ -1072,18 +1147,21 @@ class GameSession:
                     trade = self._execute_round_trade(actor, response.seat, response.bundle)
                 except ValueError:
                     trade = None
-        if trade is None and any(r.kind != RESPONSE_PASS for r in round_.responses):
-            self._note(actor, f"{self._who(actor)} declines every answer.")
-        self._close_round()
+        self._close_round(traded=trade is not None)
         return trade
 
-    def _close_round(self) -> None:
+    def _close_round(self, *, traded: bool = False) -> None:
         """Drop the open round and every unanswered `pending` entry it left
         with a manual seat -- an offer nobody can act on any more must not
-        keep showing on a page."""
+        keep showing on a page. A round closing with accepts or counters
+        still on the table and nothing `traded` is the actor declining
+        them, whichever way it closed (its own decline, its turn ending, a
+        fresh broadcast replacing it), and is recorded as such."""
         round_ = self.open_round
         if round_ is not None:
             offer = round_.offer
+            if not traded and any(r.kind != RESPONSE_PASS for r in round_.responses):
+                self._note(RoundNote("decline", offer.actor, offer.actor, None))
             self.game.pending = [
                 t for t in self.game.pending
                 if not (t.a == offer.actor and t.received == offer.received)
@@ -1123,8 +1201,9 @@ class GameSession:
             seat, kind, None if kind == RESPONSE_PASS else (received if kind != RESPONSE_COUNTER else bundle)
         )
         round_.responses.append(response)
-        self._note(seat, self._response_line(response))
+        self._note(RoundNote(kind, seat, actor, response.bundle))
         round_.awaiting.discard(seat)
+        self._note_if_everyone_passed()
         self._resolve()
 
     def execute_round_choice(self, actor: int, seat: int, bundle: Bundle) -> Trade:
@@ -1138,7 +1217,7 @@ class GameSession:
         if not any(r.seat == seat and r.kind != RESPONSE_PASS and r.bundle == bundle for r in round_.responses):
             raise ValueError("no such response is open")
         trade = self._execute_round_trade(actor, seat, bundle)
-        self._close_round()
+        self._close_round(traded=True)
         return trade
 
     def decline_round(self, actor: int) -> None:
@@ -1146,8 +1225,6 @@ class GameSession:
         round_ = self.open_round
         if round_ is None or round_.offer.actor != actor:
             raise ValueError("there is no open round to decline")
-        if any(r.kind != RESPONSE_PASS for r in round_.responses):
-            self._note(actor, f"{self._who(actor)} declines every answer.")
         self._close_round()
 
     def _execute_round_trade(self, actor: int, counterparty: int, bundle: Bundle) -> Trade:
@@ -1258,16 +1335,16 @@ class GameSession:
         self,
         steps: list[tuple[int, Action | None, tuple[Trade, ...]]],
         journal: Journal | None = None,
-        notes: dict[int, list[tuple[int, int, str]]] | None = None,
+        notes: dict[int, list[tuple[int, RoundNote]]] | None = None,
     ) -> None:
         """Re-apply a journalled game's actions, bringing this session up to
         where it left off (see `hexset.server.journal.replayable`).
 
-        `notes` (`hexset.server.journal.notes_of`) are the trade-round lines
-        the live session logged, keyed by the step they preceded; each is
-        put back into the log at the same place, under the round number it
-        was written with, so the restored transcript reads as the live one
-        did. They move nothing.
+        `notes` (`hexset.server.journal.notes_of`) are the trade-round steps
+        the live session recorded, keyed by the step they preceded; each is
+        put back into the record at the same place, under the round number
+        it was written with, so the restored transcript reads as the live
+        one did. They move nothing.
 
         Every step with a real `action` goes through `_apply` like any
         other, so the sidebar log, the per-seat rolls and the round
@@ -1289,8 +1366,8 @@ class GameSession:
             raise ValueError("restore would rewrite the journal it is reading")
         notes = notes or {}
         for actor, action, trades in steps:
-            for note_round, note_actor, text in notes.get(self._steps, ()):
-                self._note(note_actor, text, round_num=note_round)
+            for note_round, note in notes.get(self._steps, ()):
+                self._note(note, round_num=note_round)
             if action is None:
                 round_num = self.round
                 before = _snapshot(self.game)
@@ -1313,8 +1390,8 @@ class GameSession:
                     f"step {self._steps}: {action} is not legal in {self.game.phase.name}"
                 )
             self._apply(actor, action, replay=trades)
-        for note_round, note_actor, text in notes.get(self._steps, ()):
-            self._note(note_actor, text, round_num=note_round)
+        for note_round, note in notes.get(self._steps, ()):
+            self._note(note, round_num=note_round)
         self.journal = journal
         if journal is not None:
             journal.reopened(at_step=self._steps)

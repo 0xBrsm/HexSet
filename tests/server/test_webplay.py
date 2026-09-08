@@ -432,7 +432,7 @@ def test_the_trade_round_is_in_the_log_and_a_pass_is_an_answer():
     game._state.hands[0][Resource.WOOD] = 1
     game._state.hands[1][Resource.ORE] = 1
     game._state.hands[2][Resource.SHEEP] = 1
-    session = a_session(game, {0})
+    session = a_session(game, {0}, player_names={0: "Ada"})
     session.confirm_mode(0)
     session.set_trader(1, _Wants(Resource.WOOD))  # accepts: it gets wood
     session.set_trader(2, _Wants(Resource.BRICK))  # nothing in the offer for it
@@ -447,19 +447,45 @@ def test_the_trade_round_is_in_the_log_and_a_pass_is_an_answer():
     assert view["offer"] == {"actor": 0, "bundle": list(received)}
     assert {r["seat"]: r["kind"] for r in view["responses"]} == {1: RESPONSE_ACCEPT, 2: RESPONSE_PASS}
     assert next(r for r in view["responses"] if r["seat"] == 2)["bundle"] is None
-    log = session.log_for(None)
-    assert any(line.endswith("offers 1 Wood for 1 Ore.") for line in log)
-    assert any(line.endswith("(bot) accepts the offer.") for line in log)
-    assert any(line.endswith("(bot) passes.") for line in log)
+    # One line for the round, rewritten as it goes: the offer, then the
+    # accept; the pass is in the record and on the pane, not in the line.
+    line = session.log_for(None)[-1]
+    assert line.endswith("offers 1 Wood for 1 Ore. Player 2 (bot) accepts.")
+    assert "passes" not in line and len(session.events) == 3
 
     session.decline_round(0)
-    assert session.log_for(None)[-1].endswith("declines every answer.")
+    assert session.log_for(None)[-1].endswith("offers 1 Wood for 1 Ore. Player 2 (bot) accepts. Player 1 (Ada) declines.")
     assert session.open_round is None
 
     session.open_round_for(0, received)
     session.execute_round_choice(0, 1, received)
-    assert session.log_for(None)[-1].endswith("traded 1 Wood to Player 2 (bot) for 1 Ore.")
+    line = session.log_for(None)[-1]
+    assert line.endswith("accepts. Player 1 (Ada) traded 1 Wood to Player 2 (bot) for 1 Ore.")
     assert game._state.hands[0][Resource.ORE] == 1 and game._state.hands[1][Resource.WOOD] == 1
+
+
+def test_a_round_everyone_passes_on_reads_everyone_declines_at_once():
+    from hexset.board.terrain import Resource
+    from hexset.game import Phase
+
+    game = a_game(seed=3)
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    game._state.hands[0][Resource.WOOD] = 1
+    session = a_session(game, {0}, player_names={0: "Ada"})
+    session.confirm_mode(0)
+    for seat in (1, 2, 3):
+        session.set_trader(seat, _Wants(Resource.BRICK))
+    received = [0, 0, 0, 0, 0]
+    received[Resource.ORE] = 1
+    received[Resource.WOOD] = -1
+
+    session.open_round_for(0, tuple(received))
+
+    assert session.log_for(None) == ["1\tPlayer 1 (Ada) offers 1 Wood for 1 Ore. Everyone declines."]
+    assert [e.note.kind for e in session.events] == ["offer", "pass", "pass", "pass", "nobody"]
+    session.decline_round(0)  # nothing was on the table: nothing more to say
+    assert len(session.log_for(None)) == 1
 
 
 def test_execute_trade_reaches_the_session_and_moves_cards():

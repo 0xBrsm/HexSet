@@ -140,7 +140,7 @@ def test_trade_round_lines_survive_a_restart(tmp_path):
     session.open_round_for(0, tuple(received))
     session.decline_round(0)
     log = session.log_for(0)
-    assert any(line.endswith("offers 2 Wood for 1 Ore.") for line in log)
+    assert any("offers 2 Wood for 1 Ore." in line for line in log)
 
     resumed = resume_session("ABC123", seats, config)
 

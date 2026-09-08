@@ -181,11 +181,13 @@ seat-token gated:
   recorded answer exactly; `{"decline": true}` closes the round. Only the
   actor may call it; the round also closes when the turn ends.
 
-The round is in the log: the offer (`Player 1 (Ada) offers 2 Wood for 1
-Ore.`), every answer (`... accepts the offer.` / `... counters with ... for
-....` / `... passes.`), the executed trade, and `... declines every answer.`
-when the actor turns down what was on the table. The lines are journalled
-(`kind: "note"`) and come back on a restart.
+The round is one line of the log, rewritten as it goes: the offer, each
+accept or counter as it lands, and how it ended -- `Player 1 (Ada) offers 2
+Wood for 1 Ore. Player 3 (heximax) accepts. Player 1 (Ada) traded 2 Wood to
+Player 3 (heximax) for 1 Ore.`, or `... Player 1 (Ada) declines.`, or
+`... Everyone declines.` the moment every seat has passed. Passes are not
+written one by one. The record underneath is discrete: every step is its
+own journal line (`kind: "note"`) and comes back on a restart.
 
 `POST /api/action`, `.../trade/round/answer` and `.../trade/round/choose` all
 take an optional `"version"`, compared against the table's current one — a

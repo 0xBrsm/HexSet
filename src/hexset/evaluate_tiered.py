@@ -65,8 +65,8 @@ class Weights:
     below it can outweigh one unit of it: a victory point beats any production
     advantage, production beats any amount of reachable production, and so on.
     Hand-designed rather than fitted, because a search cannot discover a
-    hierarchy — it can only tune within one, which is what `hexset.tuning` is
-    for once these are in place.
+    hierarchy — a fit can only place weight within one, once these tiers are
+    in place.
     """
 
     # Tier 1: the only thing that actually ends a game. Twelve points times this

@@ -25,19 +25,18 @@ seat's view of the game is engine functionality, reached through
 `Game.state(seat, hidden=True)`, not something a bot builds for itself.
 
 * `evaluate` -- `hexset.bots.evaluate.Evaluator`'s term set read through the
-  view (`HonestEvaluator`), with progress zeroed where the piece supply is
-  exhausted, and two weight profiles (`TRADING_WEIGHTS`, a trading table,
-  and `NO_TRADE_WEIGHTS`, a no-trade table). Duplicates rather than imports
-  `hexset.bots.evaluate`'s term functions (see the duplication note in
-  `evaluate.py`'s own module docstring); not merged, on purpose, for now.
+  view (`HonestEvaluator`), and two weight profiles (`TRADING_WEIGHTS`, a
+  trading table, and `NO_TRADE_WEIGHTS`, a no-trade table). The three hand
+  terms are `hexset.bots.evaluate.hand_terms` itself, shared rather than
+  duplicated, so the trade gate that recomputes them from a post-trade hand
+  gets bit-identically what the search would have scored.
 * `search`   -- max^n over `HonestEvaluator` with a node budget and
   iterative deepening (`Heximax`), opponents expanded from determinized
   samples of the belief (PIMC over `k` worlds), and every hidden draw
   averaged over its distribution. See its module docstring for the leaf
   budget's cost accounting.
 * `presets`  -- registers "heximax"/"heximax-omni"/"heximax-notrade" with
-  `hexset.arena` and "heximax-trading"/"heximax-notrade" with
-  `hexset.tuning`, as an import-time side effect of importing this package
+  `hexset.arena`, as an import-time side effect of importing this package
   (and therefore of `import hexset.bots`, which imports this package).
 
 Trading is not an action and needs no adapter: `Heximax.gains_many` returns
@@ -53,18 +52,18 @@ reads every true hand at the same weights (the honest/omni dial this module
 exists to measure the cost of), and `mode="notrade"` plays the no-trade
 weight table with trading switched off. `weights=` overrides either mode's
 profile with a candidate vector while leaving the mode's other defaults (the
-trade switch, `omniscient`) unchanged -- the hook `hexset.tuning` fits
-through. Importing this package, or `hexset.bots` (which imports it), or
-anything that imports either, registers the three presets above with
-`hexset.arena` and the two evaluator names above with `hexset.tuning`; a
-process that never imports `hexset.bots` (or the deprecated `heximax` shim)
-cannot spawn or fit heximax by name.
+trade switch, `omniscient`) unchanged -- the hook the position-level fit in
+`hexset.fitting` uses to compare a candidate vector. Importing this package,
+or `hexset.bots` (which imports it), or anything that imports either,
+registers the three presets above with `hexset.arena`; a process that never
+imports `hexset.bots` (or the deprecated `heximax` shim) cannot spawn
+heximax by name.
 
 Engine dependency: this package is a consumer of `hexset` (actions, board,
 cards, economy, game, ledger, mcts, placement, robber, state, trading,
 victory, view), of the sibling `hexset.bots.search2`/`hexset.bots.evaluate` (the
-shared STANCES and the shared evaluation), and of `hexset.arena`/
-`hexset.tuning` for registration. It does not modify any of them. Nesting
+shared STANCES and the shared evaluation), and of `hexset.arena` for
+registration. It does not modify any of them. Nesting
 under `hexset.bots` means `hexset.bots`, `hexset.arena` and `hexset.mcts` now
 have a real import cycle through this package (`hexset.bots` -> `heximax` ->
 `hexset.arena`/`hexset.mcts` -> `hexset.bots`, for the names those two
@@ -87,8 +86,7 @@ from .evaluate import NO_TRADE_WEIGHTS, TRADING_WEIGHTS, HonestEvaluator, Weight
 from .search import BY_MODE, DEFAULT_MAX_NODES, MODES, Heximax, heximax
 
 # Import-time side effect only: registers "heximax"/"heximax-omni"/
-# "heximax-notrade" with `hexset.arena` and "heximax-trading"/
-# "heximax-notrade" with `hexset.tuning`. See `presets`'s own docstring.
+# "heximax-notrade" with `hexset.arena`. See `presets`'s own docstring.
 from . import presets  # noqa: F401
 
 __all__ = [

@@ -1,0 +1,862 @@
+{
+  "environment": {
+    "commit": "fb1b13d",
+    "dirty": "false",
+    "python": "3.12.14",
+    "platform": "Linux-6.18.33.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "machine": "x86_64"
+  },
+  "settings": {
+    "profile": "notrade",
+    "games": 1024,
+    "confirm": 3072,
+    "seed": 88000,
+    "workers": 30,
+    "terms": "production,buy_progress,robber_risk,spare_card,road,diversity,port,knight",
+    "passes": "0,0.5,2;0.71,1.41",
+    "out": "docs/readouts/heximax-fit/sweep-notrade.json"
+  },
+  "start": {
+    "victory_point": 1.0,
+    "production": 2.785,
+    "diversity": 0.358,
+    "scarce": 0.07039861111111112,
+    "buy_progress": 0.45,
+    "road": 0.1237,
+    "knight": 0.1026,
+    "spare_card": 0.15,
+    "robber_risk": -0.15,
+    "port": 0.03063
+  },
+  "steps": [
+    {
+      "pass": 0,
+      "term": "production",
+      "from": 2.785,
+      "seed": 88000,
+      "cells": [
+        {
+          "factor": 0.0,
+          "value": 0.0,
+          "wins": 468,
+          "decided": 1024,
+          "win_rate": 0.45703125,
+          "interval_95": [
+            0.4267373444630457,
+            0.4876463387016914
+          ],
+          "roads_per_game": [
+            8.3818359375,
+            8.64111328125
+          ],
+          "seconds": 669.3
+        },
+        {
+          "factor": 0.5,
+          "value": 1.3925,
+          "wins": 516,
+          "decided": 1024,
+          "win_rate": 0.50390625,
+          "interval_95": [
+            0.4733254241488202,
+            0.5344578773816583
+          ],
+          "roads_per_game": [
+            8.50390625,
+            8.49560546875
+          ],
+          "seconds": 481.9
+        },
+        {
+          "factor": 2.0,
+          "value": 5.57,
+          "wins": 521,
+          "decided": 1024,
+          "win_rate": 0.5087890625,
+          "interval_95": [
+            0.47819376343444836,
+            0.5393186650091282
+          ],
+          "roads_per_game": [
+            8.61376953125,
+            8.5390625
+          ],
+          "seconds": 208.1
+        }
+      ],
+      "accepted": false,
+      "to": 2.785
+    },
+    {
+      "pass": 0,
+      "term": "buy_progress",
+      "from": 0.45,
+      "seed": 89000,
+      "cells": [
+        {
+          "factor": 0.0,
+          "value": 0.0,
+          "wins": 176,
+          "decided": 1024,
+          "win_rate": 0.171875,
+          "interval_95": [
+            0.15000450658918763,
+            0.19619816485062208
+          ],
+          "roads_per_game": [
+            10.33447265625,
+            8.97802734375
+          ],
+          "seconds": 242.6
+        },
+        {
+          "factor": 0.5,
+          "value": 0.225,
+          "wins": 424,
+          "decided": 1024,
+          "win_rate": 0.4140625,
+          "interval_95": [
+            0.3842696913155129,
+            0.4444976750139612
+          ],
+          "roads_per_game": [
+            9.404296875,
+            8.60302734375
+          ],
+          "seconds": 252.5
+        },
+        {
+          "factor": 2.0,
+          "value": 0.9,
+          "wins": 473,
+          "decided": 1024,
+          "win_rate": 0.4619140625,
+          "interval_95": [
+            0.431577723357339,
+            0.4925350867204962
+          ],
+          "roads_per_game": [
+            6.810546875,
+            8.064453125
+          ],
+          "seconds": 230.0
+        }
+      ],
+      "accepted": false,
+      "to": 0.45
+    },
+    {
+      "pass": 0,
+      "term": "robber_risk",
+      "from": -0.15,
+      "seed": 90000,
+      "cells": [
+        {
+          "factor": 0.0,
+          "value": -0.0,
+          "wins": 387,
+          "decided": 1024,
+          "win_rate": 0.3779296875,
+          "interval_95": [
+            0.3487402139654341,
+            0.40803161320711423
+          ],
+          "roads_per_game": [
+            7.52197265625,
+            8.50146484375
+          ],
+          "seconds": 246.5
+        },
+        {
+          "factor": 0.5,
+          "value": -0.075,
+          "wins": 472,
+          "decided": 1024,
+          "win_rate": 0.4609375,
+          "interval_95": [
+            0.4306094129952049,
+            0.49155757170001063
+          ],
+          "roads_per_game": [
+            8.01123046875,
+            8.462890625
+          ],
+          "seconds": 247.9
+        },
+        {
+          "factor": 2.0,
+          "value": -0.3,
+          "wins": 545,
+          "decided": 1024,
+          "win_rate": 0.5322265625,
+          "interval_95": [
+            0.5016022822451546,
+            0.5626099553812928
+          ],
+          "roads_per_game": [
+            8.603515625,
+            8.31689453125
+          ],
+          "seconds": 166.6
+        }
+      ],
+      "accepted": true,
+      "to": -0.3
+    },
+    {
+      "pass": 0,
+      "term": "spare_card",
+      "from": 0.15,
+      "seed": 91000,
+      "cells": [
+        {
+          "factor": 0.0,
+          "value": 0.0,
+          "wins": 468,
+          "decided": 1024,
+          "win_rate": 0.45703125,
+          "interval_95": [
+            0.4267373444630457,
+            0.4876463387016914
+          ],
+          "roads_per_game": [
+            9.30322265625,
+            8.6787109375
+          ],
+          "seconds": 112.4
+        },
+        {
+          "factor": 0.5,
+          "value": 0.075,
+          "wins": 534,
+          "decided": 1024,
+          "win_rate": 0.521484375,
+          "interval_95": [
+            0.4908650489816659,
+            0.5519431094359656
+          ],
+          "roads_per_game": [
+            9.14501953125,
+            8.4833984375
+          ],
+          "seconds": 112.8
+        },
+        {
+          "factor": 2.0,
+          "value": 0.3,
+          "wins": 241,
+          "decided": 1024,
+          "win_rate": 0.2353515625,
+          "interval_95": [
+            0.21038750942857962,
+            0.26229381188150497
+          ],
+          "roads_per_game": [
+            7.09619140625,
+            8.95458984375
+          ],
+          "seconds": 118.5
+        }
+      ],
+      "accepted": false,
+      "to": 0.15
+    },
+    {
+      "pass": 0,
+      "term": "road",
+      "from": 0.1237,
+      "seed": 92000,
+      "cells": [
+        {
+          "factor": 0.0,
+          "value": 0.0,
+          "wins": 488,
+          "decided": 1024,
+          "win_rate": 0.4765625,
+          "interval_95": [
+            0.44611641432919297,
+            0.5071837764879363
+          ],
+          "roads_per_game": [
+            5.6982421875,
+            8.60693359375
+          ],
+          "seconds": 129.3
+        },
+        {
+          "factor": 0.5,
+          "value": 0.06185,
+          "wins": 528,
+          "decided": 1024,
+          "win_rate": 0.515625,
+          "interval_95": [
+            0.4850143202866804,
+            0.5461188858352335
+          ],
+          "roads_per_game": [
+            7.47900390625,
+            8.5322265625
+          ],
+          "seconds": 123.1
+        },
+        {
+          "factor": 2.0,
+          "value": 0.2474,
+          "wins": 377,
+          "decided": 1024,
+          "win_rate": 0.3681640625,
+          "interval_95": [
+            0.33916721142190015,
+            0.398146361924452
+          ],
+          "roads_per_game": [
+            10.50927734375,
+            8.69873046875
+          ],
+          "seconds": 110.5
+        }
+      ],
+      "accepted": false,
+      "to": 0.1237
+    },
+    {
+      "pass": 0,
+      "term": "diversity",
+      "from": 0.358,
+      "seed": 93000,
+      "cells": [
+        {
+          "factor": 0.0,
+          "value": 0.0,
+          "wins": 495,
+          "decided": 1024,
+          "win_rate": 0.4833984375,
+          "interval_95": [
+            0.4529101192494571,
+            0.5140108492460096
+          ],
+          "roads_per_game": [
+            8.546875,
+            8.53173828125
+          ],
+          "seconds": 117.2
+        },
+        {
+          "factor": 0.5,
+          "value": 0.179,
+          "wins": 522,
+          "decided": 1024,
+          "win_rate": 0.509765625,
+          "interval_95": [
+            0.4791677799177534,
+            0.5402904739084426
+          ],
+          "roads_per_game": [
+            8.611328125,
+            8.56298828125
+          ],
+          "seconds": 118.7
+        },
+        {
+          "factor": 2.0,
+          "value": 0.716,
+          "wins": 511,
+          "decided": 1024,
+          "win_rate": 0.4990234375,
+          "interval_95": [
+            0.4684599894133352,
+            0.5295941852040452
+          ],
+          "roads_per_game": [
+            8.50146484375,
+            8.44921875
+          ],
+          "seconds": 117.4
+        }
+      ],
+      "accepted": false,
+      "to": 0.358
+    },
+    {
+      "pass": 0,
+      "term": "port",
+      "from": 0.03063,
+      "seed": 94000,
+      "cells": [
+        {
+          "factor": 0.0,
+          "value": 0.0,
+          "wins": 516,
+          "decided": 1024,
+          "win_rate": 0.50390625,
+          "interval_95": [
+            0.4733254241488202,
+            0.5344578773816583
+          ],
+          "roads_per_game": [
+            8.607421875,
+            8.6015625
+          ],
+          "seconds": 117.9
+        },
+        {
+          "factor": 0.5,
+          "value": 0.015315,
+          "wins": 517,
+          "decided": 1024,
+          "win_rate": 0.5048828125,
+          "interval_95": [
+            0.4742988596194128,
+            0.5354302672936853
+          ],
+          "roads_per_game": [
+            8.63037109375,
+            8.5908203125
+          ],
+          "seconds": 119.2
+        },
+        {
+          "factor": 2.0,
+          "value": 0.06126,
+          "wins": 527,
+          "decided": 1024,
+          "win_rate": 0.5146484375,
+          "interval_95": [
+            0.4840396061578692,
+            0.545147774581425
+          ],
+          "roads_per_game": [
+            8.58056640625,
+            8.5048828125
+          ],
+          "seconds": 115.8
+        }
+      ],
+      "accepted": false,
+      "to": 0.03063
+    },
+    {
+      "pass": 0,
+      "term": "knight",
+      "from": 0.1026,
+      "seed": 95000,
+      "cells": [
+        {
+          "factor": 0.0,
+          "value": 0.0,
+          "wins": 493,
+          "decided": 1024,
+          "win_rate": 0.4814453125,
+          "interval_95": [
+            0.45096847852331284,
+            0.5120608392069146
+          ],
+          "roads_per_game": [
+            8.46826171875,
+            8.51904296875
+          ],
+          "seconds": 117.8
+        },
+        {
+          "factor": 0.5,
+          "value": 0.0513,
+          "wins": 508,
+          "decided": 1024,
+          "win_rate": 0.49609375,
+          "interval_95": [
+            0.46554212261834177,
+            0.5266745758511798
+          ],
+          "roads_per_game": [
+            8.51220703125,
+            8.50439453125
+          ],
+          "seconds": 199.8
+        },
+        {
+          "factor": 2.0,
+          "value": 0.2052,
+          "wins": 499,
+          "decided": 1024,
+          "win_rate": 0.4873046875,
+          "interval_95": [
+            0.45679479686071583,
+            0.5179094731652294
+          ],
+          "roads_per_game": [
+            8.52734375,
+            8.51513671875
+          ],
+          "seconds": 237.8
+        }
+      ],
+      "accepted": false,
+      "to": 0.1026
+    },
+    {
+      "pass": 1,
+      "term": "production",
+      "from": 2.785,
+      "seed": 96000,
+      "cells": [
+        {
+          "factor": 0.71,
+          "value": 1.97735,
+          "wins": 507,
+          "decided": 1024,
+          "win_rate": 0.4951171875,
+          "interval_95": [
+            0.4645697327063148,
+            0.5257011403805872
+          ],
+          "roads_per_game": [
+            8.4091796875,
+            8.39453125
+          ],
+          "seconds": 230.4
+        },
+        {
+          "factor": 1.41,
+          "value": 3.92685,
+          "wins": 512,
+          "decided": 1024,
+          "win_rate": 0.5,
+          "interval_95": [
+            0.4694328440202656,
+            0.5305671559797344
+          ],
+          "roads_per_game": [
+            8.419921875,
+            8.4228515625
+          ],
+          "seconds": 237.1
+        }
+      ],
+      "accepted": false,
+      "to": 2.785
+    },
+    {
+      "pass": 1,
+      "term": "buy_progress",
+      "from": 0.45,
+      "seed": 97000,
+      "cells": [
+        {
+          "factor": 0.71,
+          "value": 0.3195,
+          "wins": 467,
+          "decided": 1024,
+          "win_rate": 0.4560546875,
+          "interval_95": [
+            0.4257696208419677,
+            0.4866682369401498
+          ],
+          "roads_per_game": [
+            9.50830078125,
+            8.70849609375
+          ],
+          "seconds": 247.0
+        },
+        {
+          "factor": 1.41,
+          "value": 0.6345,
+          "wins": 516,
+          "decided": 1024,
+          "win_rate": 0.50390625,
+          "interval_95": [
+            0.4733254241488202,
+            0.5344578773816583
+          ],
+          "roads_per_game": [
+            7.73193359375,
+            8.263671875
+          ],
+          "seconds": 230.8
+        }
+      ],
+      "accepted": false,
+      "to": 0.45
+    },
+    {
+      "pass": 1,
+      "term": "robber_risk",
+      "from": -0.3,
+      "seed": 98000,
+      "cells": [
+        {
+          "factor": 0.71,
+          "value": -0.213,
+          "wins": 520,
+          "decided": 1024,
+          "win_rate": 0.5078125,
+          "interval_95": [
+            0.4772198631735642,
+            0.5383467398873927
+          ],
+          "roads_per_game": [
+            8.2578125,
+            8.439453125
+          ],
+          "seconds": 239.9
+        },
+        {
+          "factor": 1.41,
+          "value": -0.423,
+          "wins": 500,
+          "decided": 1024,
+          "win_rate": 0.48828125,
+          "interval_95": [
+            0.4577662570118931,
+            0.5188838383966716
+          ],
+          "roads_per_game": [
+            8.45166015625,
+            8.392578125
+          ],
+          "seconds": 237.6
+        }
+      ],
+      "accepted": false,
+      "to": -0.3
+    },
+    {
+      "pass": 1,
+      "term": "spare_card",
+      "from": 0.15,
+      "seed": 99000,
+      "cells": [
+        {
+          "factor": 0.71,
+          "value": 0.1065,
+          "wins": 544,
+          "decided": 1024,
+          "win_rate": 0.53125,
+          "interval_95": [
+            0.5006255864702731,
+            0.5616408257735546
+          ],
+          "roads_per_game": [
+            8.8076171875,
+            8.4658203125
+          ],
+          "seconds": 201.7
+        },
+        {
+          "factor": 1.41,
+          "value": 0.2115,
+          "wins": 405,
+          "decided": 1024,
+          "win_rate": 0.3955078125,
+          "interval_95": [
+            0.366003589093162,
+            0.4257930949665394
+          ],
+          "roads_per_game": [
+            8.38818359375,
+            8.62939453125
+          ],
+          "seconds": 120.9
+        }
+      ],
+      "accepted": true,
+      "to": 0.1065
+    },
+    {
+      "pass": 1,
+      "term": "road",
+      "from": 0.1237,
+      "seed": 100000,
+      "cells": [
+        {
+          "factor": 0.71,
+          "value": 0.087827,
+          "wins": 538,
+          "decided": 1024,
+          "win_rate": 0.525390625,
+          "interval_95": [
+            0.49476786424883223,
+            0.5558235956992776
+          ],
+          "roads_per_game": [
+            8.154296875,
+            8.736328125
+          ],
+          "seconds": 116.4
+        },
+        {
+          "factor": 1.41,
+          "value": 0.174417,
+          "wins": 451,
+          "decided": 1024,
+          "win_rate": 0.4404296875,
+          "interval_95": [
+            0.41030207117520967,
+            0.471002580484994
+          ],
+          "roads_per_game": [
+            9.88720703125,
+            8.822265625
+          ],
+          "seconds": 109.1
+        }
+      ],
+      "accepted": false,
+      "to": 0.1237
+    },
+    {
+      "pass": 1,
+      "term": "diversity",
+      "from": 0.358,
+      "seed": 101000,
+      "cells": [
+        {
+          "factor": 0.71,
+          "value": 0.25417999999999996,
+          "wins": 502,
+          "decided": 1024,
+          "win_rate": 0.490234375,
+          "interval_95": [
+            0.45970952609155735,
+            0.5208322200822466
+          ],
+          "roads_per_game": [
+            8.7978515625,
+            8.79541015625
+          ],
+          "seconds": 112.0
+        },
+        {
+          "factor": 1.41,
+          "value": 0.5047799999999999,
+          "wins": 503,
+          "decided": 1024,
+          "win_rate": 0.4912109375,
+          "interval_95": [
+            0.4606813349908719,
+            0.5218062365655517
+          ],
+          "roads_per_game": [
+            8.7626953125,
+            8.8115234375
+          ],
+          "seconds": 114.5
+        }
+      ],
+      "accepted": false,
+      "to": 0.358
+    },
+    {
+      "pass": 1,
+      "term": "port",
+      "from": 0.03063,
+      "seed": 102000,
+      "cells": [
+        {
+          "factor": 0.71,
+          "value": 0.0217473,
+          "wins": 508,
+          "decided": 1024,
+          "win_rate": 0.49609375,
+          "interval_95": [
+            0.46554212261834177,
+            0.5266745758511798
+          ],
+          "roads_per_game": [
+            8.634765625,
+            8.67431640625
+          ],
+          "seconds": 110.3
+        },
+        {
+          "factor": 1.41,
+          "value": 0.0431883,
+          "wins": 491,
+          "decided": 1024,
+          "win_rate": 0.4794921875,
+          "interval_95": [
+            0.4490273034314607,
+            0.5101103635335276
+          ],
+          "roads_per_game": [
+            8.6669921875,
+            8.681640625
+          ],
+          "seconds": 110.8
+        }
+      ],
+      "accepted": false,
+      "to": 0.03063
+    },
+    {
+      "pass": 1,
+      "term": "knight",
+      "from": 0.1026,
+      "seed": 103000,
+      "cells": [
+        {
+          "factor": 0.71,
+          "value": 0.072846,
+          "wins": 505,
+          "decided": 1024,
+          "win_rate": 0.4931640625,
+          "interval_95": [
+            0.4626253014454979,
+            0.523753920876165
+          ],
+          "roads_per_game": [
+            8.8076171875,
+            8.75634765625
+          ],
+          "seconds": 113.1
+        },
+        {
+          "factor": 1.41,
+          "value": 0.144666,
+          "wins": 507,
+          "decided": 1024,
+          "win_rate": 0.4951171875,
+          "interval_95": [
+            0.4645697327063148,
+            0.5257011403805872
+          ],
+          "roads_per_game": [
+            8.83056640625,
+            8.787109375
+          ],
+          "seconds": 112.1
+        }
+      ],
+      "accepted": false,
+      "to": 0.1026
+    }
+  ],
+  "incumbent": {
+    "victory_point": 1.0,
+    "production": 2.785,
+    "diversity": 0.358,
+    "scarce": 0.07039861111111112,
+    "buy_progress": 0.45,
+    "road": 0.1237,
+    "knight": 0.1026,
+    "spare_card": 0.1065,
+    "robber_risk": -0.3,
+    "port": 0.03063
+  },
+  "seconds": 7693.6,
+  "confirm": {
+    "games": 3072,
+    "seed": 588000,
+    "wins": 1625,
+    "decided": 3072,
+    "win_rate": 0.5289713541666666,
+    "interval_95": [
+      0.5112948387648326,
+      0.5465755041574387
+    ],
+    "roads_per_game": [
+      8.803873697916666,
+      8.267415364583334
+    ],
+    "seconds": 335.8
+  }
+}

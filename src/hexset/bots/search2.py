@@ -120,19 +120,25 @@ def paranoid(vector: Sequence[float], seat: int) -> float:
 WIN_TEMPERATURE = 2.476644394795811
 
 
+def win_at(vector: Sequence[float], seat: int, temperature: float) -> float:
+    """Softmax(vector / temperature)[seat]: the seat's win probability at a
+    given exchange rate between the vector's units and win log-odds.
+    Numerically stable: the max is subtracted before exponentiating."""
+    scaled = [v / temperature for v in vector]
+    m = max(scaled)
+    exps = [math.exp(s - m) for s in scaled]
+    return exps[seat] / sum(exps)
+
+
 def win(vector: Sequence[float], seat: int) -> float:
     """Softmax(vector / WIN_TEMPERATURE)[seat]: the seat's win probability.
 
     This reads the vector as the seat's win probability, which is what the
     game actually pays, rather than a margin over the table — at a
     temperature fitted by maximum likelihood against real game outcomes (see
-    `WIN_TEMPERATURE`). Numerically stable: the max is subtracted before
-    exponentiating. `relative` remains search2's frozen stance.
+    `WIN_TEMPERATURE`). `relative` remains search2's frozen stance.
     """
-    scaled = [v / WIN_TEMPERATURE for v in vector]
-    m = max(scaled)
-    exps = [math.exp(s - m) for s in scaled]
-    return exps[seat] / sum(exps)
+    return win_at(vector, seat, WIN_TEMPERATURE)
 
 
 # How a seat turns the per-seat vector into the one number it maximises. The

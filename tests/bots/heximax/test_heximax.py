@@ -453,6 +453,64 @@ def test_an_honest_trade_read_is_unchanged_by_the_partners_real_cards():
     assert values[0] == pytest.approx(values[1])
 
 
+def test_the_vectorised_gate_matches_the_clone_it_replaces_bit_for_bit():
+    """`_delta`'s fast path prices a candidate by recomputing every seat's
+    hand terms from the post-trade pool (`HonestEvaluator.score_many`);
+    `_delta_reference` clones the state and re-reads it the slow way.
+
+    Worth pinning rather than trusting: `score_many` is a hand-written
+    transposition of `hand_terms` onto the candidate axis, and the hand terms
+    put a `PURCHASE_VALUE`-weighted argmax in the middle of it whose tie-break
+    has to match the scalar loop's strictly-greater test exactly. Pick a
+    different winner there and `best_cost` changes with it, which silently
+    moves `spare_card` on a subset of hands -- the private gate would then be
+    pricing a position the search would never score.
+    """
+    worst = 0.0
+    checked = nonzero = 0
+    for seed in (26, 31, 44):
+        game = after_setup(seed)
+        rng = random.Random(seed)
+        bot = a_bot(game, seed)
+        for _ in range(120):
+            options = legal_actions(game)
+            if not options or is_over(game):
+                break
+            apply(game, rng.choice(options))
+            if game.phase is not Phase.MAIN:
+                continue
+            seat = to_move(game)
+            view = game.state(seat)
+            for counterparty in range(game._state.num_players):
+                if counterparty == seat:
+                    continue
+                for give_r in range(NUM_RESOURCES):
+                    if not game._state.hands[seat][give_r]:
+                        continue
+                    for take_r in range(NUM_RESOURCES):
+                        if take_r == give_r or not game._state.hands[counterparty][take_r]:
+                            continue
+                        received = one_for_one(give_r, take_r)
+                        fast = bot._delta(view, seat, seat, received, counterparty, bot._rank)
+                        slow = bot._delta_reference(
+                            view, seat, seat, received, counterparty, bot._rank
+                        )
+                        worst = max(worst, abs(fast - slow))
+                        checked += 1
+                        nonzero += fast != 0.0
+    # A run that priced nothing, or priced everything at zero, would pass
+    # vacuously -- the equality is only worth anything over real candidates.
+    assert checked > 500
+    assert nonzero > 100
+    # To floating-point noise, not bit for bit: `score_many` sums a hand's
+    # bank value with numpy's pairwise reduction where the scalar loop adds
+    # left to right, so the two agree exactly only for weight values that
+    # happen to round alike -- the shipped -0.15 did, the swept -0.30 differs
+    # by one ulp. `score_many`'s own docstring states the contract as
+    # `gains_many`'s caller checks it, at 1e-12; that is what is pinned here.
+    assert worst <= 1e-12
+
+
 # --- presets ------------------------------------------------------------------
 
 
@@ -506,3 +564,76 @@ def test_heximax_reads_the_true_state_only_where_it_says_so():
     source = "\n".join(lines)
     assert "._state" not in source
     assert source.count("omniscient=self.omniscient") <= 2
+
+
+# --- hidden victory points and the fitted temperature --------------------------
+
+
+def test_an_opponents_development_cards_are_worth_their_expected_victory_points():
+    """The anchor term means the same thing in every row: the knower's own VP
+    cards are exact, an opponent's are its held count times the VP share of
+    the unseen pool, and the omniscient reader sees the truth for everyone."""
+    from hexset.bots.heximax.evaluate import VP_CARDS, HonestEvaluator, expected_card_points
+    from hexset.cards import DevCard
+
+    game = after_setup(3)
+    for p in range(4):
+        set_known_hand(game, p, [0] * NUM_RESOURCES)
+    state = game._state
+    # Seat 1 holds two knights and a VP card, seat 2 one knight; all drawn
+    # from the deck, so the unseen pool shrinks by the same three cards.
+    state.dev_cards[1][DevCard.KNIGHT] = 2
+    state.new_dev_cards[1][DevCard.VICTORY_POINT] = 1
+    state.dev_cards[2][DevCard.KNIGHT] = 1
+    del state.deck[:4]
+
+    unseen_from_0 = len(state.deck) + 3 + 1
+    assert expected_card_points(state, 1, 0) == pytest.approx(3 * VP_CARDS / unseen_from_0)
+    assert expected_card_points(state, 2, 0) == pytest.approx(1 * VP_CARDS / unseen_from_0)
+    assert expected_card_points(state, 0, 1) == 0.0
+    # Seat 1 knows its own VP card, so the pool it reads has one VP card fewer
+    # and excludes its own three cards.
+    assert expected_card_points(state, 2, 1) == pytest.approx(
+        (VP_CARDS - 1) / (len(state.deck) + 1)
+    )
+
+    honest = HonestEvaluator(state.board)
+    plain = Evaluator(state.board)
+    rows = honest.rows_game(game, 0)
+    truth = [plain.terms(state, p, knower=p) for p in range(4)]
+    assert rows[0][0] == truth[0][0]
+    assert rows[1][0] == pytest.approx(truth[1][0] - 1 + 3 * VP_CARDS / unseen_from_0)
+    own = honest.rows_game(game, 1)
+    assert own[1][0] == truth[1][0]  # exact for the knower: the real VP card counts
+    omni = HonestEvaluator(state.board, omniscient=True).rows_game(game, 0)
+    assert [row[0] for row in omni] == pytest.approx([row[0] for row in truth])
+    # `evaluate` is `rows` dotted with the weights, so the two cannot drift.
+    scored = honest.evaluate_game(game, 0)
+    assert scored == pytest.approx(
+        [sum(w * v for w, v in zip(honest.vector, row)) for row in rows]
+    )
+
+
+def test_a_candidate_temperature_travels_with_the_entrant():
+    from hexset.arena import Entrant
+    from hexset.bots.search2 import WIN_TEMPERATURE, win, win_at
+
+    vector = [4.0, 6.0, 5.0, 3.0]
+    assert win(vector, 1) == pytest.approx(win_at(vector, 1, WIN_TEMPERATURE))
+    assert win_at(vector, 1, 0.5) > win(vector, 1) > win_at(vector, 1, 50.0)
+
+    board = random_base_board(random.Random(0))
+    bot = spawn(
+        Entrant("hot", kind="heximax", depth=2, width=6, temperature=0.5),
+        board, random.Random(0),
+    )
+    assert bot.temperature == 0.5
+    assert bot._rank(vector, 1) == pytest.approx(win_at(vector, 1, 0.5))
+    default = spawn(PRESETS["heximax"], board, random.Random(0))
+    assert default.temperature is None
+    assert default._rank(vector, 1) == pytest.approx(win(vector, 1))
+    with pytest.raises(ValueError):
+        spawn(
+            Entrant("bad", kind="heximax", depth=2, width=6, stance="relative", temperature=1.0),
+            board, random.Random(0),
+        )

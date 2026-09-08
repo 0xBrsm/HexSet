@@ -1,0 +1,32 @@
+{
+  "a": "heximax-notrade",
+  "b": "search2-notrade",
+  "a_path": "heximax-notrade",
+  "b_path": "search2-notrade",
+  "games": 800,
+  "duel_seed": 59300,
+  "workers": 30,
+  "seconds": 217.6185828819871,
+  "via": "arena.compete",
+  "geometry": "blocked",
+  "unfinished": 0,
+  "wins": 551,
+  "win_rate": 0.68875,
+  "wilson_low": 0.6558280282802083,
+  "wilson_high": 0.7198679459238251,
+  "paired_vp": 0.93375,
+  "paired_vp_low": 0.7773124618224134,
+  "paired_vp_high": 1.0901875381775865,
+  "turns_mean": 85.6425,
+  "turns_median": 83.5,
+  "turns_max": 156,
+  "exhausted": 0,
+  "environment": {
+    "commit": "6dc1afb",
+    "dirty": "true",
+    "python": "3.12.14",
+    "platform": "Linux-6.18.33.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "machine": "x86_64"
+  },
+  "previous": "62.63% [59.22, 65.91]"
+}

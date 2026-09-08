@@ -25,9 +25,14 @@ from dataclasses import asdict, dataclass, replace
 from typing import Sequence
 
 from hexset.bench.throughput import default_workers, environment
-from hexset.arena import Z_95, compete, mean_interval, wilson
+from hexset.arena import Entrant, Z_95, compete, mean_interval, wilson
 from hexset.bots.evaluate import Weights
-from hexset.tuning import entrant_for
+
+
+def _entrant_for(name: str, weights: Weights, depth: int, width: int | None) -> Entrant:
+    kind = "greedy" if depth <= 1 else "search"
+    return Entrant(name=name, kind=kind, weights=weights, depth=depth, width=width)
+
 
 DEFAULT_LEVELS = (0.0, 1.0, 2.0, 3.0, 3.5, 5.0, Weights().production, 10.0, 14.0)
 
@@ -100,7 +105,7 @@ def measure(
     candidate = replace(intact, production=production)
     # Two of each, so the pairing survives the seat rotation.
     entrants = tuple(
-        entrant_for(f"{name}-{copy}", weights, 1, None)
+        _entrant_for(f"{name}-{copy}", weights, 1, None)
         for copy in range(2)
         for name, weights in (("candidate", candidate), ("intact", intact))
     )

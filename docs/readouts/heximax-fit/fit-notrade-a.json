@@ -1,0 +1,189 @@
+{
+  "environment": {
+    "commit": "6dc1afb",
+    "dirty": "true",
+    "python": "3.12.14",
+    "platform": "Linux-6.18.33.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "machine": "x86_64"
+  },
+  "settings": {
+    "records": "/workspaces/dev-hexset/tmp/heximax-fit/records-notrade-a.jsonl",
+    "stride": 8,
+    "holdout": 0.2,
+    "split_seed": 0,
+    "omniscient": false,
+    "variants": "standard,no_risk",
+    "profile": "notrade",
+    "bootstrap": 0,
+    "workers": 30,
+    "out": "docs/readouts/heximax-fit/fit-notrade-a.json",
+    "json": false
+  },
+  "data": {
+    "records": 5000,
+    "decided": 5000,
+    "choice_sets": 530368,
+    "train_choice_sets": 423308,
+    "test_choice_sets": 107060,
+    "train_games": 4000,
+    "test_games": 1000,
+    "replay_seconds": 45.1
+  },
+  "uniform_loss": 1.3862943611198906,
+  "incumbent": {
+    "profile": "notrade",
+    "weights": {
+      "victory_point": 1.0,
+      "production": 2.785,
+      "diversity": 0.358,
+      "scarce": 0.07039861111111112,
+      "buy_progress": 0.45,
+      "road": 0.1237,
+      "knight": 0.1026,
+      "spare_card": 0.15,
+      "robber_risk": -0.15,
+      "port": 0.03063
+    },
+    "temperature": 2.476644394795811,
+    "train_loss": 1.170813889167273,
+    "test_loss": 1.1697229485732332
+  },
+  "variants": {
+    "standard": {
+      "columns": [
+        "victory_point",
+        "production",
+        "diversity",
+        "buy_progress",
+        "road",
+        "knight",
+        "spare_card",
+        "robber_risk",
+        "port"
+      ],
+      "beta": [
+        0.4994087033488391,
+        1.8599589870032889,
+        0.14245562775995654,
+        1.1662737134741685,
+        -0.06260920950482456,
+        0.03739624832365976,
+        -0.11330135631339124,
+        0.35829959465304306,
+        0.05383963473275991
+      ],
+      "beta_se_clustered": [
+        0.011449657295315952,
+        0.0744161989942289,
+        0.022882649038081054,
+        0.030819486074232714,
+        0.008279016241731756,
+        0.012435602951166608,
+        0.01527384496638197,
+        0.03423973644965004,
+        0.008500244997979195
+      ],
+      "weights": {
+        "victory_point": 1.0,
+        "production": 3.7243223326528607,
+        "diversity": 0.2852485885902767,
+        "scarce": 0.09414259229761397,
+        "buy_progress": 2.335309147905501,
+        "road": -0.12536667680196947,
+        "knight": 0.07488105047608336,
+        "spare_card": -0.2268710087622357,
+        "robber_risk": 0.7174476380776433,
+        "port": 0.10780676101904596
+      },
+      "weights_se": {
+        "victory_point": null,
+        "production": 0.1903078309582764,
+        "diversity": 0.04483969628140327,
+        "scarce": null,
+        "buy_progress": 0.07649017209717413,
+        "road": 0.01601684673581759,
+        "knight": 0.025427334805858643,
+        "spare_card": 0.03154877061497915,
+        "robber_risk": 0.07062279528319772,
+        "port": 0.017582111721241085
+      },
+      "extras": {},
+      "extras_se": {},
+      "temperature": 2.0023679869701745,
+      "temperature_se": 0.04590714394079346,
+      "train_loss": 1.1299593452274033,
+      "test_loss": 1.1329723490303014,
+      "converged": true,
+      "iterations": 5,
+      "samples": 423308,
+      "games": 4000
+    },
+    "no_risk": {
+      "columns": [
+        "victory_point",
+        "production",
+        "diversity",
+        "buy_progress",
+        "road",
+        "knight",
+        "spare_card",
+        "port"
+      ],
+      "beta": [
+        0.500212361558088,
+        1.8667213801783307,
+        0.14141977665473526,
+        1.1999332028136789,
+        -0.062450504215897776,
+        0.03702477125263529,
+        -0.03824039711051111,
+        0.05252448118069284
+      ],
+      "beta_se_clustered": [
+        0.011445260087590229,
+        0.07442946910830611,
+        0.022872153928912016,
+        0.030736614439667204,
+        0.008272119968661276,
+        0.012428966873382049,
+        0.01212362766152991,
+        0.008496845132282627
+      ],
+      "weights": {
+        "victory_point": 1.0,
+        "production": 3.7318577541022133,
+        "diversity": 0.2827194758126997,
+        "scarce": 0.09433307100647262,
+        "buy_progress": 2.3988475596166063,
+        "road": -0.12484798260757417,
+        "knight": 0.07401810530493202,
+        "spare_card": -0.07644832485026538,
+        "robber_risk": 0.0,
+        "port": 0.10500436458044898
+      },
+      "weights_se": {
+        "victory_point": null,
+        "production": 0.19007619170163906,
+        "diversity": 0.04475182550065303,
+        "scarce": null,
+        "buy_progress": 0.07719481722704069,
+        "road": 0.01597870321100439,
+        "knight": 0.025365656469424333,
+        "spare_card": 0.024510619968202377,
+        "robber_risk": null,
+        "port": 0.01752782547665321
+      },
+      "extras": {},
+      "extras_se": {},
+      "temperature": 1.9991509143939326,
+      "temperature_se": 0.045742176579387304,
+      "train_loss": 1.1305645433442517,
+      "test_loss": 1.1338425291528438,
+      "converged": true,
+      "iterations": 5,
+      "samples": 423308,
+      "games": 4000
+    }
+  },
+  "seconds": 67.4
+}

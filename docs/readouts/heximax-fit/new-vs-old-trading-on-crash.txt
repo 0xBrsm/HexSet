@@ -1,0 +1,40 @@
+multiprocessing.pool.RemoteTraceback: 
+"""
+Traceback (most recent call last):
+  File "/usr/local/python/3.12.14/lib/python3.12/multiprocessing/pool.py", line 125, in worker
+    result = (True, func(*args, **kwds))
+                    ^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/python/3.12.14/lib/python3.12/multiprocessing/pool.py", line 48, in mapstar
+    return list(map(*args))
+           ^^^^^^^^^^^^^^^^
+  File "/workspaces/dev-hexset/tmp/hexset-fit/src/hexset/bench/road_sweep.py", line 88, in _play_one
+    game = play(
+           ^^^^^
+  File "/workspaces/dev-hexset/tmp/hexset-fit/src/hexset/arena.py", line 478, in play
+    apply(game, bot.choose(game))
+  File "/workspaces/dev-hexset/tmp/hexset-fit/src/hexset/actions.py", line 317, in apply
+    roll_dice(game)
+  File "/workspaces/dev-hexset/tmp/hexset-fit/src/hexset/game.py", line 474, in roll_dice
+    enter_main(game)
+  File "/workspaces/dev-hexset/tmp/hexset-fit/src/hexset/game.py", line 740, in enter_main
+    run_trade_event(game)
+  File "/workspaces/dev-hexset/tmp/hexset-fit/src/hexset/game.py", line 724, in run_trade_event
+    trade_event(
+  File "/workspaces/dev-hexset/tmp/hexset-fit/src/hexset/trading.py", line 372, in trade_event
+    assert position not in seen, (
+           ^^^^^^^^^^^^^^^^^^^^
+AssertionError: a trade event revisited a position: a gate is not strictly increasing in the acting seat's own value
+"""
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/workspaces/dev-hexset/tmp/heximax-fit/new_vs_old.py", line 22, in <module>
+    r = run_cell(None, games, seed=99000, depth=2, width=6, workers=30,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/dev-hexset/tmp/hexset-fit/src/hexset/bench/road_sweep.py", line 163, in run_cell
+    outcomes = pool.map(_play_one, jobs, chunksize=1)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/python/3.12.14/lib/python3.12/multiprocessing/pool.py", line 367, in map
+    return self._map_async(func, iterable, mapstar, chunksize).get()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -36,7 +36,7 @@ TOKEN_HEADER = "X-HexSet-Token"
 # action space now (`hexset.onnx_record.CONTRACT_VERSION`'s own comment).
 #
 # The numbers are `hexset.export_onnx._CONTRACT_VERSION`'s, and only its. PR #2
-# re-stamped the 29-field record as `"2"` in this repo while dev-HexNet was
+# re-stamped the 29-field record as `"2"` in this repo while dev-HexN was
 # exporting it as `"4"`, so one number named two different graphs and no real
 # export could load. One number, one meaning, defined there.
 #

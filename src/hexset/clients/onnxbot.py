@@ -271,7 +271,7 @@ class NetworkBot:
     """A policy answering one position at a time.
 
     Trades off the same value head `choose` already reads, no new
-    parameters: `accepts`/`accepts_many` mirror dev-HexNet's
+    parameters: `accepts`/`accepts_many` mirror dev-HexN's
     `hexnet.policy.DerivedTrader` exactly, reimplemented against the
     record-contract wire shape instead of a live `torch` forward. There is
     no `gains_many` here -- `hexset.bots.search2.Bot`'s default derives one

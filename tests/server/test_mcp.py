@@ -8,6 +8,7 @@ names the right seat, game and trade.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 
@@ -48,10 +49,14 @@ def _creator_at_seat_zero(monkeypatch):
 @pytest.fixture(autouse=True)
 def _reset_mcp_state(monkeypatch):
     """Each test gets its own server and its own seat: the module-global
-    `_token`/`_code` (see `mcp.py`'s docstring on why they're globals — one
-    process, one seat) must not leak across tests."""
+    `_token`/`_code`/`_model` (see `mcp.py`'s docstring on why they're
+    globals — one process, one seat) must not leak across tests."""
     monkeypatch.setattr(mcp, "_token", None)
     monkeypatch.setattr(mcp, "_code", None)
+    monkeypatch.setattr(mcp, "_model", None)
+
+
+MODEL = "claude-test-model"
 
 
 def call(tool: str, **arguments) -> dict:
@@ -68,7 +73,7 @@ def call(tool: str, **arguments) -> dict:
 def test_new_game_seats_the_caller_and_remembers_the_code(live_server):
     _, base = live_server
     mcp.BASE_URL = base
-    data = call("new_game", opponents=SOLO, name="Ada")
+    data = call("new_game", model=MODEL, opponents=SOLO, name="Ada")
     assert "token" not in data  # popped by _seat -- never reaches the LLM
     assert data["code"] == mcp._code
     assert mcp._token
@@ -82,7 +87,7 @@ def test_new_game_always_installs_a_pending_gate_for_the_llm_seat(live_server):
     with no argument required to ask for it."""
     server, base = live_server
     mcp.BASE_URL = base
-    data = call("new_game", opponents=SOLO)
+    data = call("new_game", model=MODEL, opponents=SOLO)
     seat = data["seat"]
     table = server.tables.get(data["code"])
     assert seat in table.session.confirm_seats
@@ -250,7 +255,7 @@ def test_undo_translates_its_own_response(monkeypatch, _seat_for_trade_stubs):
 def test_board_annotates_hexes_and_vertices_with_resource_and_pips(live_server):
     _, base = live_server
     mcp.BASE_URL = base
-    call("new_game", opponents=SOLO)
+    call("new_game", model=MODEL, opponents=SOLO)
     data = call("board")
 
     for hex_ in data["hexes"]:
@@ -271,22 +276,22 @@ def test_board_annotates_hexes_and_vertices_with_resource_and_pips(live_server):
 def test_new_game_defaults_the_seat_name_to_mcp(live_server):
     server, base = live_server
     mcp.BASE_URL = base
-    data = call("new_game", opponents=SOLO)
+    data = call("new_game", model=MODEL, opponents=SOLO)
     assert server.tables.get(data["code"]).seats[data["seat"]].name == "mcp"
 
 
 def test_new_game_keeps_an_explicit_name(live_server):
     server, base = live_server
     mcp.BASE_URL = base
-    data = call("new_game", opponents=SOLO, name="Ada")
+    data = call("new_game", model=MODEL, opponents=SOLO, name="Ada")
     assert server.tables.get(data["code"]).seats[data["seat"]].name == "Ada"
 
 
 def test_join_defaults_the_seat_name_to_mcp(live_server):
     server, base = live_server
     mcp.BASE_URL = base
-    creator = call("new_game")
-    joiner = call("join", code=creator["code"])
+    creator = call("new_game", model=MODEL)
+    joiner = call("join", code=creator["code"], model=MODEL)
     assert server.tables.get(creator["code"]).seats[joiner["seat"]].name == "mcp"
 
 
@@ -296,7 +301,47 @@ def test_join_defaults_the_seat_name_to_mcp(live_server):
 def test_leave_game_locks_the_seat(live_server):
     server, base = live_server
     mcp.BASE_URL = base
-    data = call("new_game", opponents=SOLO)
+    data = call("new_game", model=MODEL, opponents=SOLO)
     seat = data["seat"]
     result = call("leave_game")
     assert result["locked"] == [seat]
+
+
+# --- Identity: model -> client, and resume_game's reclaim fallback -----------
+
+
+def test_new_game_records_the_clients_id_and_kind_from_model(live_server):
+    """`secret = model.strip().lower()`, `id = sha256(secret)`, kind "mcp" --
+    the exact string the LLM gives, normalised the one way `resume_game`'s
+    later reclaim can reproduce it."""
+    server, base = live_server
+    mcp.BASE_URL = base
+    data = call("new_game", model=" Claude-Opus-5 ")
+    expected_id = hashlib.sha256(b"claude-opus-5").hexdigest()
+    client = server.tables.get(data["code"]).seats[data["seat"]].client
+    assert client == {"id": expected_id, "kind": "mcp"}
+
+
+def test_resume_game_reclaims_the_seat_once_its_token_is_dead(live_server, tmp_path, monkeypatch):
+    """The saved token stops working (here: blanked directly on the server,
+    the same symptom a restart or a second reclaim elsewhere would leave) --
+    resume_game() falls back to POST /api/reclaim with the saved model's own
+    secret and comes back with the same seat."""
+    server, base = live_server
+    mcp.BASE_URL = base
+    monkeypatch.setattr(mcp, "_SESSION_FILE", tmp_path / "session.json")
+
+    data = call("new_game", model=MODEL, opponents=SOLO)
+    seat = data["seat"]
+    code = data["code"]
+    dead_token = mcp._token
+
+    server.tables.get(code).seats[seat].token = None
+    monkeypatch.setattr(mcp, "_token", None)
+    monkeypatch.setattr(mcp, "_code", None)
+    monkeypatch.setattr(mcp, "_model", None)
+
+    result = call("resume_game")
+    assert result["seat"] == seat
+    assert mcp._token is not None
+    assert mcp._token != dead_token

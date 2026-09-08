@@ -32,6 +32,7 @@ log line here goes to stderr instead.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import pathlib
@@ -59,6 +60,10 @@ _token: str | None = None
 # the token alone already names one game, but the trade endpoints are
 # addressed by code (`api.py`), so it is remembered here the same way.
 _code: str | None = None
+# The `model` string new_game/join were called with -- this connection's own
+# secret (see `_client_of`), saved so `resume_game` can reclaim this seat by
+# it if the token above stops working.
+_model: str | None = None
 
 # Where a seat's token/code are cached between processes, so an LLM can
 # resume a game the same way a human's browser does -- by holding onto the
@@ -75,7 +80,10 @@ class ToolError(Exception):
     LLM as a normal (not protocol-level) tool result — see `_call_tool`."""
 
 
-def _request(method: str, path: str, body: dict | None = None) -> dict:
+def _request_status(method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
+    """Like `_request`, but also hands back the HTTP status -- `resume_game`
+    is the one caller that needs to tell a dead token (403) apart from any
+    other refusal."""
     data = json.dumps(body).encode("utf-8") if body is not None else None
     request = urllib.request.Request(f"{BASE_URL}{path}", data=data, method=method)
     # A real User-Agent, not urllib's default: a `BASE_URL` fronted by
@@ -90,17 +98,21 @@ def _request(method: str, path: str, body: dict | None = None) -> dict:
         request.add_header(TOKEN_HEADER, _token)
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
-            return json.loads(response.read().decode("utf-8"))
+            return response.status, json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as error:
         # The API's own refusals are still a JSON body (see web.Handler._serve)
         # — read it rather than raising past it, so a 400 ("it is not your turn
         # to act") reaches the LLM as the same message a browser would get.
-        return json.loads(error.read().decode("utf-8"))
+        return error.code, json.loads(error.read().decode("utf-8"))
     except urllib.error.URLError as error:
         raise ToolError(
             f"could not reach the HexSet server at {BASE_URL} ({error.reason}) "
             "— is `python -m hexset.server.web` running?"
         ) from error
+
+
+def _request(method: str, path: str, body: dict | None = None) -> dict:
+    return _request_status(method, path, body)[1]
 
 
 def _request_ok(method: str, path: str, body: dict | None = None) -> dict:
@@ -133,20 +145,25 @@ def _seat(result: dict) -> dict:
 def _save_session() -> None:
     """Persists the current seat so a later process can resume it (see
     `resume_game`) -- the same trick a human's browser plays by holding onto
-    the token client-side, since the server itself remembers nothing."""
+    the token client-side, since the server itself remembers nothing. `model`
+    goes with it: it's this connection's own secret (`_client_of`), needed to
+    reclaim the seat if the token above stops working."""
     try:
         _SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _SESSION_FILE.write_text(json.dumps({"base_url": BASE_URL, "code": _code, "token": _token}))
+        _SESSION_FILE.write_text(
+            json.dumps({"base_url": BASE_URL, "code": _code, "token": _token, "model": _model})
+        )
         _SESSION_FILE.chmod(0o600)
     except OSError as error:
         print(f"could not save session to {_SESSION_FILE}: {error}", file=sys.stderr)
 
 
-def _load_session() -> dict:
-    """Resumes the seat a previous process saved, if any -- called explicitly
-    from `resume_game()` rather than at import time, so tests (which reset
-    `_token`/`_code` per test via monkeypatch) aren't at the mercy of
-    whatever session file happens to sit on disk."""
+def _load_session() -> None:
+    """Loads the seat a previous process saved into this process's globals,
+    if any -- called explicitly from `resume_game()` rather than at import
+    time, so tests (which reset `_token`/`_code`/`_model` per test via
+    monkeypatch) aren't at the mercy of whatever session file happens to sit
+    on disk."""
     try:
         saved = json.loads(_SESSION_FILE.read_text())
     except (OSError, json.JSONDecodeError):
@@ -157,40 +174,74 @@ def _load_session() -> dict:
         )
     if not saved.get("token"):
         raise ToolError(f"no saved session at {_SESSION_FILE}")
-    global _token, _code
+    global _token, _code, _model
     _token = saved["token"]
     _code = saved.get("code")
-    return _state()
+    _model = saved.get("model")
+
+
+def _client_of(model: str) -> tuple[dict, str]:
+    """The `client` wire field and the secret behind it, from a model
+    string: `secret = model.strip().lower()`, `id = sha256(secret)`, kind
+    `"mcp"` -- no env-var override, the model supplies its own string."""
+    if not isinstance(model, str) or not model.strip():
+        raise ToolError("model must be a non-empty string identifying you, e.g. claude-opus-5")
+    secret = model.strip().lower()
+    client = {"id": hashlib.sha256(secret.encode("utf-8")).hexdigest(), "kind": "mcp"}
+    return client, secret
 
 
 def _resume_game() -> dict:
-    return _load_session()
+    """Reclaims the seat saved by an earlier `new_game()`/`join()` in this
+    process, or a previous one pointed at the same server: the saved token
+    first, and `POST /api/reclaim` with the saved code and the saved model's
+    own secret if the server no longer recognises it (a restart, or the
+    token superseded by a second reclaim elsewhere)."""
+    global _token
+    _load_session()
+    status, result = _request_status("GET", "/api/state")
+    if status == 403:
+        if not _model:
+            raise ToolError("no model on the saved session to reclaim with")
+        _, secret = _client_of(_model)
+        reclaimed = _request_ok("POST", "/api/reclaim", {"code": _code, "secret": secret})
+        _token = reclaimed.pop("token")
+        _save_session()
+        return _translate_view(reclaimed)
+    if "error" in result:
+        raise ToolError(result["error"])
+    return _translate_view(result)
 
 
 def _models() -> dict:
     return _request_ok("GET", "/api/models")
 
 
-def _display_name(name: str | None) -> str:
-    """A claimed seat with no name of its own falls back to `webplay.py`'s
-    generic "human" label -- indistinguishable in the log/UI from an actual
-    person, which is exactly backwards for a seat only an LLM can hold.
-    `new_game`/`join` always send a name because of this: `name` if the LLM
-    gave one, "mcp" otherwise."""
-    return str(name).strip()[:40] if name else "mcp"
+def _display_name(name: str | None) -> str | None:
+    """The 40-character cap every client applies, or `None` for no name at
+    all -- the server now defaults an unnamed mcp seat to "mcp" itself
+    (`api.default_seat_name`), so there is nothing left for this to fall
+    back to."""
+    return str(name).strip()[:40] if name else None
 
 
-def _new_game(opponents: list[str] | None = None, name: str | None = None) -> dict:
-    body: dict = {"name": _display_name(name)}
+def _new_game(model: str, opponents: list[str] | None = None, name: str | None = None) -> dict:
+    global _model
+    client, _ = _client_of(model)
+    _model = model
+    body: dict = {"name": _display_name(name), "client": client}
     if opponents:
         body["bots"] = opponents
     return _seat(_request_ok("POST", "/api/games", body))
 
 
-def _join(code: str, name: str | None = None) -> dict:
+def _join(code: str, model: str, name: str | None = None) -> dict:
+    global _model
     if not isinstance(code, str) or not code.strip():
         raise ToolError("code must be a game's six-character code")
-    body: dict = {"code": code.strip().lower(), "name": _display_name(name)}
+    client, _ = _client_of(model)
+    _model = model
+    body: dict = {"code": code.strip().lower(), "name": _display_name(name), "client": client}
     return _seat(_request_ok("POST", "/api/join", body))
 
 
@@ -440,10 +491,15 @@ _TOOLS: dict[str, tuple] = {
         "other bots) to join by the code this returns. There is no separate "
         "start — the board is live from the first response. Nothing is ever "
         "traded on your behalf: offers to you wait in get_table()'s `pending` "
-        "for answer_trade().",
+        "for answer_trade(). `model` identifies you for resume_game() -- keep "
+        "it exactly as given if you ever mean to reclaim this seat.",
         {
             "type": "object",
             "properties": {
+                "model": {
+                    "type": "string",
+                    "description": "Your exact model identifier, e.g. claude-opus-5.",
+                },
                 "opponents": {
                     "type": "array",
                     "items": {"type": "string"},
@@ -454,6 +510,7 @@ _TOOLS: dict[str, tuple] = {
                 },
                 "name": {"type": "string", "description": "Your display name, up to 40 characters."},
             },
+            "required": ["model"],
         },
     ),
     "join": (
@@ -462,14 +519,19 @@ _TOOLS: dict[str, tuple] = {
         "Fails if every seat is taken or has locked out (see state()'s `locked`) "
         "— a seat somebody closed outright is retired for the rest of that "
         "game, so join before that happens. Your seat is gated the same way "
-        "new_game()'s is — see its description.",
+        "new_game()'s is — see its description. `model` identifies you for "
+        "resume_game() the same way it does there.",
         {
             "type": "object",
             "properties": {
                 "code": {"type": "string", "description": "The game's six-character code."},
+                "model": {
+                    "type": "string",
+                    "description": "Your exact model identifier, e.g. claude-opus-5.",
+                },
                 "name": {"type": "string", "description": "Your display name, up to 40 characters."},
             },
-            "required": ["code"],
+            "required": ["code", "model"],
         },
     ),
     "board": (
@@ -606,11 +668,13 @@ _TOOLS: dict[str, tuple] = {
     "resume_game": (
         _resume_game,
         "Reclaim the seat this process (or an earlier run pointed at the same "
-        "server) last held, restored from a local cache file rather than the "
-        "server -- the same trick a human's browser plays by holding onto its "
-        "own session token, since the server itself forgets a seat's token the "
-        "moment nothing is holding it. Fails if nothing was saved here, or it "
-        "was saved for a different HEXSET_UI_BASE_URL than this process has now.",
+        "server) last held, from a local cache file rather than the server -- "
+        "the same trick a human's browser plays by holding onto its own "
+        "session token. Tries that saved token first; if the server no longer "
+        "honours it (a restart, or the seat reclaimed a second time elsewhere) "
+        "this falls back to reclaiming the seat by the `model` new_game()/"
+        "join() were called with. Fails if nothing was saved here, or it was "
+        "saved for a different HEXSET_UI_BASE_URL than this process has now.",
         {"type": "object", "properties": {}},
     ),
 }

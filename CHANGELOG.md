@@ -9,6 +9,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.44.0
+
 ### Changed
 
 - **The network gate's continuation is the mover's, in a paired belief world.** `hexset.clients.netbot.NetworkBot` scores each candidate in one world drawn from this seat's own belief (`View.sample`, the counterparty certified to hold what the candidate says it gives), exchanged and not, and rolls out whoever is to move -- this seat as the actor, the actor when this seat responds -- so a responder prices what the actor will do with the cards. A counter that hands a seat the card completing its winning build reads as that win: zero for the responder's own gain or below, the win itself for the estimate, a pass from `default_respond`. Two worlds per candidate; the live table is never touched.

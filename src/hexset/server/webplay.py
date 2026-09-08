@@ -854,6 +854,10 @@ class GameSession:
     # labelling `bot_names` does for the other seats. A seat with no entry
     # here is one nobody named, which the log and the journal just say.
     player_names: dict[int, str] = field(default_factory=dict)
+    # Seat -> `{"id", "kind"}` of the client that claimed it (see
+    # `api.parse_client`), for the journal only -- nothing about play reads
+    # this, and a seat nobody has claimed, or a bot's, has no entry.
+    clients: dict[int, dict] = field(default_factory=dict)
     # The join code of the table this game was dealt for, journalled in the
     # header so a restart can find this game again by the code people already
     # have. Nothing about play reads it, and a session dealt outside a table
@@ -1132,6 +1136,7 @@ class GameSession:
                 bot_names=self.bot_names,
                 bot_specs=self.bot_specs,
                 player_names=self.player_names,
+                clients=self.clients,
                 code=self.code,
             )
 
@@ -1142,19 +1147,18 @@ class GameSession:
         The log and the client both want a name per seat and neither cares
         which kind of player it belongs to, so the two sources are merged
         here rather than at each of the half-dozen call sites. A claimed
-        seat with no bot label falls back to its own registered name, or
-        "human" if it never gave one -- lowercase, matching the bot names
-        (search2, heximax) and the client's own label for its seat (see
-        seatLabel in index.html): every seat gets a label, so `_who` never
-        has to invent one.
+        seat with no bot label falls back to its own registered name -- every
+        seat gets a label, so `_who` never has to invent one.
         """
         labels = dict(self.bot_names)
         for seat in self.claimed_seats:
             if seat not in labels:
-                labels[seat] = self.player_names.get(seat) or "human"
+                # `api.py` resolves a name at claim time now, so this is only
+                # ever hit by a session built directly (tests) with no name.
+                labels[seat] = self.player_names.get(seat) or "api"
         return SeatLabels(labels, locked_of(self.game))
 
-    def claim(self, seat: int, name: str | None) -> None:
+    def claim(self, seat: int, name: str | None, client: dict | None = None) -> None:
         """A seat somebody just joined, after the deal — the one seat this
         session's own header (see `__post_init__`) could not have named
         because nobody had taken it yet. Journalled the same way a mid-game
@@ -1165,8 +1169,10 @@ class GameSession:
         self.claimed_seats.add(seat)
         if name:
             self.player_names[seat] = name
+        if client is not None:
+            self.clients[seat] = client
         if self.journal is not None:
-            self.journal.seated(seat=seat, name=name or "", spec="")
+            self.journal.seated(seat=seat, name=name or "", spec="", client=client)
 
     @property
     def round(self) -> int:

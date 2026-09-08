@@ -177,6 +177,7 @@ class Journal:
         bot_names: dict[int, str],
         bot_specs: dict[int, str],
         player_names: dict[int, str] | None = None,
+        clients: dict[int, dict] | None = None,
         code: str | None = None,
     ) -> None:
         """The header: everything true before the first action.
@@ -196,8 +197,10 @@ class Journal:
         `human_seats` are the seats occupied at deal time (any kind — see
         `api.GameSession.claimed_seats`, the key name predates that) and
         `player_names` whatever they registered as — a seat missing from the
-        latter is one nobody named. A seat claiming in later, or a seat
-        somebody closes outright, both show up as their own event kind
+        latter is one nobody named. `clients` is `api.parse_client`'s record
+        (`{"id", "kind"}`) for whichever of those seats claimed with one — a
+        bot's or an unclaimed seat has no entry. A seat claiming in later, or
+        a seat somebody closes outright, both show up as their own event kind
         (`seated`, `locked`) rather than here.
         """
         # true state: the journal is the record of everything that
@@ -214,6 +217,7 @@ class Journal:
                 "num_players": state.num_players,
                 "human_seats": list(human_seats),
                 "player_names": {str(s): n for s, n in sorted((player_names or {}).items())},
+                "clients": {str(s): c for s, c in sorted((clients or {}).items())},
                 "bots": {
                     str(seat): {"name": name, "spec": bot_specs.get(seat, name)}
                     for seat, name in sorted(bot_names.items())
@@ -316,14 +320,17 @@ class Journal:
             }
         )
 
-    def seated(self, *, seat: int, name: str, spec: str) -> None:
+    def seated(self, *, seat: int, name: str, spec: str, client: dict | None = None) -> None:
         """A seat's occupant, named after the deal: a different bot swapped
         in mid-game, or an open seat somebody joined after the header was
         already written (see `api.GameSession.claim`). `spec` is empty for a
         person — there is no checkpoint to name — which the header's own
         `bots` map already treats as absent from it, so a resumed table
-        only ever re-seats an actual bot from this."""
-        self._emit({"kind": "seated", "at": _now(), "seat": seat, "name": name, "spec": spec})
+        only ever re-seats an actual bot from this. `client` is the same
+        record the header's `clients` map carries, `None` for a bot swap."""
+        self._emit(
+            {"kind": "seated", "at": _now(), "seat": seat, "name": name, "spec": spec, "client": client}
+        )
 
     def locked(self, seat: int, *, at_step: int) -> None:
         """`seat` was closed outright while it was still empty (see
@@ -497,6 +504,20 @@ def seating(events: list[dict]) -> dict[int, tuple[str, str]]:
             else:
                 seats.pop(event["seat"], None)
     return seats
+
+
+def clients(events: list[dict]) -> dict[int, dict]:
+    """Seat -> its client record (`{"id", "kind"}`), from the header's own
+    `clients` map with every later `seated` event's `client` applied on top
+    -- the same fold `seating` does for bots, so a seat's identity for
+    `POST /api/reclaim` survives a restart (`api.Tables._reopen`) the same
+    way a bot's spec does. A seat with no client anywhere is left out."""
+    header = events[0] if events else {}
+    result = {int(seat): client for seat, client in header.get("clients", {}).items() if client}
+    for event in events:
+        if event.get("kind") == "seated" and event.get("client"):
+            result[event["seat"]] = event["client"]
+    return result
 
 
 def locked_seats(events: list[dict]) -> frozenset[int]:

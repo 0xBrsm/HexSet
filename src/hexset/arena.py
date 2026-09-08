@@ -109,8 +109,8 @@ def register_preset(name: str, entrant: "Entrant") -> None:
 def register_checkpoint_loader(loader) -> None:
     """Register `hexnet.netbot.load`-shaped loader: `(path, topology, device)
     -> Loaded`, an object with `.policy`, `.space` and `.max_trades`. Lets
-    `hexset.bench.aivat`/`hexset.bench.human_agreement` load a checkpoint without
-    importing hexnet themselves."""
+    `hexset.bench.human_agreement` load a checkpoint without importing
+    hexnet itself."""
     global _CHECKPOINT_LOADER
     _CHECKPOINT_LOADER = loader
 

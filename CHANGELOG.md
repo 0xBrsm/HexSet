@@ -44,6 +44,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Removed
 
+- `hexset.bench.aivat` and `hexset.bench.trade_lab` (and `trade_lab`'s
+  test) -- `hexset.arena.compete` and `catanatron/duel.py` are the only
+  game loops left. `aivat` had no dependents since August and needed a
+  value-function baseline the project never built; `compete`'s antithetic
+  paired boards and within-game VP margins already do the variance
+  reduction it was for. `trade_lab`'s three phases are closed (floor
+  0.0197 recorded), its data are Record v2 files replayable without it,
+  and its private seeding scheme was the coupling the collapse could not
+  remove. A position judge, if wanted again, will be built on `compete`
+  with a start position and a chance stream.
 - `hexset.tuning`, `hexset.bench.tune`, `hexset.bench.win_temperature` and
   `hexset.bench.learn_weights`, the hill-climb weight fitter and its
   supporting scripts -- superseded by the position-level likelihood fit in

@@ -28,9 +28,12 @@ That token, not the request's source or a cookie, is the identity here. It
 names one seat at one game, it is the only way to act on that seat, and it is
 what `state` reads to decide whose hand to show. There are no accounts and
 nothing to log out of — and, deliberately, the token never touches disk (see
-`journal.py`): a restart cannot hand a lost token back to anyone, so a table
-reopened after one simply treats every non-bot seat as open again (see
-`Tables._reopen`).
+`journal.py`): a restart cannot hand a lost token back to anyone. What a
+restart *can* put back is who was sitting where, which the journal does
+record, so a reopened table comes back with every seat claimed by whoever
+held it and none of them tokened (`Tables._reopen`). `POST /api/reclaim` is
+how a returning client trades its own secret for a fresh token on its own
+seat; nobody else is ever handed that seat instead.
 
 ## A seat resolves before anyone moves
 
@@ -90,7 +93,7 @@ from hexset.arena import PRESETS, spawn as spawn_entrant
 from hexset.board.board import Board, random_base_board
 from hexset.bots import Bot
 from hexset.clients.botclient import BotRunner, LocalSearchBrain, LocalTransport
-from hexset.game import Phase, is_over, lock_seat, may_act
+from hexset.game import Game, Phase, is_over, lock_seat, may_act
 from hexset.onnx_record import record_from_game
 from hexset.trading import holds
 
@@ -181,6 +184,25 @@ class ApiError(Exception):
     def __init__(self, message: str, status: int = 400) -> None:
         super().__init__(message)
         self.status = status
+
+
+def require_live(game: Game) -> None:
+    """Refuses anything that would change a game already over.
+
+    One function rather than the same two lines at each call site, so
+    "the game is already over" is one message with one status
+    everywhere -- it was a 409 from `_seated`'s gate and a bare 400 from
+    `seat_bot`/`leave_seat`'s own, for the same refusal. It is a conflict
+    with the state of the thing, not a malformed request, so: 409.
+
+    Deliberately not hoisted into `Tables.handle` as a blanket gate. Dealing
+    a brand-new game must never be refused because some unrelated old one
+    finished, and reads must not be either (a finished game is exactly as
+    readable as any other -- that is the point of keeping it around). What
+    is shared is the raise, not where it belongs.
+    """
+    if is_over(game):
+        raise ApiError("the game is already over", status=409)
 
 
 def new_code(taken: set[str]) -> str:
@@ -472,16 +494,14 @@ class Table:
         seat's display name falls back to `default_seat_name(client.kind)`
         rather than staying blank, so `player_names` always holds something.
 
-        Refuses once `is_over` -- a finished game's own seats look `EMPTY`
-        after a restart (`Tables._reopen`/`reopen_closed_session`, nothing
-        left there to reconstruct a person's claim from) exactly the way a
-        genuinely open seat does, and without this check `join` could not
-        tell the two apart. Every seat, from here, is what a spectator
-        already was: `GET /api/table/<code>`'s route is now the only way
-        into this game.
+        There is no `is_over` check here and there is nothing for one to do:
+        a game cannot start while an unlocked `EMPTY` seat is left
+        (`waiting_for`) and a seat never re-empties, so a finished game has
+        no candidate for this to find — live, or rebuilt from its journal,
+        where every seat comes back as whoever held it (`reopened_seats`).
+        A finished table refuses here as "no open seats", which is the
+        truth about it.
         """
-        if is_over(self.session.game):
-            raise ApiError("the game is already over", status=409)
         candidates = [
             i
             for i, seat in enumerate(self.seats)
@@ -574,7 +594,7 @@ def _seat_labels(
 
 def build_session(code: str, seats: list[Seat], config: Config, *, first: int) -> GameSession:
     """A fresh `MAX_SEATS`-seat game, `first` the seat the setup snake opens
-    on -- `Tables.create` always passes `0`; `resume_session` passes back
+    on -- `Tables.create` always passes `0`; `reopen_session` passes back
     whatever a journal recorded. Every seat not already claimed here is left
     for `Table.join`/`lock_seat` to resolve as the game unfolds."""
     seed = config.seed
@@ -584,7 +604,7 @@ def build_session(code: str, seats: list[Seat], config: Config, *, first: int) -
     if seed is None:
         seed = random.SystemRandom().randrange(2**31)
     # Two separate Random instances from the same seed, not one shared stream.
-    # `resume_session` rebuilds a game exactly this way, so the two must agree:
+    # `reopen_session` rebuilds a game exactly this way, so the two must agree:
     # consuming this seed's stream to build the board and then handing the same
     # object on to `start` would leave `start`'s rng at a position resuming
     # cannot reconstruct, and a journalled game would fail to resume.
@@ -614,19 +634,82 @@ def build_session(code: str, seats: list[Seat], config: Config, *, first: int) -
     )
 
 
-def _replayed_session(code: str, seats: list[Seat], path: Path) -> tuple[GameSession, list[dict]]:
-    """The construction `resume_session` and `reopen_closed_session` share:
-    everything through building the session, before `restore` decides
-    whether the result gets a live journal attached. `seats` names only the
-    seats the caller wants pre-claimed on the rebuilt game (see
-    `Tables._reopen`) — a bot's, whose identity is just its spec and needs
-    no lost token back; every other seat, including one a person held
-    before, comes back open. `game.locked` is seeded from the journal's own
-    `locked` events before replay runs, which is provably equivalent to
-    locking each seat at the step it actually happened (see
-    `hexset.server.seating`'s own note on `advance_setup`).
+def journal_dir(config: Config) -> str | None:
+    """Where this server's journals live: whatever `config` named, or the
+    environment's own directory when it named nothing (see
+    `journal.configured_dir` for why an empty string is not nothing)."""
+    return config.games_dir if config.games_dir is not None else journal.configured_dir()
+
+
+def reopened_seats(events: list[dict]) -> list[Seat]:
+    """The row of seats a journalled game comes back with.
+
+    Every seat the record says was somebody's comes back as theirs: a bot's
+    (`journal.seating`) re-tokened fresh, since a checkpoint's identity is
+    just its spec and no lost token was protecting it, and a person's
+    (`journal.players`) claimed but **untokened** — a token never touches
+    disk (see the module docstring), so there is none to hand back, and
+    `POST /api/reclaim` against the seat's own `client` record is how the
+    person who held it proves it is still theirs.
+
+    Claimed-but-untokened rather than `EMPTY` is the whole point. A seat
+    rebuilt `EMPTY` is one `Table.join` will hand to whoever opens the link
+    next, which after a restart means a stranger walking into a game already
+    in progress — and, for a game already over, means a finished table
+    looking joinable. Neither needs a rule refusing it once the seats say
+    who is actually sitting in them.
     """
-    events = journal.read(path)
+    seats = [Seat() for _ in range(MAX_SEATS)]
+    for seat, (bot_name, spec) in journal.seating(events).items():
+        seats[seat] = Seat(kind=SeatKind.BOT, name=bot_name, spec=spec, token=secrets.token_urlsafe(18))
+    for seat, name in journal.players(events).items():
+        seats[seat] = Seat(kind=SeatKind.PLAYER, name=name or None, token=None)
+    # A bot's seat carries no client identity; every other seat gets its back,
+    # which is what `POST /api/reclaim` matches a returning browser against.
+    for seat, client in journal.clients(events).items():
+        if seats[seat].kind is not SeatKind.BOT:
+            seats[seat].client = client
+    return seats
+
+
+def reopen_session(code: str, seats: list[Seat], path: Path, events: list[dict]) -> GameSession | None:
+    """The game `path` records, replayed back to exactly where it stopped —
+    still in play, or over and read-only — or `None` when there is nothing
+    left to hand anyone back.
+
+    A session lives in memory, so it used to be lost to anything that ended
+    the process: a deploy, a crash, or simply going quiet long enough to be
+    evicted. The journal is the whole game though (see
+    `hexset.server.journal`), and it replays exactly, so the loss was never
+    necessary — for a finished game either, which is just as worth reading
+    after a restart as it was before one.
+
+    Which of the three a file is, is decided from the *replayed game*, never
+    from the file: a closing line (`journal.is_closed`) says only that
+    nothing more will be appended, and is written both by a game somebody
+    won (`Journal.finish`) and by one nobody did (`Journal.abandoned`, on
+    New Game or on a 24h eviction). So:
+
+    * over — replayed to `is_over` — comes back read-only, with no `Journal`
+      attached: nothing will ever be appended to it again, and holding the
+      file open for writing could only risk that.
+    * still open, still in play — comes back live, journalling onward into
+      the same file from where it left off.
+    * closed but *not* over is the game that was walked away from. It is
+      gone: rebuilding it would hand back a table whose every action is
+      silently dropped (each journal write is conditional on there being a
+      journal) with no bot runner left to answer, which is worse than the
+      404 the caller gets instead.
+
+    `seats` is `reopened_seats` (whose `game.locked` companion,
+    `journal.locked_seats`, is seeded before replay runs — provably
+    equivalent to locking each seat at the step it actually happened; see
+    `hexset.server.seating`'s own note on `advance_setup`). `events` is the
+    caller's single read of `path`, passed down rather than re-read: these
+    files run to tens of thousands of lines.
+    """
+    if not events or events[0].get("kind") != "game":
+        return None
     header = events[0]
     seed = header["seed"]
     first = header.get("first", 0)
@@ -646,66 +729,29 @@ def _replayed_session(code: str, seats: list[Seat], path: Path) -> tuple[GameSes
         clients=clients,
         code=code,
     )
-    return session, events
-
-
-def resume_session(code: str, seats: list[Seat], config: Config) -> GameSession | None:
-    """The game this code left unfinished, played back to where it stopped —
-    or `None` if there isn't one, in which case the caller deals.
-
-    A session lives in memory, so it used to be lost to anything that ended the
-    process: a deploy, a crash, or simply going quiet long enough to be
-    evicted. The journal is the whole game though (see `hexset.server.journal`), and
-    it replays exactly, so the loss was never necessary.
-
-    Refuses a closed game the same way `journal.resumable` does — see
-    `reopen_closed_session` for that half.
-    """
-    where = config.games_dir if config.games_dir is not None else journal.configured_dir()
-    path = journal.resumable(where, code)
-    if path is None:
-        return None
-
-    session, events = _replayed_session(code, seats, path)
+    closed = journal.is_closed(events)
     try:
-        session.restore(
-            journal.replayable(events),
-            journal.Journal(directory=str(path.parent), game_id=path.stem),
-            notes=journal.notes_of(events),
-        )
+        # No journal handed to `restore` either way: whether this game is one
+        # to keep writing to is `is_over`'s to say, and only the finished
+        # replay can answer that. Attached below if it is.
+        session.restore(journal.replayable(events), notes=journal.notes_of(events))
     except (ResumeError, ValueError, KeyError) as error:
         # Kept rather than deleted: a journal that will not replay is the one
         # copy of a game that did happen, and is worth more as evidence of
-        # whatever broke than the disk space is. Closed, though, so the next
-        # request tries to resume it once and then deals instead of failing
-        # this way forever.
-        print(f"could not resume {path.name}: {error}")
-        journal.Journal(directory=str(path.parent), game_id=path.stem).abandoned()
+        # whatever broke than the disk space is. Closed, though (unless it
+        # already is), so the next request tries it once and then deals
+        # instead of failing this way forever.
+        print(f"could not reopen {path.name}: {error}")
+        if not closed:
+            journal.Journal(directory=str(path.parent), game_id=path.stem).abandoned()
         return None
 
-    return session
-
-
-def reopen_closed_session(code: str, seats: list[Seat], path: Path) -> GameSession | None:
-    """A finished game's own record, replayed once so it can still be
-    viewed after the process that played it is gone — the eviction-or-
-    restart loss `resume_session` solves for an unfinished game applied
-    just as much to a finished one, until now: `journal.resumable` refuses
-    a closed game on purpose (there is nothing left in it to *resume*), so
-    `Tables._reopen` was left with no path back to a game already over.
-
-    `restore` gets no `Journal` here, unlike `resume_session` — the game is
-    over, nothing further is ever appended to it again, and reopening the
-    file for writing would only risk that. `path` is `Tables._reopen`'s own
-    (`journal.most_recent`, since `resumable` won't hand one back), not
-    re-derived here.
-    """
-    session, events = _replayed_session(code, seats, path)
-    try:
-        session.restore(journal.replayable(events), None, notes=journal.notes_of(events))
-    except (ResumeError, ValueError, KeyError) as error:
-        print(f"could not reopen {path.name} for viewing: {error}")
+    if is_over(session.game):
+        return session
+    if closed:
         return None
+    session.journal = journal.Journal(directory=str(path.parent), game_id=path.stem)
+    session.journal.reopened(at_step=session._steps)
     return session
 
 
@@ -848,45 +894,37 @@ class Tables:
         """Must be called with `_registry_lock` held. Puts a game back
         together from its journal for a code the registry has lost — a
         restart — whether that game is still in progress or already over.
+        `None` for a code with no game behind it, and for the one kind of
+        record that is not a game to come back to: one walked away from
+        unfinished (see `reopen_session`).
 
-        In progress, every seat comes back open except a bot's (re-tokened
-        fresh; a checkpoint's identity is just its spec, nothing a lost
-        token was protecting) and a locked one (still locked) — see
-        `resume_session`'s own docstring for why a human's old seat is not,
-        and cannot be, specially recovered. Already over, no bot runner is
-        spawned for it (`reopen_closed_session` attaches no journal either;
-        nothing further will ever happen to this game either way) — the
-        seats are rebuilt only so `GET /api/table/<code>` and a `POST
-        /api/reclaim` on an old seat can still name who played it.
+        Every seat comes back as whoever held it (`reopened_seats`), so an
+        old seat is not on offer to whoever opens the link next; a locked
+        one stays locked. A game already over gets no bot runner — nothing
+        further will ever happen to it, and its own record already says
+        everything its seats did.
 
         Registers the rebuilt table itself, before spawning any bot runner
         (same ordering reason as `create`) — the lock is already held by the
         caller either way, so there is no separate window to race.
         """
-        where = self.config.games_dir if self.config.games_dir is not None else journal.configured_dir()
-        path = journal.resumable(where, code)
-        closed = path is None
-        if closed:
-            path = journal.most_recent(where, code)
+        path = journal.most_recent(journal_dir(self.config), code)
         if path is None:
             return None
+        # The one read of this file: `reopened_seats` and `reopen_session`
+        # both work off it rather than opening it again for themselves.
         events = journal.read(path)
-        seats = [Seat() for _ in range(MAX_SEATS)]
-        for seat, (bot_name, spec) in journal.seating(events).items():
-            seats[seat] = Seat(kind=SeatKind.BOT, name=bot_name, spec=spec, token=secrets.token_urlsafe(18))
-        # A bot's seat carries no client identity; every other seat gets its
-        # client back even though it comes back `EMPTY` (see the docstring
-        # above), so `POST /api/reclaim` still recognises it after a restart.
-        for seat, client in journal.clients(events).items():
-            if seats[seat].kind is not SeatKind.BOT:
-                seats[seat].client = client
-        session = (
-            reopen_closed_session(code, seats, path)
-            if closed
-            else resume_session(code, seats, self.config)
-        )
+        seats = reopened_seats(events)
+        session = reopen_session(code, seats, path, events)
         if session is None:
             return None
+        # A manual seat is a `PendingGate` from the moment it is claimed
+        # (`Table.join`, `Tables.create`), and a seat restored above was
+        # claimed — before the restart. Nothing is ever traded on its behalf
+        # here either.
+        for index, seat in enumerate(seats):
+            if seat.kind is SeatKind.PLAYER:
+                session.confirm_mode(index)
         table = Table(
             code=code,
             seats=seats,
@@ -896,7 +934,7 @@ class Tables:
             layout=board_layout(session.game.state(0, hidden=False).board),
         )
         self._tables[code] = table
-        if not closed:
+        if not is_over(session.game):
             self._spawn_local_bots(table)
         return table
 
@@ -933,24 +971,27 @@ class Tables:
     def reclaim(self, code: str, secret: str) -> tuple[Table, int, str]:
         """`POST /api/reclaim`: a fresh token for the seat whose `client.id`
         equals `sha256(secret).hexdigest()` -- the one way back into a seat
-        once its token is gone, whether that is a server restart (every
-        non-bot seat comes back `EMPTY`, its client restored by `_reopen`)
-        or just a token superseded by a second reclaim on a still-live seat.
+        once its token is gone, whether that is a server restart (`_reopen`
+        rebuilds every seat as whoever held it, client record and all, but
+        cannot hand back a token that never touched disk) or just a token
+        superseded by a second reclaim on a still-live seat.
 
-        An `EMPTY` seat is revived the same way `Table.join` would seat it
-        (claimed, named, gated); a seat still `PLAYER` just gets a new token
-        -- its old one then fails every later request. Refuses a bot seat (no
-        secret to check), a locked one (retired for good, the same as
-        `close_seat`/`leave_seat`), and -- same reasoning as `Table.join` --
-        any seat at all once `is_over`: a finished game has nothing left to
-        act on even in the seat that made every recorded move, and reclaiming
-        one there would only dress up what `GET /api/table/<code>` already
-        shows a spectator as somebody's own claimed seat. No match anywhere,
-        or the game already over: 403/409.
+        A seat still `PLAYER` -- which after a restart is every seat somebody
+        held -- just gets a new token; its old one then fails every later
+        request. An `EMPTY` seat is revived the same way `Table.join` would
+        seat it (claimed, named, gated). Refuses a bot seat (no secret to
+        check) and a locked one (retired for good, the same as
+        `close_seat`/`leave_seat`). No match anywhere: 403.
+
+        Works on a finished game, on purpose: this is a handshake about who
+        you are, not permission to do anything. It is the "otherwise I
+        resume my seat" half of a link that opens its game whatever state
+        that game is in -- your own name on your own seat and your own hand
+        in the view, rather than a spectator's account of both. Acting is
+        what `is_over` refuses, once, in `_seated`, and it refuses the
+        freshly minted token exactly as it refuses no token at all.
         """
         table = self.get(code)
-        if is_over(table.session.game):
-            raise ApiError("the game is already over", status=409)
         digest = hashlib.sha256(secret.encode("utf-8")).hexdigest()
         with table.lock:
             locked = locked_of(table.session.game)
@@ -1069,8 +1110,7 @@ class Tables:
         touched its picker, and left their client believing it was sitting
         somewhere it was not.
         """
-        if is_over(table.session.game):
-            raise ApiError("the game is already over")
+        require_live(table.session.game)
         if not 0 <= seat < len(table.seats):
             raise ApiError(f"there is no seat {seat} at this game")
         kind = table.seats[seat].kind
@@ -1193,8 +1233,7 @@ class Tables:
         (`answer_trade`/`choose_trade`), so a round never outlives the one
         seat that would have to close it.
         """
-        if is_over(table.session.game):
-            raise ApiError("the game is already over")
+        require_live(table.session.game)
         round_ = table.session.open_round
         if round_ is not None and (round_.offer.actor == viewer or viewer in round_.awaiting):
             raise ApiError("resolve the open trade round first (answer_trade/choose_trade), then leave")
@@ -1433,12 +1472,18 @@ class Tables:
         already was (`GET /api/table/<code>`'s route, `state_view`'s
         `omniscient or over` reveal) -- read-only, no name, no bot, no
         seat, permanently. One gate here rather than one per method below
-        (`seat_bot`/`leave_seat` also refuse on their own, for callers that
-        reach them outside this dispatch) is what makes it every route at
-        once instead of whichever ones somebody remembered to check.
+        (`seat_bot`/`leave_seat` also call `require_live` on their own, for
+        callers that reach them outside this dispatch) is what makes it
+        every route at once instead of whichever ones somebody remembered
+        to check.
+
+        This is also the whole of why `Tables.reclaim` does not care whether
+        a game is over: the token it mints is refused here exactly as no
+        token at all is, so reclaiming a finished seat buys its holder
+        their own view of it and nothing more.
         """
-        if method == "POST" and is_over(table.session.game):
-            raise ApiError("the game is already over", status=409)
+        if method == "POST":
+            require_live(table.session.game)
         if method == "GET" and path == "/api/state":
             return table.view(seat)
         if method == "GET" and path == "/api/board":

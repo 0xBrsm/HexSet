@@ -337,7 +337,7 @@ def test_a_journalled_game_replays_clean(played):
     engine, its actions have to be legal in order and end the same game.
 
     Deliberately goes through `replayable` and `restore` — the same two calls
-    `api.resume_session` makes — rather than a replay written for the
+    `api.reopen_session` makes — rather than a replay written for the
     test. A journal that replays clean here is one a returning player would
     actually get their game back from.
     """

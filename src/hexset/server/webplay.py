@@ -80,7 +80,7 @@ DEV_CARD_NAMES: tuple[str, ...] = tuple(c.name.title().replace("_", " ") for c i
 class ResumeError(Exception):
     """A journalled game would not replay — its actions no longer describe a
     legal game under this engine. Recoverable, and by design: the caller deals
-    a fresh game rather than failing the request (see `api.resume_session`), so
+    a fresh game rather than failing the request (see `api.reopen_session`), so
     an engine change that invalidates old journals costs the games in flight
     at the time and nothing else."""
 

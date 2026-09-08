@@ -12,12 +12,13 @@ from __future__ import annotations
 import hashlib
 import json
 import random
-import re
+from pathlib import Path
 
 import pytest
 
 from hexset.actions import legal_actions
 
+from hexset.server import journal
 from hexset.server.api import (
     MAX_SEATS,
     ApiError,
@@ -26,8 +27,8 @@ from hexset.server.api import (
     SeatKind,
     Tables,
     build_session,
-    reopen_closed_session,
-    resume_session,
+    reopen_session,
+    reopened_seats,
 )
 
 from hexset.game import is_over, to_move
@@ -87,10 +88,16 @@ def bot_seat() -> Seat:
     return Seat(kind=SeatKind.BOT, name="search2", spec="search2")
 
 
-def _unlabelled(line: str) -> str:
-    """A log line with every seat's `(name)` blanked out -- see the reopen
-    tests below for why."""
-    return re.sub(r"\([^)]*\)", "(-)", line)
+def reopened(code: str, directory, seats: list[Seat] | None = None):
+    """The one journal in `directory`, replayed -- exactly the two calls
+    `Tables._reopen` makes (one `journal.read`, then `reopen_session`),
+    without a registry around them. `seats` defaults to the row the record
+    itself says was at the table (`reopened_seats`), which is what a real
+    reopen builds; a caller passes its own only to say what a *different*
+    row would replay to."""
+    path = next(Path(directory).glob("*.jsonl"))
+    events = journal.read(path)
+    return reopen_session(code, reopened_seats(events) if seats is None else seats, path, events)
 
 
 def drive(session, moves: int, rng: random.Random) -> None:
@@ -113,7 +120,7 @@ def test_an_unfinished_game_comes_back_where_it_was_left(tmp_path):
     drive(session, 12, random.Random(4))
     assert not is_over(session.game)
 
-    resumed = resume_session("ABC123", seats, config)
+    resumed = reopened("ABC123", tmp_path)
 
     assert resumed is not None
     assert resumed.game.phase is session.game.phase
@@ -129,67 +136,131 @@ def test_an_unfinished_game_comes_back_where_it_was_left(tmp_path):
     assert resumed.player_names == session.player_names
 
 
-def test_a_finished_game_can_still_be_viewed_after_a_restart(tmp_path):
-    """`journal.resumable` refuses a closed game on purpose -- there is
-    nothing left in it to *resume* -- which used to be the whole story for
-    `Tables._reopen` too: a restart made a finished game's own spectator
-    link 404 forever, even with its full journal still sitting on disk.
-    `reopen_closed_session` is the other half `resumable` was never meant
-    to cover.
+WEB_SECRET = "a returning browser's own secret"
+WEB_CLIENT = {"id": hashlib.sha256(WEB_SECRET.encode("utf-8")).hexdigest(), "kind": "web"}
 
-    Played to a real, random win (`drive`'s own random legal play, seeded
-    the same as the other replay tests in this file, converges in under a
-    thousand steps here) rather than forced onto the `Game` directly: an
-    `is_over`/`won_by` set by hand leaves no trace in the actions replay
-    reconstructs from, so a forced one would prove nothing about the
-    replayed session actually reaching it.
 
-    Log lines are compared with each seat's `(name)` blanked out: a human
-    seat's chosen name was never restorable on any reopen, closed or not
-    (`Tables._reopen` only ever recovers a *bot* seat's name/spec, via
-    `journal.seating` -- a person's display name isn't tracked anywhere a
-    reopen can read it back from, live-resume included). That gap predates
-    this fix and isn't what it's about; a same-shape transcript modulo the
-    label is.
+@pytest.fixture(scope="module")
+def finished_game(tmp_path_factory):
+    """A real, played-out game and the directory holding its journal: Ada
+    (a browser, `WEB_SECRET`) at seat 0 against three bots, played to a
+    random win.
+
+    Played out rather than forced onto the `Game` directly (`drive`'s own
+    random legal play, seeded the same as the other replay tests in this
+    file, converges in under a thousand steps here): an `is_over`/`won_by`
+    set by hand leaves no trace in the actions a replay reconstructs from,
+    so a forced one would prove nothing about the replayed session actually
+    reaching it.
+
+    Module-scoped because playing it is the slow part and nothing that reads
+    it back can write to it -- a game replayed to `is_over` is handed back
+    with no journal attached at all (see `api.reopen_session`), so every
+    test below shares one file without disturbing the next.
+    """
+    directory = tmp_path_factory.mktemp("finished")
+    seats = [
+        Seat(kind=SeatKind.PLAYER, name="Ada", token="t-Ada", client=WEB_CLIENT),
+        bot_seat(),
+        bot_seat(),
+        bot_seat(),
+    ]
+    session = build_session("ABC123", seats, Config(games_dir=str(directory), seed=99), first=0)
+    drive(session, 2000, random.Random(4))
+    assert is_over(session.game)
+    return session, directory
+
+
+def test_a_finished_game_can_still_be_viewed_after_a_restart(finished_game):
+    """A finished game used to be reopenable by nobody: the reader that put
+    a table back refused a closed file on purpose -- there is nothing left
+    in one to *resume* -- so a restart made a played-out game's own
+    spectator link 404 forever, with its full journal still sitting on
+    disk. It comes back read-only instead: same winner, same transcript,
+    and no journal attached, because nothing will ever be appended to it
+    again.
+    """
+    session, directory = finished_game
+
+    replayed = reopened("ABC123", directory)
+
+    assert replayed is not None
+    assert is_over(replayed.game)
+    assert replayed.game.won_by == session.game.won_by
+    assert replayed.log_for(None, omniscient=True) == session.log_for(None, omniscient=True)
+    assert replayed.journal is None  # never reopened for writing
+    # Compared line for line, names and all: a reopened game puts every seat
+    # back as whoever held it (`api.reopened_seats`), so the transcript is
+    # the one that was written rather than one about four numbered strangers.
+    assert replayed.player_names == session.player_names == {0: "Ada"}
+
+
+def test_a_reopened_game_puts_every_seat_back_as_whoever_held_it(finished_game):
+    """The seats are what makes the rest of this safe. A seat rebuilt
+    `EMPTY` is one `Table.join` hands to whoever opens the link next --
+    which for a game already over means a finished table looking joinable,
+    and for one still in progress means a stranger walking into somebody's
+    seat after a restart. Both stop being possible once the record's own
+    account of who was sitting where is read back.
+
+    A person's seat comes back untokened: a token never touches disk, and
+    `POST /api/reclaim` against the restored `client` record is the way
+    back into it. A bot's is simply re-minted -- a checkpoint's identity is
+    its spec, and no lost token was protecting it.
+    """
+    _session, directory = finished_game
+
+    seats = reopened_seats(journal.read(next(Path(directory).glob("*.jsonl"))))
+
+    assert [seat.kind for seat in seats] == [SeatKind.PLAYER] + [SeatKind.BOT] * 3
+    assert seats[0].name == "Ada"
+    assert seats[0].client == WEB_CLIENT
+    assert seats[0].token is None
+    assert [seat.name for seat in seats[1:]] == ["search2"] * 3
+    assert all(seat.token is not None and seat.client is None for seat in seats[1:])
+
+
+def test_a_finished_table_reopens_read_only_through_get_after_a_restart(finished_game):
+    """The full path a real restart exercises, not `reopen_session` in
+    isolation: a second `Tables` (standing in for the process that starts
+    after one) rediscovers a code it never held live, purely from disk,
+    through the ordinary token-free spectator route."""
+    session, directory = finished_game
+
+    fresh = new_tables(games_dir=str(directory))
+    view = fresh.handle("GET", "/api/table/ABC123", {}, None)
+
+    assert view["game_over"] is True
+    assert view["log"] == session.log_for(None, omniscient=True)
+    assert [seat["name"] for seat in view["seats"]] == ["Ada"] + ["search2"] * 3
+
+
+def test_an_abandoned_unfinished_game_does_not_come_back(tmp_path):
+    """A closing line says only that nothing more will be appended -- it is
+    written both by a game somebody won (`Journal.finish`) and by one
+    nobody did (`Journal.abandoned`: New Game, or a 24h eviction through
+    `Table.close`). Which of the two it was is the replayed game's to say,
+    never the file's.
+
+    Getting that wrong is not a cosmetic 404: an unfinished game rebuilt as
+    if it were finished is a *mutable* table with no journal to write to
+    and no bot runners to answer, so every action taken at it is silently
+    dropped on the floor. A game walked away from is gone.
     """
     config = Config(games_dir=str(tmp_path), seed=99)
     seats = [player("Ada"), bot_seat(), bot_seat(), bot_seat()]
     session = build_session("ABC123", seats, config, first=0)
-    drive(session, 2000, random.Random(4))
-    assert is_over(session.game)
-    expected_winner = session.game.won_by
-    expected_log = [_unlabelled(line) for line in session.log_for(None, omniscient=True)]
+    drive(session, 12, random.Random(4))
+    assert not is_over(session.game)
+    assert reopened("ABC123", tmp_path) is not None  # still in play: still there
 
-    path = next(tmp_path.glob("*.jsonl"))
-    reopened = reopen_closed_session("ABC123", [Seat() for _ in range(4)], path)
+    session.journal.abandoned()
 
-    assert reopened is not None
-    assert is_over(reopened.game)
-    assert reopened.game.won_by == expected_winner
-    assert [_unlabelled(line) for line in reopened.log_for(None, omniscient=True)] == expected_log
-    assert reopened.journal is None  # never reopened for writing
-
-
-def test_a_finished_table_reopens_read_only_through_get_after_a_restart(tmp_path):
-    """The full path a real restart exercises, not just `reopen_closed_
-    session` in isolation: a second `Tables` (standing in for the process
-    that starts after one) rediscovers a code it never held live, purely
-    from disk, through the ordinary token-free spectator route -- see
-    `test_a_finished_game_can_still_be_viewed_after_a_restart` for why the
-    comparison blanks out each seat's `(name)`."""
-    config = Config(games_dir=str(tmp_path), seed=99)
-    seats = [player("Ada"), bot_seat(), bot_seat(), bot_seat()]
-    session = build_session("ABC123", seats, config, first=0)
-    drive(session, 2000, random.Random(4))
-    assert is_over(session.game)
-    expected_log = [_unlabelled(line) for line in session.log_for(None, omniscient=True)]
-
+    assert reopened("ABC123", tmp_path) is None
     fresh = new_tables(games_dir=str(tmp_path))
-    view = fresh.handle("GET", "/api/table/ABC123", {}, None)
-
-    assert view["game_over"] is True
-    assert [_unlabelled(line) for line in view["log"]] == expected_log
-    fresh.close()
+    with pytest.raises(ApiError) as gone:
+        fresh.handle("GET", "/api/table/ABC123", {}, None)
+    assert gone.value.status == 404
 
 
 def test_locked_seats_reads_closes_and_reopens_in_order():
@@ -279,7 +350,7 @@ def test_trade_round_lines_survive_a_restart(tmp_path):
     log = session.log_for(0)
     assert any("offers 2 Wood for 1 Ore." in line for line in log)
 
-    resumed = resume_session("ABC123", seats, config)
+    resumed = reopened("ABC123", tmp_path)
 
     assert resumed is not None
     assert resumed.log_for(0) == log
@@ -512,23 +583,21 @@ def test_join_refuses_an_unknown_client_kind_or_a_malformed_id():
     assert bad_id.value.status == 400
 
 
-def test_join_refuses_once_the_game_is_over():
-    """Same reasoning as `Table.join`'s own docstring: a finished game's
-    open-looking seat (`EMPTY`, unlocked -- exactly what one reopened after
-    a restart looks like, see the `_reopen`/`reopen_closed_session` tests)
-    must not be joinable, or the one thing that makes a finished game safe
-    to reopen at all stops being true."""
-    from hexset.game import Phase
-
-    registry = tables()
-    code, _ = deal(registry, bots=[])
-    table = registry.get(code)
-    table.session.game.phase = Phase.GAME_OVER
+def test_a_reopened_finished_game_has_no_seat_left_to_join(finished_game):
+    """No `is_over` check in `Table.join`, and none needed: a game cannot
+    start while an unlocked `EMPTY` seat is left (`Table.waiting_for`) and a
+    seat never re-empties, so a finished game has no candidate to offer --
+    live, or rebuilt from its record, where every seat comes back as
+    whoever held it. The refusal a finished table gives is the true one,
+    "no open seats", rather than a rule standing in for seats that were
+    thrown away on the way back from disk."""
+    _session, directory = finished_game
+    fresh = new_tables(games_dir=str(directory))
 
     with pytest.raises(ApiError) as refused:
-        registry.handle("POST", "/api/join", {"code": code}, None)
+        fresh.handle("POST", "/api/join", {"code": "ABC123"}, None)
 
-    assert "already over" in refused.value.args[0]
+    assert "no open seats" in refused.value.args[0]
     assert refused.value.status == 409
 
 
@@ -605,28 +674,67 @@ def test_reclaim_with_the_wrong_secret_403s():
     assert wrong.value.status == 403
 
 
-def test_reclaim_refuses_once_the_game_is_over_even_with_the_right_secret():
-    """The right secret still names the right seat -- this isn't a 403,
-    which would mean no match -- but a finished game has nothing left for
-    even its own seat to act on, and reclaiming one there would only dress
-    up what `GET /api/table/<code>` already shows a spectator as somebody's
-    own claim."""
-    from hexset.game import Phase
+def test_reclaim_gets_a_finished_game_s_seat_back_but_it_still_cannot_act(finished_game):
+    """The crux of the whole arrangement, in one test: reclaiming a seat at
+    a game already over *succeeds*, and the token it hands back can read
+    that game as its own seat and change nothing about it.
 
-    registry = tables()
-    secret = "a client's own secret"
-    client_id = hashlib.sha256(secret.encode("utf-8")).hexdigest()
-    dealt = registry.handle(
-        "POST", "/api/games", {"bots": [], "client": {"id": client_id, "kind": "api"}}, None
-    )
-    table = registry.get(dealt["code"])
-    table.session.game.phase = Phase.GAME_OVER
+    Succeeding is the point -- "if I didn't have a seat or the game is
+    over, I get observer view, otherwise I resume my seat" -- and it costs
+    nothing to allow, because the token is refused by exactly the gate that
+    refuses no token at all (`Tables._seated`). Reclaiming is a handshake
+    about who you are, not permission to do anything.
+    """
+    _session, directory = finished_game
+    fresh = new_tables(games_dir=str(directory))
 
+    mine = fresh.handle("POST", "/api/reclaim", {"code": "ABC123", "secret": WEB_SECRET}, None)
+
+    assert mine["seat"] == 0 and mine["game_over"] is True
+    # Ada's own seat, read as hers -- not a spectator's account of it.
+    assert fresh.handle("GET", "/api/state", {}, mine["token"])["seat"] == 0
+    for method, path, payload in [
+        ("POST", "/api/name", {"name": "Grace"}),
+        ("POST", "/api/action", {"action": {"type": "END_TURN"}}),
+        ("POST", "/api/leave", {}),
+        ("POST", "/api/bot", {"seat": 1, "model": "search2"}),
+    ]:
+        with pytest.raises(ApiError) as refused:
+            fresh.handle(method, path, payload, mine["token"])
+        assert "already over" in refused.value.args[0], f"{path} did not refuse"
+        assert refused.value.status == 409, f"{path} refused with {refused.value.status}"
+
+
+def test_reclaim_at_a_reopened_game_is_the_way_back_into_a_seat_no_one_else_gets(tmp_path):
+    """The same handshake on a game still in progress, which is where it
+    stopped a real defect: every seat used to come back `EMPTY` after a
+    restart, so a stranger holding the link could `join` straight into a
+    seat somebody was still playing -- and the person whose seat it was got
+    back in only by the luck of `join` picking theirs.
+    """
+    config = Config(games_dir=str(tmp_path), seed=99)
+    seats = [
+        Seat(kind=SeatKind.PLAYER, name="Ada", token="t-Ada", client=WEB_CLIENT),
+        bot_seat(),
+        bot_seat(),
+        bot_seat(),
+    ]
+    session = build_session("ABC123", seats, config, first=0)
+    drive(session, 12, random.Random(4))
+    assert not is_over(session.game)
+
+    fresh = new_tables(games_dir=str(tmp_path))
     with pytest.raises(ApiError) as refused:
-        registry.handle("POST", "/api/reclaim", {"code": dealt["code"], "secret": secret}, None)
-
-    assert "already over" in refused.value.args[0]
+        fresh.handle("POST", "/api/join", {"code": "ABC123"}, None)
     assert refused.value.status == 409
+
+    mine = fresh.handle("POST", "/api/reclaim", {"code": "ABC123", "secret": WEB_SECRET}, None)
+
+    assert mine["seat"] == 0
+    assert fresh.handle("GET", "/api/state", {}, mine["token"])["seat"] == 0
+    # And gated the way a freshly claimed seat is: nothing is traded on a
+    # person's behalf, restart or no restart.
+    assert fresh.get("ABC123").session.is_manual(0)
 
 
 # --- GET /api/version, and the optional `version` guard on acting routes ------

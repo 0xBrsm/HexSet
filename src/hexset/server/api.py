@@ -603,28 +603,18 @@ def build_session(code: str, seats: list[Seat], config: Config, *, first: int) -
     )
 
 
-def resume_session(code: str, seats: list[Seat], config: Config) -> GameSession | None:
-    """The game this code left unfinished, played back to where it stopped —
-    or `None` if there isn't one, in which case the caller deals.
-
-    A session lives in memory, so it used to be lost to anything that ended the
-    process: a deploy, a crash, or simply going quiet long enough to be
-    evicted. The journal is the whole game though (see `hexset.server.journal`), and
-    it replays exactly, so the loss was never necessary.
-
-    `seats` names only the seats the caller wants pre-claimed on the rebuilt
-    game (see `Tables._reopen`) — a bot's, whose identity is just its spec and
-    needs no lost token back; every other seat, including one a person held
+def _replayed_session(code: str, seats: list[Seat], path: Path) -> tuple[GameSession, list[dict]]:
+    """The construction `resume_session` and `reopen_closed_session` share:
+    everything through building the session, before `restore` decides
+    whether the result gets a live journal attached. `seats` names only the
+    seats the caller wants pre-claimed on the rebuilt game (see
+    `Tables._reopen`) — a bot's, whose identity is just its spec and needs
+    no lost token back; every other seat, including one a person held
     before, comes back open. `game.locked` is seeded from the journal's own
     `locked` events before replay runs, which is provably equivalent to
     locking each seat at the step it actually happened (see
     `hexset.server.seating`'s own note on `advance_setup`).
     """
-    where = config.games_dir if config.games_dir is not None else journal.configured_dir()
-    path = journal.resumable(where, code)
-    if path is None:
-        return None
-
     events = journal.read(path)
     header = events[0]
     seed = header["seed"]
@@ -645,6 +635,27 @@ def resume_session(code: str, seats: list[Seat], config: Config) -> GameSession 
         clients=clients,
         code=code,
     )
+    return session, events
+
+
+def resume_session(code: str, seats: list[Seat], config: Config) -> GameSession | None:
+    """The game this code left unfinished, played back to where it stopped —
+    or `None` if there isn't one, in which case the caller deals.
+
+    A session lives in memory, so it used to be lost to anything that ended the
+    process: a deploy, a crash, or simply going quiet long enough to be
+    evicted. The journal is the whole game though (see `hexset.server.journal`), and
+    it replays exactly, so the loss was never necessary.
+
+    Refuses a closed game the same way `journal.resumable` does — see
+    `reopen_closed_session` for that half.
+    """
+    where = config.games_dir if config.games_dir is not None else journal.configured_dir()
+    path = journal.resumable(where, code)
+    if path is None:
+        return None
+
+    session, events = _replayed_session(code, seats, path)
     try:
         session.restore(
             journal.replayable(events),
@@ -661,6 +672,29 @@ def resume_session(code: str, seats: list[Seat], config: Config) -> GameSession 
         journal.Journal(directory=str(path.parent), game_id=path.stem).abandoned()
         return None
 
+    return session
+
+
+def reopen_closed_session(code: str, seats: list[Seat], path: Path) -> GameSession | None:
+    """A finished game's own record, replayed once so it can still be
+    viewed after the process that played it is gone — the eviction-or-
+    restart loss `resume_session` solves for an unfinished game applied
+    just as much to a finished one, until now: `journal.resumable` refuses
+    a closed game on purpose (there is nothing left in it to *resume*), so
+    `Tables._reopen` was left with no path back to a game already over.
+
+    `restore` gets no `Journal` here, unlike `resume_session` — the game is
+    over, nothing further is ever appended to it again, and reopening the
+    file for writing would only risk that. `path` is `Tables._reopen`'s own
+    (`journal.most_recent`, since `resumable` won't hand one back), not
+    re-derived here.
+    """
+    session, events = _replayed_session(code, seats, path)
+    try:
+        session.restore(journal.replayable(events), None, notes=journal.notes_of(events))
+    except (ResumeError, ValueError, KeyError) as error:
+        print(f"could not reopen {path.name} for viewing: {error}")
+        return None
     return session
 
 
@@ -802,11 +836,17 @@ class Tables:
     def _reopen(self, code: str) -> Table | None:
         """Must be called with `_registry_lock` held. Puts a game back
         together from its journal for a code the registry has lost — a
-        restart — if that game is still in progress. Every seat comes back
-        open except a bot's (re-tokened fresh; a checkpoint's identity is
-        just its spec, nothing a lost token was protecting) and a locked
-        one (still locked) — see `resume_session`'s own docstring for why a
-        human's old seat is not, and cannot be, specially recovered.
+        restart — whether that game is still in progress or already over.
+
+        In progress, every seat comes back open except a bot's (re-tokened
+        fresh; a checkpoint's identity is just its spec, nothing a lost
+        token was protecting) and a locked one (still locked) — see
+        `resume_session`'s own docstring for why a human's old seat is not,
+        and cannot be, specially recovered. Already over, no bot runner is
+        spawned for it (`reopen_closed_session` attaches no journal either;
+        nothing further will ever happen to this game either way) — the
+        seats are rebuilt only so `GET /api/table/<code>` and a `POST
+        /api/reclaim` on an old seat can still name who played it.
 
         Registers the rebuilt table itself, before spawning any bot runner
         (same ordering reason as `create`) — the lock is already held by the
@@ -814,6 +854,9 @@ class Tables:
         """
         where = self.config.games_dir if self.config.games_dir is not None else journal.configured_dir()
         path = journal.resumable(where, code)
+        closed = path is None
+        if closed:
+            path = journal.most_recent(where, code)
         if path is None:
             return None
         events = journal.read(path)
@@ -826,7 +869,11 @@ class Tables:
         for seat, client in journal.clients(events).items():
             if seats[seat].kind is not SeatKind.BOT:
                 seats[seat].client = client
-        session = resume_session(code, seats, self.config)
+        session = (
+            reopen_closed_session(code, seats, path)
+            if closed
+            else resume_session(code, seats, self.config)
+        )
         if session is None:
             return None
         table = Table(
@@ -838,7 +885,8 @@ class Tables:
             layout=board_layout(session.game.state(0, hidden=False).board),
         )
         self._tables[code] = table
-        self._spawn_local_bots(table)
+        if not closed:
+            self._spawn_local_bots(table)
         return table
 
     def by_token(self, token: str | None) -> tuple[Table, int]:

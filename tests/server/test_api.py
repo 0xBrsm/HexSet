@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+import re
 
 import pytest
 
@@ -25,6 +26,7 @@ from hexset.server.api import (
     SeatKind,
     Tables,
     build_session,
+    reopen_closed_session,
     resume_session,
 )
 
@@ -85,6 +87,12 @@ def bot_seat() -> Seat:
     return Seat(kind=SeatKind.BOT, name="search2", spec="search2")
 
 
+def _unlabelled(line: str) -> str:
+    """A log line with every seat's `(name)` blanked out -- see the reopen
+    tests below for why."""
+    return re.sub(r"\([^)]*\)", "(-)", line)
+
+
 def drive(session, moves: int, rng: random.Random) -> None:
     """Play `moves` actions total, whoever's seat is up — there is no
     separate "human" driving here any more, every claimed seat submits the
@@ -119,6 +127,69 @@ def test_an_unfinished_game_comes_back_where_it_was_left(tmp_path):
     assert resumed.log_for(0) == session.log_for(0)
     assert (resumed.seed, resumed.claimed_seats) == (session.seed, session.claimed_seats)
     assert resumed.player_names == session.player_names
+
+
+def test_a_finished_game_can_still_be_viewed_after_a_restart(tmp_path):
+    """`journal.resumable` refuses a closed game on purpose -- there is
+    nothing left in it to *resume* -- which used to be the whole story for
+    `Tables._reopen` too: a restart made a finished game's own spectator
+    link 404 forever, even with its full journal still sitting on disk.
+    `reopen_closed_session` is the other half `resumable` was never meant
+    to cover.
+
+    Played to a real, random win (`drive`'s own random legal play, seeded
+    the same as the other replay tests in this file, converges in under a
+    thousand steps here) rather than forced onto the `Game` directly: an
+    `is_over`/`won_by` set by hand leaves no trace in the actions replay
+    reconstructs from, so a forced one would prove nothing about the
+    replayed session actually reaching it.
+
+    Log lines are compared with each seat's `(name)` blanked out: a human
+    seat's chosen name was never restorable on any reopen, closed or not
+    (`Tables._reopen` only ever recovers a *bot* seat's name/spec, via
+    `journal.seating` -- a person's display name isn't tracked anywhere a
+    reopen can read it back from, live-resume included). That gap predates
+    this fix and isn't what it's about; a same-shape transcript modulo the
+    label is.
+    """
+    config = Config(games_dir=str(tmp_path), seed=99)
+    seats = [player("Ada"), bot_seat(), bot_seat(), bot_seat()]
+    session = build_session("ABC123", seats, config, first=0)
+    drive(session, 2000, random.Random(4))
+    assert is_over(session.game)
+    expected_winner = session.game.won_by
+    expected_log = [_unlabelled(line) for line in session.log_for(None, omniscient=True)]
+
+    path = next(tmp_path.glob("*.jsonl"))
+    reopened = reopen_closed_session("ABC123", [Seat() for _ in range(4)], path)
+
+    assert reopened is not None
+    assert is_over(reopened.game)
+    assert reopened.game.won_by == expected_winner
+    assert [_unlabelled(line) for line in reopened.log_for(None, omniscient=True)] == expected_log
+    assert reopened.journal is None  # never reopened for writing
+
+
+def test_a_finished_table_reopens_read_only_through_get_after_a_restart(tmp_path):
+    """The full path a real restart exercises, not just `reopen_closed_
+    session` in isolation: a second `Tables` (standing in for the process
+    that starts after one) rediscovers a code it never held live, purely
+    from disk, through the ordinary token-free spectator route -- see
+    `test_a_finished_game_can_still_be_viewed_after_a_restart` for why the
+    comparison blanks out each seat's `(name)`."""
+    config = Config(games_dir=str(tmp_path), seed=99)
+    seats = [player("Ada"), bot_seat(), bot_seat(), bot_seat()]
+    session = build_session("ABC123", seats, config, first=0)
+    drive(session, 2000, random.Random(4))
+    assert is_over(session.game)
+    expected_log = [_unlabelled(line) for line in session.log_for(None, omniscient=True)]
+
+    fresh = new_tables(games_dir=str(tmp_path))
+    view = fresh.handle("GET", "/api/table/ABC123", {}, None)
+
+    assert view["game_over"] is True
+    assert [_unlabelled(line) for line in view["log"]] == expected_log
+    fresh.close()
 
 
 def test_locked_seats_reads_closes_and_reopens_in_order():

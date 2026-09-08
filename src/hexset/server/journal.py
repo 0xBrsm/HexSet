@@ -591,13 +591,14 @@ def locked_seats(events: list[dict]) -> frozenset[int]:
     return frozenset(locked)
 
 
-def resumable(directory: str | None, code: str) -> Path | None:
-    """The unfinished game filed under join code `code`, or `None`.
+def most_recent(directory: str | None, code: str) -> Path | None:
+    """The most recent file filed under join code `code`, closed or not, or
+    `None` if there isn't one.
 
     Only the most recent file bearing that code is ever a candidate. An older
-    unfinished one is a game the table already walked away from once — handing
-    it back because a newer one happens to have ended would be reaching
-    further into the past than anyone asked for.
+    game under the same code — closed or not — is one the table already
+    walked away from once; handing it back would be reaching further into
+    the past than anyone asked for.
 
     Matched without regard to case, for the same reason `api.Tables.get`
     normalises one: case is not part of a code's identity. It also means a
@@ -615,8 +616,22 @@ def resumable(directory: str | None, code: str) -> Path | None:
         header = header_of(path)
         if header is None or str(header.get("code") or "").lower() != wanted:
             continue
-        return None if is_closed(read(path)) else path
+        return path
     return None
+
+
+def resumable(directory: str | None, code: str) -> Path | None:
+    """The unfinished game filed under join code `code`, or `None`.
+
+    A closed game is `most_recent` plus `is_closed` to check, not this: there
+    is nothing left in a finished game to resume play from. `api.Tables.
+    _reopen` calls this first for exactly that reason, and falls back to
+    `most_recent` on its own only to rebuild a closed game read-only.
+    """
+    path = most_recent(directory, code)
+    if path is None or is_closed(read(path)):
+        return None
+    return path
 
 
 def _now() -> str:

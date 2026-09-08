@@ -683,16 +683,26 @@ def default_offer(
 ) -> int | None:
     """The default `offer(view, candidates) -> index | None` for a gate that
     only has `gains_many`: the candidate maximising the actor's own gain
-    (`valued_many`) among those whose *estimated* counterparty gain clears
-    `TRADE_FLOOR` (`_estimate_many`, `clears_floor`) -- so a gate with a
-    real opponent model offers what it believes the table will actually
-    take, and a plain gate falls back to "what is best for itself" (its own
-    gain stands in for the estimate too). `None` when nothing clears the
-    estimate -- this seat passes rather than broadcasts. Ties break on the
-    actor's own gain again, then canonical bundle order, then the lower
-    counterparty seat -- the same purely-deterministic tie-break
-    `_best_clearing` uses, for the same reason (real-valued gains
-    essentially never tie in practice).
+    (`valued_many`) among those that clear `TRADE_FLOOR` on *both* readings
+    -- the actor's own gain and the *estimated* counterparty gain
+    (`_estimate_many`, `clears_floor`) -- so a gate with a real opponent
+    model offers what it believes the table will actually take, and a plain
+    gate falls back to "what is best for itself" (its own gain stands in
+    for the estimate too). `None` when nothing clears both -- this seat
+    passes rather than broadcasts. Ties break on the actor's own gain
+    again, then canonical bundle order, then the lower counterparty seat --
+    the same purely-deterministic tie-break `_best_clearing` uses, for the
+    same reason (real-valued gains essentially never tie in practice).
+
+    The own-gain floor is what makes an offer a promise. Without it the
+    actor broadcast whatever the *table* liked best among what it could
+    cover -- routinely a deal it would then refuse itself, since `pick`
+    (`default_pick`) and the engine's re-ask at execution
+    (`execute_agreed`) both apply the actor's own floor. Measured on
+    heximax, 2026-09-08: every one of its broadcasts priced negative for
+    itself, so an accepted offer never completed. The same rule already
+    governed a counter (`default_respond`: "never counter with a deal it
+    would then refuse"); an offer is held to it too.
     """
     if not candidates:
         return None
@@ -700,7 +710,10 @@ def default_offer(
     thems = [c for c, _ in candidates]
     own_gains = valued_many(gate, view, receiveds, thems)
     estimates = _estimate_many(gate, view, candidates)
-    eligible = [i for i in range(len(candidates)) if clears_floor(estimates[i])]
+    eligible = [
+        i for i in range(len(candidates))
+        if clears_floor(estimates[i]) and clears_floor(own_gains[i])
+    ]
     if not eligible:
         return None
 

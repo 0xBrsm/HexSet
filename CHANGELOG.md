@@ -11,6 +11,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `hexset.trading.default_offer` only broadcasts a candidate that clears `TRADE_FLOOR` on the actor's *own* gain as well as on the estimated counterparty gain, so a bot never offers a deal it would then refuse when accepted. Measured on heximax, every prior broadcast priced negative for itself and no accepted offer ever completed.
+- A pass is an answer: a bot's or a person's pass on the open offer stays in the round's `responses` (`"kind": "pass"`, `bundle` null) and shows as "Passed" on the acceptance pane, instead of looking like a seat still to answer.
+- The trade round is in the game log and the journal: the offer, every answer (accept, counter, pass), the executed trade, and the actor declining every answer. `Journal.note` / `notes_of` carry the lines through a restart.
+
 - `hexset.clients.onnxbot.LeafEvaluator.terminal` scores a finished game as the one-hot winner, the win-probability scale its contract-6 value head is trained on, instead of `terminal_relative_points`; it raises if the game has not finished.
 - `hexset.trading.default_respond` no longer answers `accept` to an offer the responding seat cannot cover; such an offer is countered or passed instead.
 

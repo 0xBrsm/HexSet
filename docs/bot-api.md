@@ -165,9 +165,13 @@ seat-token gated:
 - **`POST /api/games/<code>/trade/round`** -- `{"give": [5 ints], "want":
   [5 ints]}`, unsigned counts. The current player's broadcast; 409 off its
   turn or outside MAIN, 400 for a bundle it cannot cover. Bots answer
-  synchronously. The view's `trade_round` block carries the offer, the accepts
-  and counters so far (`responses`, each `{"seat", "kind", "bundle"}`), and
-  the manual seats still to answer (`awaiting`).
+  synchronously. The view's `trade_round` block carries the offer, every
+  answer so far (`responses`, each `{"seat", "kind", "bundle"}` -- a pass
+  has `"kind": "pass"` and a `null` bundle, so a seat that turned the offer
+  down is told apart from one still to answer), and the manual seats still
+  to answer (`awaiting`). A bot's own offer is one it would take: its gate
+  only broadcasts a candidate that clears the floor on its own gain as well
+  as on the estimated counterparty gain (`default_offer`).
 - **`POST .../trade/round/answer`** -- `{"actor", "received", "kind":
   "accept"|"counter"|"pass", "bundle"?}`: the exact offer from `pending`
   echoed back; a counter's `bundle` is signed towards the actor like
@@ -176,6 +180,12 @@ seat-token gated:
 - **`POST .../trade/round/choose`** -- `{"seat", "bundle"}` executes that
   recorded answer exactly; `{"decline": true}` closes the round. Only the
   actor may call it; the round also closes when the turn ends.
+
+The round is in the log: the offer (`Player 1 (Ada) offers 2 Wood for 1
+Ore.`), every answer (`... accepts the offer.` / `... counters with ... for
+....` / `... passes.`), the executed trade, and `... declines every answer.`
+when the actor turns down what was on the table. The lines are journalled
+(`kind: "note"`) and come back on a restart.
 
 `POST /api/action`, `.../trade/round/answer` and `.../trade/round/choose` all
 take an optional `"version"`, compared against the table's current one — a

@@ -22,7 +22,7 @@ from hexset.server.seating import start_at
 
 from hexset.server.journal import open_journal, replayable
 
-from hexset.trading import Trade
+from hexset.trading import RESPONSE_ACCEPT, RESPONSE_PASS, Trade
 
 from hexset.server.webplay import (
     RESOURCE_NAMES,
@@ -415,6 +415,51 @@ def test_confirm_mode_installs_a_pending_gate():
     session = a_session(game, {0})
     session.confirm_mode(0)
     assert isinstance(game.gates[0], PendingGate)
+
+
+def test_the_trade_round_is_in_the_log_and_a_pass_is_an_answer():
+    """A person's broadcast, one bot accepting and one passing: the offer
+    and both answers are log lines, the pass stays in the round's
+    `responses` (bundle `None`) so the pane can say "Passed", declining
+    what was on the table is a line, and the trade the actor finally takes
+    is the usual "traded ... to ... for ..." line."""
+    from hexset.board.terrain import Resource
+    from hexset.game import Phase
+
+    game = a_game(seed=3)
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    game._state.hands[0][Resource.WOOD] = 1
+    game._state.hands[1][Resource.ORE] = 1
+    game._state.hands[2][Resource.SHEEP] = 1
+    session = a_session(game, {0})
+    session.confirm_mode(0)
+    session.set_trader(1, _Wants(Resource.WOOD))  # accepts: it gets wood
+    session.set_trader(2, _Wants(Resource.BRICK))  # nothing in the offer for it
+    received = [0, 0, 0, 0, 0]
+    received[Resource.ORE] = 1
+    received[Resource.WOOD] = -1
+    received = tuple(received)
+
+    session.open_round_for(0, received)
+
+    view = session.state_view(0)["trade_round"]
+    assert view["offer"] == {"actor": 0, "bundle": list(received)}
+    assert {r["seat"]: r["kind"] for r in view["responses"]} == {1: RESPONSE_ACCEPT, 2: RESPONSE_PASS}
+    assert next(r for r in view["responses"] if r["seat"] == 2)["bundle"] is None
+    log = session.log_for(None)
+    assert any(line.endswith("offers 1 Wood for 1 Ore.") for line in log)
+    assert any(line.endswith("(bot) accepts the offer.") for line in log)
+    assert any(line.endswith("(bot) passes.") for line in log)
+
+    session.decline_round(0)
+    assert session.log_for(None)[-1].endswith("declines every answer.")
+    assert session.open_round is None
+
+    session.open_round_for(0, received)
+    session.execute_round_choice(0, 1, received)
+    assert session.log_for(None)[-1].endswith("traded 1 Wood to Player 2 (bot) for 1 Ore.")
+    assert game._state.hands[0][Resource.ORE] == 1 and game._state.hands[1][Resource.WOOD] == 1
 
 
 def test_execute_trade_reaches_the_session_and_moves_cards():

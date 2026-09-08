@@ -538,6 +538,7 @@
   .pane { display: flex; flex-direction: column; gap: 0.3rem; align-self: stretch; }
   .pane-row { display: flex; align-items: center; gap: 0.5rem; min-height: 44px; }
   .pane-row.quiet { opacity: 0.35; }
+  .pane-pass { flex: 1 1 auto; min-width: 0; color: var(--muted, #888); font-size: 0.9em; }
   .pane-row .trade-line { flex: 1 1 auto; min-width: 0; }
   .pane-rule { border-top: 1px solid var(--border); align-self: stretch; }
   /* Only inside the pane, where the rows above and below it are 0.3rem apart;
@@ -2575,6 +2576,15 @@ function acceptancePane(round) {
       wrap.appendChild(row);
       continue;
     }
+    if (answer.kind === "pass") {
+      // A pass is an answer, not silence: the row reads at full strength so
+      // it is told apart from a seat still to answer, and says the one word
+      // that is the whole of what the seat said.
+      row.appendChild(html("div", {class: "pane-pass"}, "Passed"));
+      row.appendChild(buttonGap());
+      wrap.appendChild(row);
+      continue;
+    }
     // A counter's bundle is signed towards us the same way the offer is, so
     // what that seat gives is what we get.
     const theirGive = answer.kind === "counter" ? answer.bundle.map((n) => Math.max(0, n)) : iGet;
@@ -2701,7 +2711,8 @@ function renderTradeMode(title, body, actions) {
     // No action column: the checks live in the pane's own rows, one per
     // answer, and turning the whole round down is the close glyph.
     title.textContent = "Trade Acceptance";
-    modalCloseGlyph((round.responses || []).length ? "Turn every answer down and close the round"
+    const offers = (round.responses || []).filter((r) => r.kind !== "pass").length;
+    modalCloseGlyph(offers ? "Turn every answer down and close the round"
       : "Close the round", () => postRound("/trade/round/choose", {decline: true}));
     body.appendChild(acceptancePane(round));
     return;

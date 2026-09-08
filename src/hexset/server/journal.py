@@ -298,6 +298,13 @@ class Journal:
             }
         )
 
+    def note(self, *, step: int, round_num: int, actor: int, text: str) -> None:
+        """A trade-round line (`webplay.GameSession._note`): an offer
+        broadcast, a seat's answer, the actor declining. Nothing moved, so
+        no hands are written; `step` is the step this line preceded, which
+        is where `notes_of`/`GameSession.restore` put it back."""
+        self._emit({"kind": "note", "step": step, "round": round_num, "actor": actor, "text": text})
+
     def undo(self, game: Game, *, back_to: int) -> None:
         """The human took a placement back (see `webplay.undo_last_build`).
 
@@ -483,6 +490,24 @@ def replayable(events: list[dict]) -> list[tuple[int, Action | None, tuple[Trade
         elif kind == "undo":
             del steps[event["back_to"] :]
     return steps
+
+
+def notes_of(events: list[dict]) -> dict[int, list[tuple[int, int, str]]]:
+    """The trade-round lines (`Journal.note`) as `(round, actor, text)`,
+    keyed by the step each preceded, for `GameSession.restore`. An undo
+    drops the notes it took back the same way `replayable` drops the steps:
+    everything from `back_to` onwards did not happen."""
+    notes: dict[int, list[tuple[int, int, str]]] = {}
+    for event in events:
+        kind = event.get("kind")
+        if kind == "note":
+            notes.setdefault(int(event["step"]), []).append(
+                (int(event["round"]), int(event["actor"]), str(event["text"]))
+            )
+        elif kind == "undo":
+            for step in [s for s in notes if s >= event["back_to"]]:
+                del notes[step]
+    return notes
 
 
 def seating(events: list[dict]) -> dict[int, tuple[str, str]]:

@@ -78,7 +78,7 @@ class Record:
     # `("discard", resource)` per card a seat that does not choose its own
     # discards gave up. This is what `replay` drives the game from
     # (`chance.Scripted`) -- the porting surface: a converter (`from_journal`
-    # below; colonist.io's own converter lives in dev-HexNet's private
+    # below; colonist.io's own converter lives in dev-HexN's private
     # `colonists/`) builds one of these from a game this engine never
     # played, with no seed at all.
     chance: tuple[tuple[str, int], ...]

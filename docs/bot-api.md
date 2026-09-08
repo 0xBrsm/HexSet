@@ -114,7 +114,7 @@ serves both.
 **The engine drift this section used to list is gone.** This server no longer
 carries its own copy of the engine: it depends on the `hexset` package (now
 one distribution together with the gym, see the CHANGELOG's "one
-distribution" entry), so what it plays is exactly what dev-HexNet plays.
+distribution" entry), so what it plays is exactly what dev-HexN plays.
 
 **The one mask difference that used to remain is gone too.** The
 `action_mask` served here was built over an *honest* trade sample, because

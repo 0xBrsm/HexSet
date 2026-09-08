@@ -9,6 +9,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Changed
+
+- References to the private training repository follow its rename to
+  `dev-HexN`.
+
 ### Added
 
 - `hexset.trading.trade_round`: a second trading protocol, for a *served*

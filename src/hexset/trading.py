@@ -29,11 +29,14 @@ Registered `agents/reference/trading-final.md`, superseding the shipped
   Ties break on the actor's own gain, then a canonical bundle order, then
   the lower counterparty seat, for determinism only. Then it loops: the
   private gates are re-evaluated on the position the last trade left, and
-  clearing continues until nothing clears. There is no budget: the acting
-  seat's own gain exceeds its floor at every step -- strictly positive,
-  since every floor is non-negative -- the state space is finite, so no cycle is
-  possible. `Game.max_trades` is an off switch (`0`), not a budget; `None`
-  is the unbounded default.
+  clearing continues until nothing clears or a position comes back. There
+  is no budget: a gate that is a strict function of the position cannot
+  revisit one (the acting seat's own gain exceeds its floor at every step,
+  and every floor is non-negative), and a gate that is not -- one that
+  scores candidates in a world sampled from its belief, as the network gate
+  and heximax do -- ends the event at the first revisit rather than cycling.
+  `Game.max_trades` is an off switch (`0`), not a budget; `None` is the
+  unbounded default.
 
 There are no trade actions -- no propose, respond, accept or decline -- so
 nothing here reads an opponent's hand on an actor's behalf and the action
@@ -353,16 +356,20 @@ def trade_event(game: "Game", gate: Gate) -> list[Trade]:
     `game.trade_rule` picks the winner (`_best_clearing`). No budget: the
     loop runs until nothing clears.
 
-    The single engine limit is the assertion below: an event never revisits
-    a position (every seat's hand plus the public ledger). The acting seat's
-    own gain exceeds its floor at every clearing -- strictly positive, since
-    every floor is non-negative -- so a position that comes back means a gate is
-    broken (not strictly increasing in the acting seat's own value), and
-    that is a bug to surface rather than a knob to tune. It is deliberately
-    not a count of trades: a legitimate event of one- and two-card exchanges
-    can run longer than there are cards on the table without ever repeating
-    a position -- self-play against a network gate does so in about one
-    event in two hundred.
+    The single engine limit is the revisit check below: an event ends the
+    moment a position (every seat's hand plus the public ledger) comes
+    back. For a gate that is a strict function of the position that never
+    happens -- the acting seat's own gain exceeds its floor at every
+    clearing, strictly positive since every floor is non-negative -- and it
+    used to be an assertion for that reason. It is a termination now,
+    because the gates that matter are not strict functions of the position:
+    the network gate scores each candidate in a world drawn from its belief
+    (`hexset.clients.netbot`), heximax samples worlds too, and a trade that
+    changes the ledger changes the next draw, so a reverse exchange can
+    price positive at the new position without anything being broken. The
+    check is deliberately not a count of trades: a legitimate event of one-
+    and two-card exchanges can run longer than there are cards on the table
+    without ever repeating a position.
     """
     # A snapshot of *this* event only: whatever a manual seat's `PendingGate`
     # recorded last event no longer describes hands that may have since
@@ -386,10 +393,8 @@ def trade_event(game: "Game", gate: Gate) -> list[Trade]:
     seen: set[tuple] = set()
     while game.max_trades is None or len(executed) < game.max_trades:
         position = _position_key(state, game.ledger)
-        assert position not in seen, (
-            "a trade event revisited a position: a gate is not strictly "
-            "increasing in the acting seat's own value"
-        )
+        if position in seen:
+            break  # a sampling gate came back round; the event is over
         seen.add(position)
         views.clear()
         best = _best_clearing(game, me, gate, view)

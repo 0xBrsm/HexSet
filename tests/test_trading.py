@@ -605,6 +605,19 @@ def test_each_seat_is_held_to_its_own_floor_and_no_floor_is_borrowed():
         run(game, [Undeclared(), Trader(wants(WOOD, 1.0)), Trader(), Trader()])
 
 
+def test_an_event_that_comes_back_to_a_position_ends_there():
+    """Two blanket-yes gates ping-pong the same card: the event used to
+    assert on the revisit as a broken gate. Gates that score candidates in a
+    sampled world are not strict functions of the position, so a revisit is
+    an ordinary way for an event to end -- it stops, keeps what cleared, and
+    leaves the hands legal."""
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    done = run(game, [Trader(lambda r, c: 1.0), Trader(lambda r, c: 1.0), Trader(), Trader()])
+    assert done, "the first exchange clears"
+    assert all(n >= 0 for hand in game._state.hands for n in hand)
+    assert sum(sum(hand) for hand in game._state.hands) == 2
+
+
 def test_a_bot_with_no_trading_surface_never_trades():
     class JustChoose:
         def choose(self, game):  # pragma: no cover -- not exercised here

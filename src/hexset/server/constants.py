@@ -1,10 +1,12 @@
 """The handful of names shared across process boundaries.
 
-Nothing here may import anything else in this package: `mcp.py` is a
-standard-library-only HTTP client that has to run on a machine with no
-ONNX Runtime (see its own docstring), so a constant both it and `web.py`
-need has to live somewhere neither pulls the other's dependencies in to
-reach.
+Nothing here may import anything else in this package: `botclient.py`'s
+`HttpTransport` is a standard-library-only HTTP client that has to run on a
+machine with no ONNX Runtime for its own checkpoint (it is talking to a
+*different* machine's server), so a constant it and `web.py` both need has
+to live somewhere neither pulls the other's dependencies in to reach. MCP is
+served by `web.py` itself now (`POST /mcp`, `mcptools.py`) — there is no
+longer a second, separate process on the other end of this constant for it.
 """
 
 from __future__ import annotations

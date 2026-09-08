@@ -10,6 +10,7 @@ privileged access to the session, and no HTTP server to start.
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -20,11 +21,72 @@ from hexset.clients.botclient import (  # noqa: E402
     BotRunner,
     LocalTransport,
     RecordBrain,
+    client_of,
 )
 
 from conftest import new_tables  # noqa: E402
 
 STUB6 = Path(__file__).parent / "fixtures" / "stub-contract6.onnx"
+
+
+# --- client_of: the payload builder join sends, no checkpoint needed --------
+
+
+def test_client_of_hashes_the_secret_and_names_kind_api():
+    client = client_of("checkpoint-name")
+    assert client == {"id": hashlib.sha256(b"checkpoint-name").hexdigest(), "kind": "api"}
+
+
+def test_main_defaults_the_secret_to_the_models_own_stem(monkeypatch):
+    """`--client-secret` omitted: the secret `_main` joins with is the
+    checkpoint file's own stem, so two runs of the same file correlate and
+    can reclaim each other's seat with no flag."""
+    import hexset.clients.botclient as botclient
+
+    captured: dict = {}
+
+    class FakeTransport:
+        def __init__(self, base_url):
+            captured["base_url"] = base_url
+
+        def post(self, path, token, body):
+            captured["path"] = path
+            captured["body"] = body
+            return {"error": "stop here — this test only checks the join payload"}
+
+    monkeypatch.setattr(botclient, "HttpTransport", FakeTransport)
+    with pytest.raises(SystemExit):
+        botclient._main(
+            ["--url", "http://x", "--game", "abcdef", "--model", "/models/my-checkpoint.onnx"]
+        )
+    assert captured["path"] == "/api/join"
+    assert captured["body"]["client"] == client_of("my-checkpoint")
+
+
+def test_client_secret_flag_overrides_the_models_stem(monkeypatch):
+    import hexset.clients.botclient as botclient
+
+    captured: dict = {}
+
+    class FakeTransport:
+        def __init__(self, base_url):
+            pass
+
+        def post(self, path, token, body):
+            captured["body"] = body
+            return {"error": "stop here — this test only checks the join payload"}
+
+    monkeypatch.setattr(botclient, "HttpTransport", FakeTransport)
+    with pytest.raises(SystemExit):
+        botclient._main(
+            [
+                "--url", "http://x",
+                "--game", "abcdef",
+                "--model", "/models/my-checkpoint.onnx",
+                "--client-secret", "my own secret",
+            ]
+        )
+    assert captured["body"]["client"] == client_of("my own secret")
 
 
 def _table_with_one_open_seat(registry):

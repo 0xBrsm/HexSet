@@ -23,6 +23,41 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - `hexset.clients.onnxbot`: `load`, `network_bot`, `network_evaluator`, `searcher` and `spawn` take `threads`, capping onnxruntime's intra- and inter-op thread pools; `None` (the default) keeps onnxruntime's own sizing.
+- `POST /api/games`/`POST /api/join` accept an optional `client: {"id":
+  <64-hex sha256>, "kind": "web"|"api"|"mcp"}`; absent defaults to kind
+  `"api"`, an unknown kind or malformed `id` is a 400.
+- `POST /api/reclaim {"code", "secret"}`: mints a fresh token for the seat
+  whose `client.id` equals `sha256(secret)`, replacing any token that seat
+  already held. 403 with no match.
+- An unnamed claimed seat's display name now follows its client's kind:
+  `web` → `human`, `api` → `api`, `mcp` → `mcp`.
+- MCP `new_game`/`join` take a required `model` argument (your exact model
+  identifier); it becomes the seat's client secret, and
+  `resume_game(code, model)` reclaims the seat with it via
+  `POST /api/reclaim`.
+- `POST /mcp`: MCP served over HTTP by `web.py` itself (Streamable HTTP
+  transport), replacing the `python -m hexset.server.mcp` stdio program.
+  `initialize` mints an `Mcp-Session-Id`; every later request on that
+  session must carry it back: a missing one is a 400, an unknown one a 404
+  (call `initialize` again). `DELETE /mcp` ends a session; `GET /mcp` is 405. A
+  `tools/call` for `wait_for_turn` answers as `text/event-stream`; every
+  other tool answers one JSON-RPC response. `Origin` is checked per the
+  spec's security section: present and not 127.0.0.1/localhost/::1/this
+  server's own `--host` is a 403.
+- MCP `wait_for_turn(timeout?)`: blocks until `legal_actions` is non-empty,
+  an offer is pending, your own trade round is fully answered, or the game
+  is over -- returning at once if already true. Streamed with a keepalive
+  roughly every 15 seconds while it waits.
+- `GET /api/version` (no token): `{"version", "git_commit"}`.
+- `POST /api/action`, `.../trade/round/answer` and `.../trade/round/choose`
+  accept an optional `"version"`; a mismatch against the table's current one
+  is a 409 ("the table has moved") rather than applying against a stale
+  read. MCP `act`, `answer_trade` and `choose_trade` take the same optional
+  `version` and refuse with the same message if it has moved since the
+  `state()`/`get_table()` an index was chosen from.
+- `hexset.clients.botclient`'s external join sends `client: {"id":
+  sha256(secret), "kind": "api"}`; `secret` defaults to `--model`'s own
+  filename stem, overridable with `--client-secret`.
 - The trade round is now the served table's protocol end to end
   (`docs/bot-api.md` §3). `POST /api/games/<code>/trade/round` broadcasts
   the current player's offer (1-3 cards a side) to every seat;
@@ -73,8 +108,23 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and `.../trade/decline` (the one-to-one proposal routes), the MCP tools
   over them, `webplay.bundle_from_wire`, and `docs/negotiation-interface.md`.
   `PendingGate` no longer records clearing-house candidates.
+- `hexset.server.mcp`, the stdio MCP program (`python -m hexset.server.mcp`,
+  `HEXSET_UI_BASE_URL`) -- MCP is `POST /mcp` on `web.py` now (see Added,
+  above). Its tool layer moved to `hexset.server.mcptools`, called
+  in-process rather than over its own HTTP client.
+- `resume_game`'s local cache file and `HEXSET_MCP_SESSION_FILE`: nothing is
+  left to cache once a seat's identity lives in an MCP session in memory,
+  not a process. `resume_game` now takes `code`/`model` explicitly.
+- `HEXSET_UI_BASE_URL` (MCP's own use of it -- `botclient.py`'s `--url`
+  still names a server the ordinary way).
 
 ### Changed
+
+- References to the sibling training package follow its rename from `hexnet` to `hexn`.
+- References to the private training repository follow its rename to
+  `dev-HexN`.
+- MCP `new_game`/`join` no longer default an unnamed seat's display name to
+  `"mcp"` themselves; the server does it now (see Added, above).
 
 - The trade round's third gate method is `pick(view, responses)`, not
   `choose` -- which is every bot's action picker and collided with it.

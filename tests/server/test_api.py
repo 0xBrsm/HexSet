@@ -9,6 +9,8 @@ to be in `models/` and drag onnxruntime into a suite that has no need of it.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import random
 
 import pytest
@@ -304,3 +306,147 @@ def test_a_discard_round_resolves_in_whatever_order_the_seats_answer_in():
     assert game._state.hands[3][Resource.ORE] == 2
     assert game.phase is Phase.ROBBER
     assert game.current_player == 1
+
+
+# --- client identity + default seat names (`parse_client`, `default_seat_name`) -
+
+
+def test_a_joined_seats_default_name_follows_its_clients_kind():
+    """No `client` at all is kind "api"; an explicit kind gets its own
+    default -- resolved once at claim time, so `player_names` never has to
+    fall back later (see `Table.join`/`webplay.GameSession.seat_labels`)."""
+    registry = tables()
+    code, _ = deal(registry, bots=[])
+
+    api_join = registry.handle("POST", "/api/join", {"code": code}, None)
+    table = registry.get(code)
+    assert table.seats[api_join["seat"]].name == "api"
+
+    web_join = registry.handle(
+        "POST", "/api/join", {"code": code, "client": {"kind": "web"}}, None
+    )
+    assert table.seats[web_join["seat"]].name == "human"
+
+    mcp_join = registry.handle(
+        "POST", "/api/join", {"code": code, "client": {"kind": "mcp"}}, None
+    )
+    assert table.seats[mcp_join["seat"]].name == "mcp"
+
+
+def test_join_refuses_an_unknown_client_kind_or_a_malformed_id():
+    registry = tables()
+    code, _ = deal(registry, bots=[])
+
+    with pytest.raises(ApiError) as bad_kind:
+        registry.handle("POST", "/api/join", {"code": code, "client": {"kind": "browser"}}, None)
+    assert bad_kind.value.status == 400
+
+    with pytest.raises(ApiError) as bad_id:
+        registry.handle(
+            "POST", "/api/join", {"code": code, "client": {"id": "not-hex", "kind": "web"}}, None
+        )
+    assert bad_id.value.status == 400
+
+
+def test_the_journal_header_and_a_seated_event_carry_the_client(tmp_path):
+    registry = tables(games_dir=str(tmp_path))
+    creator_id = "a" * 64
+    dealt = registry.handle(
+        "POST",
+        "/api/games",
+        {"bots": [], "client": {"id": creator_id, "kind": "web"}},
+        None,
+    )
+    creator_seat = registry.by_token(dealt["token"])[1]
+
+    joiner_id = "b" * 64
+    joined = registry.handle(
+        "POST",
+        "/api/join",
+        {"code": dealt["code"], "client": {"id": joiner_id, "kind": "mcp"}},
+        None,
+    )
+    joiner_seat = registry.by_token(joined["token"])[1]
+
+    files = list(tmp_path.glob("*.jsonl"))
+    assert len(files) == 1, f"expected one game journal, found {files}"
+    events = [json.loads(line) for line in files[0].read_text().splitlines()]
+
+    header = events[0]
+    assert header["clients"][str(creator_seat)] == {"id": creator_id, "kind": "web"}
+
+    seated = next(e for e in events if e["kind"] == "seated")
+    assert seated["seat"] == joiner_seat
+    assert seated["client"] == {"id": joiner_id, "kind": "mcp"}
+
+
+# --- POST /api/reclaim ---------------------------------------------------------
+
+
+def test_reclaim_with_the_right_secret_mints_a_token_that_reads_state():
+    registry = tables()
+    secret = "a client's own secret"
+    client_id = hashlib.sha256(secret.encode("utf-8")).hexdigest()
+    dealt = registry.handle(
+        "POST", "/api/games", {"bots": [], "client": {"id": client_id, "kind": "api"}}, None
+    )
+    old_token = dealt["token"]
+
+    reclaimed = registry.handle(
+        "POST", "/api/reclaim", {"code": dealt["code"], "secret": secret}, None
+    )
+    new_token = reclaimed["token"]
+    assert new_token != old_token
+    assert reclaimed["code"] == dealt["code"]
+
+    state = registry.handle("GET", "/api/state", {}, new_token)
+    assert state["code"] == dealt["code"]
+
+    with pytest.raises(ApiError) as expired:
+        registry.handle("GET", "/api/state", {}, old_token)
+    assert expired.value.status == 403
+
+
+def test_reclaim_with_the_wrong_secret_403s():
+    registry = tables()
+    client_id = hashlib.sha256(b"the right secret").hexdigest()
+    dealt = registry.handle(
+        "POST", "/api/games", {"bots": [], "client": {"id": client_id, "kind": "api"}}, None
+    )
+
+    with pytest.raises(ApiError) as wrong:
+        registry.handle(
+            "POST", "/api/reclaim", {"code": dealt["code"], "secret": "not it"}, None
+        )
+    assert wrong.value.status == 403
+
+
+# --- GET /api/version, and the optional `version` guard on acting routes ------
+
+
+def test_version_route_matches_the_installed_package():
+    import hexset
+
+    registry = tables()
+    info = registry.handle("GET", "/api/version", {}, None)
+    assert info == hexset.build_info()
+    assert info["version"] == hexset.__version__
+
+
+def test_action_with_a_stale_version_409s_and_the_current_one_acts():
+    registry = tables()
+    code, token = deal(registry)
+    state = registry.handle("GET", "/api/state", {}, token)
+    current = state["version"]
+    action = state["legal_actions"][0]
+
+    with pytest.raises(ApiError) as stale:
+        registry.handle(
+            "POST", "/api/action", {"action": action, "version": current - 1}, token
+        )
+    assert stale.value.status == 409
+    assert "version" in str(stale.value)
+
+    # the right version still acts
+    acted = registry.handle("POST", "/api/action", {"action": action, "version": current}, token)
+    assert acted["version"] > current

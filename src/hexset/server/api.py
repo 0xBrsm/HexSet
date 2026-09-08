@@ -1,7 +1,8 @@
 """Games, seats and the `/api/*` surface everything plays through.
 
 One place decides what a game is and who may touch it. The browser, a script
-driving a seat over HTTP, and an LLM over MCP (see `mcp.py`) are all clients of
+driving a seat over HTTP, and an LLM over MCP (`POST /mcp`, see `mcptools.py`
+and `web.py`) are all clients of
 this module and get no special treatment from it — the same join, the same
 token, the same `state`/`act` pair. A bot (embedded or external — see
 `botclient.py`) is no different: it is a client like any other, submitting its
@@ -69,8 +70,10 @@ answer the table holds that bot's turn (`trade_wait`, `to_move` None).
 
 from __future__ import annotations
 
+import hashlib
 import os
 import random
+import re
 import secrets
 import threading
 import time
@@ -80,6 +83,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
 
+from hexset import build_info
 import hexset.bots  # noqa: F401 -- registers the "heximax" presets with hexset.arena
 from hexset.actions import build_space
 from hexset.arena import PRESETS, spawn as spawn_entrant
@@ -148,7 +152,7 @@ MAX_SEATS = 4
 CODE_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz"
 CODE_LENGTH = 6
 
-# The cap every client already enforces (mcp.py, index.html) on a display
+# The cap every client already enforces (mcptools.py, index.html) on a display
 # name, applied here too: those are conveniences, not the check, since a raw
 # POST to /api/games, /api/join or /api/name bypasses both of them.
 MAX_NAME_LENGTH = 40
@@ -201,6 +205,43 @@ def clean_name(name: str | None) -> str | None:
         return None
     name = name.strip()[:MAX_NAME_LENGTH]
     return name or None
+
+
+# What a client is, on the wire: a hash of a secret it alone holds, purely for
+# correlating games in the journal and for reclaiming a seat after a token is
+# gone (see `POST /api/reclaim`) -- not an account, and seat theft via a
+# leaked secret is accepted (this is an experiment rig, not a login system).
+CLIENT_KINDS = ("web", "api", "mcp")
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
+
+# The name a claimed seat gets when nobody sent one, by the kind of client
+# that claimed it -- resolved once, here, at claim time, so `player_names`
+# always holds something and no later reader has to invent a fallback.
+_DEFAULT_SEAT_NAME = {"web": "human", "api": "api", "mcp": "mcp"}
+
+
+def default_seat_name(kind: str) -> str:
+    return _DEFAULT_SEAT_NAME.get(kind, "api")
+
+
+def parse_client(payload: dict) -> dict:
+    """The optional `client` on `POST /api/games`/`/api/join`: `{"id": <64-hex
+    sha256>, "kind": "web"|"api"|"mcp"}`. Absent entirely -> `{"id": None,
+    "kind": "api"}`. An unknown `kind` or an `id` that isn't a 64-hex sha256
+    digest is a 400 -- the one thing worth refusing here, since anything else
+    just changes what a seat correlates to in the journal."""
+    raw = payload.get("client")
+    if raw is None:
+        return {"id": None, "kind": "api"}
+    if not isinstance(raw, dict):
+        raise ApiError("client must be an object")
+    kind = raw.get("kind", "api")
+    if kind not in CLIENT_KINDS:
+        raise ApiError(f"unknown client kind: {kind!r}")
+    client_id = raw.get("id")
+    if client_id is not None and not (isinstance(client_id, str) and _HEX64.match(client_id)):
+        raise ApiError("client.id must be a 64-character hex sha256 digest")
+    return {"id": client_id, "kind": kind}
 
 
 def catanatron_seatable() -> bool:
@@ -263,6 +304,16 @@ def wait_query(query: str) -> tuple[int | None, float]:
     return after, max(0.0, min(wait, MAX_WAIT_SECONDS))
 
 
+def _check_version(table: "Table", version: int | None) -> None:
+    """The optional `version` an acting request can send: a caller that read
+    `state()` at one version and wants to refuse acting on stale knowledge of
+    it, rather than silently applying `index`/`seat`/`bundle` meant for a
+    table that has since moved. `None` (the default -- every existing caller)
+    skips this outright."""
+    if version is not None and version != table.version:
+        raise ApiError(f"the table has moved (version {table.version}); read state again", status=409)
+
+
 @dataclass
 class Config:
     """How this server builds the games it deals — the CLI's business (see
@@ -302,6 +353,11 @@ class Seat:
     name: str | None = None
     spec: str | None = None
     token: str | None = field(default=None, repr=False)
+    # `{"id": <64-hex sha256 or None>, "kind": "web"|"api"|"mcp"}` -- the
+    # client that claimed this seat (see `parse_client`), or `None` for a
+    # bot or a seat nobody has ever claimed. Never in `public`; it exists for
+    # the journal and for `POST /api/reclaim` only.
+    client: dict | None = None
 
     def public(self, seat: int) -> dict:
         """What anyone may see about this seat. Never the token."""
@@ -401,8 +457,8 @@ class Table:
         locked = locked_of(game)
         return [i for i, seat in enumerate(self.seats) if seat.kind is SeatKind.EMPTY and i not in locked]
 
-    def join(self, name: str | None) -> tuple[int, str]:
-        """Seats a person (or an LLM, over `hexset.server.mcp`) at a random
+    def join(self, name: str | None, client: dict | None = None) -> tuple[int, str]:
+        """Seats a person (or an LLM, over `POST /mcp`) at a random
         still-open, still-unlocked seat, returning it and their token.
 
         Every manual seat gets a `PendingGate` the instant it is claimed --
@@ -410,7 +466,11 @@ class Table:
         trading-final.md`, item 5: "human and LLM seats are direct gates").
         Nothing is ever traded on a person's or an LLM's behalf: a bot's
         broadcast is recorded against this seat (`GameSession.confirm_mode`)
-        and answered through the trade round."""
+        and answered through the trade round.
+
+        `client` (see `parse_client`) names who's claiming it; an unnamed
+        seat's display name falls back to `default_seat_name(client.kind)`
+        rather than staying blank, so `player_names` always holds something."""
         candidates = [
             i
             for i, seat in enumerate(self.seats)
@@ -420,9 +480,10 @@ class Table:
             raise ApiError("this game has no open seats", status=409)
         index = random.SystemRandom().choice(candidates)
         token = secrets.token_urlsafe(18)
-        clean = clean_name(name)
-        self.seats[index] = Seat(kind=SeatKind.PLAYER, name=clean, token=token)
-        self.session.claim(index, clean)
+        client = client or {"id": None, "kind": "api"}
+        clean = clean_name(name) or default_seat_name(client["kind"])
+        self.seats[index] = Seat(kind=SeatKind.PLAYER, name=clean, token=token, client=client)
+        self.session.claim(index, clean, client)
         self.session.confirm_mode(index)
         self.bump()
         return index, token
@@ -485,8 +546,10 @@ def spawn_bot(spec: str, board: Board, rng: random.Random, config: Config) -> Bo
     return spawn(spec, board, rng=rng, device=config.device, max_trades=config.max_trades)
 
 
-def _seat_labels(seats: list[Seat]) -> tuple[dict[int, str], dict[int, str], dict[int, str]]:
-    """The three name/spec maps `GameSession` is built with, read off `seats`
+def _seat_labels(
+    seats: list[Seat],
+) -> tuple[dict[int, str], dict[int, str], dict[int, str], dict[int, dict]]:
+    """The name/spec/client maps `GameSession` is built with, read off `seats`
     the same way whether the game is being dealt fresh or replayed back from
     a journal — the two must agree on how a seat's kind decides which map it
     lands in, or a resumed game's labels would silently diverge from a fresh
@@ -494,7 +557,8 @@ def _seat_labels(seats: list[Seat]) -> tuple[dict[int, str], dict[int, str], dic
     bot_names = {i: s.name for i, s in enumerate(seats) if s.kind is SeatKind.BOT and s.name}
     bot_specs = {i: s.spec for i, s in enumerate(seats) if s.kind is SeatKind.BOT and s.spec}
     player_names = {i: s.name for i, s in enumerate(seats) if s.kind is SeatKind.PLAYER and s.name}
-    return bot_names, bot_specs, player_names
+    clients = {i: s.client for i, s in enumerate(seats) if s.client is not None}
+    return bot_names, bot_specs, player_names, clients
 
 
 def build_session(code: str, seats: list[Seat], config: Config, *, first: int) -> GameSession:
@@ -524,7 +588,7 @@ def build_session(code: str, seats: list[Seat], config: Config, *, first: int) -
     # governs a *bot's own* internal never-trade flag, a different thing --
     # see `spawn_bot`).
     game.max_trades = 0
-    bot_names, bot_specs, player_names = _seat_labels(seats)
+    bot_names, bot_specs, player_names, clients = _seat_labels(seats)
     claimed = {i for i, s in enumerate(seats) if s.kind is not SeatKind.EMPTY}
     return GameSession(
         game=game,
@@ -534,6 +598,7 @@ def build_session(code: str, seats: list[Seat], config: Config, *, first: int) -
         bot_names=bot_names,
         bot_specs=bot_specs,
         player_names=player_names,
+        clients=clients,
         code=code,
     )
 
@@ -565,7 +630,7 @@ def resume_session(code: str, seats: list[Seat], config: Config) -> GameSession 
     seed = header["seed"]
     first = header.get("first", 0)
     board = random_base_board(random.Random(seed))
-    bot_names, bot_specs, player_names = _seat_labels(seats)
+    bot_names, bot_specs, player_names, clients = _seat_labels(seats)
     game = start_at(board, MAX_SEATS, random.Random(seed), first=first)
     game.max_trades = 0  # the trade round is this table's protocol; see `build_session`
     game.locked = journal.locked_seats(events)  # noqa: attribute, see seating.py
@@ -577,6 +642,7 @@ def resume_session(code: str, seats: list[Seat], config: Config) -> GameSession 
         bot_names=bot_names,
         bot_specs=bot_specs,
         player_names=player_names,
+        clients=clients,
         code=code,
     )
     try:
@@ -618,6 +684,7 @@ class Tables:
         self,
         bots: list[str] | None = None,
         name: str | None = None,
+        client: dict | None = None,
     ) -> tuple[Table, str]:
         """A new game, dealt immediately: the creator at a random seat, any
         named bots seated (and tokened) alongside them, everything else
@@ -652,9 +719,11 @@ class Tables:
             table.close()
 
         creator_seat = random.SystemRandom().randrange(MAX_SEATS)
+        client = client or {"id": None, "kind": "api"}
+        clean = clean_name(name) or default_seat_name(client["kind"])
         seats: list[Seat] = [Seat() for _ in range(MAX_SEATS)]
         seats[creator_seat] = Seat(
-            kind=SeatKind.PLAYER, name=clean_name(name), token=secrets.token_urlsafe(18)
+            kind=SeatKind.PLAYER, name=clean, token=secrets.token_urlsafe(18), client=client
         )
         remaining = [i for i in range(MAX_SEATS) if i != creator_seat]
         for entry, seat_index in zip(bots, remaining):
@@ -750,6 +819,12 @@ class Tables:
         seats = [Seat() for _ in range(MAX_SEATS)]
         for seat, (bot_name, spec) in journal.seating(events).items():
             seats[seat] = Seat(kind=SeatKind.BOT, name=bot_name, spec=spec, token=secrets.token_urlsafe(18))
+        # A bot's seat carries no client identity; every other seat gets its
+        # client back even though it comes back `EMPTY` (see the docstring
+        # above), so `POST /api/reclaim` still recognises it after a restart.
+        for seat, client in journal.clients(events).items():
+            if seats[seat].kind is not SeatKind.BOT:
+                seats[seat].client = client
         session = resume_session(code, seats, self.config)
         if session is None:
             return None
@@ -795,6 +870,42 @@ class Tables:
                     return table, index
         raise ApiError("unknown or expired seat token", status=403)
 
+    def reclaim(self, code: str, secret: str) -> tuple[Table, int, str]:
+        """`POST /api/reclaim`: a fresh token for the seat whose `client.id`
+        equals `sha256(secret).hexdigest()` -- the one way back into a seat
+        once its token is gone, whether that is a server restart (every
+        non-bot seat comes back `EMPTY`, its client restored by `_reopen`)
+        or just a token superseded by a second reclaim on a still-live seat.
+
+        An `EMPTY` seat is revived the same way `Table.join` would seat it
+        (claimed, named, gated); a seat still `PLAYER` just gets a new token
+        -- its old one then fails every later request. Refuses a bot seat (no
+        secret to check) and a locked one (retired for good, the same as
+        `close_seat`/`leave_seat`). No match anywhere: 403.
+        """
+        table = self.get(code)
+        digest = hashlib.sha256(secret.encode("utf-8")).hexdigest()
+        with table.lock:
+            locked = locked_of(table.session.game)
+            for index, seat in enumerate(table.seats):
+                if seat.kind is SeatKind.BOT or index in locked:
+                    continue
+                client = seat.client
+                if not client or not client.get("id"):
+                    continue
+                if not secrets.compare_digest(client["id"], digest):
+                    continue
+                token = secrets.token_urlsafe(18)
+                seat.token = token
+                if seat.kind is SeatKind.EMPTY:
+                    seat.kind = SeatKind.PLAYER
+                    seat.name = seat.name or default_seat_name(client["kind"])
+                    table.session.claim(index, seat.name, client)
+                    table.session.confirm_mode(index)
+                table.bump()
+                return table, index, token
+        raise ApiError("no seat matches that secret", status=403)
+
     def _evict_stale(self, now: float, keep: str | None = None) -> list[Table]:
         """Must be called with `_registry_lock` held. Drops any game untouched
         for longer than `TABLE_TTL_SECONDS` — an abandoned game or a closed
@@ -834,7 +945,8 @@ class Tables:
 
     # --- play -------------------------------------------------------------
 
-    def act(self, table: Table, seat: int, wire: dict) -> dict:
+    def act(self, table: Table, seat: int, wire: dict, version: int | None = None) -> dict:
+        _check_version(table, version)
         waiting = table.waiting_for()
         if waiting:
             names = ", ".join(str(s) for s in waiting)
@@ -963,6 +1075,31 @@ class Tables:
             table.bump()
         return table.view(viewer)
 
+    def leave_seat(self, table: Table, viewer: int) -> dict:
+        """`POST /api/leave`: retire your own seat for the rest of this game
+        -- the one case `close_seat` above refuses on purpose (it only ever
+        closes a seat nobody holds). `hexset.game.lock_seat`'s own docstring
+        already covers what retiring an occupied, currently-acting seat
+        does: nothing to its hand or pieces, only to whose turn comes next,
+        and permanently.
+
+        Refuses while a trade round is open naming you either as its actor
+        or as a seat it is still owed an answer from -- resolve it first
+        (`answer_trade`/`choose_trade`), so a round never outlives the one
+        seat that would have to close it.
+        """
+        if is_over(table.session.game):
+            raise ApiError("the game is already over")
+        round_ = table.session.open_round
+        if round_ is not None and (round_.offer.actor == viewer or viewer in round_.awaiting):
+            raise ApiError("resolve the open trade round first (answer_trade/choose_trade), then leave")
+        if viewer not in locked_of(table.session.game):
+            lock_seat(table.session.game, viewer)
+            if table.session.journal is not None:
+                table.session.journal.locked(viewer, at_step=table.session._steps)
+            table.bump()
+        return table.view(viewer)
+
     # --- the trade round (`hexset.trading`, "The trade round") --------------
 
     def open_round(self, table: Table, seat: int, payload: dict) -> dict:
@@ -995,6 +1132,7 @@ class Tables:
         showed, signed towards `actor`; `bundle` is the counter, signed the
         same way (required for `"counter"`). 409 for an offer that is no
         longer open -- never answered against something else."""
+        _check_version(table, payload.get("version"))
         actor = payload.get("actor")
         if not isinstance(actor, int):
             raise ApiError("send the offer's `actor` seat")
@@ -1018,6 +1156,7 @@ class Tables:
         """`POST /api/games/<CODE>/trade/round/choose`: `{"seat": <seat that
         answered>, "bundle": [5 ints]}` executes that exact recorded answer;
         `{"decline": true}` closes the round with nothing moved."""
+        _check_version(table, payload.get("version"))
         if payload.get("decline"):
             try:
                 table.session.decline_round(seat)
@@ -1084,11 +1223,12 @@ class Tables:
         """One request, dispatched. Raises `ApiError` for anything refused.
 
         Every transport in the project ends up here: `web.py` calls it with a
-        parsed HTTP request, `mcp.py` reaches it over that same HTTP from
-        wherever the LLM is running, and `botclient.py` reaches it either the
-        same way (a real external process) or in-process, directly, for a
-        locally-embedded bot. Routing lives with the rules rather than in the
-        transport so none of them can drift into serving different games.
+        parsed HTTP request for both `/api/*` and `/mcp` (`mcptools.py`'s
+        tools call this in-process, same process, no second server), and
+        `botclient.py` reaches it either the same way (a real external
+        process) or in-process, directly, for a locally-embedded bot. Routing
+        lives with the rules rather than in the transport so none of them can
+        drift into serving different games.
 
         The query string is split off here rather than by any one transport,
         so `/api/state?after=7&wait=20` means the same thing over HTTP and
@@ -1096,6 +1236,8 @@ class Tables:
         is answered on the spot, exactly as every read always was.
         """
         path, _, query = path.partition("?")
+        if method == "GET" and path == "/api/version":
+            return build_info()
         if method == "GET" and path == "/api/models":
             return {"models": listed_models()}
 
@@ -1138,14 +1280,21 @@ class Tables:
             table, new_token = self.create(
                 bots=payload.get("bots"),
                 name=payload.get("name"),
+                client=parse_client(payload),
             )
             return {"token": new_token, **table.view(table.seat_of(new_token))}
 
         if method == "POST" and path == "/api/join":
             table = self.get(str(payload.get("code", "")))
             with table.lock:
-                seat, new_token = table.join(payload.get("name"))
+                seat, new_token = table.join(payload.get("name"), parse_client(payload))
                 return {"token": new_token, **table.view(seat)}
+
+        if method == "POST" and path == "/api/reclaim":
+            table, seat, new_token = self.reclaim(
+                str(payload.get("code", "")), str(payload.get("secret", ""))
+            )
+            return {"token": new_token, **table.view(seat)}
 
         # Everything past here acts on a seat, so it needs the token that names
         # one. Resolved once, here, rather than in each branch.
@@ -1179,7 +1328,7 @@ class Tables:
         if method == "GET" and path == "/api/record":
             return self.record(table, seat)
         if method == "POST" and path == "/api/action":
-            return self.act(table, seat, payload.get("action") or {})
+            return self.act(table, seat, payload.get("action") or {}, payload.get("version"))
         if method == "POST" and path == "/api/undo":
             return self.undo(table, seat)
         if method == "POST" and path == "/api/name":
@@ -1190,6 +1339,8 @@ class Tables:
             )
         if method == "POST" and path == "/api/close":
             return self.close_seat(table, seat, int(payload.get("seat", -1)))
+        if method == "POST" and path == "/api/leave":
+            return self.leave_seat(table, seat)
         if method == "POST" and path == f"/api/games/{table.code}/trade/round":
             return self.open_round(table, seat, payload)
         if method == "POST" and path == f"/api/games/{table.code}/trade/round/answer":

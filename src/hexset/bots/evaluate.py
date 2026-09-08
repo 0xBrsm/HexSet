@@ -156,8 +156,8 @@ class Weights:
     earns nothing outright and `port` cannot be told from nothing. Do not
     quote the older four-term reading.
 
-    The three hand terms are the `hand_terms` redesign (readout
-    `docs/readouts/hand-valuation/`): the flat `card`/`progress`/
+    The three hand terms are the `hand_terms` redesign (hand-valuation
+    readout, 2026-09-07): the flat `card`/`progress`/
     `surplus_card` trio priced a card at 0.005 VP and being one card over
     seven at -0.39, so dumping six cards for one read as two victory points
     and any lopsided trade cleared.

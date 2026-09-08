@@ -70,6 +70,23 @@ def test_a_closed_seat_can_be_reopened_or_given_a_bot_until_the_first_move():
     assert "retired" in str(refused.value)
 
 
+def test_bot_seat_refuses_once_the_game_is_over():
+    """`seat_bot`'s "at any point during the game" stops exactly where the
+    game does -- the same "already over" `leave_seat` refuses with below,
+    so the seat that made every recorded move stays the one the
+    journal/log/win banner still name, for good."""
+    registry, table, code, token, leaver, other = _table()
+    empty = next(s for s in range(4) if table.seats[s].kind.value == "empty")
+    registry.handle("POST", "/api/bot", {"seat": empty, "model": "heximax"}, token)
+    table.session.game.phase = Phase.GAME_OVER
+
+    with pytest.raises(ApiError) as excinfo:
+        registry.handle("POST", "/api/bot", {"seat": empty, "model": "search2"}, token)
+
+    assert "already over" in excinfo.value.args[0]
+    assert table.seats[empty].name == "heximax"
+
+
 def test_leave_locks_the_seat_and_hands_the_turn_on():
     registry, table, code, token, leaver, other = _table()
     game = table.session.game

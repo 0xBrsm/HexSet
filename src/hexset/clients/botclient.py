@@ -39,12 +39,14 @@ seat's move.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 import threading
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Protocol
 
 import numpy as np
@@ -56,6 +58,16 @@ from hexset.bots import Bot
 from hexset.server.constants import RECORD_CONTRACTS, TOKEN_HEADER
 from hexset.server.modelmeta import search_config
 from hexset.server.webplay import action_to_wire
+
+
+def client_of(secret: str) -> dict:
+    """The `client` wire field `POST /api/join` reads (`api.parse_client`):
+    kind `"api"`, `id` the sha256 of `secret`. `_main` defaults `secret` to
+    the checkpoint file's own stem so two runs of the same checkpoint
+    correlate in the journal and can `POST /api/reclaim` each other's seat
+    without a flag; `--client-secret` overrides it for a caller that wants
+    its own."""
+    return {"id": hashlib.sha256(secret.encode("utf-8")).hexdigest(), "kind": "api"}
 
 
 # The two fields the graph reads as bool; every other declared input in the
@@ -356,10 +368,23 @@ def _main(argv: list[str] | None = None) -> None:
         default=10.0,
         help="Longest a parked read waits for the table to change (seconds).",
     )
+    parser.add_argument(
+        "--client-secret",
+        default=None,
+        help=(
+            "Identifies this client for POST /api/reclaim (see api.py's "
+            "module docstring): the seat's client.id is sha256 of this. "
+            "Defaults to --model's own filename stem, so two runs against "
+            "the same checkpoint reclaim each other's seat with no flag."
+        ),
+    )
     args = parser.parse_args(argv)
 
+    secret = args.client_secret or Path(args.model).stem
     transport = HttpTransport(args.url.rstrip("/"))
-    joined = transport.post("/api/join", "", {"code": args.game, "name": args.name})
+    joined = transport.post(
+        "/api/join", "", {"code": args.game, "name": args.name, "client": client_of(secret)}
+    )
     if "error" in joined:
         raise SystemExit(f"could not join {args.game}: {joined['error']}")
     token = joined["token"]

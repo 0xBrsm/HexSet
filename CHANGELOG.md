@@ -9,6 +9,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added
+
+- **`hexset.bench.versus.compete_batched`: `arena.compete`'s verdict over batched policies.** `compete_batched(policies, games, caster=..., players=..., seed=..., lanes=..., action_cap=..., max_trades=..., antithetic=True, learner=0)` plays a duel through `hexset.gym.lanes.LaneEnv` — one call per tick across every lane, which is what a network-backed policy needs and what `compete`'s one-position-at-a-time `Bot` cannot give it — under `compete`'s own pairing law: the two halves of an antithetic pair are the same board with the two sides' seats exchanged, so the seat term cancels per board. Returns a `Verdict` carrying the paired victory-point margin with a normal interval (`arena.mean_interval`), wins with `arena.wilson`'s interval, `arena.Standing`s, boards counted both ways only, and `truncated`/`exhausted` kept apart; `Verdict.metrics()` is the flat dict a training run logs. `BatchPolicy` is the protocol (`act(requests)` over `LaneEnv.Request`s) and `BotPolicy` puts any `hexset.bots.Bot` behind it, gate included.
+- `hexset.casting.rotating(lineup)` and `hexset.casting.swapped(caster, a=0, b=1)`: `arena.compete`'s lineup rotation as a caster, and the complementary cast that exchanges two policy ids. Exchanging the ids is the complement of *any* cast, where the tournament's own `seats // 2` seat shift is only the complement of its adjacent lineup — `swapped(alternating(n))` is `alternating(n, flip=True)`.
+
 ## 0.41.0
 
 ### Added

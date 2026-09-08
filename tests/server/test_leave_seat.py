@@ -87,6 +87,31 @@ def test_bot_seat_refuses_once_the_game_is_over():
     assert table.seats[empty].name == "heximax"
 
 
+def test_every_seated_mutation_refuses_once_the_game_is_over():
+    """The one gate in `Tables._seated`, exercised across every route it
+    covers -- not just `/api/bot` and `/api/leave`, which each also refuse
+    on their own (see the tests around this one): `/api/name` had no such
+    guard of its own before this gate existed, and was still renamable
+    after `game_over` until it did."""
+    registry, table, _code, token, leaver, _other = _table()
+    table.session.game.phase = Phase.GAME_OVER
+
+    routes = [
+        ("POST", "/api/name", {"name": "new name"}),
+        ("POST", "/api/action", {"action": {"type": "END_TURN"}}),
+        ("POST", "/api/undo", {}),
+        ("POST", "/api/open", {"seat": (leaver + 1) % 4}),
+        ("POST", "/api/close", {"seat": (leaver + 1) % 4}),
+    ]
+    for method, path, payload in routes:
+        with pytest.raises(ApiError) as excinfo:
+            registry.handle(method, path, payload, token)
+        assert "already over" in excinfo.value.args[0], f"{path} did not refuse"
+
+    # Reads still work -- a finished game is exactly as observable as before.
+    registry.handle("GET", "/api/state", {}, token)
+
+
 def test_leave_locks_the_seat_and_hands_the_turn_on():
     registry, table, _code, token, leaver, other = _table()
     game = table.session.game

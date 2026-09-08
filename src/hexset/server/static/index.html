@@ -2525,8 +2525,9 @@ function acceptancePane(round) {
   const iGive = signed.map((n) => Math.max(0, -n));
   const iGet = signed.map((n) => Math.max(0, n));
 
+  // No pip on our own row: the pane is ours, and the pip is what says whose
+  // answer a row below is.
   const ours = html("div", {class: "pane-row"});
-  ours.appendChild(seatPip(state.seat));
   ours.appendChild(tradeLine(iGive, iGet, {small: true}));
   wrap.appendChild(ours);
   wrap.appendChild(html("div", {class: "pane-rule"}));

@@ -283,6 +283,49 @@ def test_a_runtime_registers_the_arena_entrant_kinds_in_one_call(board, arena_re
         spawn(Entrant("stub", kind="network", weights=[1.0]), board, random.Random(0))
 
 
+def test_a_bot_seated_at_one_seat_refuses_to_answer_for_another(board):
+    """`seat` is the guard a driver installs one gate per seat with: a gate
+    wired to the wrong seat would answer for somebody else's hand, and that
+    is the one failure the mechanic must never have quietly."""
+    bot = bot_for(stub_checkpoint(board))
+    bot.seat = 1
+    game = start(board, PLAYERS, random.Random(2))
+    for _ in range(40):
+        step_randomly(game, random.Random(2))
+    bot.seat_at(game)
+    candidates = list(_candidates(game.state(0, hidden=False), 0, frozenset()))
+    received = [b for _, b in candidates][:3]
+    thems = [c for c, _ in candidates][:3]
+    with pytest.raises(ValueError, match="seated at 1"):
+        bot.gains_many(game.state(0), received, thems)
+    with pytest.raises(ValueError, match="seated at 1"):
+        bot.estimate_many(game.state(0), list(zip(thems, received)))
+    # Its own seat is answered, and `seat_at` alone -- no `choose` -- is enough
+    # to seat the gate.
+    own = list(_candidates(game.state(1, hidden=False), 1, frozenset()))
+    if own:
+        gains = bot.gains_many(game.state(1), [b for _, b in own], [c for c, _ in own])
+        assert len(gains) == len(own)
+
+
+def test_the_evaluator_trade_switch_is_the_runtimes_to_set(board, arena_registry):
+    """`register_entrants(loader, evaluator_max_trades=0)`: a handcrafted
+    search over a learned value (`netsearch`/`netgreedy`) must never be
+    asked to trade -- its gate scores a bare `GameState` no encoder can read
+    -- and the runtime says so once, at registration, rather than
+    re-registering the evaluator provider over the top."""
+    from hexset import arena
+
+    checkpoint = stub_checkpoint(board)
+    register_entrants(lambda path, topology: checkpoint, evaluator_max_trades=0)
+    evaluator = arena._EVALUATOR_PROVIDERS["network"]("a-path", board)
+    assert evaluator.max_trades == 0
+
+    register_entrants(lambda path, topology: checkpoint)
+    evaluator = arena._EVALUATOR_PROVIDERS["network"]("a-path", board)
+    assert evaluator.max_trades == checkpoint.max_trades
+
+
 @pytest.fixture
 def arena_registry():
     """`hexset.arena`'s registries are process-global, so a test that

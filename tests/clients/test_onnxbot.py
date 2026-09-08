@@ -87,6 +87,36 @@ def test_a_v2_search_over_a_learned_prior_plays_a_legal_action(checkpoint_v2):
         apply(game, action)
 
 
+def test_a_searched_checkpoint_trades_through_its_own_value_head(checkpoint_v2):
+    """`Search` decides moves and nothing else; a served checkpoint exported
+    with `search: mcts` therefore had no trade gate at all and never traded
+    (`linear24` at the table, 2026-09-08). The searcher now carries the plain
+    bot's gate, seated where `choose` last was, and answers `accepts_many`
+    with one verdict per candidate -- the same verdicts the plain bot gives."""
+    from hexset.clients.onnxbot import network_bot, searcher
+    from hexset.trading import _candidates, valued_many
+
+    path, board = checkpoint_v2
+    search = searcher(path, board, simulations=8, wave=4, rng=random.Random(0))
+    plain = network_bot(path, board)
+    game = start(board, 4, random.Random(2))
+    for _ in range(40):
+        step_randomly(game, random.Random(2))
+    seat = to_move(game)
+    search.choose(game)
+    plain.choose(game)
+    candidates = list(_candidates(game.state(seat, hidden=False), seat, frozenset()))
+    received = [b for _, b in candidates]
+    counterparties = [c for c, _ in candidates]
+    verdicts = search.accepts_many(game.state(seat), received, counterparties)
+    assert len(verdicts) == len(candidates)
+    assert verdicts == plain.accepts_many(game.state(seat), received, counterparties)
+    # What the clearing house and the round read: not -1 across the board.
+    gains = valued_many(search, game.state(seat), received, counterparties)
+    assert set(gains) <= {1.0, -1.0}
+    assert gains == [1.0 if ok else -1.0 for ok in verdicts]
+
+
 def test_a_terminal_leaf_is_scored_on_the_win_probability_scale(checkpoint_v2):
     """Contract-6 value heads are trained on `hexn.rewards.win_loss`, so every
     non-terminal leaf in a wave is a win probability. A terminal leaf has to be

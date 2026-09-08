@@ -154,6 +154,18 @@ def next_unlocked(game: Game, after: int) -> int:
     raise AssertionError("every seat is retired")  # the creator's never is
 
 
+def unlock_seat(game: Game, seat: int) -> None:
+    """Reopen a retired `seat` -- only ever before the first move
+    (`api.Tables.open_seat` enforces that), when nothing has been placed and
+    the snake can simply be re-pointed from where it stands. A no-op for a
+    seat that is not retired."""
+    if seat not in locked_of(game):
+        return
+    game.locked = locked_of(game) - {seat}  # type: ignore[attr-defined]
+    if game.phase in SETUP_PHASES:
+        advance_setup(game)
+
+
 def lock_seat(game: Game, seat: int) -> None:
     """Retire `seat` outright. A no-op if it is already retired — the caller
     does not have to track that. `api.py` calls `hexset.game.lock_seat`

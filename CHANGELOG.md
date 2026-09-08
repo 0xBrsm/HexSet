@@ -12,9 +12,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - The page's incoming-offer window is the counteroffer layout, titled "Trade Offer Received": the offer quoted on top with Accept (primary) on its row, a reply pre-loaded from the offer beneath with Send (secondary); passing is the close glyph. The separate "Trade Counteroffer" step is gone.
+- Seats are the table's to change until the first move, then fixed. A closed seat stays on the roster as a picker reading "(closed)" until play starts -- it can be reopened ("(empty)", new `POST /api/open {seat}`) or given a bot -- and leaves the roster at the first move. `POST /api/close` and `/api/open` are refused (409) once play has started, so the log's Player 1, 2, 3 numbering never shifts mid-game. Picker labels read "(empty)" and "(closed)". The journal records `unlocked` alongside `locked`.
+- The reply rows of "Trade Offer Received" carry a small "Counter" caption in the gutter, so the two rows read as offer and answer.
 
 ### Fixed
 
+- A checkpoint served with `search: mcts` trades. `hexset.clients.onnxbot.searcher` returns a `GatedSearch`: `hexset.mcts.Search` with the checkpoint's own value-head gate (`accepts`/`accepts_many`), seated where `choose` last was. `Search` alone had no gate, so `valued_many` priced every candidate at -1 and a searched checkpoint never accepted or made an offer, while the same checkpoint played plainly traded.
 - Closing any trade window closes it: declining a round, taking a deal, or passing on an offer dismisses the modal instead of leaving the composer up because it is still this seat's turn.
 - The acceptance pane lists only the seats still in the game; a closed seat has no row.
 - A closed seat leaves the roster the moment it is closed, in every phase, and the remaining seats renumber (Player 1, 2, 3), matching the log.

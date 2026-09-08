@@ -539,6 +539,11 @@
   .pane-row { display: flex; align-items: center; gap: 0.5rem; min-height: 44px; }
   .pane-row.quiet { opacity: 0.35; }
   .pane-pass { flex: 1 1 auto; min-width: 0; color: var(--muted, #888); font-size: 0.9em; }
+  .reply-cap {
+    flex: none; writing-mode: vertical-rl; transform: rotate(180deg); align-self: stretch;
+    text-align: center; font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); padding: 0.2rem 0;
+  }
   .pane-row .trade-line { flex: 1 1 auto; min-width: 0; }
   .pane-rule { border-top: 1px solid var(--border); align-self: stretch; }
   /* Only inside the pane, where the rows above and below it are 0.3rem apart;
@@ -1004,7 +1009,7 @@ function seatLabel(seat) {
   // fields tells it apart from a person who never gave a name.
   const info = state?.seats?.[seat];
   if (info && info.kind === "empty") {
-    return state?.locked?.includes(seat) ? "closed" : "empty";
+    return state?.locked?.includes(seat) ? "(closed)" : "(empty)";
   }
   return (info && info.name) || `Player ${playerNumber(seat)}`;
 }
@@ -1072,6 +1077,22 @@ const CLOSE_SEAT = "__close__";
 // Closes an open seat outright: no bot, no person, ever, for the rest of
 // this game — the third way an empty seat resolves (see api.Tables.close_seat)
 // besides seating a bot on it or somebody opening the link to take it.
+async function reopenSeat(seat) {
+  if (inFlight) return;
+  inFlight = true;
+  try {
+    const {ok, data} = await postJSON("/api/open", {seat});
+    if (ok) {
+      state = data;
+      render();
+    } else {
+      showNotice(data.error || "Could not reopen that seat.");
+    }
+  } finally {
+    inFlight = false;
+  }
+}
+
 async function closeSeat(seat) {
   if (inFlight) return;
   inFlight = true;
@@ -1635,10 +1656,13 @@ function renderPlayers() {
   if (container.contains(document.activeElement)) return;
   container.innerHTML = "";
   for (const p of state.players) {
-    // A closed seat has nobody in it and never will: its row goes the moment
-    // it is closed, and the seats left renumber (playerNumber) so the table
-    // reads Player 1, 2, 3.
-    if ((state.locked || []).includes(p.seat)) continue;
+    // A closed seat stays on the roster, as a picker, until the first move:
+    // the table can still change its mind (reopen it, seat a bot). Once play
+    // starts the seats are fixed -- closing and reopening are refused
+    // server-side -- and the row goes, since there is nobody in it and never
+    // will be; the seats left renumber (playerNumber) so the table reads
+    // Player 1, 2, 3 and the log's numbering never shifts mid-game.
+    if (state.started && (state.locked || []).includes(p.seat)) continue;
     const color = SEAT_COLORS[p.seat];
     const row = html("div", {class: `player-row${state.to_move === p.seat ? " active" : ""}`});
     const swatch = html("div", {class: "swatch"});
@@ -1699,17 +1723,19 @@ function renderPlayers() {
       // step. An empty seat holds the whole table (see renderStatus) until
       // somebody picks a bot for it, opens the link and takes it, or picks
       // "closed" to close it outright -- nothing here ever resolves itself.
+      const closed = (state.locked || []).includes(p.seat);
       const select = html("select", {});
       if (!p.bot) {
-        select.appendChild(html("option", {value: ""}, "empty"));
-        select.appendChild(html("option", {value: CLOSE_SEAT}, "closed"));
+        select.appendChild(html("option", {value: ""}, "(empty)"));
+        select.appendChild(html("option", {value: CLOSE_SEAT}, "(closed)"));
       }
       for (const name of modelNames) select.appendChild(html("option", {value: name}, name));
-      select.value = p.bot || "";
+      select.value = p.bot || (closed ? CLOSE_SEAT : "");
       select.classList.toggle("unset", !p.bot);
       select.addEventListener("change", () => {
         select.blur();
         if (select.value === CLOSE_SEAT) closeSeat(p.seat);
+        else if (select.value === "") reopenSeat(p.seat);
         else swapBot(p.seat, select.value);
       });
       nameEl.appendChild(select);
@@ -2748,6 +2774,10 @@ function renderTradeMode(title, body, actions) {
   body.appendChild(html("div", {class: "pane-rule"}));
 
   const reply = html("div", {class: "counter-row"});
+  // The one word that says what the rows beneath their offer are for: a
+  // reply, not a fresh trade. Small and muted, set in the gutter the pip
+  // occupies on their row, so the two rows read as offer and answer.
+  reply.appendChild(html("div", {class: "reply-cap"}, "Counter"));
   reply.appendChild(composerRows(p));
   reply.appendChild(html("div", {class: "modal-fill"}));
   const ready = composerReady(p) && offerableToPlayers();

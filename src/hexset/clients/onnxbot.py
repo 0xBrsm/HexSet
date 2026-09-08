@@ -38,8 +38,8 @@ import onnxruntime as ort
 
 from hexset.actions import Action, ActionSpace, build_space
 from hexset.board.topology import Topology
-from hexset.game import Game, to_move
-from hexset.mcts import Search, terminal_relative_points
+from hexset.game import Game, is_over, to_move
+from hexset.mcts import Search
 from hexset.onnx_record import record_from_game
 from hexset.server.constants import RECORD_CONTRACTS
 from hexset.server.modelmeta import SearchConfig, search_config
@@ -205,8 +205,16 @@ class Loaded:
 
 
 @lru_cache(maxsize=4)
-def _load_cached(path: str, topology: Topology, device: str, mtime_ns: int) -> Loaded:
-    session = ort.InferenceSession(str(path), providers=_providers_for(device))
+def _load_cached(
+    path: str, topology: Topology, device: str, mtime_ns: int, threads: int | None
+) -> Loaded:
+    options = ort.SessionOptions()
+    if threads is not None:
+        options.intra_op_num_threads = threads
+        options.inter_op_num_threads = threads
+    session = ort.InferenceSession(
+        str(path), sess_options=options, providers=_providers_for(device)
+    )
     meta = session.get_modelmeta().custom_metadata_map
 
     players = int(meta["players"])
@@ -254,7 +262,9 @@ def _load_cached(path: str, topology: Topology, device: str, mtime_ns: int) -> L
     )
 
 
-def load(path: str, topology: Topology, device: str = "cpu") -> Loaded:
+def load(
+    path: str, topology: Topology, device: str = "cpu", threads: int | None = None
+) -> Loaded:
     """The checkpoint at `path`, ready to act on boards of this topology.
 
     Cache key folds in the file's mtime, unlike the training repo's loader: its
@@ -262,8 +272,13 @@ def load(path: str, topology: Topology, device: str = "cpu") -> Loaded:
     artifacts, but hexset's whole pitch is replacing a file in `models/`
     by name — without the mtime, a same-named replacement would silently
     keep serving the old in-memory session.
+
+    `threads` caps onnxruntime's intra- and inter-op pools. Left `None`,
+    onnxruntime sizes them from the core count, which is right for one bot at
+    one table and wrong for a caller that has already sharded the work across
+    processes -- each would claim the whole machine. Such a caller passes 1.
     """
-    return _load_cached(path, topology, device, os.stat(path).st_mtime_ns)
+    return _load_cached(path, topology, device, os.stat(path).st_mtime_ns, threads)
 
 
 @dataclass
@@ -371,13 +386,20 @@ class NetworkBot:
         """Each hand's value on `seat`'s own row, `seat`'s hand swapped in
         turn and everything else about the live position held fixed.
 
-        Mirrors `hexn.policy.DerivedTrader._own_values`: `set_state` is the
-        engine's own sanctioned way to swap a hypothetical state in and back
-        out, the observation is built from the game (not the bare state) for
-        the same reason as there -- phase, turn count and every seat's
-        published vector all live on `Game`, not `GameState` -- and the
-        original is restored in a `finally` so a raised error still leaves
-        the live game exactly as `choose` left it.
+        `set_state` is the engine's own sanctioned way to swap a hypothetical
+        state in and back out, the observation is built from the game (not the
+        bare state) because phase, turn count and every seat's published
+        vector live on `Game`, not `GameState`, and the original is restored
+        in a `finally` so a raised error still leaves the live game exactly as
+        `choose` left it.
+
+        **This no longer mirrors `hexn.policy.DerivedTrader`.** That side moved
+        to `after_exchange`, which moves *both* hands and updates the
+        counterparty's ledger row; swapping only the acting seat's hand, as
+        here, is what it calls its earlier version. The gate on this side
+        therefore prices a candidate against a position the clearing house
+        would not actually produce. Porting it is a behaviour change to the
+        trade gate and wants its own change and its own evidence.
         """
         game = self._seated
         assert game is not None  # callers check this first
@@ -433,12 +455,27 @@ class LeafEvaluator:
         return self.policy.score_rows(rows)[:count]
 
     def terminal(self, game: Game) -> Sequence[float]:
-        """`hexset.mcts.Evaluator.terminal`: every graph this contract range
-        (`RECORD_CONTRACTS`) serves has a value head trained against
-        `relative_points`, the same quantity `Search` scored a terminal leaf
-        with itself before this method existed, so this returns exactly that
-        and a finished game's score is unchanged."""
-        return terminal_relative_points(game)
+        """`hexset.mcts.Evaluator.terminal`: the one-hot winner, board-seat
+        order.
+
+        `RECORD_CONTRACTS` is contract 6 alone, and a contract-6 value head is
+        trained on `hexn.rewards.win_loss` — a win probability, whether it came
+        from `hexn.ppo` or from `hexn.distill`, which was ported to the same
+        target. So every non-terminal leaf in a wave is scored on that scale,
+        and returning `terminal_relative_points` here would back a points
+        margin up the tree alongside them. `hexn.netbot.LeafEvaluator`, the
+        torch-side twin of this class, already returns the winner for exactly
+        this reason.
+
+        Raises if `game` has not finished: `Search` only calls this on a
+        terminal node, so a caller passing an unfinished game has a bug of its
+        own.
+        """
+        if not is_over(game):
+            raise ValueError("terminal() called on a game that has not finished")
+        players = game.state(0, hidden=False).num_players
+        winner = game.won_by
+        return tuple(1.0 if seat == winner else 0.0 for seat in range(players))
 
 
 def searcher(
@@ -451,9 +488,10 @@ def searcher(
     device: str = "cpu",
     inference_batch: int | None = None,
     rng=None,
+    threads: int | None = None,
 ) -> Search:
     """The checkpoint at `path` as a batched PUCT search, playing on `board`."""
-    loaded = load(path, board.topology, device)
+    loaded = load(path, board.topology, device, threads)
     budget = loaded.max_trades if max_trades is None else max_trades
     return Search(
         LeafEvaluator(
@@ -468,19 +506,26 @@ def searcher(
     )
 
 
-def network_evaluator(path: str, board, *, device: str = "cpu") -> NetworkEvaluator:
+def network_evaluator(
+    path: str, board, *, device: str = "cpu", threads: int | None = None
+) -> NetworkEvaluator:
     """The checkpoint at `path` as a leaf evaluation for the search."""
-    loaded = load(path, board.topology, device)
+    loaded = load(path, board.topology, device, threads)
     return NetworkEvaluator(
         policy=loaded.policy, players=loaded.players, max_trades=loaded.max_trades
     )
 
 
 def network_bot(
-    path: str, board, *, max_trades: int | None = None, device: str = "cpu"
+    path: str,
+    board,
+    *,
+    max_trades: int | None = None,
+    device: str = "cpu",
+    threads: int | None = None,
 ) -> NetworkBot:
     """The checkpoint at `path`, playing on `board`."""
-    loaded = load(path, board.topology, device)
+    loaded = load(path, board.topology, device, threads)
     return NetworkBot(
         policy=loaded.policy,
         space=loaded.space,
@@ -496,6 +541,7 @@ def spawn(
     rng: random.Random | None = None,
     device: str = "cpu",
     max_trades: int | None = None,
+    threads: int | None = None,
 ):
     """The checkpoint at `path` as something with `.choose(game) -> Action`.
 
@@ -508,9 +554,11 @@ def spawn(
     machine serving the game, not about the checkpoint, and a model file has no
     business demanding an accelerator its host may not have.
     """
-    loaded = load(path, board.topology, device)
+    loaded = load(path, board.topology, device, threads)
     if not loaded.search.searches:
-        return network_bot(path, board, max_trades=max_trades, device=device)
+        return network_bot(
+            path, board, max_trades=max_trades, device=device, threads=threads
+        )
     return searcher(
         path,
         board,
@@ -519,4 +567,5 @@ def spawn(
         max_trades=max_trades,
         device=device,
         rng=rng,
+        threads=threads,
     )

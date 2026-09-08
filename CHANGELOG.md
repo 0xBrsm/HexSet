@@ -9,8 +9,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Fixed
+
+- `hexset.clients.onnxbot.LeafEvaluator.terminal` scores a finished game as the one-hot winner, the win-probability scale its contract-6 value head is trained on, instead of `terminal_relative_points`; it raises if the game has not finished.
+- `hexset.trading.default_respond` no longer answers `accept` to an offer the responding seat cannot cover; such an offer is countered or passed instead.
+
+### Changed
+
+- References to the sibling training package follow its rename from `hexnet` to `hexn`.
+- References to the private training repository follow its rename to
+  `dev-HexN`.
+
 ### Added
 
+- `hexset.clients.onnxbot`: `load`, `network_bot`, `network_evaluator`, `searcher` and `spawn` take `threads`, capping onnxruntime's intra- and inter-op thread pools; `None` (the default) keeps onnxruntime's own sizing.
 - `POST /api/games`/`POST /api/join` accept an optional `client: {"id":
   <64-hex sha256>, "kind": "web"|"api"|"mcp"}`; absent defaults to kind
   `"api"`, an unknown kind or malformed `id` is a 400.
@@ -26,8 +38,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `POST /mcp`: MCP served over HTTP by `web.py` itself (Streamable HTTP
   transport), replacing the `python -m hexset.server.mcp` stdio program.
   `initialize` mints an `Mcp-Session-Id`; every later request on that
-  session must carry it back, and an unknown or missing one is a 404 (call
-  `initialize` again). `DELETE /mcp` ends a session; `GET /mcp` is 405. A
+  session must carry it back: a missing one is a 400, an unknown one a 404
+  (call `initialize` again). `DELETE /mcp` ends a session; `GET /mcp` is 405. A
   `tools/call` for `wait_for_turn` answers as `text/event-stream`; every
   other tool answers one JSON-RPC response. `Origin` is checked per the
   spec's security section: present and not 127.0.0.1/localhost/::1/this

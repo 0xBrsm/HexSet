@@ -97,6 +97,10 @@ class Game:
     trades: list[Trade] = field(default_factory=list)
     trades_made: int = 0
     max_trades: int | None = None
+    # The `turns` value the trade event last ran in: `run_trade_event` is
+    # once a turn, and a knight played in MAIN re-enters MAIN after its
+    # robber move, which used to run it a second time.
+    trade_event_turn: int = -1
     # Candidates the current player's trade event found against a manual
     # (human/LLM) seat's `PendingGate` (`hexset.server.webplay`) -- a
     # snapshot of the *last* event, not an accumulating log like `trades`.
@@ -319,6 +323,7 @@ def imagine(
         trades=game.trades[:],
         trades_made=game.trades_made,
         max_trades=game.max_trades,
+        trade_event_turn=game.trade_event_turn,
         trade_rule=game.trade_rule,
         locked=game.locked,
         first=game.first,
@@ -749,13 +754,18 @@ def run_trade_event(game: Game) -> None:
     from `move_robber_to` (a seven or a knight, once the robber phase
     resumes into `MAIN`) -- the two paths by which a turn transitions into
     `MAIN`. No MAIN action calls this again; a build, a buy, a bank/port
-    trade or a development card no longer reopens the event mid-turn.
+    trade or a development card no longer reopens the event mid-turn -- and
+    a knight played in MAIN, whose robber move re-enters MAIN, does not
+    either: `trade_event_turn` remembers the turn the event ran in.
 
     A game whose `gates` is `None` -- a bare `start()` with nobody seated --
     simply does not trade.
     """
     if game.phase is not Phase.MAIN:
         return
+    if game.trade_event_turn == game.turns:
+        return
+    game.trade_event_turn = game.turns
     gates = game.gates
     if gates is None:
         return

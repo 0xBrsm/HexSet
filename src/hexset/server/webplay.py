@@ -788,8 +788,11 @@ def render_log(
                 continue
             trade_lines = _trade_lines(event, labels)
             key = ("round", event.actor, event.round_num)
-            if run is not None and run["key"] == key and len(trade_lines) == 1:
-                run["text"] = f"{run['text']} {trade_lines[0]}"
+            if run is not None and run["key"] == key and len(event.trades) == 1:
+                # The bundle is already on the line -- in the offer clause
+                # for a taken accept, in the counter clause for a taken
+                # counter -- so the close names only who it was with.
+                run["text"] = f"{run['text']} Traded with {_who(event.trades[0].b, labels)}."
                 emit(event.round_num, run["text"], True)
                 continue
             run = None
@@ -965,6 +968,10 @@ class GameSession:
     # one is journalled under. Distinct from `len(events)` only in intent:
     # this is the journal's own numbering and follows it through an undo.
     _steps: int = field(default=0, repr=False)
+    # The `(turns, current_player)` a bot actor last broadcast in, so a
+    # second entry into MAIN in the same turn (a knight's robber move) does
+    # not open a second round (`begin_round`).
+    _broadcast_turn: tuple[int, int] | None = field(default=None, repr=False)
     # Set the first time the game is seen to be over, so the game is filed
     # away exactly once however many more times _apply runs afterwards.
     _ended: bool = field(default=False, repr=False)
@@ -1034,10 +1041,18 @@ class GameSession:
     def begin_round(self) -> None:
         """A bot actor's broadcast at MAIN entry (`_apply`): its gate's
         `offer` over every coverable candidate, or nothing. A manual actor
-        broadcasts through `open_round_for` instead."""
-        self._close_round()
+        broadcasts through `open_round_for` instead.
+
+        Once a turn. `_apply` calls this on every entry into MAIN, and a
+        knight re-enters MAIN after its robber move -- which used to give a
+        bot a second broadcast in the same turn. The turn is keyed by
+        `(turns, current_player)`, so a new turn always gets its one."""
         game = self.game
         me = game.current_player
+        if self._broadcast_turn == (game.turns, me):
+            return
+        self._broadcast_turn = (game.turns, me)
+        self._close_round()
         if me in game.locked:
             return
         gate = self.traders.get(me)
@@ -1075,6 +1090,15 @@ class GameSession:
                 continue
             gate = self.traders.get(seat)
             if gate is None:
+                continue
+            if isinstance(gate, PendingGate) and not any(game.state(0, hidden=False).hands[seat]):
+                # true state: the engine is the referee for coverage. A seat
+                # with no cards can neither accept nor counter, so it is not
+                # asked: its pass is recorded at once rather than holding a
+                # bot actor's turn on an answer that could only be no.
+                response = Response(seat, RESPONSE_PASS)
+                responses.append(response)
+                self._note(RoundNote(response.kind, seat, offer.actor, None))
                 continue
             view = game.state(seat)
             respond_fn = getattr(gate, "respond", None)

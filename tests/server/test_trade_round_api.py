@@ -83,7 +83,7 @@ def test_human_offer_collects_bot_answers_and_a_pick_executes_one():
     assert (data["trades"][0]["a"], data["trades"][0]["b"]) == (human, bot)
     assert state.hands[human][Resource.ORE] == 1 and state.hands[bot][Resource.WOOD] == 1
     assert data["trade_round"] is None
-    assert any("traded" in line for line in data["log"])
+    assert any("Traded with" in line for line in data["log"])
 
 
 def test_the_view_keeps_the_lap_number_and_the_open_round_apart():
@@ -125,6 +125,24 @@ def test_bot_offer_holds_the_bots_turn_until_the_human_answers():
     assert table.view(human)["to_move"] == bot
 
 
+def test_a_bot_broadcasts_once_a_turn_however_often_main_is_entered():
+    """A knight played in MAIN re-enters MAIN after its robber move, and
+    `_apply` calls `begin_round` on every entry; the second call in the same
+    turn is a no-op -- it neither closes the open round nor broadcasts
+    again."""
+    _registry, table, _code, _token, human, bot = _table(actor_is_human=False, other_gate=_Wants(Resource.ORE))
+    session = table.session
+
+    session.begin_round()
+    first = session.open_round
+    assert first is not None and first.awaiting == {human}
+    session.begin_round()
+
+    assert session.open_round is first
+    assert [e.note.kind for e in session.events if e.note is not None].count("offer") == 1
+    assert table.view(human)["pending"] == [{"actor": bot, "bundle": WOOD_FOR_ORE}]
+
+
 def test_human_pass_releases_the_bot_and_a_stale_answer_is_refused():
     registry, table, code, token, human, bot = _table(actor_is_human=False, other_gate=_Wants(Resource.ORE))
     table.session.begin_round()
@@ -157,6 +175,7 @@ def test_human_counter_to_a_bot_offer_is_picked_by_the_bots_gate():
     assert data["trades"] == [] and data["trade_wait"] == []
     assert table.session.open_round is None
 
+    table.session.game.turns += 1  # a new turn: a bot broadcasts once a turn
     table.session.begin_round()
     data = registry.handle("POST", f"/api/games/{code}/trade/round/answer",
                            {"actor": bot, "received": WOOD_FOR_ORE, "kind": "counter",

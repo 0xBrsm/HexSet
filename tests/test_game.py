@@ -399,6 +399,31 @@ def test_trade_event_runs_again_after_a_knight_in_main_but_not_in_roll(monkeypat
     assert calls == [Phase.MAIN]
 
 
+def test_trade_event_runs_once_a_turn_even_when_a_knight_re_enters_main(monkeypatch):
+    """The turn's event ran on the way into MAIN; a knight played there
+    re-enters MAIN after its robber move and used to run it a second time.
+    `Game.trade_event_turn` keeps it to one per turn; the next turn gets its
+    own."""
+    from hexset.game import enter_main
+
+    game = _seated(run_setup(a_game(players=3)))
+    game._state.dev_cards[0][DevCard.KNIGHT] = 1
+    target = (game._state.robber + 1) % game._state.board.num_hexes
+    calls = _spy_on_trade_event(monkeypatch)
+
+    enter_main(game)
+    assert calls == [Phase.MAIN]
+    play_knight_card(game)
+    move_robber_to(game, target)
+    assert game.phase is Phase.MAIN
+    assert calls == [Phase.MAIN], "no second event in the same turn"
+
+    end_turn(game)
+    game.phase = Phase.MAIN
+    enter_main(game)
+    assert calls == [Phase.MAIN, Phase.MAIN], "the next turn gets its own"
+
+
 def test_trade_event_never_runs_after_end_turn(monkeypatch):
     game = _seated(run_setup(a_game(players=3)))
     game.phase = Phase.MAIN

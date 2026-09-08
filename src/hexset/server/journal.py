@@ -364,6 +364,12 @@ class Journal:
         the live game actually walked. `at_step` is diagnostic only."""
         self._emit({"kind": "locked", "at": _now(), "seat": seat, "at_step": at_step})
 
+    def unlocked(self, seat: int, *, at_step: int) -> None:
+        """`seat` was reopened (see `api.Tables.open_seat`) -- only ever
+        before the first move, so `at_step` is always 0 and diagnostic
+        only. `locked_seats` reads the two kinds in order."""
+        self._emit({"kind": "unlocked", "at": _now(), "seat": seat, "at_step": at_step})
+
     def reopened(self, *, at_step: int) -> None:
         """This game was put back together from the lines above — a server
         restart, or a session evicted for going quiet (see `webplay.resume`).
@@ -571,11 +577,18 @@ def clients(events: list[dict]) -> dict[int, dict]:
 
 
 def locked_seats(events: list[dict]) -> frozenset[int]:
-    """Every seat the setup snake ever locked out (see `Journal.locked`).
-    Order doesn't matter for a resume: pre-seeding the whole set before
-    replay reproduces the exact same snake the live game walked (see
-    `hexset.server.seating`'s own note on why), so this is just the set."""
-    return frozenset(event["seat"] for event in events if event.get("kind") == "locked")
+    """The seats closed at the end of the record (`Journal.locked`, less
+    any later `Journal.unlocked`). Pre-seeding the whole set before replay
+    reproduces the exact same snake the live game walked (see
+    `hexset.server.seating`'s own note on why): every close and reopen
+    happened before the first move, so only the final set matters."""
+    locked: set[int] = set()
+    for event in events:
+        if event.get("kind") == "locked":
+            locked.add(event["seat"])
+        elif event.get("kind") == "unlocked":
+            locked.discard(event["seat"])
+    return frozenset(locked)
 
 
 def resumable(directory: str | None, code: str) -> Path | None:

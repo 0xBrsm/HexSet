@@ -478,6 +478,37 @@ class LeafEvaluator:
         return tuple(1.0 if seat == winner else 0.0 for seat in range(players))
 
 
+class GatedSearch(Search):
+    """`hexset.mcts.Search` over a checkpoint, with that checkpoint's own
+    trade gate.
+
+    `Search` decides moves and nothing else: it has no `accepts`,
+    `accepts_many` or `gains_many`, so `hexset.trading.valued_many` priced
+    every candidate at -1 for a searched checkpoint -- it never accepted an
+    offer and never made one, while the same checkpoint played plainly
+    (`network_bot`) traded through its value head. Found at the served table
+    2026-09-08: `linear24` (exported `search: mcts`) never traded, `clio`
+    (no search) did. The gate is the plain bot's, seated at the position
+    `choose` was last handed, exactly as `NetworkBot.choose` seats its own.
+    """
+
+    def __init__(self, evaluator, gate: NetworkBot, **kwargs) -> None:
+        super().__init__(evaluator, **kwargs)
+        self.gate = gate
+
+    def choose(self, game: Game) -> Action:
+        self.gate._seated = game
+        return super().choose(game)
+
+    def accepts(self, view: View, received: Bundle, counterparty: int) -> bool:
+        return self.gate.accepts(view, received, counterparty)
+
+    def accepts_many(
+        self, view: View, received: Sequence[Bundle], counterparties: Sequence[int]
+    ) -> list[bool]:
+        return self.gate.accepts_many(view, received, counterparties)
+
+
 def searcher(
     path: str,
     board,
@@ -490,14 +521,18 @@ def searcher(
     rng=None,
     threads: int | None = None,
 ) -> Search:
-    """The checkpoint at `path` as a batched PUCT search, playing on `board`."""
+    """The checkpoint at `path` as a batched PUCT search, playing on `board`,
+    trading through the checkpoint's own value-head gate (`GatedSearch`)."""
     loaded = load(path, board.topology, device, threads)
     budget = loaded.max_trades if max_trades is None else max_trades
-    return Search(
+    return GatedSearch(
         LeafEvaluator(
             policy=loaded.policy,
             space=loaded.space,
             pad_to=inference_batch,
+        ),
+        NetworkBot(
+            policy=loaded.policy, space=loaded.space, players=loaded.players, max_trades=budget
         ),
         simulations=simulations,
         wave=wave,

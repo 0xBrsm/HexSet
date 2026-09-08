@@ -539,6 +539,11 @@
   .pane-row { display: flex; align-items: center; gap: 0.5rem; min-height: 44px; }
   .pane-row.quiet { opacity: 0.35; }
   .pane-pass { flex: 1 1 auto; min-width: 0; color: var(--muted, #888); font-size: 0.9em; }
+  .reply-cap {
+    flex: none; writing-mode: vertical-rl; transform: rotate(180deg); align-self: stretch;
+    text-align: center; font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); padding: 0.2rem 0;
+  }
   .pane-row .trade-line { flex: 1 1 auto; min-width: 0; }
   .pane-rule { border-top: 1px solid var(--border); align-self: stretch; }
   /* Only inside the pane, where the rows above and below it are 0.3rem apart;
@@ -1004,7 +1009,7 @@ function seatLabel(seat) {
   // fields tells it apart from a person who never gave a name.
   const info = state?.seats?.[seat];
   if (info && info.kind === "empty") {
-    return state?.locked?.includes(seat) ? "closed" : "empty";
+    return state?.locked?.includes(seat) ? "(closed)" : "(empty)";
   }
   return (info && info.name) || `Player ${playerNumber(seat)}`;
 }
@@ -1072,6 +1077,22 @@ const CLOSE_SEAT = "__close__";
 // Closes an open seat outright: no bot, no person, ever, for the rest of
 // this game — the third way an empty seat resolves (see api.Tables.close_seat)
 // besides seating a bot on it or somebody opening the link to take it.
+async function reopenSeat(seat) {
+  if (inFlight) return;
+  inFlight = true;
+  try {
+    const {ok, data} = await postJSON("/api/open", {seat});
+    if (ok) {
+      state = data;
+      render();
+    } else {
+      showNotice(data.error || "Could not reopen that seat.");
+    }
+  } finally {
+    inFlight = false;
+  }
+}
+
 async function closeSeat(seat) {
   if (inFlight) return;
   inFlight = true;
@@ -1634,12 +1655,14 @@ function renderPlayers() {
   // would have refreshed can wait for the tick after the choice.
   if (container.contains(document.activeElement)) return;
   container.innerHTML = "";
-  const setup = state.phase === "SETUP_SETTLEMENT" || state.phase === "SETUP_ROAD";
   for (const p of state.players) {
-    // A retired seat is shown as such while setup is still placing, so the
-    // table can see the snake pass it; once the match is under way the row
-    // goes, since there is nobody in it and never will be.
-    if (!setup && (state.locked || []).includes(p.seat)) continue;
+    // A closed seat stays on the roster, as a picker, until the first move:
+    // the table can still change its mind (reopen it, seat a bot). Once play
+    // starts the seats are fixed -- closing and reopening are refused
+    // server-side -- and the row goes, since there is nobody in it and never
+    // will be; the seats left renumber (playerNumber) so the table reads
+    // Player 1, 2, 3 and the log's numbering never shifts mid-game.
+    if (state.started && (state.locked || []).includes(p.seat)) continue;
     const color = SEAT_COLORS[p.seat];
     const row = html("div", {class: `player-row${state.to_move === p.seat ? " active" : ""}`});
     const swatch = html("div", {class: "swatch"});
@@ -1692,12 +1715,6 @@ function renderPlayers() {
       // nothing here to change about it.
       nameEl.classList.add("player-name-plain");
       nameEl.textContent = state.seats[p.seat].name || `Player ${playerNumber(p.seat)}`;
-    } else if (state.locked.includes(p.seat)) {
-      // Retired: somebody closed this seat outright rather than leave it
-      // sitting empty. A picker would only ever refuse, so it reads as text
-      // instead.
-      nameEl.classList.add("player-name-plain");
-      nameEl.textContent = "closed";
     } else {
       // The picker *is* the player line, and it is the only place a table
       // says who else is playing: an empty seat starts blank and choosing a
@@ -1706,17 +1723,19 @@ function renderPlayers() {
       // step. An empty seat holds the whole table (see renderStatus) until
       // somebody picks a bot for it, opens the link and takes it, or picks
       // "closed" to close it outright -- nothing here ever resolves itself.
+      const closed = (state.locked || []).includes(p.seat);
       const select = html("select", {});
       if (!p.bot) {
-        select.appendChild(html("option", {value: ""}, "empty"));
-        select.appendChild(html("option", {value: CLOSE_SEAT}, "closed"));
+        select.appendChild(html("option", {value: ""}, "(empty)"));
+        select.appendChild(html("option", {value: CLOSE_SEAT}, "(closed)"));
       }
       for (const name of modelNames) select.appendChild(html("option", {value: name}, name));
-      select.value = p.bot || "";
+      select.value = p.bot || (closed ? CLOSE_SEAT : "");
       select.classList.toggle("unset", !p.bot);
       select.addEventListener("change", () => {
         select.blur();
         if (select.value === CLOSE_SEAT) closeSeat(p.seat);
+        else if (select.value === "") reopenSeat(p.seat);
         else swapBot(p.seat, select.value);
       });
       nameEl.appendChild(select);
@@ -2562,7 +2581,10 @@ function acceptancePane(round) {
   wrap.appendChild(ours);
   wrap.appendChild(html("div", {class: "pane-rule"}));
 
-  const seats = state.players.map((pl) => pl.seat).sort((a, b) => a - b);
+  // Only the seats still in the game: a closed seat was never asked and
+  // has no row, so a three-seat table reads as three, not four with a blank.
+  const locked = state.locked || [];
+  const seats = state.players.map((pl) => pl.seat).filter((seat) => !locked.includes(seat)).sort((a, b) => a - b);
   for (const seat of seats) {
     if (seat === state.seat) continue;
     const answer = (round.responses || []).find((r) => r.seat === seat);
@@ -2592,7 +2614,7 @@ function acceptancePane(round) {
     row.appendChild(tradeLine(theirGive, theirWant, {small: true}));
     const take = modalActionButton("check", `Trade with ${seatFullLabel(seat)}`);
     take.addEventListener("click",
-      () => postRound("/trade/round/choose", {seat: answer.seat, bundle: answer.bundle}));
+      () => { closeModal(); postRound("/trade/round/choose", {seat: answer.seat, bundle: answer.bundle}); });
     row.appendChild(take);
     wrap.appendChild(row);
   }
@@ -2646,8 +2668,7 @@ function dealSummary(p, myTurn) {
 //
 //   compose   my turn, nothing open   Trade Offer          composer; Offer, Bank/Port
 //   round     my offer is out         Trade Acceptance     a pane, a check per answer
-//   offer     another seat's offer    Trade Offer Received a line; Accept, Counter
-//   counter   editing a reply         Trade Counteroffer   their line, then a composer
+//   offer     another seat's offer    Trade Offer Received their line + Accept, then a composer + Send
 //
 // The read-only states used to draw the editable rows greyed out — ten tiles
 // with two of them lit — which is why they now draw a line of just the cards
@@ -2666,7 +2687,17 @@ function renderTradeMode(title, body, actions) {
   }
   const offer = (state.pending || [])[0] || null;
   const round = state.trade_round;
-  const mode = counterOf ? "counter" : offer ? "offer" : round ? "round" : "compose";
+  const mode = offer ? "offer" : round ? "round" : "compose";
+  // An incoming offer is answered in the one layout: their offer quoted on
+  // top with the button that takes it, a reply being built beneath. The
+  // reply starts as their own offer from this side -- countering is almost
+  // always an edit of what you were sent -- loaded once per offer, so a poll
+  // never resets a reply mid-edit.
+  if (offer && !(counterOf && counterOf.actor === offer.actor
+      && counterOf.bundle.every((n, r) => n === offer.bundle[r]))) {
+    counterOf = offer;
+    loadComposer(offer.bundle.map((n) => -n));
+  }
 
   if (mode === "compose") {
     title.textContent = "Trade Offer";
@@ -2712,74 +2743,49 @@ function renderTradeMode(title, body, actions) {
     // answer, and turning the whole round down is the close glyph.
     title.textContent = "Trade Acceptance";
     const offers = (round.responses || []).filter((r) => r.kind !== "pass").length;
+    // Closing is leaving: the round is declined and the modal goes, rather
+    // than falling back to the composer because it is still this seat's
+    // turn.
     modalCloseGlyph(offers ? "Turn every answer down and close the round"
-      : "Close the round", () => postRound("/trade/round/choose", {decline: true}));
+      : "Close the round", () => { closeModal(); postRound("/trade/round/choose", {decline: true}); });
     body.appendChild(acceptancePane(round));
     return;
   }
 
-  if (mode === "offer") {
-    // Signed towards the actor, so from this seat what they take is what
-    // leaves this hand, and what they give is what lands in it.
-    const iGive = offer.bundle.map((n) => Math.max(0, n));
-    const iGet = offer.bundle.map((n) => Math.max(0, -n));
-    title.textContent = "Trade Offer Received";
-    modalCloseGlyph("Pass — turn this offer down", () => answerOffer(offer, "pass"));
-    const row = html("div", {class: "counter-row"});
-    row.appendChild(seatPip(offer.actor));
-    const shortfall = iGive.map((n, r) => n > (p.hand[board.resources[r]] || 0));
-    // Their pip, so their deal: their give first, their want second — this
-    // seat's get and give in that order reversed.
-    row.appendChild(tradeLine(iGet, iGive, {rightShortfall: shortfall}));
-    body.appendChild(row);
-
-    const accept = modalActionButton("check", "Take this trade");
-    if (handCovers(p, iGive)) accept.addEventListener("click", () => answerOffer(offer, "accept"));
-    else accept.disabled = true;
-    actions.appendChild(accept);
-    const counter = modalActionButton("send", "Reply with a different trade", {primary: false});
-    counter.addEventListener("click", () => {
-      // Start from their own offer, from this seat's side: countering is
-      // almost always an edit of what you were sent, not a fresh trade.
-      counterOf = offer;
-      loadComposer(offer.bundle.map((n) => -n));
-      renderModal();
-    });
-    actions.appendChild(counter);
-    return;
-  }
-
-  // counter: their offer stays on screen above the reply being built. It used
-  // to be replaced by an editable copy of itself — so the one thing you were
-  // answering vanished the moment you started answering it. Signed towards the
-  // actor, same as the "offer" mode above: their give is what lands in this
-  // hand, their want is what leaves it. No action column here either — the
-  // quiet Accept that takes their offer as it stands belongs on their row, and
-  // Send belongs on the reply's, at the same x.
-  title.textContent = "Trade Counteroffer";
-  modalCloseGlyph("Back to their offer", () => { counterOf = null; renderModal(); });
-  const theirGive = counterOf.bundle.map((n) => Math.max(0, -n));
-  const theirWant = counterOf.bundle.map((n) => Math.max(0, n));
+  // offer: their offer stays on screen above the reply being built, signed
+  // towards the actor: their give is what lands in this hand, their want is
+  // what leaves it. No action column -- Accept, the primary way out, sits on
+  // their row; Send, the quieter one, on the reply's, at the same x. Passing
+  // is the close glyph, and closes the modal with it.
+  title.textContent = "Trade Offer Received";
+  modalCloseGlyph("Pass — turn this offer down", () => { closeModal(); answerOffer(offer, "pass"); });
+  const theirGive = offer.bundle.map((n) => Math.max(0, -n));
+  const theirWant = offer.bundle.map((n) => Math.max(0, n));
+  const shortfall = theirWant.map((n, r) => n > (p.hand[board.resources[r]] || 0));
   const quoted = html("div", {class: "counter-row"});
-  quoted.appendChild(seatPip(counterOf.actor));
-  quoted.appendChild(tradeLine(theirGive, theirWant, {small: true}));
+  quoted.appendChild(seatPip(offer.actor));
+  quoted.appendChild(tradeLine(theirGive, theirWant, {small: true, rightShortfall: shortfall}));
   quoted.appendChild(html("div", {class: "modal-fill"}));
-  const asStands = modalActionButton("check", "Accept their offer as it stands", {primary: false});
-  if (handCovers(p, theirWant)) asStands.addEventListener("click", () => answerOffer(counterOf, "accept"));
+  const asStands = modalActionButton("check", "Take this trade");
+  if (handCovers(p, theirWant)) asStands.addEventListener("click", () => answerOffer(offer, "accept"));
   else asStands.disabled = true;
   quoted.appendChild(asStands);
   body.appendChild(quoted);
   body.appendChild(html("div", {class: "pane-rule"}));
 
   const reply = html("div", {class: "counter-row"});
+  // The one word that says what the rows beneath their offer are for: a
+  // reply, not a fresh trade. Small and muted, set in the gutter the pip
+  // occupies on their row, so the two rows read as offer and answer.
+  reply.appendChild(html("div", {class: "reply-cap"}, "Counter"));
   reply.appendChild(composerRows(p));
   reply.appendChild(html("div", {class: "modal-fill"}));
   const ready = composerReady(p) && offerableToPlayers();
   const send = modalActionButton("send", ready ? "Send this back as your counter"
-    : dealSummary(p, true));
+    : dealSummary(p, true), {primary: false});
   if (ready) {
     // signed towards the actor: what they get is what I give
-    send.addEventListener("click", () => answerOffer(counterOf, "counter", tradeGive.map((g, r) => g - tradeWant[r])));
+    send.addEventListener("click", () => answerOffer(offer, "counter", tradeGive.map((g, r) => g - tradeWant[r])));
   } else {
     send.disabled = true;
   }

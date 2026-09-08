@@ -35,6 +35,41 @@ def _table():
     return registry, table, code, token, leaver, other
 
 
+def test_a_closed_seat_can_be_reopened_or_given_a_bot_until_the_first_move():
+    registry = new_tables()
+    data = registry.handle("POST", "/api/games", {"bots": []}, None)
+    code, token = data["code"], data["token"]
+    table = registry.get(code)
+    me = table.seat_of(token)
+    empties = [s for s in range(4) if s != me]
+    a, b, c = empties
+
+    view = registry.handle("POST", "/api/close", {"seat": a}, token)
+    assert view["locked"] == [a] and view["started"] is False
+    view = registry.handle("POST", "/api/open", {"seat": a}, token)
+    assert view["locked"] == []
+    view = registry.handle("POST", "/api/close", {"seat": a}, token)
+    view = registry.handle("POST", "/api/bot", {"seat": a, "model": "heximax"}, token)
+    assert view["locked"] == [] and view["seats"][a]["kind"] == "bot"
+
+    # Fill the rest and make the first move: from here the seats are fixed.
+    registry.handle("POST", "/api/close", {"seat": b}, token)
+    registry.handle("POST", "/api/close", {"seat": c}, token)
+    session = table.session
+    while session.game.current_player != me:
+        break
+    state = registry.handle("GET", "/api/state", {}, token)
+    assert state["to_move"] == me and state["legal_actions"]
+    state = registry.handle("POST", "/api/action", {"action": state["legal_actions"][0]}, token)
+    assert state["started"] is True
+    with pytest.raises(ApiError) as refused:
+        registry.handle("POST", "/api/open", {"seat": b}, token)
+    assert refused.value.status == 409
+    with pytest.raises(ApiError) as refused:
+        registry.handle("POST", "/api/bot", {"seat": b, "model": "heximax"}, token)
+    assert "retired" in str(refused.value)
+
+
 def test_leave_locks_the_seat_and_hands_the_turn_on():
     registry, table, code, token, leaver, other = _table()
     game = table.session.game

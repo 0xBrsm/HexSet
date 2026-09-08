@@ -96,8 +96,10 @@ def settle(game: Game, before: Before) -> None:
     1. The setup snake advanced (`place_initial_road`): re-point it, skipping
        retired seats.
     2. Setup just ended: `hexset.game` hands the first turn to seat 0; the
-       rule is that whoever placed *first* takes it, which here is
-       `setup_queue[0]` and never a retired seat.
+       rule is that whoever placed *first* takes it, which here is the first
+       entry of `setup_queue` that is not a retired seat (`first_unlocked`)
+       -- `setup_queue[0]` is seat 0 whoever created the table, and seat 0
+       can be closed like any other empty seat.
     3. A turn ended (`end_turn`, `(p + 1) % n`): skip retired seats.
     """
     if game.phase in SETUP_PHASES:
@@ -105,7 +107,7 @@ def settle(game: Game, before: Before) -> None:
             advance_setup(game)
         return
     if before.phase in SETUP_PHASES:
-        game.current_player = game.setup_queue[0]
+        game.current_player = first_unlocked(game)
         return
     if game.current_player in locked_of(game):
         game.current_player = next_unlocked(game, before.current_player)
@@ -126,8 +128,16 @@ def advance_setup(game: Game) -> None:
         game.current_player = queue[game.setup_step]
         game.phase = Phase.SETUP_SETTLEMENT
     else:
-        game.current_player = queue[0]
+        game.current_player = first_unlocked(game)
         game.phase = Phase.ROLL
+
+
+def first_unlocked(game: Game) -> int:
+    """The seat that placed first and is still in the game: the first entry
+    of the setup snake not retired. A table with seats 0 and 3 closed used
+    to hand the first roll to seat 0 and wait on it forever."""
+    locked = locked_of(game)
+    return next(seat for seat in game.setup_queue if seat not in locked)
 
 
 def next_unlocked(game: Game, after: int) -> int:
@@ -142,6 +152,18 @@ def next_unlocked(game: Game, after: int) -> int:
         if seat not in locked:
             return seat
     raise AssertionError("every seat is retired")  # the creator's never is
+
+
+def unlock_seat(game: Game, seat: int) -> None:
+    """Reopen a retired `seat` -- only ever before the first move
+    (`api.Tables.open_seat` enforces that), when nothing has been placed and
+    the snake can simply be re-pointed from where it stands. A no-op for a
+    seat that is not retired."""
+    if seat not in locked_of(game):
+        return
+    game.locked = locked_of(game) - {seat}  # type: ignore[attr-defined]
+    if game.phase in SETUP_PHASES:
+        advance_setup(game)
 
 
 def lock_seat(game: Game, seat: int) -> None:

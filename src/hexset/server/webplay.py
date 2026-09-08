@@ -1702,6 +1702,12 @@ class GameSession:
             # retired, for good, from this game. `api.Table.join` refuses one
             # of these the same way it refuses an already-occupied seat.
             "locked": sorted(locked_of(game)),
+            # Whether the first move has been made. Until then the table is
+            # still being set: an empty seat can be closed and a closed one
+            # reopened or given a bot (`api.Tables.close_seat`/`open_seat`/
+            # `seat_bot`); from the first move on the seats are fixed, so
+            # the numbering the log uses never shifts mid-game.
+            "started": self._steps > 0,
             "winner": game.won_by,
             "game_over": over,
             # Whether POST /api/undo would succeed right now — see

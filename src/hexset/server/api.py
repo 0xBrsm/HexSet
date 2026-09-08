@@ -96,7 +96,7 @@ from hexset.trading import holds
 
 from . import journal
 from hexset.actions import legal_actions
-from .seating import SETUP_PHASES, locked_of, start_at
+from .seating import SETUP_PHASES, locked_of, start_at, unlock_seat
 from .webplay import (
     GameSession,
     ResumeError,
@@ -1006,7 +1006,13 @@ class Tables:
         if kind is SeatKind.PLAYER:
             raise ApiError(f"seat {seat} belongs to a player")
         if kind is SeatKind.EMPTY and seat in locked_of(table.session.game):
-            raise ApiError(f"seat {seat} has been retired from this game")
+            # Before the first move a closed seat is still the table's to
+            # change: seating a bot there reopens it. After, it is retired.
+            if table.session._steps > 0:
+                raise ApiError(f"seat {seat} has been retired from this game")
+            unlock_seat(table.session.game, seat)
+            if table.session.journal is not None:
+                table.session.journal.unlocked(seat, at_step=table.session._steps)
         try:
             spec = model_options()[model]
         except KeyError:
@@ -1064,15 +1070,42 @@ class Tables:
         person — closing is only ever for one that is otherwise going to sit
         empty forever. Idempotent for a seat already closed, the same as
         `hexset.game.lock_seat` itself.
+
+        Only before the first move. Nobody moves while a seat is empty
+        (`Table.waiting_for`), so once play has started every seat is
+        already filled or closed and the set is fixed -- which is what keeps
+        the log's Player 1, 2, 3 numbering (`SeatLabels`) from shifting
+        mid-game. `open_seat` is the reverse, under the same rule.
         """
         if not 0 <= seat < len(table.seats):
             raise ApiError(f"there is no seat {seat} at this game")
         if table.seats[seat].kind is not SeatKind.EMPTY:
             raise ApiError(f"seat {seat} belongs to a {table.seats[seat].kind.value}")
+        if table.session._steps > 0:
+            raise ApiError("seats are fixed once play has started", status=409)
         if seat not in locked_of(table.session.game):
             lock_seat(table.session.game, seat)
             if table.session.journal is not None:
                 table.session.journal.locked(seat, at_step=table.session._steps)
+            table.bump()
+        return table.view(viewer)
+
+    def open_seat(self, table: Table, viewer: int, seat: int) -> dict:
+        """`POST /api/open`: reopen a closed `seat` -- the table changed its
+        mind before anyone moved. Empty again, it holds the table
+        (`Table.waiting_for`) until it is filled or closed once more. Refused
+        once play has started, like `close_seat`; idempotent for a seat that
+        is not closed."""
+        if not 0 <= seat < len(table.seats):
+            raise ApiError(f"there is no seat {seat} at this game")
+        if table.seats[seat].kind is not SeatKind.EMPTY:
+            raise ApiError(f"seat {seat} belongs to a {table.seats[seat].kind.value}")
+        if table.session._steps > 0:
+            raise ApiError("seats are fixed once play has started", status=409)
+        if seat in locked_of(table.session.game):
+            unlock_seat(table.session.game, seat)
+            if table.session.journal is not None:
+                table.session.journal.unlocked(seat, at_step=table.session._steps)
             table.bump()
         return table.view(viewer)
 
@@ -1338,6 +1371,8 @@ class Tables:
             return self.seat_bot(
                 table, seat, int(payload.get("seat", -1)), str(payload.get("model", ""))
             )
+        if method == "POST" and path == "/api/open":
+            return self.open_seat(table, seat, int(payload.get("seat", -1)))
         if method == "POST" and path == "/api/close":
             return self.close_seat(table, seat, int(payload.get("seat", -1)))
         if method == "POST" and path == "/api/leave":

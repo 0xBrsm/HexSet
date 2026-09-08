@@ -19,8 +19,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Catanatron adapter and the server's spectator view read, is unchanged.
   `heximax.MODES` is now `("honest", "notrade")`.
 
+### Changed
+
+- The page's incoming-offer window is the counteroffer layout, titled "Trade Offer Received": the offer quoted on top with Accept (primary) on its row, a reply pre-loaded from the offer beneath with Send (secondary); passing is the close glyph. The separate "Trade Counteroffer" step is gone.
+- Seats are the table's to change until the first move, then fixed. A closed seat stays on the roster as a picker reading "(closed)" until play starts -- it can be reopened ("(empty)", new `POST /api/open {seat}`) or given a bot -- and leaves the roster at the first move. `POST /api/close` and `/api/open` are refused (409) once play has started, so the log's Player 1, 2, 3 numbering never shifts mid-game. Picker labels read "(empty)" and "(closed)". The journal records `unlocked` alongside `locked`.
+- The reply rows of "Trade Offer Received" carry a small "Counter" caption in the gutter, so the two rows read as offer and answer.
+
 ### Fixed
 
+- A checkpoint served with `search: mcts` trades. `hexset.clients.onnxbot.searcher` returns a `GatedSearch`: `hexset.mcts.Search` with the checkpoint's own value-head gate (`accepts`/`accepts_many`), seated where `choose` last was. `Search` alone had no gate, so `valued_many` priced every candidate at -1 and a searched checkpoint never accepted or made an offer, while the same checkpoint played plainly traded.
+- Closing any trade window closes it: declining a round, taking a deal, or passing on an offer dismisses the modal instead of leaving the composer up because it is still this seat's turn.
+- The acceptance pane lists only the seats still in the game; a closed seat has no row.
+- A closed seat leaves the roster the moment it is closed, in every phase, and the remaining seats renumber (Player 1, 2, 3), matching the log.
+- Setup ending hands the first roll to the first seat still in the game. With seat 0 closed, it went to seat 0 and the table waited on it forever (`hexset.server.seating.first_unlocked`).
 - `hexset.trading.default_offer` only broadcasts a candidate that clears `TRADE_FLOOR` on the actor's *own* gain as well as on the estimated counterparty gain, so a bot never offers a deal it would then refuse when accepted. Measured on heximax, every prior broadcast priced negative for itself and no accepted offer ever completed.
 - A pass is an answer: a bot's or a person's pass on the open offer stays in the round's `responses` (`"kind": "pass"`, `bundle` null) and shows as "Passed" on the acceptance pane, instead of looking like a seat still to answer.
 - The trade round is in the game log as one line, rewritten as it goes -- the offer, each accept or counter, then the trade taken, `declines.`, or `Everyone declines.` the moment every seat has passed -- and in the journal as discrete steps (`kind: "note"`, one per offer/answer/close; `Journal.note` / `notes_of` carry them through a restart).

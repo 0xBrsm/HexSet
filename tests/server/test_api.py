@@ -121,6 +121,16 @@ def test_an_unfinished_game_comes_back_where_it_was_left(tmp_path):
     assert resumed.player_names == session.player_names
 
 
+def test_locked_seats_reads_closes_and_reopens_in_order():
+    from hexset.server.journal import locked_seats
+
+    events = [
+        {"kind": "locked", "seat": 1}, {"kind": "locked", "seat": 3},
+        {"kind": "unlocked", "seat": 1}, {"kind": "locked", "seat": 2},
+    ]
+    assert locked_seats(events) == frozenset({2, 3})
+
+
 def test_trade_round_lines_survive_a_restart(tmp_path):
     """The round's log lines are journalled as notes and put back at the
     same step on restore, so a restarted table's transcript reads as the

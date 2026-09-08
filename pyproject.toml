@@ -30,8 +30,9 @@ dependencies = [
 # bot, and `hexset.clients.onnxbot`/`botclient` load `.onnx` checkpoints
 # directly -- both real dependents of the runtime wheel, so onnxruntime is an
 # extra rather than a hard dependency of the distribution as a whole.
-# `hexset.server.mcp` is the one server module that needs neither: it is a
-# stdio client of the HTTP API, standard library only.
+# MCP is served by `hexset.server.web` itself now (`POST /mcp`,
+# `hexset.server.mcptools`) rather than by a separate stdio program -- there
+# is no longer a module in this package that needs neither extra.
 [project.optional-dependencies]
 test = ["pytest>=8"]
 server = ["onnxruntime>=1.18"]

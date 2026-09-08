@@ -9,6 +9,27 @@ about who may do what are `api.py`'s, and this module does three things around
 them: read a request, hand it to `Tables.handle`, and write the answer back.
 An `ApiError` carries its own status, so even the error mapping is a one-liner.
 
+## MCP is served here too, over HTTP
+
+`POST /mcp` is the MCP Streamable HTTP transport (spec: modelcontextprotocol.io
+/specification/2025-06-18/basic/transports) for the tool layer `mcptools.py`
+defines -- there is no longer a separate `python -m hexset.server.mcp` stdio
+program. `initialize` mints an `Mcp-Session-Id` (`secrets.token_urlsafe`) and
+keeps the seat (`mcptools.Session`) it stands up in memory on this server for
+as long as that id lives; every later request on that session must carry the
+header back, and an unknown or missing one is a 404 (a client that sees one
+just calls `initialize` again — a fresh Mcp-Session-Id, an unseated `Session`,
+same as a fresh process used to be). `DELETE /mcp` drops a session early;
+`GET /mcp` is 405 -- this server never pushes anything to a client outside of
+one `tools/call`'s own response. A `tools/call` for `wait_for_turn` is the one
+tool answered as `text/event-stream` rather than one JSON object (see
+`_mcp_wait_for_turn_stream` below); everything else is a single JSON-RPC
+response, same as `initialize`/`tools/list`.
+
+`Origin` is checked the way the spec's security section asks: present and not
+127.0.0.1/localhost/::1/this server's own `--host` is a 403; absent (every
+non-browser client) is let through, since DNS rebinding is a browser attack.
+
 ## Codes in the URL, tokens in the header
 
 The address is the game, and there is no page in front of it. `GET /` deals
@@ -44,12 +65,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import secrets
+import threading
 import traceback
+import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import journal
+import hexset
+
+from . import journal, mcptools
 from .api import (
     CODE_ALPHABET,
     CODE_LENGTH,
@@ -63,6 +89,12 @@ from .constants import TOKEN_HEADER
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 INDEX_HTML = STATIC_DIR / "index.html"
+
+# Protocol versions this server understands, and what it answers with when a
+# client's `initialize` names something else -- the spec's own version
+# negotiation (modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle).
+MCP_PROTOCOL_VERSIONS = {"2024-11-05", "2025-03-26", "2025-06-18"}
+DEFAULT_MCP_PROTOCOL_VERSION = "2025-06-18"
 
 
 def is_code(path: str) -> bool:
@@ -90,6 +122,16 @@ class HexSetServer(ThreadingHTTPServer):
     def __init__(self, address: tuple[str, int], tables: Tables) -> None:
         super().__init__(address, Handler)
         self.tables = tables
+        # This server's own configured host, for Origin validation -- an
+        # Origin naming anything else (besides 127.0.0.1/localhost/::1,
+        # always allowed) is a 403 (`web.py`'s module docstring).
+        self.host = address[0]
+        # Every live MCP session: Mcp-Session-Id -> mcptools.Session. A plain
+        # dict behind a lock, the same shape `Tables` uses for its own
+        # registry, and for the same reason (a handful of live sessions, not
+        # millions) -- see `Handler._mcp_*`.
+        self.mcp_sessions: dict[str, mcptools.Session] = {}
+        self.mcp_lock = threading.Lock()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -140,7 +182,12 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": f"{type(error).__name__}: {error}"}, status=500)
 
     def do_GET(self) -> None:  # noqa: N802 (http.server's naming convention)
-        if self.path in ("/", "/index.html") or is_code(self.path):
+        if self.path == "/mcp":
+            # This server never pushes a message to a client outside of one
+            # tools/call's own response (`wait_for_turn`'s SSE) -- there is
+            # no standing stream to open here (spec: a GET may 405).
+            self.send_error(405)
+        elif self.path in ("/", "/index.html") or is_code(self.path):
             self._file(INDEX_HTML, "text/html; charset=utf-8")
         elif self.path.startswith("/api/"):
             self._serve("GET", {})
@@ -150,7 +197,24 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self) -> None:  # noqa: N802
-        self._with_body("POST")
+        if self.path == "/mcp":
+            self._mcp_post()
+        else:
+            self._with_body("POST")
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        if self.path != "/mcp":
+            self.send_error(404)
+            return
+        session_id = self.headers.get("Mcp-Session-Id")
+        with self.server.mcp_lock:
+            removed = self.server.mcp_sessions.pop(session_id, None) if session_id else None
+        if removed is None:
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def do_PUT(self) -> None:  # noqa: N802
         # No route answers PUT -- `PUT /api/games/<code>/valuation` was the
@@ -177,6 +241,142 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "body must be a JSON object"}, status=400)
             return
         self._serve(method, payload)
+
+    # --- MCP: POST /mcp (JSON-RPC), DELETE /mcp above -----------------------
+
+    def _origin_ok(self) -> bool:
+        """The spec's Origin check: absent is fine (every non-browser client
+        sends none), present is only fine naming this machine -- see the
+        module docstring."""
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+        host = urllib.parse.urlparse(origin).hostname
+        return host in {"127.0.0.1", "localhost", "::1", self.server.host}
+
+    def _mcp_error(self, status: int, message: str) -> None:
+        self._json({"error": message}, status=status)
+
+    def _mcp_result(self, request_id, result: dict) -> None:
+        self._json({"jsonrpc": "2.0", "id": request_id, "result": result})
+
+    def _mcp_post(self) -> None:
+        if not self._origin_ok():
+            self._mcp_error(403, "Origin not allowed")
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length) if length else b""
+        try:
+            message = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            self._mcp_error(400, "invalid JSON body")
+            return
+        if not isinstance(message, dict):
+            self._mcp_error(400, "the body must be a single JSON-RPC message")
+            return
+
+        method = message.get("method")
+        if method == "initialize":
+            self._mcp_initialize(message)
+            return
+
+        session_id = self.headers.get("Mcp-Session-Id")
+        with self.server.mcp_lock:
+            session = self.server.mcp_sessions.get(session_id) if session_id else None
+        if session is None:
+            self._mcp_error(404, "unknown or missing Mcp-Session-Id -- call initialize again")
+            return
+
+        if "id" not in message:
+            # A notification (`notifications/initialized`, or any other
+            # id-less message): the spec's 202, no body, no reply.
+            self.send_response(202)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
+        request_id = message["id"]
+        if method == "ping":
+            self._mcp_result(request_id, {})
+        elif method == "tools/list":
+            self._mcp_result(request_id, {"tools": mcptools.tool_list()})
+        elif method == "tools/call":
+            params = message.get("params") or {}
+            name = params.get("name")
+            arguments = params.get("arguments")
+            arguments = arguments if isinstance(arguments, dict) else {}
+            if name == "wait_for_turn":
+                self._mcp_wait_for_turn_stream(request_id, session, arguments)
+            else:
+                self._mcp_call_tool(request_id, session, name, arguments)
+        else:
+            self._json({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32601, "message": f"method not found: {method}"}})
+
+    def _mcp_initialize(self, message: dict) -> None:
+        params = message.get("params") or {}
+        requested = params.get("protocolVersion")
+        protocol_version = requested if requested in MCP_PROTOCOL_VERSIONS else DEFAULT_MCP_PROTOCOL_VERSION
+        session_id = secrets.token_urlsafe(24)
+        with self.server.mcp_lock:
+            self.server.mcp_sessions[session_id] = mcptools.Session()
+        result = {
+            "protocolVersion": protocol_version,
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "hexset", "version": hexset.__version__},
+        }
+        body = json.dumps({"jsonrpc": "2.0", "id": message.get("id"), "result": result}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Mcp-Session-Id", session_id)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _mcp_call_tool(self, request_id, session: mcptools.Session, name: str, arguments: dict) -> None:
+        try:
+            result = mcptools.call_tool(self.server.tables, session, name, arguments)
+            payload = {"content": [{"type": "text", "text": json.dumps(result)}], "isError": False}
+        except mcptools.ToolError as error:
+            payload = {"content": [{"type": "text", "text": str(error)}], "isError": True}
+        self._mcp_result(request_id, payload)
+
+    def _mcp_wait_for_turn_stream(self, request_id, session: mcptools.Session, arguments: dict) -> None:
+        """The one tool answered as `text/event-stream`: a `: keepalive`
+        comment between each 15s wait tick (`mcptools._wait_for_turn_events`),
+        then one `event: message` carrying the JSON-RPC response, then the
+        connection closes -- this server defaults to HTTP/1.0 (no keep-alive)
+        so nothing further is needed to make that happen cleanly."""
+        timeout = arguments.get("timeout")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        try:
+            for item in mcptools._wait_for_turn_events(self.server.tables, session, timeout=timeout):
+                if item is mcptools._KEEPALIVE:
+                    self.wfile.write(b": keepalive\n\n")
+                else:
+                    payload = {"content": [{"type": "text", "text": json.dumps(item)}], "isError": False}
+                    response = {"jsonrpc": "2.0", "id": request_id, "result": payload}
+                    self.wfile.write(f"event: message\ndata: {json.dumps(response)}\n\n".encode("utf-8"))
+                self.wfile.flush()
+        except mcptools.ToolError as error:
+            response = {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {"content": [{"type": "text", "text": str(error)}], "isError": True},
+            }
+            try:
+                self.wfile.write(f"event: message\ndata: {json.dumps(response)}\n\n".encode("utf-8"))
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+        except (BrokenPipeError, ConnectionResetError):
+            # The client gave up waiting and closed its side -- nobody left
+            # to write to, and http.server's own traceback for it says
+            # nothing about this server (same reasoning as `_serve`).
+            pass
 
 
 def main(argv: list[str] | None = None) -> None:

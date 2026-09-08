@@ -1,183 +1,76 @@
-"""An MCP server so an LLM can take a seat in a HexSet game, over stdio.
+"""The MCP tool layer: what an LLM seat calls, translated to/from the wire
+`api.py` speaks -- served over HTTP by `web.py`'s `POST /mcp` now, not a
+separate stdio process (see `web.py`'s module docstring on why that program
+is gone).
 
-This is a thin client of the HTTP API `api.py` defines and `web.py` serves,
-not a second game engine binding: every tool below is a `urllib` call to a
-running `python -m hexset.server.web` (see `HEXSET_UI_BASE_URL`). That server can
-be anywhere — this is how an LLM joins a game on a machine that actually has
-ONNX Runtime while running somewhere that does not. A bot checkpoint reaches
-the same server the same way — see `botclient.py` — this module and that one
-are peers, not one built on the other.
+Every tool below reaches the game through `tables.handle(method, path,
+payload, token)` -- the same in-process seam `web.py` and
+`clients.botclient.LocalTransport` use, never `Tables`/`Table` internals
+directly. `ApiError` becomes `ToolError`, the shape `_call_tool`/`web.py`
+report back to the LLM as a normal (not protocol-level) tool result.
 
-Identity is the seat token the API mints (see `api.py`), held in this process
-for its lifetime. One MCP connection is one seat at one game: `new_game`
-deals a fresh one, dealt and playable immediately (there is no lobby to
-start), `join` takes an open seat at somebody else's by its code, and either
-way the token that comes back is what every later tool acts with.
-
-Standard library only, deliberately: the official `mcp` SDK pulls in
-`pydantic` (a compiled, Rust-built dependency `onnxruntime` and `numpy` don't
-ask for anywhere else in this project), and the stdio wire format it would
-save writing here is a handful of JSON-RPC 2.0 methods — `initialize`,
-`tools/list`, `tools/call` — small enough to hand-roll directly against the
-MCP spec instead, matching the same "standard library only" choice
-`web.py`'s own docstring already made for the HTTP side.
-
-Run it with (from `src/`, alongside an already-running web)::
-
-    python -m hexset.server.mcp
-
-stdin/stdout carry the protocol; nothing else may write to stdout, so every
-log line here goes to stderr instead.
+Identity used to be a handful of module globals (`_token`/`_code`/`_model`)
+because one stdio process was one seat. An HTTP server serves many MCP
+sessions at once, so that state now lives in a `Session` object -- one per
+`Mcp-Session-Id` -- threaded through every call instead.
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
-import os
-import pathlib
-import sys
-import urllib.error
-import urllib.request
+from dataclasses import dataclass
 
-from .constants import TOKEN_HEADER
-
-BASE_URL = os.environ.get("HEXSET_UI_BASE_URL", "http://127.0.0.1:8770").rstrip("/")
-PROTOCOL_VERSION = "2024-11-05"
-SERVER_INFO = {"name": "hexset", "version": "0.1.0"}
+from .api import ApiError, Tables
 
 # Resource order every wire bundle (5 signed or unsigned ints) uses -- see
 # `catanatron/names.py`'s RESOURCE_NAMES, Title-cased as the wire's hand/bank
 # dicts spell them.
 RESOURCES = ("Wood", "Brick", "Sheep", "Wheat", "Ore")
 
-# The seat this connection is playing, set by new_game/join and sent on every
-# request after. A module global for the same reason the cookie jar it
-# replaced was one: the process is the client, and there is exactly one of it.
-_token: str | None = None
-# The game this connection is seated at, needed to address the trade routes
-# (`/api/games/<code>/...`) -- `/api/state`/`/api/action` don't need it, since
-# the token alone already names one game, but the trade endpoints are
-# addressed by code (`api.py`), so it is remembered here the same way.
-_code: str | None = None
-# The `model` string new_game/join were called with -- this connection's own
-# secret (see `_client_of`), saved so `resume_game` can reclaim this seat by
-# it if the token above stops working.
-_model: str | None = None
-
-# Where a seat's token/code are cached between processes, so an LLM can
-# resume a game the same way a human's browser does -- by holding onto the
-# token client-side, not because the server remembers anything (`api.py`'s
-# module docstring: a token "never touches disk", a restart "cannot hand a
-# lost token back to anyone"). One file, since one process is one seat.
-_SESSION_FILE = pathlib.Path(
-    os.environ.get("HEXSET_MCP_SESSION_FILE", os.path.expanduser("~/.cache/hexset-mcp/session.json"))
-)
-
 
 class ToolError(Exception):
     """Raised by a tool implementation to report the failure back to the
-    LLM as a normal (not protocol-level) tool result — see `_call_tool`."""
+    LLM as a normal (not protocol-level) tool result."""
 
 
-def _request_status(method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
-    """Like `_request`, but also hands back the HTTP status -- `resume_game`
-    is the one caller that needs to tell a dead token (403) apart from any
-    other refusal."""
-    data = json.dumps(body).encode("utf-8") if body is not None else None
-    request = urllib.request.Request(f"{BASE_URL}{path}", data=data, method=method)
-    # A real User-Agent, not urllib's default: a `BASE_URL` fronted by
-    # Cloudflare (or similar) treats the default one as bot traffic and
-    # returns a plain-text 403 instead of the JSON `web.py` would send,
-    # which breaks the `json.loads` below for reasons that have nothing
-    # to do with the game.
-    request.add_header("User-Agent", f"hexset-mcp/{SERVER_INFO['version']}")
-    if data is not None:
-        request.add_header("Content-Type", "application/json")
-    if _token is not None:
-        request.add_header(TOKEN_HEADER, _token)
+@dataclass
+class Session:
+    """One MCP session's seat: the token `tables.handle` acts with, the game
+    code the trade routes are addressed by, and the `model` string identity
+    was minted from (needed if `resume_game` is ever called with it again).
+    Scoped to one `Mcp-Session-Id`, held in memory by `web.py` for as long as
+    that session lives -- nothing here ever touches disk."""
+
+    token: str | None = None
+    code: str | None = None
+    model: str | None = None
+
+
+def _call_status(tables: Tables, session: Session, method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return response.status, json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as error:
-        # The API's own refusals are still a JSON body (see web.Handler._serve)
-        # — read it rather than raising past it, so a 400 ("it is not your turn
-        # to act") reaches the LLM as the same message a browser would get.
-        return error.code, json.loads(error.read().decode("utf-8"))
-    except urllib.error.URLError as error:
-        raise ToolError(
-            f"could not reach the HexSet server at {BASE_URL} ({error.reason}) "
-            "— is `python -m hexset.server.web` running?"
-        ) from error
+        return 200, tables.handle(method, path, body or {}, session.token)
+    except ApiError as error:
+        return error.status, {"error": str(error)}
 
 
-def _request(method: str, path: str, body: dict | None = None) -> dict:
-    return _request_status(method, path, body)[1]
-
-
-def _request_ok(method: str, path: str, body: dict | None = None) -> dict:
-    result = _request(method, path, body)
+def _call_ok(tables: Tables, session: Session, method: str, path: str, body: dict | None = None) -> dict:
+    status, result = _call_status(tables, session, method, path, body)
     if "error" in result:
         raise ToolError(result["error"])
     return result
 
 
-def _seated() -> None:
-    if _token is None:
+def _seated(session: Session) -> None:
+    if session.token is None:
         raise ToolError("not at a game yet — call new_game() or join(code) first")
 
 
-def _seat(result: dict) -> dict:
-    """Records the token a join or a deal handed back, and hides it again.
-
-    The LLM never needs to see it — it is sent on its behalf by `_request` —
-    and a token in the transcript is a token in the context window of whatever
-    reads that transcript next. Also remembers the game's code, off the same
-    response (`table.view` always carries `code`), for the trade routes below.
-    """
-    global _token, _code
-    _token = result.pop("token")
-    _code = result.get("code")
-    _save_session()
+def _seat(session: Session, result: dict) -> dict:
+    """Records the token a join or a deal handed back, and hides it again --
+    the LLM never needs to see it, it is sent on its behalf by `_call_ok`."""
+    session.token = result.pop("token")
+    session.code = result.get("code")
     return result
-
-
-def _save_session() -> None:
-    """Persists the current seat so a later process can resume it (see
-    `resume_game`) -- the same trick a human's browser plays by holding onto
-    the token client-side, since the server itself remembers nothing. `model`
-    goes with it: it's this connection's own secret (`_client_of`), needed to
-    reclaim the seat if the token above stops working."""
-    try:
-        _SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _SESSION_FILE.write_text(
-            json.dumps({"base_url": BASE_URL, "code": _code, "token": _token, "model": _model})
-        )
-        _SESSION_FILE.chmod(0o600)
-    except OSError as error:
-        print(f"could not save session to {_SESSION_FILE}: {error}", file=sys.stderr)
-
-
-def _load_session() -> None:
-    """Loads the seat a previous process saved into this process's globals,
-    if any -- called explicitly from `resume_game()` rather than at import
-    time, so tests (which reset `_token`/`_code`/`_model` per test via
-    monkeypatch) aren't at the mercy of whatever session file happens to sit
-    on disk."""
-    try:
-        saved = json.loads(_SESSION_FILE.read_text())
-    except (OSError, json.JSONDecodeError):
-        raise ToolError(f"no saved session at {_SESSION_FILE}")
-    if saved.get("base_url") != BASE_URL:
-        raise ToolError(
-            f"saved session is for {saved.get('base_url')!r}, not this server ({BASE_URL!r})"
-        )
-    if not saved.get("token"):
-        raise ToolError(f"no saved session at {_SESSION_FILE}")
-    global _token, _code, _model
-    _token = saved["token"]
-    _code = saved.get("code")
-    _model = saved.get("model")
 
 
 def _client_of(model: str) -> tuple[dict, str]:
@@ -191,58 +84,51 @@ def _client_of(model: str) -> tuple[dict, str]:
     return client, secret
 
 
-def _resume_game() -> dict:
-    """Reclaims the seat saved by an earlier `new_game()`/`join()` in this
-    process, or a previous one pointed at the same server: the saved token
-    first, and `POST /api/reclaim` with the saved code and the saved model's
-    own secret if the server no longer recognises it (a restart, or the
-    token superseded by a second reclaim elsewhere)."""
-    global _token
-    _load_session()
-    status, result = _request_status("GET", "/api/state")
-    if status == 403:
-        if not _model:
-            raise ToolError("no model on the saved session to reclaim with")
-        _, secret = _client_of(_model)
-        reclaimed = _request_ok("POST", "/api/reclaim", {"code": _code, "secret": secret})
-        _token = reclaimed.pop("token")
-        _save_session()
-        return _translate_view(reclaimed)
-    if "error" in result:
-        raise ToolError(result["error"])
-    return _translate_view(result)
-
-
-def _models() -> dict:
-    return _request_ok("GET", "/api/models")
+def _models(tables: Tables, session: Session) -> dict:
+    return _call_ok(tables, session, "GET", "/api/models")
 
 
 def _display_name(name: str | None) -> str | None:
     """The 40-character cap every client applies, or `None` for no name at
-    all -- the server now defaults an unnamed mcp seat to "mcp" itself
+    all -- the server defaults an unnamed mcp seat to "mcp" itself
     (`api.default_seat_name`), so there is nothing left for this to fall
     back to."""
     return str(name).strip()[:40] if name else None
 
 
-def _new_game(model: str, opponents: list[str] | None = None, name: str | None = None) -> dict:
-    global _model
+def _new_game(tables: Tables, session: Session, model: str, opponents: list[str] | None = None, name: str | None = None) -> dict:
     client, _ = _client_of(model)
-    _model = model
+    session.model = model
     body: dict = {"name": _display_name(name), "client": client}
     if opponents:
         body["bots"] = opponents
-    return _seat(_request_ok("POST", "/api/games", body))
+    return _seat(session, _call_ok(tables, session, "POST", "/api/games", body))
 
 
-def _join(code: str, model: str, name: str | None = None) -> dict:
-    global _model
+def _join(tables: Tables, session: Session, code: str, model: str, name: str | None = None) -> dict:
     if not isinstance(code, str) or not code.strip():
         raise ToolError("code must be a game's six-character code")
     client, _ = _client_of(model)
-    _model = model
+    session.model = model
     body: dict = {"code": code.strip().lower(), "name": _display_name(name), "client": client}
-    return _seat(_request_ok("POST", "/api/join", body))
+    return _seat(session, _call_ok(tables, session, "POST", "/api/join", body))
+
+
+def _resume_game(tables: Tables, session: Session, code: str, model: str) -> dict:
+    """Reclaims a seat by `POST /api/reclaim`, the same way a browser's own
+    reclaim works -- no local cache file any more (there is nothing left to
+    cache: a session dies with its `Mcp-Session-Id`, and a fresh MCP
+    connection just calls this again with the `code`/`model` it already
+    knows). `secret = model.strip().lower()`, the same secret `new_game`/
+    `join` mint from `model`."""
+    if not isinstance(code, str) or not code.strip():
+        raise ToolError("code must be a game's six-character code")
+    _, secret = _client_of(model)
+    reclaimed = _call_ok(tables, session, "POST", "/api/reclaim", {"code": code.strip().lower(), "secret": secret})
+    session.token = reclaimed.pop("token")
+    session.code = reclaimed.get("code")
+    session.model = model
+    return _translate_view(reclaimed)
 
 
 #  --- Board summary -----------------------------------------------------------
@@ -272,9 +158,9 @@ _TERRAIN_RESOURCE = {
 }
 
 
-def _board() -> dict:
-    _seated()
-    raw = _request_ok("GET", "/api/board")
+def _board(tables: Tables, session: Session) -> dict:
+    _seated(session)
+    raw = _call_ok(tables, session, "GET", "/api/board")
     by_vertex: dict[int, list[tuple[str, int]]] = {}
     for hex_ in raw.get("hexes") or []:
         resource = _TERRAIN_RESOURCE.get(hex_["terrain"])
@@ -292,13 +178,22 @@ def _board() -> dict:
     return raw
 
 
-def _state() -> dict:
-    _seated()
-    return _translate_view(_request_ok("GET", "/api/state"))
+def _state(tables: Tables, session: Session) -> dict:
+    _seated(session)
+    return _translate_view(_call_ok(tables, session, "GET", "/api/state"))
 
 
-def _act(index: int) -> dict:
-    state = _state()
+def _version_check(fresh: dict, version: int | None) -> None:
+    if version is not None and fresh.get("version") != version:
+        raise ToolError(
+            f"the table has moved (version {fresh.get('version')}); call state() or "
+            "get_table() again and re-index from there"
+        )
+
+
+def _act(tables: Tables, session: Session, index: int, version: int | None = None) -> dict:
+    state = _state(tables, session)
+    _version_check(state, version)
     options = state.get("legal_actions") or []
     if not isinstance(index, int) or not (0 <= index < len(options)):
         raise ToolError(
@@ -307,17 +202,17 @@ def _act(index: int) -> dict:
             if options
             else "index out of range — state()'s legal_actions is empty; it is not your turn"
         )
-    return _translate_view(_request_ok("POST", "/api/action", {"action": options[index]}))
+    return _translate_view(_call_ok(tables, session, "POST", "/api/action", {"action": options[index]}))
 
 
-def _undo() -> dict:
-    _seated()
-    return _translate_view(_request_ok("POST", "/api/undo"))
+def _undo(tables: Tables, session: Session) -> dict:
+    _seated(session)
+    return _translate_view(_call_ok(tables, session, "POST", "/api/undo"))
 
 
-def _leave_game() -> dict:
-    _seated()
-    return _translate_view(_request_ok("POST", "/api/leave"))
+def _leave_game(tables: Tables, session: Session) -> dict:
+    _seated(session)
+    return _translate_view(_call_ok(tables, session, "POST", "/api/leave"))
 
 
 # --- Trading (docs/bot-api.md §3; the human/LLM surface, `agents/reference/
@@ -428,19 +323,28 @@ def _translate_view(raw: dict) -> dict:
     return raw
 
 
-def _get_table() -> dict:
-    return _state()
+def _get_table(tables: Tables, session: Session) -> dict:
+    return _state(tables, session)
 
 
-def _offer_trade(give: dict, want: dict) -> dict:
-    _seated()
+def _offer_trade(tables: Tables, session: Session, give: dict, want: dict) -> dict:
+    _seated(session)
     body = {"give": _positional(give), "want": _positional(want)}
-    return _translate_view(_request_ok("POST", f"/api/games/{_code}/trade/round", body))
+    return _translate_view(_call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round", body))
 
 
-def _answer_trade(index: int, kind: str, give: dict | None = None, receive: dict | None = None) -> dict:
-    _seated()
-    raw = _request_ok("GET", "/api/state")
+def _answer_trade(
+    tables: Tables,
+    session: Session,
+    index: int,
+    kind: str,
+    give: dict | None = None,
+    receive: dict | None = None,
+    version: int | None = None,
+) -> dict:
+    _seated(session)
+    raw = _call_ok(tables, session, "GET", "/api/state")
+    _version_check(raw, version)
     pending = raw.get("pending") or []
     if not isinstance(index, int) or not (0 <= index < len(pending)):
         raise ToolError(
@@ -453,16 +357,23 @@ def _answer_trade(index: int, kind: str, give: dict | None = None, receive: dict
     body = {"actor": offer["actor"], "received": offer["bundle"], "kind": kind}
     if kind == "counter":
         body["bundle"] = _bundle_towards_actor(give, receive)
-    return _translate_view(_request_ok("POST", f"/api/games/{_code}/trade/round/answer", body))
+    return _translate_view(_call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/answer", body))
 
 
-def _choose_trade(index: int | None = None, decline: bool = False) -> dict:
-    _seated()
+def _choose_trade(
+    tables: Tables,
+    session: Session,
+    index: int | None = None,
+    decline: bool = False,
+    version: int | None = None,
+) -> dict:
+    _seated(session)
+    raw = _call_ok(tables, session, "GET", "/api/state")
+    _version_check(raw, version)
     if decline:
         return _translate_view(
-            _request_ok("POST", f"/api/games/{_code}/trade/round/choose", {"decline": True})
+            _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/choose", {"decline": True})
         )
-    raw = _request_ok("GET", "/api/state")
     responses = ((raw.get("trade_round") or {}).get("responses")) or []
     if not isinstance(index, int) or not (0 <= index < len(responses)):
         raise ToolError(
@@ -474,7 +385,69 @@ def _choose_trade(index: int | None = None, decline: bool = False) -> dict:
         )
     response = responses[index]
     body = {"seat": response["seat"], "bundle": response["bundle"]}
-    return _translate_view(_request_ok("POST", f"/api/games/{_code}/trade/round/choose", body))
+    return _translate_view(_call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/choose", body))
+
+
+# --- wait_for_turn: a long poll, exposed as an SSE stream (web.py) -----------
+#
+# `web.py`'s `POST /mcp` answers a `tools/call` for this one tool with
+# `text/event-stream` instead of one JSON object, writing a keepalive
+# between each 15s wait so the connection (and whatever proxy sits in front
+# of it) doesn't decide the server has gone quiet. The generator below is
+# the shared loop: `_wait_for_turn_events` yields `_KEEPALIVE` for every tick
+# that doesn't resolve the wait and the final translated view once it does
+# (or once `timeout` runs out); `web.py` drives it directly for the SSE
+# framing, and `_wait_for_turn` (registered as the tool, for tools/list and
+# any caller that wants one blocking call) just drains it.
+
+_KEEPALIVE = object()
+_WAIT_TICK = 15.0
+
+
+def _turn_ready(view: dict) -> bool:
+    if view.get("game_over"):
+        return True
+    if view.get("legal_actions"):
+        return True
+    if view.get("pending"):
+        return True
+    trade_round = view.get("trade_round")
+    if trade_round is not None and not trade_round.get("awaiting"):
+        return True
+    return False
+
+
+def _poll_state(tables: Tables, session: Session, after: int | None = None, wait: float = 0.0) -> dict:
+    query = "" if after is None else f"?after={after}&wait={wait}"
+    return _translate_view(_call_ok(tables, session, "GET", f"/api/state{query}"))
+
+
+def _wait_for_turn_events(tables: Tables, session: Session, timeout: float | None = None):
+    """Yields `_KEEPALIVE` for each wait tick that doesn't resolve, then the
+    final translated view -- immediately, if it's already true."""
+    _seated(session)
+    view = _poll_state(tables, session)
+    if _turn_ready(view):
+        yield view
+        return
+    elapsed = 0.0
+    while timeout is None or elapsed < timeout:
+        yield _KEEPALIVE
+        remaining = _WAIT_TICK if timeout is None else max(0.0, min(_WAIT_TICK, timeout - elapsed))
+        view = _poll_state(tables, session, after=view.get("version"), wait=remaining)
+        elapsed += remaining
+        if _turn_ready(view) or (timeout is not None and elapsed >= timeout):
+            yield view
+            return
+    yield view
+
+
+def _wait_for_turn(tables: Tables, session: Session, timeout: float | None = None) -> dict:
+    result: dict = {}
+    for item in _wait_for_turn_events(tables, session, timeout=timeout):
+        if item is not _KEEPALIVE:
+            result = item
+    return result
 
 
 # name -> (handler, description, JSON Schema for `arguments`)
@@ -553,12 +526,35 @@ _TOOLS: dict[str, tuple] = {
         "counting isn't hidden information here, only a steal's identity and "
         "dev-card types are), the board's dynamic contents, and `legal_actions` "
         "— a 0-indexed list of the actions act() currently accepts, empty when "
-        "it is not your turn. Poll this while another seat is thinking: nothing "
-        "plays a turn on your behalf, bot seats included. A legal_actions entry "
-        "that spends a resource names it too, alongside the raw `a`/`b` act() "
+        "it is not your turn. Also carries `version`, which bumps on every "
+        "change — pass it to act()/answer_trade()/choose_trade() to have them "
+        "refuse instead of guessing if the table moved under you. Poll this "
+        "while another seat is thinking, or call wait_for_turn() instead to "
+        "block until it's worth polling again. A legal_actions entry that "
+        "spends a resource names it too, alongside the raw `a`/`b` act() "
         "replays: BANK_TRADE has `give`/`want`, PLAY_MONOPOLY/DISCARD have "
         "`resource`, PLAY_YEAR_OF_PLENTY has `resources` (a 2-list).",
         {"type": "object", "properties": {}},
+    ),
+    "wait_for_turn": (
+        _wait_for_turn,
+        "Block until there is something for you to do: legal_actions is "
+        "non-empty, an offer is waiting for answer_trade(), your own open "
+        "trade_round has an answer from everyone, or the game is over. "
+        "Returns immediately if any of that is already true. Streamed as "
+        "Server-Sent Events with a keepalive roughly every 15 seconds while "
+        "it waits, so a long turn from another seat doesn't look like a dead "
+        "connection.",
+        {
+            "type": "object",
+            "properties": {
+                "timeout": {
+                    "type": "number",
+                    "description": "Give up and return the current state after this many "
+                    "seconds. Omit to wait indefinitely.",
+                },
+            },
+        },
     ),
     "act": (
         _act,
@@ -568,7 +564,15 @@ _TOOLS: dict[str, tuple] = {
         "other, not something act() infers.",
         {
             "type": "object",
-            "properties": {"index": {"type": "integer", "description": "Index into legal_actions."}},
+            "properties": {
+                "index": {"type": "integer", "description": "Index into legal_actions."},
+                "version": {
+                    "type": "integer",
+                    "description": "Optional: pass the `version` from the state() you chose "
+                    "the index from. If the table has moved since, act() refuses instead of "
+                    "guessing what index still means what you intended.",
+                },
+            },
             "required": ["index"],
         },
     ),
@@ -648,6 +652,12 @@ _TOOLS: dict[str, tuple] = {
                     "additionalProperties": {"type": "integer"},
                     "description": "Only for kind=counter: resource -> count you'd receive.",
                 },
+                "version": {
+                    "type": "integer",
+                    "description": "Optional: pass the `version` from the state() you chose "
+                    "the index from. If the table has moved since, this refuses instead of "
+                    "guessing what index still means what you intended.",
+                },
             },
             "required": ["index", "kind"],
         },
@@ -662,105 +672,55 @@ _TOOLS: dict[str, tuple] = {
             "properties": {
                 "index": {"type": "integer", "description": "Index into trade_round.responses."},
                 "decline": {"type": "boolean"},
+                "version": {
+                    "type": "integer",
+                    "description": "Optional: pass the `version` from the state() you chose "
+                    "the index from. If the table has moved since, this refuses instead of "
+                    "guessing what index still means what you intended.",
+                },
             },
         },
     ),
     "resume_game": (
         _resume_game,
-        "Reclaim the seat this process (or an earlier run pointed at the same "
-        "server) last held, from a local cache file rather than the server -- "
-        "the same trick a human's browser plays by holding onto its own "
-        "session token. Tries that saved token first; if the server no longer "
-        "honours it (a restart, or the seat reclaimed a second time elsewhere) "
-        "this falls back to reclaiming the seat by the `model` new_game()/"
-        "join() were called with. Fails if nothing was saved here, or it was "
-        "saved for a different HEXSET_UI_BASE_URL than this process has now.",
-        {"type": "object", "properties": {}},
+        "Reclaim a seat by its game `code` and the `model` new_game()/join() "
+        "were called with — the same way a browser reclaims one after losing "
+        "its token, via POST /api/reclaim. Use this after a fresh MCP "
+        "connection (a new Mcp-Session-Id starts with no seat at all) or "
+        "after a 404 on a request that used to work. Fails if no seat's "
+        "client matches that `model`'s secret, or the seat has locked out.",
+        {
+            "type": "object",
+            "properties": {
+                "code": {"type": "string", "description": "The game's six-character code."},
+                "model": {
+                    "type": "string",
+                    "description": "The exact model identifier new_game()/join() were called with.",
+                },
+            },
+            "required": ["code", "model"],
+        },
     ),
 }
 
-def _tool_list() -> list[dict]:
+
+def tool_list() -> list[dict]:
     return [
         {"name": name, "description": description, "inputSchema": schema}
         for name, (_, description, schema) in _TOOLS.items()
     ]
 
 
-def _call_tool(name: str, arguments: dict) -> dict:
+def call_tool(tables: Tables, session: Session, name: str, arguments: dict) -> dict:
+    """One tool call -> its raw result dict, or a raised `ToolError`. The
+    `{"content": [...], "isError": ...}` MCP result envelope is `web.py`'s
+    job, not this module's — it's the one thing that differs between a plain
+    JSON response and `wait_for_turn`'s streamed one."""
     entry = _TOOLS.get(name)
     if entry is None:
         raise ToolError(f"unknown tool: {name}")
     handler, _, _ = entry
     try:
-        result = handler(**arguments)
+        return handler(tables, session, **arguments)
     except TypeError as error:
         raise ToolError(f"bad arguments for {name}: {error}") from error
-    return {"content": [{"type": "text", "text": json.dumps(result)}], "isError": False}
-
-
-def _dispatch(message: dict) -> dict | None:
-    """One JSON-RPC request -> its response, or `None` for a notification
-    (an `id`-less message, which the spec says gets no reply at all — the
-    only one a compliant client sends unprompted is `notifications/initialized`
-    right after `initialize`, and nothing here needs to react to it)."""
-    method = message.get("method")
-    request_id = message.get("id")
-    if request_id is None:
-        return None
-
-    if method == "initialize":
-        result = {
-            "protocolVersion": PROTOCOL_VERSION,
-            "capabilities": {"tools": {}},
-            "serverInfo": SERVER_INFO,
-        }
-        return {"jsonrpc": "2.0", "id": request_id, "result": result}
-
-    if method == "tools/list":
-        return {"jsonrpc": "2.0", "id": request_id, "result": {"tools": _tool_list()}}
-
-    if method == "tools/call":
-        params = message.get("params") or {}
-        try:
-            result = _call_tool(params.get("name"), params.get("arguments") or {})
-        except ToolError as error:
-            result = {"content": [{"type": "text", "text": str(error)}], "isError": True}
-        return {"jsonrpc": "2.0", "id": request_id, "result": result}
-
-    return {
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "error": {"code": -32601, "message": f"method not found: {method}"},
-    }
-
-
-def main() -> None:
-    print(f"hexset MCP server: talking to {BASE_URL}", file=sys.stderr)
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            message = json.loads(line)
-        except json.JSONDecodeError as error:
-            print(f"bad JSON-RPC line, skipped: {error}", file=sys.stderr)
-            continue
-        if not isinstance(message, dict):
-            print(f"bad JSON-RPC message, skipped: {message!r}", file=sys.stderr)
-            continue
-        try:
-            response = _dispatch(message)
-        except Exception as error:  # noqa: BLE001 — one bad request must not kill the process
-            print(f"unhandled error dispatching {message.get('method')}: {error}", file=sys.stderr)
-            response = {
-                "jsonrpc": "2.0",
-                "id": message.get("id"),
-                "error": {"code": -32603, "message": str(error)},
-            }
-        if response is not None:
-            sys.stdout.write(json.dumps(response) + "\n")
-            sys.stdout.flush()
-
-
-if __name__ == "__main__":
-    main()

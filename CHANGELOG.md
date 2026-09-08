@@ -9,6 +9,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Changed
+
+- **A checkpoint runtime is a `Policy`, and gets the bot, the evaluator, the searcher and the trade gate for free.** `hexset.clients.policy` states that protocol -- `act_rows`, `value_rows`, `score_rows` over live `(game, seat)` positions rather than encoded records, values in board-seat order -- and `hexset.clients.netbot` holds `NetworkBot` (with its two-sided trade gate), `NetworkEvaluator`, `LeafEvaluator`, `GatedSearch`, the `bot_for`/`evaluator_for`/`searcher_for` constructors, and `register_entrants(loader)`, which registers the arena's "network"/"mcts" entrant kinds, its "network" evaluator, its checkpoint loader and its leaf-evaluator factory in one call. `hexset.clients.onnxbot` keeps the ONNX half -- `load` and `V2Policy` -- and re-exports every name it exported before, so `spawn(path, board)` and every existing import are unchanged. The trade gate now hands the policy a copy of the seated game per candidate instead of mutating the live one, so a runtime encodes a post-trade position however it likes; the gate's own arithmetic, its `NETWORK_GATE_ROWS` cap and its verdicts are unchanged.
+
 ## 0.40.0
 
 ### Changed

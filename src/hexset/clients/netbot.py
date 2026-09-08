@@ -92,19 +92,39 @@ class NetworkBot:
     # so there is no resolution for a floor to express; strict positivity is
     # the whole gate.
     trade_floor: float = 0.0
-    # The game `choose` was last handed, so a trade event -- which runs
-    # inside the same `apply` this bot's own choice already went through --
-    # asks about the position it is actually seated at. `None` only for a
-    # bot nobody has asked to move yet, which cannot happen in play (the
-    # trade event runs after every seat has moved through setup) but is the
-    # right answer for `valuation`/`accepts` below regardless.
+    # Which seat this bot is installed at, or `None` for a bot that answers
+    # whatever seat the view names (the arena spawns one bot per seat and
+    # never asks it about another). When set, the view must agree: a gate
+    # wired to the wrong seat would answer for somebody else's hand, and
+    # that is the one failure the mechanic must never have quietly.
+    seat: int | None = None
+    # The game `choose` was last handed (or `seat_at` seated), so a trade
+    # event -- which runs inside the same `apply` this bot's own choice
+    # already went through -- asks about the position it is actually seated
+    # at. `None` only for a bot nobody has seated yet, which cannot happen
+    # in play (the trade event runs after every seat has moved through
+    # setup) but is the right answer for the gate regardless.
     _seated: Game | None = field(default=None, repr=False, compare=False)
 
-    def choose(self, game: Game) -> Action:
+    def seat_at(self, game: Game) -> None:
+        """Seat this bot at `game` without asking it to move: the position
+        its gate is an evaluation of. `choose` does this itself; a driver
+        that installs a bot as a gate only (a searched policy, a collector's
+        seat) calls it in place of poking `_seated`."""
         _check_players(game, self.players)
         self._seated = game
+
+    def choose(self, game: Game) -> Action:
+        self.seat_at(game)
         seat = to_move(game)
         return self.policy.act_rows([(game, seat, tuple(options_for(game)))])[0]
+
+    def _perspective(self, view: View) -> int:
+        if self.seat is not None and view.perspective != self.seat:
+            raise ValueError(
+                f"a network bot seated at {self.seat} was asked for seat {view.perspective}"
+            )
+        return view.perspective
 
     def gains_many(
         self, view: View, received: Sequence[Bundle], counterparties: Sequence[int]
@@ -117,7 +137,7 @@ class NetworkBot:
         """
         if self.max_trades == 0 or self._seated is None or not received:
             return [-1.0] * len(received)
-        seat = view.perspective
+        seat = self._perspective(view)
         before, afters = self._score(seat, view, received, counterparties)
         out = [-1.0] * len(received)
         for i, after in afters.items():
@@ -136,7 +156,7 @@ class NetworkBot:
         """
         if self.max_trades == 0 or self._seated is None or not candidates:
             return [-1.0] * len(candidates)
-        seat = view.perspective
+        seat = self._perspective(view)
         received = [b for _, b in candidates]
         thems = [c for c, _ in candidates]
         before, afters = self._score(seat, view, received, thems)
@@ -303,7 +323,7 @@ class GatedSearch(Search):
         self.trade_floor = gate.trade_floor
 
     def choose(self, game: Game) -> Action:
-        self.gate._seated = game
+        self.gate.seat_at(game)
         return super().choose(game)
 
     def accepts(self, view: View, received: Bundle, counterparty: int) -> bool:
@@ -389,7 +409,7 @@ def _checkpoint_path(weights: object, what: str) -> str:
     raise ValueError(f"{what}'s weights is a checkpoint path")
 
 
-def register_entrants(loader) -> None:
+def register_entrants(loader, *, evaluator_max_trades: int | None = None) -> None:
     """Make `hexset.arena`'s "network" and "mcts" entrant kinds -- and its
     "network" evaluator, checkpoint loader and leaf-evaluator factory --
     spawnable through `loader`.
@@ -397,6 +417,13 @@ def register_entrants(loader) -> None:
     `loader(path, topology)` returns a `Checkpoint`; everything the arena
     then does with it is this module's, so a runtime registers itself in one
     call instead of carrying five factories of its own.
+
+    `evaluator_max_trades` is the trade switch for the "network" *evaluator*
+    (the value head under `SearchBot`, `netsearch`/`netgreedy`): `None`
+    keeps each checkpoint's recorded budget; `0` switches trading off for
+    every evaluator this runtime provides, which is what a handcrafted
+    search over a learned value wants -- its gate scores a bare `GameState`
+    no encoder can read, so it must never be asked to trade.
 
     Deliberately *not* called at import by any runtime in this package. The
     kinds are global names with a single owner, an entrant's `weights` is a
@@ -427,7 +454,7 @@ def register_entrants(loader) -> None:
 
     def _spawn_evaluator(weights: object, board: Board) -> NetworkEvaluator:
         path = _checkpoint_path(weights, "a network evaluator")
-        return evaluator_for(loader(path, board.topology))
+        return evaluator_for(loader(path, board.topology), max_trades=evaluator_max_trades)
 
     def _leaf_evaluator(policy, space, pad_to=None) -> LeafEvaluator:
         return LeafEvaluator(policy=policy, space=space, pad_to=pad_to)

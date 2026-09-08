@@ -7,7 +7,7 @@
 The only test of a fit that counts. `hexset.bench.fit_weights` says whether
 a vector predicts winners better on held-out games; this says whether the
 bot that reads it wins more, on the same boards as the incumbent with seats
-swapped (`hexset.bench.duel._via_arena`, blocked geometry: two of each
+swapped (`hexset.bench.duel._via_arena`, `aabb` seating: two of each
 side, antithetic pairs), reporting the Wilson interval on games and the
 paired VP margin. Adoption is a decision made on this file, by hand.
 
@@ -28,7 +28,7 @@ from types import SimpleNamespace
 
 import hexset.bots  # noqa: F401 -- registers the heximax presets
 from hexset.arena import Entrant, register_preset
-from hexset.bench.duel import _via_arena
+from hexset.bench.duel import ARENA_GEOMETRY, _via_arena
 from hexset.bench.throughput import default_workers, environment
 from hexset.bots.evaluate import TERM_NAMES, Weights
 
@@ -57,7 +57,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--games", type=int, default=3072)
     parser.add_argument("--seed", type=int, default=42000, help="duel seed")
-    parser.add_argument("--geometry", choices=("blocked", "interleaved"), default="blocked")
+    parser.add_argument(
+        "--geometry", default=ARENA_GEOMETRY,
+        help="seating, as `hexset.bench.duel.arena_lineup` spells it: a pattern "
+        "of `a`/`b` letters, or a comma-separated lineup of entrant specs",
+    )
     parser.add_argument("--workers", type=int, default=default_workers())
     parser.add_argument("--out", default=None)
     args = parser.parse_args(argv)

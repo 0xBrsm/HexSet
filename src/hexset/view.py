@@ -20,10 +20,8 @@ with the transfer certified, and the certification is a ledger operation.
 
 Every opponent quantity `HonestEvaluator` (`bots/heximax/evaluate.py`)
 reads comes through a `View` -- never through `state.hands[opponent]` or
-`state.dev_cards[opponent]` directly -- except in `omniscient` mode, which
-keeps the old true-hand reading so the price of honesty can be measured
-rather than assumed. See `View`'s own docstring for the model
-(`known`/`unknown`/the shared residual `pool`).
+`state.dev_cards[opponent]` directly. See `View`'s own docstring for the
+model (`known`/`unknown`/the shared residual `pool`).
 """
 
 from __future__ import annotations
@@ -44,8 +42,8 @@ class View:
 
     Per seat: `known[s]` is the certified lower bound on each resource and
     `unknown[s]` the number of cards the record cannot type. The perspective's
-    own seat is exact (`known` is the hand, `unknown` is zero), and so is every
-    seat when `omniscient`. Everything hidden is drawn from one shared
+    own seat is exact (`known` is the hand, `unknown` is zero). Everything
+    hidden is drawn from one shared
     **residual pool**: per resource, the cards that are neither in the bank
     nor certified in any seat's `known`, sized from the bank's initial count
     rather than the true hands, which the belief may not read. `certify`
@@ -59,19 +57,18 @@ class View:
 
     def __init__(
         self, state: GameState, ledger: PublicLedger, perspective: int, *,
-        omniscient: bool = False, certify: Sequence[tuple[int, Sequence[int]]] = (),
+        certify: Sequence[tuple[int, Sequence[int]]] = (),
     ) -> None:
         self.state = state
         self.ledger = ledger
         self.perspective = perspective
-        self.omniscient = omniscient
         n = state.num_players
         self.num_players = n
         self.sizes = [sum(hand) for hand in state.hands]
         self.known: list[list[int]] = []
         self.unknown: list[int] = []
         for seat in range(n):
-            if omniscient or seat == perspective:
+            if seat == perspective:
                 self.known.append(state.hands[seat][:])
                 self.unknown.append(0)
                 continue
@@ -105,8 +102,8 @@ class View:
         self._signature: tuple | None = None
 
     @classmethod
-    def from_game(cls, game: Game, perspective: int, *, omniscient: bool = False) -> View:
-        return cls(game._state, game.ledger, perspective, omniscient=omniscient)
+    def from_game(cls, game: Game, perspective: int) -> View:
+        return cls(game._state, game.ledger, perspective)
 
     def signature(self) -> tuple:
         """`known`/`unknown`/`pool` as one hashable tuple: everything
@@ -124,7 +121,7 @@ class View:
     def __eq__(self, other: object) -> bool:
         """Same information set, not the same object.
 
-        Compares `perspective`/`omniscient`/`num_players` and `signature()`
+        Compares `perspective`/`num_players` and `signature()`
         -- everything a caller of `expected_hand`/`table_holding`/`steal_odds`/
         `p_holds` can see -- the same fields `HonestEvaluator.belief_for`
         already treats as the whole of what a `View` is a pure function of.
@@ -139,18 +136,17 @@ class View:
             return NotImplemented
         return (
             self.perspective == other.perspective
-            and self.omniscient == other.omniscient
             and self.num_players == other.num_players
             and self.sizes == other.sizes
             and self.signature() == other.signature()
         )
 
     def __hash__(self) -> int:
-        return hash((self.perspective, self.omniscient, self.num_players, tuple(self.sizes), self.signature()))
+        return hash((self.perspective, self.num_players, tuple(self.sizes), self.signature()))
 
     def exact(self, seat: int) -> bool:
         """Whether `seat`'s hand is read verbatim rather than estimated."""
-        return self.omniscient or seat == self.perspective
+        return seat == self.perspective
 
     def expected_hand(self, seat: int) -> list[float]:
         """`known` plus the hidden cards spread in the pool's proportions.
@@ -188,14 +184,8 @@ class View:
         monopoly plays are not counted by the state once resolved, so those
         cards stay in the estimate after they have gone: an approximation
         that overstates the unseen count slightly and is documented here.
-        When `omniscient`, it is the true remaining deck.
         """
         state = self.state
-        if self.omniscient:
-            counts = [0] * NUM_DEV_CARDS
-            for card in state.deck:
-                counts[card] += 1
-            return counts
         counts = [DECK_COMPOSITION[card] for card in DevCard]
         me = self.perspective
         for card in range(NUM_DEV_CARDS):
@@ -265,10 +255,6 @@ class View:
         count match the real position.
         """
         state = copy_state(self.state)
-        if self.omniscient:
-            rng.shuffle(state.deck)
-            return state
-
         cards = self._pool_cards()
         rng.shuffle(cards)
         cursor = 0

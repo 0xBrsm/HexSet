@@ -46,11 +46,9 @@ register_entrant_kind("heximax", _spawn)
 # The honest handcrafted baseline (design note `heximax.md` §5). The
 # placement prior is composed into the bot rather than wrapped around it, so
 # `placement` stays False here and `spawn` returns the bot itself.
-# `heximax-omni` is the same bot reading every true hand, kept to measure
-# what honesty costs; `heximax-notrade` plays the no-trade table with the
-# trade switch off.
+# `heximax-notrade` plays the no-trade table with the trade switch off.
 #
-# None of the three passes `stance` -- `Entrant`'s own field default is
+# Neither passes `stance` -- `Entrant`'s own field default is
 # `None`, which `_spawn` above leaves out of the `heximax()` call, so
 # `heximax()`'s own default (`"win"`) applies. `agents/reference/heximax.md`,
 # "Registration 2026-09-04: the objective -- a win-probability stance against
@@ -58,10 +56,6 @@ register_entrant_kind("heximax", _spawn)
 # heximax's default; stated once, on the bot, rather than on every preset
 # that spawns it.
 register_preset("heximax", Entrant("heximax", kind="heximax", depth=2, width=6))
-register_preset(
-    "heximax-omni",
-    Entrant("heximax-omni", kind="heximax", depth=2, width=6, mode="omniscient"),
-)
 register_preset(
     "heximax-notrade",
     Entrant(

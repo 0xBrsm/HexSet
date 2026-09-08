@@ -59,9 +59,9 @@ VARIANTS: dict[str, dict] = {
 }
 
 
-def _replay(job: tuple[int, object, int, bool]) -> list[ChoiceSet]:
-    game, record, stride, omniscient = job
-    return list(samples_from(record, game, stride=stride, omniscient=omniscient))
+def _replay(job: tuple[int, object, int]) -> list[ChoiceSet]:
+    game, record, stride = job
+    return list(samples_from(record, game, stride=stride))
 
 
 def summarise(fit, design: Design, test_X: np.ndarray, test_y: np.ndarray) -> dict:
@@ -110,11 +110,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--holdout", type=float, default=0.2)
     parser.add_argument("--split-seed", type=int, default=0)
     parser.add_argument(
-        "--omniscient", action="store_true",
-        help="read every row exact instead of through the ledger; measures how "
-        "much the honest reading attenuates the fit",
-    )
-    parser.add_argument(
         "--variants", default=",".join(VARIANTS),
         help=f"comma-separated subset of {', '.join(VARIANTS)}",
     )
@@ -131,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
 
     started = time.perf_counter()
     records = list(read(args.records))
-    jobs = [(i, r, args.stride, args.omniscient) for i, r in enumerate(records)]
+    jobs = [(i, r, args.stride) for i, r in enumerate(records)]
     if args.workers > 1:
         with Pool(args.workers) as pool:
             replayed = pool.map(_replay, jobs, chunksize=max(1, len(jobs) // (args.workers * 4)))

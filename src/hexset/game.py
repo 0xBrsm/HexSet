@@ -177,9 +177,9 @@ class Game:
         never a copy, so reading it costs nothing and mutating it through
         the returned reference works exactly as mutating `_state` always
         did. This is the only sanctioned way to read the true state from
-        outside the engine; the three sanctioned callers are
-        `hexset.bots.search2`, heximax's own `omniscient` mode, and the
-        Catanatron adapter when it hosts a Catanatron bot.
+        outside the engine; the two sanctioned callers are
+        `hexset.bots.search2` and the Catanatron adapter when it hosts a
+        Catanatron bot.
         """
         if not hidden:
             return self._state

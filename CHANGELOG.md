@@ -9,6 +9,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Removed
+
+- heximax's `omniscient` mode, the `heximax-omni` preset, `View`'s and
+  `HonestEvaluator`'s `omniscient` flag, and `hexset.dataset`'s and
+  `hexset.bench.fit_weights`'s `--omniscient` reading. Nothing outside
+  heximax's own honesty-price readouts ever constructed an omniscient
+  `View`; the engine's `game.state(seat, hidden=False)`, which the
+  Catanatron adapter and the server's spectator view read, is unchanged.
+  `heximax.MODES` is now `("honest", "notrade")`.
+
 ### Changed
 
 - The page's incoming-offer window is the counteroffer layout, titled "Trade Offer Received": the offer quoted on top with Accept (primary) on its row, a reply pre-loaded from the offer beneath with Send (secondary); passing is the close glyph. The separate "Trade Counteroffer" step is gone.

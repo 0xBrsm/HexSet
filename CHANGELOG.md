@@ -21,6 +21,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `hexset.clients.onnxbot`: `load`, `network_bot`, `network_evaluator`, `searcher` and `spawn` take `threads`, capping onnxruntime's intra- and inter-op thread pools; `None` (the default) keeps onnxruntime's own sizing.
 - The trade round is now the served table's protocol end to end
   (`docs/bot-api.md` §3). `POST /api/games/<code>/trade/round` broadcasts
   the current player's offer (1-3 cards a side) to every seat;

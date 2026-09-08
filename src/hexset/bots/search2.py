@@ -61,7 +61,7 @@ class Bot(Protocol):
     * `respond(view, offer) -> Response` -- this seat's answer to another
       seat's broadcast `Offer`: accept, counter, or pass
       (`hexset.trading.Response`).
-    * `choose(view, responses) -> index | None` -- as the actor, execute the
+    * `pick(view, responses) -> index | None` -- as the actor, execute the
       response at this index, or decline every one of them (`None`).
     * `estimate_many(view, candidates) -> list[float]` -- this seat's best
       guess at *another* seat's gain from each candidate, used by

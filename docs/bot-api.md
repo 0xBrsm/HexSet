@@ -126,102 +126,61 @@ action's legality depends on another seat's hand, and there is now one list,
 
 ## 3. Trading
 
-**Status, 2026-09-05: complete for the trading-final mechanic
-(`agents/reference/trading-final.md`, item 5 — "human and LLM seats are
-direct gates"). Supersedes the earlier negotiation-interface draft, whose
-design this finishes.**
+**Status, 2026-09-06: the trade round is the served table's protocol.**
+The engine's automatic clearing house (`hexset.trading.trade_event`) stays
+the training protocol -- the arena, the bench, the gym and every self-play
+run play under it -- but a served table (`hexset.server`) switches it off
+(`Game.max_trades = 0`) and runs the **trade round** instead
+(`hexset.trading`, "The trade round"; `agents/reference/trading-final.md`).
 
-A checkpoint does not act to trade, and there is no public layer any more:
-nothing is advertised, and no vector rides in this record. Instead, every
-seat answers a private **gate** — `gains_many(view, received,
-counterparties) -> list[float]`, that seat's own gain from each candidate
-exchange, in whatever unit its value is, read through its own view. The
-engine enumerates every coverable candidate bundle between the current
-player and each other seat after the roll and the robber, and again after
-every MAIN action the current player takes (build, buy, a bank/port trade, a
-development card): any signed bundle on disjoint resources, each side
-bounded only by what that hand holds (not one card for one card — a
-candidate can give several resources and receive several back in the same
-exchange). It asks the current player's gate once over every candidate,
-keeps the strictly positive subset, asks each counterparty's gate once over
-its own accepted subset, keeps the strictly positive subset of *that*, and
-clears the one candidate `Game.trade_rule` ranks highest — the default,
-`"egalitarian"`, maximises the smaller of the two private gains; ties fall
-to the current player's own gain, then a canonical bundle order, then the
-lower counterparty seat, for determinism. Then it loops until nothing
-clears. A gate is a pure function of the current position, asked fresh
-every time — there is no publish step and no timing to get right.
+One round: the current player broadcasts one offer to every other seat;
+each seat answers once -- accept, counter with a bundle it would take
+instead, or pass; the actor executes one answer or declines them all. A
+trade moves 1-3 cards a side on disjoint resources (`MAX_TRADE_CARDS`),
+and a bot side's own gate must clear `TRADE_FLOOR` at execution, re-asked
+fresh. Bundles on the wire are five signed counts in `RESOURCE_NAMES`
+order, always signed towards the offer's actor: positive is what the actor
+receives.
 
-A checkpoint served embedded (`hexset.clients.onnxbot.NetworkBot`) trades
-off the same `value` head this contract already declares: `accepts` is the
-head's strict preference for the concrete post-trade hand over the current
-one — the derivation `hexn.policy.DerivedTrader` trains under,
-reimplemented here against the wire record instead of a live forward — and
-`accepts_many` batches it over up to `NETWORK_GATE_ROWS` candidates in one
-graph call. There is no magnitude-valued `gains_many` here: `hexset.bots.
-search2.Bot`'s structural default derives one from `accepts_many`
-(`+1.0`/`-1.0`), which is all a boolean value-head gate can support; a
-magnitude-valued network gate is HexN's own concern. `max_trades=0` in the
-metadata is still the explicit off switch — a seat with it set accepts
-nothing, exactly like a bot with no trading methods at all.
+**Bots.** A bot's offer is the candidate maximising its own gain among
+those it estimates the counterparty accepts (`default_offer`: own gain via
+`gains_many`, the counterparty's via `estimate_many` -- heximax and search2
+evaluate the exchange from the other seat's frame; a gate without it uses
+its own gain as the estimate). A bot answers an offer by accepting when its
+own gain clears the floor, else countering with its best coverable bundle
+it estimates the actor accepts, else passing (`default_respond`); as actor
+it picks the answer with the highest own gain above the floor
+(`default_pick`). A bot may implement `offer`, `respond`, `pick` and
+`estimate_many` itself; `hexset.bots.search2.Bot` lists the signatures.
 
-A checkpoint served externally (`hexset.clients.botclient.RecordBrain`, the
-`python -m hexset.clients.botclient` peer) does not share this brain and
-does not trade at all: it reads `GET /api/record` for `action_index` alone
-and is never seated as a gate.
+**Manual seats (a person at the page, an LLM over `hexset.server.mcp`)**
+are `PendingGate`s: nothing is ever agreed on their behalf. A bot's
+broadcast is recorded against each manual seat in `GET /api/state`'s
+`pending` (`{"actor": <seat>, "bundle": [...]}`), and **the bot's turn
+holds until every manual seat has answered** -- `trade_wait` lists the
+seats being waited on and `to_move` reads `null` meanwhile -- so a person
+gets to accept or counter before the bot picks. Three routes, all
+seat-token gated:
 
-**The negotiation interface (human and LLM seats).** Every manual seat —
-claimed at the web page or over `hexset.server.mcp` — is a direct gate,
-unconditionally: seat-up installs a `PendingGate` on it (`hexset.server.
-webplay.GameSession.confirm_mode`), and there is no other mode a person or
-an LLM can get any more. As **counterparty**, that means nothing a bot's
-automatic event or another seat's proposal finds against a manual seat ever
-clears on its own; the candidate is recorded instead, unexecuted, to
-`Game.pending`, and `GET /api/state`'s `pending` block lists this seat's own
-entries (only ever the ones naming it, never another seat's) as `{"counterparty":
-<seat>, "gave": [...], "got": [...]}` in `RESOURCE_NAMES` order. Three
-routes, all seat-token gated:
+- **`POST /api/games/<code>/trade/round`** -- `{"give": [5 ints], "want":
+  [5 ints]}`, unsigned counts. The current player's broadcast; 409 off its
+  turn or outside MAIN, 400 for a bundle it cannot cover. Bots answer
+  synchronously. The view's `trade_round` block carries the offer, the accepts
+  and counters so far (`responses`, each `{"seat", "kind", "bundle"}`), and
+  the manual seats still to answer (`awaiting`).
+- **`POST .../trade/round/answer`** -- `{"actor", "received", "kind":
+  "accept"|"counter"|"pass", "bundle"?}`: the exact offer from `pending`
+  echoed back; a counter's `bundle` is signed towards the actor like
+  `received`. 409 once that offer is no longer open. With a bot actor, the
+  round resolves the moment the last manual seat answers.
+- **`POST .../trade/round/choose`** -- `{"seat", "bundle"}` executes that
+  recorded answer exactly; `{"decline": true}` closes the round. Only the
+  actor may call it; the round also closes when the turn ends.
 
-- **`POST /api/games/<code>/trade`** — `{"counterparty": <seat>, "give":
-  {<resource>: <count>}, "receive": {<resource>: <count>}}`, named amounts.
-  Composes and submits a bundle directly (`hexset.game.Game.execute_trade`),
-  bypassing the automatic candidate search entirely — any bundle both sides
-  can cover, not only what the event would have found. Legal on the
-  proposer's own turn against any seat, or during another seat's turn
-  against that seat only; requires the counterparty's own gate to price the
-  exchange strictly above zero — the proposer's own gate is never
-  consulted, since submitting is its own consent. Returns the usual
-  `state()` view on success — its `log` names the trade too, and it
-  survives a server restart, the same as any other move
-  (`GameSession.execute_manual_trade`) — or a 400 (naming which check
-  failed: not affordable, wrong turn, or the counterparty's gate declined)
-  otherwise. A checkpoint served through this contract is never itself a
-  *proposer* here — nothing calls this route on a bot's behalf — but it is
-  a valid
-  **counterparty**: a person or an LLM may propose a bundle against a
-  served checkpoint at any time, and the checkpoint's gate answers it
-  exactly as it would an automatically-found candidate, because the call is
-  the same.
-- **`GET /api/games/<code>/trade/acceptable`** — the actor's own read-only
-  preview of what the route above would accept right now: every bundle a
-  bot counterparty's own gate already prices above zero, grouped by
-  counterparty (`{"offers": [{"counterparty": <seat>, "deals": [{"gave":
-  [...], "got": [...], "gain": <float>}, ...]}, ...]}`), sorted by that
-  counterparty's own gain descending, capped at 12 deals per counterparty.
-  Computing this makes no engine change at all. A manual counterparty is
-  never listed here — its answer is asynchronous, through its own `pending`
-  once something is actually proposed against it, not through this
-  enumeration.
-- **`POST /api/games/<code>/trade/confirm`** / **`.../trade/decline`** —
-  `{"index": <int into this seat's own `pending`>}`. Confirm executes that
-  entry's exact recorded `(a, b, received)` through `execute_trade`'s own
-  re-validation (a stale entry against hands that already moved fails the
-  same way a fresh proposal would) and logs it the same as a fresh
-  proposal; decline drops it, no cards move. Either way the offer is gone
-  afterward — declining is final, not "ask me again later": the bot that
-  made it has already played on by the time this seat ever saw it, so there
-  is nothing left to re-offer, only whatever the table's own next trade
-  event finds.
+An executed trade is logged (`log`, `trades`) and journalled like any other
+move, so it survives a restart. A checkpoint served externally
+(`hexset.clients.botclient.RecordBrain`) is never seated as a gate and does
+not trade.
 
 ## What is never part of this contract
 

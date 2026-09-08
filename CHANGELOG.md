@@ -17,6 +17,62 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The trade round is now the served table's protocol end to end
+  (`docs/bot-api.md` §3). `POST /api/games/<code>/trade/round` broadcasts
+  the current player's offer (1-3 cards a side) to every seat;
+  `.../trade/round/answer` is a seat's accept, counter or pass;
+  `.../trade/round/choose` is the actor's pick or decline. A bot actor's
+  turn holds (`trade_wait`, `to_move` null) until every person at the table
+  has answered its offer. MCP tools `offer_trade`, `answer_trade`,
+  `choose_trade`. Bot offers, answers and picks come from
+  `hexset.trading.default_offer`/`default_respond`/`default_pick` (own gain,
+  and the estimated gain of the other side) unless a bot implements
+  `offer`/`respond`/`pick` itself.
+- The page's trade modal, in one shape for all four of its states, at one
+  width in all of them. The title names the state -- Trade Offer, Trade
+  Offer Received, Trade Counteroffer, Trade Acceptance -- and the one way
+  out of it is a plain glyph in that title row, so Cancel, Pass, Back and
+  Decline all are the same X where the heading says which it is. A trade
+  being built, offer or counter alike, is two rows of five cards, give over
+  get, "for" between them: a tap on a card adds one of it, and the "−" that
+  appears under a card in the offer takes one back. A trade being read is a
+  line of just the cards in
+  it, prefixed by the colour pip of the seat *giving* -- so left of "for" is
+  always what that pip hands over, and a seat's accept mirrors the offer it
+  answers. Your own open offer draws as an acceptance pane: your offer, a
+  rule, then one row per seat in seat order with the check that takes that
+  deal, a seat still to answer left blank. Every button in the modal is one
+  44px icon square, its word in the tooltip; the bank/port square keeps its
+  rate. Countering keeps the offer you were sent on screen, quoted above the
+  reply you are building with a quiet Accept for taking it as it stands, and
+  starts that reply from it. Seats are named as the rest of the page names
+  them, so a table of three `search2` bots reads as Player 2, Player 3 and
+  Player 4.
+- The give side of the composer counts up to the bank's own rate, not to
+  `MAX_TRADE_CARDS`. A 4:1 sale could not be drawn at all before, so the
+  bank button fired on whatever the row happened to show and took four
+  cards for it; it is now offered only when the cards on the table *are*
+  the rate, and the offer-to-players button only when both sides are within
+  the table's three-card rule. Whichever of the two buttons is out of
+  reach says why in its own tooltip, in place of the sentence that used to
+  sit above the rows.
+- `hexset.trading.execute_agreed`: one execution path for every agreed
+  exchange, asking a bot side's gate fresh and taking a manual side's
+  submission as its consent; `execute_trade` and the round's own execution
+  are both built on it.
+
+### Removed
+
+- `POST .../trade`, `GET .../trade/acceptable`, `POST .../trade/confirm`
+  and `.../trade/decline` (the one-to-one proposal routes), the MCP tools
+  over them, `webplay.bundle_from_wire`, and `docs/negotiation-interface.md`.
+  `PendingGate` no longer records clearing-house candidates.
+
+### Changed
+
+- The trade round's third gate method is `pick(view, responses)`, not
+  `choose` -- which is every bot's action picker and collided with it.
+
 - `hexset.trading.trade_round`: a second trading protocol, for a *served*
   game only (`hexset.server`) -- propose-and-respond rather than the
   engine's exhaustive clearing house (`trade_event`, unchanged and still
@@ -25,13 +81,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   no-ops itself, and calls `trade_round(game, gates)` itself, as many times
   a turn as the acting seat wants -- nothing counts or caps rounds, the
   floor and the card cap already bound what one moves. `Bot` gains four new
-  optional methods for it (`offer`, `respond`, `choose`, `estimate_many`),
+  optional methods for it (`offer`, `respond`, `pick`, `estimate_many`),
   each with a sensible default off a plain `gains_many`
-  (`hexset.trading.default_offer`/`default_respond`/`default_choose`), so
+  (`hexset.trading.default_offer`/`default_respond`/`default_pick`), so
   every existing bot plays a served table unchanged; heximax and search2
   additionally implement `estimate_many` for real. `hexset.server.webplay.
   PendingGate` gains the manual-seat side of the same three methods
-  (`offer`/`respond`/`choose`), recording a broadcast offer to
+  (`offer`/`respond`/`pick`), recording a broadcast offer to
   `game.pending` exactly as it already does for the clearing house.
 - `hexset.fitting` fits the evaluation weights *and* the win temperature in
   one solve: a conditional logit over the four seats of a recorded position,
@@ -174,6 +230,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   names only the lowest-numbered owing seat. It now shows the phase to any
   seat with a `discard_quota` entry left to clear. The modal itself needed
   no change: it opens off `state.legal_actions`, which now answers per seat.
+- `hexset.trading.default_respond` countered with exchanges it would then
+  refuse: a candidate was admitted on the *actor's* estimated gain alone,
+  with the responder's own gain used only to rank what was already in. When
+  the actor took such a deal, `execute_agreed`'s fresh ask of that same gate
+  turned it down. A counter now has to clear the floor on both sides, like
+  every other admitted exchange.
+- A seat's view carried two keys named `round` -- the lap number every log
+  line is tagged with, and the open trade round -- so only the second
+  survived and the lap number never reached a client. The board's log pane,
+  which filters on it, showed nothing at all. The open round is
+  `trade_round` now; `round` is the lap number again.
 - `hexset.__version__` tried installed package metadata before the source
   tree's `pyproject.toml`, so an editable install with stale dist-info kept
   reporting `0.26.0` for four releases after the tree moved on; it now reads

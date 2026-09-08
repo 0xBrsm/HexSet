@@ -53,13 +53,19 @@ from hexset.ledger import PublicLedger
 from hexset.roads import road_lengths
 from hexset.state import MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS, GameState, copy_state
 from hexset.trading import (
+    MAX_TRADE_CARDS,
+    RESPONSE_COUNTER,
     RESPONSE_PASS,
     Bundle,
     Offer,
     Response,
     Trade,
+    _candidates,
     apply_trades,
-    valued_many,
+    default_offer,
+    default_pick,
+    default_respond,
+    execute_agreed,
 )
 from hexset.victory import public_victory_points, victory_points
 
@@ -186,134 +192,39 @@ def board_layout(board: Board, size: float = 60.0) -> dict:
 
 @dataclass(frozen=True)
 class PendingGate:
-    """A seat's gate under confirm mode: never clears on its own, and
-    records every candidate the table's automatic trade event found for it
-    instead (`agents/reference/trading-final.md`, item 5).
+    """The gate of a manual seat -- a person at the page or an LLM over MCP
+    -- installed at seat-up (`GameSession.confirm_mode`). It never agrees to
+    anything on its own: every answer a manual seat gives goes through the
+    server (`GameSession.answer_round`, `execute_round_choice`), where the
+    submission itself is the consent (`hexset.trading.execute_agreed`).
 
-    `gains_many` (below) is this seat's surface for the automatic clearing
-    house (`hexset.trading.trade_event`/`_best_clearing`), unchanged by
-    anything here. `offer`/`respond`/`choose` (further below) are the same
-    seat's surface for the *trade round* instead -- the served table's own
-    protocol (`hexset.trading.trade_round`, `hexset.trading`'s module
-    docstring "The trade round") -- and are simpler precisely because the
-    round asks each of the three separately: nothing here has to
-    disambiguate which role a batched `gains_many` call was playing the way
-    the clearing-house method below still must.
-
-    `gains_many` always returns a negative gain for every candidate it is
-    asked about -- so nothing this seat is party to can ever clear on its
-    own -- and its only side effect is appending each candidate to
-    `game.pending` for the player (or LLM) to review through
-    `POST .../trade/confirm` or `.../decline`. Batched now: a table's
-    automatic event asks this gate once over the whole subset it is
-    considering (`hexset.trading._best_clearing`), so one event can record
-    several candidates against this seat at once, not only the first one
-    another seat's own gate happened to accept. Holds `game` rather than
-    `game.pending` itself so that a later event's `game.pending = []` (see
-    `trade_event`) is seen through the same reference, not one already left
-    behind.
-
-    This gate is asked in two quite different shapes, and both record --
-    `_best_clearing` (`hexset.trading`) does not distinguish a `PendingGate`
-    from any other gate, so neither does this method:
-
-    * As the **counterparty** to a real actor: `_best_clearing` calls this
-      once per event with every candidate that one acting seat already
-      priced above zero, `counterparties` one seat repeated. `gain_a` on
-      each recorded `Trade` is that acting seat's own gain, recomputed by
-      asking its gate again over the mirrored bundle (the same call
-      `_best_clearing` already made to price it the first time, not
-      re-derived any other way) -- what `GameSession.pending_for` sorts by
-      and caps to the top 5 a viewer is ever shown, since a lenient bot
-      gate can price many candidates above zero in one event. Skipped --
-      `gain_a` stays the default `0.0` -- when `counterparties` is not in
-      fact uniform (see the next bullet, which this method cannot tell
-      apart from this one just by looking at one call), when no `gates` are
-      seated at all (this module's own bare-engine tests), or when the
-      acting seat's own gate is *also* a `PendingGate`: asking a recording
-      gate purely to estimate a number would append its own
-      (differently-perspectived) entries to `game.pending` as a side
-      effect, which real play never reaches (see the next bullet) but is
-      not worth relying on silently.
-    * As the **actor** itself, when this seat is the current player:
-      `_best_clearing` asks `me`'s gate once over *every* coverable
-      candidate (`hexset.trading._candidates`, `counterparties` here is
-      `thems` -- one entry per candidate, not a single seat repeated)
-      before any counterparty is ever consulted. A `PendingGate` prices
-      every one of them at `-1.0`, so nothing downstream ever clears and no
-      counterparty's gate is asked for this event -- but the candidates are
-      still recorded here, against whichever seat each one would have gone
-      to. `_candidates`, not this class, decides how many that is, but it
-      is now bounded by `hexset.trading.MAX_TRADE_CARDS`: at most 55
-      bundles a side over five resources, not the ~100,000 a rich,
-      spread-out hand could reach before that cap. `pending_for`'s cap
-      still holds for what a viewer is ever shown.
+    Under the trade round (`hexset.trading`, "The trade round") `offer`
+    passes -- a person composes an offer through `POST .../trade/round`,
+    never automatically; `respond` records the broadcast to `game.pending`
+    for the seat to answer later and passes for the round's own
+    bookkeeping; `pick` declines -- a person picks through
+    `POST .../trade/round/choose`. `gains_many`, the clearing house's
+    surface, refuses everything; a served table never reaches it
+    (`game.max_trades = 0`, `api.build_session`).
     """
 
     game: "Game"
     seat: int
 
-    def gains_many(
-        self, view, received: Sequence[Bundle], counterparties: Sequence[int]
-    ) -> list[float]:
-        del view
-        gains_a = [0.0] * len(received)
-        # A uniform `counterparties` is the shape `_best_clearing` calls this
-        # gate with when it sits as *counterparty* to one real actor; a
-        # per-candidate mix of seats means it is being asked as the *actor*
-        # instead (see the class docstring's second bullet), where "the
-        # acting seat's own gain" is not a meaningful number to compute --
-        # every one is already known to price at -1.0, that being this
-        # gate's own answer.
-        if received and self.game.gates is not None and counterparties.count(counterparties[0]) == len(
-            counterparties
-        ):
-            actor = counterparties[0]
-            trader = self.game.gates[actor]
-            if trader is not None and not isinstance(trader, PendingGate):
-                mirrors = [tuple(-n for n in r) for r in received]
-                gains_a = valued_many(
-                    trader, self.game.state(actor), mirrors, [self.seat] * len(received)
-                )
-        for r, c, gain_a in zip(received, counterparties, gains_a):
-            self.game.pending.append(Trade(self.seat, c, r, gain_a=gain_a))
+    def gains_many(self, view, received: Sequence[Bundle], counterparties: Sequence[int]) -> list[float]:
+        del view, counterparties
         return [-1.0] * len(received)
 
-    # -- the trade round (`hexset.trading.trade_round`, the served table's ---
-    # protocol -- see `hexset.trading`'s module docstring, "The trade round")
-
     def offer(self, view, candidates):
-        """A human or LLM seat never auto-broadcasts: it composes an offer
-        through the modal/MCP, which is a separate server call
-        (`hexset.trading.Offer` built directly from what the seat submits),
-        not a `trade_round` step. `None` -- pass -- for every synchronous
-        round `trade_round` runs on this seat's turn until that call lands.
-        """
         del view, candidates
         return None
 
     def respond(self, view, offer: Offer) -> Response:
-        """Record the broadcast `offer` to `game.pending` for this seat to
-        review (the same list `GameSession.pending_for` already reads,
-        top-N by the actor's own gain), and answer `PASS` for the round's
-        own purposes -- the same "never clears on its own" contract
-        `gains_many` above keeps for the clearing house. `trading-final.md`
-        item 5 / "the trade round" item 2: the round stays open for the
-        rest of this seat's turn to answer for real (accept or counter)
-        through `POST .../trade/confirm`/`.../decline` or their trade-round
-        successors; nothing here loses that offer, it is simply not
-        answered *yet*.
-        """
         del view
         self.game.pending.append(Trade(offer.actor, self.seat, offer.received))
         return Response(self.seat, RESPONSE_PASS)
 
-    def choose(self, view, responses):
-        """A human or LLM actor never auto-executes: it picks (or declines)
-        through the modal/MCP, a separate server call, not a synchronous
-        `trade_round` step. `None` -- decline every response -- for every
-        round this seat's own gate is asked to judge automatically.
-        """
+    def pick(self, view, responses):
         del view, responses
         return None
 
@@ -336,27 +247,52 @@ def wire_to_action(data: dict) -> Action:
         raise ValueError(f"malformed action payload: {data!r}") from exc
 
 
-# --- Wire format for a manually composed trade ---------------------------------
+# --- Wire format for the trade round (`hexset.trading`, "The trade round") ---
+#
+# Positional counts in `RESOURCE_NAMES` order, never named amounts: a round's
+# bundles are echoed back verbatim by the client at every later step (an
+# offer's `received`, a response's `bundle`), so the wire carries them exactly
+# as the engine does and no client reconstructs one from named parts.
 
 
-def bundle_from_wire(give: dict, receive: dict) -> Bundle:
-    """A signed `Bundle`, positive towards the proposer, from the named
-    amounts `POST .../trade`'s body carries (`{"Wood": 2}`, matching
-    `RESOURCE_NAMES`'s own resource-name convention). Raises `ValueError` --
-    the same as a malformed action -- for an unknown name or a non-integer
-    count."""
-    index = {name: r for r, name in enumerate(RESOURCE_NAMES)}
-    counts = [0] * NUM_RESOURCES
-    for side, sign in ((give, -1), (receive, 1)):
-        for name, n in (side or {}).items():
-            r = index.get(name)
-            if r is None:
-                raise ValueError(f"unknown resource: {name!r}")
-            try:
-                counts[r] += sign * int(n)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(f"malformed amount for {name!r}: {n!r}") from exc
-    return tuple(counts)
+def round_bundle_from_wire(give: list, want: list) -> Bundle:
+    """A signed `Bundle` for `POST .../trade/round`'s own body, positive
+    towards the proposer -- `give`/`want` are each `NUM_RESOURCES`-long
+    lists of nonnegative counts, on disjoint resources, `MAX_TRADE_CARDS`
+    cards or fewer a side (`hexset.trading`'s own cap, checked again here
+    rather than only at broadcast time, so a malformed request is refused
+    before anything is asked of a gate). Raises `ValueError` naming the
+    first check that fails."""
+    give = _int_list(give, "give")
+    want = _int_list(want, "want")
+    if any(n < 0 for n in give) or any(n < 0 for n in want):
+        raise ValueError("give/want must be nonnegative")
+    if any(g and w for g, w in zip(give, want)):
+        raise ValueError("give and want must not share a resource")
+    if not 0 < sum(give) <= MAX_TRADE_CARDS:
+        raise ValueError(f"give must be 1-{MAX_TRADE_CARDS} cards")
+    if not 0 < sum(want) <= MAX_TRADE_CARDS:
+        raise ValueError(f"want must be 1-{MAX_TRADE_CARDS} cards")
+    return tuple(w - g for w, g in zip(want, give))
+
+
+def signed_bundle_from_wire(values: list) -> Bundle:
+    """A signed `Bundle` echoed straight off the wire -- `.../trade/round/
+    answer`'s `received` and `.../trade/round/choose`'s `bundle`, both of
+    which name an *exact* offer or response the client read out of a
+    previous `state_view` rather than composing a fresh one (`GameSession.
+    answer_round`/`execute_round_choice` match it verbatim, never a
+    reconstructed approximation)."""
+    return tuple(_int_list(values, "bundle"))
+
+
+def _int_list(values: list, name: str) -> list[int]:
+    if not isinstance(values, list) or len(values) != NUM_RESOURCES:
+        raise ValueError(f"{name} must be a {NUM_RESOURCES}-length list")
+    try:
+        return [int(n) for n in values]
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be integers") from exc
 
 
 # --- Human-readable log -------------------------------------------------------
@@ -512,7 +448,7 @@ class _Event:
     engine only keeps the current hand.
 
     `action` is `None` for the one kind of event that is not a board action
-    at all: a manually executed trade (`GameSession.execute_manual_trade`,
+    at all: a manually executed trade (`GameSession._execute_round_trade`,
     `POST .../trade` or a confirmed pending offer) -- nothing about the
     phase or the turn changed, only two hands, so there is nothing for
     `_describe` to say and `render_log` skips straight to `_trade_lines`.
@@ -765,7 +701,7 @@ def render_log(
             # owed, so any other event is proof the round closed before it.
             flush_discards()
         if event.action is None:
-            # A manually executed trade (`GameSession.execute_manual_trade`):
+            # A manually executed trade (`GameSession._execute_round_trade`):
             # no board action happened, only the exchange itself -- and,
             # like any other line that isn't a build/discard/bank-trade run,
             # it ends whatever run was open.
@@ -849,6 +785,21 @@ def render_log(
 
 
 # --- The session ---------------------------------------------------------------
+
+
+@dataclass
+class _OpenRound:
+    """The current turn's broadcast still being negotiated (`GameSession.
+    open_round`; `None` when nothing is open). `responses` holds at most one
+    answer per seat -- a seat answering again replaces its earlier one.
+    `awaiting` is the manual seats that have not answered yet: while a bot
+    actor's round has any, the table holds that bot's turn (`api.Table.view`
+    reports `trade_wait` and a `to_move` of `None`) so a person gets to
+    accept, counter or pass before the bot picks."""
+
+    offer: Offer
+    responses: list[Response] = field(default_factory=list)
+    awaiting: set[int] = field(default_factory=set)
 
 
 @dataclass
@@ -944,6 +895,10 @@ class GameSession:
     # controlling whether a claimed seat lands here. Never populated for a
     # bot seat; nothing reads it for one.
     confirm_seats: set[int] = field(default_factory=set)
+    # This turn's own broadcast, still being negotiated -- see `_OpenRound`.
+    # `None` whenever nothing is open (before the first broadcast, after one
+    # executes or is declined, or once the turn ends).
+    open_round: "_OpenRound | None" = field(default=None, repr=False)
 
     def set_trader(self, seat: int, trader: object | None) -> None:
         """Seat (or unseat) what answers `seat`'s side of a trade's gate."""
@@ -956,65 +911,197 @@ class GameSession:
         )
 
     def confirm_mode(self, seat: int) -> None:
-        """Gate `seat` with a `PendingGate`, which never clears on its own
-        and records every candidate the table's automatic event finds
-        against this seat to `game.pending`, for the player (or LLM) to
-        confirm or decline through `POST .../trade/confirm`/`.../decline`.
-
-        Called unconditionally for every manual seat, right at seat-up
-        (`api.Tables.create`/`Table.join`) -- there is no other gate a
-        person or an LLM can get any more, and no flag left to ask for one.
-        Installing it here, at seat-up, rather than waiting for anything
-        else is what makes "a person at the web page does not trade
-        automatically" a property of sitting down. Bots are unaffected:
-        their own gates are seated by `api.Tables._spawn_local_bots`/
-        `seat_bot`, and they go on trading with each other through the same
-        engine event.
-        """
+        """Gate `seat` with a `PendingGate` -- every manual seat, at seat-up
+        (`api.Tables.create`/`Table.join`): a person or an LLM only ever
+        trades through its own explicit answers on the round."""
         self.confirm_seats.add(seat)
         self.set_trader(seat, PendingGate(self.game, seat))
 
     def pending_for(self, seat: int) -> list[Trade]:
-        """`seat`'s own pending offers, top 5 by the acting seat's own
-        gain, descending (`agents/reference/trading-final.md`, item 1) --
-        the single source both `state_view`'s `pending` block and
-        `api.Tables._pending_of` read, so a confirm/decline call's `index`
-        always counts into the same list a viewer was just shown. A
-        `PendingGate` can record more than 5 in one event (see its own
-        docstring); this is what actually bounds what a person is handed.
-        """
-        mine = [t for t in self.game.pending if t.a == seat]
-        return sorted(mine, key=lambda t: t.gain_a, reverse=True)[:5]
+        """The broadcasts standing against `seat`, unanswered:
+        `PendingGate.respond` records one as `Trade(actor, seat, received)`,
+        signed towards the actor."""
+        return [t for t in self.game.pending if t.b == seat]
 
-    def execute_manual_trade(self, proposer: int, counterparty: int, bundle: Bundle) -> Trade:
-        """Runs `Game.execute_trade` for a bundle composed outside the
-        automatic event -- a proposal (`api.Tables.trade`) or a confirmed
-        pending offer (`api.Tables.confirm_trade`) -- and records it the two
-        ways an automatic clearing is recorded, so neither the sidebar log
-        nor a resumed game ever forgets it:
+    def is_manual(self, seat: int) -> bool:
+        return isinstance(self.traders.get(seat), PendingGate)
 
-        * One line in the log (`_trade_lines`, via an `_Event` with no
-          `action` of its own -- nothing about the phase or the turn
-          changed, only two hands, so there is nothing else to describe).
-        * One line in the journal (`Journal.manual_trade`), replayed by
-          `restore` as its own step (`journal.replayable` hands back an
-          `action`-less entry the same way) -- without this the trade still
-          happened in the live game but a server restart would silently
-          lose it, since resuming rebuilds hands purely from recorded
-          actions and *their* attached trades.
+    def trade_wait(self) -> list[int]:
+        """The manual seats a bot actor's open round is still waiting on.
+        Empty for a manual actor (a person picks whenever they like) and
+        whenever no round is open."""
+        round_ = self.open_round
+        if round_ is None or self.is_manual(round_.offer.actor):
+            return []
+        return sorted(round_.awaiting)
 
-        Also clears any pending take-back (`self._undo`): a manual trade
-        moves cards same as a build does, and an undo point captured before
-        it must not silently erase this trade along with whatever it was
-        actually asked to take back.
-        """
+    # -- the trade round (`hexset.trading`, "The trade round"): the session
+    # drives it itself so a round survives between calls -- a person's answer
+    # lands well after the broadcast that invited it.
+
+    def begin_round(self) -> None:
+        """A bot actor's broadcast at MAIN entry (`_apply`): its gate's
+        `offer` over every coverable candidate, or nothing. A manual actor
+        broadcasts through `open_round_for` instead."""
+        self._close_round()
+        game = self.game
+        me = game.current_player
+        if me in game.locked:
+            return
+        gate = self.traders.get(me)
+        if gate is None or isinstance(gate, PendingGate):
+            return
+        # true state: the engine enumerates coverable candidates as the referee.
+        candidates = list(_candidates(game.state(0, hidden=False), me, game.locked))
+        if not candidates:
+            return
+        view = game.state(me)
+        offer_fn = getattr(gate, "offer", None)
+        index = offer_fn(view, candidates) if offer_fn is not None else default_offer(gate, view, candidates)
+        if index is None or not (0 <= index < len(candidates)):
+            return
+        _them, received = candidates[index]
+        self._broadcast(Offer(me, received))
+
+    def open_round_for(self, actor: int, received: Bundle) -> None:
+        """A manual actor's own broadcast (`POST .../trade/round`), already
+        validated by the caller. Replaces any round it had open."""
+        self._close_round()
+        self._broadcast(Offer(actor, received))
+
+    def _broadcast(self, offer: Offer) -> None:
+        game = self.game
+        responses: list[Response] = []
+        awaiting: set[int] = set()
+        for seat in range(game.num_players):
+            if seat == offer.actor or seat in game.locked:
+                continue
+            gate = self.traders.get(seat)
+            if gate is None:
+                continue
+            view = game.state(seat)
+            respond_fn = getattr(gate, "respond", None)
+            response = respond_fn(view, offer) if respond_fn is not None else default_respond(gate, view, offer)
+            if isinstance(gate, PendingGate):
+                awaiting.add(seat)  # recorded to `game.pending`; answers through `answer_round`
+            elif response.kind != RESPONSE_PASS:
+                responses.append(response)
+        self.open_round = _OpenRound(offer, responses, awaiting)
+        self._resolve()
+
+    def _resolve(self) -> Trade | None:
+        """A bot actor's pick once every manual seat has answered: its gate's
+        `pick` over the responses, executed through `_execute_round_trade`;
+        the round closes either way. Nothing happens for a manual actor
+        (who picks through `execute_round_choice`) or while `awaiting` is
+        non-empty."""
+        round_ = self.open_round
+        if round_ is None:
+            return None
+        actor = round_.offer.actor
+        gate = self.traders.get(actor)
+        if gate is None or isinstance(gate, PendingGate) or round_.awaiting:
+            return None
+        trade = None
+        view = self.game.state(actor)
+        pick_fn = getattr(gate, "pick", None)
+        chosen = pick_fn(view, round_.responses) if pick_fn is not None else default_pick(gate, view, round_.responses)
+        if chosen is not None and 0 <= chosen < len(round_.responses):
+            response = round_.responses[chosen]
+            if response.kind != RESPONSE_PASS and response.bundle is not None:
+                try:
+                    trade = self._execute_round_trade(actor, response.seat, response.bundle)
+                except ValueError:
+                    trade = None
+        self._close_round()
+        return trade
+
+    def _close_round(self) -> None:
+        """Drop the open round and every unanswered `pending` entry it left
+        with a manual seat -- an offer nobody can act on any more must not
+        keep showing on a page."""
+        round_ = self.open_round
+        if round_ is not None:
+            offer = round_.offer
+            self.game.pending = [
+                t for t in self.game.pending
+                if not (t.a == offer.actor and t.received == offer.received)
+            ]
+        self.open_round = None
+
+    def answer_round(self, seat: int, actor: int, received: Bundle, kind: str, bundle: Bundle | None) -> None:
+        """A manual `seat` answers the open broadcast from `actor` -- the
+        exact offer its `pending` showed (`received`, signed towards
+        `actor`): `"accept"`, `"counter"` (`bundle` is the counter, signed
+        towards `actor`) or `"pass"`. `ValueError` for an offer that is no
+        longer open, or a counter `seat` cannot cover. A fresh answer
+        replaces the seat's earlier one; then a bot actor resolves the
+        round once nobody is left to wait on (`_resolve`)."""
+        round_ = self.open_round
+        if round_ is None or round_.offer.actor != actor or round_.offer.received != received:
+            raise ValueError("that offer is no longer open")
+        if kind == RESPONSE_COUNTER:
+            if bundle is None:
+                raise ValueError("a counter needs a bundle")
+            give = [max(0, n) for n in bundle]  # what `seat` hands over: positive towards the actor
+            take = [max(0, -n) for n in bundle]
+            if not any(give) or not any(take) or any(g and t for g, t in zip(give, take)):
+                raise ValueError("a counter gives and gets on disjoint resources")
+            if sum(give) > MAX_TRADE_CARDS or sum(take) > MAX_TRADE_CARDS:
+                raise ValueError(f"a trade moves at most {MAX_TRADE_CARDS} cards a side")
+            # true state: the engine is the referee for coverage.
+            hand = self.game.state(0, hidden=False).hands[seat]
+            if any(hand[r] < n for r, n in enumerate(give)):
+                raise ValueError("you cannot cover your side of that counter")
+        self.game.pending = [
+            t for t in self.game.pending
+            if not (t.a == actor and t.b == seat and t.received == received)
+        ]
+        round_.responses = [r for r in round_.responses if r.seat != seat]
+        if kind != RESPONSE_PASS:
+            round_.responses.append(Response(seat, kind, received if kind != RESPONSE_COUNTER else bundle))
+        round_.awaiting.discard(seat)
+        self._resolve()
+
+    def execute_round_choice(self, actor: int, seat: int, bundle: Bundle) -> Trade:
+        """A manual `actor`'s own pick (`POST .../trade/round/choose`):
+        `seat`'s recorded response whose `bundle` matches exactly, executed
+        through `_execute_round_trade`. `ValueError` for no open round or no
+        such response; the round closes on success."""
+        round_ = self.open_round
+        if round_ is None or round_.offer.actor != actor:
+            raise ValueError("there is no open round to choose from")
+        if not any(r.seat == seat and r.kind != RESPONSE_PASS and r.bundle == bundle for r in round_.responses):
+            raise ValueError("no such response is open")
+        trade = self._execute_round_trade(actor, seat, bundle)
+        self._close_round()
+        return trade
+
+    def decline_round(self, actor: int) -> None:
+        """`actor` declines every response on its open round. Nothing moves."""
+        round_ = self.open_round
+        if round_ is None or round_.offer.actor != actor:
+            raise ValueError("there is no open round to decline")
+        self._close_round()
+
+    def _execute_round_trade(self, actor: int, counterparty: int, bundle: Bundle) -> Trade:
+        """Execute an agreed exchange (`hexset.trading.execute_agreed`): a
+        bot side has its gate re-asked fresh, a manual side's consent is its
+        submission. Recorded the two ways an automatic clearing is -- one
+        `_Event` of its own for the log (`_trade_lines`) and one journal
+        line (`Journal.manual_trade`, replayed by `restore`) -- and clears
+        any pending take-back, since cards moved."""
         round_num = self.round
         before = _snapshot(self.game)
-        trade = self.game.execute_trade(proposer, counterparty, bundle)
+        trade = execute_agreed(
+            self.game, actor, counterparty, bundle,
+            ask_actor=not self.is_manual(actor),
+            ask_counterparty=not self.is_manual(counterparty),
+        )
         self.events.append(
             _Event(
                 round_num=round_num,
-                actor=proposer,
+                actor=actor,
                 action=None,
                 before=before,
                 after=_snapshot(self.game),
@@ -1056,13 +1143,15 @@ class GameSession:
         which kind of player it belongs to, so the two sources are merged
         here rather than at each of the half-dozen call sites. A claimed
         seat with no bot label falls back to its own registered name, or
-        plain "player" if it never gave one: every seat gets a label, so
-        `_who` never has to invent one.
+        "human" if it never gave one -- lowercase, matching the bot names
+        (search2, heximax) and the client's own label for its seat (see
+        seatLabel in index.html): every seat gets a label, so `_who` never
+        has to invent one.
         """
         labels = dict(self.bot_names)
         for seat in self.claimed_seats:
             if seat not in labels:
-                labels[seat] = self.player_names.get(seat) or "player"
+                labels[seat] = self.player_names.get(seat) or "human"
         return SeatLabels(labels, locked_of(self.game))
 
     def claim(self, seat: int, name: str | None) -> None:
@@ -1115,7 +1204,7 @@ class GameSession:
         so the recorded `Trade` is simply re-executed (`apply_trades`, not
         `Game.execute_trade` -- replaying trusts the journal outright, the
         same as an automatic clearing's own replay does) and logged the
-        same way `execute_manual_trade` logs a live one.
+        same way `_execute_round_trade` logs a live one.
 
         `journal` is attached only once the replay is done: it is the file
         these steps were just read out of, and a session journalling as it
@@ -1244,6 +1333,8 @@ class GameSession:
         settle(self.game, seating_before)
         if action.type is ActionType.ROLL:
             self.last_roll_by_seat[actor] = self.game.last_roll
+        if action.type is ActionType.END_TURN:
+            self._close_round()  # a round is a per-turn thing
         self.events.append(
             _Event(
                 round_num=round_num,
@@ -1280,6 +1371,19 @@ class GameSession:
         # was there. A win is excluded because the record above may already
         # be on disk by now.
         self._undo = undo_point if (undo_point is not None and not is_over(self.game)) else None
+
+        if (
+            replay is None
+            and action.type in (ActionType.ROLL, ActionType.MOVE_ROBBER)
+            and self.game.phase is Phase.MAIN
+        ):
+            # MAIN entry -- where the clearing house used to fire for a served
+            # table (`game.max_trades = 0` switches it off, `api.build_session`)
+            # -- opens this turn's round for a bot actor. After this action's own
+            # event and journal line, so a trade the round executes at once is
+            # recorded once, as its own step (`_execute_round_trade`). Never on
+            # a journal replay, which asks no gate.
+            self.begin_round()
 
     def undo_last_build(self, seat: int) -> None:
         """Reverts `seat`'s most recent placement, bank/port trade, or Road
@@ -1475,24 +1579,39 @@ class GameSession:
                 }
                 for t in game.trades
             ],
-            # This turn's *pending* offers (`Game.pending`): a snapshot of
-            # the last trade event against a confirm-mode seat, filtered per
-            # viewer -- only the seat named `a` (the one the offer is
-            # standing against) ever sees an entry, since it names a private
-            # exchange nobody has agreed to yet (`agents/reference/
-            # trading-final.md`, item 1) -- and capped to the top 5 by the
-            # acting seat's own gain (`pending_for`). Empty for a spectator
-            # (`viewer is None`).
+            # The broadcasts standing against `viewer` unanswered (`pending_for`):
+            # `bundle` is the offer's own `received`, signed towards `actor`,
+            # echoed back verbatim by `POST .../trade/round/answer`.
             "pending": [
-                {
-                    "counterparty": t.b,
-                    "gave": [max(0, -n) for n in t.received],
-                    "got": [max(0, n) for n in t.received],
-                }
+                {"actor": t.a, "bundle": list(t.received)}
                 for t in self.pending_for(viewer)
             ]
             if viewer is not None
             else [],
+            # `viewer`'s own open round, only for the seat that broadcast it:
+            # the offer, every accept/counter so far (`bundle` signed towards
+            # the actor, echoed back by `.../trade/round/choose`), and the
+            # manual seats still to answer.
+            #
+            # `trade_round`, not `round`: this dict already carries a `round`
+            # — the lap number the log lines are tagged with — and two keys of
+            # one name in one literal silently keep the second. That is what
+            # happened: the lap number never reached a client, so the sidebar
+            # log's current-round filter matched nothing and the log read
+            # empty from the day the trade round landed.
+            "trade_round": (
+                {
+                    "offer": {"actor": self.open_round.offer.actor, "bundle": list(self.open_round.offer.received)},
+                    "responses": [
+                        {"seat": r.seat, "kind": r.kind, "bundle": list(r.bundle)}
+                        for r in self.open_round.responses
+                        if r.kind != RESPONSE_PASS
+                    ],
+                    "awaiting": sorted(self.open_round.awaiting),
+                }
+                if self.open_round is not None and self.open_round.offer.actor == viewer
+                else None
+            ),
             "legal_actions": self.legal_wire_actions(viewer),
             "log": self.log_for(viewer, omniscient=omniscient),
         }

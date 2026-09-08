@@ -56,31 +56,15 @@ waiting, never a clock doing it for them.
 Every response here is built for one viewer. Two of the filters are not
 obvious and both are load-bearing:
 
-The turn's trade log is public to every viewer (`hexset.trading`; there is
-no public valuation layer any more -- a seat's gate is a private judgement,
-never advertised). `POST /api/games/<code>/trade` lets a seat compose a
-bundle against any counterparty whose own gate clears `TRADE_FLOOR`
-(`hexset.game.Game.execute_trade`, `docs/bot-api.md` §3), on its own turn
-against anyone or during another seat's turn against that seat only;
-`GET .../trade/acceptable` is the same seat's own read-only preview of what
-every bot counterparty would accept right now, computed with no mutation;
-`pending` in the per-viewer state is a snapshot of what the current player's
-own trade event found against a manual (human or LLM) seat -- every such
-seat gets a `PendingGate` unconditionally, there is no other mode -- and
-`.../trade/confirm`/`.../trade/decline` answer one of those.
-
-The `action_mask`/`options` on `GET /api/record` are the engine's own
-`legal_actions`, and so is what an embedded bot searches: one list for every
-seat, honest by construction now that no action's legality depends on
-another seat's hand.
-
-## Liveness is people, not bots
-
-`Table.last_seen` is refreshed by a request from a person or an external
-client, never by an embedded bot runner's poll — a runner parks on a long poll
-until its game ends, so counting those would mean no table with a bot at it
-could ever go stale. Eviction (`_evict_stale`) runs on every `get` as well as
-on `create`, and closing a table stops its runners before the journal.
+The turn's trade log is public to every viewer (`hexset.trading`). Trading
+between seats is the trade round (`hexset.trading`, "The trade round";
+`docs/bot-api.md` §3): `POST /api/games/<code>/trade/round` broadcasts one
+offer from the current player to every other seat, `.../trade/round/answer`
+is a seat's accept, counter or pass on a broadcast its `pending` shows, and
+`.../trade/round/choose` is the actor's pick among the answers, or a decline
+of them all. Every manual seat (human or LLM) is a `PendingGate`: nothing is
+ever agreed on its behalf. While a bot's broadcast waits on a manual seat's
+answer the table holds that bot's turn (`trade_wait`, `to_move` None).
 """
 
 from __future__ import annotations
@@ -102,8 +86,9 @@ from hexset.arena import PRESETS, spawn as spawn_entrant
 from hexset.board.board import Board, random_base_board
 from hexset.bots import Bot
 from hexset.clients.botclient import BotRunner, LocalSearchBrain, LocalTransport
-from hexset.game import is_over, lock_seat, may_act
+from hexset.game import Phase, is_over, lock_seat, may_act
 from hexset.onnx_record import record_from_game
+from hexset.trading import holds
 
 from . import journal
 from hexset.actions import legal_actions
@@ -113,7 +98,8 @@ from .webplay import (
     ResumeError,
     action_to_wire,
     board_layout,
-    bundle_from_wire,
+    round_bundle_from_wire,
+    signed_bundle_from_wire,
 )
 
 # The opponents that are not files. Everything else in the picker is a path to
@@ -422,10 +408,9 @@ class Table:
         Every manual seat gets a `PendingGate` the instant it is claimed --
         there is no flag left to opt out of it (`agents/reference/
         trading-final.md`, item 5: "human and LLM seats are direct gates").
-        Nothing ever auto-clears against a person or an LLM; a bot's own
-        trade event only ever *records* a candidate against this seat
-        (`GameSession.confirm_mode`), for `POST .../trade/confirm` or
-        `.../trade/decline` to answer."""
+        Nothing is ever traded on a person's or an LLM's behalf: a bot's
+        broadcast is recorded against this seat (`GameSession.confirm_mode`)
+        and answered through the trade round."""
         candidates = [
             i
             for i, seat in enumerate(self.seats)
@@ -459,10 +444,12 @@ class Table:
             self.bump()
         waiting = self.waiting_for()
         state["waiting_for"] = waiting
-        if waiting:
-            # Nobody's turn while a seat is still empty — overrides
-            # `state_view`'s own `to_move`, which knows nothing about the
-            # hold (see `waiting_for`'s docstring).
+        # The manual seats a bot's trade offer is waiting on. Nobody moves
+        # while either list is non-empty: `to_move` reads `None`, so the bot
+        # runner (which acts only when a view names its seat) parks on its
+        # long poll until the answer bumps the table.
+        state["trade_wait"] = self.session.trade_wait()
+        if waiting or state["trade_wait"]:
             state["to_move"] = None
         state["code"] = self.code
         state["seats"] = [seat.public(i) for i, seat in enumerate(self.seats)]
@@ -528,6 +515,15 @@ def build_session(code: str, seats: list[Seat], config: Config, *, first: int) -
     # cannot reconstruct, and a journalled game would fail to resume.
     board = random_base_board(random.Random(seed))
     game = start_at(board, MAX_SEATS, random.Random(seed), first=first)
+    # The automatic clearing house is off for every served table, for good
+    # -- the trade round (`GameSession.begin_round`) is this table's own
+    # trading protocol now, driven by the session itself rather than by
+    # `hexset.game.run_trade_event` (`agents/reference/trading-final.md`,
+    # "the trade round"). Set here, at the one place a served game's engine
+    # object is built, rather than left to `Config.max_trades` (which still
+    # governs a *bot's own* internal never-trade flag, a different thing --
+    # see `spawn_bot`).
+    game.max_trades = 0
     bot_names, bot_specs, player_names = _seat_labels(seats)
     claimed = {i for i, s in enumerate(seats) if s.kind is not SeatKind.EMPTY}
     return GameSession(
@@ -571,6 +567,7 @@ def resume_session(code: str, seats: list[Seat], config: Config) -> GameSession 
     board = random_base_board(random.Random(seed))
     bot_names, bot_specs, player_names = _seat_labels(seats)
     game = start_at(board, MAX_SEATS, random.Random(seed), first=first)
+    game.max_trades = 0  # the trade round is this table's protocol; see `build_session`
     game.locked = journal.locked_seats(events)  # noqa: attribute, see seating.py
     claimed = {i for i, s in enumerate(seats) if s.kind is not SeatKind.EMPTY}
     session = GameSession(
@@ -842,6 +839,8 @@ class Tables:
         if waiting:
             names = ", ".join(str(s) for s in waiting)
             raise ApiError(f"waiting for seats: {names}", status=409)
+        if table.session.trade_wait():
+            raise ApiError("waiting for trade answers", status=409)
         table.session.submit(seat, wire)
         table.bump()
         return table.view(seat)
@@ -964,134 +963,76 @@ class Tables:
             table.bump()
         return table.view(viewer)
 
-    def acceptable_trades(self, table: Table, seat: int) -> dict:
-        """`GET /api/games/<CODE>/trade/acceptable`: `seat`'s own preview of
-        what `POST .../trade` would accept right now -- the actor's view
-        onto `hexset.trading._candidates`, computed with **no engine
-        mutation at all**.
+    # --- the trade round (`hexset.trading`, "The trade round") --------------
 
-        Enumerates every bundle `seat` could cover with each other unlocked
-        seat, same as the automatic event; for every counterparty that is
-        the current player or, if `seat` itself is the current player,
-        every other seat (the same turn-timing rule `execute_trade` itself
-        enforces), asks that counterparty's own `gains_many` once, batched
-        over its whole candidate set, and keeps the subset that clears
-        `TRADE_FLOOR` (`clears_floor`). Sorted within a counterparty by that
-        counterparty's own gain, descending, capped at 12; counterparties
-        themselves are sorted the same way, by their best offer.
-
-        A manual (human or LLM) seat is never a counterparty here: its
-        answer is asynchronous, through `state_view`'s `pending` block once
-        something is actually proposed against it, never through this
-        enumeration (`agents/reference/trading-final.md`, item 5).
-        """
-        from hexset.game import Phase
-        from hexset.trading import Bundle, _candidates, clears_floor, valued_many
-
+    def open_round(self, table: Table, seat: int, payload: dict) -> dict:
+        """`POST /api/games/<CODE>/trade/round`: broadcast one offer --
+        `{"give": [5 ints], "want": [5 ints]}`, unsigned counts in
+        `RESOURCE_NAMES` order, 1-3 cards a side on disjoint resources
+        (`round_bundle_from_wire`) -- to every other seat. Only on `seat`'s
+        own turn in MAIN, and only while `seat` holds `give`. Bots answer at
+        once; a manual seat's answer lands later through
+        `.../trade/round/answer`. Returns the seat's view: its `trade_round` block
+        carries the answers so far and who is still to answer."""
         game = table.session.game
         if game.phase is not Phase.MAIN:
-            return {"offers": []}
-        # true state: the engine is the referee for coverage
-        # (`trading._candidates`), the same as it is for the automatic event.
+            raise ApiError(f"trading is only open in MAIN, not {game.phase.name}", status=409)
+        if game.current_player != seat:
+            raise ApiError("it is not your turn to open a round", status=409)
+        received = round_bundle_from_wire(payload.get("give") or [], payload.get("want") or [])
+        # true state: the engine is the referee for coverage.
         state = game.state(0, hidden=False)
-        locked = locked_of(game)
-        current = game.current_player
-        by_counterparty: dict[int, list[Bundle]] = {}
-        for them, received in _candidates(state, seat, locked):
-            if seat != current and them != current:
-                continue  # neither side is the current player -- not proposable
-            if table.seats[them].kind is not SeatKind.BOT:
-                continue  # a manual counterparty answers through `pending`
-            by_counterparty.setdefault(them, []).append(received)
-
-        offers = []
-        for them, bundles in by_counterparty.items():
-            trader = game.gates[them] if game.gates is not None else None
-            if trader is None:
-                continue
-            mirrors = [tuple(-n for n in b) for b in bundles]
-            gains = valued_many(trader, game.state(them), mirrors, [seat] * len(bundles))
-            deals = sorted(
-                (
-                    {
-                        "gave": [max(0, -n) for n in b],
-                        "got": [max(0, n) for n in b],
-                        "gain": g,
-                    }
-                    for b, g in zip(bundles, gains)
-                    if clears_floor(g)
-                ),
-                key=lambda d: d["gain"],
-                reverse=True,
-            )[:12]
-            if deals:
-                offers.append({"counterparty": them, "deals": deals})
-        offers.sort(key=lambda o: o["deals"][0]["gain"], reverse=True)
-        return {"offers": offers}
-
-    def trade(self, table: Table, seat: int, payload: dict) -> dict:
-        """`POST /api/games/<CODE>/trade`: `seat` proposes a bundle to
-        `counterparty` (`docs/bot-api.md` §3). `give`/`receive`
-        are named amounts (`{"Wood": 2}`); `GameSession.execute_manual_trade`
-        (over `hexset.game.Game.execute_trade`) raises `ValueError` -- turned
-        into a 400 by `handle`'s caller like any other -- for a bundle
-        whose given or received side exceeds `hexset.trading.MAX_TRADE_CARDS`
-        (3) cards, either side can't cover, a seat that is neither the
-        proposer nor the current player, or a counterparty whose own gate
-        does not clear `TRADE_FLOOR` on this exchange. On success it is in
-        the sidebar log and the journal exactly the way an automatically
-        cleared trade is.
-        """
-        counterparty = payload.get("counterparty")
-        if not isinstance(counterparty, int):
-            raise ApiError("send a `counterparty` seat")
-        bundle = bundle_from_wire(payload.get("give") or {}, payload.get("receive") or {})
-        table.session.execute_manual_trade(seat, counterparty, bundle)
+        if not holds(state, seat, [max(0, -n) for n in received]):
+            raise ApiError("you cannot cover your side of that offer", status=400)
+        table.session.open_round_for(seat, received)
         table.bump()
         return table.view(seat)
 
-    def _pending_of(self, table: Table, seat: int) -> list:
-        """`seat`'s own pending offers, in the exact order and the same
-        top-5-by-gain cap `state_view`'s `pending` block shows them in --
-        what a confirm/decline call's `index` counts into
-        (`GameSession.pending_for`, `agents/reference/trading-final.md`
-        item 1)."""
-        return table.session.pending_for(seat)
-
-    def confirm_trade(self, table: Table, seat: int, payload: dict) -> dict:
-        """`POST /api/games/<CODE>/trade/confirm`: execute `seat`'s pending
-        offer at `index` exactly as the table found it (its own `(a, b,
-        received)`, via `GameSession.execute_manual_trade`), then drop it
-        from `game.pending` -- confirming a stale entry against hands that
-        already moved fails `execute_trade`'s own checks the same way a
-        fresh proposal would."""
-        index = payload.get("index")
-        mine = self._pending_of(table, seat)
-        if not isinstance(index, int) or not 0 <= index < len(mine):
-            raise ApiError("no pending offer at that index", status=404)
-        trade = mine[index]
-        table.session.execute_manual_trade(trade.a, trade.b, trade.received)
-        table.session.game.pending.remove(trade)
+    def answer_round(self, table: Table, seat: int, payload: dict) -> dict:
+        """`POST /api/games/<CODE>/trade/round/answer`: `{"actor": <seat>,
+        "received": [5 ints], "kind": "accept"|"counter"|"pass", "bundle":
+        [5 ints]?}`. `received` is the exact offer this seat's `pending`
+        showed, signed towards `actor`; `bundle` is the counter, signed the
+        same way (required for `"counter"`). 409 for an offer that is no
+        longer open -- never answered against something else."""
+        actor = payload.get("actor")
+        if not isinstance(actor, int):
+            raise ApiError("send the offer's `actor` seat")
+        kind = payload.get("kind")
+        if kind not in ("accept", "counter", "pass"):
+            raise ApiError('kind must be "accept", "counter" or "pass"')
+        received = signed_bundle_from_wire(payload.get("received") or [])
+        bundle = (
+            signed_bundle_from_wire(payload.get("bundle"))
+            if kind != "pass" and payload.get("bundle") is not None
+            else (received if kind == "accept" else None)
+        )
+        try:
+            table.session.answer_round(seat, actor, received, kind, bundle)
+        except ValueError as error:
+            raise ApiError(str(error), status=409) from None
         table.bump()
         return table.view(seat)
 
-    def decline_trade(self, table: Table, seat: int, payload: dict) -> dict:
-        """`POST /api/games/<CODE>/trade/decline`: drop `seat`'s pending offer
-        at `index`. No cards move.
-
-        This loses the deal outright, not just for now: the bot that offered
-        it has already moved on by the time `seat` ever sees it (the trade
-        event that found this candidate ran and returned before `state_view`
-        could report it, and the game has continued since), so there is no
-        "ask again later" -- declining simply drops the recorded candidate,
-        and the next thing that offers this seat anything is whatever the
-        table's own next trade event finds.
-        """
-        index = payload.get("index")
-        mine = self._pending_of(table, seat)
-        if not isinstance(index, int) or not 0 <= index < len(mine):
-            raise ApiError("no pending offer at that index", status=404)
-        table.session.game.pending.remove(mine[index])
+    def choose_round(self, table: Table, seat: int, payload: dict) -> dict:
+        """`POST /api/games/<CODE>/trade/round/choose`: `{"seat": <seat that
+        answered>, "bundle": [5 ints]}` executes that exact recorded answer;
+        `{"decline": true}` closes the round with nothing moved."""
+        if payload.get("decline"):
+            try:
+                table.session.decline_round(seat)
+            except ValueError as error:
+                raise ApiError(str(error), status=409) from None
+            table.bump()
+            return table.view(seat)
+        responder = payload.get("seat")
+        if not isinstance(responder, int):
+            raise ApiError("send the responding `seat`")
+        bundle = signed_bundle_from_wire(payload.get("bundle") or [])
+        try:
+            table.session.execute_round_choice(seat, responder, bundle)
+        except ValueError as error:
+            raise ApiError(str(error), status=409) from None
         table.bump()
         return table.view(seat)
 
@@ -1249,12 +1190,10 @@ class Tables:
             )
         if method == "POST" and path == "/api/close":
             return self.close_seat(table, seat, int(payload.get("seat", -1)))
-        if method == "GET" and path == f"/api/games/{table.code}/trade/acceptable":
-            return self.acceptable_trades(table, seat)
-        if method == "POST" and path == f"/api/games/{table.code}/trade":
-            return self.trade(table, seat, payload)
-        if method == "POST" and path == f"/api/games/{table.code}/trade/confirm":
-            return self.confirm_trade(table, seat, payload)
-        if method == "POST" and path == f"/api/games/{table.code}/trade/decline":
-            return self.decline_trade(table, seat, payload)
+        if method == "POST" and path == f"/api/games/{table.code}/trade/round":
+            return self.open_round(table, seat, payload)
+        if method == "POST" and path == f"/api/games/{table.code}/trade/round/answer":
+            return self.answer_round(table, seat, payload)
+        if method == "POST" and path == f"/api/games/{table.code}/trade/round/choose":
+            return self.choose_round(table, seat, payload)
         raise ApiError(f"no such endpoint: {method} {path}", status=404)

@@ -23,7 +23,8 @@ from hexset.trading import (
     Response,
     Trade,
     bundle,
-    default_choose,
+    choose_and_execute,
+    default_pick,
     default_offer,
     default_respond,
 )
@@ -168,6 +169,27 @@ def test_default_respond_counters_with_its_best_estimate_clearing_bundle():
     assert response.bundle[SHEEP] == -1
 
 
+def test_default_respond_never_counters_with_a_deal_it_would_refuse():
+    """The actor's estimated gain clears on both counter-candidates, but
+    seat 1's own gain clears on neither -- so it passes rather than
+    countering. A counter it would not itself honour is a deal that fails
+    at `execute_agreed`, which asks the responder's gate again and applies
+    the same floor, in an error the actor could do nothing about."""
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    give(game._state, 0, Resource.SHEEP, 2)
+    game.ledger.receive(0, Resource.SHEEP, 2)
+    offer = Offer(actor=0, received=bundle(wood=-1, ore=1))
+
+    gate = Gate(
+        lambda received, counterparty: -1.0,  # wants nothing on offer
+        lambda counterparty, received: 1.0,  # but thinks the actor wants it all
+    )
+
+    response = default_respond(gate, game.state(1), offer)
+
+    assert response == Response(1, RESPONSE_PASS, None)
+
+
 def test_default_respond_passes_when_nothing_clears():
     game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
     offer = Offer(actor=0, received=bundle(wood=-1, ore=1))
@@ -178,10 +200,10 @@ def test_default_respond_passes_when_nothing_clears():
     assert response == Response(1, RESPONSE_PASS, None)
 
 
-# --- default_choose ----------------------------------------------------------
+# --- default_pick ----------------------------------------------------------
 
 
-def test_default_choose_picks_the_response_with_the_highest_clearing_gain():
+def test_default_pick_picks_the_response_with_the_highest_clearing_gain():
     game = a_game()
     responses = [
         Response(1, RESPONSE_ACCEPT, bundle(wood=-1, ore=1)),
@@ -190,17 +212,17 @@ def test_default_choose_picks_the_response_with_the_highest_clearing_gain():
     ]
     gate = Gate(lambda received, counterparty: {1: 2.0, 2: 9.0}.get(counterparty, -1.0))
 
-    chosen = default_choose(gate, game.state(0), responses)
+    chosen = default_pick(gate, game.state(0), responses)
 
     assert chosen == 1  # seat 2's counter (9.0) beats seat 1's accept (2.0)
 
 
-def test_default_choose_returns_none_when_nothing_clears():
+def test_default_pick_returns_none_when_nothing_clears():
     game = a_game()
     responses = [Response(1, RESPONSE_ACCEPT, bundle(wood=-1, ore=1))]
     gate = Gate(lambda received, counterparty: -1.0)
 
-    assert default_choose(gate, game.state(0), responses) is None
+    assert default_pick(gate, game.state(0), responses) is None
 
 
 # --- trade_round: end to end ---------------------------------------------------
@@ -313,6 +335,44 @@ def test_trade_round_cap_blocks_an_over_cap_counter_even_if_both_gates_would_cle
     assert trade_round(game, gates) == []
     assert game._state.hands[1][ORE] == 5
     assert game._state.hands[0][WOOD] == 1
+
+
+# --- choose_and_execute: resolving a round assembled across more than one call ---
+
+
+def test_choose_and_execute_resolves_responses_collected_across_two_calls():
+    """A served table keeps a round open across a manual seat's late answer
+    (`hexset.server.webplay.GameSession`) rather than calling `trade_round`
+    itself, so it builds its own `responses` list one seat at a time --
+    exactly what this test does by hand -- and calls `choose_and_execute`
+    once enough of them are in, the same way `trade_round`'s own tail
+    would from one synchronous batch."""
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    actor_gate = Gate(lambda r, c: 5.0 if r[ORE] > 0 else -1.0)
+
+    # First call: only seat 2's (indifferent) answer is in hand yet -- no
+    # seat 1 response at all, so nothing can clear.
+    early = [Response(2, RESPONSE_PASS, None)]
+    assert choose_and_execute(game, (actor_gate, None, None, None), 0, early) is None
+    assert game.trades == []
+
+    # Second call: seat 1's real answer has since arrived and is appended to
+    # the same list -- this is the "late manual answer" shape.
+    responder_gate = Gate(lambda r, c: 3.0 if r[WOOD] > 0 else -1.0)
+    gates = (actor_gate, responder_gate, None, None)
+    later = early + [Response(1, RESPONSE_ACCEPT, bundle(wood=-1, ore=1))]
+
+    trade = choose_and_execute(game, gates, 0, later)
+
+    assert trade == Trade(0, 1, bundle(wood=-1, ore=1), gain_a=5.0, gain_b=3.0)
+    assert game.trades == [trade]
+    assert game._state.hands[0][ORE] == 1
+    assert game._state.hands[1][WOOD] == 1
+
+
+def test_choose_and_execute_returns_none_with_no_responses():
+    game = a_game()
+    assert choose_and_execute(game, (Gate(lambda r, c: 5.0), None, None, None), 0, []) is None
 
 
 # --- manual seats (`PendingGate`) --------------------------------------------

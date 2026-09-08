@@ -9,14 +9,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
-### Changed
-
-- References to the sibling training package follow its rename from `hexnet` to `hexn`.
-- References to the private training repository follow its rename to
-  `dev-HexN`.
-
 ### Added
 
+- `POST /api/games`/`POST /api/join` accept an optional `client: {"id":
+  <64-hex sha256>, "kind": "web"|"api"|"mcp"}`; absent defaults to kind
+  `"api"`, an unknown kind or malformed `id` is a 400.
+- `POST /api/reclaim {"code", "secret"}`: mints a fresh token for the seat
+  whose `client.id` equals `sha256(secret)`, replacing any token that seat
+  already held. 403 with no match.
+- An unnamed claimed seat's display name now follows its client's kind:
+  `web` → `human`, `api` → `api`, `mcp` → `mcp`.
+- MCP `new_game`/`join` take a required `model` argument (your exact model
+  identifier); it becomes the seat's client secret, and `resume_game` uses
+  it to reclaim the seat via `POST /api/reclaim` if its saved token stops
+  working.
 - The trade round is now the served table's protocol end to end
   (`docs/bot-api.md` §3). `POST /api/games/<code>/trade/round` broadcasts
   the current player's offer (1-3 cards a side) to every seat;
@@ -69,6 +75,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `PendingGate` no longer records clearing-house candidates.
 
 ### Changed
+
+- References to the sibling training package follow its rename from `hexnet` to `hexn`.
+- References to the private training repository follow its rename to
+  `dev-HexN`.
+- MCP `new_game`/`join` no longer default an unnamed seat's display name to
+  `"mcp"` themselves; the server does it now (see Added, above).
 
 - The trade round's third gate method is `pick(view, responses)`, not
   `choose` -- which is every bot's action picker and collided with it.

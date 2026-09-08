@@ -182,6 +182,18 @@ move, so it survives a restart. A checkpoint served externally
 (`hexset.clients.botclient.RecordBrain`) is never seated as a gate and does
 not trade.
 
+## 4. Identity (manual seats only)
+
+`POST /api/games` and `POST /api/join` take an optional `client: {"id":
+<64-hex sha256>, "kind": "web"|"api"|"mcp"}` — a hash of a secret only the
+caller holds. No `client` at all defaults to kind `"api"`; an unknown kind
+or a malformed `id` is a 400. `POST /api/reclaim {"code", "secret"}` mints a
+fresh token for the seat whose `client.id` equals `sha256(secret)`, once the
+original token is gone (a server restart, most often) — `hexset.server.mcp`'s
+`resume_game` uses this to get its seat back by the same `model` string
+`new_game`/`join` were called with. None of this applies to a `.onnx` bot: a
+checkpoint is never seated as a manual gate and has no client identity.
+
 ## What is never part of this contract
 
 `onnxbot.py`'s job stops at reading these names and shapes. It never imports

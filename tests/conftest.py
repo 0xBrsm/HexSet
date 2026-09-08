@@ -9,8 +9,8 @@ package should not ship one to make its own tests convenient.
 `registry` is the one way a test should build a `Tables`. Every bot seat at
 every table starts a runner thread that lives until its game ends -- parked on
 a read of the table between turns -- and a test that deals three bots and then
-asserts one thing leaves three of them running: PR #2's suite left 67 live `bot-*` threads behind
-(`docs/engine-divergence-2026-09-02.md`, defect 5). Going through the fixture
+asserts one thing leaves three of them running: PR #2's suite left 67 live
+`bot-*` threads behind. Going through the fixture
 means teardown stops them.
 
 The `slow` marker (registered in `pyproject.toml`) is the other lever on wall

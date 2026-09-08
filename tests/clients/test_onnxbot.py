@@ -23,7 +23,7 @@ def checkpoint_v2():
     board — uniform-over-legal prior, zero value, no learned weights (see
     `tests/fixtures/build_stub.py`). This is the only policy `onnxbot`
     serves: contract 1 (and the `encoding_v1`-based policy that read it) was
-    dropped 2026-09-02 (`docs/engine-divergence-2026-09-02.md`, B5), so every
+    dropped 2026-09-02, so every
     generic bot behaviour below — caching, staleness, offer budgets, player
     checks, determinism — is exercised against this fixture rather than a
     frozen contract-1 checkpoint.

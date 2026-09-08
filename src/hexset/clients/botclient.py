@@ -59,7 +59,7 @@ from hexset.server.webplay import action_to_wire
 
 
 # The two fields the graph reads as bool; every other declared input in the
-# contract-2 record is int64 (see docs/onnx-contract-v2.md). Recomputed by
+# contract-2 record is int64. Recomputed by
 # `RecordBrain` from the budget-trimmed options rather than trusted from the
 # wire as-is (see its own docstring for why).
 _BOOL_FIELDS = frozenset({"action_mask"})
@@ -183,8 +183,8 @@ class RecordBrain:
             # 1: PR #2 told the owner of a genuine contract-4 export that
             # their file "is a contract=1 checkpoint". Contract 1 itself is
             # no longer served at all — the owner dropped it 2026-09-02
-            # (`docs/engine-divergence-2026-09-02.md`, B5) — so it is refused
-            # here the same as any other unsupported contract, with no
+            # — so it is refused here the same as any
+            # other unsupported contract, with no
             # "run it embedded instead" escape hatch left to point to.
             raise ValueError(
                 f"{spec} declares contract={contract!r}; RecordBrain plays "

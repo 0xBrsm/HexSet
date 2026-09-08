@@ -90,7 +90,7 @@ _PURCHASE_COSTS = np.array(
 
 # `evaluate.Weights` (the one-ply fit, `evaluate.Weights`' own docstring)
 # with the one term the play sweep moved. `hexset.bench.weight_sweep`,
-# 2026-09-07 (`docs/readouts/heximax-fit/sweep-trading.json`): every free
+# 2026-09-07 (trading play sweep): every free
 # term rung at x0, x0.5, x2 and then x0.71, x1.41 of its value against the
 # incumbent on 1,024 paired boards; only `robber_risk` cleared the bar
 # (-0.15 -> -0.30: 54.2% [51.1, 57.2]; zero reads 36.8%), and the swept
@@ -113,7 +113,7 @@ NO_TRADE_WEIGHTS = Weights(
     scarce=0.91 * 2.785 / ROLLS,
     # The three hand terms are the redesign's, then swept by play on the
     # no-trade table (`hexset.bench.weight_sweep --profile notrade`,
-    # 2026-09-07, `docs/readouts/heximax-fit/sweep-notrade.json`): the same
+    # 2026-09-07, no-trade play sweep): the same
     # rings as the trading profile, 1,024 paired games a cell against the
     # incumbent. Two moves cleared the bar -- `robber_risk` -0.15 -> -0.30
     # (53.2% [50.2, 56.3]; zero reads 37.8%) and `spare_card` 0.15 -> 0.1065

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """A seven's discards through the gym: any owing seat, in any order.
 
-`docs/gym-design.md` §2. AEC still names exactly one agent per `step()` --
+AEC still names exactly one agent per `step()` --
 that contract is untouched -- but during `Phase.DISCARD` the agent it names is
 chosen among the seats still owing rather than fixed at the lowest-indexed
 one, which is a serialization no table has and the live server no longer

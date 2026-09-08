@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """`action_mask` must equal `hexset.actions.legal_actions`, checked over 50
-random positions, per `docs/gym-design.md` §5.
+random positions.
 
 This used to have to check the mask against a *second*, honest enumeration
 (`server.rules.fair_legal_actions`), because the engine's own
@@ -30,7 +30,7 @@ def _expected_mask(env: HexSetAEC, agent: str) -> np.ndarray:
 
     Named explicitly rather than left to `legal_actions`' own default: during
     a seven's discards several seats may act at once and `agent_selection` is
-    any of them (`docs/gym-design.md` §2), so the bare call would answer for
+    any of them, so the bare call would answer for
     the lowest-indexed owing seat, which need not be this one.
     """
     seat = env.possible_agents.index(agent)

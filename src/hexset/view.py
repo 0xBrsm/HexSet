@@ -133,7 +133,7 @@ class View:
         no `__eq__` of their own, and would otherwise never compare equal --
         which is exactly what broke `gymnasium.utils.env_checker.check_env`'s
         `check_step_determinism` for `hexset.gym.HexSetEnv`, whose `info`
-        carries a `View` (`docs/gym-design.md` §3).
+        carries a `View`.
         """
         if not isinstance(other, View):
             return NotImplemented

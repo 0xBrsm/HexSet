@@ -719,7 +719,7 @@ def test_a_draw_count_below_one_is_refused_rather_than_returning_nothing():
 
 def test_the_search_resolves_a_discard_round_one_owing_seat_at_a_time():
     """`hexset.mcts` is deliberately unchanged by the simultaneous-discard
-    work (`docs/gym-design.md` §2).
+    work.
 
     It asks nothing of the seat-aware `legal_actions`/`apply` overloads: a
     node's `mover` is `to_move(game)` and its options are `legal_actions(game)`,

@@ -29,8 +29,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", required=True, help="JSON lines file, appended to")
     parser.add_argument("--games", type=int, default=100)
     # A preset name, or any checkpoint-prefixed entrant the arena resolves —
-    # `network:<path>` records a trained policy's self-play, which is what
-    # `hexset.bench.behaviour` needs to profile a checkpoint's style.
+    # `network:<path>` records a trained policy's self-play, so a downstream
+    # analysis can profile a checkpoint's style.
     parser.add_argument("--bot", default="greedy")
     parser.add_argument("--players", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)

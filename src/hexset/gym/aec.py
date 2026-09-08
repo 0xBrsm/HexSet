@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """`HexSetAEC`: a PettingZoo AEC environment around the HexSet engine.
 
-See `docs/gym-design.md` for the ratified design this implements. One agent
+One agent
 per seat (`seat_0`..`seat_{n-1}`), `agent_selection` naming the one seat
 entitled to act next; `observe(agent)` never reads more than `agent`'s own
 information set.
@@ -13,7 +13,7 @@ its cards at the same instant and none of them waits on any other
 exactly one active agent per `step()`, so this environment picks one of the
 owing seats -- but it picks *among* them rather than always taking the
 lowest-indexed one, which is a fiction no table has. `discard_order`
-(§2 of `docs/gym-design.md`) says how:
+says how:
 
 - `"random"` (default) draws uniformly from the seats still owing, from a
   stream seeded off `reset(seed)` alone and never shared with the game's own

@@ -6,7 +6,7 @@ model.
 state directly -- fine for training, where the caller and the network are the
 same process, but wrong for a served checkpoint: it means the *feature
 layout* has to be reimplemented, bit-identical, in whatever language serves
-the model (`onnx-contract-v2.md`'s complaint about hexset-ui's `encoding.py`).
+the model -- the complaint that got hexset-ui's own `encoding.py` retired.
 
 The record below is the alternative. It states the position **in the rules'
 own terms, already filtered to what the perspective seat may legally know**

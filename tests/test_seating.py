@@ -8,8 +8,7 @@ setup snake or the turn rotation past a seat the table had retired. That is
 correct for the game actually being played, but `hexset.game.imagine` did not
 know to copy the correction's plain, undeclared `game.locked` attribute, so an
 embedded bot searching forward from a table with a retired seat simulated
-turns for it as though it still played
-(`docs/engine-divergence-2026-09-02.md`, request R2).
+turns for it as though it still played (divergence audit request R2).
 
 This module tests the primitive that closes that gap: `Game.locked` is now a
 real dataclass field, `imagine` copies it, and `lock_seat`/`start(first=)`

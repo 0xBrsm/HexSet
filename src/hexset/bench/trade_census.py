@@ -2,7 +2,7 @@
 """Every executed trade, precisely: who, what, how lopsided, and who was flush.
 
 Plays N games for a lineup through `hexset.arena.compete` (grouped seating,
-antithetic-paired boards, exactly `hexset.bench.road_sweep`'s convention) and
+antithetic-paired boards, grouped `[a, a, b, b]` seating) and
 rolls up the arena's own `ClearedTrade` census -- turn, phase, both seats'
 kinds, the signed 5-vector each way, each side's hand size at the top of the
 step, and each side's own private gain -- so bulk/imbalanced trading can be
@@ -22,7 +22,6 @@ from pathlib import Path
 from typing import Sequence
 
 import hexset.bots  # noqa: F401 -- registers heximax presets with hexset.arena
-import hexset.bench.shipped_hand  # noqa: F401 -- and the frozen shipped hand valuation
 from hexset.arena import MAX_ACTIONS, Entrant, base_name, compete
 from hexset.record import Record
 
@@ -40,7 +39,7 @@ CARD_VALUE = 1.0 / BANK_RATE
 # reckoning of Catan hand sizes.
 DUMP_THRESHOLD = 8
 
-# The machine this runs on is shared; see `hexset.bench.road_sweep`'s MAX_WORKERS.
+# The machine this runs on is shared; 8 is the ceiling the owner set.
 MAX_WORKERS = 8
 
 

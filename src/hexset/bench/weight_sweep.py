@@ -8,11 +8,10 @@ only what clearly wins.
 The outcome-likelihood fit (`hexset.fitting`) predicts winners better and
 plays worse: a search consumes its coefficients as causal and they are not.
 The one objective the search respects is the paired duel, so this tunes on
-it directly, the way `hexset.bench.hand_valuation` settled the three hand
-terms -- but without a climb's random walk. For each free term in turn, a
+it directly -- but without a climb's random walk. For each free term in turn, a
 handful of multiples of the incumbent's value (zero, half, double; then a
 finer ring) each play the incumbent on the same boards, grouped
-`[c, c, b, b]` with antithetic seat swaps (`road_sweep.run_cell`). The best
+`[c, c, b, b]` with antithetic seat swaps (`run_cell` below). The best
 cell replaces the incumbent only if its Wilson lower bound clears 50%; a
 term whose every cell reads inside the interval is left where it is. `scarce`
 is derived from `production` and moves with it. At the end the swept vector
@@ -28,12 +27,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import statistics
 import sys
 import time
 from dataclasses import replace
 
-from hexset.arena import Entrant
-from hexset.bench.road_sweep import run_cell
+from hexset.arena import Entrant, Z_95, compete, wilson
 from hexset.bench.throughput import default_workers, environment
 from hexset.bots.evaluate import ROLLS, TERM_NAMES, Weights
 from hexset.bots.heximax.evaluate import NO_TRADE_WEIGHTS, TRADING_WEIGHTS
@@ -56,6 +55,58 @@ def with_term(weights: Weights, term: str, value: float) -> Weights:
     if term == "production":
         changes["scarce"] = SCARCE_PER_PRODUCTION * value
     return replace(weights, **changes)
+
+
+def run_cell(
+    games: int, *, seed: int, workers: int, challenger: Entrant, baseline: Entrant
+) -> dict:
+    """One challenger-vs-baseline cell: `games` games, `[c, c, b, b]` seats.
+
+    The grouping is nothing more than the lineup handed to `hexset.arena.
+    compete`: its antithetic pairing swaps seats by `seats // 2` between the
+    two halves of a pair, which exchanges the seat *pairs* `{0, 1}` and
+    `{2, 3}` -- exactly the two sides of a `[c, c, b, b]` lineup. An
+    interleaved `[c, b, c, b]` lineup does not get this: its seat pairs are
+    the diagonals `{0, 2}`/`{1, 3}`, and shifting by two maps each diagonal
+    onto itself, so the challenger holds the same two seats on both halves of
+    a pair and the per-board seat term never cancels. That is why `--games`
+    must be a multiple of 4.
+
+    Roads per seat come from `Tournament.roads`, which the arena keeps for
+    every game: a bare win rate would not show a term buying its wins by
+    building differently.
+    """
+    challenger_seats = (0, 1)
+    baseline_seats = (2, 3)
+
+    started = time.perf_counter()
+    tournament = compete(
+        [challenger, challenger, baseline, baseline], games, seed=seed, workers=workers
+    )
+    elapsed = time.perf_counter() - started
+
+    wins = decided = 0
+    c_roads: list[int] = []
+    b_roads: list[int] = []
+    for winner, roads in zip(tournament.winners, tournament.roads):
+        if winner is not None:
+            decided += 1
+            if winner in challenger_seats:
+                wins += 1
+        c_roads.extend(roads[i] for i in challenger_seats)
+        b_roads.extend(roads[i] for i in baseline_seats)
+
+    low, high = wilson(wins, decided, Z_95) if decided else (0.0, 1.0)
+    return {
+        "games": games,
+        "decided": decided,
+        "wins": wins,
+        "win_rate": wins / decided if decided else 0.0,
+        "interval_95": [low, high],
+        "challenger_roads_per_game": statistics.mean(c_roads),
+        "baseline_roads_per_game": statistics.mean(b_roads),
+        "seconds": round(elapsed, 1),
+    }
 
 
 def entrant(name: str, weights: Weights, notrade: bool) -> Entrant:
@@ -91,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
     incumbent = start
     passes = [tuple(float(f) for f in ring.split(",")) for ring in args.passes.split(";")]
     terms = args.terms.split(",")
-    common = dict(depth=2, width=6, workers=args.workers)
+    common = dict(workers=args.workers)
     started = time.perf_counter()
     steps: list[dict] = []
     report: dict = {
@@ -121,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
                     continue
                 candidate = with_term(incumbent, term, value)
                 result = run_cell(
-                    None, args.games, seed=seed, baseline=baseline,
+                    args.games, seed=seed, baseline=baseline,
                     challenger=entrant("candidate", candidate, notrade), **common,
                 )
                 low, high = result["interval_95"]
@@ -158,7 +209,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if incumbent != start and args.confirm:
         result = run_cell(
-            None, args.confirm, seed=args.seed + 500_000,
+            args.confirm, seed=args.seed + 500_000,
             baseline=entrant("start", start, notrade),
             challenger=entrant("swept", incumbent, notrade), **common,
         )

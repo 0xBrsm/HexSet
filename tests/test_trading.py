@@ -674,7 +674,7 @@ def test_pending_is_not_copied_by_imagine():
     assert child.pending == []
 
 
-# --- execute_trade (the negotiation interface, docs/negotiation-interface.md) -
+# --- execute_trade (the negotiation interface) ----------------------------
 
 
 def _seated(game, traders):

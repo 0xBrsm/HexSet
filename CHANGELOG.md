@@ -44,6 +44,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Removed
 
+- `docs/readouts/`, `docs/engine-divergence-2026-09-02.md`,
+  `docs/gym-design.md`, `docs/negotiation-interface.md` and
+  `docs/onnx-contract-v2.md`, and the research-only bench instruments
+  `hexset.bench.shipped_hand`, `hand_valuation`, `road_sweep`,
+  `production_curve`, `encode_cost`, `behaviour` and `human_agreement`
+  (with `hexset.behaviour`, which only served the last two) -- this is a
+  gym to import, not a lab notebook, and the measurement record and the
+  dated instruments now live in the private research repo. `docs/bot-api.md`
+  is the live interface reference and stays. The shareable bench is
+  `duel`, `generate`, `throughput`, `trade_census`, `fit_weights`,
+  `fit_duel`, `weight_sweep`, `ablate`, `baselines`, `placement_policy`
+  and `profile_heximax`; `weight_sweep` now runs its own paired cell
+  instead of borrowing `road_sweep`'s, and `trade_census` no longer seats
+  the frozen shipped hand.
 - `hexset.bench.aivat` and `hexset.bench.trade_lab` (and `trade_lab`'s
   test) -- `hexset.arena.compete` and `catanatron/duel.py` are the only
   game loops left. `aivat` had no dependents since August and needed a

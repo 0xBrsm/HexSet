@@ -43,8 +43,7 @@ TOKEN_HEADER = "X-HexSet-Token"
 # Contract 1 ("observation in, raw logits/give/want/value out", masked and
 # softmaxed in Python against the frozen `encoding_v1` feature layout) went
 # the same way earlier: the owner decided on 2026-09-02 that legacy
-# checkpoints are not worth carrying `encoding_v1.py` for
-# (`docs/engine-divergence-2026-09-02.md`, B5). A file with no `contract`
-# key at all is refused by name at load, same as any other unknown
-# contract.
+# checkpoints are not worth carrying `encoding_v1.py` for. A file with no
+# `contract` key at all is refused by name at load, same as any other
+# unknown contract.
 RECORD_CONTRACTS = frozenset({"6"})

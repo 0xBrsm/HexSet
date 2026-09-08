@@ -58,8 +58,7 @@ same phase a seven enters, rather than one action carrying both) dropped
 graph's `action_mask`/`prior` were traced against. Either change alone would
 have forced the bump. Contract 1 — the original shape, where the engine
 encoded the position into feature tensors and the graph was a bare
-policy/value head masked in Python — went the same way on 2026-09-02
-(`docs/engine-divergence-2026-09-02.md`, B5).
+policy/value head masked in Python — went the same way on 2026-09-02.
 
 ## 2. The graph — the record contract (`6`)
 
@@ -67,8 +66,8 @@ The engine builds a **record**: the position stated in the rules' own terms,
 already filtered to what the perspective seat may legally know. The graph
 owns everything downstream of that — encoding, masking, normalising,
 argmax, un-rotating back to board-seat order. Built by
-`hexset.onnx_record.record_from_game`; the full field-by-field derivation
-lives in [`onnx-contract-v2.md`](onnx-contract-v2.md).
+`hexset.onnx_record.record_from_game`, whose module docstring carries the
+field-by-field derivation.
 
 Leading batch axis `B` on every tensor.
 
@@ -115,9 +114,7 @@ serves both.
 **The engine drift this section used to list is gone.** This server no longer
 carries its own copy of the engine: it depends on the `hexset` package (now
 one distribution together with the gym, see the CHANGELOG's "one
-distribution" entry), so what it plays is exactly what dev-HexNet plays. See
-[`engine-divergence-2026-09-02.md`](engine-divergence-2026-09-02.md) for the
-full account of what the copy held and how each difference was resolved.
+distribution" entry), so what it plays is exactly what dev-HexNet plays.
 
 **The one mask difference that used to remain is gone too.** The
 `action_mask` served here was built over an *honest* trade sample, because
@@ -131,9 +128,8 @@ action's legality depends on another seat's hand, and there is now one list,
 
 **Status, 2026-09-05: complete for the trading-final mechanic
 (`agents/reference/trading-final.md`, item 5 — "human and LLM seats are
-direct gates"). Supersedes `docs/negotiation-interface.md`, whose design
-this finishes; see that document's own header for what changed between the
-draft and here.**
+direct gates"). Supersedes the earlier negotiation-interface draft, whose
+design this finishes.**
 
 A checkpoint does not act to trade, and there is no public layer any more:
 nothing is advertised, and no vector rides in this record. Instead, every

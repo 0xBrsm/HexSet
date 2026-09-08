@@ -9,6 +9,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Changed
+
+- **A network checkpoint's trade gate prices continuations, not hands.** `hexset.clients.netbot.NetworkBot` values the live position and every post-trade position *after the seat's own best play from it*: the policy's greedy actions through the rest of the turn on an imagined copy (fresh chance, deck reshuffled), a finished game reading as its one-hot winner, at most `CONTINUATION_PLIES` (8) actions, one batched forward a ply. Two raw value estimates of nearly identical hands differ by the head's noise, and the old gate offered that noise -- at a won position it priced giving the winning card away at +0.006. Now a won position reads 1.0 before and after any trade that keeps the build and lower after one that does not; the counterparty's row reads the actor's win either way, so nobody offers or counters into it. On the g4 game of 2026-09-08 19:47Z, round 19, clio-r3's gate goes from one candidate clearing to none. No per-model floor is needed for this; the network gate's `trade_floor` stays `0.0`.
+
 ## 0.42.2
 
 ### Fixed

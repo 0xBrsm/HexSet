@@ -11,6 +11,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## 0.42.1
 
+### Fixed
+
+- The win banner numbers the winner the way the roster and the log do (`playerNumber`), so a table with a closed seat reads Player 1, 2, 3 everywhere.
+- A finished game's own seats see the full log the spectator link shows: the reveal that already opened hands and cards at game over now opens the transcript too.
+- `POST /api/bot` refuses once the game is over, as `POST /api/leave` already did: a finished game's record is not rewritten by re-picking who played it.
+
 ## 0.42.0
 
 ### Added

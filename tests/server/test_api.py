@@ -419,3 +419,34 @@ def test_reclaim_with_the_wrong_secret_403s():
             "POST", "/api/reclaim", {"code": dealt["code"], "secret": "not it"}, None
         )
     assert wrong.value.status == 403
+
+
+# --- GET /api/version, and the optional `version` guard on acting routes ------
+
+
+def test_version_route_matches_the_installed_package():
+    import hexset
+
+    registry = tables()
+    info = registry.handle("GET", "/api/version", {}, None)
+    assert info == hexset.build_info()
+    assert info["version"] == hexset.__version__
+
+
+def test_action_with_a_stale_version_409s_and_the_current_one_acts():
+    registry = tables()
+    code, token = deal(registry)
+    state = registry.handle("GET", "/api/state", {}, token)
+    current = state["version"]
+    action = state["legal_actions"][0]
+
+    with pytest.raises(ApiError) as stale:
+        registry.handle(
+            "POST", "/api/action", {"action": action, "version": current - 1}, token
+        )
+    assert stale.value.status == 409
+    assert "version" in str(stale.value)
+
+    # the right version still acts
+    acted = registry.handle("POST", "/api/action", {"action": action, "version": current}, token)
+    assert acted["version"] > current

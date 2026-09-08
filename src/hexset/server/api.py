@@ -1,7 +1,8 @@
 """Games, seats and the `/api/*` surface everything plays through.
 
 One place decides what a game is and who may touch it. The browser, a script
-driving a seat over HTTP, and an LLM over MCP (see `mcp.py`) are all clients of
+driving a seat over HTTP, and an LLM over MCP (`POST /mcp`, see `mcptools.py`
+and `web.py`) are all clients of
 this module and get no special treatment from it — the same join, the same
 token, the same `state`/`act` pair. A bot (embedded or external — see
 `botclient.py`) is no different: it is a client like any other, submitting its
@@ -82,6 +83,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
 
+from hexset import build_info
 import hexset.bots  # noqa: F401 -- registers the "heximax" presets with hexset.arena
 from hexset.actions import build_space
 from hexset.arena import PRESETS, spawn as spawn_entrant
@@ -150,7 +152,7 @@ MAX_SEATS = 4
 CODE_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz"
 CODE_LENGTH = 6
 
-# The cap every client already enforces (mcp.py, index.html) on a display
+# The cap every client already enforces (mcptools.py, index.html) on a display
 # name, applied here too: those are conveniences, not the check, since a raw
 # POST to /api/games, /api/join or /api/name bypasses both of them.
 MAX_NAME_LENGTH = 40
@@ -302,6 +304,16 @@ def wait_query(query: str) -> tuple[int | None, float]:
     return after, max(0.0, min(wait, MAX_WAIT_SECONDS))
 
 
+def _check_version(table: "Table", version: int | None) -> None:
+    """The optional `version` an acting request can send: a caller that read
+    `state()` at one version and wants to refuse acting on stale knowledge of
+    it, rather than silently applying `index`/`seat`/`bundle` meant for a
+    table that has since moved. `None` (the default -- every existing caller)
+    skips this outright."""
+    if version is not None and version != table.version:
+        raise ApiError(f"the table has moved (version {table.version}); read state again", status=409)
+
+
 @dataclass
 class Config:
     """How this server builds the games it deals — the CLI's business (see
@@ -446,7 +458,7 @@ class Table:
         return [i for i, seat in enumerate(self.seats) if seat.kind is SeatKind.EMPTY and i not in locked]
 
     def join(self, name: str | None, client: dict | None = None) -> tuple[int, str]:
-        """Seats a person (or an LLM, over `hexset.server.mcp`) at a random
+        """Seats a person (or an LLM, over `POST /mcp`) at a random
         still-open, still-unlocked seat, returning it and their token.
 
         Every manual seat gets a `PendingGate` the instant it is claimed --
@@ -933,7 +945,8 @@ class Tables:
 
     # --- play -------------------------------------------------------------
 
-    def act(self, table: Table, seat: int, wire: dict) -> dict:
+    def act(self, table: Table, seat: int, wire: dict, version: int | None = None) -> dict:
+        _check_version(table, version)
         waiting = table.waiting_for()
         if waiting:
             names = ", ".join(str(s) for s in waiting)
@@ -1119,6 +1132,7 @@ class Tables:
         showed, signed towards `actor`; `bundle` is the counter, signed the
         same way (required for `"counter"`). 409 for an offer that is no
         longer open -- never answered against something else."""
+        _check_version(table, payload.get("version"))
         actor = payload.get("actor")
         if not isinstance(actor, int):
             raise ApiError("send the offer's `actor` seat")
@@ -1142,6 +1156,7 @@ class Tables:
         """`POST /api/games/<CODE>/trade/round/choose`: `{"seat": <seat that
         answered>, "bundle": [5 ints]}` executes that exact recorded answer;
         `{"decline": true}` closes the round with nothing moved."""
+        _check_version(table, payload.get("version"))
         if payload.get("decline"):
             try:
                 table.session.decline_round(seat)
@@ -1208,11 +1223,12 @@ class Tables:
         """One request, dispatched. Raises `ApiError` for anything refused.
 
         Every transport in the project ends up here: `web.py` calls it with a
-        parsed HTTP request, `mcp.py` reaches it over that same HTTP from
-        wherever the LLM is running, and `botclient.py` reaches it either the
-        same way (a real external process) or in-process, directly, for a
-        locally-embedded bot. Routing lives with the rules rather than in the
-        transport so none of them can drift into serving different games.
+        parsed HTTP request for both `/api/*` and `/mcp` (`mcptools.py`'s
+        tools call this in-process, same process, no second server), and
+        `botclient.py` reaches it either the same way (a real external
+        process) or in-process, directly, for a locally-embedded bot. Routing
+        lives with the rules rather than in the transport so none of them can
+        drift into serving different games.
 
         The query string is split off here rather than by any one transport,
         so `/api/state?after=7&wait=20` means the same thing over HTTP and
@@ -1220,6 +1236,8 @@ class Tables:
         is answered on the spot, exactly as every read always was.
         """
         path, _, query = path.partition("?")
+        if method == "GET" and path == "/api/version":
+            return build_info()
         if method == "GET" and path == "/api/models":
             return {"models": listed_models()}
 
@@ -1310,7 +1328,7 @@ class Tables:
         if method == "GET" and path == "/api/record":
             return self.record(table, seat)
         if method == "POST" and path == "/api/action":
-            return self.act(table, seat, payload.get("action") or {})
+            return self.act(table, seat, payload.get("action") or {}, payload.get("version"))
         if method == "POST" and path == "/api/undo":
             return self.undo(table, seat)
         if method == "POST" and path == "/api/name":

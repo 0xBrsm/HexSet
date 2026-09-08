@@ -108,6 +108,22 @@ def test_locking_every_other_seat_still_ends_setup_on_the_creator():
     assert to_move(game) == 0
 
 
+def test_setup_ending_hands_the_first_roll_to_the_first_seat_still_in_the_game():
+    """Seat 0 is closed like any other empty seat; the snake still starts
+    there (`first=0`), so `setup_queue[0]` is a retired seat. Setup ending
+    used to hand the first roll to it, and a table of two people at seats 1
+    and 2 with 0 and 3 closed waited on seat 0 forever."""
+    game = start_at(_board(), 4, random.Random(1), first=0)
+    lock_seat(game, 0)
+    lock_seat(game, 3)
+    assert game.current_player == 1
+    for _ in range(4):  # 1, 2, then 2, 1
+        _place(game)
+    assert game.phase is Phase.ROLL
+    assert game.current_player == 1
+    assert to_move(game) == 1
+
+
 def test_end_turn_never_lands_on_a_locked_seat():
     game = start_at(_board(), 4, random.Random(1), first=0)
     _place(game)

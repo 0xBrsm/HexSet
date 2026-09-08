@@ -9,6 +9,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Fixed
+
+- **A reopened table puts every seat back as whoever held it** (`journal.players`, `api.reopened_seats`), instead of rebuilding every non-bot seat as empty. Before this, a restart handed your still-in-progress seat to whoever opened the link next, and you got it back only by the luck of `POST /api/join` picking it; now `join` finds no candidate at all and `POST /api/reclaim` is the way back into your own seat. The browser (`index.html`'s `resumeGame`) actually calls `reclaim` now — it never did — and stops attempting to join a game that is already over.
+- A game *abandoned* unfinished (New Game, or a 24h eviction) stays gone. A closing line alone does not say whether a game was played out or walked away from, and inferring "finished" from one rebuilt an abandoned game as a mutable table with no journal to write to and no bots to answer, silently dropping every action taken at it.
+- `POST /api/reclaim` succeeds at a game that is over: it is a handshake about who you are, not permission to act, and the token it mints is refused by the same gate that refuses no token at all. "The game is already over" is now one 409 from one place (`api.require_live`) rather than a 409 from some routes and a 400 from others.
+
 ## 0.44.2
 
 ### Fixed

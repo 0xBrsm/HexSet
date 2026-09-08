@@ -1152,15 +1152,32 @@ async function dealGame() {
 // works.
 let seatError = null;
 
-// The game named in the URL, or the last one we sat at. Returns its state
-// — seated if there is a seat to be had, watching if the table is full —
-// or null if there is no such game to be at: played out, evicted, or a code
-// with nothing behind it.
+// Trades this browser's own secret for a fresh token on the seat it already
+// holds at `code` (POST /api/reclaim), or null if the server knows no such
+// seat. The seat itself survives a restart — the server rebuilds it from the
+// journal, claimed, with our client id on it — but its token does not, since
+// a token never touches disk. This is the handshake that gets one back.
 //
-// A token this server has never heard of counts as no seat rather than no
-// game: a restart re-tokens bot seats and reopens every human one, so there
-// is no lost token to recover, and the right answer is to try for a seat
-// again from scratch.
+// Works on a finished game too, and is worth doing there: it is the
+// difference between watching a game you played and watching a stranger's.
+async function reclaimSeat(code) {
+  const secret = clientSecret();
+  if (!secret) return null; // private mode: nothing to prove the seat with
+  const {ok, data} = await postJSON("/api/reclaim", {code, secret});
+  if (!ok) return null;
+  rememberSeat(code, data.token);
+  showCodeInUrl(code);
+  return data;
+}
+
+// The game named in the URL, or the last one we sat at. Returns its state
+// — seated if the seat is ours or there is one to be had, watching
+// otherwise — or null if there is no such game to be at: abandoned,
+// evicted, or a code with nothing behind it.
+//
+// A token this server has never heard of counts as no seat *yet* rather than
+// no game: a restart re-tokens every seat, so the answer is to prove the old
+// one is ours (reclaim) and only then, failing that, to look for an open one.
 async function resumeGame(code) {
   if (!code) return null;
   tableCode = code;
@@ -1172,8 +1189,14 @@ async function resumeGame(code) {
       return view;
     }
     forgetSeat(code);
+    // We held a seat here, so the seat is still ours to ask for by secret —
+    // a 403 in the console on the way is possible (a seat claimed before
+    // this browser had a secret can't be proved) but this is not the path
+    // an ordinary arrival takes, which is the one the read below protects.
+    const mine = await reclaimSeat(code);
+    if (mine) return mine;
   }
-  // No seat here, or not one of ours any more. Ask the table itself what it
+  // No seat here, or not one we can get back. Ask the table itself what it
   // has before knocking: every game is public, so this one read answers both
   // questions — whether the game exists at all, and whether a seat is left.
   //
@@ -1183,14 +1206,17 @@ async function resumeGame(code) {
   // the link is for — and a refused POST is one the browser writes into the
   // console as a failed request whatever the page then does with it. A page
   // whose ordinary path logs an error has no clean console left to read a
-  // real one out of (`tests/web/test_page.py` asserts an empty one on every
-  // test for exactly that reason), so the read comes first.
+  // real one out of, so the read comes first.
   const view = await getJSON(`/api/table/${code}`);
   if (view.error) {
     seatError = view.error;
     return null;
   }
-  const open = (view.seats || []).some(
+  // Nothing to join in a game already over, whatever its seats look like —
+  // arriving at a finished game to watch it is an ordinary arrival, and the
+  // refused POST it used to make is exactly the console noise the read-first
+  // ordering above exists to avoid.
+  const open = !view.game_over && (view.seats || []).some(
     (s) => s.kind === "empty" && !(view.locked || []).includes(s.seat)
   );
   if (open) {

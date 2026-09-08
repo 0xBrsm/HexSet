@@ -213,8 +213,13 @@ or a malformed `id` is a 400. `POST /api/reclaim {"code", "secret"}` mints a
 fresh token for the seat whose `client.id` equals `sha256(secret)`, once the
 original token is gone (a server restart, most often) — MCP's `resume_game`
 (`hexset.server.mcptools`) uses this to get its seat back by the same `model`
-string `new_game`/`join` were called with. None of this applies to a `.onnx`
-bot: a checkpoint is never seated as a manual gate and has no client identity.
+string `new_game`/`join` were called with. It is the *only* way back in after
+a restart: a reopened table puts every seat back as whoever held it, so
+`POST /api/join` has nothing to offer there. It also succeeds at a game
+already over, which buys the caller its own seat's view of that game and
+nothing else — every acting route still refuses with a 409. None of this
+applies to a `.onnx` bot: a checkpoint is never seated as a manual gate and
+has no client identity.
 
 ## What is never part of this contract
 

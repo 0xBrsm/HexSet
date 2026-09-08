@@ -358,10 +358,11 @@ class Journal:
     def locked(self, seat: int, *, at_step: int) -> None:
         """`seat` was closed outright while it was still empty (see
         `api.Tables.close_seat`) — retired for the rest of the
-        game. `resumable`'s reader (`locked_seats`) only needs to know *that*
-        a seat locked, not when: see `hexset.server.seating`'s own note on why
-        pre-seeding the whole set before replay reproduces the same snake
-        the live game actually walked. `at_step` is diagnostic only."""
+        game. The reader that puts a table back (`locked_seats`, see
+        `api.reopen_session`) only needs to know *that* a seat locked, not
+        when: see `hexset.server.seating`'s own note on why pre-seeding the
+        whole set before replay reproduces the same snake the live game
+        actually walked. `at_step` is diagnostic only."""
         self._emit({"kind": "locked", "at": _now(), "seat": seat, "at_step": at_step})
 
     def unlocked(self, seat: int, *, at_step: int) -> None:
@@ -382,10 +383,16 @@ class Journal:
         self._emit({"kind": "reopened", "at": _now(), "at_step": at_step})
 
     def abandoned(self) -> None:
-        """The human pressed New Game, which ends this one as surely as
-        winning does. `resumable` hands back any game whose file has no
-        closing line, so without this the game they chose to walk away from
-        would be waiting for them on their next visit."""
+        """The human pressed New Game, or the table was evicted for going
+        quiet (`api.Table.close`), which ends this game as surely as winning
+        does — for playing on, at least. Without this line the file reads as
+        a game still in flight, and the one they chose to walk away from
+        would be waiting for them on their next visit.
+
+        Not the same closing line as `finish` and deliberately so: this one
+        says the game stopped, `finish`'s says it *ended*. Only the game
+        itself, replayed, says which (`api.reopen_session` asks `is_over`),
+        and only the second is worth reopening to look at."""
         self._emit({"kind": "abandoned", "at": _now()})
 
     def finish(self, game: Game) -> None:
@@ -419,8 +426,12 @@ def open_journal(seed: int, directory: str | None = None) -> Journal | None:
 # --- Reading one back ---------------------------------------------------------
 
 
-# The lines that mean this game is over and is not to be handed back: played
-# out, or walked away from. Anything else leaves the file open.
+# The lines that mean nothing further will ever be appended to this file:
+# played out (`result`) or walked away from (`abandoned`). Anything else
+# leaves the file open. Note what this does *not* say — which of the two it
+# was: an abandoned game is unfinished, and `is_closed` alone would file it
+# alongside a game somebody won. `api.reopen_session` asks the replayed game
+# itself (`is_over`) rather than this.
 CLOSING_KINDS = frozenset({"result", "abandoned"})
 
 
@@ -451,7 +462,7 @@ def read(path: Path | str) -> list[dict]:
 def header_of(path: Path | str) -> dict | None:
     """A journal's opening line alone, without reading the rest of it.
 
-    `resumable` looks at every file in the directory to find one browser's
+    `most_recent` looks at every file in the directory to find one browser's
     game, and these run to tens of thousands of lines; only the one that
     matches is worth reading in full.
     """
@@ -547,7 +558,8 @@ def seating(events: list[dict]) -> dict[int, tuple[str, str]]:
     happened. A `seated` event for a person rather than a bot carries an
     empty `spec` (see `Journal.seated`) and is skipped here -- this map is
     bots only, which is what a table rebuilding after a restart needs to
-    know which seats to re-seat automatically (see `api.Tables._reopen`)."""
+    know which seats to re-seat automatically (see `api.Tables._reopen`).
+    `players` below is the other half of that split, read the same way."""
     header = events[0] if events else {}
     seats = {
         int(seat): (bot["name"], bot["spec"])
@@ -559,6 +571,43 @@ def seating(events: list[dict]) -> dict[int, tuple[str, str]]:
                 seats[event["seat"]] = (event["name"], event["spec"])
             else:
                 seats.pop(event["seat"], None)
+    return seats
+
+
+def players(events: list[dict]) -> dict[int, str]:
+    """Seat -> the name of the person (or LLM) holding it: `seating`'s exact
+    complement, and read the same way.
+
+    The seats are the header's own `human_seats` less the ones its `bots` map
+    claims (that field is every seat occupied at deal time, whichever kind —
+    see `Journal.start`), named from `player_names`; a seat nobody named
+    comes back with an empty string rather than being left out, since *that a
+    seat was somebody's* is the thing this map exists to say. Every later
+    `seated` event is folded on top exactly as `seating` folds them, with the
+    test inverted: an empty `spec` is a person taking a seat
+    (`api.GameSession.claim`) and puts them in this map, a `spec` is a bot
+    taking one (`api.Tables.seat_bot`) and takes the seat out of it.
+
+    `api.Tables._reopen` rebuilds these seats as claimed-but-untokened, which
+    is what makes a reopened game's own seats stop looking open to
+    `Table.join`: the token is gone for good (it never touches disk — see
+    `api.py`'s module docstring) and `POST /api/reclaim` is how whoever held
+    the seat proves it is still theirs.
+    """
+    header = events[0] if events else {}
+    names = header.get("player_names", {})
+    bots = set(header.get("bots", {}))
+    seats = {
+        int(seat): names.get(str(seat), "")
+        for seat in header.get("human_seats", [])
+        if str(seat) not in bots
+    }
+    for event in events:
+        if event.get("kind") == "seated":
+            if event["spec"]:
+                seats.pop(event["seat"], None)
+            else:
+                seats[event["seat"]] = event.get("name") or ""
     return seats
 
 
@@ -595,6 +644,13 @@ def most_recent(directory: str | None, code: str) -> Path | None:
     """The most recent file filed under join code `code`, closed or not, or
     `None` if there isn't one.
 
+    Closed or not on purpose: a finished game is still worth handing back
+    (there is nothing left to play, but the whole of it is still worth
+    reading), and `is_closed` alone cannot tell a game that was played out
+    from one that was walked away from — both write a closing line. Which
+    of the three a file is, is `api.reopen_session`'s to decide from the
+    replayed game itself, not this function's to guess from the file.
+
     Only the most recent file bearing that code is ever a candidate. An older
     game under the same code — closed or not — is one the table already
     walked away from once; handing it back would be reaching further into
@@ -618,20 +674,6 @@ def most_recent(directory: str | None, code: str) -> Path | None:
             continue
         return path
     return None
-
-
-def resumable(directory: str | None, code: str) -> Path | None:
-    """The unfinished game filed under join code `code`, or `None`.
-
-    A closed game is `most_recent` plus `is_closed` to check, not this: there
-    is nothing left in a finished game to resume play from. `api.Tables.
-    _reopen` calls this first for exactly that reason, and falls back to
-    `most_recent` on its own only to rebuild a closed game read-only.
-    """
-    path = most_recent(directory, code)
-    if path is None or is_closed(read(path)):
-        return None
-    return path
 
 
 def _now() -> str:

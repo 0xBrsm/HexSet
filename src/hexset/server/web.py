@@ -17,8 +17,8 @@ defines -- there is no longer a separate `python -m hexset.server.mcp` stdio
 program. `initialize` mints an `Mcp-Session-Id` (`secrets.token_urlsafe`) and
 keeps the seat (`mcptools.Session`) it stands up in memory on this server for
 as long as that id lives; every later request on that session must carry the
-header back, and an unknown or missing one is a 404 (a client that sees one
-just calls `initialize` again — a fresh Mcp-Session-Id, an unseated `Session`,
+header back: a missing one is a 400, an unknown one a 404 (a client that sees
+a 404 just calls `initialize` again — a fresh Mcp-Session-Id, an unseated `Session`,
 same as a fresh process used to be). `DELETE /mcp` drops a session early;
 `GET /mcp` is 405 -- this server never pushes anything to a client outside of
 one `tools/call`'s own response. A `tools/call` for `wait_for_turn` is the one
@@ -281,10 +281,13 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         session_id = self.headers.get("Mcp-Session-Id")
+        if not session_id:
+            self._mcp_error(400, "missing Mcp-Session-Id -- call initialize first")
+            return
         with self.server.mcp_lock:
-            session = self.server.mcp_sessions.get(session_id) if session_id else None
+            session = self.server.mcp_sessions.get(session_id)
         if session is None:
-            self._mcp_error(404, "unknown or missing Mcp-Session-Id -- call initialize again")
+            self._mcp_error(404, "unknown Mcp-Session-Id -- call initialize again")
             return
 
         if "id" not in message:

@@ -132,11 +132,11 @@ def test_initialize_echoes_a_known_protocol_version(live_server):
     assert result["protocolVersion"] == "2024-11-05"
 
 
-def test_tools_call_without_a_session_id_is_404(live_server):
+def test_tools_call_without_a_session_id_is_400(live_server):
     _, base = live_server
     client = MCPClient(base)  # never initialized -- no session id to send
     status, _, data = client.call_tool_raw("models")
-    assert status == 404
+    assert status == 400
     assert "error" in data
 
 

@@ -9,6 +9,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.44.2
+
+### Fixed
+
+- A finished game can still be opened after a restart: `GET /api/table/<code>` finds a closed game's journal (`journal.most_recent`) instead of 404-ing once the process that held it in memory is gone, and reopens it read-only.
+
 ## 0.44.1
 
 ### Fixed

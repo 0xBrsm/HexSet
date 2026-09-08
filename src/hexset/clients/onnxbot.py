@@ -205,8 +205,16 @@ class Loaded:
 
 
 @lru_cache(maxsize=4)
-def _load_cached(path: str, topology: Topology, device: str, mtime_ns: int) -> Loaded:
-    session = ort.InferenceSession(str(path), providers=_providers_for(device))
+def _load_cached(
+    path: str, topology: Topology, device: str, mtime_ns: int, threads: int | None
+) -> Loaded:
+    options = ort.SessionOptions()
+    if threads is not None:
+        options.intra_op_num_threads = threads
+        options.inter_op_num_threads = threads
+    session = ort.InferenceSession(
+        str(path), sess_options=options, providers=_providers_for(device)
+    )
     meta = session.get_modelmeta().custom_metadata_map
 
     players = int(meta["players"])
@@ -254,7 +262,9 @@ def _load_cached(path: str, topology: Topology, device: str, mtime_ns: int) -> L
     )
 
 
-def load(path: str, topology: Topology, device: str = "cpu") -> Loaded:
+def load(
+    path: str, topology: Topology, device: str = "cpu", threads: int | None = None
+) -> Loaded:
     """The checkpoint at `path`, ready to act on boards of this topology.
 
     Cache key folds in the file's mtime, unlike the training repo's loader: its
@@ -262,8 +272,13 @@ def load(path: str, topology: Topology, device: str = "cpu") -> Loaded:
     artifacts, but hexset's whole pitch is replacing a file in `models/`
     by name — without the mtime, a same-named replacement would silently
     keep serving the old in-memory session.
+
+    `threads` caps onnxruntime's intra- and inter-op pools. Left `None`,
+    onnxruntime sizes them from the core count, which is right for one bot at
+    one table and wrong for a caller that has already sharded the work across
+    processes -- each would claim the whole machine. Such a caller passes 1.
     """
-    return _load_cached(path, topology, device, os.stat(path).st_mtime_ns)
+    return _load_cached(path, topology, device, os.stat(path).st_mtime_ns, threads)
 
 
 @dataclass
@@ -451,9 +466,10 @@ def searcher(
     device: str = "cpu",
     inference_batch: int | None = None,
     rng=None,
+    threads: int | None = None,
 ) -> Search:
     """The checkpoint at `path` as a batched PUCT search, playing on `board`."""
-    loaded = load(path, board.topology, device)
+    loaded = load(path, board.topology, device, threads)
     budget = loaded.max_trades if max_trades is None else max_trades
     return Search(
         LeafEvaluator(
@@ -468,19 +484,26 @@ def searcher(
     )
 
 
-def network_evaluator(path: str, board, *, device: str = "cpu") -> NetworkEvaluator:
+def network_evaluator(
+    path: str, board, *, device: str = "cpu", threads: int | None = None
+) -> NetworkEvaluator:
     """The checkpoint at `path` as a leaf evaluation for the search."""
-    loaded = load(path, board.topology, device)
+    loaded = load(path, board.topology, device, threads)
     return NetworkEvaluator(
         policy=loaded.policy, players=loaded.players, max_trades=loaded.max_trades
     )
 
 
 def network_bot(
-    path: str, board, *, max_trades: int | None = None, device: str = "cpu"
+    path: str,
+    board,
+    *,
+    max_trades: int | None = None,
+    device: str = "cpu",
+    threads: int | None = None,
 ) -> NetworkBot:
     """The checkpoint at `path`, playing on `board`."""
-    loaded = load(path, board.topology, device)
+    loaded = load(path, board.topology, device, threads)
     return NetworkBot(
         policy=loaded.policy,
         space=loaded.space,
@@ -496,6 +519,7 @@ def spawn(
     rng: random.Random | None = None,
     device: str = "cpu",
     max_trades: int | None = None,
+    threads: int | None = None,
 ):
     """The checkpoint at `path` as something with `.choose(game) -> Action`.
 
@@ -508,9 +532,11 @@ def spawn(
     machine serving the game, not about the checkpoint, and a model file has no
     business demanding an accelerator its host may not have.
     """
-    loaded = load(path, board.topology, device)
+    loaded = load(path, board.topology, device, threads)
     if not loaded.search.searches:
-        return network_bot(path, board, max_trades=max_trades, device=device)
+        return network_bot(
+            path, board, max_trades=max_trades, device=device, threads=threads
+        )
     return searcher(
         path,
         board,
@@ -519,4 +545,5 @@ def spawn(
         max_trades=max_trades,
         device=device,
         rng=rng,
+        threads=threads,
     )

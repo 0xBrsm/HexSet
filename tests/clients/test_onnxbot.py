@@ -94,6 +94,24 @@ def test_a_checkpoint_refuses_a_table_it_was_not_trained_for(checkpoint_v2):
         network_bot(path, board3).choose(start(board3, 3, random.Random(0)))
 
 
+def test_threads_caps_the_session_pools_and_keys_the_cache(checkpoint_v2):
+    """A caller that has already sharded games across processes asks for one
+    thread each, rather than every process sizing a pool from the whole core
+    count and oversubscribing the box."""
+    from hexset.clients.onnxbot import load
+
+    path, board = checkpoint_v2
+    capped = load(path, board.topology, threads=1)
+    options = capped.policy.session.get_session_options()
+    assert options.intra_op_num_threads == 1
+    assert options.inter_op_num_threads == 1
+
+    # `threads` is part of the cache key, so a differently-capped request is
+    # not handed back the session built for the first one.
+    assert load(path, board.topology, threads=1) is capped
+    assert load(path, board.topology) is not capped
+
+
 # --- Trading: `accepts` off the value head, mirroring
 # `hexnet.policy.DerivedTrader` ---
 

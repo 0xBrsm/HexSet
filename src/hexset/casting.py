@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 
+from .arena import seat_of
+
 Cast = tuple[int, ...]
 Caster = Callable[[int], Cast]
 
@@ -102,3 +104,59 @@ def league_rotation(
         return tuple(seq[(seat + index) % learners] for seat in range(players))
 
     return caster
+
+
+def rotating(lineup: Sequence[int]) -> Caster:
+    """`arena.compete`'s own seating, read as a caster.
+
+    A tournament rotates a fixed lineup through every seat -- entrant `e`
+    sits at `arena.seat_of(e, index, seats)` -- so that over any `seats`
+    consecutive indices each entrant holds each seat exactly once. `lineup`
+    is that same lineup written as policy ids: `(0, 0, 1, 1)` is the duel
+    `compete` runs, the learner on two adjacent seats and the reference on
+    the other two, cycling by index.
+
+    It is here rather than left inside `compete` because a batched
+    evaluation deals the same boards under the same law without going
+    through the tournament's per-position job at all, and a seating law
+    written twice is how two evaluations of the same pair come to disagree
+    about what they measured.
+    """
+    seats = len(lineup)
+    if seats < 2:
+        raise ValueError("a cast needs at least two seats")
+    order = tuple(lineup)
+    if any(pid < 0 for pid in order):
+        raise ValueError(f"lineup {order} names a policy that cannot exist")
+
+    def caster(index: int) -> Cast:
+        cast = [0] * seats
+        for entrant, pid in enumerate(order):
+            cast[seat_of(entrant, index, seats)] = pid
+        return tuple(cast)
+
+    return caster
+
+
+def swapped(caster: Caster, a: int = 0, b: int = 1) -> Caster:
+    """The complementary cast: ids `a` and `b` exchange seats on every index.
+
+    This is the other half of an antithetic pair -- same index, so the same
+    board and the same dice, with the two sides' seat sets traded, which is
+    what lets a caller average a board's two readings and difference the
+    seat term out exactly rather than hope it cancels in the mean.
+
+    Exchanging the two ids is the complement for *any* cast, which a seat
+    shift is not: `arena.compete` writes its own complement as a shift of
+    `seats // 2`, and that is only the complement of its adjacent lineup --
+    the same shift leaves `alternating`'s interleaved cast untouched.
+    `swapped(alternating(n))` is `alternating(n, flip=True)`, and
+    `swapped(rotating((0, 0, 1, 1)))` is `compete`'s antithetic partner.
+    """
+
+    def caster_swapped(index: int) -> Cast:
+        return tuple(
+            b if pid == a else a if pid == b else pid for pid in caster(index)
+        )
+
+    return caster_swapped

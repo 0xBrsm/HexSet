@@ -3,7 +3,14 @@ from __future__ import annotations
 
 import pytest
 
-from hexset.casting import alternating, league_rotation, paired
+from hexset.arena import seat_of
+from hexset.casting import (
+    alternating,
+    league_rotation,
+    paired,
+    rotating,
+    swapped,
+)
 
 
 @pytest.mark.parametrize("players", [2, 3, 4])
@@ -72,3 +79,39 @@ def test_league_rotation_order_permutes_who_sits_next_to_whom():
 def test_league_rotation_rejects_an_order_that_is_not_a_permutation():
     with pytest.raises(ValueError):
         league_rotation(4, 4, order=(0, 1, 1, 3))
+
+
+@pytest.mark.parametrize("players", [2, 4, 6])
+def test_rotating_is_arenas_own_seating(players):
+    """`compete`'s lineup rotation, read as a caster over the game index."""
+    lineup = tuple(0 if entrant < players // 2 else 1 for entrant in range(players))
+    caster = rotating(lineup)
+    for index in range(12):
+        cast = caster(index)
+        assert cast == caster(index)  # pure in the index, like every caster here
+        for entrant, pid in enumerate(lineup):
+            assert cast[seat_of(entrant, index, players)] == pid
+
+
+@pytest.mark.parametrize("players", [2, 3, 4, 5])
+def test_swapped_alternating_is_alternatings_own_flip(players):
+    """One complement law: exchanging the ids is what `flip` already did."""
+    plain = alternating(players)
+    for index in range(20):
+        assert swapped(plain)(index) == alternating(players, flip=True)(index)
+
+
+def test_swapped_rotating_is_competes_antithetic_partner():
+    """`compete` shifts the seats by `seats // 2`; the ids exchange instead.
+
+    The two are the same permutation of its adjacent lineup, which is what
+    lets a batched duel deal `compete`'s second half without repeating the
+    tournament's inline `divmod`.
+    """
+    lineup = (0, 0, 1, 1)
+    caster = rotating(lineup)
+    for pair in range(12):
+        shifted = [0] * 4
+        for entrant, pid in enumerate(lineup):
+            shifted[seat_of(entrant, pair + 4 // 2, 4)] = pid
+        assert swapped(caster)(pair) == tuple(shifted)

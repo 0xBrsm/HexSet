@@ -111,6 +111,13 @@ python -m hexset.bench.duel heximax search2 --games 400
 not a raw win count. See `python -m hexset.bench.duel --help` for the full
 flag set (workers, board/duel seeds, geometry).
 
+A duel between *batched* policies — a network answering a whole tick of
+games in one forward, rather than one position per call — is
+`hexset.bench.versus.compete_batched({0: learner, 1: reference}, games,
+players=4, seed=0, lanes=64)`: `hexset.arena.compete`'s pairing law and its
+Wilson interval, driven over `hexset.gym.lanes.LaneEnv`, reporting the paired
+victory-point margin a training run evaluates a checkpoint by.
+
 To duel against Catanatron's own bots instead:
 
 ```

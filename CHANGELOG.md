@@ -9,6 +9,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.42.0
+
 ### Added
 
 - `hexset.gym.lanes.LaneEnv` takes a board *law* -- `board=` may be `board(index) -> Board | None` -- so a paired evaluation gives games `2k` and `2k+1` one board while each keeps its own dice; `LaneEnv.cohort(games)` re-arms a bounded environment for a fresh cohort without rebuilding it; `hexset.actions.mask_of(space, options)` is the legality mask over options already enumerated (`legal_mask` is now this over `legal_actions`).

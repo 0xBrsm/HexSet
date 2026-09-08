@@ -11,22 +11,29 @@ from hexset.board.board import random_base_board
 from hexset.board.terrain import NUM_RESOURCES, Resource
 from hexset.board.topology import build as build_topology
 from hexset.board.maps import BASE_LAYOUT, MINI_LAYOUT
+from hexset.cards import DECK_SIZE
 from hexset.encoding import (
+    BANK_SCALE,
+    HAND_SCALE,
     HEX_FEATURES,
     NUM_BUILDINGS,
+    TURN_SCALE,
     _building_points,
     _seat,
     edge_features,
     encode,
     encode_batch,
+    from_frame,
+    global_columns,
     global_features,
     static_graph,
+    to_frame,
     vertex_features,
 )
-from hexset.game import is_over, start
+from hexset.game import Phase, is_over, start
 from hexset.play import step_randomly
 from hexset.state import NO_OWNER, Building
-from hexset.victory import building_points
+from hexset.victory import building_points, public_victory_points
 
 
 def a_game(players: int = 4, seed: int = 0, steps: int = 120):
@@ -478,3 +485,177 @@ def test_batched_ledger_encoding_matches_the_canonical_path():
         want = encode(game, perspective)
         assert np.array_equal(got.globals, want.globals)
         assert got.globals.dtype == np.float32
+
+
+# --- seat-frame rotation: `to_frame`/`from_frame` -----------------------
+#
+# The convention "the perspective seat is slot 0, others follow in turn
+# order" used to be written by hand three times over in `hexn`
+# (`netbot._board_order`, `ppo.rotate`, `export_onnx._rotate_slot`), on top
+# of the one already implicit here in `encoding`. The two functions below
+# are copies of `hexn`'s exact formulas -- `_hexn_ppo_rotate` mirrors
+# `hexn.ppo.rotate`, `_hexn_netbot_board_order` mirrors
+# `hexn.netbot._board_order` -- so a change to `to_frame`/`from_frame` that
+# quietly altered the direction or the modulus fails here, even though
+# nothing in this repository imports hexn.
+
+
+def _hexn_ppo_rotate(rewards, seat):
+    """`hexn.ppo.rotate`'s exact formula: board order -> perspective frame."""
+    players = len(rewards)
+    return tuple(rewards[(seat + i) % players] for i in range(players))
+
+
+def _hexn_netbot_board_order(value, seat):
+    """`hexn.netbot._board_order`'s exact formula: perspective frame -> board order."""
+    players = len(value)
+    return tuple(
+        float(value[(board_seat - seat) % players]) for board_seat in range(players)
+    )
+
+
+@pytest.mark.parametrize("players", [3, 4])
+def test_to_frame_matches_the_arithmetic_hexn_uses(players):
+    values = [float(i) for i in range(players)]
+    for seat in range(players):
+        assert to_frame(values, seat) == _hexn_ppo_rotate(values, seat)
+
+
+@pytest.mark.parametrize("players", [3, 4])
+def test_from_frame_matches_the_arithmetic_hexn_uses(players):
+    values = [float(i) for i in range(players)]
+    for seat in range(players):
+        assert from_frame(values, seat) == _hexn_netbot_board_order(values, seat)
+
+
+@pytest.mark.parametrize("players", [3, 4])
+def test_to_frame_and_from_frame_round_trip_every_seat(players):
+    values = tuple(1.5 * i for i in range(players))
+    for seat in range(players):
+        assert from_frame(to_frame(values, seat), seat) == values
+        assert to_frame(from_frame(values, seat), seat) == values
+
+
+def test_to_frame_puts_the_seat_first():
+    assert to_frame([10.0, 20.0, 30.0], seat=1) == (20.0, 30.0, 10.0)
+
+
+def test_from_frame_undoes_that():
+    assert from_frame((20.0, 30.0, 10.0), seat=1) == (10.0, 20.0, 30.0)
+
+
+# --- the named global column map -----------------------------------------
+
+
+@pytest.mark.parametrize("players", [3, 4])
+def test_global_columns_tile_the_vector_exactly(players):
+    from itertools import pairwise
+
+    columns = global_columns(players)
+    spans = sorted(columns.values(), key=lambda s: s.start)
+
+    assert spans[0].start == 0
+    assert spans[-1].stop == global_features(players)
+    for earlier, later in pairwise(spans):
+        assert earlier.stop == later.start  # contiguous, no gap
+    covered = sum(span.stop - span.start for span in spans)
+    assert covered == global_features(players)  # non-overlapping and total
+
+
+def test_global_columns_read_the_value_the_encoder_wrote():
+    from hexset.ledger import SeatLedger
+
+    players = 4
+    perspective = 1
+    game = _main_phase_game()
+
+    for player in range(players):
+        _set_hand(game, player, Resource.WOOD, player + 1)
+    game._state.bank = [3, 4, 5, 6, 7]
+    for player in range(players):
+        game._state.dev_cards[player] = [1, 0, 0, 0, player]
+        game._state.new_dev_cards[player] = [0, 0, 1, 0, 0]
+    game._state.knights_played = [0, 2, 1, 3]
+    game._state.longest_road_holder = 2
+    game._state.largest_army_holder = 0
+    game.phase = Phase.MAIN
+    game.free_roads = 1
+    game._state.deck = game._state.deck[:7]
+    game.turns = 42
+    game.ledger.seats[0] = SeatLedger(known=[1, 0, 0, 0, 0], unknown=0)
+    game.ledger.seats[2] = SeatLedger(known=[0, 2, 0, 0, 0], unknown=1)
+    game.ledger.seats[3] = SeatLedger(known=[0, 0, 0, 3, 0], unknown=0)
+
+    obs = encode(game, perspective)
+    columns = global_columns(players)
+    seats = to_frame(range(players), perspective)  # board seat held by each slot
+
+    own_hand = obs.globals[columns["own_hand"]]
+    assert own_hand == pytest.approx(
+        np.array(game._state.hands[perspective]) / HAND_SCALE
+    )
+
+    opponent_hand_sizes = obs.globals[columns["opponent_hand_sizes"]]
+    for i, seat in enumerate(seats[1:]):
+        assert opponent_hand_sizes[i] == pytest.approx(
+            sum(game._state.hands[seat]) / HAND_SCALE
+        )
+
+    assert obs.globals[columns["bank"]] == pytest.approx(
+        np.array(game._state.bank) / BANK_SCALE
+    )
+
+    own_dev = [
+        h + f
+        for h, f in zip(
+            game._state.dev_cards[perspective], game._state.new_dev_cards[perspective]
+        )
+    ]
+    assert obs.globals[columns["own_dev_cards"]] == pytest.approx(
+        np.array(own_dev) / 5.0
+    )
+
+    opponent_dev_counts = obs.globals[columns["opponent_dev_card_counts"]]
+    for i, seat in enumerate(seats[1:]):
+        expected = sum(game._state.dev_cards[seat]) + sum(
+            game._state.new_dev_cards[seat]
+        )
+        assert opponent_dev_counts[i] == pytest.approx(expected / 5.0)
+
+    knights = obs.globals[columns["knights_played"]]
+    for i, seat in enumerate(seats):
+        assert knights[i] == pytest.approx(game._state.knights_played[seat] / 5.0)
+
+    vp = obs.globals[columns["victory_points"]]
+    for i, seat in enumerate(seats):
+        assert vp[i] == pytest.approx(public_victory_points(game._state, seat) / 10.0)
+
+    longest = obs.globals[columns["longest_road_holder"]]
+    assert longest[_seat(game._state.longest_road_holder, perspective, players)] == 1.0
+    assert longest.sum() == 1.0
+
+    largest = obs.globals[columns["largest_army_holder"]]
+    assert largest[_seat(game._state.largest_army_holder, perspective, players)] == 1.0
+    assert largest.sum() == 1.0
+
+    phase_block = obs.globals[columns["phase"]]
+    assert phase_block[int(game.phase)] == 1.0
+    assert phase_block.sum() == 1.0
+
+    assert obs.globals[columns["free_roads"]][0] == pytest.approx(
+        game.free_roads / 2.0
+    )
+    assert obs.globals[columns["deck_size"]][0] == pytest.approx(
+        len(game._state.deck) / DECK_SIZE
+    )
+    assert obs.globals[columns["turn"]][0] == pytest.approx(
+        min(game.turns / TURN_SCALE, 1.0)
+    )
+
+    ledger_block = obs.globals[columns["ledger"]]
+    for i, seat in enumerate(seats[1:]):
+        entry = game.ledger.seats[seat]
+        known = ledger_block[i * 6 : i * 6 + 5]
+        unknown = ledger_block[i * 6 + 5]
+        assert known == pytest.approx(np.array(entry.known) / HAND_SCALE)
+        assert unknown == pytest.approx(entry.unknown / HAND_SCALE)

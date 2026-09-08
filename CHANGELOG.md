@@ -9,6 +9,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added
+
+- `hexset.encoding.to_frame`/`from_frame`: the seat-frame rotation (perspective seat to slot 0, others in turn order behind it) as two pure, inverse functions, replacing the by-hand `(seat ± perspective) % players` arithmetic `_encode_globals`/`_ledger_parts` repeated inline. One named seam for a convention a training repo previously had to write out three times over.
+- `hexset.encoding.global_columns(players)`: a named `dict[str, slice]` over `global_features(players)`'s fourteen blocks (`own_hand` through `ledger`), built from the same widths `global_features` sums, so a caller reads a block by name instead of counting offsets by hand off those constants the way a checkpoint migration across encodings used to have to.
+- `hexset.casting`: pure casting laws over a game index -- `alternating(players, flip=False)` (the duel caster, seat-pair swapping by parity), `paired(caster)` (games `2k`/`2k+1` share `caster(k)`), `league_rotation(learners, players, order=None)` (rotate learner ids over seats, `order` reseating who sits next to whom) -- so a training loop's seating law lives beside `arena`'s own rotation rather than being re-derived per caller.
+
 ## 0.40.0
 
 ### Changed

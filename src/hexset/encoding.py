@@ -115,25 +115,92 @@ def edge_features(players: int) -> int:
     return players + 1
 
 
+def _global_blocks(players: int) -> list[tuple[str, int]]:
+    """Every block `_encode_globals` writes, in write order, named and sized.
+
+    The one list `global_features` and `global_columns` both read, so a
+    caller counting the vector's width and a caller naming a slice of it can
+    never drift apart the way a second, hand-copied offset table would.
+    """
+    return [
+        ("own_hand", NUM_RESOURCES),
+        ("opponent_hand_sizes", players - 1),
+        ("bank", NUM_RESOURCES),
+        ("own_dev_cards", NUM_DEV_CARDS),
+        ("opponent_dev_card_counts", players - 1),
+        ("knights_played", players),
+        ("victory_points", players),
+        ("longest_road_holder", players + 1),
+        ("largest_army_holder", players + 1),
+        ("phase", NUM_PHASES),
+        ("free_roads", 1),
+        ("deck_size", 1),
+        ("turn", 1),
+        # known[5] + unknown per opponent.
+        ("ledger", (players - 1) * (NUM_RESOURCES + 1)),
+    ]
+
+
 def global_features(players: int) -> int:
-    return (
-        NUM_RESOURCES  # own hand
-        + (players - 1)  # opponent hand sizes
-        + NUM_RESOURCES  # bank
-        + NUM_DEV_CARDS  # own development cards
-        + (players - 1)  # opponent development card counts
-        + players  # knights played
-        + players  # public victory points
-        + 2 * (players + 1)  # longest road and largest army holders
-        + NUM_PHASES
-        + 3  # free roads, deck size, turn
-        + (players - 1) * (NUM_RESOURCES + 1)  # ledger: known[5] + unknown per opponent
-    )
+    return sum(width for _, width in _global_blocks(players))
+
+
+def global_columns(players: int) -> dict[str, slice]:
+    """Name every block of `global_features(players)`, by where `_encode_globals`
+    writes it.
+
+    Each value is a `slice` into `Observation.globals` (or one row of
+    `encode_batch`'s globals) for that block, in the exact order `encode`
+    writes them: `own_hand`, `opponent_hand_sizes`, `bank`, `own_dev_cards`,
+    `opponent_dev_card_counts`, `knights_played`, `victory_points`,
+    `longest_road_holder`, `largest_army_holder`, `phase`, `free_roads`,
+    `deck_size`, `turn`, `ledger`. The slices tile the vector exactly --
+    contiguous, non-overlapping, covering every column -- so a caller reads
+    `obs.globals[global_columns(players)["victory_points"]]` by name instead
+    of counting offsets from these constants by hand, the way a migration
+    across encodings otherwise has to.
+    """
+    columns: dict[str, slice] = {}
+    offset = 0
+    for name, width in _global_blocks(players):
+        columns[name] = slice(offset, offset + width)
+        offset += width
+    return columns
 
 
 def _seat(seat: int, perspective: int, players: int) -> int:
     """Rotate so the perspective player is seat 0."""
     return (seat - perspective) % players
+
+
+def to_frame(values: Sequence[float], seat: int) -> tuple[float, ...]:
+    """Board-order values rotated into `seat`'s perspective frame.
+
+    Slot `i` is board seat `(seat + i) % players`, so `seat` itself lands on
+    slot 0 and everyone else follows behind it in turn order -- the rotation
+    `encode` applies to every per-seat block, and the one a value or reward
+    vector produced in board-seat order needs before it lines up with a
+    perspective-frame observation. Getting the direction backwards still
+    type-checks and still trains, it just silently swaps whose number is
+    whose, which is why this is one function pinned by a round-trip test
+    rather than an inline expression written wherever a caller needs it.
+    """
+    players = len(values)
+    return tuple(values[(seat + i) % players] for i in range(players))
+
+
+def from_frame(values: Sequence[float], seat: int) -> tuple[float, ...]:
+    """The inverse of `to_frame`: a perspective-frame vector (slot 0 is
+    `seat`) restored to board-seat order.
+
+    `from_frame(to_frame(v, seat), seat) == tuple(v)` for every seat and
+    every player count -- this is what a value head's slot-0-is-mover output
+    has to pass through before it can be compared against board seats again.
+    """
+    players = len(values)
+    return tuple(
+        values[(board_seat - seat) % players] for board_seat in range(players)
+    )
 
 
 @dataclass(frozen=True)
@@ -327,8 +394,7 @@ def _ledger_parts(game: Game, perspective: int) -> list[float]:
     """
     players = game._state.num_players
     parts: list[float] = []
-    for i in range(1, players):
-        seat = (perspective + i) % players
+    for seat in to_frame(range(players), perspective)[1:]:
         seat_ledger = game.ledger.seats[seat]
         parts.extend(k / HAND_SCALE for k in seat_ledger.known)
         parts.append(seat_ledger.unknown / HAND_SCALE)
@@ -342,7 +408,7 @@ def _encode_globals(
 
     state = game._state
     players = state.num_players
-    seats = [(perspective + i) % players for i in range(players)]
+    seats = to_frame(range(players), perspective)
 
     parts: list[float] = []
     parts.extend(n / HAND_SCALE for n in state.hands[perspective])

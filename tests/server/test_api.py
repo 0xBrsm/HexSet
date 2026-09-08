@@ -512,6 +512,26 @@ def test_join_refuses_an_unknown_client_kind_or_a_malformed_id():
     assert bad_id.value.status == 400
 
 
+def test_join_refuses_once_the_game_is_over():
+    """Same reasoning as `Table.join`'s own docstring: a finished game's
+    open-looking seat (`EMPTY`, unlocked -- exactly what one reopened after
+    a restart looks like, see the `_reopen`/`reopen_closed_session` tests)
+    must not be joinable, or the one thing that makes a finished game safe
+    to reopen at all stops being true."""
+    from hexset.game import Phase
+
+    registry = tables()
+    code, _ = deal(registry, bots=[])
+    table = registry.get(code)
+    table.session.game.phase = Phase.GAME_OVER
+
+    with pytest.raises(ApiError) as refused:
+        registry.handle("POST", "/api/join", {"code": code}, None)
+
+    assert "already over" in refused.value.args[0]
+    assert refused.value.status == 409
+
+
 def test_the_journal_header_and_a_seated_event_carry_the_client(tmp_path):
     registry = tables(games_dir=str(tmp_path))
     creator_id = "a" * 64
@@ -583,6 +603,30 @@ def test_reclaim_with_the_wrong_secret_403s():
             "POST", "/api/reclaim", {"code": dealt["code"], "secret": "not it"}, None
         )
     assert wrong.value.status == 403
+
+
+def test_reclaim_refuses_once_the_game_is_over_even_with_the_right_secret():
+    """The right secret still names the right seat -- this isn't a 403,
+    which would mean no match -- but a finished game has nothing left for
+    even its own seat to act on, and reclaiming one there would only dress
+    up what `GET /api/table/<code>` already shows a spectator as somebody's
+    own claim."""
+    from hexset.game import Phase
+
+    registry = tables()
+    secret = "a client's own secret"
+    client_id = hashlib.sha256(secret.encode("utf-8")).hexdigest()
+    dealt = registry.handle(
+        "POST", "/api/games", {"bots": [], "client": {"id": client_id, "kind": "api"}}, None
+    )
+    table = registry.get(dealt["code"])
+    table.session.game.phase = Phase.GAME_OVER
+
+    with pytest.raises(ApiError) as refused:
+        registry.handle("POST", "/api/reclaim", {"code": dealt["code"], "secret": secret}, None)
+
+    assert "already over" in refused.value.args[0]
+    assert refused.value.status == 409
 
 
 # --- GET /api/version, and the optional `version` guard on acting routes ------

@@ -470,7 +470,18 @@ class Table:
 
         `client` (see `parse_client`) names who's claiming it; an unnamed
         seat's display name falls back to `default_seat_name(client.kind)`
-        rather than staying blank, so `player_names` always holds something."""
+        rather than staying blank, so `player_names` always holds something.
+
+        Refuses once `is_over` -- a finished game's own seats look `EMPTY`
+        after a restart (`Tables._reopen`/`reopen_closed_session`, nothing
+        left there to reconstruct a person's claim from) exactly the way a
+        genuinely open seat does, and without this check `join` could not
+        tell the two apart. Every seat, from here, is what a spectator
+        already was: `GET /api/table/<code>`'s route is now the only way
+        into this game.
+        """
+        if is_over(self.session.game):
+            raise ApiError("the game is already over", status=409)
         candidates = [
             i
             for i, seat in enumerate(self.seats)
@@ -929,10 +940,17 @@ class Tables:
         An `EMPTY` seat is revived the same way `Table.join` would seat it
         (claimed, named, gated); a seat still `PLAYER` just gets a new token
         -- its old one then fails every later request. Refuses a bot seat (no
-        secret to check) and a locked one (retired for good, the same as
-        `close_seat`/`leave_seat`). No match anywhere: 403.
+        secret to check), a locked one (retired for good, the same as
+        `close_seat`/`leave_seat`), and -- same reasoning as `Table.join` --
+        any seat at all once `is_over`: a finished game has nothing left to
+        act on even in the seat that made every recorded move, and reclaiming
+        one there would only dress up what `GET /api/table/<code>` already
+        shows a spectator as somebody's own claimed seat. No match anywhere,
+        or the game already over: 403/409.
         """
         table = self.get(code)
+        if is_over(table.session.game):
+            raise ApiError("the game is already over", status=409)
         digest = hashlib.sha256(secret.encode("utf-8")).hexdigest()
         with table.lock:
             locked = locked_of(table.session.game)

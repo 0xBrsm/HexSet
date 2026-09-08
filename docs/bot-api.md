@@ -153,7 +153,7 @@ it picks the answer with the highest own gain above the floor
 (`default_pick`). A bot may implement `offer`, `respond`, `pick` and
 `estimate_many` itself; `hexset.bots.search2.Bot` lists the signatures.
 
-**Manual seats (a person at the page, an LLM over `hexset.server.mcp`)**
+**Manual seats (a person at the page, an LLM over `POST /mcp`)**
 are `PendingGate`s: nothing is ever agreed on their behalf. A bot's
 broadcast is recorded against each manual seat in `GET /api/state`'s
 `pending` (`{"actor": <seat>, "bundle": [...]}`), and **the bot's turn
@@ -177,6 +177,11 @@ seat-token gated:
   recorded answer exactly; `{"decline": true}` closes the round. Only the
   actor may call it; the round also closes when the turn ends.
 
+`POST /api/action`, `.../trade/round/answer` and `.../trade/round/choose` all
+take an optional `"version"`, compared against the table's current one — a
+mismatch is a 409 rather than the request applying against a state that has
+since moved.
+
 An executed trade is logged (`log`, `trades`) and journalled like any other
 move, so it survives a restart. A checkpoint served externally
 (`hexset.clients.botclient.RecordBrain`) is never seated as a gate and does
@@ -189,10 +194,10 @@ not trade.
 caller holds. No `client` at all defaults to kind `"api"`; an unknown kind
 or a malformed `id` is a 400. `POST /api/reclaim {"code", "secret"}` mints a
 fresh token for the seat whose `client.id` equals `sha256(secret)`, once the
-original token is gone (a server restart, most often) — `hexset.server.mcp`'s
-`resume_game` uses this to get its seat back by the same `model` string
-`new_game`/`join` were called with. None of this applies to a `.onnx` bot: a
-checkpoint is never seated as a manual gate and has no client identity.
+original token is gone (a server restart, most often) — MCP's `resume_game`
+(`hexset.server.mcptools`) uses this to get its seat back by the same `model`
+string `new_game`/`join` were called with. None of this applies to a `.onnx`
+bot: a checkpoint is never seated as a manual gate and has no client identity.
 
 ## What is never part of this contract
 

@@ -712,11 +712,13 @@ def _play_and_record(
     index: int,
     action_cap: int,
 ) -> tuple[Game, "Record", tuple[ClearedTrade, ...]]:
-    """`play`'s own loop, with the bookkeeping `hexset.record.record_game`
-    uses to build a `Record` alongside it -- the two are kept in step
-    deliberately: `--records` must record exactly the game `play` would have
-    played, not an approximation of it, so this is not `play` calling out to
-    a separate recorder but the same loop instrumented in place.
+    """`play`'s own loop, with a `hexset.record.Tape` running alongside it.
+
+    `--records` must record exactly the game `play` would have played, not
+    an approximation of it, so this is not `play` calling out to a separate
+    recorder but the same loop instrumented in place -- and the instrument
+    is the same `Tape` `record_game` and `hexset.gym.lanes` file their steps
+    on, so a tournament's records and a lane's are records of the same kind.
 
     The same pass builds the `ClearedTrade` census, off the one before/after
     `game.trades` diff the record already takes. A census used to mean a
@@ -725,24 +727,14 @@ def _play_and_record(
     `hand_before`: here the hand sizes are read once, off the true state, at
     the top of the step the trade cleared inside.
     """
-    from .chance import Live, Recording
-    from .record import Record, board_fields
+    from .record import Tape, recording
 
-    game = deal_game(
-        seed,
-        index,
-        len(lineup),
-        board=board,
-        chance=lambda rng: Recording(Live(rng)),
-    )
-    chance = game.chance
+    game = deal_game(seed, index, len(lineup), board=board, chance=recording)
     game.gates = tuple(lineup)
     game.max_trades = None
-    actions: list[tuple[int, int, int]] = []
-    trades: list[tuple[int, int, int, tuple[int, ...]]] = []
+    tape = Tape()
     cleared: list[ClearedTrade] = []
-    steps_taken = 0
-    while not is_over(game) and steps_taken < action_cap:
+    while not is_over(game) and len(tape.actions) < action_cap:
         seat = to_move(game)
         bot = lineup[seat]
         before = len(game.trades)
@@ -750,13 +742,13 @@ def _play_and_record(
         # view of the table.
         hands = [sum(hand) for hand in game.state(0, hidden=False).hands]
         turn, phase = game.turns, game.phase.name
+        step = len(tape.actions)
         action = bot.choose(game)
         apply(game, action)
         for trade in game.trades[before:]:
-            trades.append((len(actions), trade.a, trade.b, tuple(trade.received)))
             cleared.append(
                 ClearedTrade(
-                    step=len(actions),
+                    step=step,
                     turn=turn,
                     phase=phase,
                     a=trade.a,
@@ -773,21 +765,9 @@ def _play_and_record(
             moved = sum(trade.received)
             hands[trade.a] += moved
             hands[trade.b] -= moved
-        actions.append((int(action.type), action.a, action.b))
-        steps_taken += 1
+        tape.step(action, game.trades[before:])
 
-    record = Record(
-        num_players=len(lineup),
-        seed=game_key(seed, index),
-        first=game.first,
-        actions=tuple(actions),
-        chance=tuple(chance.events),
-        trades=tuple(trades),
-        winner=game.won_by,
-        turns=game.turns,
-        **board_fields(board),
-    )
-    return game, record, tuple(cleared)
+    return game, tape.sealed(game, seed=game_key(seed, index)), tuple(cleared)
 
 
 def compete(

@@ -530,3 +530,41 @@ def test_the_gate_is_a_pure_function_of_the_ask(board):
     bot.rng = random.Random(99)  # a later rng state must not move the answer
     assert bot.gains_many(view, received, thems) == first
     assert bot.estimate_many(view, candidates) == bot.estimate_many(view, candidates)
+
+
+def test_a_policy_duels_through_compete_batched(board):
+    """`PolicyPolicy` is the whole adapter between a runtime and an evaluation.
+
+    The stub is a `Policy` and nothing more -- no bot, no gate, no arena
+    entrant -- and that is all `hexset.bench.versus` needs to seat it on
+    both sides of a duel. The seat given the checkpoint as well is gated by
+    `bot_for`'s own trade gate, priced on the *run's* budget rather than the
+    checkpoint's, which is the reason `gate` takes a third argument.
+    """
+    from hexset.bench.versus import PolicyPolicy, _budgeted, compete_batched
+
+    checkpoint = stub_checkpoint(board)
+    bare = PolicyPolicy(checkpoint.policy)
+    gated = PolicyPolicy(checkpoint.policy, checkpoint)
+
+    game = start(board, PLAYERS, random.Random(2))
+    assert bare.gate(game, 0, 0) is None
+    assert gated.gate(game, 0, 0).max_trades == 0
+    # The seater is what actually hands the budget over.
+    assert _budgeted(gated.gate, 0)(game, 0).max_trades == 0
+    def plain_gate(game, seat):
+        return "seated"
+
+    assert _budgeted(plain_gate, 0) is plain_gate  # two-argument: untouched
+
+    verdict = compete_batched(
+        {0: gated, 1: bare},
+        4,
+        players=PLAYERS,
+        seed=5,
+        lanes=2,
+        action_cap=400,
+        max_trades=0,
+    )
+    assert verdict.games == 4
+    assert 0 <= verdict.wins <= 4

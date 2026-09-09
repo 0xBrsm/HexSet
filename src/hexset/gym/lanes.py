@@ -45,10 +45,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from ..actions import Action, apply
-from ..arena import MAX_ACTIONS, deal_game
+from ..arena import MAX_ACTIONS, deal_game, game_key
 from ..board.board import Board
 from ..bots.search2 import options_for
 from ..game import Game, is_over, to_move
+from ..record import Record, Tape, recording
 from ..victory import victory_points
 
 if TYPE_CHECKING:  # annotation-only, so no import cost and no cycle
@@ -161,6 +162,17 @@ class Episode:
     decisions: tuple[tuple[Decision, ...], ...]
     outcome: Outcome
     trades: tuple[tuple[int, int, int, tuple[int, ...]], ...] = ()
+    # The game itself, when the environment was built with `records=True`:
+    # a `hexset.record.Record` of exactly the game this lane played, which
+    # `hexset.record.replay`/`replay_to` reopen at any ply. `None`
+    # otherwise, never partly built -- an environment that was not asked for
+    # records does not even wrap its chance source.
+    #
+    # This is what a driver should replay from. Rebuilding the game from
+    # `(seed, index)` and walking `stream()` forward is a second replay path
+    # beside `hexset.record`, and two paths that must agree about a position
+    # eventually do not.
+    record: Record | None = None
 
     def stream(self) -> list[Decision]:
         """Every decision back in the order it was taken."""
@@ -221,6 +233,8 @@ class _Lane:
     actions: int = 0
     trades: int = 0
     trade_log: list[tuple[int, int, int, tuple[int, ...]]] = field(default_factory=list)
+    # The record under construction, or `None` when nobody asked for one.
+    tape: Tape | None = None
 
 
 class LaneEnv:
@@ -272,6 +286,7 @@ class LaneEnv:
         stride: int = 1,
         max_trades: int | None = None,
         bot_capacity: int = 256,
+        records: bool = False,
     ) -> None:
         """`deal` bounds how many games are ever started.
 
@@ -293,6 +308,15 @@ class LaneEnv:
         evaluation gives games `2k` and `2k+1` one board while each keeps its
         own dice (`hexset.casting.paired` is the casting half of the same
         pairing).
+
+        `records` has every finished `Episode` carry a
+        `hexset.record.Record` of its own game, built on the same
+        `hexset.record.Tape` `hexset.arena` records a tournament game with,
+        so a lane's record and a tournament's are records of the same kind.
+        Off by default and skipped entirely rather than discarded: a game
+        recorded here is dealt with `hexset.record.recording` wrapping its
+        chance source, and an environment nobody asked for records from
+        deals the plain `hexset.chance.Live` it always did.
         """
         if players < 2:
             raise ValueError("a game needs at least two seats")
@@ -316,6 +340,7 @@ class LaneEnv:
             for pid, spawn in (bots or {}).items()
         }
         self.stride = stride
+        self.records = records
         self.ticks = 0
         self.steps = 0
         self.games = 0
@@ -361,7 +386,13 @@ class LaneEnv:
         self._next += self.stride
         cast = self._cast(index)
         board = self.board(index) if callable(self.board) else self.board
-        game = deal_game(self.seed, index, self.players, board=board)
+        game = deal_game(
+            self.seed,
+            index,
+            self.players,
+            board=board,
+            chance=recording if self.records else None,
+        )
         game.max_trades = self.max_trades
         game.gates = self._seat_gates(game, cast)
         return _Lane(
@@ -369,6 +400,7 @@ class LaneEnv:
             game=game,
             cast=cast,
             by_seat=[[] for _ in range(self.players)],
+            tape=Tape() if self.records else None,
         )
 
     # --- the tick ---------------------------------------------------------
@@ -454,6 +486,8 @@ class LaneEnv:
                 lane.trade_log.append(
                     (lane.actions, trade.a, trade.b, tuple(trade.received))
                 )
+            if lane.tape is not None:
+                lane.tape.step(action, lane.game.trades[before:])
             lane.actions += 1
             if is_over(lane.game) or lane.actions >= self.action_cap:
                 finished.append(self._harvest(lane, request.lane))
@@ -479,6 +513,17 @@ class LaneEnv:
         game = lane.game
         # true state: terminal victory points include hidden dev cards.
         state = game.state(0, hidden=False)
+        # The seed the record names is the stream the game's own draws came
+        # from (`hexset.arena.game_key`), not the run seed: a record names
+        # the stream it replays, and `hexset.record.replay` checks the
+        # recorded chance against it. It stays right when the environment
+        # pinned a board, because a pinned board changes the board and not
+        # the draws.
+        record = (
+            None
+            if lane.tape is None
+            else lane.tape.sealed(game, seed=game_key(self.seed, lane.index))
+        )
         episode = Episode(
             index=lane.index,
             seed=self.seed,
@@ -486,6 +531,7 @@ class LaneEnv:
             cast=lane.cast,
             decisions=tuple(tuple(seat) for seat in lane.by_seat),
             trades=tuple(lane.trade_log),
+            record=record,
             outcome=Outcome(
                 winner=game.won_by,
                 points=tuple(

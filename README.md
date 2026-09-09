@@ -325,7 +325,11 @@ per live lane — the seat to move, its legal `options`, its information-set
 and returns the games that ended, as `Episode`s carrying every decision filed
 under the seat that took it, the cleared-trade census, and an `Outcome` with
 both candidate rewards (winner and per-seat terminal points) plus whether the
-action cap truncated the game. Every game is
+action cap truncated the game. Built with `records=True`, every finished
+`Episode` also carries a `hexset.record.Record` of the game the lane played,
+so replaying a stored game is `hexset.record.open_record`/`advance`/`replay`
+(or `replay_to(record, ply)` for one position) and never a second reconstruction
+from the seed. Every game is
 `hexset.arena.deal_game(seed, index, players)`, the same law `compete` deals
 from, so a game is the same whichever lane draws it and however many lanes are
 in flight. A `caster(index)` seats policy ids; ids in `bots` are played by a

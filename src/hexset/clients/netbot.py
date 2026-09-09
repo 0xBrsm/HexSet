@@ -27,7 +27,7 @@ from hexset.actions import Action, ActionSpace, ActionType, apply
 from hexset.clients.policy import Checkpoint, Policy
 from hexset.game import Game, imagine, is_over, to_move
 from hexset.mcts import Search
-from hexset.server.rules import options_for
+from hexset.actions import options_for
 from hexset.state import copy_state
 from hexset.trading import NETWORK_GATE_ROWS, exchange
 from hexset.view import View
@@ -334,7 +334,7 @@ def _is_small(bundle: Bundle) -> bool:
 
 @dataclass
 class NetworkEvaluator:
-    """The value head as `hexset.bots.SearchBot`'s leaf evaluation."""
+    """A checkpoint value head exposed as per-seat game evaluation."""
 
     policy: Policy
     players: int
@@ -350,10 +350,7 @@ class LeafEvaluator:
     """A whole wave of `hexset.mcts` leaves in one forward."""
 
     policy: Policy
-    # As on `NetworkBot`: kept because `hexset.arena.leaf_evaluator`'s
-    # registered factory signature is `(policy, space, pad_to)`, and because
-    # a caller with a loaded checkpoint has one to hand. The policy indexes
-    # its own space.
+    # The action space declared by the checkpoint.
     space: ActionSpace
     pad_to: int | None = None
 
@@ -450,8 +447,7 @@ def bot_for(checkpoint: Checkpoint, *, max_trades: int | None = None) -> Network
 def evaluator_for(
     checkpoint: Checkpoint, *, max_trades: int | None = None
 ) -> NetworkEvaluator:
-    """`checkpoint`'s value head as a leaf evaluation for the handcrafted
-    search (`hexset.bots.SearchBot`), rather than as a bot of its own."""
+    """Expose a checkpoint value head for position evaluation."""
     return NetworkEvaluator(
         policy=checkpoint.policy,
         players=checkpoint.players,
@@ -498,58 +494,26 @@ def _checkpoint_path(weights: object, what: str) -> str:
     raise ValueError(f"{what}'s weights is a checkpoint path")
 
 
-def register_entrants(loader, *, evaluator_max_trades: int | None = None) -> None:
-    """Make `hexset.arena`'s "network" and "mcts" entrant kinds -- and its
-    "network" evaluator, checkpoint loader and leaf-evaluator factory --
-    spawnable through `loader`.
+def register_entrants(loader) -> None:
+    """Register network and MCTS arena factories for a checkpoint loader.
 
-    `loader(path, topology)` returns a `Checkpoint`; everything the arena
-    then does with it is this module's, so a runtime registers itself in one
-    call instead of carrying five factories of its own.
-
-    `evaluator_max_trades` is the trade switch for the "network" *evaluator*
-    (the value head under `SearchBot`, `netsearch`/`netgreedy`): `None`
-    keeps each checkpoint's recorded budget; `0` switches trading off for
-    every evaluator this runtime provides, which is what a handcrafted
-    search over a learned value wants -- its gate scores a bare `GameState`
-    no encoder can read, so it must never be asked to trade.
-
-    Deliberately *not* called at import by any runtime in this package. The
-    kinds are global names with a single owner, an entrant's `weights` is a
-    path in whatever format that owner loads, and a process that has merely
-    imported a module should not thereby have changed what
-    `arena.spawn` does with somebody else's checkpoint. A driver that wants
-    network entrants calls this itself, once, naming the runtime it means.
+    ``loader(path, topology)`` returns a Checkpoint. Call this explicitly in
+    each process that will spawn entrants; imports do not choose a runtime.
     """
-    from hexset.arena import (
-        register_checkpoint_loader,
-        register_entrant_kind,
-        register_evaluator_provider,
-        register_leaf_evaluator_factory,
-    )
+    from hexset.arena import register_entrant_kind
 
-    def _spawn_network(entrant, board: Board, rng) -> NetworkBot:
-        path = _checkpoint_path(entrant.weights, "a network entrant")
-        return bot_for(loader(path, board.topology), max_trades=entrant.max_trades)
+    def spawn_network(entrant, board: Board, rng) -> NetworkBot:
+        bot = bot_for(loader(_checkpoint_path(entrant.weights, "network"), board.topology),
+                      max_trades=entrant.max_trades)
+        bot.rng = rng
+        return bot
 
-    def _spawn_mcts(entrant, board: Board, rng) -> GatedSearch:
+    def spawn_mcts(entrant, board: Board, rng) -> GatedSearch:
         return searcher_for(
-            loader(_checkpoint_path(entrant.weights, "an mcts entrant"), board.topology),
-            simulations=entrant.simulations,
-            wave=entrant.wave,
-            max_trades=entrant.max_trades,
-            rng=rng,
+            loader(_checkpoint_path(entrant.weights, "mcts"), board.topology),
+            simulations=entrant.simulations, wave=entrant.wave,
+            max_trades=entrant.max_trades, rng=rng,
         )
 
-    def _spawn_evaluator(weights: object, board: Board) -> NetworkEvaluator:
-        path = _checkpoint_path(weights, "a network evaluator")
-        return evaluator_for(loader(path, board.topology), max_trades=evaluator_max_trades)
-
-    def _leaf_evaluator(policy, space, pad_to=None) -> LeafEvaluator:
-        return LeafEvaluator(policy=policy, space=space, pad_to=pad_to)
-
-    register_entrant_kind("network", _spawn_network)
-    register_entrant_kind("mcts", _spawn_mcts)
-    register_evaluator_provider("network", _spawn_evaluator)
-    register_checkpoint_loader(loader)
-    register_leaf_evaluator_factory(_leaf_evaluator)
+    register_entrant_kind("network", spawn_network)
+    register_entrant_kind("mcts", spawn_mcts)

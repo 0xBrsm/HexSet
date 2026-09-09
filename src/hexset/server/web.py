@@ -50,7 +50,7 @@ Run it with (from `src/`)::
 
     python -m hexset.server.web
 
-then open the printed URL. Opponents come from `api.model_options()`: `search2`
+then open the printed URL. Opponents come from `api.model_options()`: `heximax`
 (handcrafted, no checkpoint needed) plus one entry per `*.onnx` file found in
 `HEXSET_UI_MODELS_DIR` (default: `<repo root>/models`) — drop a file in, it
 shows up in the picker, no restart, no code change. Pass `--checkpoint <name>`
@@ -388,7 +388,7 @@ def main(argv: list[str] | None = None) -> None:
         "--checkpoint",
         default=None,
         help=(
-            "An opponent (see api.model_options() — 'search2' or a .onnx name), "
+            "An opponent (see api.model_options() — 'heximax' or a .onnx name), "
             "seated at every bot seat a new game is dealt with when the "
             "request creating it doesn't name its own lineup. There is no "
             "automatic mixed default any more — omit this and a fresh game "

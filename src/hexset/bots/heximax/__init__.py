@@ -1,79 +1,18 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""heximax: the handcrafted baseline that does not read the opponents' hands.
+"""Heximax: a handcrafted expectimax/max-n baseline using per-seat information.
 
-Lives at `hexset.bots.heximax`, a subpackage of `hexset.bots` -- the package
-that holds every heuristic bot (`hexset.bots.search2` is the other one) so
-they can share code, chiefly the handcrafted evaluation at
-`hexset.bots.evaluate`.
+The evaluator reads the player's own hand, public counts and public resource
+ledger. Search expands opponents from sampled beliefs and averages dice,
+steals and development-card draws over their distributions. The default uses
+one determinization, depth two and a bounded leaf budget.
 
-`hexset.bots.search2.SearchBot` over `hexset.bots.evaluate.Evaluator` --
-`search2` -- is the project's one clean held-out referent, and it cheats: its
-evaluation reads every seat's true hand, its tree expands opponents from
-their true hands and development cards, and a steal or a dev-card buy is
-valued on one frozen draw. heximax is the next generation of that bot, built
-to the design in `agents/reference/heximax.md`. It is **information-set
-honest by default**: every quantity about an opponent is read through the
-public ledger (`game.ledger`, `known[s]` + `unknown`) and the public counts,
-never through `state.hands[opponent]` or `state.dev_cards[opponent]`. Its own
-hand is exact.
+Use ``heximax(board, ...)`` to construct a bot. ``mode="honest"`` enables
+trading with TRADING_WEIGHTS; ``mode="notrade"`` uses NO_TRADE_WEIGHTS and
+declines trades. ``weights=`` overrides the selected profile.
 
-A package, so a downstream copy takes the directory: `heximax/evaluate.py`,
-`heximax/search.py`, `heximax/presets.py`, one concern a file. The
-information set itself, `View`, lives in the engine at `hexset.view` -- a
-seat's view of the game is engine functionality, reached through
-`Game.state(seat, hidden=True)`, not something a bot builds for itself.
-
-* `evaluate` -- `hexset.bots.evaluate.Evaluator`'s term set read through the
-  view (`HonestEvaluator`), and two weight profiles (`TRADING_WEIGHTS`, a
-  trading table, and `NO_TRADE_WEIGHTS`, a no-trade table). The three hand
-  terms are `hexset.bots.evaluate.hand_terms` itself, shared rather than
-  duplicated, so the trade gate that recomputes them from a post-trade hand
-  gets bit-identically what the search would have scored.
-* `search`   -- max^n over `HonestEvaluator` with a node budget and
-  iterative deepening (`Heximax`), opponents expanded from determinized
-  samples of the belief (PIMC over `k` worlds), and every hidden draw
-  averaged over its distribution. See its module docstring for the leaf
-  budget's cost accounting.
-* `presets`  -- registers "heximax"/"heximax-notrade" with
-  `hexset.arena`, as an import-time side effect of importing this package
-  (and therefore of `import hexset.bots`, which imports this package).
-
-Trading is not an action and needs no adapter: `Heximax.gains_many` returns
-each candidate's win-probability delta under its own evaluation and
-`Heximax.accepts` gates on it being strictly positive, and the engine's one
-trade event a turn does the rest (`hexset.trading`). `max_trades=0` refuses
-everything.
-
-Instantiate through the `heximax(board, ...)` factory, not `Heximax(...)`
-directly, unless you are building a custom evaluator or weight vector by
-hand: `heximax(board, mode="honest")` is the shipped bot and
-`mode="notrade"` plays the no-trade weight table with trading switched off.
-`weights=` overrides either mode's profile with a candidate vector while
-leaving the mode's other defaults (the trade switch) unchanged -- the hook the position-level fit in
-`hexset.fitting` uses to compare a candidate vector. Importing this package,
-or `hexset.bots` (which imports it), or anything that imports either,
-registers the three presets above with `hexset.arena`; a process that never
-imports `hexset.bots` (or the deprecated `heximax` shim) cannot spawn
-heximax by name.
-
-Engine dependency: this package is a consumer of `hexset` (actions, board,
-cards, economy, game, ledger, mcts, placement, robber, state, trading,
-victory, view), of the sibling `hexset.bots.search2`/`hexset.bots.evaluate` (the
-shared STANCES and the shared evaluation), and of `hexset.arena` for
-registration. It does not modify any of them. Nesting
-under `hexset.bots` means `hexset.bots`, `hexset.arena` and `hexset.mcts` now
-have a real import cycle through this package (`hexset.bots` -> `heximax` ->
-`hexset.arena`/`hexset.mcts` -> `hexset.bots`, for the names those two
-modules borrow back); it resolves because `hexset.arena`'s and
-`hexset.mcts`'s own uses of `hexset.bots` names are deferred to inside the
-functions/methods that need them rather than sitting at module-import time --
-see the comment at each of those two import sites.
-
-`bot.choose()`'s own choices, and the leaves it spends reaching them, are
-checked on every position by
-`test_choices_are_byte_identical_to_the_recorded_census`. History -- the
-optimization and structural passes, with their per-change breakdowns -- is
-in `agents/reference/heximax.md`.
+Importing this package registers the heximax and heximax-notrade arena presets.
+Shared evaluation terms live in hexset.bots.evaluate; search objectives live
+in hexset.bots.stances, and the engine owns the information-set View.
 """
 
 from __future__ import annotations

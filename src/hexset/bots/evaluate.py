@@ -170,7 +170,7 @@ class Weights:
     and no ranking moves -- so that fit could not have pinned it, and only
     the three terms' ratios to each other mean anything. Under `win` the
     scale is identified, because scaling the vector by k is exactly changing
-    `search2.WIN_TEMPERATURE` to T/k. Carried over as a starting point to
+    `stances.WIN_TEMPERATURE` to T/k. Carried over as a starting point to
     refit from, not as a result: read them as "the shape the redesign
     argued for", and do not quote them as fitted values.
 

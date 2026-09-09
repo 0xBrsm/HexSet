@@ -37,7 +37,6 @@ from hexset.bench.throughput import default_workers, environment
 from hexset.bots.evaluate import ROLLS, TERM_NAMES, Weights
 from hexset.bots.heximax.evaluate import NO_TRADE_WEIGHTS, TRADING_WEIGHTS
 
-MAX_WORKERS = 30
 SCARCE_PER_PRODUCTION = 0.91 / ROLLS
 
 # Most load-bearing first, by the fit's own coefficients and the hand
@@ -126,7 +125,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--games", type=int, default=1024, help="per cell; multiple of 4")
     parser.add_argument("--confirm", type=int, default=3072, help="final swept vs start")
     parser.add_argument("--seed", type=int, default=98000)
-    parser.add_argument("--workers", type=int, default=min(MAX_WORKERS, default_workers()))
+    parser.add_argument("--workers", type=int, default=default_workers())
     parser.add_argument("--terms", default=",".join(DEFAULT_ORDER))
     parser.add_argument(
         "--passes", default="0,0.5,2;0.71,1.41",

@@ -6,7 +6,7 @@ from hexset.actions import ActionType, apply
 from hexset.board.board import random_base_board
 from hexset.game import Phase, _in_second_setup_round, end_turn, roll_dice, to_move
 
-from hexset.server.rules import options_for
+from hexset.actions import options_for
 from hexset.server.seating import (
     advance_setup,
     lock_seat,

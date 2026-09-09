@@ -32,7 +32,7 @@ from hexset.clients.netbot import (
     searcher_for,
 )
 from hexset.game import Phase, run_trade_event, start, to_move
-from hexset.server.rules import options_for
+from hexset.actions import options_for
 from hexset.trading import _candidates, valued_many
 
 # Five distinct weights, as in `fixtures/build_stub.py --valued`, but read
@@ -314,24 +314,6 @@ def test_a_bot_seated_at_one_seat_refuses_to_answer_for_another(board):
         assert len(gains) == len(own)
 
 
-def test_the_evaluator_trade_switch_is_the_runtimes_to_set(board, arena_registry):
-    """`register_entrants(loader, evaluator_max_trades=0)`: a handcrafted
-    search over a learned value (`netsearch`/`netgreedy`) must never be
-    asked to trade -- its gate scores a bare `GameState` no encoder can read
-    -- and the runtime says so once, at registration, rather than
-    re-registering the evaluator provider over the top."""
-    from hexset import arena
-
-    checkpoint = stub_checkpoint(board)
-    register_entrants(lambda path, topology: checkpoint, evaluator_max_trades=0)
-    evaluator = arena._EVALUATOR_PROVIDERS["network"]("a-path", board)
-    assert evaluator.max_trades == 0
-
-    register_entrants(lambda path, topology: checkpoint)
-    evaluator = arena._EVALUATOR_PROVIDERS["network"]("a-path", board)
-    assert evaluator.max_trades == checkpoint.max_trades
-
-
 @pytest.fixture
 def arena_registry():
     """`hexset.arena`'s registries are process-global, so a test that
@@ -339,16 +321,9 @@ def arena_registry():
     from hexset import arena
 
     kinds = dict(arena._ENTRANT_KIND_FACTORIES)
-    evaluators = dict(arena._EVALUATOR_PROVIDERS)
-    loader = arena._CHECKPOINT_LOADER
-    leaf = arena._LEAF_EVALUATOR_FACTORY
     yield
     arena._ENTRANT_KIND_FACTORIES.clear()
     arena._ENTRANT_KIND_FACTORIES.update(kinds)
-    arena._EVALUATOR_PROVIDERS.clear()
-    arena._EVALUATOR_PROVIDERS.update(evaluators)
-    arena._CHECKPOINT_LOADER = loader
-    arena._LEAF_EVALUATOR_FACTORY = leaf
 
 
 def test_the_onnx_policy_satisfies_the_same_protocol():

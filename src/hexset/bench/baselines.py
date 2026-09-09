@@ -16,7 +16,7 @@ from dataclasses import asdict
 from hexset.bench.throughput import default_workers, environment
 from hexset.arena import Z_95, compete, lineup_from_names, mean_interval, pooled
 
-DEFAULT_LINEUP = ("greedy", "greedy", "random", "random")
+DEFAULT_LINEUP = ("heximax", "heximax", "random", "random")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -27,7 +27,7 @@ def main(argv: list[str] | None = None) -> int:
         default=list(DEFAULT_LINEUP),
         metavar="BOT",
         help=(
-            "one bot per seat: a preset name (random, greedy, search2, ...) or "
+            "one bot per seat: a preset name (random, heximax, heximax-notrade) or "
             "network:<checkpoint> for a trained network"
         ),
     )

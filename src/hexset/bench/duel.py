@@ -1,19 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""Two checkpoints, head to head on identical boards, in paired terminal VP.
+"""Compare two arena entrants with paired boards and confidence intervals.
 
-The in-loop ladder's 200-game rungs cannot resolve a slope: their scatter is the
-binomial floor of the eval size, so a 150-iteration block's slope carries a 95%
-half-width of ~9 points. This runs the instrument that *did* resolve ppo3's
-selection — `train.versus` at 400 games — between any two checkpoints, so a
-block's gain is measured as one high-resolution difference rather than fitted
-through noise.
-
-    python -m hexset.bench.duel /w/runs/ppo5/latest.pt /w/runs/ppo4/latest.pt \
-        --games 400 --label-a ppo5 --label-b ppo4
-
-Every verdict names its seating -- a lineup pattern such as `aabb`, see
-`arena_lineup` -- because the two paths seat a 2v2 differently and the seating
-alone is worth ~0.35 VP.
+Run ``python -m hexset.bench.duel heximax heximax-notrade --games 400``.
+For batched model evaluation use ``hexset.bench.versus.compete_batched``.
 """
 
 from __future__ import annotations
@@ -24,39 +13,13 @@ import statistics
 import sys
 import time
 from pathlib import Path
-from typing import Callable
 
 import hexset.bots  # noqa: F401 -- registers the heximax presets with hexset.arena
-from hexset.arena import NETWORK
 from hexset.game import MAX_TURNS
 
-# The `--workers 1` path (bare checkpoints, network-vs-network) runs through
-# `hexn.collect`/`hexn.train`, which need torch -- so this module never
-# imports them itself. `hexn.duel` registers the runner here at import,
-# which every HexN entry point that wants this path pulls in; a hexset-only
-# process gets a clear error naming the package instead of an ImportError deep
-# inside `hexn.train`.
-_VERSUS_BACKEND: Callable[[argparse.Namespace, str, str], dict] | None = None
+from hexset.bench.throughput import default_workers
 
-
-def register_versus_backend(runner: Callable[[argparse.Namespace, str, str], dict]) -> None:
-    """Register the network-backed `--workers 1` runner: `hexn.duel` calls
-    this at import, wiring `_via_versus` (bare checkpoints, `hexn.train.versus`)
-    back into this module without it importing torch or hexn itself."""
-    global _VERSUS_BACKEND
-    _VERSUS_BACKEND = runner
-
-# A seating is a lineup, not a menu entry. `arena._play_one` seats entrant `e`
-# at `(e + rotation) % seats`, so `aabb` gives every copy one same-side
-# neighbour and `abab` puts the copies opposite each other, each flanked by two
-# opponents. `collect.alternating` seats the versus path on same-parity seats,
-# so `--workers 1` has always played `abab`; `--workers >1` has always played
-# `aabb`. On identical boards and dice the seating alone moves `lam095-805` vs
-# `ppo4-585` from +0.08 to +0.43 VP (the harness-path check, addenda 6-8;
-# `runs/eval/harness-seat-geometry.json`), so a verdict that does not record
-# its seating cannot be compared with one that does.
 ARENA_GEOMETRY = "aabb"
-VERSUS_GEOMETRY = "abab"
 
 
 def arena_lineup(a: str, b: str, geometry: str) -> tuple[list[str], list[int], list[int]]:
@@ -84,180 +47,27 @@ def arena_lineup(a: str, b: str, geometry: str) -> tuple[list[str], list[int], l
     return specs, mine, theirs
 
 
-def _is_bare_network(spec: str) -> bool:
-    """A checkpoint played as a plain network -- the one entrant that batches.
-
-    Either a raw path (what `side` and `train.versus` take) or the arena's
-    `network:<path>` spelling of the same thing. Anything else -- a preset name
-    or a `netsearch:`/`netgreedy:`/`mcts:` spec -- wraps the network in a search
-    that cannot batch across lanes and gets one core in-process.
-    """
-    return Path(spec).exists() or spec.startswith(NETWORK)
-
-
-def _default_workers(a: str, b: str) -> int:
-    """1 for network-vs-network, which `--workers`' own help text prices at 400
-    games in 134 s single-process; 26 for anything else, which the same help
-    text prices at 200 games unfinished in 11 minutes at workers=1.
-    """
-    return 1 if _is_bare_network(a) and _is_bare_network(b) else 26
-
-
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("a", help="checkpoint path, or an arena entrant name")
-    p.add_argument(
-        "b", help="checkpoint path, or an arena entrant name, e.g. search2-notrade"
-    )
+    p.add_argument("a", help="arena entrant name or registered checkpoint spec")
+    p.add_argument("b", help="arena entrant name or registered checkpoint spec")
     p.add_argument("--label-a", default=None)
     p.add_argument("--label-b", default=None)
     p.add_argument("--games", type=int, default=400)
-    p.add_argument("--lanes", type=int, default=512)
-    p.add_argument("--players", type=int, default=4)
-    p.add_argument("--device", default="cuda")
-    # Board seed 0 matches the training runs; the duel seed is deliberately
-    # *not* the in-loop ladder's `seed + 10_000` — those boards were already
-    # used for monitoring and selection, so a verdict wants fresh ones. Keep
-    # one value across every duel in a comparison: the boards then cancel
-    # between the treatment and control differences too, not just within one.
-    p.add_argument("--board-seed", type=int, default=0)
-    p.add_argument("--duel-seed", type=int, default=20_000)
-    p.add_argument(
-        "--workers",
-        type=int,
-        default=None,
-        help="above 1, run through `arena.compete`, which shards games across "
-        "processes and is the path every recorded duel took. "
-        "`train.versus` (workers=1) batches network inference across lanes in ONE "
-        "process, which is ideal for network-vs-network — 400 games in 134 s — and "
-        "catastrophic against a scripted bot, whose search cannot batch and gets "
-        "one core: 200 games against search2 had not finished in 11 "
-        "minutes, where the recorded arena run did 4000 in 607 s. Use workers for "
-        "anything with a handcrafted bot on either side. Default: 1 when both "
-        "entrants are bare network checkpoints, 26 otherwise -- see "
-        "`_default_workers`",
-    )
-    p.add_argument(
-        "--geometry",
-        default=None,
-        help="the seating, as a lineup rather than a named mode: a pattern of "
-        "`a`/`b` letters, one per seat and any length (`aabb`, `abab`, `aab`), "
-        "or a comma-separated lineup whose entries are `a`, `b`, or any entrant "
-        "spec -- `a,b,search2,random` duels two seats at a four-seat table. "
-        f"Side A is every slot holding `a`. Default {ARENA_GEOMETRY!r}, what "
-        "every recorded arena verdict played, so a default invocation "
-        f"reproduces the record exactly. {VERSUS_GEOMETRY!r} puts each copy "
-        "between two opponents -- the seating `train.versus` plays and the only "
-        f"one it can play, so at workers=1 this may only name {VERSUS_GEOMETRY!r}. "
-        "Same boards and dice, the seating alone moves a pair by ~0.35 VP, and "
-        "the verdict records which one it was",
-    )
-    p.add_argument(
-        "--threads",
-        type=int,
-        default=0,
-        help="torch intra-op threads; 0 leaves the default. Set it whenever the "
-        "container is capped with --cpus: torch sizes its pool from the host's "
-        "core count, not the cgroup's, so a 6-CPU cap still spawns ~32 threads "
-        "that then fight over 6 cores. Costs nothing when the box is idle and a "
-        "great deal when it is not",
-    )
-    p.add_argument(
-        "--json",
-        default=None,
-        help="append the result here instead of the default verdict path",
-    )
-    p.add_argument(
-        "--verdicts",
-        default="runs/eval",
-        help="where a result lands when --json is not given. A duel that "
-        "writes nowhere is the failure this default removes: a 400-game "
-        "mcts-against-its-own-policy result was written up in prose and "
-        "nowhere a tool could read it, so the ratings fit never saw it and "
-        "placed that entrant half a VP wrong off a single unrelated duel",
-    )
-    p.add_argument(
-        "--no-json",
-        action="store_true",
-        help="really write nothing, for a throwaway probe",
-    )
-    p.add_argument(
-        "--records",
-        default=None,
-        help="append every game played as a v2 record (hexset.record.Record) "
-        "here. Arena path only (--workers > 1): `train.versus` "
-        "(--workers 1) plays through hexn's own batched collector, which "
-        "returns a verdict and no per-game history to record.",
-    )
+    p.add_argument("--duel-seed", type=int, default=20000)
+    p.add_argument("--workers", type=int, default=default_workers())
+    p.add_argument("--geometry", default=ARENA_GEOMETRY,
+                   help="a/b seat pattern or comma-separated lineup, e.g. a,b,random,random")
+    p.add_argument("--json", default=None, help="append verdict to this JSON Lines file")
+    p.add_argument("--verdicts", default="runs/eval", help="default verdict directory")
+    p.add_argument("--no-json", action="store_true", help="print without writing a verdict file")
+    p.add_argument("--records", default=None, help="append replayable game records to this file")
     args = p.parse_args(argv)
-
-    if args.threads:
-        import torch
-
-        torch.set_num_threads(args.threads)
-
-    # Resolved rather than defaulted silently: 1 is right for network-vs-network
-    # and catastrophic against anything that searches, so which one a run got
-    # has to be visible in the run's own output, not inferred after the fact.
-    if args.workers is None:
-        args.workers = _default_workers(args.a, args.b)
-        print(f"--workers not given; defaulting to {args.workers}", file=sys.stderr)
-    else:
-        print(f"--workers {args.workers}", file=sys.stderr)
-
-    # The geometry is a factor of the same kind as `--workers`, and until it was
-    # recorded the worker count chose it silently. It is printed for the same
-    # reason the worker count is: which seating a verdict measured has to be
-    # visible in the run's own output. The versus path cannot seat blocked --
-    # `collect.alternating` is the interleaving -- so asking it to is an error,
-    # not something to note and play anyway.
-    if args.workers > 1:
-        geometry = args.geometry or ARENA_GEOMETRY
-        if args.geometry is None:
-            print(f"--geometry not given; defaulting to {geometry}", file=sys.stderr)
-        else:
-            print(f"--geometry {geometry}", file=sys.stderr)
-    else:
-        if args.geometry not in (None, VERSUS_GEOMETRY):
-            print(
-                f"--geometry {args.geometry} is not available at --workers 1: "
-                "`train.versus` seats the sides through `collect.alternating`, "
-                f"which is always {VERSUS_GEOMETRY}. Use --workers 2 or more for "
-                "the arena path, which can seat either way.",
-                file=sys.stderr,
-            )
-            return 2
-        geometry = VERSUS_GEOMETRY
-        print(
-            f"--geometry {geometry} (the only seating `train.versus` plays)",
-            file=sys.stderr,
-        )
-
+    if args.workers < 1:
+        p.error("--workers must be positive")
     label_a = args.label_a or Path(args.a).stem
     label_b = args.label_b or Path(args.b).stem
-
-    if args.records and args.workers <= 1:
-        print(
-            "--records needs the arena path (--workers > 1): `train.versus` "
-            "(--workers 1) returns a verdict only, with no per-game history "
-            "to record.",
-            file=sys.stderr,
-        )
-        return 2
-
-    if args.workers > 1:
-        result = _via_arena(args, label_a, label_b, geometry)
-    else:
-        if _VERSUS_BACKEND is None:
-            print(
-                "the --workers 1 path (bare checkpoints, network-vs-network) "
-                "needs the hexn package: import hexn.duel, or run "
-                "`python -m hexn.duel` instead of `python -m hexset.bench.duel`, "
-                "or pass --workers 2 or more to use the arena path instead.",
-                file=sys.stderr,
-            )
-            return 2
-        result = _VERSUS_BACKEND(args, label_a, label_b)
+    result = _via_arena(args, label_a, label_b, args.geometry)
 
     destination = None
     if not args.no_json:

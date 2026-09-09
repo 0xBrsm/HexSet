@@ -5,8 +5,8 @@ this module — the board layout math, the wire-format mapping and the session
 that drives a game — can be imported and tested without PyTorch, the same way
 `hexset.actions` and `hexset.game` can. Anything with a
 `choose(game) -> Action` method is all a session needs of its opponent:
-`NetworkBot` from `hexset.clients.onnxbot`, `Heximax` or `SearchBot` from
-`heximax`/`hexset.bots`, or the `RandomBot` the tests use.
+`NetworkBot` from `hexset.clients.netbot`, `Heximax` or `RandomBot` from
+`hexset.bots`.
 
 ## The wire format
 
@@ -20,7 +20,7 @@ played-out game rather than a handful of hand-picked shapes.
 ## Never build an action the engine did not offer
 
 `GameSession.submit` decodes the wire action and checks it against
-a *fresh* call to `rules.is_legal`, not merely against what was on offer at
+a *fresh* list from `hexset.actions.legal_actions`, not merely against what was on offer at
 some earlier poll. A UI bug, a stale page, or a tampered request all fail the same
 way: the action is rejected before it reaches `hexset.actions.apply`. That is
 also why every clickable thing in the frontend is one of the literal wire
@@ -70,7 +70,6 @@ from hexset.trading import (
 from hexset.victory import public_victory_points, victory_points
 
 from .journal import Journal
-from .rules import is_legal
 from .seating import locked_of, settle, snapshot
 
 RESOURCE_NAMES: tuple[str, ...] = tuple(r.name.title() for r in Resource)
@@ -1409,7 +1408,7 @@ class GameSession:
                 )
                 self._steps += 1
                 continue
-            if not is_legal(self.game, action, legal_actions(self.game, actor)):
+            if action not in legal_actions(self.game, actor):
                 raise ResumeError(
                     f"step {self._steps}: {action} is not legal in {self.game.phase.name}"
                 )
@@ -1452,7 +1451,7 @@ class GameSession:
             raise ValueError("it is not your turn to act")
         action = wire_to_action(wire)
         options = legal_actions(self.game, seat)
-        if not is_legal(self.game, action, options):
+        if action not in options:
             raise ValueError(f"{action} is not a legal action right now")
         self._apply(seat, action)
 

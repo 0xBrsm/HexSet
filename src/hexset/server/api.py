@@ -112,22 +112,9 @@ from .webplay import (
 # The opponents that are not files. Everything else in the picker is a path to
 # a checkpoint, and what it does is the checkpoint's business.
 #
-# All three are `hexset.arena` presets, built through `hexset.arena.spawn` so
-# this server seats the same bot the training repo duels — `heximax` is the
-# honest handcrafted search (it reads the public ledger, never a hidden hand)
-# and is the default embedded opponent; `catanatron` is Catanatron's own
-# AlphaBeta player at depth two, sitting at a HexSet table through
-# `hexset.catanatron.bot`; `search2` is the older depth-two bot every ladder
-# number on record was measured against, kept by name so a game can still be
-# played against it. `heximax` is registered as a preset by the sibling
-# `heximax` package (imported above for that side effect), not by `hexset`
-# itself -- see `heximax`'s "registration" section, and `catanatron_seatable`
-# below for the one that is registered only where its extra is installed.
+# Built through the arena registry so served and benchmarked bots agree.
 HANDCRAFTED = "heximax"
-HANDCRAFTED_ENTRANTS = ("heximax", "catanatron", "search2")
-# What the board offers. `search2` stays seatable by name (API clients, tests,
-# the training mix) but is no longer on the board's picker.
-LISTED_ENTRANTS = ("heximax", "catanatron")
+HANDCRAFTED_ENTRANTS = ("heximax", "catanatron")
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 MODELS_DIR = Path(os.environ.get("HEXSET_UI_MODELS_DIR", REPO_ROOT / "models"))
@@ -303,9 +290,8 @@ def model_options() -> dict[str, str]:
 
 
 def listed_models() -> list[str]:
-    """`GET /api/models`: what the board's picker offers — `LISTED_ENTRANTS`
-    then every checkpoint; `search2` is seatable by name but not listed."""
-    return [name for name in model_options() if name not in set(HANDCRAFTED_ENTRANTS) - set(LISTED_ENTRANTS)]
+    """Names available to browser and API clients."""
+    return list(model_options())
 
 
 def wait_query(query: str) -> tuple[int | None, float]:
@@ -565,11 +551,7 @@ def spawn_bot(spec: str, board: Board, rng: random.Random, config: Config) -> Bo
     if spec not in PRESETS:
         catanatron_seatable()  # a resumed game names a spec no picker built
     if spec in PRESETS:
-        # `hexset.arena` is the training repo's own bot registry, and the one
-        # `search2` every duel on record was played against — built here
-        # rather than re-declared, so "the handcrafted opponent" means one
-        # thing in both repos. The trade switch is this deployment's
-        # (`Config.max_trades`), not the preset's.
+        # The deployment supplies the trade switch; other defaults are the preset's.
         return spawn_entrant(replace(PRESETS[spec], max_trades=config.max_trades), board, rng)
 
     from hexset.clients.onnxbot import spawn  # onnxruntime-free import boundary
@@ -850,7 +832,7 @@ class Tables:
         """Starts one embedded `LocalSearchBrain` runner thread per bot seat
         `table` already has, tokened and all — the in-process half of
         `botclient.py`'s two brains (see its module docstring). `spawn_bot`
-        (unchanged) builds whatever the spec asks for — `search2`, a plain
+        (unchanged) builds whatever the spec asks for — `heximax`, a plain
         checkpoint, or a search over one — and the runner drives it through
         the same token-gated `/api/action` route an external client would
         use, never a direct write to the session."""

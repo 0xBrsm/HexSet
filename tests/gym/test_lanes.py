@@ -17,7 +17,7 @@ import pytest
 
 from hexset import arena
 from hexset.arena import Entrant, _play_one
-from hexset.bots.search2 import options_for
+from hexset.actions import options_for
 from hexset.chance import Live, Recording
 from hexset.gym.lanes import LaneEnv
 from hexset.record import advance, moves, open_record, replay, replay_to

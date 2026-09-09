@@ -63,7 +63,7 @@ from hexset.board.board import random_base_board  # noqa: E402
 from hexset.game import Phase, start  # noqa: E402
 
 from hexset.clients.onnxbot import V2Policy, load  # noqa: E402
-from hexset.server.rules import options_for  # noqa: E402
+from hexset.actions import options_for  # noqa: E402
 
 FIXTURES = Path(__file__).parent / "fixtures"
 STUB = FIXTURES / "stub-contract6.onnx"

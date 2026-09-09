@@ -8,7 +8,7 @@ from hexset.board.terrain import NUM_RESOURCES
 from hexset.game import Phase, move_robber_to, start, to_move
 
 from hexset.onnx_record import record_from_game
-from hexset.server.rules import options_for
+from hexset.actions import options_for
 
 
 def _rig_one_card_steal(num_players: int, thief: int, victim: int, resource: int):

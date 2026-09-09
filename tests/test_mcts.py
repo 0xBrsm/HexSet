@@ -579,7 +579,7 @@ def test_a_search_needs_a_known_stance_and_a_real_budget():
 
 def test_a_search_refuses_the_bots_win_stance():
     """`"win"` is a real `hexset.bots.STANCES` member -- the softmax
-    conversion `hexset.bots.search2.win` applies to a vector a search has
+    conversion `hexset.bots.stances.win` applies to a vector a search has
     already finished producing -- but `STANCE_ROWS`/`_backup` never
     implemented an incremental form of it, only `own`/`relative`/`paranoid`.
     Building a tree with it used to construct fine and leave `Node.ranked`

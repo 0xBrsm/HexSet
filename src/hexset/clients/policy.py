@@ -74,7 +74,7 @@ class Policy(Protocol):
         A bare `(game, seat)` row carries no options because a value question
         has none to offer; a runtime that needs a legal mask to normalise
         over derives it from the position itself
-        (`hexset.server.rules.options_for`).
+        (`hexset.actions.options_for`).
 
         This is the whole of what the trade gate asks for
         (`netbot.NetworkBot._score`), which is why it takes positions: the

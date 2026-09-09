@@ -181,9 +181,8 @@ class Game:
         never a copy, so reading it costs nothing and mutating it through
         the returned reference works exactly as mutating `_state` always
         did. This is the only sanctioned way to read the true state from
-        outside the engine; the two sanctioned callers are
-        `hexset.bots.search2` and the Catanatron adapter when it hosts a
-        Catanatron bot.
+        outside the engine. Adapters, record tooling and diagnostics use it;
+        information-set policies must use the default view.
         """
         if not hidden:
             return self._state

@@ -47,7 +47,7 @@ from typing import TYPE_CHECKING
 from ..actions import Action, apply
 from ..arena import MAX_ACTIONS, deal_game, game_key
 from ..board.board import Board
-from ..bots.search2 import options_for
+from ..actions import options_for
 from ..game import Game, is_over, to_move
 from ..record import Record, Tape, recording
 from ..victory import victory_points

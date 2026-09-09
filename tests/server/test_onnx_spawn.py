@@ -2,8 +2,8 @@
 `ModuleNotFoundError` when `hexset.server.onnxbot` moved to
 `hexset.clients.onnxbot` (the one-distribution restructure) and `api.py`'s
 deferred import was left pointing at the old, now-nonexistent module.
-`spec in PRESETS` (`search2`, `heximax`) never touches this import at all, so
-`tests/server/test_api.py`'s all-`search2` suite could not have caught it —
+`spec in PRESETS` (`heximax`, `heximax`) never touches this import at all, so
+`tests/server/test_api.py`'s all-`heximax` suite could not have caught it —
 this is the only server-side test that walks the `.onnx` branch of
 `spawn_bot` rather than stubbing it out.
 """

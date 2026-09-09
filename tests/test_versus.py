@@ -19,7 +19,7 @@ import pytest
 from hexset import arena
 from hexset.arena import Entrant, compete, wilson
 from hexset.bench.versus import BotPolicy, compete_batched
-from hexset.bots.search2 import options_for
+from hexset.actions import options_for
 from hexset.record import replay
 
 SEED = 11

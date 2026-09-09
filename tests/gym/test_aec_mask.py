@@ -3,7 +3,7 @@
 random positions.
 
 This used to have to check the mask against a *second*, honest enumeration
-(`server.rules.fair_legal_actions`), because the engine's own
+(`hexset.actions.legal_actions`), because the engine's own
 `PROPOSE_TRADE` sample read every opponent's true hand to decide which
 `want` anyone could cover. Trading is no longer an action
 (`hexset.trading`), so no action's legality depends on another seat's hand,

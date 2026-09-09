@@ -24,7 +24,7 @@ from conftest import new_tables
 from hexset.server import mcptools
 from hexset.server.web import HexSetServer
 
-SOLO = ["search2", "search2", "search2"]
+SOLO = ["heximax", "heximax", "heximax"]
 MODEL = "claude-test-model"
 
 

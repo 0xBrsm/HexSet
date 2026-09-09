@@ -7,7 +7,7 @@ import pytest
 
 pytest.importorskip("onnxruntime", reason="hexset.clients.onnxbot needs onnxruntime installed")
 
-from hexset.server.rules import options_for  # noqa: E402
+from hexset.actions import options_for  # noqa: E402
 from hexset.board.board import random_base_board  # noqa: E402
 from hexset.game import Phase, start, to_move  # noqa: E402
 from hexset.clients.onnxbot import network_bot  # noqa: E402

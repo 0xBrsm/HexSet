@@ -1,0 +1,183 @@
+# Server operation and client interfaces
+
+The browser, HTTP clients, MCP clients, and embedded bots use the same
+server action validation. Each participant has a seat token. Bot seats run
+in background clients; submitting an action returns the state after that
+action, and subsequent bot moves arrive through state updates.
+
+## Configuration
+
+Start the server with `python -m hexset.server.web`. Defaults are
+`127.0.0.1:8770`, CPU inference, and an automatically opened browser.
+
+| Option | Purpose |
+| --- | --- |
+| `--host`, `--port` | Listening address and port |
+| `--no-browser` | Suppress opening a browser |
+| `--seed` | Board and game random seed |
+| `--checkpoint` | Opponent name used to fill the default bot lineup |
+| `--device` | Inference provider selection; defaults to `cpu` |
+| `--no-trade` | Disable trading for bot seats |
+| `--games-dir` | Journal directory; an empty string disables journaling |
+
+`HEXSET_UI_MODELS_DIR` selects the model directory; it defaults to `models/`
+under the repository root. `HEXSET_UI_GAMES_DIR` selects the journal directory
+when `--games-dir` is omitted; it defaults to `games` relative to the working
+directory. An empty environment value disables journaling.
+
+## Docker
+
+The example image installs NumPy, ONNX Runtime, and the pinned Catanatron
+dependency from `pyproject.toml`. The image includes HexSet; the
+example Compose file overrides source and models with bind mounts and runs
+as UID 10001.
+Prepare a writable journal directory before starting it:
+
+```sh
+cp compose.example.yaml compose.yaml
+mkdir -p games
+sudo chown 10001 games
+docker compose up -d --build
+```
+
+Alternatively, set `user:` in `compose.yaml` to a user that owns `games/`.
+Open `http://localhost:8770`. The Compose file publishes port 8770 on the
+host; edit the port mapping for your deployment.
+
+`compose.yaml` is gitignored. Python source changes require
+`docker compose restart`; the HTML file is read on each request. Dependency
+or Dockerfile changes require a rebuild. The container uses a read-only root
+filesystem, read-only source and model mounts, and a writable journal mount.
+
+## Saved games and visibility
+
+The server writes one JSON Lines journal per game. Journals contain complete
+state, including hidden cards and random outcomes. After a restart, journal
+replay restores unfinished games and completed games requested for viewing.
+Games abandoned through New Game or inactivity eviction remain closed.
+Disabling journaling disables recovery. If the journal directory is not
+writable, the server logs the error and continues without recording.
+
+Reopened games retain their original seat assignments, names, and client
+identities. Seat tokens are held in memory and are replaced through
+`/api/reclaim` after a restart. Manual seats do not reopen for unrelated
+players. The browser retains a client secret and uses it to reclaim its seat.
+
+Before the first move, unused seats can be closed or reopened. Once play
+starts, participation is fixed. Leaving permanently retires the caller's seat;
+it does not make the seat available to someone else. Pieces and cards remain
+on the board. An unresolved trade round involving that seat must be handled
+before leaving.
+
+Completed games are read-only for both participants and spectators. The
+browser reveals the full log and hands, and all seated mutation routes
+return 409. A participant may still reclaim a finished seat to view the game.
+
+Public spectator routes require only the game code and expose every hand,
+development card, and true victory-point count. Players can access these
+routes too. Seat tokens protect actions and seat-specific responses; they
+do not prevent a player from inspecting the public view.
+
+## HTTP API
+
+Send JSON request bodies. Creating or joining a game returns a `token` and
+seat state. Supply that token in the `X-HexSet-Token` header on subsequent
+seat requests.
+
+| Method and route | Request or result |
+| --- | --- |
+| `GET /api/version` | Package `version` and `git_commit`; no token required |
+| `GET /api/models` | Available opponent names |
+| `POST /api/games` | Optional `{"name": "Alice", "bots": ["heximax"]}`; creates a game |
+| `POST /api/join` | `{"code": "ABCDEF", "name": "Alice"}`; claims an open seat |
+| `POST /api/reclaim` | `{"code": "ABCDEF", "secret": "..."}`; replace a matching seat's token |
+| `GET /api/state` | Seat-specific state and current `legal_actions` |
+| `GET /api/board` | Static board layout |
+| `GET /api/record` | ONNX input record and action-space dimensions |
+| `POST /api/action` | `{"action": ...}` with an entry from `legal_actions` |
+| `POST /api/undo` | Undo the seat's last eligible build or bank trade; check `can_undo` |
+| `POST /api/name` | `{"name": "Alice"}`; rename the seat |
+| `POST /api/bot` | `{"seat": 1, "model": "heximax"}`; fill an open seat or replace a bot |
+| `POST /api/close` | `{"seat": 1}`; close an unused seat before the first move |
+| `POST /api/open` | `{"seat": 1}`; reopen a closed unused seat before the first move |
+| `POST /api/leave` | Permanently retire the caller's seat |
+| `GET /api/table/<code>` | Public, omniscient game state; no token required |
+| `GET /api/table/<code>/board` | Public board layout; no token required |
+
+The models, create, join, and reclaim routes also require no seat token.
+State reads support `?after=<version>&wait=<seconds>` to wait for a change. Use fresh
+`legal_actions` when submitting a move. Include the state's `version` in
+`/api/action`, trade answers, and trade choices to reject stale submissions
+with 409. Without a version, a request is validated against the current
+position rather than the position the client last read.
+
+Player trading uses three additional routes documented in the
+[trade-round reference](bot-api.md#trading).
+
+## Client identity and seat recovery
+
+`/api/games` and `/api/join` accept an optional client object:
+
+```json
+{"client": {"id": "<64 hexadecimal SHA-256 characters>", "kind": "api"}}
+```
+
+Hash a retained client secret as UTF-8 to obtain `id`. Valid kinds are `web`,
+`api`, and `mcp`; omitting the client object defaults to `api` without a
+recoverable identity. Unnamed seats default to `human`, `api`, or `mcp`
+according to kind.
+
+`POST /api/reclaim` receives the game code and original secret. It finds the
+seat with a matching hash and returns a fresh token, invalidating the old
+one. Reclaim works on live and completed games but refuses retired seats and
+embedded bots. A journal records the identity hash, not the secret or token.
+
+## MCP
+
+The HTTP server serves MCP at `http://127.0.0.1:8770/mcp`. Configure an MCP
+client with that Streamable HTTP URL; no separate stdio command is provided.
+
+An `initialize` request returns an `Mcp-Session-Id` header. Send it with all
+subsequent requests. A missing session ID returns 400; an unknown ID returns
+404 and requires reinitialization. `DELETE /mcp` ends the session.
+`GET /mcp` returns 405; events are streamed in response to requests.
+
+Available tools are `models`, `new_game`, `join`, `resume_game`, `board`,
+`state`, `wait_for_turn`, `act`, `undo`, `leave_game`, `get_table`,
+`offer_trade`, `answer_trade`, and `choose_trade`.
+
+`new_game` and `join` require a `model` string identifying the client model.
+The server trims and lowercases that string, then hashes it as the seat's
+client identity. `resume_game(code, model)` uses the same string to reclaim
+the seat after an MCP session or server restart. There is no local session
+cache. This identity is derived from the supplied identifier, not from
+independently verified model credentials.
+
+`act(index)` submits one entry from the latest `state().legal_actions`.
+Ending a turn requires `END_TURN`. Trading tools use resource-name
+dictionaries and indices into `get_table()` results, translating them to
+signed HTTP bundles. Pass `version` to `act`, `answer_trade`, and
+`choose_trade` when acting on a previously read state.
+
+`wait_for_turn(timeout=...)` waits until legal actions, a pending offer, a
+fully answered round, or game completion gives the caller something to
+handle. The response uses Server-Sent Events, with keepalives during the
+wait. Use this tool to wait for other seats without repeatedly reading state.
+
+## External ONNX clients
+
+A compatible policy model can claim an open seat from a separate process:
+
+```sh
+python -m hexset.clients.botclient \
+  --url http://127.0.0.1:8770 \
+  --game ABCDEF \
+  --model models/policy.onnx
+```
+
+Replace the game code and model path with your own. The client defaults to
+an identity derived from the model filename stem; `--client-secret` overrides
+that value. This client reads
+`/api/record` and submits actions through the seat API. It does not participate
+in player trading and rejects models with `search=mcts`; search models must
+run as embedded opponents. See the [ONNX model contract](bot-api.md).

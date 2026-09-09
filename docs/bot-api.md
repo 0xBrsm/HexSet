@@ -1,77 +1,56 @@
-# The bot API
+# ONNX model contract
 
-This is the complete interface a `.onnx` file must satisfy to plug in as an
-opponent. It is the only thing `src/hexset/clients/onnxbot.py` reads — the file
-does not need access to this repo's source, only to what is written here plus
-the public [ONNX](https://onnx.ai/) format itself. `hexset.heximax` (the
-default handcrafted opponent) and `hexset.bots`' `search2` implement the same
-interface a different way and are the reference for what "correct" means when
-in doubt.
+HexSet loads ONNX opponents through `hexset.clients.onnxbot`. A model must
+provide compatible metadata, record inputs, and named outputs. Only contract
+`6` is supported. An absent or different contract number is rejected;
+changing the number alone does not make an older graph compatible.
 
-Two independent parts make up the contract:
+The contract is defined by `CONTRACT_VERSION`, `RECORD_FIELDS`, and
+`record_shapes` in [onnx_record.py](../src/hexset/onnx_record.py), together with
+the action layout in [actions.py](../src/hexset/actions.py). Heuristic bots
+implement Python interfaces; they do not consume ONNX tensors.
 
-1. **Self-description** — `metadata_props` on the ONNX model, read once at
-   load time.
-2. **The graph itself** — named inputs in, named outputs out. Which shape
-   this takes depends on the `contract` key below.
+## Model metadata
 
-## 1. Self-description (`metadata_props`)
+ONNX `metadata_props` values are strings.
 
-| key | meaning | default |
+| Key | Meaning | Default or validation |
 | --- | --- | --- |
-| `players` | table size the graph was traced for | required |
-| `num_hexes` / `num_vertices` / `num_edges` | board-shape fingerprint; a mismatched board fails the load rather than running on meaningless input | required |
-| `contract` | which graph shape below applies: `6`, the record shape | refused if absent — see below |
-| `max_trades` | `0` to switch trading off for this checkpoint | trading on |
-| `search` | `mcts` to search over the model's own priors; anything else plays one forward pass | none |
-| `simulations` | descents per decision, when `search=mcts` (clamped to 4096) | 128 |
-| `wave` | leaves batched per expansion, when `search=mcts` (clamped to 256) | 16 |
-| `iteration` | informational only; not read for behaviour | 0 |
+| `contract` | Record and action-space version | Required: `"6"` |
+| `players` | Number of seats used by the graph | Required integer; embedded policies check the game's player count when choosing |
+| `num_hexes` | Board hex count | Required integer |
+| `num_vertices` | Board vertex count | Required integer |
+| `num_edges` | Board edge count | Required integer |
+| `max_trades` | `0` disables this bot's trading | Absent or empty: no override; otherwise must parse as an integer |
+| `search` | `mcts` enables search using the graph's priors and values | Any other value: direct policy inference |
+| `simulations` | Search descents per decision | 128; maximum 4096 |
+| `wave` | Leaves evaluated per search wave | 16; maximum 256 |
+| `iteration` | Training iteration, retained as model information | 0; must parse as an integer when present |
 
-Unreadable or missing optional keys fall back to their default rather than
-failing the load — a typo'd hint costs the hint, not the whole opponent. See
-`src/hexset/server/modelmeta.py` for the exact clamping.
+The embedded loader checks the three board counts against the target
+topology. These counts do not verify connectivity or index ordering: the
+graph must also use the same board indexing as the engine.
 
-Inference device (`cpu`/GPU) is deliberately **not** a metadata key — it is a
-fact about the machine serving the game, not the checkpoint.
+Search settings are read only for `search=mcts`. Missing, malformed, zero,
+or negative `simulations` and `wave` values use their defaults; values above
+the maximum are capped. This fallback does not apply to other integer
+metadata, where malformed values fail loading.
 
-**The `contract` number is assigned by the exporter, not by this repo.**
-`hexset.export_onnx._CONTRACT_VERSION` is the one definition; `hexset.server`
-reads it and never writes it. A graph declares the fields it wants and is fed
-exactly those, so a graph that predates a field this record has gained still
-loads and plays. An unknown number is refused at load with the number named,
-rather than failing later on its first move with a missing-input error.
+Inference device selection belongs to the host's `--device` option. It is
+not read from model metadata.
 
-**Only contract 6 is served.** 2, 3 and 4 are the offer protocol's
-contracts — 3 added four live-offer fields, 4 the two public-knowledge ledger
-fields, and all three declare a `pair_mask` input and a `pair_index` output
-for the one-for-one give/want heads. Trading is now one engine event with no
-actions at all (see §4), so those graphs describe a game this engine does not
-play: there is no honest way to feed them, and they are refused by name.
-Contract 5 is refused too now, for two independent reasons that happened to
-land together: it declared a `valuations` field for the one-event mechanic's
-public valuation vector, and that public layer is gone outright
-(`agents/reference/trading-final.md`, item 1) rather than replaced; and the
-knight two-step fix (a knight is played, then the robber moves through the
-same phase a seven enters, rather than one action carrying both) dropped
-`PLAY_KNIGHT`'s operands, shrinking the flat `ActionSpace` a contract-5
-graph's `action_mask`/`prior` were traced against. Either change alone would
-have forced the bump. Contract 1 — the original shape, where the engine
-encoded the position into feature tensors and the graph was a bare
-policy/value head masked in Python — went the same way on 2026-09-02.
+## Record inputs
 
-## 2. The graph — the record contract (`6`)
+The record describes the position from one seat's perspective. Its own hand
+and development cards are exact. Opponents contribute card totals and the
+public resource ledger, rather than hidden card identities. Seat arrays
+remain in board-seat order; `perspective` identifies the perspective seat.
+The graph handles rotation, feature encoding, masking, and normalization.
 
-The engine builds a **record**: the position stated in the rules' own terms,
-already filtered to what the perspective seat may legally know. The graph
-owns everything downstream of that — encoding, masking, normalising,
-argmax, un-rotating back to board-seat order. Built by
-`hexset.onnx_record.record_from_game`, whose module docstring carries the
-field-by-field derivation.
-
-Leading batch axis `B` on every tensor.
-
-**Inputs:**
+Every tensor has a leading batch axis `B`. `NUM_RESOURCES` and
+`NUM_DEV_CARDS` are both 5. A graph may declare a subset of record fields;
+the loader feeds only the names it requests. Unknown input names fail when
+an inference request is built.
 
 | Name | Shape | dtype |
 | --- | --- | --- |
@@ -100,131 +79,152 @@ Leading batch axis `B` on every tensor.
 | `ledger_unknown` | `(B, players)` | int64 |
 | `action_mask` | `(B, space.size)` | bool |
 
-**Outputs:**
+Resource indices are `WOOD=0`, `BRICK=1`, `SHEEP=2`, `WHEAT=3`, `ORE=4`.
+Development-card indices are `KNIGHT=0`, `VICTORY_POINT=1`,
+`ROAD_BUILDING=2`, `YEAR_OF_PLENTY=3`, `MONOPOLY=4`.
 
-| Name | Shape | Note |
+Terrain indices are `FOREST=0`, `HILLS=1`, `PASTURE=2`, `FIELDS=3`,
+`MOUNTAINS=4`, `DESERT=5`, `SEA=6`, `GOLD=7`. Port codes are `-1` for no
+port, `0` for a generic port, or `1 + resource_index` for a resource port.
+Owners and award holders use `-1` when unassigned. Building values are
+`0` for empty, `1` for a settlement, and `2` for a city.
+
+Phase values are `SETUP_SETTLEMENT=0`, `SETUP_ROAD=1`, `ROLL=2`,
+`DISCARD=3`, `ROBBER=4`, `MAIN=5`, `GAME_OVER=6`. `own_dev` and
+`dev_totals` include newly purchased cards; the action mask determines
+which cards may currently be played. `award_points` contains points from
+Longest Road and Largest Army, not total victory points.
+
+## Graph outputs
+
+| Name | Shape and dtype | Meaning |
 | --- | --- | --- |
-| `action_index` | `(B,)` int64 | argmax over the masked distribution |
-| `prior` | `(B, space.size)` | normalised over legal actions, zero elsewhere |
-| `value` | `(B, players)` | board-seat order, already un-rotated |
+| `action_index` | `(B,)`, int64 | Selected legal action's flat index |
+| `prior` | `(B, space.size)`, floating point | Probability distribution over legal actions, zero on illegal actions |
+| `value` | `(B, players)`, floating point | Per-seat win probabilities in board-seat order |
 
-`NetworkBot` reads `action_index`; searches read `prior`/`value`. One graph
-serves both.
+Direct action selection reads `action_index`. Embedded network trading
+also reads `value`. MCTS reads `prior` and `value`, so a model intended for
+all embedded modes should export all three outputs. The graph selects a
+legal action; the server validates the resulting action.
 
-**The engine drift this section used to list is gone.** This server no longer
-carries its own copy of the engine: it depends on the `hexset` package (now
-one distribution together with the gym, see the CHANGELOG's "one
-distribution" entry), so what it plays is exactly what dev-HexN plays.
+MCTS terminal evaluation uses a one-hot winner vector in board-seat order,
+or all zeros when the game ends without a winner. The value head must use
+win probabilities on the same scale.
 
-**The one mask difference that used to remain is gone too.** The
-`action_mask` served here was built over an *honest* trade sample, because
-the engine's own `legal_actions` filtered the offer sample by opponents'
-true hands and telling a human that would give away a specific opponent's
-hand. There is no offer sample: trading is not an action, no remaining
-action's legality depends on another seat's hand, and there is now one list,
-`hexset.actions.legal_actions`, for every seat.
+Use a dynamic batch axis for search and trade continuation evaluation, which
+call the policy on batches of positions. Direct policy inference uses a batch
+of one. Value-only reads can fall back to individual calls for fixed-batch-one
+graphs, but batched action and prior reads must match the declared shape.
 
-## 3. Trading
+### Action indices
 
-**Status, 2026-09-06: the trade round is the served table's protocol.**
-The engine's automatic clearing house (`hexset.trading.trade_event`) stays
-the training protocol -- the arena, the bench, the gym and every self-play
-run play under it -- but a served table (`hexset.server`) switches it off
-(`Game.max_trades = 0`) and runs the **trade round** instead
-(`hexset.trading`, "The trade round"; `agents/reference/trading-final.md`).
+`hexset.actions.build_space(V, E, H, P)` builds the flat space from vertex,
+edge, hex, and player counts. Blocks appear in this order; each block's
+offset is the sum of all preceding sizes.
 
-One round: the current player broadcasts one offer to every other seat;
-each seat answers once -- accept, counter with a bundle it would take
-instead, or pass; the actor executes one answer or declines them all. A
-trade moves 1-3 cards a side on disjoint resources (`MAX_TRADE_CARDS`),
-and a bot side's own gate must clear its own `trade_floor` at execution,
-re-asked fresh. The floor is the gate's, not the table's: every bot declares
-its own measured resolution (`hexset.trading.trade_floor_of`), and there is
-no default. Bundles on the wire are five signed counts in `RESOURCE_NAMES`
-order, always signed towards the offer's actor: positive is what the actor
-receives.
+| Action | Block size | Index within block |
+| --- | --- | --- |
+| `ROLL` | 1 | 0 |
+| `END_TURN` | 1 | 0 |
+| `BUY_DEV_CARD` | 1 | 0 |
+| `PLAY_ROAD_BUILDING` | 1 | 0 |
+| `SETUP_SETTLEMENT` | V | Vertex index |
+| `SETUP_ROAD` | E | Edge index |
+| `BUILD_ROAD` | E | Edge index |
+| `BUILD_SETTLEMENT` | V | Vertex index |
+| `BUILD_CITY` | V | Vertex index |
+| `MOVE_ROBBER` | H × (P + 1) | Hex index × (P + 1) + victim; victim P means no victim |
+| `PLAY_KNIGHT` | 1 | 0; moving the robber is a separate decision |
+| `PLAY_MONOPOLY` | 5 | Resource index |
+| `PLAY_YEAR_OF_PLENTY` | 15 | Index into sorted resource pairs with repetition: (0,0), (0,1), …, (4,4) |
+| `BANK_TRADE` | 25 | Given resource × 5 + received resource |
+| `DISCARD` | 5 | Resource index; discards one card |
 
-**Bots.** A bot's offer is the candidate maximising its own gain among
-those it estimates the counterparty accepts (`default_offer`: own gain via
-`gains_many`, the counterparty's via `estimate_many` -- heximax and search2
-evaluate the exchange from the other seat's frame; a network checkpoint
-scores the post-trade position once, both hands moved, and reads its own
-row for the gain and the counterparty's row for the estimate, so a bundle
-that hands an opponent win probability reads as the bad offer it is; a
-gate without an estimate uses its own gain in its place). A bot answers an offer by accepting when its
-own gain clears the floor, else countering with its best coverable bundle
-it estimates the actor accepts, else passing (`default_respond`); as actor
-it picks the answer with the highest own gain above the floor
-(`default_pick`). A bot may implement `offer`, `respond`, `pick` and
-`estimate_many` itself; `hexset.bots.search2.Bot` lists the signatures.
+Thus `space.size = 3V + 2E + H(P + 1) + 55`. Use `action_mask` to select
+legal entries. Player trading has no entry in this space.
 
-**Manual seats (a person at the page, an LLM over `POST /mcp`)**
-are `PendingGate`s: nothing is ever agreed on their behalf. A bot's
-broadcast is recorded against each manual seat in `GET /api/state`'s
-`pending` (`{"actor": <seat>, "bundle": [...]}`), and **the bot's turn
-holds until every manual seat has answered** -- `trade_wait` lists the
-seats being waited on and `to_move` reads `null` meanwhile -- so a person
-gets to accept or counter before the bot picks. Three routes, all
-seat-token gated:
+## Trading
 
-- **`POST /api/games/<code>/trade/round`** -- `{"give": [5 ints], "want":
-  [5 ints]}`, unsigned counts. The current player's broadcast; 409 off its
-  turn or outside MAIN, 400 for a bundle it cannot cover. Bots answer
-  synchronously. The view's `trade_round` block carries the offer, every
-  answer so far (`responses`, each `{"seat", "kind", "bundle"}` -- a pass
-  has `"kind": "pass"` and a `null` bundle, so a seat that turned the offer
-  down is told apart from one still to answer), and the manual seats still
-  to answer (`awaiting`). A bot's own offer is one it would take: its gate
-  only broadcasts a candidate that clears the floor on its own gain as well
-  as on the estimated counterparty gain (`default_offer`).
-- **`POST .../trade/round/answer`** -- `{"actor", "received", "kind":
-  "accept"|"counter"|"pass", "bundle"?}`: the exact offer from `pending`
-  echoed back; a counter's `bundle` is signed towards the actor like
-  `received`. 409 once that offer is no longer open. With a bot actor, the
-  round resolves the moment the last manual seat answers.
-- **`POST .../trade/round/choose`** -- `{"seat", "bundle"}` executes that
-  recorded answer exactly; `{"decline": true}` closes the round. Only the
-  actor may call it; the round also closes when the turn ends.
+Server games disable the engine's automatic trade event with
+`Game.max_trades = 0` and run offer–response rounds instead. Arena
+simulations use automatic clearing when trade gates are installed. The Gym
+wrappers have additional limitations described in the
+[README](../README.md#training-environments).
 
-The round is one line of the log, rewritten as it goes: the offer, each
-accept or counter as it lands, and how it ended -- `Player 1 (Ada) offers 2
-Wood for 1 Ore. Player 3 (heximax) accepts. Traded with Player 3 (heximax).`
-(the bundle is already on the line), or `... Player 1 (Ada) declines.`, or
-`... Everyone declines.` the moment every seat has passed. Passes are not
-written one by one. The record underneath is discrete: every step is its
-own journal line (`kind: "note"`) and comes back on a restart.
+A server round has three steps:
 
-`POST /api/action`, `.../trade/round/answer` and `.../trade/round/choose` all
-take an optional `"version"`, compared against the table's current one — a
-mismatch is a 409 rather than the request applying against a state that has
-since moved.
+1. The current player broadcasts an offer to the other active seats.
+2. Each seat accepts, counters with another bundle, or passes.
+3. The current player executes one response or declines the round.
 
-An executed trade is logged (`log`, `trades`) and journalled like any other
-move, so it survives a restart. A checkpoint served externally
-(`hexset.clients.botclient.RecordBrain`) is never seated as a gate and does
-not trade.
+An exchange moves 1–3 cards per side, on disjoint resources. Both hands must
+cover the exchange. A bot's gate is checked again at execution and must
+return a gain strictly above that gate's `trade_floor`. There is no table-wide
+default: a gate that returns positive gains must declare a nonnegative floor.
+A manual seat's explicit submission supplies its consent.
 
-## 4. Identity (manual seats only)
+The Python bot protocol supports `gains_many(view, received, counterparties)`
+for valuing exchanges. Bots may also implement `offer`, `respond`, `pick`,
+and `estimate_many`; defaults in `hexset.trading` evaluate offers and
+responses using the bot's own gain and an estimate of the other seat's gain.
+Boolean `accepts` or `accepts_many` gates are mapped to gains of +1 or −1;
+a bot with no supported gate declines trades.
 
-`POST /api/games` and `POST /api/join` take an optional `client: {"id":
-<64-hex sha256>, "kind": "web"|"api"|"mcp"}` — a hash of a secret only the
-caller holds. No `client` at all defaults to kind `"api"`; an unknown kind
-or a malformed `id` is a 400. `POST /api/reclaim {"code", "secret"}` mints a
-fresh token for the seat whose `client.id` equals `sha256(secret)`, once the
-original token is gone (a server restart, most often) — MCP's `resume_game`
-(`hexset.server.mcptools`) uses this to get its seat back by the same `model`
-string `new_game`/`join` were called with. It is the *only* way back in after
-a restart: a reopened table puts every seat back as whoever held it, so
-`POST /api/join` has nothing to offer there. It also succeeds at a game
-already over, which buys the caller its own seat's view of that game and
-nothing else — every acting route still refuses with a 409. None of this
-applies to a `.onnx` bot: a checkpoint is never seated as a manual gate and
-has no client identity.
+`hexset.clients.netbot.NetworkBot` supplies the shared network trade gate,
+including for ONNX policies and embedded MCTS. Its `trade_floor` is `0.0`.
+For each candidate it samples a belief world consistent with the seat's
+information, then compares continuations with and without the exchange.
+Both hands and the ledger change in the exchanged world. The current mover's
+policy plays up to eight actions in each continuation, stopping at an
+end-turn choice or a finished game. The value head scores the resulting
+positions from the evaluating seat's perspective. Its own row supplies the
+gain; the counterparty's row supplies the estimate of the other side's gain.
 
-## What is never part of this contract
+Every candidate with at most two cards per side is evaluated. Larger bundles
+fill any remaining places up to `NETWORK_GATE_ROWS` (32); unscored candidates
+are declined. Thus 32 is not a hard cap when there are more small bundles.
+These are Python adapter behaviors, not additional graph inputs or outputs.
+The external `RecordBrain` client has no trade gate and rejects search models.
 
-`onnxbot.py`'s job stops at reading these names and shapes. It never imports
-or inspects anything else about how a checkpoint was produced, and a
-checkpoint's author never needs this repo's source to write one — only this
-document, the ONNX spec, and the topology fingerprint of the board they are
-targeting.
+A different inference runtime can implement the `Policy` protocol and use
+the same bot, trade gate, and search. See [runtime integration](training.md#model-runtimes).
+The ONNX loader also accepts a Python `threads` argument to cap both ONNX
+Runtime thread pools; it is not model metadata.
+
+### HTTP trade routes
+
+All routes require `X-HexSet-Token`. Bundles are five signed integers in
+resource order, from the offer actor's perspective: positive counts are
+received by the actor, negative counts are given away. For example,
+`[-1, 0, 0, 1, 0]` means the actor gives one wood and receives one wheat.
+
+| Route | JSON body |
+| --- | --- |
+| `POST /api/games/<code>/trade/round` | `{"give": [1,0,0,0,0], "want": [0,0,0,1,0]}`; unsigned counts |
+| `POST /api/games/<code>/trade/round/answer` | `{"actor": 0, "received": [-1,0,0,1,0], "kind": "accept"}`; kind is `accept`, `counter`, or `pass`; counters also supply a signed `bundle` |
+| `POST /api/games/<code>/trade/round/choose` | `{"seat": 1, "bundle": [-1,0,0,1,0]}` to execute that response, or `{"decline": true}` |
+
+Only the current player in MAIN may open a round. `pending` in a manual
+seat's state contains offers requiring its answer, as `actor` and `bundle`.
+Echo that exact offer as `actor` and `received` when answering; stale offers
+are rejected. Counter bundles remain signed toward the original actor.
+
+The actor's `trade_round` state contains the offer, `responses` (each with
+`seat`, `kind`, and `bundle`), and `awaiting` seats. The actor chooses an
+exact recorded accept or counter; a pass has `kind="pass"` and a null bundle.
+A bot actor waits for every manual seat to answer:
+`trade_wait` identifies those seats and `to_move` is null while it waits.
+A cardless manual seat passes automatically. Bots broadcast at most once per
+turn and resolve their round after the final required answer. Manual players
+may open a replacement round on their own turn. Executed trades are
+logged and journaled for replay.
+
+`/api/action`, `/trade/round/answer`, and `/trade/round/choose` accept an
+optional `version` field (trade routes use the full game-specific prefix
+above). A mismatch with the table's current version returns 409. All acting
+routes refuse once the game is over.
+
+MCP over HTTP provides `offer_trade`, `answer_trade`, and `choose_trade` over these
+routes, using named resource counts and response indices. See
+[client interfaces](server.md#mcp).

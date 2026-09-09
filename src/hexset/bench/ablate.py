@@ -21,22 +21,18 @@ from dataclasses import fields, replace
 
 from hexset.bench.throughput import default_workers, environment
 from hexset.arena import Entrant, Z_95, compete, wilson
-from hexset.bots.evaluate import Weights as DefaultWeights
-from hexset.evaluate_tiered import Weights as TieredWeights
+from hexset.bots.heximax import TRADING_WEIGHTS, NO_TRADE_WEIGHTS
 
-# Which evaluation each `--evaluator` name builds. Position-level weight
-# fitting now lives in `hexset.fitting`; this only needs the two greedy/
-# search profiles to zero a term against.
-WEIGHTS: dict[str, type] = {"default": DefaultWeights, "tiered": TieredWeights}
+WEIGHTS = {"trading": TRADING_WEIGHTS, "notrade": NO_TRADE_WEIGHTS}
 
 
 def _entrant_for(
-    name: str, weights, depth: int, width: int | None, evaluator: str
+    name: str, weights, depth: int, width: int | None, profile: str
 ) -> Entrant:
-    kind = "greedy" if depth <= 1 else "search"
     return Entrant(
-        name=name, kind=kind, weights=weights, depth=depth, width=width,
-        evaluator=evaluator,
+        name=name, kind="heximax", weights=weights, depth=depth, width=width,
+        mode="notrade" if profile == "notrade" else "honest",
+        max_trades=0 if profile == "notrade" else None,
     )
 
 
@@ -49,11 +45,11 @@ def _duel(
     depth: int,
     width: int | None,
     workers: int,
-    evaluator: str,
+    profile: str,
 ) -> tuple[int, int]:
     """Play two of each, seats rotated. Returns (challenger wins, decided games)."""
-    a = _entrant_for("challenger", challenger, depth, width, evaluator)
-    b = _entrant_for("incumbent", incumbent, depth, width, evaluator)
+    a = _entrant_for("challenger", challenger, depth, width, profile)
+    b = _entrant_for("incumbent", incumbent, depth, width, profile)
     result = compete([a, b, a, b], games, seed=seed, workers=workers)
     wins = sum(s.wins for s in result.standings if s.name == "challenger")
     return wins, result.games - result.unfinished
@@ -67,9 +63,9 @@ def ablate(
     depth: int,
     width: int | None,
     workers: int,
-    evaluator: str = "default",
+    profile: str = "trading",
 ) -> tuple[int, int]:
-    full = WEIGHTS[evaluator]()
+    full = WEIGHTS[profile]
     return _duel(
         replace(full, **{term: 0.0}),
         full,
@@ -78,7 +74,7 @@ def ablate(
         depth=depth,
         width=width,
         workers=workers,
-        evaluator=evaluator,
+        profile=profile,
     )
 
 
@@ -86,14 +82,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--games", type=int, default=400)
     parser.add_argument("--seed", type=int, default=7000)
-    parser.add_argument("--depth", type=int, default=1)
+    parser.add_argument("--depth", type=int, default=2)
     parser.add_argument("--width", type=int, default=6)
     parser.add_argument("--workers", type=int, default=default_workers())
-    parser.add_argument("--evaluator", choices=sorted(WEIGHTS), default="default")
+    parser.add_argument("--profile", choices=sorted(WEIGHTS), default="trading")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
-    terms = [f.name for f in fields(WEIGHTS[args.evaluator])]
+    terms = [f.name for f in fields(WEIGHTS[args.profile])]
     started = time.perf_counter()
     rows = []
     for term in terms:
@@ -104,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
             depth=args.depth,
             width=args.width,
             workers=args.workers,
-            evaluator=args.evaluator,
+            profile=args.profile,
         )
         low, high = wilson(wins, decided, Z_95)
         rows.append(

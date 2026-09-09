@@ -6,8 +6,8 @@ antithetic-paired boards, grouped `[a, a, b, b]` seating) and
 rolls up the arena's own `ClearedTrade` census -- turn, phase, both seats'
 kinds, the signed 5-vector each way, each side's hand size at the top of the
 step, and each side's own private gain -- so bulk/imbalanced trading can be
-described without guessing at it from win rates. `--from-journals` replays the same
-census over `hexset.server.journal` files instead of playing fresh games.
+described alongside win rates. Records for these same games can be saved
+with --records. Server journals do not contain this private-gain census.
 """
 
 from __future__ import annotations
@@ -39,24 +39,14 @@ CARD_VALUE = 1.0 / BANK_RATE
 # reckoning of Catan hand sizes.
 DUMP_THRESHOLD = 8
 
-# The machine this runs on is shared; 8 is the ceiling the owner set.
-MAX_WORKERS = 8
-
 
 @dataclass(frozen=True)
 class TradeRecord:
-    """One executed trade, both sides' full accounting.
+    """An exchange with unsigned resource bundles in engine resource order.
 
-    `given_a`/`given_b` and `received_a`/`received_b` are 5-vectors in
-    resource order (`hexset.board.terrain.Resource`). `hand_before_a/b` are
-    each side's total card count the instant before this trade executed,
-    reconstructed by replaying the turn's trades in order over a true
-    pre-turn hand snapshot -- exact, not estimated, since a trade can only
-    move cards that both hands already held. `gain_a`/`gain_b` are each
-    side's own private gain from the trade (`hexset.trading.Trade.gain_a`/
-    `gain_b`), in that seat's own value units -- there is no shared public
-    surplus any more (`agents/reference/trading-final.md`, item 1), so two
-    bots at one table need not be on the same scale for this to be read.
+    Hands are card counts at the start of the action step, as recorded by
+    the arena. Gains retain each bot's own value units; comparisons between
+    different evaluators do not imply a common measure of utility.
     """
 
     game: int
@@ -134,7 +124,7 @@ def run_census(
         games,
         seed=seed,
         action_cap=action_cap,
-        workers=min(workers, MAX_WORKERS),
+        workers=workers,
         records=True,
     )
 
@@ -217,7 +207,6 @@ class BotSummary:
 def summarize(result: CensusResult, entrant_names: Sequence[str]) -> dict[str, BotSummary]:
     """Per-bot-kind rollup. Each trade contributes one row per side, reoriented
     to that side's own given/received/hand-before/gain."""
-    turns_played: dict[str, int] = defaultdict(int)
     bundle_counts: dict[str, Counter] = defaultdict(Counter)
     bulk_hits: dict[str, int] = defaultdict(int)
     given_totals: dict[str, list[int]] = defaultdict(list)
@@ -227,9 +216,6 @@ def summarize(result: CensusResult, entrant_names: Sequence[str]) -> dict[str, B
     swings: dict[str, list[float]] = defaultdict(list)
     rows: dict[str, int] = defaultdict(int)
 
-    for name in entrant_names:
-        turns_played[name] = 0  # ensure present even with zero trades
-
     for t in result.trades:
         x = sum(t.given_a)
         y = sum(t.given_b)
@@ -237,9 +223,9 @@ def summarize(result: CensusResult, entrant_names: Sequence[str]) -> dict[str, B
         is_bulk = max(x, y) >= 3
         imbalance = abs(x - y) / (x + y) if (x + y) else 0.0
 
-        for name, given, received, hand_before, is_dump_side in (
-            (t.name_a, x, y, t.hand_before_a, t.hand_before_a >= DUMP_THRESHOLD),
-            (t.name_b, y, x, t.hand_before_b, t.hand_before_b >= DUMP_THRESHOLD),
+        for name, given, received, is_dump_side in (
+            (t.name_a, x, y, t.hand_before_a >= DUMP_THRESHOLD),
+            (t.name_b, y, x, t.hand_before_b >= DUMP_THRESHOLD),
         ):
             rows[name] += 1
             bundle_counts[name][category] += 1
@@ -252,10 +238,6 @@ def summarize(result: CensusResult, entrant_names: Sequence[str]) -> dict[str, B
                 dumps[name] += 1
             swings[name].append((received - given) * CARD_VALUE)
 
-    turn_max: dict[str, int] = defaultdict(int)
-    for t in result.trades:
-        turn_max[t.name_a] = max(turn_max[t.name_a], t.turn)
-        turn_max[t.name_b] = max(turn_max[t.name_b], t.turn)
     # Turns-per-game isn't tracked per-name (games are shared by the whole
     # lineup); use the census-wide mean game length as the denominator for
     # "trades per turn" so it is comparable across bots in the same lineup.
@@ -296,118 +278,34 @@ def table(summaries: dict[str, BotSummary]) -> str:
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
-# --from-journals: replay the census over hexset.server.journal files
-
-
-def census_from_journal(path: Path) -> tuple[list[TradeRecord], dict[int, str]]:
-    """Reconstruct trades from one journal `.jsonl` file.
-
-    Journals record every action verbatim (`hexset.server.journal`), so a
-    trade shows up as whatever event kind the server writes for a cleared
-    exchange. This reads the header for bot names/seats and scans for trade
-    events; a journal format that names them differently than expected is
-    reported rather than silently skipped.
-    """
-    records: list[TradeRecord] = []
-    names: dict[int, str] = {}
-    turn = 0
-    phase = "MAIN"
-    with open(path, encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            event = json.loads(line)
-            kind = event.get("kind") or event.get("type")
-            if kind in ("start", "header"):
-                bot_names = event.get("bot_names") or {}
-                names = {int(k): v for k, v in bot_names.items()}
-            if kind == "turn":
-                turn = event.get("turn", turn)
-            if kind in ("trade", "trades"):
-                phase = event.get("phase", phase)
-                trades = event.get("trades") or [event]
-                for tr in trades:
-                    a, b = tr["a"], tr["b"]
-                    received = tuple(tr["received"])
-                    given_a, given_b = _resource_split(received)
-                    records.append(
-                        TradeRecord(
-                            game=0,
-                            turn=tr.get("turn", turn),
-                            phase=phase,
-                            seat_a=a,
-                            seat_b=b,
-                            name_a=names.get(a, f"seat{a}"),
-                            name_b=names.get(b, f"seat{b}"),
-                            given_a=given_a,
-                            given_b=given_b,
-                            hand_before_a=tr.get("hand_before_a", 0),
-                            hand_before_b=tr.get("hand_before_b", 0),
-                            gain_a=tr.get("gain_a", 0.0),
-                            gain_b=tr.get("gain_b", 0.0),
-                            larger_gain=tr.get("larger_gain", "tie"),
-                        )
-                    )
-    return records, names
-
-
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("bots", nargs="*", help="entrant names, e.g. heximax heximax search2 search2")
+    parser.add_argument("bots", nargs="*", help="entrant names, e.g. heximax heximax heximax-notrade heximax-notrade")
     parser.add_argument("--games", type=int, default=96)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument(
-        "--from-journals",
-        type=Path,
-        default=None,
-        help="directory of hexset.server.journal .jsonl files to census instead of playing games",
-    )
-    parser.add_argument(
         "--records",
         default=None,
         help="append every game played as a v2 record (hexset.record.Record) "
-        "here. Not available with --from-journals -- convert those with "
-        "hexset.record.from_journal instead.",
+        "here.",
     )
     args = parser.parse_args(argv)
 
-    if args.records and args.from_journals is not None:
-        print("--records plays fresh games; it has nothing to add to --from-journals "
-              "(convert those files with hexset.record.from_journal instead)",
-              file=sys.stderr)
-        return
+    if not args.bots:
+        parser.error("provide one entrant name per seat")
+    if args.workers < 1:
+        parser.error("--workers must be positive")
+    from hexset.arena import lineup_from_names
 
-    if args.from_journals is not None:
-        directory = args.from_journals
-        files = sorted(directory.glob("*.jsonl"))
-        if not files:
-            print(f"no journals found under {directory}; nothing to census", file=sys.stderr)
-            return
-        all_records: list[TradeRecord] = []
-        all_names: set[str] = set()
-        for f in files:
-            records, names = census_from_journal(f)
-            all_records.extend(records)
-            all_names.update(names.values())
-        result = CensusResult(games=len(files), trades=all_records, winners=[], turns=[])
-        summaries = summarize(result, sorted(all_names))
-    else:
-        from hexset.arena import lineup_from_names
-
-        entrants = lineup_from_names(args.bots)
-        result = run_census(
-            entrants,
-            args.games,
-            seed=args.seed,
-            workers=args.workers,
-            records=bool(args.records),
-        )
-        entrant_names = sorted({base_name(e.name) for e in entrants})
-        summaries = summarize(result, entrant_names)
+    entrants = lineup_from_names(args.bots)
+    result = run_census(
+        entrants, args.games, seed=args.seed, workers=args.workers,
+        records=bool(args.records),
+    )
+    entrant_names = sorted({base_name(e.name) for e in entrants})
+    summaries = summarize(result, entrant_names)
 
     print(table(summaries))
     if args.records:

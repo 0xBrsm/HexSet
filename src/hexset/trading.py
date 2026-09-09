@@ -90,7 +90,7 @@ accept, counter, or pass; the actor's gate picks one answer to execute
 `default_respond`/`default_pick`), the same "structural, not by
 inheritance" convention `valued`/`valued_many` already give `accepts`/
 `accepts_many`; a gate with a real opponent model instead implements
-`estimate_many(view, candidates) -> list[float]` (heximax, search2), read
+`estimate_many(view, candidates) -> list[float]` (heximax), read
 by the defaults wherever they would otherwise have to guess a counterparty
 that has not answered yet with "this seat's own gain stands in for
 theirs."
@@ -202,7 +202,7 @@ def valued(trader: object, view: "View", received: Bundle, counterparty: int) ->
     default for a bot with no trading surface at all: never trade.
 
     Implemented once here, rather than by inheritance, so it holds for a bot
-    that satisfies `hexset.bots.search2.Bot` only structurally: a bot from
+    that satisfies `hexset.bots.base.Bot` only structurally: a bot from
     another package that defines `gains_many` (the primary surface),
     `accepts_many`, or plain `accepts` all work, in that preference order,
     and one that defines none of them never trades.
@@ -690,9 +690,7 @@ def _estimate_many(
 ) -> list[float]:
     """`gate`'s best estimate of each `(counterparty, bundle)` candidate's
     *counterparty*-side gain -- `gate.estimate_many(view, candidates)` when
-    the gate provides one (heximax, search2: read through this seat's own
-    belief or, for search2, the true state it is sanctioned to read -- see
-    each bot's own `estimate_many`), else this gate's own gain on every
+    the gate provides one (Heximax uses this seat's belief), else this gate's own gain on every
     candidate (`valued_many`), "so a plain gate offers what is best for
     itself" (`hexset.trading`'s "the trade round", item 1). Never reaches a
     hidden hand either way: the fallback reads only the gate's own

@@ -95,8 +95,7 @@ _PURCHASE_COSTS = np.array(
 # (-0.15 -> -0.30: 54.2% [51.1, 57.2]; zero reads 36.8%), and the swept
 # vector confirmed 52.5% [50.7, 54.3] over 3,072 fresh boards against the
 # start. The other seven terms sit within a point and a half of their best
-# ring value, which is the resolution 1,024 paired games buy. search2 keeps
-# the bare default: it is the frozen referent.
+# ring value, which is the resolution 1,024 paired games buy.
 TRADING_WEIGHTS = Weights(robber_risk=-0.30)
 
 # The fit that preceded the trading refit, recovered from git: `87d9095`

@@ -8,9 +8,7 @@ import pytest
 from hexset.actions import ActionType, apply, legal_actions
 from hexset.board.board import pips, random_base_board
 from hexset.board.terrain import Resource
-from hexset.bots import RandomBot, SearchBot, greedy
-from hexset.cards import DevCard
-from hexset.bots.evaluate import Evaluator
+from hexset.bots import RandomBot
 from hexset.game import (
     ROLL_ODDS,
     Phase,
@@ -20,10 +18,6 @@ from hexset.game import (
     start,
     to_move,
 )
-from hexset.state import place_settlement, upgrade_to_city
-from hexset.trading import one_for_one
-from hexset.victory import victory_points
-from helpers import clear_hand, give, independent_vertices, mini_board
 
 
 def a_game(seed: int = 0, players: int = 4):
@@ -118,52 +112,3 @@ def test_a_random_bot_finishes_a_game():
     game = a_game(seed=3)
     play_out(game, RandomBot(random.Random(3)))
     assert is_over(game)
-
-
-def a_trade_that_wins_the_game_for_the_counterparty():
-    """Player 0 is nine points and one ore short of a winning city.
-
-    The exchange is good for player 1 in isolation -- it moves their hand
-    closer to a settlement -- and fatal in context, because it ends the game
-    in somebody else's favour. This is the whole of what the private gate
-    exists for (`hexset.trading`): the public vectors would advertise it.
-    """
-    board = mini_board()
-    game = start(board, 4, random.Random(0))
-    game.phase = Phase.MAIN
-    game.current_player = 0
-
-    spots = independent_vertices(board, 4)
-    for vertex in spots[:3]:
-        place_settlement(game._state, 0, vertex, connected=False)
-        upgrade_to_city(game._state, 0, vertex)
-    place_settlement(game._state, 0, spots[3], connected=False)
-    game._state.dev_cards[0][DevCard.VICTORY_POINT] += 2
-    assert victory_points(game._state, 0) == 9
-
-    clear_hand(game._state, 0)
-    give(game._state, 0, Resource.WHEAT, 2)
-    give(game._state, 0, Resource.ORE, 2)
-    give(game._state, 0, Resource.WOOD, 1)
-
-    clear_hand(game._state, 1)
-    give(game._state, 1, Resource.ORE, 1)
-    give(game._state, 1, Resource.BRICK, 1)
-    give(game._state, 1, Resource.WHEAT, 1)
-    return game
-
-
-def test_the_gate_takes_a_good_exchange_and_refuses_a_bad_one():
-    game = a_trade_that_wins_the_game_for_the_counterparty()
-    bot = SearchBot(Evaluator(game._state.board), depth=2, width=6, rng=random.Random(0))
-    # Seat 0 is one ore short of a city: the ore is worth more than the wood.
-    wanted = one_for_one(int(Resource.WOOD), int(Resource.ORE))
-    assert bot.accepts(game.state(0), wanted, 1) is True
-    assert bot.accepts(game.state(0), tuple(-n for n in wanted), 1) is False
-
-
-def test_a_bot_that_never_trades_refuses_everything():
-    game = a_trade_that_wins_the_game_for_the_counterparty()
-    quiet = greedy(Evaluator(game._state.board), random.Random(0), max_trades=0)
-    assert quiet.accepts(game.state(1), one_for_one(4, 0), 0) is False
-    assert quiet.gains_many(game.state(1), [one_for_one(4, 0)], [0]) == [-1.0]

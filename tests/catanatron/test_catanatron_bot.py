@@ -241,13 +241,13 @@ def test_the_picker_offers_catanatron_and_a_seat_takes_it():
     """`/api/models` and `POST /api/bot`, the two the browser actually uses.
 
     The order is the picker's order: `heximax` first (the default opponent),
-    then `catanatron`, then `search2`, then whatever checkpoints are on disk.
+    then `catanatron`, then `heximax`, then whatever checkpoints are on disk.
     """
     from conftest import new_tables
 
     registry = new_tables()
     models = registry.handle("GET", "/api/models", {}, None)["models"]
-    assert models[:2] == ["heximax", "catanatron"]  # search2 left the picker in #45; seatable by name only
+    assert models[:2] == ["heximax", "catanatron"]
 
     data = registry.handle("POST", "/api/games", {"bots": []}, None)
     code, token = data["code"], data["token"]

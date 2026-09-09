@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — research interface cleanup
+
+- Remove search2, greedy, tiered evaluation and their arena/checkpoint presets.
+- Move shared bot protocols, random policy and scoring objectives into dedicated
+  modules; centralize legal-action helpers in `hexset.actions`.
+- Use the arena for duels at every worker count and for profiling; update
+  ablations and default research lineups to Heximax.
+- Remove the obsolete journal-census parser and machine-specific worker caps.
+- Isolate optional ONNX imports, consolidate test helpers, and build packaging
+  tests in managed temporary directories.
+- Install Docker dependencies from project metadata and update public guides.
+
+See [research interfaces and migration](docs/research.md) for removed APIs.
+
+
 All notable changes to HexSet are recorded here — the `hexset` engine, its
 bots (`hexset.bots`), `hexset.bench`, `hexset.server`, `hexset.clients` and
 `hexset.gym`, shipped from `src/` as one distribution.

@@ -142,7 +142,14 @@ class PolicyPolicy:
             return None
         from ..clients.netbot import bot_for
 
-        return bot_for(self.checkpoint, max_trades=max_trades)
+        # Seated where it is installed: a gate's worlds are drawn from the
+        # game it is asked about, and an unseated NetworkBot prices every
+        # candidate at -1.0 (the training repo found a network duellist that
+        # never traded for exactly this reason).
+        bot = bot_for(self.checkpoint, max_trades=max_trades)
+        bot.seat = seat
+        bot.seat_at(game)
+        return bot
 
 
 def _budgeted(

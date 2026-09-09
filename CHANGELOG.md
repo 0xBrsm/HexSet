@@ -9,6 +9,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.45.0
+
 ### Added
 
 - **A lane environment hands back the games it played.** `hexset.gym.lanes.LaneEnv(..., records=True)` gives every finished `Episode` a `hexset.record.Record` of its own game — the chance stream recorded, so it replays without the seed — built on the same `hexset.record.Tape` `hexset.arena` records a tournament game with. A driver that kept a game to re-search or re-encode it now replays through `hexset.record` alone, instead of rebuilding the position from `(seed, index)` and its own action stream. Off by default: an environment nobody asked for records from deals the plain chance source it always did. `hexset.bench.versus.compete_batched(..., episodes=True, records=True)` passes it through.

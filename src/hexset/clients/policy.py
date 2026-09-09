@@ -1,34 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""What a checkpoint runtime has to provide, and nothing else.
+"""Runtime-neutral interfaces for batched neural policies and checkpoints.
 
-`hexset.clients.netbot` builds a bot, a leaf evaluation, a search and a trade
-gate out of a checkpoint. None of that is specific to onnxruntime, and the
-proof that it was not is that the training repo carried a torch copy of every
-one of those classes -- a copy that drifted from this one three ways before
-anybody noticed (`agents/reference/hexn-boundary-audit.md`). The fix is this
-protocol: a runtime implements `Policy`, and gets the bot, the evaluator, the
-searcher and the gate for free.
+Rows contain live games, explicit perspective seats and legal options. The
+runtime owns encoding, action masking and inference. These games contain
+private state: use a perspective-aware encoder to enforce the experiment's
+information assumptions, and never mutate input games.
 
-**The surface is stated in live positions, never in records.** A row is a
-`(game, seat)` pair (with the seat's options, where a decision needs them),
-because that is the only description of a position both runtimes can agree
-on: how a position becomes numbers -- `hexset.onnx_record.record_from_game`
-for the ONNX graph, `hexset.encoding.encode` for a torch net -- is the
-runtime's own business, and the moment it appears in this protocol the
-protocol has picked a side. It also means a runtime is free to encode a whole
-batch its own way, which is what makes the trade gate's fan-out one forward
-rather than one per candidate.
-
-Every value the protocol hands back is in **board-seat order**: seat *i* of
-the row's `game`, not seat *i* of whatever rotated frame the runtime encodes
-in. Un-rotating is the runtime's job (the exported ONNX graph does it
-in-graph; the torch side does it in Python), because the frame is a property
-of the network, and a caller that had to know about it would be back to
-knowing which runtime it holds.
-
-`hexset.clients.onnxbot.V2Policy` satisfies `Policy` structurally -- nothing
-inherits from it, and nothing should have to.
-"""
+Every returned value vector uses board-seat order, regardless of the
+runtime's internal seat rotation. Action priors align with the supplied
+options. `hexset.clients.netbot` adapts these interfaces into playable bots,
+trade gates and policy/value-guided search without importing a model runtime."""
 
 from __future__ import annotations
 
@@ -40,82 +21,50 @@ from hexset.game import Game
 
 
 class Policy(Protocol):
-    """A loaded checkpoint, asked about live positions.
+    """Batched policy and value inference over live positions.
 
-    Batched throughout: every method takes a list of rows and answers one
-    element per row, in the same order. A single-position caller passes a
-    list of one -- the cost of a network call is its dispatch, so making the
-    batch the primitive is what lets the trade gate price thirty candidates
-    for the price of one.
+    Every method returns one result per input row, in input order. Runtime
+    integrations own stochastic action selection and its random seed.
     """
 
-    #: The flat action space this checkpoint was built against
-    #: (`hexset.actions.build_space`) -- the bot's decisions and the search's
-    #: priors are indexed through it, so a caller holding only the policy can
-    #: still ask which slot an option occupies.
     space: ActionSpace
 
     def act_rows(
         self, rows: Sequence[tuple[Game, int, tuple[Action, ...]]]
     ) -> list[Action]:
-        """One chosen action per row, each drawn from that row's own options.
-
-        The options are passed rather than re-derived so the runtime masks
-        against exactly what the caller will accept, and so a caller that has
-        already enumerated them (a search leaf, a gym step) does not pay for
-        it twice.
-        """
+        """Choose one action from each row's supplied legal options."""
         ...
 
     def value_rows(self, rows: Sequence[tuple[Game, int]]) -> list[tuple[float, ...]]:
-        """The value head alone: one vector per row, one entry per seat, in
-        board-seat order.
+        """Return one value vector per row, with one entry per board seat.
 
-        A bare `(game, seat)` row carries no options because a value question
-        has none to offer; a runtime that needs a legal mask to normalise
-        over derives it from the position itself
-        (`hexset.server.rules.options_for`).
-
-        This is the whole of what the trade gate asks for
-        (`netbot.NetworkBot._score`), which is why it takes positions: the
-        gate's candidate positions are games it built, not records it
-        encoded.
+        Checkpoint adapters interpret these entries as win probabilities.
+        Search terminal values and trade gains use that same scale.
         """
         ...
 
     def score_rows(
         self, rows: Sequence[tuple[Game, int, tuple[Action, ...]]]
     ) -> list[tuple[Sequence[float], tuple[float, ...]]]:
-        """`(prior, value)` per row, as `hexset.mcts` wants a leaf scored:
-        the prior a non-negative weight per option of that row, aligned with
-        the row's own options and summing to one; the value the same
-        board-seat vector `value_rows` returns.
+        """Return `(priors, values)` for each search leaf.
 
-        Prior and value come off the same trunk in every runtime worth
-        having, so asking for them separately would pay the dispatch toll
-        twice for one position.
+        Priors are nonnegative, sum to one, and align with the supplied
+        options. Values follow `value_rows`' board-seat order and scale.
         """
         ...
 
 
 class Checkpoint(Protocol):
-    """A checkpoint file made playable: the `Policy` plus the facts about the
-    run it came from that a caller needs to seat it.
+    """A policy and the metadata required to construct its bot adapters.
 
-    What `hexset.clients.onnxbot.Loaded` (and the training repo's own
-    `Loaded`) already are, named here so `netbot`'s constructors can take one
-    without importing either. A runtime is free to carry more (the ONNX
-    loader also carries the search configuration and the iteration number);
-    these four are what seating a bot reads.
+    Loaders may attach additional metadata such as architecture, training
+    iteration and search settings.
     """
 
-    #: The runtime.
     policy: Policy
-    #: The action space `policy` was built against -- the same object.
+    #: The same action space used by `policy`.
     space: ActionSpace
-    #: How many seats this checkpoint was trained for. A table with a
-    #: different count is refused at the first `choose`, loudly.
+    #: Supported seat count; adapters reject games with a different count.
     players: int
-    #: The trade switch the run recorded training under: `0` for a no-trade
-    #: referent, `None` for unbounded (the engine has no budget).
+    #: Training trade setting: zero disables trading; None leaves it unbounded.
     max_trades: int | None

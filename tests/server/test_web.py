@@ -5,7 +5,7 @@ header, and that a refusal `api.py` raises arrives as the status it carries
 rather than as a dropped connection. The rules those refusals come from are
 `test_api.py`'s, tested there without a socket.
 
-Torch-free on purpose: the opponents are named `search2` at every call, so this
+Torch-free on purpose: the opponents are named `heximax` at every call, so this
 suite runs anywhere the rest of the engine's tests do.
 """
 
@@ -31,7 +31,7 @@ from hexset.server.web import TOKEN_HEADER, HexSetServer
 
 from hexset.server.webplay import action_to_wire
 
-SOLO = ["search2", "search2", "search2"]
+SOLO = ["heximax", "heximax", "heximax"]
 
 
 @pytest.fixture(autouse=True)

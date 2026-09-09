@@ -31,7 +31,7 @@ def main(argv: list[str] | None = None) -> int:
     # A preset name, or any checkpoint-prefixed entrant the arena resolves —
     # `network:<path>` records a trained policy's self-play, so a downstream
     # analysis can profile a checkpoint's style.
-    parser.add_argument("--bot", default="greedy")
+    parser.add_argument("--bot", default="heximax")
     parser.add_argument("--players", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--workers", type=int, default=default_workers())

@@ -62,7 +62,7 @@ WEB_CLIENT = {"id": hashlib.sha256(SECRET.encode("utf-8")).hexdigest(), "kind": 
 
 
 def _bot_seat() -> Seat:
-    return Seat(kind=SeatKind.BOT, name="search2", spec="search2")
+    return Seat(kind=SeatKind.BOT, name="heximax", spec="heximax")
 
 
 def _play_out(session, rng: random.Random) -> None:

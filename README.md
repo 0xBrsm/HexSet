@@ -2,368 +2,163 @@
 
 # HexSet
 
-HexSet is a gym for a hex-tile trading and building game: a numpy-only rules
-engine with an information-set-honest public ledger and bundle trading, a
-sample handcrafted bot, an adapter into the Catanatron benchmark suite, and a
-UI layer — HTTP API, MCP server, and browser client — that seats bots, LLMs,
-and humans at the same table.
+HexSet implements a hex-tile trading and building game based on the rules of
+*Settlers of Catan*. It includes a NumPy rules engine, heuristic bots, ONNX
+model inference, a browser interface, HTTP and MCP interfaces, Gymnasium and
+PettingZoo adapters, and batched environments for neural-network training and
+evaluation.
 
-The rules implemented here are those of the classic hex-tile trading game
-published as *Settlers of Catan*. That name is used only to say what game
-this plays; see [Trademarks](#trademarks) below.
+The engine supports resource production, construction, development cards,
+the robber, victory conditions, and player trading. Trading uses two
+protocols: automatic exchanges for engine simulations and offer–response
+rounds for server games. Neural-network training and checkpoint export are
+maintained outside this repository in the sibling HexN project. HexSet owns
+the rules, information sets, encoding, game loops, seating and board pairing,
+records and replay, and trade evaluation. Training projects supply model
+runtimes and learning algorithms through those interfaces.
 
-## What's here
+## Research workflows
 
-One distribution, `hexset`, ships from `src/`:
+- **Implement a bot:** start with the [Python bot example](examples/custom_bot.py)
+  and [extension guide](docs/research.md#implement-a-bot).
+- **Train a neural network:** collect batches, attach policy/value runtimes and
+  evaluate checkpoints through the [training interfaces](docs/training.md).
+- **Compare policies:** use the [research tools](docs/research.md) for seating,
+  reproducible experiments and interpretation of results.
+- **Inspect a game:** retain [replay records](docs/research.md#inspect-behavior)
+  alongside aggregate results.
 
-- **`hexset`** (`src/hexset`) — the rules engine: actions, board, trading,
-  the development deck, victory conditions, a seat-balanced arena for
-  measuring one bot against another, and the ledger of public knowledge a
-  policy may honestly read instead of the true hidden state. No seat, human
-  or bot, is ever shown what it could not legally know. Depends on nothing
-  but numpy.
-  - **`hexset.view`** (`src/hexset/view.py`) — the per-seat information
-    set, `View`: known/unknown hands, expected hands, hold probabilities,
-    `sample`. Reached through `game.state(seat, hidden=True)` (the default);
-    `game.state(seat, hidden=False)` returns the true `GameState` instead,
-    the only sanctioned way to read it from outside the engine. Two
-    callers are sanctioned to do so: `hexset.bots.search2` (the project's
-    held-out perfect-information referent) and the Catanatron adapter when
-    it hosts a Catanatron bot; every
-    other outside caller that genuinely needs the true state says so with a
-    `# true state: <why>` comment at the call site. It is also what the trade
-    mechanic hands a seat: `Bot.gains_many(view, received, counterparties)`
-    receives nothing else.
-  - **`hexset.bots`** (`src/hexset/bots`) — every heuristic bot, sharing the
-    handcrafted evaluation at `hexset.bots.evaluate`: `search2`
-    (`hexset.bots.search2`: `SearchBot`, `greedy`, `RandomBot`, the
-    `STANCES` a per-seat vector is read through) and `heximax`
-    (`hexset.bots.heximax`, files by concern — `evaluate`/`search`/
-    `presets` — a handcrafted perfect-information-Monte-Carlo player
-    that reads its own view of the game (`hexset.view`) rather than the
-    true state, registered as a `hexset.arena` entrant on import).
-  - **`hexset.catanatron`** (`src/hexset/catanatron`) — a two-way adapter
-    between HexSet and [Catanatron](https://github.com/bcollazo/catanatron):
-    it seats `hexset` bots as players in Catanatron, for sharded duels
-    against Catanatron's own shipped bots, and seats Catanatron's bots at a
-    HexSet table (`hexset.catanatron.bot`, the `catanatron` preset — the
-    web picker, an arena lineup or the gym).
-  - **`hexset.bench`** (`src/hexset/bench`) — the duel, throughput, and
-    tuning scripts the engine is measured with.
-  - **`hexset.server`** (`src/hexset/server`) — the gym's server half: a
-    dependency-free `http.server` HTTP API, an MCP server, a single-file
-    vanilla-JS browser client, and a game journal.
-  - **`hexset.clients`** (`src/hexset/clients`) — the gym's client half: a
-    bot as a peer client of the API (embedded or external) and the ONNX
-    Runtime model boundary. No PyTorch, no GPU required to play.
-  - **`hexset.gym`** (`src/hexset/gym`) — a training-loop-facing gym: a
-    lockstep multi-game environment (`LaneEnv`), a PettingZoo `AECEnv`
-    (`HexSetAEC`) and a single-agent Gymnasium `Env` (`HexSetEnv`,
-    registered as `HexSet-v0`) on top of the same engine and the same
-    honest `action_mask` sample as everything above. See [Gym](#gym)
-    below.
+## Bots and Catanatron integration
 
-Training — self-play, PPO, expert iteration — is not part of this repo. It
-lives in HexN, the sibling package this gym plays exported checkpoints
-from; see [Adding an opponent](#adding-an-opponent) below.
+- **`heximax`** is a handcrafted **expectimax/maxⁿ search bot**. Decision
+  nodes maximize the acting player's score, and chance nodes average possible
+  outcomes by probability. It samples opponents' holdings from public
+  information (Perfect Information Monte Carlo, or PIMC), with one sampled
+  world by default. It uses iterative deepening, a leaf budget and heuristic
+  evaluation, and requires no trained model. `heximax-notrade` disables player
+  trading and uses a separate fitted weight profile.
+- **Catanatron** is a separate Python implementation of Catan with its own
+  bots. HexSet's adapter supports both directions: running HexSet bots in
+  Catanatron and running Catanatron bots in HexSet. The `catanatron` opponent
+  uses Catanatron's depth-two alpha-beta player and requires the optional
+  `catanatron` extra.
 
-## What belongs here
+Heximax knows its own cards and estimates opponents' cards from the public
+resource ledger. Its default objective converts per-seat heuristic scores to
+an estimated win probability. Catanatron's adapter and search have different
+information assumptions; comparisons must identify which engine hosted the
+games and whether trading was enabled.
 
-HexSet is the engine and the gym. Everything about a *position* is this
-package's job: the rules and what is legal, the information set and its
-encoding, the game loops (one game, or many in lockstep), seating and board
-pairing, records and replay, and every seat's trade judgement -- including
-how a network checkpoint judges an exchange (`hexset.clients`). A training
-project drives HexSet through these; it does not re-implement any of them
-for its own runtime. If you find yourself writing, outside this package,
-something a bot with no model would still need, it belongs in here.
+### Recorded Catanatron result
 
-## Install
+In the archived September 7, 2026 benchmark, `heximax-notrade` won **47.3%**
+of 1,000 recorded four-player games against three Catanatron `AB:2` bots.
+For context, an equal share of wins at a four-player table is 25%.
+The games ran in Catanatron with player trading disabled and Heximax's
+no-trade evaluation weights. This is a historical result, not a measurement
+of the current revision. See the [benchmark record](docs/benchmarks.md) for
+run settings and limitations.
 
-```
+## Installation
+
+Requires Python 3.11 or later. From the repository root:
+
+```sh
 pip install -e .
 ```
 
-Provides `hexset` (and its `hexset.bench`/`hexset.server`/`hexset.clients`/
-`hexset.catanatron` subpackages) and `heximax` from one editable install.
-Extras:
+The base installation requires only NumPy. Install extras for the interfaces
+you use:
 
-- `.[test]` — pytest, for this repo's own test suite.
-- `.[server]` — onnxruntime, to run `hexset.server` (it embeds a bot via
-  `hexset.clients`, which needs it).
-- `.[clients]` — onnxruntime, to run `hexset.clients` standalone (an
-  external bot process with no server of its own).
-- `.[export]` — onnx + onnxruntime, for building `.onnx` checkpoints.
-- `.[catanatron]` — pulls in Catanatron itself, for `hexset.catanatron` duels.
-- `.[gym]` — pettingzoo + gymnasium, for `hexset.gym`'s `HexSetAEC`/`HexSetEnv`
-  (`hexset.gym.LaneEnv` needs neither; see [Gym](#gym) below).
+| Extra | Provides |
+| --- | --- |
+| `.[server]` | ONNX Runtime for embedded model opponents; Heximax needs only the base install |
+| `.[clients]` | ONNX Runtime for standalone model clients |
+| `.[gym]` | Gymnasium and PettingZoo environments |
+| `.[catanatron]` | Catanatron integration, pinned to a specific Git commit |
+| `.[export]` | ONNX and ONNX Runtime libraries; no training or export command is included |
+| `.[test]` | pytest |
 
-`pip install -e ".[server,catanatron,test]"` covers everything below.
+Extras can be combined, for example `pip install -e ".[server,gym,test]"`.
 
-## Run a duel
+## Play in a browser
 
-```
-python -m hexset.bench.duel heximax search2 --games 400
-```
-
-`a`/`b` are checkpoint paths or `hexset.arena` entrant names (`heximax`,
-`heximax-notrade`, `search2`, `search2-notrade`, ...). Reports a Wilson interval,
-not a raw win count. See `python -m hexset.bench.duel --help` for the full
-flag set (workers, board/duel seeds, geometry).
-
-A duel between *batched* policies — a network answering a whole tick of
-games in one forward, rather than one position per call — is
-`hexset.bench.versus.compete_batched({0: learner, 1: reference}, games,
-players=4, seed=0, lanes=64)`: `hexset.arena.compete`'s pairing law and its
-Wilson interval, driven over `hexset.gym.lanes.LaneEnv`, reporting the paired
-victory-point margin a training run evaluates a checkpoint by.
-
-To duel against Catanatron's own bots instead:
-
-```
-python -m hexset.catanatron.duel --players=DC:search2-notrade,AB:2,AB:2,AB:2 --num=400 --workers=8
-```
-
-## Run the server
-
-```
+```sh
 python -m hexset.server.web
 ```
 
-Or via Docker:
+The server opens a browser at `http://127.0.0.1:8770`. Share a game's URL to
+invite other players. Each new game starts with its creator seated and the
+remaining seats open. Fill them with people or bots, or close unused seats
+with the picker’s `none` option. Play waits until every seat is filled or
+closed. Closed seats can be reopened before the first move; the participating
+seats are fixed once play starts.
 
-```
-cp compose.example.yaml compose.yaml
-docker compose up -d --build
-```
+The opponent picker lists `heximax`, `catanatron` when its extra is installed,
+and models found in `models/`. To add a model opponent, place a compatible `.onnx` file in `models/`; the next model
+listing includes it under its filename stem. See the
+[ONNX model contract](docs/bot-api.md) for requirements.
 
-`compose.yaml` is gitignored, so that copy is yours to edit and a `git pull`
-on a deployment will never collide with it. The image only carries
-`numpy`/`onnxruntime` — `src/` and `models/` are bind-mounted read-only, so a
-code change is a `git pull` + `docker compose restart`, not a rebuild. It
-runs unprivileged on a read-only filesystem with no Linux capabilities.
+The trade modal supports bank and port trades, offers to other players,
+and responses to their offers. Player trades exchange 1–3 cards per side.
+A bot makes at most one broadcast per turn and waits for manual seats to
+answer before continuing. A seat with no resource cards passes automatically.
 
-Then open the printed URL (or the mapped port, `8770` by default under
-compose). That deals a game and lands you on the board — there is no lobby,
-no front page and no code to type.
+Games have a public spectator view that reveals all hands, development
+cards, and victory points. Anyone with the game URL can access it, including
+players at that table. Seat-specific responses filter hidden information,
+but the public view means a server game does not enforce secrecy between
+participants.
 
-**The address is the game.** Whatever the URL bar shows is the table you are
-at, and sending it to somebody is the whole invitation: they open it and sit
-down at the same table, at their own seat. Reloading keeps your seat; a link
-to a game that is over or gone says so rather than quietly dealing you a
-different one.
+See [Server operation and client interfaces](docs/server.md) for Docker,
+configuration, saved games, HTTP routes, and MCP tools.
 
-**Every seat but yours starts open, and you fill them from the player list.**
-Each open seat's row is a model picker — choosing one seats that bot for the
-rest of the game — and a person who opens the link takes one instead.
-Opponents come from `model_options()` in `src/hexset/server/api.py`:
-`heximax` and `search2` (handcrafted, no checkpoint needed) plus one entry
-per `*.onnx` file found in the models directory. Nobody moves while any seat
-is still open: a friend takes it, the picker fills it with a bot, or the
-picker's "none" closes it outright, permanently — a turn only ever advances
-because the seat holding it said so, and there is no timer that closes a
-seat for you.
+## Evaluate bots
 
-**Your own row is your name.** It reads "human" until you type something;
-what you type is what everyone else's player list and the game log call you
-from then on, and blanking it puts the seat back to unnamed.
-
-**Every game is public, and watching one is omniscient.** A link to a game
-with every seat taken opens it to watch: the board draws, the log fills as
-the game goes, and clicking any player's row shows that seat's cards below.
-A spectator is outside the game and is shown all of it — every hand, every
-development card, every true victory-point count, and a transcript that names
-the card bought, the card stolen and the cards discarded. Nothing is
-actionable, so the pickers, the board buttons and the piece supply are simply
-absent. Be plain about the cost: `GET /api/table/<code>` is not
-authenticated and cannot be, since holding the link is the whole
-qualification — and everyone playing holds the link. Every route that *acts*
-still answers a seat token and still gets that seat's own honest view, so
-nothing a bot or a training run reads is affected.
-
-**The page offers a person no way to trade with another seat** (owner,
-2026-09-03 — withheld for now while the mechanic is built back up). The
-bank/port modal a resource card opens is unchanged. See
-[Trading](#trading).
-
-Tests are `pip install -e ".[test,server,clients,catanatron]" && pytest`.
-The default run skips tests marked `slow` — full-game and other
-behaviour-preservation runs too slow for the everyday loop. Run the full
-gate with `pytest -m slow`.
-
-## Adding an opponent
-
-Drop a `.onnx` file into `models/` (or wherever `HEXSET_UI_MODELS_DIR`
-points) and it shows up in the in-game picker — no restart, no code change.
-The filename's stem (minus `.onnx`) is what's shown in the dropdown.
-
-`.onnx` files aren't built here. HexN's `export_onnx` converts a trained
-`.pt` checkpoint:
-
-```
-# from HexN's src/, with torch + onnx + onnxruntime installed
-python -m export_onnx --checkpoint runs/some-run/latest.pt --out latest.onnx
+```sh
+python -m hexset.bench.duel heximax heximax-notrade --games 400 --workers 4
 ```
 
-Copy the resulting file into this repo's `models/` directory.
+The arena runner reports win rates with Wilson confidence intervals and
+balances seats. Game counts must complete seat rotations and paired boards;
+for an odd number of players under antithetic pairing, use a multiple of twice
+the seat count.
+Use `--geometry ab` for a two-player game; the default is four-player
+`aabb`. One and multiple workers use the same arena implementation.
+Checkpoint entrants require a registered runtime loader; installing the
+`clients` extra alone does not register one. A driver can call
+`hexset.clients.netbot.register_entrants` to use its loader with the shared bot
+and search implementations. See the [research tools guide](docs/research.md)
+for the benchmark commands and removed legacy interfaces.
 
-### A checkpoint configures itself
+With the `catanatron` extra installed, run HexSet bots inside Catanatron:
 
-How an opponent plays is declared in the `.onnx` file, not here. `export_onnx` writes ONNX `metadata_props`, and `src/hexset/server/modelmeta.py` reads them. See [`docs/bot-api.md`](docs/bot-api.md) for the complete interface — metadata plus the graph's own inputs/outputs — that any `.onnx` file, from any source, must satisfy to plug in; a checkpoint author never needs this repo's source, only that document.
-
-| key | meaning | default |
-| --- | --- | --- |
-| `players` | table size the graph was traced for | required |
-| `num_hexes` / `num_vertices` / `num_edges` | board-shape fingerprint, so a mismatched board fails loudly | required |
-| `max_trades` | `0` to switch trading off for this checkpoint | trading on |
-| `search` | `mcts` to search over the model's own priors; anything else plays one forward pass | none |
-| `simulations` | descents per decision, when `search=mcts` | 128 |
-| `wave` | leaves batched per expansion, when `search=mcts` | 16 |
-
-So a checkpoint exported with `search=mcts` and `simulations=256` is just `mcts256.onnx` in `models/` — there is no spec grammar and no flag. `simulations` and `wave` are clamped on read (`models/` is a drop directory and a bot is built inside a request, so a file asking for ten million simulations would hang the seat rather than play it).
-
-Inference device is **not** read from metadata — it's a property of the host, not the checkpoint, so it stays on `--device`.
-
-### Another runtime
-
-A `.onnx` file is one way to hold a model, not the only one. Everything about
-*playing* a checkpoint — the bot, its two-sided trade gate, the leaf
-evaluation, the PUCT search, and the arena's `network`/`mcts` entrant kinds —
-lives in `hexset.clients.netbot` and knows nothing about onnxruntime. A
-second runtime (a torch checkpoint, a remote inference service, a stub in a
-test) implements `hexset.clients.policy.Policy` — `act_rows`, `value_rows`,
-`score_rows`, all batched, all stated in live `(game, seat)` positions rather
-than encoded rows, all answering in board-seat order — and gets the rest for
-free: `bot_for(checkpoint)`, `evaluator_for(checkpoint)`,
-`searcher_for(checkpoint)`, and `register_entrants(loader)` to make the arena
-spawn it by name. Positions, not records, is the load-bearing choice: how a
-position becomes numbers is the runtime's own business, so a runtime is free
-to encode a whole batch its own way. `hexset.clients.onnxbot.V2Policy`
-satisfies the protocol structurally, inheriting nothing.
-
-## Playing without a browser
-
-The human seat can also be driven by a script or an LLM, over either interface, as a peer to the browser rather than a replacement for it — both still go through the same `apply_human_action`/`legal_actions` path the browser does, so nothing sent this way skips validation.
-
-- **HTTP**: the same `/api/*` endpoints the frontend calls (`GET /api/state`, `POST /api/action`, `POST /api/join`, etc. — see `api.py`). `POST /api/games`/`POST /api/join` take an optional `client: {"id": <64-hex sha256>, "kind": "web"|"api"|"mcp"}` — a hash of a secret only the caller holds, for correlating games in the journal and for `POST /api/reclaim {"code", "secret"}`, which mints a fresh token for the seat whose `client.id` matches `sha256(secret)` once the original token is gone (a server restart, most often). No `client` at all defaults to kind `"api"`, and an unnamed seat's display name follows its kind (`web` → `human`, `api` → `api`, `mcp` → `mcp`). `GET /api/version` (no token) returns `{"version", "git_commit"}`. `POST /api/action`, `.../trade/round/answer` and `.../trade/round/choose` take an optional `"version"`: if it doesn't match the table's current one, the request is refused (409, "the table has moved") instead of applying an index or a bundle meant for a state that has since changed.
-- **MCP**: `web.py` itself serves it, over the Streamable HTTP transport ([spec](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)) — there is no separate stdio program any more. Point a client at `POST http://127.0.0.1:8770/mcp` (e.g. with Claude Code: `claude mcp add --transport http hexset http://127.0.0.1:8770/mcp`). `initialize` mints an `Mcp-Session-Id` header the client must send back on every later request; an unknown or missing one is a 404 — just call `initialize` again, the same as a fresh connection. Tools: `models`, `new_game`, `join`, `board`, `state`, `wait_for_turn`, `act`, `undo`, `leave_game`, `get_table`, `offer_trade`, `answer_trade`, `choose_trade`, `resume_game`. `new_game`/`join` take a required `model` argument — your exact model identifier, e.g. `claude-opus-5` — hashed into the seat's `client` identity so `resume_game(code, model)` can reclaim it later by that same string if its session (or the server) is gone; there is no environment-variable override and no cache file, the model supplies its own string every time. `state()` carries a `version`; `act`, `answer_trade` and `choose_trade` take an optional `version` and refuse (rather than guess) if the table has moved since the `state()`/`get_table()` an index was chosen from. `wait_for_turn(timeout?)` blocks until there's something to do — `legal_actions` non-empty, an offer waiting, your own trade round fully answered, or the game over — streamed back as Server-Sent Events with a keepalive roughly every 15 seconds so a long wait doesn't look like a dead connection. Every seat this connects is gated by `PendingGate` (see "Trading" below): nothing a bot's trade event or another seat's offer finds against it ever clears on its own.
-
-Any number of these seats — browser, HTTP script, MCP-connected LLM, or an embedded `.onnx` bot — can sit at the same table; the server does not distinguish who or what is behind a seat beyond the interface it came in on.
-
-`python -m hexset.clients.botclient --url <server> --game <code> --model <checkpoint.onnx>` joins as an external bot client (see "Playing without a browser" above for the identity it sends); its `client.id` defaults to `sha256(<checkpoint file's stem>)`, overridable with `--client-secret <your own secret>`.
-
-## Trading
-
-Trading is one event, not a language of actions, interleaved with the turn
-rather than sitting before it: it runs after the roll and the robber, and
-again after every MAIN action the current player takes (build, buy, a
-bank/port trade, a development card), never after ending the turn and never
-during setup, rolling, the robber or discard resolution. There is no public
-layer — nothing is advertised. Every seat instead answers a private **gate**,
-`Bot.gains_many(view, received, counterparties) -> list[float]`: that seat's
-own gain from each candidate exchange, in whatever unit its value is, read
-through its own information set. A candidate is a **bundle** — any signed
-counts on disjoint resources, each side bounded only by what that hand holds,
-both sides coverable from the true hands — not a one-for-one swap; a 2-for-1
-has to clear as one bundle. The engine enumerates every coverable bundle
-between the current player and each other seat, asks the current player's
-gate once over all of them, keeps the strictly positive subset, asks each
-counterparty's gate once over its own accepted subset, keeps the strictly
-positive subset of *that*, and clears the one candidate `Game.trade_rule`
-ranks highest — `"egalitarian"` (the default) maximises the smaller of the
-two private gains; `"nash"` and `"actor"` remain selectable for lab
-comparisons. Ties fall to the acting seat's own gain, then a canonical
-bundle order, then the lower counterparty seat, for determinism. Then it
-loops, re-asking the gates fresh on the position the last trade left, until
-nothing clears — no budget, no cap, since the acting seat's own gain is
-strictly positive at every step and the state space is finite.
-
-The automatic event above is engine-driven and asks nobody a question: no
-trade action, no phase, nothing in the action space to mask — which is what
-keeps the legal-action list honest for every seat regardless. A bot brings
-its own `gains_many`; one with only a boolean `accepts`/`accepts_many` is
-priced at `+1.0`/`-1.0` by a structural default, and one with none of the
-three never trades.
-
-**Human and LLM seats are direct gates**, unconditionally, from the moment a
-seat is claimed (the web page's own seat-up, or MCP's `new_game`/`join`
-(`hexset.server.mcptools`) — there is no flag to ask for anything else): a
-`PendingGate` never clears on its own, and every candidate a bot's event or
-another seat's proposal finds against it lands, unexecuted, in `pending`
-(`GET /api/state`, filtered to the seat it names, top 5 by the acting seat's
-own gain), answered with `POST /api/games/<code>/trade/confirm` or
-`.../decline`. As the seat on the move, `POST /api/games/<code>/trade`
-composes and submits any bundle a counterparty's own gate prices above zero
-— on that seat's own turn against anyone, or during another seat's turn
-naming only that seat — and `GET /api/games/<code>/trade/acceptable` is that
-seat's own read-only preview of what every bot counterparty would accept
-right now. The page wires all of this into the trade modal: a counterparty
-picker and the give/want cards for "Offer to players," the acceptable-deals
-list so a deal can be picked directly, and a pending-offers panel with
-Confirm/Decline. Full endpoint shapes: [`docs/bot-api.md`](docs/bot-api.md)
-§3.
-
-`max_trades=0` is the off switch for the no-trade referents
-(`search2-notrade`, `heximax-notrade`).
-
-## Gym
-
-`hexset.gym` is three training-facing entry points on top of the engine. Two
-of them implement third-party APIs and need `pip install -e ".[gym]"`; the
-third needs nothing beyond the engine. `import hexset` stays numpy-only, and
-only `HexSetAEC`/`HexSetEnv` need `pettingzoo`/`gymnasium`. All three document
-themselves: `hexset.gym.lanes`, `hexset.gym.aec` and `hexset.gym.env` carry the
-design each one implements, down to why the mask is the honest one and why
-seat rotates.
-
-**`hexset.gym.LaneEnv`** — a lockstep multi-game environment for a batched
-policy: `lanes` games in flight, every one of them stepped a single action per
-tick, so one forward pass serves the whole batch instead of paying the
-network's fixed dispatch toll per move. `requests()` hands out one `Request`
-per live lane — the seat to move, its legal `options`, its information-set
-`view` and the live `Game` — and `step(actions)` applies one `Action` to each
-and returns the games that ended, as `Episode`s carrying every decision filed
-under the seat that took it, the cleared-trade census, and an `Outcome` with
-both candidate rewards (winner and per-seat terminal points) plus whether the
-action cap truncated the game. Built with `records=True`, every finished
-`Episode` also carries a `hexset.record.Record` of the game the lane played,
-so replaying a stored game is `hexset.record.open_record`/`advance`/`replay`
-(or `replay_to(record, ply)` for one position) and never a second reconstruction
-from the seed. Every game is
-`hexset.arena.deal_game(seed, index, players)`, the same law `compete` deals
-from, so a game is the same whichever lane draws it and however many lanes are
-in flight. A `caster(index)` seats policy ids; ids in `bots` are played by a
-`hexset.bots` bot, and **every** seat is seated as its own trade gate on
-`game.gates`, which is what lets a learner trade here and not in the two
-environments below:
-
-```python
-import random
-
-from hexset.arena import Entrant, spawn
-from hexset.gym import LaneEnv
-
-heximax = Entrant("heximax", "heximax")
-env = LaneEnv(
-    players=4,
-    seed=0,
-    lanes=64,
-    deal=256,
-    caster=lambda index: (0, 1, 1, 1),          # seat 0 is mine, the rest are bots
-    bots={1: lambda board: spawn(heximax, board, random.Random(0))},
-)
-episodes = []
-while env.running:
-    mine = [r for r in env.requests() if r.policy == 0]
-    # Unanswered lanes are played by their own bot, so only my seats are batched.
-    episodes.extend(env.step({r.lane: my_policy(r.view, r.options) for r in mine}))
+```sh
+python -m hexset.catanatron.duel --players=DC:heximax-notrade,AB:2,AB:2,AB:2 --num=400 --workers=8
 ```
 
-**`hexset.gym.HexSetAEC`** — a [PettingZoo](https://pettingzoo.farama.org/)
-`AECEnv`, one agent per seat (`seat_0`..`seat_{n-1}`). `observe(agent)`
-returns the encoder's four arrays plus an honest `action_mask` — built from
-`hexset.server.rules.fair_legal_actions`, never the engine's own omniscient
-`PROPOSE_TRADE` sample:
+For batched policies, `hexset.bench.versus.compete_batched` evaluates multiple
+games per tick using the arena's board and seat-pairing rules. It reports win
+rates, descriptive Wilson intervals, and board-based intervals for win rates
+and victory-point margins. See
+[Training and runtime interfaces](docs/training.md).
+
+## Training environments
+
+`hexset.gym.LaneEnv` runs multiple games in lockstep and accepts a batch of
+actions per tick. It uses the base installation, supports learner trade gates,
+and can return replayable episode records. See the
+[training guide](docs/training.md) for an example and runtime integration.
+
+The two third-party environment adapters require the `gym` extra:
+
+```sh
+pip install -e ".[gym]"
+```
+
+`HexSetAEC` provides one PettingZoo agent per seat. Observations contain
+`hexes`, `vertices`, `edges`, `globals`, and an `action_mask` derived from the
+engine's legal actions.
 
 ```python
 from hexset.gym import HexSetAEC
@@ -372,25 +167,22 @@ env = HexSetAEC(num_players=4)
 env.reset(seed=0)
 for agent in env.agent_iter():
     observation, reward, terminated, truncated, info = env.last()
-    if terminated or truncated:
-        env.step(None)
-        continue
-    mask = observation["action_mask"]
-    action = env.action_space(agent).sample(mask)
+    action = None if terminated or truncated else env.action_space(agent).sample(
+        observation["action_mask"]
+    )
     env.step(action)
 env.close()
 ```
 
-**`hexset.gym.HexSetEnv`** — a single-agent [Gymnasium](https://gymnasium.farama.org/)
-`Env`, registered as `HexSet-v0`: one learner seat, the rest `hexset.arena`
-opponents (default three honest `heximax`) auto-played inside `step`/`reset`
-until the learner is next to move or the episode ends:
+`HexSetEnv`, registered as `HexSet-v0`, provides one learner seat and plays
+the opponent seats automatically. Its default opponents are three `heximax`
+bots. The learner seat is sampled at each reset unless a fixed seat is given.
 
 ```python
 import gymnasium
-import hexset.gym  # registers "HexSet-v0"
+import hexset.gym  # registers HexSet-v0
 
-env = gymnasium.make("HexSet-v0", opponents=("heximax", "heximax", "heximax"))
+env = gymnasium.make("HexSet-v0")
 observation, info = env.reset(seed=0)
 for _ in range(1000):
     action = env.action_space.sample(mask=info["action_mask"])
@@ -400,35 +192,70 @@ for _ in range(1000):
 env.close()
 ```
 
-`flatten=True` (default) returns one concatenated `Box`, matching what most
-single-agent RL code and `sb3-contrib`'s `MaskablePPO` expect (`env.action_masks()`
-is that library's hook); `flatten=False` returns the dict of arrays instead.
-`learner_seat="rotate"` (default) draws a new seat each `reset()`, since seat
-is not neutral at this table; `info["view"]` carries the seat's full
-information-set object (`hexset.view.View`) for a caller that wants more than
-the encoder's arrays.
+The single-agent environment returns a flat observation by default;
+`flatten=False` returns the four feature arrays as a dictionary. Its action
+mask is in `info["action_mask"]`, and `action_masks()` provides a masking
+hook. `info["view"]` contains the learner's `View` object.
 
-## Layout
+In all three environments, player trading is separate from the action space. `HexSetAEC` supplies no
+trade gates, so its agents do not trade. In `HexSetEnv`, opponent bots have
+trade gates and may trade with each other; the learner has no gate and does
+not participate. Bank and port trades remain available as actions in both
+environments.
 
-- **The engine lives in this repo, under `src/hexset/`** (`actions`, `game`, `ledger`, `board`, `mcts`, `arena`, `fitting`, `catanatron`, `bench`, and the rest, plus `hexset.bots` — every heuristic bot: `search2` (`hexset.bots.search2`) and `heximax` (`hexset.bots.heximax`, files by concern), sharing `hexset.bots.evaluate`). `hexset`, `hexset.bench`, `hexset.server` and `hexset.clients` are all one distribution (`hexset`) and one `pyproject.toml`; see the CHANGELOG's "one distribution" entry for what was renamed to get there.
-- `src/hexset/server/api.py` — tables, seats, join codes, seat tokens, the `/api/*` surface. `web.py` is the HTTP transport over it and also serves MCP (`POST /mcp`); `mcptools.py` is the tool layer that transport calls, in-process, the same way `webplay.py`'s `GameSession` is the human/browser-facing session: what a seat may see, the human-readable log, undo, and the wire encoding of an action.
-- `src/hexset/server/rules.py` — what a served table needs beyond the engine's own `legal_actions`: naming an empty option list as the bug it is, and checking a submitted action against the list. It used to hold a second, honest enumeration, because the engine's offer sample read opponents' hands; trading is no longer an action, so there is one list for every seat.
-- `src/hexset/server/seating.py` — the setup snake starting at whoever created the game, and retiring a seat nobody claimed.
-- `src/hexset/clients/policy.py` and `src/hexset/clients/netbot.py` — the model boundary, split by what varies. `policy.py` is the `Policy` protocol: `act_rows`/`value_rows`/`score_rows` over live `(game, seat)` positions. `netbot.py` is everything built on one — `NetworkBot` and its trade gate, `NetworkEvaluator`, `LeafEvaluator`, `GatedSearch`, and `register_entrants(loader)` for the arena's `network`/`mcts` kinds — and holds no runtime at all. See [Another runtime](#another-runtime).
-- `src/hexset/clients/onnxbot.py` — onnxruntime's half of that boundary: loading a `.onnx` file, checking what it declares, and answering `Policy` for it (`V2Policy`); `spawn(path, board)` is the only entry point anything else uses, and the `netbot` names it used to define are re-exported here. Builds its record with `hexset.onnx_record.record_from_game` directly — the torch-free split that used to block that has landed, so this package no longer carries its own copy. `botclient.py` is the other half: a bot plays its seat as a peer client of the API, embedded or external, never as a privileged writer. Only record contract `6` is served — 2, 3 and 4 are the offer protocol's contracts and describe a game this engine no longer plays; contract 1 was dropped 2026-09-02; contract 5 was dropped 2026-09-05 when the knight two-step fix shrank the flat action space.
-- `src/hexset/server/static/index.html` — the entire frontend: inline CSS, inline SVG icons, vanilla JS. No build step. No advertisement UI of any kind (there is no public vector left to publish); its trade modal composes a bundle and offers it to a chosen counterparty, shows the acceptable-deals list (`GET .../trade/acceptable`) so one can be picked directly, and surfaces a pending-offers panel with Confirm/Decline the moment a bot's trade event finds something against this seat (`docs/bot-api.md` §3).
-- `models/` — drop `.onnx` files here.
-- `games/` — where every game is journalled: one JSON lines file per game, written as it is played, with nothing hidden (the dice, the deck order, every card drawn or stolen, every seat's hand after every action — see `src/hexset/server/journal.py`). On by default; `HEXSET_UI_GAMES_DIR` moves it, and setting that empty turns it off.
+## Engine interfaces
 
-  These files are also what a game is resumed from. Sessions live in memory, so a restart or a long enough silence used to lose whatever was in flight; now a browser returning to a game it never finished has it replayed from its own journal instead of being dealt a new one. Pressing New Game is what ends a game short of winning it — that writes a closing line, and a closed game is never handed back. Turning journalling off turns resuming off with it.
-- `docker/Dockerfile` — a small CPU-only image (deps only) for deploying this without a GPU.
-- `compose.example.yaml` — copy to `compose.yaml` (gitignored) and edit. Bind-mounts `src/` and `models/` into the image rather than baking them in.
+`game.state(seat)` returns a `View`: the seat's own cards, public information,
+and estimates of opponents' hands derived from the resource ledger.
+`game.state(seat, hidden=False)` returns the true `GameState`. Code that needs
+true state outside the engine should explain its purpose with a
+`# true state: <reason>` comment.
 
-## License
+For simulations with trade gates installed, the engine evaluates coverable
+bundles when the game enters MAIN after a roll or robber resolution. Builds,
+purchases, and bank trades do not trigger another automatic event. Both sides
+must gain more than their own gate's `trade_floor`, and each side may
+exchange at most three cards. Heximax's floor is `0.0197`; the network gate
+uses `0.0`. There is no engine-wide default floor. The default `egalitarian` rule
+selects the trade with the largest minimum gain; `nash` and `actor` are
+alternative ranking rules. Evaluation repeats after each exchange until no
+trade clears, a position is revisited, or a configured positive `max_trades`
+limit is reached.
+`max_trades=0` disables the automatic event. Server games use
+the separate [trade-round protocol](docs/bot-api.md#trading).
 
-GPL-3.0-only — see [LICENSE](LICENSE). Third-party components used or
-bundled by this distribution are listed in [NOTICE.md](NOTICE.md).
+## Repository layout
 
-## Trademarks
+| Path | Contents |
+| --- | --- |
+| `src/hexset/` | Rules, board topology, state, ledger, encoding, records, search, and arena |
+| `src/hexset/bots/` | Heximax, bot protocols, random policy and shared evaluation |
+| `src/hexset/bench/` | Duels, throughput measurements, record generation, and weight fitting |
+| `src/hexset/catanatron/` | Adapters for running bots in either engine |
+| `src/hexset/server/` | HTTP and MCP server, sessions, journals, and static browser UI |
+| `src/hexset/clients/` | Runtime-independent policy, trade, and search interfaces; ONNX inference; bot clients |
+| `src/hexset/gym/` | Lane, PettingZoo, and Gymnasium environments |
+| `tests/` | Engine and integration tests |
+| `models/` | Local ONNX opponents |
 
-CATAN and SETTLERS OF CATAN are trademarks of Catan GmbH and Catan Studio. This project is not affiliated with, endorsed by, or sponsored by either, and it ships no Catan artwork, text, or other content. Those names appear here only to identify which game's rules this implements — nominative use, not a claim on the marks. HexSet is the name of this software.
+## Tests
+
+```sh
+pip install -e ".[test,server,export,catanatron,gym]"
+pytest
+pytest -m slow
+```
+
+The default run excludes tests marked `slow`. Run both commands to cover the
+regular and slow suites, or use `pytest -m ""` to run all markers together.
+Optional integration tests may skip when their dependencies are unavailable.
+
+## License and attribution
+
+HexSet is licensed under GPL-3.0-only. See [LICENSE](LICENSE) and
+[third-party notices](NOTICE.md). Development history is in
+[CHANGELOG.md](CHANGELOG.md).
+
+CATAN and SETTLERS OF CATAN are trademarks of Catan GmbH and Catan Studio.
+HexSet is not affiliated with, endorsed by, or sponsored by either company.
+The names identify the game whose rules this project implements.

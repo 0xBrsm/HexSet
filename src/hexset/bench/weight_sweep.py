@@ -12,15 +12,14 @@ it directly -- but without a climb's random walk. For each free term in turn, a
 handful of multiples of the incumbent's value (zero, half, double; then a
 finer ring) each play the incumbent on the same boards, grouped
 `[c, c, b, b]` with antithetic seat swaps (`run_cell` below). The best
-cell replaces the incumbent only if its Wilson lower bound clears 50%; a
+cell replaces the incumbent only if its board-level lower bound clears 50%; a
 term whose every cell reads inside the interval is left where it is. `scarce`
 is derived from `production` and moves with it. At the end the swept vector
 plays the vector it started from over a larger confirm, on fresh boards.
 
-What this can resolve is set by `--games`: 1,024 paired games put a cell's
-standard error near 1.5 points, so an accept needs roughly 53%. A term that
-matters less than that at the incumbent's scale is, for this bot, already
-where it needs to be.
+Cell selection is exploratory: repeated comparisons on shared seeds do not
+provide a confirmatory significance test. Use the fresh-board confirmation
+and an independent evaluation before adopting a selected configuration.
 """
 
 from __future__ import annotations
@@ -32,12 +31,12 @@ import sys
 import time
 from dataclasses import replace
 
-from hexset.arena import Entrant, Z_95, compete, wilson
+from hexset.arena import Entrant, compete
+from hexset.bench.metrics import side_metrics
 from hexset.bench.throughput import default_workers, environment
 from hexset.bots.evaluate import ROLLS, TERM_NAMES, Weights
 from hexset.bots.heximax.evaluate import NO_TRADE_WEIGHTS, TRADING_WEIGHTS
 
-MAX_WORKERS = 30
 SCARCE_PER_PRODUCTION = 0.91 / ROLLS
 
 # Most load-bearing first, by the fit's own coefficients and the hand
@@ -85,24 +84,10 @@ def run_cell(
     )
     elapsed = time.perf_counter() - started
 
-    wins = decided = 0
-    c_roads: list[int] = []
-    b_roads: list[int] = []
-    for winner, roads in zip(tournament.winners, tournament.roads):
-        if winner is not None:
-            decided += 1
-            if winner in challenger_seats:
-                wins += 1
-        c_roads.extend(roads[i] for i in challenger_seats)
-        b_roads.extend(roads[i] for i in baseline_seats)
-
-    low, high = wilson(wins, decided, Z_95) if decided else (0.0, 1.0)
+    c_roads = [roads[i] for roads in tournament.roads for i in challenger_seats]
+    b_roads = [roads[i] for roads in tournament.roads for i in baseline_seats]
     return {
-        "games": games,
-        "decided": decided,
-        "wins": wins,
-        "win_rate": wins / decided if decided else 0.0,
-        "interval_95": [low, high],
+        **side_metrics(tournament, challenger_seats),
         "challenger_roads_per_game": statistics.mean(c_roads),
         "baseline_roads_per_game": statistics.mean(b_roads),
         "seconds": round(elapsed, 1),
@@ -126,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--games", type=int, default=1024, help="per cell; multiple of 4")
     parser.add_argument("--confirm", type=int, default=3072, help="final swept vs start")
     parser.add_argument("--seed", type=int, default=98000)
-    parser.add_argument("--workers", type=int, default=min(MAX_WORKERS, default_workers()))
+    parser.add_argument("--workers", type=int, default=default_workers())
     parser.add_argument("--terms", default=",".join(DEFAULT_ORDER))
     parser.add_argument(
         "--passes", default="0,0.5,2;0.71,1.41",
@@ -177,6 +162,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 low, high = result["interval_95"]
                 cells.append({
+                    **result,
                     "factor": factor, "value": value, "wins": result["wins"],
                     "decided": result["decided"], "win_rate": result["win_rate"],
                     "interval_95": [low, high],
@@ -187,12 +173,12 @@ def main(argv: list[str] | None = None) -> int:
                 })
                 print(
                     f"  pass {pass_index} {term:<13} x{factor:<5g} = {value:9.4g}  "
-                    f"{result['wins']:>4}/{result['decided']} {result['win_rate']:6.1%} "
+                    f"{result['wins']:>4}/{result['games']} {result['win_rate']:6.1%} "
                     f"[{low:.1%}, {high:.1%}]  ({result['seconds']:.0f}s)",
                     file=sys.stderr, flush=True,
                 )
             best = max(cells, key=lambda c: c["wins"]) if cells else None
-            accepted = bool(best and best["interval_95"][0] > 0.5)
+            accepted = bool(best and not best["unfinished"] and best["interval_95"][0] > 0.5)
             if accepted:
                 incumbent = with_term(incumbent, term, best["value"])
             steps.append({
@@ -214,6 +200,7 @@ def main(argv: list[str] | None = None) -> int:
             challenger=entrant("swept", incumbent, notrade), **common,
         )
         report["confirm"] = {
+            **result,
             "games": args.confirm, "seed": args.seed + 500_000, "wins": result["wins"],
             "decided": result["decided"], "win_rate": result["win_rate"],
             "interval_95": result["interval_95"],
@@ -224,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
         }
         low, high = result["interval_95"]
         print(
-            f"CONFIRM swept vs start: {result['wins']}/{result['decided']} = "
+            f"CONFIRM swept vs start: {result['wins']}/{result['games']} = "
             f"{result['win_rate']:.1%} [{low:.1%}, {high:.1%}]",
             file=sys.stderr, flush=True,
         )

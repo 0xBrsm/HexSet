@@ -396,3 +396,15 @@ def victim_of(game: Game, slot: int) -> int | None:
     ordinary one. Two copies of it would drift.
     """
     return None if slot >= game._state.num_players else slot
+
+
+class Stuck(RuntimeError):
+    """A live game has no legal action for the active seat."""
+
+
+def options_for(game: Game) -> list[Action]:
+    """Return legal actions, raising Stuck if the active seat cannot move."""
+    options = legal_actions(game)
+    if not options:
+        raise Stuck(f"no legal action in {game.phase.name} for player {to_move(game)}")
+    return options

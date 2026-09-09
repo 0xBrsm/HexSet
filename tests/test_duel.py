@@ -17,8 +17,6 @@ import pytest
 from hexset.bench import duel
 from hexset.bench.duel import (
     ARENA_GEOMETRY,
-    VERSUS_GEOMETRY,
-    _default_workers,
     _via_arena,
     arena_lineup,
     sides,
@@ -75,20 +73,6 @@ def test_a_checkpoint_duelled_against_itself_still_has_two_sides():
     ]
 
 
-def test_default_workers_is_one_only_for_two_bare_network_checkpoints(tmp_path):
-    """`workers=1` batches two checkpoints in one process; anything else
-    (a scripted opponent, a search wrapper) cannot batch and needs the
-    26-worker default to finish in reasonable wall clock."""
-    a = tmp_path / "a.pt"
-    b = tmp_path / "b.pt"
-    a.touch()
-    b.touch()
-    assert _default_workers(str(a), str(b)) == 1
-    assert _default_workers("network:/runs/a.pt", "network:/runs/b.pt") == 1
-    assert _default_workers(str(a), "search2-offers3") == 26
-    assert _default_workers("search2-offers3", "random") == 26
-
-
 # --------------------------------------------------------------------------
 # seat geometry
 # --------------------------------------------------------------------------
@@ -104,7 +88,6 @@ def test_the_default_arena_lineup_is_the_recorded_one():
 
 def test_the_interleaved_lineup_matches_the_seat_geometry_probe():
     """The lineup and slots `tmp/seat_geometry.py` used for the archived rows."""
-    assert VERSUS_GEOMETRY == "abab"
     assert arena_lineup(A, B, "abab") == ([A, B, A, B], [0, 2], [1, 3])
 
 
@@ -118,8 +101,8 @@ def test_a_seating_is_any_pattern_of_a_and_b_slots():
 def test_a_comma_separated_seating_can_name_third_party_entrants():
     """Two sides at a table that also seats bots on neither side; every slot
     that is not `a` or `b` is its own entrant spec and belongs to no side."""
-    assert arena_lineup(A, B, "a,b,search2,random") == (
-        [A, B, "search2", "random"], [0], [1]
+    assert arena_lineup(A, B, "a,b,heximax,random") == (
+        [A, B, "heximax", "random"], [0], [1]
     )
 
 
@@ -130,10 +113,10 @@ def test_a_seating_with_only_one_side_is_refused():
 
 def test_third_party_slots_keep_their_own_names():
     lineup = sides(
-        lineup_from_names([A, B, "search2", "random"]), "ppo6", "ppo4", [0], [1]
+        lineup_from_names([A, B, "heximax", "random"]), "ppo6", "ppo4", [0], [1]
     )
     assert [base_name(entrant.name) for entrant in lineup] == [
-        "ppo6", "ppo4", "search2", "random",
+        "ppo6", "ppo4", "heximax", "random",
     ]
 
 
@@ -151,17 +134,20 @@ def _fake_compete(seen: dict, points, turns=None, winners=None):
         seen["lineup"] = [entrant.weights for entrant in lineup]
         seen["names"] = [entrant.name for entrant in lineup]
         seen["records"] = records
+        seen["workers"] = workers
         game_turns = tuple(turns) if turns is not None else tuple(80 for _ in range(games))
         game_winners = (
             tuple(winners) if winners is not None else tuple(0 for _ in range(games))
         )
         return Tournament(
-            standings=tuple(Standing(e.name, 1, games) for e in lineup),
+            standings=tuple(Standing(e.name, game_winners.count(i), games)
+                            for i, e in enumerate(lineup)),
             games=games,
             unfinished=sum(1 for w in game_winners if w is None),
             mean_turns=statistics.mean(game_turns) if game_turns else 0.0,
             seconds=0.0,
             winners=game_winners,
+            seating=tuple(tuple(range(len(lineup))) for _ in range(games)),
             points=tuple(points for _ in range(games)),
             turns=game_turns,
         )
@@ -228,11 +214,45 @@ def test_arena_verdict_reports_game_length_and_exhaustion(monkeypatch):
     assert verdict["unfinished"] == 2
 
 
-def test_the_versus_path_refuses_a_blocked_geometry(capsys):
-    """`collect.alternating` is the interleaving; asking for anything else at
-    workers=1 must fail loudly rather than play interleaved under a wrong label."""
-    code = duel.main([A, B, "--workers", "1", "--geometry", "aabb", "--no-json"])
-    assert code == 2
-    _, err = capsys.readouterr()
-    assert "--geometry aabb is not available at --workers 1" in err
-    assert "--workers 2" in err
+
+
+@pytest.mark.parametrize("workers", [1, 2])
+def test_cli_uses_arena_for_every_worker_count(monkeypatch, capsys, workers):
+    seen = {}
+    monkeypatch.setattr("hexset.arena.compete", _fake_compete(seen, POINTS))
+    assert duel.main(["heximax", "heximax-notrade", "--games", "4",
+                      "--workers", str(workers), "--no-json"]) == 0
+    assert seen["workers"] == workers
+    assert '"via": "arena.compete"' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("geometry,winners,expected", [
+    ("bbaa", (0, 2, 3, None), 2),
+    ("random,a,b,random", (0, 1, 2, None), 1),
+])
+def test_duel_counts_side_a_by_slot_even_when_labels_collide(monkeypatch, geometry, winners, expected):
+    monkeypatch.setattr("hexset.arena.compete", _fake_compete({}, POINTS, winners=winners))
+    verdict = _via_arena(_arena_args(), "random", "random", geometry)
+    assert verdict["wins"] == expected
+    assert verdict["win_rate"] == expected / 4
+
+
+def test_duel_intervals_use_board_pairs(monkeypatch):
+    compete = _fake_compete({}, POINTS)
+    def paired(*args, **kwargs):
+        from dataclasses import replace
+        return replace(compete(*args, **kwargs), points=((10, 10, 0, 0), (0, 0, 10, 10)) * 2)
+    monkeypatch.setattr("hexset.arena.compete", paired)
+    verdict = _via_arena(_arena_args(), "a", "b")
+    assert verdict["boards"] == 2
+    assert verdict["paired_vp_low"] == verdict["paired_vp_high"] == 0
+
+
+def test_one_board_verdict_serializes_unestimable_vp_bounds_as_null(monkeypatch):
+    import json
+
+    monkeypatch.setattr("hexset.arena.compete", _fake_compete({}, (10, 3)))
+    verdict = _via_arena(_arena_args(games=2), "a", "b", "ab")
+    assert verdict["paired_vp_low"] is None
+    assert verdict["paired_vp_high"] is None
+    json.dumps(verdict, allow_nan=False)

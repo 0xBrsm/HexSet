@@ -1,16 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""`Game.state(seat, *, hidden=True)`: the engine's information-set access
-path (P0, `agents/reference/trading-design.md`, "Registration -- the
-one-event trade mechanic").
-
-`hidden=True` (the default) returns the seat's `View` (`hexset.view`,
-moved here from `hexset.bots.heximax.belief.Belief` -- `Belief` is kept as
-an alias); `hidden=False` returns the true `GameState`, the same object
-every time, and is the only sanctioned way to read it from outside the
-engine. This is a pure move: the census in `tests/bots/heximax` and
-`tests/bots/test_search2.py` is the exactness guard for the bots that
-actually depend on this path; this file pins the access path itself.
-"""
+"""Information-set access, hidden-state boundaries and imagined-game isolation."""
 
 from __future__ import annotations
 

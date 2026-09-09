@@ -11,7 +11,7 @@ in the trade gate alone (`agents/reference/hexn-boundary-audit.md`).
 
 The rest of the package still hands over a `Game` and gets an `Action` back,
 and `spawn` below is the only entry point it needs. The names it has always
-imported from this module -- `NetworkBot`, `NetworkEvaluator`,
+imported from this module -- `NetworkBot`,
 `LeafEvaluator`, `GatedSearch` -- are re-exported here and mean exactly what
 they did.
 
@@ -45,9 +45,7 @@ from hexset.clients.netbot import (
     GatedSearch,
     LeafEvaluator,
     NetworkBot,
-    NetworkEvaluator,
     bot_for,
-    evaluator_for,
     register_entrants,
     searcher_for,
 )
@@ -56,7 +54,7 @@ from hexset.mcts import Search
 from hexset.onnx_record import record_from_game
 from hexset.server.constants import RECORD_CONTRACTS
 from hexset.server.modelmeta import SearchConfig, search_config
-from hexset.server.rules import options_for
+from hexset.actions import options_for
 
 # What this module has always exported. `NetworkBot` and the other three are
 # `hexset.clients.netbot`'s now -- re-exported by name so every existing
@@ -67,11 +65,9 @@ __all__ = [
     "LeafEvaluator",
     "Loaded",
     "NetworkBot",
-    "NetworkEvaluator",
     "V2Policy",
     "load",
     "network_bot",
-    "network_evaluator",
     "options_for",
     "register_entrants",
     "searcher",
@@ -335,13 +331,6 @@ def searcher(
         inference_batch=inference_batch,
         rng=rng,
     )
-
-
-def network_evaluator(
-    path: str, board, *, device: str = "cpu", threads: int | None = None
-) -> NetworkEvaluator:
-    """The checkpoint at `path` as a leaf evaluation for the search."""
-    return evaluator_for(load(path, board.topology, device, threads))
 
 
 def network_bot(

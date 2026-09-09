@@ -19,7 +19,7 @@ import pytest
 from hexset import arena
 from hexset.arena import Entrant, compete, wilson
 from hexset.bench.versus import BotPolicy, compete_batched
-from hexset.bots.search2 import options_for
+from hexset.actions import options_for
 from hexset.record import replay
 
 SEED = 11
@@ -239,3 +239,40 @@ def test_records_ride_along_with_the_episodes():
     )
     assert quiet.episodes == ()
     assert quiet.metrics()["seconds"] == quiet.seconds
+
+
+@pytest.mark.parametrize("kwargs", [{"games": 3}, {"games": 2, "lanes": 0}, {"games": 2, "action_cap": 0}])
+def test_invalid_collection_budgets_are_rejected(kwargs):
+    with pytest.raises(ValueError):
+        compete_batched(two_policies(), **kwargs)
+
+
+def test_one_board_batched_metrics_are_strict_json():
+    import json
+
+    verdict = compete_batched(two_policies(), 2, lanes=1, action_cap=2)
+    metrics = verdict.metrics()
+    assert metrics["paired_vp_low"] is None
+    assert metrics["paired_vp_high"] is None
+    json.dumps(metrics, allow_nan=False)
+
+
+def test_policy_adapter_gate_seeds_are_repeatable_without_game_rng(monkeypatch):
+    from hexset.bench.versus import PolicyPolicy
+
+    salts = []
+    class Gate:
+        def seat_at(self, game):
+            pass
+
+    def bot_for(checkpoint, *, max_trades, rng):
+        salts.append(rng.getrandbits(64))
+        return Gate()
+
+    monkeypatch.setattr("hexset.clients.netbot.bot_for", bot_for)
+    adapter = PolicyPolicy(None, object(), gate_seed=17)
+    adapter.gate(object(), 0)
+    adapter.gate(object(), 1)
+    adapter.gate(object(), 0)
+    assert salts[0] == salts[2]
+    assert salts[0] != salts[1]

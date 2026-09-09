@@ -5,7 +5,7 @@ import random
 import numpy as np
 
 from hexset.actions import build_space
-from hexset.server.rules import options_for
+from hexset.actions import options_for
 from hexset.board.board import random_base_board
 from hexset.game import start, to_move
 from hexset.onnx_record import record_from_game

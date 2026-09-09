@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """`HexSetEnv`: Gymnasium conformance, determinism under a seed, and one full
-episode against `search2` opponents."""
+episode against `heximax` opponents."""
 
 from __future__ import annotations
 
@@ -25,8 +25,8 @@ def test_check_env():
     check_env(env, skip_render_check=True)
 
 
-def test_episode_vs_search2_terminates_within_max_turns():
-    env = HexSetEnv(opponents=("search2", "search2", "search2"), learner_seat=0)
+def test_episode_vs_heximax_terminates_within_max_turns():
+    env = HexSetEnv(opponents=("heximax", "heximax", "heximax"), learner_seat=0)
     obs, info = env.reset(seed=3)
     steps = 0
     # A learner decision is at most one action per engine turn across the

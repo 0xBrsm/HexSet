@@ -25,77 +25,36 @@ import random
 import statistics
 import time
 from dataclasses import dataclass, replace
+from concurrent.futures import ProcessPoolExecutor
 from math import sqrt
-from multiprocessing import Pool
+from multiprocessing import get_context
 from typing import TYPE_CHECKING, Callable, Sequence
 
 from .actions import apply
 from .board.board import Board, random_base_board
-from .board.topology import Topology
 from .game import Game, is_over, start, to_move
 from .placement import PlacementBot
 from .state import city_count, road_count, settlement_count
 from .victory import victory_points
 
 if TYPE_CHECKING:
-    # `Bot` is annotation-only here (`from __future__ import annotations`
-    # makes every annotation a string) -- never imported for real. The three
-    # names `_spawn` actually calls at runtime (`RandomBot`, `SearchBot`,
-    # `greedy`) are imported locally inside `_spawn` instead of at module
-    # level, because `hexset.bots` imports `hexset.bots.heximax`, which
-    # imports this module back (for `Entrant`/`register_entrant_kind`/
-    # `register_preset`) -- a module-level `from .bots import ...` here
-    # would deadlock that cycle on whichever of the two is cold-started
-    # first. See `hexset.bots.heximax`'s own docstring for the full cycle.
+    # Runtime imports are local to avoid cycles through preset registration
+    # and record.MAX_ACTIONS.
     from .bots import Bot
-    # Same reasoning, the other direction: `hexset.record` imports
-    # `MAX_ACTIONS` from this module at load time, so a module-level import
-    # here would be the same cycle in reverse. `_play_one` imports it for
-    # real, locally, only when `--records` actually asks for one.
     from .record import Record
 
 Z_95 = 1.959964
 
-# Network-backed entrant kinds and evaluators are not implemented here: they
-# need torch and a trained checkpoint, which live in the `hexn` package, and
-# hexset must never import hexn. Instead `hexn.netbot` registers factories
-# here at import time -- so any HexN entry point (train, league, collect,
-# its duel wrapper) that imports `hexn.netbot` makes "network"/"mcts"
-# entrants and the "network" evaluator spawnable, and a hexset-only process
-# that never imports it gets a clear error naming the package that provides
-# them rather than a silent `ImportError` on torch.
+# Runtimes register their network/MCTS factories explicitly.
 _ENTRANT_KIND_FACTORIES: dict[str, Callable[[Entrant, Board, random.Random], Bot]] = {}
-_EVALUATOR_PROVIDERS: dict[str, Callable[[object, Board], object]] = {}
-_CHECKPOINT_LOADER: Callable[[str, Topology, str], object] | None = None
-_LEAF_EVALUATOR_FACTORY: Callable[..., object] | None = None
-
-# Kinds/evaluators hexset knows the *name* of but does not implement itself --
-# used only to tell "not registered yet" apart from "not a real kind at all".
 _NETWORK_KINDS = frozenset({"network", "mcts"})
-_NETWORK_EVALUATORS = frozenset({"network"})
-_HEXIMAX_KINDS = frozenset({"heximax"})
-
-_HEXNET_HINT = (
-    "is provided by the hexn package; import hexn.netbot (or an entry "
-    "point that does, such as hexn.train/hexn.league/hexn.collect) "
-    "before spawning it"
-)
-_HEXIMAX_HINT = "is provided by hexset.bots.heximax; import hexset.bots before spawning it"
+_RUNTIME_HINT = "requires a runtime loader registered with hexset.clients.netbot.register_entrants"
 
 
 def register_entrant_kind(kind: str, factory) -> None:
     """Register a bot-building factory for an `Entrant.kind` hexset does not
     implement itself. `factory(entrant, board, rng) -> Bot`."""
     _ENTRANT_KIND_FACTORIES[kind] = factory
-
-
-def register_evaluator_provider(name: str, factory) -> None:
-    """Register a leaf-evaluation factory for an `Entrant.evaluator` value
-    hexset does not implement itself. `factory(weights, board) -> Evaluator`,
-    matching `EVALUATORS[name](board, weights)`'s role for the built-in ones --
-    the object just needs an `evaluate_game(game, seat)` method and may carry
-    its own `max_trades`."""
-    _EVALUATOR_PROVIDERS[name] = factory
 
 
 def register_preset(name: str, entrant: "Entrant") -> None:
@@ -106,46 +65,6 @@ def register_preset(name: str, entrant: "Entrant") -> None:
     PRESETS[name] = entrant
 
 
-def register_checkpoint_loader(loader) -> None:
-    """Register `hexn.netbot.load`-shaped loader: `(path, topology, device)
-    -> Loaded`, an object with `.policy`, `.space` and `.max_trades`. Lets
-    a caller load a checkpoint without importing hexn itself."""
-    global _CHECKPOINT_LOADER
-    _CHECKPOINT_LOADER = loader
-
-
-def register_leaf_evaluator_factory(factory) -> None:
-    """Register a `hexn.netbot.LeafEvaluator`-shaped factory:
-    `(policy, space, pad_to=None) -> object` with an `evaluate(leaves)`
-    method matching `hexset.mcts.Evaluator`."""
-    global _LEAF_EVALUATOR_FACTORY
-    _LEAF_EVALUATOR_FACTORY = factory
-
-
-def load_checkpoint(path: str, topology: Topology, device: str = "cpu"):
-    """A trained checkpoint, loaded through whatever registered
-    `register_checkpoint_loader`. Raises with a clear message if nothing has."""
-    if _CHECKPOINT_LOADER is None:
-        raise RuntimeError(f"loading a checkpoint {_HEXNET_HINT}")
-    return _CHECKPOINT_LOADER(path, topology, device)
-
-
-def leaf_evaluator(policy, space, pad_to: int | None = None):
-    """A `hexset.mcts.Evaluator` over a loaded network policy, through
-    whatever registered `register_leaf_evaluator_factory`."""
-    if _LEAF_EVALUATOR_FACTORY is None:
-        raise RuntimeError(f"a network leaf evaluator {_HEXNET_HINT}")
-    return _LEAF_EVALUATOR_FACTORY(policy, space, pad_to)
-
-# The engine caps turns, but nothing caps actions within a turn, so a policy
-# that liked trading in circles would never reach the turn cap. A game that
-# trips this is a bug worth seeing, not a result worth counting.
-#
-# Raised once the old offer protocol landed: negotiating cost an action per
-# offer and one per response, so a random four-player game went from about
-# 1400 actions to 3400 and 5000 had stopped being a guard. Trading is one
-# engine event now and costs no actions at all, so the headroom is larger
-# than it needs to be -- kept, because a guard is not a target.
 MAX_ACTIONS = 20000
 
 
@@ -216,24 +135,14 @@ class Entrant:
     """What to build, not a built bot. Picklable, so it can cross a process."""
 
     name: str
-    kind: str = "greedy"
+    kind: str = "heximax"
     # Fitted evaluation weights, or — for `kind="network"` — the path to a
     # training checkpoint. Both are "what this entrant plays with", and both
     # have to survive a pickle to a worker, which a loaded network would not.
     weights: object | None = None
-    depth: int = 1
+    depth: int = 2
     width: int | None = None
-    # Which evaluation to score with. `weights` has to be the matching type,
-    # since the two evaluations do not share a term set — that is the point of
-    # keeping both.
-    evaluator: str = "default"
-    # How the per-seat vector is read: see `hexset.bots.STANCES`. `None`
-    # means "the bot's own default" -- resolved at spawn time in `_spawn`,
-    # below, since different `kind`s ship different defaults (`"relative"`
-    # for `greedy`/`search`; `kind="heximax"` resolves through
-    # `bots.heximax.presets._spawn`, which lets `heximax()`'s own default
-    # (`"win"`) apply). `greedy-own` reproduces the plain max^n baseline by
-    # passing `"own"` explicitly.
+    # None uses the selected bot's search objective.
     stance: str | None = None
     # Whether the opening settlements come from the fitted placement prior
     # rather than from whatever this entrant would otherwise do. Orthogonal to
@@ -269,74 +178,9 @@ class Entrant:
         return replace(self, name=name)
 
 
-# `Evaluator`/`TieredEvaluator` are not imported at module level, and
-# `EVALUATORS` is not a module-level literal -- see `_evaluators` below for
-# why: `hexset.bots` now imports `heximax`, which imports this module back
-# for `Entrant`/`register_entrant_kind`/`register_evaluator_provider`/
-# `register_preset`.
-_EVALUATORS: dict[str, type] | None = None
-
-
-def _evaluators() -> dict[str, type]:
-    """`{"default": Evaluator, "tiered": TieredEvaluator}`, built on first use
-    and cached.
-
-    Deferred rather than a module-level import + literal:
-    `hexset.bots.evaluate` is a submodule of the `hexset.bots` *package*, so
-    importing it requires `hexset/bots/__init__.py` to finish running first,
-    and that module imports `hexset.bots.heximax`, which imports this module
-    back for the four names above. A module-level import here would deadlock that cycle
-    on whichever of `hexset.arena`/`hexset.bots` is cold-started first, so
-    the whole dependency is pushed to first use, well after every module
-    involved has finished importing. See `hexset.bots.heximax`'s own docstring
-    for the full cycle and why `hexset.mcts` carries the same pattern for
-    `STANCES`.
-    """
-    global _EVALUATORS
-    if _EVALUATORS is None:
-        from .bots.evaluate import Evaluator
-        from .evaluate_tiered import Evaluator as TieredEvaluator
-
-        _EVALUATORS = {"default": Evaluator, "tiered": TieredEvaluator}
-    return _EVALUATORS
-
 PRESETS: dict[str, Entrant] = {
     "random": Entrant("random", kind="random"),
-    "greedy": Entrant("greedy", kind="greedy"),
-    "search2": Entrant("search2", kind="search", depth=2, width=6),
-    "greedy-own": Entrant("greedy-own", kind="greedy", stance="own"),
-    "search2-own": Entrant(
-        "search2-own", kind="search", depth=2, width=6, stance="own"
-    ),
-    "search3": Entrant("search3", kind="search", depth=3, width=4),
-    # Scored with the same stance as the default, so a comparison between them
-    # differs only in the feature set. The stance barely moves it either way:
-    # 38.5% relative against 36.7% own, intervals overlapping.
-    "greedy-tiered": Entrant("greedy-tiered", kind="greedy", evaluator="tiered"),
-    "search2-tiered": Entrant(
-        "search2-tiered", kind="search", depth=2, width=6, evaluator="tiered"
-    ),
-    "greedy-relative": Entrant("greedy-relative", kind="greedy", stance="relative"),
-    "greedy-paranoid": Entrant("greedy-paranoid", kind="greedy", stance="paranoid"),
-    # The no-trade referents: same bot, trade switch off, so a duel between
-    # them and their trading twins prices the mechanic and a duel between two
-    # of them is a game with no trading in it at all.
-    "greedy-notrade": Entrant("greedy-notrade", kind="greedy", max_trades=0),
-    "search2-notrade": Entrant(
-        "search2-notrade", kind="search", depth=2, width=6, max_trades=0
-    ),
-    "search2-relative": Entrant(
-        "search2-relative", kind="search", depth=2, width=6, stance="relative"
-    ),
-    # The placement prior bolted onto entrants that otherwise pick their opening
-    # at random. Paired with their plain versions above, the duel isolates the
-    # eight setup settlements from everything else.
     "random-placement": Entrant("random-placement", kind="random", placement=True),
-    "greedy-placement": Entrant("greedy-placement", kind="greedy", placement=True),
-    # "heximax"/"heximax-notrade" are not built in -- they are
-    # registered by `hexset.bots.heximax` at import time via `register_preset`
-    # (see that package's "registration" section), the same way `hexn`
-    # registers "network"/"mcts".
 }
 
 
@@ -346,49 +190,16 @@ def spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
 
 
 def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
-    from .bots import RandomBot, SearchBot, greedy
+    from .bots import RandomBot
 
     if entrant.kind == "random":
         return RandomBot(rng)
+    if entrant.kind == "catanatron" and entrant.kind not in _ENTRANT_KIND_FACTORIES:
+        _load_presets(("catanatron",))
     if entrant.kind in _ENTRANT_KIND_FACTORIES:
         return _ENTRANT_KIND_FACTORIES[entrant.kind](entrant, board, rng)
     if entrant.kind in _NETWORK_KINDS:
-        raise ValueError(f"entrant kind {entrant.kind!r} {_HEXNET_HINT}")
-    if entrant.kind in _HEXIMAX_KINDS:
-        raise ValueError(f"entrant kind {entrant.kind!r} {_HEXIMAX_HINT}")
-
-    max_trades = entrant.max_trades
-    if entrant.evaluator in _EVALUATOR_PROVIDERS:
-        evaluator = _EVALUATOR_PROVIDERS[entrant.evaluator](entrant.weights, board)
-        if max_trades is None:
-            max_trades = getattr(evaluator, "max_trades", None)
-    elif entrant.evaluator in _NETWORK_EVALUATORS:
-        raise ValueError(f"evaluator {entrant.evaluator!r} {_HEXNET_HINT}")
-    elif entrant.evaluator not in _evaluators():
-        raise ValueError(f"unknown evaluator: {entrant.evaluator}")
-    else:
-        evaluator = _evaluators()[entrant.evaluator](board, entrant.weights)
-
-    # `greedy`/`search` (`SearchBot`, which `greedy` also builds) both default
-    # to `"relative"` on their own constructors, so `None` here resolves to
-    # that -- byte-identical to the old hardcoded `Entrant` default.
-    stance = entrant.stance if entrant.stance is not None else "relative"
-    if entrant.kind == "greedy":
-        return greedy(
-            evaluator,
-            rng,
-            stance=stance,
-            max_trades=max_trades,
-        )
-    if entrant.kind == "search":
-        return SearchBot(
-            evaluator,
-            depth=entrant.depth,
-            width=entrant.width,
-            rng=rng,
-            stance=stance,
-            max_trades=max_trades,
-        )
+        raise ValueError(f"entrant kind {entrant.kind!r} {_RUNTIME_HINT}")
     raise ValueError(f"unknown bot kind: {entrant.kind}")
 
 
@@ -779,14 +590,24 @@ def compete(
     workers: int = 1,
     antithetic: bool = True,
     records: bool = False,
+    worker_initializer: Callable | None = None,
+    worker_initargs: tuple = (),
+    start_method: str | None = None,
 ) -> Tournament:
     """Run `games` games, rotating the lineup so every entrant sits every seat.
 
     `games` must be a multiple of the lineup size, otherwise the rotation is
     incomplete and the seat bias it exists to cancel leaks into the result.
+    Antithetic runs with odd seat counts require twice that many games to
+    complete both halves of every board pair and balance all seats.
 
     `workers` only changes the wall clock. Results are identical at any worker
     count, which is the property that makes a parallel run quotable.
+    Custom runtimes can register their entrant factories with
+    ``worker_initializer(*worker_initargs)``. It runs once in each worker
+    (or in the calling process for workers=1). With spawn/forkserver the
+    initializer must be importable at module scope. ``start_method`` selects
+    a multiprocessing context without changing the process-wide default.
 
     `records=True` has every job build a `hexset.record.Record` of its own
     game alongside the verdict (`_play_and_record`), returned as
@@ -798,16 +619,29 @@ def compete(
     seats = len(entrants)
     if seats < 2:
         raise ValueError("a tournament needs at least two entrants")
+    if games <= 0:
+        raise ValueError("games must be positive")
+    if workers <= 0:
+        raise ValueError("workers must be positive")
+    if action_cap <= 0:
+        raise ValueError("action_cap must be positive")
     if games % seats:
         raise ValueError(f"{games} games does not divide evenly over {seats} seats")
+    if antithetic and seats % 2 and games % (2 * seats):
+        raise ValueError("antithetic runs with odd seat counts require games divisible by twice the seat count")
 
     lineup = tuple(entrants)
     jobs = [(lineup, i, seed, action_cap, antithetic, records) for i in range(games)]
     started = time.perf_counter()
     if workers > 1:
-        with Pool(workers) as pool:
-            outcomes = pool.map(_play_one, jobs, chunksize=1)
+        with ProcessPoolExecutor(
+            max_workers=workers, mp_context=get_context(start_method),
+            initializer=worker_initializer, initargs=worker_initargs,
+        ) as pool:
+            outcomes = list(pool.map(_play_one, jobs, chunksize=1))
     else:
+        if worker_initializer is not None:
+            worker_initializer(*worker_initargs)
         outcomes = [_play_one(job) for job in jobs]
     elapsed = time.perf_counter() - started
 
@@ -845,17 +679,20 @@ def compete(
 # and the entrant it builds still pickles to a worker verbatim.
 NETWORK = "network:"
 
-# The same checkpoint, read as a leaf evaluation instead of as a policy: the
-# handcrafted search with learned leaves. `search2` is the entrant it has to be
-# compared against, since the two then differ only in what scores a leaf.
-NETSEARCH = "netsearch:"
-NETGREEDY = "netgreedy:"
-
-# The same checkpoint again, under the batched PUCT search rather than the
-# handcrafted one. `mcts:<path>@<simulations>w<wave>` names both quantities;
-# the `w<wave>` suffix is optional and defaults to 16 for compatibility with
-# the runs already on record.
 MCTS = "mcts:"
+
+
+def _load_presets(names: Sequence[str]) -> None:
+    # Resolve built-ins even when the caller imports only hexset.arena.
+    from . import bots  # noqa: F401
+
+    if "catanatron" in names and "catanatron" not in PRESETS:
+        try:
+            from .catanatron import bot  # noqa: F401
+        except ModuleNotFoundError as exc:
+            if exc.name and (exc.name == "catanatron" or exc.name.startswith("catanatron.")):
+                raise ValueError("catanatron requires the 'catanatron' extra") from exc
+            raise
 
 
 def entrant_from_name(name: str) -> Entrant:
@@ -884,30 +721,16 @@ def entrant_from_name(name: str) -> Entrant:
             simulations=simulations,
             wave=width,
         )
-    if name.startswith(NETSEARCH):
-        return Entrant(
-            name="netsearch",
-            kind="search",
-            depth=2,
-            width=6,
-            evaluator="network",
-            weights=name[len(NETSEARCH) :],
-        )
-    if name.startswith(NETGREEDY):
-        return Entrant(
-            name="netgreedy",
-            kind="greedy",
-            evaluator="network",
-            weights=name[len(NETGREEDY) :],
-        )
+    _load_presets((name,))
     return PRESETS[name]
 
 
-CHECKPOINT_KINDS = (NETWORK, NETSEARCH, NETGREEDY, MCTS)
+CHECKPOINT_KINDS = (NETWORK, MCTS)
 
 
 def lineup_from_names(names: Sequence[str]) -> list[Entrant]:
     """Resolve names to entrants, numbering repeats so standings stay readable."""
+    _load_presets(names)
     unknown = sorted(
         name
         for name in set(names)

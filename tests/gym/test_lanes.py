@@ -17,7 +17,7 @@ import pytest
 
 from hexset import arena
 from hexset.arena import Entrant, _play_one
-from hexset.bots.search2 import options_for
+from hexset.actions import options_for
 from hexset.chance import Live, Recording
 from hexset.gym.lanes import LaneEnv
 from hexset.record import advance, moves, open_record, replay, replay_to
@@ -304,3 +304,120 @@ def test_an_environment_not_asked_for_records_does_not_record_chance():
 
     recorded = LaneEnv(4, SEED, 1, deal=1, action_cap=CAP, bots={0: spawn}, records=True)
     assert [type(game.chance) for game in recorded.in_flight()] == [Recording]
+
+
+@pytest.mark.parametrize("bad_response", ["missing", "illegal", "inactive"])
+def test_invalid_batch_does_not_advance_any_lane_and_can_be_retried(bad_response):
+    from hexset.actions import Action, ActionType
+
+    env = LaneEnv(players=2, lanes=2, deal=2, action_cap=1, records=True)
+    requests = env.requests()
+    answers = {r.lane: r.options[0] for r in requests}
+    if bad_response == "missing":
+        del answers[requests[-1].lane]
+    elif bad_response == "illegal":
+        answers[requests[-1].lane] = Action(ActionType.END_TURN)
+    else:
+        answers[99] = requests[0].options[0]
+    with pytest.raises(ValueError):
+        env.step(answers)
+    assert env.requests() is requests
+    assert (env.steps, env.ticks, env.games) == (0, 0, 0)
+    episodes = env.step([r.options[0] for r in requests])
+    assert len(episodes) == 2
+    assert all(len(e.record.actions) == len(e) == 1 for e in episodes)
+
+
+def test_illegal_scripted_bot_action_does_not_advance_other_lanes():
+    from hexset.actions import Action, ActionType
+
+    class InvalidBot:
+        def choose(self, game):
+            return Action(ActionType.END_TURN)
+
+    env = LaneEnv(players=2, lanes=2, deal=2, bots={1: lambda board: InvalidBot()},
+                  caster=lambda index: (index, index), action_cap=1)
+    requests = env.requests()
+    with pytest.raises(ValueError, match="illegal bot action"):
+        env.step([requests[0].options[0], None])
+    assert env.requests() is requests
+    assert env.steps == 0
+    assert len(env.step([r.options[0] for r in requests])) == 2
+
+
+def test_lightweight_policy_collects_batched_training_rows_and_replayable_episodes():
+    """Exercise the collection contract without a model or optional runtime."""
+    import random
+    import numpy as np
+    from hexset.actions import mask_of, space_for
+    from hexset.clients.netbot import NetworkBot
+    from hexset.encoding import encode, encode_batch
+
+    class Policy:
+        def __init__(self, space):
+            self.space = space
+            self.batch_sizes = []
+            self.samples = []
+
+        def act_rows(self, rows):
+            self.batch_sizes.append(len(rows))
+            observations = encode_batch([g for g, _, _ in rows], [s for _, s, _ in rows])
+            actions = []
+            for (game, seat, options), obs in zip(rows, observations, strict=True):
+                mask = np.asarray(mask_of(self.space, options))
+                action = options[0]
+                assert mask[self.space.index(action)]
+                assert mask.sum() == len(options)
+                # Saved arrays belong to this decision even after the lane advances.
+                self.samples.append((seat, obs.globals.copy(), mask.copy()))
+                actions.append(action)
+            return actions
+
+        def value_rows(self, rows):
+            return [(0.5, 0.5) for _ in rows]
+
+        def score_rows(self, rows):
+            return [([1 / len(options)] * len(options), (0.5, 0.5))
+                    for _, _, options in rows]
+
+    space = space_for(arena.deal_game(19, 0, 2))
+    policy = Policy(space)
+    gates = []
+
+    def gate(game, seat):
+        bot = NetworkBot(policy, players=2, seat=seat,
+                         rng=random.Random(19 + len(gates)))
+        bot.seat_at(game)  # The collector calls the policy directly, not bot.choose.
+        gates.append(bot)
+        return bot
+
+    env = LaneEnv(players=2, seed=19, lanes=3, deal=4, action_cap=48,
+                  gates={0: gate}, records=True)
+    episodes, retained, collector_batches = [], {}, []
+    while env.running:
+        requests = env.requests()
+        collector_batches.append(len(requests))
+        actions = policy.act_rows([(r.game, r.seat, r.options) for r in requests])
+        for r, sample in zip(requests, policy.samples[-len(requests):], strict=True):
+            assert r.view.perspective == r.seat
+            retained[r.index, r.step] = sample
+        episodes.extend(env.step(actions))
+
+    assert max(collector_batches) == 3 and min(collector_batches) == 1
+    # The same runtime also services batched imagined continuations for gates.
+    assert len(policy.batch_sizes) > len(collector_batches)
+    assert len(gates) == 8  # A new, correctly seated gate for every game/seat.
+    assert sorted(e.index for e in episodes) == list(range(4))
+    assert env.steps == len(retained) == 4 * 48
+    for episode in episodes:
+        assert episode.outcome.truncated and episode.outcome.winner is None
+        assert len(episode.outcome.points) == 2
+        assert episode.record.trades == episode.trades
+        for decision in episode.stream()[::11]:
+            game = replay_to(episode.record, decision.step)
+            seat, observation, mask = retained[episode.index, decision.step]
+            assert seat == decision.seat
+            np.testing.assert_array_equal(observation, encode(game, seat).globals)
+            assert mask[space.index(decision.action)]
+        final = replay(episode.record)
+        assert tuple(victory_points(final.state(s, hidden=False), s) for s in range(2)) == episode.outcome.points

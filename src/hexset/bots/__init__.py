@@ -1,83 +1,18 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""Every heuristic bot lives here, so they can share code.
+"""Bots, trade gates, and heuristic search objectives.
 
-`search2` (`hexset.bots.search2`: `Bot`, `SearchBot`, `greedy`, `RandomBot`,
-the `STANCES` a per-seat vector is read through) and `heximax`
-(`hexset.bots.heximax`, split by concern into `evaluate`/`search`/`presets`)
-both build on the same handcrafted evaluation, `hexset.bots.evaluate`.
-
-`Bot` is the seam every driver and the engine share: `choose(game)`, plus
-`gains_many(view, received, counterparties)` for the trade mechanic
-(`hexset.trading`), defaulting to "this seat never trades".
-
-This module re-exports `search2`'s public names (so `from hexset.bots import
-SearchBot` keeps working exactly as it did when `bots.py` was a single file)
-and most of `heximax`'s (`Heximax`, `HonestEvaluator`, `Weights`,
-`TRADING_WEIGHTS`, `NO_TRADE_WEIGHTS`, `MODES`, `BY_MODE`). Importing
-`.heximax` here is what makes `import hexset.bots` register the "heximax"/
-"heximax-notrade" presets and the "heximax-trading"/
-"heximax-notrade" evaluator names -- previously only an explicit `import
-heximax` did that; now any consumer of this package's bots gets it too, since
-the two live in the same package. See `heximax`'s own module docstring for
-the import-cycle this creates with `hexset.arena`/`hexset.mcts`, and how it
-resolves.
-
-**Rule for this file: no re-exported name may equal a submodule's name.**
-`hexset.bots.heximax`, imported as a side effect above, is the submodule
-(the package at `hexset/bots/heximax/`) for as long as nothing here rebinds
-that attribute. An earlier version of this file did -- re-exporting the
-`heximax(...)` factory function under its own name shadowed the submodule,
-so `hexset.bots.heximax` (and `import hexset.bots.heximax as x`) meant
-whichever one was bound *last*, depending on import order: a real
-public-API bug, not merely confusing. The factory is deliberately left
-un-re-exported here for that reason; reach it at its home,
-`from hexset.bots.heximax import heximax`, the same way `search2`'s and
-`evaluate`'s own names are reached at `hexset.bots.search2`/
-`hexset.bots.evaluate` rather than through this package (neither module
-name collides with a re-export here either, and this file should stay that
-way as it grows).
+Importing this package registers the Heximax arena presets. The factory is
+available from ``hexset.bots.heximax`` without shadowing that submodule.
 """
-
-from __future__ import annotations
-
-from .search2 import (
-    Bot,
-    RandomBot,
-    SearchBot,
-    STANCES,
-    greedy,
-    options_for,
-    own,
-    paranoid,
-    relative,
-)
+from .base import Bot, RandomBot, TradeGate
+from .stances import STANCES, own, paranoid, relative
 from .heximax import (
-    BY_MODE,
-    MODES,
-    Heximax,
-    HonestEvaluator,
-    NO_TRADE_WEIGHTS,
-    TRADING_WEIGHTS,
-    View,
-    Weights,
+    BY_MODE, MODES, Heximax, HonestEvaluator, NO_TRADE_WEIGHTS,
+    TRADING_WEIGHTS, View, Weights,
 )
 
 __all__ = [
-    "BY_MODE",
-    "Bot",
-    "Heximax",
-    "HonestEvaluator",
-    "MODES",
-    "NO_TRADE_WEIGHTS",
-    "RandomBot",
-    "SearchBot",
-    "STANCES",
-    "TRADING_WEIGHTS",
-    "View",
-    "Weights",
-    "greedy",
-    "options_for",
-    "own",
-    "paranoid",
-    "relative",
+    "Bot", "RandomBot", "TradeGate", "STANCES", "own", "paranoid", "relative",
+    "BY_MODE", "MODES", "Heximax", "HonestEvaluator", "NO_TRADE_WEIGHTS",
+    "TRADING_WEIGHTS", "View", "Weights",
 ]

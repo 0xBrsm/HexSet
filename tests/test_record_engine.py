@@ -9,8 +9,8 @@ import pytest
 
 from hexset.actions import Action, ActionType, apply
 from hexset.board.board import random_base_board
-from hexset.bots import RandomBot, greedy
-from hexset.bots.evaluate import Evaluator
+from hexset.bots import RandomBot
+from hexset.bots.heximax import heximax
 from hexset.game import is_over
 from hexset.record import (
     Record,
@@ -29,8 +29,8 @@ from hexset.record import (
 def a_record(seed: int = 0, bot: str = "random") -> Record:
     rng = random.Random(seed)
     board = random_base_board(rng)
-    if bot == "greedy":
-        bots = [greedy(Evaluator(board), random.Random(seed * 10 + s)) for s in range(4)]
+    if bot == "heximax":
+        bots = [heximax(board, rng=random.Random(seed * 10 + s), depth=1) for s in range(4)]
     else:
         bots = [RandomBot(random.Random(seed * 10 + s)) for s in range(4)]
     return record_game(bots, board, seed)
@@ -62,11 +62,6 @@ def test_replaying_reproduces_the_game_that_was_recorded():
     assert is_over(game)
     assert game.won_by == record.winner
     assert game.turns == record.turns
-
-
-@pytest.mark.parametrize("bot", ["random"])
-def test_replay_holds_for_either_bot(bot):
-    replay(a_record(seed=7, bot=bot))
 
 
 def test_a_record_survives_json():
@@ -165,7 +160,7 @@ def test_an_altered_roll_diverges_from_the_seed_and_raises():
     """A record with `seed` present checks every scripted outcome against
     what that seed's stream would actually have produced -- altering one
     recorded roll must be caught, not silently replayed."""
-    record = a_record(seed=13, bot="greedy")
+    record = a_record(seed=13, bot="heximax")
     assert record.seed is not None
     events = list(record.chance)
     index = next(i for i, (kind, _) in enumerate(events) if kind == "roll")
@@ -255,7 +250,7 @@ def test_default_chance_matches_the_seeded_stream():
     clean replay matching the game that was actually played, not merely
     matching itself.
     """
-    record = a_record(seed=42, bot="greedy")
+    record = a_record(seed=42, bot="heximax")
     assert record.seed == 42
     # The stream really was exercised, not vacuously empty or roll-only.
     kinds = {kind for kind, _ in record.chance}

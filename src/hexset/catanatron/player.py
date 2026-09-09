@@ -48,7 +48,7 @@ _SEAT_INDEX = {color: i for i, color in enumerate(Color)}
 
 
 class DevCatanPlayer(Player):
-    """`--players=DC:<entrant>`, e.g. `DC:search2-notrade` or `DC:network:<path>`.
+    """`--players=DC:<entrant>`, e.g. `DC:heximax-notrade` or `DC:network:<path>`.
 
     catanatron's own CLI splits `--players` on every `:` and passes each piece
     as a separate positional argument, so an entrant spec that itself contains
@@ -65,7 +65,7 @@ class DevCatanPlayer(Player):
 
     def __init__(self, color, *entrant_parts: str):
         super().__init__(color)
-        self.entrant_spec = ":".join(entrant_parts) if entrant_parts else "search2-notrade"
+        self.entrant_spec = ":".join(entrant_parts) if entrant_parts else "heximax-notrade"
         self.fallbacks = 0
         self.decisions = 0
         self._mapping = None

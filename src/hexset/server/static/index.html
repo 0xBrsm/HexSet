@@ -132,7 +132,7 @@
      1px border + 0.25rem left padding so both start at the same x. */
   .player-name-plain { padding-left: calc(0.25rem + 1px); }
   /* The picker *is* the player line for a bot seat: a select standing in for
-     the name, sized to the short display names (search2, linear805, ...). */
+     the name, sized to the short display names (heximax, linear805, ...). */
   .player-name select {
     font: inherit; font-weight: 600; width: 100%; padding: 0.1rem 0.25rem; border-radius: 5px;
     border: 1px solid var(--border); background: #232733; color: var(--ink);
@@ -1035,7 +1035,7 @@ function playerNumber(seat) {
   return seat + 1 - locked.filter((s) => s < seat).length;
 }
 
-// Same label, but seat-number-first — "Player 2 (search2)" — for the spots
+// Same label, but seat-number-first — "Player 2 (heximax)" — for the spots
 // where the model name alone would misleadingly read as an opponent's own
 // identity (trade offers, robber-victim picks) rather than as one seat's
 // current bot. 1-indexed to match the backend log's `_who` (webplay.py).

@@ -445,7 +445,7 @@ def test_trade_round_manual_actor_never_auto_broadcasts():
     assert game._state.hands[0][WOOD] == 1
 
 
-# --- heximax/search2: `estimate_many` is wired to the counterparty's row -----
+# --- heximax: `estimate_many` is wired to the counterparty's row -----
 
 
 def test_heximax_estimate_many_reads_the_counterpartys_row_through_belief():
@@ -472,34 +472,6 @@ def test_heximax_estimate_many_off_switch():
 
     game = a_game()
     bot = Heximax(HonestEvaluator(game._state.board), rng=random.Random(0), max_trades=0)
-    view = game.state(0)
-
-    assert bot.estimate_many(view, [(1, bundle(wood=-1, ore=1))]) == [-1.0]
-
-
-def test_search_bot_estimate_many_reads_the_counterpartys_row():
-    from hexset.bots import SearchBot
-    from hexset.bots.evaluate import Evaluator
-
-    game = a_game()
-    give(game._state, 0, Resource.WOOD, 1)
-    give(game._state, 1, Resource.ORE, 1)
-    bot = SearchBot(Evaluator(game._state.board), rng=random.Random(0))
-    view = game.state(0)
-    candidates = [(1, bundle(wood=-1, ore=1))]
-
-    estimates = bot.estimate_many(view, candidates)
-
-    expected = bot._delta_for(view, 0, 1, bundle(wood=-1, ore=1), 1)
-    assert estimates == [pytest.approx(expected)]
-
-
-def test_search_bot_estimate_many_off_switch():
-    from hexset.bots import SearchBot
-    from hexset.bots.evaluate import Evaluator
-
-    game = a_game()
-    bot = SearchBot(Evaluator(game._state.board), rng=random.Random(0), max_trades=0)
     view = game.state(0)
 
     assert bot.estimate_many(view, [(1, bundle(wood=-1, ore=1))]) == [-1.0]

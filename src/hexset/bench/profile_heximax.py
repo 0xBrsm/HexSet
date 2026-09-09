@@ -7,10 +7,7 @@ throughput one). Reports wall time per game, decisions per game, ms per
 decision (mean/p50/p95), and the top functions by cumulative and total time.
 Saves the raw `.prof` to `--out` for `pstats`/`snakeviz` follow-up.
 
-Mirrors `hexset.arena.play`/`_play_one`'s own game loop (board per game index,
-one bot per seat) rather than importing `play` directly, so a decision's
-wall time can be timed individually -- `arena.play` only returns the
-finished `Game`.
+Uses the arena's game law and play loop, with a wrapper measuring each choice.
 """
 
 from __future__ import annotations
@@ -25,31 +22,36 @@ import time
 
 import hexset.bots  # noqa: F401 -- registers "heximax"/"heximax-notrade"/... presets
 
-from hexset.actions import apply
-from hexset.arena import MAX_ACTIONS, entrant_from_name, spawn
-from hexset.board.board import random_base_board
-from hexset.game import is_over, start, to_move
+from hexset.arena import MAX_ACTIONS, entrant_from_name, spawn, deal_game, play_game
 
 
-def play_one_game(preset: str, seed: str, *, action_cap: int = MAX_ACTIONS):
-    """One four-seat game, every seat `preset`. Returns (game, decision_times_s)."""
-    entrant = entrant_from_name(preset)
-    board = random_base_board(random.Random(f"{seed}:board"))
-    bots = [spawn(entrant, board, random.Random(f"{seed}:{seat}")) for seat in range(4)]
-    game = start(board, 4, random.Random(f"{seed}:game"))
-    game.gates = tuple(bots)
-    game.max_trades = None
-    times: list[float] = []
-    actions = 0
-    while not is_over(game) and actions < action_cap:
-        seat = to_move(game)
-        bot = bots[seat]
+class TimedBot:
+    """Record decision latency while forwarding trade methods to the bot."""
+
+    def __init__(self, bot, times):
+        self.bot = bot
+        self.times = times
+
+    def choose(self, game):
         before = time.perf_counter()
-        action = bot.choose(game)
-        times.append(time.perf_counter() - before)
-        apply(game, action)
-        actions += 1
-    return game, times
+        try:
+            return self.bot.choose(game)
+        finally:
+            self.times.append(time.perf_counter() - before)
+
+    def __getattr__(self, name):
+        return getattr(self.bot, name)
+
+
+def play_one_game(preset: str, seed: int, index: int = 0, *, action_cap: int = MAX_ACTIONS):
+    """Profile decisions in a game dealt and played by the arena."""
+    game = deal_game(seed, index, 4)
+    board = game.state(0, hidden=False).board  # true state: public board geometry
+    entrant = entrant_from_name(preset)
+    times = []
+    bots = [TimedBot(spawn(entrant, board, random.Random(f"{seed}:{index}:{seat}")), times)
+            for seat in range(4)]
+    return play_game(game, bots, action_cap=action_cap), times
 
 
 def run(preset: str, games: int, seed: int):
@@ -60,7 +62,7 @@ def run(preset: str, games: int, seed: int):
     profile.enable()
     for i in range(games):
         start_t = time.perf_counter()
-        _game, times = play_one_game(preset, f"{seed}:{i}")
+        _game, times = play_one_game(preset, seed, i)
         per_game_seconds.append(time.perf_counter() - start_t)
         decision_times.extend(times)
     profile.disable()

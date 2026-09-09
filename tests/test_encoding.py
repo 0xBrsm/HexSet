@@ -659,3 +659,16 @@ def test_global_columns_read_the_value_the_encoder_wrote():
         unknown = ledger_block[i * 6 + 5]
         assert known == pytest.approx(np.array(entry.known) / HAND_SCALE)
         assert unknown == pytest.approx(entry.unknown / HAND_SCALE)
+
+
+def test_default_encoding_uses_discarding_seat_instead_of_turn_owner():
+    game = a_game(steps=0)
+    game.phase = Phase.DISCARD
+    game.current_player = 0
+    game.discard_quota = [0, 0, 4, 0]
+    game._state.hands[0] = [1, 0, 0, 0, 0]
+    game._state.hands[2] = [0, 8, 0, 0, 0]
+    default, discarder, owner = encode(game), encode(game, 2), encode(game, 0)
+    for actual, expected in zip(arrays(default), arrays(discarder), strict=True):
+        np.testing.assert_array_equal(actual, expected)
+    assert not np.array_equal(default.globals, owner.globals)

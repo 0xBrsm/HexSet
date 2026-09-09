@@ -19,7 +19,7 @@ docstring) — what varies is only *how* a client decides its move, and
 - **`LocalSearchBrain`** is the escape hatch, and it is honestly a
   privileged one: it holds a direct reference to the live `Game` and calls
   `api.spawn_bot(...).choose(game)`, the same way every bot used to be
-  driven server-side. This is the only way `search2` and an MCTS checkpoint
+  driven server-side. This is the only way `heximax` and an MCTS checkpoint
   can play today — a search needs the *true* state to simulate forward
   (deck contents, both dev-card piles, the setup queue, none of which are
   on the wire, deliberately), and until a proper information-set-safe
@@ -47,10 +47,12 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    import onnxruntime as ort
 
 import numpy as np
-import onnxruntime as ort
 
 from hexset.actions import build_space
 from hexset.bots import Bot
@@ -187,6 +189,8 @@ class RecordBrain:
 
     @classmethod
     def load(cls, spec: str, device: str = "cpu") -> "RecordBrain":
+        import onnxruntime as ort
+
         session = ort.InferenceSession(spec, providers=_providers(device))
         meta = session.get_modelmeta().custom_metadata_map
         contract = meta.get("contract", "1")
@@ -236,7 +240,7 @@ class RecordBrain:
 @dataclass
 class LocalSearchBrain:
     """In-process only, and explicitly privileged (see the module
-    docstring): `bot` is whatever `api.spawn_bot` built — `search2`, a
+    docstring): `bot` is whatever `api.spawn_bot` built — `heximax`, a
     single-forward `NetworkBot`, or an MCTS `Search` — and `choose` is
     called against the session's own live `Game`, hidden information and
     all. Constructible only by `web.py`'s embedded runner thread; there is
@@ -256,7 +260,7 @@ class LocalSearchBrain:
         # holds this seat's one live `Game` for its whole life -- one
         # instance per bot-runner thread -- so handing it over now is not
         # new information, only earlier than `choose` would have. A bot
-        # kind without this attribute (`search2`, an MCTS `Search`) is
+        # kind without this attribute (`heximax`, an MCTS `Search`) is
         # untouched.
         if getattr(self.bot, "_seated", "not-a-network-bot") is None:
             self.bot._seated = self.game

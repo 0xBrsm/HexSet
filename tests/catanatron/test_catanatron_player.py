@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """End-to-end: DevCatanPlayer playing real, complete catanatron games.
 
-This is the test the earlier ones were building towards -- `search2-notrade`
+This is the test the earlier ones were building towards -- `heximax-notrade`
 (no torch, so it runs anywhere) driven entirely through the bridge, against
 catanatron's own bots, for whole games rather than isolated decisions. It is
 also what actually exercises a knight played for real: `PLAY_KNIGHT` maps
@@ -49,7 +49,7 @@ def test_importing_the_bridge_registers_the_heximax_presets():
 @pytest.mark.parametrize("seed", range(1))
 def test_full_games_complete_against_random(seed):
     random.seed(seed)
-    bridge = DevCatanPlayer(Color.RED, "search2-notrade")
+    bridge = DevCatanPlayer(Color.RED, "heximax-notrade")
     players = [bridge, RandomPlayer(Color.BLUE), RandomPlayer(Color.WHITE), RandomPlayer(Color.ORANGE)]
     catan_map = CatanMap.from_template(BASE_MAP_TEMPLATE)
     game = CatanatronGame(players, catan_map=catan_map)

@@ -1,54 +1,17 @@
-"""Project-wide pytest options, test-only ways to drive a game forward, and
-the fixture that stops the bots afterwards.
-
-The two movers below are not opponents anyone plays: the server deals
-`heximax`, `search2` or a checkpoint from `models/` and nothing else. They
-live here rather than in `src/` because a random mover is a fixture, and the
-package should not ship one to make its own tests convenient.
-
-`registry` is the one way a test should build a `Tables`. Every bot seat at
-every table starts a runner thread that lives until its game ends -- parked on
-a read of the table between turns -- and a test that deals three bots and then
-asserts one thing leaves three of them running: PR #2's suite left 67 live
-`bot-*` threads behind. Going through the fixture
-means teardown stops them.
-
-The `slow` marker (registered in `pyproject.toml`) is the other lever on wall
-clock: `pytest` excludes it by default (`addopts = -m "not slow"`) so the
-everyday suite stays a ~10-minute inner loop, and `pytest -m slow` runs it --
-see the README's "Tests" section for what that covers and when it is
-required before merging.
-"""
+"""Shared table lifecycle fixtures; teardown closes every bot runner."""
 
 from __future__ import annotations
 
-import random
 import threading
-from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import pytest
 
-from hexset.actions import Action, apply
-from hexset.game import Game
-from hexset.server.api import Config, Tables
-from hexset.server.rules import options_for
+from hexset.bots import RandomBot
+from hexset.play import step_randomly
 
-
-@dataclass
-class RandomBot:
-    """Satisfies what a `GameSession` needs of an opponent: `choose(game)`."""
-
-    rng: random.Random = field(default_factory=random.Random)
-
-    def choose(self, game: Game) -> Action:
-        return self.rng.choice(options_for(game))
-
-
-def step_randomly(game: Game, rng: random.Random) -> Action:
-    """Pick a legal action at random and apply it, returning what was played."""
-    action = rng.choice(options_for(game))
-    apply(game, action)
-    return action
+if TYPE_CHECKING:
+    from hexset.server.api import Tables
 
 
 # Every `Tables` a test builds, so teardown can stop its bot runners. A test
@@ -70,6 +33,8 @@ def new_tables(**config) -> Tables:
     `HEXSET_UI_GAMES_DIR` points", and a test suite must not journal into a
     real player's games directory.
     """
+    from hexset.server.api import Config, Tables
+
     config.setdefault("games_dir", "")
     return track(Tables(Config(**config)))
 

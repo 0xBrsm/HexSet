@@ -7,7 +7,7 @@ import pytest
 
 pytest.importorskip("onnxruntime", reason="hexset.clients.onnxbot needs onnxruntime installed")
 
-from hexset.server.rules import options_for  # noqa: E402
+from hexset.actions import options_for  # noqa: E402
 from hexset.board.board import random_base_board  # noqa: E402
 from hexset.game import Phase, start, to_move  # noqa: E402
 from hexset.clients.onnxbot import network_bot  # noqa: E402
@@ -60,16 +60,16 @@ def test_a_v2_checkpoint_plays_a_legal_action_from_every_phase(checkpoint_v2):
 
 
 def test_a_v2_checkpoints_value_head_is_already_board_seat_order(checkpoint_v2):
-    from hexset.clients.onnxbot import network_evaluator
+    from hexset.clients.onnxbot import load
 
     path, board = checkpoint_v2
-    evaluator = network_evaluator(path, board)
+    policy = load(path, board.topology).policy
     game = start(board, 4, random.Random(2))
     for _ in range(30):
         step_randomly(game, random.Random(2))
 
     for seat in range(4):
-        vector = evaluator.evaluate_game(game, seat)
+        vector = policy.value_rows([(game, seat)])[0]
         assert len(vector) == 4
         assert vector == pytest.approx([0.0, 0.0, 0.0, 0.0])
 
@@ -167,7 +167,7 @@ def test_a_terminal_leaf_is_scored_on_the_win_probability_scale(checkpoint_v2):
 
     path, board = checkpoint_v2
     loaded = load(path, board.topology)
-    evaluator = LeafEvaluator(policy=loaded.policy, space=loaded.space)
+    evaluator = LeafEvaluator(policy=loaded.policy)
 
     game = start(board, 4, random.Random(2))
     with pytest.raises(ValueError, match="has not finished"):

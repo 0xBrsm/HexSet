@@ -1,40 +1,18 @@
-# A small CPU-only image: onnxruntime inference, no GPU toolchain, and no
-# build step for the frontend (it is one static HTML file).
-#
-# Dependencies only — src/ and models/ are bind-mounted at run time rather
-# than copied in (see compose.example.yaml), so editing the code is a
-# restart and not a rebuild; only a dependency bump touches the image. If you
-# would rather have a self-contained image to push to a registry, add
-#
-#     COPY src/ /app/src/
-#
-# below and drop the matching volume from your compose file.
-#
-# `hexset`, `heximax` and the gym (`hexset.server`, `hexset.clients`) are all
-# one distribution under this repo's own `src/`, so one bind mount and one
-# PYTHONPATH entry cover all of it — no separate engine checkout to mount.
+# CPU image with a complete installed package. Compose overrides the source
+# through a read-only bind mount for local development.
 FROM python:3.12-slim
 
 LABEL org.opencontainers.image.title="HexSet"
 LABEL org.opencontainers.image.source="https://github.com/0xBrsm/HexSet"
 
-# Kept in step with pyproject.toml's [project].dependencies plus the
-# `server`/`clients`/`catanatron` extras by hand. A version bump belongs in
-# both places or `pip install -e .` and this image drift apart. The package itself is not
-# installed here: it is not on an index yet, so it arrives as the /app/src
-# bind mount below.
-RUN pip install --no-cache-dir "numpy>=1.26" "onnxruntime>=1.18"
-
-# The `catanatron` extra, so the picker's `catanatron` opponent
-# (`hexset.catanatron.bot`) can be seated here too. Pinned to the same commit
-# as pyproject.toml's extra — a git URL needs git to resolve, which is
-# installed and removed inside this one layer rather than left in the image.
+# Resolve dependencies and the pinned Catanatron revision from pyproject.toml.
+COPY pyproject.toml LICENSE /tmp/hexset-build/
+COPY src/ /tmp/hexset-build/src/
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git \
-    && pip install --no-cache-dir \
-        "catanatron @ git+https://github.com/bcollazo/catanatron.git@d3f4ad05bb78d8b2309631d6d3cfa8fcb6fda816" \
+    && pip install --no-cache-dir '/tmp/hexset-build[server,catanatron]' \
     && apt-get purge -y --auto-remove git \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* /tmp/hexset-build
 
 # Runs unprivileged. The uid is arbitrary and deliberately high enough not to
 # collide with a host account: it reads the bind-mounted source and models,

@@ -81,7 +81,7 @@ def test_bot_seat_refuses_once_the_game_is_over():
     table.session.game.phase = Phase.GAME_OVER
 
     with pytest.raises(ApiError) as excinfo:
-        registry.handle("POST", "/api/bot", {"seat": empty, "model": "search2"}, token)
+        registry.handle("POST", "/api/bot", {"seat": empty, "model": "heximax"}, token)
 
     assert "already over" in excinfo.value.args[0]
     assert table.seats[empty].name == "heximax"

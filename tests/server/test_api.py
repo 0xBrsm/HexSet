@@ -2,7 +2,7 @@
 
 Everything here calls `Tables.handle` the way `web.py` would, so the routing
 and the rules are pinned together; `test_web.py` covers only what the HTTP
-transport adds on top. `search2` is named explicitly at every call rather than
+transport adds on top. `heximax` is named explicitly at every call rather than
 left to `Config.default_bots`, which would seat whatever `.onnx` files happen
 to be in `models/` and drag onnxruntime into a suite that has no need of it.
 """
@@ -37,7 +37,7 @@ from hexset.server.webplay import action_to_wire
 
 from conftest import new_tables
 
-SOLO = ["search2", "search2", "search2"]
+SOLO = ["heximax", "heximax", "heximax"]
 
 
 @pytest.fixture(autouse=True)
@@ -47,7 +47,6 @@ def _creator_at_seat_zero(monkeypatch):
     tests treat the dealt token as the one that moves first, so pin the
     creator to seat 0 for that determinism."""
     monkeypatch.setattr(random.SystemRandom, "randrange", lambda self, n: 0)
-
 
 
 def tables(**config) -> Tables:
@@ -69,7 +68,7 @@ def test_a_spectator_sees_every_hand_and_a_seat_still_sees_only_its_own():
     is shown all of it. A seat is inside it and is not — the same table, read
     two ways, and the difference is the whole of what the token buys."""
     registry = tables()
-    code, token = deal(registry, bots=["search2", "search2", "search2"])
+    code, token = deal(registry, bots=["heximax", "heximax", "heximax"])
     mine = registry.by_token(token)[1]
 
     watched = registry.handle("GET", f"/api/table/{code}", {}, None)
@@ -85,7 +84,7 @@ def player(name: str | None = None) -> Seat:
 
 
 def bot_seat() -> Seat:
-    return Seat(kind=SeatKind.BOT, name="search2", spec="search2")
+    return Seat(kind=SeatKind.BOT, name="heximax", spec="heximax")
 
 
 def reopened(code: str, directory, seats: list[Seat] | None = None):
@@ -216,7 +215,7 @@ def test_a_reopened_game_puts_every_seat_back_as_whoever_held_it(finished_game):
     assert seats[0].name == "Ada"
     assert seats[0].client == WEB_CLIENT
     assert seats[0].token is None
-    assert [seat.name for seat in seats[1:]] == ["search2"] * 3
+    assert [seat.name for seat in seats[1:]] == ["heximax"] * 3
     assert all(seat.token is not None and seat.client is None for seat in seats[1:])
 
 
@@ -232,7 +231,7 @@ def test_a_finished_table_reopens_read_only_through_get_after_a_restart(finished
 
     assert view["game_over"] is True
     assert view["log"] == session.log_for(None, omniscient=True)
-    assert [seat["name"] for seat in view["seats"]] == ["Ada"] + ["search2"] * 3
+    assert [seat["name"] for seat in view["seats"]] == ["Ada"] + ["heximax"] * 3
 
 
 def test_an_abandoned_unfinished_game_does_not_come_back(tmp_path):
@@ -375,14 +374,6 @@ def _a_position_where_no_opponent_holds_anything(mover: int = 0):
     return game
 
 
-def test_an_embedded_bot_is_offered_the_same_list_the_wire_serves():
-    from hexset.actions import legal_actions
-    from hexset.clients.onnxbot import options_for as onnxbot_options_for
-
-    game = _a_position_where_no_opponent_holds_anything()
-    assert onnxbot_options_for(game) == legal_actions(game)
-
-
 def test_record_matches_the_embedded_bots_options():
     """The claim at the level it was actually made, through the real route:
     the record `GET /api/record` serves and the record an in-process bot
@@ -392,7 +383,7 @@ def test_record_matches_the_embedded_bots_options():
     from hexset.actions import build_space
 
     from hexset.onnx_record import record_from_game
-    from hexset.server.rules import options_for
+    from hexset.actions import options_for
 
     registry = tables()
     code, token = deal(registry, bots=[])
@@ -697,7 +688,7 @@ def test_reclaim_gets_a_finished_game_s_seat_back_but_it_still_cannot_act(finish
         ("POST", "/api/name", {"name": "Grace"}),
         ("POST", "/api/action", {"action": {"type": "END_TURN"}}),
         ("POST", "/api/leave", {}),
-        ("POST", "/api/bot", {"seat": 1, "model": "search2"}),
+        ("POST", "/api/bot", {"seat": 1, "model": "heximax"}),
     ]:
         with pytest.raises(ApiError) as refused:
             fresh.handle(method, path, payload, mine["token"])

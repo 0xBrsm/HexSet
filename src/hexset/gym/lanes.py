@@ -1,40 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""Many games in flight at once, stepped in lockstep, one batch per tick.
+"""Batched game collection without a Gymnasium or neural-network dependency.
 
-A learner that steps a single game and asks its network for each move spends
-essentially all of its time in dispatch: the measured toll is ~1.5 ms fixed per
-forward against ~25 µs per position, so one position per call wastes the
-hardware by a factor of fifty. That measurement is the whole reason this module
-exists. Hold `lanes` games in flight, step every one of them once per tick, and
-hand the caller the whole tick as one batch, so a single forward serves every
-lane. Exactly one seat is ever to move in a Catan position, so a live lane
-contributes exactly one decision per tick and a tick is a batch of `lanes`.
+Each tick exposes one decision per live lane. The caller batches policy
+inference, then supplies one legal action per request. Finished lanes refill
+until the configured game cohort is exhausted.
 
-`hexset.gym.aec` is the same engine for a different consumer: one game, one
-agent per seat, PettingZoo's turn-taking convention. That environment seats no
-trade gate, so an agent played through it cannot trade -- there was nobody to
-ask. Here a gate is seated at *every* seat (`game.gates`), so the engine's own
-trade event (`hexset.trading`) runs exactly as it does under `hexset.arena`,
-and a lane environment is the first gym entry point at which a learner can
-trade at all.
-
-Nothing about the model is here, and nothing about reward. A tick's `Request`
-carries the position, the seat's information set and its legal actions; the
-caller answers with an `Action`. What a decision is worth, what it is encoded
-as, and what the trainer keeps alongside it are the caller's, because the
-choice between terminal win/loss and terminal victory points is not the
-engine's to make -- both are on the `Outcome`.
-
-Decisions come back demultiplexed by seat. One game interleaves four seats'
-decisions into a single action stream, and a seat's next position is not the
-one that follows its action but the next one that seat was asked about; keeping
-a list per seat with the stream index on every entry is what makes a transition
-mean anything to a policy-gradient update, while `Episode.stream()` puts the
-interleaving back.
-
-This module is numpy-free and imports neither `pettingzoo` nor `gymnasium` --
-it is a plain engine driver, and a training loop should not have to install a
-gym API it does not use to get one.
+Requests expose both the live engine state and the acting seat's information
+set. Encode observations before stepping; retained live states are not
+trajectory snapshots. Episodes retain actions grouped by seat, terminal
+outcomes, cleared trades and optional replay records. Reward definitions,
+model tensors and optimizer state belong to the training application.
 """
 
 from __future__ import annotations
@@ -44,10 +19,9 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from ..actions import Action, apply
+from ..actions import Action, apply, options_for
 from ..arena import MAX_ACTIONS, deal_game, game_key
 from ..board.board import Board
-from ..bots.search2 import options_for
 from ..game import Game, is_over, to_move
 from ..record import Record, Tape, recording
 from ..victory import victory_points
@@ -70,9 +44,11 @@ class Request:
     episode. `step` is the decision's index in the lane's whole action stream,
     the same number the resulting `Decision` carries.
 
-    `game` is the live lane state, handed out rather than copied because a
-    searching caller needs positions to step and `hexset.mcts` copies at its
-    own root. A caller that mutates it corrupts the lane.
+    `game` is the live lane state, including private information; it is not
+    an information boundary. Policies must use `view` or a perspective-aware
+    encoder and must not mutate `game`. Encode and retain training features
+    before `step`: this request does not preserve a historical snapshot,
+    and accessing `view` for the first time after stepping reads the new state.
 
     `view` is the seat's information set (`game.state(seat)`), computed on
     first access rather than up front: a seat played by its own bot is never
@@ -142,8 +118,9 @@ class Outcome:
 class Episode:
     """One finished game: per-seat decisions plus how it ended.
 
-    `seed` and `index` are the whole game (`hexset.arena.deal_game`), so an
-    episode can be replayed against the engine rather than trusted.
+    `seed` and `index` identify the default game deal. Custom boards,
+    policy randomness and trade decisions are not described by those two
+    numbers. Use `records=True` for a self-contained replay artifact.
 
     `cast` is which policy id held each seat, the caster's verdict for this
     index. `decisions` is one tuple per seat; `trades` is every exchange the
@@ -195,11 +172,12 @@ class BoardBots:
     finished game. An evicted board still in play is respawned on its next
     request, which costs a spawn and nothing else.
 
-    One bot serves every seat of a board that casts the same id twice. That is
-    deliberate: a `hexset.bots` bot is a pure function of the position it is
-    handed (its `choose` and its `gains_many` both take the seat's own view),
-    so two seats sharing one are indistinguishable from two seats holding one
-    each, and the pips cache is shared rather than built twice.
+    One bot serves every seat and lane using the same board object and
+    policy id. Use factories whose bots support that sharing. Mutable bot
+    state, including random generators, is shared too: stochastic choices
+    can depend on request order and therefore on the number of lanes.
+    Seat-specific network trade gates belong in `LaneEnv.gates`, whose
+    factories receive a game and seat for each installation.
     """
 
     def __init__(self, spawn: Callable[[Board], Bot], capacity: int = 256) -> None:
@@ -252,22 +230,17 @@ class LaneEnv:
     with `None` (or simply leave it out of a mapping) and the seated bot
     chooses. Any other id is the caller's to answer.
 
-    **Gates.** Every seat is seated as a trade gate on `game.gates`, so the
-    engine's own trade event (`hexset.trading`) asks each seat's private
-    verdict and a game played here trades exactly as the same table would under
-    `hexset.arena.play`. A bot is its own gate -- `hexset.bots.Bot` carries
-    `gains_many` -- so an id in `bots` needs nothing further; an id the caller
-    drives supplies one through `gates[id](game, seat)`, which is where a
-    network-backed gate is seated. An id with neither is seated as `None`,
-    which `hexset.trading` reads as "this seat never trades".
+    **Gates.** Trading uses the same engine events as arena play. Scripted
+    seats use their bot as a gate if it implements the optional trading
+    methods. Caller-driven seats supply `gates[id](game, seat)`. A missing
+    gate disables that seat's trading. A `NetworkBot` used only as a gate
+    must be bound with `seat_at(game)` because its `choose` is bypassed.
 
-    **The games.** Every game is `hexset.arena.deal_game(seed, index, players)`
-    -- the same law `hexset.arena.compete` deals from -- so a game is the same
-    whichever lane draws it and however many lanes are in flight, and a lane
-    environment and a tournament playing index `i` of seed `s` play the same
-    game. `first_game` and `stride` shard that sequence: worker `w` of `K`
-    takes `first_game=w, stride=K` and the workers' index sets are disjoint by
-    construction while every game stays what it was.
+    **The games.** `deal_game(seed, index, players)` fixes each game's board
+    and chance stream independently of lane count. `first_game` and `stride`
+    shard the index sequence: worker `w` of `K` uses `first_game=w, stride=K`.
+    Reproducing outcomes also requires the same policies, trade settings and
+    policy random streams; shared mutable bots may depend on request order.
     """
 
     def __init__(
@@ -410,7 +383,7 @@ class LaneEnv:
 
         Idempotent within a tick: calling it twice before `step` hands back the
         same batch rather than re-enumerating the positions. Raises
-        `hexset.play.Stuck` if a live game offers a seat no legal action, which
+        `hexset.actions.Stuck` if a live game offers a seat no legal action, which
         is always an engine bug and never a position to skip.
         """
         if self._outstanding is not None:
@@ -445,9 +418,16 @@ class LaneEnv:
         request left unanswered is played by its seat's bot, and a request with
         no answer and no bot is an error -- a lane cannot be skipped, because
         the whole point of lockstep is that every live lane advances together.
+
+        Missing, illegal or inactive-lane responses raise `ValueError` before
+        any game advances. Bot calls may update their own random generators;
+        this validation does not roll back bot-internal side effects.
         """
         requests = self.requests()
         if isinstance(actions, Mapping):
+            unknown = actions.keys() - {r.lane for r in requests}
+            if unknown:
+                raise ValueError(f"actions name inactive lanes: {sorted(unknown)}")
             chosen: list[Action | None] = [actions.get(r.lane) for r in requests]
         else:
             chosen = list(actions)
@@ -455,14 +435,30 @@ class LaneEnv:
                 raise ValueError(
                     f"{len(chosen)} actions answer {len(requests)} requests"
                 )
+        # Validate the whole response before advancing any lane. In particular,
+        # a missing answer late in the batch must not leave earlier lanes one
+        # step ahead of their recorded transitions.
+        for request, action in zip(requests, chosen):
+            if action is None and request.policy not in self.bots:
+                raise ValueError(
+                    f"lane {request.lane} seat {request.seat} is policy "
+                    f"{request.policy}, which has no bot to answer for it"
+                )
+            if action is not None and action not in request.options:
+                raise ValueError(f"illegal action {action!r} for lane {request.lane}")
+        resolved: list[Action] = []
+        for request, action in zip(requests, chosen):
+            if action is None:
+                action = self._bot_action(request)
+            if action not in request.options:
+                raise ValueError(f"illegal bot action {action!r} for lane {request.lane}")
+            resolved.append(action)
         self._outstanding = None
 
         finished: list[Episode] = []
-        for request, action in zip(requests, chosen):
+        for request, action in zip(requests, resolved):
             lane = self._lanes[request.lane]
             assert lane is not None  # a request is only built for a live lane
-            if action is None:
-                action = self._bot_action(request)
             lane.by_seat[request.seat].append(
                 Decision(
                     seat=request.seat,

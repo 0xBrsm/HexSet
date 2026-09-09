@@ -1,22 +1,10 @@
 [project]
 name = "hexset"
-# One version line for the whole distribution -- `hexset` (the engine, the
-# bots and the ONNX record contract), `hexset.bench`, `hexset.server` and
-# `hexset.clients` all ship from here. See
-# `tests/test_versions.py`, which fails the moment `hexset.__version__`
-# drifts from this file.
-version = "0.45.1"
-description = "HexSet — a numpy-only, information-set-honest hex-tile trading and building engine, a sample bot, a Catanatron adapter, and a browser/HTTP/MCP gym around them"
+# Keep in sync with hexset.__version__; checked by tests/test_versions.py.
+version = "0.46.0"
+description = "A Catan rules engine with search bots, batched training environments, reproducible evaluation, and browser play"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
-# `hexset` is the rules engine, bots, ledger and arena
-# (`src/hexset/`); `hexset.bench` the duel/throughput/tuning scripts it is
-# measured with; `hexset.server` and `hexset.clients` the gym around it --
-# an HTTP API, an MCP server, a browser client and ONNX Runtime bot inference
-# (`src/hexset/server/`, `src/hexset/clients/`). The bots live in
-# `hexset.bots` (`search2` and `heximax`), registering themselves with
-# `hexset.arena` on import. One `pip install -e .` from the
-# repo root provides all of them from one editable install.
 dependencies = [
     "numpy>=1.26",
 ]
@@ -24,26 +12,14 @@ dependencies = [
 # pytest is not needed to run the game, only to check it. Install with
 # `pip install -e ".[test]"`.
 #
-# `server` and `clients` both pull in onnxruntime: `hexset` itself (the bare
-# `import hexset`) needs nothing but numpy, but `hexset.server.api` (and so
-# `hexset.server.web`) imports `hexset.clients.botclient` to run an embedded
-# bot, and `hexset.clients.onnxbot`/`botclient` load `.onnx` checkpoints
-# directly -- both real dependents of the runtime wheel, so onnxruntime is an
-# extra rather than a hard dependency of the distribution as a whole.
-# MCP is served by `hexset.server.web` itself now (`POST /mcp`,
-# `hexset.server.mcptools`) rather than by a separate stdio program -- there
-# is no longer a module in this package that needs neither extra.
+# ONNX Runtime is loaded only for model inference. The browser, HTTP/MCP
+# server and handcrafted bots work with the base NumPy dependency.
 [project.optional-dependencies]
 test = ["pytest>=8"]
 server = ["onnxruntime>=1.18"]
 clients = ["onnxruntime>=1.18"]
 export = ["onnx>=1.16", "onnxruntime>=1.18"]
-# hexset.catanatron: the Catanatron adapter (`hexset/catanatron/`). Pinned to
-# the exact commit the R-H1c gate measured against (`agents/reference/heximax.md`,
-# "R-H1c take 2"; confirmed via the installed dist's PEP 610 `direct_url.json`
-# inside `catan-bridge:ledger`) rather than floating on catanatron's default
-# branch, since a git URL with no revision was the reproducibility gap that
-# provenance stamping (`hexset.catanatron.duel.provenance`) exists to catch.
+# Pin the reference engine so comparison results identify an exact implementation.
 catanatron = ["catanatron @ git+https://github.com/bcollazo/catanatron.git@d3f4ad05bb78d8b2309631d6d3cfa8fcb6fda816"]
 # hexset.gym: a PettingZoo AEC environment (`HexSetAEC`) and a Gymnasium
 # wrapper (`HexSetEnv`, registered as "HexSet-v0"). `import hexset` stays
@@ -60,23 +36,14 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 include = ["hexset", "hexset.*"]
 
-# setuptools only auto-includes .py files under `packages.find` —
-# static/index.html (the entire frontend) is a static asset living inside the
-# `hexset.server` package directory and needs to be listed explicitly, or a
-# real `pip install .` silently omits it (found by actually building and
-# running the Docker image, not by reading the config: FileNotFoundError on
-# GET /).
+# The browser frontend must also be present in installed wheels.
 [tool.setuptools.package-data]
 "hexset.server" = ["static/*.html"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
-# `slow` covers the byte-identity censuses and the handful of other tests
-# that play enough full games to run ~20s or more -- excluded by default so
-# `pytest` stays a ~10-minute inner-loop suite, included with `pytest -m
-# slow`. See the README's "Tests" section for the gate this must pass before
-# merging a change under `src/hexset/` or `src/hexset/bots/`.
+# Optional full-game integration checks can be selected with pytest -m slow.
 addopts = "-m \"not slow\""
 markers = [
     "slow: full-game / behaviour-preservation tests too slow (~20s+) for the default run; select with `pytest -m slow`",

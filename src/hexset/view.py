@@ -12,7 +12,7 @@ the true `GameState` instead, and is the only sanctioned way to read it from
 outside the engine.
 
 It is also what the trade mechanic hands a seat: `Bot.gains_many(view,
-received, counterparties)` (`hexset.bots.search2.Bot`) receives nothing
+received, counterparties)` (`hexset.bots.base.Bot`) receives nothing
 else, so a private gate is a function of the information set by
 construction. The `ledger` a view was built from rides along for exactly
 that reason -- pricing a hypothetical exchange means re-reading the position

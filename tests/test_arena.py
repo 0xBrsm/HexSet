@@ -27,21 +27,21 @@ def test_a_tournament_needs_opponents():
 
 
 def test_repeated_bots_are_numbered_and_unknown_ones_rejected():
-    named = [e.name for e in lineup_from_names(["greedy", "random", "greedy"])]
-    assert named == ["greedy#0", "random", "greedy#1"]
+    named = [e.name for e in lineup_from_names(["heximax", "random", "heximax"])]
+    assert named == ["heximax#0", "random", "heximax#1"]
     with pytest.raises(ValueError, match="unknown bots: mcts"):
         lineup_from_names(["mcts", "random"])
 
 
 def test_a_checkpoint_path_names_an_entrant_wherever_a_preset_would():
     lineup = lineup_from_names(
-        ["network:/tmp/latest.pt", "network:/tmp/latest.pt", "greedy", "greedy"]
+        ["network:/tmp/latest.pt", "network:/tmp/latest.pt", "heximax", "heximax"]
     )
     assert [e.name for e in lineup] == [
         "network#0",
         "network#1",
-        "greedy#0",
-        "greedy#1",
+        "heximax#0",
+        "heximax#1",
     ]
     assert lineup[0].kind == "network"
     assert lineup[0].weights == "/tmp/latest.pt"
@@ -83,7 +83,7 @@ def test_an_unknown_bot_kind_is_refused():
 
 def test_entrants_are_picklable_so_they_can_cross_a_process():
     """The reason entrants are data and not closures."""
-    lineup = lineup_from_names(["greedy", "search2"])
+    lineup = lineup_from_names(["heximax", "heximax"])
     assert pickle.loads(pickle.dumps(lineup)) == lineup
 
 
@@ -104,3 +104,19 @@ def test_a_network_spec_can_self_impose_an_offer_budget():
     assert capped.max_trades == 0
     assert capped.name == "network-trades0"
     assert capped.weights == "/tmp/x.pt"
+
+
+def test_builtin_preset_resolves_in_a_fresh_interpreter():
+    import os
+    from pathlib import Path
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "-c",
+         "from hexset.arena import entrant_from_name; "
+         "assert entrant_from_name('heximax').kind == 'heximax'"],
+        capture_output=True, text=True,
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")},
+    )
+    assert result.returncode == 0, result.stderr

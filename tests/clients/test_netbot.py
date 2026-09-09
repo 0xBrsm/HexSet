@@ -27,12 +27,11 @@ from hexset.actions import ActionSpace, ActionType, apply, build_space
 from hexset.board.board import random_base_board
 from hexset.clients.netbot import (
     bot_for,
-    evaluator_for,
     register_entrants,
     searcher_for,
 )
 from hexset.game import Phase, run_trade_event, start, to_move
-from hexset.server.rules import options_for
+from hexset.actions import options_for
 from hexset.trading import _candidates, valued_many
 
 # Five distinct weights, as in `fixtures/build_stub.py --valued`, but read
@@ -256,10 +255,6 @@ def test_a_searched_runtime_free_policy_plays_and_gates_like_the_plain_bot(board
     assert alike(lambda bot: bot.accepts_many(view, received, thems))
     assert alike(lambda bot: bot.estimate_many(view, candidates))
 
-    # The same policy as a leaf evaluation for the handcrafted search, one
-    # vector per seat in board-seat order.
-    vector = evaluator_for(checkpoint).evaluate_game(game, seat)
-    assert len(vector) == PLAYERS
 
 
 def test_a_runtime_registers_the_arena_entrant_kinds_in_one_call(board, arena_registry):
@@ -314,24 +309,6 @@ def test_a_bot_seated_at_one_seat_refuses_to_answer_for_another(board):
         assert len(gains) == len(own)
 
 
-def test_the_evaluator_trade_switch_is_the_runtimes_to_set(board, arena_registry):
-    """`register_entrants(loader, evaluator_max_trades=0)`: a handcrafted
-    search over a learned value (`netsearch`/`netgreedy`) must never be
-    asked to trade -- its gate scores a bare `GameState` no encoder can read
-    -- and the runtime says so once, at registration, rather than
-    re-registering the evaluator provider over the top."""
-    from hexset import arena
-
-    checkpoint = stub_checkpoint(board)
-    register_entrants(lambda path, topology: checkpoint, evaluator_max_trades=0)
-    evaluator = arena._EVALUATOR_PROVIDERS["network"]("a-path", board)
-    assert evaluator.max_trades == 0
-
-    register_entrants(lambda path, topology: checkpoint)
-    evaluator = arena._EVALUATOR_PROVIDERS["network"]("a-path", board)
-    assert evaluator.max_trades == checkpoint.max_trades
-
-
 @pytest.fixture
 def arena_registry():
     """`hexset.arena`'s registries are process-global, so a test that
@@ -339,16 +316,9 @@ def arena_registry():
     from hexset import arena
 
     kinds = dict(arena._ENTRANT_KIND_FACTORIES)
-    evaluators = dict(arena._EVALUATOR_PROVIDERS)
-    loader = arena._CHECKPOINT_LOADER
-    leaf = arena._LEAF_EVALUATOR_FACTORY
     yield
     arena._ENTRANT_KIND_FACTORIES.clear()
     arena._ENTRANT_KIND_FACTORIES.update(kinds)
-    arena._EVALUATOR_PROVIDERS.clear()
-    arena._EVALUATOR_PROVIDERS.update(evaluators)
-    arena._CHECKPOINT_LOADER = loader
-    arena._LEAF_EVALUATOR_FACTORY = leaf
 
 
 def test_the_onnx_policy_satisfies_the_same_protocol():
@@ -429,7 +399,7 @@ def test_the_gate_prices_a_trade_by_what_it_leaves_the_seat_able_to_do(board):
     from hexset.clients.netbot import CONTINUATION_PLIES, NetworkBot
 
     space = stub_checkpoint(board).space
-    bot = NetworkBot(policy=BuildPolicy(space), space=space, players=PLAYERS, rng=random.Random(0))
+    bot = NetworkBot(policy=BuildPolicy(space), players=PLAYERS, rng=random.Random(0))
     game = _position_with_a_settlement_in_hand(board)
     bot.seat_at(game)
     view = game.state(0)
@@ -455,7 +425,7 @@ def test_a_won_position_prices_every_trade_at_zero_or_below(board, monkeypatch):
     from hexset.victory import victory_points
 
     space = stub_checkpoint(board).space
-    bot = NetworkBot(policy=BuildPolicy(space), space=space, players=PLAYERS, rng=random.Random(0))
+    bot = NetworkBot(policy=BuildPolicy(space), players=PLAYERS, rng=random.Random(0))
     game = _position_with_a_settlement_in_hand(board)
     state = game.state(0, hidden=False)
     monkeypatch.setattr(game_mod, "WINNING_POINTS", victory_points(state, 0) + 1)
@@ -496,7 +466,7 @@ def test_a_responder_prices_what_the_actor_will_do_with_the_cards(board, monkeyp
     game.ledger = ledger
     monkeypatch.setattr(game_mod, "WINNING_POINTS", victory_points(state, 0) + 1)
 
-    responder = NetworkBot(policy=BuildPolicy(space), space=space, players=PLAYERS, seat=1, rng=random.Random(0))
+    responder = NetworkBot(policy=BuildPolicy(space), players=PLAYERS, seat=1, rng=random.Random(0))
     responder.seat_at(game)
     view = game.state(1)
     gives_the_sheep = (0, 0, -1, 0, 1)  # seat 1 gives a sheep, gets an ore
@@ -519,7 +489,7 @@ def test_the_gate_is_a_pure_function_of_the_ask(board):
     from hexset.trading import _candidates
 
     space = stub_checkpoint(board).space
-    bot = NetworkBot(policy=HandValuePolicy(space), space=space, players=PLAYERS, rng=random.Random(3))
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, rng=random.Random(3))
     game = seated(bot, board)
     seat = to_move(game)
     view = game.state(seat)
@@ -582,3 +552,28 @@ def test_a_policy_policy_gate_is_seated_where_it_is_installed(board):
     gate = PolicyPolicy(checkpoint.policy, checkpoint).gate(game, 2, 3)
     assert isinstance(gate, NetworkBot)
     assert gate._seated is game and gate.seat == 2 and gate.max_trades == 3
+
+
+def test_seeded_search_also_reproduces_the_trade_gate_worlds(board):
+    checkpoint = stub_checkpoint(board)
+    searches = [searcher_for(checkpoint, simulations=4, rng=random.Random(37))
+                for _ in range(2)]
+    game = seated(searches[0].gate, board)
+    seat = to_move(game)
+    view = game.state(seat)
+    candidates = list(_candidates(game.state(seat, hidden=False), seat, frozenset()))[:3]
+    assert candidates
+    for counterparty, bundle in candidates:
+        # These draws determine the gate's hidden worlds and chance stream.
+        worlds = [search.gate._world_rng(view, counterparty, bundle) for search in searches]
+        assert [worlds[0].random() for _ in range(10)] == [worlds[1].random() for _ in range(10)]
+
+
+def test_plain_checkpoint_adapter_accepts_a_seeded_trade_generator(board):
+    checkpoint = stub_checkpoint(board)
+    bots = [bot_for(checkpoint, rng=random.Random(41)) for _ in range(2)]
+    game = seated(bots[0], board)
+    seat = to_move(game)
+    view = game.state(seat)
+    counterparty, bundle = next(iter(_candidates(game.state(seat, hidden=False), seat, frozenset())))
+    assert bots[0]._world_rng(view, counterparty, bundle).getstate() == bots[1]._world_rng(view, counterparty, bundle).getstate()

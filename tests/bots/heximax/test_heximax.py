@@ -1,11 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""`heximax`: the honest handcrafted baseline (design: heximax.md §6).
+"""Heximax behavior and information-set invariance.
 
-The tests here are the gate the design says must be written first. The one
-that matters most is the information-set regression: two positions that the
-public record cannot tell apart must draw the same move from `heximax`, and
-the omniscient `search2` is shown to be able to tell them apart on at least
-one such pair, which is the leak the regression guards against.
+Worlds with the same public record and own hand must produce the same choice
+under the same random seed, regardless of opponents' actual hidden holdings.
 """
 
 from __future__ import annotations
@@ -18,7 +15,6 @@ from hexset.actions import Action, apply, legal_actions
 from hexset.arena import PRESETS, spawn
 from hexset.board.board import random_base_board
 from hexset.board.terrain import NUM_RESOURCES, Resource
-from hexset.bots import SearchBot
 from hexset.bots.evaluate import Evaluator
 from hexset.game import Phase, imagine, is_over, start, to_move
 from hexset.bots.heximax import (
@@ -34,15 +30,7 @@ from hexset.play import step_randomly
 from hexset.trading import one_for_one
 from helpers import clear_hand, give
 
-# The seed the pair of indistinguishable worlds below is built at. It used
-# to be the seed at which `search2`'s *chosen action* differed between them
-# (found by `_first_seed_where_search2_differs`); no seed in 0..1199 does any
-# more, because the leak that reached the choice was the engine's offer
-# sample -- `_offer_actions` read every opponent's hand to decide which
-# `want` anyone could cover -- and trading is no longer an action. What
-# `search2` still does is read those hands at its own leaves, which is what
-# `test_search2_can_tell_the_same_two_worlds_apart` now pins.
-SEARCH2_LEAK_SEED = 2
+INFORMATION_SET_SEED = 2
 
 
 def a_game(seed: int = 0, players: int = 4):
@@ -159,24 +147,6 @@ def _record_says_the_same(one, two) -> bool:
     )
 
 
-def _search2_choice(game, seed: int) -> Action:
-    bot = SearchBot(
-        Evaluator(game._state.board), depth=2, width=6, rng=random.Random(seed)
-    )
-    return bot.choose(game)
-
-
-def _first_seed_where_search2_differs(seeds=range(200)):
-    for seed in seeds:
-        worlds = two_worlds_the_record_cannot_tell_apart(seed)
-        if worlds is None:
-            continue
-        one, two = worlds
-        if _search2_choice(one, seed) != _search2_choice(two, seed):
-            return seed
-    return None
-
-
 # Seeds whose random prefix reaches a swappable mid-game position with more
 # than a handful of options; `two_worlds_the_record_cannot_tell_apart` returns
 # None for a seed that never sees a steal in time, which is not a failure of
@@ -200,35 +170,6 @@ def test_heximax_cannot_tell_ledger_consistent_worlds_apart(seed):
 
     for k in (1, 3):
         assert a_bot(one, seed, k=k).choose(one) == a_bot(two, seed, k=k).choose(two)
-
-
-def test_search2_can_tell_the_same_two_worlds_apart():
-    """The leak the regression above guards against, pinned at the leaf.
-
-    `search2` scores a position with `evaluate.Evaluator` on the true state
-    (`SearchBot._from_state`, a sanctioned true-state read by design -- it is
-    the project's perfect-information referent). So on a pair of worlds the
-    public record cannot tell apart, its leaf values still differ, while
-    `HonestEvaluator`'s -- read through the same seat's `View` -- cannot.
-
-    Pinned at the leaf rather than at the chosen action: the leak that used
-    to reach the *choice* was the engine's offer sample (see
-    `SEARCH2_LEAK_SEED`), and with trading no longer an action no seed in
-    0..1199 makes `search2` play differently between these two worlds.
-    """
-    worlds = two_worlds_the_record_cannot_tell_apart(SEARCH2_LEAK_SEED)
-    assert worlds is not None
-    one, two = worlds
-    assert _record_says_the_same(one, two)
-
-    seat = to_move(one)
-    cheat = Evaluator(one._state.board)
-    assert cheat.evaluate(one._state, seat) != cheat.evaluate(two._state, seat)
-
-    honest = HonestEvaluator(one._state.board)
-    assert honest.evaluate_game(one, seat) == pytest.approx(
-        honest.evaluate_game(two, seat)
-    )
 
 
 # --- belief -------------------------------------------------------------------
@@ -566,7 +507,7 @@ def test_an_opponents_development_cards_are_worth_their_expected_victory_points(
 
 def test_a_candidate_temperature_travels_with_the_entrant():
     from hexset.arena import Entrant
-    from hexset.bots.search2 import WIN_TEMPERATURE, win, win_at
+    from hexset.bots.stances import WIN_TEMPERATURE, win, win_at
 
     vector = [4.0, 6.0, 5.0, 3.0]
     assert win(vector, 1) == pytest.approx(win_at(vector, 1, WIN_TEMPERATURE))

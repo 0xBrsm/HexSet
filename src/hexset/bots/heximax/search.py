@@ -1,60 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""Max^n over the honest evaluation, within a leaf budget.
+"""Budgeted expectimax/max-n search over the player's information set.
 
-`Heximax`'s search core: `choose` (the one public entry point, plus the
-setup/discard shortcuts it resolves directly), iterative deepening
-(`_search`/`_estimate`/`_root_values`), the tree itself
-(`_value`/`_after`/`_best_of`), roll expansion (`_over_dice`), and hidden-draw
-expansion (`draw_children`: a steal weighted over the victim's belief, a
-dev-card buy weighted over the unseen deck). It also carries the bot's whole
-trading surface -- `gains_many` and `accepts`, and the `_delta` machinery
-they are built from -- which is two methods and no protocol at
-all now that trading is one engine event rather than an action language
-(`hexset.trading`). The offer adapter this file used to inherit from
-`heximax/trade.py` (candidate bundles, `score_proposal`, `accept_rule`,
-`rank_partners`, `propose_actions`) is gone with the protocol it adapted to.
-
-Cost: leaf evaluations per move are capped by `max_nodes`
-(`DEFAULT_MAX_NODES`, 600). The mirror table is
-`agents/scripts/heximax_cost.py` -- three four-seat games an arm, board
-seeds 0/1/2, every seat the same preset, `search2` as the control, arms
-interleaved seed by seed. Two rules for reading it, both learned the hard way
-in the structural pass:
-
-* **On an idle box, and paired.** heximax's per-move cost inflates faster
-  than `search2`'s under contention, so identical code reads 2.6x idle and
-  3.1x at load 5 -- more drift than most changes are worth. Time the before
-  and after in one process instead. So paired, the pass's exact steps took
-  **2.687x -> 2.357x**: -12.3% of ms/move and -13.0% of function calls per
-  game (10.47M -> 9.11M, which no load can move;
-  `runs/eval/heximax/structural-cost-paired-vs-810dec7.json`).
-* **Beside `ratio_phase_neutral`**, which re-weights the control by
-  heximax's own phase mix. Under the offer protocol `search2` booked ~20x
-  more `TRADE_RESPOND` decisions over the same games (2481 against 126 over
-  nine) and those cheap decisions sat in the mirror table's denominator;
-  phase-neutral heximax read **2.08x** against a raw 2.36x. The phase that
-  caused the skew no longer exists -- there are no trade decisions at all --
-  so the raw ratio and the phase-neutral one now measure the same games,
-  and the re-read belongs to the one-event readout, not to this note.
-
-Three behaviour-changing steps were registered and none landed: a
-transposition table across the iterative-deepening passes hits 0.046% of
-`_value` calls (the depth-1/depth-2 redundancy is leaf *count*, not repeated
-positions); a vectorised evaluator would need `_value` rewritten
-breadth-first to beat a Python loop that is 2.0% of runtime; and sampling
-the ply-1 roll (`EXACT_ROLL_PLIES` 2 -> 1), worth -11.9%, cleared the
-trading strength gate at 67.0% but missed the no-trade gate's pre-stated
-floor by 0.6 of a game, so it was reverted rather than tuned. Whether the
-rest is a cost problem or a denominator problem -- the trade gate too
-strict, `relative` the wrong stance for `willing`, or the ceiling owed a
-protocol allowance -- is a design question, not one a performance pass
-answers by loosening a gate to hit a number.
-
-`bot.choose()`'s own choices, and the leaves it spends reaching them, are
-checked on every position by
-`test_choices_are_byte_identical_to_the_recorded_census`. History -- the
-optimization and structural passes, with their per-change breakdowns -- is
-in `agents/reference/heximax.md`.
+Iterative deepening retains the last completed result when the leaf budget
+is exhausted. Each decision node maximizes its mover's objective; chance
+nodes average dice and hidden draws. Opponent actions are expanded from
+sampled beliefs across k determinizations. Setup and discard decisions use
+specialized policies. Trading uses the same evaluator through gains_many,
+accepts and estimate_many.
 """
 
 from __future__ import annotations
@@ -69,7 +21,8 @@ from hexset.actions import Action, ActionType, apply, legal_actions, victim_of
 from hexset.board.board import Board
 from hexset.board.terrain import NUM_RESOURCES
 from hexset.chance import Forced, Live
-from ..search2 import STANCES, options_for, win_at
+from ..stances import STANCES, win_at
+from ...actions import options_for
 from hexset.game import ROLL_ODDS, Game, Phase, imagine, is_over, roll_dice, to_move
 from hexset.ledger import PublicLedger
 from hexset.mcts import draws_hidden
@@ -80,10 +33,7 @@ from hexset.trading import Bundle
 from hexset.view import View
 from .evaluate import NO_TRADE_WEIGHTS, TRADING_WEIGHTS, HonestEvaluator, Weights
 
-# Leaf evaluations a move may spend. Chosen so the default configuration costs
-# no more than twice `search2` per move (the design's ceiling): at 600 the
-# mean is 1.5x and the per-move tail, which the unbounded search takes to
-# ~1500 leaves, is cut at the budget. Figures in the module docstring.
+# Maximum leaf evaluations per decision.
 DEFAULT_MAX_NODES = 600
 
 # A roll taken this many plies or fewer below the root is expanded over all
@@ -230,7 +180,7 @@ class Heximax:
     k: int = 1
     rng: random.Random = field(default_factory=random.Random)
     stance: str = "win"
-    # The trade off switch (`hexset.bots.search2.SearchBot.max_trades`): `0`
+    # The trade off switch (`Heximax.max_trades`): `0`
     # publishes nothing and refuses everything. Not a budget -- the engine
     # has no cap.
     max_trades: int | None = None
@@ -242,7 +192,7 @@ class Heximax:
     mode: str = "honest"
     exact_roll_plies: int = EXACT_ROLL_PLIES
     # `win` stance only: the temperature the per-seat vector is read at,
-    # `None` meaning `search2.WIN_TEMPERATURE`. A fitted vector and its
+    # `None` meaning `stances.WIN_TEMPERATURE`. A fitted vector and its
     # temperature are identified jointly (`hexset.fitting`), so a candidate
     # has to carry its own for a duel against the incumbent to mean anything.
     temperature: float | None = None
@@ -940,7 +890,7 @@ def heximax(
 
     `weights` overrides the mode's own profile (`TRADING_WEIGHTS` or
     `NO_TRADE_WEIGHTS`) with the given vector, and `temperature` the `win`
-    stance's `search2.WIN_TEMPERATURE`, leaving everything else about the
+    stance's `stances.WIN_TEMPERATURE`, leaving everything else about the
     mode -- the trade switch -- unchanged. This is how a fit
     (`hexset.fitting`) is played before adoption: a candidate and the
     incumbent are otherwise identical heximax bots, differing only in the

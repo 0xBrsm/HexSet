@@ -1,47 +1,24 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""A duel between batched policies, over lanes rather than a process pool.
+"""Compare batched policies through LaneEnv using reproducible paired boards.
 
-`hexset.arena.compete` is the tournament: it owns the pairing law, the
-rotation, the Wilson interval and the per-game record, and it plays every
-game through a `hexset.bots.Bot` that answers one position at a time. That
-is the right shape for a scripted bot and the wrong one for a network,
-where the measured dispatch toll is ~1.5 ms per forward against ~25 us per
-position -- one position per call wastes the hardware by a factor of fifty,
-which is the whole reason `hexset.gym.lanes` exists.
-
-So this is `compete`'s verdict over `LaneEnv`'s driver: the same boards
-under the same casts, `arena.wilson` on the same counts, `arena.Standing`
-for the standings, and one batched call per tick across every lane. A
-training loop evaluating a checkpoint needs exactly this and had been
-writing its own; two evaluations of the same pair that derive the boards
-alike rather than calling the one law are two evaluations that can disagree
-about what they measured.
-
-**The pairing law is `compete`'s.** Under `antithetic`, the two halves of a
-pair are the same board played under complementary casts -- ids exchanged,
-so the seat term cancels per board rather than only in the mean -- and the
-board index is the pair, not the game. Written as casters
-(`hexset.casting.rotating`, `hexset.casting.swapped`) instead of as
-`compete`'s inline `divmod`, because a lane environment is cast by a pure
-function of the game index and a tournament is not.
-
-**What it reports.** The win rate with its Wilson interval, and the finer
-instrument: paired terminal victory points, the learner's seats' mean minus
-the reference's within a board, with a normal interval on the per-board
-mean (`arena.mean_interval`). Boards seen only one way are dropped, since a
-board played once reintroduces exactly the seat term the pairing exists to
-delete.
+Antithetic runs play each board under a cast and its policy-swapped cast.
+Victory-point margins and win-share intervals use board means as samples.
+Win rates include unfinished games in the denominator. Game-level Wilson
+bounds remain available, but assume independence that paired games do not
+have. Request episodes and records to inspect individual outcomes.
 """
 
 from __future__ import annotations
 
 import inspect
+import random
 import statistics
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from .metrics import json_metrics
 from ..arena import MAX_ACTIONS, Standing, mean_interval, wilson
 from ..casting import Caster, rotating, swapped
 from ..gym.lanes import BoardBots, Episode, LaneEnv, Request
@@ -127,11 +104,16 @@ class PolicyPolicy:
     it learned. Pass the `checkpoint` as well and the seat is gated by
     `hexset.clients.netbot.bot_for`, the one trade gate a checkpoint has --
     priced on the run's own trade budget, since `gate` takes it.
+    `gate_seed` fixes each seat's belief-sampling salt without consuming game
+    randomness. Custom policy action sampling must be seeded by its caller.
     """
 
-    def __init__(self, policy: Policy, checkpoint: Checkpoint | None = None) -> None:
+    def __init__(
+        self, policy: Policy, checkpoint: Checkpoint | None = None, *, gate_seed: int = 0,
+    ) -> None:
         self.policy = policy
         self.checkpoint = checkpoint
+        self.gate_seed = gate_seed
 
     def act(self, requests: Sequence[Request]) -> list[Action]:
         return self.policy.act_rows([(r.game, r.seat, r.options) for r in requests])
@@ -146,7 +128,10 @@ class PolicyPolicy:
         # game it is asked about, and an unseated NetworkBot prices every
         # candidate at -1.0 (the training repo found a network duellist that
         # never traded for exactly this reason).
-        bot = bot_for(self.checkpoint, max_trades=max_trades)
+        bot = bot_for(
+            self.checkpoint, max_trades=max_trades,
+            rng=random.Random(f"{self.gate_seed}:{seat}:trade"),
+        )
         bot.seat = seat
         bot.seat_at(game)
         return bot
@@ -172,12 +157,12 @@ def _budgeted(
 
 @dataclass(frozen=True)
 class Verdict:
-    """What a duel measured, in `hexn.train._antithetic`'s own vocabulary.
+    """Batched evaluation outcomes and board-level uncertainty.
 
     `paired_vp` is the headline: the learner's seats' mean terminal victory
     points minus the reference's, averaged over the boards, with the seat
     term differenced out. `wins`/`win_rate` are the coarser reading kept
-    beside it because a margin is not a result anyone bets on.
+    beside it to distinguish score differences from game outcomes.
 
     `boards` is how many boards were counted, `games` the readings that made
     them -- twice `boards` under `antithetic`. `exhausted` is a game that
@@ -201,6 +186,8 @@ class Verdict:
     exhausted: int
     truncated: int
     seconds: float
+    board_win_rate_low: float = 0.0
+    board_win_rate_high: float = 1.0
     standings: tuple[Standing, ...] = ()
     # Every episode counted, when `episodes=True` asked for them: what a
     # `Tournament.records` is to `compete`, and what a caller checking the
@@ -209,13 +196,8 @@ class Verdict:
     episodes: tuple[Episode, ...] = ()
 
     def metrics(self) -> dict:
-        """The verdict as the flat dict a training run logs.
-
-        Key for key what `hexn.train._antithetic` returned, so a run can
-        call this instead of its own harness without a line of its logging
-        or its plotting changing.
-        """
-        return {
+        """Flat metrics for training logs, including interval assumptions."""
+        return json_metrics({
             "games": self.games,
             "boards": self.boards,
             "antithetic": self.antithetic,
@@ -223,6 +205,11 @@ class Verdict:
             "win_rate": self.win_rate,
             "wilson_low": self.wilson_low,
             "wilson_high": self.wilson_high,
+            "board_win_rate_low": self.board_win_rate_low,
+            "board_win_rate_high": self.board_win_rate_high,
+            "interval_unit": "board",
+            "win_rate_denominator": "all games, including unfinished",
+            "wilson_assumption": "independent games; paired games are correlated",
             "paired_vp": self.paired_vp,
             "paired_vp_low": self.paired_vp_low,
             "paired_vp_high": self.paired_vp_high,
@@ -235,7 +222,7 @@ class Verdict:
             # say how long it cost is one nobody can budget the next one
             # from, and `seconds` was on the `Verdict` all along.
             "seconds": self.seconds,
-        }
+        })
 
 
 @dataclass(frozen=True)
@@ -339,15 +326,12 @@ def compete_batched(
     `antithetic` plays every board **both** ways: half the games under
     `caster`, half under `swapped(caster)`, same indices and so the same
     boards and the same dice, and averages a board's two readings. The seat
-    term then differences out exactly instead of being counted as ordinary
-    noise -- it was 55% of a single-order duel's variance on this engine --
-    and a self-duel reads 0.0, which is the test. It needs exactly two
+    assignments are exchanged within each board. It needs exactly two
     policies, since exchanging more than two ids is not one complement but
     a choice of several.
 
-    `games` counts games, not boards, so an antithetic run halves it
-    between the two orders and an odd count loses a game rather than
-    silently playing a board once.
+    `games` counts games, not boards. Antithetic runs require an even count
+    so every board is played in both orders.
 
     `lanes` changes only the wall clock: a game is a function of `(seed,
     index)`, so the verdict at one lane and at sixty-four is the same
@@ -364,6 +348,10 @@ def compete_batched(
     caller on an `Episode`, so it is passed through only under
     `episodes=True` and costs nothing without it.
     """
+    if antithetic and games % 2:
+        raise ValueError("an antithetic duel requires an even number of games")
+    if lanes < 1 or action_cap < 1:
+        raise ValueError("lanes and action_cap must be positive")
     if len(policies) < 2:
         raise ValueError("a duel needs at least two policies")
     if learner not in policies:
@@ -444,6 +432,10 @@ def compete_batched(
     turns = [row.turns for row in rows]
     low, high = wilson(wins, n) if n else (0.0, 0.0)
     margin = mean_interval(paired)
+    win_share = mean_interval(
+        [sum(row.won for row in pair) / 2 for pair in both]
+        if antithetic else [float(row.won) for row in rows]
+    )
     return Verdict(
         games=n,
         boards=boards,
@@ -452,6 +444,8 @@ def compete_batched(
         win_rate=wins / n if n else 0.0,
         wilson_low=low,
         wilson_high=high,
+        board_win_rate_low=max(0.0, win_share.lower),
+        board_win_rate_high=min(1.0, win_share.upper),
         paired_vp=margin.mean,
         paired_vp_low=margin.lower,
         paired_vp_high=margin.upper,

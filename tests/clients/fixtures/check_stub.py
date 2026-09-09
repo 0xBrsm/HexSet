@@ -11,7 +11,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[2] / "src"))
 
 from hexset.actions import ActionType, apply, build_space
-from hexset.server.rules import options_for
+from hexset.actions import options_for
 from hexset.board.board import random_base_board
 from hexset.game import start, to_move
 

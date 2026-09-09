@@ -15,7 +15,6 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("onnxruntime", reason="botclient needs onnxruntime installed")
 
 from hexset.clients.botclient import (  # noqa: E402
     BotRunner,
@@ -108,6 +107,7 @@ def test_a_record_brain_joins_and_plays_its_own_seat():
     rather than bots: nothing here should race an embedded runner thread,
     only this test's own loop, the same as the creator's seat always drove
     itself."""
+    pytest.importorskip("onnxruntime")
     registry = new_tables()
     code, creator_token = _table_with_one_open_seat(registry)
     transport = LocalTransport(registry)
@@ -157,7 +157,8 @@ def test_a_search_flagged_checkpoint_is_refused_as_an_external_bot(tmp_path):
     using `dev-contract2.onnx`, which really does ask for a search but is now
     refused one step earlier for its contract — the two checks are ordered
     and this one is about the second."""
-    import onnx
+    pytest.importorskip("onnxruntime")
+    onnx = pytest.importorskip("onnx")
 
     model = onnx.load(str(STUB6))
     entry = model.metadata_props.add()

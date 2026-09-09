@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import subprocess
 import tomllib
 from importlib import metadata
 from pathlib import Path
@@ -32,24 +31,13 @@ def build_info() -> dict[str, Any]:
     """`{"version": ..., "git_commit": ...}` for a consumer's provenance record.
 
     `git_commit` is the commit this package's own files are checked out at,
-    read from whatever git repo contains this file -- None if that fails (a
+    read from this package's source checkout -- None if unavailable (a
     wheel install with no `.git` directory, or `git` unavailable), because a
     provenance field that is sometimes wrong is worse than one that is
     sometimes absent. Consumers (e.g. HexN's `hexn.run.manifest`) stamp
     this into their own run records rather than reproducing the git call
     themselves, so there is exactly one place that knows how to ask.
     """
-    commit: str | None = None
-    try:
-        out = subprocess.run(
-            ("git", "rev-parse", "HEAD"),
-            cwd=Path(__file__).resolve().parent,
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        if out.returncode == 0:
-            commit = out.stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        commit = None
-    return {"version": __version__, "git_commit": commit}
+    from ._source import git_value
+
+    return {"version": __version__, "git_commit": git_value(__file__, "rev-parse", "HEAD")}

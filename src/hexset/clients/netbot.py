@@ -1,20 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""A checkpoint as a seat: bot, leaf evaluation, search, and trade gate.
+"""Runtime-neutral checkpoint adapters for bots, evaluation, search and trading.
 
-Everything here is written against `hexset.clients.policy.Policy` and never
-touches a runtime. Feed it the onnxruntime policy (`hexset.clients.onnxbot`)
-and it serves a `.onnx` file; feed it a torch policy from the training repo
-and it plays a `.pt` checkpoint. The two used to be separate implementations
-of these same four classes, and they drifted three ways in the trade gate
-alone before it was noticed (`agents/reference/hexn-boundary-audit.md`);
-there is one of each now, and a runtime is a `Policy` and nothing more.
-
-The constructors take a `Checkpoint` rather than a path for the same reason:
-finding the file, reading its metadata and building a session is the
-runtime's job, and it is the only part of "play this checkpoint" that differs
-between runtimes. `hexset.clients.onnxbot.spawn(path, board)` is still the
-one entry point a server needs.
-"""
+Constructors accept `Checkpoint` objects. Runtime integrations own loading,
+metadata and encoding; this module uses only the batched `Policy` interface.
+A gate used without `choose` must be installed with `seat_at(game)` before
+trading. Create separate gates for separate games and fixed seats."""
 
 from __future__ import annotations
 
@@ -23,11 +13,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from hexset.actions import Action, ActionSpace, ActionType, apply
+from hexset.actions import Action, ActionType, apply
 from hexset.clients.policy import Checkpoint, Policy
 from hexset.game import Game, imagine, is_over, to_move
 from hexset.mcts import Search
-from hexset.server.rules import options_for
+from hexset.actions import options_for
 from hexset.state import copy_state
 from hexset.trading import NETWORK_GATE_ROWS, exchange
 from hexset.view import View
@@ -67,8 +57,7 @@ class NetworkBot:
       seat's estimate of what the exchange does to that seat's chances,
       read by `hexset.trading.default_offer`/`default_respond` so a bot
       offers, and counters with, the candidate best for itself among those
-      it believes the other seat gains from too (`agents/reference/
-      trading-final.md`, "the trade round", items 1-2). By construction
+      it believes the other seat gains from too. By construction
       that prices the risk of handing an opponent win probability: a
       bundle that lifts this seat's row a little and the counterparty's a
       lot is a bad offer, and it reads as one.
@@ -81,10 +70,6 @@ class NetworkBot:
     """
 
     policy: Policy
-    # Carried for a caller that builds a bot by hand and for symmetry with
-    # `LeafEvaluator`; nothing here indexes it any more, because encoding a
-    # position is the runtime's own business (`hexset.clients.policy`).
-    space: ActionSpace
     players: int
     max_trades: int | None = None
     # This gate's clearing floor (`hexset.trading.trade_floor_of`): `accepts`
@@ -158,9 +143,8 @@ class NetworkBot:
         """This seat's estimate of each `(counterparty, bundle)` candidate's
         *counterparty*-side gain: `V(after)[them] - V(before)[them]` on the
         same two positions `gains_many` scores, from this seat's own frame
-        -- its own belief about the other seat's chances, standing in for
-        the acceptance model the design names (`agents/reference/
-        trading-final.md`, "the trade round", item 1) until one exists.
+        -- its own belief about the other seat's chances, used as an
+        estimate of their willingness to trade.
         """
         if self.max_trades == 0 or self._seated is None or not candidates:
             return [-1.0] * len(candidates)
@@ -333,28 +317,10 @@ def _is_small(bundle: Bundle) -> bool:
 
 
 @dataclass
-class NetworkEvaluator:
-    """The value head as `hexset.bots.SearchBot`'s leaf evaluation."""
-
-    policy: Policy
-    players: int
-    max_trades: int | None = None
-
-    def evaluate_game(self, game: Game, seat: int) -> list[float]:
-        _check_players(game, self.players)
-        return list(self.policy.value_rows([(game, seat)])[0])
-
-
-@dataclass
 class LeafEvaluator:
     """A whole wave of `hexset.mcts` leaves in one forward."""
 
     policy: Policy
-    # As on `NetworkBot`: kept because `hexset.arena.leaf_evaluator`'s
-    # registered factory signature is `(policy, space, pad_to)`, and because
-    # a caller with a loaded checkpoint has one to hand. The policy indexes
-    # its own space.
-    space: ActionSpace
     pad_to: int | None = None
 
     def __post_init__(self) -> None:
@@ -393,17 +359,10 @@ class LeafEvaluator:
 
 
 class GatedSearch(Search):
-    """`hexset.mcts.Search` over a checkpoint, with that checkpoint's own
-    trade gate -- `gains_many`, `estimate_many`, `accepts`, `accepts_many`.
+    """Policy/value-guided MCTS with the checkpoint's own trade gate.
 
-    `Search` decides moves and nothing else: it has no `accepts`,
-    `accepts_many` or `gains_many`, so `hexset.trading.valued_many` priced
-    every candidate at -1 for a searched checkpoint -- it never accepted an
-    offer and never made one, while the same checkpoint played plainly
-    (`bot_for`) traded through its value head. Found at the served table
-    2026-09-08: `linear24` (exported `search: mcts`) never traded, `clio`
-    (no search) did. The gate is the plain bot's, seated at the position
-    `choose` was last handed, exactly as `NetworkBot.choose` seats its own.
+    `choose` binds the gate to the live game before searching. Trade
+    acceptance and counterparty estimates delegate to `NetworkBot`.
     """
 
     def __init__(self, evaluator, gate: NetworkBot, **kwargs) -> None:
@@ -432,30 +391,22 @@ class GatedSearch(Search):
         return self.gate.estimate_many(view, candidates)
 
 
-def bot_for(checkpoint: Checkpoint, *, max_trades: int | None = None) -> NetworkBot:
+def bot_for(
+    checkpoint: Checkpoint, *, max_trades: int | None = None,
+    rng: random.Random | None = None,
+) -> NetworkBot:
     """`checkpoint`, playing one position at a time.
 
     `max_trades` of `None` means the trade switch the checkpoint recorded
     training under -- the default that measures a policy on the game it
-    learned. Pass `0` to seat it as its own no-trade referent.
+    learned. Pass `0` to disable this bot's trading. `rng` controls imagined
+    trade continuations; policy action sampling remains the runtime's job.
     """
     return NetworkBot(
         policy=checkpoint.policy,
-        space=checkpoint.space,
         players=checkpoint.players,
         max_trades=checkpoint.max_trades if max_trades is None else max_trades,
-    )
-
-
-def evaluator_for(
-    checkpoint: Checkpoint, *, max_trades: int | None = None
-) -> NetworkEvaluator:
-    """`checkpoint`'s value head as a leaf evaluation for the handcrafted
-    search (`hexset.bots.SearchBot`), rather than as a bot of its own."""
-    return NetworkEvaluator(
-        policy=checkpoint.policy,
-        players=checkpoint.players,
-        max_trades=checkpoint.max_trades if max_trades is None else max_trades,
+        rng=random.Random() if rng is None else rng,
     )
 
 
@@ -466,18 +417,22 @@ def searcher_for(
     wave: int = 16,
     max_trades: int | None = None,
     inference_batch: int | None = None,
-    rng=None,
+    rng: random.Random | None = None,
 ) -> GatedSearch:
     """`checkpoint` as a batched PUCT search, trading through its own
-    value-head gate (`GatedSearch`)."""
+    value-head gate (`GatedSearch`).
+
+    A supplied `rng` seeds both search and a separate trade-gate stream.
+    The policy runtime must seed any stochastic inference of its own.
+    """
+    gate_rng = None if rng is None else random.Random(rng.getrandbits(128))
     budget = checkpoint.max_trades if max_trades is None else max_trades
     return GatedSearch(
         LeafEvaluator(
             policy=checkpoint.policy,
-            space=checkpoint.space,
             pad_to=inference_batch,
         ),
-        bot_for(checkpoint, max_trades=budget),
+        bot_for(checkpoint, max_trades=budget, rng=gate_rng),
         simulations=simulations,
         wave=wave,
         max_trades=budget,
@@ -498,58 +453,25 @@ def _checkpoint_path(weights: object, what: str) -> str:
     raise ValueError(f"{what}'s weights is a checkpoint path")
 
 
-def register_entrants(loader, *, evaluator_max_trades: int | None = None) -> None:
-    """Make `hexset.arena`'s "network" and "mcts" entrant kinds -- and its
-    "network" evaluator, checkpoint loader and leaf-evaluator factory --
-    spawnable through `loader`.
+def register_entrants(loader) -> None:
+    """Register network and MCTS arena factories for a checkpoint loader.
 
-    `loader(path, topology)` returns a `Checkpoint`; everything the arena
-    then does with it is this module's, so a runtime registers itself in one
-    call instead of carrying five factories of its own.
-
-    `evaluator_max_trades` is the trade switch for the "network" *evaluator*
-    (the value head under `SearchBot`, `netsearch`/`netgreedy`): `None`
-    keeps each checkpoint's recorded budget; `0` switches trading off for
-    every evaluator this runtime provides, which is what a handcrafted
-    search over a learned value wants -- its gate scores a bare `GameState`
-    no encoder can read, so it must never be asked to trade.
-
-    Deliberately *not* called at import by any runtime in this package. The
-    kinds are global names with a single owner, an entrant's `weights` is a
-    path in whatever format that owner loads, and a process that has merely
-    imported a module should not thereby have changed what
-    `arena.spawn` does with somebody else's checkpoint. A driver that wants
-    network entrants calls this itself, once, naming the runtime it means.
+    ``loader(path, topology)`` returns a Checkpoint. Call this explicitly in
+    each process that will spawn entrants; imports do not choose a runtime.
     """
-    from hexset.arena import (
-        register_checkpoint_loader,
-        register_entrant_kind,
-        register_evaluator_provider,
-        register_leaf_evaluator_factory,
-    )
+    from hexset.arena import register_entrant_kind
 
-    def _spawn_network(entrant, board: Board, rng) -> NetworkBot:
-        path = _checkpoint_path(entrant.weights, "a network entrant")
-        return bot_for(loader(path, board.topology), max_trades=entrant.max_trades)
+    def spawn_network(entrant, board: Board, rng) -> NetworkBot:
+        bot = bot_for(loader(_checkpoint_path(entrant.weights, "network"), board.topology),
+                      max_trades=entrant.max_trades, rng=rng)
+        return bot
 
-    def _spawn_mcts(entrant, board: Board, rng) -> GatedSearch:
+    def spawn_mcts(entrant, board: Board, rng) -> GatedSearch:
         return searcher_for(
-            loader(_checkpoint_path(entrant.weights, "an mcts entrant"), board.topology),
-            simulations=entrant.simulations,
-            wave=entrant.wave,
-            max_trades=entrant.max_trades,
-            rng=rng,
+            loader(_checkpoint_path(entrant.weights, "mcts"), board.topology),
+            simulations=entrant.simulations, wave=entrant.wave,
+            max_trades=entrant.max_trades, rng=rng,
         )
 
-    def _spawn_evaluator(weights: object, board: Board) -> NetworkEvaluator:
-        path = _checkpoint_path(weights, "a network evaluator")
-        return evaluator_for(loader(path, board.topology), max_trades=evaluator_max_trades)
-
-    def _leaf_evaluator(policy, space, pad_to=None) -> LeafEvaluator:
-        return LeafEvaluator(policy=policy, space=space, pad_to=pad_to)
-
-    register_entrant_kind("network", _spawn_network)
-    register_entrant_kind("mcts", _spawn_mcts)
-    register_evaluator_provider("network", _spawn_evaluator)
-    register_checkpoint_loader(loader)
-    register_leaf_evaluator_factory(_leaf_evaluator)
+    register_entrant_kind("network", spawn_network)
+    register_entrant_kind("mcts", spawn_mcts)

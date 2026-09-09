@@ -29,7 +29,6 @@ from hexset.actions import Action, ActionType, apply, legal_actions
 from hexset.arena import entrant_from_name, spawn
 from hexset.board.board import random_base_board
 from hexset.game import Phase, is_over, start, to_move
-from hexset.victory import victory_points
 
 from catanatron.models.player import Color
 
@@ -204,14 +203,11 @@ def test_a_knight_resolves_as_two_separate_decisions():
 
 @pytest.mark.slow
 def test_a_catanatron_seat_plays_out_full_games():
-    """A couple of four-seat games, `catanatron` against three `heximax`.
+    """Two full games check adapter legality and bounded termination."""
+    from hexset.arena import MAX_ACTIONS
 
-    A first read on the seat, not a bar: what it has to do here is finish
-    eight whole games without a translation failing anywhere in them.
-    """
     import hexset.catanatron.bot  # noqa: F401 -- registers the preset
 
-    wins = 0
     games = 2
     for seed in range(games):
         rng = random.Random(1000 + seed)
@@ -226,12 +222,14 @@ def test_a_catanatron_seat_plays_out_full_games():
             )
             for i in range(4)
         ]
-        while not is_over(game):
-            apply(game, bots[to_move(game)].choose(game))
-        points = [victory_points(game.state(0, hidden=False), p) for p in range(4)]
-        wins += points.index(max(points)) == seat
-    print(f"\ncatanatron won {wins}/{games} against three heximax")
-    assert 0 <= wins <= games
+        for _ in range(MAX_ACTIONS):
+            if is_over(game):
+                break
+            action = bots[to_move(game)].choose(game)
+            assert action in legal_actions(game)
+            apply(game, action)
+        else:
+            pytest.fail("adapter game exceeded the arena action cap")
 
 
 # --- Seated at the served table -----------------------------------------------
@@ -241,13 +239,13 @@ def test_the_picker_offers_catanatron_and_a_seat_takes_it():
     """`/api/models` and `POST /api/bot`, the two the browser actually uses.
 
     The order is the picker's order: `heximax` first (the default opponent),
-    then `catanatron`, then `search2`, then whatever checkpoints are on disk.
+    then `catanatron`, then whatever checkpoints are on disk.
     """
     from conftest import new_tables
 
     registry = new_tables()
     models = registry.handle("GET", "/api/models", {}, None)["models"]
-    assert models[:2] == ["heximax", "catanatron"]  # search2 left the picker in #45; seatable by name only
+    assert models[:2] == ["heximax", "catanatron"]
 
     data = registry.handle("POST", "/api/games", {"bots": []}, None)
     code, token = data["code"], data["token"]
@@ -257,3 +255,22 @@ def test_the_picker_offers_catanatron_and_a_seat_takes_it():
         "POST", "/api/bot", {"seat": open_seats[0], "model": "catanatron"}, token
     )
     assert seated["seats"][open_seats[0]]["name"] == "catanatron"
+
+
+def test_catanatron_can_spawn_without_parent_process_registration():
+    import os
+    from pathlib import Path
+    import subprocess
+    import sys
+
+    script = """
+import random
+from hexset.arena import Entrant, spawn, deal_board
+bot = spawn(Entrant('catanatron', kind='catanatron'), deal_board(1, 0), random.Random(1))
+assert type(bot).__name__ == 'CatanatronBot'
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True,
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src")},
+    )
+    assert completed.returncode == 0, completed.stderr

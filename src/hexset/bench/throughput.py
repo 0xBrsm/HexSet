@@ -17,13 +17,12 @@ import argparse
 import json
 import os
 import platform
-import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass
-from pathlib import Path
 
 from hexset.arena import PRESETS, compete
+from hexset.experiment import provenance
 
 
 @dataclass
@@ -52,9 +51,6 @@ def run(games: int, players: int, seed: int, workers: int) -> Result:
     )
 
 
-REPO = Path(__file__).resolve().parents[3]
-
-
 def default_workers() -> int:
     """Every core by default.
 
@@ -65,39 +61,14 @@ def default_workers() -> int:
     return os.cpu_count() or 1
 
 
-def _git(*args: str) -> str | None:
-    """Run git against this repo, or None if it cannot be asked.
-
-    `safe.directory` is passed on the command line rather than written to a
-    config, because the devcontainer mounts the repo as a different owner than
-    the user inside it and git refuses to read it otherwise. Without this every
-    run inside the container recorded its commit as "unknown".
-    """
-    try:
-        return subprocess.run(
-            ["git", "-C", str(REPO), "-c", f"safe.directory={REPO}", *args],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return None
-
-
 def environment() -> dict[str, str]:
-    """What a recorded figure was measured on, and from what source.
-
-    `dirty` matters as much as the commit. A run taken on a modified working
-    tree is not reproducible from the SHA it reports, and several figures on
-    record were taken that way before this said so.
-    """
-    sha = _git("rev-parse", "--short", "HEAD")
-    changes = _git("status", "--porcelain")
+    """Compact compatibility view of the shared experiment provenance."""
+    source = provenance()
     return {
-        "commit": sha or "unknown",
-        "dirty": "unknown" if changes is None else str(bool(changes)).lower(),
-        "python": platform.python_version(),
-        "platform": platform.platform(),
+        "commit": source["commit"][:7] if source["commit"] else "unknown",
+        "dirty": "unknown" if source["dirty"] is None else str(source["dirty"]).lower(),
+        "python": source["python"],
+        "platform": source["platform"],
         "machine": platform.machine(),
     }
 

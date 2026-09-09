@@ -36,7 +36,7 @@ import numpy as np
 from hexset.bench.throughput import default_workers, environment
 from hexset.bots.evaluate import TERM_NAMES
 from hexset.bots.heximax.evaluate import NO_TRADE_WEIGHTS, TRADING_WEIGHTS
-from hexset.bots.search2 import WIN_TEMPERATURE
+from hexset.bots.stances import WIN_TEMPERATURE
 from hexset.dataset import ChoiceSet, samples_from, split_by_game
 from hexset.fitting import (
     Design,

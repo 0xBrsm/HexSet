@@ -1,72 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""PUCT over a learned policy and value, with the leaves evaluated in batches.
+"""Monte Carlo tree search with PUCT selection and batched policy/value inference.
 
-The shape of this module is decided by one measurement, the same one that
-decided `hexn.selfplay`: a forward costs a ~1.5 ms fixed dispatch toll plus
-~25 µs per position, so a search that evaluated one leaf per call would spend
-essentially all of its time in dispatch. A hundred leaves evaluated singly cost
-1.25 seconds; batched they cost about fifteen milliseconds. **Leaves are
-therefore gathered into waves and handed to the evaluator together**, which is
-what virtual loss is for — without it every simulation in a wave picks the same
-path and the wave is worth one simulation.
+Leaves are collected in waves; virtual loss discourages duplicate descents
+within a wave. Nodes store per-seat value vectors and select actions using
+the mover's configured stance. Dice, robber steals and development-card
+draws are sampled on each simulation rather than frozen at expansion.
 
-This is deliberately not `hexset.bots.SearchBot` with a network evaluator. That
-combination exists (`netsearch:<path>`) and it is the thing this replaces: it
-evaluates one leaf at a time, and it lost to the handcrafted `search2` 13.3% to
-86.7%. Two separate problems are tangled there — batching and the value head's
-accuracy off-policy — and only the first is addressed here.
-
-Four places this departs from the Go setting, each for a reason already
-measured in this project rather than imported from a paper:
-
-**Per-seat vectors and a stance, not a scalar and a sign flip.** Four seats with
-non-opposed fortunes need max^n, so a node backs up the whole vector and each
-node maximises its own mover's reading of it. How a seat reads the vector is
-`hexset.bots.STANCES`, unchanged: `relative` — own less the mean of the others —
-beat plain max^n 53.6% over 2000 games on this engine. The literature's
-alternative here is CatAnalysis's κ=0.8 damping at another seat's node; it is
-not used, because the stance was measured on this codebase and κ was not.
-
-**Chance nodes are sampled, not expanded.** `SearchBot` expands a roll into all
-eleven outcomes weighted by probability, which is exact and multiplies the leaf
-count by eleven at every roll. Under a fixed simulation budget that is the wrong
-trade: the budget should be spent where the search finds it useful, and the
-frequencies of repeated simulations approximate the same distribution. A roll
-edge keeps one child per outcome actually drawn.
-
-Three transitions in this engine hide a draw, not one: `ROLL` hides the dice,
-`MOVE_ROBBER` hides the stolen card (whether the robber got there off a seven
-or off a knight — `PLAY_KNIGHT` itself never draws: it only spends the card,
-credits Largest Army and hands off to the same `MOVE_ROBBER` decision a seven
-enters), and `BUY_DEV_CARD` hides the card off the deck. **All three are
-sampled per simulation.** The other two were cached children for the life of
-the tree until the afterstate audit found it, which made each such edge's `Q`
-one frozen steal or one frozen card rather than an expectation over them —
-and made the first draw decide the edge for every later visit. They differ
-from a roll only in when the outcome becomes visible: the dice can be drawn
-before the child exists, while these two resolve inside `apply`, so the draw
-is read back off the child that made it.
-
-`draws_hidden` and `sampled_children` are public because the ranking probes need
-the same semantics without a tree: they visit each child once, so where the
-search averages over outcomes by resampling across visits, a probe has to draw
-the outcome several times and average explicitly. One predicate, two callers.
-
-**The tree stores its positions.** Replaying from the root would cost ~19 µs of
-engine per ply against ~25 µs for a batched network evaluation, so a path of any
-depth would cost more to walk than to evaluate.
-
-**A terminal leaf is scored by the evaluator, not by the tree.** A finished
-game has a known value, but "known" depends on the scale the rest of the
-leaves are on: a value head trained against `hexset.victory.relative_points`
-wants that; a value head trained as a per-seat win probability (softmax over
-seats) wants a one-hot winner instead. The tree used to score every terminal
-itself with `relative_points`, which matched the first kind of head and
-silently mixed scales with the second — a backup cannot tell -1 relative
-points from a 0.0 win probability apart, so a fixed formula in the tree is
-only ever right for one evaluator. `Evaluator.terminal` puts the terminal
-value with the same evaluator that scores everything else, so a leaf and a
-terminal are always read on that evaluator's own scale.
+The tree owns imagined game positions. A runtime supplies prior probabilities
+and values through the evaluator interface; hexset.clients.netbot adapts a
+Policy to that interface and supplies the trade gate.
 """
 
 from __future__ import annotations
@@ -335,7 +277,7 @@ class Search:
     `stance` is restricted to what the tree's own backup implements —
     `own`, `relative`, `paranoid` (`STANCE_ROWS`'s keys) — not the wider
     `hexset.bots.STANCES`. `"win"` reads a per-seat vector as a win
-    probability (`hexset.bots.search2.win`), which is a conversion the bots
+    probability (`hexset.bots.stances.win`), which is a conversion the bots
     apply to a vector a search has already finished producing, not something
     the tree accumulates one backup at a time; `STANCE_ROWS`/`_backup` have no
     incremental form of that softmax, so a stance outside the implemented set

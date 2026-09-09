@@ -1001,6 +1001,20 @@ function watching() {
   return state.seat === null || state.seat === undefined;
 }
 
+// Watching, *or* holding a seat at a game that is over: the two states in
+// which nothing on the table is ours to change any more, which is what the
+// seat-shaped controls (renderPlayers) and the hand area (renderHand)
+// actually want to ask — `watching()` alone left a seated player looking at
+// a finished game with a live name box on their own row and a live model
+// picker on every bot's, each one a POST the server answers 409 ("the game
+// is already over", `api._not_over`). The seat itself is not gone and is
+// still worth having (`reclaimSeat` restores it on purpose, on a finished
+// game too): it is what puts our own hand in the view and our own name on
+// our own row. It just no longer comes with anything to do.
+function browsing() {
+  return watching() || !!state.game_over;
+}
+
 function seatLabel(seat) {
   if (seat === state.seat) return "human";
   // What a seat *is* comes from state.seats, not from the player entry:
@@ -1698,14 +1712,22 @@ function renderPlayers() {
 
     const nameEl = html("div", {class: "player-name"});
     const kind = state.seats[p.seat] && state.seats[p.seat].kind;
-    if (watching()) {
+    if (browsing()) {
       // Nothing here is ours to change — seating a bot needs a seat's own
-      // token — so every row reads as text, empty ones included. What a row
-      // does instead is open: a spectator is told every hand at the table
-      // (see api.Tables.handle's public routes), and clicking a row picks
-      // which one the hand area below shows.
+      // token, and once the game is over nobody's seat may be changed at all
+      // (`api.Tables.seat_bot`/`rename`, refused past `is_over`) — so every
+      // row reads as text, empty ones included. What a row does instead is
+      // open: every hand at the table is told to a spectator, and to
+      // everyone once the game is over (`webplay`'s `reveal = over or
+      // omniscient or p == viewer`), and clicking a row picks which one the
+      // hand area below shows.
       nameEl.classList.add("player-name-plain");
-      nameEl.textContent = seatLabel(p.seat);
+      // Our own row keeps the name we chose rather than seatLabel's "human":
+      // that name is what every other viewer's list has read all game, and
+      // the game ending is no reason for it to be the one row that loses it.
+      nameEl.textContent = p.seat === state.seat
+        ? (state.seats[p.seat].name || "human")
+        : seatLabel(p.seat);
       if (p.hand !== undefined) {
         row.classList.add("player-row-openable");
         if (openSeat === p.seat) {
@@ -1834,10 +1856,17 @@ function devCardPlay(name, g) {
 // the player list instead (openSeat) — nobody's until one is. The clicks that
 // make a card do something all come off `legal_actions`, which is empty for a
 // spectator, so every card here is inert without a check of its own.
+//
+// Once the game is over the same click works for a seat's holder too: every
+// hand is revealed to everyone by then, so the row that used to be a model
+// picker is a way to read what that seat was actually holding at the end.
+// Their own is what shows until they click one, and clicking the open row
+// again comes back to it rather than to nobody's.
 function renderHand() {
   const container = document.getElementById("hand");
   container.innerHTML = "";
-  const seat = watching() ? openSeat : state.seat;
+  const own = watching() ? null : state.seat;
+  const seat = browsing() && openSeat !== null ? openSeat : own;
   if (seat === null) {
     container.appendChild(html("div", {class: "hand-hint"}, "Click a player to see their cards."));
     return;

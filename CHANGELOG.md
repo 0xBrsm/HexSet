@@ -9,6 +9,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Fixed
+
+- **A finished game is read-only in the browser for the seat that played it, not just for a spectator.** The page asked `watching()` — *do I hold a seat here* — before deciding whether the player list was editable, and a seat at a game that is over is still a seat, so whoever played the game went on being shown a live name box on their own row and a live model picker on every bot's. Every one of those was a request the server already refused (`api._not_over`: 409 "the game is already over"), so the table looked live and answered dead. Those rows now read as text and open a seat's hand instead, which is what they were always for once every hand is revealed — the same list a spectator has had all along, minus the guessing about whose cards are whose.
+
 ## 0.45.1
 
 ### Fixed

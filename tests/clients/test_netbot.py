@@ -568,3 +568,17 @@ def test_a_policy_duels_through_compete_batched(board):
     )
     assert verdict.games == 4
     assert 0 <= verdict.wins <= 4
+
+
+def test_a_policy_policy_gate_is_seated_where_it_is_installed(board):
+    """`PolicyPolicy.gate` hands `compete_batched` a NetworkBot seated at the
+    game it will be asked about, at that seat -- unseated, the bot priced
+    every candidate at -1.0 and a network duellist silently never traded."""
+    from hexset.bench.versus import PolicyPolicy
+    from hexset.clients.netbot import NetworkBot
+
+    checkpoint = stub_checkpoint(board)
+    game = start(board, PLAYERS, random.Random(2))
+    gate = PolicyPolicy(checkpoint.policy, checkpoint).gate(game, 2, 3)
+    assert isinstance(gate, NetworkBot)
+    assert gate._seated is game and gate.seat == 2 and gate.max_trades == 3

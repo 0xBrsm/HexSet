@@ -419,21 +419,11 @@ def test_a_finished_game_is_scored_by_the_evaluators_terminal():
     assert stub.waves == []
 
 
-def test_the_shipped_onnx_evaluator_scores_a_terminal_leaf_on_its_own_scale():
-    """`terminal_relative_points` is what `Search` scored a terminal leaf with
-    before `Evaluator.terminal` existed, and it remains the right answer for a
-    `relative_points`-trained evaluator. The one evaluator this repo ships is
-    not one: `RECORD_CONTRACTS` is contract 6 alone and a contract-6 value head
-    trains on `hexn.rewards.win_loss`, so it owes the one-hot winner. Mixing
-    the two scales in a single backup is what the protocol warns against.
+def test_the_policy_evaluator_scores_a_terminal_leaf_on_its_own_scale():
+    """The shared policy adapter backs up terminal wins on the value-head scale."""
+    from hexset.clients.netbot import LeafEvaluator
 
-    `LeafEvaluator.terminal` never touches `self.policy`, so this needs no
-    loaded model -- only the optional `onnxruntime` import its module makes
-    at load time."""
-    pytest.importorskip("onnxruntime")
-    from hexset.clients.onnxbot import LeafEvaluator
-
-    evaluator = LeafEvaluator(policy=None, space=None)
+    evaluator = LeafEvaluator(policy=None)
     with pytest.raises(ValueError, match="has not finished"):
         evaluator.terminal(a_game())
 

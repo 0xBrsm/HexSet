@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import statistics
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -200,13 +199,7 @@ def summarize(result: CensusResult) -> dict[str, BotSummary]:
         raise ValueError("census needs one turn count per game")
     counts = Counter(base_name(name) for name in result.entrant_names)
     bundle_counts: dict[str, Counter] = defaultdict(Counter)
-    bulk_hits: dict[str, int] = defaultdict(int)
-    given_totals: dict[str, list[int]] = defaultdict(list)
-    received_totals: dict[str, list[int]] = defaultdict(list)
-    imbalances: dict[str, list[float]] = defaultdict(list)
-    dumps: dict[str, int] = defaultdict(int)
-    swings: dict[str, list[float]] = defaultdict(list)
-    rows: dict[str, int] = defaultdict(int)
+    totals: dict[str, Counter] = defaultdict(Counter)
 
     for t in result.trades:
         x = sum(t.given_a)
@@ -219,20 +212,15 @@ def summarize(result: CensusResult) -> dict[str, BotSummary]:
             (t.name_a, x, y, t.hand_before_a >= LARGE_HAND_THRESHOLD),
             (t.name_b, y, x, t.hand_before_b >= LARGE_HAND_THRESHOLD),
         ):
-            rows[name] += 1
             bundle_counts[name][category] += 1
-            if is_bulk:
-                bulk_hits[name] += 1
-            given_totals[name].append(given)
-            received_totals[name].append(received)
-            imbalances[name].append(imbalance)
-            if is_dump_side:
-                dumps[name] += 1
-            swings[name].append(received - given)
+            totals[name].update(sides=1, given=given, received=received,
+                                imbalance=imbalance, bulk=is_bulk, large_hand=is_dump_side)
 
     out: dict[str, BotSummary] = {}
     for name, seats in counts.items():
-        n = rows[name]
+        total = totals[name]
+        n = total["sides"]
+        divisor = n or 1
         exposure = sum(result.turns) * seats
         out[name] = BotSummary(
             name=name,
@@ -242,12 +230,12 @@ def summarize(result: CensusResult) -> dict[str, BotSummary]:
             seat_game_turns=exposure,
             trade_sides_per_seat_game_turn=n / exposure if exposure else 0.0,
             bundle_distribution=dict(bundle_counts[name]),
-            bulk_share=(bulk_hits[name] / n) if n else 0.0,
-            mean_given=(statistics.mean(given_totals[name]) if n else 0.0),
-            mean_received=(statistics.mean(received_totals[name]) if n else 0.0),
-            mean_imbalance=(statistics.mean(imbalances[name]) if n else 0.0),
-            large_hand_share=(dumps[name] / n) if n else 0.0,
-            mean_net_cards=(statistics.mean(swings[name]) if n else 0.0),
+            bulk_share=total["bulk"] / divisor,
+            mean_given=total["given"] / divisor,
+            mean_received=total["received"] / divisor,
+            mean_imbalance=total["imbalance"] / divisor,
+            large_hand_share=total["large_hand"] / divisor,
+            mean_net_cards=(total["received"] - total["given"]) / divisor,
         )
     return out
 

@@ -68,6 +68,9 @@ def test_census_normalizes_repeated_labels_by_seat_exposure():
     assert summary["a"].seat_games == 4
     assert summary["a"].seat_game_turns == 80
     assert summary["a"].trade_sides_per_seat_game_turn == pytest.approx(2 / 80)
+    assert summary["a"].mean_given == summary["a"].mean_received == 1.5
+    assert summary["a"].mean_imbalance == pytest.approx(1 / 3)
+    assert summary["a"].bundle_distribution == {"2:1": 2}
     assert summary["a"].mean_net_cards == 0
     assert summary["a"].large_hand_share == 0.5
     assert summary["b"].trade_sides == 0

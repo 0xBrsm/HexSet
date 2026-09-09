@@ -385,7 +385,7 @@ def test_lightweight_policy_collects_batched_training_rows_and_replayable_episod
     gates = []
 
     def gate(game, seat):
-        bot = NetworkBot(policy, space, players=2, seat=seat,
+        bot = NetworkBot(policy, players=2, seat=seat,
                          rng=random.Random(19 + len(gates)))
         bot.seat_at(game)  # The collector calls the policy directly, not bot.choose.
         gates.append(bot)

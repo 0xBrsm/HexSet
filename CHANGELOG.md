@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — consolidation
+
+- Use standard JSON for experiment persistence; retain provenance, checkpoint
+  change detection, raw outcomes and entrant-accounting validation.
+- Compute baseline summaries once and accumulate census totals without
+  retaining a second set of per-trade lists.
+- Remove retired-search value-head wrappers and unused action-space fields
+  from network adapters. Batched Policy evaluation, collection and MCTS stay
+  on their existing interfaces; migration details are in the research guide.
+
 ## Unreleased — reproducible research and training
 
 - Correct side attribution, repeated-bot census exposure and board-paired

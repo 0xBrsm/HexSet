@@ -84,12 +84,15 @@ calibration before interpreting which player benefited more.
 
 ## Save an experiment
 
-`hexset.experiment` stores versioned JSON containing entrant settings, source
+`hexset.experiment.result_document` builds JSON data containing entrant settings, source
 and dependency provenance, checkpoint hashes and raw per-game outcomes. Capture
 provenance before execution and pass the same settings to the runner and the
 artifact builder:
 
 ```python
+import json
+from pathlib import Path
+
 from hexset import experiment
 from hexset.arena import Entrant, compete
 
@@ -101,11 +104,12 @@ result = compete(entrants, games=2, records=True, **settings)
 document = experiment.result_document(
     result, entrants, run_provenance=before, **settings,
 )
-experiment.write("runs/example.json", document)
+Path("result.json").write_text(json.dumps(document, indent=2, allow_nan=False))
 ```
 
 This short run tests the artifact workflow; it cannot establish playing
-strength. `experiment.read(path)` checks the schema identifier and version.
+strength. Read it with `json.loads`; the `schema` and `schema_version` fields
+identify the layout.
 In each outcome, winner and point-vector indices refer to entrant order;
 `seating[e]` is entrant `e`'s board seat. `board_index` identifies the shared
 board/random-stream unit for paired games. The duel's JSON includes this
@@ -188,6 +192,14 @@ Raw `gain_a` and `gain_b` retain private evaluator values. Cross-evaluator
 they implied a shared utility scale that the bot interfaces do not provide.
 
 ## Removed interfaces
+
+The consolidation pass removes the standalone experiment reader/writer; use
+standard JSON with `result_document`. It also removes `NetworkEvaluator`,
+`evaluator_for` and `network_evaluator`, which adapted value heads to the
+retired handcrafted search. Use `Policy.value_rows` for batched evaluation.
+`NetworkBot` and `LeafEvaluator` no longer accept an unused `space` argument;
+the policy owns its action space. The `bot_for` and `searcher_for` factory
+interfaces and the `Checkpoint` contract remain unchanged.
 
 The cleanup removes `search2`, `greedy`, the tiered evaluator, their presets,
 and the `netsearch:`/`netgreedy:` checkpoint variants. Git history preserves

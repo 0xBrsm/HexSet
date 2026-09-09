@@ -8,7 +8,7 @@ import pytest
 
 from hexset.arena import Entrant, compete, lineup_from_names
 from hexset.bots.heximax import TRADING_WEIGHTS
-from hexset.experiment import provenance, read, result_document, write
+from hexset.experiment import provenance, result_document
 from hexset.record import replay
 
 
@@ -34,8 +34,9 @@ def test_result_round_trip_keeps_settings_raw_outcomes_and_replay(tmp_path, resu
     doc = result_document(tournament, entrants, seed=9, action_cap=16,
                           run_provenance={"commit": "test", "checkpoints": {}})
     path = tmp_path / "run" / "result.json"
-    write(path, doc)
-    saved = read(path)
+    path.parent.mkdir()
+    path.write_text(json.dumps(doc, allow_nan=False))
+    saved = json.loads(path.read_text())
     assert saved == doc
     assert saved["settings"]["action_cap"] == 16
     assert [row["board_index"] for row in saved["outcomes"]] == [0, 0]
@@ -68,13 +69,6 @@ def test_result_refuses_incomplete_rows_and_nonserializable_settings(result):
         result_document(replace(tournament, seating=()), entrants, seed=9)
     with pytest.raises(TypeError, match="runtime object"):
         result_document(tournament, [replace(entrants[0], weights=object()), entrants[1]], seed=9)
-
-
-def test_read_refuses_an_unknown_schema_version(tmp_path):
-    path = tmp_path / "future.json"
-    path.write_text(json.dumps({"schema": "hexset.experiment", "schema_version": 99}))
-    with pytest.raises(ValueError, match="schema version"):
-        read(path)
 
 
 @pytest.mark.parametrize("kwargs", [{"games": 0}, {"workers": 0}, {"action_cap": 0}])
@@ -132,13 +126,6 @@ def test_artifact_rejects_ambiguous_entrant_mapping(result, change):
         tournament = replace(tournament, winners=(3, None))
     with pytest.raises(ValueError):
         result_document(tournament, entrants, seed=9)
-
-
-def test_reader_rejects_nonfinite_json(tmp_path):
-    path = tmp_path / "invalid.json"
-    path.write_text('{"seconds": NaN}')
-    with pytest.raises(ValueError, match="non-finite"):
-        read(path)
 
 
 def test_installed_package_does_not_claim_an_enclosing_repositories_revision(tmp_path, monkeypatch):

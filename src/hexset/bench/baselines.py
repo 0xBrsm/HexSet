@@ -16,7 +16,7 @@ from dataclasses import asdict
 from hexset.bench.metrics import json_metrics, paired_mean, side_metrics
 from hexset.experiment import provenance, result_document
 from hexset.bench.throughput import default_workers, environment
-from hexset.arena import Z_95, compete, lineup_from_names, pooled
+from hexset.arena import base_name, compete, lineup_from_names, pooled
 
 DEFAULT_LINEUP = ("heximax", "heximax", "random", "random")
 
@@ -74,34 +74,17 @@ def main(argv: list[str] | None = None) -> int:
         "seconds": round(result.seconds, 1),
         "seat_wins": list(result.seat_wins),
         "standings": [
-            {
-                "name": standing.name,
-                "wins": standing.wins,
-                "win_rate": round(standing.win_rate, 3),
-                "interval_95": [round(bound, 3) for bound in standing.interval(Z_95)],
-            }
-            for standing in result.standings
+            {"name": standing.name, **side_metrics(result, [e])}
+            for e, standing in enumerate(result.standings)
         ],
-        # Two seats a side is the usual duel, so the side's share of the games
-        # is the number to quote and each seat's quarter is not.
         "pooled": [
-            {
-                "name": standing.name,
-                "wins": standing.wins,
-                "win_rate": round(standing.win_rate, 4),
-                "interval_95": [round(bound, 4) for bound in standing.interval(Z_95)],
-            }
+            {"name": standing.name, **side_metrics(result, [
+                e for e, entrant in enumerate(lineup)
+                if base_name(entrant.name) == standing.name
+            ])}
             for standing in pooled(result.standings, result.games)
         ],
     }
-
-    from hexset.arena import base_name
-
-    for e, row in enumerate(payload["standings"]):
-        row.update(side_metrics(result, [e]))
-    for row in payload["pooled"]:
-        slots = [e for e, entrant in enumerate(lineup) if base_name(entrant.name) == row["name"]]
-        row.update(side_metrics(result, slots))
 
     if args.against is not None:
         # Subtracting within a game cancels the board and the dice, so a

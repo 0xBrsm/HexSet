@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from hexset.actions import Action, ActionSpace, ActionType, apply
+from hexset.actions import Action, ActionType, apply
 from hexset.clients.policy import Checkpoint, Policy
 from hexset.game import Game, imagine, is_over, to_move
 from hexset.mcts import Search
@@ -70,10 +70,6 @@ class NetworkBot:
     """
 
     policy: Policy
-    # Carried for a caller that builds a bot by hand and for symmetry with
-    # `LeafEvaluator`; nothing here indexes it any more, because encoding a
-    # position is the runtime's own business (`hexset.clients.policy`).
-    space: ActionSpace
     players: int
     max_trades: int | None = None
     # This gate's clearing floor (`hexset.trading.trade_floor_of`): `accepts`
@@ -321,25 +317,10 @@ def _is_small(bundle: Bundle) -> bool:
 
 
 @dataclass
-class NetworkEvaluator:
-    """A checkpoint value head exposed as per-seat game evaluation."""
-
-    policy: Policy
-    players: int
-    max_trades: int | None = None
-
-    def evaluate_game(self, game: Game, seat: int) -> list[float]:
-        _check_players(game, self.players)
-        return list(self.policy.value_rows([(game, seat)])[0])
-
-
-@dataclass
 class LeafEvaluator:
     """A whole wave of `hexset.mcts` leaves in one forward."""
 
     policy: Policy
-    # The action space declared by the checkpoint.
-    space: ActionSpace
     pad_to: int | None = None
 
     def __post_init__(self) -> None:
@@ -423,21 +404,9 @@ def bot_for(
     """
     return NetworkBot(
         policy=checkpoint.policy,
-        space=checkpoint.space,
         players=checkpoint.players,
         max_trades=checkpoint.max_trades if max_trades is None else max_trades,
         rng=random.Random() if rng is None else rng,
-    )
-
-
-def evaluator_for(
-    checkpoint: Checkpoint, *, max_trades: int | None = None
-) -> NetworkEvaluator:
-    """Expose a checkpoint value head for position evaluation."""
-    return NetworkEvaluator(
-        policy=checkpoint.policy,
-        players=checkpoint.players,
-        max_trades=checkpoint.max_trades if max_trades is None else max_trades,
     )
 
 
@@ -461,7 +430,6 @@ def searcher_for(
     return GatedSearch(
         LeafEvaluator(
             policy=checkpoint.policy,
-            space=checkpoint.space,
             pad_to=inference_batch,
         ),
         bot_for(checkpoint, max_trades=budget, rng=gate_rng),

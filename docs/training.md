@@ -105,8 +105,9 @@ actions, per-seat values, and legal-option priors in board-seat order.
 dense action prior is converted to that order by its adapter.
 
 A checkpoint carries `policy`, `space`, `players`, and `max_trades`.
-[netbot.py](../src/hexset/clients/netbot.py) provides `bot_for`,
-`evaluator_for`, and `searcher_for` constructors using these fields. The bot,
+[netbot.py](../src/hexset/clients/netbot.py) provides `bot_for` and
+`searcher_for` constructors using these fields. Evaluate positions directly
+with `checkpoint.policy.value_rows([(game, seat), ...])`. The bot,
 continuation-based trade gate, and search are shared across runtimes.
 Pass `rng=random.Random(seed)` to `bot_for` to seed trade-gate belief sampling.
 A supplied `rng` in `searcher_for` seeds both MCTS and a separate trade-gate

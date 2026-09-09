@@ -27,7 +27,6 @@ from hexset.actions import ActionSpace, ActionType, apply, build_space
 from hexset.board.board import random_base_board
 from hexset.clients.netbot import (
     bot_for,
-    evaluator_for,
     register_entrants,
     searcher_for,
 )
@@ -256,10 +255,6 @@ def test_a_searched_runtime_free_policy_plays_and_gates_like_the_plain_bot(board
     assert alike(lambda bot: bot.accepts_many(view, received, thems))
     assert alike(lambda bot: bot.estimate_many(view, candidates))
 
-    # The same policy as a leaf evaluation for the handcrafted search, one
-    # vector per seat in board-seat order.
-    vector = evaluator_for(checkpoint).evaluate_game(game, seat)
-    assert len(vector) == PLAYERS
 
 
 def test_a_runtime_registers_the_arena_entrant_kinds_in_one_call(board, arena_registry):
@@ -404,7 +399,7 @@ def test_the_gate_prices_a_trade_by_what_it_leaves_the_seat_able_to_do(board):
     from hexset.clients.netbot import CONTINUATION_PLIES, NetworkBot
 
     space = stub_checkpoint(board).space
-    bot = NetworkBot(policy=BuildPolicy(space), space=space, players=PLAYERS, rng=random.Random(0))
+    bot = NetworkBot(policy=BuildPolicy(space), players=PLAYERS, rng=random.Random(0))
     game = _position_with_a_settlement_in_hand(board)
     bot.seat_at(game)
     view = game.state(0)
@@ -430,7 +425,7 @@ def test_a_won_position_prices_every_trade_at_zero_or_below(board, monkeypatch):
     from hexset.victory import victory_points
 
     space = stub_checkpoint(board).space
-    bot = NetworkBot(policy=BuildPolicy(space), space=space, players=PLAYERS, rng=random.Random(0))
+    bot = NetworkBot(policy=BuildPolicy(space), players=PLAYERS, rng=random.Random(0))
     game = _position_with_a_settlement_in_hand(board)
     state = game.state(0, hidden=False)
     monkeypatch.setattr(game_mod, "WINNING_POINTS", victory_points(state, 0) + 1)
@@ -471,7 +466,7 @@ def test_a_responder_prices_what_the_actor_will_do_with_the_cards(board, monkeyp
     game.ledger = ledger
     monkeypatch.setattr(game_mod, "WINNING_POINTS", victory_points(state, 0) + 1)
 
-    responder = NetworkBot(policy=BuildPolicy(space), space=space, players=PLAYERS, seat=1, rng=random.Random(0))
+    responder = NetworkBot(policy=BuildPolicy(space), players=PLAYERS, seat=1, rng=random.Random(0))
     responder.seat_at(game)
     view = game.state(1)
     gives_the_sheep = (0, 0, -1, 0, 1)  # seat 1 gives a sheep, gets an ore
@@ -494,7 +489,7 @@ def test_the_gate_is_a_pure_function_of_the_ask(board):
     from hexset.trading import _candidates
 
     space = stub_checkpoint(board).space
-    bot = NetworkBot(policy=HandValuePolicy(space), space=space, players=PLAYERS, rng=random.Random(3))
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, rng=random.Random(3))
     game = seated(bot, board)
     seat = to_move(game)
     view = game.state(seat)

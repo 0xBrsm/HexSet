@@ -19,7 +19,7 @@ import random
 from hexset.gym import LaneEnv
 
 rng = random.Random(0)
-env = LaneEnv(players=4, seed=0, lanes=4, deal=8, records=True)
+env = LaneEnv(players=4, seed=0, lanes=4, deal=8, action_cap=40, records=True)
 episodes = []
 while env.running:
     requests = env.requests()
@@ -27,9 +27,15 @@ while env.running:
     episodes.extend(env.step(actions))
 ```
 
+This bounded example exercises collection and truncation, not full-game
+learning. For training, choose an action cap that fits your task and inspect
+`episode.outcome.truncated`: an unfinished game is not a terminal loss.
+
 Each request contains the lane, game index, seat, policy ID, legal actions,
-and live `Game`. `request.view` provides the seat's information set. Do not
-mutate the live game; simulations should use copies.
+and live `Game`. `request.view` provides the seat's information set. The `Game` remains mutable and exposes full state; `View` is the information
+contract, not an access-control mechanism. Encode or copy the observation and
+legal mask before calling `step()`, because the request refers to a live game.
+Do not mutate that game; simulations should use copies.
 
 `step()` accepts either actions in request order or a mapping from lane IDs
 to actions. Missing answers use a configured bot for that seat; an unanswered
@@ -60,14 +66,24 @@ automatic trade event.
 arena's board and seating rules:
 
 ```python
+import random
 from hexset.bench.versus import BotPolicy, compete_batched
 from hexset.bots import RandomBot
 
-policies = {0: BotPolicy(lambda board: RandomBot()),
-            1: BotPolicy(lambda board: RandomBot())}
-verdict = compete_batched(policies, games=8, players=4, seed=0, lanes=4)
+policies = {0: BotPolicy(lambda board: RandomBot(random.Random(0))),
+            1: BotPolicy(lambda board: RandomBot(random.Random(1)))}
+verdict = compete_batched(
+    policies, games=8, players=4, seed=0, lanes=4, action_cap=40,
+)
 print(verdict.metrics())
 ```
+
+This is another bounded interface example, not a strength comparison. A
+runner seed controls game generation; it does not seed arbitrary runtime
+sampling. `BotPolicy` shares a bot per board and policy ID, including its
+mutable random generator, so stochastic decisions can depend on lane count
+and request order. For scheduling-independent sampling, a runtime should key
+its randomness by game index, seat and decision step.
 
 A batch policy implements `act(requests)` and returns one action per request.
 `BotPolicy` adapts a regular bot factory. `PolicyPolicy` adapts the model
@@ -92,6 +108,10 @@ A checkpoint carries `policy`, `space`, `players`, and `max_trades`.
 [netbot.py](../src/hexset/clients/netbot.py) provides `bot_for`,
 `evaluator_for`, and `searcher_for` constructors using these fields. The bot,
 continuation-based trade gate, and search are shared across runtimes.
+Pass `rng=random.Random(seed)` to `bot_for` to seed trade-gate belief sampling.
+A supplied `rng` in `searcher_for` seeds both MCTS and a separate trade-gate
+stream. These generators do not seed sampling inside the model runtime; the
+training application must control that source of randomness separately.
 The ONNX implementation is `hexset.clients.onnxbot.V2Policy`; see the
 [ONNX contract](bot-api.md) for record tensors and output requirements.
 
@@ -101,15 +121,24 @@ A driver can register an ONNX loader for arena entrants explicitly:
 from hexset.clients.netbot import register_entrants
 from hexset.clients.onnxbot import load
 
-register_entrants(load)
+def configure_runtime():
+    register_entrants(load)
+
+configure_runtime()
 ```
 
 This requires the `clients` extra. Registration assigns the process's network
 and MCTS entrant factories. Imports alone do not register a runtime. A custom
-runtime can register its own loader with the same interface. Register it in
-each worker process that spawns entrants.
+runtime can register its own loader with the same interface. For an arena
+run, pass `worker_initializer=configure_runtime` to `compete` to register in
+each worker process, including under `start_method="spawn"`. Define this
+function at module scope in an importable driver and guard its entry point;
+with one worker the initializer runs in the calling process. Optional
+`worker_initargs` supplies initializer arguments.
 
-For a gate installed separately from the action bot, `NetworkBot.seat_at(game)`
-sets the game it evaluates without choosing an action. Its optional `seat`
-field guards against requests for another seat. `PolicyPolicy` supplies this
+For a gate installed separately from the action bot, construct a fresh
+`NetworkBot` per seat, set `bot.seat = seat`, and call `bot.seat_at(game)` in
+the gate factory. The collector does not call that gate's `choose()` method,
+so the factory must bind the game explicitly. The `seat` field guards against
+requests for another seat. `PolicyPolicy` supplies this
 wiring when given a checkpoint.

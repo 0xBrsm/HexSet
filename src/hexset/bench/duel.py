@@ -18,6 +18,8 @@ import hexset.bots  # noqa: F401 -- registers the heximax presets with hexset.ar
 from hexset.game import MAX_TURNS
 
 from hexset.bench.throughput import default_workers
+from hexset.bench.metrics import json_metrics, paired_mean
+from hexset.experiment import provenance, result_document
 
 ARENA_GEOMETRY = "aabb"
 
@@ -74,21 +76,17 @@ def main(argv: list[str] | None = None) -> int:
         destination = Path(args.json) if args.json else _verdict_path(args, label_a, label_b)
         destination.parent.mkdir(parents=True, exist_ok=True)
         with destination.open("a") as handle:
-            handle.write(json.dumps(result) + "\n")
+            handle.write(json.dumps(result, allow_nan=False) + "\n")
 
-    print(json.dumps(result, indent=1))
+    print(json.dumps(result, indent=1, allow_nan=False))
     if destination is not None:
         print(f"\nappended to {destination}", file=sys.stderr)
     print(
         f"\n{label_a} vs {label_b}: {result['win_rate']*100:.1f}% "
-        f"[{result['wilson_low']*100:.1f}, {result['wilson_high']*100:.1f}] "
-        f"over {result['games']} games, paired VP {result['paired_vp']:+.2f}",
+        f"[{result['board_win_rate_low']*100:.1f}, {result['board_win_rate_high']*100:.1f}] "
+        f"over {result['games']} games (board-level interval), paired VP {result['paired_vp']:+.2f}",
         file=sys.stderr,
     )
-    # The write happens once, above, whether the destination came from --json or
-    # from the verdict default. A second append used to live here and survived
-    # the change that introduced the default, so every duel passing --json
-    # recorded itself twice.
     return 0
 
 
@@ -106,8 +104,8 @@ def sides(lineup: list, label_a: str, label_b: str, mine=(0, 1), theirs=(2, 3)) 
     `aabb`, `[0, 2]`/`[1, 3]` for `abab`. Any remaining slot is on neither
     side and keeps the name its own entrant spec gave it, so a duel run at a
     table with third-party bots pools into three groups and the paired split
-    still has exactly two to subtract. Slot 0 is always side A, so `pooled`'s
-    first group is side A under any seating.
+    still has exactly two to subtract. Verdicts use slot indices, so side
+    labels and the first slot do not determine which outcomes count.
     """
     side_a, side_b = label_a, label_b
     if side_a == side_b:
@@ -151,9 +149,11 @@ def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY)
     terminal points per game in entrant order, so the within-game difference the
     single-process path reports can be rebuilt exactly.
     """
-    from hexset.arena import compete, lineup_from_names, pooled, wilson
+    from hexset.arena import compete, lineup_from_names, wilson
 
     names, mine, theirs = arena_lineup(args.a, args.b, geometry)
+    if args.games % 2:
+        raise ValueError("paired evaluation requires an even number of games")
     if args.games % len(names):
         raise ValueError(
             f"{args.games} games does not divide evenly over the {len(names)} "
@@ -162,6 +162,7 @@ def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY)
         )
     lineup = sides(lineup_from_names(names), label_a, label_b, mine, theirs)
 
+    run_provenance = provenance(lineup)
     started = time.monotonic()
     tournament = compete(
         lineup,
@@ -179,20 +180,16 @@ def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY)
         written = write(args.records, tournament.records)
         print(f"appended {written} records to {args.records}", file=sys.stderr)
 
-    grouped = pooled(tournament.standings, tournament.games)
-    wins = grouped[0].wins
+    wins = sum(winner in mine for winner in tournament.winners)
     low, high = wilson(wins, tournament.games)
     paired = [
         sum(points[i] for i in mine) / len(mine)
         - sum(points[i] for i in theirs) / len(theirs)
         for points in tournament.points
     ]
-    mean = sum(paired) / len(paired) if paired else 0.0
-    spread = (
-        1.96 * (sum((x - mean) ** 2 for x in paired) / (len(paired) - 1) / len(paired)) ** 0.5
-        if len(paired) > 1
-        else 0.0
-    )
+    # Adjacent games share a board and random streams; use boards as samples.
+    margin = paired_mean(paired)
+    win_share = paired_mean([float(w in mine) for w in tournament.winners])
     turns = tournament.turns
     # Exhausted: reached `MAX_TURNS` without a winner. Distinct from
     # `unfinished`, which also counts games `play`'s own action cap cut off
@@ -201,7 +198,9 @@ def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY)
     exhausted = sum(
         1 for winner, t in zip(tournament.winners, turns) if winner is None and t >= MAX_TURNS
     )
-    return {
+    return json_metrics({
+        "experiment": result_document(tournament, lineup, seed=args.duel_seed,
+                                      workers=args.workers, run_provenance=run_provenance),
         "a": label_a, "b": label_b, "a_path": args.a, "b_path": args.b,
         "games": tournament.games, "duel_seed": args.duel_seed,
         "workers": args.workers, "seconds": seconds, "via": "arena.compete",
@@ -209,13 +208,20 @@ def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY)
         "unfinished": tournament.unfinished,
         "wins": wins, "win_rate": wins / tournament.games if tournament.games else 0.0,
         "wilson_low": low, "wilson_high": high,
-        "paired_vp": mean,
-        "paired_vp_low": mean - spread, "paired_vp_high": mean + spread,
+        "boards": margin.samples,
+        "paired_vp": margin.mean,
+        "paired_vp_low": margin.lower, "paired_vp_high": margin.upper,
+        "board_win_rate_low": max(0.0, win_share.lower),
+        "board_win_rate_high": min(1.0, win_share.upper),
+        "interval_unit": "board",
+        "win_rate_denominator": "all games, including unfinished",
+        "wilson_assumption": "independent games; paired games are correlated",
+        "truncated": tournament.unfinished - exhausted,
         "turns_mean": statistics.mean(turns) if turns else 0.0,
         "turns_median": statistics.median(turns) if turns else 0.0,
         "turns_max": max(turns) if turns else 0,
         "exhausted": exhausted,
-    }
+    })
 
 
 if __name__ == "__main__":

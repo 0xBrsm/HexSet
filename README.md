@@ -4,9 +4,9 @@
 
 HexSet implements a hex-tile trading and building game based on the rules of
 *Settlers of Catan*. It includes a NumPy rules engine, heuristic bots, ONNX
-model inference, a browser interface, HTTP and MCP interfaces, and Gymnasium
-and PettingZoo environments, and a batched multi-game environment for training
-and evaluation.
+model inference, a browser interface, HTTP and MCP interfaces, Gymnasium and
+PettingZoo adapters, and batched environments for neural-network training and
+evaluation.
 
 The engine supports resource production, construction, development cards,
 the robber, victory conditions, and player trading. Trading uses two
@@ -16,6 +16,17 @@ maintained outside this repository in the sibling HexN project. HexSet owns
 the rules, information sets, encoding, game loops, seating and board pairing,
 records and replay, and trade evaluation. Training projects supply model
 runtimes and learning algorithms through those interfaces.
+
+## Research workflows
+
+- **Implement a bot:** start with the [Python bot example](examples/custom_bot.py)
+  and [extension guide](docs/research.md#implement-a-bot).
+- **Train a neural network:** collect batches, attach policy/value runtimes and
+  evaluate checkpoints through the [training interfaces](docs/training.md).
+- **Compare policies:** use the [research tools](docs/research.md) for seating,
+  reproducible experiments and interpretation of results.
+- **Inspect a game:** retain [replay records](docs/research.md#inspect-behavior)
+  alongside aggregate results.
 
 ## Bots and Catanatron integration
 
@@ -109,7 +120,9 @@ python -m hexset.bench.duel heximax heximax-notrade --games 400 --workers 4
 ```
 
 The arena runner reports win rates with Wilson confidence intervals and
-balances seats; the game count must be divisible by the lineup's seat count.
+balances seats. Game counts must complete seat rotations and paired boards;
+for an odd number of players under antithetic pairing, use a multiple of twice
+the seat count.
 Use `--geometry ab` for a two-player game; the default is four-player
 `aabb`. One and multiple workers use the same arena implementation.
 Checkpoint entrants require a registered runtime loader; installing the
@@ -126,7 +139,8 @@ python -m hexset.catanatron.duel --players=DC:heximax-notrade,AB:2,AB:2,AB:2 --n
 
 For batched policies, `hexset.bench.versus.compete_batched` evaluates multiple
 games per tick using the arena's board and seat-pairing rules. It reports win
-rates, Wilson intervals, and paired victory-point margins. See
+rates, descriptive Wilson intervals, and board-based intervals for win rates
+and victory-point margins. See
 [Training and runtime interfaces](docs/training.md).
 
 ## Training environments

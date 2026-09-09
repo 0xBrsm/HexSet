@@ -8,7 +8,7 @@ The only test of a fit that counts. `hexset.bench.fit_weights` says whether
 a vector predicts winners better on held-out games; this says whether the
 bot that reads it wins more, on the same boards as the incumbent with seats
 swapped (`hexset.bench.duel._via_arena`, `aabb` seating: two of each
-side, antithetic pairs), reporting the Wilson interval on games and the
+side, antithetic pairs), reporting board-level win-share intervals and the
 paired VP margin. Adoption is a decision made on this file, by hand.
 
 The candidate is a heximax preset built from the fit: the variant's
@@ -96,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
         Path(args.out).write_text(json.dumps(result, indent=2) + "\n")
     print(
         f"{result['a']} vs {result['b']}: {result['wins']}/{result['games']} = "
-        f"{result['win_rate']:.1%} [{result['wilson_low']:.1%}, {result['wilson_high']:.1%}]"
+        f"{result['win_rate']:.1%} [{result['board_win_rate_low']:.1%}, {result['board_win_rate_high']:.1%}]"
         f"  paired VP {result['paired_vp']:+.3f} [{result['paired_vp_low']:+.3f}, "
         f"{result['paired_vp_high']:+.3f}]  unfinished {result['unfinished']}  "
         f"{result['seconds']:.0f}s",

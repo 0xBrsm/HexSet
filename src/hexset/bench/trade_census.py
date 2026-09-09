@@ -1,13 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""Every executed trade, precisely: who, what, how lopsided, and who was flush.
+"""Measure executed trades by bot label using the arena's recorded census.
 
-Plays N games for a lineup through `hexset.arena.compete` (grouped seating,
-antithetic-paired boards, grouped `[a, a, b, b]` seating) and
-rolls up the arena's own `ClearedTrade` census -- turn, phase, both seats'
-kinds, the signed 5-vector each way, each side's hand size at the top of the
-step, and each side's own private gain -- so bulk/imbalanced trading can be
-described alongside win rates. Records for these same games can be saved
-with --records. Server journals do not contain this private-gain census.
+Each exchange retains both resource bundles and each participant's private gain.
+Summaries report card counts and trade participation, not shared economic utility.
+Use --records to retain the games underlying the measurements.
 """
 
 from __future__ import annotations
@@ -15,7 +11,6 @@ from __future__ import annotations
 import argparse
 import json
 import statistics
-import sys
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -25,19 +20,8 @@ import hexset.bots  # noqa: F401 -- registers heximax presets with hexset.arena
 from hexset.arena import MAX_ACTIONS, Entrant, base_name, compete
 from hexset.record import Record
 
-# Card price for the value yardstick: the flat 4:1 bank rate, so a swing is
-# comparable across bots with no bot's own valuation in it. Port-adjusted
-# rates are the documented alternative (a seat's best rate can be under 4:1)
-# but need a seat's settlement/city-to-port adjacency, which nothing in
-# `hexset.board` exposes as a public helper yet -- flat rate ships as the
-# neutral default and the per-seat refinement is future work.
-BANK_RATE = 4
-CARD_VALUE = 1.0 / BANK_RATE
-
-# A side "dumps" a trade if it enters it holding at least this many cards --
-# the discard threshold minus nothing, i.e. hoard territory by any human
-# reckoning of Catan hand sizes.
-DUMP_THRESHOLD = 8
+# A hand of eight or more resource cards is subject to discarding on a seven.
+LARGE_HAND_THRESHOLD = 8
 
 
 @dataclass(frozen=True)
@@ -62,7 +46,6 @@ class TradeRecord:
     hand_before_b: int
     gain_a: float
     gain_b: float
-    larger_gain: str  # "a", "b", or "tie"
 
 
 def _resource_split(received: Sequence[int]) -> tuple[tuple[int, ...], tuple[int, ...]]:
@@ -75,6 +58,7 @@ def _resource_split(received: Sequence[int]) -> tuple[tuple[int, ...], tuple[int
 @dataclass
 class CensusResult:
     games: int
+    entrant_names: tuple[str, ...] = ()
     trades: list[TradeRecord] = field(default_factory=list)
     winners: list[int | None] = field(default_factory=list)
     turns: list[int] = field(default_factory=list)
@@ -89,6 +73,8 @@ class CensusResult:
     def to_json(self) -> dict:
         return {
             "games": self.games,
+            "entrant_names": self.entrant_names,
+            "unfinished": sum(w is None for w in self.winners),
             "winners": self.winners,
             "turns": self.turns,
             "points": self.points,
@@ -128,7 +114,7 @@ def run_census(
         records=True,
     )
 
-    result = CensusResult(games=games)
+    result = CensusResult(games=games, entrant_names=tuple(base_name(e.name) for e in entrants))
     result.winners = list(tournament.winners)
     result.turns = list(tournament.turns)
     result.points = list(tournament.points)
@@ -145,12 +131,6 @@ def run_census(
         }
         for trade in cleared:
             given_a, given_b = _resource_split(trade.received)
-            if trade.gain_a > trade.gain_b:
-                larger = "a"
-            elif trade.gain_b > trade.gain_a:
-                larger = "b"
-            else:
-                larger = "tie"
             result.trades.append(
                 TradeRecord(
                     game=index,
@@ -166,7 +146,6 @@ def run_census(
                     hand_before_b=trade.hand_b,
                     gain_a=trade.gain_a,
                     gain_b=trade.gain_b,
-                    larger_gain=larger,
                 )
             )
     return result
@@ -194,19 +173,32 @@ class BotSummary:
     name: str
     trade_sides: int  # number of (trade, side) rows contributing
     games_present: int
-    trades_per_turn: float
+    seat_games: int
+    seat_game_turns: int
+    trade_sides_per_seat_game_turn: float
     bundle_distribution: dict
     bulk_share: float
     mean_given: float
     mean_received: float
     mean_imbalance: float
-    dump_share: float
-    mean_value_swing: float
+    large_hand_share: float
+    mean_net_cards: float
 
 
-def summarize(result: CensusResult, entrant_names: Sequence[str]) -> dict[str, BotSummary]:
-    """Per-bot-kind rollup. Each trade contributes one row per side, reoriented
-    to that side's own given/received/hand-before/gain."""
+def summarize(result: CensusResult) -> dict[str, BotSummary]:
+    """Aggregate by base entrant label, retaining repeated seats in exposure.
+
+    A trade contributes one participation per side, including two when the
+    labels match. The rate divides participations by sum(game turns) times
+    that label's seat count. It measures participation per occupied seat per
+    elapsed game turn, not trades on that seat's own turns. Unfinished games
+    contribute their observed turns and exchanges. Zero-trade labels remain.
+    """
+    if not result.entrant_names:
+        raise ValueError("census needs the complete lineup, including repeated labels")
+    if len(result.turns) != result.games:
+        raise ValueError("census needs one turn count per game")
+    counts = Counter(base_name(name) for name in result.entrant_names)
     bundle_counts: dict[str, Counter] = defaultdict(Counter)
     bulk_hits: dict[str, int] = defaultdict(int)
     given_totals: dict[str, list[int]] = defaultdict(list)
@@ -224,8 +216,8 @@ def summarize(result: CensusResult, entrant_names: Sequence[str]) -> dict[str, B
         imbalance = abs(x - y) / (x + y) if (x + y) else 0.0
 
         for name, given, received, is_dump_side in (
-            (t.name_a, x, y, t.hand_before_a >= DUMP_THRESHOLD),
-            (t.name_b, y, x, t.hand_before_b >= DUMP_THRESHOLD),
+            (t.name_a, x, y, t.hand_before_a >= LARGE_HAND_THRESHOLD),
+            (t.name_b, y, x, t.hand_before_b >= LARGE_HAND_THRESHOLD),
         ):
             rows[name] += 1
             bundle_counts[name][category] += 1
@@ -236,44 +228,41 @@ def summarize(result: CensusResult, entrant_names: Sequence[str]) -> dict[str, B
             imbalances[name].append(imbalance)
             if is_dump_side:
                 dumps[name] += 1
-            swings[name].append((received - given) * CARD_VALUE)
-
-    # Turns-per-game isn't tracked per-name (games are shared by the whole
-    # lineup); use the census-wide mean game length as the denominator for
-    # "trades per turn" so it is comparable across bots in the same lineup.
-    mean_turns = statistics.mean(result.turns) if result.turns else 0.0
+            swings[name].append(received - given)
 
     out: dict[str, BotSummary] = {}
-    for name in entrant_names:
+    for name, seats in counts.items():
         n = rows[name]
-        denom = mean_turns * result.games if mean_turns else 1.0
+        exposure = sum(result.turns) * seats
         out[name] = BotSummary(
             name=name,
             trade_sides=n,
             games_present=result.games,
-            trades_per_turn=(n / denom) if denom else 0.0,
+            seat_games=result.games * seats,
+            seat_game_turns=exposure,
+            trade_sides_per_seat_game_turn=n / exposure if exposure else 0.0,
             bundle_distribution=dict(bundle_counts[name]),
             bulk_share=(bulk_hits[name] / n) if n else 0.0,
             mean_given=(statistics.mean(given_totals[name]) if n else 0.0),
             mean_received=(statistics.mean(received_totals[name]) if n else 0.0),
             mean_imbalance=(statistics.mean(imbalances[name]) if n else 0.0),
-            dump_share=(dumps[name] / n) if n else 0.0,
-            mean_value_swing=(statistics.mean(swings[name]) if n else 0.0),
+            large_hand_share=(dumps[name] / n) if n else 0.0,
+            mean_net_cards=(statistics.mean(swings[name]) if n else 0.0),
         )
     return out
 
 
 def table(summaries: dict[str, BotSummary]) -> str:
     header = (
-        f"{'bot':<18}{'trades/turn':>12}{'mean give':>11}{'mean recv':>11}"
-        f"{'imbalance':>11}{'bulk%':>8}{'dump%':>8}{'val swing':>11}"
+        f"{'bot':<18}{'sides/seat/t':>12}{'mean give':>11}{'mean recv':>11}"
+        f"{'imbalance':>11}{'bulk%':>8}{'hand8+%':>8}{'net cards':>11}"
     )
     lines = [header, "-" * len(header)]
     for name, s in summaries.items():
         lines.append(
-            f"{name:<18}{s.trades_per_turn:>12.3f}{s.mean_given:>11.2f}"
+            f"{name:<18}{s.trade_sides_per_seat_game_turn:>12.3f}{s.mean_given:>11.2f}"
             f"{s.mean_received:>11.2f}{s.mean_imbalance:>11.2f}{s.bulk_share*100:>7.1f}%"
-            f"{s.dump_share*100:>7.1f}%{s.mean_value_swing:>+11.3f}"
+            f"{s.large_hand_share*100:>7.1f}%{s.mean_net_cards:>+11.3f}"
         )
     return "\n".join(lines)
 
@@ -304,8 +293,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         entrants, args.games, seed=args.seed, workers=args.workers,
         records=bool(args.records),
     )
-    entrant_names = sorted({base_name(e.name) for e in entrants})
-    summaries = summarize(result, entrant_names)
+    summaries = summarize(result)
 
     print(table(summaries))
     if args.records:
@@ -319,6 +307,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "census": result.to_json(),
             "summaries": {k: asdict(v) for k, v in summaries.items()},
         }
+        args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(payload, indent=2))
         print(f"wrote {args.out}")
 

@@ -13,8 +13,10 @@ import json
 import sys
 from dataclasses import asdict
 
+from hexset.bench.metrics import json_metrics, paired_mean, side_metrics
+from hexset.experiment import provenance, result_document
 from hexset.bench.throughput import default_workers, environment
-from hexset.arena import Z_95, compete, lineup_from_names, mean_interval, pooled
+from hexset.arena import Z_95, compete, lineup_from_names, pooled
 
 DEFAULT_LINEUP = ("heximax", "heximax", "random", "random")
 
@@ -49,13 +51,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    lineup = lineup_from_names(args.lineup)
+    if args.against is not None and not 0 <= args.against < len(lineup):
+        parser.error("--against must index an entrant in the lineup")
+    run_provenance = provenance(lineup)
     result = compete(
-        lineup_from_names(args.lineup),
+        lineup,
         args.games,
         seed=args.seed,
         workers=args.workers,
     )
     payload = {
+        "experiment": result_document(result, lineup, seed=args.seed, workers=args.workers,
+                                      run_provenance=run_provenance),
         "environment": environment(),
         "lineup": args.lineup,
         "seed": args.seed,
@@ -87,27 +95,35 @@ def main(argv: list[str] | None = None) -> int:
         ],
     }
 
+    from hexset.arena import base_name
+
+    for e, row in enumerate(payload["standings"]):
+        row.update(side_metrics(result, [e]))
+    for row in payload["pooled"]:
+        slots = [e for e, entrant in enumerate(lineup) if base_name(entrant.name) == row["name"]]
+        row.update(side_metrics(result, slots))
+
     if args.against is not None:
         # Subtracting within a game cancels the board and the dice, so a
         # difference far smaller than the win-rate interval can still be seen.
-        rows = [row for _, row in result.decided()]
+        rows = result.points
         payload["paired_points"] = [
             {
                 "name": entrant.name,
-                **asdict(mean_interval([row[e] - row[args.against] for row in rows])),
+                **asdict(paired_mean([row[e] - row[args.against] for row in rows])),
             }
             for e, entrant in enumerate(result.standings)
         ]
 
     if args.json:
-        print(json.dumps(payload, indent=2))
+        print(json.dumps(json_metrics(payload), indent=2, allow_nan=False))
         return 0
 
     env = payload["environment"]
     print(f"commit {env['commit']}  python {env['python']}  {env['machine']}")
     print(f"{result.games} games, seed {args.seed}, {result.seconds:.1f}s")
-    for standing in result.standings:
-        low, high = standing.interval(Z_95)
+    for standing, row in zip(result.standings, payload["standings"]):
+        low, high = row["interval_95"]
         print(
             f"  {standing.name:<10} {standing.wins:>4}/{result.games}"
             f"  {standing.win_rate:6.1%}  95% CI [{low:.1%}, {high:.1%}]"

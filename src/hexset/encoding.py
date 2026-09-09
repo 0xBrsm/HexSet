@@ -29,7 +29,7 @@ from .board.board import Board, pips
 from .board.terrain import NUM_RESOURCES, Terrain
 from .board.topology import Topology
 from .cards import NUM_DEV_CARDS, DECK_SIZE
-from .game import Game, Phase
+from .game import Game, Phase, to_move
 from .state import NO_OWNER, Building, GameState
 
 NUM_TERRAIN = len(Terrain)
@@ -623,7 +623,7 @@ def encode(game: Game, perspective: int | None = None) -> Observation:
     """Encode the position as seen by `perspective`, defaulting to the mover."""
     state = game._state
     if perspective is None:
-        perspective = game.current_player
+        perspective = to_move(game)
     if not 0 <= perspective < state.num_players:
         raise ValueError(f"no such player: {perspective}")
 

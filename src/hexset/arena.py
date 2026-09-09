@@ -25,8 +25,9 @@ import random
 import statistics
 import time
 from dataclasses import dataclass, replace
+from concurrent.futures import ProcessPoolExecutor
 from math import sqrt
-from multiprocessing import Pool
+from multiprocessing import get_context
 from typing import TYPE_CHECKING, Callable, Sequence
 
 from .actions import apply
@@ -193,6 +194,8 @@ def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
 
     if entrant.kind == "random":
         return RandomBot(rng)
+    if entrant.kind == "catanatron" and entrant.kind not in _ENTRANT_KIND_FACTORIES:
+        _load_presets(("catanatron",))
     if entrant.kind in _ENTRANT_KIND_FACTORIES:
         return _ENTRANT_KIND_FACTORIES[entrant.kind](entrant, board, rng)
     if entrant.kind in _NETWORK_KINDS:
@@ -587,14 +590,24 @@ def compete(
     workers: int = 1,
     antithetic: bool = True,
     records: bool = False,
+    worker_initializer: Callable | None = None,
+    worker_initargs: tuple = (),
+    start_method: str | None = None,
 ) -> Tournament:
     """Run `games` games, rotating the lineup so every entrant sits every seat.
 
     `games` must be a multiple of the lineup size, otherwise the rotation is
     incomplete and the seat bias it exists to cancel leaks into the result.
+    Antithetic runs with odd seat counts require twice that many games to
+    complete both halves of every board pair and balance all seats.
 
     `workers` only changes the wall clock. Results are identical at any worker
     count, which is the property that makes a parallel run quotable.
+    Custom runtimes can register their entrant factories with
+    ``worker_initializer(*worker_initargs)``. It runs once in each worker
+    (or in the calling process for workers=1). With spawn/forkserver the
+    initializer must be importable at module scope. ``start_method`` selects
+    a multiprocessing context without changing the process-wide default.
 
     `records=True` has every job build a `hexset.record.Record` of its own
     game alongside the verdict (`_play_and_record`), returned as
@@ -606,16 +619,29 @@ def compete(
     seats = len(entrants)
     if seats < 2:
         raise ValueError("a tournament needs at least two entrants")
+    if games <= 0:
+        raise ValueError("games must be positive")
+    if workers <= 0:
+        raise ValueError("workers must be positive")
+    if action_cap <= 0:
+        raise ValueError("action_cap must be positive")
     if games % seats:
         raise ValueError(f"{games} games does not divide evenly over {seats} seats")
+    if antithetic and seats % 2 and games % (2 * seats):
+        raise ValueError("antithetic runs with odd seat counts require games divisible by twice the seat count")
 
     lineup = tuple(entrants)
     jobs = [(lineup, i, seed, action_cap, antithetic, records) for i in range(games)]
     started = time.perf_counter()
     if workers > 1:
-        with Pool(workers) as pool:
-            outcomes = pool.map(_play_one, jobs, chunksize=1)
+        with ProcessPoolExecutor(
+            max_workers=workers, mp_context=get_context(start_method),
+            initializer=worker_initializer, initargs=worker_initargs,
+        ) as pool:
+            outcomes = list(pool.map(_play_one, jobs, chunksize=1))
     else:
+        if worker_initializer is not None:
+            worker_initializer(*worker_initargs)
         outcomes = [_play_one(job) for job in jobs]
     elapsed = time.perf_counter() - started
 

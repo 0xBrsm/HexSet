@@ -88,7 +88,6 @@ def test_the_default_arena_lineup_is_the_recorded_one():
 
 def test_the_interleaved_lineup_matches_the_seat_geometry_probe():
     """The lineup and slots `tmp/seat_geometry.py` used for the archived rows."""
-    assert "abab" == "abab"
     assert arena_lineup(A, B, "abab") == ([A, B, A, B], [0, 2], [1, 3])
 
 
@@ -141,12 +140,14 @@ def _fake_compete(seen: dict, points, turns=None, winners=None):
             tuple(winners) if winners is not None else tuple(0 for _ in range(games))
         )
         return Tournament(
-            standings=tuple(Standing(e.name, 1, games) for e in lineup),
+            standings=tuple(Standing(e.name, game_winners.count(i), games)
+                            for i, e in enumerate(lineup)),
             games=games,
             unfinished=sum(1 for w in game_winners if w is None),
             mean_turns=statistics.mean(game_turns) if game_turns else 0.0,
             seconds=0.0,
             winners=game_winners,
+            seating=tuple(tuple(range(len(lineup))) for _ in range(games)),
             points=tuple(points for _ in range(games)),
             turns=game_turns,
         )
@@ -223,3 +224,35 @@ def test_cli_uses_arena_for_every_worker_count(monkeypatch, capsys, workers):
                       "--workers", str(workers), "--no-json"]) == 0
     assert seen["workers"] == workers
     assert '"via": "arena.compete"' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("geometry,winners,expected", [
+    ("bbaa", (0, 2, 3, None), 2),
+    ("random,a,b,random", (0, 1, 2, None), 1),
+])
+def test_duel_counts_side_a_by_slot_even_when_labels_collide(monkeypatch, geometry, winners, expected):
+    monkeypatch.setattr("hexset.arena.compete", _fake_compete({}, POINTS, winners=winners))
+    verdict = _via_arena(_arena_args(), "random", "random", geometry)
+    assert verdict["wins"] == expected
+    assert verdict["win_rate"] == expected / 4
+
+
+def test_duel_intervals_use_board_pairs(monkeypatch):
+    compete = _fake_compete({}, POINTS)
+    def paired(*args, **kwargs):
+        from dataclasses import replace
+        return replace(compete(*args, **kwargs), points=((10, 10, 0, 0), (0, 0, 10, 10)) * 2)
+    monkeypatch.setattr("hexset.arena.compete", paired)
+    verdict = _via_arena(_arena_args(), "a", "b")
+    assert verdict["boards"] == 2
+    assert verdict["paired_vp_low"] == verdict["paired_vp_high"] == 0
+
+
+def test_one_board_verdict_serializes_unestimable_vp_bounds_as_null(monkeypatch):
+    import json
+
+    monkeypatch.setattr("hexset.arena.compete", _fake_compete({}, (10, 3)))
+    verdict = _via_arena(_arena_args(games=2), "a", "b", "ab")
+    assert verdict["paired_vp_low"] is None
+    assert verdict["paired_vp_high"] is None
+    json.dumps(verdict, allow_nan=False)

@@ -1,17 +1,4 @@
-"""What a real `pip install` actually ships.
-
-Every other way this repo gets imported bypasses packaging entirely: the test
-suite puts `src` on the path (`[tool.pytest.ini_options]`), the Docker image
-sets `PYTHONPATH=/app/src` and never installs the package at all, and
-`pip install -e .` reads the source tree in place. All three work fine with a
-`pyproject.toml` that would produce a broken wheel, which is how
-`static/index.html` came to be missing from one once — caught only by building
-and running the image back when it did install the package, as a
-FileNotFoundError on GET /.
-
-So this builds an actual wheel and looks inside it. It is the only test here
-that exercises the packaging config rather than the code.
-"""
+"""Build a clean wheel and verify modules and browser assets are included."""
 
 from __future__ import annotations
 

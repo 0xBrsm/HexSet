@@ -88,9 +88,9 @@ class HexSetEnv(Env):
     The action mask never rides in the observation -- it is always
     `info["action_mask"]`, and `action_masks()` is the `sb3-contrib` hook.
     The learner's seat has no gate seated for it, so it never trades; the
-    opponent seats trade with each other and with the learner's cards
-    only through their own bots' `gains_many`, asked fresh by the engine's
-    own trade event.
+    opponent seats can trade with each other through their bots' optional
+    `gains_many` methods. They cannot trade with the learner without its
+    consent. Use `LaneEnv` to provide a learner trade gate.
     `info["view"]` carries `hexset.view.View`, the seat's full information-set
     object (`known`/`unknown`/`sample`), for a caller that wants more than
     the encoder's arrays.

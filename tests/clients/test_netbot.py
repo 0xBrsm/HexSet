@@ -557,3 +557,28 @@ def test_a_policy_policy_gate_is_seated_where_it_is_installed(board):
     gate = PolicyPolicy(checkpoint.policy, checkpoint).gate(game, 2, 3)
     assert isinstance(gate, NetworkBot)
     assert gate._seated is game and gate.seat == 2 and gate.max_trades == 3
+
+
+def test_seeded_search_also_reproduces_the_trade_gate_worlds(board):
+    checkpoint = stub_checkpoint(board)
+    searches = [searcher_for(checkpoint, simulations=4, rng=random.Random(37))
+                for _ in range(2)]
+    game = seated(searches[0].gate, board)
+    seat = to_move(game)
+    view = game.state(seat)
+    candidates = list(_candidates(game.state(seat, hidden=False), seat, frozenset()))[:3]
+    assert candidates
+    for counterparty, bundle in candidates:
+        # These draws determine the gate's hidden worlds and chance stream.
+        worlds = [search.gate._world_rng(view, counterparty, bundle) for search in searches]
+        assert [worlds[0].random() for _ in range(10)] == [worlds[1].random() for _ in range(10)]
+
+
+def test_plain_checkpoint_adapter_accepts_a_seeded_trade_generator(board):
+    checkpoint = stub_checkpoint(board)
+    bots = [bot_for(checkpoint, rng=random.Random(41)) for _ in range(2)]
+    game = seated(bots[0], board)
+    seat = to_move(game)
+    view = game.state(seat)
+    counterparty, bundle = next(iter(_candidates(game.state(seat, hidden=False), seat, frozenset())))
+    assert bots[0]._world_rng(view, counterparty, bundle).getstate() == bots[1]._world_rng(view, counterparty, bundle).getstate()

@@ -1,20 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""A checkpoint as a seat: bot, leaf evaluation, search, and trade gate.
+"""Runtime-neutral checkpoint adapters for bots, evaluation, search and trading.
 
-Everything here is written against `hexset.clients.policy.Policy` and never
-touches a runtime. Feed it the onnxruntime policy (`hexset.clients.onnxbot`)
-and it serves a `.onnx` file; feed it a torch policy from the training repo
-and it plays a `.pt` checkpoint. The two used to be separate implementations
-of these same four classes, and they drifted three ways in the trade gate
-alone before it was noticed (`agents/reference/hexn-boundary-audit.md`);
-there is one of each now, and a runtime is a `Policy` and nothing more.
-
-The constructors take a `Checkpoint` rather than a path for the same reason:
-finding the file, reading its metadata and building a session is the
-runtime's job, and it is the only part of "play this checkpoint" that differs
-between runtimes. `hexset.clients.onnxbot.spawn(path, board)` is still the
-one entry point a server needs.
-"""
+Constructors accept `Checkpoint` objects. Runtime integrations own loading,
+metadata and encoding; this module uses only the batched `Policy` interface.
+A gate used without `choose` must be installed with `seat_at(game)` before
+trading. Create separate gates for separate games and fixed seats."""
 
 from __future__ import annotations
 
@@ -67,8 +57,7 @@ class NetworkBot:
       seat's estimate of what the exchange does to that seat's chances,
       read by `hexset.trading.default_offer`/`default_respond` so a bot
       offers, and counters with, the candidate best for itself among those
-      it believes the other seat gains from too (`agents/reference/
-      trading-final.md`, "the trade round", items 1-2). By construction
+      it believes the other seat gains from too. By construction
       that prices the risk of handing an opponent win probability: a
       bundle that lifts this seat's row a little and the counterparty's a
       lot is a bad offer, and it reads as one.
@@ -158,9 +147,8 @@ class NetworkBot:
         """This seat's estimate of each `(counterparty, bundle)` candidate's
         *counterparty*-side gain: `V(after)[them] - V(before)[them]` on the
         same two positions `gains_many` scores, from this seat's own frame
-        -- its own belief about the other seat's chances, standing in for
-        the acceptance model the design names (`agents/reference/
-        trading-final.md`, "the trade round", item 1) until one exists.
+        -- its own belief about the other seat's chances, used as an
+        estimate of their willingness to trade.
         """
         if self.max_trades == 0 or self._seated is None or not candidates:
             return [-1.0] * len(candidates)
@@ -390,17 +378,10 @@ class LeafEvaluator:
 
 
 class GatedSearch(Search):
-    """`hexset.mcts.Search` over a checkpoint, with that checkpoint's own
-    trade gate -- `gains_many`, `estimate_many`, `accepts`, `accepts_many`.
+    """Policy/value-guided MCTS with the checkpoint's own trade gate.
 
-    `Search` decides moves and nothing else: it has no `accepts`,
-    `accepts_many` or `gains_many`, so `hexset.trading.valued_many` priced
-    every candidate at -1 for a searched checkpoint -- it never accepted an
-    offer and never made one, while the same checkpoint played plainly
-    (`bot_for`) traded through its value head. Found at the served table
-    2026-09-08: `linear24` (exported `search: mcts`) never traded, `clio`
-    (no search) did. The gate is the plain bot's, seated at the position
-    `choose` was last handed, exactly as `NetworkBot.choose` seats its own.
+    `choose` binds the gate to the live game before searching. Trade
+    acceptance and counterparty estimates delegate to `NetworkBot`.
     """
 
     def __init__(self, evaluator, gate: NetworkBot, **kwargs) -> None:
@@ -429,18 +410,23 @@ class GatedSearch(Search):
         return self.gate.estimate_many(view, candidates)
 
 
-def bot_for(checkpoint: Checkpoint, *, max_trades: int | None = None) -> NetworkBot:
+def bot_for(
+    checkpoint: Checkpoint, *, max_trades: int | None = None,
+    rng: random.Random | None = None,
+) -> NetworkBot:
     """`checkpoint`, playing one position at a time.
 
     `max_trades` of `None` means the trade switch the checkpoint recorded
     training under -- the default that measures a policy on the game it
-    learned. Pass `0` to seat it as its own no-trade referent.
+    learned. Pass `0` to disable this bot's trading. `rng` controls imagined
+    trade continuations; policy action sampling remains the runtime's job.
     """
     return NetworkBot(
         policy=checkpoint.policy,
         space=checkpoint.space,
         players=checkpoint.players,
         max_trades=checkpoint.max_trades if max_trades is None else max_trades,
+        rng=random.Random() if rng is None else rng,
     )
 
 
@@ -462,10 +448,15 @@ def searcher_for(
     wave: int = 16,
     max_trades: int | None = None,
     inference_batch: int | None = None,
-    rng=None,
+    rng: random.Random | None = None,
 ) -> GatedSearch:
     """`checkpoint` as a batched PUCT search, trading through its own
-    value-head gate (`GatedSearch`)."""
+    value-head gate (`GatedSearch`).
+
+    A supplied `rng` seeds both search and a separate trade-gate stream.
+    The policy runtime must seed any stochastic inference of its own.
+    """
+    gate_rng = None if rng is None else random.Random(rng.getrandbits(128))
     budget = checkpoint.max_trades if max_trades is None else max_trades
     return GatedSearch(
         LeafEvaluator(
@@ -473,7 +464,7 @@ def searcher_for(
             space=checkpoint.space,
             pad_to=inference_batch,
         ),
-        bot_for(checkpoint, max_trades=budget),
+        bot_for(checkpoint, max_trades=budget, rng=gate_rng),
         simulations=simulations,
         wave=wave,
         max_trades=budget,
@@ -504,8 +495,7 @@ def register_entrants(loader) -> None:
 
     def spawn_network(entrant, board: Board, rng) -> NetworkBot:
         bot = bot_for(loader(_checkpoint_path(entrant.weights, "network"), board.topology),
-                      max_trades=entrant.max_trades)
-        bot.rng = rng
+                      max_trades=entrant.max_trades, rng=rng)
         return bot
 
     def spawn_mcts(entrant, board: Board, rng) -> GatedSearch:

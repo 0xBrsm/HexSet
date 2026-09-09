@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — reproducible research and training
+
+- Correct side attribution, repeated-bot census exposure and board-paired
+  uncertainty estimates. Retain unfinished games in reported win-rate
+  denominators and identify exploratory weight-selection results.
+- Add versioned experiment documents containing settings, source/runtime
+  provenance, checkpoint hashes and raw outcomes; duel and baseline JSON
+  include these documents. Record/replay remains the trajectory format.
+- Support runtime initialization in spawned arena workers, report initializer
+  failures, and reject incomplete odd-player antithetic rotations.
+- Validate complete lane action batches before advancing games; correct the
+  default encoder perspective during discards and seed network trade gates.
+- Add end-to-end training/replay coverage, a runnable custom-bot example,
+  research documentation, and CI for core and optional integrations.
+
+See [research interfaces](docs/research.md) and [training](docs/training.md)
+for metric migrations, reproducibility assumptions and extension examples.
+
 ## Unreleased — research interface cleanup
 
 - Remove search2, greedy, tiered evaluation and their arena/checkpoint presets.

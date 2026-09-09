@@ -9,6 +9,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.45.1
+
 ### Fixed
 
 - `hexset.bench.versus.PolicyPolicy.gate` seats the `NetworkBot` it builds at the game and seat it is installed for. Unseated, the gate priced every candidate at -1.0 and a network duellist never traded.

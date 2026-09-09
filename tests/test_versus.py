@@ -20,6 +20,7 @@ from hexset import arena
 from hexset.arena import Entrant, compete, wilson
 from hexset.bench.versus import BotPolicy, compete_batched
 from hexset.bots.search2 import options_for
+from hexset.record import replay
 
 SEED = 11
 CAP = 2000
@@ -190,7 +191,12 @@ def test_lane_count_does_not_change_the_verdict():
         two_policies(), 4, players=4, seed=SEED, lanes=8, action_cap=CAP
     )
 
-    assert one.metrics() == many.metrics()
+    # `seconds` is the wall clock, which is exactly what changing the lane
+    # count is meant to change; every other metric is the verdict.
+    def verdict_of(v):
+        return {k: value for k, value in v.metrics().items() if k != "seconds"}
+
+    assert verdict_of(one) == verdict_of(many)
     assert [s.wins for s in one.standings] == [s.wins for s in many.standings]
 
 
@@ -206,3 +212,30 @@ def test_the_win_interval_is_the_arenas_wilson():
     assert verdict.standings[0].interval() == wilson(
         verdict.standings[0].wins, verdict.games
     )
+
+
+def test_records_ride_along_with_the_episodes():
+    """`records=` reaches the lanes, so a duel's episodes carry their games.
+
+    What `Tournament.records` is to `compete`: the games the verdict counted
+    are the games the file holds, because both come out of the one run.
+    """
+    verdict = compete_batched(
+        two_policies(), GAMES, seed=SEED, action_cap=CAP, episodes=True, records=True
+    )
+
+    assert len(verdict.episodes) == GAMES
+    for episode in verdict.episodes:
+        game = replay(episode.record)
+        assert (game.won_by, game.turns) == (
+            episode.outcome.winner,
+            episode.outcome.turns,
+        )
+
+    # A record only reaches a caller on an episode, so asking for records
+    # without them buys nothing and costs nothing.
+    quiet = compete_batched(
+        two_policies(), GAMES, seed=SEED, action_cap=CAP, records=True
+    )
+    assert quiet.episodes == ()
+    assert quiet.metrics()["seconds"] == quiet.seconds

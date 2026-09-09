@@ -18,7 +18,10 @@ import pytest
 from hexset import arena
 from hexset.arena import Entrant, _play_one
 from hexset.bots.search2 import options_for
+from hexset.chance import Live, Recording
 from hexset.gym.lanes import LaneEnv
+from hexset.record import advance, moves, open_record, replay, replay_to
+from hexset.victory import victory_points
 
 SEED = 11
 CAP = 2000
@@ -224,3 +227,80 @@ def test_mask_of_is_legal_mask_over_the_options_in_hand():
     game = deal_game(1, 0, 4)
     space = space_for(game)
     assert mask_of(space, legal_actions(game)) == legal_mask(game, space)
+
+
+def drain_watching(env):
+    """`env.drain()`, holding on to each lane's live `Game` by game index.
+
+    A finished lane is refilled on the spot, so an `Episode` is all a caller
+    normally keeps -- and comparing a record against the game it recorded
+    needs the game itself.
+    """
+    games, episodes = {}, []
+    while env.running:
+        requests = env.requests()
+        for request in requests:
+            games[request.index] = request.game
+        episodes.extend(env.step([None] * len(requests)))
+    return games, episodes
+
+
+def test_a_lane_record_replays_to_the_game_the_lane_played():
+    """The point of `records=True`: the episode carries the game, replayable.
+
+    Checked against the live game the lane actually played, not against the
+    record's own claims -- `hexset.record.replay` already re-checks the
+    winner and the turn count internally, so what is left to prove is that
+    the position it lands on is the position the lane left behind.
+    """
+    env = LaneEnv(4, SEED, 2, deal=2, action_cap=CAP, bots={0: spawn}, records=True)
+    games, episodes = drain_watching(env)
+
+    assert len(episodes) == 2
+    for episode in episodes:
+        played = games[episode.index].state(0, hidden=False)
+        replayed = replay(episode.record).state(0, hidden=False)
+        assert replayed.hands == played.hands
+        assert tuple(victory_points(replayed, s) for s in range(4)) == (
+            episode.outcome.points
+        )
+        # A record's own trade log is the episode's, since both are the one
+        # before/after diff around the same `apply`.
+        assert episode.record.trades == episode.trades
+        assert len(episode.record.actions) == episode.outcome.actions
+
+
+def test_replay_to_is_the_record_stepped_that_far():
+    """`replay_to` is `open_record` + `advance`, and refuses a ply it lacks."""
+    env = LaneEnv(4, SEED, 1, deal=1, action_cap=CAP, bots={0: spawn}, records=True)
+    (episode,) = env.drain()
+    record = episode.record
+    walk = list(moves(record))
+
+    for ply in (0, 1, 17, len(record.actions)):
+        stepped = open_record(record)
+        for _, action, trades in walk[:ply]:
+            advance(stepped, action, trades)
+        got = replay_to(record, ply)
+        assert got.state(0, hidden=False).hands == stepped.state(0, hidden=False).hands
+        assert (got.turns, got.phase, got.current_player) == (
+            stepped.turns,
+            stepped.phase,
+            stepped.current_player,
+        )
+
+    with pytest.raises(ValueError):
+        replay_to(record, len(record.actions) + 1)
+    with pytest.raises(ValueError):
+        replay_to(record, -1)
+
+
+def test_an_environment_not_asked_for_records_does_not_record_chance():
+    """Off by default, and skipped rather than discarded: no `Recording` at all."""
+    plain = LaneEnv(4, SEED, 1, deal=1, action_cap=CAP, bots={0: spawn})
+    assert [type(game.chance) for game in plain.in_flight()] == [Live]
+    (episode,) = plain.drain()
+    assert episode.record is None
+
+    recorded = LaneEnv(4, SEED, 1, deal=1, action_cap=CAP, bots={0: spawn}, records=True)
+    assert [type(game.chance) for game in recorded.in_flight()] == [Recording]

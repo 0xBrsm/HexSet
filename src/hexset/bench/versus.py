@@ -35,6 +35,7 @@ delete.
 
 from __future__ import annotations
 
+import inspect
 import statistics
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -49,6 +50,7 @@ if TYPE_CHECKING:  # annotation-only: no import cost, and no cycle through bots
     from ..actions import Action
     from ..board.board import Board
     from ..bots import Bot
+    from ..clients.policy import Checkpoint, Policy
     from ..game import Game
 
 
@@ -69,6 +71,15 @@ class BatchPolicy(Protocol):
     answers that seat's private trade verdict for that game
     (`hexset.trading`); one that does not is seated as a seat that never
     trades. `BotPolicy` supplies its own bot, which is already a gate.
+
+    A gate written `gate(game, seat, max_trades)` is handed the run's own
+    trade budget instead (`compete_batched`'s `max_trades`, whatever the
+    caller passed). A checkpoint-backed gate needs it: `bot_for`'s budget
+    defaults to the switch the *checkpoint* trained under, so a duel run at
+    `max_trades=0` would otherwise seat a trading gate into a no-trade
+    evaluation and measure a different game than it asked for. Which form a
+    gate takes is read off its signature, so a two-argument gate is
+    unaffected.
     """
 
     def act(self, requests: Sequence[Request]) -> Sequence[object]: ...
@@ -99,6 +110,57 @@ class BotPolicy:
     def gate(self, game: Game, seat: int) -> Bot:
         """The seated bot itself: `hexset.bots.Bot` is already the gate."""
         return self._bot(game)
+
+
+class PolicyPolicy:
+    """A `hexset.clients.policy.Policy` behind `BatchPolicy`.
+
+    A `Policy` is already batched -- `act_rows` takes a whole list of
+    positions and answers one action each -- so this is the adapter and
+    nothing more: the tick's requests as `(game, seat, options)` rows, in
+    order. It exists so that evaluating a checkpoint means loading a runtime
+    and seating it, rather than every caller writing its own eight-line
+    shim and each one differing about what a row is.
+
+    A bare policy is seated as a seat that never trades, which is right for
+    a value-only yardstick and wrong for measuring a checkpoint on the game
+    it learned. Pass the `checkpoint` as well and the seat is gated by
+    `hexset.clients.netbot.bot_for`, the one trade gate a checkpoint has --
+    priced on the run's own trade budget, since `gate` takes it.
+    """
+
+    def __init__(self, policy: Policy, checkpoint: Checkpoint | None = None) -> None:
+        self.policy = policy
+        self.checkpoint = checkpoint
+
+    def act(self, requests: Sequence[Request]) -> list[Action]:
+        return self.policy.act_rows([(r.game, r.seat, r.options) for r in requests])
+
+    def gate(self, game: Game, seat: int, max_trades: int | None = None) -> object:
+        """This seat's trade verdict: the checkpoint's own gate, or none."""
+        if self.checkpoint is None:
+            return None
+        from ..clients.netbot import bot_for
+
+        return bot_for(self.checkpoint, max_trades=max_trades)
+
+
+def _budgeted(
+    gate: Callable[..., object], max_trades: int | None
+) -> Callable[[Game, int], object]:
+    """`gate` as the two-argument seater `hexset.gym.lanes` calls.
+
+    A gate that spells its signature `(game, seat, max_trades)` is asking
+    for the run's trade budget and is given it; every other gate is passed
+    through untouched. Read off the signature rather than switched on by a
+    flag, because the caller seating a policy is not the one that wrote its
+    gate.
+    """
+    try:
+        inspect.signature(gate).bind(None, None, None)
+    except (TypeError, ValueError):
+        return gate
+    return lambda game, seat: gate(game, seat, max_trades)
 
 
 @dataclass(frozen=True)
@@ -162,6 +224,10 @@ class Verdict:
             "turns_max": self.turns_max,
             "exhausted": self.exhausted,
             "truncated": self.truncated,
+            # The wall clock the duel took. A logged evaluation that cannot
+            # say how long it cost is one nobody can budget the next one
+            # from, and `seconds` was on the `Verdict` all along.
+            "seconds": self.seconds,
         }
 
 
@@ -252,6 +318,7 @@ def compete_batched(
     names: Mapping[int, str] | None = None,
     gates: Mapping[int, Callable[[Game, int], object]] | None = None,
     episodes: bool = False,
+    records: bool = False,
 ) -> Verdict:
     """Play `games` games between batched policies and report the verdict.
 
@@ -281,7 +348,14 @@ def compete_batched(
 
     `max_trades` is passed through rather than defaulted, because an
     evaluation that trades where the run did not is measuring a different
-    game.
+    game. It reaches a policy's own gate too, where that gate asks for it
+    (`_budgeted`).
+
+    `records=True` has every episode carry a `hexset.record.Record` of its
+    game (`hexset.gym.lanes.LaneEnv(records=True)`) -- what
+    `arena.Tournament.records` is to `compete`. A record only reaches the
+    caller on an `Episode`, so it is passed through only under
+    `episodes=True` and costs nothing without it.
     """
     if len(policies) < 2:
         raise ValueError("a duel needs at least two policies")
@@ -307,6 +381,7 @@ def compete_batched(
         if gate is not None:
             seated[pid] = gate
     seated.update(gates or {})
+    seated = {pid: _budgeted(gate, max_trades) for pid, gate in seated.items()}
 
     if antithetic:
         if len(ids) != 2:
@@ -337,6 +412,7 @@ def compete_batched(
             caster=cohort_caster,
             gates=seated,
             max_trades=max_trades,
+            records=records and episodes,
         )
         for episode in env.drain(answer):
             readings.setdefault(episode.index, []).append(_read(episode, learner))
@@ -393,6 +469,7 @@ def compete_batched(
 __all__ = [
     "BatchPolicy",
     "BotPolicy",
+    "PolicyPolicy",
     "Verdict",
     "compete_batched",
 ]

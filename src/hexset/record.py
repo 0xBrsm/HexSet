@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import json
 import random
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Iterable, Iterator, Sequence
 
 from .actions import Action, ActionType, apply, legal_actions
@@ -166,6 +166,84 @@ def board_of(record: Record) -> Board:
     )
 
 
+def recording(rng: random.Random) -> Recording:
+    """The chance source a game has to be dealt with to be recordable.
+
+    A function rather than something each loop inlines, because it is the
+    one thing every recording loop must do identically: a `Record`'s
+    `chance` is whatever this wrapper logged, so a loop that wrapped
+    something else would file a stream nobody played. Shaped to hand
+    straight to `hexset.arena.deal_game`'s `chance` seam, which passes in
+    the generator the game would otherwise have drawn from -- so a recorded
+    game is the same game, not a similar one.
+    """
+    return Recording(Live(rng))
+
+
+@dataclass
+class Tape:
+    """A record under construction, collected as the game is played.
+
+    Three loops record a game and they agree on nothing but this: one plays
+    a whole game here in a `while`, one plays a whole game with a cleared-
+    trade census riding along (`hexset.arena._play_and_record`), and one
+    advances a single action per tick alongside every other lane's
+    (`hexset.gym.lanes`). A second builder is precisely how a recorded game
+    comes to differ from the game that was played, so the bookkeeping lives
+    here once: a loop calls `step` where it applies an action and `sealed`
+    where its game ends.
+    """
+
+    actions: list[tuple[int, int, int]] = field(default_factory=list)
+    trades: list[tuple[int, int, int, tuple[int, ...]]] = field(default_factory=list)
+
+    def step(self, action: Action, cleared: Sequence[Trade]) -> None:
+        """File one applied action and the exchanges that cleared inside it.
+
+        `cleared` is the `game.trades` slice taken across that action's own
+        `apply`. The turn's first trade event fires eagerly, inside the ROLL
+        or ROBBER action (`hexset.game.enter_main`), so its exchanges belong
+        to that action's step -- which is exactly where `advance` replays
+        them.
+        """
+        step = len(self.actions)
+        for trade in cleared:
+            self.trades.append((step, trade.a, trade.b, tuple(trade.received)))
+        self.actions.append((int(action.type), action.a, action.b))
+
+    def sealed(self, game: Game, *, seed: int | str | None = None) -> Record:
+        """The finished `Record` of `game`, as this tape watched it played.
+
+        The board, the setup snake's first seat, the winner and the turn
+        count are read off the game rather than passed in, so a caller
+        cannot hand back a record of a game other than the one it stepped.
+        `game` must have been dealt with `recording` above: the chance
+        stream is what that wrapper logged and there is nowhere else to get
+        it from, so a game dealt without it is refused rather than sealed
+        into a record that cannot replay.
+        """
+        chance = game.chance
+        if not isinstance(chance, Recording):
+            raise TypeError(
+                "a recorded game must be dealt with hexset.record.recording as "
+                f"its chance source, not {type(chance).__name__}"
+            )
+        # true state: the board is public either way, and `state(0)` is the
+        # accessor every caller in this package already reads it through.
+        board = game.state(0, hidden=False).board
+        return Record(
+            num_players=game.num_players,
+            seed=seed,
+            first=game.first,
+            actions=tuple(self.actions),
+            chance=tuple(chance.events),
+            trades=tuple(self.trades),
+            winner=game.won_by,
+            turns=game.turns,
+            **board_fields(board),
+        )
+
+
 def record_game(
     bots: Sequence[Bot],
     board: Board,
@@ -178,40 +256,20 @@ def record_game(
     The bots are seated as the game's `gates` too, and a gate is a pure
     function of the position, asked fresh at every trade event -- there is
     nothing this loop has to publish, so it trades the way `arena.play`
-    does: seat the gates and step the game. The turn's first trade event
-    fires eagerly, inside the ROLL or ROBBER action's own `apply` (via
-    `enter_main`), so its trades are already captured by the ordinary
-    before/after `game.trades` diff around `apply` below, attributed to
-    that action's own step -- exactly where `advance` already knows to
-    replay them (`apply(the action); apply_trades(...)`).
+    does: seat the gates and step the game.
     """
     rng = random.Random(seed)
-    recording = Recording(Live(rng))
-    game = start(board, len(bots), rng, chance=recording)
+    game = start(board, len(bots), rng, chance=recording(rng))
     game.gates = tuple(bots)
-    actions: list[tuple[int, int, int]] = []
-    trades: list[tuple[int, int, int, tuple[int, ...]]] = []
-    while not is_over(game) and len(actions) < action_cap:
+    tape = Tape()
+    while not is_over(game) and len(tape.actions) < action_cap:
         seat = to_move(game)
         bot = bots[seat]
         before = len(game.trades)
         action = bot.choose(game)
         apply(game, action)
-        for trade in game.trades[before:]:
-            trades.append((len(actions), trade.a, trade.b, tuple(trade.received)))
-        actions.append((int(action.type), action.a, action.b))
-
-    return Record(
-        num_players=len(bots),
-        seed=seed,
-        first=game.first,
-        actions=tuple(actions),
-        chance=tuple(recording.events),
-        trades=tuple(trades),
-        winner=game.won_by,
-        turns=game.turns,
-        **board_fields(board),
-    )
+        tape.step(action, game.trades[before:])
+    return tape.sealed(game, seed=seed)
 
 
 def actions_of(record: Record) -> Iterator[Action]:
@@ -382,6 +440,42 @@ def replay(record: Record) -> Game:
             f"replay ended {game.won_by} after {game.turns} turns, "
             f"record says {record.winner} after {record.turns}"
         )
+    return game
+
+
+def replay_to(record: Record, ply: int) -> Game:
+    """The live `Game` after `ply` of `record`'s recorded actions.
+
+    `ply` counts actions applied, so `replay_to(record, 0)` is the opening
+    position (`open_record`) and `replay_to(record, len(record.actions))` is
+    the final one -- the same game `replay` ends on, without its legality
+    and outcome checks. A driver that wants a stored position back -- to
+    re-search it, to re-encode it under a new feature layout -- wants this
+    and nothing else: a record is the one replay path, and re-deriving a
+    position from a seed and an action stream is a second one that can
+    disagree with it.
+
+    Trades are applied as recorded (`advance`), because a replayed game
+    seats no gates and its own trade event therefore never fires; a walk
+    that only re-applied the actions would play a trade-free game however
+    the table actually traded.
+
+    A `ply` outside the record is refused rather than clamped: asking for a
+    position a record does not hold is a bug in the caller's indexing, and
+    silently handing back the last one it does hold would answer it with a
+    wrong position that looks like a right one.
+    """
+    if ply < 0:
+        raise ValueError("a ply is a non-negative number of actions applied")
+    if ply > len(record.actions):
+        raise ValueError(
+            f"record holds {len(record.actions)} actions, ply {ply} asked for more"
+        )
+    game = open_record(record)
+    for taken, (actor, action, trades) in enumerate(moves(record)):
+        if taken >= ply:
+            break
+        advance(game, action, trades, actor)
     return game
 
 

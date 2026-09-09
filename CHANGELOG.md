@@ -1,60 +1,40 @@
 # Changelog
 
-## Unreleased — consolidation
+Changes to the HexSet distribution. The project follows
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-- Use standard JSON for experiment persistence; retain provenance, checkpoint
-  change detection, raw outcomes and entrant-accounting validation.
-- Compute baseline summaries once and accumulate census totals without
-  retaining a second set of per-trade lists.
-- Remove retired-search value-head wrappers and unused action-space fields
-  from network adapters. Batched Policy evaluation, collection and MCTS stay
-  on their existing interfaces; migration details are in the research guide.
+## 0.46.0
 
-## Unreleased — reproducible research and training
+This release changes public APIs and benchmark result semantics. HexSet remains
+in the 0.x development series. See the [migration guide](docs/research.md#removed-interfaces).
 
-- Correct side attribution, repeated-bot census exposure and board-paired
-  uncertainty estimates. Retain unfinished games in reported win-rate
-  denominators and identify exploratory weight-selection results.
-- Add versioned experiment documents containing settings, source/runtime
-  provenance, checkpoint hashes and raw outcomes; duel and baseline JSON
-  include these documents. Record/replay remains the trajectory format.
-- Support runtime initialization in spawned arena workers, report initializer
-  failures, and reject incomplete odd-player antithetic rotations.
-- Validate complete lane action batches before advancing games; correct the
-  default encoder perspective during discards and seed network trade gates.
-- Add end-to-end training/replay coverage, a runnable custom-bot example,
-  research documentation, and CI for core and optional integrations.
+### Removed
 
-See [research interfaces](docs/research.md) and [training](docs/training.md)
-for metric migrations, reproducibility assumptions and extension examples.
+- Search2, greedy, tiered evaluation, their presets, and retired checkpoint
+  registration paths. Heximax and Catanatron are the handcrafted baselines.
+- The obsolete journal-census parser, external duel backend, network evaluator
+  wrappers and unused adapter action-space arguments.
 
-## Unreleased — research interface cleanup
+### Changed
 
-- Remove search2, greedy, tiered evaluation and their arena/checkpoint presets.
-- Move shared bot protocols, random policy and scoring objectives into dedicated
-  modules; centralize legal-action helpers in `hexset.actions`.
-- Use the arena for duels at every worker count and for profiling; update
-  ablations and default research lineups to Heximax.
-- Remove the obsolete journal-census parser and machine-specific worker caps.
-- Isolate optional ONNX imports, consolidate test helpers, and build packaging
-  tests in managed temporary directories.
-- Install Docker dependencies from project metadata and update public guides.
-
-See [research interfaces and migration](docs/research.md) for removed APIs.
-
-
-All notable changes to HexSet are recorded here — the `hexset` engine, its
-bots (`hexset.bots`), `hexset.bench`, `hexset.server`, `hexset.clients` and
-`hexset.gym`, shipped from `src/` as one distribution.
-
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
-project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## Unreleased
+- Consolidate legal-action helpers, bot interfaces, benchmark statistics and
+  provenance. Duels and profiling use the arena; census aggregation uses totals.
+- Correct duel side attribution and census seat exposure. Win-rate denominators
+  include unfinished games; uncertainty estimates account for paired boards.
+- Include settings, checkpoint hashes and raw outcomes in benchmark JSON.
+  Replay records remain the trajectory format; JSON persistence uses the standard library.
+- Support custom runtime initialization in spawned workers and reject incomplete
+  odd-player antithetic rotations.
+- Validate complete lane action batches before advancing games, correct the
+  encoder perspective during discards and seed network trade gates.
+- Update research and training documentation, add a runnable bot example and
+  CI coverage for core and optional integrations, and consolidate test setup.
+- Install Docker dependencies from project metadata and load ONNX Runtime only
+  where model inference needs it.
 
 ### Fixed
 
-- **A finished game is read-only in the browser for the seat that played it, not just for a spectator.** The page asked `watching()` — *do I hold a seat here* — before deciding whether the player list was editable, and a seat at a game that is over is still a seat, so whoever played the game went on being shown a live name box on their own row and a live model picker on every bot's. Every one of those was a request the server already refused (`api._not_over`: 409 "the game is already over"), so the table looked live and answered dead. Those rows now read as text and open a seat's hand instead, which is what they were always for once every hand is revealed — the same list a spectator has had all along, minus the guessing about whose cards are whose.
+- Finished games are read-only in the browser for seated players as well as spectators.
 
 ## 0.45.1
 

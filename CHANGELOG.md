@@ -30,16 +30,11 @@ Changes to the HexSet distribution. The project follows
   the highlighted row both announced the next player's turn while the table
   sat waiting for the seat that still had it.
 
-- **The board's banner names the action on offer, not the phase.** The two
-  agreed almost everywhere -- `PHASE_LABELS` reads as a list of verbs because
-  most phases hold exactly one kind of action -- but a seat holding its setup
-  turn open is offered `END_TURN` while the engine's phase has already moved
-  on to the next seat's `SETUP_SETTLEMENT`, so the banner said "PLACE
-  SETTLEMENT" at a seat with nothing to place. Where one kind of action is
-  offered the banner now names it; where several are (`MAIN`, or `ROLL` with
-  a Knight in hand) the phase label is still the summary. A Main phase with
-  nothing affordable left now reads "END YOUR TURN" rather than naming three
-  things the seat cannot do.
+- **The board's banner said "PLACE SETTLEMENT" at a seat with nothing to
+  place.** A seat holding its setup turn open has already placed, and the
+  engine's phase has moved on to the *next* seat's `SETUP_SETTLEMENT`, which
+  is what the banner was reading. It now names ending the turn, which while
+  held is the only thing the seat can do.
 
   Scoped to seats whose client `kind` is `"web"`, and nothing else:
 

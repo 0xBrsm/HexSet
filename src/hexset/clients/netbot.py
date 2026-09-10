@@ -19,7 +19,8 @@ from hexset.game import Game, imagine, is_over, to_move
 from hexset.mcts import Search
 from hexset.actions import options_for
 from hexset.state import copy_state
-from hexset.trading import NETWORK_GATE_ROWS, exchange
+from hexset.clients.modelmeta import DEFAULT_GATE_ROWS, DEFAULT_TRADE_FLOOR, gate_config_of
+from hexset.trading import exchange
 from hexset.view import View
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -64,19 +65,22 @@ class NetworkBot:
     * `accepts`/`accepts_many` -- `gains_many` thresholded at strictly
       positive.
 
-    `trade_floor` is `0.0`: this gate's resolution has not been measured
-    (heximax's has, `hexset.bots.heximax.HEXIMAX_TRADE_FLOOR`); its gains
-    are in win probability, so a paired-chance measurement would replace it.
+    `trade_floor` and `gate_rows` are the checkpoint's own, read off the
+    file it was loaded from (`hexset.clients.modelmeta.gate_config`) and
+    passed in by `bot_for`. A floor measured against one value head says
+    nothing about another's, so neither is a constant of this module: the
+    defaults below are what a checkpoint that declares nothing gets.
     """
 
     policy: Policy
     players: int
     max_trades: int | None = None
-    # This gate's clearing floor (`hexset.trading.trade_floor_of`): `accepts`
-    # is a strict value-head comparison and `gains_many` reads +1/-1 off it,
-    # so there is no resolution for a floor to express; strict positivity is
-    # the whole gate.
-    trade_floor: float = 0.0
+    # This gate's clearing floor (`hexset.trading.trade_floor_of`) and its
+    # own bound on how many of a trade event's candidates one batched
+    # forward scores. Defaults are the unmeasured case: strict positivity is
+    # the whole gate, and `DEFAULT_GATE_ROWS` candidates get looked at.
+    trade_floor: float = DEFAULT_TRADE_FLOOR
+    gate_rows: int = DEFAULT_GATE_ROWS
     # Which seat this bot is installed at, or `None` for a bot that answers
     # whatever seat the view names (the arena spawns one bot per seat and
     # never asks it about another). When set, the view must agree: a gate
@@ -207,16 +211,16 @@ class NetworkBot:
         nothing here touches the live table or reads its deck.
 
         Every candidate two cards or fewer a side (`_is_small`) is scored;
-        the rest fill whatever is left of `NETWORK_GATE_ROWS` in the order
-        the engine enumerated them -- the stated cost bound on this gate's
-        own evaluation. A candidate `seat` cannot cover is never scored.
+        the rest fill whatever is left of `gate_rows` in the order the
+        engine enumerated them -- this checkpoint's own stated cost bound on
+        its evaluation. A candidate `seat` cannot cover is never scored.
         """
         game = self._seated
         assert game is not None  # callers check this first
         hand = list(view.known[seat])
         small = [i for i, bundle in enumerate(received) if _is_small(bundle)]
         rest = [i for i in range(len(received)) if not _is_small(received[i])]
-        order = (small + rest)[: max(NETWORK_GATE_ROWS, len(small))]
+        order = (small + rest)[: max(self.gate_rows, len(small))]
         mover = to_move(game)
 
         worlds: list[Game] = []
@@ -401,11 +405,18 @@ def bot_for(
     training under -- the default that measures a policy on the game it
     learned. Pass `0` to disable this bot's trading. `rng` controls imagined
     trade continuations; policy action sampling remains the runtime's job.
+
+    The gate's floor and row bound come from the checkpoint too, for the
+    same reason: they describe the exported model, not this adapter. A
+    checkpoint that declares neither is read at the unmeasured defaults.
     """
+    gate = gate_config_of(checkpoint)
     return NetworkBot(
         policy=checkpoint.policy,
         players=checkpoint.players,
         max_trades=checkpoint.max_trades if max_trades is None else max_trades,
+        trade_floor=gate.trade_floor,
+        gate_rows=gate.rows,
         rng=random.Random() if rng is None else rng,
     )
 

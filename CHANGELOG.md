@@ -5,6 +5,23 @@ Changes to the HexSet distribution. The project follows
 
 ## Unreleased
 
+### Added
+
+- `trade_floor` and `gate_rows` ONNX metadata keys: a checkpoint's clearing
+  floor and its trade gate's per-event row bound are now read off the file
+  (`hexset.clients.modelmeta.gate_config`) and carried onto the bot by
+  `hexset.clients.netbot.bot_for`. Both are properties of the exported value
+  head — a floor measured against one checkpoint says nothing about
+  another's — so they no longer sit as one constant applied to every
+  checkpoint alike. A file declaring neither is read at the previous
+  behaviour, `0.0` and `32`. `trade_floor` is clamped to `[0.0, 1.0]` and
+  `gate_rows` to `512`; both fall back to their defaults when unreadable,
+  the same bargain `simulations` and `wave` already strike.
+
+  Both are read off a checkpoint by name rather than required of it
+  (`gate_config_of`), so a loader in another repo that has not adopted them
+  still spawns a bot, at the behaviour it had before the keys existed.
+
 ### Changed
 
 - **`GET /api/version` answers for the API, not for the build.** It returns
@@ -22,7 +39,16 @@ Changes to the HexSet distribution. The project follows
   became the trade round), `4` at 0.46.0 (`search2` stopped being seatable by
   name).
 
+- **`hexset.server.modelmeta` is now `hexset.clients.modelmeta`.** It imports
+  no runtime and is no longer server-only: the runtime-neutral
+  `hexset.clients.netbot` reads the gate settings from it too. Update the
+  import path; nothing else about the module changed.
+
 ### Removed
+
+- **`hexset.trading.NETWORK_GATE_ROWS`**: a network gate's cost bound living
+  in the engine's trading module. Read `NetworkBot.gate_rows` instead, or
+  `hexset.clients.modelmeta.DEFAULT_GATE_ROWS` for the value it held.
 
 - **`hexset.build_info()`.** The git commit it carried only ever mattered as
   research provenance, and that already lives in

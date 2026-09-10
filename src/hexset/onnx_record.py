@@ -65,7 +65,7 @@ from .game import Game, to_move
 from .state import NO_OWNER
 from .victory import award_points
 
-# `hexset.server.modelmeta`/`onnxbot._load_cached` read this off the exported
+# `hexset.clients.modelmeta`/`onnxbot._load_cached` read this off the exported
 # graph's metadata: `"1"` (absent) is the old feature-tensor-in shape; `"2"`
 # the 23-input record; `"3"` contract 2 plus the four live-offer record
 # fields (trading design part 1); `"4"` contract 3 plus the two

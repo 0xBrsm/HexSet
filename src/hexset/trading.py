@@ -138,12 +138,11 @@ def trade_floor_of(gate: object) -> float:
     claim no outcome can verify, and the table does not honour it.
 
     The floor is a property of the gate, not of the table: every seat's
-    gate declares its own (`hexset.bots.heximax.HEXIMAX_TRADE_FLOOR`, the
-    one measured so far; `0.0` for a boolean gate such as a network
-    checkpoint's, whose +1/-1 has no resolution to speak of), and there is
-    no engine default -- a gate that prices a candidate positive without
-    declaring one is refused loudly rather than judged by a number that was
-    measured on some other gate.
+    gate declares its own -- heximax from its own measurement, a checkpoint
+    from its file's metadata, `0.0` for a gate whose resolution has not been
+    measured -- and there is no engine default. A gate that prices a
+    candidate positive without declaring one is refused loudly rather than
+    judged by a number that was measured on some other gate.
     """
     floor = getattr(gate, "trade_floor", None)
     if floor is None:
@@ -167,18 +166,6 @@ def clears_floor(gain: float, gate: object) -> bool:
     if gain <= 0.0:
         return False
     return gain > trade_floor_of(gate)
-
-
-# How many of a trade event's candidates a network gate will score, at most,
-# in its one batched forward -- a network gate's own bound on its evaluation,
-# not a bound the engine itself places on the candidate set (see
-# `hexset.clients.onnxbot.NetworkBot.accepts_many`, which reads this).
-# Registered fallback (`agents/reference/trading-design.md`'s post-data note,
-# "gate re-run with batched gates: 3.0-3.3x, still failing"): batching cut
-# calls, not rows -- ~85% of events clear nothing, so a batched ask over
-# every clearing candidate still scores everything a sequential ask would
-# have stopped short of.
-NETWORK_GATE_ROWS = 32
 
 
 class Trade(NamedTuple):

@@ -58,7 +58,7 @@ from hexset.actions import build_space
 from hexset.bots import Bot
 
 from hexset.server.constants import RECORD_CONTRACTS, TOKEN_HEADER
-from hexset.server.modelmeta import search_config
+from hexset.clients.modelmeta import search_config
 from hexset.server.webplay import action_to_wire
 
 

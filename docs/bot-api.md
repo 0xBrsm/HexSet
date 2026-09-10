@@ -25,6 +25,8 @@ ONNX `metadata_props` values are strings.
 | `search` | `mcts` enables search using the graph's priors and values | Any other value: direct policy inference |
 | `simulations` | Search descents per decision | 128; maximum 4096 |
 | `wave` | Leaves evaluated per search wave | 16; maximum 256 |
+| `trade_floor` | This checkpoint's measured clearing floor, in win probability | 0.0; clamped to `[0.0, 1.0]` |
+| `gate_rows` | Candidates this checkpoint's trade gate scores per event | 32; maximum 512 |
 | `iteration` | Training iteration, retained as model information | 0; must parse as an integer when present |
 
 The embedded loader checks the three board counts against the target
@@ -33,8 +35,14 @@ graph must also use the same board indexing as the engine.
 
 Search settings are read only for `search=mcts`. Missing, malformed, zero,
 or negative `simulations` and `wave` values use their defaults; values above
-the maximum are capped. This fallback does not apply to other integer
-metadata, where malformed values fail loading.
+the maximum are capped. `trade_floor` and `gate_rows` fall back the same
+way. This fallback does not apply to other integer metadata, where
+malformed values fail loading.
+
+`trade_floor` and `gate_rows` describe the exported value head, not the
+Python adapter: a floor measured against one checkpoint says nothing about
+another's, so each file carries its own. A checkpoint whose resolution has
+not been measured declares no floor, and any strictly positive gain clears.
 
 Inference device selection belongs to the host's `--device` option. It is
 not read from model metadata.
@@ -172,7 +180,10 @@ Boolean `accepts` or `accepts_many` gates are mapped to gains of +1 or −1;
 a bot with no supported gate declines trades.
 
 `hexset.clients.netbot.NetworkBot` supplies the shared network trade gate,
-including for ONNX policies and embedded MCTS. Its `trade_floor` is `0.0`.
+including for ONNX policies and embedded MCTS. Its `trade_floor` and
+`gate_rows` come from the checkpoint it was loaded from — see
+[model metadata](#model-metadata) — defaulting to `0.0` and `32` for a file
+that declares neither.
 For each candidate it samples a belief world consistent with the seat's
 information, then compares continuations with and without the exchange.
 Both hands and the ledger change in the exchanged world. The current mover's
@@ -182,8 +193,9 @@ positions from the evaluating seat's perspective. Its own row supplies the
 gain; the counterparty's row supplies the estimate of the other side's gain.
 
 Every candidate with at most two cards per side is evaluated. Larger bundles
-fill any remaining places up to `NETWORK_GATE_ROWS` (32); unscored candidates
-are declined. Thus 32 is not a hard cap when there are more small bundles.
+fill any remaining places up to the gate's `gate_rows`; unscored candidates
+are declined. So `gate_rows` is not a hard cap when there are more small
+bundles.
 These are Python adapter behaviors, not additional graph inputs or outputs.
 The external `RecordBrain` client has no trade gate and rejects search models.
 

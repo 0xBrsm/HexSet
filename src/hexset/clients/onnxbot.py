@@ -53,7 +53,7 @@ from hexset.game import Game
 from hexset.mcts import Search
 from hexset.onnx_record import record_from_game
 from hexset.server.constants import RECORD_CONTRACTS
-from hexset.server.modelmeta import SearchConfig, search_config
+from hexset.clients.modelmeta import GateConfig, SearchConfig, gate_config, search_config
 from hexset.actions import options_for
 
 # What this module has always exported. `NetworkBot` and the other three are
@@ -229,6 +229,15 @@ class Loaded:
     max_trades: int | None
     iteration: int
     search: SearchConfig = SearchConfig()
+    gate: GateConfig = GateConfig()
+
+    @property
+    def trade_floor(self) -> float:
+        return self.gate.trade_floor
+
+    @property
+    def gate_rows(self) -> int:
+        return self.gate.rows
 
 
 @lru_cache(maxsize=4)
@@ -286,6 +295,7 @@ def _load_cached(
         max_trades=int(max_trades) if max_trades is not None else None,
         iteration=int(meta.get("iteration", 0)),
         search=search_config(meta),
+        gate=gate_config(meta),
     )
 
 

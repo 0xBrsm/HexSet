@@ -32,6 +32,7 @@ from hexset.clients.netbot import (
 )
 from hexset.game import Phase, run_trade_event, start, to_move
 from hexset.actions import options_for
+from hexset.clients.modelmeta import DEFAULT_GATE_ROWS, DEFAULT_TRADE_FLOOR, MAX_GATE_ROWS
 from hexset.trading import _candidates, valued_many
 
 # Five distinct weights, as in `fixtures/build_stub.py --valued`, but read
@@ -87,6 +88,8 @@ class StubCheckpoint:
     space: ActionSpace
     players: int = PLAYERS
     max_trades: int | None = None
+    trade_floor: float = DEFAULT_TRADE_FLOOR
+    gate_rows: int = DEFAULT_GATE_ROWS
 
 
 def stub_checkpoint(board) -> StubCheckpoint:
@@ -134,7 +137,7 @@ def check_gate_is_self_consistent(bot, game):
     assert valued_many(bot, view, received, thems) == gains
     assert bot.accepts_many(view, received, thems) == [g > 0.0 for g in gains]
     # One at a time agrees with the batch, for a handful of candidates the
-    # batch actually scored (one past `NETWORK_GATE_ROWS` reads `-1.0` in the
+    # batch actually scored (one past the gate's `gate_rows` reads `-1.0` in the
     # batch and is scored for real when asked alone, which is the cap's
     # documented behaviour, not a disagreement).
     spot = [(i, r, c) for i, (r, c) in enumerate(zip(received, thems)) if gains[i] != -1.0]
@@ -151,6 +154,64 @@ def check_gate_is_self_consistent(bot, game):
     assert bot.gains_many(view, [short], [thems[0]]) == [-1.0]
     assert game.state(seat, hidden=False).hands[seat] == hand
     return gains
+
+
+def test_the_gate_settings_are_the_checkpoints_own_not_the_adapters(board):
+    """A floor measured against one value head says nothing about another's,
+    and the row bound prices one checkpoint's forward. Both ride on the
+    checkpoint (`hexset.clients.modelmeta.gate_config` reads them off the
+    file), so `bot_for` must carry them over rather than seat every
+    checkpoint alike at this module's defaults."""
+    default = bot_for(stub_checkpoint(board))
+    assert (default.trade_floor, default.gate_rows) == (DEFAULT_TRADE_FLOOR, DEFAULT_GATE_ROWS)
+
+    from dataclasses import replace
+
+    declared = replace(stub_checkpoint(board), trade_floor=0.0197, gate_rows=4)
+    bot = bot_for(declared)
+    assert bot.trade_floor == 0.0197
+    assert bot.gate_rows == 4
+    # And the search built over the same checkpoint reads the same floor.
+    assert searcher_for(declared, simulations=2, wave=2).trade_floor == 0.0197
+
+
+def test_a_checkpoint_predating_these_keys_still_seats_and_trades(board):
+    """The two keys are read by name, not required by inheritance: a loader
+    in another repo that has never heard of them still spawns a bot, at the
+    behaviour it had before they existed. This is the training repo's own
+    checkpoint class, which `bot_for` must keep accepting."""
+    @dataclass(frozen=True)
+    class OlderCheckpoint:
+        policy: HandValuePolicy
+        space: ActionSpace
+        players: int = PLAYERS
+        max_trades: int | None = None
+
+    space = stub_checkpoint(board).space
+    bot = bot_for(OlderCheckpoint(policy=HandValuePolicy(space=space), space=space))
+    assert (bot.trade_floor, bot.gate_rows) == (DEFAULT_TRADE_FLOOR, DEFAULT_GATE_ROWS)
+    check_gate_is_self_consistent(bot, seated(bot, board))
+
+
+def test_the_row_bound_is_what_actually_caps_the_batch(board):
+    """`gate_rows` is a real cost bound, not a recorded number: a gate given
+    a small one scores fewer candidates for real, and the rest read `-1.0`.
+    Every candidate two cards or fewer a side is scored regardless, so the
+    cap is measured against the large ones."""
+    def large_unscored(rows: int) -> int:
+        from dataclasses import replace
+
+        bot = bot_for(replace(stub_checkpoint(board), gate_rows=rows))
+        game = seated(bot, board)
+        seat = to_move(game)
+        view = game.state(seat)
+        candidates = list(_candidates(game.state(seat, hidden=False), seat, frozenset()))
+        received = [b for _, b in candidates]
+        thems = [c for c, _ in candidates]
+        gains = bot.gains_many(view, received, thems)
+        return sum(1 for g in gains if g == -1.0)
+
+    assert large_unscored(1) > large_unscored(MAX_GATE_ROWS)
 
 
 def test_a_runtime_free_policy_drives_the_bot_and_its_gate(board):

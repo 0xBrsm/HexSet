@@ -1,7 +1,7 @@
 """What a checkpoint declares about itself, and what is done with it.
 
 These bounds are the only thing standing between a typo'd export and a hung
-seat, and `hexset.server.modelmeta` is importable without a runtime wheel so they
+seat, and `hexset.clients.modelmeta` is importable without a runtime wheel so they
 can be checked on a machine that cannot load a session at all — which is the
 usual development machine here.
 """
@@ -10,7 +10,17 @@ from __future__ import annotations
 
 import pytest
 
-from hexset.server.modelmeta import MAX_SIMULATIONS, MAX_WAVE, SearchConfig, search_config
+from hexset.clients.modelmeta import (
+    DEFAULT_GATE_ROWS,
+    MAX_GATE_ROWS,
+    MAX_SIMULATIONS,
+    MAX_TRADE_FLOOR,
+    MAX_WAVE,
+    GateConfig,
+    SearchConfig,
+    gate_config,
+    search_config,
+)
 
 
 def test_a_checkpoint_that_says_nothing_is_played_as_a_single_forward():
@@ -63,3 +73,43 @@ def test_an_unreadable_budget_falls_back_instead_of_failing_the_load(value):
     config = search_config({"search": "mcts", "simulations": value})
     assert config.searches
     assert config.simulations == 128
+
+
+def test_a_checkpoint_that_declares_no_gate_is_read_as_unmeasured():
+    """The floor is a property of the value head that was exported, and an
+    unmeasured one has no resolution to express: strict positivity is then
+    the whole gate (`hexset.trading.clears_floor`)."""
+    assert gate_config({}) == GateConfig()
+    assert gate_config({}).trade_floor == 0.0
+    assert gate_config({}).rows == DEFAULT_GATE_ROWS
+
+
+def test_a_checkpoint_carries_its_own_measured_floor_and_row_bound():
+    config = gate_config({"trade_floor": "0.0197", "gate_rows": "64"})
+    assert config.trade_floor == pytest.approx(0.0197)
+    assert config.rows == 64
+
+
+@pytest.mark.parametrize(
+    "meta, floor, rows",
+    [
+        ({"trade_floor": "9.5"}, MAX_TRADE_FLOOR, DEFAULT_GATE_ROWS),
+        ({"trade_floor": "-0.5"}, 0.0, DEFAULT_GATE_ROWS),
+        ({"gate_rows": "10000000"}, 0.0, MAX_GATE_ROWS),
+    ],
+)
+def test_an_absurd_gate_setting_is_clamped_rather_than_honoured(meta, floor, rows):
+    """A negative floor is refused outright by `hexset.trading.trade_floor_of`,
+    so it is pulled to zero here rather than loaded and raised on at the first
+    trade event; gains are win probabilities, so nothing above 1.0 is a floor
+    any gain could clear."""
+    config = gate_config(meta)
+    assert config.trade_floor == floor
+    assert config.rows == rows
+
+
+@pytest.mark.parametrize("value", ["", "not-a-number", "nan"])
+def test_an_unreadable_floor_falls_back_instead_of_failing_the_load(value):
+    """Same bargain the search budget strikes -- and `nan` in particular would
+    compare false against every gain, silently muting the seat's trading."""
+    assert gate_config({"trade_floor": value}).trade_floor == 0.0

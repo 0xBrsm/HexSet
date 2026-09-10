@@ -98,12 +98,12 @@ def provenance() -> str:
     the dist-info as `direct_url.json`, so read it back and stamp it on every
     report. A recorded eval without this cannot be reproduced or compared.
 
-    `seed` and `workers` belong here for the same reason and it is the less
-    obvious half: `run_duel` derives one seed per *shard* as `seed + i`, so the
-    shard count -- and therefore the actual set of games played -- is a function
-    of `--workers`. Two runs at the same `--seed` and different `--workers` play
-    different games. A 500-game pair measured this way differed by 4 points on
-    one checkpoint, which is why this line exists.
+    `seed` and `workers` belong here for the same reason. `seed` still selects
+    the games: game `g` (0-based over the duel) always starts from
+    `random.seed(seed + g)`, so the set of games played no longer depends on
+    `--workers` -- the same `--seed` plays the same games at any worker count.
+    `workers` is stamped anyway: it still decides the shard plan, hence the
+    wall-clock time and the exact process layout the games ran under.
 
     `PYTHONHASHSEED` is the third thing that has to match for a *reproducibility*
     check (not the reading itself -- see `_ensure_pythonhashseed_zero`) to be
@@ -144,8 +144,8 @@ class DuelResult:
             f"({self.games / self.seconds:.2f} games/sec)",
             f"  {provenance()} | seed {self.seed} | workers {self.workers} "
             f"| {shard_plan(self.games, self.workers)[1]} shards "
-            f"of {shard_plan(self.games, self.workers)[0]}, seeds "
-            f"{self.seed}-{self.seed + shard_plan(self.games, self.workers)[1] - 1}",
+            f"of {shard_plan(self.games, self.workers)[0]}; "
+            f"game g plays seed {self.seed}+g",
         ]
         for color, label in self.labels.items():
             w = self.wins.get(color, 0)
@@ -159,12 +159,29 @@ class DuelResult:
         return "\n".join(lines)
 
 
-def _play_chunk(args: tuple[str, int, int]) -> tuple[dict, dict]:
-    players_spec, num_games, seed = args
-    random.seed(seed)
+def _play_chunk(args: tuple[str, int, int, int]) -> tuple[dict, dict]:
+    """Play games [start, start + count), one `play_batch(1, ...)` at a time.
+
+    Game `g` always starts from `random.seed(seed + g)`, so the duel plays the
+    same games whatever `--workers` shards them into. `play_batch` draws each
+    game's catanatron seed (`Game.seed`) from the global `random` stream, and
+    the HexSet bot's own RNG is derived from that seed per seat (`player.py`),
+    so reseeding the global stream per game pins everything downstream -- dice,
+    map, bot beliefs, steal/draw resolution -- to the duel seed and the game
+    index alone.
+    """
+    players_spec, start, count, seed = args
     players = parse_cli_string(players_spec)
-    wins, results_by_player, _games = play_batch(num_games, players, quiet=True)
-    return dict(wins), dict(results_by_player)
+    wins: dict[Color, int] = {}
+    points: dict[Color, list[int]] = {}
+    for g in range(start, start + count):
+        random.seed(seed + g)
+        game_wins, game_points, _games = play_batch(1, players, quiet=True)
+        for color, n in game_wins.items():
+            wins[color] = wins.get(color, 0) + n
+        for color, vps in game_points.items():
+            points.setdefault(color, []).extend(vps)
+    return wins, points
 
 
 def run_duel(players_spec: str, num_games: int, workers: int, seed: int = 0) -> DuelResult:
@@ -174,13 +191,14 @@ def run_duel(players_spec: str, num_games: int, workers: int, seed: int = 0) -> 
 
     shard_size, _ = shard_plan(num_games, workers)
     chunks = []
-    remaining = num_games
-    i = 0
-    while remaining > 0:
-        n = min(shard_size, remaining)
-        chunks.append((players_spec, n, seed + i))
-        remaining -= n
-        i += 1
+    start = 0
+    while start < num_games:
+        n = min(shard_size, num_games - start)
+        # The chunk carries the duel seed and the game-index range; each game
+        # re-derives its own seed inside `_play_chunk`, so the games played
+        # do not move when `--workers` re-shards them.
+        chunks.append((players_spec, start, n, seed))
+        start += n
 
     start = time.time()
     with Pool(len(chunks)) as pool:

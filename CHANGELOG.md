@@ -7,6 +7,36 @@ Changes to the HexSet distribution. The project follows
 
 ### Fixed
 
+- **A browser seat could not take back a setup placement.** A setup road is
+  the one handoff the engine makes on its own -- the snake moves
+  `current_player` on as part of applying the placement, where every
+  Main-phase handoff waits for that seat's own `END_TURN`. `_apply` drops the
+  undo point the instant another seat moves, and since bots became peer
+  clients they move in milliseconds, so the button never survived long enough
+  to press.
+
+  A browser seat now holds its setup turn open until it ends it, and the
+  session offers it an ordinary `END_TURN` to do so -- the board's existing
+  End Turn button, in its usual corner. Undo stays reachable for as long as
+  the turn is held, which gives setup the same take-back window Main-phase
+  builds already had.
+
+  Scoped to seats whose client `kind` is `"web"`, and nothing else:
+
+  - A **bot** seat is never held. A bot decides from `onnx_record`'s
+    `action_mask`, which is built from the engine's own action space, so an
+    `END_TURN` only the session knows about is not in it -- a held bot seat
+    would have no legal move at all, and widening the mask would be a new
+    action every checkpoint has to be trained on for a button no bot presses.
+  - An **LLM** seat (`kind` `"mcp"`/`"api"`) is never held either. It is a
+    manual seat, but it drives itself with nobody watching, so holding it
+    only stalls the table.
+
+  This restores `awaiting_confirm`, added in `4f9dbe4` and lost in `82f4bd1`
+  when the no-lobby/no-cascade rewrite removed `advance_bots()`. The original
+  hold was written as "do not run the cascade driver", so it went out with
+  the driver; there is no driver to hold now, so the turn itself is held.
+
 - **A journalled game with a `PLAY_KNIGHT` from before the knight/robber
   split ("play a knight, then move the robber", commit `3034778`, 0.35.0)
   would not resume.** That change made `PLAY_KNIGHT` operand-less and moved

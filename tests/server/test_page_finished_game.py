@@ -31,7 +31,7 @@ from pathlib import Path
 
 import pytest
 
-from hexset.actions import legal_actions
+from hexset.actions import Action, ActionType, legal_actions
 from hexset.game import is_over, to_move
 from hexset.server.api import Config, Seat, SeatKind, build_session
 from hexset.server.webplay import action_to_wire
@@ -73,6 +73,15 @@ def _play_out(session, rng: random.Random) -> None:
     for _ in range(2000):
         if is_over(session.game):
             return
+        # A browser seat holding its setup turn open is the one time the
+        # seat to play is not `to_move`'s: it has already handed the snake on
+        # and owes the END_TURN the board's own button sends
+        # (`webplay.GameSession.awaiting_confirm`).
+        if session.awaiting_confirm is not None:
+            session.submit(
+                session.awaiting_confirm, action_to_wire(Action(ActionType.END_TURN))
+            )
+            continue
         seat = to_move(session.game)
         session.submit(seat, action_to_wire(rng.choice(legal_actions(session.game))))
     raise AssertionError("the seeded game did not finish")

@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from hexset.actions import legal_actions
+from hexset.actions import Action, ActionType, legal_actions
 
 from hexset.server import journal
 from hexset.server.api import (
@@ -106,6 +106,15 @@ def drive(session, moves: int, rng: random.Random) -> None:
     for _ in range(moves):
         if is_over(session.game):
             break
+        # A browser seat holding its setup turn open is the one time the
+        # seat to play is not `to_move`'s: it has already handed the snake on
+        # and owes the END_TURN the board's own button sends
+        # (`webplay.GameSession.awaiting_confirm`).
+        if session.awaiting_confirm is not None:
+            session.submit(
+                session.awaiting_confirm, action_to_wire(Action(ActionType.END_TURN))
+            )
+            continue
         seat = to_move(session.game)
         session.submit(seat, action_to_wire(rng.choice(legal_actions(session.game))))
 
@@ -407,7 +416,7 @@ def test_record_matches_the_embedded_bots_options():
 def test_the_option_list_does_not_move_when_opponents_hands_do():
     """The property the second enumeration existed to guarantee, asserted
     directly: nothing the mover may do depends on what anybody else holds."""
-    from hexset.actions import legal_actions
+    from hexset.actions import Action, ActionType, legal_actions
     from hexset.board.terrain import NUM_RESOURCES
 
     game = _a_position_where_no_opponent_holds_anything()

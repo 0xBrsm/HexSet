@@ -1849,6 +1849,16 @@ class GameSession:
         game = self.game
         if is_over(game):
             return game.current_player
+        # A seat holding its setup turn open still has the move, whatever the
+        # engine says: the snake advanced when the road was placed, but the
+        # table is not going anywhere until that seat ends its turn. Answered
+        # here rather than at each reader, because "whose move is it" is one
+        # question with about a dozen askers -- the phase banner, the roster
+        # highlight, the board's own buttons, every other seat's client
+        # deciding whether to act -- and they were never going to be kept in
+        # agreement one at a time.
+        if self.awaiting_confirm is not None:
+            return self.awaiting_confirm
         return to_move(game)
 
     def state_view(self, viewer: int | None = None, *, omniscient: bool = False) -> dict:

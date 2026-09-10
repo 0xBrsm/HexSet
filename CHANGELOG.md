@@ -21,6 +21,15 @@ Changes to the HexSet distribution. The project follows
   the turn is held, which gives setup the same take-back window Main-phase
   builds already had.
 
+  The seat holding its turn open is also the seat the view reports as
+  `to_move`, rather than the one the engine's snake advanced to. "Whose move
+  is it" has about a dozen askers -- the phase banner, the roster highlight,
+  the board's own buttons, every other seat's client deciding whether to act
+  -- and answering it once in `_public_mover` is what keeps them agreeing.
+  The first cut of this answered it only for the buttons, so the banner and
+  the highlighted row both announced the next player's turn while the table
+  sat waiting for the seat that still had it.
+
   Scoped to seats whose client `kind` is `"web"`, and nothing else:
 
   - A **bot** seat is never held. A bot decides from `onnx_record`'s

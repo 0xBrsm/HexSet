@@ -3,6 +3,27 @@
 Changes to the HexSet distribution. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+
+- **The board's setup-turn controls were gated twice, on two different
+  things.** `renderBoardButtons` read `awaiting_confirm` directly while the
+  banner and the roster row read `to_move`, which is how 0.48.2 shipped with
+  the buttons offered to the right seat and the banner announcing the next
+  player's turn. `_public_mover` now reports the held seat as the one on
+  move, so the page has one notion of whose turn it is again and the extra
+  gating is gone.
+
+### Added
+
+- `tests/server/test_page_setup_turn.py`: browser coverage for the setup
+  hold -- the banner, the roster highlight, the two buttons offered, and the
+  release when the turn is ended. Every defect 0.48.2 shipped was in
+  `index.html` and passed the whole Python suite; all three of these fail
+  against the unfixed page. It also covers a reopen restoring the hold,
+  which nothing else did.
+
 ## 0.48.2
 
 ### Fixed

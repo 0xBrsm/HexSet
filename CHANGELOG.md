@@ -3,7 +3,7 @@
 Changes to the HexSet distribution. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 0.47.0
 
 ### Added
 
@@ -59,6 +59,13 @@ Changes to the HexSet distribution. The project follows
   `provenance()` instead and gets strictly more. `hexset._source.git_value` is
   unchanged and still serves that path.
 
+### Fixed
+
+- A finished game's player roster keeps the height it had while the game was
+  live. Going read-only replaced every row's `<select>`/`<input>` with plain
+  text carrying neither their padding nor their border, so each row lost about
+  4px and a four-seat list collapsed 18px, jumping the board below it.
+
 ## 0.46.0
 
 This release changes public APIs and benchmark result semantics. HexSet remains
@@ -111,9 +118,6 @@ in the 0.x development series. See the [migration guide](docs/research.md#remove
 ### Fixed
 
 - `hexset.trading.trade_event` ends at the first revisited position instead of asserting. The assertion assumed a gate is a strict function of the position; the network gate scores each candidate in a world drawn from its belief (0.44.0), and heximax samples worlds too, so a trade that changes the ledger changes the next draw and a reverse exchange can price positive without anything being broken. Self-play against a network checkpoint tripped it on hexn's distillation test.
-
-### Fixed
-
 - **A reopened table puts every seat back as whoever held it** (`journal.players`, `api.reopened_seats`), instead of rebuilding every non-bot seat as empty. Before this, a restart handed your still-in-progress seat to whoever opened the link next, and you got it back only by the luck of `POST /api/join` picking it; now `join` finds no candidate at all and `POST /api/reclaim` is the way back into your own seat. The browser (`index.html`'s `resumeGame`) actually calls `reclaim` now — it never did — and stops attempting to join a game that is already over.
 - A game *abandoned* unfinished (New Game, or a 24h eviction) stays gone. A closing line alone does not say whether a game was played out or walked away from, and inferring "finished" from one rebuilt an abandoned game as a mutable table with no journal to write to and no bots to answer, silently dropping every action taken at it.
 - `POST /api/reclaim` succeeds at a game that is over: it is a handshake about who you are, not permission to act, and the token it mints is refused by the same gate that refuses no token at all. "The game is already over" is now one 409 from one place (`api.require_live`) rather than a 409 from some routes and a 400 from others.

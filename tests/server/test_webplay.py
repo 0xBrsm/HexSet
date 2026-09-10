@@ -359,6 +359,64 @@ def test_a_journalled_game_replays_clean(played):
     assert resumed.game.turns == session.game.turns
 
 
+def _setup_complete_game(seed: int, players: int = 4):
+    """A `start_at` game with every seat's two opening placements already
+    made, walking the setup snake by always taking the first legal option --
+    good enough for a test that only needs somebody sitting on the board, not
+    where."""
+    board = random_base_board(random.Random(seed))
+    game = start_at(board, players, random.Random(seed), first=0)
+    while game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
+        apply(game, next(iter(legal_actions(game))))
+    return game
+
+
+def test_a_pre_split_journalled_knight_play_still_replays():
+    """Before commit 3034778 ("play a knight, then move the robber"), a
+    played Knight moved the robber and resolved the steal in the very same
+    action, with the target hex and victim written as its own `a`/`b`
+    (`hexset.game.play_knight_card`'s own docstring covers the two-step rule
+    this engine follows instead now, and `test_a_knight_resolves_through_
+    the_session_like_a_seven` above covers today's shape). A journal written
+    under the old rule still has exactly that one-step shape on its
+    `PLAY_KNIGHT` line, and this is the one thing `replayable`/`restore`
+    stopped being able to make sense of: `GameSession._apply_knight` is the
+    fix, and this is the regression test that bites without it.
+    """
+    # A scouting copy of the same deterministic setup, played forward far
+    # enough to read off a robber move this engine will actually accept --
+    # not used for the real replay below, which starts fresh from the same
+    # seed so nothing the scout did leaks into it.
+    scout = _setup_complete_game(seed=3)
+    scout.phase = Phase.MAIN
+    scout.current_player = 0
+    scout._state.dev_cards[0][DevCard.KNIGHT] = 1
+    apply(scout, Action(ActionType.PLAY_KNIGHT), seat=0)
+    move = next(
+        a for a in legal_actions(scout) if a.type is ActionType.MOVE_ROBBER and a.b < 4
+    )
+    target, victim = move.a, move.b
+
+    game = _setup_complete_game(seed=3)
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    game._state.dev_cards[0][DevCard.KNIGHT] = 1
+    game._state.hands[victim] = [1, 1, 1, 1, 1]  # something for the knight to take
+    session = GameSession(game=game, claimed_seats={0, victim})
+
+    events = [{"kind": "action", "actor": 0, "type": "PLAY_KNIGHT", "a": target, "b": victim}]
+    session.restore(replayable(events))  # raises ResumeError if it doesn't
+
+    assert game._state.robber == target
+    assert game.phase is Phase.MAIN
+    assert sum(game._state.hands[victim]) == 4  # one card taken
+    # The file recorded this as one step, not the two actions this engine
+    # actually needed to reproduce it -- `_apply_knight` has to fold that
+    # second `_apply`'s own count back out, or every step after this one in
+    # a real file would replay against the wrong `undo.back_to`/`note.step`.
+    assert session._steps == 1
+
+
 def test_an_undone_placement_is_written_down_not_erased(tmp_path):
     """The journal is append-only and read forwards, so a step number that
     quietly came round twice would leave a reader unable to say which of the

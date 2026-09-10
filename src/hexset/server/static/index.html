@@ -2130,18 +2130,28 @@ function renderBoardDynamic() {
 // Plenty's pair — is a mode of the one modal.
 function renderBoardButtons() {
   const myTurn = !state.game_over && state.to_move === state.seat;
+  // Our setup road is down but we haven't said we're done, so the turn is
+  // still ours to finish even though `to_move` has already named the next
+  // seat — the engine's snake hands off inside the placement itself. The
+  // server holds the table there (GameSession.awaiting_confirm) so nobody
+  // moves until we press End Turn, which is also what keeps Undo reachable:
+  // it's cleared the moment another seat acts.
   // A robber move is the one choice the game asks for on the board rather
   // than in the modal, and it behaves like a modal mode all the same: nothing
   // behind it is reachable until it's answered, whether Phase.ROBBER was
   // entered off a seven or off a knight -- the engine offers nothing else
   // in that phase either way, so the corners come down with everything else.
+  const confirming = !state.game_over && state.awaiting_confirm === state.seat;
+  const mine = myTurn || confirming;
   const move = robberMove(groupActions(state.legal_actions));
   const offered = (type) => myTurn && !move && legalAction(type) !== null;
   // Not a legal_actions entry — undo is a session convenience, not a game
   // rule — so it reads the server's own can_undo flag instead of offered().
-  showFab("undo-build", myTurn && !move && Boolean(state.can_undo));
+  showFab("undo-build", mine && !move && Boolean(state.can_undo));
   showFab("roll-dice", offered("ROLL"));
-  showFab("end-turn", offered("END_TURN"));
+  // `offered` can't see it: it gates on `myTurn`, and the engine has already
+  // moved the snake on. Same button, same corner, same meaning either way.
+  showFab("end-turn", offered("END_TURN") || confirming);
   showFab("buy-dev-card", offered("BUY_DEV_CARD"));
 }
 
@@ -2935,6 +2945,9 @@ for (const [id, type] of [["roll-dice", "ROLL"], ["buy-dev-card", "BUY_DEV_CARD"
   });
 }
 document.getElementById("end-turn").addEventListener("click", () => {
+  // Works unchanged while holding a setup turn: the server offers END_TURN
+  // in legal_actions for exactly that seat, so this finds it the same way it
+  // finds a Main-phase one (GameSession.legal_wire_actions).
   const action = legalAction("END_TURN");
   if (action) sendAction(action);
 });

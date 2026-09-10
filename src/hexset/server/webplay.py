@@ -1014,6 +1014,25 @@ class GameSession:
     # right after a qualifying human action, cleared by anything else. See
     # _apply and undo_last_build.
     _undo: _UndoPoint | None = field(default=None, repr=False)
+    # The seat that has placed its setup road and not yet said it is done, or
+    # None. A setup road is the one handoff in the game the engine makes on
+    # its own: the snake moves `current_player` to the next seat as part of
+    # applying the placement, where every Main-phase handoff waits for that
+    # seat's own explicit END_TURN. That left setup as the one phase where a
+    # seat could not take its placement back -- `_apply` drops the undo point
+    # the instant another seat moves, and with peer-client bots the next seat
+    # moves in milliseconds (`hexset.clients.botclient.BotRunner` acts the
+    # moment `to_move` names it), so the button never survived long enough to
+    # press. Holding the turn here gives setup the same shape as everywhere
+    # else: nobody moves until the seat on move says it is done.
+    #
+    # This restores `awaiting_confirm`, added in 4f9dbe4 and lost in 82f4bd1
+    # when the no-cascade rewrite removed `advance_bots()` -- the old hold was
+    # written as "don't run the cascade driver", so it went out with the
+    # driver. There is no driver to hold now, so the turn itself is held
+    # instead, which gates every client through one rule rather than asking
+    # each of them to be polite.
+    awaiting_confirm: int | None = field(default=None)
     # Seat -> whatever answers that seat's private gate (`hexset.trading`):
     # an embedded bot itself for a bot seat, a `PendingGate` for every manual
     # (human or LLM) seat, nothing at all for a claimed seat this session has
@@ -1550,7 +1569,17 @@ class GameSession:
         discards are owed by several seats at once and none of them is
         anybody's turn, so each owing seat is offered its own cards for as
         long as it still owes some, whatever the others have done."""
-        if is_over(self.game) or viewer is None or not may_act(self.game, viewer):
+        if is_over(self.game) or viewer is None:
+            return []
+        # A seat holding its setup turn open has exactly one move: end it.
+        # Offered as an ordinary END_TURN rather than a route or a control of
+        # its own, because every client already knows what that means -- the
+        # board's End Turn button reads this list, and so does an LLM seat
+        # through MCP. `may_act` says no here (the engine has already moved
+        # the snake on), which is the whole reason it needs saying.
+        if self.awaiting_confirm == viewer:
+            return [action_to_wire(Action(ActionType.END_TURN))]
+        if not may_act(self.game, viewer):
             return []
         return [action_to_wire(a) for a in legal_actions(self.game, viewer)]
 
@@ -1570,6 +1599,24 @@ class GameSession:
         # seat 3 submitting one while seat 0 still owes its own is not out of
         # turn — there is no turn — and refusing it was this gate's one real
         # bug (see `hexset.game.to_move`).
+        # The held seat's own END_TURN, which is what releases the table --
+        # see `legal_wire_actions`. Checked before `may_act`, which refuses it
+        # (the engine moved the snake on when the road was placed), and before
+        # the legality check, since the engine offers nothing in that phase.
+        if self.awaiting_confirm == seat:
+            if wire_to_action(wire).type is not ActionType.END_TURN:
+                raise ValueError("end your setup turn first")
+            self.awaiting_confirm = None
+            return
+        # Somebody else is still finishing their setup turn. Refused here
+        # rather than left to each client to respect, so nobody can take a
+        # seat's placement away by being quicker than its button: this is the
+        # one enforcement point every client funnels through, and the hold is
+        # worth exactly as much as its least polite reader.
+        if self.awaiting_confirm is not None:
+            raise ValueError(
+                f"seat {self.awaiting_confirm} has not finished its setup turn"
+            )
         if not may_act(self.game, seat):
             raise ValueError("it is not your turn to act")
         action = wire_to_action(wire)
@@ -1675,6 +1722,38 @@ class GameSession:
         # be on disk by now.
         self._undo = undo_point if (undo_point is not None and not is_over(self.game)) else None
 
+        # Recomputed on every action, so the ordinary case clears it without
+        # anything having to remember to: only a setup road that actually
+        # handed the snake on leaves a turn owing a confirm. `to_move` still
+        # naming `actor` is the turn of the snake, where a seat places twice
+        # in a row -- it never gave the turn away, so it has nothing to end.
+        self.awaiting_confirm = (
+            actor
+            if (
+                action.type is ActionType.SETUP_ROAD
+                and not is_over(self.game)
+                and to_move(self.game) != actor
+                # A browser seat, and only a browser seat. Undo is a
+                # misclick affordance -- it exists because a person can put a
+                # settlement somewhere they did not mean to -- so the hold
+                # that protects it is scoped to the client that has the
+                # button. Everything else plays setup exactly as before:
+                #
+                # - a bot decides from `onnx_record`'s `action_mask`, built
+                #   from the engine's own action space. An END_TURN only this
+                #   session knows about is not in it, so a held bot seat
+                #   would have no legal move at all -- and widening the mask
+                #   would be a new action every checkpoint has to be trained
+                #   on, for a button no bot will ever press.
+                # - an LLM seat (`kind` "mcp"/"api") is manual, and so is in
+                #   `confirm_seats`, but drives itself through a turn without
+                #   a person watching; holding it just stalls the table until
+                #   it thinks to end a turn the engine already moved past.
+                and self.clients.get(actor, {}).get("kind") == "web"
+            )
+            else None
+        )
+
         if (
             replay is None
             and action.type in (ActionType.ROLL, ActionType.MOVE_ROBBER)
@@ -1724,6 +1803,11 @@ class GameSession:
         if self.journal is not None:
             self.journal.undo(self.game, back_to=point.steps)
         self._undo = None
+        # Undoing a setup road always lands back before the handoff it was
+        # holding, so there is no longer a turn to end -- and leaving it set
+        # would wedge the table behind a confirm for a road that no longer
+        # exists. The seat places again and owes a fresh confirm then.
+        self.awaiting_confirm = None
 
     def _log_result(self, round_num: int) -> str:
         """The closing line, appended once the game is over.
@@ -1867,6 +1951,12 @@ class GameSession:
             # undo_last_build. A session convenience, not a rule, so it isn't
             # in legal_actions alongside everything hexset.actions offers.
             "can_undo": self._undo is not None and self._undo.actor == viewer,
+            # The seat whose setup turn is placed but not yet ended, or None.
+            # Every seat sees which one it is, not just a bool for itself:
+            # a spectator's banner and the other seats' "waiting for..." read
+            # the same field the holder's own End Turn button does, and
+            # `BotRunner` needs to know whether the seat owing it is its own.
+            "awaiting_confirm": self.awaiting_confirm,
             # "round" — one lap of the table — not game.turns' per-seat count
             # (see the `round` property docstring). The only client reader
             # is the sidebar log's current-round filter, which now needs

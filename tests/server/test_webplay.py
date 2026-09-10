@@ -16,7 +16,7 @@ from hexset.cards import DevCard
 
 from conftest import RandomBot
 
-from hexset.game import Phase, is_over, to_move
+from hexset.game import Phase, is_over, may_act, to_move
 
 from hexset.server.seating import start_at
 
@@ -908,3 +908,130 @@ def test_the_round_stays_zero_through_setup_however_many_seats_retired():
 
     assert game.phase is Phase.SETUP_SETTLEMENT
     assert session.round == 0
+
+
+# --- The setup turn's own end (GameSession.awaiting_confirm) ----------------
+
+
+def _manual_session(seed=5):
+    """A session of browser seats. `clients` carries the `kind` `api.Tables`
+    records at seat-up, and the setup hold is scoped to `"web"` alone -- see
+    `_apply`, and `test_a_bot_seat_is_never_held_through_setup` /
+    `test_an_llm_seat_is_never_held_through_setup` for the two it skips."""
+    session = a_session(a_game(seed=seed), {0, 1, 2, 3})
+    for seat in range(4):
+        session.confirm_mode(seat)
+        session.clients[seat] = {"id": None, "kind": "web"}
+    return session
+
+
+def _setup_turn(session, seat):
+    """`seat`'s whole setup turn: settlement, then road. The road is the one
+    that hands the snake on, so it is the one that leaves a turn to end."""
+    for kind in (ActionType.SETUP_SETTLEMENT, ActionType.SETUP_ROAD):
+        session._apply(seat, next(a for a in legal_actions(session.game) if a.type is kind))
+
+
+def test_a_setup_road_leaves_the_turn_owing_an_end():
+    """The snake moves `current_player` on inside the placement itself, so
+    without this the turn is over before its seat can react to it."""
+    session = _manual_session()
+    assert session.awaiting_confirm is None
+    _setup_turn(session, 0)
+    assert session.awaiting_confirm == 0
+    assert session.state_view(0)["awaiting_confirm"] == 0
+
+
+def test_the_next_seat_cannot_move_until_the_setup_turn_is_ended():
+    """The hold is enforced here, not asked of each client: a bot acts the
+    moment `to_move` names it, so politeness would be a race."""
+    session = _manual_session()
+    _setup_turn(session, 0)
+    nxt = to_move(session.game)
+    assert nxt != 0
+    settlement = next(a for a in legal_actions(session.game) if a.type is ActionType.SETUP_SETTLEMENT)
+    with pytest.raises(ValueError, match="has not finished its setup turn"):
+        session.submit(nxt, action_to_wire(settlement))
+
+    session.submit(0, action_to_wire(Action(ActionType.END_TURN)))
+    assert session.awaiting_confirm is None
+    session.submit(nxt, action_to_wire(settlement))  # no longer held
+
+
+def test_a_setup_placement_is_still_undoable_while_the_turn_is_held():
+    """The bug this exists for: `_apply` drops the undo point the instant
+    another seat moves, and with peer-client bots that was milliseconds."""
+    session = _manual_session()
+    _setup_turn(session, 0)
+    assert session.state_view(0)["can_undo"] is True
+    session.undo_last_build(0)
+    # Undoing the road returns to before the handoff, so nothing is owed.
+    assert session.awaiting_confirm is None
+    assert session.state_view(0)["awaiting_confirm"] is None
+    assert to_move(session.game) == 0
+
+
+def test_only_the_held_seat_can_end_its_own_setup_turn():
+    """Otherwise whoever asked first could hand a seat's placement on before
+    that seat had taken it back."""
+    session = _manual_session()
+    _setup_turn(session, 0)
+    with pytest.raises(ValueError, match="has not finished its setup turn"):
+        session.submit(1, action_to_wire(Action(ActionType.END_TURN)))
+    assert session.awaiting_confirm == 0  # not seat 1's to end
+    session.submit(0, action_to_wire(Action(ActionType.END_TURN)))
+    assert session.awaiting_confirm is None
+
+
+def test_the_snakes_turn_owes_nothing_because_it_never_handed_off():
+    """At the turn of the snake a seat places twice in a row. It still holds
+    the turn after its first road, so there is nothing to end."""
+    session = _manual_session()
+    seats = []
+    for _ in range(8):
+        seat = to_move(session.game)
+        _setup_turn(session, seat)
+        seats.append((seat, session.awaiting_confirm))
+        if session.awaiting_confirm == seat:
+            session.submit(seat, action_to_wire(Action(ActionType.END_TURN)))
+    # The snake is 0,1,2,3,3,2,1,0 -- seat 3 places twice in a row, and the
+    # first of those two is the one handoff that never happens.
+    assert [s for s, _ in seats] == [0, 1, 2, 3, 3, 2, 1, 0]
+    assert seats[3][1] is None, "seat 3's first road kept the turn"
+    assert [owed for _, owed in seats[:3]] == [0, 1, 2]
+
+
+def test_a_bot_seat_is_never_held_through_setup():
+    """The hold exists to protect undo, which is a human affordance. A bot
+    decides from `onnx_record`'s action mask, built from the engine's own
+    action space -- an END_TURN only this session knows about isn't in it, so
+    a held bot seat would have no legal move at all."""
+    session = a_session(a_game(seed=5), {0, 1, 2, 3})  # no client record == bot seats
+    _setup_turn(session, 0)
+    assert session.awaiting_confirm is None
+    assert session.state_view(0)["awaiting_confirm"] is None
+    nxt = to_move(session.game)
+    settlement = next(a for a in legal_actions(session.game) if a.type is ActionType.SETUP_SETTLEMENT)
+    session.submit(nxt, action_to_wire(settlement))  # straight through, as today
+
+
+def test_the_held_seat_is_offered_an_end_turn_it_would_not_otherwise_have():
+    """`may_act` says no -- the engine moved the snake on when the road was
+    placed -- so the offer has to come from the session."""
+    session = _manual_session()
+    _setup_turn(session, 0)
+    assert not may_act(session.game, 0)
+    assert session.state_view(0)["legal_actions"] == [action_to_wire(Action(ActionType.END_TURN))]
+    with pytest.raises(ValueError, match="end your setup turn first"):
+        session.submit(0, action_to_wire(Action(ActionType.SETUP_SETTLEMENT, 0, 0)))
+
+
+def test_an_llm_seat_is_never_held_through_setup():
+    """A manual seat, but not a browser one: it drives itself through a turn
+    with nobody watching, so holding it only stalls the table."""
+    session = a_session(a_game(seed=5), {0, 1, 2, 3})
+    for seat in range(4):
+        session.confirm_mode(seat)
+        session.clients[seat] = {"id": None, "kind": "mcp"}
+    _setup_turn(session, 0)
+    assert session.awaiting_confirm is None

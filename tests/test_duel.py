@@ -130,7 +130,10 @@ def _fake_compete(seen: dict, points, turns=None, winners=None):
     those fields.
     """
 
-    def compete(lineup, games, *, seed, workers, records=False):
+    def compete(lineup, games, *, seed, workers, records=False,
+                worker_initializer=None, worker_initargs=()):
+        seen["worker_initializer"] = worker_initializer
+        seen["worker_initargs"] = worker_initargs
         seen["lineup"] = [entrant.weights for entrant in lineup]
         seen["names"] = [entrant.name for entrant in lineup]
         seen["records"] = records
@@ -156,7 +159,7 @@ def _fake_compete(seen: dict, points, turns=None, winners=None):
 
 
 def _arena_args(**overrides):
-    base = dict(a=A, b=B, games=4, duel_seed=20_000, workers=2, records=None)
+    base = dict(a=A, b=B, games=4, duel_seed=20_000, workers=2, records=None, runtime=None)
     base.update(overrides)
     return SimpleNamespace(**base)
 
@@ -256,3 +259,33 @@ def test_one_board_verdict_serializes_unestimable_vp_bounds_as_null(monkeypatch)
     assert verdict["paired_vp_low"] is None
     assert verdict["paired_vp_high"] is None
     json.dumps(verdict, allow_nan=False)
+
+
+def test_a_named_runtime_reaches_the_workers_that_spawn_entrants(monkeypatch):
+    """`--runtime` is how a `network:`/`mcts:` entrant becomes spawnable
+    without hexset importing a package it does not depend on.
+
+    It has to arrive as `compete`'s `worker_initializer`, not as an import
+    made in this process: entrants are spawned inside the pool, and with
+    spawn or forkserver a worker starts from a bare interpreter that never
+    ran this process's imports. Passing the module by name is what survives
+    that.
+    """
+    from hexset.clients.netbot import load_runtime
+
+    seen = {}
+    monkeypatch.setattr("hexset.arena.compete", _fake_compete(seen, POINTS))
+    _via_arena(_arena_args(runtime="json"), "a", "b")
+
+    assert seen["worker_initializer"] is load_runtime
+    assert seen["worker_initargs"] == ("json",)
+
+
+def test_no_runtime_named_seats_no_initializer(monkeypatch):
+    """A duel between handcrafted entrants imports nothing extra."""
+    seen = {}
+    monkeypatch.setattr("hexset.arena.compete", _fake_compete(seen, POINTS))
+    _via_arena(_arena_args(), "a", "b")
+
+    assert seen["worker_initializer"] is None
+    assert seen["worker_initargs"] == ()

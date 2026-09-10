@@ -3,6 +3,12 @@
 
 Run ``python -m hexset.bench.duel heximax heximax-notrade --games 400``.
 For batched model evaluation use ``hexset.bench.versus.compete_batched``.
+
+A `network:`/`mcts:` entrant needs a runtime that can open its checkpoint,
+which lives outside this distribution. Name it with ``--runtime``::
+
+    python -m hexset.bench.duel --runtime hexn.netbot \
+        network:runs/ppo/latest.pt heximax --games 400
 """
 
 from __future__ import annotations
@@ -60,6 +66,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--workers", type=int, default=default_workers())
     p.add_argument("--geometry", default=ARENA_GEOMETRY,
                    help="a/b seat pattern or comma-separated lineup, e.g. a,b,random,random")
+    p.add_argument("--runtime", default=None,
+                   help="import this module before spawning, so it can register the "
+                        "entrant kinds it provides (e.g. hexn.netbot for network:/mcts:)")
     p.add_argument("--json", default=None, help="append verdict to this JSON Lines file")
     p.add_argument("--verdicts", default="runs/eval", help="default verdict directory")
     p.add_argument("--no-json", action="store_true", help="print without writing a verdict file")
@@ -150,6 +159,7 @@ def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY)
     single-process path reports can be rebuilt exactly.
     """
     from hexset.arena import compete, lineup_from_names, wilson
+    from hexset.clients.netbot import load_runtime
 
     names, mine, theirs = arena_lineup(args.a, args.b, geometry)
     if args.games % 2:
@@ -170,6 +180,11 @@ def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY)
         seed=args.duel_seed,
         workers=args.workers,
         records=bool(args.records),
+        # Runs once per worker, and in this process when there is only one:
+        # `compete` owns both, so the runtime is registered exactly where an
+        # entrant is spawned and nowhere else.
+        worker_initializer=load_runtime if args.runtime else None,
+        worker_initargs=(args.runtime,) if args.runtime else (),
     )
     seconds = time.monotonic() - started
 

@@ -8,6 +8,7 @@ trading. Create separate gates for separate games and fixed seats."""
 
 from __future__ import annotations
 
+import importlib
 import random
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -486,3 +487,21 @@ def register_entrants(loader) -> None:
 
     register_entrant_kind("network", spawn_network)
     register_entrant_kind("mcts", spawn_mcts)
+
+
+def load_runtime(module: str) -> None:
+    """Import `module` for its side effect: a `register_entrants` call.
+
+    A runtime that can open a checkpoint needs torch, or onnxruntime, or
+    something else this distribution does not depend on, so hexset cannot
+    import one by name of its own -- and a driver that wrapped a hexset CLI
+    just to get its own import in first was carrying a whole module to say
+    one line. Naming the module on the command line is that line, moved to
+    where the entrant is resolved.
+
+    Module scope on purpose, and taking a string rather than a callable:
+    `hexset.arena.compete` hands this to a spawned worker as its
+    `worker_initializer`, where a closure or a bound loader would not
+    survive the pickle.
+    """
+    importlib.import_module(module)

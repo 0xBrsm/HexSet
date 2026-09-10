@@ -3,6 +3,26 @@
 Changes to the HexSet distribution. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.48.0
+
+### Added
+
+- **`hexset.bench.duel --runtime <module>`**, and
+  `hexset.clients.netbot.load_runtime` behind it. A `network:`/`mcts:`
+  entrant needs a runtime that can open its checkpoint, which needs torch or
+  onnxruntime and so cannot live here. Until now the only way to get one
+  registered was for the driver to wrap this CLI in a module of its own whose
+  whole body was an import (HexN carried a `hexn.duel` for exactly that, and
+  nothing else). Naming the module on the command line is that import, moved
+  to where the entrant is resolved.
+
+  It reaches the pool as `hexset.arena.compete`'s `worker_initializer`, so it
+  runs once in each worker -- and in the calling process at `--workers 1` --
+  which is what a wrapping module could not do under spawn or forkserver,
+  where a worker starts from a bare interpreter. Passed by name rather than
+  as a loader, for the same reason: a bound callable does not survive the
+  pickle. A duel that names no runtime imports nothing extra.
+
 ## 0.47.0
 
 ### Added

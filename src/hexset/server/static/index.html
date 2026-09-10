@@ -127,10 +127,17 @@
      clipped with an ellipsis rather than pushing the stat columns after it
      out of their tracks. */
   .player-name { font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  /* "Human" has no border/padding of its own the way the <select> below
-     does, so its text sat left of the dropdown's — inset it by the same
-     1px border + 0.25rem left padding so both start at the same x. */
-  .player-name-plain { padding-left: calc(0.25rem + 1px); }
+  /* A plain row stands in for the control it replaces — a bot's <select>, or
+     your own <input> once the game is over (browsing()) — so it carries the
+     same box: same padding, same 1px border, transparent. Without that the
+     roster lost ~4px a row the moment a game ended and every row went to
+     text, collapsing a four-seat table by ~18px under the board.
+     The real border also replaces the old padding-left fudge: it lines this
+     text up with the dropdown's by being the same box, rather than by adding
+     1px of padding to stand in for a border that wasn't there. */
+  .player-name-plain {
+    padding: 0.1rem 0.25rem; border: 1px solid transparent; border-radius: 5px;
+  }
   /* The picker *is* the player line for a bot seat: a select standing in for
      the name, sized to the short display names (heximax, linear805, ...). */
   .player-name select {
@@ -167,6 +174,13 @@
   .player-name input:focus {
     outline: none; border-color: var(--accent); background: #232733;
   }
+  /* One line box for all three, so a row is the same height whichever it
+     holds. A native <select> and a text <input> do not agree on their own —
+     they differed by 1px even mid-game — and neither matches a bare text
+     node. Declared after both rules above on purpose: `font: inherit` there
+     is a shorthand, and it resets line-height, so it would undo this if it
+     came later. */
+  .player-name select, .player-name input, .player-name-plain { line-height: 1.1; }
   .player-meta { color: var(--muted); font-size: 0.82rem; flex: 1; }
   .stat { display: inline-flex; align-items: center; gap: 0.12rem; color: var(--muted); font-size: 0.82rem; }
   /* Double digits (see statChip) take up the icon-to-number gap instead of

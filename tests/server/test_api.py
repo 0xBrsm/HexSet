@@ -731,13 +731,21 @@ def test_reclaim_at_a_reopened_game_is_the_way_back_into_a_seat_no_one_else_gets
 # --- GET /api/version, and the optional `version` guard on acting routes ------
 
 
-def test_version_route_matches_the_installed_package():
+def test_version_route_answers_the_api_contract_not_the_package():
+    """The route names the API, so it answers for the API. The distribution's
+    own version moves for engine, bot and research work that never touches the
+    wire, which is why a client must not read compatibility off it."""
     import hexset
+    from hexset.server.api import API_VERSION
 
     registry = tables()
     info = registry.handle("GET", "/api/version", {}, None)
-    assert info == hexset.build_info()
-    assert info["version"] == hexset.__version__
+    assert info == {"api": API_VERSION}
+    assert isinstance(info["api"], int)
+    # The two are deliberately unrelated; nothing here may reintroduce the
+    # package version or a build stamp.
+    assert "version" not in info and "git_commit" not in info
+    assert not hasattr(hexset, "build_info")
 
 
 def test_action_with_a_stale_version_409s_and_the_current_one_acts():

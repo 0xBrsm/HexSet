@@ -6,7 +6,6 @@ from __future__ import annotations
 import tomllib
 from importlib import metadata
 from pathlib import Path
-from typing import Any
 
 # `hexset`, `heximax`, `hexset.bench`, `hexset.server` and `hexset.clients`
 # are all one distribution now (`../../pyproject.toml`) -- see
@@ -27,17 +26,18 @@ except (OSError, KeyError, tomllib.TOMLDecodeError):
         __version__ = "0+unknown"
 
 
-def build_info() -> dict[str, Any]:
-    """`{"version": ..., "git_commit": ...}` for a consumer's provenance record.
-
-    `git_commit` is the commit this package's own files are checked out at,
-    read from this package's source checkout -- None if unavailable (a
-    wheel install with no `.git` directory, or `git` unavailable), because a
-    provenance field that is sometimes wrong is worse than one that is
-    sometimes absent. Consumers (e.g. HexN's `hexn.run.manifest`) stamp
-    this into their own run records rather than reproducing the git call
-    themselves, so there is exactly one place that knows how to ask.
-    """
-    from ._source import git_value
-
-    return {"version": __version__, "git_commit": git_value(__file__, "rev-parse", "HEAD")}
+# `build_info()` was here: `{"version", "git_commit"}`, served by
+# `GET /api/version` and stamped into a consumer's run records. It is gone.
+# The commit only ever mattered as research provenance -- identifying the code
+# that produced a benchmark number -- and that belongs to the run document, not
+# to a package-level accessor and not to a server endpoint. It lives in
+# `hexset.experiment.provenance()`, alongside the rest of the fingerprint a
+# result actually needs: the dirty flag (a commit alone cannot reproduce a run
+# off a modified tree), dependency versions and their VCS revisions, the
+# determinism-relevant environment, and checkpoint hashes.
+#
+# A consumer that stamped `build_info()` into its own records (HexN's
+# `hexn.run.manifest`) reads `hexset.experiment.provenance()` instead, and gets
+# strictly more than it had. `GET /api/version` now answers with the API's own
+# contract version (`hexset.server.api.API_VERSION`), which is what that route
+# always should have meant.

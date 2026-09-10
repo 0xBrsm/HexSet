@@ -1035,3 +1035,20 @@ def test_an_llm_seat_is_never_held_through_setup():
         session.clients[seat] = {"id": None, "kind": "mcp"}
     _setup_turn(session, 0)
     assert session.awaiting_confirm is None
+
+
+def test_the_held_seat_is_still_the_one_on_move():
+    """The engine advanced the snake when the road went down, but the table
+    is not going anywhere until the seat ends its turn -- so every reader of
+    `to_move` (the phase banner, the roster highlight, the board's buttons,
+    another seat's client deciding whether to act) has to agree it is still
+    that seat's. Reported once, in the view, rather than a dozen times."""
+    session = _manual_session()
+    _setup_turn(session, 0)
+    assert to_move(session.game) != 0  # the engine has moved on
+    assert session.state_view(0)["to_move"] == 0  # the table has not
+    assert session.state_view(1)["to_move"] == 0  # and it looks the same to everyone
+    assert session.state_view(None)["to_move"] == 0  # spectators included
+
+    session.submit(0, action_to_wire(Action(ActionType.END_TURN)))
+    assert session.state_view(0)["to_move"] == to_move(session.game)

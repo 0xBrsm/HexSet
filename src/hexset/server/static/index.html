@@ -1446,6 +1446,21 @@ const PHASE_LABELS = {
   GAME_OVER: "GAME OVER",
 };
 
+// The one state where the phase does not describe what a seat is being asked
+// to do. A seat holding its setup turn open (GameSession.awaiting_confirm)
+// has already placed, and the engine's phase has moved on to the *next*
+// seat's SETUP_SETTLEMENT — so the banner told a seat with nothing to place
+// to place a settlement.
+//
+// This was briefly a general rule ("name the single kind of action on
+// offer"), which is wrong: player-to-player trading is an engine event, not
+// an action (see hexset.trading, and canTrade below gating on the phase
+// rather than on legal_actions), so a MAIN phase offering nothing but
+// END_TURN is a seat that can still trade. legal_actions is only the whole
+// story outside MAIN, and MAIN is exactly where PHASE_LABELS was already
+// right. One special case for one special state instead.
+const HOLDING_SETUP_TURN_LABEL = "END YOUR TURN";
+
 // --- Action grouping -------------------------------------------------------
 
 const VERTEX_TYPES = new Set(["SETUP_SETTLEMENT", "BUILD_SETTLEMENT", "BUILD_CITY"]);
@@ -1669,6 +1684,10 @@ function renderStatus() {
   const owing = state.phase === "DISCARD" && state.discard_quota[state.seat] > 0;
   if (state.to_move !== state.seat && !owing) {
     phaseEl.textContent = `PLAYER ${state.to_move + 1}'S TURN`;
+    return;
+  }
+  if (state.awaiting_confirm === state.seat) {
+    phaseEl.textContent = HOLDING_SETUP_TURN_LABEL;
     return;
   }
   phaseEl.textContent = PHASE_LABELS[state.phase] || state.phase;

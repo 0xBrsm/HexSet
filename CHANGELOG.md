@@ -3,7 +3,7 @@
 Changes to the HexSet distribution. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 0.48.2
 
 ### Fixed
 
@@ -20,6 +20,21 @@ Changes to the HexSet distribution. The project follows
   End Turn button, in its usual corner. Undo stays reachable for as long as
   the turn is held, which gives setup the same take-back window Main-phase
   builds already had.
+
+  The seat holding its turn open is also the seat the view reports as
+  `to_move`, rather than the one the engine's snake advanced to. "Whose move
+  is it" has about a dozen askers -- the phase banner, the roster highlight,
+  the board's own buttons, every other seat's client deciding whether to act
+  -- and answering it once in `_public_mover` is what keeps them agreeing.
+  The first cut of this answered it only for the buttons, so the banner and
+  the highlighted row both announced the next player's turn while the table
+  sat waiting for the seat that still had it.
+
+- **The board's banner said "PLACE SETTLEMENT" at a seat with nothing to
+  place.** A seat holding its setup turn open has already placed, and the
+  engine's phase has moved on to the *next* seat's `SETUP_SETTLEMENT`, which
+  is what the banner was reading. It now names ending the turn, which while
+  held is the only thing the seat can do.
 
   Scoped to seats whose client `kind` is `"web"`, and nothing else:
 

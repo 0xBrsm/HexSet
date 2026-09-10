@@ -3,6 +3,42 @@
 Changes to the HexSet distribution. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+
+- **A journalled game with a `PLAY_KNIGHT` from before the knight/robber
+  split ("play a knight, then move the robber", commit `3034778`, 0.35.0)
+  would not resume.** That change made `PLAY_KNIGHT` operand-less and moved
+  the robber through a following `MOVE_ROBBER` step instead, but left
+  `webplay.GameSession.restore` reading every journalled `PLAY_KNIGHT`
+  line's `a`/`b` as if they were still today's shape -- always `0, 0`. A
+  file written under the old rule has its knight's actual target hex and
+  victim on that same line, and replaying it now checked a bare
+  `Action(PLAY_KNIGHT)` against `Action(PLAY_KNIGHT, target, victim)` and
+  found them unequal: `ResumeError: PLAY_KNIGHT is not legal in ROLL` (or
+  `MAIN`), for a table that had done nothing wrong. Any finished game
+  journalled before that split that ever played a knight could not be
+  reopened at all.
+
+  `GameSession._apply_knight` now recognises a pre-split line (its
+  `MOVE_ROBBER` follow-up is missing, not journalled separately -- see
+  `_is_split_knight_play`) and plays it as the two actions this engine
+  wants, folding the extra step back out afterward so every
+  `undo.back_to`/`note.step` recorded after it in the same file still
+  lands where it was written to. A knight that won the game outright plays
+  as today's rule says regardless of which shape recorded it -- no robber
+  move at all -- rather than the pre-split engine's own behaviour of moving
+  it anyway; the position is already decided by then, so nothing downstream
+  reads the difference.
+
+  Investigated in response to an operator report of "advance/undo missing
+  from setup phase" on three specific tables; a faithful re-replay (each
+  table's own `locked` seats applied at the step they actually retired,
+  not pre-seeded before setup) showed the setup/lock path was not at fault
+  -- all three, and no others found in a full sweep of the journal
+  directory, failed on exactly this.
+
 ## 0.48.1
 
 ### Fixed

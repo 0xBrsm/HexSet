@@ -873,6 +873,42 @@ def render_log(
     return lines
 
 
+def _is_split_knight_play(
+    steps: list[tuple[int, Action | None, tuple[Trade, ...]]], index: int, actor: int
+) -> bool:
+    """Whether `steps[index]`, a `PLAY_KNIGHT` that did not end the game
+    outright, is today's bare card play followed by its own `MOVE_ROBBER`
+    step (`hexset.game.play_knight_card` enters `Phase.ROBBER` and nothing
+    else resolves it, so that follow-up is the only thing legal right
+    after) -- as opposed to one journalled before the knight/robber split
+    (commit `3034778`, "play a knight, then move the robber"), whose `a`/`b`
+    were the target hex and victim of a robber move this engine no longer
+    folds into the same step (`GameSession._apply_knight`).
+
+    Only ever asked once the knight itself is already known not to have won
+    the game (`_apply_knight`) -- a bare play that does is a real next step
+    short exactly the same way an old one always is (no robber move follows
+    a win either engine's way; `play_knight_card`'s own docstring), which is
+    what makes checking the *next* step, rather than guessing from operand
+    values here, the exact test: an old knight that robbed hex 0 from seat 0
+    wrote `a=0, b=0`, the same as today's operand-less card
+    (`Action(PLAY_KNIGHT)` defaults both to 0), and either shape can name
+    any other hex/victim too, so no threshold on `a`/`b` alone can tell them
+    apart. Nothing in this engine's turn structure ever lands two of this
+    actor's own actions back to back with no other action between them
+    except this one case, so a real next step can only be that follow-up
+    `MOVE_ROBBER`.
+    """
+    if index + 1 >= len(steps):
+        return False
+    next_actor, next_action, _ = steps[index + 1]
+    return (
+        next_actor == actor
+        and next_action is not None
+        and next_action.type is ActionType.MOVE_ROBBER
+    )
+
+
 # --- The session ---------------------------------------------------------------
 
 
@@ -1402,6 +1438,13 @@ class GameSession:
         same as an automatic clearing's own replay does) and logged the
         same way `_execute_round_trade` logs a live one.
 
+        A `PLAY_KNIGHT` step goes through `_apply_knight` instead, which
+        also handles one journalled before the knight/robber split
+        (`_is_split_knight_play`): played as the two actions this engine
+        now wants, but still counted as the one step the file actually
+        recorded, so every `undo.back_to`/`note.step` after it in this same
+        file still lands where it was written to land.
+
         `journal` is attached only once the replay is done: it is the file
         these steps were just read out of, and a session journalling as it
         restores would write the whole game into it a second time.
@@ -1409,7 +1452,7 @@ class GameSession:
         if self.journal is not None:
             raise ValueError("restore would rewrite the journal it is reading")
         notes = notes or {}
-        for actor, action, trades in steps:
+        for index, (actor, action, trades) in enumerate(steps):
             for note_round, note in notes.get(self._steps, ()):
                 self._note(note, round_num=note_round)
             if action is None:
@@ -1429,6 +1472,9 @@ class GameSession:
                 )
                 self._steps += 1
                 continue
+            if action.type is ActionType.PLAY_KNIGHT:
+                self._apply_knight(actor, action, trades, steps, index)
+                continue
             if action not in legal_actions(self.game, actor):
                 raise ResumeError(
                     f"step {self._steps}: {action} is not legal in {self.game.phase.name}"
@@ -1439,6 +1485,62 @@ class GameSession:
         self.journal = journal
         if journal is not None:
             journal.reopened(at_step=self._steps)
+
+    def _apply_knight(
+        self,
+        actor: int,
+        action: Action,
+        trades: tuple[Trade, ...],
+        steps: list[tuple[int, Action | None, tuple[Trade, ...]]],
+        index: int,
+    ) -> None:
+        """Replay one journalled `PLAY_KNIGHT` step -- today's bare card, or
+        one written before the knight/robber split (commit `3034778`, "play
+        a knight, then move the robber"), whose `action.a`/`action.b` are a
+        robber move's target hex and victim that the file folded into the
+        same action this engine now resolves as a separate `MOVE_ROBBER`.
+
+        Always plays the bare card first (`hexset.game.play_knight_card`
+        ignores whatever operands the action carries, so this is safe
+        either way) and stops there if that already ended the game -- a
+        winning knight never moves the robber, its own docstring's rule.
+        The pre-split engine moved the robber unconditionally, ahead of its
+        own win check, so an old file recording a winning knight really did
+        see one move; replayed today, it does not. Left that way rather than
+        chased: the position is already decided the instant the game ends,
+        so nothing past this step ever reads the difference.
+
+        Otherwise checks `_is_split_knight_play`: today's shape already has
+        its own `MOVE_ROBBER` as the very next step, which this leaves for
+        the ordinary path in `restore`'s own loop to apply and log; an old
+        one does not; synthesized here from `action.a`/`action.b` and
+        applied the same way instead, with the recorded step's own `trades`
+        -- attached to this `MOVE_ROBBER`, not the bare card, which is when
+        this engine would actually have cleared them.
+
+        Plays both through the ordinary `_apply` each still is on its own --
+        so `settle`, the sidebar log and `begin_round`'s own MAIN-entry rule
+        all run exactly as they would live -- and then folds `self._steps`
+        back down by one whenever it does both: two calls to `_apply` each
+        count a step, but the file only ever recorded this as one, and every
+        `undo.back_to`/`note.step` written after it in the same file was
+        counted that way too.
+        """
+        bare = Action(ActionType.PLAY_KNIGHT)
+        if bare not in legal_actions(self.game, actor):
+            raise ResumeError(
+                f"step {self._steps}: {action} is not legal in {self.game.phase.name}"
+            )
+        self._apply(actor, bare, replay=())
+        if is_over(self.game) or _is_split_knight_play(steps, index, actor):
+            return
+        move = Action(ActionType.MOVE_ROBBER, action.a, action.b)
+        if move not in legal_actions(self.game, actor):
+            raise ResumeError(
+                f"step {self._steps}: {move} is not legal in {self.game.phase.name}"
+            )
+        self._apply(actor, move, replay=trades)
+        self._steps -= 1
 
     def legal_wire_actions(self, viewer: int | None) -> list[dict]:
         """What `viewer` may play right now — empty unless it is their turn,

@@ -241,3 +241,63 @@ def test_a_live_game_still_offers_the_seat_controls(running_server):
             context.close()
         finally:
             browser.close()
+
+
+def _row_heights(page) -> list[float]:
+    """Every roster row's rendered height, in CSS pixels."""
+    return page.eval_on_selector_all(
+        "#players .player-row",
+        "els => els.map(e => e.getBoundingClientRect().height)",
+    )
+
+
+def test_the_roster_keeps_its_height_when_a_game_ends(running_server):
+    """A row is the same height whether it holds a control or plain text.
+
+    The read-only fix above swaps every row's <select>/<input> for a text
+    node, and those carry padding and a 1px border that the text node did
+    not: each row lost ~4px the moment a game ended, so a four-seat roster
+    collapsed ~18px and the board below it jumped. Both viewports, since the
+    height comes from the name cell's own box and not from the layout width.
+
+    The two pages are the same two this module already builds -- the seat at
+    the finished game, and a freshly dealt live one -- read here for their
+    geometry rather than their controls.
+    """
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        try:
+            live = browser.new_context()  # nobody: this page deals its own game
+            live_page = live.new_page()
+            with live_page.expect_response(
+                lambda r: r.request.method == "POST" and "/api/games" in r.url
+            ):
+                live_page.goto(f"{BASE_URL}/", wait_until="load")
+            live_page.wait_for_selector(".player-row")
+            live_heights = _row_heights(live_page)
+
+            over = _returning_context(browser)
+            over_page = over.new_page()
+            with over_page.expect_response(lambda r: "/api/reclaim" in r.url):
+                over_page.goto(f"{BASE_URL}/{CODE.lower()}", wait_until="load")
+            over_page.wait_for_selector(".player-row")
+            over_heights = _row_heights(over_page)
+
+            # Guard the guard: without controls on one page and none on the
+            # other there is nothing here to compare.
+            assert live_page.locator("#players select").count() > 0
+            assert over_page.locator("#players select, #players input").count() == 0
+
+            assert live_heights and over_heights
+            every = live_heights + over_heights
+            # One height for every row on both pages. A pixel of tolerance for
+            # sub-pixel text metrics; the defect was four times that per row.
+            assert max(every) - min(every) < 1.0, (
+                f"roster rows disagree on height: live={live_heights} "
+                f"finished={over_heights}"
+            )
+
+            live.close()
+            over.close()
+        finally:
+            browser.close()

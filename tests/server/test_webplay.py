@@ -765,3 +765,88 @@ def test_a_second_seven_starts_a_fresh_discard_line():
     lines = _discards(session, None, omniscient=True)
     assert len(lines) == 3  # two from the first seven, one from the second
     assert "discarded 2" in lines[2]
+
+
+def _finish_setup(game) -> None:
+    """Play out the placement snake with whatever the engine offers first --
+    geometry is not the point here, only reaching `Phase.MAIN`, which is
+    where `GameSession.round` starts counting laps. Mirrors
+    `tests/server/test_setup_lock.py`'s `_place`, including the seating
+    correction `GameSession._apply` makes on every action."""
+    from hexset.server.seating import settle, snapshot
+
+    while game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
+        action = next(
+            a
+            for a in legal_actions(game)
+            if a.type in (ActionType.SETUP_SETTLEMENT, ActionType.SETUP_ROAD)
+        )
+        before = snapshot(game)
+        apply(game, action)
+        settle(game, before)
+
+
+def _take_turn(game) -> None:
+    """One seat's whole turn. `roll=8` is forced for the same reason
+    `tests/test_seating.py` forces it -- a seven would divert into DISCARD
+    and this is a test about counting laps, not about resolving robbers."""
+    from hexset.game import end_turn, roll_dice
+
+    roll_dice(game, roll=8)
+    end_turn(game)
+
+
+def test_a_lap_is_four_turns_at_a_full_table():
+    """The unchanged case: nobody retired, so a lap is every seat the board
+    was dealt for and the round turns over on the fourth end_turn."""
+    game = a_game(seed=3)
+    _finish_setup(game)
+    session = a_session(game, {0})
+
+    assert session.round == 1
+    for _ in range(3):
+        _take_turn(game)
+        assert session.round == 1
+    _take_turn(game)
+    assert session.round == 2
+
+
+def test_a_lap_is_two_turns_when_two_seats_are_retired():
+    """The 1v1 shape -- a four-seat board with two seats locked. Turn
+    rotation skips the retired seats, so a lap is the two seats actually
+    taking turns; counting it as four made each player appear twice per
+    round and reported half the laps played."""
+    from hexset.server.seating import lock_seat
+
+    game = a_game(seed=3)
+    lock_seat(game, 2)
+    lock_seat(game, 3)
+    _finish_setup(game)
+    session = a_session(game, {0})
+
+    assert session.round == 1
+    _take_turn(game)
+    assert session.round == 1
+    _take_turn(game)
+    assert session.round == 2  # was 1: four dealt seats, only two playing
+
+    # Ten turns between two seats is five laps, not the two-and-a-half a
+    # dealt-seat count would report.
+    for _ in range(8):
+        _take_turn(game)
+    assert session.round == 6
+    assert session.game.turns == 10
+
+
+def test_the_round_stays_zero_through_setup_however_many_seats_retired():
+    """`game.turns` doesn't move until end_turn() first runs, so there is no
+    lap to report yet whatever the divisor would be."""
+    from hexset.server.seating import lock_seat
+
+    game = a_game(seed=3)
+    lock_seat(game, 1)
+    lock_seat(game, 3)
+    session = a_session(game, {0})
+
+    assert game.phase is Phase.SETUP_SETTLEMENT
+    assert session.round == 0

@@ -3,6 +3,29 @@
 Changes to the HexSet distribution. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+
+- **`webplay.GameSession.round` counted a lap as the seats the board was
+  dealt for, not the seats still playing it.** A retired seat (`Game.locked`)
+  is skipped by turn rotation and never takes one of the lap's turns, but the
+  divisor was the dealt `num_players`, so those skipped turns were counted as
+  if somebody had played them. On the shape every 1v1 has here -- a four-seat
+  board with two seats locked -- a lap was reported as four turns when only
+  two seats were taking them, so each player appeared twice per round and the
+  count came out at half the laps actually played. A 69-turn 1v1 ended on
+  round 18 rather than 35.
+
+  Display only: `game.turns` was always right, turn rotation was always
+  right, and nothing about play or the trained policy's turn feature
+  (`hexset.encoding`'s `TURN_SCALE`) reads this. It reaches a viewer through
+  the state view's `round` and the journal's per-event `round` field, so
+  historical journals keep the numbers they were written with -- replaying
+  one now renumbers its rounds, it does not rewrite the file.
+
+  Full tables are unaffected, and are pinned by a test of their own.
+
 ## 0.48.0
 
 ### Added

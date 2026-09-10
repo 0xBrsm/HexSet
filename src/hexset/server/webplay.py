@@ -1348,11 +1348,32 @@ class GameSession:
         normal sense (order is 1,2,3,4,4,3,2,1, not 1,2,3,4 repeating), and
         `game.turns` doesn't move at all until end_turn() first runs, which
         `Phase.MAIN` requires — setup can't reach it.
+
+        A lap is the seats *still in the game*, not the seats the board was
+        dealt for: a retired seat is skipped by turn rotation (`Game.locked`,
+        via `game._next_unlocked`) and so never takes one of the lap's turns.
+        Dividing by the dealt `num_players` instead counted those skipped
+        turns as if somebody played them, which on a table with two seats
+        retired — the shape every 1v1 here has, since a 1v1 is a four-seat
+        board with two seats locked — made a lap four turns long when only
+        two seats were taking them, so each player showed up twice per round
+        and the count came out at half the laps actually played.
+
+        Only laps shrink, so this stays monotonic across a mid-game
+        retirement: locking a seat divides by less and the round can jump
+        forward, never back. `seating.unlock_seat` is the one way it could go
+        the other way; nothing in the server calls it on a live game.
         """
         if self.game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
             return 0
-        # true state: `num_players` is a fixed, public board property.
-        return self.game.turns // self.game.state(0, hidden=False).num_players + 1
+        # true state: `num_players` is a fixed, public board property, and the
+        # retired set is read through `locked_of` exactly as `SeatLabels` and
+        # the wire view below read it. `max(..., 1)` is for the table nobody
+        # is left at: `lock_seat` places no restriction on retiring the last
+        # seat (see `Game.locked`), and a display property is the wrong place
+        # to raise about it.
+        playing = self.game.state(0, hidden=False).num_players - len(locked_of(self.game))
+        return self.game.turns // max(playing, 1) + 1
 
     def restore(
         self,

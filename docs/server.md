@@ -86,7 +86,7 @@ seat requests.
 
 | Method and route | Request or result |
 | --- | --- |
-| `GET /api/version` | Package `version` and `git_commit`; no token required |
+| `GET /api/version` | `{"api": <int>}`, this API's contract version; no token required |
 | `GET /api/models` | Available opponent names |
 | `POST /api/games` | Optional `{"name": "Alice", "bots": ["heximax"]}`; creates a game |
 | `POST /api/join` | `{"code": "ABCDEF", "name": "Alice"}`; claims an open seat |

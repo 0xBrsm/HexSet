@@ -3,6 +3,36 @@
 Changes to the HexSet distribution. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- **`GET /api/version` answers for the API, not for the build.** It returns
+  `{"api": <int>}` — this API's own contract version, `hexset.server.api.
+  API_VERSION`, currently `4` — in place of `{"version", "git_commit"}`. The
+  route named the API and answered with the distribution's version, which is
+  the wrong signal to key compatibility off: `hexset.__version__` moves for
+  engine, bot and research work that never touches the wire (0.46.0 removed a
+  research interface and left every route alone), so a client watching it saw
+  churn it had to ignore and could have missed a break it must not. The
+  integer is bumped only when a client written against the previous contract
+  can break. Its history, recovered from this file, is recorded on
+  `API_VERSION` itself: `1` at 0.14.0, `2` at 0.26.1 (the valuation route and
+  the `confirm` flag went), `3` at 0.36.0 (the one-to-one proposal routes
+  became the trade round), `4` at 0.46.0 (`search2` stopped being seatable by
+  name).
+
+### Removed
+
+- **`hexset.build_info()`.** The git commit it carried only ever mattered as
+  research provenance, and that already lives in
+  `hexset.experiment.provenance()` alongside the rest of the fingerprint a
+  result needs — the dirty flag, dependency versions and VCS revisions, the
+  determinism-relevant environment, checkpoint hashes. A consumer that stamped
+  `build_info()` into its own run records (HexN's `hexn.run.manifest`) reads
+  `provenance()` instead and gets strictly more. `hexset._source.git_value` is
+  unchanged and still serves that path.
+
 ## 0.46.0
 
 This release changes public APIs and benchmark result semantics. HexSet remains

@@ -86,7 +86,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
 
-from hexset import build_info
 import hexset.bots  # noqa: F401 -- registers the "heximax" presets with hexset.arena
 from hexset.actions import build_space
 from hexset.arena import PRESETS, spawn as spawn_entrant
@@ -108,6 +107,51 @@ from .webplay import (
     round_bundle_from_wire,
     signed_bundle_from_wire,
 )
+
+# The version of *this API*, served by `GET /api/version`. An integer, not the
+# distribution's version: the two answer different questions and moved at
+# different times. `hexset.__version__` bumps for engine, bot and research work
+# that never touches the wire (0.46.0 removed a research interface and left
+# every route alone), so a client that keyed off it would see churn it must
+# ignore and could miss a break it must not.
+#
+# Bumped when a client written against the previous contract can break: a route
+# removed or renamed, a request field or value no longer accepted, or a
+# response's shape changed. Additive work -- a new route, a new optional
+# request field, a new key in a response -- leaves it alone, since nothing
+# written against the older contract stops working.
+#
+# The history, recovered from CHANGELOG.md:
+#
+#   1  0.14.0  The API. `POST /api/games` deals and seats immediately,
+#              `POST /api/join` or `GET /<id>` claims a seat,
+#              `GET /api/table/<id>` is the token-free observer view.
+#   2  0.26.1  The public valuation layer went, and with it
+#              `PUT /api/games/<code>/valuation`; `POST /api/games` and
+#              `/api/join` stopped accepting `confirm`, since `PendingGate`
+#              became the only gate a manual seat can have.
+#   3  0.36.0  The one-to-one proposal routes -- `POST .../trade`,
+#              `GET .../trade/acceptable`, `POST .../trade/confirm` and
+#              `.../trade/decline` -- were replaced by the trade round:
+#              `POST .../trade/round`, `.../trade/round/answer`,
+#              `.../trade/round/choose`.
+#   4  0.46.0  `search2` is no longer seatable by name, so a request naming
+#              it in `POST /api/games`'s `bots` or `POST /api/bot` is now
+#              refused. It had been kept seatable for API clients after it
+#              left the board's picker.
+#
+# Three other numbers in this project are versions of something else, and none
+# of them is this one: a checkpoint's `contract` (the record and action-space
+# format baked into an ONNX file, `docs/bot-api.md`), the `version` an acting
+# route optionally carries (the table's own sequence number, an optimistic-
+# concurrency guard that 409s a stale write), and `hexset.__version__`.
+#
+# Additive along the way, and deliberately not bumps: `PUT .../valuation` and
+# the `confirm` flag (0.17.0, 0.23.0), the one-to-one trade routes (0.23.0),
+# `GET .../trade/acceptable` (0.26.1), `GET /api/table/<code>/board` (0.25.2),
+# the optional `client` object and `POST /api/reclaim` (0.37.0), and the
+# optional `version` guard on acting routes plus `POST /api/open` (0.38.0).
+API_VERSION = 4
 
 # The opponents that are not files. Everything else in the picker is a path to
 # a checkpoint, and what it does is the checkpoint's business.
@@ -1363,7 +1407,7 @@ class Tables:
         """
         path, _, query = path.partition("?")
         if method == "GET" and path == "/api/version":
-            return build_info()
+            return {"api": API_VERSION}
         if method == "GET" and path == "/api/models":
             return {"models": listed_models()}
 

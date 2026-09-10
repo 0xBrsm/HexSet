@@ -1446,6 +1446,38 @@ const PHASE_LABELS = {
   GAME_OVER: "GAME OVER",
 };
 
+// What the banner is actually for: naming the thing this seat is being asked
+// to do. That is a fact about the actions on offer, not about the phase —
+// which is why PHASE_LABELS above reads as a list of verbs rather than a list
+// of phases. Most phases contain exactly one kind of action, so the two
+// agreed and the distinction never came up; the phases where they part are
+// the interesting ones:
+//
+//   - A seat holding its setup turn open (GameSession.awaiting_confirm) is
+//     offered END_TURN alone, while the engine's phase has already moved on
+//     to the next seat's SETUP_SETTLEMENT — the banner read "PLACE
+//     SETTLEMENT" at a seat with nothing to place.
+//   - MAIN with nothing affordable left offers END_TURN alone too, where
+//     "BUILD · BUY · TRADE" names three things you cannot do.
+//   - ROLL offers a Knight as well as the dice, so it is deliberately *not*
+//     single-kinded and keeps its phase label.
+//
+// So: name the offer where there is one kind of it, and fall back to the
+// phase where there are several and only a summary will do.
+const ACTION_LABELS = {
+  SETUP_SETTLEMENT: "PLACE SETTLEMENT",
+  SETUP_ROAD: "PLACE ROAD",
+  ROLL: "ROLL",
+  DISCARD: "DISCARD",
+  MOVE_ROBBER: "PLACE ROBBER",
+  END_TURN: "END YOUR TURN",
+};
+
+function offeredLabel() {
+  const kinds = new Set((state.legal_actions || []).map((a) => a.type));
+  return kinds.size === 1 ? ACTION_LABELS[[...kinds][0]] || null : null;
+}
+
 // --- Action grouping -------------------------------------------------------
 
 const VERTEX_TYPES = new Set(["SETUP_SETTLEMENT", "BUILD_SETTLEMENT", "BUILD_CITY"]);
@@ -1671,7 +1703,8 @@ function renderStatus() {
     phaseEl.textContent = `PLAYER ${state.to_move + 1}'S TURN`;
     return;
   }
-  phaseEl.textContent = PHASE_LABELS[state.phase] || state.phase;
+  phaseEl.textContent =
+    offeredLabel() || PHASE_LABELS[state.phase] || state.phase;
 }
 
 // One icon + (optional) number, for the player list's stat row — glyphs

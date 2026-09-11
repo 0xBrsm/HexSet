@@ -1,0 +1,82 @@
+{
+  "identity": {
+    "action_cap": 20000,
+    "antithetic": false,
+    "audit": false,
+    "candidate": "road-zero-exp025",
+    "catanatron_revision": "d3f4ad05bb78d8b2309631d6d3cfa8fcb6fda816",
+    "frozen_shipped": {
+      "depth": 2,
+      "k": 1,
+      "max_nodes": 600,
+      "max_trades": 0,
+      "mode": "notrade",
+      "placement": true,
+      "stance": "win",
+      "temperature": 2.476644394795811,
+      "weights": {
+        "buy_progress": 0.45,
+        "diversity": 0.358,
+        "knight": 0.1026,
+        "port": 0.03063,
+        "production": 2.785,
+        "road": 0.1237,
+        "robber_risk": -0.3,
+        "scarce": 0.07039861111111112,
+        "spare_card": 0.1065,
+        "victory_point": 1.0
+      },
+      "width": 6
+    },
+    "gate": "ab2",
+    "host": "hexset",
+    "index": 1935,
+    "information_model": "native-public-history",
+    "phenotype": {
+      "depth": 2,
+      "expansion_value": 0.25,
+      "k": 1,
+      "max_nodes": 600,
+      "max_trades": 0,
+      "mode": "notrade",
+      "placement": true,
+      "stance": "win",
+      "temperature": 2.476644394795811,
+      "weights": {
+        "buy_progress": 0.45,
+        "diversity": 0.358,
+        "knight": 0.1026,
+        "port": 0.03063,
+        "production": 2.785,
+        "road": 0.0,
+        "robber_risk": -0.3,
+        "scarce": 0.07039861111111112,
+        "spare_card": 0.1065,
+        "victory_point": 1.0
+      },
+      "width": 6
+    },
+    "protocol": "native-hexset-public-ledger-v1-independent-boards",
+    "rule_set": "standard",
+    "runtime": {
+      "networkx": "3.6.1",
+      "numpy": "2.5.2",
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]"
+    },
+    "seed": 716000000,
+    "source_sha256": "efaecd276604bc23c7d16a23a996cc3815064353dd2d453e52f146fc21d347b1",
+    "speedups": "fast"
+  },
+  "phase": "MAIN",
+  "current_player": 0,
+  "free_roads": 1,
+  "pending_free_roads": [],
+  "owned_roads": 15,
+  "native_actions": [
+    "Action(type=<ActionType.END_TURN: 1>, a=0, b=0)"
+  ],
+  "mirror_actions": [],
+  "mirror_road_building": true,
+  "mirror_free_roads": 1,
+  "turns": 120
+}

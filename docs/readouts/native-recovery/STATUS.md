@@ -157,3 +157,12 @@ Observed utilization was 2,979.97% CPU, 35 PIDs and 1.557 GiB. The focused
 expansion worktree plus adapter fix passed 39 relevant tests (one slow
 test deselected). The earlier adapter-specific worktree passed 43 tests.
 Holdout outcomes remain uninspected until all 4,096 records complete.
+
+## Final holdout: endpoints passed
+
+All 4,096 fixed games completed. Candidate road-zero-exp025 won 1,086/2,048
+against AB2 and 714/2,048 against frozen shipped Heximax. Both ordinary and
+first-attempt adjusted lower bounds exceed their registered thresholds.
+See holdout-readout.md and holdout-road-zero-exp025.tar.gz. Independent local
+verification confirmed complete unique indices, balanced candidate seats,
+unchanged legacy hashes, and the confidence calculations.

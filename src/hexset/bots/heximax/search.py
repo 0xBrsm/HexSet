@@ -843,6 +843,7 @@ def _thin_copy(state: GameState, *, copy_bank: bool = False) -> GameState:
         knights_played=state.knights_played,
         longest_road_holder=state.longest_road_holder,
         largest_army_holder=state.largest_army_holder,
+        rules=state.rules,
     )
 
 

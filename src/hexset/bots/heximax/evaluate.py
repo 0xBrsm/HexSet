@@ -38,10 +38,9 @@ from hexset.cards import DECK_COMPOSITION, DevCard
 from hexset.devcards import holdings
 from hexset.economy import COSTS
 from hexset.game import Game
-from hexset.robber import DISCARD_THRESHOLD
 from hexset.ledger import PublicLedger
 from hexset.state import GameState
-from hexset.victory import WINNING_POINTS, award_points, card_points
+from hexset.victory import award_points, card_points
 
 from hexset.view import View
 
@@ -260,6 +259,7 @@ class HonestEvaluator:
             self._walk(state, seat) if walk is None else walk,
             num_players=state.num_players,
             deck_left=len(state.deck),
+            discard_limit=state.rules.discard_limit,
         )
 
     def _hand_terms_of(
@@ -328,12 +328,13 @@ class HonestEvaluator:
         self, state: GameState, seat: int, hand: Sequence[float], *, knower: int | None = None,
         belief: View | None = None,
     ) -> float:
-        """`terms` dotted with the weight vector, plus the win bonus at 10 VP."""
+        """`terms` dotted with the weight vector, plus the win bonus at the
+        game type's winning points."""
         values = self.terms(state, seat, hand, knower=knower, belief=belief)
         total = 0.0
         for weight, value in zip(self.vector, values):
             total += weight * value
-        if values[0] >= WINNING_POINTS:
+        if values[0] >= state.rules.winning_points:
             total += WIN_SCORE
         return total
 
@@ -438,7 +439,7 @@ class HonestEvaluator:
         best_cost = _PURCHASE_COSTS[np.where(progress > 0.0, chosen, len(_PURCHASES))]
         spare = (np.maximum(0.0, hands - best_cost) / rates).sum(axis=2)
 
-        over = held - DISCARD_THRESHOLD
+        over = held - state.rules.discard_limit
         ramp = np.clip(over, 0.0, 1.0)
         risk = seven_before_next_turn(num_players) * 0.5 * ramp * bank_value
 
@@ -446,7 +447,7 @@ class HonestEvaluator:
         total = np.zeros((n, num_players))
         for weight, value in zip(vector, values):
             total = total + weight * value
-        total = total + WIN_SCORE * (points >= WINNING_POINTS)
+        total = total + WIN_SCORE * (points >= state.rules.winning_points)
         return total
 
     def evaluate(

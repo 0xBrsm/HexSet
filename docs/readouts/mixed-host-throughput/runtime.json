@@ -1,0 +1,50 @@
+{
+  "Id": "dc42b34008bbe22cfacec0507a53c37de2d0b7d8403a61d7f15998e0019f2cdc",
+  "Image": "sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+  "State": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-09-11T04:01:30.918358245Z",
+    "FinishedAt": "2026-09-11T04:05:02.539051824Z"
+  },
+  "Mounts": [
+    {
+      "Type": "bind",
+      "Source": "/home/bsm/tmp/hexset-mixed-host",
+      "Destination": "/study",
+      "Mode": "ro",
+      "RW": false,
+      "Propagation": "rprivate"
+    },
+    {
+      "Type": "bind",
+      "Source": "/home/bsm/tmp/hexset-mixed-host-results",
+      "Destination": "/out",
+      "Mode": "rw",
+      "RW": true,
+      "Propagation": "rprivate"
+    }
+  ],
+  "command": [
+    "/study/docs/readouts/mixed-host-throughput/run_compare.py"
+  ],
+  "user": "1000:1000",
+  "env": [
+    "PYTHONPATH=/study/src",
+    "PYTHONHASHSEED=0",
+    "OPENBLAS_NUM_THREADS=1",
+    "OMP_NUM_THREADS=1",
+    "MKL_NUM_THREADS=1"
+  ],
+  "runtime": {
+    "NanoCpus": 30000000000,
+    "NetworkMode": "none"
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "hexset": {
+    "batch_seconds": [
+      53.57028902694583,
+      54.91902008000761
+    ],
+    "games_per_second": 2.2121995427530803,
+    "game_cpu_seconds": 2652.625607684,
+    "cpu_seconds_per_game": 11.052606698683332,
+    "effective_cpu_concurrency": 24.4505714850569,
+    "cpu": {
+      "ab2_search_cpu": 2349.104974244,
+      "ab2_total_cpu": 2384.4417891100006,
+      "heximax_search_cpu": 235.44749424099982,
+      "heximax_total_cpu": 235.61322992900003
+    },
+    "cpu_per_game": {
+      "ab2_search_cpu": 9.787937392683334,
+      "ab2_total_cpu": 9.93517412129167,
+      "heximax_search_cpu": 0.9810312260041659,
+      "heximax_total_cpu": 0.9817217913708335
+    },
+    "decisions": {
+      "ab2": 53126,
+      "heximax": 19918
+    },
+    "heximax_bridge_cpu": 0.1657356880002112,
+    "heximax_bridge_share": 6.247986429751562e-05,
+    "mean_actions": 304.35,
+    "mean_turns": 78.65833333333333,
+    "fallbacks": 0,
+    "hexset_source_sha256": "0cc6d8a2d6d65da7bacd801062655f22fc4c2c0ca903ced93ced11a9ad561b44",
+    "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af"
+  },
+  "catanatron": {
+    "batch_seconds": [
+      50.31817107205279,
+      51.14186848211102
+    ],
+    "games_per_second": 2.36546330017817,
+    "game_cpu_seconds": 2645.205468143,
+    "cpu_seconds_per_game": 11.021689450595833,
+    "effective_cpu_concurrency": 26.07140190134534,
+    "cpu": {
+      "ab2_search_cpu": 2404.99608626,
+      "ab2_total_cpu": 2405.3250004440006,
+      "heximax_search_cpu": 226.85477457899995,
+      "heximax_total_cpu": 231.2946121290003
+    },
+    "cpu_per_game": {
+      "ab2_search_cpu": 10.020817026083334,
+      "ab2_total_cpu": 10.022187501850002,
+      "heximax_search_cpu": 0.9452282274124998,
+      "heximax_total_cpu": 0.9637275505375013
+    },
+    "decisions": {
+      "ab2": 51890,
+      "heximax": 18266
+    },
+    "heximax_bridge_cpu": 4.439837550000362,
+    "heximax_bridge_share": 0.0016784471389730035,
+    "mean_actions": 292.31666666666666,
+    "mean_turns": 82.14166666666667,
+    "fallbacks": 0,
+    "hexset_source_sha256": "0cc6d8a2d6d65da7bacd801062655f22fc4c2c0ca903ced93ced11a9ad561b44",
+    "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af"
+  },
+  "native_throughput_gain": 0.06928116314243193,
+  "hexset_throughput_deficit": 0.0647922787107057
+}

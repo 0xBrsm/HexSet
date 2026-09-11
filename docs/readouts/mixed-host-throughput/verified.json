@@ -1,0 +1,15 @@
+{
+  "complete": true,
+  "games": 480,
+  "matched_repeat_pairs": 240,
+  "fields": [
+    "seed",
+    "winner",
+    "points",
+    "turns",
+    "actions",
+    "action_sha256",
+    "decisions",
+    "heximax_fallbacks"
+  ]
+}

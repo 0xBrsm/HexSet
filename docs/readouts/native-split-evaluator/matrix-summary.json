@@ -1,0 +1,126 @@
+{
+  "manifest": {
+    "antithetic": false,
+    "host": "hexset",
+    "information_model": "native-public-history",
+    "parameters": {
+      "depth": 2,
+      "k": 1,
+      "max_nodes": 600,
+      "max_trades": null,
+      "mode": "honest",
+      "placement": true,
+      "stance": "win",
+      "temperature": 2.476644394795811,
+      "width": 6
+    },
+    "profiles": {
+      "N": {
+        "expansion_value": 0.25,
+        "weights": {
+          "buy_progress": 0.45,
+          "diversity": 0.358,
+          "knight": 0.1026,
+          "port": 0.03063,
+          "production": 2.785,
+          "road": 0.0,
+          "robber_risk": -0.3,
+          "scarce": 0.07039861111111112,
+          "spare_card": 0.1065,
+          "victory_point": 1.0
+        }
+      },
+      "O": {
+        "expansion_value": 0.0,
+        "weights": {
+          "buy_progress": 0.45,
+          "diversity": 0.358,
+          "knight": 0.1026,
+          "port": 0.03063,
+          "production": 2.785,
+          "road": 0.1237,
+          "robber_risk": -0.3,
+          "scarce": 0.07039861111111112,
+          "spare_card": 0.1065,
+          "victory_point": 1.0
+        }
+      },
+      "T": {
+        "expansion_value": 0.0,
+        "weights": {
+          "buy_progress": 0.45,
+          "diversity": 0.358,
+          "knight": 0.1041,
+          "port": 0.007373,
+          "production": 7.067,
+          "road": 0.1209,
+          "robber_risk": -0.3,
+          "scarce": 0.1786,
+          "spare_card": 0.15,
+          "victory_point": 1.0
+        }
+      }
+    },
+    "protocol": "native-split-evaluator-v1",
+    "rule_set": "standard",
+    "runner_sha256": "7366eef4d8fde1b1d5e5d362800bd1d6ccec64b79a5563547ee36daad294e693",
+    "runtime": {
+      "numpy": "2.5.2",
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]"
+    },
+    "source_sha256": "0254eb3dbe0d14bea1b2d9eb42ec18a553d38c2f9100dd3477edb62347778c3e",
+    "trade_census": "all-live-trade-events"
+  },
+  "rows": [
+    {
+      "candidate": "N:N:0.0",
+      "candidate_trades": 3740,
+      "domestic_trades": 7672,
+      "games": 128,
+      "rate": 0.1484375,
+      "wilson95": [
+        0.09713463082600934,
+        0.22022729186758075
+      ],
+      "wins": 19
+    },
+    {
+      "candidate": "N:T:0.0",
+      "candidate_trades": 3764,
+      "domestic_trades": 7459,
+      "games": 128,
+      "rate": 0.265625,
+      "wilson95": [
+        0.19675500968374224,
+        0.34815293877865117
+      ],
+      "wins": 34
+    },
+    {
+      "candidate": "T:N:0.0",
+      "candidate_trades": 3874,
+      "domestic_trades": 7934,
+      "games": 128,
+      "rate": 0.109375,
+      "wilson95": [
+        0.06627879544591961,
+        0.17523445199140272
+      ],
+      "wins": 14
+    },
+    {
+      "candidate": "T:T:0.0",
+      "candidate_trades": 3697,
+      "domestic_trades": 7342,
+      "games": 128,
+      "rate": 0.1796875,
+      "wilson95": [
+        0.12282459937109706,
+        0.2552162635275072
+      ],
+      "wins": 23
+    }
+  ],
+  "seconds": 73.505004262086,
+  "seed": 718000000
+}

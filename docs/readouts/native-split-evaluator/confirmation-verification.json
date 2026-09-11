@@ -1,0 +1,8 @@
+{
+  "games": 1024,
+  "complete_unique_indices": true,
+  "candidate_games_per_seat": 128,
+  "exact_identities": true,
+  "trade_counts_verified": true,
+  "paired_interval_independently_verified": true
+}

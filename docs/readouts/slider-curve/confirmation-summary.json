@@ -1,0 +1,471 @@
+{
+  "games": 9216,
+  "manifest": {
+    "antithetic": false,
+    "exchange_weights": {
+      "buy_progress": 0.45,
+      "diversity": 0.358,
+      "knight": 0.1041,
+      "port": 0.007373,
+      "production": 7.067,
+      "road": 0.1209,
+      "robber_risk": -0.3,
+      "scarce": 0.1786,
+      "spare_card": 0.15,
+      "victory_point": 1.0
+    },
+    "host": "hexset",
+    "information_model": "native-public-history",
+    "numpy": "2.5.2",
+    "parameters": {
+      "depth": 2,
+      "k": 1,
+      "max_nodes": 600,
+      "max_trades": null,
+      "mode": "honest",
+      "placement": true,
+      "stance": "win",
+      "temperature": 2.476644394795811,
+      "trade_floor": 0.0,
+      "width": 6
+    },
+    "plan_sha256": "528ded256c524c21abcc41216ba61b1ab15df0266cb73336ba4254e31736e8ec",
+    "profiles": {
+      ".25": {
+        "expansion": 0.21875,
+        "weights": {
+          "buy_progress": 0.45,
+          "diversity": 0.358,
+          "knight": 0.10278749999999999,
+          "port": 0.027722875,
+          "production": 3.32025,
+          "road": 0.0151125,
+          "robber_risk": -0.3,
+          "scarce": 0.08392378472222223,
+          "spare_card": 0.1119375,
+          "victory_point": 1.0
+        }
+      },
+      ".5": {
+        "expansion": 0.1875,
+        "weights": {
+          "buy_progress": 0.45,
+          "diversity": 0.358,
+          "knight": 0.102975,
+          "port": 0.02481575,
+          "production": 3.8555,
+          "road": 0.030225,
+          "robber_risk": -0.3,
+          "scarce": 0.09744895833333334,
+          "spare_card": 0.11737500000000001,
+          "victory_point": 1.0
+        }
+      },
+      ".75": {
+        "expansion": 0.15625,
+        "weights": {
+          "buy_progress": 0.45,
+          "diversity": 0.358,
+          "knight": 0.10316249999999999,
+          "port": 0.021908625,
+          "production": 4.390750000000001,
+          "road": 0.045337499999999996,
+          "robber_risk": -0.3,
+          "scarce": 0.11097413194444446,
+          "spare_card": 0.1228125,
+          "victory_point": 1.0
+        }
+      },
+      "0": {
+        "expansion": 0.25,
+        "weights": {
+          "buy_progress": 0.45,
+          "diversity": 0.358,
+          "knight": 0.1026,
+          "port": 0.03063,
+          "production": 2.785,
+          "road": 0.0,
+          "robber_risk": -0.3,
+          "scarce": 0.07039861111111112,
+          "spare_card": 0.1065,
+          "victory_point": 1.0
+        }
+      },
+      "1": {
+        "expansion": 0.125,
+        "weights": {
+          "buy_progress": 0.45,
+          "diversity": 0.358,
+          "knight": 0.10335,
+          "port": 0.0190015,
+          "production": 4.926,
+          "road": 0.06045,
+          "robber_risk": -0.3,
+          "scarce": 0.12449930555555556,
+          "spare_card": 0.12825,
+          "victory_point": 1.0
+        }
+      }
+    },
+    "protocol": "direct-slider-curve-v1",
+    "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+    "regimes": {
+      "falling": {
+        "after": [
+          0.1,
+          0.1,
+          0.1
+        ],
+        "change": 40,
+        "moves": [
+          "0",
+          "1",
+          "T"
+        ],
+        "rates": [
+          0.75,
+          0.75,
+          0.75
+        ]
+      },
+      "full": {
+        "moves": [
+          "1",
+          "1",
+          "1"
+        ],
+        "rates": [
+          1,
+          1,
+          1
+        ]
+      },
+      "heavy": {
+        "moves": [
+          "1",
+          "1",
+          "1"
+        ],
+        "rates": [
+          0.65,
+          0.65,
+          0.65
+        ]
+      },
+      "mixed": {
+        "moves": [
+          "0",
+          "1",
+          "T"
+        ],
+        "rates": [
+          0.05,
+          0.45,
+          0.85
+        ]
+      },
+      "moderate": {
+        "moves": [
+          "1",
+          "1",
+          "1"
+        ],
+        "rates": [
+          0.3,
+          0.3,
+          0.3
+        ]
+      },
+      "none": {
+        "moves": [
+          "0",
+          "0",
+          "0"
+        ],
+        "rates": [
+          0,
+          0,
+          0
+        ]
+      },
+      "rising": {
+        "after": [
+          0.75,
+          0.75,
+          0.75
+        ],
+        "change": 40,
+        "moves": [
+          "0",
+          "1",
+          "T"
+        ],
+        "rates": [
+          0.1,
+          0.1,
+          0.1
+        ]
+      }
+    },
+    "runner_sha256": "57455c8fbe113a8788ae31fdd3fd0dfb8138ba74bda8893b1f7ab2cdef72d48c",
+    "source_sha256": "d2df60dd0abeb72f1bd0ae4222716ce1b4246ac249c64cd2d76aeb0aa611b001",
+    "trade_census": "all-live-trade-events"
+  },
+  "noninferiority_confirmed": true,
+  "primary": {
+    "conditional": {
+      "difference": 0.0030691964285714285,
+      "interval95": [
+        -0.00993769179765144,
+        0.016076084654794296
+      ],
+      "lower975": -0.00993769179765144,
+      "se": 0.006636289353387546
+    },
+    "global": {
+      "difference": -0.0025111607142857145,
+      "interval95": [
+        -0.015088263655713386,
+        0.010065942227141958
+      ],
+      "lower975": -0.015088263655713386,
+      "se": 0.006417007119226512
+    }
+  },
+  "rows": [
+    {
+      "candidate": ".5",
+      "domestic_trades": 14428,
+      "games": 512,
+      "rate": 0.314453125,
+      "regime": "falling",
+      "wilson95": [
+        0.275744098569247,
+        0.35592567762118843
+      ],
+      "wins": 161
+    },
+    {
+      "candidate": "0",
+      "domestic_trades": 14434,
+      "games": 512,
+      "rate": 0.328125,
+      "regime": "falling",
+      "wilson95": [
+        0.2888661897460744,
+        0.36994370819874994
+      ],
+      "wins": 168
+    },
+    {
+      "candidate": "A",
+      "domestic_trades": 14446,
+      "games": 512,
+      "rate": 0.33203125,
+      "regime": "falling",
+      "wilson95": [
+        0.29262250582423127,
+        0.3739417126218471
+      ],
+      "wins": 170
+    },
+    {
+      "candidate": ".5",
+      "domestic_trades": 28948,
+      "games": 512,
+      "rate": 0.224609375,
+      "regime": "full",
+      "wilson95": [
+        0.1905884511642973,
+        0.2627319534972965
+      ],
+      "wins": 115
+    },
+    {
+      "candidate": "A",
+      "domestic_trades": 28824,
+      "games": 512,
+      "rate": 0.236328125,
+      "regime": "full",
+      "wilson95": [
+        0.20157840920407466,
+        0.2750049569612811
+      ],
+      "wins": 121
+    },
+    {
+      "candidate": ".5",
+      "domestic_trades": 19968,
+      "games": 512,
+      "rate": 0.271484375,
+      "regime": "heavy",
+      "wilson95": [
+        0.23477045962847023,
+        0.31160179104817143
+      ],
+      "wins": 139
+    },
+    {
+      "candidate": "A",
+      "domestic_trades": 19981,
+      "games": 512,
+      "rate": 0.255859375,
+      "regime": "heavy",
+      "wilson95": [
+        0.21997900781665297,
+        0.2953759608549727
+      ],
+      "wins": 131
+    },
+    {
+      "candidate": ".25",
+      "domestic_trades": 13907,
+      "games": 512,
+      "rate": 0.25390625,
+      "regime": "mixed",
+      "wilson95": [
+        0.21813441200261882,
+        0.29334339641837986
+      ],
+      "wins": 130
+    },
+    {
+      "candidate": ".5",
+      "domestic_trades": 13769,
+      "games": 512,
+      "rate": 0.2578125,
+      "regime": "mixed",
+      "wilson95": [
+        0.2218245834540427,
+        0.29740754546820997
+      ],
+      "wins": 132
+    },
+    {
+      "candidate": "A",
+      "domestic_trades": 13808,
+      "games": 512,
+      "rate": 0.2734375,
+      "regime": "mixed",
+      "wilson95": [
+        0.23662362581261376,
+        0.3136257851146548
+      ],
+      "wins": 140
+    },
+    {
+      "candidate": ".5",
+      "domestic_trades": 10265,
+      "games": 512,
+      "rate": 0.314453125,
+      "regime": "moderate",
+      "wilson95": [
+        0.275744098569247,
+        0.35592567762118843
+      ],
+      "wins": 161
+    },
+    {
+      "candidate": "1",
+      "domestic_trades": 10388,
+      "games": 512,
+      "rate": 0.291015625,
+      "regime": "moderate",
+      "wilson95": [
+        0.25334281343408205,
+        0.33180103974882946
+      ],
+      "wins": 149
+    },
+    {
+      "candidate": "A",
+      "domestic_trades": 10362,
+      "games": 512,
+      "rate": 0.29296875,
+      "regime": "moderate",
+      "wilson95": [
+        0.2552049199207752,
+        0.3338160935127633
+      ],
+      "wins": 150
+    },
+    {
+      "candidate": ".5",
+      "domestic_trades": 0,
+      "games": 512,
+      "rate": 0.25,
+      "regime": "none",
+      "wilson95": [
+        0.214448189457842,
+        0.28927529846190264
+      ],
+      "wins": 128
+    },
+    {
+      "candidate": "A",
+      "domestic_trades": 0,
+      "games": 512,
+      "rate": 0.251953125,
+      "regime": "none",
+      "wilson95": [
+        0.21629080337711143,
+        0.2913098447932602
+      ],
+      "wins": 129
+    },
+    {
+      "candidate": ".5",
+      "domestic_trades": 14304,
+      "games": 512,
+      "rate": 0.29296875,
+      "regime": "rising",
+      "wilson95": [
+        0.2552049199207752,
+        0.3338160935127633
+      ],
+      "wins": 150
+    },
+    {
+      "candidate": "0",
+      "domestic_trades": 14138,
+      "games": 512,
+      "rate": 0.267578125,
+      "regime": "rising",
+      "wilson95": [
+        0.23106691141932287,
+        0.3075510187560647
+      ],
+      "wins": 137
+    },
+    {
+      "candidate": "A",
+      "domestic_trades": 14037,
+      "games": 512,
+      "rate": 0.265625,
+      "regime": "rising",
+      "wilson95": [
+        0.22921654206312084,
+        0.3055242278616398
+      ],
+      "wins": 136
+    }
+  ],
+  "seconds": 1420.5327432069462,
+  "selection": {
+    "conditional_best": {
+      "falling": "0",
+      "full": ".5",
+      "heavy": ".5",
+      "mixed": ".25",
+      "moderate": "1",
+      "none": ".5",
+      "rising": "0"
+    },
+    "confirmation_n": 512,
+    "estimated_variance": 0.1631590136054422,
+    "global_best": ".5",
+    "power_cap_applied": false,
+    "uncapped_target_per_regime": 457.3626697729078
+  },
+  "stage": "confirmation"
+}

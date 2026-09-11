@@ -1,0 +1,738 @@
+{
+  "games": 2688,
+  "manifest": {
+    "antithetic": false,
+    "exchange_weights": {
+      "buy_progress": 0.45,
+      "diversity": 0.358,
+      "knight": 0.1041,
+      "port": 0.007373,
+      "production": 7.067,
+      "road": 0.1209,
+      "robber_risk": -0.3,
+      "scarce": 0.1786,
+      "spare_card": 0.15,
+      "victory_point": 1.0
+    },
+    "host": "hexset",
+    "information_model": "native-public-history",
+    "numpy": "2.5.2",
+    "parameters": {
+      "depth": 2,
+      "k": 1,
+      "max_nodes": 600,
+      "max_trades": null,
+      "mode": "honest",
+      "placement": true,
+      "stance": "win",
+      "temperature": 2.476644394795811,
+      "trade_floor": 0.0,
+      "width": 6
+    },
+    "plan_sha256": "528ded256c524c21abcc41216ba61b1ab15df0266cb73336ba4254e31736e8ec",
+    "profiles": {
+      ".25": {
+        "expansion": 0.21875,
+        "weights": {
+          "buy_progress": 0.45,
+          "diversity": 0.358,
+          "knight": 0.10278749999999999,
+          "port": 0.027722875,
+          "production": 3.32025,
+          "road": 0.0151125,
+          "robber_risk": -0.3,
+          "scarce": 0.08392378472222223,
+          "spare_card": 0.1119375,
+          "victory_point": 1.0
+        }
+      },
+      ".5": {
+        "expansion": 0.1875,
+        "weights": {
+          "buy_progress": 0.45,
+          "diversity": 0.358,
+          "knight": 0.102975,
+          "port": 0.02481575,
+          "production": 3.8555,
+          "road": 0.030225,
+          "robber_risk": -0.3,
+          "scarce": 0.09744895833333334,
+          "spare_card": 0.11737500000000001,
+          "victory_point": 1.0
+        }
+      },
+      ".75": {
+        "expansion": 0.15625,
+        "weights": {
+          "buy_progress": 0.45,
+          "diversity": 0.358,
+          "knight": 0.10316249999999999,
+          "port": 0.021908625,
+          "production": 4.390750000000001,
+          "road": 0.045337499999999996,
+          "robber_risk": -0.3,
+          "scarce": 0.11097413194444446,
+          "spare_card": 0.1228125,
+          "victory_point": 1.0
+        }
+      },
+      "0": {
+        "expansion": 0.25,
+        "weights": {
+          "buy_progress": 0.45,
+          "diversity": 0.358,
+          "knight": 0.1026,
+          "port": 0.03063,
+          "production": 2.785,
+          "road": 0.0,
+          "robber_risk": -0.3,
+          "scarce": 0.07039861111111112,
+          "spare_card": 0.1065,
+          "victory_point": 1.0
+        }
+      },
+      "1": {
+        "expansion": 0.125,
+        "weights": {
+          "buy_progress": 0.45,
+          "diversity": 0.358,
+          "knight": 0.10335,
+          "port": 0.0190015,
+          "production": 4.926,
+          "road": 0.06045,
+          "robber_risk": -0.3,
+          "scarce": 0.12449930555555556,
+          "spare_card": 0.12825,
+          "victory_point": 1.0
+        }
+      }
+    },
+    "protocol": "direct-slider-curve-v1",
+    "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+    "regimes": {
+      "falling": {
+        "after": [
+          0.1,
+          0.1,
+          0.1
+        ],
+        "change": 40,
+        "moves": [
+          "0",
+          "1",
+          "T"
+        ],
+        "rates": [
+          0.75,
+          0.75,
+          0.75
+        ]
+      },
+      "full": {
+        "moves": [
+          "1",
+          "1",
+          "1"
+        ],
+        "rates": [
+          1,
+          1,
+          1
+        ]
+      },
+      "heavy": {
+        "moves": [
+          "1",
+          "1",
+          "1"
+        ],
+        "rates": [
+          0.65,
+          0.65,
+          0.65
+        ]
+      },
+      "mixed": {
+        "moves": [
+          "0",
+          "1",
+          "T"
+        ],
+        "rates": [
+          0.05,
+          0.45,
+          0.85
+        ]
+      },
+      "moderate": {
+        "moves": [
+          "1",
+          "1",
+          "1"
+        ],
+        "rates": [
+          0.3,
+          0.3,
+          0.3
+        ]
+      },
+      "none": {
+        "moves": [
+          "0",
+          "0",
+          "0"
+        ],
+        "rates": [
+          0,
+          0,
+          0
+        ]
+      },
+      "rising": {
+        "after": [
+          0.75,
+          0.75,
+          0.75
+        ],
+        "change": 40,
+        "moves": [
+          "0",
+          "1",
+          "T"
+        ],
+        "rates": [
+          0.1,
+          0.1,
+          0.1
+        ]
+      }
+    },
+    "runner_sha256": "57455c8fbe113a8788ae31fdd3fd0dfb8138ba74bda8893b1f7ab2cdef72d48c",
+    "source_sha256": "d2df60dd0abeb72f1bd0ae4222716ce1b4246ac249c64cd2d76aeb0aa611b001",
+    "trade_census": "all-live-trade-events"
+  },
+  "rows": [
+    {
+      "candidate": ".25",
+      "domestic_trades": 1777,
+      "games": 64,
+      "rate": 0.21875,
+      "regime": "falling",
+      "wilson95": [
+        0.13502319354373135,
+        0.3343278405637433
+      ],
+      "wins": 14
+    },
+    {
+      "candidate": ".5",
+      "domestic_trades": 1754,
+      "games": 64,
+      "rate": 0.1875,
+      "regime": "falling",
+      "wilson95": [
+        0.1106464312646328,
+        0.2997436066325612
+      ],
+      "wins": 12
+    },
+    {
+      "candidate": ".75",
+      "domestic_trades": 1749,
+      "games": 64,
+      "rate": 0.234375,
+      "regime": "falling",
+      "wilson95": [
+        0.14749895538818128,
+        0.35133257682443364
+      ],
+      "wins": 15
+    },
+    {
+      "candidate": "0",
+      "domestic_trades": 1783,
+      "games": 64,
+      "rate": 0.28125,
+      "regime": "falling",
+      "wilson95": [
+        0.18593372270957867,
+        0.40133930381845717
+      ],
+      "wins": 18
+    },
+    {
+      "candidate": "1",
+      "domestic_trades": 1758,
+      "games": 64,
+      "rate": 0.265625,
+      "regime": "falling",
+      "wilson95": [
+        0.17296379013909535,
+        0.38482873828380015
+      ],
+      "wins": 17
+    },
+    {
+      "candidate": "A",
+      "domestic_trades": 1762,
+      "games": 64,
+      "rate": 0.21875,
+      "regime": "falling",
+      "wilson95": [
+        0.13502319354373135,
+        0.3343278405637433
+      ],
+      "wins": 14
+    },
+    {
+      "candidate": ".25",
+      "domestic_trades": 3410,
+      "games": 64,
+      "rate": 0.171875,
+      "regime": "full",
+      "wilson95": [
+        0.09877742257874725,
+        0.28213211721330644
+      ],
+      "wins": 11
+    },
+    {
+      "candidate": ".5",
+      "domestic_trades": 3492,
+      "games": 64,
+      "rate": 0.234375,
+      "regime": "full",
+      "wilson95": [
+        0.14749895538818128,
+        0.35133257682443364
+      ],
+      "wins": 15
+    },
+    {
+      "candidate": ".75",
+      "domestic_trades": 3499,
+      "games": 64,
+      "rate": 0.234375,
+      "regime": "full",
+      "wilson95": [
+        0.14749895538818128,
+        0.35133257682443364
+      ],
+      "wins": 15
+    },
+    {
+      "candidate": "0",
+      "domestic_trades": 3492,
+      "games": 64,
+      "rate": 0.171875,
+      "regime": "full",
+      "wilson95": [
+        0.09877742257874725,
+        0.28213211721330644
+      ],
+      "wins": 11
+    },
+    {
+      "candidate": "1",
+      "domestic_trades": 3549,
+      "games": 64,
+      "rate": 0.203125,
+      "regime": "full",
+      "wilson95": [
+        0.12273417769708575,
+        0.31713635830524856
+      ],
+      "wins": 13
+    },
+    {
+      "candidate": "A",
+      "domestic_trades": 3453,
+      "games": 64,
+      "rate": 0.203125,
+      "regime": "full",
+      "wilson95": [
+        0.12273417769708575,
+        0.31713635830524856
+      ],
+      "wins": 13
+    },
+    {
+      "candidate": ".25",
+      "domestic_trades": 2403,
+      "games": 64,
+      "rate": 0.28125,
+      "regime": "heavy",
+      "wilson95": [
+        0.18593372270957867,
+        0.40133930381845717
+      ],
+      "wins": 18
+    },
+    {
+      "candidate": ".5",
+      "domestic_trades": 2458,
+      "games": 64,
+      "rate": 0.28125,
+      "regime": "heavy",
+      "wilson95": [
+        0.18593372270957867,
+        0.40133930381845717
+      ],
+      "wins": 18
+    },
+    {
+      "candidate": ".75",
+      "domestic_trades": 2472,
+      "games": 64,
+      "rate": 0.265625,
+      "regime": "heavy",
+      "wilson95": [
+        0.17296379013909535,
+        0.38482873828380015
+      ],
+      "wins": 17
+    },
+    {
+      "candidate": "0",
+      "domestic_trades": 2352,
+      "games": 64,
+      "rate": 0.25,
+      "regime": "heavy",
+      "wilson95": [
+        0.16014926473210675,
+        0.3681627655856484
+      ],
+      "wins": 16
+    },
+    {
+      "candidate": "1",
+      "domestic_trades": 2451,
+      "games": 64,
+      "rate": 0.171875,
+      "regime": "heavy",
+      "wilson95": [
+        0.09877742257874725,
+        0.28213211721330644
+      ],
+      "wins": 11
+    },
+    {
+      "candidate": "A",
+      "domestic_trades": 2444,
+      "games": 64,
+      "rate": 0.28125,
+      "regime": "heavy",
+      "wilson95": [
+        0.18593372270957867,
+        0.40133930381845717
+      ],
+      "wins": 18
+    },
+    {
+      "candidate": ".25",
+      "domestic_trades": 1788,
+      "games": 64,
+      "rate": 0.328125,
+      "regime": "mixed",
+      "wilson95": [
+        0.22570557834870092,
+        0.4500089424947557
+      ],
+      "wins": 21
+    },
+    {
+      "candidate": ".5",
+      "domestic_trades": 1766,
+      "games": 64,
+      "rate": 0.28125,
+      "regime": "mixed",
+      "wilson95": [
+        0.18593372270957867,
+        0.40133930381845717
+      ],
+      "wins": 18
+    },
+    {
+      "candidate": ".75",
+      "domestic_trades": 1700,
+      "games": 64,
+      "rate": 0.265625,
+      "regime": "mixed",
+      "wilson95": [
+        0.17296379013909535,
+        0.38482873828380015
+      ],
+      "wins": 17
+    },
+    {
+      "candidate": "0",
+      "domestic_trades": 1817,
+      "games": 64,
+      "rate": 0.265625,
+      "regime": "mixed",
+      "wilson95": [
+        0.17296379013909535,
+        0.38482873828380015
+      ],
+      "wins": 17
+    },
+    {
+      "candidate": "1",
+      "domestic_trades": 1794,
+      "games": 64,
+      "rate": 0.265625,
+      "regime": "mixed",
+      "wilson95": [
+        0.17296379013909535,
+        0.38482873828380015
+      ],
+      "wins": 17
+    },
+    {
+      "candidate": "A",
+      "domestic_trades": 1830,
+      "games": 64,
+      "rate": 0.234375,
+      "regime": "mixed",
+      "wilson95": [
+        0.14749895538818128,
+        0.35133257682443364
+      ],
+      "wins": 15
+    },
+    {
+      "candidate": ".25",
+      "domestic_trades": 1349,
+      "games": 64,
+      "rate": 0.296875,
+      "regime": "moderate",
+      "wilson95": [
+        0.19905151260405385,
+        0.41770201202912227
+      ],
+      "wins": 19
+    },
+    {
+      "candidate": ".5",
+      "domestic_trades": 1298,
+      "games": 64,
+      "rate": 0.40625,
+      "regime": "moderate",
+      "wilson95": [
+        0.2945690917038622,
+        0.528547919665296
+      ],
+      "wins": 26
+    },
+    {
+      "candidate": ".75",
+      "domestic_trades": 1314,
+      "games": 64,
+      "rate": 0.421875,
+      "regime": "moderate",
+      "wilson95": [
+        0.30869782393295747,
+        0.5438996855413409
+      ],
+      "wins": 27
+    },
+    {
+      "candidate": "0",
+      "domestic_trades": 1393,
+      "games": 64,
+      "rate": 0.234375,
+      "regime": "moderate",
+      "wilson95": [
+        0.14749895538818128,
+        0.35133257682443364
+      ],
+      "wins": 15
+    },
+    {
+      "candidate": "1",
+      "domestic_trades": 1315,
+      "games": 64,
+      "rate": 0.484375,
+      "regime": "moderate",
+      "wilson95": [
+        0.3663355157825022,
+        0.6041839861123575
+      ],
+      "wins": 31
+    },
+    {
+      "candidate": "A",
+      "domestic_trades": 1303,
+      "games": 64,
+      "rate": 0.3125,
+      "regime": "moderate",
+      "wilson95": [
+        0.2123106647207225,
+        0.43392335801759396
+      ],
+      "wins": 20
+    },
+    {
+      "candidate": ".25",
+      "domestic_trades": 0,
+      "games": 64,
+      "rate": 0.359375,
+      "regime": "none",
+      "wilson95": [
+        0.25288402217722405,
+        0.4817914948765132
+      ],
+      "wins": 23
+    },
+    {
+      "candidate": ".5",
+      "domestic_trades": 0,
+      "games": 64,
+      "rate": 0.375,
+      "regime": "none",
+      "wilson95": [
+        0.2666598010315012,
+        0.4974962141273763
+      ],
+      "wins": 24
+    },
+    {
+      "candidate": ".75",
+      "domestic_trades": 0,
+      "games": 64,
+      "rate": 0.34375,
+      "regime": "none",
+      "wilson95": [
+        0.23923142006738501,
+        0.4659635988812119
+      ],
+      "wins": 22
+    },
+    {
+      "candidate": "0",
+      "domestic_trades": 0,
+      "games": 64,
+      "rate": 0.328125,
+      "regime": "none",
+      "wilson95": [
+        0.22570557834870092,
+        0.4500089424947557
+      ],
+      "wins": 21
+    },
+    {
+      "candidate": "1",
+      "domestic_trades": 0,
+      "games": 64,
+      "rate": 0.25,
+      "regime": "none",
+      "wilson95": [
+        0.16014926473210675,
+        0.3681627655856484
+      ],
+      "wins": 16
+    },
+    {
+      "candidate": "A",
+      "domestic_trades": 0,
+      "games": 64,
+      "rate": 0.328125,
+      "regime": "none",
+      "wilson95": [
+        0.22570557834870092,
+        0.4500089424947557
+      ],
+      "wins": 21
+    },
+    {
+      "candidate": ".25",
+      "domestic_trades": 1814,
+      "games": 64,
+      "rate": 0.296875,
+      "regime": "rising",
+      "wilson95": [
+        0.19905151260405385,
+        0.41770201202912227
+      ],
+      "wins": 19
+    },
+    {
+      "candidate": ".5",
+      "domestic_trades": 1861,
+      "games": 64,
+      "rate": 0.234375,
+      "regime": "rising",
+      "wilson95": [
+        0.14749895538818128,
+        0.35133257682443364
+      ],
+      "wins": 15
+    },
+    {
+      "candidate": ".75",
+      "domestic_trades": 1792,
+      "games": 64,
+      "rate": 0.234375,
+      "regime": "rising",
+      "wilson95": [
+        0.14749895538818128,
+        0.35133257682443364
+      ],
+      "wins": 15
+    },
+    {
+      "candidate": "0",
+      "domestic_trades": 1849,
+      "games": 64,
+      "rate": 0.328125,
+      "regime": "rising",
+      "wilson95": [
+        0.22570557834870092,
+        0.4500089424947557
+      ],
+      "wins": 21
+    },
+    {
+      "candidate": "1",
+      "domestic_trades": 1663,
+      "games": 64,
+      "rate": 0.171875,
+      "regime": "rising",
+      "wilson95": [
+        0.09877742257874725,
+        0.28213211721330644
+      ],
+      "wins": 11
+    },
+    {
+      "candidate": "A",
+      "domestic_trades": 1834,
+      "games": 64,
+      "rate": 0.28125,
+      "regime": "rising",
+      "wilson95": [
+        0.18593372270957867,
+        0.40133930381845717
+      ],
+      "wins": 18
+    }
+  ],
+  "seconds": 417.8427782780491,
+  "selection": {
+    "conditional_best": {
+      "falling": "0",
+      "full": ".5",
+      "heavy": ".5",
+      "mixed": ".25",
+      "moderate": "1",
+      "none": ".5",
+      "rising": "0"
+    },
+    "confirmation_n": 512,
+    "estimated_variance": 0.1631590136054422,
+    "global_best": ".5",
+    "power_cap_applied": false,
+    "uncapped_target_per_regime": 457.3626697729078
+  },
+  "stage": "screen"
+}

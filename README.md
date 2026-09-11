@@ -123,6 +123,15 @@ configuration, saved games, HTTP routes, and MCP tools.
 
 ## Evaluate bots
 
+`heximax-adaptive` uses one policy that slides between the current best no-trade
+and trading move profiles. Recent public exchange activity sets the slider;
+both endpoints are exact. Its exchange evaluator remains the trading profile,
+with floor zero. The fixed presets remain benchmark controls. See the
+[slider implementation](docs/readouts/trading-conditions/SLIDER.md) and
+[fresh curve validation](docs/readouts/slider-curve/README.md), which passed the
+registered aggregate 2-percentage-point non-inferiority margin against both
+global and condition-selected fixed controls.
+
 ```sh
 python -m hexset.bench.duel heximax heximax-notrade --games 400 --workers 4
 ```

@@ -142,6 +142,8 @@ class Entrant:
     weights: object | None = None
     depth: int = 2
     width: int | None = None
+    # Optional leaf budget for experimental Heximax configurations.
+    max_nodes: int | None = None
     # None uses the selected bot's search objective.
     stance: str | None = None
     # Whether the opening settlements come from the fitted placement prior

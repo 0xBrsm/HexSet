@@ -908,7 +908,7 @@ def heximax(
     placement: bool = True, exact_progress_samples: int = 0, weights: Weights | None = None,
     temperature: float | None = None, expansion_value: float | None = None,
     trade_weights: Weights | None = None, trade_expansion_value: float = 0.0,
-    trade_floor: float = HEXIMAX_TRADE_FLOOR,
+    trade_floor: float | None = None, adaptive: bool = False,
 ) -> Heximax:
     """The two shipped configurations, by `mode`.
 
@@ -921,6 +921,11 @@ def heximax(
     None uses the mode default: 0.25 VP for `notrade`, zero for `honest`.
     Pass zero explicitly to disable it when replaying an older configuration.
     Values below one VP keep settling worth more than the entire option bonus.
+
+    `adaptive=True` slides the current no-trade move profile toward the
+    balanced trading profile using recent public exchange activity. It uses
+    a separate trading-profile gate and floor zero by default; explicit
+    trading-off switches still apply. Fixed weight overrides are incompatible.
 
     `trade_weights` optionally gives exchanges their own evaluator, with
     `trade_expansion_value` (zero by default). Otherwise exchanges share the
@@ -935,6 +940,13 @@ def heximax(
     incumbent are otherwise identical heximax bots, differing only in the
     vector and the temperature it was fitted with.
     """
+    if adaptive:
+        if weights is not None or expansion_value is not None or trade_weights is not None:
+            raise ValueError("adaptive uses the current no-trade and balanced endpoints")
+        weights, expansion_value = NO_TRADE_WEIGHTS, .25
+        trade_weights, trade_expansion_value = TRADING_WEIGHTS, 0.0
+    if trade_floor is None:
+        trade_floor = 0.0 if adaptive else HEXIMAX_TRADE_FLOOR
     if mode not in MODES:
         raise ValueError(f"unknown heximax mode: {mode}")
     if max_trades is BY_MODE:
@@ -949,7 +961,11 @@ def heximax(
         board, trade_weights, exact_progress_samples=exact_progress_samples,
         expansion_value=trade_expansion_value,
     )
-    return Heximax(
+    cls = Heximax
+    if adaptive:
+        from .adaptive import AdaptiveHeximax
+        cls = AdaptiveHeximax
+    return cls(
         evaluator,
         trade_evaluator=trade_evaluator,
         trade_floor=trade_floor,

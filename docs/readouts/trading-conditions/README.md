@@ -1,11 +1,20 @@
 # Heximax under varying trading conditions
 
-## Decision and fresh evidence
+## Current policy
 
-Use the selectable **`heximax-balanced`** preset for native floor-zero games
-where trading is permitted but opponent participation is uncertain. Keep
+The unified policy is now `heximax-adaptive`: directly slide between the current
+no-trade profile N and the best validated trading policy M/T. See
+[SLIDER.md](SLIDER.md). Its finite activity window reaches both endpoints; the
+old adaptive screen used N to legacy T with a persistent prior, so its reported
+win rate is not a measurement of this revised slider. The original study and
+its preregistered decision are retained below as historical evidence.
+
+## Original decision and fresh evidence
+
+The original study recommended the selectable **`heximax-balanced`** preset for native floor-zero games
+where trading is permitted but opponent participation is uncertain. It retained
 `heximax-notrade` for explicitly non-trading play. Do not infer that trading
-is unavailable from a short quiet stretch. Public-activity adaptation stays
+is unavailable from a short quiet stretch. Its public-activity adaptation remained
 experimental: it tracked conditions, but did not improve on the fixed midpoint.
 
 | Policy | Wins in six primary conditions | Win rate |

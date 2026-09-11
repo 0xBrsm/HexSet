@@ -44,6 +44,8 @@ def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Heximax:
             weights=BALANCED_WEIGHTS if entrant.weights is None else entrant.weights,
             expansion_value=.125, trade_weights=TRADING_WEIGHTS, trade_floor=0.0,
         )
+    if entrant.kind == "heximax-adaptive":
+        kwargs["adaptive"] = True
     return heximax(board, rng, **kwargs)
 
 
@@ -74,4 +76,11 @@ register_preset(
 register_entrant_kind("heximax-balanced", _spawn)
 register_preset(
     "heximax-balanced", Entrant("heximax-balanced", kind="heximax-balanced", depth=2, width=6),
+)
+
+# Direct interpolation of the two current best endpoints; the earlier fixed
+# presets remain useful reproducible controls, not required user mode switches.
+register_entrant_kind("heximax-adaptive", _spawn)
+register_preset(
+    "heximax-adaptive", Entrant("heximax-adaptive", kind="heximax-adaptive", depth=2, width=6),
 )

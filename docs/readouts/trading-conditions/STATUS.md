@@ -1,4 +1,13 @@
-# Trading-condition study status
+# Current slider update
+
+The user selected direct interpolation between the current best no-trade and
+trading settings. heximax-adaptive now interpolates N to the validated M move
+profile, keeping M's T exchange evaluator and floor zero. An eight-eligible-turn
+public activity window replaces the old persistent-prior estimator. Both
+endpoints are exact; see SLIDER.md. The preceding study below tested a different
+adaptive rule and does not establish this revised slider's win rate.
+
+# Preceding trading-condition study
 
 Research endpoint reached. Fresh validation confirms fixed midpoint move
 weights with a separate trading-profile exchange evaluator. M wins523/1536

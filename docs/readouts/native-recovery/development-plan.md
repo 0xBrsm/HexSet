@@ -22,3 +22,10 @@ roots for the changed source fingerprint. Frozen opponents retain zero.
 Manifest v6 registers p10-dev015 and p10-dev03: 64 games per gate initially,
 seed 711000000. Expand only if the joint target margin is promising. This
 candidate screen follows the current diagnostic pool, with no overlap.
+
+
+After the completed 64/gate screen, .15 scores 30 AB2 /14 shipped wins,
+joint margin -3.125 points, improving the p10 screen margin. Extend only
+p10-dev015 to 256/gate on the same seed, reusing 128 completed games and
+adding 384. The .30 arm (18 AB2 /11 shipped) is not extended. No holdout or
+confirmation has been launched. This allocation was recorded before launch.

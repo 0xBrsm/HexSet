@@ -58,3 +58,18 @@ Containers: `hexset-native-recovery-initial`, `...-screen128`,
 `...-followon32`, `...-search32`, `...-policy32` completed.
 Manifest-v5 diagnostic block is running in `...-diagnostic64`; see
 stage5-plan.md for the finite allocation and selection rule.
+
+
+Diagnostic block completed: 1,152 additional games, 433.5 seconds on 16
+workers. None of the ten arms beat the registered p10 joint target margin
+(-7.03 percentage points). Best margins were -7.81 points (road-zero-vp4
+and p10-spare005), so no arm receives a 256-game extension from this block.
+See diagnostic64-summary.json for all arms, including depth-one regression.
+
+Optional development value implemented in `cb6200b`; default remains zero.
+Source SHA256 `2630ead823e3fc4072b836f40cbbc80b8de38a6117417145e8d37370e82d936d`.
+Eight audited native default-control games exactly matched the old source's
+full traces and outcomes. Focused tests and CI passed. Two manifest-v6 arms
+(.15 and .30 per unused non-VP card) are screening at 64 games/gate in
+`hexset-native-recovery-development64`, output root `screen-development`.
+This screen uses the changed source and never reuses old-source checkpoints.

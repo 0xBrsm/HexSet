@@ -26,7 +26,7 @@ from ...actions import options_for
 from hexset.game import ROLL_ODDS, Game, Phase, imagine, is_over, roll_dice, to_move
 from hexset.ledger import PublicLedger
 from hexset.mcts import draws_hidden
-from hexset.placement import best as best_opening
+from hexset.placement import RESOURCE_WEIGHT, best as best_opening
 from hexset.state import GameState
 from hexset.trading import Bundle
 
@@ -189,6 +189,7 @@ class Heximax:
     # stance's gains are read in.
     trade_floor: float = HEXIMAX_TRADE_FLOOR
     placement: bool = True
+    placement_resource_weight: float = RESOURCE_WEIGHT
     mode: str = "honest"
     exact_roll_plies: int = EXACT_ROLL_PLIES
     # `win` stance only: the temperature the per-seat vector is read at,
@@ -244,7 +245,10 @@ class Heximax:
             options = options_for(game)
             # true state: opening placement scores board layout and vertex
             # ownership only (`placement.best`), both public.
-            chosen = best_opening(game.state(seat, hidden=False), seat, [a.a for a in options])
+            chosen = best_opening(
+                game.state(seat, hidden=False), seat, [a.a for a in options],
+                resource_weight=self.placement_resource_weight,
+            )
             return Action(ActionType.SETUP_SETTLEMENT, chosen)
         if game.phase is Phase.DISCARD:
             options = options_for(game)
@@ -885,6 +889,7 @@ def heximax(
     max_nodes: int = DEFAULT_MAX_NODES, k: int = 1, stance: str = "win",
     placement: bool = True, exact_progress_samples: int = 0, weights: Weights | None = None,
     temperature: float | None = None, development_value: float = 0.0,
+    placement_resource_weight: float = RESOURCE_WEIGHT,
 ) -> Heximax:
     """The two shipped configurations, by `mode`.
 
@@ -895,6 +900,8 @@ def heximax(
 
     `development_value` optionally credits unused non-VP development cards;
     it defaults to zero and is experimental, pending native evaluation.
+    `placement_resource_weight` controls the opening prior's resource-variety
+    premium in pips; its default retains the fitted prior.
 
     `weights` overrides the mode's own profile (`TRADING_WEIGHTS` or
     `NO_TRADE_WEIGHTS`) with the given vector, and `temperature` the `win`
@@ -922,6 +929,7 @@ def heximax(
         stance=stance,
         max_trades=max_trades,
         placement=placement,
+        placement_resource_weight=placement_resource_weight,
         mode=mode,
         temperature=temperature,
     )

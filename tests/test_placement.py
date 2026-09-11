@@ -59,3 +59,22 @@ def test_the_wrapper_picks_a_legal_vertex_throughout_setup():
 
     assert len(placed) == 8
     assert len(set(placed)) == 8
+
+
+def test_heximax_can_test_more_opening_variety_without_changing_default():
+    from hexset.board.terrain import TERRAIN_RESOURCE
+    from hexset.bots.heximax import heximax
+
+    board = random_base_board(random.Random(7))
+    game = start(board, 4, random.Random(7))
+    default = heximax(board).choose(game)
+    explicit = heximax(board, placement_resource_weight=1.19).choose(game)
+    diverse = heximax(board, placement_resource_weight=8).choose(game)
+    assert default == explicit
+    assert default in legal_actions(game) and diverse in legal_actions(game)
+
+    def resources(action):
+        return {TERRAIN_RESOURCE[board.terrain[h]]
+                for h in board.topology.vertex_hexes[action.a]} - {None}
+
+    assert len(resources(diverse)) > len(resources(default))

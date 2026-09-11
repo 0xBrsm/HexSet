@@ -40,7 +40,10 @@ RESOURCE_WEIGHT = 1.19
 SCARCE_WEIGHT = 0.91
 
 
-def score(board: Board, vertices: Iterable[int], scarce: frozenset[Resource]) -> float:
+def score(
+    board: Board, vertices: Iterable[int], scarce: frozenset[Resource], *,
+    resource_weight: float = RESOURCE_WEIGHT,
+) -> float:
     """Rate a whole opening: the vertices one seat holds, candidate included.
 
     Hexes are counted once per vertex that touches them, not once overall: two
@@ -55,26 +58,32 @@ def score(board: Board, vertices: Iterable[int], scarce: frozenset[Resource]) ->
             resource = TERRAIN_RESOURCE[board.terrain[hex_index]]
             if resource is not None:
                 kinds.add(resource)
-    return total + RESOURCE_WEIGHT * len(kinds) + SCARCE_WEIGHT * len(kinds & scarce)
+    return total + resource_weight * len(kinds) + SCARCE_WEIGHT * len(kinds & scarce)
 
 
-def rank(state: GameState, player: int, candidates: Iterable[int]) -> list[tuple[float, int]]:
+def rank(
+    state: GameState, player: int, candidates: Iterable[int], *,
+    resource_weight: float = RESOURCE_WEIGHT,
+) -> list[tuple[float, int]]:
     """Score each candidate vertex as the opening it would complete."""
     held = [v for v, owner in enumerate(state.vertex_owner) if owner == player]
     scarce = scarce_resources(state.board)
     return sorted(
-        ((score(state.board, [*held, vertex], scarce), vertex) for vertex in candidates),
+        ((score(state.board, [*held, vertex], scarce, resource_weight=resource_weight), vertex) for vertex in candidates),
         key=lambda pair: (-pair[0], pair[1]),
     )
 
 
-def best(state: GameState, player: int, candidates: Iterable[int]) -> int:
+def best(
+    state: GameState, player: int, candidates: Iterable[int], *,
+    resource_weight: float = RESOURCE_WEIGHT,
+) -> int:
     """The highest-scoring candidate, ties broken by vertex index for repeatability.
 
     Greedy per pick rather than over the pair, which is what the corpus shows
     humans doing: setup play there is pip-greedy with no denial component.
     """
-    options = rank(state, player, candidates)
+    options = rank(state, player, candidates, resource_weight=resource_weight)
     if not options:
         raise ValueError(f"no candidate vertices for player {player}")
     return options[0][1]

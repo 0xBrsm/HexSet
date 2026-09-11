@@ -5,6 +5,33 @@ Changes to the HexSet distribution. The project follows
 
 ## 0.50.0
 
+This release changes the MCP tool contract in ways an existing MCP client
+will notice (see **Changed** and **Removed**). Under 0.x semantic versioning
+a minor bump is the signal for that, and 0.50.0 is already one over 0.49.1,
+so the number stands.
+
+### Changed
+
+- **`act(index)` guards against a moved list with `expect`, not `version`.**
+  Pass the `legal_actions` entry you chose (its `type`, and `a`/`b` if you
+  have them) and `act` refuses if that index now names something else.
+  The old `version` argument compared against the whole table's change
+  counter, which bumps on every other seat's move, every trade answer, and
+  even a read that fires a pending trade event -- so in a 4-seat game it
+  was stale by the time the reply had been read. **Breaking:** `act` no
+  longer accepts `version`; a call that passes it fails as bad arguments.
+
+### Removed
+
+- **`version` on `answer_trade` and `choose_trade`.** In a trade round the
+  other seats' answers to the *same* offer bump the table version, so a
+  seat that passed it could not answer at all -- the one LLM game played
+  through these tools had to stop sending it to make trading work. The
+  server already refuses an answer that does not match the exact open offer
+  (`actor` + bundle) and a choice that does not match a recorded answer
+  (`seat` + bundle), which is the only staleness that can hurt either call.
+  The HTTP API's own `version` field on those routes is unchanged.
+
 ### Added
 
 - **`log_after`, a transcript cursor on every MCP tool that answers with

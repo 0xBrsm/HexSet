@@ -156,8 +156,12 @@ independently verified model credentials.
 `act(index)` submits one entry from the latest `state().legal_actions`.
 Ending a turn requires `END_TURN`. Trading tools use resource-name
 dictionaries and indices into `get_table()` results, translating them to
-signed HTTP bundles. Pass `version` to `act`, `answer_trade`, and
-`choose_trade` when acting on a previously read state.
+signed HTTP bundles. Pass the chosen `legal_actions` entry as `act`'s
+`expect` to refuse if that index now names a different action. The trade
+tools take no staleness guard: the server already rejects an answer or a
+choice that does not match the exact open offer. The HTTP API's whole-table
+`version` is not exposed as an MCP argument, since it changes whenever any
+seat does anything, including other seats answering the same trade round.
 
 `wait_for_turn(timeout=...)` waits until legal actions, a pending offer, a
 fully answered round, or game completion gives the caller something to

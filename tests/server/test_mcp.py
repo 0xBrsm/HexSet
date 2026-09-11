@@ -239,29 +239,55 @@ def _setup_settlement_index(view: dict) -> int:
     return next(i for i, a in enumerate(view["legal_actions"]) if a["type"] == "SETUP_SETTLEMENT")
 
 
-def test_act_with_a_stale_version_is_an_error_naming_version(live_server):
+def test_act_with_an_expect_that_no_longer_matches_is_an_error(live_server):
+    """`expect` is the guard against an index that now names a different
+    action. It replaced a whole-table `version`, which bumped on every other
+    seat's move and every trade answer, and so was stale by design."""
     _, base = live_server
     client = connected(base)
     data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
-    version = data["version"]
     index = _setup_settlement_index(data)
+    chosen = data["legal_actions"][index]
 
-    status, _, response = client.call_tool_raw("act", index=index, version=version - 1)
+    status, _, response = client.call_tool_raw(
+        "act", index=index, expect={"type": "SETUP_SETTLEMENT", "a": chosen["a"] + 1}
+    )
     assert status == 200
     result = response["result"]
     assert result["isError"] is True
-    assert "version" in result["content"][0]["text"]
+    assert "moved" in result["content"][0]["text"]
+    assert client.call_tool("state")["phase"] == "SETUP_SETTLEMENT"  # nothing was played
 
 
-def test_act_with_the_right_version_acts(live_server):
+def test_act_with_a_matching_expect_acts(live_server):
     _, base = live_server
     client = connected(base)
     data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
-    version = data["version"]
     index = _setup_settlement_index(data)
 
-    result = client.call_tool("act", index=index, version=version)
+    result = client.call_tool("act", index=index, expect=data["legal_actions"][index])
     assert result["phase"] == "SETUP_ROAD"
+
+
+def test_act_expect_may_name_only_the_type(live_server):
+    _, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    index = _setup_settlement_index(data)
+
+    result = client.call_tool("act", index=index, expect={"type": "SETUP_SETTLEMENT"})
+    assert result["phase"] == "SETUP_ROAD"
+
+
+def test_act_no_longer_takes_a_version(live_server):
+    _, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+
+    status, _, response = client.call_tool_raw("act", index=_setup_settlement_index(data), version=data["version"])
+    assert status == 200
+    assert response["result"]["isError"] is True
+    assert "bad arguments" in response["result"]["content"][0]["text"]
 
 
 # --- wait_for_turn: streamed as SSE, blocks through a bot's turn --------
@@ -573,7 +599,7 @@ def test_state_log_after_trims_the_transcript_it_sends_back(live_server):
     data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
     # A freshly dealt game has an empty transcript -- place something so
     # there are lines for the cursor to be about.
-    client.call_tool("act", index=_setup_settlement_index(data), version=data["version"])
+    client.call_tool("act", index=_setup_settlement_index(data))
 
     full = client.call_tool("state")
     assert full["log_from"] == 0
@@ -591,9 +617,7 @@ def test_act_log_after_sends_only_the_lines_the_action_added(live_server):
     data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
     before = client.call_tool("state")
 
-    result = client.call_tool(
-        "act", index=_setup_settlement_index(data), version=data["version"], log_after=before["log_total"]
-    )
+    result = client.call_tool("act", index=_setup_settlement_index(data), log_after=before["log_total"])
     # The whole transcript is still counted, but only its tail is carried.
     assert result["log_total"] >= before["log_total"]
     assert len(result["log"]) < result["log_total"] or result["log_total"] <= 1

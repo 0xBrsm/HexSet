@@ -183,11 +183,33 @@ def _state(tables: Tables, session: Session, log_after: int | None = None) -> di
     return _translate_view(_call_ok(tables, session, "GET", "/api/state"), log_after)
 
 
-def _version_check(fresh: dict, version: int | None) -> None:
-    if version is not None and fresh.get("version") != version:
+# --- Guarding an index against a table that moved ----------------------------
+#
+# `act` used to take the table's `version` and refuse if it had changed. That
+# counter (`api.Table.version`) bumps on *every* change anybody makes -- an
+# opponent answering your trade offer, a bot's move at another seat, a rename,
+# even a read that fires a pending trade event -- so in a 4-seat game it was
+# stale by the time the reply had been read, and a seat answering a trade
+# round could never pass it at all: the other seats' answers to the same
+# offer bumped it under them. What an index actually has to be stable
+# against is narrower: that `legal_actions[index]` still names the action the
+# caller chose. `expect` checks exactly that, and nothing else.
+
+_ACTION_KEYS = ("type", "a", "b")
+
+
+def _expect_check(chosen: dict, expect: dict | None) -> None:
+    if expect is None:
+        return
+    if not isinstance(expect, dict) or "type" not in expect:
+        raise ToolError("expect must be the legal_actions entry you chose, at least its `type`")
+    mismatch = [k for k in _ACTION_KEYS if k in expect and expect[k] != chosen.get(k)]
+    if mismatch:
         raise ToolError(
-            f"the table has moved (version {fresh.get('version')}); call state() or "
-            "get_table() again and re-index from there"
+            "legal_actions moved under you: that index is now "
+            f"{ {k: chosen.get(k) for k in _ACTION_KEYS} }, not the "
+            f"{ {k: expect[k] for k in _ACTION_KEYS if k in expect} } you chose — "
+            "call state() again and pick from the fresh list"
         )
 
 
@@ -195,12 +217,13 @@ def _act(
     tables: Tables,
     session: Session,
     index: int,
-    version: int | None = None,
+    expect: dict | None = None,
     log_after: int | None = None,
 ) -> dict:
-    state = _state(tables, session)
-    _version_check(state, version)
-    options = state.get("legal_actions") or []
+    _seated(session)
+    # The raw list, not the translated one: only `index` is resolved here, and
+    # `POST /api/action` reads `type`/`a`/`b` alone (`wire_to_action`).
+    options = _call_ok(tables, session, "GET", "/api/state").get("legal_actions") or []
     if not isinstance(index, int) or not (0 <= index < len(options)):
         raise ToolError(
             f"index {index!r} out of range — state()'s legal_actions has "
@@ -208,6 +231,7 @@ def _act(
             if options
             else "index out of range — state()'s legal_actions is empty; it is not your turn"
         )
+    _expect_check(options[index], expect)
     return _translate_view(
         _call_ok(tables, session, "POST", "/api/action", {"action": options[index]}), log_after
     )
@@ -396,12 +420,13 @@ def _answer_trade(
     kind: str,
     give: dict | None = None,
     receive: dict | None = None,
-    version: int | None = None,
     log_after: int | None = None,
 ) -> dict:
     _seated(session)
+    # No `version` here on purpose: the wire refuses anything but the exact
+    # open offer by `actor` + `received` (`GameSession.answer_round`), which is
+    # the only staleness that can hurt this call. See `_expect_check`.
     raw = _call_ok(tables, session, "GET", "/api/state")
-    _version_check(raw, version)
     pending = raw.get("pending") or []
     if not isinstance(index, int) or not (0 <= index < len(pending)):
         raise ToolError(
@@ -424,12 +449,12 @@ def _choose_trade(
     session: Session,
     index: int | None = None,
     decline: bool = False,
-    version: int | None = None,
     log_after: int | None = None,
 ) -> dict:
     _seated(session)
+    # No `version` (see `_answer_trade`): the wire matches the chosen answer
+    # by `seat` + `bundle` exactly (`GameSession.execute_round_choice`).
     raw = _call_ok(tables, session, "GET", "/api/state")
-    _version_check(raw, version)
     if decline:
         return _translate_view(
             _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/choose", {"decline": True}),
@@ -602,11 +627,10 @@ _TOOLS: dict[str, tuple] = {
         "counting isn't hidden information here, only a steal's identity and "
         "dev-card types are), the board's dynamic contents, and `legal_actions` "
         "— a 0-indexed list of the actions act() currently accepts, empty when "
-        "it is not your turn. Also carries `version`, which bumps on every "
-        "change — pass it to act()/answer_trade()/choose_trade() to have them "
-        "refuse instead of guessing if the table moved under you. Poll this "
-        "while another seat is thinking, or call wait_for_turn() instead to "
-        "block until it's worth polling again. A legal_actions entry that "
+        "it is not your turn. Pass the entry you pick as act()'s `expect` to "
+        "have it refuse instead of guessing if the list moved under you. Poll "
+        "this while another seat is thinking, or call wait_for_turn() instead "
+        "to block until it's worth polling again. A legal_actions entry that "
         "spends a resource names it too, alongside the raw `a`/`b` act() "
         "replays: BANK_TRADE has `give`/`want`, PLAY_MONOPOLY/DISCARD have "
         "`resource`, PLAY_YEAR_OF_PLENTY has `resources` (a 2-list).",
@@ -670,11 +694,11 @@ _TOOLS: dict[str, tuple] = {
             "type": "object",
             "properties": {
                 "index": {"type": "integer", "description": "Index into legal_actions."},
-                "version": {
-                    "type": "integer",
-                    "description": "Optional: pass the `version` from the state() you chose "
-                    "the index from. If the table has moved since, act() refuses instead of "
-                    "guessing what index still means what you intended.",
+                "expect": {
+                    "type": "object",
+                    "description": "Optional: the legal_actions entry you chose (its `type`, "
+                    "and `a`/`b` if you have them). If legal_actions[index] no longer matches "
+                    "it, act() refuses instead of playing whatever now sits at that index.",
                 },
                 "log_after": {
                     "type": "integer",
@@ -799,12 +823,6 @@ _TOOLS: dict[str, tuple] = {
                     "additionalProperties": {"type": "integer"},
                     "description": "Only for kind=counter: resource -> count you'd receive.",
                 },
-                "version": {
-                    "type": "integer",
-                    "description": "Optional: pass the `version` from the state() you chose "
-                    "the index from. If the table has moved since, this refuses instead of "
-                    "guessing what index still means what you intended.",
-                },
                 "log_after": {
                     "type": "integer",
                     "description": "Optional: how many transcript lines you already hold — "
@@ -831,12 +849,6 @@ _TOOLS: dict[str, tuple] = {
             "properties": {
                 "index": {"type": "integer", "description": "Index into trade_round.responses."},
                 "decline": {"type": "boolean"},
-                "version": {
-                    "type": "integer",
-                    "description": "Optional: pass the `version` from the state() you chose "
-                    "the index from. If the table has moved since, this refuses instead of "
-                    "guessing what index still means what you intended.",
-                },
                 "log_after": {
                     "type": "integer",
                     "description": "Optional: how many transcript lines you already hold — "

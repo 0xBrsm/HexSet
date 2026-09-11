@@ -35,6 +35,7 @@ def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Heximax:
         k=entrant.k,
         weights=entrant.weights,
         temperature=entrant.temperature,
+        native_action_compat=entrant.native_action_compat,
     )
     if entrant.stance is not None:
         kwargs["stance"] = entrant.stance

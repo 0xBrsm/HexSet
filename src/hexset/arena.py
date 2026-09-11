@@ -173,6 +173,8 @@ class Entrant:
     # at, `None` meaning the bot's own constant. A fitted `weights` and its
     # temperature are identified jointly, so a candidate carries both.
     temperature: float | None = None
+    # Opt-in parity with native Catanatron forced-road action legality.
+    native_action_compat: bool = False
 
     def renamed(self, name: str) -> Entrant:
         return replace(self, name=name)

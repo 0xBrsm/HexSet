@@ -393,15 +393,26 @@ def play_game(
     bots: Sequence[Bot],
     *,
     action_cap: int = MAX_ACTIONS,
+    trade_mechanism: str = "round",
+    trade_rounds: int = 1,
 ) -> Game:
     """`play`'s loop over a game somebody else dealt (`deal_game`).
 
     Dealing a game and playing it are separate acts: a tournament deals from
     `(seed, index)` and plays it here, while a lockstep environment deals from
     the same law and steps the loop itself, one action per lane per tick.
+
+    `trade_mechanism`/`trade_rounds` are the table's bargaining rules, and
+    default to what a real table plays: one broadcast round a turn. Pass
+    `trade_mechanism="clearing"` for the exhaustive automatic house, which is
+    what every study recorded before this defaulted the other way -- see
+    `Game.trade_mechanism` for why that is a comparability option now rather
+    than the thing to fit against.
     """
     game.gates = tuple(bots)
     game.max_trades = None
+    game.trade_mechanism = trade_mechanism
+    game.trade_rounds = trade_rounds
     actions = 0
     while not is_over(game) and actions < action_cap:
         seat = to_move(game)

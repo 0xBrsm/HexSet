@@ -62,25 +62,48 @@ everything (`agents/reference/trading-theory.md` §5-6): the one
 approximation this mechanic makes is the gate itself, and everything
 downstream of it is exact.
 
-## The trade round (the served table's protocol)
+## The trade round (the default protocol)
 
 Everything above -- `trade_event`/`_best_clearing`, fired once a turn from
-`hexset.game.enter_main`/`move_robber_to` -- is unchanged and stays the
-engine's own automatic clearing: what the arena, the bench, `record_game`
-and the gym all still play under, and what a self-play run's acceptance
-labels are drawn from (`agents/reference/trading-final.md`, "Training").
+`hexset.game.enter_main`/`move_robber_to` -- is unchanged, and is the
+engine's own automatic clearing. It is **no longer what anything plays under
+by default**: `Game.trade_mechanism` chooses, and defaults to `"round"`.
+`"clearing"` opts back in.
 
-`trade_round` (below) is a second, separate protocol for a *served* game
-(`hexset.server`) with a human, an LLM or a foreign bot at the table:
-propose-and-respond rather than exhaustive clearing, because a served
-table's seats answer through a wire, not through a synchronous function
-call. A session that wants it seats `game.max_trades = 0` -- the existing
-off switch, not a new flag -- so the automatic event no-ops itself on
-every `enter_main`/`move_robber_to`, and calls `trade_round(game, gates)`
-itself instead, as many times a turn as the acting seat wants: nothing
-here counts rounds or caps them, since the floor and the card cap already
-bound what one round can move. A game nobody serves never calls this at
-all and never notices it exists.
+Clearing is not a model of bargaining; it is a strong approximation standing
+in for one. It enumerates every candidate deal and keeps clearing until
+nothing clears, against a counterparty that never holds out, never asks for
+more and never refuses a deal it merely dislikes. No table plays that way. A
+policy fitted or trained against it learns to exploit an exhaustive,
+perfectly agreeable opponent, and that edge does not survive contact with a
+real one -- which is why the arena, the bench, `record_game` and the gym now
+run rounds, and why self-play acceptance labels are drawn from them
+(`agents/reference/trading-final.md`, "Training").
+
+Results recorded before this switched -- the fitted presets, the adaptive
+slider, the trading-condition screens -- are clearing-mechanism results.
+They are not wrong, they are about the other mechanism, and `docs/research.md`
+already requires a historical study to run from its recorded source
+revision. `"clearing"` stays reachable so they stay reproducible, not
+because it is the better default.
+
+`trade_round` (below) is propose-and-respond: the actor broadcasts one
+offer, every other seated gate answers once, and the actor picks. Nothing
+here counts rounds or caps them -- the floor and the card cap already bound
+what one round can move -- so the *caller* decides how many a turn is worth,
+and there are two callers.
+
+An unserved game is driven by `hexset.game.run_trade_event`, once a turn
+from `enter_main`/`move_robber_to`, under `Game.trade_rounds`: `1` by
+default, `0` for no trading at all, `-1` for as many as keep clearing.
+
+A *served* game (`hexset.server`) drives its own instead, because its seats
+answer through a wire rather than a synchronous call -- a round there spans
+many requests while a person or an LLM thinks. Such a session seats both
+switches off, `game.trade_rounds = 0` and `game.max_trades = 0`
+(`api.build_session`), so the engine drives neither mechanism underneath the
+one the session is already running, and calls `trade_round(game, gates)`
+itself as many times a turn as the acting seat wants.
 
 One round: the current player's gate broadcasts one offer (`Bot.offer`,
 new); every other seated gate answers once (`Bot.respond`, new) --

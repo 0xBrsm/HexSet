@@ -8,8 +8,21 @@ policy is useful for engine throughput and control experiments. Learned
 policies use the runtime-independent interfaces in [training.md](training.md).
 
 Record the host engine, information model, source revisions, dependency
-versions, effective bot settings, seeds, lineup, trading mode, acceleration
-mode and unfinished-game count with every comparison. A label such as
+versions, effective bot settings, seeds, lineup, trading mode, bargaining
+mechanism, acceleration mode and unfinished-game count with every comparison.
+
+**The bargaining mechanism is part of what a result is about.** Games now
+default to one trade round a turn: the actor broadcasts one offer, every
+other seat answers once, the actor picks (`Game.trade_mechanism="round"`,
+`Game.trade_rounds=1`; `0` is no trading, `-1` is as many rounds as keep
+clearing). The exhaustive automatic clearing house that used to run instead
+is `Game.trade_mechanism="clearing"`. Clearing deals until nothing clears,
+against a counterparty that never holds out and never refuses a deal it
+merely dislikes, so a policy fitted or trained against it learns a game
+nobody plays. Every study recorded before this changed -- the fitted
+presets, the adaptive slider, the trading-condition screens -- is a clearing
+result; reproducing one means selecting `"clearing"` as well as running from
+its recorded source revision. A label such as
 "vs shipped Heximax" identifies the opponents, not the engine or information
 model. `hexset.catanatron.duel` runs a separate external compatibility
 experiment; stock `DC:` Heximax there receives a memoryless public ledger.

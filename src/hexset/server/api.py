@@ -644,6 +644,12 @@ def build_session(code: str, seats: list[Seat], config: Config, *, first: int) -
     # governs a *bot's own* internal never-trade flag, a different thing --
     # see `spawn_bot`).
     game.max_trades = 0
+    # And no engine-driven rounds either. `run_trade_event` now broadcasts a
+    # round of its own by default, which on a served table would put one
+    # offer out per turn *underneath* the one the session is already driving
+    # through `begin_round` -- two protocols on one table. `max_trades` does
+    # not cover this: it is read by the clearing house alone.
+    game.trade_rounds = 0
     bot_names, bot_specs, player_names, clients = _seat_labels(seats)
     claimed = {i for i, s in enumerate(seats) if s.kind is not SeatKind.EMPTY}
     return GameSession(
@@ -741,7 +747,10 @@ def reopen_session(code: str, seats: list[Seat], path: Path, events: list[dict])
     board = random_base_board(random.Random(seed))
     bot_names, bot_specs, player_names, clients = _seat_labels(seats)
     game = start_at(board, MAX_SEATS, random.Random(seed), first=first)
-    game.max_trades = 0  # the trade round is this table's protocol; see `build_session`
+    # The trade round is this table's protocol, driven by the session; see
+    # `build_session` for why both switches are needed.
+    game.max_trades = 0
+    game.trade_rounds = 0
     game.locked = journal.locked_seats(events)  # noqa: attribute, see seating.py
     claimed = {i for i, s in enumerate(seats) if s.kind is not SeatKind.EMPTY}
     session = GameSession(

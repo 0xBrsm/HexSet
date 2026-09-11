@@ -22,7 +22,15 @@ from .economy import Purchase, bank_trade, distribute, pay
 from .ledger import PublicLedger
 from .robber import discard, discard_count, move_robber, steal
 from .rules import STANDARD, Rules
-from .trading import TRADE_RULES, Bundle, Trade, execute_trade, trade_event, valued
+from .trading import (
+    TRADE_RULES,
+    Bundle,
+    Trade,
+    execute_trade,
+    trade_event,
+    trade_round,
+    valued,
+)
 from .state import (
     NO_OWNER,
     GameState,
@@ -98,6 +106,21 @@ class Game:
     trades: list[Trade] = field(default_factory=list)
     trades_made: int = 0
     max_trades: int | None = None
+    # Which mechanism a turn's trading runs under. `"round"` is the default
+    # and the one a real table plays: the actor broadcasts one offer, every
+    # other seat answers once, the actor picks (`trading.trade_round`).
+    # `"clearing"` selects the exhaustive automatic house
+    # (`trading.trade_event`), which enumerates every candidate and keeps
+    # clearing until nothing does. Clearing is a strong approximation of
+    # bargaining rather than a model of it, so fitting or training a policy
+    # against it teaches a game nobody plays -- it is available for
+    # comparability with studies recorded under it, not as the default.
+    trade_mechanism: str = "round"
+    # Rounds the actor gets per turn under `"round"`. `1` is the default, `0`
+    # is no trading at all, and `-1` is unlimited -- which still stops at the
+    # first round that clears nothing, the way clearing stops when nothing
+    # clears. Ignored under `"clearing"`, whose stopping rule is its own.
+    trade_rounds: int = 1
     # The `turns` value the trade event last ran in: `run_trade_event` is
     # once a turn, and a knight played in MAIN re-enters MAIN after its
     # robber move, which used to run it a second time.
@@ -752,6 +775,33 @@ def trade_with_bank(game: Game, give: Resource, receive: Resource) -> None:
     game.ledger.apply_hand_diff(before, game._state.hands)
 
 
+def _run_trade_rounds(game: Game, gates) -> list[Trade]:
+    """This turn's trade rounds, under `Game.trade_rounds`.
+
+    `0` never asks. `-1` keeps broadcasting until a round clears nothing,
+    which is the same stopping rule the clearing house uses -- a round that
+    found no deal will not find one on a rerun of the same position. A
+    positive budget caps the broadcasts, not the trades: a round clears at
+    most one exchange, so the two only differ when a round passes.
+
+    Rounds are counted rather than trades so the knob means what a table
+    would mean by it: how many times the actor gets to put something to the
+    table this turn.
+    """
+    budget = game.trade_rounds
+    if budget == 0:
+        return []
+    completed: list[Trade] = []
+    asked = 0
+    while budget < 0 or asked < budget:
+        asked += 1
+        cleared = trade_round(game, gates)
+        if not cleared:
+            break
+        completed.extend(cleared)
+    return completed
+
+
 def run_trade_event(game: Game) -> None:
     """Clear this turn's one trade event for the current player, if anybody
     is seated to answer a gate.
@@ -780,10 +830,13 @@ def run_trade_event(game: Game) -> None:
     # Counts and completed participants are public. Publish after clearing,
     # once per live event; imagine() deliberately carries no seated gates.
     hand_sizes = tuple(map(sum, game._state.hands)) if observers else ()
-    completed = trade_event(
-        game,
-        lambda seat, view, received, other: valued(gates[seat], view, received, other),
-    )
+    if game.trade_mechanism == "clearing":
+        completed = trade_event(
+            game,
+            lambda seat, view, received, other: valued(gates[seat], view, received, other),
+        )
+    else:
+        completed = _run_trade_rounds(game, gates)
     if observers:
         participants = tuple((trade.a, trade.b) for trade in completed)
         for observe in observers:

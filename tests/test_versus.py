@@ -23,7 +23,13 @@ from hexset.actions import options_for
 from hexset.record import replay
 
 SEED = 11
-CAP = 2000
+# High enough that a game finishes on its own: these tests use it as the
+# "uncapped" control against a deliberately tiny cap, so it has to be a
+# number no game reaches. 2000 was, until trade rounds became the default
+# mechanism (`Game.trade_mechanism`) -- a round clears at most one exchange
+# a turn where the clearing house cleared until nothing cleared, so less
+# trading means longer games, and some ran past 2000.
+CAP = 20000
 GAMES = 8
 LINEUP = (0, 0, 1, 1)
 

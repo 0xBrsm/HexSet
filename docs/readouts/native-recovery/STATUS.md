@@ -140,3 +140,20 @@ resumed with 30 workers, retaining completed per-game checkpoints. Wintermute
 reports 32 CPUs, negligible competing CPU, and the new pool uses about 30 CPUs.
 Current container: hexset-native-recovery-holdout30. Source and statistical
 rules are unchanged. Do not interpret interim holdout wins or stop for success.
+
+## Holdout adapter repair and 30-worker continuation
+
+The original holdout stopped at 1,978 completed AB2 games on a stranded
+Road Building credit (index 1935). The narrow fix is commit 788f27e; the
+compatibility argument and immutable checkpoint rules are recorded in
+holdout-repair-plan.md. All four registered full-trace replays matched and
+the original failing index completed. The v1 comparison needed JSON
+normalization for in-memory tuple versus checkpoint list values; v2 reads
+the replay checkpoint before comparing, reusing the completed replay.
+No game policy, seed, sample size, or success criterion changed.
+
+The remaining fixed games now run with 30 workers and a 30-CPU limit.
+Observed utilization was 2,979.97% CPU, 35 PIDs and 1.557 GiB. The focused
+expansion worktree plus adapter fix passed 39 relevant tests (one slow
+test deselected). The earlier adapter-specific worktree passed 43 tests.
+Holdout outcomes remain uninspected until all 4,096 records complete.

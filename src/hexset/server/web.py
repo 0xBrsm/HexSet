@@ -350,13 +350,16 @@ class Handler(BaseHTTPRequestHandler):
         connection closes -- this server defaults to HTTP/1.0 (no keep-alive)
         so nothing further is needed to make that happen cleanly."""
         timeout = arguments.get("timeout")
+        log_after = arguments.get("log_after")
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "close")
         self.end_headers()
         try:
-            for item in mcptools._wait_for_turn_events(self.server.tables, session, timeout=timeout):
+            for item in mcptools._wait_for_turn_events(
+                self.server.tables, session, timeout=timeout, log_after=log_after
+            ):
                 if item is mcptools._KEEPALIVE:
                     self.wfile.write(b": keepalive\n\n")
                 else:

@@ -516,3 +516,96 @@ def test_resume_game_reclaims_the_seat_by_code_and_model(live_server):
     fresh = connected(base)
     result = fresh.call_tool("resume_game", code=code, model=MODEL)
     assert result["seat"] == seat
+
+
+# --- The transcript cursor: log_after -----------------------------------
+#
+# `log` is otherwise resent whole on every tool call and grows for the
+# length of the game, which is the largest single cost an LLM seat pays to
+# read this API (see `mcptools._trim_log`).
+
+
+def test_trim_log_without_a_cursor_returns_the_whole_transcript():
+    view = mcptools._trim_log({"log": ["a", "b", "c"]}, None)
+    assert view["log"] == ["a", "b", "c"]
+    assert view["log_from"] == 0
+    assert view["log_total"] == 3
+
+
+def test_trim_log_returns_only_what_is_new_plus_one_line_of_overlap():
+    """The caller holds 2 of 4 lines. It is owed the 2 new ones and, because
+    `render_log` rewrites a growing run in place, the last line it already
+    has -- which may have changed under it since."""
+    view = mcptools._trim_log({"log": ["a", "b", "c", "d"]}, 2)
+    assert view["log"] == ["b", "c", "d"]
+    assert view["log_from"] == 1
+    assert view["log_total"] == 4
+
+
+def test_trim_log_up_to_date_caller_still_gets_the_rewritable_line():
+    view = mcptools._trim_log({"log": ["a", "b", "c"]}, 3)
+    assert view["log"] == ["c"]
+    assert view["log_from"] == 2
+
+
+def test_trim_log_clamps_a_cursor_past_the_end_of_a_log_an_undo_shrank():
+    view = mcptools._trim_log({"log": ["a", "b"]}, 9)
+    assert view["log"] == ["b"]
+    assert view["log_from"] == 1
+    assert view["log_total"] == 2
+
+
+def test_trim_log_on_an_empty_transcript_is_empty_not_an_error():
+    view = mcptools._trim_log({"log": []}, 4)
+    assert view["log"] == []
+    assert view["log_from"] == 0
+    assert view["log_total"] == 0
+
+
+def test_trim_log_leaves_a_view_carrying_no_log_alone():
+    view = mcptools._trim_log({"phase": "ROLL"}, 2)
+    assert view == {"phase": "ROLL"}
+
+
+def test_state_log_after_trims_the_transcript_it_sends_back(live_server):
+    _, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    # A freshly dealt game has an empty transcript -- place something so
+    # there are lines for the cursor to be about.
+    client.call_tool("act", index=_setup_settlement_index(data), version=data["version"])
+
+    full = client.call_tool("state")
+    assert full["log_from"] == 0
+    assert full["log_total"] == len(full["log"]) > 0
+
+    caught_up = client.call_tool("state", log_after=full["log_total"])
+    assert len(caught_up["log"]) == 1
+    assert caught_up["log"][0] == full["log"][-1]
+    assert caught_up["log_total"] == full["log_total"]
+
+
+def test_act_log_after_sends_only_the_lines_the_action_added(live_server):
+    _, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    before = client.call_tool("state")
+
+    result = client.call_tool(
+        "act", index=_setup_settlement_index(data), version=data["version"], log_after=before["log_total"]
+    )
+    # The whole transcript is still counted, but only its tail is carried.
+    assert result["log_total"] >= before["log_total"]
+    assert len(result["log"]) < result["log_total"] or result["log_total"] <= 1
+    assert result["log_from"] == max(0, before["log_total"] - 1)
+
+
+def test_state_log_after_omitted_is_unchanged_for_a_caller_that_never_sends_it(live_server):
+    """The cursor is opt-in: a client that knows nothing about it still gets
+    the entire transcript, which is also what a resumed seat needs."""
+    _, base = live_server
+    client = connected(base)
+    client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("state")
+    assert data["log"] == client.call_tool("state")["log"]
+    assert data["log_from"] == 0

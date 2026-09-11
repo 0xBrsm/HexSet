@@ -156,6 +156,7 @@ class DuelResult:
     game_type: str
     wins: dict[Color, int]
     points: dict[Color, list[int]]
+    speedups: str = "off"
 
     def report(self) -> str:
         rules = GAME_TYPES[self.game_type]
@@ -169,6 +170,7 @@ class DuelResult:
             f"  game type {self.game_type}: "
             f"{rules.winning_points} VP to win, "
             f"discard over {rules.discard_limit}",
+            f"  Catanatron speedups: {self.speedups}",
         ]
         for color, label in self.labels.items():
             w = self.wins.get(color, 0)
@@ -182,7 +184,15 @@ class DuelResult:
         return "\n".join(lines)
 
 
-def _play_chunk(args: tuple[str, int, int, int, str]) -> tuple[dict, dict]:
+def _play_chunk(args: tuple[str, int, int, int, str, str]) -> tuple[dict, dict]:
+    from .speedups import catanatron_speedups
+
+    *game_args, speedups = args
+    with catanatron_speedups(speedups):
+        return _play_chunk_native(tuple(game_args))
+
+
+def _play_chunk_native(args: tuple[str, int, int, int, str]) -> tuple[dict, dict]:
     """Play games [start, start + count) with one rules variant.
 
     Game g starts from random.seed(seed + g), independent of worker count.
@@ -238,12 +248,18 @@ def run_duel(
     workers: int,
     seed: int = 0,
     game_type: str = "standard",
+    speedups: str = "off",
 ) -> DuelResult:
     parts = players_spec.split(",")
     colors = list(Color)[: len(parts)]
     labels = {color: f"{i}:{part}" for i, (color, part) in enumerate(zip(colors, parts))}
     # Fail fast on a bad game type, before any shard starts playing.
     game_config_for(game_type)
+    from .speedups import MODES, verify_runtime
+    if speedups not in MODES:
+        raise ValueError(f"unknown Catanatron speedups: {speedups!r}")
+    if speedups != "off":
+        verify_runtime()
 
     shard_size, _ = shard_plan(num_games, workers)
     chunks = []
@@ -253,7 +269,7 @@ def run_duel(
         # The chunk carries the duel seed and the game-index range; each game
         # re-derives its own seed inside `_play_chunk`, so the games played
         # do not move when `--workers` re-shards them.
-        chunks.append((players_spec, start, n, seed, game_type))
+        chunks.append((players_spec, start, n, seed, game_type, speedups))
         start += n
 
     start = time.time()
@@ -279,6 +295,7 @@ def run_duel(
         game_type=game_type,
         wins=wins,
         points=points,
+        speedups=speedups,
     )
 
 
@@ -306,9 +323,14 @@ def main() -> None:
         help="rules variant: standard (10 VP, discard over 7) or "
         "colonist-1v1 (15 VP, discard over 9)",
     )
+    parser.add_argument(
+        "--catanatron-speedups", choices=("off", "basic", "cached"), default="off",
+        help="optional reference-engine acceleration; recorded in the report",
+    )
     args = parser.parse_args()
 
-    result = run_duel(args.players, args.num, args.workers, args.seed, args.game_type)
+    result = run_duel(args.players, args.num, args.workers, args.seed, args.game_type,
+                      args.catanatron_speedups)
     print(result.report())
 
 

@@ -131,3 +131,24 @@ def test_uneven_sharding_still_covers_every_game_exactly_once(first_draws):
     run_duel("DC:heximax,AB:2", 7, 3, seed=0)
 
     assert first_draws == [random.Random(g).random() for g in range(7)]
+
+
+@pytest.mark.parametrize('speedups', ['off', 'basic', 'cached'])
+def test_speedups_are_scoped_to_worker_and_reported(monkeypatch, speedups):
+    from catanatron.models.board import Board
+    from hexset.catanatron.speedups import clone_board_mutable_structures
+    observed = []
+
+    def fake_play_batch(num_games, players, game_config=None, quiet=False):
+        observed.append(Board.copy is clone_board_mutable_structures)
+        return {}, {}, 1
+
+    before = Board.copy
+    monkeypatch.setattr(duel, 'play_batch', fake_play_batch)
+    monkeypatch.setattr(duel, 'parse_cli_string', lambda spec: [])
+    monkeypatch.setattr(duel, 'Pool', _InlinePool)
+    result = run_duel('DC:heximax,AB:2', 3, 2, speedups=speedups)
+    assert observed == [speedups != 'off'] * 3
+    assert Board.copy is before
+    assert result.speedups == speedups
+    assert f'Catanatron speedups: {speedups}' in result.report()

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .board.terrain import Resource
 from .chance import Chance
+from .economy import hand_size
 from .state import NO_OWNER, GameState
 
 # The standard game's discard limit; the live rule reads
@@ -26,7 +27,7 @@ def victims(state: GameState, hex_index: int, thief: int) -> tuple[int, ...]:
     return tuple(
         p
         for p in occupants(state, hex_index)
-        if p != thief and sum(state.hands[p]) > 0
+        if p != thief and hand_size(state, p) > 0
     )
 
 
@@ -59,7 +60,7 @@ def discard_count(state: GameState, player: int) -> int:
     Holding more than the game type's discard limit discards half (7/8+
     in the standard game, 9/10+ in colonist 1v1).
     """
-    held = sum(state.hands[player])
+    held = hand_size(state, player)
     return held // 2 if held > state.rules.discard_limit else 0
 
 

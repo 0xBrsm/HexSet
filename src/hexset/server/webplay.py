@@ -46,8 +46,8 @@ from hexset.board.coords import Hex
 from hexset.board.terrain import NUM_RESOURCES, TERRAIN_RESOURCE, Resource
 from hexset.board.topology import Topology
 from hexset.cards import NUM_DEV_CARDS, DevCard
-from hexset.devcards import holdings
-from hexset.economy import trade_ratios
+from hexset.devcards import dev_count, holdings
+from hexset.economy import hand_size, trade_ratios
 from hexset.game import Game, Phase, is_over, may_act, players_owing_discards, to_move
 from hexset.ledger import PublicLedger
 from hexset.roads import road_lengths
@@ -1938,8 +1938,8 @@ class GameSession:
                 "road_length": lengths[p],
                 "longest_road": state.longest_road_holder == p,
                 "largest_army": state.largest_army_holder == p,
-                "hand_size": sum(state.hands[p]),
-                "dev_card_count": sum(holdings(state, p)),
+                "hand_size": hand_size(state, p),
+                "dev_card_count": dev_count(state, p),
                 # The public-knowledge ledger (`hexset.ledger`) — public
                 # for every seat, reveal or not: resource *counting* is not
                 # hidden information in this game, only a steal's identity

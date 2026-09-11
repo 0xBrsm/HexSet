@@ -9,7 +9,7 @@ from .cards import (
     DevCard,
 )
 from .economy import Purchase, can_afford, pay
-from .state import GameState, can_place_road, place_road
+from .state import GameState, can_place_road, pile_size, place_road
 
 
 def can_buy(state: GameState, player: int) -> bool:
@@ -34,8 +34,20 @@ def mature(state: GameState, player: int) -> None:
         bought[card] = 0
 
 
+def dev_count(state: GameState, player: int) -> int:
+    """How many development cards a seat holds, matured and fresh together.
+
+    The size-only counterpart to `holdings`: public in the rules, so it
+    reads on an observed state too (see `state.Hidden`)."""
+    return pile_size(state.dev_cards[player]) + pile_size(state.new_dev_cards[player])
+
+
 def holdings(state: GameState, player: int) -> list[int]:
-    """Every card held, playable or not — what the player would reveal on winning."""
+    """Every card held, playable or not — what the player would reveal on winning.
+
+    An *identity* read: on an observed state a seat whose cards are hidden
+    raises `state.HiddenRead` rather than returning a made-up composition.
+    Callers that only need the number call `dev_count`."""
     return [
         held + fresh
         for held, fresh in zip(state.dev_cards[player], state.new_dev_cards[player])

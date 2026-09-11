@@ -5,7 +5,7 @@ from enum import IntEnum
 
 from .board.ports import BASE_TRADE_RATIO
 from .board.terrain import NUM_RESOURCES, Resource
-from .state import BANK_PER_RESOURCE, GameState, production
+from .state import BANK_PER_RESOURCE, GameState, pile_size, production
 
 BANK_TRADE_RATIO = BASE_TRADE_RATIO
 
@@ -33,7 +33,12 @@ COSTS: dict[Purchase, tuple[int, ...]] = {
 
 
 def hand_size(state: GameState, player: int) -> int:
-    return sum(state.hands[player])
+    """How many resource cards a seat holds.
+
+    Works on a referee's state and on a seat's observed state alike (see
+    `state.Hidden`), which is why every size-only reader in the engine calls
+    this instead of summing `state.hands[player]` itself."""
+    return pile_size(state.hands[player])
 
 
 def can_afford(state: GameState, player: int, purchase: Purchase) -> bool:
@@ -113,7 +118,9 @@ def distribute(state: GameState, roll: int) -> list[list[int]]:
 
 
 def total_in_play(state: GameState) -> int:
-    return sum(state.bank) + sum(sum(hand) for hand in state.hands)
+    return sum(state.bank) + sum(
+        hand_size(state, p) for p in range(state.num_players)
+    )
 
 
 def expected_total() -> int:

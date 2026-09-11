@@ -60,6 +60,8 @@ from .actions import Action, ActionSpace, legal_actions
 from .board.board import Board
 from .board.terrain import NUM_RESOURCES
 from .cards import NUM_DEV_CARDS
+from .devcards import dev_count
+from .economy import hand_size
 from .encoding import StaticGraph
 from .game import Game, to_move
 from .state import NO_OWNER
@@ -194,10 +196,11 @@ def record_from_game(
         [held + fresh for held, fresh in zip(state.dev_cards[perspective], state.new_dev_cards[perspective])],
         dtype=np.int64,
     )
-    hand_totals = np.array([sum(state.hands[s]) for s in range(players)], dtype=np.int64)
+    hand_totals = np.array(
+        [hand_size(state, s) for s in range(players)], dtype=np.int64
+    )
     dev_totals = np.array(
-        [sum(state.dev_cards[s]) + sum(state.new_dev_cards[s]) for s in range(players)],
-        dtype=np.int64,
+        [dev_count(state, s) for s in range(players)], dtype=np.int64
     )
     award = np.array([award_points(state, s) for s in range(players)], dtype=np.int64)
 

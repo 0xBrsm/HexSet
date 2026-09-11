@@ -36,7 +36,7 @@ from hexset.chance import Live
 from hexset.game import Game, Phase, to_move, pending_free_roads
 from hexset.ledger import PublicLedger, SeatLedger
 from hexset.rules import Rules
-from hexset.state import NO_OWNER, Building, GameState
+from hexset.state import NO_OWNER, Building, GameState, pile_size
 
 from catanatron.game import Game as CatanatronGame
 from catanatron.models.actions import generate_playable_actions
@@ -231,7 +231,7 @@ def translate(catanatron_game, mapping: BoardMapping, rng: random.Random) -> tup
     # actually certifies rather than this floor.
     ledger = PublicLedger(
         seats=[
-            SeatLedger(known=[0] * NUM_RESOURCES, unknown=sum(hands[seat]))
+            SeatLedger(known=[0] * NUM_RESOURCES, unknown=pile_size(hands[seat]))
             for seat in range(n)
         ]
     )

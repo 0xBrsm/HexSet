@@ -8,6 +8,20 @@ Changes to the HexSet distribution. The project follows
 
 ### Added
 
+- **Hidden hands and cards in `GameState`.** A state written by a seat rather
+  than by the referee can now say "n cards, types unknown": `hands[seat]`,
+  `dev_cards[seat]` and `new_dev_cards[seat]` accept a `HiddenHand`/
+  `HiddenCards` count and `deck` a `HiddenDeck` length
+  (`hexset.state`). Sizes, `len` and the `[:]` copy idiom work; indexing,
+  iterating or summing one raises `HiddenRead` instead of returning a
+  fabricated number. `observed_by(state, seat)` downgrades a true state to
+  what one seat can see. A `View`, `View.sample`, `Heximax`, `HonestEvaluator`,
+  `hexset.encoding` and `hexset.onnx_record` all read the same off an observed
+  state as off the truth it was observed from; an identity read -- an
+  opponent's `holdings`, `card_points`, `victory_points`, `is_over`, or
+  `legal_actions` for a seat whose hand is hidden -- raises. A live adapter
+  therefore needs no placeholder composition for the hands it cannot see.
+
 - Opt-in sampled-world voting for model/search callbacks, with a decision-local
   cache and frequency-weighted votes (`hexset.bots.determinized`). The default
   key includes the sampled development deck; models that cannot observe it can
@@ -16,6 +30,14 @@ Changes to the HexSet distribution. The project follows
   See [the cache contract and examples](docs/determinized-worlds.md).
 
 ### Changed
+
+- Size-only readers go through `hexset.economy.hand_size` and
+  `hexset.devcards.dev_count` rather than summing a hand or a
+  development holding, so the robber, the discard rule, the encoding, the
+  record, the arena census and the Catanatron bridge's ledger read on an
+  observed state too. `HonestEvaluator`'s belief and evaluation caches key
+  on the knower's own hand and cards plus every other seat's *sizes* --
+  exactly what the evaluation reads -- instead of every seat's composition.
 
 - **One Heximax policy.** `heximax` now uses the validated adaptive slider
   everywhere, including the server and Gym defaults. `pin_weights=0` or `1`

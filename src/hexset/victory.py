@@ -55,7 +55,17 @@ def building_points(state: GameState, player: int) -> int:
 
 
 def card_points(state: GameState, player: int) -> int:
-    """Victory point cards score the moment they are drawn, so they can win a game."""
+    """Victory point cards score the moment they are drawn, so they can win a game.
+
+    An identity read, and deliberately left one: on an observed state
+    (`state.Hidden`) a seat whose cards are hidden raises
+    `state.HiddenRead`, and so do `victory_points` and `is_over` through
+    it. That is correct rather than inconvenient -- a hidden victory-point
+    card is exactly what nobody at the table can see, so an observed game's
+    winner is the table's word, not the engine's. A caller that wants the
+    public floor uses `public_victory_points`, and one that wants the
+    number of cards uses `devcards.dev_count`.
+    """
     return holdings(state, player)[DevCard.VICTORY_POINT]
 
 

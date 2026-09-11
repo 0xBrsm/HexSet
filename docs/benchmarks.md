@@ -6,9 +6,13 @@ guarantee for the current code.
 
 ## Primary evaluation and profiling framework
 
-Use HexSet's own `hexset.arena` / `hexset.bench.duel` path for native
-self-play, ablations and performance profiling. Catanatron matchups provide
-external reference comparisons and must identify which engine hosted them.
+**HexSet is the primary engine and evaluation framework. Catanatron is an
+external reference opponent.** Use `hexset.arena` / `hexset.bench.duel` for
+self-play, ablations, candidate validation and performance profiling. Matches
+against the `catanatron` entrant also run in HexSet. See the
+[evaluation protocol and recovery steps](evaluation.md). Catanatron-hosted
+runs are separate external compatibility experiments and must be labeled
+with their host and information model.
 
 The [September 11 native-engine profile](readouts/native-engine/README.md)
 measures trading and no-trade Heximax self-play without importing Catanatron.
@@ -18,9 +22,12 @@ trace checks, source fingerprints and raw cProfile data.
 
 The [four-AB2 host comparison](readouts/ab2-host-throughput/README.md) measures
 AB2 games/second on both hosts using the same supported native pin. With fast
-mode and 30 workers, 120 games per host measured 1.63 games/s through HexSet's
-adapter and 1.85 games/s directly in Catanatron. AB2's hypothetical search uses
-Catanatron in both configurations; this is the current integration's throughput.
+mode and 30 workers, the initial 120-game batches measured 1.63 games/s through
+HexSet's adapter and 1.85 directly in Catanatron. The subsequent
+[adapter fix and repeated comparison](readouts/ab2-host-throughput/adapter-fix/README.md)
+measured 1.689 versus 1.827 games/s. AB2's hypothetical search uses Catanatron
+in both configurations. These workload-specific timings do not establish
+information-model equivalence or select the host for HexSet policy research.
 
 ## Information-model correction (September 11, 2026)
 

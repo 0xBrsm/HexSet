@@ -18,6 +18,11 @@ def records(path,prefix):
   assert r['complete'] and r['winner'] is not None and i['host']=='hexset' and i['floor']==0
   assert i['index'] not in group and len(r['trades'])==r['domestic_trades']
   assert all(t['gain_a']>0 and t['gain_b']>0 for t in r['trades'])
+  # Outcome.seating maps entrant -> seat. Frozen runners used index(0),
+  # the inverse, for descriptive candidate counts; wins use entrant IDs.
+  r['reported_candidate_seat']=r['candidate_seat']
+  r['candidate_seat']=r['seating'][0]
+  r['candidate_trades']=sum(t['a']==r['candidate_seat'] or t['b']==r['candidate_seat'] for t in r['trades'])
   group[i['index']]=r
  for key,g in groups.items():
   n=len(g);assert n%4==0 and set(g)==set(range(n))

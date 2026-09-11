@@ -17,8 +17,8 @@ Bank/port exchanges are available throughout.
 
 | Three opponents | Candidate wins | Win rate | 95% Wilson interval | Domestic exchanges | Games with exchanges | Candidate exchanges |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Old no-trade weights | 110 / 400 | 27.50% | 23.35–32.07% | 23,258 | 400 | 11,594 |
-| Trading weights | 64 / 400 | 16.00% | 12.73–19.91% | 25,025 | 400 | 12,338 |
+| Old no-trade weights | 110 / 400 | 27.50% | 23.35–32.07% | 23,258 | 400 | 11,773 |
+| Trading weights | 64 / 400 | 16.00% | 12.73–19.91% | 25,025 | 400 | 12,146 |
 
 The first interval includes 25% fair share; it does not establish an advantage
 or equivalence against the old no-trade profile with active trading. The
@@ -58,3 +58,6 @@ PYTHONPATH=/study/src python /study/docs/readouts/native-trading-fair-share/run_
 
 See ../PLAN-floor0.md and ../runtime-floor0.txt. Previous floor-.0197 records
 remain preserved separately and are excluded from this 800-game sample.
+
+Candidate participation uses the corrected entrant-to-seat mapping; see
+[reporting correction](../../trading-conditions/REPORTING-CORRECTION.md).

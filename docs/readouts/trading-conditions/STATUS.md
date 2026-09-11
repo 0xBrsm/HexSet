@@ -8,21 +8,18 @@ five-interior equal mixture gave N/T 104/320, midpoint/T 107/320, T/T 85/320.
 No clean monotonic curve was established in 64-game cells. Full raw results
 are in fixed-screen-games.tar.gz. Four prior full traces/trade histories matched.
 
-Adaptive screen is running in Wintermute container hexset-trading-adaptive-721,
-source export /home/bsm/tmp/hexset-trading-adaptive-source, output
-/home/bsm/tmp/hexset-trading-conditions-results/adaptive-screen. One pool of
-30 workers, no other evaluation pool running. Fixed N/M/T/H and adaptive A/P,
-7 regimes x64 =2,688 games. See ADAPTIVE-SCREEN-PLAN.md. Five observer tests
-passed. Four fixed observer-control games must match previous complete traces
-before the screen starts; they passed. Source policy defaults are unchanged.
+The adaptive screen completed 2,688 games. Its five-interior ranking was
+M130, A117, H110, P106, N99, T88 wins out of320 each. These screen results
+selected M (fixed midpoint), A (public-activity full interpolation), and T
+for fresh validation. Raw records, summary and analysis are checked in.
 
-Next: archive and analyze the completed adaptive screen, ranking equal-weight
-quiet/moderate/active/mixed/rising results. None/full remain boundary checks.
-Select at most one adaptive policy and strongest fixed alternatives; preregister
-fresh fixed-sample validation, including held-out intermediate participation,
-heterogeneity and a falling-activity regime. If adaptation is selected, include
-a stage-only signal control if feasible to distinguish observed conditions
-from generic time-in-game effects. No fresh validation has been launched yet.
+Fresh validation is running in container hexset-trading-validation-722,
+source commit54ac458 exported to /home/bsm/tmp/hexset-trading-validation-source,
+output /home/bsm/tmp/hexset-trading-conditions-results/validation. One30-worker
+pool, 5,632 games. VALIDATION-PLAN.md and validate.py froze the design before
+launch: six interior regimes, new probabilities, mixed opponent move profiles,
+rising and falling activity, and two boundary checks. Two primary contrasts
+use multiplicity-adjusted intervals. No default policy changes before results.
 
 Working branch research/trading-conditions lives in
 /data/data/com.termux/files/usr/tmp/hexset-trading-conditions. Original phone

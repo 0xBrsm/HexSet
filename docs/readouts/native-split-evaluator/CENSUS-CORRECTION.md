@@ -17,8 +17,8 @@ Replays are audits, not additional statistical samples.
 | --- | --- | ---: | ---: | ---: | ---: |
 | .0197 | Old no-trade | 138 | 0 | 0 | 0 |
 | .0197 | Trading | 129 | 0 | 0 | 0 |
-| 0 | Old no-trade | 110 | 23,258 | 400 | 11,594 |
-| 0 | Trading | 64 | 25,025 | 400 | 12,338 |
+| 0 | Old no-trade | 110 | 23,258 | 400 | 11,773 |
+| 0 | Trading | 64 | 25,025 | 400 | 12,146 |
 
 Floor-zero averages are 58.15 and 62.56 exchanges/game, consistent in scale
 with the earlier trade-frequency study's 57.9. The reported 601 and 580 were
@@ -30,3 +30,9 @@ as historical artifacts. Their trade counts are superseded by
 census-audit-summary.json and census-audit-games.tar.gz; source/runner identities
 and all per-event records are retained there. Archive hashes are alongside.
 The narrative floor-zero readout has been corrected to the complete counts.
+
+Candidate participation counts were separately corrected using
+`Outcome.seating[0]`, the entrant-to-seat map. The frozen runner incorrectly
+used `seating.index(0)`. See ../trading-conditions/REPORTING-CORRECTION.md;
+original archives remain unchanged, and candidate-seat-correction.json gives
+the derived totals. Wins and whole-game exchange totals are unaffected.

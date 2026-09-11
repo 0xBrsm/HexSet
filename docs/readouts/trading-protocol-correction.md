@@ -1,5 +1,10 @@
 # Trading protocol correction — September 11, 2026
 
+> Historical correction: the arena statements below describe the source at
+> the time of this correction. PR #151 subsequently made engine-driven rounds
+> the default. Automatic clearing remains research-only; current driver and
+> notification limits are documented in [current scope](served-robber-confirmation/CURRENT-SCOPE.md).
+
 **Automatic clearing is research-only. Never use it for evaluation, fitting,
 coefficient selection or adoption, or claims about served Heximax behavior.**
 The required trading protocol is the served offer/response/counter/pick flow

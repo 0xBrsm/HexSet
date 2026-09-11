@@ -1,0 +1,60 @@
+{
+  "audit": false,
+  "games_per_gate": 64,
+  "protocol": "native-hexset-public-ledger-v1-independent-boards",
+  "rows": [
+    {
+      "candidate": "p10-probability",
+      "games": 64,
+      "gate": "ab2",
+      "rate": 0.359375,
+      "seconds": 552.9847161169164,
+      "wilson95": [
+        0.25288402217722405,
+        0.4817914948765132
+      ],
+      "wins": 23
+    },
+    {
+      "candidate": "p10-probability",
+      "games": 64,
+      "gate": "shipped",
+      "rate": 0.25,
+      "seconds": 192.84753822046332,
+      "wilson95": [
+        0.16014926473210675,
+        0.3681627655856484
+      ],
+      "wins": 16
+    },
+    {
+      "candidate": "p10-exp025-probability",
+      "games": 64,
+      "gate": "ab2",
+      "rate": 0.4375,
+      "seconds": 567.7655666605569,
+      "wilson95": [
+        0.3229400962171096,
+        0.5591379113623292
+      ],
+      "wins": 28
+    },
+    {
+      "candidate": "p10-exp025-probability",
+      "games": 64,
+      "gate": "shipped",
+      "rate": 0.3125,
+      "seconds": 184.64621055708267,
+      "wilson95": [
+        0.2123106647207225,
+        0.43392335801759396
+      ],
+      "wins": 20
+    }
+  ],
+  "seconds": 95.70606225496158,
+  "seed": 711000000,
+  "source_sha256": "b5207f22bbd0a4e0814f7abb4822db31b2f97debf11ae9ec61eb7d583026aad1",
+  "speedups": "fast",
+  "workers": 16
+}

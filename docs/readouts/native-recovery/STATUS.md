@@ -106,3 +106,25 @@ survived fresh boards, but the registered AB2 advancement gate failed.
 No final holdout is allocated. Preserve this useful candidate; continue with
 the already registered probability-backup screen, alone and with exp025.
 Both screens retain original frozen shipped opponents and native history.
+
+
+Probability-backup screen completed: p10 23/64 AB2 /16 shipped; combined
+with expansion025 28/64 /20. Neither improved on expansion025's 32/20
+screen. Defaults exactly matched eight prior control traces; change deferred.
+
+Fresh local screen (seed 714000000) completed: exp025 34/64 AB2 /21 shipped;
+exp0125 31/22; exp0375 34/19; road-zero-exp025 38/24;
+p10-exp025-prod2785 35/24. The last two met the registered extension rule.
+The local-followon controller is extending them and the matched exp025
+parent to 256/gate, then will apply the preregistered conditional confirmation
+and first-holdout rules. No final holdout has started as of this update.
+
+
+Local extension finished: all three policies won 148/256 AB2. Shipped wins
+were parent exp025 78/256, road-zero-exp025 81/256, and reduced-production
+p10 79/256. The registered joint-margin rule selected road-zero-exp025 for
+fresh confirmation: seed 715000000, 512/gate. This is currently running in
+hexset-native-recovery-local-followon. It may advance to the registered
+2048/gate first holdout at seed 716000000 only with 269 AB2 and 144 shipped
+confirmation wins. The earlier failed p10-exp025 confirmation remains in
+the evidence; it is not combined into this candidate's fresh result.

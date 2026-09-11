@@ -8,7 +8,7 @@
       "games": 4,
       "gate": "ab2",
       "rate": 0.5,
-      "seconds": 12.76277078106068,
+      "seconds": 13.096426630858332,
       "wilson95": [
         0.15003898774401986,
         0.8499610122559802
@@ -20,7 +20,7 @@
       "games": 4,
       "gate": "shipped",
       "rate": 0.0,
-      "seconds": 4.437401674920693,
+      "seconds": 4.552284786477685,
       "wilson95": [
         0.0,
         0.4898908403969213
@@ -28,9 +28,9 @@
       "wins": 0
     }
   ],
-  "seconds": 5.2087037831079215,
+  "seconds": 5.359834563918412,
   "seed": 710000000,
-  "source_sha256": "ce4f1c02424216b525f9ce27728525216ae4872850bb64f444cda35b1ee0eddf",
+  "source_sha256": "b5207f22bbd0a4e0814f7abb4822db31b2f97debf11ae9ec61eb7d583026aad1",
   "speedups": "fast",
   "workers": 4
 }

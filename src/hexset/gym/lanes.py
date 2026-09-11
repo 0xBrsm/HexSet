@@ -257,7 +257,7 @@ class LaneEnv:
         gates: Mapping[int, Callable[[Game, int], object]] | None = None,
         first_game: int = 0,
         stride: int = 1,
-        max_trades: int | None = None,
+        max_trades: int = 1,
         bot_capacity: int = 256,
         records: bool = False,
     ) -> None:
@@ -366,7 +366,7 @@ class LaneEnv:
             board=board,
             chance=recording if self.records else None,
         )
-        game.max_trades = self.max_trades
+        game.max_trades = 1 if self.max_trades is None else self.max_trades
         game.gates = self._seat_gates(game, cast)
         return _Lane(
             index=index,

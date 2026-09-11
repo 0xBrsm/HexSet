@@ -211,13 +211,18 @@ bundles when the game enters MAIN after a roll or robber resolution. Builds,
 purchases, and bank trades do not trigger another automatic event. Both sides
 must gain more than their own gate's `trade_floor`, and each side may
 exchange at most three cards. Heximax's floor is `0`; the network gate
-uses `0.0`. There is no engine-wide default floor. The default `egalitarian` rule
-selects the trade with the largest minimum gain; `nash` and `actor` are
-alternative ranking rules. Evaluation repeats after each exchange until no
-trade clears, a position is revisited, or a configured positive `max_trades`
-limit is reached.
-`max_trades=0` disables the automatic event. Server games use
-the separate [trade-round protocol](docs/bot-api.md#trading).
+uses `0.0`. There is no engine-wide default floor.
+
+By default, `trade_mode="round"` runs the [trade-round protocol](docs/bot-api.md#trading):
+the actor broadcasts an offer, opponents accept, counter or pass, and the
+actor picks a response. `max_trades=1` permits one broadcast per turn;
+`0` disables the engine's trade driver and `-1` allows further distinct offers.
+For exhaustive clearing, use `trade_mode="auto"`: the `egalitarian` rule
+selects the trade with the largest minimum gain, with `nash` and `actor` as
+alternative rankings. In this mode, `max_trades` caps completed exchanges.
+Reproducing the old uncapped behavior requires `trade_mode="auto"` and
+`max_trades=-1`. Server games use `trade_mode="external"` and manage rounds
+across requests, with limits owned by the session.
 
 ## Repository layout
 

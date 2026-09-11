@@ -570,3 +570,47 @@ def test_pinned_upper_endpoint_uses_the_validated_move_and_exchange_profiles():
     assert bot.trade_evaluator.expansion_value == 0.0
     assert bot.trade_floor == 0.0 and bot.max_trades is None
     assert (bot.depth, bot.width, bot.max_nodes, bot.k) == (2, 6, 600, 1)
+
+
+@pytest.mark.parametrize("stance", ["own", "relative", "paranoid", "win"])
+@pytest.mark.parametrize("perspective", [0, 2])
+def test_batched_opponent_estimates_match_reference_with_hidden_hands(stance, perspective):
+    from hexset.trading import _candidates
+
+    game = after_setup(26)
+    for seat in range(4):
+        set_known_hand(game, seat, [1, 1, 1, 1, 1])
+        give_unknown(game, seat, seat, 2)
+    candidates = list(_candidates(game._state, perspective, game.locked))
+    candidates = random.Random(17).sample(candidates, min(48, len(candidates)))
+    bot = Heximax(HonestEvaluator(game._state.board), stance=stance)
+    view = game.state(perspective)
+    expected = [
+        bot._delta_reference(view, perspective, them, tuple(-n for n in received),
+                             perspective, bot._rank)
+        for them, received in candidates
+    ]
+    assert bot.estimate_many(view, candidates) == pytest.approx(expected, rel=1e-10, abs=1e-12)
+    assert bot.estimate_many(view, []) == []
+
+    # Swap hidden cards while keeping public totals and the ledger fixed.
+    a, b = [seat for seat in range(4) if seat != perspective][:2]
+    game._state.hands[a][a] -= 1
+    game._state.hands[b][a] += 1
+    game._state.hands[b][b] -= 1
+    game._state.hands[a][b] += 1
+    bot._clear_evaluation_caches()
+    assert bot.estimate_many(game.state(perspective), candidates) == pytest.approx(
+        expected, rel=1e-10, abs=1e-12)
+
+
+def test_opponent_estimates_keep_exact_progress_sampling_reference():
+    game = after_setup(26)
+    for seat in range(4):
+        set_known_hand(game, seat, [1, 1, 1, 1, 1])
+        give_unknown(game, seat, seat, 1)
+    bot = Heximax(HonestEvaluator(game._state.board, exact_progress_samples=2))
+    view = game.state(0)
+    received = one_for_one(0, 4)
+    expected = bot._delta_reference(view, 0, 1, tuple(-n for n in received), 0, bot._rank)
+    assert bot.estimate_many(view, [(1, received)]) == pytest.approx([expected])

@@ -918,3 +918,23 @@ def test_trim_log_ignores_the_cursor_once_the_game_is_over():
 def test_trim_log_still_trims_while_the_game_is_running():
     view = mcptools._trim_log({"log": ["a", "b", "c", "d"], "game_over": False}, 3)
     assert view["log_from"] == 2
+
+
+def test_wait_for_turn_carries_the_summary_too(live_server):
+    """`wait_for_turn` is the call a seat makes to reach its own turn, so the
+    view it returns is exactly the one `afford`/`spots`/`robber` are for. It
+    does not go through `_reply`, so the summary has to be applied at the
+    yield -- it was missing here while `state` had it."""
+    _, base = live_server
+    client = connected(base)
+    client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    for _ in range(4):
+        view = client.call_tool("state")
+        if not view.get("legal_actions"):
+            break
+        client.call_tool("act", index=0)
+
+    _, waited = _wait_for_turn_streamed(client)
+    assert "summary" in waited
+    assert "afford" in waited["summary"]
+    assert waited["summary"] == client.call_tool("state", full_log=True)["summary"]

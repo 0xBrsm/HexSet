@@ -821,13 +821,19 @@ def _wait_for_turn_events(
     """Yields `_KEEPALIVE` for each wait tick that doesn't resolve, then the
     final translated view -- immediately, if it's already true.
 
-    Only the view that is actually yielded is trimmed (`_trim_for`), and only
-    it moves the session's cursor. The polls in between are read for
-    `version` and `_turn_ready` alone and are never seen by the caller."""
+    Only the view that is actually yielded is summarised and trimmed, and
+    only it moves the session's cursor. The polls in between are read for
+    `version` and `_turn_ready` alone and are never seen by the caller.
+
+    The summary matters most here of all: this is the call a seat makes to
+    reach its own turn, so the view it returns is the one `afford`/`spots`/
+    `robber` are for. `_poll_state` only translates -- `_summarize` is part
+    of `_reply`, which this path does not go through -- so it is applied at
+    the yield, against the board `_layout` cached on the session."""
     _seated(session)
     view = _poll_state(tables, session)
     if _turn_ready(view):
-        yield _trim_for(session, view, log_after, full_log)
+        yield _trim_for(session, _summarize(view, session.board), log_after, full_log)
         return
     elapsed = 0.0
     while timeout is None or elapsed < timeout:
@@ -836,9 +842,9 @@ def _wait_for_turn_events(
         view = _poll_state(tables, session, after=view.get("version"), wait=remaining)
         elapsed += remaining
         if _turn_ready(view) or (timeout is not None and elapsed >= timeout):
-            yield _trim_for(session, view, log_after, full_log)
+            yield _trim_for(session, _summarize(view, session.board), log_after, full_log)
             return
-    yield _trim_for(session, view, log_after, full_log)
+    yield _trim_for(session, _summarize(view, session.board), log_after, full_log)
 
 
 def _wait_for_turn(

@@ -436,3 +436,34 @@ def test_arena_reference_bots_use_independent_seeded_search_streams():
     assert draws == [expected.random(), random.Random(99).random(), expected.random()]
     assert game.rng.getstate() == live_before
     assert random.getstate() == global_before
+
+
+@pytest.mark.parametrize("worlds, expected", [(0, 2), (40, 2)])
+def test_world_vote_is_opt_in_and_reuses_reference_answers_per_decision(worlds, expected):
+    from catanatron.models.player import Player
+    from hexset.arena import deal_game
+    from hexset.bots.determinized import holdings_signature
+    game = deal_game(96, 0, 4)
+    calls = []
+    class FirstPlayer(Player):
+        def decide(self, mirror, actions):
+            calls.append(mirror)
+            return actions[0]
+    rng = random.Random(7)
+    before = rng.getstate(), game.rng.getstate()
+    bot = CatanatronBot(FirstPlayer, worlds=worlds, rng=rng,
+                       world_key=holdings_signature)
+    assert bot.choose(game) in legal_actions(game)
+    assert bot.choose(game) in legal_actions(game)
+    assert len(calls) == expected
+    assert (rng.getstate(), game.rng.getstate()) == before
+
+
+def test_reference_world_vote_uses_current_pinned_ab2_and_reproduces(positions):
+    game = positions[-1]
+    before = game.rng.getstate()
+    first = CatanatronBot(worlds=3, rng=random.Random(7)).choose(game)
+    again = CatanatronBot(worlds=3, rng=random.Random(7)).choose(game)
+    assert first == again
+    assert first in legal_actions(game)
+    assert game.rng.getstate() == before

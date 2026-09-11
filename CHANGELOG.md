@@ -5,6 +5,15 @@ Changes to the HexSet distribution. The project follows
 
 ## Unreleased
 
+### Added
+
+- Opt-in sampled-world voting for model/search callbacks, with a decision-local
+  cache and frequency-weighted votes (`hexset.bots.determinized`). The default
+  key includes the sampled development deck; models that cannot observe it can
+  explicitly use `holdings_signature` for greater reuse. `CatanatronBot` exposes
+  the same optional vote while preserving its default reference behavior.
+  See [the cache contract and examples](docs/determinized-worlds.md).
+
 ### Changed
 
 - **Pinned Catanatron to `ecf931181b9a65bb4116a2153fb78c16f1438e00`.**

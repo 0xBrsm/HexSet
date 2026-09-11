@@ -34,6 +34,7 @@ from weakref import WeakValueDictionary
 from hexset.actions import Action, legal_actions
 from hexset.arena import Entrant, register_entrant_kind, register_preset
 from hexset.board.board import Board
+from hexset.bots.determinized import WorldKey, determinized, world_signature
 from hexset.game import Game, to_move
 
 from catanatron.models.player import Color, Player
@@ -70,11 +71,20 @@ def alpha_beta(depth: int) -> Callable[[Color], Player]:
 
 
 class CatanatronBot:
-    """A catanatron `Player` playing a hexset seat. `player(color) -> Player`."""
+    """A catanatron `Player` playing a hexset seat. `player(color) -> Player`.
+
+    ``worlds=0`` retains the reference's single search of the supplied state.
+    Positive ``worlds`` samples the mover's information set and votes, caching
+    one answer per distinct sampled state within this decision. ``world_key``
+    may explicitly ignore deck order for a chooser that does not read it;
+    see :mod:`hexset.bots.determinized` for the cache contract.
+    """
 
     def __init__(
         self, player: Callable[[Color], Player] | None = None,
-        *, rng: random.Random | None = None,
+        *, rng: random.Random | None = None, worlds: int = 0,
+        temperature: float = 0.0, select: str = "argmax",
+        world_key: WorldKey = world_signature,
     ) -> None:
         self.player = player or alpha_beta(2)
         self._rng = rng
@@ -82,8 +92,23 @@ class CatanatronBot:
         self._seats = None
         self._players: dict[Color, Player] = {}
         self._table = None
+        # Sampling must not consume the reference player's search stream.
+        # Cloning also preserves the exact worlds=0 entrant RNG sequence.
+        sampling_rng = random.Random(0)
+        if rng is not None:
+            sampling_rng.setstate(rng.getstate())
+        self._choose = determinized(
+            self._decide, worlds, sampling_rng, temperature=temperature,
+            select=select, world_key=world_key,
+        )
 
     def choose(self, game: Game) -> Action:
+        action = self._choose(game)
+        if action is None:
+            raise ValueError("catanatron returned no action in any sampled world")
+        return action
+
+    def _decide(self, game: Game) -> Action:
         # true state: `to_catanatron` mirrors the whole table, which is what a
         # catanatron player reads; the board alone is public either way.
         state = game.state(0, hidden=False)

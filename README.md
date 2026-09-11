@@ -55,6 +55,10 @@ an estimated win probability. Catanatron's adapter and search have different
 information assumptions; comparisons must identify which engine hosted the
 games and whether trading was enabled.
 
+Model and search callbacks can opt into [cached sampled-world voting](docs/determinized-worlds.md).
+The helper reuses duplicate-world answers while preserving their vote frequency;
+it does not change any arena preset.
+
 ### Recorded Catanatron result
 
 In the archived September 7, 2026 benchmark, `heximax-notrade` won **47.3%**

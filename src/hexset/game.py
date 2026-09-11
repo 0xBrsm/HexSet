@@ -787,15 +787,21 @@ def trade_with_bank(game: Game, give: Resource, receive: Resource) -> None:
 def _run_trade_rounds(game: Game, gates) -> list[Trade]:
     """This turn's trade rounds, under `Game.trade_rounds`.
 
-    `0` never asks. `-1` keeps broadcasting until a round clears nothing,
-    which is the same stopping rule the clearing house uses -- a round that
-    found no deal will not find one on a rerun of the same position. A
-    positive budget caps the broadcasts, not the trades: a round clears at
-    most one exchange, so the two only differ when a round passes.
+    `0` never asks. `-1` keeps broadcasting while the actor still has an
+    offer it has not made this turn, and stops when it runs out -- not at the
+    first refusal, which is the usual reason to put something else to the
+    table. `already_offered` is what makes that terminate: `default_offer` is
+    a pure function of the position, so without it a rerun would repeat the
+    same bundle and collect the same answer for ever.
 
-    Rounds are counted rather than trades so the knob means what a table
-    would mean by it: how many times the actor gets to put something to the
-    table this turn.
+    A positive budget caps the broadcasts, not the trades: a round clears at
+    most one exchange, so the two only differ when a round passes. Rounds are
+    counted rather than trades so the knob means what a table would mean by
+    it: how many times the actor gets to put something to the table.
+
+    This is the round mechanism's budget alone. `"clearing"` does not read
+    it -- its stopping rule is its own -- so `0` here is not a table-wide
+    "nobody trades"; a seat that should never trade refuses at its own gate.
     """
     budget = game.trade_rounds
     if budget == 0:

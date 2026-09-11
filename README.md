@@ -20,8 +20,8 @@ runtimes and learning algorithms through those interfaces.
 **HexSet is the primary engine and evaluation framework. Catanatron is an
 external reference opponent.** Run Heximax self-play, ablations and candidate
 validation in HexSet using the served offer–response protocol, including
-matches against Catanatron's AB2 bot. The current automatic arena is not an
-approved evaluation or fitting path. See the
+matches against Catanatron's AB2 bot. The arena now defaults to engine-driven
+rounds; served equivalence still requires checking the driver and notifications. See the
 [evaluation protocol and recovery steps](docs/evaluation.md).
 
 ## Research workflows
@@ -115,8 +115,9 @@ configuration, saved games, HTTP routes, and MCP tools.
 
 Use native HexSet with the **served offer–response protocol** for evaluation
 and fitting. Automatic clearing is research-only. The stock arena and its
-trading-enabled duel/ablation/fitting runners still use automatic clearing;
-a verified served runner is required before another campaign.
+trading-enabled duel/ablation/fitting runners default to engine-driven rounds.
+Before a campaign, verify their budgets, proposal policy and activity
+notifications against the intended served driver.
 
 See the [evaluation contract](docs/evaluation.md) and
 [protocol correction](docs/readouts/trading-protocol-correction.md).
@@ -196,18 +197,23 @@ and estimates of opponents' hands derived from the resource ledger.
 true state outside the engine should explain its purpose with a
 `# true state: <reason>` comment.
 
-For research-only automatic-clearing simulations with trade gates installed, the engine evaluates coverable
+For simulations with trade gates installed, the engine evaluates coverable
 bundles when the game enters MAIN after a roll or robber resolution. Builds,
 purchases, and bank trades do not trigger another automatic event. Both sides
 must gain more than their own gate's `trade_floor`, and each side may
 exchange at most three cards. Heximax's floor is `0`; the network gate
-uses `0.0`. There is no engine-wide default floor. The default `egalitarian` rule
-selects the trade with the largest minimum gain; `nash` and `actor` are
-alternative ranking rules. Scoring repeats after each exchange until no
-trade clears, a position is revisited, or a configured positive `max_trades`
-limit is reached.
-`max_trades=0` disables the automatic event. Server games use
-the separate [trade-round protocol](docs/bot-api.md#trading).
+uses `0.0`. There is no engine-wide default floor.
+
+By default, `trade_mode="round"` runs the [trade-round protocol](docs/bot-api.md#trading):
+the actor broadcasts an offer, opponents accept, counter or pass, and the
+actor picks a response. `max_trades=1` permits one broadcast per turn;
+`0` disables the engine's trade driver and `-1` allows further distinct offers.
+For exhaustive clearing, use `trade_mode="auto"`: the `egalitarian` rule
+selects the trade with the largest minimum gain, with `nash` and `actor` as
+alternative rankings. In this mode, `max_trades` caps completed exchanges.
+Reproducing the old uncapped behavior requires `trade_mode="auto"` and
+`max_trades=-1`. Server games use `trade_mode="external"` and manage rounds
+across requests, with limits owned by the session.
 
 ## Repository layout
 

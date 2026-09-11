@@ -29,6 +29,7 @@ from hexset.game import (
     play_year_of_plenty_card,
     players_owing_discards,
     roll_dice,
+    run_trade_event,
     start,
     submit_discard,
     trade_with_bank,
@@ -264,21 +265,32 @@ def test_largest_army_is_awarded_before_the_robber_moves():
 
 
 def _spy_on_trade_event(monkeypatch):
-    """Count calls to `trade_event` as `hexset.game` itself sees it -- the
-    name `run_trade_event` calls -- recording the phase at each call. A
-    patch on `hexset.trading.trade_event` would not be seen here: `game.py`
-    imported the name directly (`from .trading import ... trade_event`), so
-    it holds its own reference, same as any other `from x import y`."""
+    """Count the turn's trade dispatch as `hexset.game` itself sees it --
+    the names `run_trade_event` calls -- recording the phase at each call. A
+    patch on `hexset.trading.*` would not be seen here: `game.py` imported
+    the names directly (`from .trading import ...`), so it holds its own
+    references, same as any other `from x import y`.
+
+    Both mechanisms are counted. These tests ask *when* the turn's event
+    fires -- once, on entering MAIN -- and that is the same question
+    whichever of `trade_round` (the default) or `trade_event` (clearing, via
+    `Game.trade_mode`) is the one answering it."""
     import hexset.game as gamemod
 
     calls: list[Phase] = []
-    real = gamemod.trade_event
+    real_event = gamemod.trade_event
+    real_round = gamemod.trade_round
 
-    def spy(game, gate):
+    def spy_event(game, gate):
         calls.append(game.phase)
-        return real(game, gate)
+        return real_event(game, gate)
 
-    monkeypatch.setattr(gamemod, "trade_event", spy)
+    def spy_round(game, gates, already_offered=None):
+        calls.append(game.phase)
+        return real_round(game, gates, already_offered=already_offered)
+
+    monkeypatch.setattr(gamemod, "trade_event", spy_event)
+    monkeypatch.setattr(gamemod, "trade_round", spy_round)
     return calls
 
 
@@ -741,3 +753,147 @@ def test_a_seat_that_crosses_ten_off_turn_wins_at_the_start_of_its_own_turn():
     assert game.current_player == 1  # turn order hands play straight to them
     assert game.won_by == 1  # ... and they win before taking any action
     assert game.phase is Phase.GAME_OVER
+
+
+# --- which bargaining mechanism a turn runs under -----------------------
+#
+# `Game.trade_mode` defaults to the round a real table plays; `"auto"`
+# is the opt-in to `trade_event`'s exhaustive clearing.
+
+
+def _fake_rounds(monkeypatch, results, offers=None):
+    """Replace `trade_round` with one that returns `results` in order, then
+    `[]`, counting calls and recording an offer per call into
+    `already_offered` the way the real one does.
+
+    `offers` is how many distinct offers the actor has to make; once they run
+    out the fake adds nothing, which is the real signal `_run_trade_rounds`
+    stops on -- nothing left worth putting to the table, not merely a round
+    that nobody took."""
+    import hexset.game as gamemod
+
+    calls = {"n": 0}
+    queue = list(results)
+    left = len(results) if offers is None else offers
+
+    def fake(game, gates, already_offered=None):
+        calls["n"] += 1
+        if already_offered is not None and calls["n"] <= left:
+            already_offered.add((calls["n"],))
+        return queue.pop(0) if queue else []
+
+    monkeypatch.setattr(gamemod, "trade_round", fake)
+    return calls
+
+
+def _in_main_with_gates(monkeypatch):
+    game = _seated(start(random_base_board(random.Random(0)), 4, random.Random(0)))
+    game.phase = Phase.MAIN
+    game.turns = 1
+    game.trade_event_turn = -1
+    return game
+
+
+def test_a_turn_puts_one_thing_to_the_table_by_default(monkeypatch):
+    """One offer a turn: what a table does, and what keeps the engine quick
+    -- uncapped rounds cost several times the simulation speed."""
+    game = _in_main_with_gates(monkeypatch)
+    assert game.trade_mode == "round" and game.max_trades == 1
+    calls = _fake_rounds(monkeypatch, [], offers=3)
+    run_trade_event(game)
+    assert calls["n"] == 1  # the cap, not the offers it still had
+
+
+def test_max_trades_zero_never_asks_under_either_mechanism(monkeypatch):
+    """`0` is the one "nobody trades" for the whole table, so it needs no
+    per-mechanism mute."""
+    import hexset.game as gamemod
+
+    for mode in ("round", "auto"):
+        game = _in_main_with_gates(monkeypatch)
+        game.trade_mode = mode
+        game.max_trades = 0
+        rounds = _fake_rounds(monkeypatch, [])
+        cleared = {"n": 0}
+        monkeypatch.setattr(
+            gamemod, "trade_event", lambda game, gate: cleared.__setitem__("n", 1) or []
+        )
+        run_trade_event(game)
+        assert rounds["n"] == 0 and cleared["n"] == 0
+
+
+def test_a_refused_round_is_followed_by_a_different_offer(monkeypatch):
+    """The usual reason to put a second thing to the table is that nobody
+    took the first. `-1` keeps going while the actor still has offers it has
+    not made, and stops when it runs out of them -- not at the first refusal."""
+    game = _in_main_with_gates(monkeypatch)
+    game.max_trades = -1
+    # Three offers available; none of them is taken.
+    calls = _fake_rounds(monkeypatch, [], offers=3)
+    run_trade_event(game)
+    assert calls["n"] == 4  # three distinct offers, then nothing left to say
+
+
+def test_unlimited_rounds_stop_when_the_offers_run_out(monkeypatch):
+    game = _in_main_with_gates(monkeypatch)
+    game.max_trades = -1
+    calls = _fake_rounds(monkeypatch, [["a"], ["b"]])
+    run_trade_event(game)
+    assert calls["n"] == 3  # two offers made and taken, then none left
+
+
+def test_a_positive_budget_caps_the_broadcasts(monkeypatch):
+    game = _in_main_with_gates(monkeypatch)
+    game.max_trades = 2
+    calls = _fake_rounds(monkeypatch, [["a"], ["b"], ["c"]])
+    run_trade_event(game)
+    assert calls["n"] == 2  # the third was never asked for
+
+
+def test_auto_is_reachable_and_skips_the_round(monkeypatch):
+    import hexset.game as gamemod
+
+    game = _in_main_with_gates(monkeypatch)
+    game.trade_mode = "auto"
+    rounds = _fake_rounds(monkeypatch, [["a"]])
+    cleared = {"n": 0}
+
+    def fake_event(game, gate):
+        cleared["n"] += 1
+        return []
+
+    monkeypatch.setattr(gamemod, "trade_event", fake_event)
+    run_trade_event(game)
+    assert cleared["n"] == 1 and rounds["n"] == 0
+
+
+def test_an_externally_driven_game_runs_no_mechanism_at_all(monkeypatch):
+    """A served table drives its own rounds over many requests. One bit says
+    so for every mechanism at once, so the engine never runs one underneath
+    it -- muting each mechanism separately is what invites a third to be
+    forgotten."""
+    import hexset.game as gamemod
+
+    for _ in range(2):
+        game = _in_main_with_gates(monkeypatch)
+        game.trade_mode = "external"
+        rounds = _fake_rounds(monkeypatch, [["a"]])
+        cleared = {"n": 0}
+        monkeypatch.setattr(
+            gamemod, "trade_event", lambda game, gate: cleared.__setitem__("n", 1) or []
+        )
+        run_trade_event(game)
+        assert rounds["n"] == 0 and cleared["n"] == 0
+
+
+def test_invalid_trade_mode_fails_without_consuming_the_turn(monkeypatch):
+    game = _in_main_with_gates(monkeypatch)
+    game.trade_mode = "rounds"
+    calls = _fake_rounds(monkeypatch, [], offers=1)
+    with pytest.raises(ValueError, match="unknown trade mode"):
+        run_trade_event(game)
+    assert calls["n"] == 0
+    assert game.trade_event_turn == -1
+    game.trade_mode = "round"
+    run_trade_event(game)
+    assert calls["n"] == 1

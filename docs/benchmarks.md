@@ -45,8 +45,8 @@ deadline hits. The readout preserves exact source hashes, settings and records.
 
 Production GameSession confirmation found +0.075 beat −0.30 in **272/392
 fresh games (69.39%, 95% CI 64.66–73.74%)**, with zero automatic exchanges.
-This supports the selected exchange coefficient under current served behavior;
-the served move slider is zero on both sides. It does not validate the old
+This supports the selected exchange coefficient under the recorded served
+configuration; the move slider was zero on both sides. It does not validate the old
 sweep grid or adaptive served moves. See the
 [served readout](readouts/served-robber-confirmation/README.md).
 

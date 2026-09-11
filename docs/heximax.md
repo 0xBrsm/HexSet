@@ -38,10 +38,12 @@ The [served confirmation](readouts/served-robber-confirmation/README.md) found
 exchange coefficient changed. Production GameSession handled all offers,
 responses, counters and execution; automatic exchanges were forbidden.
 
-The served implementation currently holds the move slider at zero, and this
-test reproduces that on both sides. It validates the coefficient against its
-baseline under current served behavior, not adaptive movement or a unique
-optimum. Earlier automatic-clearing sweeps and the adaptive-versus-fixed
+The confirmation held the move slider at zero on both sides at its recorded
+source revision. The current served session uses `trade_mode="external"`;
+its unpinned slider still starts at zero and receives no completed-exchange
+notifications. The result supports the coefficient under the recorded served
+configuration, not adaptive movement or a unique optimum. See the
+[current scope](readouts/served-robber-confirmation/CURRENT-SCOPE.md). Earlier automatic-clearing sweeps and the adaptive-versus-fixed
 exchange comparison remain research-only; their adoption conclusions were
 withdrawn. See the [protocol correction](readouts/trading-protocol-correction.md).
 
@@ -54,10 +56,10 @@ Trading was enabled; AB2 declined exchanges and the slider remained at zero.
 The [benchmark readout](readouts/current-heximax-ab2/README.md) records exact
 revisions, confidence intervals, settings and replay validation of all 1,600 games.
 
-## Research flags (automatic arena)
+## Research flags (engine-driven rounds)
 
-These commands describe research tooling, not an approved evaluation/fitting
-path. Use a verified served driver for those tasks.
+These commands describe research tooling. Before evaluation or fitting,
+verify the driver against the intended served protocol and notifications.
 
 Compare normal Heximax against three copies pinned at one:
 

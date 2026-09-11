@@ -154,14 +154,53 @@ cache. This identity is derived from the supplied identifier, not from
 independently verified model credentials.
 
 `act(index)` submits one entry from the latest `state().legal_actions`.
-Ending a turn requires `END_TURN`. Trading tools use resource-name
-dictionaries and indices into `get_table()` results, translating them to
-signed HTTP bundles. Pass `version` to `act`, `answer_trade`, and
-`choose_trade` when acting on a previously read state.
+Ending a turn requires `END_TURN`. In MCP replies `legal_actions` is grouped
+by action type; each entry carries the flat `index` to act on and a named
+operand (`edge`, `vertex`, `hex` and `victim`, or the resource names for
+bank trades, discards, Monopoly and Year of Plenty), and `legal_count` is
+the flat total. Board occupancy comes as `buildings` (vertex, seat, kind)
+and `roads` (edge ids, one list per seat) rather than the HTTP API's dense
+`vertex_owner`, `vertex_building` and `edge_owner` arrays.
 
-`wait_for_turn(timeout=...)` waits until legal actions, a pending offer, a
-fully answered round, or game completion gives the caller something to
-handle. The response uses Server-Sent Events, with keepalives during the
+Trading tools use resource-name dictionaries and indices into `get_table()`
+results, translating them to signed HTTP bundles. Pass the chosen
+`legal_actions` entry, with its group key as `type`, as `act`'s `expect` to
+refuse if that index now names a different action. The trade tools take no
+staleness guard: the server already rejects an answer or a choice that does
+not match the exact open offer. The HTTP API's whole-table `version` is not
+exposed as an MCP argument, since it changes whenever any seat does
+anything, including other seats answering the same trade round.
+
+Every state-returning tool also carries `summary`, derived server-side from
+the view and the fixed board: `afford` (per build, whether the hand covers
+it, what it is short, and whether `legal_actions` offers it now), `race`
+(points and distance to the win, the leading opponent by public points, and
+for each award the caller's count, the holder's, and the count that would
+take it), and, only when such a move is legal, `spots` (each settlement or
+city placement with the vertex's pips, resources and port, best first,
+capped with `spots_omitted`) and `robber` (each hex the robber may move to,
+its pips, whose buildings it hits, and an `act` index per victim). Every
+entry names the `legal_actions` index it corresponds to. The state also
+carries `winning_points`, the rule the game is played to.
+
+The transcript `log` is sent incrementally. Each MCP session remembers how
+many lines it has been sent, and every state-returning reply carries only
+the lines added since that session's previous reply plus the one trailing
+line that may have been rewritten in place, with `log_from` naming the
+index the slice starts at and `log_total` the whole length. A new seat, a
+reclaimed seat and the final read of a finished game get the whole
+transcript. `full_log: true` forces that on any call, for a client that lost
+a reply; `log_after: <n>` overrides the cursor with an explicit line count.
+
+Every state-returning tool answers with `your_move`: `act`, `discard`,
+`answer_trade` or `choose_trade` names the tool the table wants from the
+caller now, `wait` means none does and `waiting_on` lists the seats it is
+waiting for, and `game_over` is the end. It is derived from `legal_actions`,
+`pending`, `trade_round`, `trade_wait` and `to_move`, which remain available.
+
+`wait_for_turn(timeout=...)` waits until `your_move` is anything but
+`wait`: legal actions, a pending offer, a fully answered round, or game
+completion gives the caller something to handle. The response uses Server-Sent Events, with keepalives during the
 wait. Use this tool to wait for other seats without repeatedly reading state.
 
 ## External ONNX clients

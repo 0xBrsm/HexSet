@@ -154,13 +154,17 @@ legal entries. Player trading has no entry in this space.
 
 ## Trading
 
-Server games disable the engine's automatic trade event with
-`Game.max_trades = 0` and run offer–response rounds instead. Arena
-simulations currently use automatic clearing when trade gates are installed.
-That path is research-only: never use automatic clearing for evaluation or
-fitting. Those tasks require the served offer–response protocol, including its
-proposal policy and activity observations; see [evaluation](evaluation.md). The Gym
-wrappers have additional limitations described in the
+Server games set `Game.trade_mode = "external"` and drive offer–response
+rounds across requests. Arena simulations use the same round protocol,
+driven synchronously by the engine with one broadcast per turn by default.
+`Game.max_trades` caps broadcasts in `"round"` mode and completed exchanges
+in `"auto"` mode; `0` disables the engine's driver and `-1` removes its cap.
+External callers manage their own limits. To reproduce the old exhaustive
+clearing behavior, set `trade_mode="auto"` and `max_trades=-1`.
+Automatic clearing is research-only. Evaluation and fitting require a driver
+verified against the intended served proposal policy, budgets and activity
+notifications; see [evaluation](evaluation.md).
+The Gym wrappers have additional limitations described in the
 [README](../README.md#training-environments).
 
 A server round has three steps:

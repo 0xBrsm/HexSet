@@ -98,7 +98,7 @@ _PURCHASE_COSTS = np.array(
 # ring value, which is the resolution 1,024 paired games buy.
 # Served-protocol confirmation (production GameSession): +0.075 beat -0.30
 # in 272/392 fresh games (69.4%, 95% Wilson 64.7-73.7%). Only exchange
-# pricing changed; this reproduces the current served move slider at zero.
+# pricing changed; the recorded served configuration held the move slider at zero.
 # The earlier automatic-clearing studies remain research-only. This confirms
 # the selected coefficient against the baseline, not a unique optimum.
 # See docs/readouts/served-robber-confirmation/README.md.

@@ -35,8 +35,9 @@ Registered `agents/reference/trading-final.md`, superseding the shipped
   and every floor is non-negative), and a gate that is not -- one that
   scores candidates in a world sampled from its belief, as the network gate
   and heximax do -- ends the event at the first revisit rather than cycling.
-  `Game.max_trades` is an off switch (`0`), not a budget; `None` is the
-  unbounded default.
+  `Game.max_trades` caps completed exchanges in automatic clearing and
+  broadcasts in round mode: `1` by default, `0` disables the engine's
+  trade driver, `-1` no cap. External callers manage their own limits.
 
 There are no trade actions -- no propose, respond, accept or decline -- so
 nothing here reads an opponent's hand on an actor's behalf and the action
@@ -62,25 +63,60 @@ everything (`agents/reference/trading-theory.md` §5-6): the one
 approximation this mechanic makes is the gate itself, and everything
 downstream of it is exact.
 
-## The trade round (the served table's protocol)
+## The trade round (the default protocol)
 
 Everything above -- `trade_event`/`_best_clearing`, fired once a turn from
-`hexset.game.enter_main`/`move_robber_to` -- is unchanged and stays the
-engine's own automatic clearing: what the arena, the bench, `record_game`
-and the gym all still play under, and what a self-play run's acceptance
-labels are drawn from (`agents/reference/trading-final.md`, "Training").
+`hexset.game.enter_main`/`move_robber_to` -- is unchanged, and is the
+engine's own automatic clearing. It is **no longer what anything plays under
+by default**: `Game.trade_mode` chooses, and defaults to `"round"`.
+`"auto"` opts back in.
 
-`trade_round` (below) is a second, separate protocol for a *served* game
-(`hexset.server`) with a human, an LLM or a foreign bot at the table:
-propose-and-respond rather than exhaustive clearing, because a served
-table's seats answer through a wire, not through a synchronous function
-call. A session that wants it seats `game.max_trades = 0` -- the existing
-off switch, not a new flag -- so the automatic event no-ops itself on
-every `enter_main`/`move_robber_to`, and calls `trade_round(game, gates)`
-itself instead, as many times a turn as the acting seat wants: nothing
-here counts rounds or caps them, since the floor and the card cap already
-bound what one round can move. A game nobody serves never calls this at
-all and never notices it exists.
+Clearing is not a model of bargaining; it is a strong approximation standing
+in for one. It enumerates every candidate deal and keeps clearing until
+nothing clears, against a counterparty that never holds out, never asks for
+more and never refuses a deal it merely dislikes. No table plays that way. A
+policy fitted or trained against it learns to exploit an exhaustive,
+perfectly agreeable opponent, and that edge does not survive contact with a
+real one -- which is why the arena, the bench, `record_game` and the gym now
+run rounds, and why self-play acceptance labels are drawn from them
+(`agents/reference/trading-final.md`, "Training").
+
+Results recorded before this switched -- the fitted presets, the adaptive
+slider, the trading-condition screens -- are clearing-mechanism results.
+They are not wrong, they are about the other mechanism, and `docs/research.md`
+already requires a historical study to run from its recorded source
+revision. `"auto"` stays reachable so they stay reproducible, not
+because it is the better default.
+
+`trade_round` (below) is propose-and-respond: the actor broadcasts one
+offer, every other seated gate answers once, and the actor picks. Nothing
+here counts rounds or caps them -- the floor and the card cap already bound
+what one round can move -- so the *caller* decides how many a turn is worth,
+and there are two callers.
+
+An unserved game is driven by `hexset.game.run_trade_event`, once a turn
+from `enter_main`/`move_robber_to`, capped by `Game.max_trades`: `1` by
+default, one thing put to the table a turn; `-1` keeps offering while the
+actor has offers left to make, at a real cost in engine speed. The
+cap is the table's rule, not a seat's willingness -- a seat that should
+never trade refuses at its own gate, under either mechanism.
+
+Successive rounds in a turn must not repeat themselves. `default_offer` is a
+pure function of the position, so a second round on an unchanged position
+would broadcast the identical bundle and collect the identical refusal. The
+`already_offered` set carries what has been put to the table this turn and
+excludes it from later candidate lists, which is both what a person does --
+the usual reason to offer again is that nobody took the last one -- and what
+makes `-1` terminate: it runs out of things to say, rather than stopping at
+the first refusal.
+
+A *served* game (`hexset.server`) drives its own rounds instead, because its
+seats answer through a wire rather than a synchronous call -- a round there
+spans many requests while a person or an LLM thinks. Such a session sets
+`game.trade_mode = "external"` (`api.build_session`), which is one value on
+the same axis rather than a mute per mechanism, and calls
+`trade_round(game, gates)` itself as many times a turn as the acting seat
+wants.
 
 One round: the current player's gate broadcasts one offer (`Bot.offer`,
 new); every other seated gate answers once (`Bot.respond`, new) --
@@ -340,11 +376,11 @@ def trade_event(game: "Game", gate: Gate) -> list[Trade]:
     for the acting seat over every coverable candidate, then once per
     distinct counterparty over the acting seat's subset that clears the
     floor with it. Among the candidates both sides clear their own floor on,
-    `game.trade_rule` picks the winner (`_best_clearing`). No budget: the
-    loop runs until nothing clears.
+    `game.trade_rule` picks the winner (`_best_clearing`). The loop stops at
+    `game.max_trades` exchanges, or when nothing clears; `-1` is uncapped.
 
-    The single engine limit is the revisit check below: an event ends the
-    moment a position (every seat's hand plus the public ledger) comes
+    The revisit check also ends an event the moment a position (every
+    seat's hand plus the public ledger) comes
     back. For a gate that is a strict function of the position that never
     happens -- the acting seat's own gain exceeds its floor at every
     clearing, strictly positive since every floor is non-negative -- and it
@@ -378,7 +414,7 @@ def trade_event(game: "Game", gate: Gate) -> list[Trade]:
 
     executed: list[Trade] = []
     seen: set[tuple] = set()
-    while game.max_trades is None or len(executed) < game.max_trades:
+    while game.max_trades < 0 or len(executed) < game.max_trades:
         position = _position_key(state, game.ledger)
         if position in seen:
             break  # a sampling gate came back round; the event is over
@@ -673,22 +709,21 @@ def _belief_candidates(view: "View", me: int, counterparty: int) -> list[Bundle]
 
 
 def _estimate_many(
-    gate: object, view: "View", candidates: Sequence[tuple[int, Bundle]]
+    gate: object, view: "View", candidates: Sequence[tuple[int, Bundle]],
+    own_gains: list[float],
 ) -> list[float]:
     """`gate`'s best estimate of each `(counterparty, bundle)` candidate's
     *counterparty*-side gain -- `gate.estimate_many(view, candidates)` when
-    the gate provides one (Heximax uses this seat's belief), else this gate's own gain on every
-    candidate (`valued_many`), "so a plain gate offers what is best for
-    itself" (`hexset.trading`'s "the trade round", item 1). Never reaches a
+    the gate provides one (Heximax uses this seat's belief), else the
+    already computed `own_gains`: a plain gate offers what is best for
+    itself (`hexset.trading`'s "the trade round", item 1). Never reaches a
     hidden hand either way: the fallback reads only the gate's own
     information, the same as `gains_many` always has.
     """
     fn = getattr(gate, "estimate_many", None)
     if fn is not None:
         return [float(x) for x in fn(view, list(candidates))]
-    receiveds = [b for _, b in candidates]
-    counterparties = [c for c, _ in candidates]
-    return valued_many(gate, view, receiveds, counterparties)
+    return own_gains
 
 
 def default_offer(
@@ -723,7 +758,9 @@ def default_offer(
     receiveds = [b for _, b in candidates]
     thems = [c for c, _ in candidates]
     own_gains = valued_many(gate, view, receiveds, thems)
-    estimates = _estimate_many(gate, view, candidates)
+    if not any(clears_floor(gain, gate) for gain in own_gains):
+        return None
+    estimates = _estimate_many(gate, view, candidates, own_gains)
     eligible = [
         i for i in range(len(candidates))
         if clears_floor(estimates[i], gate) and clears_floor(own_gains[i], gate)
@@ -771,7 +808,9 @@ def default_respond(gate: object, view: "View", offer: Offer) -> Response:
     if candidates:
         counterparties = [actor] * len(candidates)
         own_gains = valued_many(gate, view, candidates, counterparties)
-        estimates = _estimate_many(gate, view, list(zip(counterparties, candidates)))
+        if not any(clears_floor(gain, gate) for gain in own_gains):
+            return Response(me, RESPONSE_PASS)
+        estimates = _estimate_many(gate, view, list(zip(counterparties, candidates)), own_gains)
         eligible = [
             i
             for i in range(len(candidates))
@@ -891,7 +930,9 @@ def _execute_round(
         game.gates = had
 
 
-def trade_round(game: "Game", gates: Sequence[object]) -> list[Trade]:
+def trade_round(
+    game: "Game", gates: Sequence[object], already_offered: set[Bundle] | None = None
+) -> list[Trade]:
     """One live-table round: the current player's gate broadcasts one offer,
     every other seated gate answers once, and the actor's gate picks one
     answer to execute. See the module docstring, "The trade round", for how
@@ -939,7 +980,11 @@ def trade_round(game: "Game", gates: Sequence[object]) -> list[Trade]:
     if actor_gate is None:
         return []
 
-    candidates = list(_candidates(state, me, game.locked))
+    candidates = [
+        candidate
+        for candidate in _candidates(state, me, game.locked)
+        if already_offered is None or candidate[1] not in already_offered
+    ]
     if not candidates:
         return []
 
@@ -953,6 +998,8 @@ def trade_round(game: "Game", gates: Sequence[object]) -> list[Trade]:
     if index is None or not (0 <= index < len(candidates)):
         return []
     _them0, received0 = candidates[index]
+    if already_offered is not None:
+        already_offered.add(received0)
     offer = Offer(me, received0)
 
     responses: list[Response] = []

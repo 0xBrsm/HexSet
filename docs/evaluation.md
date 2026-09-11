@@ -5,12 +5,14 @@ Evaluation and fitting must use HexSet's served offer/response/counter/pick
 protocol. Automatic clearing is research-only and must never be used for
 evaluation, fitting, weight selection or policy adoption.**
 
-The stock `hexset.arena` loop currently uses automatic clearing. Its engine
-identity and replay checks do not make it an approved evaluation path. Do not
-launch its trading-enabled `duel`, `ablate`, `weight_sweep`, `fit_duel` or
-dataset-generation paths for evaluation/fitting. A served driver must first
-be verified against the actual served implementation, including proposal
-policy, responses, execution, offer budgets and public activity observations.
+The stock `hexset.arena` loop defaults to engine-driven offer/response rounds.
+Its engine identity, replay checks and protocol name alone do not establish
+served equivalence. Before using its trading-enabled `duel`, `ablate`,
+`weight_sweep`, `fit_duel` or dataset-generation paths for evaluation/fitting,
+verify the driver against the intended served implementation, including
+proposal policy, responses, execution, offer budgets and public activity
+observations. Engine-driven rounds notify trade observers; the current served
+session does not deliver completed exchanges to that observer.
 See the [protocol correction](readouts/trading-protocol-correction.md).
 
 ## Engine and opponent are separate choices
@@ -33,12 +35,14 @@ framework. A lineup of four `DC:heximax` players still runs in Catanatron.
 
 ## Evaluation launch prerequisite
 
-No stock automatic-arena command is approved here as an evaluation example.
+An arena command alone is not evidence of served-driver equivalence.
 The served driver must freeze native board/chance seeds and seating while
 using the production offer/response protocol. The manifest must explicitly
 identify that protocol; a generic `trading=true` field is insufficient.
-Automatic clearing must be off at the game level while bot trade gates remain
-on. A game-level off switch must not silently disable the bot's adaptive policy.
+Session-driven games must set `trade_mode="external"` while bot trade gates
+remain on. This disables the engine's synchronous driver without using the
+old `max_trades=0` switch, which also forced an unpinned bot's move slider to
+zero. Record and verify the effective adaptive policy separately.
 
 Verify a small recorded trace before a campaign. This applies to AB2 reference
 matches too, even though AB2 declines player exchanges. Historical zero-exchange
@@ -48,9 +52,10 @@ establish served-driver equivalence by themselves.
 A [bounded served robber confirmation](readouts/served-robber-confirmation/README.md)
 now provides a verified direct GameSession driver for the current embedded
 server policy, with full journal/record checks and no automatic exchanges.
-Its scope explicitly includes the current served move slider staying at zero;
-it is not a validation of adaptive served movement. The stock automatic arena
-remains prohibited for evaluation and fitting.
+Its scope is the recorded source revision with the served move slider held at
+zero; it does not validate adaptive served movement or the newer engine-driven
+rounds. See the [current scope](readouts/served-robber-confirmation/CURRENT-SCOPE.md).
+Automatic clearing remains prohibited for evaluation and fitting.
 
 ## Result identity and historical scope
 

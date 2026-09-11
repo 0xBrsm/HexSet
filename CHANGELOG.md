@@ -3,6 +3,7 @@
 Changes to the HexSet distribution. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
 ## Unreleased
 
 ### Added
@@ -39,6 +40,112 @@ Changes to the HexSet distribution. The project follows
   `build_players`. Reference bots hosted by HexSet use their seeded entrant
   RNG for search; mirrored games and copies share that stream, independently
   of live chance draws and other games.
+
+## 0.50.0
+
+This release changes the MCP tool contract in ways an existing MCP client
+will notice (see **Changed** and **Removed**). Under 0.x semantic versioning
+a minor bump is the signal for that, and 0.50.0 is already one over 0.49.1,
+so the number stands.
+
+### Changed
+
+- **MCP replies group `legal_actions` by type and list the board sparsely.**
+  The flat `{type, a, b}` list repeated the type string on every one of
+  fifty entries and carried a dead `b: 0` on most; it is now
+  `{type: [{index, <operand>}]}` with the operand named (`edge`, `vertex`,
+  `hex` and `victim`, or the resource names for bank trades, discards,
+  Monopoly and Year of Plenty) and `legal_count` the flat total. `index` is
+  unchanged and is what `act` takes. The three dense occupancy arrays
+  (`vertex_owner`, `vertex_building`, `edge_owner`, mostly `-1`) are
+  replaced by `buildings` (vertex, seat, kind) and `roads` (edge ids per
+  seat): roughly neutral in tokens late in a game, cheaper early, and
+  readable throughout. **Breaking** for an MCP client reading either old
+  shape; the HTTP API's `/api/state` is unchanged.
+
+- **`act(index)` guards against a moved list with `expect`, not `version`.**
+  Pass the `legal_actions` entry you chose, with its group key as `type`
+  (e.g. `{"type": "BUILD_ROAD", "edge": 17}`; raw `a`/`b` work too), and
+  `act` refuses if that index now names something else.
+  The old `version` argument compared against the whole table's change
+  counter, which bumps on every other seat's move, every trade answer, and
+  even a read that fires a pending trade event -- so in a 4-seat game it
+  was stale by the time the reply had been read. **Breaking:** `act` no
+  longer accepts `version`; a call that passes it fails as bad arguments.
+
+### Removed
+
+- **`version` on `answer_trade` and `choose_trade`.** In a trade round the
+  other seats' answers to the *same* offer bump the table version, so a
+  seat that passed it could not answer at all -- the one LLM game played
+  through these tools had to stop sending it to make trading work. The
+  server already refuses an answer that does not match the exact open offer
+  (`actor` + bundle) and a choice that does not match a recorded answer
+  (`seat` + bundle), which is the only staleness that can hurt either call.
+  The HTTP API's own `version` field on those routes is unchanged.
+
+### Added
+
+- **`summary` on every MCP reply that carries state: the derived facts a
+  turn turns on, computed once server-side.** `board()` already joined hex
+  tokens into per-vertex pips because that arithmetic is what an LLM does
+  unreliably at the board's size; the first LLM game through these tools
+  showed it redoing the rest of that work by hand every turn. `summary`
+  now carries `afford` (per build: whether the hand covers it, what it is
+  short, whether `legal_actions` offers it right now), `race` (points,
+  `to_win`, the public leader, and for longest road and largest army your
+  count, the holder's and the `need` that would take it), and -- only when
+  such a move is legal -- `spots` (each settlement/city placement joined to
+  its vertex's pips, resources and port, best first, capped at fifteen with
+  `spots_omitted`) and `robber` (each hex the robber may go to, its pips,
+  whose buildings it hits, and an `act` index per victim). Every entry
+  names the `legal_actions` index to play. The state view also gains
+  `winning_points`, the rule the game is actually played to, so `to_win`
+  is right for a 15-point variant too.
+
+- **`your_move` and `waiting_on` on every MCP reply that carries state.**
+  `your_move` is `act`, `discard`, `answer_trade` or `choose_trade` -- the
+  tool the table wants from this seat now -- or `wait`, with `waiting_on`
+  naming the seats it is waiting for, or `game_over`. The same answer used
+  to be spread across `legal_actions`, `pending`, `trade_round.awaiting`,
+  `trade_wait` and `to_move`, and the first LLM game through these tools
+  spent several calls working out how they relate. `wait_for_turn` returns
+  exactly when `your_move` stops being `wait`; the underlying fields are
+  unchanged. `new_game` and `join` now answer with the same translated
+  shape as every other state reply (they used to come back raw, without
+  the named trade dicts or the transcript cursor fields).
+
+- **The transcript is sent incrementally, by default, on every MCP tool
+  that answers with game state** (`state`, `act`, `wait_for_turn`,
+  `get_table`, and the three trade tools). `log` was otherwise re-rendered
+  and resent whole on every single call, so what an LLM seat paid to read
+  the table grew with the length of the game and was by a wide margin the
+  largest part of each reply. Each MCP session now remembers how many lines
+  it has been sent and every reply carries only what is new; `log_from`
+  names the index the slice starts at and `log_total` the whole length.
+  Nothing has to be passed back for this to happen -- an optional argument
+  on seven tools is one an LLM forgets, and the first game through these
+  tools showed exactly that. Two overrides: `full_log: true` sends the whole
+  transcript (for a reply that went missing -- `log_from` past the lines
+  you hold is the tell), and `log_after: <n>` names an explicit line count
+  to cut at instead of the session's own. A failed call sends no transcript
+  and so does not move the cursor.
+
+  The reply carries one line of overlap on purpose. `render_log` collapses a
+  burst of engine steps into one line that it rewrites *in place* as the
+  burst grows, so the last line a caller holds is the one line that can
+  still change under it -- resending exactly that line is what makes the
+  cursor safe to splice, and is why the cursor counts lines rather than
+  reusing the version number `after` already carries (the transcript is
+  folded from events, and no version maps to a line count).
+
+  A session's first read after `new_game`, `join` or `resume_game` is the
+  whole transcript, which is what a fresh seat and a just-reclaimed seat
+  both want. The final read of a finished game ignores the cursor too: `state_view` asks for the
+  transcript with `omniscient or over` once a game is over, which lifts
+  redaction across the whole history at once -- every earlier steal stops
+  being "a card" and names what it was -- and those are rewrites of lines the
+  caller already holds, too far back for any overlap to cover.
 
 
 ## 0.49.1

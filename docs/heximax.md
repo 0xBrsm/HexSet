@@ -30,6 +30,16 @@ observed activity or trading restrictions. To decline trades independently,
 pass `max_trades=0`. An unpinned bot immediately uses the zero endpoint when
 its own or the game's trading switch is off. A pinned bot retains its pin.
 
+## Why exchange weights stay fixed
+
+A native 400-game 2v2 comparison kept adaptive move search identical on both
+sides and varied only the exchange coefficients. The current fixed exchange
+weights won **265/400 games (66.25%, 95% interval 61.5–70.7%)** against using
+the adaptive move coefficients for exchanges. All 400 games passed replay and
+public-activity audits, with 23,382 completed exchanges. This supports the
+split for that matchup; it does not establish optimal weights across all
+opponents. See the [exchange-weight readout](readouts/adaptive-exchange-2v2/README.md).
+
 ## Current reference results
 
 With its default unpinned adaptive configuration, Heximax won **590/800

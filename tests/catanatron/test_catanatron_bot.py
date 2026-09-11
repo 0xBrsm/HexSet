@@ -361,3 +361,31 @@ def test_cached_board_matches_fresh_and_isolates_mutation(positions, mode):
             assert cached.state.player_state == fresh.state.player_state
             assert cached.state.buildings_by_color == fresh.state.buildings_by_color
             assert cached.playable_actions == fresh.playable_actions
+
+
+@pytest.mark.parametrize("phase", [Phase.MAIN, Phase.ROLL])
+def test_stranded_road_building_credit_does_not_deadlock_reference(phase):
+    from hexset.state import can_place_road, place_road, place_settlement
+    from hexset.game import pending_free_roads
+
+    board = random_base_board(random.Random(3))
+    game = start(board, 4, random.Random(4))
+    place_settlement(game._state, 0, 0, connected=False)
+    for _ in range(15):
+        edge = next(e for e in range(len(game._state.edge_owner))
+                    if can_place_road(game._state, 0, e))
+        place_road(game._state, 0, edge)
+    game.phase = phase
+    game.current_player = 0
+    game.free_roads = 1
+    game.dev_card_played = True
+    assert not pending_free_roads(game)
+    seats = seating(tuple(list(Color)[:4]))
+    mapping = translate_board(catanatron_map(board))
+    mirror = to_catanatron(game, mapping, seats)
+    assert not mirror.state.is_road_building
+    assert mirror.state.free_roads_available == 0
+    expected = ActionType.END_TURN if phase is Phase.MAIN else ActionType.ROLL
+    reference = spawn(entrant_from_name("catanatron"), board, random.Random(5))
+    assert reference.choose(game) == Action(expected)
+    assert game.free_roads == 1  # the mirror never mutates the real game

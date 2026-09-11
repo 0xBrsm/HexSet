@@ -33,7 +33,7 @@ import random
 from hexset.board.terrain import NUM_RESOURCES, Resource
 from hexset.cards import DevCard, NUM_DEV_CARDS
 from hexset.chance import Live
-from hexset.game import Game, Phase, to_move
+from hexset.game import Game, Phase, to_move, pending_free_roads
 from hexset.ledger import PublicLedger, SeatLedger
 from hexset.rules import Rules
 from hexset.state import NO_OWNER, Building, GameState
@@ -448,4 +448,12 @@ def to_catanatron(
     cgame.friendly_robber = False
     cgame.state = cstate
     cgame.playable_actions = generate_playable_actions(cstate)
+    if not cgame.playable_actions and cstate.is_road_building and not pending_free_roads(game):
+        # HexSet lets unplaceable credit expire: exhausting road pieces or
+        # legal sites must not prevent rolling/ending the turn. Catanatron's
+        # road-building prompt otherwise has no actions. Repair only that
+        # previously deadlocked mirror; ordinary offers remain unchanged.
+        cstate.is_road_building = False
+        cstate.free_roads_available = 0
+        cgame.playable_actions = generate_playable_actions(cstate)
     return cgame

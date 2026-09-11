@@ -98,3 +98,11 @@ promising joint signal at 256/gate. Fresh confirmation registered at seed
 least 269 AB2 and 144 shipped wins. No final holdout has been launched.
 The probability-backup experiment is implemented/tested but deferred while
 this candidate receives confirmation; it is not part of this candidate.
+
+
+Fresh exp025 confirmation completed: 246/512 AB2 (48.05%, interval
+43.75–52.37%) and 161/512 shipped (31.45%, 27.57–35.59%). The self-play gain
+survived fresh boards, but the registered AB2 advancement gate failed.
+No final holdout is allocated. Preserve this useful candidate; continue with
+the already registered probability-backup screen, alone and with exp025.
+Both screens retain original frozen shipped opponents and native history.

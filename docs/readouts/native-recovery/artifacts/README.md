@@ -15,3 +15,12 @@ new-source default-control preflight plays. SHA256: `44a904b727981db6055e92a1106
 `stage8.tar.gz` adds the development extension, opening screen and initial
 expansion screen: 3,648 exploratory games and 48 preflight plays total.
 SHA256: `8e5f4930548b82bcb46916b9eb3ee8017928b8d54112af12245c30c5d3b85afd`.
+
+`screens-complete.tar.gz` is the complete pre-confirmation evidence: 4,032
+exploratory games and 48 preflight plays, including expansion025 at 256/gate.
+SHA256: `f800eb0b639d5eba4b00f6b6f450dc347e79138697219b325fdfe6caea749baf`.
+
+`confirmation-exp025.tar.gz` contains only the 1,024 fresh confirmation games
+on seed 712000000. AB2 did not meet the registered advancement rule; shipped
+win rate was 31.45% with a 95% lower bound of 27.57%. No final holdout.
+SHA256: `cdc77227132442cee0cedfe89bcf40dc739cae49089d9d593b2db4f7883050ed`.

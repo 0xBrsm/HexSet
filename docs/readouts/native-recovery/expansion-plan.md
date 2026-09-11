@@ -23,3 +23,11 @@ Completed screen: exp025 won 32/64 AB2 and 20/64 shipped, joint margin zero;
 exp05 won 25/64 and 22/64, joint margin -10.94 points. Extend only exp025 to
 256/gate on the same seed, reusing all 128 records and adding 384 games.
 This decision is recorded before launch. No fresh confirmation yet.
+
+
+Matched exploratory comparison on the first 128 shared boards: exp025 won
+67 AB2 games versus control 47 and p10 55; shipped wins were 48 versus 25
+and 33. This supports the decision to spend on fresh confirmation, but is
+not confirmatory evidence: the candidate was selected from multiple screens.
+The full 256/gate outcome is 135 AB2 /91 shipped. Archived complete screen
+records contain all 4,032 unique exploratory games and all failed arms.

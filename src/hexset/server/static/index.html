@@ -332,9 +332,15 @@
   .board-btn-label { font-size: 0.6rem; font-weight: 700; letter-spacing: 0.05em; line-height: 1; }
   /* Stacked directly above the roll/end-turn spot, 8px clear of it — shown
      only in the instant right after the human's own build (see
-     renderBoardButtons/state.can_undo), never alongside a robber move, so it
-     never has to share a corner the way roll/end-turn or buy/cancel do. */
-  #undo-build { bottom: 76px; }
+     renderBoardButtons/state.can_undo). It does share the corner with a
+     robber move now: a self-played Knight is undoable up until the robber
+     actually lands (see _UNDOABLE_BUILDS), and roll/end-turn are never on
+     offer in Phase.ROBBER to begin with, so nothing else ever needs the
+     spot at the same time. Above #modal's z-index:55, same as the old
+     cancel-robber corner was: a hex with more than one victim opens the
+     "Steal from" modal on top of the board, and undo has to reach through
+     that too, not just the board underneath it. */
+  #undo-build { bottom: 76px; z-index: 60; }
   /* Buying a development card is the one purchase with nothing on the board
      to click for it, so the button *is* the thing being bought: the same
      face the hand's dev cards wear (see .card and --dev-card-bg), scaled up
@@ -1459,7 +1465,7 @@ const PHASE_LABELS = {
 // END_TURN is a seat that can still trade. legal_actions is only the whole
 // story outside MAIN, and MAIN is exactly where PHASE_LABELS was already
 // right. One special case for one special state instead.
-const HOLDING_SETUP_TURN_LABEL = "END YOUR TURN";
+const HOLDING_SETUP_TURN_LABEL = "END TURN";
 
 // --- Action grouping -------------------------------------------------------
 
@@ -1503,6 +1509,21 @@ function robberMove(g) {
 
 // --- Sending actions --------------------------------------------------
 
+// Nothing left for the loop to wait on: the game is over, or the move is
+// this seat's and so the table cannot change without it.
+//
+// That second half stops being true the moment this seat broadcasts a trade
+// offer. `to_move` stays here for the whole round while the other seats
+// answer, and their answers are exactly what the page is waiting for — so a
+// round with anyone still to answer is watched like anybody else's turn.
+// Without this the offer goes out, settle() returns on its first line, and
+// the accepts land on the server with nothing left running to fetch them.
+function nothingToWatch() {
+  if (state.game_over) return true;
+  if (watching() || state.to_move !== state.seat) return false;
+  return !((state.trade_round || {}).awaiting || []).length;
+}
+
 // Waiting for somebody else — a bot, or another person at this table.
 //
 // This used to be settle(), a loop of POST /api/advance that walked the bot
@@ -1531,7 +1552,7 @@ function settle() {
   const mine = ++watchSeq;  // retires whatever loop was already running
   // Watching, every move is somebody else's, so this never stops until the
   // game does — that is the whole of what a spectator's page does.
-  if (state.game_over || (!watching() && state.to_move === state.seat)) return;
+  if (nothingToWatch()) return;
   (async () => {
     while (mine === watchSeq) {
       // A seat reads its own view; a spectator has no token to read one
@@ -1553,7 +1574,7 @@ function settle() {
         state = next;
         render();
       }
-      if (state.game_over || (!watching() && state.to_move === state.seat)) return;
+      if (nothingToWatch()) return;
     }
   })();
 }
@@ -1609,6 +1630,11 @@ function newGame() {
 
 function undoBuild() {
   return blocking(async () => {
+    // Same reason sendAction clears it: undoing a Knight can fire while a
+    // multi-victim hex is still pending (the "Steal from" modal open over
+    // it), and the state coming back has no robber move left to hold it
+    // open for.
+    pendingRobberHex = null;
     const {ok, data} = await postJSON("/api/undo", {});
     if (ok) state = data;
     showNotice(ok ? "" : (data.error || "Nothing to undo."));
@@ -1863,8 +1889,11 @@ function renderPlayers() {
 //     Road Building's two free roads, or the Knight's forced robber move
 //     (the same Phase.ROBBER a seven enters, once the card lands)
 //   - a resource (Monopoly, Year of Plenty) — open the modal that picks one
-// Cancelled by closing the modal; a sent Knight or Road Building is as
-// final as a roll, so neither needs a way back out.
+// Cancelled by closing the modal for those two; a sent Knight or Road
+// Building has its own way back out instead, since neither opens one -- the
+// #undo-build corner button, offered by state.can_undo for exactly as long
+// as what the card opened (a free road, the forced robber move) hasn't
+// landed yet. See _UNDOABLE_BUILDS.
 function devCardPlay(name, g) {
   if (robberMove(g)) return null;
   if (name === "Knight" && g.simple.PLAY_KNIGHT) {
@@ -2161,7 +2190,12 @@ function renderBoardButtons() {
   const offered = (type) => myTurn && !move && legalAction(type) !== null;
   // Not a legal_actions entry — undo is a session convenience, not a game
   // rule — so it reads the server's own can_undo flag instead of offered().
-  showFab("undo-build", myTurn && !move && Boolean(state.can_undo));
+  // Left out of `offered`'s !move gate on purpose: a self-played Knight
+  // stays undoable through the forced robber move it opened (see
+  // _UNDOABLE_BUILDS), and can_undo is exactly what tells the two cases
+  // apart -- a rolled seven clears it same as ever, since there was never a
+  // card to hand back.
+  showFab("undo-build", myTurn && Boolean(state.can_undo));
   showFab("roll-dice", offered("ROLL"));
   showFab("end-turn", offered("END_TURN"));
   showFab("buy-dev-card", offered("BUY_DEV_CARD"));
@@ -2698,12 +2732,30 @@ function acceptancePane(round) {
       wrap.appendChild(row);
       continue;
     }
+    if (answer.kind === "accept") {
+      // An accept mirrors our own offer, already drawn in "ours" above this
+      // row's rule -- redrawing the identical cards here said the same thing
+      // twice. Same treatment as "Passed": the one word is the whole answer.
+      row.appendChild(html("div", {class: "pane-pass"}, "Accepted"));
+      const take = modalActionButton("check", `Trade with ${seatFullLabel(seat)}`);
+      take.addEventListener("click",
+        () => { closeModal(); postRound("/trade/round/choose", {seat: answer.seat, bundle: answer.bundle}); });
+      row.appendChild(take);
+      wrap.appendChild(row);
+      continue;
+    }
     // A counter's bundle is signed towards us the same way the offer is, so
-    // what that seat gives is what we get.
-    const theirGive = answer.kind === "counter" ? answer.bundle.map((n) => Math.max(0, n)) : iGet;
-    const theirWant = answer.kind === "counter" ? answer.bundle.map((n) => Math.max(0, -n)) : iGive;
+    // what that seat gives is what we get -- and unlike a plain accept, this
+    // is new information the offer above didn't already say.
+    const theirGive = answer.bundle.map((n) => Math.max(0, n));
+    const theirWant = answer.bundle.map((n) => Math.max(0, -n));
     row.appendChild(tradeLine(theirGive, theirWant, {small: true}));
-    const take = modalActionButton("check", `Trade with ${seatFullLabel(seat)}`);
+    // Gray, not accent: the row above already reads as a deal on offer, not
+    // one struck -- the accent is reserved for the one check that takes a
+    // trade exactly as this seat asked for it (see the "accept" branch
+    // above), so a counter's own check doesn't compete with it for "the
+    // thing to press."
+    const take = modalActionButton("check", `Trade with ${seatFullLabel(seat)}`, {primary: false});
     take.addEventListener("click",
       () => { closeModal(); postRound("/trade/round/choose", {seat: answer.seat, bundle: answer.bundle}); });
     row.appendChild(take);

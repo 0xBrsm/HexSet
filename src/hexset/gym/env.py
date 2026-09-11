@@ -4,7 +4,7 @@
 One seat is the learner; every other seat is an `hexset.arena` entrant,
 auto-played inside `step`/`reset` until the learner is next to move or the
 episode ends -- the same `_advance_until_p0_decision` shape Catanatron's own
-`CatanatronEnv` uses (pinned catanatron `d3f4ad05bb7`,
+`CatanatronEnv` uses (pinned catanatron `ecf931181b9`,
 `catanatron/gym/envs/catanatron_env.py`), and the pattern
 `hexset.arena.play`'s own loop already follows, restricted to non-learner
 seats.

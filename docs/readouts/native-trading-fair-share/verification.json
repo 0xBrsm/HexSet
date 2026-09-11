@@ -1,0 +1,22 @@
+{
+  "games": 800,
+  "candidate_games_per_seat_per_matchup": 100,
+  "exact_preflight_replay": true,
+  "all_trade_gates_exercised": true,
+  "diagnostics": [
+    {
+      "opponent": "old-notrade",
+      "gate_calls": 39251,
+      "offers_evaluated": 7680278,
+      "offers_above_own_floor": 26691,
+      "max_observed_gain": 0.04351567618377483
+    },
+    {
+      "opponent": "trading",
+      "gate_calls": 39839,
+      "offers_evaluated": 8367779,
+      "offers_above_own_floor": 25220,
+      "max_observed_gain": 0.042704210531392284
+    }
+  ]
+}

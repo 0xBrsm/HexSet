@@ -443,6 +443,14 @@ def to_catanatron(
 
     cgame = CatanatronGame([], initialize=False)
     cgame.seed = 0
+    # `initialize=False` skips the per-game RNG (`Game.__init__` sets
+    # `self.random` only on the initialize path), but the search this mirror
+    # exists for copies it (`Game.copy`/`State.copy` share the stream by
+    # reference). Point both at the global module: before upstream gave each
+    # game its own `random.Random`, chance draws in these searches came from
+    # the ambient global stream, and this keeps that exactly.
+    cgame.random = random
+    cstate.random = random
     cgame.id = ""
     cgame.vps_to_win = state.rules.winning_points
     cgame.friendly_robber = False

@@ -32,13 +32,15 @@ from multiprocessing import Pool
 from hexset.arena import wilson
 from hexset.rules import GAME_TYPES
 
-from catanatron.cli.cli_players import parse_cli_string, register_cli_player
 from catanatron.cli.play import GameConfigOptions, play_batch
 from catanatron.models.player import Color
+from catanatron.players import register_builtins
+from catanatron.registry import REGISTRY, SpecError
 
 from .player import DevCatanPlayer
 
-register_cli_player("DC", DevCatanPlayer)
+register_builtins()  # idempotent; seats AB/R/F/... by key below
+REGISTRY.register("DC", DevCatanPlayer, replace=True)
 
 _MODULE = "hexset.catanatron.duel"
 
@@ -188,6 +190,33 @@ class DuelResult:
         return "\n".join(lines)
 
 
+def build_players(players_spec: str) -> list:
+    """One catanatron `Player` per comma-separated `--players` entry.
+
+    Everything but `DC` goes through the shared player registry
+    (`REGISTRY.build`, the replacement for the removed `parse_cli_string`).
+    `DC` seats are built directly instead: the registry splits a spec on
+    every `:`, but an entrant spec may itself contain colons
+    (`network:<path>`, `mcts:<path>@N`), so the whole tail after `DC:` is
+    the entrant.
+    """
+    parts = [part.strip() for part in players_spec.split(",") if part.strip()]
+    if not 2 <= len(parts) <= 4:
+        raise SpecError(f"a game needs 2 to 4 players, got {len(parts)}")
+    players = []
+    for part, color in zip(parts, Color):
+        if part.split(":")[0].upper() == "DC":
+            tail = part.split(":", 1)[1] if ":" in part else ""
+            players.append(
+                DevCatanPlayer(
+                    color, DevCatanPlayer.Params(entrant=tail or "heximax-notrade")
+                )
+            )
+        else:
+            players.append(REGISTRY.build(part, color))
+    return players
+
+
 def _play_chunk(args: tuple[str, int, int, int, str, str]) -> tuple[dict, dict]:
     from .speedups import catanatron_speedups
 
@@ -203,7 +232,7 @@ def _play_chunk_native(args: tuple[str, int, int, int, str]) -> tuple[dict, dict
     Each game receives the selected config; progress is reported between games.
     """
     players_spec, start, count, seed, game_type = args
-    players = parse_cli_string(players_spec)
+    players = build_players(players_spec)
     config = game_config_for(game_type)
     wins: dict[Color, int] = {}
     points: dict[Color, list[int]] = {}

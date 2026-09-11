@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """A catanatron `Player` backed by any dev-catan `Bot` entrant.
 
-Registered via catanatron's own extension point (`--code`, see `register.py`)
-rather than by forking catanatron's source -- `register_cli_player` is the
+Registered via catanatron's own extension point (`--bot`, see `register.py`)
+rather than by forking catanatron's source -- the player registry is the
 documented mechanism for exactly this.
 
 One thing needs handling beyond a straight translate-decide-translate-back:
@@ -18,6 +18,7 @@ rather than silently absorbed.
 
 from __future__ import annotations
 
+import dataclasses
 import random
 from dataclasses import replace
 
@@ -50,12 +51,14 @@ _SEAT_INDEX = {color: i for i, color in enumerate(Color)}
 class DevCatanPlayer(Player):
     """`--players=DC:<entrant>`, e.g. `DC:heximax-notrade` or `DC:network:<path>`.
 
-    catanatron's own CLI splits `--players` on every `:` and passes each piece
-    as a separate positional argument, so an entrant spec that itself contains
-    a colon -- `network:<path>` and `mcts:<path>@N` both do -- arrives here in
-    parts rather than whole. Rejoining them is this class's job, not
-    catanatron's: `parse_cli_string` has no way to know which colons are
-    structural and which belong to the payload.
+    catanatron's player registry splits a spec on every `:` and binds the
+    pieces to the player's `Params` positionally, so an entrant spec that
+    itself contains a colon -- `network:<path>` and `mcts:<path>@N` both do
+    -- cannot round-trip through it. `hexset.catanatron.duel.build_players`
+    therefore builds `DC` seats directly from the unsplit tail instead of
+    routing them through the registry; the `Params` model below exists for
+    the registry paths that do go through it (`catanatron-play --bot`,
+    `DC:entrant=<spec>`).
 
     Player-to-player trading is forced off (`max_trades=0`) regardless of
     what the entrant spec would otherwise use: catanatron never generates
@@ -63,14 +66,46 @@ class DevCatanPlayer(Player):
     for a proposal to resolve to.
     """
 
-    def __init__(self, color, *entrant_parts: str):
-        super().__init__(color)
-        self.entrant_spec = ":".join(entrant_parts) if entrant_parts else "heximax-notrade"
+    def __init__(self, color, *entrant_parts):
+        # Two construction styles, one class. The player registry builds
+        # `Player(color, params)`, so declare the `Params` model it needs;
+        # direct construction (the duel shards, the tests) still passes the
+        # entrant spec the old way -- the CLI used to split it on every ":"
+        # and hand the pieces over positionally, so rejoin them here. An
+        # entrant spec may itself contain colons (`network:<path>`,
+        # `mcts:<path>@N`), which the registry's own colon-splitting cannot
+        # round-trip; `duel.build_players` keeps the whole tail for `DC`
+        # specs instead of routing them through the registry.
+        if len(entrant_parts) == 1 and isinstance(entrant_parts[0], DevCatanPlayer.Params):
+            params = entrant_parts[0]
+        else:
+            params = DevCatanPlayer.Params(
+                entrant=":".join(entrant_parts) if entrant_parts else "heximax-notrade"
+            )
+        super().__init__(color, params)
         self.fallbacks = 0
         self.decisions = 0
         self._mapping = None
         self._bot = None
         self._rng = None
+
+    @dataclasses.dataclass(frozen=True)
+    class Params:
+        """The registry-facing configuration: which entrant sits this seat."""
+
+        entrant: str = "heximax-notrade"
+
+    def before(self, game):
+        """`GameObserver` hook: reset the per-game state.
+
+        catanatron's `play_batch` used to call `player.reset_state()` before
+        every game; that call is gone upstream, and this hook -- fired once
+        per game from `Game.__init__`, before any action is taken -- is its
+        documented replacement ("reset whatever state you carry between
+        games"). Without it the board mapping, bot, and RNG derived from the
+        first game's seed would leak into every later game of the process.
+        """
+        self.reset_state()
 
     def reset_state(self) -> None:
         self._mapping = None
@@ -103,7 +138,7 @@ class DevCatanPlayer(Player):
         our_game, seats = translate(game, self._mapping, self._rng)
 
         if self._bot is None:
-            entrant = replace(entrant_from_name(self.entrant_spec), max_trades=0)
+            entrant = replace(entrant_from_name(self.params.entrant), max_trades=0)
             self._bot = spawn(entrant, self._mapping.board, self._rng)
 
         action = self._bot.choose(our_game)

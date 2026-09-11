@@ -61,11 +61,12 @@ _TABLE_MIRRORS: WeakValueDictionary[tuple[int, int], _TableMirror] = WeakValueDi
 def alpha_beta(depth: int) -> Callable[[Color], Player]:
     """`catanatron-play --players=AB:<depth>`, seat for seat.
 
-    Its CLI splits the spec on `:` and passes the pieces positionally
-    (`cli_players.parse_cli_string`), so `AB:2` is `AlphaBetaPlayer(color,
-    "2")` -- depth two, no pruning, the default value function.
+    catanatron's registry-era players construct as `(color, params)`, with
+    the tunables declared on a nested `Params` model -- so `AB:2` is
+    `AlphaBetaPlayer(color, AlphaBetaPlayer.Params(depth=2))`: depth two,
+    no pruning, the default value function.
     """
-    return lambda color: AlphaBetaPlayer(color, str(depth))
+    return lambda color: AlphaBetaPlayer(color, AlphaBetaPlayer.Params(depth=int(depth)))
 
 
 class CatanatronBot:

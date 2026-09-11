@@ -218,6 +218,10 @@ class Heximax:
         return self.evaluator.development_value
 
     @property
+    def expansion_value(self) -> float:
+        return self.evaluator.expansion_value
+
+    @property
     def nodes(self) -> int:
         """Leaf evaluations the last `choose` spent."""
         return self._spent
@@ -238,6 +242,7 @@ class Heximax:
         self._budget = self.max_nodes
         self.depth_reached = 0
         self.evaluator._walk_cache.clear()
+        self.evaluator._expansion_cache.clear()
         self.evaluator._belief_cache.clear()
         self.evaluator._evaluate_cache.clear()
 
@@ -889,7 +894,7 @@ def heximax(
     max_nodes: int = DEFAULT_MAX_NODES, k: int = 1, stance: str = "win",
     placement: bool = True, exact_progress_samples: int = 0, weights: Weights | None = None,
     temperature: float | None = None, development_value: float = 0.0,
-    placement_resource_weight: float = RESOURCE_WEIGHT,
+    placement_resource_weight: float = RESOURCE_WEIGHT, expansion_value: float = 0.0,
 ) -> Heximax:
     """The two shipped configurations, by `mode`.
 
@@ -902,6 +907,8 @@ def heximax(
     it defaults to zero and is experimental, pending native evaluation.
     `placement_resource_weight` controls the opening prior's resource-variety
     premium in pips; its default retains the fitted prior.
+    `expansion_value` optionally caps credit for the best reachable settlement
+    site, default zero; experimental positive values should remain below one VP.
 
     `weights` overrides the mode's own profile (`TRADING_WEIGHTS` or
     `NO_TRADE_WEIGHTS`) with the given vector, and `temperature` the `win`
@@ -918,7 +925,7 @@ def heximax(
     if weights is None:
         weights = NO_TRADE_WEIGHTS if mode == "notrade" else TRADING_WEIGHTS
     evaluator = HonestEvaluator(board, weights, exact_progress_samples=exact_progress_samples,
-                                development_value=development_value)
+                                development_value=development_value, expansion_value=expansion_value)
     return Heximax(
         evaluator,
         depth=depth,

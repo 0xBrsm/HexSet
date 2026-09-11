@@ -39,7 +39,8 @@ from hexset.devcards import holdings
 from hexset.economy import COSTS
 from hexset.game import Game
 from hexset.ledger import PublicLedger
-from hexset.state import GameState
+from hexset.state import (GameState, MAX_SETTLEMENTS, MAX_ROADS,
+                          can_place_road, can_place_settlement)
 from hexset.victory import award_points, card_points
 
 from hexset.view import View
@@ -144,12 +145,15 @@ class HonestEvaluator:
     def __init__(
         self, board: Board, weights: Weights | None = None, *,
         exact_progress_samples: int = 0, development_value: float = 0.0,
+        expansion_value: float = 0.0,
     ) -> None:
         self.inner = Evaluator(board, weights)
         self.weights = self.inner.weights
         self.vector = self.inner.vector
         self.exact_progress_samples = exact_progress_samples
         self.development_value = development_value
+        self.expansion_value = expansion_value
+        self._expansion_cache: dict[tuple, float] = {}
         self._walk_cache: dict[tuple, Survey] = {}
         self._belief_cache: dict[tuple, View] = {}
         self._evaluate_cache: dict[tuple, list[float]] = {}
@@ -338,6 +342,51 @@ class HonestEvaluator:
         vp = card_points(state, seat) if seat == knower else expected_card_points(state, seat, knower)
         return self.development_value * (sum(holdings(state, seat)) - vp)
 
+    def expansion_bonus(self, state: GameState, seat: int) -> float:
+        """Bounded option value of the best settlement site at 0 or 1 roads.
+
+        Public board facts only. Taking a maximum avoids credit for many
+        mutually incompatible sites. The coefficient caps the total bonus:
+        below one VP, losing the entire option can never offset the actual
+        point earned by settling it (before considering hand costs).
+        """
+        if not self.expansion_value:
+            return 0.0
+        key = (tuple(state.vertex_owner), tuple(state.vertex_building),
+               tuple(state.edge_owner), seat)
+        if key in self._expansion_cache:
+            return self._expansion_cache[key]
+        walk = self._walk(state, seat)
+        if walk.settlements >= MAX_SETTLEMENTS:
+            self._expansion_cache[key] = 0.0
+            return 0.0
+        edges = state.board.topology.edges
+        sites: dict[int, float] = {}
+        for edge, owner in enumerate(state.edge_owner):
+            if owner == seat:
+                for vertex in edges[edge]:
+                    sites[vertex] = 1.0
+        if walk.roads < MAX_ROADS:
+            frontier = set(sites) | {v for v, owner in enumerate(state.vertex_owner)
+                                     if owner == seat}
+            possible = {edge for vertex in frontier
+                        if state.vertex_owner[vertex] in (-1, seat)
+                        for edge in state.board.topology.vertex_edges[vertex]}
+            for edge in possible:
+                if can_place_road(state, seat, edge):
+                    for vertex in edges[edge]:
+                        sites.setdefault(vertex, 0.5)
+        best = 0.0
+        for vertex, discount in sites.items():
+            if can_place_settlement(state, seat, vertex, connected=False):
+                # A future site is priced by its unblocked long-run yield;
+                # temporary robber placement does not change its geography.
+                production = sum(p for _, _, p in self.inner.yields[vertex])
+                best = max(best, discount * min(1.0, production / 15.0))
+        bonus = self.expansion_value * best
+        self._expansion_cache[key] = bonus
+        return bonus
+
     def score(
         self, state: GameState, seat: int, hand: Sequence[float], *, knower: int | None = None,
         belief: View | None = None,
@@ -350,7 +399,8 @@ class HonestEvaluator:
             total += weight * value
         if values[0] >= state.rules.winning_points:
             total += WIN_SCORE
-        return total + self.development_bonus(state, seat, knower)
+        return (total + self.development_bonus(state, seat, knower)
+                + self.expansion_bonus(state, seat))
 
     def score_many(self, state: GameState, knower: int, hands: np.ndarray) -> np.ndarray:
         """`score`, over every row of `hands` at once: `(candidates, seat,
@@ -464,6 +514,9 @@ class HonestEvaluator:
         total = total + WIN_SCORE * (points >= state.rules.winning_points)
         if self.development_value:
             total = total + np.array([self.development_bonus(state, seat, knower)
+                                     for seat in range(num_players)])
+        if self.expansion_value:
+            total = total + np.array([self.expansion_bonus(state, seat)
                                      for seat in range(num_players)])
         return total
 

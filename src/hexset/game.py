@@ -116,11 +116,20 @@ class Game:
     # against it teaches a game nobody plays -- it is available for
     # comparability with studies recorded under it, not as the default.
     trade_mechanism: str = "round"
-    # Rounds the actor gets per turn under `"round"`. `1` is the default, `0`
-    # is no trading at all, and `-1` is unlimited -- which still stops at the
-    # first round that clears nothing, the way clearing stops when nothing
-    # clears. Ignored under `"clearing"`, whose stopping rule is its own.
+    # Rounds the actor gets per turn under `"round"`: `1` by default, `-1`
+    # for as many as it has distinct offers worth making. Not a willingness
+    # switch -- whether a seat trades at all is its gate's business, and a
+    # refusing gate declines under either mechanism. Ignored under
+    # `"clearing"`, whose stopping rule is its own.
     trade_rounds: int = 1
+    # Whether somebody other than the engine drives this game's trading.
+    # `run_trade_event` fires from `enter_main`/`move_robber_to` so that no
+    # driver can forget to trade, which leaves a served table -- whose seats
+    # answer over a wire, across many requests -- needing to say that it
+    # drives its own rounds and the engine must not run one underneath
+    # (`hexset.server.api.build_session`). One bit, covering every mechanism,
+    # rather than muting each in turn.
+    trades_driven_externally: bool = False
     # The `turns` value the trade event last ran in: `run_trade_event` is
     # once a turn, and a knight played in MAIN re-enters MAIN after its
     # robber move, which used to run it a second time.
@@ -792,11 +801,13 @@ def _run_trade_rounds(game: Game, gates) -> list[Trade]:
     if budget == 0:
         return []
     completed: list[Trade] = []
+    offered: set = set()
     asked = 0
     while budget < 0 or asked < budget:
         asked += 1
-        cleared = trade_round(game, gates)
-        if not cleared:
+        before = len(offered)
+        cleared = trade_round(game, gates, already_offered=offered)
+        if len(offered) == before:
             break
         completed.extend(cleared)
     return completed
@@ -823,7 +834,7 @@ def run_trade_event(game: Game) -> None:
         return
     game.trade_event_turn = game.turns
     gates = game.gates
-    if gates is None:
+    if gates is None or game.trades_driven_externally:
         return
     observers = [observe for gate in gates
                  if (observe := getattr(gate, "observe_trade", None)) is not None]

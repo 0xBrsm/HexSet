@@ -9,25 +9,27 @@ policies use the runtime-independent interfaces in [training.md](training.md).
 
 Record the host engine, information model, source revisions, dependency
 versions, effective bot settings, seeds, lineup, trading mode, bargaining
-mechanism, acceleration mode and unfinished-game count with every comparison.
+mechanism, acceleration mode and unfinished-game count with every
+comparison. A label such as "vs shipped Heximax" identifies the opponents,
+not the engine or information model. `hexset.catanatron.duel` runs a
+separate external compatibility experiment; stock `DC:` Heximax there
+receives a memoryless public ledger. Follow the [evaluation protocol and
+recovery steps](evaluation.md) before using results to select or reject
+native HexSet policies.
 
-**The bargaining mechanism is part of what a result is about.** Games now
+**The bargaining mechanism is part of what a result is about.** Games
 default to one trade round a turn: the actor broadcasts one offer, every
 other seat answers once, the actor picks (`Game.trade_mechanism="round"`,
-`Game.trade_rounds=1`; `0` is no trading, `-1` is as many rounds as keep
-clearing). The exhaustive automatic clearing house that used to run instead
-is `Game.trade_mechanism="clearing"`. Clearing deals until nothing clears,
-against a counterparty that never holds out and never refuses a deal it
-merely dislikes, so a policy fitted or trained against it learns a game
-nobody plays. Every study recorded before this changed -- the fitted
-presets, the adaptive slider, the trading-condition screens -- is a clearing
-result; reproducing one means selecting `"clearing"` as well as running from
-its recorded source revision. A label such as
-"vs shipped Heximax" identifies the opponents, not the engine or information
-model. `hexset.catanatron.duel` runs a separate external compatibility
-experiment; stock `DC:` Heximax there receives a memoryless public ledger.
-Follow the [evaluation protocol and recovery steps](evaluation.md) before
-using results to select or reject native HexSet policies.
+`Game.trade_rounds=1`; `-1` keeps offering until the actor runs out of
+distinct offers worth making). Whether a seat trades at all is its own
+gate's business, not a table setting. The exhaustive automatic clearing
+house that used to run instead is `Game.trade_mechanism="clearing"`, which
+deals until nothing clears against a counterparty that never holds out and
+never refuses a deal it merely dislikes -- so a policy fitted or trained
+against it learns a game nobody plays. Every study recorded before this
+changed (the fitted presets, the adaptive slider, the trading-condition
+screens) is a clearing result; reproducing one means selecting `"clearing"`
+as well as running from its recorded source revision.
 
 The standard `heximax` now adapts its weights automatically. Pin a testing
 control at slider position 0 or 1 using `--pin-weights-a`/`--pin-weights-b`

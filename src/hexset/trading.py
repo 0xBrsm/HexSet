@@ -95,15 +95,26 @@ and there are two callers.
 
 An unserved game is driven by `hexset.game.run_trade_event`, once a turn
 from `enter_main`/`move_robber_to`, under `Game.trade_rounds`: `1` by
-default, `0` for no trading at all, `-1` for as many as keep clearing.
+default, `-1` for as many rounds as the actor has distinct offers worth
+making. That budget is not a willingness switch -- whether a seat trades at
+all is its own gate's business, and a gate that refuses declines under
+either mechanism.
 
-A *served* game (`hexset.server`) drives its own instead, because its seats
-answer through a wire rather than a synchronous call -- a round there spans
-many requests while a person or an LLM thinks. Such a session seats both
-switches off, `game.trade_rounds = 0` and `game.max_trades = 0`
-(`api.build_session`), so the engine drives neither mechanism underneath the
-one the session is already running, and calls `trade_round(game, gates)`
-itself as many times a turn as the acting seat wants.
+Successive rounds in a turn must not repeat themselves. `default_offer` is a
+pure function of the position, so a second round on an unchanged position
+would broadcast the identical bundle and collect the identical refusal. The
+`already_offered` set carries what has been put to the table this turn and
+excludes it from later candidate lists, which is both what a person does --
+the usual reason to offer again is that nobody took the last one -- and what
+makes `-1` terminate: it runs out of things to say, rather than stopping at
+the first refusal.
+
+A *served* game (`hexset.server`) drives its own rounds instead, because its
+seats answer through a wire rather than a synchronous call -- a round there
+spans many requests while a person or an LLM thinks. Such a session sets
+`game.trades_driven_externally = True` (`api.build_session`), one bit that
+covers every mechanism at once, and calls `trade_round(game, gates)` itself
+as many times a turn as the acting seat wants.
 
 One round: the current player's gate broadcasts one offer (`Bot.offer`,
 new); every other seated gate answers once (`Bot.respond`, new) --
@@ -914,7 +925,9 @@ def _execute_round(
         game.gates = had
 
 
-def trade_round(game: "Game", gates: Sequence[object]) -> list[Trade]:
+def trade_round(
+    game: "Game", gates: Sequence[object], already_offered: set[Bundle] | None = None
+) -> list[Trade]:
     """One live-table round: the current player's gate broadcasts one offer,
     every other seated gate answers once, and the actor's gate picks one
     answer to execute. See the module docstring, "The trade round", for how
@@ -962,7 +975,11 @@ def trade_round(game: "Game", gates: Sequence[object]) -> list[Trade]:
     if actor_gate is None:
         return []
 
-    candidates = list(_candidates(state, me, game.locked))
+    candidates = [
+        candidate
+        for candidate in _candidates(state, me, game.locked)
+        if already_offered is None or candidate[1] not in already_offered
+    ]
     if not candidates:
         return []
 
@@ -976,6 +993,8 @@ def trade_round(game: "Game", gates: Sequence[object]) -> list[Trade]:
     if index is None or not (0 <= index < len(candidates)):
         return []
     _them0, received0 = candidates[index]
+    if already_offered is not None:
+        already_offered.add(received0)
     offer = Offer(me, received0)
 
     responses: list[Response] = []

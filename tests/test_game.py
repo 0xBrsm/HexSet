@@ -285,9 +285,9 @@ def _spy_on_trade_event(monkeypatch):
         calls.append(game.phase)
         return real_event(game, gate)
 
-    def spy_round(game, gates):
+    def spy_round(game, gates, already_offered=None):
         calls.append(game.phase)
-        return real_round(game, gates)
+        return real_round(game, gates, already_offered=already_offered)
 
     monkeypatch.setattr(gamemod, "trade_event", spy_event)
     monkeypatch.setattr(gamemod, "trade_round", spy_round)
@@ -761,17 +761,25 @@ def test_a_seat_that_crosses_ten_off_turn_wins_at_the_start_of_its_own_turn():
 # `trade_event`'s exhaustive clearing is the opt-in (`_run_trade_rounds`).
 
 
-def _fake_rounds(monkeypatch, results):
+def _fake_rounds(monkeypatch, results, offers=None):
     """Replace `trade_round` with one that returns `results` in order, then
-    `[]`, counting calls. Exercises `_run_trade_rounds`'s budget and its
-    stop-when-nothing-clears rule without needing gates that really deal."""
+    `[]`, counting calls and recording an offer per call into
+    `already_offered` the way the real one does.
+
+    `offers` is how many distinct offers the actor has to make; once they run
+    out the fake adds nothing, which is the real signal `_run_trade_rounds`
+    stops on -- nothing left worth putting to the table, not merely a round
+    that nobody took."""
     import hexset.game as gamemod
 
     calls = {"n": 0}
     queue = list(results)
+    left = len(results) if offers is None else offers
 
-    def fake(game, gates):
+    def fake(game, gates, already_offered=None):
         calls["n"] += 1
+        if already_offered is not None and calls["n"] <= left:
+            already_offered.add((calls["n"],))
         return queue.pop(0) if queue else []
 
     monkeypatch.setattr(gamemod, "trade_round", fake)
@@ -802,15 +810,24 @@ def test_trade_rounds_zero_never_asks(monkeypatch):
     assert calls["n"] == 0
 
 
-def test_unlimited_rounds_stop_at_the_first_that_clears_nothing(monkeypatch):
-    """`-1` is not a loop forever: a round that found no deal will not find
-    one on a rerun of the same position, which is the clearing house's own
-    stopping rule."""
+def test_a_refused_round_is_followed_by_a_different_offer(monkeypatch):
+    """The usual reason to put a second thing to the table is that nobody
+    took the first. `-1` keeps going while the actor still has offers it has
+    not made, and stops when it runs out of them -- not at the first refusal."""
+    game = _in_main_with_gates(monkeypatch)
+    game.trade_rounds = -1
+    # Three offers available; none of them is taken.
+    calls = _fake_rounds(monkeypatch, [], offers=3)
+    run_trade_event(game)
+    assert calls["n"] == 4  # three distinct offers, then nothing left to say
+
+
+def test_unlimited_rounds_stop_when_the_offers_run_out(monkeypatch):
     game = _in_main_with_gates(monkeypatch)
     game.trade_rounds = -1
     calls = _fake_rounds(monkeypatch, [["a"], ["b"]])
     run_trade_event(game)
-    assert calls["n"] == 3  # two that cleared, then the one that did not
+    assert calls["n"] == 3  # two offers made and taken, then none left
 
 
 def test_a_positive_budget_caps_the_broadcasts(monkeypatch):
@@ -836,3 +853,23 @@ def test_clearing_is_reachable_and_skips_the_round(monkeypatch):
     monkeypatch.setattr(gamemod, "trade_event", fake_event)
     run_trade_event(game)
     assert cleared["n"] == 1 and rounds["n"] == 0
+
+
+def test_an_externally_driven_game_runs_no_mechanism_at_all(monkeypatch):
+    """A served table drives its own rounds over many requests. One bit says
+    so for every mechanism at once, so the engine never runs one underneath
+    it -- muting each mechanism separately is what invites a third to be
+    forgotten."""
+    import hexset.game as gamemod
+
+    for mechanism in ("round", "clearing"):
+        game = _in_main_with_gates(monkeypatch)
+        game.trade_mechanism = mechanism
+        game.trades_driven_externally = True
+        rounds = _fake_rounds(monkeypatch, [["a"]])
+        cleared = {"n": 0}
+        monkeypatch.setattr(
+            gamemod, "trade_event", lambda game, gate: cleared.__setitem__("n", 1) or []
+        )
+        run_trade_event(game)
+        assert rounds["n"] == 0 and cleared["n"] == 0

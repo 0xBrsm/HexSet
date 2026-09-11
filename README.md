@@ -33,43 +33,25 @@ validation in HexSet, including matches against Catanatron's AB2 bot. See the
 - **Inspect a game:** retain [replay records](docs/research.md#inspect-behavior)
   alongside aggregate results.
 
-## Bots and Catanatron integration
+## Heximax
 
-- **`heximax`** is a handcrafted **expectimax/maxⁿ search bot**. Decision
-  nodes maximize the acting player's score, and chance nodes average possible
-  outcomes by probability. It samples opponents' holdings from public
-  information (Perfect Information Monte Carlo, or PIMC), with one sampled
-  world by default. It uses iterative deepening, a leaf budget and heuristic
-  evaluation, and requires no trained model. `heximax-notrade` disables player
-  trading and uses a separate fitted weight profile.
-- **Catanatron** supplies an **external reference opponent**. The `catanatron`
-  entrant runs its depth-two alpha-beta player (AB2) at a HexSet table and
-  requires the optional `catanatron` extra. AB2's hypothetical search uses
-  Catanatron internally; HexSet runs the real game. The reverse adapter,
-  which runs Heximax inside Catanatron, is for explicitly labeled external
-  compatibility experiments.
+**Heximax** is HexSet's built-in search bot. It needs no trained model, uses
+public resource history to estimate opponents' cards, and adapts its weights
+to trading activity. Select `heximax` to play it; [testing options](docs/heximax.md)
+can pin its weights to either endpoint without disabling trading.
 
-Heximax knows its own cards and estimates opponents' cards from the public
-resource ledger. Its default objective converts per-seat heuristic scores to
-an estimated win probability. Catanatron's adapter and search have different
-information assumptions; comparisons must identify which engine hosted the
-games and whether trading was enabled.
+Against Catanatron's depth-two alpha-beta player (**AB2**), current Heximax
+achieved these win rates in the **HexSet engine**:
 
-Model and search callbacks can opt into [cached sampled-world voting](docs/determinized-worlds.md).
-The helper reuses duplicate-world answers while preserving their vote frequency;
-it does not change any arena preset.
+| Matchup | Heximax wins | Win rate (95% interval) |
+| --- | --- | --- |
+| 1v1: Heximax vs AB2 | 590 / 800 | **73.75%** (70.6–76.7%) |
+| Four players: one Heximax vs three AB2 | 450 / 800 | **56.25%** (52.8–59.6%) |
 
-### Recorded Catanatron result
-
-In the archived September 7, 2026 benchmark, `heximax-notrade` won **47.3%**
-of 1,000 recorded four-player games against three Catanatron `AB:2` bots.
-For context, an equal share of wins at a four-player table is 25%.
-The games ran in Catanatron with player trading disabled and Heximax's
-no-trade evaluation weights. The stock `DC:` adapter supplied a memoryless
-public hand ledger, so these results do not establish the strength of Heximax
-with native HexSet public history. This is a historical result, not a
-measurement of the current revision. See the [benchmark record](docs/benchmarks.md) for
-run settings and limitations.
+These use the default adaptive configuration, standard 10-VP rules, fresh
+boards and balanced seats. Trading is enabled; AB2 declines exchanges, so
+Heximax's slider remains at zero. See the [current benchmark readout](docs/readouts/current-heximax-ab2/README.md)
+for the exact revisions, settings and all 1,600 audited game records.
 
 ## Installation
 
@@ -127,52 +109,34 @@ configuration, saved games, HTTP routes, and MCP tools.
 
 ## Evaluate bots
 
-`heximax-adaptive` uses one policy that slides between the current best no-trade
-and trading move profiles. Recent public exchange activity sets the slider;
-both endpoints are exact. Its exchange evaluator remains the trading profile,
-with floor zero. The fixed presets remain benchmark controls. See the
-[slider implementation](docs/readouts/trading-conditions/SLIDER.md) and
-[fresh curve validation](docs/readouts/slider-curve/README.md), which passed the
-registered aggregate 2-percentage-point non-inferiority margin against both
-global and condition-selected fixed controls.
+Run evaluations in **HexSet**, including games against Catanatron's AB2
+reference bot. With the `catanatron` extra installed, this eight-game wiring
+check seats one Heximax against three AB2 opponents:
 
 ```sh
-python -m hexset.bench.duel heximax heximax-notrade --games 400 --workers 4
+python -m hexset.bench.duel heximax catanatron \
+  --geometry abbb --games 8 --workers 1 --records runs/preflight/ab2.jsonl
 ```
 
-The arena runner reports win rates with Wilson confidence intervals and
-balances seats. Game counts must complete seat rotations and paired boards;
-for an odd number of players under antithetic pairing, use a multiple of twice
-the seat count.
-Use `--geometry ab` for a two-player game; the default is four-player
-`aabb`. One and multiple workers use the same arena implementation.
-Checkpoint entrants require a registered runtime loader; installing the
-`clients` extra alone does not register one. A driver can call
-`hexset.clients.netbot.register_entrants` to use its loader with the shared bot
-and search implementations. See the [research tools guide](docs/research.md)
-for the benchmark commands and removed legacy interfaces.
+Use `--geometry ab` for 1v1. Eight games exercise seat rotation; they are
+not a strength estimate. The runner reports win rates and confidence intervals
+and can retain replay records.
 
-With the `catanatron` extra installed, this small wiring check seats one
-Heximax against three external AB2 reference opponents **in HexSet**:
+For a controlled weight comparison, pin one side at slider position 0 or 1:
 
 ```sh
-python -m hexset.bench.duel heximax-notrade catanatron \
-  --geometry abbb --games 8 --workers 1 --duel-seed 700000000 \
-  --records runs/preflight/ab2.jsonl
+python -m hexset.bench.duel heximax heximax --pin-weights-b 0 --games 400 --workers 4
 ```
 
-Eight games exercise seat rotation; they are not a strength estimate or a
-completed validation of the recovery protocol. This CLI uses the reference
-AB2 search without the optional fast patches. See the
-[evaluation protocol](docs/evaluation.md) for the checks required before
-another campaign. The separate `hexset.catanatron.duel` command hosts games
-in Catanatron and must not be used as the HexSet ablation runner.
+Pins leave trading enabled. See [Heximax configuration](docs/heximax.md) for
+independent trading controls, [research tools](docs/research.md) for pairing,
+profiling and model runtimes, and the [evaluation protocol](docs/evaluation.md)
+for strength studies. The separate `hexset.catanatron.duel` runner hosts games
+in Catanatron and is reserved for external compatibility work.
 
-For batched policies, `hexset.bench.versus.compete_batched` evaluates multiple
-games per tick using the arena's board and seat-pairing rules. It reports win
-rates, descriptive Wilson intervals, and board-based intervals for win rates
-and victory-point margins. See
-[Training and runtime interfaces](docs/training.md).
+Model callbacks can use [cached world voting](docs/determinized-worlds.md).
+For batched model evaluation and training environments, see
+[training interfaces](docs/training.md).
 
 ## Training environments
 
@@ -246,7 +210,7 @@ For simulations with trade gates installed, the engine evaluates coverable
 bundles when the game enters MAIN after a roll or robber resolution. Builds,
 purchases, and bank trades do not trigger another automatic event. Both sides
 must gain more than their own gate's `trade_floor`, and each side may
-exchange at most three cards. Heximax's floor is `0.0197`; the network gate
+exchange at most three cards. Heximax's floor is `0`; the network gate
 uses `0.0`. There is no engine-wide default floor. The default `egalitarian` rule
 selects the trade with the largest minimum gain; `nash` and `actor` are
 alternative ranking rules. Evaluation repeats after each exchange until no

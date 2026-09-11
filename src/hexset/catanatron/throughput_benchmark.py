@@ -81,7 +81,7 @@ def trial(args):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--players', default='DC:heximax-notrade,AB:2,AB:2,AB:2')
+    p.add_argument('--players', default='DC:heximax,AB:2,AB:2,AB:2')
     p.add_argument('--games', type=int, default=240)
     p.add_argument('--workers', type=int, default=30)
     p.add_argument('--seed', type=int, default=650200000)

@@ -131,7 +131,7 @@ def compare(rows, audit, baseline="off"):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--players', default='DC:heximax-notrade,AB:2,AB:2,AB:2')
+    parser.add_argument('--players', default='DC:heximax,AB:2,AB:2,AB:2')
     parser.add_argument('--game-type', default='standard')
     parser.add_argument('--seed', type=int, default=630000000)
     parser.add_argument('--games', type=int, default=8, help='games per arm')

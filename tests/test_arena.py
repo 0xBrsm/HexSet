@@ -120,3 +120,26 @@ def test_builtin_preset_resolves_in_a_fresh_interpreter():
         env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")},
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize('pin', [0, 1])
+@pytest.mark.parametrize('trading', ['on', 'off'])
+def test_heximax_pin_specs_remain_independent_of_trading_and_survive_serialization(pin, trading):
+    import pickle
+    from hexset.arena import entrant_from_name, lineup_from_names
+    spec = f'heximax:pin-weights={pin}:trading={trading}'
+    entrant = pickle.loads(pickle.dumps(entrant_from_name(spec)))
+    assert entrant.kind == 'heximax' and entrant.pin_weights == pin
+    assert entrant.max_trades == (0 if trading == 'off' else None)
+    assert [e.pin_weights for e in lineup_from_names([spec, spec])] == [pin, pin]
+
+
+@pytest.mark.parametrize('spec', [
+    'heximax:', 'heximax:pin-weights=trade', 'heximax:pin-weights=.5',
+    'heximax:pin-weights=0:pin-weights=1', 'heximax:trading=maybe',
+    'heximax:unknown=0', 'heximax:trading=off:trading=on',
+])
+def test_invalid_heximax_spec_is_rejected(spec):
+    from hexset.arena import lineup_from_names
+    with pytest.raises(ValueError):
+        lineup_from_names([spec])

@@ -220,3 +220,7 @@ that value. This client reads
 `/api/record` and submits actions through the seat API. It does not participate
 in player trading and rejects models with `search=mcts`; search models must
 run as embedded opponents. See the [ONNX model contract](bot-api.md).
+
+The `heximax` opponent uses the adaptive policy. Endpoint pinning is available
+through the [Python and evaluation interfaces](heximax.md), without adding
+separate bot choices to the server picker.

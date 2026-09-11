@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Compare two arena entrants with paired boards and confidence intervals.
 
-Run ``python -m hexset.bench.duel heximax heximax-notrade --games 400``.
+Run ``python -m hexset.bench.duel heximax heximax:pin-weights=0 --games 400``.
 For batched model evaluation use ``hexset.bench.versus.compete_batched``.
 
 A `network:`/`mcts:` entrant needs a runtime that can open its checkpoint,
@@ -19,6 +19,7 @@ import statistics
 import sys
 import time
 from pathlib import Path
+from dataclasses import replace
 
 import hexset.bots  # noqa: F401 -- registers the heximax presets with hexset.arena
 from hexset.game import MAX_TURNS
@@ -59,6 +60,10 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("a", help="arena entrant name or registered checkpoint spec")
     p.add_argument("b", help="arena entrant name or registered checkpoint spec")
+    p.add_argument("--pin-weights-a", type=int, choices=(0, 1), default=None,
+                   help="pin side A Heximax to slider endpoint 0 or 1; trading is unchanged")
+    p.add_argument("--pin-weights-b", type=int, choices=(0, 1), default=None,
+                   help="pin side B Heximax to slider endpoint 0 or 1; trading is unchanged")
     p.add_argument("--label-a", default=None)
     p.add_argument("--label-b", default=None)
     p.add_argument("--games", type=int, default=400)
@@ -170,7 +175,19 @@ def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY)
             f"seats of {geometry!r}: the arena rotates the lineup through every "
             "seat and an incomplete rotation leaves the seat bias in the verdict"
         )
-    lineup = sides(lineup_from_names(names), label_a, label_b, mine, theirs)
+    entrants = lineup_from_names(names)
+    for side, slots in (("a", mine), ("b", theirs)):
+        pin = getattr(args, f"pin_weights_{side}", None)
+        if pin is None:
+            continue
+        for slot in slots:
+            entrant = entrants[slot]
+            if entrant.kind != "heximax" or entrant.weights is not None:
+                raise ValueError(f"--pin-weights-{side} requires standard Heximax")
+            if entrant.pin_weights is not None:
+                raise ValueError(f"side {side} specifies a weight pin twice")
+            entrants[slot] = replace(entrant, pin_weights=pin)
+    lineup = sides(entrants, label_a, label_b, mine, theirs)
 
     run_provenance = provenance(lineup)
     started = time.monotonic()

@@ -1,0 +1,86 @@
+{
+  "command": [
+    "/study/docs/readouts/current-heximax-ab2/extension/run.py",
+    "--out",
+    "/out",
+    "--workers",
+    "30"
+  ],
+  "entrypoint": [
+    "python"
+  ],
+  "environment": [
+    "PYTHONPATH=/study/src:/reference",
+    "PYTHONDONTWRITEBYTECODE=1",
+    "PYTHONHASHSEED=0",
+    "OMP_NUM_THREADS=1",
+    "OPENBLAS_NUM_THREADS=1",
+    "MKL_NUM_THREADS=1",
+    "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "LANG=C.UTF-8",
+    "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+    "PYTHON_VERSION=3.12.14",
+    "PYTHON_SHA256=5c8462af5790baf43a321a1559dbe0db06d1be4300fb85fb53c40060668e548a",
+    "HOME=/tmp",
+    "PYTHONUNBUFFERED=1",
+    "HEXSET_UI_MODELS_DIR=/app/models",
+    "HEXSET_UI_GAMES_DIR=/app/games"
+  ],
+  "image": "sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+  "memory_bytes": 4294967296,
+  "mounts": [
+    {
+      "Destination": "/reference",
+      "Mode": "ro",
+      "Propagation": "rprivate",
+      "RW": false,
+      "Source": "/home/bsm/tmp/hexset-current-ab2-147/reference",
+      "Type": "bind"
+    },
+    {
+      "Destination": "/out",
+      "Mode": "",
+      "Propagation": "rprivate",
+      "RW": true,
+      "Source": "/home/bsm/tmp/hexset-current-ab2-147/extension-out",
+      "Type": "bind"
+    },
+    {
+      "Destination": "/study",
+      "Mode": "ro",
+      "Propagation": "rprivate",
+      "RW": false,
+      "Source": "/home/bsm/tmp/hexset-current-ab2-147/extension-study",
+      "Type": "bind"
+    }
+  ],
+  "nano_cpus": 30000000000,
+  "network_mode": "none",
+  "readonly_rootfs": true,
+  "state": {
+    "Dead": false,
+    "Error": "",
+    "ExitCode": 0,
+    "FinishedAt": "2026-09-11T17:29:50.301668645Z",
+    "OOMKilled": false,
+    "Paused": false,
+    "Pid": 0,
+    "Restarting": false,
+    "Running": false,
+    "StartedAt": "2026-09-11T17:26:10.374863862Z",
+    "Status": "exited"
+  },
+  "stats_snapshot": {
+    "BlockIO": "0B / 5.01MB",
+    "CPUPerc": "2983.41%",
+    "Container": "hexset-current-ab2-147-extension",
+    "ID": "ac70e0713efe",
+    "MemPerc": "44.14%",
+    "MemUsage": "1.765GiB / 4GiB",
+    "Name": "hexset-current-ab2-147-extension",
+    "NetIO": "0B / 0B",
+    "PIDs": "34"
+  },
+  "user": "1000:1000",
+  "working_dir": "/study"
+}

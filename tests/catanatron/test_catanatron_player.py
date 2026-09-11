@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """End-to-end: DevCatanPlayer playing real, complete catanatron games.
 
-This is the test the earlier ones were building towards -- `heximax-notrade`
+This is the test the earlier ones were building towards -- `heximax`
 (no torch, so it runs anywhere) driven entirely through the bridge, against
 catanatron's own bots, for whole games rather than isolated decisions. It is
 also what actually exercises a knight played for real: `PLAY_KNIGHT` maps
@@ -35,21 +35,21 @@ from hexset.catanatron.player import DevCatanPlayer
 def test_importing_the_bridge_registers_the_heximax_presets():
     """`hexset.catanatron.player` (and `.duel`, which imports it) used to
     import neither `hexset.bots` nor anything that does, so a worker process
-    asking for `DC:heximax-notrade` raised a bare `KeyError` on the name --
-    `PRESETS` only gains "heximax"/"heximax-notrade" as an
+    asking for `DC:heximax` raised a bare `KeyError` on the name --
+    `PRESETS` only gains "heximax" as an
     import-time side effect of importing `hexset.bots.heximax`. Importing
     this module (done above, at collection time) is what this test is
     actually checking survived; the assertion below just makes that explicit
     rather than relying on the import above not raising.
     """
-    assert "heximax-notrade" in PRESETS
+    assert "heximax" in PRESETS
     assert "heximax" in PRESETS
 
 
 @pytest.mark.parametrize("seed", range(1))
 def test_full_games_complete_against_random(seed):
     random.seed(seed)
-    bridge = DevCatanPlayer(Color.RED, "heximax-notrade")
+    bridge = DevCatanPlayer(Color.RED, "heximax")
     players = [bridge, RandomPlayer(Color.BLUE), RandomPlayer(Color.WHITE), RandomPlayer(Color.ORANGE)]
     catan_map = CatanMap.from_template(BASE_MAP_TEMPLATE)
     game = CatanatronGame(players, catan_map=catan_map)

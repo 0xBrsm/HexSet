@@ -35,7 +35,7 @@ from hexset.arena import Entrant, compete
 from hexset.bench.metrics import side_metrics
 from hexset.bench.throughput import default_workers, environment
 from hexset.bots.evaluate import ROLLS, TERM_NAMES, Weights
-from hexset.bots.heximax.evaluate import NO_TRADE_WEIGHTS, TRADING_WEIGHTS
+from hexset.bots.heximax.evaluate import NO_TRADE_WEIGHTS, BALANCED_WEIGHTS
 
 SCARCE_PER_PRODUCTION = 0.91 / ROLLS
 
@@ -94,10 +94,10 @@ def run_cell(
     }
 
 
-def entrant(name: str, weights: Weights, notrade: bool) -> Entrant:
+def entrant(name: str, weights: Weights, pin_weights: int, no_trading: bool = False) -> Entrant:
     return Entrant(
         name, kind="heximax", depth=2, width=6, weights=weights,
-        mode="notrade" if notrade else "honest", max_trades=0 if notrade else None,
+        expansion_value=.25 if pin_weights == 0 else .125, max_trades=0 if no_trading else None,
     )
 
 
@@ -107,7 +107,8 @@ def as_dict(weights: Weights) -> dict[str, float]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", choices=("trading", "notrade"), default="trading")
+    parser.add_argument("--pin-weights", type=int, choices=(0, 1), default=1)
+    parser.add_argument("--no-trading", action="store_true")
     parser.add_argument("--games", type=int, default=1024, help="per cell; multiple of 4")
     parser.add_argument("--confirm", type=int, default=3072, help="final swept vs start")
     parser.add_argument("--seed", type=int, default=98000)
@@ -122,8 +123,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.games % 4 or args.confirm % 4:
         parser.error("--games and --confirm must be multiples of 4")
 
-    notrade = args.profile == "notrade"
-    start = NO_TRADE_WEIGHTS if notrade else TRADING_WEIGHTS
+    start = NO_TRADE_WEIGHTS if args.pin_weights == 0 else BALANCED_WEIGHTS
     incumbent = start
     passes = [tuple(float(f) for f in ring.split(",")) for ring in args.passes.split(";")]
     terms = args.terms.split(",")
@@ -149,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
                 continue  # a zeroed term has no ring to refine
             seed = args.seed + 1000 * cell_index
             cell_index += 1
-            baseline = entrant("incumbent", incumbent, notrade)
+            baseline = entrant("incumbent", incumbent, args.pin_weights, args.no_trading)
             cells = []
             for factor in ring:
                 value = current * factor if current != 0.0 else factor * 0.05
@@ -158,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
                 candidate = with_term(incumbent, term, value)
                 result = run_cell(
                     args.games, seed=seed, baseline=baseline,
-                    challenger=entrant("candidate", candidate, notrade), **common,
+                    challenger=entrant("candidate", candidate, args.pin_weights, args.no_trading), **common,
                 )
                 low, high = result["interval_95"]
                 cells.append({
@@ -196,8 +196,8 @@ def main(argv: list[str] | None = None) -> int:
     if incumbent != start and args.confirm:
         result = run_cell(
             args.confirm, seed=args.seed + 500_000,
-            baseline=entrant("start", start, notrade),
-            challenger=entrant("swept", incumbent, notrade), **common,
+            baseline=entrant("start", start, args.pin_weights, args.no_trading),
+            challenger=entrant("swept", incumbent, args.pin_weights, args.no_trading), **common,
         )
         report["confirm"] = {
             **result,

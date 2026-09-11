@@ -1,0 +1,19 @@
+{
+  "adaptive_exchange_wins": 135,
+  "exchanges": 23382,
+  "fixed_exchange_wins": 265,
+  "games": 400,
+  "seconds": 62.565132627030835,
+  "unfinished": 0,
+  "wilson95": [
+    0.2929016373845367,
+    0.3851898583224166
+  ],
+  "win_rate": 0.3375,
+  "winners": {
+    "0": 67,
+    "1": 68,
+    "2": 131,
+    "3": 134
+  }
+}

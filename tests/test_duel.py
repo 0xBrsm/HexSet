@@ -223,7 +223,7 @@ def test_arena_verdict_reports_game_length_and_exhaustion(monkeypatch):
 def test_cli_uses_arena_for_every_worker_count(monkeypatch, capsys, workers):
     seen = {}
     monkeypatch.setattr("hexset.arena.compete", _fake_compete(seen, POINTS))
-    assert duel.main(["heximax", "heximax-notrade", "--games", "4",
+    assert duel.main(["heximax", "heximax", "--pin-weights-b", "0", "--games", "4",
                       "--workers", str(workers), "--no-json"]) == 0
     assert seen["workers"] == workers
     assert '"via": "arena.compete"' in capsys.readouterr().out
@@ -289,3 +289,27 @@ def test_no_runtime_named_seats_no_initializer(monkeypatch):
 
     assert seen["worker_initializer"] is None
     assert seen["worker_initargs"] == ()
+
+
+def test_cli_pins_only_the_requested_side_and_records_configuration(monkeypatch, capsys):
+    import json
+    seen = {}
+    fake = _fake_compete(seen, POINTS)
+    def compete(lineup, *args, **kwargs):
+        assert [e.pin_weights for e in lineup] == [None, 1, 1, 1]
+        assert all(e.kind == 'heximax' and e.max_trades is None for e in lineup)
+        return fake(lineup, *args, **kwargs)
+    monkeypatch.setattr('hexset.arena.compete', compete)
+    duel.main(['heximax', 'heximax', '--geometry', 'abbb', '--pin-weights-b', '1',
+               '--games', '4', '--workers', '1', '--no-json'])
+    result = json.loads(capsys.readouterr().out)
+    assert [e['pin_weights'] for e in result['experiment']['settings']['entrants']] == [None, 1, 1, 1]
+
+
+@pytest.mark.parametrize('a, b, flags', [
+    ('random', 'heximax', ['--pin-weights-a', '0']),
+    ('heximax', 'heximax:pin-weights=0', ['--pin-weights-b', '1']),
+])
+def test_cli_rejects_wrong_bot_or_conflicting_pin_before_launch(a, b, flags):
+    with pytest.raises(ValueError):
+        duel.main([a, b, *flags, '--games', '4', '--workers', '1', '--no-json'])

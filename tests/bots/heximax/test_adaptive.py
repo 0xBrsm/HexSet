@@ -64,7 +64,7 @@ def test_adaptive_search_matches_the_selected_fixed_profile_and_trade_gate(succe
     for seat in range(4):
         set_known_hand(game, seat, [2, 2, 2, 2, 2])
     board = game._state.board
-    adaptive = spawn(PRESETS['heximax-adaptive'], board, random.Random(81))
+    adaptive = spawn(PRESETS['heximax'], board, random.Random(81))
     for turn in range(8):
         adaptive.observe_trade(**event(turn, turn < successes))
     weights, expansion = trading_profile(successes / 8)
@@ -88,7 +88,7 @@ def test_native_event_publishes_only_public_inputs_once_and_ignores_search_copie
     game.phase = Phase.MAIN
     for seat in range(4):
         set_known_hand(game, seat, [2, 2, 2, 2, 2])
-    bot = heximax(game._state.board, adaptive=True)
+    bot = heximax(game._state.board)
     game.gates = (bot,) * 4
     seen = []
     original = bot.observe_trade
@@ -108,3 +108,45 @@ def test_native_event_publishes_only_public_inputs_once_and_ignores_search_copie
     hypothetical.turns += 1
     run_trade_event(hypothetical)
     assert len(seen) == 4
+
+
+@pytest.mark.parametrize('pin', [0, 1])
+def test_pin_holds_weights_and_expansion_despite_activity_and_trade_switches(pin):
+    game = after_setup(26)
+    game.phase = Phase.MAIN
+    for seat in range(4):
+        set_known_hand(game, seat, [2, 2, 2, 2, 2])
+    weights, expansion = trading_profile(pin)
+    bot = heximax(game._state.board, random.Random(81), pin_weights=pin)
+    fixed = heximax(game._state.board, random.Random(81), weights=weights,
+                    expansion_value=expansion)
+    assert bot.max_trades is None  # pinning zero still permits exchanges
+    for turn in range(8):
+        bot.observe_trade(**event(turn, not bool(pin)))
+    assert bot.choose(game) == fixed.choose(game)
+    assert bot.evaluator.weights == weights
+    assert bot.expansion_value == expansion
+    assert bot.rng.getstate() == fixed.rng.getstate()
+    received = [one_for_one(0, 4)]
+    assert bot.gains_many(game.state(0), received, [1]) == fixed.gains_many(game.state(0), received, [1])
+    for switch in ('game', 'bot'):
+        game.max_trades = 0 if switch == 'game' else None
+        bot.max_trades = 0 if switch == 'bot' else None
+        bot.choose(game)
+        assert bot.evaluator.weights == weights
+        assert bot.expansion_value == expansion
+    assert bot.gains_many(game.state(0), received, [1]) == [-1.0]
+
+
+@pytest.mark.parametrize('pin', ['trade', 'notrade', .5, -1, 2, float('nan')])
+def test_only_numeric_endpoint_pins_are_accepted(pin):
+    with pytest.raises(ValueError, match='pin_weights'):
+        heximax(after_setup(26)._state.board, pin_weights=pin)
+
+
+def test_custom_experiments_cannot_silently_override_a_pin():
+    board = after_setup(26)._state.board
+    with pytest.raises(ValueError, match='custom weights'):
+        heximax(board, weights=NO_TRADE_WEIGHTS, pin_weights=0)
+    with pytest.raises(ValueError, match='endpoint bonuses'):
+        heximax(board, pin_weights=1, expansion_value=.25)

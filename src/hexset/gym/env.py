@@ -30,8 +30,7 @@ from .aec import TOPOLOGY, HexSetAEC, agent_name
 
 ENV_ID = "HexSet-v0"
 
-# The default lineup: three honest `heximax` opponents (mode="honest", the
-# live-deployment referent -- `hexset.arena.Entrant.mode`'s own default), one
+# The default lineup: three adaptive Heximax opponents, one
 # seat short of the standard 4-seat table so `len(opponents) + 1 == num_players`.
 DEFAULT_OPPONENTS: tuple[str, ...] = ("heximax", "heximax", "heximax")
 

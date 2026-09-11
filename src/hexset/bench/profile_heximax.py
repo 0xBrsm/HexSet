@@ -20,7 +20,7 @@ import statistics
 import sys
 import time
 
-import hexset.bots  # noqa: F401 -- registers "heximax"/"heximax-notrade"/... presets
+import hexset.bots  # noqa: F401 -- registers "heximax"/"heximax:pin-weights=0"/... presets
 
 from hexset.arena import MAX_ACTIONS, entrant_from_name, spawn, deal_game, play_game
 
@@ -105,9 +105,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--games", type=int, default=3)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--preset", default="heximax")
+    parser.add_argument("--pin-weights", type=int, choices=(0, 1), default=None)
     parser.add_argument("--out", default=None, help="path to write the .prof file")
     args = parser.parse_args(argv)
 
+    if args.pin_weights is not None:
+        if args.preset != "heximax":
+            parser.error("--pin-weights requires --preset heximax")
+        args.preset = f"heximax:pin-weights={args.pin_weights}"
     profile, per_game_seconds, decision_times = run(args.preset, args.games, args.seed)
     report(args.preset, per_game_seconds, decision_times)
     print_top(profile)

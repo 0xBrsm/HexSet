@@ -16,6 +16,12 @@ experiment; stock `DC:` Heximax there receives a memoryless public ledger.
 Follow the [evaluation protocol and recovery steps](evaluation.md) before
 using results to select or reject native HexSet policies.
 
+The standard `heximax` now adapts its weights automatically. Pin a testing
+control at slider position 0 or 1 using `--pin-weights-a`/`--pin-weights-b`
+or a `heximax:pin-weights=0` entrant spec. Weight pinning and trading
+participation are independent. See [the API and migration guide](heximax.md).
+Historical studies must run from their recorded source revision.
+
 ## Implement a bot
 
 A Python bot implements `choose(game) -> Action`; no base class is required.
@@ -164,7 +170,7 @@ Commands are modules under `hexset.bench`; each provides `--help`.
 | `placement_policy` | Compare opening choices with the placement heuristic |
 | `fit_weights` | Fit evaluation weights from records and measure held-out prediction loss |
 | `fit_duel` | Compare a fitted weights/temperature pair with an incumbent |
-| `ablate` | Zero each Heximax evaluation term; select `--profile trading` or `notrade` |
+| `ablate` | Zero each Heximax evaluation term; select `--pin-weights 0` or `1`; disable trading separately |
 | `weight_sweep` | Evaluate candidate term weights in paired games |
 
 `hexset.bench.versus.compete_batched` is the programmatic runner for batched

@@ -60,8 +60,8 @@ def register_entrant_kind(kind: str, factory) -> None:
 def register_preset(name: str, entrant: "Entrant") -> None:
     """Register a named lineup shortcut (`PRESETS[name]`, resolved by
     `entrant_from_name`/`lineup_from_names`) for an entrant hexset does not
-    ship itself -- how `hexset.bots.heximax` makes "heximax" and
-    "heximax-notrade" resolvable by name once imported."""
+    ship itself -- how `hexset.bots.heximax` makes "heximax"
+    resolvable by name once imported."""
     PRESETS[name] = entrant
 
 
@@ -160,10 +160,11 @@ class Entrant:
     # a wider wave changes collision rate as well as network batch size.
     simulations: int = 128
     wave: int = 16
-    # `kind="heximax"` only: which of `heximax.MODES` to build --
-    # `honest` (the referent) or `notrade` (the no-trade weights, declining everything). Defaulted so
-    # every other entrant is unchanged.
-    mode: str = "honest"
+    # Heximax follows public trade activity unless pinned for an experiment.
+    # This does not toggle willingness to trade (max_trades does that).
+    pin_weights: float | None = None
+    # Only for explicit custom weight vectors, e.g. fitting or frozen controls.
+    expansion_value: float | None = None
     # `kind="heximax"` only: determinized worlds searched per decision (PIMC).
     # P1½ (`heximax.md` §8) found no k > 1 beat k = 1 beyond the instrument's
     # resolution over 400 games; `k = 1` ships and the field stays for anyone
@@ -696,7 +697,25 @@ def _load_presets(names: Sequence[str]) -> None:
 
 
 def entrant_from_name(name: str) -> Entrant:
-    """One preset name, or one `<kind>:<checkpoint>` spec, as an entrant."""
+    """Resolve a preset, a Heximax testing spec, or a checkpoint spec."""
+    if name.startswith("heximax:"):
+        _load_presets(("heximax",))
+        settings = {}
+        for option in name.split(":")[1:]:
+            key, separator, value = option.partition("=")
+            if not separator or key in settings:
+                raise ValueError(f"invalid or repeated Heximax option: {option!r}")
+            if key == "pin-weights" and value in ("0", "1"):
+                settings[key] = int(value)
+            elif key == "trading" and value in ("on", "off"):
+                settings[key] = value
+            else:
+                raise ValueError(f"unknown Heximax option: {option!r}; use pin-weights=0|1 or trading=on|off")
+        return replace(
+            PRESETS["heximax"], name=name,
+            pin_weights=settings.get("pin-weights"),
+            max_trades=0 if settings.get("trading") == "off" else None,
+        )
     if name.startswith(NETWORK):
         # `network:<path>@<trades>` switches trading off with `@0`, mirroring
         # `mcts:<path>@<simulations>`. Nothing else is a meaningful value:
@@ -734,7 +753,7 @@ def lineup_from_names(names: Sequence[str]) -> list[Entrant]:
     unknown = sorted(
         name
         for name in set(names)
-        if name not in PRESETS and not name.startswith(CHECKPOINT_KINDS)
+        if name not in PRESETS and not name.startswith((*CHECKPOINT_KINDS, "heximax:"))
     )
     if unknown:
         raise ValueError(f"unknown bots: {', '.join(unknown)}")

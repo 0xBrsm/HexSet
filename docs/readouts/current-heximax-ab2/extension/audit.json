@@ -1,0 +1,58 @@
+{
+  "distinct_game_seeds": 800,
+  "games_replayed": 800,
+  "passed": true,
+  "preflight_games_excluded": 12,
+  "results": [
+    {
+      "deadline_hits": 0,
+      "exchanges": 0,
+      "focal_seats": {
+        "0": 200,
+        "1": 200
+      },
+      "heximax_win_rate": 0.745,
+      "legal_actions": 79995,
+      "observed_alphas": [
+        0.0
+      ],
+      "players": 2,
+      "replayed": 400,
+      "wilson95": [
+        0.7000956766555838,
+        0.785243299120611
+      ],
+      "wins": {
+        "0": 298,
+        "1": 102
+      }
+    },
+    {
+      "deadline_hits": 0,
+      "exchanges": 0,
+      "focal_seats": {
+        "0": 100,
+        "1": 100,
+        "2": 100,
+        "3": 100
+      },
+      "heximax_win_rate": 0.565,
+      "legal_actions": 119090,
+      "observed_alphas": [
+        0.0
+      ],
+      "players": 4,
+      "replayed": 400,
+      "wilson95": [
+        0.516026076233405,
+        0.6127373255031363
+      ],
+      "wins": {
+        "0": 226,
+        "1": 68,
+        "2": 65,
+        "3": 41
+      }
+    }
+  ]
+}

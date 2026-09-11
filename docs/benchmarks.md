@@ -29,6 +29,17 @@ measured 1.689 versus 1.827 games/s. AB2's hypothetical search uses Catanatron
 in both configurations. These workload-specific timings do not establish
 information-model equivalence or select the host for HexSet policy research.
 
+## Current unified Heximax (September 11, 2026)
+
+The [current-config benchmark](readouts/current-heximax-ab2/README.md) measures
+stock unpinned adaptive `heximax` against the current pinned Catanatron AB2
+reference, with HexSet hosting every game. Heximax won **590/800 in 1v1
+(73.75%, 95% Wilson interval 70.6–76.7%)** and **450/800 against three AB2
+players (56.25%, 52.8–59.6%)**. Boards are independent and focal seats balanced.
+Trading is enabled; AB2 declines exchanges, so the adaptive slider stays at
+zero. All 1,600 games finished and passed replay validation, with no reference
+deadline hits. The readout preserves exact source hashes, settings and records.
+
 ## Native Heximax improvement (September 11, 2026)
 
 The [fixed native holdout](readouts/native-expansion/README.md) passed the

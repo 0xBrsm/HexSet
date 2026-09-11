@@ -1,0 +1,77 @@
+{
+  "mode": "fast",
+  "results": [
+    {
+      "deadline_hits": 0,
+      "exchanges": 0,
+      "focal_seats": {
+        "0": 200,
+        "1": 200
+      },
+      "games": 400,
+      "heximax_wins": 292,
+      "observed_alphas": [
+        0.0
+      ],
+      "seats": 2,
+      "unfinished": 0,
+      "wilson95": [
+        0.6844571283551331,
+        0.7711672161827179
+      ],
+      "win_rate": 0.73,
+      "winners": {
+        "0": 292,
+        "1": 108
+      }
+    },
+    {
+      "deadline_hits": 0,
+      "exchanges": 0,
+      "focal_seats": {
+        "0": 100,
+        "1": 100,
+        "2": 100,
+        "3": 100
+      },
+      "games": 400,
+      "heximax_wins": 224,
+      "observed_alphas": [
+        0.0
+      ],
+      "seats": 4,
+      "unfinished": 0,
+      "wilson95": [
+        0.511012786807899,
+        0.6078457378541492
+      ],
+      "win_rate": 0.56,
+      "winners": {
+        "0": 224,
+        "1": 80,
+        "2": 53,
+        "3": 43
+      }
+    }
+  ],
+  "runtime": {
+    "antithetic": false,
+    "catanatron_commit": "ecf931181b9a65bb4116a2153fb78c16f1438e00",
+    "catanatron_path": "/reference/catanatron/__init__.py",
+    "catanatron_source_sha256": "d17c64ace107eae861082e75fdeda02c8f18b9f029e377881987ab768f89e7b2",
+    "driver_sha256": "abb083ebd22080872bc2af838d3fe0d046b8c11d697d55117dc9e53a4218cab7",
+    "games_per_format": 400,
+    "hexset_source_sha256": "c5b426a446f78e5686bca51c66f053bef44f58e924911bbb38a53eb1f743d9ef",
+    "host": "HexSet",
+    "policy_commit": "38ac537e44944a892b881b5c0152d4de6828b2a4",
+    "python": "3.12.14",
+    "pythonhashseed": "0",
+    "threads": {
+      "MKL_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+    },
+    "workers": 30
+  },
+  "seconds": 194.16658108006231
+}

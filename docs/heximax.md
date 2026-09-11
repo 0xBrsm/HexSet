@@ -32,12 +32,12 @@ its own or the game's trading switch is off. A pinned bot retains its pin.
 
 ## Current reference results
 
-With its default unpinned adaptive configuration, Heximax won **292/400
-1v1 games (73.0%)** and **224/400 four-player games (56.0%)** against one
+With its default unpinned adaptive configuration, Heximax won **590/800
+1v1 games (73.75%)** and **450/800 four-player games (56.25%)** against one
 and three Catanatron AB2 references respectively, all hosted in HexSet.
 Trading was enabled; AB2 declined exchanges and the slider remained at zero.
 The [benchmark readout](readouts/current-heximax-ab2/README.md) records exact
-revisions, confidence intervals, settings and replay validation of all 800 games.
+revisions, confidence intervals, settings and replay validation of all 1,600 games.
 
 ## Evaluation flags
 

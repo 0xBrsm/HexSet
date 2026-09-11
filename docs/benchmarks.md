@@ -33,11 +33,11 @@ information-model equivalence or select the host for HexSet policy research.
 
 The [current-config benchmark](readouts/current-heximax-ab2/README.md) measures
 stock unpinned adaptive `heximax` against the current pinned Catanatron AB2
-reference, with HexSet hosting every game. Heximax won **292/400 in 1v1
-(73.0%, 95% Wilson interval 68.4–77.1%)** and **224/400 against three AB2
-players (56.0%, 51.1–60.8%)**. Boards are independent and focal seats balanced.
+reference, with HexSet hosting every game. Heximax won **590/800 in 1v1
+(73.75%, 95% Wilson interval 70.6–76.7%)** and **450/800 against three AB2
+players (56.25%, 52.8–59.6%)**. Boards are independent and focal seats balanced.
 Trading is enabled; AB2 declines exchanges, so the adaptive slider stays at
-zero. All 800 games finished and passed replay validation, with no reference
+zero. All 1,600 games finished and passed replay validation, with no reference
 deadline hits. The readout preserves exact source hashes, settings and records.
 
 ## Native Heximax improvement (September 11, 2026)

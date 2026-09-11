@@ -45,13 +45,13 @@ achieved these win rates in the **HexSet engine**:
 
 | Matchup | Heximax wins | Win rate (95% interval) |
 | --- | --- | --- |
-| 1v1: Heximax vs AB2 | 292 / 400 | **73.0%** (68.4–77.1%) |
-| Four players: one Heximax vs three AB2 | 224 / 400 | **56.0%** (51.1–60.8%) |
+| 1v1: Heximax vs AB2 | 590 / 800 | **73.75%** (70.6–76.7%) |
+| Four players: one Heximax vs three AB2 | 450 / 800 | **56.25%** (52.8–59.6%) |
 
 These use the default adaptive configuration, standard 10-VP rules, fresh
 boards and balanced seats. Trading is enabled; AB2 declines exchanges, so
 Heximax's slider remains at zero. See the [current benchmark readout](docs/readouts/current-heximax-ab2/README.md)
-for the exact revisions, settings and all 800 audited game records.
+for the exact revisions, settings and all 1,600 audited game records.
 
 ## Installation
 

@@ -1,0 +1,19 @@
+{
+  "status": "PLAN_ONLY",
+  "objective": "Compare determinization at equal per-world leaf budget",
+  "gates": ["vs-ab2", "vs-shipped"],
+  "games_per_arm": 120,
+  "workers": 30,
+  "depth": 2,
+  "width": 12,
+  "mode": "notrade",
+  "max_trades": 0,
+  "weights": "NO_TRADE_WEIGHTS",
+  "arms": [
+    {"label": "k1-nodes2400", "k": 1, "max_nodes": 2400},
+    {"label": "k4-nodes9600", "k": 4, "max_nodes": 9600}
+  ],
+  "seed_policy": "paired fresh seeds shared by candidate and gate; no reuse of prior 10m/20m/30m families",
+  "note": "k is determinized worlds; max_nodes is total leaf budget. Equalizing max_nodes/k gives 2400 leaves per world.",
+  "launch": false
+}

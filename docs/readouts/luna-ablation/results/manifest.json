@@ -1,0 +1,11 @@
+{
+  "campaign": "luna-heximax-4p-ab2-ablation",
+  "objective": "candidate > 50% vs three AB:2; candidate > 25% vs three shipped heximax-notrade",
+  "screen_games": 120,
+  "confirm_games": 256, "holdout_games": 2048,
+  "workers": 30,
+  "screen_seed": 610000,
+  "confirm_seed": 710000,
+  "candidates": ["baseline","drop-production","drop-buy_progress","drop-robber_risk","drop-spare_card","drop-road","drop-diversity","drop-port","drop-knight","prod-half","prod-141","progress-half","progress-141","risk-half","risk-141","road-half","road-zero","spare-half","spare-141"],
+  "selection": "exclude baseline; rank by min(p_vs_ab2 - 0.50, p_vs_shipped - 0.25); confirm top four at 256; choose one finalist; run fresh 2048-game holdout per gate; pass only if both Wilson lower bounds clear their thresholds"
+}

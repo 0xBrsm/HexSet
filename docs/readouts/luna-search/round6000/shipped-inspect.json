@@ -1,0 +1,277 @@
+[
+    {
+        "Id": "6db94f7e27757df72ed93ebe0f22b42d919a25a6cad447367021283caa8bf0e1",
+        "Created": "2026-09-11T00:24:09.45329669Z",
+        "Path": "python",
+        "Args": [
+            "-m",
+            "hexset.catanatron.evolve_candidate_eval",
+            "--candidate-id",
+            "g6000-p10",
+            "--weights-json",
+            "{\"buy_progress\":0.4606045314909384,\"diversity\":0.360074083309872,\"knight\":0.16043960472833257,\"port\":0.019305197991678444,\"production\":3.8803981040675644,\"road\":0.00019147194463070284,\"robber_risk\":-0.31245697996217825,\"scarce\":0.07039861111111112,\"spare_card\":0.11421297701105623,\"victory_point\":1.0}",
+            "--stance",
+            "win",
+            "--temperature",
+            "2.476644394795811",
+            "--gate",
+            "vs-shipped",
+            "--games",
+            "1000",
+            "--workers",
+            "30",
+            "--seed",
+            "620100000",
+            "--out",
+            "/out/round6000-confirmation-vs-shipped-620100000.json"
+        ],
+        "State": {
+            "Status": "exited",
+            "Running": false,
+            "Paused": false,
+            "Restarting": false,
+            "OOMKilled": false,
+            "Dead": false,
+            "Pid": 0,
+            "ExitCode": 0,
+            "Error": "",
+            "StartedAt": "2026-09-11T00:24:09.55809178Z",
+            "FinishedAt": "2026-09-11T00:26:52.13082173Z"
+        },
+        "Image": "sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+        "ResolvConfPath": "/var/lib/docker/containers/6db94f7e27757df72ed93ebe0f22b42d919a25a6cad447367021283caa8bf0e1/resolv.conf",
+        "HostnamePath": "/var/lib/docker/containers/6db94f7e27757df72ed93ebe0f22b42d919a25a6cad447367021283caa8bf0e1/hostname",
+        "HostsPath": "/var/lib/docker/containers/6db94f7e27757df72ed93ebe0f22b42d919a25a6cad447367021283caa8bf0e1/hosts",
+        "LogPath": "/var/lib/docker/containers/6db94f7e27757df72ed93ebe0f22b42d919a25a6cad447367021283caa8bf0e1/6db94f7e27757df72ed93ebe0f22b42d919a25a6cad447367021283caa8bf0e1-json.log",
+        "Name": "/luna-round6000-confirm-vs-shipped",
+        "RestartCount": 0,
+        "Driver": "overlayfs",
+        "Platform": "linux",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "",
+        "ExecIDs": null,
+        "HostConfig": {
+            "Binds": [
+                "/home/bsm/tmp/hexset-luna-followon-certified:/study:ro",
+                "/home/bsm/tmp/luna-round6000-confirmation:/out:rw"
+            ],
+            "ContainerIDFile": "",
+            "LogConfig": {
+                "Type": "json-file",
+                "Config": {}
+            },
+            "NetworkMode": "none",
+            "PortBindings": {},
+            "RestartPolicy": {
+                "Name": "no",
+                "MaximumRetryCount": 0
+            },
+            "AutoRemove": false,
+            "VolumeDriver": "",
+            "VolumesFrom": null,
+            "ConsoleSize": [
+                0,
+                0
+            ],
+            "CapAdd": null,
+            "CapDrop": null,
+            "CgroupnsMode": "private",
+            "Dns": null,
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": null,
+            "GroupAdd": null,
+            "IpcMode": "private",
+            "Cgroup": "",
+            "Links": null,
+            "OomScoreAdj": 0,
+            "PidMode": "",
+            "Privileged": false,
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": false,
+            "SecurityOpt": null,
+            "UTSMode": "",
+            "UsernsMode": "",
+            "ShmSize": 67108864,
+            "Runtime": "runc",
+            "Isolation": "",
+            "CpuShares": 0,
+            "Memory": 0,
+            "NanoCpus": 30000000000,
+            "CgroupParent": "",
+            "BlkioWeight": 0,
+            "BlkioWeightDevice": [],
+            "BlkioDeviceReadBps": [],
+            "BlkioDeviceWriteBps": [],
+            "BlkioDeviceReadIOps": [],
+            "BlkioDeviceWriteIOps": [],
+            "CpuPeriod": 0,
+            "CpuQuota": 0,
+            "CpuRealtimePeriod": 0,
+            "CpuRealtimeRuntime": 0,
+            "CpusetCpus": "",
+            "CpusetMems": "",
+            "Devices": [],
+            "DeviceCgroupRules": null,
+            "DeviceRequests": null,
+            "MemoryReservation": 0,
+            "MemorySwap": 0,
+            "MemorySwappiness": null,
+            "OomKillDisable": null,
+            "PidsLimit": null,
+            "Ulimits": [],
+            "CpuCount": 0,
+            "CpuPercent": 0,
+            "IOMaximumIOps": 0,
+            "IOMaximumBandwidth": 0,
+            "MaskedPaths": [
+                "/proc/acpi",
+                "/proc/asound",
+                "/proc/interrupts",
+                "/proc/kcore",
+                "/proc/keys",
+                "/proc/latency_stats",
+                "/proc/sched_debug",
+                "/proc/scsi",
+                "/proc/timer_list",
+                "/proc/timer_stats",
+                "/sys/devices/virtual/powercap",
+                "/sys/firmware"
+            ],
+            "ReadonlyPaths": [
+                "/proc/bus",
+                "/proc/fs",
+                "/proc/irq",
+                "/proc/sys",
+                "/proc/sysrq-trigger"
+            ]
+        },
+        "Storage": {
+            "RootFS": {
+                "Snapshot": {
+                    "Name": "overlayfs"
+                }
+            }
+        },
+        "Mounts": [
+            {
+                "Type": "bind",
+                "Source": "/home/bsm/tmp/hexset-luna-followon-certified",
+                "Destination": "/study",
+                "Mode": "ro",
+                "RW": false,
+                "Propagation": "rprivate"
+            },
+            {
+                "Type": "bind",
+                "Source": "/home/bsm/tmp/luna-round6000-confirmation",
+                "Destination": "/out",
+                "Mode": "rw",
+                "RW": true,
+                "Propagation": "rprivate"
+            }
+        ],
+        "Config": {
+            "Hostname": "6db94f7e2775",
+            "Domainname": "",
+            "User": "1000:1000",
+            "AttachStdin": false,
+            "AttachStdout": false,
+            "AttachStderr": false,
+            "ExposedPorts": {
+                "8770/tcp": {}
+            },
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "PYTHONHASHSEED=0",
+                "OMP_NUM_THREADS=1",
+                "OPENBLAS_NUM_THREADS=1",
+                "MKL_NUM_THREADS=1",
+                "PYTHONPATH=/study/src",
+                "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "LANG=C.UTF-8",
+                "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+                "PYTHON_VERSION=3.12.14",
+                "PYTHON_SHA256=5c8462af5790baf43a321a1559dbe0db06d1be4300fb85fb53c40060668e548a",
+                "HOME=/tmp",
+                "PYTHONDONTWRITEBYTECODE=1",
+                "PYTHONUNBUFFERED=1",
+                "HEXSET_UI_MODELS_DIR=/app/models",
+                "HEXSET_UI_GAMES_DIR=/app/games"
+            ],
+            "Cmd": [
+                "-m",
+                "hexset.catanatron.evolve_candidate_eval",
+                "--candidate-id",
+                "g6000-p10",
+                "--weights-json",
+                "{\"buy_progress\":0.4606045314909384,\"diversity\":0.360074083309872,\"knight\":0.16043960472833257,\"port\":0.019305197991678444,\"production\":3.8803981040675644,\"road\":0.00019147194463070284,\"robber_risk\":-0.31245697996217825,\"scarce\":0.07039861111111112,\"spare_card\":0.11421297701105623,\"victory_point\":1.0}",
+                "--stance",
+                "win",
+                "--temperature",
+                "2.476644394795811",
+                "--gate",
+                "vs-shipped",
+                "--games",
+                "1000",
+                "--workers",
+                "30",
+                "--seed",
+                "620100000",
+                "--out",
+                "/out/round6000-confirmation-vs-shipped-620100000.json"
+            ],
+            "Image": "58c092875440",
+            "Volumes": null,
+            "WorkingDir": "/study",
+            "Entrypoint": [
+                "python"
+            ],
+            "Labels": {
+                "com.docker.compose.project": "hexset-ui-local-proof",
+                "com.docker.compose.service": "hexset",
+                "com.docker.compose.version": "5.3.1",
+                "desktop.docker.io/wsl-distro": "Debian",
+                "org.opencontainers.image.source": "https://github.com/0xBrsm/HexSet",
+                "org.opencontainers.image.title": "HexSet"
+            },
+            "StopTimeout": 1
+        },
+        "NetworkSettings": {
+            "SandboxID": "",
+            "SandboxKey": "",
+            "Ports": {},
+            "Networks": {
+                "none": {
+                    "IPAMConfig": null,
+                    "Links": null,
+                    "Aliases": null,
+                    "DriverOpts": null,
+                    "GwPriority": 0,
+                    "NetworkID": "416e73a29b233066df32ed41b5f9c511e460c075e37c681919ea9998b55e931b",
+                    "EndpointID": "",
+                    "Gateway": "",
+                    "IPAddress": "",
+                    "MacAddress": "",
+                    "IPPrefixLen": 0,
+                    "IPv6Gateway": "",
+                    "GlobalIPv6Address": "",
+                    "GlobalIPv6PrefixLen": 0,
+                    "DNSNames": null
+                }
+            }
+        },
+        "ImageManifestDescriptor": {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:03da0c431ea384179c5a96b30561a8d47984b71d874148a650a51ef947089224",
+            "size": 2005,
+            "platform": {
+                "architecture": "amd64",
+                "os": "linux"
+            }
+        }
+    }
+]

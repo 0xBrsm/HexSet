@@ -17,7 +17,7 @@ import random
 from hexset.arena import Entrant, register_entrant_kind, register_preset
 from hexset.board.board import Board
 
-from .search import Heximax, heximax
+from .search import DEFAULT_MAX_NODES, Heximax, heximax
 
 
 def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Heximax:
@@ -31,10 +31,13 @@ def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Heximax:
         mode=entrant.mode,
         depth=entrant.depth,
         width=entrant.width,
+        max_nodes=entrant.max_nodes if entrant.max_nodes is not None else DEFAULT_MAX_NODES,
+        port_aware=entrant.port_aware,
         max_trades=entrant.max_trades,
         k=entrant.k,
         weights=entrant.weights,
         temperature=entrant.temperature,
+        native_action_compat=entrant.native_action_compat,
     )
     if entrant.stance is not None:
         kwargs["stance"] = entrant.stance

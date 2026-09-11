@@ -1,0 +1,24 @@
+{
+  "host": "wintermute",
+  "wsl_distribution": "Debian",
+  "remote_directory": "/home/bsm/tmp/hexset-1v1-notrade.Z1iFLS",
+  "container_name": "hexset-1v1-notrade-20260910",
+  "container_id": "52cba31eb73971323b85a79390ac170fa6b9be41e62861a11998784cfdae1d9a",
+  "image": "sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+  "hexset_head": "d5ec5eb99adc3012478e5075bb5c94e7f0fd6f79",
+  "source_archive_sha256": "364c2b53aaba7641022394f3165524bd05874b305a18e18dc33728627279c295",
+  "source_archive": "hexset-1v1-notrade-20260910.tar.gz",
+  "source_note": "Snapshot includes uncommitted trade_curve benchmark modules; shipped Heximax policy files unchanged.",
+  "players": "DC:heximax-notrade,AB:2",
+  "games": 300,
+  "workers": 30,
+  "games_per_worker": 10,
+  "seed": 20260910,
+  "shard_seeds": [
+    20260910,
+    20260939
+  ],
+  "pythonhashseed": "0",
+  "player_trading": false,
+  "catanatron_commit": "d3f4ad05bb78d8b2309631d6d3cfa8fcb6fda816"
+}

@@ -1,0 +1,32 @@
+{
+  "unique_game_seeds": 300,
+  "unique_game_ids": 300,
+  "raw_records_read": 300,
+  "heximax_by_initial_seat": {
+    "0": {
+      "games": 146,
+      "wins": 92
+    },
+    "1": {
+      "games": 154,
+      "wins": 102
+    }
+  },
+  "raw_archive_sha256": "f62dc0ddd963692683d39f8a2b4939afad9c2c6761c65d3b558a8a9d1c7407c7",
+  "raw_outcomes_match_summary": true,
+  "action_counts": {
+    "BUILD_SETTLEMENT": 2612,
+    "BUILD_ROAD": 5581,
+    "ROLL": 20978,
+    "END_TURN": 20714,
+    "MARITIME_TRADE": 3701,
+    "BUY_DEVELOPMENT_CARD": 1375,
+    "PLAY_KNIGHT_CARD": 731,
+    "MOVE_ROBBER": 4200,
+    "BUILD_CITY": 957,
+    "PLAY_MONOPOLY": 109,
+    "DISCARD_RESOURCE": 2363,
+    "PLAY_ROAD_BUILDING": 89,
+    "PLAY_YEAR_OF_PLENTY": 110
+  }
+}

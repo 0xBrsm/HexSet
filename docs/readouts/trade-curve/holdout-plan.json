@@ -1,0 +1,38 @@
+{
+  "registered_at": "2026-09-10T05:05:52.936576+00:00",
+  "study_seed": 420000,
+  "training_blocks": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "holdout_blocks": [
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+  ],
+  "environment_weights": [
+    0.3333333333333333,
+    0.3333333333333333,
+    0.3333333333333333
+  ],
+  "static_selection": "highest aggregate focal wins across all three rates; ties prefer alpha 1, then alpha .5, then alpha 0",
+  "adaptive_selection": "highest focal wins within each rate; ties prefer the selected static alpha, then closest alpha to it, then higher alpha",
+  "held_out_comparisons": [
+    "selected static versus alpha 1",
+    "selected per-rate mapping versus selected static"
+  ],
+  "confidence": "97.5% two-sided normal intervals per comparison, Bonferroni family-wise 95% for these two secondary holdout comparisons",
+  "primary_interaction_unchanged": true,
+  "note": "No holdout outcomes have been generated at registration; the original pilot is not used for selection."
+}

@@ -157,6 +157,58 @@ Commands are modules under `hexset.bench`; each provides `--help`.
 | `fit_duel` | Compare a fitted weights/temperature pair with an incumbent |
 | `ablate` | Zero each Heximax evaluation term; select `--profile trading` or `notrade` |
 | `weight_sweep` | Evaluate candidate term weights in paired games |
+| `trade_curve` | Test blends of Heximax profiles against controlled opponent trade participation |
+| `trade_curve_study` | Run a resumable fixed-sample grid and measure the weight-by-willingness interaction |
+| `trade_curve_holdout` | Select weights on early blocks and validate them on held-out boards |
+
+For a first trade-frequency experiment:
+
+```sh
+python -m hexset.bench.trade_curve --games 128 --workers 4 --rates 0,0.5,1 --alphas 0,0.5,1 --out trade-curve.json
+```
+
+Each cell seats one focal player against three Heximax opponents with fixed
+trading-profile move weights. The focal move weights interpolate from the
+no-trade profile (`alpha=0`) to the trading profile (`alpha=1`). Every player's
+trade valuation uses the trading profile throughout, including the focal
+player, so changes in acceptance criteria do not confound the weight test.
+Opening placements retain Heximax's shared placement prior.
+
+Opponent willingness is fixed for an entire game turn, with separate,
+reproducible draws for initiating on their own turn and responding on another
+player's turn. `--rates` ties those probabilities together; for example,
+`--regimes 0:0,0:1,1:0,0.5:0.5,1:1` varies them independently. Willing players
+still require both sides to expect a positive gain at the zero threshold. These controls
+model participation in automatic arena clearing, not acceptance percentages
+of server offers. Bank and port exchanges remain normal actions.
+
+This experiment defaults to a **zero gain threshold for every player**: both
+sides must expect a strictly positive gain. The shipped Heximax threshold
+makes trades too rare to study opponent trade frequency. Production presets
+are unchanged. `--trade-floor` is available for explicitly labeled follow-up
+controls; all weight comparisons in the initial experiment use zero.
+
+The report retains per-game outcomes and completed-trade counts, with board
+clustered comparisons against `alpha=1` on the same seeds and seat rotations.
+Small runs check the harness; hundreds of games per cell may still leave
+small differences unresolved. The grid is exploratory and tests only the line
+between existing weights. Confirm a selected blend on fresh seeds before
+adopting it; a measured relationship need not be linear or monotonic.
+
+The larger study runs the same grid in complete blocks and checkpoints every
+cell. Repeating its command resumes completed work; changing the plan or source
+requires a new output directory. Its primary contrast is the change in the
+trading-versus-no-trade weight advantage from willingness zero to one. It uses
+a fixed sample size rather than stopping when significance appears.
+
+```sh
+OPENBLAS_NUM_THREADS=1 python -m hexset.bench.trade_curve_study --games 1024 --chunk-games 64 --workers 30 --out trade-curve-study
+```
+
+`--games` is per cell, so this command runs 9,216 games on 512 shared board
+pairs. All gates have threshold zero. The 30-worker study is intended for
+Wintermute; [its launch record](readouts/trade-curve/wintermute-launch.json)
+identifies the isolated source snapshot and execution environment.
 
 `hexset.bench.versus.compete_batched` is the programmatic runner for batched
 policies. It shares the arena's board and seating rules while scheduling

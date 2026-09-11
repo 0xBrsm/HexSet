@@ -1,0 +1,1 @@
+{"container_id":"2eea98688cd3","image":"58c092875440","status":"exited-cleanly","exit_code":0,"mount":"/home/bsm/tmp/hexset-luna-search-corrected:/study","workdir":"/study","pythonpath":"/study/src","pythonhashseed":"0","note":"The container used --rm, so docker inspect metadata was unavailable after completion; mount and runtime parameters are recorded from the launch command."}

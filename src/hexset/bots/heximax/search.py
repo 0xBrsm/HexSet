@@ -191,6 +191,7 @@ class Heximax:
     placement: bool = True
     mode: str = "honest"
     exact_roll_plies: int = EXACT_ROLL_PLIES
+    native_action_compat: bool = False
     # `win` stance only: the temperature the per-seat vector is read at,
     # `None` meaning `stances.WIN_TEMPERATURE`. A fitted vector and its
     # temperature are identified jointly (`hexset.fitting`), so a candidate
@@ -285,6 +286,8 @@ class Heximax:
                 seen.setdefault(action, None)
         options = list(seen)
         if not options:
+            if self.native_action_compat and game.phase is Phase.MAIN and game.free_roads > 0:
+                raise ValueError("native forced-road state has no legal road placement")
             options = options_for(game)
 
         monopolies = [a for a in options if a.type is ActionType.PLAY_MONOPOLY]
@@ -765,7 +768,13 @@ class Heximax:
         offers too.
         """
         del knower
-        return legal_actions(world)
+        options = legal_actions(world)
+        # Evolve candidates run against native Catanatron action legality.
+        # During post-roll Road Building, native Catanatron suppresses all
+        # MAIN actions until the remaining free roads are placed.
+        if self.native_action_compat and world.phase is Phase.MAIN and world.free_roads > 0:
+            return [a for a in options if a.type is ActionType.BUILD_ROAD]
+        return options
 
     def _value(self, game: Game, depth: int, knower: int, ply: int) -> list[float]:
         if depth <= 0 or is_over(game):
@@ -878,8 +887,8 @@ def heximax(
     board: Board, rng: random.Random | None = None, *, mode: str = "honest", depth: int = 2,
     width: int | None = 6, max_trades: int | None = BY_MODE,  # type: ignore[assignment]
     max_nodes: int = DEFAULT_MAX_NODES, k: int = 1, stance: str = "win",
-    placement: bool = True, exact_progress_samples: int = 0, weights: Weights | None = None,
-    temperature: float | None = None,
+    placement: bool = True, exact_progress_samples: int = 0, port_aware: bool = False, weights: Weights | None = None,
+    temperature: float | None = None, native_action_compat: bool = False,
 ) -> Heximax:
     """The two shipped configurations, by `mode`.
 
@@ -902,7 +911,7 @@ def heximax(
         max_trades = 0 if mode == "notrade" else None
     if weights is None:
         weights = NO_TRADE_WEIGHTS if mode == "notrade" else TRADING_WEIGHTS
-    evaluator = HonestEvaluator(board, weights, exact_progress_samples=exact_progress_samples)
+    evaluator = HonestEvaluator(board, weights, exact_progress_samples=exact_progress_samples, port_aware=port_aware)
     return Heximax(
         evaluator,
         depth=depth,
@@ -915,4 +924,5 @@ def heximax(
         placement=placement,
         mode=mode,
         temperature=temperature,
+        native_action_compat=native_action_compat,
     )

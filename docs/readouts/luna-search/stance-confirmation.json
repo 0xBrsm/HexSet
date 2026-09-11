@@ -1,0 +1,13 @@
+{
+  "candidate": "win-T1",
+  "games": 1024,
+  "seed": 2100000,
+  "gates": {
+    "vs-ab2": {"red_wins": 445, "games": 1024, "rate": 0.4345703125, "point_gate": false},
+    "vs-shipped": {"red_wins": 263, "games": 1024, "rate": 0.2568359375, "point_gate": true}
+  },
+  "decision": "CONFIRMATION_POINT_GATE_FAIL_AB2",
+  "source_sha256": "2a5f659e4ae11743a23817865d8c083c2b301462305abbddc7cf82eab7d63dbe",
+  "artifact": "/home/bsm/tmp/hexset-luna-validation-corrected/validation/confirmation.json",
+  "recorded_utc": "2026-09-10T16:48:02Z"
+}

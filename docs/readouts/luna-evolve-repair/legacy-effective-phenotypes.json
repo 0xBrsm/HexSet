@@ -1,0 +1,484 @@
+{
+  "candidates": {
+    "g00-p00": {
+      "declared_weights": {
+        "buy_progress": 0.4130085529974732,
+        "diversity": 0.34272192658538697,
+        "knight": 0.09591326537384239,
+        "port": 0.0412224009109739,
+        "production": 3.1053871786452274,
+        "road": 0.13454969820708562,
+        "robber_risk": -0.27227347222905374,
+        "scarce": 0.07849728701575437,
+        "spare_card": 0.1081028209948184,
+        "victory_point": 1.0
+      },
+      "effective_weights": {
+        "buy_progress": 0.4130085529974732,
+        "diversity": 0.34272192658538697,
+        "knight": 0.09591326537384239,
+        "port": 0.0412224009109739,
+        "production": 3.1053871786452274,
+        "road": 0.13454969820708562,
+        "robber_risk": -0.27227347222905374,
+        "scarce": 0.07039861111111112,
+        "spare_card": 0.1081028209948184,
+        "victory_point": 1.0
+      },
+      "scarce_binding": "baseline_no_trade",
+      "search": {
+        "depth": 2,
+        "k": 1,
+        "max_nodes": 600,
+        "max_trades": 0,
+        "mode": "notrade",
+        "stance": "win",
+        "temperature": 2.476644394795811,
+        "width": 6
+      }
+    },
+    "g00-p01": {
+      "declared_weights": {
+        "buy_progress": 0.5279218643829101,
+        "diversity": 0.38692515301933594,
+        "knight": 0.1061264093411097,
+        "port": 0.020649378629540242,
+        "production": 3.709210422189416,
+        "road": 0.0,
+        "robber_risk": -0.29354552100549847,
+        "scarce": 0.09376059678312136,
+        "spare_card": 0.12781034252960838,
+        "victory_point": 1.0
+      },
+      "effective_weights": {
+        "buy_progress": 0.5279218643829101,
+        "diversity": 0.38692515301933594,
+        "knight": 0.1061264093411097,
+        "port": 0.020649378629540242,
+        "production": 3.709210422189416,
+        "road": 0.0,
+        "robber_risk": -0.29354552100549847,
+        "scarce": 0.07039861111111112,
+        "spare_card": 0.12781034252960838,
+        "victory_point": 1.0
+      },
+      "scarce_binding": "baseline_no_trade",
+      "search": {
+        "depth": 2,
+        "k": 1,
+        "max_nodes": 600,
+        "max_trades": 0,
+        "mode": "notrade",
+        "stance": "win",
+        "temperature": 2.476644394795811,
+        "width": 6
+      }
+    },
+    "g00-p02": {
+      "declared_weights": {
+        "buy_progress": 0.592826516314759,
+        "diversity": 0.35819997917740326,
+        "knight": 0.09216599438177604,
+        "port": 0.02400927273046908,
+        "production": 3.1191329470974667,
+        "road": 0.0,
+        "robber_risk": -0.16380936448697253,
+        "scarce": 0.07884474949607485,
+        "spare_card": 0.11670588656228092,
+        "victory_point": 1.0
+      },
+      "effective_weights": {
+        "buy_progress": 0.592826516314759,
+        "diversity": 0.35819997917740326,
+        "knight": 0.09216599438177604,
+        "port": 0.02400927273046908,
+        "production": 3.1191329470974667,
+        "road": 0.0,
+        "robber_risk": -0.16380936448697253,
+        "scarce": 0.07039861111111112,
+        "spare_card": 0.11670588656228092,
+        "victory_point": 1.0
+      },
+      "scarce_binding": "baseline_no_trade",
+      "search": {
+        "depth": 2,
+        "k": 1,
+        "max_nodes": 600,
+        "max_trades": 0,
+        "mode": "notrade",
+        "stance": "win",
+        "temperature": 2.476644394795811,
+        "width": 6
+      }
+    },
+    "g00-p03": {
+      "declared_weights": {
+        "buy_progress": 0.3874882993184114,
+        "diversity": 0.44780216743959367,
+        "knight": 0.11926666190724719,
+        "port": 0.027404285518687163,
+        "production": 1.382422218966912,
+        "road": 0.000698900631345514,
+        "robber_risk": -0.27329785614721147,
+        "scarce": 0.034944561646108055,
+        "spare_card": 0.11568383806075816,
+        "victory_point": 1.0
+      },
+      "effective_weights": {
+        "buy_progress": 0.3874882993184114,
+        "diversity": 0.44780216743959367,
+        "knight": 0.11926666190724719,
+        "port": 0.027404285518687163,
+        "production": 1.382422218966912,
+        "road": 0.000698900631345514,
+        "robber_risk": -0.27329785614721147,
+        "scarce": 0.07039861111111112,
+        "spare_card": 0.11568383806075816,
+        "victory_point": 1.0
+      },
+      "scarce_binding": "baseline_no_trade",
+      "search": {
+        "depth": 2,
+        "k": 1,
+        "max_nodes": 600,
+        "max_trades": 0,
+        "mode": "notrade",
+        "stance": "win",
+        "temperature": 2.476644394795811,
+        "width": 6
+      }
+    },
+    "g00-p04": {
+      "declared_weights": {
+        "buy_progress": 0.6278265387343228,
+        "diversity": 0.38831684120351573,
+        "knight": 0.10884260750914995,
+        "port": 0.054365252669491174,
+        "production": 2.5417371495666763,
+        "road": 0.009388816534480211,
+        "robber_risk": -0.2951472777549431,
+        "scarce": 0.06424946683626877,
+        "spare_card": 0.0759035046131388,
+        "victory_point": 1.0
+      },
+      "effective_weights": {
+        "buy_progress": 0.6278265387343228,
+        "diversity": 0.38831684120351573,
+        "knight": 0.10884260750914995,
+        "port": 0.054365252669491174,
+        "production": 2.5417371495666763,
+        "road": 0.009388816534480211,
+        "robber_risk": -0.2951472777549431,
+        "scarce": 0.07039861111111112,
+        "spare_card": 0.0759035046131388,
+        "victory_point": 1.0
+      },
+      "scarce_binding": "baseline_no_trade",
+      "search": {
+        "depth": 2,
+        "k": 1,
+        "max_nodes": 600,
+        "max_trades": 0,
+        "mode": "notrade",
+        "stance": "win",
+        "temperature": 2.476644394795811,
+        "width": 6
+      }
+    },
+    "g00-p05": {
+      "declared_weights": {
+        "buy_progress": 0.5314102764189538,
+        "diversity": 0.3147653380950709,
+        "knight": 0.0815601245479109,
+        "port": 0.03906816742646386,
+        "production": 2.8541445376997303,
+        "road": 0.11993118119335447,
+        "robber_risk": -0.2589315683710033,
+        "scarce": 0.07214643136963207,
+        "spare_card": 0.132650602255387,
+        "victory_point": 1.0
+      },
+      "effective_weights": {
+        "buy_progress": 0.5314102764189538,
+        "diversity": 0.3147653380950709,
+        "knight": 0.0815601245479109,
+        "port": 0.03906816742646386,
+        "production": 2.8541445376997303,
+        "road": 0.11993118119335447,
+        "robber_risk": -0.2589315683710033,
+        "scarce": 0.07039861111111112,
+        "spare_card": 0.132650602255387,
+        "victory_point": 1.0
+      },
+      "scarce_binding": "baseline_no_trade",
+      "search": {
+        "depth": 2,
+        "k": 1,
+        "max_nodes": 600,
+        "max_trades": 0,
+        "mode": "notrade",
+        "stance": "win",
+        "temperature": 2.476644394795811,
+        "width": 6
+      }
+    },
+    "g00-p06": {
+      "declared_weights": {
+        "buy_progress": 0.49266742842557953,
+        "diversity": 0.27413266494902194,
+        "knight": 0.10206867603515178,
+        "port": 0.0403851167981675,
+        "production": 3.185349226263347,
+        "road": 0.0010896254360122167,
+        "robber_risk": -0.26508529621752885,
+        "scarce": 0.08051854988610127,
+        "spare_card": 0.12204889200824866,
+        "victory_point": 1.0
+      },
+      "effective_weights": {
+        "buy_progress": 0.49266742842557953,
+        "diversity": 0.27413266494902194,
+        "knight": 0.10206867603515178,
+        "port": 0.0403851167981675,
+        "production": 3.185349226263347,
+        "road": 0.0010896254360122167,
+        "robber_risk": -0.26508529621752885,
+        "scarce": 0.07039861111111112,
+        "spare_card": 0.12204889200824866,
+        "victory_point": 1.0
+      },
+      "scarce_binding": "baseline_no_trade",
+      "search": {
+        "depth": 2,
+        "k": 1,
+        "max_nodes": 600,
+        "max_trades": 0,
+        "mode": "notrade",
+        "stance": "win",
+        "temperature": 2.476644394795811,
+        "width": 6
+      }
+    },
+    "g00-p07": {
+      "declared_weights": {
+        "buy_progress": 0.6926223778353636,
+        "diversity": 0.3174392937669561,
+        "knight": 0.09000955169264276,
+        "port": 0.05400542184700552,
+        "production": 2.7268571755575675,
+        "road": 0.0,
+        "robber_risk": -0.1612327496924534,
+        "scarce": 0.06892888971548296,
+        "spare_card": 0.09936363897554193,
+        "victory_point": 1.0
+      },
+      "effective_weights": {
+        "buy_progress": 0.6926223778353636,
+        "diversity": 0.3174392937669561,
+        "knight": 0.09000955169264276,
+        "port": 0.05400542184700552,
+        "production": 2.7268571755575675,
+        "road": 0.0,
+        "robber_risk": -0.1612327496924534,
+        "scarce": 0.07039861111111112,
+        "spare_card": 0.09936363897554193,
+        "victory_point": 1.0
+      },
+      "scarce_binding": "baseline_no_trade",
+      "search": {
+        "depth": 2,
+        "k": 1,
+        "max_nodes": 600,
+        "max_trades": 0,
+        "mode": "notrade",
+        "stance": "win",
+        "temperature": 2.476644394795811,
+        "width": 6
+      }
+    },
+    "g00-p08": {
+      "declared_weights": {
+        "buy_progress": 0.37502497488226694,
+        "diversity": 0.3109681096242852,
+        "knight": 0.11200113222375957,
+        "port": 0.05380208663464747,
+        "production": 1.0044369859337798,
+        "road": 0.0,
+        "robber_risk": -0.3438005710114926,
+        "scarce": 0.02538993492221499,
+        "spare_card": 0.09559619252327681,
+        "victory_point": 1.0
+      },
+      "effective_weights": {
+        "buy_progress": 0.37502497488226694,
+        "diversity": 0.3109681096242852,
+        "knight": 0.11200113222375957,
+        "port": 0.05380208663464747,
+        "production": 1.0044369859337798,
+        "road": 0.0,
+        "robber_risk": -0.3438005710114926,
+        "scarce": 0.07039861111111112,
+        "spare_card": 0.09559619252327681,
+        "victory_point": 1.0
+      },
+      "scarce_binding": "baseline_no_trade",
+      "search": {
+        "depth": 2,
+        "k": 1,
+        "max_nodes": 600,
+        "max_trades": 0,
+        "mode": "notrade",
+        "stance": "win",
+        "temperature": 2.476644394795811,
+        "width": 6
+      }
+    },
+    "g00-p09": {
+      "declared_weights": {
+        "buy_progress": 0.7344664159483408,
+        "diversity": 0.28234525384979,
+        "knight": 0.0923598112110609,
+        "port": 0.030593347397359832,
+        "production": 2.711578685682967,
+        "road": 0.0,
+        "robber_risk": -0.3704227053290554,
+        "scarce": 0.06854268344365279,
+        "spare_card": 0.12174208687553448,
+        "victory_point": 1.0
+      },
+      "effective_weights": {
+        "buy_progress": 0.7344664159483408,
+        "diversity": 0.28234525384979,
+        "knight": 0.0923598112110609,
+        "port": 0.030593347397359832,
+        "production": 2.711578685682967,
+        "road": 0.0,
+        "robber_risk": -0.3704227053290554,
+        "scarce": 0.07039861111111112,
+        "spare_card": 0.12174208687553448,
+        "victory_point": 1.0
+      },
+      "scarce_binding": "baseline_no_trade",
+      "search": {
+        "depth": 2,
+        "k": 1,
+        "max_nodes": 600,
+        "max_trades": 0,
+        "mode": "notrade",
+        "stance": "win",
+        "temperature": 2.476644394795811,
+        "width": 6
+      }
+    },
+    "g00-p10": {
+      "declared_weights": {
+        "buy_progress": 0.423030055740795,
+        "diversity": 0.38867945165611745,
+        "knight": 0.09366322595411021,
+        "port": 0.051878494497606356,
+        "production": 2.5077158080658553,
+        "road": 0.09070453505362173,
+        "robber_risk": -0.2750780328838512,
+        "scarce": 0.06338948292610912,
+        "spare_card": 0.11435996934589056,
+        "victory_point": 1.0
+      },
+      "effective_weights": {
+        "buy_progress": 0.423030055740795,
+        "diversity": 0.38867945165611745,
+        "knight": 0.09366322595411021,
+        "port": 0.051878494497606356,
+        "production": 2.5077158080658553,
+        "road": 0.09070453505362173,
+        "robber_risk": -0.2750780328838512,
+        "scarce": 0.07039861111111112,
+        "spare_card": 0.11435996934589056,
+        "victory_point": 1.0
+      },
+      "scarce_binding": "baseline_no_trade",
+      "search": {
+        "depth": 2,
+        "k": 1,
+        "max_nodes": 600,
+        "max_trades": 0,
+        "mode": "notrade",
+        "stance": "win",
+        "temperature": 2.476644394795811,
+        "width": 6
+      }
+    },
+    "g00-p11": {
+      "declared_weights": {
+        "buy_progress": 0.4713351096396097,
+        "diversity": 0.40726178674899727,
+        "knight": 0.11757067411202365,
+        "port": 0.035818365471429026,
+        "production": 4.239054311305701,
+        "road": 0.007816579776769389,
+        "robber_risk": -0.3466035342985284,
+        "scarce": 0.10715387286911632,
+        "spare_card": 0.12562333311866652,
+        "victory_point": 1.0
+      },
+      "effective_weights": {
+        "buy_progress": 0.4713351096396097,
+        "diversity": 0.40726178674899727,
+        "knight": 0.11757067411202365,
+        "port": 0.035818365471429026,
+        "production": 4.239054311305701,
+        "road": 0.007816579776769389,
+        "robber_risk": -0.3466035342985284,
+        "scarce": 0.07039861111111112,
+        "spare_card": 0.12562333311866652,
+        "victory_point": 1.0
+      },
+      "scarce_binding": "baseline_no_trade",
+      "search": {
+        "depth": 2,
+        "k": 1,
+        "max_nodes": 600,
+        "max_trades": 0,
+        "mode": "notrade",
+        "stance": "win",
+        "temperature": 2.476644394795811,
+        "width": 6
+      }
+    }
+  },
+  "dataset_binding": {
+    "archive_root": "/data/data/com.termux/files/usr/tmp/luna-repair-archive-11f2ae/evolve",
+    "checkpoint": "/data/data/com.termux/files/usr/tmp/luna-repair-archive-11f2ae/evolve/checkpoint.json",
+    "generation": 0,
+    "generation_one_ancillary_records": 582,
+    "generation_one_ancillary_status": "excluded_from_selection",
+    "generation_zero_discovery_records": 2880,
+    "generation_zero_expected_records": 2880,
+    "raw_concatenated_digest_from_readiness": "bbbcffd22c4df2b40feced22df3da7797c3d4013f197af54d9c01903f0be279d"
+  },
+  "future_boundary": {
+    "coupled_scarcity_fit": "separate experiment only, with new source/protocol and disjoint seeds; never append to this dataset",
+    "planned_confirmation": "same legacy effective phenotype; no candidate-specific scarcity",
+    "sidecar_required_for_approved_upload": true
+  },
+  "kind": "legacy-effective-phenotypes",
+  "legacy_effective_semantics": {
+    "candidate_specific_scarce_applied": false,
+    "domestic_trades": false,
+    "effective_scarce": 0.07039861111111112,
+    "maritime_trades": true,
+    "scarce_binding": "baseline_no_trade"
+  },
+  "provenance": {
+    "legacy_checkpoint_sha256": "e0c5a13a41e166c7919d60c9cac7b7ac00e2eee0ce3efa9359acf344f7a67716",
+    "legacy_readiness_source_tree_hash": "9d1bf3f060ace5cdfc31ed65ac58fc98a8e9611e37146b5bd7068c4dcd816b4e",
+    "legacy_source_hash": "11f2ae946884b9062a07eb3fcc40e4350bf0d5f1aeda57dc25b46146c4f664eb",
+    "migration_manifest_sha256": "06f62ae431fd9170415aea118e075e6d74508ce30ff9bf1c1b72a764b11d4bb2",
+    "old_raw_record_count_from_readiness": 3462,
+    "ops_baseline_controller_sha256": "cc06ac8ca398e64f39dd8c41b8eac87e21c7937df8d0b7abce457dd3c244a107",
+    "recovery_wrapper_sha256": "6e67177389f444850a233ae627d509c9ac95f5d4aa3c887aa21c62650b291e0f",
+    "repaired_controller_sha256": "3b39bf32966aeacf6960019c95257fbb19b16179954c59fdca5f4c5b6cba5c13"
+  },
+  "purpose": "Bind pristine g00 discovery and the planned missing g00 confirmation records to the effective legacy evaluator phenotype.",
+  "schema": 1,
+  "status": "immutable_metadata_sidecar"
+}

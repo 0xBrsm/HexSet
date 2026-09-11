@@ -1,0 +1,24 @@
+[
+  {
+    "spec": "DCL:heximax-notrade,AB:2,AB:2,AB:2",
+    "candidate_class": "PublicLedgerPlayer",
+    "bot_class": "Heximax",
+    "candidate_color": "RED",
+    "winner": "BLUE",
+    "decisions_checked": 69,
+    "nonzero_opponent_decisions": 6,
+    "max_typed_opponent_cards": 1,
+    "fallbacks": 0
+  },
+  {
+    "spec": "DCL:heximax-notrade,DC:heximax-notrade,DC:heximax-notrade,DC:heximax-notrade",
+    "candidate_class": "PublicLedgerPlayer",
+    "bot_class": "Heximax",
+    "candidate_color": "RED",
+    "winner": "RED",
+    "decisions_checked": 62,
+    "nonzero_opponent_decisions": 11,
+    "max_typed_opponent_cards": 1,
+    "fallbacks": 0
+  }
+]

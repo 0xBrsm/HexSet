@@ -1,0 +1,29 @@
+{
+  "candidate": "depth3-width6-4800",
+  "games": 120,
+  "seed": 1010700,
+  "rows": [
+    {
+      "gate": "vs-ab2",
+      "games": 120,
+      "wins": {
+        "Color.RED": 43,
+        "Color.BLUE": 25,
+        "Color.ORANGE": 26,
+        "Color.WHITE": 26
+      },
+      "report": "120 games, 213.0s (0.56 games/sec)\n  catanatron 3.3.0 @ d3f4ad05bb78 | PYTHONHASHSEED=0 | seed 1010700 | workers 30 | 30 shards of 4, seeds 1010700-1010729\n  0:DC:heximax-search-depth3-width6-4800   43/120 =  35.8% [27.8%, 44.7%]   avg VP 7.61\n  1:AB:2                         25/120 =  20.8% [14.5%, 28.9%]   avg VP 6.87\n  2:AB:2                         26/120 =  21.7% [15.2%, 29.9%]   avg VP 6.80\n  3:AB:2                         26/120 =  21.7% [15.2%, 29.9%]   avg VP 6.64"
+    },
+    {
+      "gate": "vs-shipped",
+      "games": 120,
+      "wins": {
+        "Color.RED": 22,
+        "Color.BLUE": 35,
+        "Color.ORANGE": 26,
+        "Color.WHITE": 37
+      },
+      "report": "120 games, 34.1s (3.51 games/sec)\n  catanatron 3.3.0 @ d3f4ad05bb78 | PYTHONHASHSEED=0 | seed 1010700 | workers 30 | 30 shards of 4, seeds 1010700-1010729\n  0:DC:heximax-search-depth3-width6-4800   22/120 =  18.3% [12.4%, 26.2%]   avg VP 6.87\n  1:DC:heximax-notrade           35/120 =  29.2% [21.8%, 37.8%]   avg VP 7.50\n  2:DC:heximax-notrade           26/120 =  21.7% [15.2%, 29.9%]   avg VP 6.97\n  3:DC:heximax-notrade           37/120 =  30.8% [23.3%, 39.6%]   avg VP 7.36"
+    }
+  ]
+}

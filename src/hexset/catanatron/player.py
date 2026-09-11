@@ -77,6 +77,10 @@ class DevCatanPlayer(Player):
         self._bot = None
         self._rng = None
 
+    def _translation_ledger(self, game):
+        """Optional persistent public ledger hook; default remains memoryless."""
+        return None
+
     def decide(self, game, playable_actions):
         self.decisions += 1
         if self._mapping is None:
@@ -100,9 +104,14 @@ class DevCatanPlayer(Player):
             derived = (game.seed * len(_SEAT_INDEX) + _SEAT_INDEX[self.color]) & 0xFFFFFFFF
             self._rng = random.Random(derived)
 
-        our_game, seats = translate(game, self._mapping, self._rng)
+        our_game, seats = translate(game, self._mapping, self._rng, ledger=self._translation_ledger(game))
 
         if self._bot is None:
+            # Campaign aliases are native Heximax Entrants registered by this
+            # module. Import them in every worker before name resolution;
+            # fork inherits this state, while spawn starts with a clean arena.
+            if self.entrant_spec in ("heximax-notrade-wide", "heximax-fair-k4"):
+                from . import fair_budget  # noqa: F401
             entrant = replace(entrant_from_name(self.entrant_spec), max_trades=0)
             self._bot = spawn(entrant, self._mapping.board, self._rng)
 

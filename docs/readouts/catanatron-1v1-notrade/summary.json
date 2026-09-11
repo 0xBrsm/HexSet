@@ -1,0 +1,6325 @@
+{
+  "players": "DC:heximax-notrade,AB:2",
+  "seed": 20260910,
+  "workers": 30,
+  "games_per_worker": 10,
+  "games": 300,
+  "provenance": "catanatron 3.3.0 @ d3f4ad05bb78 | PYTHONHASHSEED=0",
+  "player_trading": false,
+  "seconds": 42.822336573852226,
+  "completed_games": 300,
+  "wins": {
+    "RED": 194,
+    "BLUE": 106
+  },
+  "points": {
+    "RED": [
+      10,
+      10,
+      10,
+      10,
+      10,
+      4,
+      10,
+      10,
+      10,
+      7,
+      8,
+      3,
+      11,
+      7,
+      9,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      6,
+      10,
+      7,
+      10,
+      10,
+      10,
+      7,
+      10,
+      3,
+      10,
+      10,
+      10,
+      11,
+      10,
+      10,
+      10,
+      9,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      3,
+      7,
+      10,
+      5,
+      5,
+      7,
+      10,
+      11,
+      7,
+      10,
+      10,
+      8,
+      3,
+      5,
+      10,
+      11,
+      10,
+      10,
+      10,
+      10,
+      4,
+      10,
+      11,
+      10,
+      10,
+      5,
+      10,
+      10,
+      10,
+      6,
+      5,
+      10,
+      7,
+      10,
+      11,
+      7,
+      5,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      11,
+      11,
+      10,
+      4,
+      10,
+      10,
+      10,
+      11,
+      7,
+      6,
+      5,
+      10,
+      10,
+      11,
+      10,
+      10,
+      2,
+      3,
+      10,
+      10,
+      10,
+      10,
+      6,
+      10,
+      10,
+      5,
+      6,
+      10,
+      10,
+      9,
+      11,
+      8,
+      10,
+      10,
+      6,
+      9,
+      6,
+      10,
+      10,
+      6,
+      5,
+      10,
+      9,
+      7,
+      8,
+      10,
+      3,
+      11,
+      10,
+      8,
+      5,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      9,
+      7,
+      7,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      6,
+      10,
+      10,
+      8,
+      10,
+      10,
+      10,
+      3,
+      10,
+      4,
+      11,
+      5,
+      10,
+      3,
+      10,
+      7,
+      7,
+      10,
+      3,
+      5,
+      10,
+      10,
+      10,
+      7,
+      10,
+      10,
+      5,
+      10,
+      10,
+      10,
+      10,
+      10,
+      11,
+      10,
+      5,
+      8,
+      10,
+      10,
+      10,
+      10,
+      10,
+      3,
+      4,
+      4,
+      10,
+      8,
+      10,
+      3,
+      7,
+      2,
+      10,
+      11,
+      10,
+      10,
+      6,
+      10,
+      8,
+      10,
+      7,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      4,
+      10,
+      5,
+      7,
+      10,
+      10,
+      8,
+      10,
+      11,
+      4,
+      10,
+      10,
+      6,
+      7,
+      6,
+      10,
+      8,
+      11,
+      9,
+      10,
+      10,
+      10,
+      11,
+      6,
+      10,
+      10,
+      10,
+      10,
+      10,
+      9,
+      10,
+      7,
+      2,
+      4,
+      11,
+      7,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      11,
+      6,
+      7,
+      10,
+      10,
+      4,
+      10,
+      6,
+      8,
+      10,
+      6,
+      10,
+      10,
+      10,
+      6,
+      11,
+      9,
+      7,
+      10,
+      7,
+      6,
+      5,
+      6,
+      10,
+      8,
+      11,
+      10,
+      10
+    ],
+    "BLUE": [
+      4,
+      5,
+      4,
+      4,
+      6,
+      10,
+      5,
+      3,
+      7,
+      10,
+      10,
+      10,
+      3,
+      10,
+      10,
+      5,
+      7,
+      5,
+      2,
+      7,
+      2,
+      5,
+      9,
+      10,
+      7,
+      11,
+      7,
+      9,
+      5,
+      10,
+      6,
+      10,
+      9,
+      6,
+      7,
+      3,
+      5,
+      5,
+      6,
+      10,
+      6,
+      9,
+      3,
+      7,
+      9,
+      9,
+      10,
+      10,
+      2,
+      10,
+      10,
+      10,
+      5,
+      4,
+      10,
+      7,
+      7,
+      10,
+      10,
+      10,
+      7,
+      4,
+      4,
+      7,
+      3,
+      6,
+      10,
+      3,
+      9,
+      6,
+      5,
+      10,
+      7,
+      4,
+      9,
+      10,
+      10,
+      7,
+      10,
+      2,
+      4,
+      10,
+      10,
+      8,
+      4,
+      4,
+      3,
+      7,
+      4,
+      6,
+      4,
+      3,
+      3,
+      3,
+      5,
+      10,
+      4,
+      4,
+      8,
+      5,
+      10,
+      11,
+      11,
+      6,
+      9,
+      8,
+      9,
+      5,
+      11,
+      10,
+      6,
+      2,
+      2,
+      4,
+      10,
+      5,
+      3,
+      10,
+      10,
+      4,
+      7,
+      10,
+      7,
+      10,
+      9,
+      4,
+      10,
+      10,
+      10,
+      6,
+      6,
+      10,
+      10,
+      8,
+      10,
+      10,
+      10,
+      7,
+      10,
+      6,
+      3,
+      10,
+      11,
+      4,
+      3,
+      5,
+      8,
+      6,
+      3,
+      7,
+      8,
+      6,
+      10,
+      10,
+      10,
+      5,
+      3,
+      3,
+      3,
+      7,
+      4,
+      3,
+      3,
+      5,
+      6,
+      10,
+      9,
+      4,
+      10,
+      5,
+      5,
+      3,
+      10,
+      5,
+      10,
+      5,
+      10,
+      9,
+      10,
+      6,
+      10,
+      10,
+      5,
+      10,
+      10,
+      8,
+      5,
+      4,
+      10,
+      3,
+      4,
+      10,
+      7,
+      7,
+      3,
+      9,
+      9,
+      6,
+      5,
+      10,
+      10,
+      6,
+      6,
+      4,
+      3,
+      4,
+      11,
+      10,
+      10,
+      2,
+      10,
+      7,
+      11,
+      12,
+      10,
+      6,
+      3,
+      2,
+      8,
+      10,
+      5,
+      10,
+      8,
+      10,
+      5,
+      2,
+      8,
+      3,
+      4,
+      7,
+      10,
+      3,
+      10,
+      10,
+      4,
+      7,
+      10,
+      6,
+      6,
+      10,
+      6,
+      6,
+      10,
+      10,
+      10,
+      4,
+      10,
+      4,
+      10,
+      4,
+      2,
+      4,
+      9,
+      10,
+      7,
+      2,
+      2,
+      6,
+      8,
+      10,
+      7,
+      10,
+      10,
+      10,
+      5,
+      10,
+      4,
+      7,
+      5,
+      4,
+      5,
+      6,
+      5,
+      10,
+      10,
+      7,
+      5,
+      10,
+      5,
+      10,
+      10,
+      6,
+      10,
+      8,
+      9,
+      2,
+      10,
+      4,
+      10,
+      10,
+      2,
+      10,
+      11,
+      10,
+      10,
+      4,
+      10,
+      4,
+      5,
+      6
+    ]
+  },
+  "fallbacks": 11,
+  "decisions": 32678,
+  "shards": [
+    {
+      "shard": 0,
+      "seed": 20260910,
+      "requested_games": 10,
+      "seconds": 32.509395865025,
+      "wins": {
+        "RED": 8,
+        "BLUE": 2
+      },
+      "points": {
+        "RED": [
+          10,
+          10,
+          10,
+          10,
+          10,
+          4,
+          10,
+          10,
+          10,
+          7
+        ],
+        "BLUE": [
+          4,
+          5,
+          4,
+          4,
+          6,
+          10,
+          5,
+          3,
+          7,
+          10
+        ]
+      },
+      "decisions": 1080,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "b12cc406-2d74-4ea9-890e-909e9901d157",
+          "seed": 6201072810068878964,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 50,
+          "actions": 142,
+          "points": {
+            "RED": 10,
+            "BLUE": 4
+          }
+        },
+        {
+          "id": "f944cfd7-d863-4ff5-88f1-8ae0042df47b",
+          "seed": 7535139125033631609,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 64,
+          "actions": 190,
+          "points": {
+            "RED": 10,
+            "BLUE": 5
+          }
+        },
+        {
+          "id": "6b43bf24-28fa-4366-8125-90d4615831c4",
+          "seed": 1393375377938473763,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 80,
+          "actions": 223,
+          "points": {
+            "RED": 10,
+            "BLUE": 4
+          }
+        },
+        {
+          "id": "cff4d5e8-79b6-4da0-b1d3-1beb5a7d7d61",
+          "seed": 202004504190331157,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 70,
+          "actions": 206,
+          "points": {
+            "RED": 10,
+            "BLUE": 4
+          }
+        },
+        {
+          "id": "cc274172-8092-4b69-b32a-7cd8e989ecee",
+          "seed": 6928279780794407944,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 120,
+          "actions": 374,
+          "points": {
+            "RED": 10,
+            "BLUE": 6
+          }
+        },
+        {
+          "id": "e33a755e-64ed-4a85-888a-1b1fcc883837",
+          "seed": 3162689014850458633,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 52,
+          "actions": 153,
+          "points": {
+            "BLUE": 10,
+            "RED": 4
+          }
+        },
+        {
+          "id": "9dc29e37-d0ea-4470-9d9b-8c0bc71c1965",
+          "seed": 6728421376980724634,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 69,
+          "actions": 196,
+          "points": {
+            "BLUE": 5,
+            "RED": 10
+          }
+        },
+        {
+          "id": "a0f179b7-3ec5-42b8-9097-5dc5077ad607",
+          "seed": 1868072028235396894,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 47,
+          "actions": 147,
+          "points": {
+            "BLUE": 3,
+            "RED": 10
+          }
+        },
+        {
+          "id": "aa5422bb-f7c1-43e8-9afc-18ff6fbaa305",
+          "seed": 8886593388251968849,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 79,
+          "actions": 232,
+          "points": {
+            "BLUE": 7,
+            "RED": 10
+          }
+        },
+        {
+          "id": "3a8c9af7-b010-41f6-9645-0a4ed39f4e1c",
+          "seed": 7479539059444422379,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 66,
+          "actions": 199,
+          "points": {
+            "BLUE": 10,
+            "RED": 7
+          }
+        }
+      ]
+    },
+    {
+      "shard": 1,
+      "seed": 20260911,
+      "requested_games": 10,
+      "seconds": 36.871132355881855,
+      "wins": {
+        "BLUE": 4,
+        "RED": 6
+      },
+      "points": {
+        "BLUE": [
+          10,
+          10,
+          3,
+          10,
+          10,
+          5,
+          7,
+          5,
+          2,
+          7
+        ],
+        "RED": [
+          8,
+          3,
+          11,
+          7,
+          9,
+          10,
+          10,
+          10,
+          10,
+          10
+        ]
+      },
+      "decisions": 1113,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "5dcec9d3-7838-481d-b6ee-21475e8f2aca",
+          "seed": 7032472741314808070,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 86,
+          "actions": 261,
+          "points": {
+            "BLUE": 10,
+            "RED": 8
+          }
+        },
+        {
+          "id": "f238aced-bd95-4d07-8646-b74f2dfc018b",
+          "seed": 7574149330070560348,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 67,
+          "actions": 214,
+          "points": {
+            "RED": 3,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "45dd1dfc-d16f-4249-809d-b90fedf0cce3",
+          "seed": 5710702369504277842,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 66,
+          "actions": 199,
+          "points": {
+            "RED": 11,
+            "BLUE": 3
+          }
+        },
+        {
+          "id": "ac68dfa2-f78c-4d60-9647-361c96165405",
+          "seed": 8141829374663862957,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 79,
+          "actions": 227,
+          "points": {
+            "RED": 7,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "7797955f-6440-43d8-8765-0552c41670a5",
+          "seed": 2890199944855202916,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 76,
+          "actions": 225,
+          "points": {
+            "BLUE": 10,
+            "RED": 9
+          }
+        },
+        {
+          "id": "222da728-2a11-48f9-a172-ec545b174e1f",
+          "seed": 3399749425108361801,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 48,
+          "actions": 141,
+          "points": {
+            "RED": 10,
+            "BLUE": 5
+          }
+        },
+        {
+          "id": "6c5d8c85-8c12-488a-bcce-852a228bf14f",
+          "seed": 5071637908493323467,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 56,
+          "actions": 168,
+          "points": {
+            "RED": 10,
+            "BLUE": 7
+          }
+        },
+        {
+          "id": "0a17d762-25a1-4520-ae14-53ab49c9e0f0",
+          "seed": 7165813482824040403,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 85,
+          "actions": 262,
+          "points": {
+            "BLUE": 5,
+            "RED": 10
+          }
+        },
+        {
+          "id": "40c893cb-38ba-4bd5-8bd7-54e36cd888eb",
+          "seed": 7717293900640166619,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 52,
+          "actions": 153,
+          "points": {
+            "RED": 10,
+            "BLUE": 2
+          }
+        },
+        {
+          "id": "d1f6c3e9-5d70-464a-a13f-e1b2a111e291",
+          "seed": 3314290218863513261,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 88,
+          "actions": 258,
+          "points": {
+            "RED": 10,
+            "BLUE": 7
+          }
+        }
+      ]
+    },
+    {
+      "shard": 2,
+      "seed": 20260912,
+      "requested_games": 10,
+      "seconds": 37.43822483206168,
+      "wins": {
+        "RED": 7,
+        "BLUE": 3
+      },
+      "points": {
+        "BLUE": [
+          2,
+          5,
+          9,
+          10,
+          7,
+          11,
+          7,
+          9,
+          5,
+          10
+        ],
+        "RED": [
+          10,
+          10,
+          10,
+          6,
+          10,
+          7,
+          10,
+          10,
+          10,
+          7
+        ]
+      },
+      "decisions": 1078,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "34a21ec6-dcc7-4c9f-8ece-144c377114f7",
+          "seed": 8779226502354539574,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 67,
+          "actions": 187,
+          "points": {
+            "BLUE": 2,
+            "RED": 10
+          }
+        },
+        {
+          "id": "3f58ac88-1639-4b2b-b8ea-47b6230de5b5",
+          "seed": 205054250084636584,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 66,
+          "actions": 198,
+          "points": {
+            "RED": 10,
+            "BLUE": 5
+          }
+        },
+        {
+          "id": "fff03882-a886-4434-b380-4637aa7970f6",
+          "seed": 928616152854406452,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 87,
+          "actions": 267,
+          "points": {
+            "BLUE": 9,
+            "RED": 10
+          }
+        },
+        {
+          "id": "881006d4-9db0-460d-b80a-a4d4e23e9762",
+          "seed": 4263774675560004393,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 58,
+          "actions": 174,
+          "points": {
+            "BLUE": 10,
+            "RED": 6
+          }
+        },
+        {
+          "id": "4d5dc621-37bd-4c59-a414-28226d1c07db",
+          "seed": 70107927093646210,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 103,
+          "actions": 313,
+          "points": {
+            "BLUE": 7,
+            "RED": 10
+          }
+        },
+        {
+          "id": "2411b6b2-3846-4d8c-b7ee-6561cef82d9a",
+          "seed": 6621214985324513633,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 61,
+          "actions": 185,
+          "points": {
+            "RED": 7,
+            "BLUE": 11
+          }
+        },
+        {
+          "id": "b9bf7fc8-b62c-403e-b940-62bd89ba95db",
+          "seed": 3361597042220394031,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 70,
+          "actions": 234,
+          "points": {
+            "RED": 10,
+            "BLUE": 7
+          }
+        },
+        {
+          "id": "141d21f7-f754-4796-8de2-604733887e2f",
+          "seed": 3762252298681918011,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 65,
+          "actions": 204,
+          "points": {
+            "BLUE": 9,
+            "RED": 10
+          }
+        },
+        {
+          "id": "a91de794-0e11-45ad-a0d6-9c9c145501f7",
+          "seed": 2065766223124292153,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 62,
+          "actions": 199,
+          "points": {
+            "RED": 10,
+            "BLUE": 5
+          }
+        },
+        {
+          "id": "d09edb5f-8083-44cf-a883-c42b01f6935c",
+          "seed": 8898728550858326193,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 61,
+          "actions": 178,
+          "points": {
+            "RED": 7,
+            "BLUE": 10
+          }
+        }
+      ]
+    },
+    {
+      "shard": 3,
+      "seed": 20260913,
+      "requested_games": 10,
+      "seconds": 35.51452894206159,
+      "wins": {
+        "RED": 8,
+        "BLUE": 2
+      },
+      "points": {
+        "RED": [
+          10,
+          3,
+          10,
+          10,
+          10,
+          11,
+          10,
+          10,
+          10,
+          9
+        ],
+        "BLUE": [
+          6,
+          10,
+          9,
+          6,
+          7,
+          3,
+          5,
+          5,
+          6,
+          10
+        ]
+      },
+      "decisions": 1150,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "8c1c3e07-45ec-4e70-b2b1-c8ac31b1d5b2",
+          "seed": 8860274908294095583,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 54,
+          "actions": 152,
+          "points": {
+            "RED": 10,
+            "BLUE": 6
+          }
+        },
+        {
+          "id": "b72c8973-1fe3-4930-b7e2-216db8f00bfd",
+          "seed": 5047964524948790563,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 82,
+          "actions": 243,
+          "points": {
+            "BLUE": 10,
+            "RED": 3
+          }
+        },
+        {
+          "id": "163ed1f9-3eba-4985-b760-3d3ef8619130",
+          "seed": 934260622470283879,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 87,
+          "actions": 278,
+          "points": {
+            "BLUE": 9,
+            "RED": 10
+          }
+        },
+        {
+          "id": "ddb3b749-428d-463f-bc43-dc8a47201f8c",
+          "seed": 8400413003041096207,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 99,
+          "actions": 292,
+          "points": {
+            "BLUE": 6,
+            "RED": 10
+          }
+        },
+        {
+          "id": "6a8a5488-fa66-4077-b09b-6d62c30dd63b",
+          "seed": 8798115551870333459,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 93,
+          "actions": 273,
+          "points": {
+            "BLUE": 7,
+            "RED": 10
+          }
+        },
+        {
+          "id": "33bea464-53c0-4c14-bd37-fa727dfc520f",
+          "seed": 617623236785291738,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 67,
+          "actions": 195,
+          "points": {
+            "BLUE": 3,
+            "RED": 11
+          }
+        },
+        {
+          "id": "fad86691-1199-4fd5-b94d-f1f3ac4f8fd8",
+          "seed": 1787486067000673953,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 44,
+          "actions": 134,
+          "points": {
+            "RED": 10,
+            "BLUE": 5
+          }
+        },
+        {
+          "id": "8b7ee66d-836f-4e61-8649-2a5bc4727d09",
+          "seed": 3501988529500625376,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 63,
+          "actions": 191,
+          "points": {
+            "BLUE": 5,
+            "RED": 10
+          }
+        },
+        {
+          "id": "f0f12b1d-f246-472f-844b-c3c891ec7d90",
+          "seed": 879377222720129388,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 89,
+          "actions": 261,
+          "points": {
+            "BLUE": 6,
+            "RED": 10
+          }
+        },
+        {
+          "id": "209800aa-62d6-462f-a7c0-09b5946a03a7",
+          "seed": 126185224894512645,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 70,
+          "actions": 212,
+          "points": {
+            "BLUE": 10,
+            "RED": 9
+          }
+        }
+      ]
+    },
+    {
+      "shard": 4,
+      "seed": 20260914,
+      "requested_games": 10,
+      "seconds": 39.90632654516958,
+      "wins": {
+        "RED": 7,
+        "BLUE": 3
+      },
+      "points": {
+        "RED": [
+          10,
+          10,
+          10,
+          10,
+          10,
+          10,
+          3,
+          7,
+          10,
+          5
+        ],
+        "BLUE": [
+          6,
+          9,
+          3,
+          7,
+          9,
+          9,
+          10,
+          10,
+          2,
+          10
+        ]
+      },
+      "decisions": 1106,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "22106d23-f6a2-4d73-a397-1001b285e823",
+          "seed": 4472818937212486383,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 92,
+          "actions": 260,
+          "points": {
+            "RED": 10,
+            "BLUE": 6
+          }
+        },
+        {
+          "id": "8d0fabe0-ba4b-49c0-8f59-eedc2a91b3f9",
+          "seed": 4739682864925016053,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 73,
+          "actions": 220,
+          "points": {
+            "BLUE": 9,
+            "RED": 10
+          }
+        },
+        {
+          "id": "b51f7733-3e34-4680-b272-bf9356e71689",
+          "seed": 8502399653476988140,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 44,
+          "actions": 133,
+          "points": {
+            "RED": 10,
+            "BLUE": 3
+          }
+        },
+        {
+          "id": "8e75633a-e13f-409d-9b82-cf1f7e9e5c5f",
+          "seed": 8734709154892645609,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 73,
+          "actions": 220,
+          "points": {
+            "BLUE": 7,
+            "RED": 10
+          }
+        },
+        {
+          "id": "2c8e6aed-6ced-41d6-bcc1-9aa9ffbb9c7e",
+          "seed": 1572830963028232587,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 100,
+          "actions": 289,
+          "points": {
+            "RED": 10,
+            "BLUE": 9
+          }
+        },
+        {
+          "id": "61eff598-b9e8-4e4b-88f5-d487c907fcec",
+          "seed": 1321156012577247439,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 69,
+          "actions": 205,
+          "points": {
+            "BLUE": 9,
+            "RED": 10
+          }
+        },
+        {
+          "id": "a9968098-31e3-4cfa-94d7-20a1411ea637",
+          "seed": 4220503460374217049,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 77,
+          "actions": 228,
+          "points": {
+            "RED": 3,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "dfd79c8e-19e1-45b5-8de2-307e34e9909c",
+          "seed": 1414718594173642811,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 82,
+          "actions": 252,
+          "points": {
+            "BLUE": 10,
+            "RED": 7
+          }
+        },
+        {
+          "id": "d836ef37-5e2b-45df-85e8-032965f5c932",
+          "seed": 3454469366007396798,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 61,
+          "actions": 174,
+          "points": {
+            "BLUE": 2,
+            "RED": 10
+          }
+        },
+        {
+          "id": "341ba152-8096-4d4d-8967-bafb37171d91",
+          "seed": 6840989426382468247,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 90,
+          "actions": 265,
+          "points": {
+            "BLUE": 10,
+            "RED": 5
+          }
+        }
+      ]
+    },
+    {
+      "shard": 5,
+      "seed": 20260915,
+      "requested_games": 10,
+      "seconds": 40.230205414118245,
+      "wins": {
+        "BLUE": 6,
+        "RED": 4
+      },
+      "points": {
+        "RED": [
+          5,
+          7,
+          10,
+          11,
+          7,
+          10,
+          10,
+          8,
+          3,
+          5
+        ],
+        "BLUE": [
+          10,
+          10,
+          5,
+          4,
+          10,
+          7,
+          7,
+          10,
+          10,
+          10
+        ]
+      },
+      "decisions": 1079,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "6880900b-f936-48e3-9804-e6a3c49268e0",
+          "seed": 5123788106299296458,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 47,
+          "actions": 140,
+          "points": {
+            "RED": 5,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "1a75b210-09d2-49f0-a6d9-6d1926f51d78",
+          "seed": 4243966116657840308,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 80,
+          "actions": 253,
+          "points": {
+            "BLUE": 10,
+            "RED": 7
+          }
+        },
+        {
+          "id": "b6a73837-4a67-44b5-b476-1605b4f52286",
+          "seed": 4815979299686759787,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 68,
+          "actions": 190,
+          "points": {
+            "RED": 10,
+            "BLUE": 5
+          }
+        },
+        {
+          "id": "97055d02-3373-470b-b177-a23ac1272610",
+          "seed": 6898946647796942830,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 61,
+          "actions": 183,
+          "points": {
+            "BLUE": 4,
+            "RED": 11
+          }
+        },
+        {
+          "id": "16eb5000-753c-4472-a220-68d9dfc127bb",
+          "seed": 1559655501533549911,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 75,
+          "actions": 226,
+          "points": {
+            "RED": 7,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "876d1310-6512-4d07-8273-7ef0cb9d0ac5",
+          "seed": 6732921089551615969,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 103,
+          "actions": 307,
+          "points": {
+            "BLUE": 7,
+            "RED": 10
+          }
+        },
+        {
+          "id": "9361ef03-8896-472d-aa20-8b36f75b704b",
+          "seed": 841003673992649240,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 66,
+          "actions": 221,
+          "points": {
+            "RED": 10,
+            "BLUE": 7
+          }
+        },
+        {
+          "id": "795046a5-25ec-47df-aeb0-09bd2a59e32d",
+          "seed": 7558345119056526499,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 79,
+          "actions": 229,
+          "points": {
+            "RED": 8,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "dab4c969-e222-4249-9322-d3bdeb481e82",
+          "seed": 5741017045639272764,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 45,
+          "actions": 143,
+          "points": {
+            "RED": 3,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "8fbf181a-9d6d-45ce-8231-83e4d62d6969",
+          "seed": 5388388238153846153,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 96,
+          "actions": 286,
+          "points": {
+            "BLUE": 10,
+            "RED": 5
+          }
+        }
+      ]
+    },
+    {
+      "shard": 6,
+      "seed": 20260916,
+      "requested_games": 10,
+      "seconds": 31.385137654142454,
+      "wins": {
+        "RED": 9,
+        "BLUE": 1
+      },
+      "points": {
+        "BLUE": [
+          7,
+          4,
+          4,
+          7,
+          3,
+          6,
+          10,
+          3,
+          9,
+          6
+        ],
+        "RED": [
+          10,
+          11,
+          10,
+          10,
+          10,
+          10,
+          4,
+          10,
+          11,
+          10
+        ]
+      },
+      "decisions": 1151,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "f2ce1f3c-ba5c-4188-9669-c24445ae2c1d",
+          "seed": 1075194496240614801,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 117,
+          "actions": 359,
+          "points": {
+            "BLUE": 7,
+            "RED": 10
+          }
+        },
+        {
+          "id": "3566bb29-830c-44b7-8517-1fd4e2b2530c",
+          "seed": 2179837373846648444,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 59,
+          "actions": 171,
+          "points": {
+            "BLUE": 4,
+            "RED": 11
+          }
+        },
+        {
+          "id": "2e214cea-3b7d-4bb9-bae3-193e18d18877",
+          "seed": 2037813366266156403,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 75,
+          "actions": 223,
+          "points": {
+            "BLUE": 4,
+            "RED": 10
+          }
+        },
+        {
+          "id": "c20f2ebf-e777-4cda-bd7b-8a956d679f39",
+          "seed": 3187159085547039644,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 81,
+          "actions": 247,
+          "points": {
+            "BLUE": 7,
+            "RED": 10
+          }
+        },
+        {
+          "id": "916a7817-1081-4026-8043-ece9112288ba",
+          "seed": 7114939652117024205,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 71,
+          "actions": 212,
+          "points": {
+            "BLUE": 3,
+            "RED": 10
+          }
+        },
+        {
+          "id": "5f2d74bc-caa7-4068-9dbf-da15c042230f",
+          "seed": 9094787392625202832,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 73,
+          "actions": 213,
+          "points": {
+            "BLUE": 6,
+            "RED": 10
+          }
+        },
+        {
+          "id": "d834121f-1be5-4957-b4f6-5deadb6d0ef3",
+          "seed": 8484202164482462324,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 47,
+          "actions": 134,
+          "points": {
+            "RED": 4,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "a8db95ec-8c0e-47a8-8f32-2c697e9e876d",
+          "seed": 1608357657379856923,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 63,
+          "actions": 186,
+          "points": {
+            "BLUE": 3,
+            "RED": 10
+          }
+        },
+        {
+          "id": "9b583e55-67fe-424b-81ca-2031c6f4823b",
+          "seed": 2379691584927540143,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 66,
+          "actions": 196,
+          "points": {
+            "RED": 11,
+            "BLUE": 9
+          }
+        },
+        {
+          "id": "001b13b9-54d5-4c09-983d-1fd0344f724d",
+          "seed": 8976871092174150825,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 79,
+          "actions": 225,
+          "points": {
+            "BLUE": 6,
+            "RED": 10
+          }
+        }
+      ]
+    },
+    {
+      "shard": 7,
+      "seed": 20260917,
+      "requested_games": 10,
+      "seconds": 35.370860062073916,
+      "wins": {
+        "RED": 6,
+        "BLUE": 4
+      },
+      "points": {
+        "RED": [
+          10,
+          5,
+          10,
+          10,
+          10,
+          6,
+          5,
+          10,
+          7,
+          10
+        ],
+        "BLUE": [
+          5,
+          10,
+          7,
+          4,
+          9,
+          10,
+          10,
+          7,
+          10,
+          2
+        ]
+      },
+      "decisions": 1127,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "03739e3e-d1ba-4936-9fe0-ec812d4f7005",
+          "seed": 4905845989124283438,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 64,
+          "actions": 195,
+          "points": {
+            "RED": 10,
+            "BLUE": 5
+          }
+        },
+        {
+          "id": "21d65bd4-8e81-4589-a0bb-a00b65dc0f2c",
+          "seed": 3400592132881214811,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 73,
+          "actions": 224,
+          "points": {
+            "RED": 5,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "36882a02-8a8c-4663-8615-ea5e29a942e6",
+          "seed": 7588706634976238326,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 99,
+          "actions": 296,
+          "points": {
+            "BLUE": 7,
+            "RED": 10
+          }
+        },
+        {
+          "id": "2dcd7e32-272e-4d85-a7dc-7e083c88e484",
+          "seed": 1417160970559564272,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 54,
+          "actions": 175,
+          "points": {
+            "RED": 10,
+            "BLUE": 4
+          }
+        },
+        {
+          "id": "95c2b986-6889-474a-b4fa-ec7b12ddb58c",
+          "seed": 1975356299798006752,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 69,
+          "actions": 225,
+          "points": {
+            "BLUE": 9,
+            "RED": 10
+          }
+        },
+        {
+          "id": "eaa2c523-4b19-4507-8982-6339318bce8b",
+          "seed": 945806679900161517,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 64,
+          "actions": 184,
+          "points": {
+            "BLUE": 10,
+            "RED": 6
+          }
+        },
+        {
+          "id": "26c795c1-d0fa-418b-9910-aff678040af6",
+          "seed": 7781908851843065066,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 87,
+          "actions": 235,
+          "points": {
+            "RED": 5,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "7d007575-540f-4d58-b69b-d3e52a7fb238",
+          "seed": 4059876960200017803,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 59,
+          "actions": 180,
+          "points": {
+            "BLUE": 7,
+            "RED": 10
+          }
+        },
+        {
+          "id": "943423cc-edc4-45e7-9512-11f8115e0722",
+          "seed": 5798104479040384902,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 99,
+          "actions": 290,
+          "points": {
+            "RED": 7,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "60198c57-2852-432c-8e7e-dc00ca8af122",
+          "seed": 8352252107516952128,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 71,
+          "actions": 207,
+          "points": {
+            "BLUE": 2,
+            "RED": 10
+          }
+        }
+      ]
+    },
+    {
+      "shard": 8,
+      "seed": 20260918,
+      "requested_games": 10,
+      "seconds": 32.43259722110815,
+      "wins": {
+        "RED": 8,
+        "BLUE": 2
+      },
+      "points": {
+        "BLUE": [
+          4,
+          10,
+          10,
+          8,
+          4,
+          4,
+          3,
+          7,
+          4,
+          6
+        ],
+        "RED": [
+          11,
+          7,
+          5,
+          10,
+          10,
+          10,
+          10,
+          10,
+          10,
+          10
+        ]
+      },
+      "decisions": 1012,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "c8684dbc-fd44-4f99-aaf7-a50d9be781a0",
+          "seed": 347210702134674046,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 75,
+          "actions": 211,
+          "points": {
+            "BLUE": 4,
+            "RED": 11
+          }
+        },
+        {
+          "id": "8a39fcbd-c326-4b81-b419-314925bb13f6",
+          "seed": 7644038372831993840,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 97,
+          "actions": 281,
+          "points": {
+            "RED": 7,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "1ef92c2d-097f-4052-9afc-c4303fed3d3b",
+          "seed": 1934394269340140167,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 60,
+          "actions": 177,
+          "points": {
+            "BLUE": 10,
+            "RED": 5
+          }
+        },
+        {
+          "id": "2d792267-3762-4c7e-b8b7-4a55aeee1e1f",
+          "seed": 5648233701969608864,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 47,
+          "actions": 148,
+          "points": {
+            "BLUE": 8,
+            "RED": 10
+          }
+        },
+        {
+          "id": "0a46dd29-15fa-4ddd-804b-4857e78628c6",
+          "seed": 2955746789910992538,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 64,
+          "actions": 196,
+          "points": {
+            "RED": 10,
+            "BLUE": 4
+          }
+        },
+        {
+          "id": "3b7f5da7-6f69-48cf-a853-a319f3e2fe78",
+          "seed": 183360745478657087,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 74,
+          "actions": 224,
+          "points": {
+            "RED": 10,
+            "BLUE": 4
+          }
+        },
+        {
+          "id": "3b61b907-40b8-44ae-a689-82fe361d9015",
+          "seed": 3155009185348484786,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 62,
+          "actions": 188,
+          "points": {
+            "RED": 10,
+            "BLUE": 3
+          }
+        },
+        {
+          "id": "a23df0c2-8a04-4129-b003-86c6421f7311",
+          "seed": 8789359522925539256,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 56,
+          "actions": 167,
+          "points": {
+            "RED": 10,
+            "BLUE": 7
+          }
+        },
+        {
+          "id": "dc4686c5-3bf5-4258-838b-dd6c90f6550d",
+          "seed": 3685764354717217246,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 36,
+          "actions": 109,
+          "points": {
+            "RED": 10,
+            "BLUE": 4
+          }
+        },
+        {
+          "id": "bc7f3ce5-cd1b-41fd-b5c3-ea5e60b8f297",
+          "seed": 6018687723155310737,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 63,
+          "actions": 196,
+          "points": {
+            "BLUE": 6,
+            "RED": 10
+          }
+        }
+      ]
+    },
+    {
+      "shard": 9,
+      "seed": 20260919,
+      "requested_games": 10,
+      "seconds": 27.447689229156822,
+      "wins": {
+        "RED": 9,
+        "BLUE": 1
+      },
+      "points": {
+        "RED": [
+          10,
+          10,
+          11,
+          11,
+          10,
+          4,
+          10,
+          10,
+          10,
+          11
+        ],
+        "BLUE": [
+          4,
+          3,
+          3,
+          3,
+          5,
+          10,
+          4,
+          4,
+          8,
+          5
+        ]
+      },
+      "decisions": 969,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "92ea045f-d3a5-4247-9d22-67c3561b06a4",
+          "seed": 5781678543505007884,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 70,
+          "actions": 210,
+          "points": {
+            "RED": 10,
+            "BLUE": 4
+          }
+        },
+        {
+          "id": "0ee4ce93-b79f-4422-a912-2df05b49a533",
+          "seed": 711265520280574649,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 49,
+          "actions": 140,
+          "points": {
+            "BLUE": 3,
+            "RED": 10
+          }
+        },
+        {
+          "id": "fb8768ae-ec0c-470d-8034-2e43c47763b1",
+          "seed": 415460041947472961,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 53,
+          "actions": 161,
+          "points": {
+            "BLUE": 3,
+            "RED": 11
+          }
+        },
+        {
+          "id": "0ac24730-77d2-4bc8-836a-11e0655f45f2",
+          "seed": 3826405540752412120,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 66,
+          "actions": 187,
+          "points": {
+            "RED": 11,
+            "BLUE": 3
+          }
+        },
+        {
+          "id": "eac5035c-e11a-4b99-b691-9f20acea8bff",
+          "seed": 5496104061856258976,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 66,
+          "actions": 194,
+          "points": {
+            "RED": 10,
+            "BLUE": 5
+          }
+        },
+        {
+          "id": "88c68d18-969a-4652-b3ac-f28dc58033fd",
+          "seed": 5424488210453747530,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 62,
+          "actions": 177,
+          "points": {
+            "BLUE": 10,
+            "RED": 4
+          }
+        },
+        {
+          "id": "05421316-2c2c-4481-9581-c34900f47af3",
+          "seed": 2892102771949105518,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 62,
+          "actions": 180,
+          "points": {
+            "RED": 10,
+            "BLUE": 4
+          }
+        },
+        {
+          "id": "fd18b81a-e670-4f48-8a46-da039ca9fbfc",
+          "seed": 6203204310879124370,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 33,
+          "actions": 106,
+          "points": {
+            "BLUE": 4,
+            "RED": 10
+          }
+        },
+        {
+          "id": "b96f61e6-f3ef-4d6a-8ca9-52442ed54354",
+          "seed": 319218514320101555,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 85,
+          "actions": 242,
+          "points": {
+            "BLUE": 8,
+            "RED": 10
+          }
+        },
+        {
+          "id": "5c13d5cb-073c-448c-af62-7ec1a998d020",
+          "seed": 9122366939082554839,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 67,
+          "actions": 208,
+          "points": {
+            "BLUE": 5,
+            "RED": 11
+          }
+        }
+      ]
+    },
+    {
+      "shard": 10,
+      "seed": 20260920,
+      "requested_games": 10,
+      "seconds": 32.92482242011465,
+      "wins": {
+        "BLUE": 5,
+        "RED": 5
+      },
+      "points": {
+        "BLUE": [
+          10,
+          11,
+          11,
+          6,
+          9,
+          8,
+          9,
+          5,
+          11,
+          10
+        ],
+        "RED": [
+          7,
+          6,
+          5,
+          10,
+          10,
+          11,
+          10,
+          10,
+          2,
+          3
+        ]
+      },
+      "decisions": 1006,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "f1631679-221d-4c2c-850e-dfc4ad831ee5",
+          "seed": 1796186758826566349,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 76,
+          "actions": 216,
+          "points": {
+            "BLUE": 10,
+            "RED": 7
+          }
+        },
+        {
+          "id": "b0e2ae16-16d1-4548-a220-4b7a80811220",
+          "seed": 5608119084009060546,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 42,
+          "actions": 120,
+          "points": {
+            "BLUE": 11,
+            "RED": 6
+          }
+        },
+        {
+          "id": "2410a97e-bdd0-4a71-a84f-444547c737d1",
+          "seed": 6351478340463436617,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 79,
+          "actions": 227,
+          "points": {
+            "RED": 5,
+            "BLUE": 11
+          }
+        },
+        {
+          "id": "c11b943e-171a-4adb-bd25-421552134a34",
+          "seed": 1849796446378338355,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 103,
+          "actions": 301,
+          "points": {
+            "BLUE": 6,
+            "RED": 10
+          }
+        },
+        {
+          "id": "ff52727d-dde3-4730-be4c-b73331e2fb9b",
+          "seed": 4617085692896340107,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 80,
+          "actions": 237,
+          "points": {
+            "RED": 10,
+            "BLUE": 9
+          }
+        },
+        {
+          "id": "51575eff-44c7-45a3-b31f-76368e18328e",
+          "seed": 5056877105668679666,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 65,
+          "actions": 194,
+          "points": {
+            "BLUE": 8,
+            "RED": 11
+          }
+        },
+        {
+          "id": "fe297d0b-5d43-46f9-abc9-236c0883c28a",
+          "seed": 4190372229592663465,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 79,
+          "actions": 232,
+          "points": {
+            "BLUE": 9,
+            "RED": 10
+          }
+        },
+        {
+          "id": "ecbf5a37-cebc-4573-a096-5ada04230f70",
+          "seed": 4740421613687041322,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 60,
+          "actions": 180,
+          "points": {
+            "RED": 10,
+            "BLUE": 5
+          }
+        },
+        {
+          "id": "8489e172-8688-4b87-8da6-41593dda91b9",
+          "seed": 5733722598814947904,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 59,
+          "actions": 178,
+          "points": {
+            "RED": 2,
+            "BLUE": 11
+          }
+        },
+        {
+          "id": "88cf7a67-ac41-48e6-bfad-59cb22e3f517",
+          "seed": 892420588090350732,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 40,
+          "actions": 118,
+          "points": {
+            "BLUE": 10,
+            "RED": 3
+          }
+        }
+      ]
+    },
+    {
+      "shard": 11,
+      "seed": 20260921,
+      "requested_games": 10,
+      "seconds": 33.39032968203537,
+      "wins": {
+        "RED": 7,
+        "BLUE": 3
+      },
+      "points": {
+        "RED": [
+          10,
+          10,
+          10,
+          10,
+          6,
+          10,
+          10,
+          5,
+          6,
+          10
+        ],
+        "BLUE": [
+          6,
+          2,
+          2,
+          4,
+          10,
+          5,
+          3,
+          10,
+          10,
+          4
+        ]
+      },
+      "decisions": 964,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "8d7f3f4f-47c8-4808-a9d0-3c550efb4a06",
+          "seed": 573964670682570644,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 72,
+          "actions": 205,
+          "points": {
+            "RED": 10,
+            "BLUE": 6
+          }
+        },
+        {
+          "id": "2b604185-acf6-4a68-9e65-6af23a566707",
+          "seed": 4654509883552725662,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 57,
+          "actions": 165,
+          "points": {
+            "BLUE": 2,
+            "RED": 10
+          }
+        },
+        {
+          "id": "9b2fd8c8-1ef6-4288-a5a2-53fb7211bf67",
+          "seed": 3847052805074149470,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 34,
+          "actions": 95,
+          "points": {
+            "RED": 10,
+            "BLUE": 2
+          }
+        },
+        {
+          "id": "eb30de31-88ec-42dd-9711-626e3d98bc10",
+          "seed": 1378374675164870641,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 49,
+          "actions": 157,
+          "points": {
+            "BLUE": 4,
+            "RED": 10
+          }
+        },
+        {
+          "id": "05ed5b1f-2175-4ab4-b207-3cb778f00dfb",
+          "seed": 4012373748415711187,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 69,
+          "actions": 208,
+          "points": {
+            "RED": 6,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "43069ac7-a276-441e-a5e6-fccb83087285",
+          "seed": 7776030622775445223,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 85,
+          "actions": 242,
+          "points": {
+            "BLUE": 5,
+            "RED": 10
+          }
+        },
+        {
+          "id": "173b435c-3f65-4a9d-9e7d-3384498e4e27",
+          "seed": 2006029871687779128,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 57,
+          "actions": 156,
+          "points": {
+            "BLUE": 3,
+            "RED": 10
+          }
+        },
+        {
+          "id": "c6947b4f-451b-48b0-9439-665bb25141c6",
+          "seed": 1392775923769905793,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 80,
+          "actions": 243,
+          "points": {
+            "BLUE": 10,
+            "RED": 5
+          }
+        },
+        {
+          "id": "f002a0fe-7a9d-474e-b1f3-2624f864d832",
+          "seed": 4070274774553963934,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 79,
+          "actions": 229,
+          "points": {
+            "RED": 6,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "3421a0f3-58a5-498f-8b96-7bd1d34bcaa7",
+          "seed": 834221073077135573,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 63,
+          "actions": 181,
+          "points": {
+            "BLUE": 4,
+            "RED": 10
+          }
+        }
+      ]
+    },
+    {
+      "shard": 12,
+      "seed": 20260922,
+      "requested_games": 10,
+      "seconds": 42.69586988305673,
+      "wins": {
+        "RED": 5,
+        "BLUE": 5
+      },
+      "points": {
+        "RED": [
+          10,
+          9,
+          11,
+          8,
+          10,
+          10,
+          6,
+          9,
+          6,
+          10
+        ],
+        "BLUE": [
+          7,
+          10,
+          7,
+          10,
+          9,
+          4,
+          10,
+          10,
+          10,
+          6
+        ]
+      },
+      "decisions": 1186,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "a78751e2-2d92-4bfe-87bd-591f04b8614e",
+          "seed": 8031630495616144364,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 80,
+          "actions": 234,
+          "points": {
+            "RED": 10,
+            "BLUE": 7
+          }
+        },
+        {
+          "id": "ee17dc77-85a6-4568-89c2-1e492eb10d50",
+          "seed": 4817958741211154306,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 93,
+          "actions": 269,
+          "points": {
+            "RED": 9,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "c3b4a8e1-3147-43b3-aef0-ff11cfb0dac8",
+          "seed": 4435017680818481341,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 74,
+          "actions": 231,
+          "points": {
+            "RED": 11,
+            "BLUE": 7
+          }
+        },
+        {
+          "id": "6504d9ca-6dfc-4d65-9363-c2c7cf57bf4b",
+          "seed": 6344746001523879063,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 75,
+          "actions": 228,
+          "points": {
+            "RED": 8,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "f62207ea-de63-46d5-be0b-a7e23a82462e",
+          "seed": 6916138778660997876,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 98,
+          "actions": 298,
+          "points": {
+            "RED": 10,
+            "BLUE": 9
+          }
+        },
+        {
+          "id": "723bd2aa-b006-4008-bf7c-ce98bceeb63e",
+          "seed": 2073048282841318291,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 51,
+          "actions": 155,
+          "points": {
+            "BLUE": 4,
+            "RED": 10
+          }
+        },
+        {
+          "id": "16b9ca83-432e-4e4e-b575-2ea826ed5a07",
+          "seed": 3381253444330834820,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 89,
+          "actions": 275,
+          "points": {
+            "RED": 6,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "d4bc69c7-ccd2-4551-bc7f-024b3fbba678",
+          "seed": 726281557401109531,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 80,
+          "actions": 246,
+          "points": {
+            "BLUE": 10,
+            "RED": 9
+          }
+        },
+        {
+          "id": "5cea4599-2569-4f67-9259-78582a117116",
+          "seed": 7891496070199684472,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 69,
+          "actions": 205,
+          "points": {
+            "RED": 6,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "9929e7f9-66db-434d-8190-b1186c053121",
+          "seed": 1506334180132098240,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 63,
+          "actions": 184,
+          "points": {
+            "BLUE": 6,
+            "RED": 10
+          }
+        }
+      ]
+    },
+    {
+      "shard": 13,
+      "seed": 20260923,
+      "requested_games": 10,
+      "seconds": 39.146935355849564,
+      "wins": {
+        "RED": 4,
+        "BLUE": 6
+      },
+      "points": {
+        "BLUE": [
+          6,
+          10,
+          10,
+          8,
+          10,
+          10,
+          10,
+          7,
+          10,
+          6
+        ],
+        "RED": [
+          10,
+          6,
+          5,
+          10,
+          9,
+          7,
+          8,
+          10,
+          3,
+          11
+        ]
+      },
+      "decisions": 1076,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "3cd7f117-85de-4247-bac4-798c7a0eea67",
+          "seed": 4709207681811041102,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 57,
+          "actions": 176,
+          "points": {
+            "BLUE": 6,
+            "RED": 10
+          }
+        },
+        {
+          "id": "d56ea734-97c6-4b24-b148-43532b8ba279",
+          "seed": 3094538182329433626,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 61,
+          "actions": 188,
+          "points": {
+            "RED": 6,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "9d57cf3e-0581-4e9d-86e3-8fcbb93625ef",
+          "seed": 8213914944443724223,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 66,
+          "actions": 186,
+          "points": {
+            "BLUE": 10,
+            "RED": 5
+          }
+        },
+        {
+          "id": "f46fef52-1ace-49dc-8f22-12ce32a5a412",
+          "seed": 8529026010170123433,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 90,
+          "actions": 264,
+          "points": {
+            "RED": 10,
+            "BLUE": 8
+          }
+        },
+        {
+          "id": "ced26ed8-dc64-4ee2-9158-ebdff07ae8a3",
+          "seed": 3411670865134046907,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 84,
+          "actions": 265,
+          "points": {
+            "BLUE": 10,
+            "RED": 9
+          }
+        },
+        {
+          "id": "045f236e-9176-4be6-855c-0c6ae9dd11a2",
+          "seed": 829193311175252553,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 76,
+          "actions": 215,
+          "points": {
+            "BLUE": 10,
+            "RED": 7
+          }
+        },
+        {
+          "id": "a64908bc-853c-40f6-a0e9-472ad4bfbe03",
+          "seed": 5999234313990447809,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 114,
+          "actions": 330,
+          "points": {
+            "BLUE": 10,
+            "RED": 8
+          }
+        },
+        {
+          "id": "a70982d2-578e-45ff-848d-cd5f486ff933",
+          "seed": 8671763360781934056,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 74,
+          "actions": 221,
+          "points": {
+            "RED": 10,
+            "BLUE": 7
+          }
+        },
+        {
+          "id": "085d624c-9818-4dd6-87fd-360d9284e794",
+          "seed": 6093342331997284010,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 60,
+          "actions": 187,
+          "points": {
+            "BLUE": 10,
+            "RED": 3
+          }
+        },
+        {
+          "id": "bfa5be32-0b67-46ed-a170-959f97a3bbbb",
+          "seed": 3691905172524171993,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 51,
+          "actions": 163,
+          "points": {
+            "BLUE": 6,
+            "RED": 11
+          }
+        }
+      ]
+    },
+    {
+      "shard": 14,
+      "seed": 20260924,
+      "requested_games": 10,
+      "seconds": 37.05959190707654,
+      "wins": {
+        "RED": 8,
+        "BLUE": 2
+      },
+      "points": {
+        "RED": [
+          10,
+          8,
+          5,
+          10,
+          10,
+          10,
+          10,
+          10,
+          10,
+          10
+        ],
+        "BLUE": [
+          3,
+          10,
+          11,
+          4,
+          3,
+          5,
+          8,
+          6,
+          3,
+          7
+        ]
+      },
+      "decisions": 1067,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "c8d0011a-a6cd-420c-aa6d-73bdee8b9adf",
+          "seed": 7437541748286049735,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 76,
+          "actions": 215,
+          "points": {
+            "RED": 10,
+            "BLUE": 3
+          }
+        },
+        {
+          "id": "b644058d-2888-4901-bb24-517453ed3bbf",
+          "seed": 8869464020715572916,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 97,
+          "actions": 292,
+          "points": {
+            "RED": 8,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "69477f71-f3f0-459a-8a21-805d25dce764",
+          "seed": 7887910937809582973,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 44,
+          "actions": 143,
+          "points": {
+            "BLUE": 11,
+            "RED": 5
+          }
+        },
+        {
+          "id": "3043b81f-93de-4405-b8b1-9e21578644c0",
+          "seed": 4885646980468879871,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 71,
+          "actions": 229,
+          "points": {
+            "BLUE": 4,
+            "RED": 10
+          }
+        },
+        {
+          "id": "991b0234-24ab-4b85-a2f0-a584b201ee1a",
+          "seed": 4352244489059069032,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 47,
+          "actions": 140,
+          "points": {
+            "BLUE": 3,
+            "RED": 10
+          }
+        },
+        {
+          "id": "8b28244a-920d-4aa1-81e5-a6e2829f58f3",
+          "seed": 2035514947150393236,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 86,
+          "actions": 258,
+          "points": {
+            "RED": 10,
+            "BLUE": 5
+          }
+        },
+        {
+          "id": "b9d6ae67-ae9e-4b33-aab3-1a3967f71434",
+          "seed": 6303472775476785852,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 71,
+          "actions": 229,
+          "points": {
+            "BLUE": 8,
+            "RED": 10
+          }
+        },
+        {
+          "id": "e08c42d6-d57b-4915-8e50-aac9ca6f66d8",
+          "seed": 8861994987013584954,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 51,
+          "actions": 149,
+          "points": {
+            "BLUE": 6,
+            "RED": 10
+          }
+        },
+        {
+          "id": "72e08208-a54a-4e02-b64f-430303b1eca8",
+          "seed": 348624380531137254,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 41,
+          "actions": 122,
+          "points": {
+            "BLUE": 3,
+            "RED": 10
+          }
+        },
+        {
+          "id": "959899e0-7e3c-4728-95b3-2f454cf905d5",
+          "seed": 4833701899693402838,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 78,
+          "actions": 253,
+          "points": {
+            "RED": 10,
+            "BLUE": 7
+          }
+        }
+      ]
+    },
+    {
+      "shard": 15,
+      "seed": 20260925,
+      "requested_games": 10,
+      "seconds": 37.035835579037666,
+      "wins": {
+        "RED": 7,
+        "BLUE": 3
+      },
+      "points": {
+        "BLUE": [
+          8,
+          6,
+          10,
+          10,
+          10,
+          5,
+          3,
+          3,
+          3,
+          7
+        ],
+        "RED": [
+          10,
+          10,
+          9,
+          7,
+          7,
+          10,
+          10,
+          10,
+          10,
+          10
+        ]
+      },
+      "decisions": 1178,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "72fc1608-947e-408c-933e-f03de1015f49",
+          "seed": 3335343381940628679,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 75,
+          "actions": 230,
+          "points": {
+            "BLUE": 8,
+            "RED": 10
+          }
+        },
+        {
+          "id": "27d79553-f637-40af-8c72-2959a8054510",
+          "seed": 1887614749706397741,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 86,
+          "actions": 248,
+          "points": {
+            "RED": 10,
+            "BLUE": 6
+          }
+        },
+        {
+          "id": "c94c822b-4a1c-4f3a-91a3-b668d52ca324",
+          "seed": 256562556279147944,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 82,
+          "actions": 244,
+          "points": {
+            "BLUE": 10,
+            "RED": 9
+          }
+        },
+        {
+          "id": "591cdea1-b28a-4be1-976f-50782dd299e6",
+          "seed": 4094717086772887409,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 62,
+          "actions": 189,
+          "points": {
+            "BLUE": 10,
+            "RED": 7
+          }
+        },
+        {
+          "id": "d93a4127-15f1-4170-8938-a16c293a41f8",
+          "seed": 301614736786510525,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 101,
+          "actions": 296,
+          "points": {
+            "RED": 7,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "860bb34d-74e1-4859-98b6-c63d13aa3ca7",
+          "seed": 7935595448138688496,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 59,
+          "actions": 177,
+          "points": {
+            "BLUE": 5,
+            "RED": 10
+          }
+        },
+        {
+          "id": "3ca12525-b3bc-4e14-a5d7-f5fa0dbf7520",
+          "seed": 8072302930887757645,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 63,
+          "actions": 182,
+          "points": {
+            "BLUE": 3,
+            "RED": 10
+          }
+        },
+        {
+          "id": "dadfe7d5-6e24-4cb5-8ad8-4ba6b767085a",
+          "seed": 8803819482573027563,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 60,
+          "actions": 179,
+          "points": {
+            "RED": 10,
+            "BLUE": 3
+          }
+        },
+        {
+          "id": "c98eca24-d8d0-428e-9386-e00555ed4245",
+          "seed": 4396408301711952408,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 100,
+          "actions": 296,
+          "points": {
+            "RED": 10,
+            "BLUE": 3
+          }
+        },
+        {
+          "id": "2b42a207-bc5e-4302-8b4d-8824dcd68f45",
+          "seed": 5950402453786552765,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 94,
+          "actions": 272,
+          "points": {
+            "RED": 10,
+            "BLUE": 7
+          }
+        }
+      ]
+    },
+    {
+      "shard": 16,
+      "seed": 20260926,
+      "requested_games": 10,
+      "seconds": 29.828448466956615,
+      "wins": {
+        "RED": 8,
+        "BLUE": 2
+      },
+      "points": {
+        "RED": [
+          10,
+          10,
+          10,
+          10,
+          10,
+          6,
+          10,
+          10,
+          8,
+          10
+        ],
+        "BLUE": [
+          4,
+          3,
+          3,
+          5,
+          6,
+          10,
+          9,
+          4,
+          10,
+          5
+        ]
+      },
+      "decisions": 1029,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "e11eb3b3-f228-4b57-8912-89bbe38d7d82",
+          "seed": 990496066431537512,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 72,
+          "actions": 201,
+          "points": {
+            "RED": 10,
+            "BLUE": 4
+          }
+        },
+        {
+          "id": "587b9bbe-16e6-40e6-b0f8-f950f9f17026",
+          "seed": 2760886724352872239,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 67,
+          "actions": 196,
+          "points": {
+            "BLUE": 3,
+            "RED": 10
+          }
+        },
+        {
+          "id": "86e77581-9b55-4fc8-94f6-d3c7dd0ee8ac",
+          "seed": 4603516114404044305,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 67,
+          "actions": 186,
+          "points": {
+            "BLUE": 3,
+            "RED": 10
+          }
+        },
+        {
+          "id": "e06a57cf-ea19-4e45-895d-b8536d7769bb",
+          "seed": 2365442746748637030,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 78,
+          "actions": 250,
+          "points": {
+            "RED": 10,
+            "BLUE": 5
+          }
+        },
+        {
+          "id": "5dc2b69a-b5c0-4de5-860e-633b932c294e",
+          "seed": 637821462254630687,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 66,
+          "actions": 194,
+          "points": {
+            "RED": 10,
+            "BLUE": 6
+          }
+        },
+        {
+          "id": "bb442216-cc9f-4cee-b2ba-440315628520",
+          "seed": 85402187567595826,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 48,
+          "actions": 142,
+          "points": {
+            "BLUE": 10,
+            "RED": 6
+          }
+        },
+        {
+          "id": "5b1f8c5a-6c5f-45fe-82d9-2bc2c81eb316",
+          "seed": 2243515966952443385,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 99,
+          "actions": 280,
+          "points": {
+            "BLUE": 9,
+            "RED": 10
+          }
+        },
+        {
+          "id": "3b3513f5-0e16-441a-aabe-9018a9be78f4",
+          "seed": 1494315080049274676,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 49,
+          "actions": 140,
+          "points": {
+            "BLUE": 4,
+            "RED": 10
+          }
+        },
+        {
+          "id": "e38621a4-1d5c-4420-a013-9fbc528baf72",
+          "seed": 1340287152680326309,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 72,
+          "actions": 208,
+          "points": {
+            "BLUE": 10,
+            "RED": 8
+          }
+        },
+        {
+          "id": "a74b9ba3-b8e0-4259-a489-e487416ad661",
+          "seed": 9038095691307102814,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 63,
+          "actions": 174,
+          "points": {
+            "BLUE": 5,
+            "RED": 10
+          }
+        }
+      ]
+    },
+    {
+      "shard": 17,
+      "seed": 20260927,
+      "requested_games": 10,
+      "seconds": 29.385675391182303,
+      "wins": {
+        "RED": 6,
+        "BLUE": 4
+      },
+      "points": {
+        "RED": [
+          10,
+          10,
+          3,
+          10,
+          4,
+          11,
+          5,
+          10,
+          3,
+          10
+        ],
+        "BLUE": [
+          5,
+          3,
+          10,
+          5,
+          10,
+          5,
+          10,
+          9,
+          10,
+          6
+        ]
+      },
+      "decisions": 1027,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "5d472b09-b58a-4903-9270-ce3e202152f8",
+          "seed": 1693006718714333553,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 62,
+          "actions": 182,
+          "points": {
+            "RED": 10,
+            "BLUE": 5
+          }
+        },
+        {
+          "id": "249d654c-7ead-4f50-bcfe-a96aa6edde90",
+          "seed": 3638186496388776493,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 70,
+          "actions": 200,
+          "points": {
+            "RED": 10,
+            "BLUE": 3
+          }
+        },
+        {
+          "id": "12ec334f-e495-4211-9783-ec6688f6d7bc",
+          "seed": 4458960132446453456,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 51,
+          "actions": 149,
+          "points": {
+            "RED": 3,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "9531fd05-cc03-4178-a6d6-334496d28ef0",
+          "seed": 1264068871970706891,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 50,
+          "actions": 154,
+          "points": {
+            "RED": 10,
+            "BLUE": 5
+          }
+        },
+        {
+          "id": "c8bc3f49-088e-4cdb-b8e5-5fd65db1c8ce",
+          "seed": 9121888556432766093,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 55,
+          "actions": 163,
+          "points": {
+            "RED": 4,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "a7f08137-53a5-437c-8fb3-e98f545d9922",
+          "seed": 1465805540254353640,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 102,
+          "actions": 293,
+          "points": {
+            "RED": 11,
+            "BLUE": 5
+          }
+        },
+        {
+          "id": "5f1162c1-6fff-4122-b432-855c38c94495",
+          "seed": 182042993148895082,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 70,
+          "actions": 191,
+          "points": {
+            "BLUE": 10,
+            "RED": 5
+          }
+        },
+        {
+          "id": "171c18a4-8bad-4190-9d96-8a8a2c81e372",
+          "seed": 2219331827192392256,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 79,
+          "actions": 224,
+          "points": {
+            "BLUE": 9,
+            "RED": 10
+          }
+        },
+        {
+          "id": "2c73a978-4cd4-4749-8c07-83a845118873",
+          "seed": 6767498548781303956,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 83,
+          "actions": 237,
+          "points": {
+            "RED": 3,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "7e29f0c4-3a4f-46a4-ae6a-0f166bdcc963",
+          "seed": 5698112213899993112,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 72,
+          "actions": 216,
+          "points": {
+            "RED": 10,
+            "BLUE": 6
+          }
+        }
+      ]
+    },
+    {
+      "shard": 18,
+      "seed": 20260928,
+      "requested_games": 10,
+      "seconds": 35.04928022809327,
+      "wins": {
+        "BLUE": 5,
+        "RED": 5
+      },
+      "points": {
+        "BLUE": [
+          10,
+          10,
+          5,
+          10,
+          10,
+          8,
+          5,
+          4,
+          10,
+          3
+        ],
+        "RED": [
+          7,
+          7,
+          10,
+          3,
+          5,
+          10,
+          10,
+          10,
+          7,
+          10
+        ]
+      },
+      "decisions": 1066,
+      "fallbacks": 8,
+      "games": [
+        {
+          "id": "cf875d26-bd21-4b32-81c3-4adbb75ef2ed",
+          "seed": 7231374715730965711,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 60,
+          "actions": 179,
+          "points": {
+            "BLUE": 10,
+            "RED": 7
+          }
+        },
+        {
+          "id": "8806c3d8-2056-4cad-a8bf-7b070a8357a2",
+          "seed": 2354755463776188087,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 55,
+          "actions": 170,
+          "points": {
+            "RED": 7,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "83185573-ddb8-413a-85c1-2fb37cc867c5",
+          "seed": 8263855571163540641,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 63,
+          "actions": 191,
+          "points": {
+            "BLUE": 5,
+            "RED": 10
+          }
+        },
+        {
+          "id": "5befe4ad-246b-4cba-93ca-8e67da21c244",
+          "seed": 115459472405568555,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 63,
+          "actions": 184,
+          "points": {
+            "RED": 3,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "ff443ae5-c9e2-41d6-9d44-747f51eccd8b",
+          "seed": 543657853751056712,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 59,
+          "actions": 178,
+          "points": {
+            "RED": 5,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "3ab8fb41-d305-458a-ac99-9471ddc3e704",
+          "seed": 9025787065519009758,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 69,
+          "actions": 206,
+          "points": {
+            "BLUE": 8,
+            "RED": 10
+          }
+        },
+        {
+          "id": "02e19b09-f05c-4a86-a225-e7e608d67ec8",
+          "seed": 1891129613378629401,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 106,
+          "actions": 307,
+          "points": {
+            "RED": 10,
+            "BLUE": 5
+          }
+        },
+        {
+          "id": "4649309d-d855-49be-982c-f5ee125e7ee3",
+          "seed": 3348466806083595584,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 85,
+          "actions": 239,
+          "points": {
+            "BLUE": 4,
+            "RED": 10
+          }
+        },
+        {
+          "id": "58c96b8a-a04b-4a04-a227-a7f54e49c171",
+          "seed": 2204172765788317856,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 87,
+          "actions": 259,
+          "points": {
+            "RED": 7,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "a96eae4b-7fdb-4dbf-92e0-d453d4a1a4b5",
+          "seed": 8126705895737607737,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 61,
+          "actions": 178,
+          "points": {
+            "BLUE": 3,
+            "RED": 10
+          }
+        }
+      ]
+    },
+    {
+      "shard": 19,
+      "seed": 20260929,
+      "requested_games": 10,
+      "seconds": 37.782544063869864,
+      "wins": {
+        "RED": 8,
+        "BLUE": 2
+      },
+      "points": {
+        "RED": [
+          10,
+          5,
+          10,
+          10,
+          10,
+          10,
+          10,
+          11,
+          10,
+          5
+        ],
+        "BLUE": [
+          4,
+          10,
+          7,
+          7,
+          3,
+          9,
+          9,
+          6,
+          5,
+          10
+        ]
+      },
+      "decisions": 1044,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "cf95a062-1db5-4581-8e04-b27ab80509d2",
+          "seed": 6146455757415596378,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 38,
+          "actions": 116,
+          "points": {
+            "RED": 10,
+            "BLUE": 4
+          }
+        },
+        {
+          "id": "ba34a921-3e3d-4281-8622-0c59e2eeffbc",
+          "seed": 2958607978622248425,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 82,
+          "actions": 247,
+          "points": {
+            "BLUE": 10,
+            "RED": 5
+          }
+        },
+        {
+          "id": "4e270800-020a-4624-a102-8cb2ae3c81d4",
+          "seed": 7131805101411601679,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 65,
+          "actions": 203,
+          "points": {
+            "BLUE": 7,
+            "RED": 10
+          }
+        },
+        {
+          "id": "0d60e6f5-e586-45f1-9952-8267e6fd9c71",
+          "seed": 8383550359908394106,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 86,
+          "actions": 255,
+          "points": {
+            "RED": 10,
+            "BLUE": 7
+          }
+        },
+        {
+          "id": "49160957-f2e6-439a-808f-b1549ab2b461",
+          "seed": 1895447631307591777,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 59,
+          "actions": 172,
+          "points": {
+            "BLUE": 3,
+            "RED": 10
+          }
+        },
+        {
+          "id": "5e7dc6bd-9ff3-4efa-a224-ccc6327bc8b9",
+          "seed": 2456714540023860630,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 107,
+          "actions": 303,
+          "points": {
+            "BLUE": 9,
+            "RED": 10
+          }
+        },
+        {
+          "id": "0d5e717b-82b2-4c50-8abc-f50af4bdaaa7",
+          "seed": 2893556501610993004,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 76,
+          "actions": 238,
+          "points": {
+            "RED": 10,
+            "BLUE": 9
+          }
+        },
+        {
+          "id": "149f911c-40e7-4689-8ce4-a235434d0a55",
+          "seed": 494653753759792012,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 67,
+          "actions": 198,
+          "points": {
+            "BLUE": 6,
+            "RED": 11
+          }
+        },
+        {
+          "id": "2d902783-b422-4e13-a866-60b8822e1c38",
+          "seed": 4031881192780696896,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 62,
+          "actions": 175,
+          "points": {
+            "RED": 10,
+            "BLUE": 5
+          }
+        },
+        {
+          "id": "84446a70-3560-4475-8826-5f22cbc10c26",
+          "seed": 2756765470065380939,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 61,
+          "actions": 179,
+          "points": {
+            "RED": 5,
+            "BLUE": 10
+          }
+        }
+      ]
+    },
+    {
+      "shard": 20,
+      "seed": 20260930,
+      "requested_games": 10,
+      "seconds": 28.22582843597047,
+      "wins": {
+        "BLUE": 4,
+        "RED": 6
+      },
+      "points": {
+        "BLUE": [
+          10,
+          6,
+          6,
+          4,
+          3,
+          4,
+          11,
+          10,
+          10,
+          2
+        ],
+        "RED": [
+          8,
+          10,
+          10,
+          10,
+          10,
+          10,
+          3,
+          4,
+          4,
+          10
+        ]
+      },
+      "decisions": 1027,
+      "fallbacks": 3,
+      "games": [
+        {
+          "id": "71e6354b-b5bf-4cd3-8e34-4363bda643ba",
+          "seed": 1662047124346632901,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 80,
+          "actions": 242,
+          "points": {
+            "BLUE": 10,
+            "RED": 8
+          }
+        },
+        {
+          "id": "78b1b6e8-d272-4877-88dd-92c1bba871d6",
+          "seed": 7995261977177244138,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 85,
+          "actions": 246,
+          "points": {
+            "BLUE": 6,
+            "RED": 10
+          }
+        },
+        {
+          "id": "54e4ffe8-d9da-4e57-94b2-e0d91898ab4b",
+          "seed": 6938907802685262893,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 79,
+          "actions": 230,
+          "points": {
+            "BLUE": 6,
+            "RED": 10
+          }
+        },
+        {
+          "id": "7f9c86ea-d806-46d9-9798-306b892e8411",
+          "seed": 7477956071272715094,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 45,
+          "actions": 134,
+          "points": {
+            "BLUE": 4,
+            "RED": 10
+          }
+        },
+        {
+          "id": "5c86228a-d1e4-4f64-a2c6-0d412c4e563e",
+          "seed": 8869270403106178317,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 83,
+          "actions": 260,
+          "points": {
+            "BLUE": 3,
+            "RED": 10
+          }
+        },
+        {
+          "id": "91160a5f-79c5-4f90-8c78-9f5163c481b6",
+          "seed": 8950940583292300916,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 47,
+          "actions": 139,
+          "points": {
+            "BLUE": 4,
+            "RED": 10
+          }
+        },
+        {
+          "id": "5cfe0d0a-3d59-4200-938d-216346800323",
+          "seed": 3028339709926145066,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 79,
+          "actions": 237,
+          "points": {
+            "RED": 3,
+            "BLUE": 11
+          }
+        },
+        {
+          "id": "49a338d4-85d1-4a49-983c-7d67e916e230",
+          "seed": 8062552418949830640,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 54,
+          "actions": 165,
+          "points": {
+            "BLUE": 10,
+            "RED": 4
+          }
+        },
+        {
+          "id": "aeb8b3d0-c6f4-4f12-800d-b49cc956c831",
+          "seed": 8837649521361011573,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 44,
+          "actions": 123,
+          "points": {
+            "BLUE": 10,
+            "RED": 4
+          }
+        },
+        {
+          "id": "29f95920-23c3-47fa-9cd0-8ed9e975ad90",
+          "seed": 272229911841792543,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 50,
+          "actions": 150,
+          "points": {
+            "RED": 10,
+            "BLUE": 2
+          }
+        }
+      ]
+    },
+    {
+      "shard": 21,
+      "seed": 20260931,
+      "requested_games": 10,
+      "seconds": 35.17045398289338,
+      "wins": {
+        "BLUE": 5,
+        "RED": 5
+      },
+      "points": {
+        "RED": [
+          8,
+          10,
+          3,
+          7,
+          2,
+          10,
+          11,
+          10,
+          10,
+          6
+        ],
+        "BLUE": [
+          10,
+          7,
+          11,
+          12,
+          10,
+          6,
+          3,
+          2,
+          8,
+          10
+        ]
+      },
+      "decisions": 1067,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "3ac234c1-aae4-4263-a352-9b8c4659de91",
+          "seed": 5695208997636722945,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 83,
+          "actions": 242,
+          "points": {
+            "RED": 8,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "cbb66f14-01c1-4b05-99ee-c3aa56ba03b5",
+          "seed": 8617554637319387757,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 81,
+          "actions": 255,
+          "points": {
+            "BLUE": 7,
+            "RED": 10
+          }
+        },
+        {
+          "id": "3f9fbd20-7544-4b09-89e2-fe752e4c3c65",
+          "seed": 6574030424766819797,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 97,
+          "actions": 281,
+          "points": {
+            "RED": 3,
+            "BLUE": 11
+          }
+        },
+        {
+          "id": "1068a121-9b0a-451d-8fa0-914afd00b547",
+          "seed": 8064599328223472358,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 82,
+          "actions": 271,
+          "points": {
+            "BLUE": 12,
+            "RED": 7
+          }
+        },
+        {
+          "id": "08395080-5cb9-47fd-a0b2-7d98f3dbcf7e",
+          "seed": 2774259495985887469,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 48,
+          "actions": 141,
+          "points": {
+            "BLUE": 10,
+            "RED": 2
+          }
+        },
+        {
+          "id": "e3335557-957e-43f2-8aa9-793de0ed1acf",
+          "seed": 1980625040118399244,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 61,
+          "actions": 171,
+          "points": {
+            "BLUE": 6,
+            "RED": 10
+          }
+        },
+        {
+          "id": "e5437d6e-3fab-4974-bd10-f60f49b09c51",
+          "seed": 3933860562525779995,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 74,
+          "actions": 210,
+          "points": {
+            "RED": 11,
+            "BLUE": 3
+          }
+        },
+        {
+          "id": "33af9ad3-9fbd-4a93-9c3a-523fa0fb2e62",
+          "seed": 6580055196763756067,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 44,
+          "actions": 127,
+          "points": {
+            "RED": 10,
+            "BLUE": 2
+          }
+        },
+        {
+          "id": "73bef40f-69dd-4653-b0ab-2010c6aac605",
+          "seed": 1782070049989114009,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 67,
+          "actions": 203,
+          "points": {
+            "BLUE": 8,
+            "RED": 10
+          }
+        },
+        {
+          "id": "0b379be1-1fb6-4c36-ab5c-41e52b2ec4ac",
+          "seed": 1221263464005109134,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 82,
+          "actions": 249,
+          "points": {
+            "BLUE": 10,
+            "RED": 6
+          }
+        }
+      ]
+    },
+    {
+      "shard": 22,
+      "seed": 20260932,
+      "requested_games": 10,
+      "seconds": 37.82921457802877,
+      "wins": {
+        "RED": 8,
+        "BLUE": 2
+      },
+      "points": {
+        "BLUE": [
+          5,
+          10,
+          8,
+          10,
+          5,
+          2,
+          8,
+          3,
+          4,
+          7
+        ],
+        "RED": [
+          10,
+          8,
+          10,
+          7,
+          10,
+          10,
+          10,
+          10,
+          10,
+          10
+        ]
+      },
+      "decisions": 1118,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "2e7ed186-b2f5-4834-a277-b0dcf8fbdf6c",
+          "seed": 1674438663544421574,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 117,
+          "actions": 331,
+          "points": {
+            "BLUE": 5,
+            "RED": 10
+          }
+        },
+        {
+          "id": "249d4d5b-a463-40d1-818b-183151ec33a5",
+          "seed": 5577198267133694357,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 74,
+          "actions": 228,
+          "points": {
+            "BLUE": 10,
+            "RED": 8
+          }
+        },
+        {
+          "id": "6a16e5fa-feaf-422a-b717-658ac4cfb308",
+          "seed": 8257027833268050426,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 60,
+          "actions": 187,
+          "points": {
+            "RED": 10,
+            "BLUE": 8
+          }
+        },
+        {
+          "id": "f7702f1a-0954-47f9-9a6a-982eccebdbdd",
+          "seed": 744375803168821267,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 76,
+          "actions": 235,
+          "points": {
+            "BLUE": 10,
+            "RED": 7
+          }
+        },
+        {
+          "id": "e52e79b9-53a0-4e82-880d-4a7970e22b0d",
+          "seed": 3534691814454069394,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 44,
+          "actions": 133,
+          "points": {
+            "RED": 10,
+            "BLUE": 5
+          }
+        },
+        {
+          "id": "fd58de45-c050-42b8-ae52-500e5348f48b",
+          "seed": 7770682376496996358,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 76,
+          "actions": 218,
+          "points": {
+            "RED": 10,
+            "BLUE": 2
+          }
+        },
+        {
+          "id": "cfdfa264-b8c3-49c2-b887-d555458e10d8",
+          "seed": 1194455488539420343,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 60,
+          "actions": 186,
+          "points": {
+            "RED": 10,
+            "BLUE": 8
+          }
+        },
+        {
+          "id": "d079c1b7-e1e9-4178-b99c-149fdc7d1ebf",
+          "seed": 7000138700196881350,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 57,
+          "actions": 161,
+          "points": {
+            "BLUE": 3,
+            "RED": 10
+          }
+        },
+        {
+          "id": "f8c1ab87-cee6-4634-9007-521dbbb7e81a",
+          "seed": 5967018203684315957,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 69,
+          "actions": 212,
+          "points": {
+            "BLUE": 4,
+            "RED": 10
+          }
+        },
+        {
+          "id": "fce33e0b-4fda-4b0d-a630-180b2456f1aa",
+          "seed": 1910508151622496964,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 82,
+          "actions": 236,
+          "points": {
+            "RED": 10,
+            "BLUE": 7
+          }
+        }
+      ]
+    },
+    {
+      "shard": 23,
+      "seed": 20260933,
+      "requested_games": 10,
+      "seconds": 35.444536261959,
+      "wins": {
+        "BLUE": 5,
+        "RED": 5
+      },
+      "points": {
+        "RED": [
+          4,
+          10,
+          5,
+          7,
+          10,
+          10,
+          8,
+          10,
+          11,
+          4
+        ],
+        "BLUE": [
+          10,
+          3,
+          10,
+          10,
+          4,
+          7,
+          10,
+          6,
+          6,
+          10
+        ]
+      },
+      "decisions": 1185,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "dfa53ccc-5a7a-4f0c-b2e2-11c3933d574b",
+          "seed": 1082235605528577677,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 61,
+          "actions": 178,
+          "points": {
+            "RED": 4,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "6533d115-148e-4e36-aa4f-6fb53b03320a",
+          "seed": 9150356564731049674,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 76,
+          "actions": 220,
+          "points": {
+            "RED": 10,
+            "BLUE": 3
+          }
+        },
+        {
+          "id": "957b641b-b581-4c3b-865b-4092fe9ac31e",
+          "seed": 8551078988339975189,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 85,
+          "actions": 249,
+          "points": {
+            "RED": 5,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "e80d0d02-0293-47bc-baef-10b4d11e3c4c",
+          "seed": 1147639806187296160,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 85,
+          "actions": 259,
+          "points": {
+            "RED": 7,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "048e6444-f9d9-47fe-a1a2-d68c3473fed0",
+          "seed": 4739996484167526105,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 72,
+          "actions": 212,
+          "points": {
+            "RED": 10,
+            "BLUE": 4
+          }
+        },
+        {
+          "id": "92fdf8b6-ac1a-4763-9e7a-ea3da548abe6",
+          "seed": 6817127356314952968,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 83,
+          "actions": 254,
+          "points": {
+            "BLUE": 7,
+            "RED": 10
+          }
+        },
+        {
+          "id": "0017dc95-10e3-43ce-846d-3b396012505c",
+          "seed": 8465326862506514301,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 111,
+          "actions": 330,
+          "points": {
+            "RED": 8,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "e33d67c3-9567-4f2b-a9f9-bc9bb4b99bb0",
+          "seed": 4928972357570106677,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 78,
+          "actions": 239,
+          "points": {
+            "RED": 10,
+            "BLUE": 6
+          }
+        },
+        {
+          "id": "33afcfa7-8ce3-4f8a-b6a7-fbb8a9491c6f",
+          "seed": 9195553081671540369,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 70,
+          "actions": 214,
+          "points": {
+            "RED": 11,
+            "BLUE": 6
+          }
+        },
+        {
+          "id": "62276bfd-7d90-4b44-824c-7560c5a7a7d6",
+          "seed": 346873686101734370,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 63,
+          "actions": 189,
+          "points": {
+            "RED": 4,
+            "BLUE": 10
+          }
+        }
+      ]
+    },
+    {
+      "shard": 24,
+      "seed": 20260934,
+      "requested_games": 10,
+      "seconds": 35.53374291420914,
+      "wins": {
+        "RED": 5,
+        "BLUE": 5
+      },
+      "points": {
+        "RED": [
+          10,
+          10,
+          6,
+          7,
+          6,
+          10,
+          8,
+          11,
+          9,
+          10
+        ],
+        "BLUE": [
+          6,
+          6,
+          10,
+          10,
+          10,
+          4,
+          10,
+          4,
+          10,
+          4
+        ]
+      },
+      "decisions": 1196,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "22296bb9-8484-435d-a0b1-9210450fe1c6",
+          "seed": 8646009612312660766,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 64,
+          "actions": 180,
+          "points": {
+            "RED": 10,
+            "BLUE": 6
+          }
+        },
+        {
+          "id": "ad4796d3-0cb1-4736-bfaa-92a38a5436da",
+          "seed": 1378326722013102711,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 77,
+          "actions": 223,
+          "points": {
+            "BLUE": 6,
+            "RED": 10
+          }
+        },
+        {
+          "id": "2c20987c-6e6f-4353-8cf5-abdffaaa6b2b",
+          "seed": 5374428197287882090,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 88,
+          "actions": 277,
+          "points": {
+            "BLUE": 10,
+            "RED": 6
+          }
+        },
+        {
+          "id": "ef6e3768-1009-40b4-b34e-f5caf9bff061",
+          "seed": 4109158317851768705,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 111,
+          "actions": 316,
+          "points": {
+            "RED": 7,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "0f3cdf31-a2ea-46c3-8233-2c6371f75d6f",
+          "seed": 2267615411413633386,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 54,
+          "actions": 162,
+          "points": {
+            "BLUE": 10,
+            "RED": 6
+          }
+        },
+        {
+          "id": "3f3373d4-0491-4b6b-a361-0155be1c2222",
+          "seed": 6889468799618519686,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 48,
+          "actions": 147,
+          "points": {
+            "RED": 10,
+            "BLUE": 4
+          }
+        },
+        {
+          "id": "ec7d07e9-cf9b-4e8e-88d8-cde0bbf89dd3",
+          "seed": 1510061293575027772,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 120,
+          "actions": 361,
+          "points": {
+            "BLUE": 10,
+            "RED": 8
+          }
+        },
+        {
+          "id": "4fe55ca3-2cee-45c8-8782-c29e8229f4b0",
+          "seed": 8200982649343916317,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 82,
+          "actions": 245,
+          "points": {
+            "RED": 11,
+            "BLUE": 4
+          }
+        },
+        {
+          "id": "ae45f9be-4ecf-4ef7-a199-ee73c39d710c",
+          "seed": 2306012169050067717,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 64,
+          "actions": 203,
+          "points": {
+            "BLUE": 10,
+            "RED": 9
+          }
+        },
+        {
+          "id": "d4663e60-2af3-4eeb-8803-cb8198f656e8",
+          "seed": 6421914418843921488,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 64,
+          "actions": 187,
+          "points": {
+            "RED": 10,
+            "BLUE": 4
+          }
+        }
+      ]
+    },
+    {
+      "shard": 25,
+      "seed": 20260935,
+      "requested_games": 10,
+      "seconds": 34.800485842861235,
+      "wins": {
+        "RED": 8,
+        "BLUE": 2
+      },
+      "points": {
+        "RED": [
+          10,
+          10,
+          11,
+          6,
+          10,
+          10,
+          10,
+          10,
+          10,
+          9
+        ],
+        "BLUE": [
+          2,
+          4,
+          9,
+          10,
+          7,
+          2,
+          2,
+          6,
+          8,
+          10
+        ]
+      },
+      "decisions": 1076,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "b9f22ab1-dee4-4bdb-8ad6-401c7e0a72ea",
+          "seed": 1500782052445900911,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 36,
+          "actions": 107,
+          "points": {
+            "RED": 10,
+            "BLUE": 2
+          }
+        },
+        {
+          "id": "d5e180b9-8320-4521-9f16-09edee7ce52b",
+          "seed": 675432747578677374,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 55,
+          "actions": 164,
+          "points": {
+            "BLUE": 4,
+            "RED": 10
+          }
+        },
+        {
+          "id": "ecee84ed-ba34-40fc-be19-d8138f1ba385",
+          "seed": 8058524908037905245,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 91,
+          "actions": 280,
+          "points": {
+            "BLUE": 9,
+            "RED": 11
+          }
+        },
+        {
+          "id": "97d06cf8-3dba-4412-a832-164c203624cf",
+          "seed": 3276987817963686948,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 100,
+          "actions": 294,
+          "points": {
+            "BLUE": 10,
+            "RED": 6
+          }
+        },
+        {
+          "id": "c150874e-1913-41d7-af07-f51ad3b37eb5",
+          "seed": 7409380733098461534,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 64,
+          "actions": 196,
+          "points": {
+            "RED": 10,
+            "BLUE": 7
+          }
+        },
+        {
+          "id": "5792ce49-da32-4083-8b2b-21a7c9552330",
+          "seed": 6755383993346765003,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 44,
+          "actions": 133,
+          "points": {
+            "RED": 10,
+            "BLUE": 2
+          }
+        },
+        {
+          "id": "257b8cc9-1065-4f54-8e79-0a1287fa5e44",
+          "seed": 7521239863847651127,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 40,
+          "actions": 128,
+          "points": {
+            "RED": 10,
+            "BLUE": 2
+          }
+        },
+        {
+          "id": "57e7f872-2de5-4547-8359-040cff0bfdc8",
+          "seed": 89116104804137828,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 82,
+          "actions": 270,
+          "points": {
+            "RED": 10,
+            "BLUE": 6
+          }
+        },
+        {
+          "id": "fcc777cb-610f-4b45-88f9-928d41eae3a2",
+          "seed": 2238557281661556224,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 83,
+          "actions": 240,
+          "points": {
+            "BLUE": 8,
+            "RED": 10
+          }
+        },
+        {
+          "id": "0cc3233a-a444-405e-b600-a890a97ecced",
+          "seed": 7633351811918556275,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 75,
+          "actions": 228,
+          "points": {
+            "RED": 9,
+            "BLUE": 10
+          }
+        }
+      ]
+    },
+    {
+      "shard": 26,
+      "seed": 20260936,
+      "requested_games": 10,
+      "seconds": 33.48602040507831,
+      "wins": {
+        "RED": 6,
+        "BLUE": 4
+      },
+      "points": {
+        "BLUE": [
+          7,
+          10,
+          10,
+          10,
+          5,
+          10,
+          4,
+          7,
+          5,
+          4
+        ],
+        "RED": [
+          10,
+          7,
+          2,
+          4,
+          11,
+          7,
+          10,
+          10,
+          10,
+          10
+        ]
+      },
+      "decisions": 1070,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "150a246d-1c1a-44ea-a842-d2b6f924adbb",
+          "seed": 3881729780332416404,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 65,
+          "actions": 191,
+          "points": {
+            "BLUE": 7,
+            "RED": 10
+          }
+        },
+        {
+          "id": "2bad640c-7c6d-4383-93f6-7cc111f50f99",
+          "seed": 4647580156890003514,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 63,
+          "actions": 194,
+          "points": {
+            "RED": 7,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "fa0d3344-1a32-4d31-9dbb-d35307ff2494",
+          "seed": 3506282716588395341,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 55,
+          "actions": 159,
+          "points": {
+            "RED": 2,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "30dd953e-1ee4-43a3-85b7-003564167150",
+          "seed": 2436042743320224325,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 71,
+          "actions": 210,
+          "points": {
+            "RED": 4,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "eaa6c2ee-df46-449e-9230-398e47211ad6",
+          "seed": 8815181395331041469,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 89,
+          "actions": 255,
+          "points": {
+            "BLUE": 5,
+            "RED": 11
+          }
+        },
+        {
+          "id": "7ffd8093-5598-42cf-acc7-931a702ad287",
+          "seed": 1661057870016979941,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 100,
+          "actions": 297,
+          "points": {
+            "BLUE": 10,
+            "RED": 7
+          }
+        },
+        {
+          "id": "9e4880bc-05b7-44b6-a5f6-d95751ba66c8",
+          "seed": 9105213969777417059,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 52,
+          "actions": 158,
+          "points": {
+            "RED": 10,
+            "BLUE": 4
+          }
+        },
+        {
+          "id": "d4c4791f-72b2-4921-aa7f-76b2e69d5c92",
+          "seed": 7845686048380244674,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 60,
+          "actions": 182,
+          "points": {
+            "RED": 10,
+            "BLUE": 7
+          }
+        },
+        {
+          "id": "43f97e10-fadd-4488-8a7f-a37ac532df6a",
+          "seed": 8228566385889211872,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 93,
+          "actions": 278,
+          "points": {
+            "BLUE": 5,
+            "RED": 10
+          }
+        },
+        {
+          "id": "15c4eb4c-0efc-4615-8d70-2fd85482c3b7",
+          "seed": 6683147379188626409,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 45,
+          "actions": 139,
+          "points": {
+            "BLUE": 4,
+            "RED": 10
+          }
+        }
+      ]
+    },
+    {
+      "shard": 27,
+      "seed": 20260937,
+      "requested_games": 10,
+      "seconds": 39.482518734876066,
+      "wins": {
+        "RED": 6,
+        "BLUE": 4
+      },
+      "points": {
+        "RED": [
+          10,
+          10,
+          11,
+          6,
+          7,
+          10,
+          10,
+          4,
+          10,
+          6
+        ],
+        "BLUE": [
+          5,
+          6,
+          5,
+          10,
+          10,
+          7,
+          5,
+          10,
+          5,
+          10
+        ]
+      },
+      "decisions": 1168,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "420babf0-29bf-4f0f-ac4c-dcb1747436f5",
+          "seed": 1682984511655372454,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 78,
+          "actions": 218,
+          "points": {
+            "RED": 10,
+            "BLUE": 5
+          }
+        },
+        {
+          "id": "28f3d770-c17a-4267-843f-c9fd47a8a943",
+          "seed": 1065138578235488772,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 96,
+          "actions": 283,
+          "points": {
+            "RED": 10,
+            "BLUE": 6
+          }
+        },
+        {
+          "id": "0bfdc4ff-194c-4f88-be4f-b39e0a9c49f8",
+          "seed": 6852772247261623078,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 85,
+          "actions": 269,
+          "points": {
+            "BLUE": 5,
+            "RED": 11
+          }
+        },
+        {
+          "id": "19936314-2792-4eb8-a528-c5357865de5f",
+          "seed": 2987509062511277753,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 86,
+          "actions": 267,
+          "points": {
+            "BLUE": 10,
+            "RED": 6
+          }
+        },
+        {
+          "id": "6790b9a1-43ca-4aae-af24-9addd8330a4e",
+          "seed": 5363940399995744615,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 79,
+          "actions": 240,
+          "points": {
+            "RED": 7,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "ce44356c-ef3f-4c52-b2e2-2fdca5109cf6",
+          "seed": 3181818446889638430,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 72,
+          "actions": 218,
+          "points": {
+            "RED": 10,
+            "BLUE": 7
+          }
+        },
+        {
+          "id": "db997843-2fc8-47dd-8085-a4b169e35e05",
+          "seed": 4384322717386929627,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 89,
+          "actions": 255,
+          "points": {
+            "BLUE": 5,
+            "RED": 10
+          }
+        },
+        {
+          "id": "8efbf464-621c-40b9-a839-0c52ae0e1ecc",
+          "seed": 3208420377782958340,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 54,
+          "actions": 163,
+          "points": {
+            "BLUE": 10,
+            "RED": 4
+          }
+        },
+        {
+          "id": "af487638-d55f-43b6-921d-d560468a7d03",
+          "seed": 5390430569943130319,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 37,
+          "actions": 117,
+          "points": {
+            "BLUE": 5,
+            "RED": 10
+          }
+        },
+        {
+          "id": "3f255abd-54fd-4f79-88fc-893024290ea3",
+          "seed": 7086799769836096502,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 81,
+          "actions": 236,
+          "points": {
+            "RED": 6,
+            "BLUE": 10
+          }
+        }
+      ]
+    },
+    {
+      "shard": 28,
+      "seed": 20260938,
+      "requested_games": 10,
+      "seconds": 39.020946086151525,
+      "wins": {
+        "BLUE": 5,
+        "RED": 5
+      },
+      "points": {
+        "RED": [
+          8,
+          10,
+          6,
+          10,
+          10,
+          10,
+          6,
+          11,
+          9,
+          7
+        ],
+        "BLUE": [
+          10,
+          6,
+          10,
+          8,
+          9,
+          2,
+          10,
+          4,
+          10,
+          10
+        ]
+      },
+      "decisions": 1174,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "7cf233cb-3e24-4ee6-9b5e-f85542290aea",
+          "seed": 2595643980123529630,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 103,
+          "actions": 320,
+          "points": {
+            "RED": 8,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "9c12085c-f071-4360-9eb2-4364e2ab8b27",
+          "seed": 7233724888324935913,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 71,
+          "actions": 206,
+          "points": {
+            "BLUE": 6,
+            "RED": 10
+          }
+        },
+        {
+          "id": "c11e2819-a7fb-4ec5-b25c-0bc6672f70e6",
+          "seed": 7846844346418110870,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 65,
+          "actions": 194,
+          "points": {
+            "RED": 6,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "10696b8c-3de7-407c-85c8-cd5502ff25ee",
+          "seed": 5977262675441081077,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 84,
+          "actions": 249,
+          "points": {
+            "RED": 10,
+            "BLUE": 8
+          }
+        },
+        {
+          "id": "ea7d0dcb-4ee7-45e6-8456-226999e9fa06",
+          "seed": 3385266595394873875,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 75,
+          "actions": 220,
+          "points": {
+            "BLUE": 9,
+            "RED": 10
+          }
+        },
+        {
+          "id": "8b1f30c9-9c53-4a70-96ca-301fc5162a39",
+          "seed": 8313123838989142536,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 52,
+          "actions": 147,
+          "points": {
+            "RED": 10,
+            "BLUE": 2
+          }
+        },
+        {
+          "id": "3900bfc7-c66b-476b-a911-920afeca0cd5",
+          "seed": 6075712297753593387,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 81,
+          "actions": 242,
+          "points": {
+            "RED": 6,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "e411074b-c039-49fc-982a-799c49707be0",
+          "seed": 6892871006017512807,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 51,
+          "actions": 152,
+          "points": {
+            "BLUE": 4,
+            "RED": 11
+          }
+        },
+        {
+          "id": "8d26b2f1-9887-4daa-861f-00cd6adb2988",
+          "seed": 8730076108624340050,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 85,
+          "actions": 277,
+          "points": {
+            "RED": 9,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "ad701566-0f55-43f7-b384-cedbb9dcca43",
+          "seed": 8311977483083015855,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 99,
+          "actions": 288,
+          "points": {
+            "RED": 7,
+            "BLUE": 10
+          }
+        }
+      ]
+    },
+    {
+      "shard": 29,
+      "seed": 20260939,
+      "requested_games": 10,
+      "seconds": 35.35851134802215,
+      "wins": {
+        "RED": 5,
+        "BLUE": 5
+      },
+      "points": {
+        "RED": [
+          10,
+          7,
+          6,
+          5,
+          6,
+          10,
+          8,
+          11,
+          10,
+          10
+        ],
+        "BLUE": [
+          2,
+          10,
+          11,
+          10,
+          10,
+          4,
+          10,
+          4,
+          5,
+          6
+        ]
+      },
+      "decisions": 1089,
+      "fallbacks": 0,
+      "games": [
+        {
+          "id": "12fb9e2b-ea22-4518-af73-74d8743f5c9f",
+          "seed": 4612708928163473811,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 62,
+          "actions": 181,
+          "points": {
+            "RED": 10,
+            "BLUE": 2
+          }
+        },
+        {
+          "id": "4b8cdaf9-b1fc-46f4-a594-2f701fa4c1f7",
+          "seed": 1169490583681315974,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 80,
+          "actions": 235,
+          "points": {
+            "BLUE": 10,
+            "RED": 7
+          }
+        },
+        {
+          "id": "a0c6019e-088e-4a0c-aa01-5aaa0c9edc25",
+          "seed": 3067244670971114340,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 52,
+          "actions": 165,
+          "points": {
+            "BLUE": 11,
+            "RED": 6
+          }
+        },
+        {
+          "id": "eff8faeb-1f89-42cb-b34a-59704cdb7e49",
+          "seed": 3080844492780275393,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 68,
+          "actions": 214,
+          "points": {
+            "BLUE": 10,
+            "RED": 5
+          }
+        },
+        {
+          "id": "40cb23aa-497b-435e-8cf7-c4aae081166e",
+          "seed": 1184925731759669791,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "BLUE",
+          "turns": 56,
+          "actions": 166,
+          "points": {
+            "BLUE": 10,
+            "RED": 6
+          }
+        },
+        {
+          "id": "eed74f9e-0a2b-4119-b910-4810e50072bd",
+          "seed": 8447843175422646166,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 93,
+          "actions": 281,
+          "points": {
+            "BLUE": 4,
+            "RED": 10
+          }
+        },
+        {
+          "id": "86c4fabe-fa7b-471e-b80f-33df7d707cee",
+          "seed": 7803753232483875210,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "BLUE",
+          "turns": 75,
+          "actions": 217,
+          "points": {
+            "RED": 8,
+            "BLUE": 10
+          }
+        },
+        {
+          "id": "fc2b0fb4-0bca-473b-849e-75333da70ba7",
+          "seed": 7059962478830595744,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 56,
+          "actions": 170,
+          "points": {
+            "RED": 11,
+            "BLUE": 4
+          }
+        },
+        {
+          "id": "caf367fe-8873-4aa8-a3cd-9b3b60e0235f",
+          "seed": 8272197749790988079,
+          "seating": [
+            "BLUE",
+            "RED"
+          ],
+          "winner": "RED",
+          "turns": 67,
+          "actions": 201,
+          "points": {
+            "BLUE": 5,
+            "RED": 10
+          }
+        },
+        {
+          "id": "a811df38-0462-4ed7-83c3-93c905df7d04",
+          "seed": 1061610160118499959,
+          "seating": [
+            "RED",
+            "BLUE"
+          ],
+          "winner": "RED",
+          "turns": 74,
+          "actions": 231,
+          "points": {
+            "RED": 10,
+            "BLUE": 6
+          }
+        }
+      ]
+    }
+  ]
+}

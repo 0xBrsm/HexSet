@@ -1,0 +1,303 @@
+{
+  "completed_blocks": 16,
+  "boards": 512,
+  "cells": [
+    {
+      "rate": 0.0,
+      "alpha": 0.0,
+      "wins": 243.0,
+      "games": 1024,
+      "unfinished": 0,
+      "focal_trades": 0,
+      "table_trades": 0,
+      "win_rate": {
+        "mean": 0.2373046875,
+        "lower": 0.21355449667076232,
+        "upper": 0.2610548783292377,
+        "samples": 512
+      }
+    },
+    {
+      "rate": 0.0,
+      "alpha": 0.5,
+      "wins": 233.0,
+      "games": 1024,
+      "unfinished": 0,
+      "focal_trades": 0,
+      "table_trades": 0,
+      "win_rate": {
+        "mean": 0.2275390625,
+        "lower": 0.20308098971992616,
+        "upper": 0.25199713528007384,
+        "samples": 512
+      }
+    },
+    {
+      "rate": 0.0,
+      "alpha": 1.0,
+      "wins": 244.0,
+      "games": 1024,
+      "unfinished": 0,
+      "focal_trades": 0,
+      "table_trades": 0,
+      "win_rate": {
+        "mean": 0.23828125,
+        "lower": 0.2151536596205981,
+        "upper": 0.2614088403794019,
+        "samples": 512
+      }
+    },
+    {
+      "rate": 0.5,
+      "alpha": 0.0,
+      "wins": 317.0,
+      "games": 1024,
+      "unfinished": 0,
+      "focal_trades": 22199,
+      "table_trades": 33311,
+      "win_rate": {
+        "mean": 0.3095703125,
+        "lower": 0.2809770054538047,
+        "upper": 0.3381636195461953,
+        "samples": 512
+      }
+    },
+    {
+      "rate": 0.5,
+      "alpha": 0.5,
+      "wins": 311.0,
+      "games": 1024,
+      "unfinished": 0,
+      "focal_trades": 22389,
+      "table_trades": 33618,
+      "win_rate": {
+        "mean": 0.3037109375,
+        "lower": 0.2762064839387407,
+        "upper": 0.3312153910612593,
+        "samples": 512
+      }
+    },
+    {
+      "rate": 0.5,
+      "alpha": 1.0,
+      "wins": 301.0,
+      "games": 1024,
+      "unfinished": 0,
+      "focal_trades": 22702,
+      "table_trades": 33760,
+      "win_rate": {
+        "mean": 0.2939453125,
+        "lower": 0.2678127752322145,
+        "upper": 0.3200778497677855,
+        "samples": 512
+      }
+    },
+    {
+      "rate": 1.0,
+      "alpha": 0.0,
+      "wins": 289.0,
+      "games": 1024,
+      "unfinished": 0,
+      "focal_trades": 29056,
+      "table_trades": 58612,
+      "win_rate": {
+        "mean": 0.2822265625,
+        "lower": 0.25541266112117694,
+        "upper": 0.30904046387882306,
+        "samples": 512
+      }
+    },
+    {
+      "rate": 1.0,
+      "alpha": 0.5,
+      "wins": 257.0,
+      "games": 1024,
+      "unfinished": 0,
+      "focal_trades": 29360,
+      "table_trades": 59224,
+      "win_rate": {
+        "mean": 0.2509765625,
+        "lower": 0.22498817852756797,
+        "upper": 0.276964946472432,
+        "samples": 512
+      }
+    },
+    {
+      "rate": 1.0,
+      "alpha": 1.0,
+      "wins": 246.0,
+      "games": 1024,
+      "unfinished": 0,
+      "focal_trades": 29915,
+      "table_trades": 59928,
+      "win_rate": {
+        "mean": 0.240234375,
+        "lower": 0.21586366298426035,
+        "upper": 0.26460508701573965,
+        "samples": 512
+      }
+    }
+  ],
+  "primary_interaction": {
+    "win_rate": {
+      "mean": -0.04296875,
+      "lower": -0.08556116615929509,
+      "upper": -0.00037633384070491493,
+      "samples": 512
+    },
+    "focal_vp": {
+      "mean": -0.1845703125,
+      "lower": -0.36603775658918847,
+      "upper": -0.00310286841081156,
+      "samples": 512
+    }
+  },
+  "primary_sign": "positive means trading weights gain relative to no-trade weights as willingness rises",
+  "within_regime": [
+    {
+      "rate": 0,
+      "alpha": 0,
+      "win_rate": {
+        "mean": -0.0009765625,
+        "lower": -0.028806477881563982,
+        "upper": 0.026853352881563982,
+        "samples": 512
+      },
+      "focal_vp": {
+        "mean": -0.0029296875,
+        "lower": -0.12854873697494842,
+        "upper": 0.12268936197494842,
+        "samples": 512
+      }
+    },
+    {
+      "rate": 0,
+      "alpha": 0.5,
+      "win_rate": {
+        "mean": -0.0107421875,
+        "lower": -0.03748004750557289,
+        "upper": 0.015995672505572895,
+        "samples": 512
+      },
+      "focal_vp": {
+        "mean": -0.0400390625,
+        "lower": -0.16050810182786826,
+        "upper": 0.08042997682786826,
+        "samples": 512
+      }
+    },
+    {
+      "rate": 0.5,
+      "alpha": 0,
+      "win_rate": {
+        "mean": 0.015625,
+        "lower": -0.01697345012400031,
+        "upper": 0.04822345012400031,
+        "samples": 512
+      },
+      "focal_vp": {
+        "mean": 0.064453125,
+        "lower": -0.057285534617580625,
+        "upper": 0.18619178461758062,
+        "samples": 512
+      }
+    },
+    {
+      "rate": 0.5,
+      "alpha": 0.5,
+      "win_rate": {
+        "mean": 0.009765625,
+        "lower": -0.01977929876609091,
+        "upper": 0.039310548766090914,
+        "samples": 512
+      },
+      "focal_vp": {
+        "mean": 0.0185546875,
+        "lower": -0.09090831664859335,
+        "upper": 0.12801769164859333,
+        "samples": 512
+      }
+    },
+    {
+      "rate": 1,
+      "alpha": 0,
+      "win_rate": {
+        "mean": 0.0419921875,
+        "lower": 0.009175530426443632,
+        "upper": 0.07480884457355637,
+        "samples": 512
+      },
+      "focal_vp": {
+        "mean": 0.181640625,
+        "lower": 0.052741325412690415,
+        "upper": 0.3105399245873096,
+        "samples": 512
+      }
+    },
+    {
+      "rate": 1,
+      "alpha": 0.5,
+      "win_rate": {
+        "mean": 0.0107421875,
+        "lower": -0.01733496614268581,
+        "upper": 0.038819341142685815,
+        "samples": 512
+      },
+      "focal_vp": {
+        "mean": 0.087890625,
+        "lower": -0.02500412970299809,
+        "upper": 0.2007853797029981,
+        "samples": 512
+      }
+    }
+  ],
+  "intervals": "95% normal intervals across independent board pairs; secondary contrasts are exploratory",
+  "complete": true,
+  "plan": {
+    "source_sha256": "cc54a65744deb2716cbced5a0aaac0ccd697289e19616094f2eece6cfd2c344a",
+    "games_per_cell": 1024,
+    "chunk_games": 64,
+    "seed": 420000,
+    "grid": [
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.5
+      ],
+      [
+        0.0,
+        1.0
+      ],
+      [
+        0.5,
+        0.0
+      ],
+      [
+        0.5,
+        0.5
+      ],
+      [
+        0.5,
+        1.0
+      ],
+      [
+        1.0,
+        0.0
+      ],
+      [
+        1.0,
+        0.5
+      ],
+      [
+        1.0,
+        1.0
+      ]
+    ],
+    "gate_floor": 0,
+    "primary": "(win[1,1] - win[1,0]) - (win[0,1] - win[0,0])",
+    "stopping_rule": "fixed sample; no early stopping for significance"
+  }
+}

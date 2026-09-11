@@ -142,6 +142,10 @@ class Entrant:
     weights: object | None = None
     depth: int = 2
     width: int | None = None
+    # Optional leaf budget for experimental Heximax configurations.
+    max_nodes: int | None = None
+    # Experimental port-aware purchase progress feature.
+    port_aware: bool = False
     # None uses the selected bot's search objective.
     stance: str | None = None
     # Whether the opening settlements come from the fitted placement prior
@@ -173,6 +177,8 @@ class Entrant:
     # at, `None` meaning the bot's own constant. A fitted `weights` and its
     # temperature are identified jointly, so a candidate carries both.
     temperature: float | None = None
+    # Candidate-only native Catanatron action-space parity.
+    native_action_compat: bool = False
 
     def renamed(self, name: str) -> Entrant:
         return replace(self, name=name)

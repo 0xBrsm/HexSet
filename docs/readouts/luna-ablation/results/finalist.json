@@ -1,0 +1,37 @@
+{
+  "confirm_ranking_by_threshold_margin": [
+    [
+      -0.05859375,
+      "road-zero",
+      {
+        "vs-ab2": 0.44140625,
+        "vs-shipped": 0.328125
+      }
+    ],
+    [
+      -0.05859375,
+      "progress-141",
+      {
+        "vs-ab2": 0.44140625,
+        "vs-shipped": 0.22265625
+      }
+    ],
+    [
+      -0.0625,
+      "road-half",
+      {
+        "vs-ab2": 0.4375,
+        "vs-shipped": 0.24609375
+      }
+    ],
+    [
+      -0.10546875,
+      "prod-half",
+      {
+        "vs-ab2": 0.39453125,
+        "vs-shipped": 0.2734375
+      }
+    ]
+  ],
+  "finalist": "road-zero"
+}

@@ -1,0 +1,30 @@
+{
+  "status": "FAIL",
+  "gates": [
+    {
+      "gate": "vs-ab2",
+      "games": 2048,
+      "wins": 964,
+      "win_rate": 0.470703125,
+      "wilson95": [
+        0.4491606081886221,
+        0.4923553410655806
+      ],
+      "threshold": 0.5,
+      "pass": false
+    },
+    {
+      "gate": "vs-shipped",
+      "games": 2048,
+      "wins": 537,
+      "win_rate": 0.26220703125,
+      "wilson95": [
+        0.24361584540525363,
+        0.2816886093746924
+      ],
+      "threshold": 0.25,
+      "pass": false
+    }
+  ],
+  "completed_games": 4096
+}

@@ -44,6 +44,7 @@ from hexset.state import GameState
 from hexset.victory import WINNING_POINTS, award_points, card_points
 
 from hexset.view import View
+from .port_progress_fast import port_aware_progress_fast
 
 # Victory-point cards in the deck. None is ever revealed before its holder
 # wins, so every one not in the knower's own hand is in the unseen pool.
@@ -144,12 +145,13 @@ class HonestEvaluator:
 
     def __init__(
         self, board: Board, weights: Weights | None = None, *,
-        exact_progress_samples: int = 0,
+        exact_progress_samples: int = 0, port_aware: bool = False,
     ) -> None:
         self.inner = Evaluator(board, weights)
         self.weights = self.inner.weights
         self.vector = self.inner.vector
         self.exact_progress_samples = exact_progress_samples
+        self.port_aware = port_aware
         self._walk_cache: dict[tuple, Survey] = {}
         self._belief_cache: dict[tuple, View] = {}
         self._evaluate_cache: dict[tuple, list[float]] = {}
@@ -255,12 +257,12 @@ class HonestEvaluator:
         walk: Survey | None = None,
     ) -> tuple[float, float, float]:
         """`evaluate.hand_terms` for `hand`, on this seat's memoized board facts."""
-        return hand_terms(
-            hand,
-            self._walk(state, seat) if walk is None else walk,
-            num_players=state.num_players,
-            deck_left=len(state.deck),
-        )
+        actual_walk = self._walk(state, seat) if walk is None else walk
+        if self.port_aware:
+            progress = port_aware_progress_fast(hand, actual_walk, deck_left=len(state.deck), bank=state.bank)
+            _, spare, risk = hand_terms(hand, actual_walk, num_players=state.num_players, deck_left=len(state.deck))
+            return progress, spare, risk
+        return hand_terms(hand, actual_walk, num_players=state.num_players, deck_left=len(state.deck))
 
     def _hand_terms_of(
         self, state: GameState, seat: int, hand: Sequence[float], belief: View | None,
@@ -433,6 +435,16 @@ class HonestEvaluator:
         progress = np.maximum(np.take_along_axis(
             scored, chosen[:, :, None], axis=2
         )[:, :, 0], 0.0)
+        if self.port_aware:
+            # The scalar path prices purchase progress after legal bank/port
+            # conversions; preserve that same value in the batched path.
+            progress = np.empty((n, num_players))
+            for row in range(n):
+                for seat in range(num_players):
+                    progress[row, seat] = port_aware_progress_fast(
+                        hands[row, seat], self._walk(state, seat),
+                        deck_left=deck_left, bank=state.bank,
+                    )
         # Index `len(_PURCHASES)` is the all-zeros row: no purchase scored
         # above zero, so nothing in the hand is committed to one.
         best_cost = _PURCHASE_COSTS[np.where(progress > 0.0, chosen, len(_PURCHASES))]
@@ -487,6 +499,10 @@ class HonestEvaluator:
             tuple(tuple(hand) for hand in state.hands),
             None if belief is None else belief.signature(),
         )
+        if self.port_aware:
+            # Port-aware scalar scoring reads the mutable bank; bind it into
+            # this optional cache key without changing the ordinary key.
+            key += (tuple(state.bank),)
         cached = self._evaluate_cache.get(key)
         if cached is not None:
             return list(cached)

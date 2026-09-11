@@ -1,0 +1,80 @@
+{
+  "selection_blocks": 8,
+  "holdout_blocks": 8,
+  "selected_static_alpha": 0.0,
+  "selected_adaptive_alphas": {
+    "0.0": 1.0,
+    "0.5": 1.0,
+    "1.0": 0.0
+  },
+  "training_wins": [
+    {
+      "rate": 0.0,
+      "alpha": 0.0,
+      "wins": 120
+    },
+    {
+      "rate": 0.0,
+      "alpha": 0.5,
+      "wins": 124
+    },
+    {
+      "rate": 0.0,
+      "alpha": 1.0,
+      "wins": 129
+    },
+    {
+      "rate": 0.5,
+      "alpha": 0.0,
+      "wins": 156
+    },
+    {
+      "rate": 0.5,
+      "alpha": 0.5,
+      "wins": 153
+    },
+    {
+      "rate": 0.5,
+      "alpha": 1.0,
+      "wins": 157
+    },
+    {
+      "rate": 1.0,
+      "alpha": 0.0,
+      "wins": 145
+    },
+    {
+      "rate": 1.0,
+      "alpha": 0.5,
+      "wins": 130
+    },
+    {
+      "rate": 1.0,
+      "alpha": 1.0,
+      "wins": 130
+    }
+  ],
+  "holdout_games_per_policy": 1536,
+  "holdout_wins": {
+    "trading_baseline": 375,
+    "static": 428,
+    "adaptive": 403
+  },
+  "comparisons": {
+    "static_minus_trading_baseline": {
+      "mean": 0.03450520833333333,
+      "lower": 0.006002508716833697,
+      "upper": 0.06300790794983296,
+      "samples": 256
+    },
+    "adaptive_minus_static": {
+      "mean": -0.016276041666666664,
+      "lower": -0.038380371405442884,
+      "upper": 0.005828288072109559,
+      "samples": 256
+    }
+  },
+  "confidence": "97.5% per contrast; Bonferroni family-wise 95% for two secondary comparisons",
+  "population": "equal mixture of willingness 0, 0.5, and 1 against fixed opponents",
+  "baseline_label": "trading move weights with zero-threshold gates, not the production preset"
+}

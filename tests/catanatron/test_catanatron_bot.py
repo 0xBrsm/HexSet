@@ -274,3 +274,37 @@ assert type(bot).__name__ == 'CatanatronBot'
         env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src")},
     )
     assert completed.returncode == 0, completed.stderr
+
+def test_candidate_post_roll_free_roads_hide_bank_trades(positions):
+    """Candidate adapter parity filters native forced-road legality."""
+    from catanatron.models.enums import ActionPrompt
+
+    source = next(game for game in positions if game.phase is Phase.MAIN and any(a.type is OurActionType.BUILD_ROAD for a in legal_actions(game)))
+    state = source.state(0, hidden=False)
+    seats = seating(tuple(list(Color)[: state.num_players]))
+    mapping = translate_board(catanatron_map(state.board))
+    mirror = to_catanatron(source, mapping, seats)
+    native = mirror.state
+    current = native.current_color()
+    key = f"P{native.color_to_index[current]}"
+    native.current_prompt = ActionPrompt.PLAY_TURN
+    native.player_state[f"{key}_HAS_ROLLED"] = True
+    native.is_road_building = True
+    native.free_roads_available = 1
+    translated, _ = translate(mirror, mapping, random.Random(0))
+
+    assert translated.phase is Phase.MAIN
+    assert any(action.type is OurActionType.BANK_TRADE for action in legal_actions(translated))
+    bot = spawn(entrant_from_name("heximax-notrade"), translated._state.board, random.Random(0))
+    bot.native_action_compat = True
+    options = bot._options_in(translated, translated.current_player)
+    assert options
+    assert all(action.type is OurActionType.BUILD_ROAD for action in options)
+
+    # After placing the last free road, native legality returns to MAIN.
+    translated.free_roads = 1
+    last_road = next(action for action in legal_actions(translated) if action.type is OurActionType.BUILD_ROAD)
+    apply(translated, last_road)
+    assert translated.free_roads == 0
+    options = bot._options_in(translated, translated.current_player)
+    assert any(action.type is OurActionType.BANK_TRADE for action in options)

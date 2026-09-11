@@ -1,0 +1,324 @@
+{
+  "confirmation": {
+    "commands": [
+      {
+        "argv": [
+          "docker",
+          "run",
+          "--name",
+          "luna-round6000-confirm-vs-ab2",
+          "--network",
+          "none",
+          "--cpus",
+          "30",
+          "--user",
+          "1000:1000",
+          "-e",
+          "PYTHONHASHSEED=0",
+          "-e",
+          "OMP_NUM_THREADS=1",
+          "-e",
+          "OPENBLAS_NUM_THREADS=1",
+          "-e",
+          "MKL_NUM_THREADS=1",
+          "-e",
+          "PYTHONPATH=/study/src",
+          "-v",
+          "/home/bsm/tmp/hexset-luna-followon-certified:/study:ro",
+          "-v",
+          "/home/bsm/tmp/luna-round6000-confirmation:/out:rw",
+          "-w",
+          "/study",
+          "--entrypoint",
+          "python",
+          "58c092875440",
+          "-m",
+          "hexset.catanatron.evolve_candidate_eval",
+          "--candidate-id",
+          "g6000-p10",
+          "--weights-json",
+          "{\"buy_progress\":0.4606045314909384,\"diversity\":0.360074083309872,\"knight\":0.16043960472833257,\"port\":0.019305197991678444,\"production\":3.8803981040675644,\"road\":0.00019147194463070284,\"robber_risk\":-0.31245697996217825,\"scarce\":0.07039861111111112,\"spare_card\":0.11421297701105623,\"victory_point\":1.0}",
+          "--stance",
+          "win",
+          "--temperature",
+          "2.476644394795811",
+          "--gate",
+          "vs-ab2",
+          "--games",
+          "1000",
+          "--workers",
+          "30",
+          "--seed",
+          "620000000",
+          "--out",
+          "/out/round6000-confirmation-vs-ab2-620000000.json"
+        ],
+        "shell": "docker run --name luna-round6000-confirm-vs-ab2 --network none --cpus 30 --user 1000:1000 -e PYTHONHASHSEED=0 -e OMP_NUM_THREADS=1 -e OPENBLAS_NUM_THREADS=1 -e MKL_NUM_THREADS=1 -e PYTHONPATH=/study/src -v /home/bsm/tmp/hexset-luna-followon-certified:/study:ro -v /home/bsm/tmp/luna-round6000-confirmation:/out:rw -w /study --entrypoint python 58c092875440 -m hexset.catanatron.evolve_candidate_eval --candidate-id g6000-p10 --weights-json '{\"buy_progress\":0.4606045314909384,\"diversity\":0.360074083309872,\"knight\":0.16043960472833257,\"port\":0.019305197991678444,\"production\":3.8803981040675644,\"road\":0.00019147194463070284,\"robber_risk\":-0.31245697996217825,\"scarce\":0.07039861111111112,\"spare_card\":0.11421297701105623,\"victory_point\":1.0}' --stance win --temperature 2.476644394795811 --gate vs-ab2 --games 1000 --workers 30 --seed 620000000 --out /out/round6000-confirmation-vs-ab2-620000000.json"
+      },
+      {
+        "argv": [
+          "docker",
+          "run",
+          "--name",
+          "luna-round6000-confirm-vs-shipped",
+          "--network",
+          "none",
+          "--cpus",
+          "30",
+          "--user",
+          "1000:1000",
+          "-e",
+          "PYTHONHASHSEED=0",
+          "-e",
+          "OMP_NUM_THREADS=1",
+          "-e",
+          "OPENBLAS_NUM_THREADS=1",
+          "-e",
+          "MKL_NUM_THREADS=1",
+          "-e",
+          "PYTHONPATH=/study/src",
+          "-v",
+          "/home/bsm/tmp/hexset-luna-followon-certified:/study:ro",
+          "-v",
+          "/home/bsm/tmp/luna-round6000-confirmation:/out:rw",
+          "-w",
+          "/study",
+          "--entrypoint",
+          "python",
+          "58c092875440",
+          "-m",
+          "hexset.catanatron.evolve_candidate_eval",
+          "--candidate-id",
+          "g6000-p10",
+          "--weights-json",
+          "{\"buy_progress\":0.4606045314909384,\"diversity\":0.360074083309872,\"knight\":0.16043960472833257,\"port\":0.019305197991678444,\"production\":3.8803981040675644,\"road\":0.00019147194463070284,\"robber_risk\":-0.31245697996217825,\"scarce\":0.07039861111111112,\"spare_card\":0.11421297701105623,\"victory_point\":1.0}",
+          "--stance",
+          "win",
+          "--temperature",
+          "2.476644394795811",
+          "--gate",
+          "vs-shipped",
+          "--games",
+          "1000",
+          "--workers",
+          "30",
+          "--seed",
+          "620100000",
+          "--out",
+          "/out/round6000-confirmation-vs-shipped-620100000.json"
+        ],
+        "shell": "docker run --name luna-round6000-confirm-vs-shipped --network none --cpus 30 --user 1000:1000 -e PYTHONHASHSEED=0 -e OMP_NUM_THREADS=1 -e OPENBLAS_NUM_THREADS=1 -e MKL_NUM_THREADS=1 -e PYTHONPATH=/study/src -v /home/bsm/tmp/hexset-luna-followon-certified:/study:ro -v /home/bsm/tmp/luna-round6000-confirmation:/out:rw -w /study --entrypoint python 58c092875440 -m hexset.catanatron.evolve_candidate_eval --candidate-id g6000-p10 --weights-json '{\"buy_progress\":0.4606045314909384,\"diversity\":0.360074083309872,\"knight\":0.16043960472833257,\"port\":0.019305197991678444,\"production\":3.8803981040675644,\"road\":0.00019147194463070284,\"robber_risk\":-0.31245697996217825,\"scarce\":0.07039861111111112,\"spare_card\":0.11421297701105623,\"victory_point\":1.0}' --stance win --temperature 2.476644394795811 --gate vs-shipped --games 1000 --workers 30 --seed 620100000 --out /out/round6000-confirmation-vs-shipped-620100000.json"
+      }
+    ],
+    "games_per_gate": 1000,
+    "gates": [
+      "vs-ab2",
+      "vs-shipped"
+    ],
+    "serial": true,
+    "workers": 30
+  },
+  "consumed_raw_filename_bytes_sha256": "97bde3fbc1c75dbe78a861b3bbf34ab36f3785b7bb5685803c8527d004888938",
+  "discovery": {
+    "manifest_sha256": "dd99767f08ac115da9251345113b308ca7f4593bd1b6f6343d32252f1bebc2b3",
+    "raw_filename_bytes_sha256": "97bde3fbc1c75dbe78a861b3bbf34ab36f3785b7bb5685803c8527d004888938",
+    "records": 5760,
+    "validator_sha256": "8c288a82c21f39a53bd70b712c2a0e989f6098788c1a40e6915bf2db8a168e1f"
+  },
+  "execution": "NOT_EXECUTED_BY_THIS_PLANNER",
+  "input_binding_sha256": "7bb3d7de808c43933ac096e1446eeed25e228911a0f7bcf4e29336b8fd9b061a",
+  "phenotype": {
+    "depth": 2,
+    "effective_temperature": 2.476644394795811,
+    "id": "g6000-p10",
+    "internal_placement_default": true,
+    "k": 1,
+    "max_nodes": 600,
+    "max_trades": 0,
+    "mode": "notrade",
+    "outer_entrant_placement": false,
+    "port_aware": false,
+    "scarce_binding": "baseline_no_trade",
+    "stance": "win",
+    "temperature": 2.476644394795811,
+    "weights": {
+      "buy_progress": 0.4606045314909384,
+      "diversity": 0.360074083309872,
+      "knight": 0.16043960472833257,
+      "port": 0.019305197991678444,
+      "production": 3.8803981040675644,
+      "road": 0.00019147194463070284,
+      "robber_risk": -0.31245697996217825,
+      "scarce": 0.07039861111111112,
+      "spare_card": 0.11421297701105623,
+      "victory_point": 1.0
+    },
+    "width": 6
+  },
+  "schema": 1,
+  "selected_candidate": "g6000-p10",
+  "selection": {
+    "native_promotions_used": false,
+    "raw_records": 5760,
+    "scores": {
+      "g6000-p00": {
+        "joint_margin": -0.03749999999999998,
+        "vs-ab2-rate": 0.4625,
+        "vs-ab2-wins": 111,
+        "vs-shipped-rate": 0.2916666666666667,
+        "vs-shipped-wins": 70
+      },
+      "g6000-p01": {
+        "joint_margin": -0.04999999999999999,
+        "vs-ab2-rate": 0.45,
+        "vs-ab2-wins": 108,
+        "vs-shipped-rate": 0.2916666666666667,
+        "vs-shipped-wins": 70
+      },
+      "g6000-p02": {
+        "joint_margin": -0.04583333333333334,
+        "vs-ab2-rate": 0.45416666666666666,
+        "vs-ab2-wins": 109,
+        "vs-shipped-rate": 0.3,
+        "vs-shipped-wins": 72
+      },
+      "g6000-p03": {
+        "joint_margin": -0.08333333333333331,
+        "vs-ab2-rate": 0.4166666666666667,
+        "vs-ab2-wins": 100,
+        "vs-shipped-rate": 0.2875,
+        "vs-shipped-wins": 69
+      },
+      "g6000-p04": {
+        "joint_margin": -0.03749999999999998,
+        "vs-ab2-rate": 0.4625,
+        "vs-ab2-wins": 111,
+        "vs-shipped-rate": 0.32083333333333336,
+        "vs-shipped-wins": 77
+      },
+      "g6000-p05": {
+        "joint_margin": -0.12083333333333335,
+        "vs-ab2-rate": 0.37916666666666665,
+        "vs-ab2-wins": 91,
+        "vs-shipped-rate": 0.25416666666666665,
+        "vs-shipped-wins": 61
+      },
+      "g6000-p06": {
+        "joint_margin": -0.07500000000000001,
+        "vs-ab2-rate": 0.425,
+        "vs-ab2-wins": 102,
+        "vs-shipped-rate": 0.24583333333333332,
+        "vs-shipped-wins": 59
+      },
+      "g6000-p07": {
+        "joint_margin": -0.04583333333333334,
+        "vs-ab2-rate": 0.45416666666666666,
+        "vs-ab2-wins": 109,
+        "vs-shipped-rate": 0.2833333333333333,
+        "vs-shipped-wins": 68
+      },
+      "g6000-p08": {
+        "joint_margin": -0.09583333333333333,
+        "vs-ab2-rate": 0.4041666666666667,
+        "vs-ab2-wins": 97,
+        "vs-shipped-rate": 0.2125,
+        "vs-shipped-wins": 51
+      },
+      "g6000-p09": {
+        "joint_margin": -0.04999999999999999,
+        "vs-ab2-rate": 0.45,
+        "vs-ab2-wins": 108,
+        "vs-shipped-rate": 0.3125,
+        "vs-shipped-wins": 75
+      },
+      "g6000-p10": {
+        "joint_margin": -0.029166666666666674,
+        "vs-ab2-rate": 0.4708333333333333,
+        "vs-ab2-wins": 113,
+        "vs-shipped-rate": 0.2833333333333333,
+        "vs-shipped-wins": 68
+      },
+      "g6000-p11": {
+        "joint_margin": -0.05833333333333335,
+        "vs-ab2-rate": 0.44166666666666665,
+        "vs-ab2-wins": 106,
+        "vs-shipped-rate": 0.25416666666666665,
+        "vs-shipped-wins": 61
+      }
+    },
+    "selected_by_joint_margin": "g6000-p10",
+    "source_binding": {
+      "controller_file_sha256": "9ac7fd9b875703e34f0f25a3de0f47b3265443ac15efd4463760b8ee8b07e84c",
+      "count": 12,
+      "created_utc": "2026-09-10T22:43:40Z",
+      "dcp_dependency": {
+        "ab2_artifact": "dcp-vs-ab2-1000-410000000.json",
+        "ab2_sha256": "6135cdd72efa2a6fec82b663b9e80ed3c0aa4ee5290de152aa090c34df44771c",
+        "ab2_wins": 419,
+        "identity_sidecar_sha256": "cde5daf6e6d5ec0b42bb5d4fe12f53a225572c9054d56ed8ff1fe102c9b6c027",
+        "shipped_artifact": "dcp-vs-shipped-1000-410100000.json",
+        "shipped_sha256": "1280be9ed930ef5b87c0a00c083ec7864989b093a9f84cefb731269805b2ae66"
+      },
+      "effective_phenotype": {
+        "depth": 2,
+        "internal_placement_default": true,
+        "k": 1,
+        "kind": "heximax",
+        "max_nodes": 600,
+        "max_trades": 0,
+        "mode": "notrade",
+        "registered_candidates": 12,
+        "scarce": "baseline_no_trade",
+        "stance": "win",
+        "temperature": 2.476644394795811,
+        "width": 6
+      },
+      "games_per_candidate_per_gate": 240,
+      "gates": [
+        "vs-ab2",
+        "vs-shipped"
+      ],
+      "generation": 6000,
+      "generation_end_exclusive": 6001,
+      "image": "58c092875440",
+      "image_sha256": "58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+      "input_checkpoint_path": "/home/bsm/tmp/luna-round6000-input/round6000-input-pristine-rev2.json",
+      "input_checkpoint_sha256": "9e3fe29f39f079272b1fbfc772e881a7b6dc2e3504fd6b5fd2df924315d60596",
+      "luna_shared_cache": {
+        "candidate_game_cache": "disabled",
+        "namespace": "luna_shared_cache",
+        "raw_input": "pristine-rev2-only",
+        "reuse": false
+      },
+      "manifest_path": "/home/bsm/tmp/luna-round6000-input/round6000-input-manifest.json",
+      "manifest_sha256": "dd99767f08ac115da9251345113b308ca7f4593bd1b6f6343d32252f1bebc2b3",
+      "promote_top": 4,
+      "pythonhashseed": "0",
+      "schema": 1,
+      "seed": 600000000,
+      "source_hash": "11f2ae946884b9062a07eb3fcc40e4350bf0d5f1aeda57dc25b46146c4f664eb",
+      "source_root": "/home/bsm/tmp/hexset-luna-followon-certified",
+      "stage": "discovery",
+      "start_method": "fork",
+      "status": "PREPARED",
+      "thread_env": {
+        "MKL_NUM_THREADS": "1",
+        "OMP_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1"
+      },
+      "total_games": 240,
+      "workers": 30
+    },
+    "status": "PASS"
+  },
+  "source": {
+    "controller_file_sha256": "9ac7fd9b875703e34f0f25a3de0f47b3265443ac15efd4463760b8ee8b07e84c",
+    "evaluator_file_sha256": "37244faaa029e2d75f2145e0942eb615f74271ae3252cf9aa610bba8bced212b",
+    "image": "58c092875440",
+    "image_guard": "docker image inspect 58c092875440 must return sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+    "image_sha256": "58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+    "root": "/home/bsm/tmp/hexset-luna-followon-certified",
+    "source_hash": "11f2ae946884b9062a07eb3fcc40e4350bf0d5f1aeda57dc25b46146c4f664eb"
+  },
+  "status": "READY_FOR_ROOT_REVIEW"
+}

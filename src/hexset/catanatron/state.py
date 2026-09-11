@@ -123,7 +123,7 @@ def _setup_step(catanatron_state, phase: Phase, num_players: int) -> tuple[list[
     return queue, step
 
 
-def translate(catanatron_game, mapping: BoardMapping, rng: random.Random) -> tuple[Game, Seating]:
+def translate(catanatron_game, mapping: BoardMapping, rng: random.Random, ledger: PublicLedger | None = None) -> tuple[Game, Seating]:
     cstate = catanatron_game.state
     seats = seating(cstate.colors)
     n = len(cstate.colors)
@@ -223,12 +223,19 @@ def translate(catanatron_game, mapping: BoardMapping, rng: random.Random) -> tup
     # TODO: carry a `PublicLedger` across decisions in `player.py` and route
     # hand diffs and steals through it, so the bot sees what the public log
     # actually certifies rather than this floor.
-    ledger = PublicLedger(
-        seats=[
-            SeatLedger(known=[0] * NUM_RESOURCES, unknown=sum(hands[seat]))
-            for seat in range(n)
-        ]
-    )
+    if ledger is None:
+        ledger = PublicLedger(
+            seats=[
+                SeatLedger(known=[0] * NUM_RESOURCES, unknown=sum(hands[seat]))
+                for seat in range(n)
+            ]
+        )
+    else:
+        ledger = ledger.copy()
+        for seat in range(n):
+            excess = ledger.seats[seat].total() - sum(hands[seat])
+            if excess > 0:
+                ledger.seats[seat].unknown = max(0, ledger.seats[seat].unknown - excess)
 
     game = Game(
         _state=state,

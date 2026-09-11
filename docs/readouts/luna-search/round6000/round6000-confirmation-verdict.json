@@ -1,0 +1,35 @@
+{
+  "candidate": "g6000-p10",
+  "gates": [
+    {
+      "games": 1000,
+      "gate": "vs-ab2",
+      "rate": 0.448,
+      "sha256": "e4a87492248c0177dcdf820c36cbb534d58c7de0e8c2e9541fb42cd90f496e70",
+      "target": 0.5,
+      "wilson_lower": 0.41743567458435693,
+      "wins": 448
+    },
+    {
+      "games": 1000,
+      "gate": "vs-shipped",
+      "rate": 0.305,
+      "sha256": "a84a9b26e148e571299a9df7b205e4bf15a48c33606c69a82e213b6482784320",
+      "target": 0.25,
+      "wilson_lower": 0.2772552724809733,
+      "wins": 305
+    }
+  ],
+  "input_binding_sha256": "7bb3d7de808c43933ac096e1446eeed25e228911a0f7bcf4e29336b8fd9b061a",
+  "sidecar_sha256": "8370f2629552832708ec73236dd8096822cce3e61c2ba68285f3410d0b67f693",
+  "source_declared": {
+    "controller_file_sha256": "9ac7fd9b875703e34f0f25a3de0f47b3265443ac15efd4463760b8ee8b07e84c",
+    "evaluator_file_sha256": "37244faaa029e2d75f2145e0942eb615f74271ae3252cf9aa610bba8bced212b",
+    "image": "58c092875440",
+    "image_guard": "docker image inspect 58c092875440 must return sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+    "image_sha256": "58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+    "root": "/home/bsm/tmp/hexset-luna-followon-certified",
+    "source_hash": "11f2ae946884b9062a07eb3fcc40e4350bf0d5f1aeda57dc25b46146c4f664eb"
+  },
+  "status": "REJECTED_AT_CONFIRMATION"
+}

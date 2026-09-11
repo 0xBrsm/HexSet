@@ -1,0 +1,91 @@
+{
+  "candidate": "dcp",
+  "candidate_class": {
+    "bridge_max_trades": 0,
+    "class": "PublicProductionLedgerPlayer",
+    "entrant_spec": "heximax-notrade",
+    "maritime_trade": "enabled by normal Catanatron actions and observed by the ledger",
+    "module": "hexset.catanatron.public_ledger",
+    "mro": [
+      "PublicProductionLedgerPlayer",
+      "PublicLedgerPlayerMixin",
+      "DevCatanPlayer",
+      "Player",
+      "object"
+    ],
+    "public_production": true,
+    "spawned_heximax": {
+      "depth": 2,
+      "k": 1,
+      "max_nodes": 600,
+      "max_trades": 0,
+      "mode": "notrade",
+      "placement": true,
+      "stance": "win",
+      "temperature_effective": 2.476644394795811,
+      "temperature_input": null,
+      "weights": {
+        "buy_progress": 0.45,
+        "diversity": 0.358,
+        "knight": 0.1026,
+        "port": 0.03063,
+        "production": 2.785,
+        "road": 0.1237,
+        "robber_risk": -0.3,
+        "scarce": 0.07039861111111112,
+        "spare_card": 0.1065,
+        "victory_point": 1.0
+      },
+      "width": 6
+    }
+  },
+  "games": 1000,
+  "image": {
+    "sha256": "58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+    "tag": "58c092875440"
+  },
+  "lineups": {
+    "vs-ab2": "DCP,AB:2,AB:2,AB:2",
+    "vs-shipped": "DCP,DC:heximax-notrade,DC:heximax-notrade,DC:heximax-notrade"
+  },
+  "mounts": {
+    "output": "/home/bsm/tmp/luna-20260910-discovery-3000/dcp-followup:/out:rw",
+    "source": "/home/bsm/tmp/hexset-luna-followon-certified:/followon:ro"
+  },
+  "outputs": {
+    "vs-ab2": "dcp-vs-ab2-1000-410000000.json",
+    "vs-shipped": "dcp-vs-shipped-1000-410100000.json"
+  },
+  "preconditions": [
+    "luna-discovery-followup-p06 exits with status 0",
+    "both p06 output artifacts exist and validate exact candidate/gate/games/workers/seed/lineup/effective source identity",
+    "no other 30-worker main container is active",
+    "DCP source hash and pinned image hash match this sidecar"
+  ],
+  "schema": 1,
+  "seeds": {
+    "vs-ab2": 410000000,
+    "vs-shipped": 410100000
+  },
+  "serial": true,
+  "source": {
+    "dclcfg_sha256": "bc8d23876693434009c0ec9847da25bde7dbd4257473bab05518e40bb8f4ac0d",
+    "protocol": "public-ledger-v1",
+    "public_ledger_sha256": "f4b09d92dda66feae5464939e24bd69f3ed5bec1b6c0b14c485c3b5f827a73ea",
+    "root": "/home/bsm/tmp/hexset-luna-followon-certified"
+  },
+  "status": "PLANNED_PARENT_REVIEW_REQUIRED",
+  "stock_opponents": {
+    "depth": 2,
+    "entrant": "heximax-notrade",
+    "k": 1,
+    "kind": "heximax",
+    "max_nodes": null,
+    "max_trades": 0,
+    "mode": "notrade",
+    "stance": "win_default",
+    "temperature": null,
+    "width": 6
+  },
+  "workers": 30
+}

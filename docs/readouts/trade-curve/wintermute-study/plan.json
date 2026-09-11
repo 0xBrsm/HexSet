@@ -1,0 +1,47 @@
+{
+  "source_sha256": "cc54a65744deb2716cbced5a0aaac0ccd697289e19616094f2eece6cfd2c344a",
+  "games_per_cell": 1024,
+  "chunk_games": 64,
+  "seed": 420000,
+  "grid": [
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.5
+    ],
+    [
+      0.0,
+      1.0
+    ],
+    [
+      0.5,
+      0.0
+    ],
+    [
+      0.5,
+      0.5
+    ],
+    [
+      0.5,
+      1.0
+    ],
+    [
+      1.0,
+      0.0
+    ],
+    [
+      1.0,
+      0.5
+    ],
+    [
+      1.0,
+      1.0
+    ]
+  ],
+  "gate_floor": 0,
+  "primary": "(win[1,1] - win[1,0]) - (win[0,1] - win[0,0])",
+  "stopping_rule": "fixed sample; no early stopping for significance"
+}

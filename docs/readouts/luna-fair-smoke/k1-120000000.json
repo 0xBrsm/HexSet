@@ -1,0 +1,46 @@
+{
+  "candidate": "heximax-notrade-wide",
+  "catanatron": "3.3.0 @ d3f4ad05bb78",
+  "fallback_count": null,
+  "fallback_status": "DuelResult exposes no bridge fallback counter; raw smoke report emitted no fallback telemetry.",
+  "games": 1,
+  "gate": "ab2",
+  "phenotype": {
+    "depth": 2,
+    "k": 1,
+    "kind": "heximax",
+    "max_nodes": 2400,
+    "max_trades": 0,
+    "mode": "notrade",
+    "width": 12
+  },
+  "players": "DC:heximax-notrade-wide,AB:2,AB:2,AB:2",
+  "points": {
+    "Color.BLUE": [
+      5
+    ],
+    "Color.ORANGE": [
+      4
+    ],
+    "Color.RED": [
+      5
+    ],
+    "Color.WHITE": [
+      10
+    ]
+  },
+  "protocol": "fair-budget-smoke-v1",
+  "pythonhashseed": "0",
+  "runtime_image": "sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+  "seed": 120000000,
+  "smoke_excluded": true,
+  "source_archive_sha256": "18789ed84f64707d8734fc06637747d3aa80488c299469151d3274996c4c999d",
+  "source_hash": "11a0cbfef3280c5a9040ad6bcfbd3dff3dbf10c636b0f4e159d1b0073a47ec19",
+  "wins": {
+    "Color.BLUE": 0,
+    "Color.ORANGE": 0,
+    "Color.RED": 0,
+    "Color.WHITE": 1
+  },
+  "workers": 1
+}

@@ -1,0 +1,74 @@
+{
+  "selected_static_alpha": 0.0,
+  "selected_adaptive_alphas": {
+    "0.0": 1.0,
+    "0.5": 1.0,
+    "1.0": 0.0
+  },
+  "training_wins": [
+    {
+      "rate": 0.0,
+      "alpha": 0.0,
+      "wins": 120,
+      "games": 512
+    },
+    {
+      "rate": 0.0,
+      "alpha": 0.5,
+      "wins": 124,
+      "games": 512
+    },
+    {
+      "rate": 0.0,
+      "alpha": 1.0,
+      "wins": 129,
+      "games": 512
+    },
+    {
+      "rate": 0.5,
+      "alpha": 0.0,
+      "wins": 156,
+      "games": 512
+    },
+    {
+      "rate": 0.5,
+      "alpha": 0.5,
+      "wins": 153,
+      "games": 512
+    },
+    {
+      "rate": 0.5,
+      "alpha": 1.0,
+      "wins": 157,
+      "games": 512
+    },
+    {
+      "rate": 1.0,
+      "alpha": 0.0,
+      "wins": 145,
+      "games": 512
+    },
+    {
+      "rate": 1.0,
+      "alpha": 0.5,
+      "wins": 130,
+      "games": 512
+    },
+    {
+      "rate": 1.0,
+      "alpha": 1.0,
+      "wins": 130,
+      "games": 512
+    }
+  ],
+  "selection_blocks": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ]
+}

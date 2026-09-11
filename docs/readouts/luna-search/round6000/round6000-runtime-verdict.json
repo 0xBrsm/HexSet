@@ -1,0 +1,96 @@
+{
+  "artifact_verdict": "/data/data/com.termux/files/usr/tmp/luna-round6000-recovery/round6000-confirmation-verdict.json",
+  "candidate": "g6000-p10",
+  "gates": [
+    {
+      "games": 1000,
+      "gate": "vs-ab2",
+      "rate": 0.448,
+      "sha256": "e4a87492248c0177dcdf820c36cbb534d58c7de0e8c2e9541fb42cd90f496e70",
+      "target": 0.5,
+      "wilson_lower": 0.41743567458435693,
+      "wins": 448
+    },
+    {
+      "games": 1000,
+      "gate": "vs-shipped",
+      "rate": 0.305,
+      "sha256": "a84a9b26e148e571299a9df7b205e4bf15a48c33606c69a82e213b6482784320",
+      "target": 0.25,
+      "wilson_lower": 0.2772552724809733,
+      "wins": 305
+    }
+  ],
+  "receipts": [
+    {
+      "container_id": "1c6b3a94b0e74bbfda44f9ea8c811085152810ee0c4d41182a00469942b9ce58",
+      "cpu_nano": 30000000000,
+      "env": [
+        "MKL_NUM_THREADS=1",
+        "OMP_NUM_THREADS=1",
+        "OPENBLAS_NUM_THREADS=1",
+        "PYTHONHASHSEED=0",
+        "PYTHONPATH=/study/src"
+      ],
+      "exit_code": 0,
+      "finished_at": "2026-09-11T00:23:08.542476714Z",
+      "image": "sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+      "mounts": [
+        {
+          "Destination": "/out",
+          "Mode": "rw",
+          "Propagation": "rprivate",
+          "RW": true,
+          "Source": "/home/bsm/tmp/luna-round6000-confirmation",
+          "Type": "bind"
+        },
+        {
+          "Destination": "/study",
+          "Mode": "ro",
+          "Propagation": "rprivate",
+          "RW": false,
+          "Source": "/home/bsm/tmp/hexset-luna-followon-certified",
+          "Type": "bind"
+        }
+      ],
+      "name": "ab2",
+      "verified": true
+    },
+    {
+      "container_id": "6db94f7e27757df72ed93ebe0f22b42d919a25a6cad447367021283caa8bf0e1",
+      "cpu_nano": 30000000000,
+      "env": [
+        "MKL_NUM_THREADS=1",
+        "OMP_NUM_THREADS=1",
+        "OPENBLAS_NUM_THREADS=1",
+        "PYTHONHASHSEED=0",
+        "PYTHONPATH=/study/src"
+      ],
+      "exit_code": 0,
+      "finished_at": "2026-09-11T00:26:52.13082173Z",
+      "image": "sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+      "mounts": [
+        {
+          "Destination": "/study",
+          "Mode": "ro",
+          "Propagation": "rprivate",
+          "RW": false,
+          "Source": "/home/bsm/tmp/hexset-luna-followon-certified",
+          "Type": "bind"
+        },
+        {
+          "Destination": "/out",
+          "Mode": "rw",
+          "Propagation": "rprivate",
+          "RW": true,
+          "Source": "/home/bsm/tmp/luna-round6000-confirmation",
+          "Type": "bind"
+        }
+      ],
+      "name": "shipped",
+      "verified": true
+    }
+  ],
+  "runtime_verified": true,
+  "status": "REJECTED_AT_CONFIRMATION"
+}

@@ -35,8 +35,8 @@ from ..evaluate import (
 )
 from hexset.board.terrain import NUM_RESOURCES
 from hexset.cards import DECK_COMPOSITION, DevCard
-from hexset.devcards import holdings
-from hexset.economy import COSTS
+from hexset.devcards import dev_count, holdings
+from hexset.economy import COSTS, hand_size
 from hexset.game import Game
 from hexset.ledger import PublicLedger
 from hexset.state import (GameState, MAX_SETTLEMENTS, MAX_ROADS,
@@ -65,12 +65,12 @@ def expected_card_points(state: GameState, seat: int, knower: int | None) -> flo
     evaluator that scores that seat at zero for them ranks the table wrong
     in exactly the term whose weight is pinned to one.
     """
-    held = sum(holdings(state, seat))
+    held = dev_count(state, seat)
     if not held:
         return 0.0
     unseen_vp = VP_CARDS - (card_points(state, knower) if knower is not None else 0)
     unseen = len(state.deck) + sum(
-        sum(holdings(state, s)) for s in range(state.num_players) if s != knower
+        dev_count(state, s) for s in range(state.num_players) if s != knower
     )
     return held * unseen_vp / unseen if unseen else 0.0
 
@@ -206,19 +206,25 @@ class HonestEvaluator:
         `worlds`/`draw_children`, their only callers, build a fresh
         `View.from_game` instead.
 
+        Sizes, not compositions: the key carries every seat's hand *size*
+        and the perspective's own hand in full, which is exactly what
+        `View.__init__` reads. An earlier version keyed on every seat's
+        composition -- stricter than the view it caches, and unreadable on
+        an observed state (`hexset.state.Hidden`), where an opponent's hand
+        is a count and asking for its types raises.
+
         Built to be cheap on a hit, not just correct: this runs on every
         call, hit or miss, so its own cost is pure overhead on a cache that
-        exists to avoid work. `map(tuple, ...)` over the two nested fields
-        (hands, each seat's `known`) skips a generator's per-item frame
-        switch that a comprehension pays for the same values in the same
-        order; `certify` is `()` at both of this method's call sites today,
-        so the common case skips building its sub-tuple at all rather than
-        running an empty generator to discover it is empty. Every field is
-        still the same one `View.__init__` reads plus board/robber, just
-        assembled more directly -- the key's *value* is unchanged.
+        exists to avoid work. `map(tuple, ...)` over each seat's `known`
+        skips a generator's per-item frame switch that a comprehension pays
+        for the same values in the same order; `certify` is `()` at both of
+        this method's call sites today, so the common case skips building
+        its sub-tuple at all rather than running an empty generator to
+        discover it is empty.
         """
         key = (
-            tuple(map(tuple, state.hands)),
+            tuple([hand_size(state, seat) for seat in range(state.num_players)]),
+            tuple(state.hands[perspective]),
             tuple([tuple(seat_ledger.known) for seat_ledger in ledger.seats]),
             tuple([seat_ledger.unknown for seat_ledger in ledger.seats]),
             tuple(state.bank),
@@ -542,14 +548,31 @@ class HonestEvaluator:
         names every input `terms`/`score` read besides `hand`/`belief` --
         board occupancy and the robber (`survey`), road and knight counts,
         the longest-road/largest-army holders, every seat's development-card
-        holdings and the deck size (`card_points`/`expected_card_points`) --
-        plus every seat's hand and the belief's `signature()`, which is
+        *count* and the knower's own holdings and the deck size
+        (`card_points`/`expected_card_points`) -- plus the knower's own hand,
+        every other seat's hand size and the belief's `signature()`, which is
         `expected_hand`'s only input. A hit is byte-identical to
         recomputing, whether the belief came from `belief_for`, a fresh
         `View.from_game`, or the untyped fallback above.
+
+        Compositions appear only where the evaluation reads one. With a
+        belief, an opponent's hand reaches `score` as `expected_hand` and
+        its cards as a count, so keying either verbatim would be stricter
+        than the value it caches -- and unreadable on an observed state
+        (`hexset.state.Hidden`), which is what lets `evaluate_game` run on
+        one. Without a belief there is no knower and every hand is read
+        verbatim, so the key keeps every composition.
         """
         if belief is None and knower is not None:
             belief = View(state, PublicLedger.new(state.num_players), knower)
+        seats = range(state.num_players)
+        if belief is None:
+            hands: tuple = tuple(tuple(hand) for hand in state.hands)
+        else:
+            hands = tuple(
+                tuple(state.hands[seat]) if seat == knower else hand_size(state, seat)
+                for seat in seats
+            )
         key = (
             state.rules,
             tuple(state.vertex_owner),
@@ -560,12 +583,10 @@ class HonestEvaluator:
             state.longest_road_holder,
             state.largest_army_holder,
             knower,
-            tuple(
-                tuple(map(sum, zip(held, fresh)))
-                for held, fresh in zip(state.dev_cards, state.new_dev_cards)
-            ),
+            tuple(dev_count(state, seat) for seat in seats),
+            None if knower is None else tuple(holdings(state, knower)),
             len(state.deck),
-            tuple(tuple(hand) for hand in state.hands),
+            hands,
             None if belief is None else belief.signature(),
         )
         cached = self._evaluate_cache.get(key)

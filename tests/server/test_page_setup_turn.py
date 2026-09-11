@@ -165,7 +165,7 @@ def test_the_held_seat_sees_its_own_turn_not_the_next_players(running_server):
             # in the *next* seat's SETUP_SETTLEMENT, which is what had the
             # board telling a seat with nothing to place to place a
             # settlement.
-            assert page.locator("#phase").inner_text().strip() == "END YOUR TURN"
+            assert page.locator("#phase").inner_text().strip() == "END TURN"
 
             # And the active row is still ours.
             rows = page.locator(".player-row")
@@ -205,7 +205,7 @@ def test_ending_the_held_turn_releases_the_table(running_server):
         browser = playwright.chromium.launch()
         try:
             context, page = _seated_page(browser)
-            assert page.locator("#phase").inner_text().strip() == "END YOUR TURN"
+            assert page.locator("#phase").inner_text().strip() == "END TURN"
 
             page.click("#end-turn")
 
@@ -213,7 +213,7 @@ def test_ending_the_held_turn_releases_the_table(running_server):
             # what the banner says next is theirs -- either way it is no
             # longer ours, and the button that got us here is gone.
             page.wait_for_function(
-                "document.getElementById('phase').innerText.trim() !== 'END YOUR TURN'",
+                "document.getElementById('phase').innerText.trim() !== 'END TURN'",
                 timeout=10_000,
             )
             assert not _shown(page, "end-turn")

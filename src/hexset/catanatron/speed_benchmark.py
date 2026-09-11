@@ -96,7 +96,7 @@ def worker(args):
     return result
 
 
-def compare(rows, audit):
+def compare(rows, audit, baseline="off"):
     groups = defaultdict(dict)
     for row in rows:
         groups[row['seed']][row['mode']] = row
@@ -105,19 +105,21 @@ def compare(rows, audit):
         fields += ['leaves', 'leaf_sha256', 'deadline_observations']
     comparisons = []
     for seed, arms in groups.items():
-        if 'off' not in arms:
+        if baseline not in arms:
             continue
         for mode, row in arms.items():
-            if mode == 'off':
+            if mode == baseline:
                 continue
-            differences = [name for name in fields if row[name] != arms['off'][name]]
+            differences = [name for name in fields if row[name] != arms[baseline][name]]
             comparisons.append({'seed': seed, 'mode': mode, 'differences': differences})
     totals = {}
-    for mode in ('basic', 'cached'):
-        pairs = [g for g in groups.values() if 'off' in g and mode in g]
+    for mode in ('off', 'basic', 'cached', 'fast'):
+        if mode == baseline:
+            continue
+        pairs = [g for g in groups.values() if baseline in g and mode in g]
         if not pairs:
             continue
-        base = sum(g['off']['wall_seconds'] for g in pairs)
+        base = sum(g[baseline]['wall_seconds'] for g in pairs)
         fast = sum(g[mode]['wall_seconds'] for g in pairs)
         totals[mode] = {'pairs': len(pairs), 'baseline_wall_seconds': base,
                         'candidate_wall_seconds': fast, 'speedup': base / fast,
@@ -134,7 +136,9 @@ def main():
     parser.add_argument('--games', type=int, default=8, help='games per arm')
     parser.add_argument('--audit', action='store_true')
     parser.add_argument('--out', type=Path, required=True)
-    parser.add_argument('--mode', choices=('off', 'basic', 'cached'), default='off')
+    parser.add_argument('--mode', choices=('off', 'basic', 'cached', 'fast'), default='off')
+    parser.add_argument('--modes', nargs='+', choices=('off', 'basic', 'cached', 'fast'),
+                        default=['off', 'basic', 'cached', 'fast'])
     parser.add_argument('--worker', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.worker:
@@ -147,9 +151,12 @@ def main():
     env = {**os.environ, 'PYTHONHASHSEED': '0', 'OMP_NUM_THREADS': '1',
            'OPENBLAS_NUM_THREADS': '1', 'MKL_NUM_THREADS': '1'}
     rows = []
-    modes = ('off', 'basic', 'cached')
+    modes = tuple(args.modes)
+    if len(modes) < 2 or len(set(modes)) != len(modes):
+        parser.error('--modes requires at least two distinct modes')
+    total = len(modes) * args.games
     for i in range(args.games):
-        order = modes[i % 3:] + modes[:i % 3]
+        order = modes[i % len(modes):] + modes[:i % len(modes)]
         for mode in order:
             path = args.out.parent / (args.out.stem + '-games') / f'{args.seed + i}-{mode}.json'
             cmd = [sys.executable, '-m', __spec__.name, '--worker', '--players', args.players,
@@ -159,10 +166,10 @@ def main():
                 cmd.append('--audit')
             subprocess.run(cmd, env=env, check=True)
             rows.append(json.loads(path.read_text()))
-            summary = compare(rows, args.audit)
-            atomic_json(args.out, {'complete': len(rows) == 3 * args.games,
-                                   'rows': rows, **summary})
-            print(f'{len(rows)}/{3 * args.games}: seed {args.seed+i} {mode}', flush=True)
+            summary = compare(rows, args.audit, baseline=modes[0])
+            atomic_json(args.out, {'complete': len(rows) == total,
+                                   'baseline': modes[0], 'rows': rows, **summary})
+            print(f'{len(rows)}/{total}: seed {args.seed+i} {mode}', flush=True)
             if any(c['differences'] for c in summary['comparisons']):
                 raise RuntimeError('paired equivalence failed; see output')
     if args.audit and any(row['deadline_observations'] for row in rows):

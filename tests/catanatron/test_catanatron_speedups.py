@@ -26,7 +26,7 @@ def test_runtime_matches_the_pinned_source():
     verify_runtime()
 
 
-@pytest.mark.parametrize("mode", ["basic", "cached"])
+@pytest.mark.parametrize("mode", ["basic", "cached", "fast"])
 def test_scores_match_native_on_every_perspective_through_real_games(mode):
     native = value.base_fn()
     # Nondefault weights ensure we check every feature, including the native
@@ -55,10 +55,11 @@ def test_scores_match_native_on_every_perspective_through_real_games(mode):
             assert cache.misses > 0
 
 
-def test_cache_reads_dynamic_hand_points_and_longest_road_live():
+@pytest.mark.parametrize("compact", [False, True])
+def test_cache_reads_dynamic_hand_points_and_longest_road_live(compact):
     game = position()
-    cache = BoardFeatureCache()
-    fast = optimized_base_fn(cache=cache)
+    cache = BoardFeatureCache(compact=compact)
+    fast = optimized_base_fn(cache=cache, direct_hand=compact)
     native = value.base_fn()
     color = game.state.colors[0]
     first = fast(game, color)
@@ -73,9 +74,10 @@ def test_cache_reads_dynamic_hand_points_and_longest_road_live():
     assert cache.hits > 1
 
 
-def test_cache_invalidates_board_dependencies_and_bounds_memory():
+@pytest.mark.parametrize("compact", [False, True])
+def test_cache_invalidates_board_dependencies_and_bounds_memory(compact):
     game = position()
-    cache = BoardFeatureCache(max_entries=2)
+    cache = BoardFeatureCache(max_entries=2, compact=compact)
     color = game.state.colors[0]
     cache.terms(game, color)
     board = game.state.board
@@ -85,8 +87,8 @@ def test_cache_invalidates_board_dependencies_and_bounds_memory():
         lambda: setattr(board, 'robber_coordinate', next(c for c in board.map.land_tiles if c != board.robber_coordinate)),
         lambda: game.state.buildings_by_color[color][SETTLEMENT].append(0),
         lambda: game.state.buildings_by_color[color][CITY].append(1),
-        lambda: board.buildings.update({0: (color, SETTLEMENT)}),
-        lambda: board.roads.update({(0, 1): color}),
+        lambda: board.buildings.update({0: (game.state.colors[1], SETTLEMENT)}),
+        lambda: board.roads.update({(0, 1): game.state.colors[1]}),
         lambda: board.connected_components[color].append({0, 1}),
         lambda: board.board_buildable_ids.discard(0),
     )
@@ -124,10 +126,11 @@ def test_board_copy_matches_native_and_isolates_all_mutable_fields():
     assert vars(board) == vars(expected)
 
 
-def test_context_restores_after_failure_and_rejects_nesting():
+@pytest.mark.parametrize("mode", ["cached", "fast"])
+def test_context_restores_after_failure_and_rejects_nesting(mode):
     before = Board.copy, value.base_fn
     with pytest.raises(LookupError):
-        with catanatron_speedups('cached'):
+        with catanatron_speedups(mode):
             assert (Board.copy, value.base_fn) != before
             with pytest.raises(RuntimeError):
                 with catanatron_speedups('basic'):
@@ -137,3 +140,41 @@ def test_context_restores_after_failure_and_rejects_nesting():
     with catanatron_speedups('off') as cache:
         assert cache is None
         assert (Board.copy, value.base_fn) == before
+
+
+def test_state_clone_matches_native_and_isolates_nested_building_lists():
+    from catanatron.state import State
+    from hexset.catanatron.speedups import clone_state_mutable_structures
+    game = position()
+    state = game.state
+    color = state.colors[0]
+    state.buildings_by_color[color][SETTLEMENT].extend([0, 1])
+    expected = state.copy()
+    actual = clone_state_mutable_structures(state)
+    assert vars(actual.board) == vars(expected.board)
+    assert {k:v for k,v in vars(actual).items() if k != 'board'} == {
+        k:v for k,v in vars(expected).items() if k != 'board'}
+    assert actual.players is state.players
+    assert actual.colors is state.colors
+    for name in ('player_state', 'resource_freqdeck', 'development_listdeck',
+                 'buildings_by_color', 'action_records', 'discard_counts'):
+        assert getattr(actual, name) is not getattr(state, name)
+    assert isinstance(actual.buildings_by_color[color], defaultdict)
+    actual.buildings_by_color[color][SETTLEMENT].append(2)
+    assert state.buildings_by_color[color][SETTLEMENT] == [0, 1]
+    original_copy = State.copy
+    with catanatron_speedups('fast'):
+        assert State.copy is clone_state_mutable_structures
+    assert State.copy is original_copy
+
+
+def test_fast_hand_read_does_not_extract_other_players_features(monkeypatch):
+    from hexset.catanatron import speedups
+    game = position()
+    native = value.base_fn()
+    expected = [native(game, c) for c in game.state.colors]
+    def unexpected(*args):
+        raise AssertionError('all-player hand extraction was called')
+    monkeypatch.setattr(speedups, 'resource_hand_features', unexpected)
+    with catanatron_speedups('fast'):
+        assert [value.base_fn()(game, c) for c in game.state.colors] == expected

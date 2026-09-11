@@ -32,8 +32,8 @@ class _InlinePool:
     def __exit__(self, *exc):
         return False
 
-    def map(self, fn, args):
-        return [fn(a) for a in args]
+    def imap_unordered(self, fn, args, chunksize=1):
+        return iter(fn(a) for a in args)
 
 
 def test_game_config_for_maps_game_types_to_catanatron_options():
@@ -115,12 +115,13 @@ def first_draws(monkeypatch):
     return draws
 
 
+@pytest.mark.parametrize("scheduling", ["dynamic", "static"])
 @pytest.mark.parametrize("game_type", ["standard", "colonist-1v1"])
 @pytest.mark.parametrize("workers", [1, 2, 3, 7])
-def test_game_seeds_depend_only_on_duel_seed_and_game_index(first_draws, workers, game_type):
+def test_game_seeds_depend_only_on_duel_seed_and_game_index(first_draws, workers, game_type, scheduling):
     """10 games at 1, 2, 3 and 7 workers: every game starts from the same
     global-random state, and that state is `seed + g`, whatever the sharding."""
-    run_duel("DC:heximax,AB:2", 10, workers, seed=42, game_type=game_type)
+    run_duel("DC:heximax,AB:2", 10, workers, seed=42, game_type=game_type, scheduling=scheduling)
 
     assert len(first_draws) == 10  # every game played exactly once
     assert first_draws == [random.Random(42 + g).random() for g in range(10)]
@@ -133,7 +134,7 @@ def test_uneven_sharding_still_covers_every_game_exactly_once(first_draws):
     assert first_draws == [random.Random(g).random() for g in range(7)]
 
 
-@pytest.mark.parametrize('speedups', ['off', 'basic', 'cached'])
+@pytest.mark.parametrize('speedups', ['off', 'basic', 'cached', 'fast'])
 def test_speedups_are_scoped_to_worker_and_reported(monkeypatch, speedups):
     from catanatron.models.board import Board
     from hexset.catanatron.speedups import clone_board_mutable_structures
@@ -152,3 +153,30 @@ def test_speedups_are_scoped_to_worker_and_reported(monkeypatch, speedups):
     assert Board.copy is before
     assert result.speedups == speedups
     assert f'Catanatron speedups: {speedups}' in result.report()
+
+
+def test_dynamic_results_are_ordered_by_game_index_not_completion(monkeypatch):
+    from catanatron.models.player import Color
+    class ReversePool(_InlinePool):
+        def imap_unordered(self, fn, args, chunksize=1):
+            jobs = list(args)
+            assert len(jobs) == 7
+            assert all(job[2] == 1 for job in jobs)
+            assert chunksize == 1
+            return iter(fn(a) for a in reversed(jobs))
+    def fake_job(args):
+        index = args[1]
+        return index, 1, {Color.RED: 1}, {Color.RED: [index]}, 1.0
+    monkeypatch.setattr(duel, 'Pool', ReversePool)
+    monkeypatch.setattr(duel, '_play_job', fake_job)
+    result = run_duel('F,F', 7, 3)
+    assert result.wins[Color.RED] == 7
+    assert result.points[Color.RED] == list(range(7))
+    assert result.worker_seconds == 7
+    assert 'dynamically assigned' in result.report()
+
+
+@pytest.mark.parametrize('games,workers', [(0, 1), (1, 0), (-1, 2)])
+def test_invalid_game_or_worker_count_fails_before_pool(games, workers):
+    with pytest.raises(ValueError, match='positive'):
+        run_duel('F,F', games, workers)

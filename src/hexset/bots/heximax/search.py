@@ -20,6 +20,7 @@ import numpy as np
 from hexset.actions import Action, ActionType, apply, legal_actions, victim_of
 from hexset.board.board import Board
 from hexset.board.terrain import NUM_RESOURCES
+from hexset.economy import hand_size
 from hexset.chance import Forced, Live
 from ..stances import STANCES, win_at
 from ...actions import options_for
@@ -705,15 +706,19 @@ class Heximax:
         the fold preserves and a per-resource move, clamped at zero when the
         seat cannot cover `losses`, would not.
         """
-        hand = state.hands[seat]
         if seat == knower:
-            for r in range(len(hand)):
+            hand = state.hands[seat]
+            for r in range(NUM_RESOURCES):
                 hand[r] += gains[r] - losses[r]
                 if hand[r] < 0:
                     hand[r] = 0
         else:
+            # Size only, read through `hand_size`: on an observed state the
+            # seat's hand is a `HiddenHand`, and this is the one place the
+            # gate's pricing touches an opponent's pile at all.
             net = sum(gains) - sum(losses)
-            state.hands[seat] = [max(0, sum(hand) + net)] + [0] * (len(hand) - 1)
+            size = max(0, hand_size(state, seat) + net)
+            state.hands[seat] = [size] + [0] * (NUM_RESOURCES - 1)
 
     # -- the tree ------------------------------------------------------------
 

@@ -22,6 +22,19 @@ Every opponent quantity `HonestEvaluator` (`bots/heximax/evaluate.py`)
 reads comes through a `View` -- never through `state.hands[opponent]` or
 `state.dev_cards[opponent]` directly. See `View`'s own docstring for the
 model (`known`/`unknown`/the shared residual `pool`).
+
+**The state underneath need not be the referee's.** A `View` reads only
+sizes off the other seats (`economy.hand_size`, `devcards.dev_count`,
+`len(state.deck)`), so it is built the same way over a true `GameState` and
+over one written by a *seat* -- the live adapter for a table it is playing
+at, a replay of a public log -- whose opponents' piles are
+`state.HiddenHand`/`HiddenCards` counts and whose deck is a
+`state.HiddenDeck` length. Such a state needs no placeholder composition to
+stand in for what its author cannot see, and any path that reaches for an
+identity on it raises `state.HiddenRead` instead of reading a fabrication.
+Two views built from the same sizes, ledger and bank are equal
+(`__eq__`/`signature()`) whichever kind of state they came from, and
+`sample` returns a fully concrete state from either.
 """
 
 from __future__ import annotations
@@ -32,9 +45,11 @@ from typing import Sequence
 
 from .board.terrain import NUM_RESOURCES
 from .cards import DECK_COMPOSITION, NUM_DEV_CARDS, DevCard
+from .devcards import dev_count
+from .economy import hand_size
 from .game import Game
 from .ledger import PublicLedger
-from .state import BANK_PER_RESOURCE, GameState, copy_state
+from .state import BANK_PER_RESOURCE, GameState, HiddenRead, copy_state, is_hidden
 
 
 class View:
@@ -53,6 +68,14 @@ class View:
     past the public hand size, or the pool short; the belief clamps `known`
     to size and pads the pool proportionally rather than raise, because a
     baseline that cannot cope with a position is not a baseline.
+
+    The `state` may be observed rather than true: every read this class
+    makes of another seat is a size (`economy.hand_size`,
+    `devcards.dev_count`) or public (`bank`, the board, `knights_played`,
+    `len(state.deck)`), so hidden piles (`state.Hidden`) are enough. The
+    perspective's own hand and development cards must be concrete -- they
+    are read verbatim -- and a state that hides them raises
+    `state.HiddenRead` here rather than later.
     """
 
     def __init__(
@@ -64,7 +87,16 @@ class View:
         self.perspective = perspective
         n = state.num_players
         self.num_players = n
-        self.sizes = [sum(hand) for hand in state.hands]
+        if is_hidden(state.hands[perspective]):
+            raise HiddenRead(
+                f"seat {perspective} cannot take a view of a state that hides "
+                f"its own hand"
+            )
+        if is_hidden(state.dev_cards[perspective]) or is_hidden(state.new_dev_cards[perspective]):
+            raise HiddenRead(f"seat {perspective} cannot take a view that hides its own development cards")
+        # Sizes only, through the helper: an observed state carries opponents'
+        # hands as counts, and the same arithmetic has to run on both.
+        self.sizes = [hand_size(state, seat) for seat in range(n)]
         self.known: list[list[int]] = []
         self.unknown: list[int] = []
         for seat in range(n):
@@ -253,6 +285,12 @@ class View:
         deck is rebuilt from what remains unseen, at its public length, in
         random order. Invariant: every seat's hand size and development-card
         count match the real position.
+
+        The result is always a fully concrete `GameState`, even when the
+        view's own state is observed: every pile this replaces
+        (`hands`/`dev_cards`/`new_dev_cards` for the other seats, and the
+        deck) is written as a list of counts, which is what makes a
+        determinized world playable.
         """
         state = copy_state(self.state)
         cards = self._pool_cards()
@@ -275,7 +313,7 @@ class View:
         for seat in range(self.num_players):
             if seat == self.perspective:
                 continue
-            count = sum(state.dev_cards[seat]) + sum(state.new_dev_cards[seat])
+            count = dev_count(state, seat)
             held = [0] * NUM_DEV_CARDS
             for card in unseen[cursor : cursor + count]:
                 held[card] += 1

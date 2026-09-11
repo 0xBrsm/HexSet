@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Callable, Sequence
 
 from .actions import apply
 from .board.board import Board, random_base_board
+from .economy import hand_size
 from .game import Game, is_over, start, to_move
 from .placement import PlacementBot
 from .state import city_count, road_count, settlement_count
@@ -562,7 +563,8 @@ def _play_and_record(
         before = len(game.trades)
         # true state: a census of who was flush cannot be read off one seat's
         # view of the table.
-        hands = [sum(hand) for hand in game.state(0, hidden=False).hands]
+        true_state = game.state(0, hidden=False)
+        hands = [hand_size(true_state, s) for s in range(game.num_players)]
         turn, phase = game.turns, game.phase.name
         step = len(tape.actions)
         action = bot.choose(game)

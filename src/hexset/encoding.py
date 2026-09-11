@@ -29,6 +29,8 @@ from .board.board import Board, pips
 from .board.terrain import NUM_RESOURCES, Terrain
 from .board.topology import Topology
 from .cards import NUM_DEV_CARDS, DECK_SIZE
+from .devcards import dev_count
+from .economy import hand_size
 from .game import Game, Phase, to_move
 from .state import NO_OWNER, Building, GameState
 
@@ -412,7 +414,7 @@ def _encode_globals(
 
     parts: list[float] = []
     parts.extend(n / HAND_SCALE for n in state.hands[perspective])
-    parts.extend(sum(state.hands[s]) / HAND_SCALE for s in seats[1:])
+    parts.extend(hand_size(state, s) / HAND_SCALE for s in seats[1:])
     parts.extend(n / BANK_SCALE for n in state.bank)
 
     own_cards = [
@@ -422,9 +424,7 @@ def _encode_globals(
         )
     ]
     parts.extend(n / 5.0 for n in own_cards)
-    parts.extend(
-        (sum(state.dev_cards[s]) + sum(state.new_dev_cards[s])) / 5.0 for s in seats[1:]
-    )
+    parts.extend(dev_count(state, s) / 5.0 for s in seats[1:])
 
     parts.extend(state.knights_played[s] / 5.0 for s in seats)
     parts.extend(

@@ -18,7 +18,7 @@ from .devcards import (
     play_year_of_plenty,
     spend_card,
 )
-from .economy import Purchase, bank_trade, distribute, pay
+from .economy import Purchase, bank_trade, distribute, hand_size, pay
 from .ledger import PublicLedger
 from .robber import discard, discard_count, move_robber, steal
 from .rules import STANDARD, Rules
@@ -344,6 +344,13 @@ def imagine(
     record. `Live(rng)` sidesteps both: it draws from the copy's own `rng`,
     already isolated from the real game for the same reason dice/steals
     must be.
+
+    On an observed state (`state.Hidden`) the copy is honest and shallow in
+    the same way: hidden piles copy as counts. `randomize_deck` must be
+    `False` there -- shuffling a deck known only by its length is an
+    identity read and raises `state.HiddenRead` -- which costs nothing,
+    because a determinizer rebuilds the deck from the belief anyway
+    (`view.View.sample`).
     """
     state = copy_state(game._state)
     if randomize_deck:
@@ -855,7 +862,10 @@ def run_trade_event(game: Game) -> None:
                  if (observe := getattr(gate, "observe_trade", None)) is not None]
     # Counts and completed participants are public. Publish after clearing,
     # once per live event; imagine() deliberately carries no seated gates.
-    hand_sizes = tuple(map(sum, game._state.hands)) if observers else ()
+    hand_sizes = (
+        tuple(hand_size(game._state, s) for s in range(game._state.num_players))
+        if observers else ()
+    )
     if game.trade_mode == "auto":
         completed = trade_event(
             game,

@@ -1,0 +1,44 @@
+{
+  "source_path": "/home/bsm/code/HexSet-Clio/data/ablation-source-cap310000-v2-0451-20260909",
+  "container_mount": "/clio/source",
+  "source_commit": "9b156974773b05a6848d895382c7b4f65e32ba15",
+  "hexset_base_commit": "9b156974773b05a6848d895382c7b4f65e32ba15",
+  "source_digest": "682c1252bea34bd182f1827f8367b1f375a9d52363962760d0c0abc6e13705bd",
+  "image": "sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+  "runner_sha256": "9024b1e071305f22040cacc456fa6aabf4f7570232be2b99fd8b6e59130509fd",
+  "adapter_sha256": "4ebbb6e1eb460b5f2b051ace71651b4908e22859167ab1496143b718c0dac667",
+  "supervisor_sha256": "8690e4141145a4218c550eec46a9e3be0b91ba2864f4b0b29c5a6272d4202fa8",
+  "observer_sha256": "5963bf42d954472aea2abe0026654b116408d6a2e02dc4d1f6f8f00220e070f3",
+  "protocol": "heximax-offer-screen-v1",
+  "seed": 310000,
+  "games": 1024,
+  "cells": [
+    {
+      "label": "calibration-cap3",
+      "floor": 0.0,
+      "strategy": "own_gain",
+      "candidate_initial_card_cap": 3,
+      "control_strategy": "own_gain",
+      "control_initial_card_cap": 3,
+      "control_floor": 0.0
+    },
+    {
+      "label": "candidate-cap2",
+      "floor": 0.0,
+      "strategy": "up_to_two",
+      "candidate_initial_card_cap": 2,
+      "control_strategy": "own_gain",
+      "control_initial_card_cap": 3,
+      "control_floor": 0.0
+    },
+    {
+      "label": "candidate-cap1",
+      "floor": 0.0,
+      "strategy": "one_for_one",
+      "candidate_initial_card_cap": 1,
+      "control_strategy": "own_gain",
+      "control_initial_card_cap": 3,
+      "control_floor": 0.0
+    }
+  ]
+}

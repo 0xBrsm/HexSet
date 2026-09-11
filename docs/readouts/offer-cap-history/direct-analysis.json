@@ -1,0 +1,87 @@
+{
+  "schema": "heximax-direct-matchups-v1",
+  "matchups": {
+    "A": {
+      "games": 1024,
+      "boards": 512,
+      "candidate_wins": 507,
+      "candidate_winrate": 0.4951171875,
+      "cluster_se": 0.009424363064027321,
+      "ci95_raw": [
+        0.47664577517157675,
+        0.5135885998284232
+      ],
+      "ci98_333_raw": [
+        0.47255545081197986,
+        0.5176789241880201
+      ],
+      "ci95": [
+        0.47664577517157675,
+        0.5135885998284232
+      ],
+      "ci98_333": [
+        0.47255545081197986,
+        0.5176789241880201
+      ],
+      "strategy": "own_gain",
+      "candidate_floor": 0.0,
+      "control_strategy": "own_gain",
+      "control_floor": 0.0
+    },
+    "B": {
+      "games": 1024,
+      "boards": 512,
+      "candidate_wins": 538,
+      "candidate_winrate": 0.525390625,
+      "cluster_se": 0.013916489196277781,
+      "ci95_raw": [
+        0.4981148071689066,
+        0.5526664428310933
+      ],
+      "ci98_333_raw": [
+        0.4920748281938949,
+        0.5587064218061051
+      ],
+      "ci95": [
+        0.4981148071689066,
+        0.5526664428310933
+      ],
+      "ci98_333": [
+        0.4920748281938949,
+        0.5587064218061051
+      ],
+      "strategy": "up_to_two",
+      "candidate_floor": 0.0,
+      "control_strategy": "own_gain",
+      "control_floor": 0.0
+    },
+    "C": {
+      "games": 1024,
+      "boards": 512,
+      "candidate_wins": 535,
+      "candidate_winrate": 0.5224609375,
+      "cluster_se": 0.013753738153069933,
+      "ci95_raw": [
+        0.49550410585455645,
+        0.5494177691454436
+      ],
+      "ci98_333_raw": [
+        0.48953476343631364,
+        0.5553871115636864
+      ],
+      "ci95": [
+        0.49550410585455645,
+        0.5494177691454436
+      ],
+      "ci98_333": [
+        0.48953476343631364,
+        0.5553871115636864
+      ],
+      "strategy": "one_for_one",
+      "candidate_floor": 0.0,
+      "control_strategy": "own_gain",
+      "control_floor": 0.0
+    }
+  },
+  "interim_decisions": false
+}

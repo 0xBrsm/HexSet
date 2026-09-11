@@ -12,6 +12,10 @@ measured incumbent. It does not identify a unique optimum: +0.075 versus
 selection data. Higher positive values declined in the screen, with +2.40
 at equal share; there is no evidence here for increasing the weight indefinitely.
 
+A subsequent [spare-card sweep](../exchange-spare-ceiling/README.md) retained
+spare_card = 0.15: no alternative passed its initial screen with +0.075 robber
+pricing held fixed. That follow-up does not add to this study’s sample.
+
 ## Screen, runoff and fresh confirmation
 
 All games use adjacent A,A,B,B seating with cyclic rotation. Each bot plays

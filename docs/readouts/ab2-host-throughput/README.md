@@ -67,6 +67,54 @@ independently evolving game trajectories; it does not measure identical
 state-transition sequences or separate adapter cost from game-length/search
 work differences.
 
+## Why the observed batch differed
+
+Accounting across all 120 games per host:
+
+| Quantity | HexSet | Catanatron |
+| --- | ---: | ---: |
+| Summed measured game CPU seconds | 1828.04 | 1688.28 |
+| Actions | 36,499 | 36,359 |
+| Summed game wall time / (30 × batch wall time) | 83.64% | 87.51% |
+| Longest measured game wall seconds | 41.31 | 29.56 |
+
+HexSet used 8.28% more CPU for just 0.39% more decisions. Its effective CPU
+concurrency (summed game CPU / batch wall) was also lower: 24.87 versus 26.01.
+The combination gives 13.27% longer batch wall time, or 11.71% fewer games/s.
+These measurements account for the batch difference but do not isolate its
+causes: game trajectories, search work, conversion overhead and host load can
+all affect CPU cost. There was only one pool trial per host.
+
+A follow-up cProfile study replays seeds 680200000..680200002 under each host,
+one CPU and fast mode, with the existing worker unchanged. All six profiles
+match their corresponding clean pool records on actions/digest, winner, VP
+and turns. Profile timings are diagnostic and excluded from throughput claims.
+
+- In the HexSet profiles, rebuilding native state via `to_catanatron` costs
+  3.15% of attributed time; `_offer` adds 0.24%. AB2 `decide` consumes about
+  95.5%. This is additional adapter work around the same native search.
+- The feature cache clears **225 times across the three HexSet games**, versus
+  **three times** in native Catanatron. Each CatanatronBot owns a separate
+  BoardMapping/CatanMap; changing acting seats changes map identity and causes
+  BoardFeatureCache to invalidate. The optimization is enabled in both hosts,
+  but cache lifetime differs. Aggregate hit rates are 95.89% versus 96.49%.
+- These three board seeds produce different game trajectories under the hosts
+  (939 HexSet decisions versus 1210 native decisions), so their aggregate
+  profile times cannot assign the entire 120-game gap to adapter/cache costs.
+
+The next concrete candidates are sharing the immutable board mapping across
+AB2 seats and reducing repeated reconstruction of unchanged board/player
+fields. Longest-road and legality updates still need correct invalidation.
+The evidence does not establish that HexSet's native rules primitives are
+intrinsically 12% slower; much of an AB2-hosted game's work remains native
+Catanatron search.
+
+Raw profiles and full function statistics are in [profiles/](profiles/), with
+[runtime receipt](profiles/runtime.json). Reproduce by copying
+`profile_host.py` and `run_profile.py` beside the unchanged `worker.py` in
+`/study`, then running `python /study/run_profile.py` in the one-CPU runtime
+with fresh output paths.
+
 ## Reproduce
 
 Export the measured HexSet source into `/study/src` and copy `worker.py`,

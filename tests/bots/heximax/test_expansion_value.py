@@ -61,3 +61,20 @@ def test_scalar_batch_and_hidden_hand_invariance():
     np.testing.assert_allclose(bot.evaluator.score_many(state,0,hands)[0],scalar,rtol=0,atol=1e-12)
     assert bot.expansion_value == .5
     assert heximax(state.board).expansion_value == 0
+
+
+def test_adopted_notrade_defaults_and_explicit_legacy_override():
+    from dataclasses import replace
+    from hexset.bots.heximax.evaluate import NO_TRADE_WEIGHTS
+    from hexset.arena import PRESETS, spawn
+
+    board = random_base_board(random.Random(11))
+    adopted = spawn(PRESETS["heximax-notrade"], board, random.Random(12))
+    assert adopted.expansion_value == .25
+    assert adopted.evaluator.weights.road == 0
+    assert adopted.max_trades == 0
+    legacy = heximax(board, mode="notrade", expansion_value=0,
+                     weights=replace(NO_TRADE_WEIGHTS, road=.1237))
+    assert legacy.expansion_value == 0
+    assert legacy.evaluator.weights.road == .1237
+    assert heximax(board, mode="honest").expansion_value == 0

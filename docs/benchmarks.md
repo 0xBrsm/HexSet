@@ -29,6 +29,17 @@ measured 1.689 versus 1.827 games/s. AB2's hypothetical search uses Catanatron
 in both configurations. These workload-specific timings do not establish
 information-model equivalence or select the host for HexSet policy research.
 
+## Native Heximax improvement (September 11, 2026)
+
+The [fixed native holdout](readouts/native-expansion/README.md) passed the
+registered gates with the adopted no-trade configuration: 1,086/2,048 wins
+against three pinned AB2 external references (53.03%, 95% lower bound 50.86%)
+and 714/2,048 against three frozen previous Heximax-notrade bots (34.86%,
+lower bound 32.83%). Stricter first-attempt bounds also pass. All games use
+HexSet's public-history ledger and balanced candidate seats. The readout
+preserves complete game records and the narrowly scoped adapter repair that
+was needed to finish one originally failing seed.
+
 ## Information-model correction (September 11, 2026)
 
 Heximax results below using the stock `DC:` Catanatron adapter were measured

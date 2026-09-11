@@ -119,7 +119,9 @@ NO_TRADE_WEIGHTS = Weights(
     # confirmed 52.9% [51.1, 54.7] over 3,072 fresh boards against the start.
     # The six other terms held at every ring value.
     buy_progress=Weights.buy_progress,
-    road=0.1237,
+    # Native holdout: useful expansion credit replaces unconditional road value.
+    # See docs/readouts/native-expansion/README.md.
+    road=0.0,
     knight=0.1026,
     spare_card=0.1065,
     robber_risk=-0.30,

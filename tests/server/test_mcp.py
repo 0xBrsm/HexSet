@@ -236,7 +236,11 @@ def test_new_game_records_the_clients_id_and_kind_mcp(live_server):
 
 
 def _setup_settlement_index(view: dict) -> int:
-    return next(i for i, a in enumerate(view["legal_actions"]) if a["type"] == "SETUP_SETTLEMENT")
+    return view["legal_actions"]["SETUP_SETTLEMENT"][0]["index"]
+
+
+def _setup_road_index(view: dict) -> int:
+    return view["legal_actions"]["SETUP_ROAD"][0]["index"]
 
 
 def _wait_for_turn_streamed(client: MCPClient, **arguments) -> tuple[str, dict]:
@@ -272,10 +276,10 @@ def test_act_with_an_expect_that_no_longer_matches_is_an_error(live_server):
     client = connected(base)
     data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
     index = _setup_settlement_index(data)
-    chosen = data["legal_actions"][index]
+    chosen = data["legal_actions"]["SETUP_SETTLEMENT"][0]
 
     status, _, response = client.call_tool_raw(
-        "act", index=index, expect={"type": "SETUP_SETTLEMENT", "a": chosen["a"] + 1}
+        "act", index=index, expect={"type": "SETUP_SETTLEMENT", "vertex": chosen["vertex"] + 1}
     )
     assert status == 200
     result = response["result"]
@@ -290,8 +294,32 @@ def test_act_with_a_matching_expect_acts(live_server):
     data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
     index = _setup_settlement_index(data)
 
-    result = client.call_tool("act", index=index, expect=data["legal_actions"][index])
+    entry = data["legal_actions"]["SETUP_SETTLEMENT"][0]
+    result = client.call_tool("act", index=index, expect={"type": "SETUP_SETTLEMENT", **entry})
     assert result["phase"] == "SETUP_ROAD"
+
+
+def test_expect_check_compares_named_operands_raw_operands_and_resources():
+    road = {"type": "BUILD_ROAD", "a": 17, "b": 0}
+    mcptools._expect_check(3, road, {"type": "BUILD_ROAD", "edge": 17, "index": 3}, 4)
+    mcptools._expect_check(3, road, {"type": "BUILD_ROAD", "a": 17}, 4)
+    with pytest.raises(mcptools.ToolError, match="moved under you"):
+        mcptools._expect_check(3, road, {"type": "BUILD_ROAD", "edge": 18}, 4)
+    with pytest.raises(mcptools.ToolError, match="moved under you"):
+        mcptools._expect_check(3, road, {"type": "BUILD_SETTLEMENT", "vertex": 17}, 4)
+
+    robber = {"type": "MOVE_ROBBER", "a": 5, "b": 4}
+    mcptools._expect_check(0, robber, {"type": "MOVE_ROBBER", "hex": 5, "victim": None}, 4)
+    with pytest.raises(mcptools.ToolError):
+        mcptools._expect_check(0, robber, {"type": "MOVE_ROBBER", "hex": 5, "victim": 1}, 4)
+
+    bank = {"type": "BANK_TRADE", "a": 0, "b": 4}
+    mcptools._expect_check(0, bank, {"type": "BANK_TRADE", "give": "Wood", "want": "Ore"}, 4)
+    with pytest.raises(mcptools.ToolError):
+        mcptools._expect_check(0, bank, {"type": "BANK_TRADE", "give": "Brick", "want": "Ore"}, 4)
+
+    with pytest.raises(mcptools.ToolError, match="group key"):
+        mcptools._expect_check(0, road, {"edge": 17}, 4)
 
 
 def test_act_expect_may_name_only_the_type(live_server):
@@ -326,9 +354,10 @@ def test_wait_for_turn_streams_and_returns_once_it_is_our_turn_again(live_server
 
     settlement = _setup_settlement_index(data)
     after_settlement = client.call_tool("act", index=settlement)
-    road = next(i for i, a in enumerate(after_settlement["legal_actions"]) if a["type"] == "SETUP_ROAD")
+    road = after_settlement["legal_actions"]["SETUP_ROAD"][0]["index"]
     after_road = client.call_tool("act", index=road)
-    assert after_road["legal_actions"] == []  # a bot (seat 1) is on move now
+    assert after_road["legal_actions"] == {}  # a bot (seat 1) is on move now
+    assert after_road["legal_count"] == 0
     assert after_road["your_move"] == "wait"
     assert after_road["waiting_on"] == [1]
 
@@ -561,6 +590,72 @@ def test_resume_game_reclaims_the_seat_by_code_and_model(live_server):
     assert len(result["log"]) == result["log_total"] >= 1
 
 
+# --- The compact reply: grouped legal_actions, sparse occupancy -----------
+#
+# The wire's flat `{type, a, b}` list stays what `act(index)` resolves
+# against; the reply groups it by type with a named operand and the flat
+# index on each entry, and lists what is on the board rather than three
+# dense arrays (see `mcptools._compact`).
+
+
+def test_group_actions_names_operands_and_keeps_the_flat_index():
+    legal = [
+        {"type": "ROLL", "a": 0, "b": 0},
+        {"type": "BUILD_ROAD", "a": 17, "b": 0},
+        {"type": "MOVE_ROBBER", "a": 3, "b": 4},
+        {"type": "MOVE_ROBBER", "a": 3, "b": 1},
+        {"type": "BANK_TRADE", "a": 0, "b": 4, "give": "Wood", "want": "Ore"},
+        {"type": "PLAY_YEAR_OF_PLENTY", "a": 1, "b": 0, "resources": ["Wood", "Brick"]},
+        {"type": "DISCARD", "a": 2, "b": 0, "resource": "Sheep"},
+        {"type": "SOMETHING_NEW", "a": 9, "b": 2},
+    ]
+    assert mcptools._group_actions(legal, 4) == {
+        "ROLL": [{"index": 0}],
+        "BUILD_ROAD": [{"index": 1, "edge": 17}],
+        "MOVE_ROBBER": [{"index": 2, "hex": 3, "victim": None}, {"index": 3, "hex": 3, "victim": 1}],
+        "BANK_TRADE": [{"index": 4, "give": "Wood", "want": "Ore"}],
+        "PLAY_YEAR_OF_PLENTY": [{"index": 5, "resources": ["Wood", "Brick"]}],
+        "DISCARD": [{"index": 6, "resource": "Sheep"}],
+        "SOMETHING_NEW": [{"index": 7, "a": 9, "b": 2}],
+    }
+
+
+def test_compact_board_lists_buildings_and_roads_by_seat():
+    view = {
+        "players": [{"seat": 0}, {"seat": 1}, {"seat": 2}],
+        "vertex_owner": [-1, 1, 2, -1],
+        "vertex_building": [0, 2, 1, 0],
+        "edge_owner": [1, -1, 1, 2],
+    }
+    out = mcptools._compact_board(view)
+    assert not {"vertex_owner", "vertex_building", "edge_owner"} & set(out)
+    assert out["buildings"] == [
+        {"vertex": 1, "seat": 1, "kind": "city"},
+        {"vertex": 2, "seat": 2, "kind": "settlement"},
+    ]
+    assert out["roads"] == [[], [0, 2], [3]]
+
+
+def test_compact_board_leaves_a_view_without_the_arrays_alone():
+    assert mcptools._compact_board({"phase": "ROLL"}) == {"phase": "ROLL"}
+
+
+def test_new_game_reply_is_compact(live_server):
+    _, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    assert not {"vertex_owner", "vertex_building", "edge_owner"} & set(data)
+    assert data["buildings"] == []
+    assert data["roads"] == [[], [], [], []]
+    assert data["legal_count"] == len(data["legal_actions"]["SETUP_SETTLEMENT"]) > 0
+    assert all(set(e) == {"index", "vertex"} for e in data["legal_actions"]["SETUP_SETTLEMENT"])
+
+    after = client.call_tool("act", index=_setup_settlement_index(data))
+    assert after["buildings"] == [{"vertex": data["legal_actions"]["SETUP_SETTLEMENT"][0]["vertex"], "seat": 0, "kind": "settlement"}]
+    assert list(after["legal_actions"]) == ["SETUP_ROAD"]
+    assert all(set(e) == {"index", "edge"} for e in after["legal_actions"]["SETUP_ROAD"])
+
+
 # --- summary: derived tactical facts, computed once server-side -----------
 #
 # The joins an LLM otherwise redoes by hand every turn (see
@@ -678,12 +773,13 @@ def test_new_game_summary_ranks_the_setup_spots_it_offers(live_server):
     assert summary["afford"]["road"] == {"ok": False, "legal": False, "missing": {"Wood": 1, "Brick": 1}}
     spots = summary["spots"]
     assert len(spots) == mcptools._SPOTS_CAP
-    assert summary["spots_omitted"] + len(spots) == len(data["legal_actions"])
+    assert summary["spots_omitted"] + len(spots) == data["legal_count"]
     pips = [s["pips"] for s in spots]
     assert pips == sorted(pips, reverse=True) and pips[0] > 0
+    assert list(data["legal_actions"]) == ["SETUP_SETTLEMENT"]
     for spot in spots:
-        chosen = data["legal_actions"][spot["index"]]
-        assert chosen["type"] == "SETUP_SETTLEMENT" and chosen["a"] == spot["vertex"]
+        assert spot["type"] == "SETUP_SETTLEMENT"
+        assert {"index": spot["index"], "vertex": spot["vertex"]} in data["legal_actions"]["SETUP_SETTLEMENT"]
     board = client.call_tool("board")
     by_id = {v["id"]: v for v in board["vertices"]}
     assert all(by_id[s["vertex"]]["pips"] == s["pips"] for s in spots)
@@ -850,7 +946,7 @@ def test_the_cursor_is_automatic_for_a_caller_that_never_sends_log_after(live_se
     # the transcript holds still for the rest of the test.
     for _ in range(2):
         data = client.call_tool("state")
-        client.call_tool("act", index=next(i for i, a in enumerate(data["legal_actions"]) if a["type"].startswith("SETUP")))
+        client.call_tool("act", index=next(iter(data["legal_actions"].values()))[0]["index"])
     _, data = _wait_for_turn_streamed(client)
     client.call_tool("act", index=_setup_settlement_index(data))
 
@@ -938,3 +1034,25 @@ def test_wait_for_turn_carries_the_summary_too(live_server):
     assert "summary" in waited
     assert "afford" in waited["summary"]
     assert waited["summary"] == client.call_tool("state", full_log=True)["summary"]
+
+
+def test_wait_for_turn_returns_the_same_shape_as_state(live_server):
+    """Every outgoing view crosses one seam (`mcptools._finish`), whichever
+    tool answers. The streamed reply drifted from `state()` twice -- first
+    without `summary`, then with the flat `legal_actions` while `state()`
+    grouped them -- so the whole key set is pinned equal here, not one field."""
+    _, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    client.call_tool("act", index=_setup_settlement_index(data))
+    after_road = client.call_tool("act", index=_setup_road_index(client.call_tool("state")))
+    assert after_road["your_move"] == "wait"
+
+    _, waited = _wait_for_turn_streamed(client)
+    plain = client.call_tool("state")
+    assert set(waited) == set(plain)
+    assert isinstance(waited["legal_actions"], dict) and waited["legal_actions"]
+    assert waited["legal_actions"] == plain["legal_actions"]
+    assert waited["legal_count"] == plain["legal_count"]
+    assert waited["buildings"] == plain["buildings"] and waited["roads"] == plain["roads"]
+    assert not {"vertex_owner", "vertex_building", "edge_owner"} & set(waited)

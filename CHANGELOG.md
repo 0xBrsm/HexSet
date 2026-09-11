@@ -12,9 +12,23 @@ so the number stands.
 
 ### Changed
 
+- **MCP replies group `legal_actions` by type and list the board sparsely.**
+  The flat `{type, a, b}` list repeated the type string on every one of
+  fifty entries and carried a dead `b: 0` on most; it is now
+  `{type: [{index, <operand>}]}` with the operand named (`edge`, `vertex`,
+  `hex` and `victim`, or the resource names for bank trades, discards,
+  Monopoly and Year of Plenty) and `legal_count` the flat total. `index` is
+  unchanged and is what `act` takes. The three dense occupancy arrays
+  (`vertex_owner`, `vertex_building`, `edge_owner`, mostly `-1`) are
+  replaced by `buildings` (vertex, seat, kind) and `roads` (edge ids per
+  seat): roughly neutral in tokens late in a game, cheaper early, and
+  readable throughout. **Breaking** for an MCP client reading either old
+  shape; the HTTP API's `/api/state` is unchanged.
+
 - **`act(index)` guards against a moved list with `expect`, not `version`.**
-  Pass the `legal_actions` entry you chose (its `type`, and `a`/`b` if you
-  have them) and `act` refuses if that index now names something else.
+  Pass the `legal_actions` entry you chose, with its group key as `type`
+  (e.g. `{"type": "BUILD_ROAD", "edge": 17}`; raw `a`/`b` work too), and
+  `act` refuses if that index now names something else.
   The old `version` argument compared against the whole table's change
   counter, which bumps on every other seat's move, every trade answer, and
   even a read that fires a pending trade event -- so in a 4-seat game it

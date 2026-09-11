@@ -34,6 +34,18 @@ so the number stands.
 
 ### Added
 
+- **`your_move` and `waiting_on` on every MCP reply that carries state.**
+  `your_move` is `act`, `discard`, `answer_trade` or `choose_trade` -- the
+  tool the table wants from this seat now -- or `wait`, with `waiting_on`
+  naming the seats it is waiting for, or `game_over`. The same answer used
+  to be spread across `legal_actions`, `pending`, `trade_round.awaiting`,
+  `trade_wait` and `to_move`, and the first LLM game through these tools
+  spent several calls working out how they relate. `wait_for_turn` returns
+  exactly when `your_move` stops being `wait`; the underlying fields are
+  unchanged. `new_game` and `join` now answer with the same translated
+  shape as every other state reply (they used to come back raw, without
+  the named trade dicts or the transcript cursor fields).
+
 - **`log_after`, a transcript cursor on every MCP tool that answers with
   game state** (`state`, `act`, `wait_for_turn`, `get_table`, and the three
   trade tools). `log` was otherwise re-rendered and resent whole on every

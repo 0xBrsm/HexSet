@@ -304,6 +304,8 @@ def test_wait_for_turn_streams_and_returns_once_it_is_our_turn_again(live_server
     road = next(i for i, a in enumerate(after_settlement["legal_actions"]) if a["type"] == "SETUP_ROAD")
     after_road = client.call_tool("act", index=road)
     assert after_road["legal_actions"] == []  # a bot (seat 1) is on move now
+    assert after_road["your_move"] == "wait"
+    assert after_road["waiting_on"] == [1]
 
     body = {
         "jsonrpc": "2.0",
@@ -542,6 +544,73 @@ def test_resume_game_reclaims_the_seat_by_code_and_model(live_server):
     fresh = connected(base)
     result = fresh.call_tool("resume_game", code=code, model=MODEL)
     assert result["seat"] == seat
+
+
+# --- your_move: which tool the table wants from this seat ---------------
+#
+# One field in place of reading `legal_actions`, `pending`, `trade_round`,
+# `trade_wait` and `to_move` together (see `mcptools._your_move`).
+
+
+def test_your_move_is_act_on_your_own_turn(live_server):
+    _, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    assert data["your_move"] == "act"
+    assert data["waiting_on"] == []
+
+
+def test_your_move_game_over_wins_over_everything():
+    move, on = mcptools._your_move({"game_over": True, "legal_actions": [{"type": "END_TURN"}]})
+    assert (move, on) == ("game_over", [])
+
+
+def test_your_move_discard_comes_before_any_offer():
+    view = {"phase": "DISCARD", "legal_actions": [{"type": "DISCARD", "a": 0}], "pending": [{"actor": 2}]}
+    assert mcptools._your_move(view) == ("discard", [])
+
+
+def test_your_move_answer_trade_when_an_offer_stands_against_you():
+    view = {"phase": "MAIN", "legal_actions": [], "pending": [{"actor": 2}]}
+    assert mcptools._your_move(view) == ("answer_trade", [])
+
+
+def test_your_move_choose_trade_once_your_round_is_fully_answered():
+    view = {
+        "phase": "MAIN",
+        "legal_actions": [{"type": "END_TURN"}],  # still your turn -- but the round comes first
+        "trade_round": {"responses": [{"seat": 1, "kind": "accept"}], "awaiting": []},
+    }
+    assert mcptools._your_move(view) == ("choose_trade", [])
+
+
+def test_your_move_act_while_your_round_still_waits_on_a_person():
+    view = {
+        "phase": "MAIN",
+        "legal_actions": [{"type": "END_TURN"}],
+        "trade_round": {"responses": [], "awaiting": [3]},
+    }
+    assert mcptools._your_move(view) == ("act", [])
+
+
+def test_your_move_wait_names_who_is_holding_things_up():
+    assert mcptools._your_move({"legal_actions": [], "trade_round": {"responses": [], "awaiting": [2, 3]}}) == (
+        "wait",
+        [2, 3],
+    )
+    assert mcptools._your_move({"legal_actions": [], "trade_wait": [3]}) == ("wait", [3])
+    assert mcptools._your_move({"legal_actions": [], "waiting_for": [2]}) == ("wait", [2])
+    assert mcptools._your_move({"legal_actions": [], "phase": "DISCARD", "discard_quota": [0, 3, 0, 2]}) == (
+        "wait",
+        [1, 3],
+    )
+    assert mcptools._your_move({"legal_actions": [], "to_move": 2}) == ("wait", [2])
+    assert mcptools._your_move({"legal_actions": [], "to_move": None}) == ("wait", [])
+
+
+def test_turn_ready_is_your_move_not_wait():
+    assert mcptools._turn_ready({"legal_actions": [], "pending": [{"actor": 1}]})
+    assert not mcptools._turn_ready({"legal_actions": [], "to_move": 1})
 
 
 # --- The transcript cursor: log_after -----------------------------------

@@ -163,9 +163,15 @@ choice that does not match the exact open offer. The HTTP API's whole-table
 `version` is not exposed as an MCP argument, since it changes whenever any
 seat does anything, including other seats answering the same trade round.
 
-`wait_for_turn(timeout=...)` waits until legal actions, a pending offer, a
-fully answered round, or game completion gives the caller something to
-handle. The response uses Server-Sent Events, with keepalives during the
+Every state-returning tool answers with `your_move`: `act`, `discard`,
+`answer_trade` or `choose_trade` names the tool the table wants from the
+caller now, `wait` means none does and `waiting_on` lists the seats it is
+waiting for, and `game_over` is the end. It is derived from `legal_actions`,
+`pending`, `trade_round`, `trade_wait` and `to_move`, which remain available.
+
+`wait_for_turn(timeout=...)` waits until `your_move` is anything but
+`wait`: legal actions, a pending offer, a fully answered round, or game
+completion gives the caller something to handle. The response uses Server-Sent Events, with keepalives during the
 wait. Use this tool to wait for other seats without repeatedly reading state.
 
 ## External ONNX clients

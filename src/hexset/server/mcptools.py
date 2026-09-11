@@ -102,7 +102,9 @@ def _new_game(tables: Tables, session: Session, model: str, opponents: list[str]
     body: dict = {"name": _display_name(name), "client": client}
     if opponents:
         body["bots"] = opponents
-    return _seat(session, _call_ok(tables, session, "POST", "/api/games", body))
+    # Translated like every other state reply: the deal is the first view an
+    # LLM reads, and it used to be the one that came back raw.
+    return _translate_view(_seat(session, _call_ok(tables, session, "POST", "/api/games", body)))
 
 
 def _join(tables: Tables, session: Session, code: str, model: str, name: str | None = None) -> dict:
@@ -111,7 +113,7 @@ def _join(tables: Tables, session: Session, code: str, model: str, name: str | N
     client, _ = _client_of(model)
     session.model = model
     body: dict = {"code": code.strip().lower(), "name": _display_name(name), "client": client}
-    return _seat(session, _call_ok(tables, session, "POST", "/api/join", body))
+    return _translate_view(_seat(session, _call_ok(tables, session, "POST", "/api/join", body)))
 
 
 def _resume_game(tables: Tables, session: Session, code: str, model: str) -> dict:
@@ -393,9 +395,54 @@ def _trim_log(view: dict, log_after: int | None) -> dict:
     return view
 
 
+# --- your_move: what the table wants from this seat right now -----------------
+#
+# The answer to "is it me, and which tool?" used to be spread over five
+# fields -- `legal_actions`, `pending`, `trade_round.awaiting`, `trade_wait`,
+# `to_move` -- and the one LLM game played through these tools spent several
+# calls learning how they relate. `_turn_ready` already knew; this says it.
+
+# `your_move` -> the tool that plays it. "wait" and "game_over" name none.
+_MOVES = ("discard", "answer_trade", "choose_trade", "act", "wait", "game_over")
+
+
+def _your_move(view: dict) -> tuple[str, list[int]]:
+    """`(your_move, waiting_on)` for a translated view.
+
+    `your_move` is one of `_MOVES`, checked in that order: a seven's discards
+    come before anything else the rules allow, an offer standing against you
+    before your own play, and your own fully-answered round before the rest
+    of your turn. `waiting_on` is the seats that have to act before there is
+    anything for you to do -- empty unless `your_move` is `"wait"`."""
+    if view.get("game_over"):
+        return "game_over", []
+    legal = view.get("legal_actions") or []
+    if legal and view.get("phase") == "DISCARD":
+        return "discard", []
+    if view.get("pending"):
+        return "answer_trade", []
+    trade_round = view.get("trade_round")
+    if trade_round is not None and not trade_round.get("awaiting"):
+        return "choose_trade", []
+    if legal:
+        return "act", []
+    if trade_round is not None:
+        return "wait", list(trade_round.get("awaiting") or [])
+    if view.get("trade_wait"):
+        return "wait", list(view["trade_wait"])
+    if view.get("waiting_for"):
+        return "wait", list(view["waiting_for"])
+    owing = [seat for seat, n in enumerate(view.get("discard_quota") or []) if n]
+    if owing:
+        return "wait", owing
+    to_move = view.get("to_move")
+    return "wait", [] if to_move is None else [to_move]
+
+
 def _translate_view(raw: dict, log_after: int | None = None) -> dict:
     raw = _translate_trades(raw)
     raw["legal_actions"] = [_translate_action(a) for a in raw.get("legal_actions") or []]
+    raw["your_move"], raw["waiting_on"] = _your_move(raw)
     return _trim_log(raw, log_after)
 
 
@@ -498,16 +545,9 @@ _WAIT_TICK = 15.0
 
 
 def _turn_ready(view: dict) -> bool:
-    if view.get("game_over"):
-        return True
-    if view.get("legal_actions"):
-        return True
-    if view.get("pending"):
-        return True
-    trade_round = view.get("trade_round")
-    if trade_round is not None and not trade_round.get("awaiting"):
-        return True
-    return False
+    """Whether a translated view gives this seat something to do -- the same
+    question `your_move` answers, so it is the same code."""
+    return _your_move(view)[0] != "wait"
 
 
 def _poll_state(tables: Tables, session: Session, after: int | None = None, wait: float = 0.0) -> dict:
@@ -622,7 +662,11 @@ _TOOLS: dict[str, tuple] = {
     ),
     "state": (
         _state,
-        "The full current game state: every seat's public info (hand size, and "
+        "The full current game state. Read `your_move` first: `act`, "
+        "`discard`, `answer_trade` or `choose_trade` names the tool the table "
+        "wants from you now; `wait` means nothing does, and `waiting_on` lists "
+        "the seats it is waiting for; `game_over` is the end. Then every seat's "
+        "public info (hand size, and "
         "your own hand; the public resource-count ledger for everyone else — "
         "counting isn't hidden information here, only a steal's identity and "
         "dev-card types are), the board's dynamic contents, and `legal_actions` "

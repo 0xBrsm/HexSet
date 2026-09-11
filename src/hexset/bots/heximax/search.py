@@ -213,6 +213,10 @@ class Heximax:
         self.depth_reached = 0
 
     @property
+    def expansion_value(self) -> float:
+        return self.evaluator.expansion_value
+
+    @property
     def nodes(self) -> int:
         """Leaf evaluations the last `choose` spent."""
         return self._spent
@@ -233,6 +237,7 @@ class Heximax:
         self._budget = self.max_nodes
         self.depth_reached = 0
         self.evaluator._walk_cache.clear()
+        self.evaluator._expansion_cache.clear()
         self.evaluator._belief_cache.clear()
         self.evaluator._evaluate_cache.clear()
 
@@ -880,7 +885,7 @@ def heximax(
     width: int | None = 6, max_trades: int | None = BY_MODE,  # type: ignore[assignment]
     max_nodes: int = DEFAULT_MAX_NODES, k: int = 1, stance: str = "win",
     placement: bool = True, exact_progress_samples: int = 0, weights: Weights | None = None,
-    temperature: float | None = None,
+    temperature: float | None = None, expansion_value: float | None = None,
 ) -> Heximax:
     """The two shipped configurations, by `mode`.
 
@@ -888,6 +893,11 @@ def heximax(
     honest with the no-trade weights. Left at `BY_MODE`, trading is on for
     `honest` and off (`max_trades=0`) for `notrade`; any explicit value,
     `None` included, is taken as given.
+
+    `expansion_value` caps credit for the best nearby legal settlement site.
+    None uses the mode default: 0.25 VP for `notrade`, zero for `honest`.
+    Pass zero explicitly to disable it when replaying an older configuration.
+    Values below one VP keep settling worth more than the entire option bonus.
 
     `weights` overrides the mode's own profile (`TRADING_WEIGHTS` or
     `NO_TRADE_WEIGHTS`) with the given vector, and `temperature` the `win`
@@ -903,7 +913,10 @@ def heximax(
         max_trades = 0 if mode == "notrade" else None
     if weights is None:
         weights = NO_TRADE_WEIGHTS if mode == "notrade" else TRADING_WEIGHTS
-    evaluator = HonestEvaluator(board, weights, exact_progress_samples=exact_progress_samples)
+    if expansion_value is None:
+        expansion_value = 0.25 if mode == "notrade" else 0.0
+    evaluator = HonestEvaluator(board, weights, exact_progress_samples=exact_progress_samples,
+                                expansion_value=expansion_value)
     return Heximax(
         evaluator,
         depth=depth,

@@ -3,7 +3,7 @@
 
 A recorded game is replayed, stopped every `stride` actions at a main-phase
 position, and read the way the bot reads it: from one seat's information, one
-feature row per seat (`HonestEvaluator.rows_game`). The label is the seat
+feature row per seat (`ViewEvaluator.rows_game`). The label is the seat
 that went on to win. That is a discrete choice with four alternatives sharing
 one coefficient vector -- a conditional logit (`hexset.fitting`) -- and the
 coefficients *are* the evaluation weights and the temperature, so the fit
@@ -25,7 +25,7 @@ import random
 from dataclasses import dataclass
 from typing import Iterable, Iterator, Sequence
 
-from .bots.heximax.evaluate import HonestEvaluator
+from .bots.heximax.evaluate import ViewEvaluator
 from .game import Phase, is_over, to_move
 from .record import Record, advance, board_of, moves, open_record
 
@@ -36,7 +36,7 @@ DEFAULT_STRIDE = 8
 class ChoiceSet:
     """One position read from one seat: a feature row per seat, and who won.
 
-    `rows` are `HonestEvaluator.terms` in `evaluate.TERM_NAMES` order, in
+    `rows` are `ViewEvaluator.terms` in `evaluate.TERM_NAMES` order, in
     seat order; `winner` indexes them. `mover` is the seat to move at the
     position, `knower` the seat whose information the rows are read from.
     `progress` is how far through the game (by action) the position sits.
@@ -67,7 +67,7 @@ def samples_from(
     if record.winner is None:
         return
 
-    evaluator = HonestEvaluator(board_of(record))
+    evaluator = ViewEvaluator(board_of(record))
     state_game = open_record(record)
     total = len(record.actions)
     seats = range(record.num_players) if knowers is None else knowers

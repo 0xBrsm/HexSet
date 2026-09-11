@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """`evaluate.Evaluator`'s term set, read through a `View`.
 
-`HonestEvaluator` scores every seat from one knower's information. Board
+`ViewEvaluator` scores every seat from one knower's information. Board
 terms are the existing evaluator's own `survey`, reused rather than copied
 since it reads only public state. The three hand terms (`evaluate.hand_terms`
 -- purchase progress, spare cards, robber exposure) are read on the true hand
@@ -154,7 +154,7 @@ BALANCED_WEIGHTS = Weights(
 )
 
 
-class HonestEvaluator:
+class ViewEvaluator:
     """`evaluate.Evaluator`'s model, read through a `View`.
 
     Board terms are the existing evaluator's own `survey`, reused rather
@@ -454,11 +454,11 @@ class HonestEvaluator:
         caller is what checks that (`atol=1e-12` over real trade events),
         not this method.
 
-        Silently wrong for a `HonestEvaluator` built with
+        Silently wrong for a `ViewEvaluator` built with
         `exact_progress_samples > 0`: that reads a belief's sampled hands
         per non-exact seat, which this array has no belief to resample
         from. Nothing in this repository sets it above zero; the one caller
-        that might (`Heximax._delta_scalar_honest`) is routed around this
+        that might (`Heximax._delta_scalar`) is routed around this
         method entirely rather than asked to fake a belief for it.
         """
         n = hands.shape[0]

@@ -21,7 +21,7 @@ from hexset.bots.heximax import (
     NO_TRADE_WEIGHTS,
     TRADING_WEIGHTS,
     Heximax,
-    HonestEvaluator,
+    ViewEvaluator,
     View,
     heximax,
 )
@@ -214,13 +214,13 @@ def test_a_desynced_fixture_does_not_break_the_belief():
 # --- evaluate -----------------------------------------------------------------
 
 
-def test_the_honest_evaluator_agrees_with_the_evaluator_when_nothing_is_hidden():
+def test_the_view_evaluator_agrees_with_the_evaluator_when_nothing_is_hidden():
     """With every hand certified the two must score alike, term for term: the
     honest evaluator is the same model read through the belief, not a new one."""
     game = after_setup(5)
     for p in range(4):
         set_known_hand(game, p, [p, 1, 0, 2, 1])
-    honest = HonestEvaluator(game._state.board).evaluate_game(game, 0)
+    honest = ViewEvaluator(game._state.board).evaluate_game(game, 0)
     plain = Evaluator(game._state.board).evaluate(game._state, 0)
     assert honest == pytest.approx(plain)
 
@@ -233,7 +233,7 @@ def test_opponent_terms_read_the_expected_hand_not_the_true_one():
     give_unknown(game, 1, Resource.ORE, 3)  # a city in hand, in truth
     give_unknown(game, 2, Resource.WOOD, 5)
 
-    evaluator = HonestEvaluator(game._state.board)
+    evaluator = ViewEvaluator(game._state.board)
     honest = evaluator.evaluate_game(game, 0)
     truth = Evaluator(game._state.board).evaluate(game._state, 0)
     assert honest[1] != pytest.approx(truth[1])
@@ -306,7 +306,7 @@ def test_a_game_finishes_for_any_player_count(players):
 def test_an_unknown_stance_or_weight_pin_is_refused():
     game = a_game()
     with pytest.raises(ValueError, match="unknown stance"):
-        Heximax(HonestEvaluator(game._state.board), stance="spiteful")
+        Heximax(ViewEvaluator(game._state.board), stance="spiteful")
     with pytest.raises(ValueError, match="pin_weights"):
         heximax(game._state.board, random.Random(0), pin_weights="clairvoyant")
 
@@ -349,7 +349,7 @@ def test_an_honest_trade_read_is_unchanged_by_the_partners_real_cards():
 
 def test_the_vectorised_gate_matches_the_clone_it_replaces_bit_for_bit():
     """`_delta`'s fast path prices a candidate by recomputing every seat's
-    hand terms from the post-trade pool (`HonestEvaluator.score_many`);
+    hand terms from the post-trade pool (`ViewEvaluator.score_many`);
     `_delta_reference` clones the state and re-reads it the slow way.
 
     Worth pinning rather than trusting: `score_many` is a hand-written
@@ -464,7 +464,7 @@ def test_an_opponents_development_cards_are_worth_their_expected_victory_points(
     """The anchor term means the same thing in every row: the knower's own VP
     cards are exact, an opponent's are its held count times the VP share of
     the unseen pool."""
-    from hexset.bots.heximax.evaluate import VP_CARDS, HonestEvaluator, expected_card_points
+    from hexset.bots.heximax.evaluate import VP_CARDS, ViewEvaluator, expected_card_points
     from hexset.cards import DevCard
 
     game = after_setup(3)
@@ -488,7 +488,7 @@ def test_an_opponents_development_cards_are_worth_their_expected_victory_points(
         (VP_CARDS - 1) / (len(state.deck) + 1)
     )
 
-    honest = HonestEvaluator(state.board)
+    honest = ViewEvaluator(state.board)
     plain = Evaluator(state.board)
     rows = honest.rows_game(game, 0)
     truth = [plain.terms(state, p, knower=p) for p in range(4)]
@@ -583,7 +583,7 @@ def test_batched_opponent_estimates_match_reference_with_hidden_hands(stance, pe
         give_unknown(game, seat, seat, 2)
     candidates = list(_candidates(game._state, perspective, game.locked))
     candidates = random.Random(17).sample(candidates, min(48, len(candidates)))
-    bot = Heximax(HonestEvaluator(game._state.board), stance=stance)
+    bot = Heximax(ViewEvaluator(game._state.board), stance=stance)
     view = game.state(perspective)
     expected = [
         bot._delta_reference(view, perspective, them, tuple(-n for n in received),
@@ -609,7 +609,7 @@ def test_opponent_estimates_keep_exact_progress_sampling_reference():
     for seat in range(4):
         set_known_hand(game, seat, [1, 1, 1, 1, 1])
         give_unknown(game, seat, seat, 1)
-    bot = Heximax(HonestEvaluator(game._state.board, exact_progress_samples=2))
+    bot = Heximax(ViewEvaluator(game._state.board, exact_progress_samples=2))
     view = game.state(0)
     received = one_for_one(0, 4)
     expected = bot._delta_reference(view, 0, 1, tuple(-n for n in received), 0, bot._rank)

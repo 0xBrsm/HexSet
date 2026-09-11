@@ -83,12 +83,51 @@ def test_translate_reads_the_catanatron_games_rules():
     from catanatron.models.player import Color, RandomPlayer
 
     from hexset.catanatron.board import translate_board
-    from hexset.catanatron.state import translate
+    from hexset.catanatron.state import to_catanatron, translate
 
     players = [RandomPlayer(c) for c in (Color.RED, Color.BLUE)]
     catan_map = CatanMap.from_template(BASE_MAP_TEMPLATE)
     game = CatanatronGame(
         players, catan_map=catan_map, vps_to_win=15, discard_limit=9
     )
-    our_game, _seats = translate(game, translate_board(catan_map), random.Random(0))
+    mapping = translate_board(catan_map)
+    our_game, seats = translate(game, mapping, random.Random(0))
     assert our_game._state.rules == COLONIST_1V1
+    mirror = to_catanatron(our_game, mapping, seats)
+    assert (mirror.vps_to_win, mirror.state.discard_limit) == (15, 9)
+
+
+@pytest.fixture
+def first_draws(monkeypatch):
+    """Replace the game loop: record each game's first draw from the global
+    `random` stream -- the stream catanatron's `Game` draws its seed from, so
+    the first draw identifies the game exactly."""
+    draws = []
+
+    def fake_play_batch(num_games, players, game_config=None, quiet=False):
+        assert num_games == 1
+        draws.append(random.random())
+        return {}, {}, 1
+
+    monkeypatch.setattr(duel, "play_batch", fake_play_batch)
+    monkeypatch.setattr(duel, "parse_cli_string", lambda spec: [])
+    monkeypatch.setattr(duel, "Pool", _InlinePool)
+    return draws
+
+
+@pytest.mark.parametrize("game_type", ["standard", "colonist-1v1"])
+@pytest.mark.parametrize("workers", [1, 2, 3, 7])
+def test_game_seeds_depend_only_on_duel_seed_and_game_index(first_draws, workers, game_type):
+    """10 games at 1, 2, 3 and 7 workers: every game starts from the same
+    global-random state, and that state is `seed + g`, whatever the sharding."""
+    run_duel("DC:heximax,AB:2", 10, workers, seed=42, game_type=game_type)
+
+    assert len(first_draws) == 10  # every game played exactly once
+    assert first_draws == [random.Random(42 + g).random() for g in range(10)]
+
+
+def test_uneven_sharding_still_covers_every_game_exactly_once(first_draws):
+    """7 games over 3 workers shards 3/3/1; no game dropped, none repeated."""
+    run_duel("DC:heximax,AB:2", 7, 3, seed=0)
+
+    assert first_draws == [random.Random(g).random() for g in range(7)]

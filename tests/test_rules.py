@@ -136,3 +136,15 @@ def test_heximax_win_bonus_uses_the_game_types_threshold():
     assert evaluator.score(col, 0, hand) == pytest.approx(
         evaluator.score(std, 0, hand) - WIN_SCORE
     )
+
+
+def test_heximax_evaluation_cache_distinguishes_rules():
+    std = new_game(mini_board(), 2, random.Random(0), rules=STANDARD)
+    _cities(std, 0, 5)
+    col = copy_state(std)
+    col.rules = COLONIST_1V1
+    evaluator = HonestEvaluator(std.board)
+    standard_scores = evaluator.evaluate(std)
+    colonist_scores = evaluator.evaluate(col)
+    assert colonist_scores[0] == pytest.approx(standard_scores[0] - WIN_SCORE)
+    assert colonist_scores == pytest.approx(HonestEvaluator(col.board).evaluate(col))

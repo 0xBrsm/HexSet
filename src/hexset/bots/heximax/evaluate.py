@@ -233,6 +233,7 @@ class HonestEvaluator:
         decision.
         """
         key = (
+            state.rules,
             tuple(state.vertex_owner),
             tuple(state.vertex_building),
             tuple(state.edge_owner),
@@ -472,6 +473,7 @@ class HonestEvaluator:
         if belief is None and knower is not None:
             belief = View(state, PublicLedger.new(state.num_players), knower)
         key = (
+            state.rules,
             tuple(state.vertex_owner),
             tuple(state.vertex_building),
             state.robber,

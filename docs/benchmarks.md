@@ -37,6 +37,12 @@ The archived reports have not been rerun for this cleanup.
 
 ## Heximax against Catanatron: two players, colonist rules
 
+These September 10 results are historical aggregate reports; raw per-game
+records and an exact HexSet run revision are not included here. They were
+not rerun during PR review. The original rules PR used shard-based seeding;
+PR #134 changes the game sequence to per-game seeding, so seed 0 alone is
+not sufficient to reproduce an older run with the current runner.
+
 Three 400-game duels run September 10, 2026. `DC:heximax` is Heximax
 played through HexSet's Catanatron adapter; `AB:2` is Catanatron's
 depth-two alpha-beta player and `F` its value-function player. The games
@@ -55,10 +61,9 @@ off, while `heximax-notrade` used the no-trade profile.
 | heximax-notrade | F | 272 / 400 | 68.0% [63.3%, 72.4%] | 13.30 |
 
 All three runs used seed 0, 2 workers, `PYTHONHASHSEED=0`, and Catanatron
-3.3.0 at commit `d3f4ad05bb78d8b2309631d6d3cfa8fcb6fda816`. The two weight
-profiles and the two opponents are all within noise of each other here:
-the intervals overlap almost entirely, so neither comparison separates at
-n=400.
+3.3.0 at commit `d3f4ad05bb78d8b2309631d6d3cfa8fcb6fda816`. The marginal intervals overlap substantially. Establishing a difference
+between weight profiles or opponents requires a direct comparison, ideally
+using paired per-game outcomes; interval overlap alone is not such a test.
 
 ## Heximax against Catanatron: four players, standard rules
 
@@ -90,6 +95,6 @@ seed 0, 2 workers, `PYTHONHASHSEED=0`, Catanatron 3.3.0 at
 
 This does not reproduce the 97-53 result for the value-function player
 reported in [bcollazo/catanatron#381](https://github.com/bcollazo/catanatron/issues/381)
-at n=150. On the build measured here the two bots are evenly matched;
-the cause of the discrepancy (catanatron revision, value-function build,
+at n=150. This sample does not establish an advantage for either bot; it does not
+prove equivalence. The cause of the discrepancy (catanatron revision, value-function build,
 or harness differences) was not determined.

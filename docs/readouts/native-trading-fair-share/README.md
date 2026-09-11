@@ -1,5 +1,9 @@
 # Native trading-enabled fair-share comparison
 
+**The user clarified that the requested floor was zero. See the [corrected
+floor-zero results](floor0/README.md).** This page preserves the earlier
+standard-floor run, which is excluded from the corrected sample.
+
 September 11, 2026. One seat uses the new no-trade profile (road=0,
 expansion=.25), with trading enabled. Every opponent also has trading enabled.
 

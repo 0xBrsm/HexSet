@@ -361,3 +361,95 @@ def test_cached_board_matches_fresh_and_isolates_mutation(positions, mode):
             assert cached.state.player_state == fresh.state.player_state
             assert cached.state.buildings_by_color == fresh.state.buildings_by_color
             assert cached.playable_actions == fresh.playable_actions
+
+
+def _hidden_positions(positions):
+    """Positions where the mover's belief admits more than one world."""
+    out = []
+    for game in positions:
+        belief = game.state(to_move(game))
+        if sum(belief.unknown):
+            out.append(game)
+    return out
+
+
+def test_determinization_is_off_unless_it_is_asked_for(positions):
+    """The arena plays the true state, so a seat that reads it must keep
+    reading it: `worlds=0` is the default and means one search, no sampling."""
+    from hexset.catanatron.bot import CatanatronBot
+
+    game = positions[-1]
+    searched = []
+
+    class _Counting(CatanatronBot):
+        def _decide(self, g):
+            searched.append(g)
+            return super()._decide(g)
+
+    _Counting().choose(game)
+
+    assert len(searched) == 1
+    assert searched[0] is game          # the real position, not a sample
+
+
+def test_the_search_runs_once_per_distinct_world_not_once_per_draw(positions):
+    """`worlds` is a cap, not a quota. A belief usually admits far fewer
+    worlds than the cap -- often exactly one -- so the draws are
+    deduplicated and a high cap costs nothing where there is nothing to
+    sample."""
+    from hexset.catanatron.bot import CatanatronBot, _world_signature
+
+    game = positions[-1]
+    seat = to_move(game)
+    seen = []
+
+    class _Recording(CatanatronBot):
+        def _decide(self, g):
+            seen.append(_world_signature(g.state(seat, hidden=False), seat))
+            return super()._decide(g)
+
+    _Recording(worlds=40, rng=random.Random(5)).choose(game)
+
+    assert seen, "nothing was searched at all"
+    assert len(seen) == len(set(seen))      # no world searched twice
+    assert len(seen) <= 40
+
+
+def test_a_sampled_world_keeps_every_public_count(positions):
+    """What makes a determinization legitimate: it may move identities, and
+    may not move anything the table can see. A search handed a world with
+    the wrong hand sizes is searching a position that cannot exist."""
+    from hexset.catanatron.bot import CatanatronBot
+
+    hidden = _hidden_positions(positions)
+    if not hidden:
+        pytest.skip("no position in this sample has anything hidden")
+    game = hidden[0]
+    seat = to_move(game)
+    truth = game.state(seat, hidden=False)
+    belief = game.state(seat)
+
+    for seed in range(8):
+        world = belief.sample(random.Random(seed))
+        assert [sum(h) for h in world.hands] == [sum(h) for h in truth.hands]
+        assert world.hands[seat] == truth.hands[seat]      # ours is not sampled
+        assert sum(world.deck) >= 0
+
+
+def test_the_vote_is_reproducible_from_the_seed(positions):
+    """A run has to be replayable, so the vote's ordering comes from the
+    moves themselves and never from dict order."""
+    from hexset.catanatron.bot import CatanatronBot
+
+    game = positions[-1]
+    first = CatanatronBot(worlds=12, rng=random.Random(3)).choose(game)
+    again = CatanatronBot(worlds=12, rng=random.Random(3)).choose(game)
+
+    assert (first.type, first.a, first.b) == (again.type, again.a, again.b)
+
+
+def test_an_unknown_selector_is_refused_rather_than_defaulted():
+    from hexset.catanatron.bot import CatanatronBot
+
+    with pytest.raises(ValueError):
+        CatanatronBot(select="greedy")

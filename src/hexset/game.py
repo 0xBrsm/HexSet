@@ -99,37 +99,44 @@ class Game:
     turns: int = 0
     won_by: int | None = None
     # This turn's executed trades and their count, cleared by `end_turn` the
-    # way the offer counter was. `trades_made` is the recorded statistic;
-    # `max_trades` is the knob, and `0` is the off switch for the no-trade
-    # referents (a mode, not a budget -- `None`, unbounded, is the default:
-    # the event stops when nothing clears, not when a counter runs out).
+    # way the offer counter was. `trades_made` is the recorded statistic.
     trades: list[Trade] = field(default_factory=list)
     trades_made: int = 0
-    max_trades: int | None = None
-    # Which mechanism a turn's trading runs under. `"round"` is the default
-    # and the one a real table plays: the actor broadcasts one offer, every
-    # other seat answers once, the actor picks (`trading.trade_round`).
-    # `"clearing"` selects the exhaustive automatic house
-    # (`trading.trade_event`), which enumerates every candidate and keeps
-    # clearing until nothing does. Clearing is a strong approximation of
-    # bargaining rather than a model of it, so fitting or training a policy
-    # against it teaches a game nobody plays -- it is available for
-    # comparability with studies recorded under it, not as the default.
-    trade_mechanism: str = "round"
-    # Rounds the actor gets per turn under `"round"`: `1` by default, `-1`
-    # for as many as it has distinct offers worth making. Not a willingness
-    # switch -- whether a seat trades at all is its gate's business, and a
-    # refusing gate declines under either mechanism. Ignored under
-    # `"clearing"`, whose stopping rule is its own.
-    trade_rounds: int = 1
-    # Whether somebody other than the engine drives this game's trading.
-    # `run_trade_event` fires from `enter_main`/`move_robber_to` so that no
-    # driver can forget to trade, which leaves a served table -- whose seats
-    # answer over a wire, across many requests -- needing to say that it
-    # drives its own rounds and the engine must not run one underneath
-    # (`hexset.server.api.build_session`). One bit, covering every mechanism,
-    # rather than muting each in turn.
-    trades_driven_externally: bool = False
+    # How many exchanges a turn may clear, in every mode alike: `1` by
+    # default, `0` for no trading at all, `-1` for no cap. A seat that should
+    # never trade refuses at its own gate instead -- this is the table's
+    # rule, not a seat's willingness.
+    #
+    # `1` because it is both what a table does -- you put one thing to the
+    # table a turn -- and what keeps the engine quick: uncapped rounds
+    # re-enumerate and re-broadcast until the actor runs out of offers, which
+    # measured several times slower per game across the arena, the gym and
+    # the suite. **`"auto"` reads the same cap**, so reproducing a study
+    # recorded under the old unbounded clearing house needs `-1` set
+    # explicitly alongside `trade_mode="auto"`.
+    max_trades: int = 1
+    # How a turn's trading is run.
+    #
+    #   "round"     the default, and what a real table plays: the actor
+    #               broadcasts one offer, every other seat answers once, the
+    #               actor picks (`trading.trade_round`), repeated while it
+    #               still has offers it has not made and the cap allows.
+    #   "auto"      the exhaustive automatic clearing house
+    #               (`trading.trade_event`): every candidate enumerated,
+    #               cleared until nothing clears. A strong approximation of
+    #               bargaining rather than a model of it, so fitting or
+    #               training against it teaches a game nobody plays -- kept
+    #               for reproducing studies recorded under it.
+    #   "external"  somebody else drives, and the engine runs nothing.
+    #               `run_trade_event` fires from `enter_main`/`move_robber_to`
+    #               so no driver can forget to trade, which leaves a served
+    #               table -- whose seats answer over a wire, across many
+    #               requests -- needing to say so
+    #               (`hexset.server.api.build_session`).
+    #
+    # One axis, because these are exclusive: a game driven from outside is
+    # not also running a mechanism of its own.
+    trade_mode: str = "round"
     # The `turns` value the trade event last ran in: `run_trade_event` is
     # once a turn, and a knight played in MAIN re-enters MAIN after its
     # robber move, which used to run it a second time.
@@ -785,12 +792,12 @@ def trade_with_bank(game: Game, give: Resource, receive: Resource) -> None:
 
 
 def _run_trade_rounds(game: Game, gates) -> list[Trade]:
-    """This turn's trade rounds, under `Game.trade_rounds`.
+    """This turn's trade rounds, under `Game.max_trades`.
 
-    `0` never asks. `-1` keeps broadcasting while the actor still has an
-    offer it has not made this turn, and stops when it runs out -- not at the
-    first refusal, which is the usual reason to put something else to the
-    table. `already_offered` is what makes that terminate: `default_offer` is
+    `1`, the default, puts one thing to the table a turn. `-1` keeps
+    broadcasting while the actor still has an offer it has not made, and
+    stops when it runs out -- not at the first refusal, which is the usual
+    reason to put something else up. `already_offered` is what makes that terminate: `default_offer` is
     a pure function of the position, so without it a rerun would repeat the
     same bundle and collect the same answer for ever.
 
@@ -799,13 +806,11 @@ def _run_trade_rounds(game: Game, gates) -> list[Trade]:
     counted rather than trades so the knob means what a table would mean by
     it: how many times the actor gets to put something to the table.
 
-    This is the round mechanism's budget alone. `"clearing"` does not read
-    it -- its stopping rule is its own -- so `0` here is not a table-wide
-    "nobody trades"; a seat that should never trade refuses at its own gate.
+    The cap is read the same way under `"auto"`, whose own loop stops at it
+    too, so `0` is "nobody trades" everywhere and needs no per-mechanism
+    mute. A seat that should never trade still refuses at its own gate.
     """
-    budget = game.trade_rounds
-    if budget == 0:
-        return []
+    budget = game.max_trades
     completed: list[Trade] = []
     offered: set = set()
     asked = 0
@@ -840,14 +845,14 @@ def run_trade_event(game: Game) -> None:
         return
     game.trade_event_turn = game.turns
     gates = game.gates
-    if gates is None or game.trades_driven_externally:
+    if gates is None or game.trade_mode == "external" or game.max_trades == 0:
         return
     observers = [observe for gate in gates
                  if (observe := getattr(gate, "observe_trade", None)) is not None]
     # Counts and completed participants are public. Publish after clearing,
     # once per live event; imagine() deliberately carries no seated gates.
     hand_sizes = tuple(map(sum, game._state.hands)) if observers else ()
-    if game.trade_mechanism == "clearing":
+    if game.trade_mode == "auto":
         completed = trade_event(
             game,
             lambda seat, view, received, other: valued(gates[seat], view, received, other),

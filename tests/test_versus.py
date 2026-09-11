@@ -26,7 +26,7 @@ SEED = 11
 # High enough that a game finishes on its own: these tests use it as the
 # "uncapped" control against a deliberately tiny cap, so it has to be a
 # number no game reaches. 2000 was, until trade rounds became the default
-# mechanism (`Game.trade_mechanism`) -- a round clears at most one exchange
+# mechanism (`Game.trade_mode`) -- a round clears at most one exchange
 # a turn where the clearing house cleared until nothing cleared, so less
 # trading means longer games, and some ran past 2000.
 CAP = 20000

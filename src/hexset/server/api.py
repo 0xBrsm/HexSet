@@ -644,7 +644,7 @@ def build_session(code: str, seats: list[Seat], config: Config, *, first: int) -
     # place a served game's engine object is built. Unrelated to
     # `Config.max_trades`, which governs a *bot's own* internal never-trade
     # flag -- see `spawn_bot`.
-    game.trades_driven_externally = True
+    game.trade_mode = "external"
     bot_names, bot_specs, player_names, clients = _seat_labels(seats)
     claimed = {i for i, s in enumerate(seats) if s.kind is not SeatKind.EMPTY}
     return GameSession(
@@ -743,7 +743,7 @@ def reopen_session(code: str, seats: list[Seat], path: Path, events: list[dict])
     bot_names, bot_specs, player_names, clients = _seat_labels(seats)
     game = start_at(board, MAX_SEATS, random.Random(seed), first=first)
     # The trade round is this table's protocol, driven by the session.
-    game.trades_driven_externally = True
+    game.trade_mode = "external"
     game.locked = journal.locked_seats(events)  # noqa: attribute, see seating.py
     claimed = {i for i, s in enumerate(seats) if s.kind is not SeatKind.EMPTY}
     session = GameSession(

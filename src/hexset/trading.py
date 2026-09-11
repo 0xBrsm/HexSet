@@ -35,8 +35,8 @@ Registered `agents/reference/trading-final.md`, superseding the shipped
   and every floor is non-negative), and a gate that is not -- one that
   scores candidates in a world sampled from its belief, as the network gate
   and heximax do -- ends the event at the first revisit rather than cycling.
-  `Game.max_trades` is an off switch (`0`), not a budget; `None` is the
-  unbounded default.
+  `Game.max_trades` caps a turn's exchanges in every mode: `1` by
+  default, `0` no trading, `-1` no cap.
 
 There are no trade actions -- no propose, respond, accept or decline -- so
 nothing here reads an opponent's hand on an actor's behalf and the action
@@ -67,8 +67,8 @@ downstream of it is exact.
 Everything above -- `trade_event`/`_best_clearing`, fired once a turn from
 `hexset.game.enter_main`/`move_robber_to` -- is unchanged, and is the
 engine's own automatic clearing. It is **no longer what anything plays under
-by default**: `Game.trade_mechanism` chooses, and defaults to `"round"`.
-`"clearing"` opts back in.
+by default**: `Game.trade_mode` chooses, and defaults to `"round"`.
+`"auto"` opts back in.
 
 Clearing is not a model of bargaining; it is a strong approximation standing
 in for one. It enumerates every candidate deal and keeps clearing until
@@ -84,7 +84,7 @@ Results recorded before this switched -- the fitted presets, the adaptive
 slider, the trading-condition screens -- are clearing-mechanism results.
 They are not wrong, they are about the other mechanism, and `docs/research.md`
 already requires a historical study to run from its recorded source
-revision. `"clearing"` stays reachable so they stay reproducible, not
+revision. `"auto"` stays reachable so they stay reproducible, not
 because it is the better default.
 
 `trade_round` (below) is propose-and-respond: the actor broadcasts one
@@ -94,11 +94,11 @@ what one round can move -- so the *caller* decides how many a turn is worth,
 and there are two callers.
 
 An unserved game is driven by `hexset.game.run_trade_event`, once a turn
-from `enter_main`/`move_robber_to`, under `Game.trade_rounds`: `1` by
-default, `-1` for as many rounds as the actor has distinct offers worth
-making. That budget is not a willingness switch -- whether a seat trades at
-all is its own gate's business, and a gate that refuses declines under
-either mechanism.
+from `enter_main`/`move_robber_to`, capped by `Game.max_trades`: `1` by
+default, one thing put to the table a turn; `-1` keeps offering while the
+actor has offers left to make, at a real cost in engine speed. The
+cap is the table's rule, not a seat's willingness -- a seat that should
+never trade refuses at its own gate, under either mechanism.
 
 Successive rounds in a turn must not repeat themselves. `default_offer` is a
 pure function of the position, so a second round on an unchanged position
@@ -112,9 +112,10 @@ the first refusal.
 A *served* game (`hexset.server`) drives its own rounds instead, because its
 seats answer through a wire rather than a synchronous call -- a round there
 spans many requests while a person or an LLM thinks. Such a session sets
-`game.trades_driven_externally = True` (`api.build_session`), one bit that
-covers every mechanism at once, and calls `trade_round(game, gates)` itself
-as many times a turn as the acting seat wants.
+`game.trade_mode = "external"` (`api.build_session`), which is one value on
+the same axis rather than a mute per mechanism, and calls
+`trade_round(game, gates)` itself as many times a turn as the acting seat
+wants.
 
 One round: the current player's gate broadcasts one offer (`Bot.offer`,
 new); every other seated gate answers once (`Bot.respond`, new) --
@@ -412,7 +413,7 @@ def trade_event(game: "Game", gate: Gate) -> list[Trade]:
 
     executed: list[Trade] = []
     seen: set[tuple] = set()
-    while game.max_trades is None or len(executed) < game.max_trades:
+    while game.max_trades < 0 or len(executed) < game.max_trades:
         position = _position_key(state, game.ledger)
         if position in seen:
             break  # a sampling gate came back round; the event is over

@@ -351,10 +351,15 @@ def test_both_sides_are_handed_their_own_view_and_nothing_else():
 def test_the_event_keeps_going_while_anything_clears():
     """Wood clears against seat 1 in one bundle; brick, still held, only
     then clears against seat 2 -- a second, unrelated deal with a different
-    counterparty is what makes the loop necessary."""
+    counterparty is what makes the loop necessary.
+
+    Uncapped, because the loop is what is under test: `Game.max_trades` now
+    caps the clearing house exactly as it caps rounds, and its default of one
+    exchange a turn would stop this after the first deal."""
     game = stocked(
         (0, Resource.WOOD, 3), (0, Resource.BRICK, 3), (1, Resource.ORE, 3), (2, Resource.WHEAT, 3)
     )
+    game.max_trades = -1
 
     def seat0_gain(received, counterparty):
         # Wants ore from 1, wheat from 2, in full-hand bundles only.

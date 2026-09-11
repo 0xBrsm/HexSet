@@ -19,17 +19,19 @@ native HexSet policies.
 
 **The bargaining mechanism is part of what a result is about.** Games
 default to one trade round a turn: the actor broadcasts one offer, every
-other seat answers once, the actor picks (`Game.trade_mechanism="round"`,
-`Game.trade_rounds=1`; `-1` keeps offering until the actor runs out of
-distinct offers worth making). Whether a seat trades at all is its own
+other seat answers once, the actor picks (`Game.trade_mode="round"`;
+`Game.max_trades` caps a turn's exchanges, `1` by default, `0` for none at
+all, `-1` for no cap). Whether a seat trades at all is its own
 gate's business, not a table setting. The exhaustive automatic clearing
-house that used to run instead is `Game.trade_mechanism="clearing"`, which
+house that used to run instead is `Game.trade_mode="auto"`, which
 deals until nothing clears against a counterparty that never holds out and
 never refuses a deal it merely dislikes -- so a policy fitted or trained
 against it learns a game nobody plays. Every study recorded before this
 changed (the fitted presets, the adaptive slider, the trading-condition
-screens) is a clearing result; reproducing one means selecting `"clearing"`
-as well as running from its recorded source revision.
+screens) is a clearing result; reproducing one means `trade_mode="auto"` **and**
+`max_trades=-1` -- `"auto"` reads the same cap, so leaving it at the default
+would cap the clearing house at one exchange a turn, which is not what those
+runs recorded -- as well as running from its recorded source revision.
 
 The standard `heximax` now adapts its weights automatically. Pin a testing
 control at slider position 0 or 1 using `--pin-weights-a`/`--pin-weights-b`

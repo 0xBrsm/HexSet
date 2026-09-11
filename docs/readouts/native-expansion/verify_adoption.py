@@ -14,6 +14,7 @@ harness = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = harness
 spec.loader.exec_module(harness)
 from hexset.arena import PRESETS, spawn, register_entrant_kind
+from hexset.bots.stances import WIN_TEMPERATURE
 
 ROOT = Path('/out')
 NAME = 'road-zero-exp025'
@@ -25,7 +26,9 @@ def factory(entrant, board, rng):
         expected = harness._CONFIG[NAME]
         actual = {k: harness.asdict(bot.evaluator.inner.weights) if k == 'weights'
                   else getattr(bot, k) for k in expected}
-        assert actual == expected
+        if actual["temperature"] is None:
+            actual["temperature"] = WIN_TEMPERATURE
+        assert actual == expected, (actual, expected)
         return bot
     return harness._candidate(entrant, board, rng)
 

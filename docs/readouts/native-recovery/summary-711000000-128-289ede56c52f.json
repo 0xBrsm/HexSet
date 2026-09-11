@@ -1,0 +1,84 @@
+{
+  "audit": false,
+  "games_per_gate": 128,
+  "protocol": "native-hexset-public-ledger-v1-independent-boards",
+  "rows": [
+    {
+      "candidate": "control",
+      "games": 128,
+      "gate": "ab2",
+      "rate": 0.3671875,
+      "seconds": 1101.21633571852,
+      "wilson95": [
+        0.28868454593581666,
+        0.45342995819287296
+      ],
+      "wins": 47
+    },
+    {
+      "candidate": "control",
+      "games": 128,
+      "gate": "shipped",
+      "rate": 0.1953125,
+      "seconds": 355.31761906435713,
+      "wilson95": [
+        0.13593961243284008,
+        0.2724407205682713
+      ],
+      "wins": 25
+    },
+    {
+      "candidate": "p10",
+      "games": 128,
+      "gate": "ab2",
+      "rate": 0.4296875,
+      "seconds": 1123.0198586790357,
+      "wilson95": [
+        0.3472117127100717,
+        0.5162606718286463
+      ],
+      "wins": 55
+    },
+    {
+      "candidate": "p10",
+      "games": 128,
+      "gate": "shipped",
+      "rate": 0.2578125,
+      "seconds": 379.4586803501006,
+      "wilson95": [
+        0.18986902042805273,
+        0.33986919298308715
+      ],
+      "wins": 33
+    },
+    {
+      "candidate": "road-zero",
+      "games": 128,
+      "gate": "ab2",
+      "rate": 0.4375,
+      "seconds": 1135.272759909276,
+      "wilson95": [
+        0.3546231306495017,
+        0.5240189889404699
+      ],
+      "wins": 56
+    },
+    {
+      "candidate": "road-zero",
+      "games": 128,
+      "gate": "shipped",
+      "rate": 0.25,
+      "seconds": 362.77338192844763,
+      "wilson95": [
+        0.18301284815090707,
+        0.3315556302089792
+      ],
+      "wins": 32
+    }
+  ],
+  "seconds": 212.75296505494043,
+  "seed": 711000000,
+  "source_sha256": "ce4f1c02424216b525f9ce27728525216ae4872850bb64f444cda35b1ee0eddf",
+  "speedups": "fast",
+  "workers": 16
+}

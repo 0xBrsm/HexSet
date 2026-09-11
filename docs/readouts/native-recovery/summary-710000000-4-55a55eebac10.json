@@ -1,0 +1,36 @@
+{
+  "audit": true,
+  "games_per_gate": 4,
+  "protocol": "native-hexset-public-ledger-v1-independent-boards",
+  "rows": [
+    {
+      "candidate": "control",
+      "games": 4,
+      "gate": "ab2",
+      "rate": 0.5,
+      "seconds": 12.76277078106068,
+      "wilson95": [
+        0.15003898774401986,
+        0.8499610122559802
+      ],
+      "wins": 2
+    },
+    {
+      "candidate": "control",
+      "games": 4,
+      "gate": "shipped",
+      "rate": 0.0,
+      "seconds": 4.437401674920693,
+      "wilson95": [
+        0.0,
+        0.4898908403969213
+      ],
+      "wins": 0
+    }
+  ],
+  "seconds": 5.2087037831079215,
+  "seed": 710000000,
+  "source_sha256": "ce4f1c02424216b525f9ce27728525216ae4872850bb64f444cda35b1ee0eddf",
+  "speedups": "fast",
+  "workers": 4
+}

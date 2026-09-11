@@ -1,0 +1,15 @@
+{
+  "games": 24,
+  "matched_repeat_comparisons": 16,
+  "fields": [
+    "winner",
+    "seat",
+    "turns",
+    "points",
+    "seating",
+    "actions",
+    "action_sha256",
+    "informed_decisions"
+  ],
+  "public_ledger_audit": true
+}

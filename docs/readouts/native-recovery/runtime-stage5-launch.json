@@ -1,0 +1,492 @@
+[
+  {
+    "id": "30d252ddfed57a463e3ff3a9374737407bdcd1fc763fba4a893e88da64c58019",
+    "name": "/hexset-native-recovery-initial",
+    "image": "sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+    "created": "2026-09-11T04:33:57.506354081Z",
+    "state": {
+      "Status": "exited",
+      "Running": false,
+      "Paused": false,
+      "Restarting": false,
+      "OOMKilled": false,
+      "Dead": false,
+      "Pid": 0,
+      "ExitCode": 0,
+      "Error": "",
+      "StartedAt": "2026-09-11T04:33:57.611679754Z",
+      "FinishedAt": "2026-09-11T04:35:43.29546922Z"
+    },
+    "command": [
+      "/study/docs/readouts/native-recovery/run_initial.py"
+    ],
+    "entrypoint": [
+      "python"
+    ],
+    "env": [
+      "OPENBLAS_NUM_THREADS=1",
+      "OMP_NUM_THREADS=1",
+      "MKL_NUM_THREADS=1",
+      "PYTHONPATH=/study/src",
+      "PYTHONHASHSEED=0",
+      "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "LANG=C.UTF-8",
+      "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+      "PYTHON_VERSION=3.12.14",
+      "PYTHON_SHA256=5c8462af5790baf43a321a1559dbe0db06d1be4300fb85fb53c40060668e548a",
+      "HOME=/tmp",
+      "PYTHONDONTWRITEBYTECODE=1",
+      "PYTHONUNBUFFERED=1",
+      "HEXSET_UI_MODELS_DIR=/app/models",
+      "HEXSET_UI_GAMES_DIR=/app/games"
+    ],
+    "user": "1000:1000",
+    "mounts": [
+      {
+        "Type": "bind",
+        "Source": "/home/bsm/tmp/hexset-native-recovery-7c7ce2f",
+        "Destination": "/study",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/bsm/tmp/hexset-native-recovery-results",
+        "Destination": "/out",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": "rprivate"
+      }
+    ],
+    "nano_cpus": 16000000000,
+    "network": "none"
+  },
+  {
+    "id": "8feef35d91f06afe9ded82a1ef7022589486791cf1c6fc8aba4d5e984ef84a8d",
+    "name": "/hexset-native-recovery-screen128",
+    "image": "sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+    "created": "2026-09-11T04:36:28.971386337Z",
+    "state": {
+      "Status": "exited",
+      "Running": false,
+      "Paused": false,
+      "Restarting": false,
+      "OOMKilled": false,
+      "Dead": false,
+      "Pid": 0,
+      "ExitCode": 0,
+      "Error": "",
+      "StartedAt": "2026-09-11T04:36:29.078787474Z",
+      "FinishedAt": "2026-09-11T04:40:02.263077583Z"
+    },
+    "command": [
+      "-m",
+      "hexset.bench.native_search",
+      "--manifest",
+      "/study/docs/readouts/native-recovery/manifest-v1.json",
+      "--candidates",
+      "control",
+      "p10",
+      "road-zero",
+      "--seed",
+      "711000000",
+      "--games",
+      "128",
+      "--workers",
+      "16",
+      "--out",
+      "/out/screen-v1"
+    ],
+    "entrypoint": [
+      "python"
+    ],
+    "env": [
+      "MKL_NUM_THREADS=1",
+      "PYTHONPATH=/study/src",
+      "PYTHONHASHSEED=0",
+      "OPENBLAS_NUM_THREADS=1",
+      "OMP_NUM_THREADS=1",
+      "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "LANG=C.UTF-8",
+      "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+      "PYTHON_VERSION=3.12.14",
+      "PYTHON_SHA256=5c8462af5790baf43a321a1559dbe0db06d1be4300fb85fb53c40060668e548a",
+      "HOME=/tmp",
+      "PYTHONDONTWRITEBYTECODE=1",
+      "PYTHONUNBUFFERED=1",
+      "HEXSET_UI_MODELS_DIR=/app/models",
+      "HEXSET_UI_GAMES_DIR=/app/games"
+    ],
+    "user": "1000:1000",
+    "mounts": [
+      {
+        "Type": "bind",
+        "Source": "/home/bsm/tmp/hexset-native-recovery-results",
+        "Destination": "/out",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/bsm/tmp/hexset-native-recovery-7c7ce2f",
+        "Destination": "/study",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      }
+    ],
+    "nano_cpus": 16000000000,
+    "network": "none"
+  },
+  {
+    "id": "b773498090efa2a5d74e8acaad1686abffe90c89242376f77443f0d9bcdc8b69",
+    "name": "/hexset-native-recovery-followon32",
+    "image": "sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+    "created": "2026-09-11T04:41:27.713787208Z",
+    "state": {
+      "Status": "exited",
+      "Running": false,
+      "Paused": false,
+      "Restarting": false,
+      "OOMKilled": false,
+      "Dead": false,
+      "Pid": 0,
+      "ExitCode": 0,
+      "Error": "",
+      "StartedAt": "2026-09-11T04:41:27.816613401Z",
+      "FinishedAt": "2026-09-11T04:42:14.169737546Z"
+    },
+    "command": [
+      "-m",
+      "hexset.bench.native_search",
+      "--manifest",
+      "/configs/manifest-v2.json",
+      "--candidates",
+      "p10-temp1",
+      "p10-searched-opening",
+      "--seed",
+      "711000000",
+      "--games",
+      "32",
+      "--workers",
+      "16",
+      "--out",
+      "/out/screen-v1"
+    ],
+    "entrypoint": [
+      "python"
+    ],
+    "env": [
+      "PYTHONHASHSEED=0",
+      "OPENBLAS_NUM_THREADS=1",
+      "OMP_NUM_THREADS=1",
+      "MKL_NUM_THREADS=1",
+      "PYTHONPATH=/study/src",
+      "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "LANG=C.UTF-8",
+      "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+      "PYTHON_VERSION=3.12.14",
+      "PYTHON_SHA256=5c8462af5790baf43a321a1559dbe0db06d1be4300fb85fb53c40060668e548a",
+      "HOME=/tmp",
+      "PYTHONDONTWRITEBYTECODE=1",
+      "PYTHONUNBUFFERED=1",
+      "HEXSET_UI_MODELS_DIR=/app/models",
+      "HEXSET_UI_GAMES_DIR=/app/games"
+    ],
+    "user": "1000:1000",
+    "mounts": [
+      {
+        "Type": "bind",
+        "Source": "/home/bsm/tmp/hexset-native-recovery-7c7ce2f",
+        "Destination": "/study",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/bsm/tmp/hexset-native-recovery-configs",
+        "Destination": "/configs",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/bsm/tmp/hexset-native-recovery-results",
+        "Destination": "/out",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": "rprivate"
+      }
+    ],
+    "nano_cpus": 16000000000,
+    "network": "none"
+  },
+  {
+    "id": "24677b9870da1b77f86ef9b298241cd2cecf856b72ee7cd77ac1bd056659c5c4",
+    "name": "/hexset-native-recovery-search32",
+    "image": "sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+    "created": "2026-09-11T04:46:37.053752667Z",
+    "state": {
+      "Status": "exited",
+      "Running": false,
+      "Paused": false,
+      "Restarting": false,
+      "OOMKilled": false,
+      "Dead": false,
+      "Pid": 0,
+      "ExitCode": 0,
+      "Error": "",
+      "StartedAt": "2026-09-11T04:46:37.156606725Z",
+      "FinishedAt": "2026-09-11T04:47:34.747813652Z"
+    },
+    "command": [
+      "-m",
+      "hexset.bench.native_search",
+      "--manifest",
+      "/configs/manifest-v3.json",
+      "--candidates",
+      "p10-wide2400",
+      "p10-depth3",
+      "--seed",
+      "711000000",
+      "--games",
+      "32",
+      "--workers",
+      "16",
+      "--out",
+      "/out/screen-v1"
+    ],
+    "entrypoint": [
+      "python"
+    ],
+    "env": [
+      "PYTHONPATH=/study/src",
+      "PYTHONHASHSEED=0",
+      "OPENBLAS_NUM_THREADS=1",
+      "OMP_NUM_THREADS=1",
+      "MKL_NUM_THREADS=1",
+      "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "LANG=C.UTF-8",
+      "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+      "PYTHON_VERSION=3.12.14",
+      "PYTHON_SHA256=5c8462af5790baf43a321a1559dbe0db06d1be4300fb85fb53c40060668e548a",
+      "HOME=/tmp",
+      "PYTHONDONTWRITEBYTECODE=1",
+      "PYTHONUNBUFFERED=1",
+      "HEXSET_UI_MODELS_DIR=/app/models",
+      "HEXSET_UI_GAMES_DIR=/app/games"
+    ],
+    "user": "1000:1000",
+    "mounts": [
+      {
+        "Type": "bind",
+        "Source": "/home/bsm/tmp/hexset-native-recovery-results",
+        "Destination": "/out",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/bsm/tmp/hexset-native-recovery-7c7ce2f",
+        "Destination": "/study",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/bsm/tmp/hexset-native-recovery-configs",
+        "Destination": "/configs",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      }
+    ],
+    "nano_cpus": 16000000000,
+    "network": "none"
+  },
+  {
+    "id": "7c43da5fd06ecedd9156975eb86e39ae41c74243d4481d8eec129bd1654c2358",
+    "name": "/hexset-native-recovery-policy32",
+    "image": "sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+    "created": "2026-09-11T04:48:31.341227429Z",
+    "state": {
+      "Status": "exited",
+      "Running": false,
+      "Paused": false,
+      "Restarting": false,
+      "OOMKilled": false,
+      "Dead": false,
+      "Pid": 0,
+      "ExitCode": 0,
+      "Error": "",
+      "StartedAt": "2026-09-11T04:48:31.46016775Z",
+      "FinishedAt": "2026-09-11T04:49:45.321606716Z"
+    },
+    "command": [
+      "-m",
+      "hexset.bench.native_search",
+      "--manifest",
+      "/configs/manifest-v4.json",
+      "--candidates",
+      "p10-prod6",
+      "p10-knight032",
+      "p10-own",
+      "--seed",
+      "711000000",
+      "--games",
+      "32",
+      "--workers",
+      "16",
+      "--out",
+      "/out/screen-v1"
+    ],
+    "entrypoint": [
+      "python"
+    ],
+    "env": [
+      "PYTHONHASHSEED=0",
+      "OPENBLAS_NUM_THREADS=1",
+      "OMP_NUM_THREADS=1",
+      "MKL_NUM_THREADS=1",
+      "PYTHONPATH=/study/src",
+      "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "LANG=C.UTF-8",
+      "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+      "PYTHON_VERSION=3.12.14",
+      "PYTHON_SHA256=5c8462af5790baf43a321a1559dbe0db06d1be4300fb85fb53c40060668e548a",
+      "HOME=/tmp",
+      "PYTHONDONTWRITEBYTECODE=1",
+      "PYTHONUNBUFFERED=1",
+      "HEXSET_UI_MODELS_DIR=/app/models",
+      "HEXSET_UI_GAMES_DIR=/app/games"
+    ],
+    "user": "1000:1000",
+    "mounts": [
+      {
+        "Type": "bind",
+        "Source": "/home/bsm/tmp/hexset-native-recovery-7c7ce2f",
+        "Destination": "/study",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/bsm/tmp/hexset-native-recovery-configs",
+        "Destination": "/configs",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/bsm/tmp/hexset-native-recovery-results",
+        "Destination": "/out",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": "rprivate"
+      }
+    ],
+    "nano_cpus": 16000000000,
+    "network": "none"
+  },
+  {
+    "id": "5228de5aa9d282abddcfe7c6bbb74b5f95ffe81d8a42f72f3040d0913090e0ed",
+    "name": "/hexset-native-recovery-diagnostic64",
+    "image": "sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+    "created": "2026-09-11T04:51:23.821681016Z",
+    "state": {
+      "Status": "running",
+      "Running": true,
+      "Paused": false,
+      "Restarting": false,
+      "OOMKilled": false,
+      "Dead": false,
+      "Pid": 93757,
+      "ExitCode": 0,
+      "Error": "",
+      "StartedAt": "2026-09-11T04:51:23.925012407Z",
+      "FinishedAt": "0001-01-01T00:00:00Z"
+    },
+    "command": [
+      "-m",
+      "hexset.bench.native_search",
+      "--manifest",
+      "/configs/manifest-v5.json",
+      "--candidates",
+      "p10-prod1",
+      "p10-vp4",
+      "road-zero-vp4",
+      "p10-div0",
+      "p10-spare005",
+      "p10-risk015",
+      "p10-depth1",
+      "p10-k4",
+      "p10-own",
+      "p10-wide2400",
+      "--seed",
+      "711000000",
+      "--games",
+      "64",
+      "--workers",
+      "16",
+      "--out",
+      "/out/screen-v1"
+    ],
+    "entrypoint": [
+      "python"
+    ],
+    "env": [
+      "PYTHONHASHSEED=0",
+      "OPENBLAS_NUM_THREADS=1",
+      "OMP_NUM_THREADS=1",
+      "MKL_NUM_THREADS=1",
+      "PYTHONPATH=/study/src",
+      "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "LANG=C.UTF-8",
+      "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+      "PYTHON_VERSION=3.12.14",
+      "PYTHON_SHA256=5c8462af5790baf43a321a1559dbe0db06d1be4300fb85fb53c40060668e548a",
+      "HOME=/tmp",
+      "PYTHONDONTWRITEBYTECODE=1",
+      "PYTHONUNBUFFERED=1",
+      "HEXSET_UI_MODELS_DIR=/app/models",
+      "HEXSET_UI_GAMES_DIR=/app/games"
+    ],
+    "user": "1000:1000",
+    "mounts": [
+      {
+        "Type": "bind",
+        "Source": "/home/bsm/tmp/hexset-native-recovery-7c7ce2f",
+        "Destination": "/study",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/bsm/tmp/hexset-native-recovery-configs",
+        "Destination": "/configs",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/bsm/tmp/hexset-native-recovery-results",
+        "Destination": "/out",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": "rprivate"
+      }
+    ],
+    "nano_cpus": 16000000000,
+    "network": "none"
+  }
+]

@@ -33,3 +33,12 @@ including the expansion feature. A nonsignificant result alone does not
 establish equivalence or justify removing a weight set. These two matchups
 measure the requested new profile against both opponent populations; they
 are not a complete test of every profile under trading on and off.
+
+Preflight correction before the batch: original first game completed with
+zero trades despite active gate calls from every seat (25/23/25/24). The
+runner incorrectly required a completed exchange in that one game. Version
+2 removes only that outcome requirement and adds offer-gain diagnostics;
+it retains all original policy settings and the fixed sample/seed schedule.
+Run all 800 records under v2 identity in a separate directory, including
+replaying index 0. Preserve the original preflight record separately; it is
+not an additional statistical sample. No trade floor or policy is changed.

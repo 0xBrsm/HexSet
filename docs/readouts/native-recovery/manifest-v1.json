@@ -1,0 +1,74 @@
+{
+  "source_base": "9ca828058e48262119bcd49cc1ed7941bcc374a2",
+  "candidates": {
+    "control": {
+      "weights": {
+        "victory_point": 1.0,
+        "production": 2.785,
+        "diversity": 0.358,
+        "scarce": 0.07039861111111112,
+        "buy_progress": 0.45,
+        "road": 0.1237,
+        "knight": 0.1026,
+        "spare_card": 0.1065,
+        "robber_risk": -0.3,
+        "port": 0.03063
+      },
+      "depth": 2,
+      "width": 6,
+      "max_nodes": 600,
+      "k": 1,
+      "stance": "win",
+      "temperature": 2.476644394795811,
+      "placement": true,
+      "mode": "notrade",
+      "max_trades": 0
+    },
+    "p10": {
+      "weights": {
+        "buy_progress": 0.4606045314909384,
+        "diversity": 0.360074083309872,
+        "knight": 0.16043960472833257,
+        "port": 0.019305197991678444,
+        "production": 3.8803981040675644,
+        "road": 0.00019147194463070284,
+        "robber_risk": -0.31245697996217825,
+        "scarce": 0.07039861111111112,
+        "spare_card": 0.11421297701105623,
+        "victory_point": 1.0
+      },
+      "depth": 2,
+      "width": 6,
+      "max_nodes": 600,
+      "k": 1,
+      "stance": "win",
+      "temperature": 2.476644394795811,
+      "placement": true,
+      "mode": "notrade",
+      "max_trades": 0
+    },
+    "road-zero": {
+      "weights": {
+        "victory_point": 1.0,
+        "production": 2.785,
+        "diversity": 0.358,
+        "scarce": 0.07039861111111112,
+        "buy_progress": 0.45,
+        "road": 0.0,
+        "knight": 0.1026,
+        "spare_card": 0.1065,
+        "robber_risk": -0.3,
+        "port": 0.03063
+      },
+      "depth": 2,
+      "width": 6,
+      "max_nodes": 600,
+      "k": 1,
+      "stance": "win",
+      "temperature": 2.476644394795811,
+      "placement": true,
+      "mode": "notrade",
+      "max_trades": 0
+    }
+  }
+}

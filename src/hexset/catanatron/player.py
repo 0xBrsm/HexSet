@@ -125,8 +125,7 @@ class DevCatanPlayer(Player):
             # seat, so that the same `--seed` reproduces this bot's belief
             # sampling and steal/draw resolution exactly, seat for seat, run
             # for run -- not just catanatron's own dice/deck RNG, which was
-            # already reproducible because it lives on the global `random`
-            # module that `duel._play_chunk` seeds once per shard.
+            # already reproducible through its own per-game stream.
             #
             # Deliberately avoids `hash()` on anything but ints: `hash(str)`
             # is randomized per-process (`PYTHONHASHSEED`) unless disabled,

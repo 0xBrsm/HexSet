@@ -207,6 +207,8 @@ def build_players(players_spec: str) -> list:
     for part, color in zip(parts, Color):
         if part.split(":")[0].upper() == "DC":
             tail = part.split(":", 1)[1] if ":" in part else ""
+            if tail.startswith("entrant="):
+                tail = tail.removeprefix("entrant=")
             players.append(
                 DevCatanPlayer(
                     color, DevCatanPlayer.Params(entrant=tail or "heximax-notrade")

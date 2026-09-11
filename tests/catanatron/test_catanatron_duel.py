@@ -187,7 +187,7 @@ def test_dynamic_results_are_ordered_by_game_index_not_completion(monkeypatch):
 def test_invalid_game_or_worker_count_fails_before_pool(games, workers):
     with pytest.raises(ValueError, match='positive'):
         run_duel('F,F', games, workers)
-pytest.importorskip("catanatron.game")
+
 
 # `build_players` and the registry-era `DevCatanPlayer`: the seams the
 # catanatron ecf93118 upgrade touched.
@@ -258,3 +258,16 @@ def test_before_resets_the_per_game_state():
     assert player._rng is None
 
 
+@pytest.mark.parametrize("spec", ["heximax-notrade", "network:/tmp/x.pt"])
+def test_build_players_accepts_named_dc_entrant(spec):
+    player = build_players(f"DC:entrant={spec},R")[0]
+    assert player.params.entrant == spec
+
+
+def test_game_construction_resets_reused_dc_player():
+    from catanatron.game import Game
+    player = DevCatanPlayer(Color.RED)
+    for seed in (1451, 1452):
+        player._mapping = player._bot = player._rng = object()
+        Game([player, RandomPlayer(Color.BLUE)], seed=seed)
+        assert player._mapping is player._bot is player._rng is None

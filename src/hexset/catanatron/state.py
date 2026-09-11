@@ -20,8 +20,8 @@ every exchange for the same reason.
 table (`bot.py`): the catanatron `Game` a catanatron `Player` would see at this
 decision, rebuilt fresh the same way and off the same tables. It writes the
 `State` fields directly rather than replaying a game into them, because
-`State.__init__` reseats the players at random and reseeds the global `random`
-module -- neither of which a mirror may do.
+`State.__init__` shuffles seating and the deck -- neither of which a mirror
+may do. Search has a separate RNG shared by the mirror and its copies.
 """
 
 from __future__ import annotations
@@ -388,7 +388,7 @@ class BoardMirrorCache:
 
 def to_catanatron(
     game: Game, mapping: BoardMapping, seats: Seating,
-    *, board_cache: BoardMirrorCache | None = None,
+    *, board_cache: BoardMirrorCache | None = None, rng: random.Random | None = None,
 ) -> CatanatronGame:
     """`translate` backwards: the catanatron `Game` mirroring `game` right now."""
     # true state: a catanatron `Player` reads the whole table, so this adapter
@@ -443,14 +443,13 @@ def to_catanatron(
 
     cgame = CatanatronGame([], initialize=False)
     cgame.seed = 0
-    # `initialize=False` skips the per-game RNG (`Game.__init__` sets
-    # `self.random` only on the initialize path), but the search this mirror
-    # exists for copies it (`Game.copy`/`State.copy` share the stream by
-    # reference). Point both at the global module: before upstream gave each
-    # game its own `random.Random`, chance draws in these searches came from
-    # the ambient global stream, and this keeps that exactly.
-    cgame.random = random
-    cstate.random = random
+    # Arena callers supply the entrant's independent stream. Standalone
+    # translation clones the host stream without advancing live chance draws.
+    # Game, State and search copies intentionally share this search stream.
+    if rng is None:
+        rng = random.Random(0)
+        rng.setstate(game.rng.getstate())
+    cgame.random = cstate.random = rng
     cgame.id = ""
     cgame.vps_to_win = state.rules.winning_points
     cgame.friendly_robber = False

@@ -35,9 +35,8 @@ from hexset.cards import DevCard, NUM_DEV_CARDS
 from hexset.chance import Live
 from hexset.game import Game, Phase, to_move
 from hexset.ledger import PublicLedger, SeatLedger
-from hexset.robber import DISCARD_THRESHOLD
+from hexset.rules import Rules
 from hexset.state import NO_OWNER, Building, GameState
-from hexset.victory import WINNING_POINTS
 
 from catanatron.game import Game as CatanatronGame
 from catanatron.models.actions import generate_playable_actions
@@ -199,6 +198,13 @@ def translate(catanatron_game, mapping: BoardMapping, rng: random.Random) -> tup
         largest_army_holder=seats.seat_of[largest_army_color]
         if largest_army_color is not None
         else NO_OWNER,
+        # The bot reasons about this position with the game type's rules,
+        # read off the live catanatron game -- a 15VP/9-discard table must
+        # not be evaluated as a 10VP/7-discard one.
+        rules=Rules(
+            winning_points=catanatron_game.vps_to_win,
+            discard_limit=catanatron_game.state.discard_limit,
+        ),
     )
 
     current_color = cstate.current_color()
@@ -366,7 +372,7 @@ def to_catanatron(game: Game, mapping: BoardMapping, seats: Seating) -> Catanatr
     cstate.players = [Player(color) for color in colors]
     cstate.colors = colors
     cstate.color_to_index = {color: seat for seat, color in enumerate(colors)}
-    cstate.discard_limit = DISCARD_THRESHOLD
+    cstate.discard_limit = state.rules.discard_limit
     cstate.friendly_robber = False
     cstate.board = _catanatron_board(state, mapping, seats)
     cstate.player_state = _player_state(game, state, seats, cstate.board)
@@ -406,7 +412,7 @@ def to_catanatron(game: Game, mapping: BoardMapping, seats: Seating) -> Catanatr
     cgame = CatanatronGame([], initialize=False)
     cgame.seed = 0
     cgame.id = ""
-    cgame.vps_to_win = WINNING_POINTS
+    cgame.vps_to_win = state.rules.winning_points
     cgame.friendly_robber = False
     cgame.state = cstate
     cgame.playable_actions = generate_playable_actions(cstate)

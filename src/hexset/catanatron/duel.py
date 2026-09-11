@@ -30,9 +30,10 @@ from importlib.metadata import PackageNotFoundError, distribution, version
 from multiprocessing import Pool
 
 from hexset.arena import wilson
+from hexset.rules import GAME_TYPES
 
 from catanatron.cli.cli_players import parse_cli_string, register_cli_player
-from catanatron.cli.play import play_batch
+from catanatron.cli.play import GameConfigOptions, play_batch
 from catanatron.models.player import Color
 
 from .player import DevCatanPlayer
@@ -40,6 +41,23 @@ from .player import DevCatanPlayer
 register_cli_player("DC", DevCatanPlayer)
 
 _MODULE = "hexset.catanatron.duel"
+
+
+def game_config_for(game_type: str) -> GameConfigOptions:
+    """The catanatron game config for a HexSet game type.
+
+    Raises `ValueError` on an unknown name -- fail fast at the CLI, not
+    after the first shard is already playing the wrong game.
+    """
+    try:
+        rules = GAME_TYPES[game_type]
+    except KeyError:
+        raise ValueError(
+            f"unknown game type: {game_type!r} (choose from {sorted(GAME_TYPES)})"
+        )
+    return GameConfigOptions(
+        discard_limit=rules.discard_limit, vps_to_win=rules.winning_points
+    )
 
 
 def _ensure_pythonhashseed_zero(argv=None, env=None, execve=os.execve) -> bool:
@@ -83,7 +101,7 @@ def shard_plan(num_games: int, workers: int) -> tuple[int, int]:
     """(shard_size, shard_count) exactly as `run_duel` computes them.
 
     Factored out so the report can state the shard count without restating the
-    arithmetic, since the shard count is what selects the games.
+    arithmetic. Shards determine process layout; game indices select seeds.
     """
     shard_size = -(-num_games // workers)
     return shard_size, -(-num_games // shard_size)
@@ -92,7 +110,7 @@ def shard_plan(num_games: int, workers: int) -> tuple[int, int]:
 def provenance() -> str:
     """Which catanatron this number came from, and which games were played.
 
-    `pyproject.toml` pins catanatron to a git URL with no revision, so the
+    `pyproject.toml` pins catanatron to a git revision, but the
     version alone does not identify the code: two installs weeks apart can both
     call themselves 3.3.0 and differ. PEP 610 writes the resolved commit into
     the dist-info as `direct_url.json`, so read it back and stamp it on every
@@ -135,10 +153,12 @@ class DuelResult:
     labels: dict[Color, str]
     seed: int
     workers: int
+    game_type: str
     wins: dict[Color, int]
     points: dict[Color, list[int]]
 
     def report(self) -> str:
+        rules = GAME_TYPES[self.game_type]
         lines = [
             f"{self.games} games, {self.seconds:.1f}s "
             f"({self.games / self.seconds:.2f} games/sec)",
@@ -146,6 +166,9 @@ class DuelResult:
             f"| {shard_plan(self.games, self.workers)[1]} shards "
             f"of {shard_plan(self.games, self.workers)[0]}; "
             f"game g plays seed {self.seed}+g",
+            f"  game type {self.game_type}: "
+            f"{rules.winning_points} VP to win, "
+            f"discard over {rules.discard_limit}",
         ]
         for color, label in self.labels.items():
             w = self.wins.get(color, 0)
@@ -159,35 +182,68 @@ class DuelResult:
         return "\n".join(lines)
 
 
-def _play_chunk(args: tuple[str, int, int, int]) -> tuple[dict, dict]:
-    """Play games [start, start + count), one `play_batch(1, ...)` at a time.
+def _play_chunk(args: tuple[str, int, int, int, str]) -> tuple[dict, dict]:
+    """Play games [start, start + count) with one rules variant.
 
-    Game `g` always starts from `random.seed(seed + g)`, so the duel plays the
-    same games whatever `--workers` shards them into. `play_batch` draws each
-    game's catanatron seed (`Game.seed`) from the global `random` stream, and
-    the HexSet bot's own RNG is derived from that seed per seat (`player.py`),
-    so reseeding the global stream per game pins everything downstream -- dice,
-    map, bot beliefs, steal/draw resolution -- to the duel seed and the game
-    index alone.
+    Game g starts from random.seed(seed + g), independent of worker count.
+    Each game receives the selected config; progress is reported between games.
     """
-    players_spec, start, count, seed = args
+    players_spec, start, count, seed, game_type = args
     players = parse_cli_string(players_spec)
+    config = game_config_for(game_type)
     wins: dict[Color, int] = {}
     points: dict[Color, list[int]] = {}
+    # Progress goes to stderr, never stdout: the parent's report is stdout's
+    # only job (it is usually redirected to a file), while a silent shard is
+    # indistinguishable from a dead one on a 45-minute run. Flush every line
+    # -- worker stderr is block-buffered and a heartbeat that arrives late is
+    # no heartbeat at all.
+    t0 = time.time()
+    last_beat = t0
+
+    def heartbeat(done: int) -> None:
+        elapsed = time.time() - t0
+        print(
+            f"[duel] games {start}-{start + count - 1}, base seed {seed}: "
+            f"{done}/{count} done, "
+            f"{elapsed:.0f}s elapsed",
+            file=sys.stderr,
+            flush=True,
+        )
+
+    heartbeat(0)
     for g in range(start, start + count):
         random.seed(seed + g)
-        game_wins, game_points, _games = play_batch(1, players, quiet=True)
+        game_wins, game_points, _games = play_batch(
+            1, players, game_config=config, quiet=True
+        )
         for color, n in game_wins.items():
             wins[color] = wins.get(color, 0) + n
         for color, vps in game_points.items():
             points.setdefault(color, []).extend(vps)
+        done = g - start + 1
+        now = time.time()
+        # Check after each game: report every 25 games or after 60 seconds.
+        # A single long game can delay a heartbeat beyond that interval.
+        if done % 25 == 0 or now - last_beat >= 60:
+            heartbeat(done)
+            last_beat = now
+    heartbeat(count)
     return wins, points
 
 
-def run_duel(players_spec: str, num_games: int, workers: int, seed: int = 0) -> DuelResult:
+def run_duel(
+    players_spec: str,
+    num_games: int,
+    workers: int,
+    seed: int = 0,
+    game_type: str = "standard",
+) -> DuelResult:
     parts = players_spec.split(",")
     colors = list(Color)[: len(parts)]
     labels = {color: f"{i}:{part}" for i, (color, part) in enumerate(zip(colors, parts))}
+    # Fail fast on a bad game type, before any shard starts playing.
+    game_config_for(game_type)
 
     shard_size, _ = shard_plan(num_games, workers)
     chunks = []
@@ -197,7 +253,7 @@ def run_duel(players_spec: str, num_games: int, workers: int, seed: int = 0) -> 
         # The chunk carries the duel seed and the game-index range; each game
         # re-derives its own seed inside `_play_chunk`, so the games played
         # do not move when `--workers` re-shards them.
-        chunks.append((players_spec, start, n, seed))
+        chunks.append((players_spec, start, n, seed, game_type))
         start += n
 
     start = time.time()
@@ -220,6 +276,7 @@ def run_duel(players_spec: str, num_games: int, workers: int, seed: int = 0) -> 
         labels=labels,
         seed=seed,
         workers=workers,
+        game_type=game_type,
         wins=wins,
         points=points,
     )
@@ -242,9 +299,16 @@ def main() -> None:
     parser.add_argument("--num", type=int, default=100)
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--game-type",
+        default="standard",
+        choices=sorted(GAME_TYPES),
+        help="rules variant: standard (10 VP, discard over 7) or "
+        "colonist-1v1 (15 VP, discard over 9)",
+    )
     args = parser.parse_args()
 
-    result = run_duel(args.players, args.num, args.workers, args.seed)
+    result = run_duel(args.players, args.num, args.workers, args.seed, args.game_type)
     print(result.report())
 
 

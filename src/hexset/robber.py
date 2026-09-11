@@ -5,6 +5,8 @@ from .board.terrain import Resource
 from .chance import Chance
 from .state import NO_OWNER, GameState
 
+# The standard game's discard limit; the live rule reads
+# `state.rules.discard_limit`, which defaults to this.
 DISCARD_THRESHOLD = 7
 
 
@@ -52,9 +54,13 @@ def steal(
 
 
 def discard_count(state: GameState, player: int) -> int:
-    """How many cards a player must discard when a seven is rolled."""
+    """How many cards a player must discard when a seven is rolled.
+
+    Holding more than the game type's discard limit discards half (7/8+
+    in the standard game, 9/10+ in colonist 1v1).
+    """
     held = sum(state.hands[player])
-    return held // 2 if held > DISCARD_THRESHOLD else 0
+    return held // 2 if held > state.rules.discard_limit else 0
 
 
 def discard(

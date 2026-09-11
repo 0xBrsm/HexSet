@@ -8,6 +8,7 @@ from enum import IntEnum
 from .board.board import Board
 from .board.terrain import NUM_RESOURCES, TERRAIN_RESOURCE, Terrain
 from .cards import NUM_DEV_CARDS, make_deck
+from .rules import STANDARD, Rules
 
 NO_OWNER = -1
 BANK_PER_RESOURCE = 19
@@ -50,10 +51,20 @@ class GameState:
     knights_played: list[int] = field(default_factory=list)
     longest_road_holder: int = NO_OWNER
     largest_army_holder: int = NO_OWNER
+    # The game type this position is played under. Read by the win check,
+    # the discard rule and the bot evaluators rather than the module-level
+    # standard constants, so one engine plays every game type. Immutable and
+    # shared by reference: `copy_state` and `imagine` carry it over, they
+    # never mutate it.
+    rules: Rules = STANDARD
 
 
 def new_game(
-    board: Board, num_players: int, rng: random.Random | None = None
+    board: Board,
+    num_players: int,
+    rng: random.Random | None = None,
+    *,
+    rules: Rules = STANDARD,
 ) -> GameState:
     if not 2 <= num_players <= 6:
         raise ValueError(f"unsupported player count: {num_players}")
@@ -72,6 +83,7 @@ def new_game(
         dev_cards=[[0] * NUM_DEV_CARDS for _ in range(num_players)],
         new_dev_cards=[[0] * NUM_DEV_CARDS for _ in range(num_players)],
         knights_played=[0] * num_players,
+        rules=rules,
     )
 
 
@@ -96,6 +108,7 @@ def copy_state(state: GameState) -> GameState:
         knights_played=state.knights_played[:],
         longest_road_holder=state.longest_road_holder,
         largest_army_holder=state.largest_army_holder,
+        rules=state.rules,
     )
 
 

@@ -9,9 +9,8 @@ from ..board.ports import BASE_TRADE_RATIO
 from ..board.terrain import NUM_RESOURCES, TERRAIN_RESOURCE
 from ..economy import COSTS, Purchase
 from ..game import Game
-from ..robber import DISCARD_THRESHOLD
 from ..state import MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS, Building, GameState
-from ..victory import WINNING_POINTS, award_points, card_points
+from ..victory import award_points, card_points
 
 ROLLS = 36
 WIN_SCORE = 100.0
@@ -83,7 +82,12 @@ def affordable(purchase: Purchase, walk: Survey, deck_left: int) -> bool:
 
 
 def hand_terms(
-    hand: Sequence[float], walk: Survey, *, num_players: int, deck_left: int
+    hand: Sequence[float],
+    walk: Survey,
+    *,
+    num_players: int,
+    deck_left: int,
+    discard_limit: int,
 ) -> tuple[float, float, float]:
     """The three hand terms: purchase progress, spare cards, robber exposure.
 
@@ -116,10 +120,10 @@ def hand_terms(
     # Robber exposure, not a cliff: the chance of a 7 before this seat plays
     # again, times the half-hand it would discard, times what those cards are
     # worth. `ramp` is the discard rule made continuous in hand size -- exactly
-    # zero at seven cards and below, exactly a half hand at eight and above --
-    # so an expected hand that crosses the threshold does not jump.
+    # zero at the limit and below, exactly a half hand one card above -- so an
+    # expected hand that crosses the threshold does not jump.
     held = sum(hand)
-    over = held - DISCARD_THRESHOLD
+    over = held - discard_limit
     ramp = 0.0 if over <= 0.0 else (1.0 if over >= 1.0 else over)
     if not ramp:
         return best, spare, 0.0
@@ -368,6 +372,7 @@ class Evaluator:
             walk,
             num_players=state.num_players,
             deck_left=len(state.deck),
+            discard_limit=state.rules.discard_limit,
         )
 
     def terms(
@@ -405,7 +410,7 @@ class Evaluator:
         total = 0.0
         for weight, value in zip(self.vector, values):
             total += weight * value
-        if values[0] >= WINNING_POINTS:
+        if values[0] >= state.rules.winning_points:
             total += WIN_SCORE
         return total
 

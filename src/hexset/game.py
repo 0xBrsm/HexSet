@@ -21,6 +21,7 @@ from .devcards import (
 from .economy import Purchase, bank_trade, distribute, pay
 from .ledger import PublicLedger
 from .robber import discard, discard_count, move_robber, steal
+from .rules import STANDARD, Rules
 from .trading import TRADE_RULES, Bundle, Trade, execute_trade, trade_event, valued
 from .state import (
     NO_OWNER,
@@ -32,7 +33,7 @@ from .state import (
     place_settlement,
     upgrade_to_city,
 )
-from .victory import WINNING_POINTS, update_largest_army, update_longest_road, victory_points
+from .victory import update_largest_army, update_longest_road, victory_points
 
 if TYPE_CHECKING:
     from .view import View
@@ -229,6 +230,7 @@ def start(
     first: int = 0,
     chance: Chance | None = None,
     trade_rule: str = "egalitarian",
+    rules: Rules = STANDARD,
 ) -> Game:
     """Start a game. `first` chooses which seat opens the setup snake and
     therefore takes the first real turn; `first=0` (the default) is today's
@@ -253,6 +255,10 @@ def start(
 
     `trade_rule` is validated here (`hexset.trading.TRADE_RULES`) rather than
     left for the first trade event to discover it is wrong.
+
+    `rules` selects the game type (`hexset.rules.STANDARD` plays exactly as
+    before this parameter existed); the win threshold and discard limit come
+    from it everywhere the engine checks them.
     """
     if trade_rule not in TRADE_RULES:
         raise ValueError(f"unknown trade rule: {trade_rule!r}")
@@ -262,7 +268,7 @@ def start(
     # Snake order: the last player to place first also places first in round two,
     # which is what compensates them for choosing last.
     queue = order + order[::-1]
-    state = new_game(board, num_players)
+    state = new_game(board, num_players, rules=rules)
     state.deck = chance.deck_order(state.deck)
     return Game(
         _state=state,
@@ -589,7 +595,8 @@ def _check_win(game: Game) -> None:
     """Winning the Game (rulebook): "If you have 10 or more VPs at any point
     during YOUR turn, the game ends immediately and you are the winner" --
     scoped to whoever is on the move, not to whoever happens to be over the
-    threshold. `victory.winner` scans every seat and is right for a
+    threshold. The threshold itself is the game type's (`rules`), 10 in the
+    standard game. `victory.winner` scans every seat and is right for a
     state-only query (`tests/test_victory.py`), but a seat's own action can
     move VPs it does not own: breaking an opponent's Longest Road can hand
     the tile (and 2 VPs) to a *third*, off-turn seat who was already sitting
@@ -597,7 +604,7 @@ def _check_win(game: Game) -> None:
     total is checked, exactly as the rulebook scopes it. They still win the
     moment their own turn's `_check_win` next runs, with nothing further
     needing to happen, since nothing about their total changes in between."""
-    if victory_points(game._state, game.current_player) >= WINNING_POINTS:
+    if victory_points(game._state, game.current_player) >= game._state.rules.winning_points:
         game.won_by = game.current_player
         game.phase = Phase.GAME_OVER
 

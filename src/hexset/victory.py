@@ -9,6 +9,8 @@ from .state import NO_OWNER, GameState
 MIN_LARGEST_ARMY = 3
 LONGEST_ROAD_VP = 2
 LARGEST_ARMY_VP = 2
+# The standard game's winning threshold; the live rule reads
+# `state.rules.winning_points`, which defaults to this.
 WINNING_POINTS = 10
 
 
@@ -81,7 +83,7 @@ def public_victory_points(state: GameState, player: int) -> int:
 
 def winner(state: GameState) -> int | None:
     for player in range(state.num_players):
-        if victory_points(state, player) >= WINNING_POINTS:
+        if victory_points(state, player) >= state.rules.winning_points:
             return player
     return None
 

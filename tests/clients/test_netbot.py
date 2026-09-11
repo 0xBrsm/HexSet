@@ -474,13 +474,13 @@ def test_the_gate_prices_a_trade_by_what_it_leaves_the_seat_able_to_do(board):
     assert game.state(0, hidden=False).hands[0] == [1, 1, 1, 1, 0]
 
 
-def test_a_won_position_prices_every_trade_at_zero_or_below(board, monkeypatch):
+def test_a_won_position_prices_every_trade_at_zero_or_below(board):
     """With the winning build in hand the position is worth 1.0 after best
     play, before and after any trade that keeps the build; a trade that takes
     it away is worth the difference; and the counterparty's row reads the
     actor's win either way, so it is estimated to gain nothing. Nothing
     clears, so `default_offer` broadcasts nothing."""
-    from hexset import game as game_mod
+    from dataclasses import replace
     from hexset.clients.netbot import NetworkBot
     from hexset.trading import _candidates, default_offer
     from hexset.victory import victory_points
@@ -489,7 +489,7 @@ def test_a_won_position_prices_every_trade_at_zero_or_below(board, monkeypatch):
     bot = NetworkBot(policy=BuildPolicy(space), players=PLAYERS, rng=random.Random(0))
     game = _position_with_a_settlement_in_hand(board)
     state = game.state(0, hidden=False)
-    monkeypatch.setattr(game_mod, "WINNING_POINTS", victory_points(state, 0) + 1)
+    state.rules = replace(state.rules, winning_points=victory_points(state, 0) + 1)
     bot.seat_at(game)
     view = game.state(0)
     keeps, breaks = (1, 0, 0, 0, 1), (2, 0, -1, 0, 0)
@@ -502,14 +502,14 @@ def test_a_won_position_prices_every_trade_at_zero_or_below(board, monkeypatch):
     assert default_offer(bot, view, candidates) is None, "a won seat has nothing to offer"
 
 
-def test_a_responder_prices_what_the_actor_will_do_with_the_cards(board, monkeypatch):
+def test_a_responder_prices_what_the_actor_will_do_with_the_cards(board):
     """Asked about an exchange on the actor's turn, a responder's gate rolls
     out the *actor's* best play from the post-trade hand it can see (the
     ledger, plus what the offer certifies). Handing a seat the card that
     completes its winning build reads as that seat's win: negative for the
     responder, the win itself for the estimate of the actor's side -- so the
     default response is a pass, never a counter into it."""
-    from hexset import game as game_mod
+    from dataclasses import replace
     from hexset.clients.netbot import NetworkBot
     from hexset.ledger import PublicLedger
     from hexset.trading import Offer, default_respond
@@ -525,7 +525,7 @@ def test_a_responder_prices_what_the_actor_will_do_with_the_cards(board, monkeyp
     ledger = PublicLedger.new(state.num_players)
     ledger.apply_hand_diff([[0] * 5 for _ in state.hands], state.hands)
     game.ledger = ledger
-    monkeypatch.setattr(game_mod, "WINNING_POINTS", victory_points(state, 0) + 1)
+    state.rules = replace(state.rules, winning_points=victory_points(state, 0) + 1)
 
     responder = NetworkBot(policy=BuildPolicy(space), players=PLAYERS, seat=1, rng=random.Random(0))
     responder.seat_at(game)

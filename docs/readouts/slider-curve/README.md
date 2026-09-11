@@ -1,5 +1,11 @@
 # Validating the direct adaptive curve
 
+> **Protocol correction (2026-09-11): research-only automatic clearing.**
+> This run does not validate served trading. Its adoption, fitting and served
+> behavior conclusions are withdrawn; frozen results below record what ran.
+> For mixed studies this applies to trading-enabled cells; no-trade cells
+> remain separately scoped. See [the correction](../trading-protocol-correction.md).
+
 The direct adaptive slider passed both registered aggregate non-inferiority
 comparisons on fresh native HexSet games. It supports using one automatic policy
 across the tested trading conditions with a 2-percentage-point tolerance; it does

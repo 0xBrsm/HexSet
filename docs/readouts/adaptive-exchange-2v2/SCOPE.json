@@ -1,0 +1,9 @@
+{
+  "protocol": "automatic clearing",
+  "use": "research only",
+  "valid_for_served_evaluation": false,
+  "valid_for_fitting": false,
+  "adoption_claims_withdrawn": true,
+  "correction": "2026-09-11",
+  "note": "Trading-enabled cells affected; frozen original receipts retained."
+}

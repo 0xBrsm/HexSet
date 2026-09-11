@@ -1,5 +1,11 @@
 # Separate move and trade evaluators: native screen and confirmation
 
+> **Protocol correction (2026-09-11): research-only automatic clearing.**
+> This run does not validate served trading. Its adoption, fitting and served
+> behavior conclusions are withdrawn; frozen results below record what ran.
+> For mixed studies this applies to trading-enabled cells; no-trade cells
+> remain separately scoped. See [the correction](../trading-protocol-correction.md).
+
 The split using new no-trade move evaluation and trading-profile trade
 valuation led the screen. Fresh confirmation retained a positive estimate,
 but did not establish superiority over the all-trading baseline. No policy

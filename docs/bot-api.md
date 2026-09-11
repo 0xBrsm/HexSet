@@ -156,7 +156,10 @@ legal entries. Player trading has no entry in this space.
 
 Server games disable the engine's automatic trade event with
 `Game.max_trades = 0` and run offer–response rounds instead. Arena
-simulations use automatic clearing when trade gates are installed. The Gym
+simulations currently use automatic clearing when trade gates are installed.
+That path is research-only: never use automatic clearing for evaluation or
+fitting. Those tasks require the served offer–response protocol, including its
+proposal policy and activity observations; see [evaluation](evaluation.md). The Gym
 wrappers have additional limitations described in the
 [README](../README.md#training-environments).
 

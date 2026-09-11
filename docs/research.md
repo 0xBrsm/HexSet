@@ -1,5 +1,11 @@
 # Research workflows
 
+> **Trading protocol:** the automatic arena described below is research-only.
+> Never use automatic clearing for evaluation or fitting, including weight
+> selection and dataset collection for fitting. Those tasks require a verified
+> served offer/response driver. See [the contract](evaluation.md).
+
+
 HexSet is the primary game engine and evaluation framework. Heximax is its
 handcrafted baseline; Catanatron supplies external reference opponents. Run
 self-play, ablations and both candidate-validation gates in HexSet. Seat the

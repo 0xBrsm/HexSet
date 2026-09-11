@@ -1,5 +1,11 @@
 # Heximax under varying trading conditions
 
+> **Protocol correction (2026-09-11): research-only automatic clearing.**
+> This run does not validate served trading. Its adoption, fitting and served
+> behavior conclusions are withdrawn; frozen results below record what ran.
+> For mixed studies this applies to trading-enabled cells; no-trade cells
+> remain separately scoped. See [the correction](../trading-protocol-correction.md).
+
 ## Current policy
 
 The unified policy is now `heximax-adaptive`: directly slide between the current

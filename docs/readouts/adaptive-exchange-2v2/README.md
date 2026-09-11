@@ -1,5 +1,11 @@
 # Adaptive versus fixed exchange weights: native 2v2
 
+> **Protocol correction (2026-09-11): research-only automatic clearing.**
+> This run does not validate served trading. Its adoption, fitting and served
+> behavior conclusions are withdrawn; frozen results below record what ran.
+> For mixed studies this applies to trading-enabled cells; no-trade cells
+> remain separately scoped. See [the correction](../trading-protocol-correction.md).
+
 **Keep the current fixed exchange evaluator.** With adaptive move search on
 both sides, the two fixed-exchange seats won 265/400 games against two seats
 using the adaptive coefficient vector for exchanges. This tests the exchange

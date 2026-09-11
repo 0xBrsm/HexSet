@@ -1,5 +1,11 @@
 # Current Heximax trade volume and bundle sizes
 
+> **Protocol correction (2026-09-11): research-only automatic clearing.**
+> This run does not validate served trading. Its adoption, fitting and served
+> behavior conclusions are withdrawn; frozen results below record what ran.
+> For mixed studies this applies to trading-enabled cells; no-trade cells
+> remain separately scoped. See [the correction](../trading-protocol-correction.md).
+
 Four current Heximax seats averaged **38.97 executed player exchanges per
 game**, with a game-level approximate 95% confidence interval for the mean
 of **38.09–39.84**. **39.66% of exchanges involved three cards on at least

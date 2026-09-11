@@ -1,4 +1,4 @@
-# Current Heximax versus Catanatron AB2
+# Recorded automatic-arena Heximax versus Catanatron AB2
 
 This two-batch benchmark measures the unified **unpinned adaptive `heximax`** from
 PR #147 in the **native HexSet engine**, against Catanatron's depth-two
@@ -28,19 +28,11 @@ plays against AB2; it does not measure adaptation against trading opponents.
 
 ## Exchange-only update after this benchmark
 
-The [bounded exchange-weight sweep](../exchange-weight-sweep/README.md)
-subsequently changed only exchange robber risk from −0.30 to −0.225. Both move
-profiles, adaptation and search remain unchanged. AB2 declines all domestic
-exchanges. Eight reserved adoption replays matched the original full game
-records exactly, including four games in each format. These are behavior
-checks; the 1,600 headline observations remain the original benchmark, not a
-new sample under the updated source. The exact adopted source hash and checks
-are in [the adoption receipt](../exchange-weight-sweep/adoption-verification.json).
-
-The subsequent [positive exchange-weight follow-up](../exchange-robber-ceiling/README.md)
-changed that exchange coefficient to +0.075. Four more reserved adoption games
-(two per format) matched original AB2 records exactly. Move weights and search
-remain unchanged. These checks also remain separate from the headline sample.
+The subsequent automatic-clearing exchange-weight studies proposed −0.225
+and then +0.075, with a few exact AB2 trace checks. Those adoption conclusions
+are now withdrawn; see the [protocol correction](../trading-protocol-correction.md).
+This recorded zero-exchange AB2 sample is preserved, but is not a validation
+of the served driver. New evaluation must use the required served protocol.
 
 ## Frozen configuration
 

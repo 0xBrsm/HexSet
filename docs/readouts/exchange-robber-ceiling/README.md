@@ -1,5 +1,11 @@
 # Exchange robber weight: positive values and a bounded ceiling search
 
+> **Protocol correction (2026-09-11): research-only automatic clearing.**
+> This run does not validate served trading. Its adoption, fitting and served
+> behavior conclusions are withdrawn; frozen results below record what ran.
+> For mixed studies this applies to trading-enabled cells; no-trade cells
+> remain separately scoped. See [the correction](../trading-protocol-correction.md).
+
 **Adopt +0.075 for exchange valuation only.** It won **608/800 fresh games
 (76.0%, 95% Wilson 72.9–78.8%)** against the preceding −0.225 exchange weight
 in native 2v2. Both move endpoints retain their −0.30 robber penalty. All

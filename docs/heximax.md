@@ -13,8 +13,8 @@ For controlled tests, pin the slider to an endpoint:
 | `pin_weights=0` | Zero-activity endpoint | .25 VP | Enabled |
 | `pin_weights=1` | Full-activity endpoint | .125 VP | Enabled |
 
-Zero uses `NO_TRADE_WEIGHTS`; one uses `BALANCED_WEIGHTS`, the best validated
-trading move profile. Both use `TRADING_WEIGHTS` to price exchanges. The numeric
+Zero uses `NO_TRADE_WEIGHTS`; one uses `BALANCED_WEIGHTS`, the existing full-activity
+move profile whose served-protocol validation remains outstanding. Both use `TRADING_WEIGHTS` to price exchanges. The numeric
 pin describes a slider position, not whether the bot participates in trading.
 
 ```python
@@ -30,33 +30,20 @@ observed activity or trading restrictions. To decline trades independently,
 pass `max_trades=0`. An unpinned bot immediately uses the zero endpoint when
 its own or the game's trading switch is off. A pinned bot retains its pin.
 
-## Why exchange weights stay fixed
+## Exchange-weight validation status
 
-A native 400-game 2v2 comparison kept adaptive move search identical on both
-sides and varied only the exchange coefficients. The then-current fixed
-exchange weights (robber risk −0.30) won **265/400 games (66.25%, 95% interval 61.5–70.7%)** against using
-the adaptive move coefficients for exchanges. All 400 games passed replay and
-public-activity audits, with 23,382 completed exchanges. This supports the
-split for that matchup; it does not establish optimal weights across all
-opponents. See the [exchange-weight readout](readouts/adaptive-exchange-2v2/README.md).
+The bot retains separate fixed exchange weights, provisionally using main's
+robber_risk = −0.30 and spare_card = 0.15. PR #149's proposed −0.225 and
++0.075 robber selections are withdrawn: their sweeps used automatic clearing,
+which is research-only and is not permitted for evaluation or fitting.
 
-The subsequent [bounded exchange-only sweep](readouts/exchange-weight-sweep/README.md)
-adopted a smaller exchange robber-risk penalty: **−0.225 instead of −0.30**.
-With move search held fixed, it won **600/800 fresh 2v2 games (75.0%, 95%
-interval 71.9–77.9%)** against the previous exchange vector. All other exchange
-coefficients and both move profiles are unchanged. The full sweep and adoption
-checks stopped at 1,600 games and 4 minutes 1 second of evaluation time.
+The earlier adaptive-versus-fixed exchange comparison also used automatic
+clearing. It does not validate the split for served games. Preserve these
+research candidates for a bounded test only after verifying the served
+protocol; no new optimum is claimed. See the
+[protocol correction](readouts/trading-protocol-correction.md).
 
-The [sign/range follow-up](readouts/exchange-robber-ceiling/README.md) now adopts
-**+0.075 for exchange robber risk**, with both move penalties still −0.30.
-It won **608/800 fresh games (76.0%, 95% interval 72.9–78.8%)** against −0.225.
-A direct +0.075-versus-+0.15 runoff was inconclusive, so this is a supported
-candidate rather than a precisely identified optimum. Exchange records show
-large net card transfers from the negative-weight incumbent to the positive
-candidate; this motivates further behavioral analysis without claiming that
-actual robber exposure is beneficial. The bounded follow-up is complete.
-
-## Current reference results
+## Recorded native-arena reference results
 
 With its default unpinned adaptive configuration, Heximax won **590/800
 1v1 games (73.75%)** and **450/800 four-player games (56.25%)** against one
@@ -65,7 +52,10 @@ Trading was enabled; AB2 declined exchanges and the slider remained at zero.
 The [benchmark readout](readouts/current-heximax-ab2/README.md) records exact
 revisions, confidence intervals, settings and replay validation of all 1,600 games.
 
-## Evaluation flags
+## Research flags (automatic arena)
+
+These commands describe research tooling, not an approved evaluation/fitting
+path. Use a verified served driver for those tasks.
 
 Compare normal Heximax against three copies pinned at one:
 

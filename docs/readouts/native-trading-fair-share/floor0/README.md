@@ -1,5 +1,11 @@
 # Corrected fair-share comparison: trade floor zero
 
+> **Protocol correction (2026-09-11): research-only automatic clearing.**
+> This run does not validate served trading. Its adoption, fitting and served
+> behavior conclusions are withdrawn; frozen results below record what ran.
+> For mixed studies this applies to trading-enabled cells; no-trade cells
+> remain separately scoped. See [the correction](../../trading-protocol-correction.md).
+
 **Trade census corrected:** the original runner saved only the final turn's
 trade list. The table below now uses all live trade events from exact
 replays. All 800 original action traces and outcomes matched. Original raw

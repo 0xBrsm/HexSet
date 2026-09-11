@@ -1,5 +1,11 @@
 # Bounded exchange-weight sweep: adopted result
 
+> **Protocol correction (2026-09-11): research-only automatic clearing.**
+> This run does not validate served trading. Its adoption, fitting and served
+> behavior conclusions are withdrawn; frozen results below record what ran.
+> For mixed studies this applies to trading-enabled cells; no-trade cells
+> remain separately scoped. See [the correction](../trading-protocol-correction.md).
+
 **Adopt exchange robber-risk weight −0.225 instead of −0.30.** In fresh
 confirmation, two candidate seats won **600/800 games (75.0%, 95% Wilson
 71.9–77.9%)** against two incumbent seats. Both sides retained the same

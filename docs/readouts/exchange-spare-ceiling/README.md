@@ -1,5 +1,11 @@
 # Exchange spare-card sweep after the robber update
 
+> **Protocol correction (2026-09-11): research-only automatic clearing.**
+> This run does not validate served trading. Its adoption, fitting and served
+> behavior conclusions are withdrawn; frozen results below record what ran.
+> For mixed studies this applies to trading-enabled cells; no-trade cells
+> remain separately scoped. See [the correction](../trading-protocol-correction.md).
+
 **Retain spare_card = 0.15 and robber_risk = +0.075 for exchange valuation.**
 None of the eight alternatives exceeded 50% in the registered screen, so the
 experiment stopped after 536 games (80.70 seconds). There was no runoff,

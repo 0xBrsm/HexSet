@@ -40,9 +40,18 @@ public resource history to estimate opponents' cards, and adapts its weights
 to trading activity. Select `heximax` to play it; [testing options](docs/heximax.md)
 can pin its weights to either endpoint without disabling trading.
 
-Catanatron's depth-two alpha-beta player (**AB2**) is our external reference
-opponent. Current-config 1v1 and four-player results will be recorded here
-once the fixed native HexSet benchmark completes.
+Against Catanatron's depth-two alpha-beta player (**AB2**), current Heximax
+achieved these win rates in the **HexSet engine**:
+
+| Matchup | Heximax wins | Win rate (95% interval) |
+| --- | --- | --- |
+| 1v1: Heximax vs AB2 | 292 / 400 | **73.0%** (68.4–77.1%) |
+| Four players: one Heximax vs three AB2 | 224 / 400 | **56.0%** (51.1–60.8%) |
+
+These use the default adaptive configuration, standard 10-VP rules, fresh
+boards and balanced seats. Trading is enabled; AB2 declines exchanges, so
+Heximax's slider remains at zero. See the [current benchmark readout](docs/readouts/current-heximax-ab2/README.md)
+for the exact revisions, settings and all 800 audited game records.
 
 ## Installation
 

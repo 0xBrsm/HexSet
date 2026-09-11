@@ -30,6 +30,15 @@ observed activity or trading restrictions. To decline trades independently,
 pass `max_trades=0`. An unpinned bot immediately uses the zero endpoint when
 its own or the game's trading switch is off. A pinned bot retains its pin.
 
+## Current reference results
+
+With its default unpinned adaptive configuration, Heximax won **292/400
+1v1 games (73.0%)** and **224/400 four-player games (56.0%)** against one
+and three Catanatron AB2 references respectively, all hosted in HexSet.
+Trading was enabled; AB2 declined exchanges and the slider remained at zero.
+The [benchmark readout](readouts/current-heximax-ab2/README.md) records exact
+revisions, confidence intervals, settings and replay validation of all 800 games.
+
 ## Evaluation flags
 
 Compare normal Heximax against three copies pinned at one:

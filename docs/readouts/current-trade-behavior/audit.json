@@ -1,0 +1,82 @@
+{
+  "bundle_counts": {
+    "1x1": 1937,
+    "1x2": 5675,
+    "1x3": 76,
+    "2x2": 1792,
+    "2x3": 5130,
+    "3x3": 976
+  },
+  "bundle_fractions": {
+    "1x1": 0.12427819838316438,
+    "1x2": 0.36410881560374697,
+    "1x3": 0.004876170922622867,
+    "2x2": 0.1149749775439497,
+    "2x3": 0.3291415372770435,
+    "3x3": 0.0626203002694726
+  },
+  "cards_given_per_player_game": 37.423125,
+  "cards_moved": 59877,
+  "cards_moved_per_exchange": 3.841716925445913,
+  "cards_moved_per_game": {
+    "max": 282,
+    "mean": 149.6925,
+    "mean_ci95_normal": [
+      146.27280206054408,
+      153.1121979394559
+    ],
+    "median": 147.0,
+    "p90": 196,
+    "p95": 209,
+    "p99": 246
+  },
+  "eligible_events": 24576,
+  "evaluation_seconds": 60.39895832887851,
+  "events_with_multiple_trades": 2995,
+  "events_with_trade": 11892,
+  "exchanges": 15586,
+  "exchanges_per_game": {
+    "max": 73,
+    "mean": 38.965,
+    "mean_ci95_normal": [
+      38.08950080373371,
+      39.84049919626629
+    ],
+    "median": 38.0,
+    "p90": 51,
+    "p95": 55,
+    "p99": 62
+  },
+  "exchanges_per_player_turn": 0.6210056578213403,
+  "exchanges_per_trading_turn": 1.31062899428187,
+  "fraction_exchanges_with_three_card_side": 0.396638008469139,
+  "fraction_turns_with_multiple_trades": 0.11933221770659017,
+  "fraction_turns_with_trade": 0.4738226153478365,
+  "games": 400,
+  "hand_thresholds": {
+    "crossed_above_7": 2300,
+    "crossed_to_7_or_less": 238,
+    "participations": 31172,
+    "started_above_7": 8535
+  },
+  "legal_actions": 100535,
+  "participant_cards_given_counts": {
+    "1": 9625,
+    "2": 14389,
+    "3": 7158
+  },
+  "passed": true,
+  "player_turns_with_event": 25098,
+  "protocol": "native automatic clearing",
+  "source_sha256": "d9cd0c7c833130e401a8d0fbf468a7b6113824e6cb3a88310b47df90410411e2",
+  "trade_participations_per_player_game": 19.4825,
+  "trades_per_event_counts": {
+    "0": 13206,
+    "1": 8897,
+    "2": 2414,
+    "3": 480,
+    "4": 88,
+    "5": 9,
+    "6": 4
+  }
+}

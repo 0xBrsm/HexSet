@@ -1,0 +1,29 @@
+{
+  "adaptive_moves": true,
+  "antithetic": false,
+  "card_cap_per_side": 3,
+  "driver_sha256": "082d35730ed09f6716245079b3875d783b3b0c0cd36c199d23cd4dcf3484e682",
+  "evaluation_seconds_cap": 300,
+  "exchange_weights": {
+    "buy_progress": 0.45,
+    "diversity": 0.358,
+    "knight": 0.1041,
+    "port": 0.007373,
+    "production": 7.067,
+    "road": 0.1209,
+    "robber_risk": 0.075,
+    "scarce": 0.1786,
+    "spare_card": 0.15,
+    "victory_point": 1.0
+  },
+  "games": 400,
+  "games_cap": 400,
+  "max_trades": null,
+  "policy_commit": "270b9270ea7684c9db60dd346b1f3444e1b9fd0c",
+  "protocol": "native automatic clearing",
+  "python": "3.12.14",
+  "seed": 732000000,
+  "source_sha256": "d9cd0c7c833130e401a8d0fbf468a7b6113824e6cb3a88310b47df90410411e2",
+  "trade_floor": 0,
+  "workers": 30
+}

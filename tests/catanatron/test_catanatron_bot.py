@@ -274,3 +274,90 @@ assert type(bot).__name__ == 'CatanatronBot'
         env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src")},
     )
     assert completed.returncode == 0, completed.stderr
+
+
+def test_seats_share_map_and_release_table_mirrors():
+    import gc
+    import weakref
+    from catanatron.models.player import Player
+    from hexset.catanatron.bot import _TABLE_MIRRORS
+
+    class First(Player):
+        def decide(self, game, playable_actions):
+            return playable_actions[0]
+
+    rng = random.Random(22)
+    board = random_base_board(rng)
+    game = start(board, 4, rng)
+    bots = [CatanatronBot(First) for _ in range(4)]
+    for bot in bots:
+        assert bot.choose(game) in legal_actions(game)
+    assert all(bot._mapping is bots[0]._mapping for bot in bots)
+    table_ref = weakref.ref(bots[0]._table)
+    key = (id(board), 4)
+    # Reusing a bot with another board must replace both translation and player.
+    other = start(random_base_board(random.Random(23)), 3, random.Random(23))
+    assert bots[0].choose(other) in legal_actions(other)
+    assert bots[0]._mapping is not bots[1]._mapping
+    assert len(bots[0]._seats.color_of) == 3
+    del bot, bots
+    gc.collect()
+    assert table_ref() is None
+    assert key not in _TABLE_MIRRORS
+
+
+@pytest.mark.parametrize("mode", ["off", "fast"])
+def test_cached_board_matches_fresh_and_isolates_mutation(positions, mode):
+    from hexset.catanatron.state import BoardMirrorCache
+    from hexset.state import copy_state
+    from hexset.catanatron.speedups import catanatron_speedups
+
+    with catanatron_speedups(mode):
+        for game in positions[::20]:
+            state = game.state(0, hidden=False)
+            mapping = translate_board(catanatron_map(state.board))
+            seats = seating(tuple(list(Color)[:state.num_players]))
+            cache = BoardMirrorCache(mapping, seats)
+            # Same occupancy, then robber, building, road and holder changes.
+            snapshots = [copy_state(state) for _ in range(6)]
+            snapshots[1].robber = (state.robber + 1) % state.board.num_hexes
+            for vertex, kind in enumerate(snapshots[2].vertex_building):
+                if kind.name == "SETTLEMENT":
+                    snapshots[2].vertex_building[vertex] = type(kind).CITY
+                    break
+            for edge, owner in enumerate(snapshots[3].edge_owner):
+                if owner >= 0:
+                    snapshots[3].edge_owner[edge] = -1
+                    break
+            snapshots[4].longest_road_holder = 0 if state.longest_road_holder != 0 else -1
+            for vertex, owner in enumerate(snapshots[5].vertex_owner):
+                if owner >= 0:
+                    snapshots[5].vertex_owner[vertex] = (owner + 1) % state.num_players
+                    break
+            for snapshot in snapshots:
+                from hexset.catanatron.state import _catanatron_board
+                expected = _catanatron_board(snapshot, mapping, seats)
+                for _ in range(2):
+                    actual = cache.board(snapshot)
+                    for field in vars(expected):
+                        if field == "map":
+                            assert actual.map is expected.map
+                        elif field == "buildable_subgraph":
+                            assert list(actual.buildable_subgraph.nodes) == list(expected.buildable_subgraph.nodes)
+                            assert list(actual.buildable_subgraph.edges) == list(expected.buildable_subgraph.edges)
+                        else:
+                            assert getattr(actual, field) == getattr(expected, field), field
+                    actual.buildings.clear()
+                    actual.roads.clear()
+                    actual.road_lengths.clear()
+                    actual.board_buildable_ids.clear()
+                    actual.buildable_edges_cache[Color.RED] = [(100, 101)]
+                    actual.player_port_resources_cache[Color.RED] = {"ORE"}
+                    for components in actual.connected_components.values():
+                        for component in components:
+                            component.clear()
+            fresh = to_catanatron(game, mapping, seats)
+            cached = to_catanatron(game, mapping, seats, board_cache=cache)
+            assert cached.state.player_state == fresh.state.player_state
+            assert cached.state.buildings_by_color == fresh.state.buildings_by_color
+            assert cached.playable_actions == fresh.playable_actions

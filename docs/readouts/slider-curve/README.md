@@ -154,3 +154,8 @@ Archive SHA256 values:
 
 - Screen: `abf2ade4d1f71b85e6cdb03d8672ab4cdc3bcf39d9ac22da9af1ec2652ed5f6b`.
 - Confirmation: `b2d92acef26852a613423d3422e63cf55524ee0c9a2c644fcec300ec78b123bf`.
+
+The subsequent [adaptive shape screen](../slider-shape/README.md) tested square
+and square-root mappings against this linear policy. Neither qualified for
+fresh confirmation; linear remains unchanged. This original non-inferiority
+result validates its strength, not an optimal functional shape.

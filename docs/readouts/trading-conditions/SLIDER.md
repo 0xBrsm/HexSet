@@ -58,3 +58,8 @@ controls' 966/3,584. Both registered lower bounds (-1.51 and -0.99 percentage
 points) exceed the -2-point non-inferiority margin. This supports one automatic
 policy for the tested mixture, without claiming an optimal curve or the same
 margin separately in every condition. All evaluations used native HexSet.
+
+A subsequent [bounded shape screen](../slider-shape/README.md) compared activity²,
+activity and √activity on 448 matched boards per policy. Wins were 118, 117 and 111;
+neither nonlinear curve met the preregistered gate for fresh confirmation. We
+retain linear without claiming it is the optimal mapping.

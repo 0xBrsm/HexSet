@@ -1,0 +1,30 @@
+{
+  "container": "hexset-slider-shape-726",
+  "image": "sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+  "state": {
+    "Status": "exited",
+    "ExitCode": 0,
+    "OOMKilled": false,
+    "StartedAt": "2026-09-11T15:17:18.215557202Z",
+    "FinishedAt": "2026-09-11T15:21:05.494653506Z"
+  },
+  "workers": 30,
+  "cpu_limit": 30,
+  "cpu_snapshot_percent": "2883.32%",
+  "memory_snapshot": "1.095GiB / 95.28GiB",
+  "other_container_cpu_snapshot_percent": 117.14999999999999,
+  "network": "none",
+  "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+  "numpy": "2.5.2",
+  "environment": {
+    "PYTHONPATH": "/study/src",
+    "PYTHONHASHSEED": "0",
+    "OPENBLAS_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1"
+  },
+  "frozen_commit": "a3565b4",
+  "production_source_sha256": "d2df60dd0abeb72f1bd0ae4222716ce1b4246ac249c64cd2d76aeb0aa611b001",
+  "runner_sha256": "a20560887e30809edf897eed6a321d7ed41bf1dd8675724a0dd5b61b39a1add9",
+  "plan_sha256": "0ffe36bd3b715dd63204e6c073ad4bbd90a31e6daea707c2bb341701cc216c29"
+}

@@ -89,3 +89,12 @@ Bounded expansion option is now screening two coefficients (.25, .50) at
 `hexset-native-recovery-expansion64`. It first verifies eight frozen-control
 traces. Three new feature tests pass; evaluator/Heximax tests also pass.
 All feature changes remain optional, default zero; no candidate is adopted.
+
+
+Expansion .25 extension completed: 135/256 AB2 (52.73%, interval 46.62–58.76%)
+and 91/256 shipped (35.55%, 29.94–41.58%). It is the first candidate with a
+promising joint signal at 256/gate. Fresh confirmation registered at seed
+712000000, 512 games/gate, unchanged source d3d4618. Advance only with at
+least 269 AB2 and 144 shipped wins. No final holdout has been launched.
+The probability-backup experiment is implemented/tested but deferred while
+this candidate receives confirmation; it is not part of this candidate.

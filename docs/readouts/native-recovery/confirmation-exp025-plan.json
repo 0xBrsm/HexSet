@@ -1,0 +1,24 @@
+{
+  "stage": "confirmation",
+  "candidate": "p10-exp025",
+  "source_commit": "d3d4618",
+  "source_sha256": "efaecd276604bc23c7d16a23a996cc3815064353dd2d453e52f146fc21d347b1",
+  "manifest": "manifest-v8.json",
+  "seed": 712000000,
+  "games_per_gate": 512,
+  "gates": [
+    "ab2",
+    "shipped"
+  ],
+  "workers": 16,
+  "host": "hexset",
+  "information_model": "native-public-history",
+  "antithetic": false,
+  "speedups": "fast",
+  "output_root": "confirmation-exp025",
+  "advance_rule": {
+    "ab2_min_wins": 269,
+    "shipped_min_wins": 144
+  },
+  "rationale": "Fresh confirmation after 135/256 AB2 and 91/256 shipped screen wins. Both confirmation point estimates must exceed practical margins (52.5% and 28%) before allocating the fixed 2048/gate holdout. Confirmation is not final evidence of endpoint completion."
+}

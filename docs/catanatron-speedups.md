@@ -9,6 +9,20 @@ Stock `DC:` Heximax in this external runner receives a memoryless public
 ledger; its strength results do not establish native HexSet policy rankings.
 
 
+The current optional dependency and hash-guarded patches target Catanatron
+`ecf931181b9a65bb4116a2153fb78c16f1438e00`, including its registry/lifecycle and
+per-game RNG changes. This is a HexSet-local implementation of the optimizations;
+upstream performance PR #389 is a separate implementation against the same base.
+Historical throughput readouts below used `d3f4ad0` and retain that identity.
+Their exact traces and timing ratios are not re-certified by changing the pin.
+
+Reference bots hosted by HexSet now use the arena's seeded per-entrant stream
+for Catanatron search. The mirror, its State and their copies share that stream;
+search does not advance the live HexSet chance stream or another bot's stream.
+This replaces the old adapter's ambient global RNG and can change reference
+match traces. Standalone state translation clones the live RNG state unless a
+search RNG is supplied. Catanatron-hosted games use upstream's per-game RNG.
+
 The duel runner supports `--catanatron-speedups fast` for faster native AB
 and ValueFunction opponents. The default is `off`, preserving the pinned
 reference implementation for historical comparisons. The selected mode is

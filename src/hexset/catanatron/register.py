@@ -1,16 +1,19 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""The file to pass to `catanatron-play --code`.
+"""The file to pass to `catanatron-play --bot`.
 
-    catanatron-play --code path/to/register.py --players=DC:heximax-notrade,AB:2
+    catanatron-play --bot DC=path/to/register.py#DevCatanPlayer \
+        --players=DC:heximax-notrade,AB:2
 
-`--code` loads this file standalone via `importlib.util.spec_from_file_location`
-(see catanatron's `cli/play.py`), not as part of any package, so the import
-below has to be absolute -- a relative import fails with "No module named
-'module'", `--code`'s own placeholder module name.
+`--bot` loads the file via catanatron's `sources.load_class` (under a
+synthetic module name, so the import below has to be absolute -- a relative
+import fails) and registers the class under the given name (`DC=` here);
+the module-level `REGISTRY.register` below covers the file being imported
+directly instead. (`--code`, the old mechanism this file used to target,
+is gone upstream.)
 """
 
-from catanatron.cli.cli_players import register_cli_player
+from catanatron.registry import REGISTRY
 
 from hexset.catanatron.player import DevCatanPlayer
 
-register_cli_player("DC", DevCatanPlayer)
+REGISTRY.register("DC", DevCatanPlayer, replace=True)

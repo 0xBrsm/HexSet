@@ -3,6 +3,27 @@
 Changes to the HexSet distribution. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- **Pinned Catanatron to `ecf931181b9a65bb4116a2153fb78c16f1438e00`.**
+  The adapter follows two upstream reworks: players now construct as
+  `(color, params)` and register through the shared player registry
+  (`parse_cli_string`/`register_cli_player` are gone), and each game owns
+  its `random.Random` instead of reseeding the global module. `duel.py`
+  builds players via `REGISTRY` (`DC:` specs keep their whole
+  colon-containing tail), `DevCatanPlayer` declares a `Params` model and
+  resets per-game state on the `before` observer hook, and the
+  `catanatron-play` bridge file targets `--bot` instead of the removed
+  `--code`. The optional speedups follow the new source (updated
+  verification digests; the structural `State` copy shares the per-game
+  RNG like the native one) and the speed benchmark builds players through
+  `build_players`. Reference bots hosted by HexSet use their seeded entrant
+  RNG for search; mirrored games and copies share that stream, independently
+  of live chance draws and other games.
+
+
 ## 0.49.1
 
 ### Fixed

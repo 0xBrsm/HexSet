@@ -1,0 +1,75 @@
+{
+  "candidate": "shipped heximax-notrade preset",
+  "frozen_opponents": {
+    "depth": 2,
+    "expansion_value": 0.0,
+    "k": 1,
+    "max_nodes": 600,
+    "max_trades": 0,
+    "mode": "notrade",
+    "placement": true,
+    "stance": "win",
+    "temperature": 2.476644394795811,
+    "weights": {
+      "buy_progress": 0.45,
+      "diversity": 0.358,
+      "knight": 0.1026,
+      "port": 0.03063,
+      "production": 2.785,
+      "road": 0.1237,
+      "robber_risk": -0.3,
+      "scarce": 0.07039861111111112,
+      "spare_card": 0.1065,
+      "victory_point": 1.0
+    },
+    "width": 6
+  },
+  "matches": [
+    {
+      "exact_trace_match": true,
+      "gate": "ab2",
+      "index": 0
+    },
+    {
+      "exact_trace_match": true,
+      "gate": "ab2",
+      "index": 1
+    },
+    {
+      "exact_trace_match": true,
+      "gate": "ab2",
+      "index": 2
+    },
+    {
+      "exact_trace_match": true,
+      "gate": "ab2",
+      "index": 3
+    },
+    {
+      "exact_trace_match": true,
+      "gate": "shipped",
+      "index": 0
+    },
+    {
+      "exact_trace_match": true,
+      "gate": "shipped",
+      "index": 1
+    },
+    {
+      "exact_trace_match": true,
+      "gate": "shipped",
+      "index": 2
+    },
+    {
+      "exact_trace_match": true,
+      "gate": "shipped",
+      "index": 3
+    },
+    {
+      "exact_trace_match": true,
+      "gate": "ab2",
+      "index": 1935
+    }
+  ],
+  "source_sha256": "0254eb3dbe0d14bea1b2d9eb42ec18a553d38c2f9100dd3477edb62347778c3e"
+}

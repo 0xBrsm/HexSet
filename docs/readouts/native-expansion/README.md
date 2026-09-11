@@ -58,3 +58,17 @@ and final verdict. Replay games are excluded from the holdout sample.
 The run moved from 16 to 30 workers on the user's instruction. The resumed
 pool used about 30 cores. Its elapsed time excludes the earlier work and
 repair downtime, so it must not be presented as whole-holdout throughput.
+
+## Adoption verification
+
+The focused implementation changes the normal `heximax-notrade` preset to
+road=0 and expansion=.25. The honest trading mode keeps expansion=0.
+An explicit expansion_value=0 plus the original weight vector can replay the
+previous no-trade configuration. `verify_adoption.py` spawns the real preset
+and freezes the old opponents explicitly, including their zero expansion
+bonus. All nine full action traces matched evaluated holdout games: indices
+0–3 in both gates and repaired AB2 index 1935. The effective default win
+temperature is checked against the evaluated explicit temperature.
+See adoption-preflight-verdict.json. Forty focused tests passed locally,
+covering expansion bounds, piece supply, scalar/batch agreement, hidden-hand
+invariance, mode defaults, legacy override, and adapter action compatibility.

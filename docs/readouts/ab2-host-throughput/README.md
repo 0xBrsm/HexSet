@@ -1,5 +1,9 @@
 # Four-AB2 hosted-game throughput
 
+The adapter overhead identified here is addressed by the subsequent
+[map-sharing and board-reconstruction fix](adapter-fix/README.md), which includes
+two reversed-order baseline/fixed/native comparisons and full trace checks.
+
 September 11, 2026 UTC, Wintermute. Every seat uses Catanatron's depth-two
 AlphaBetaPlayer, standard 10-VP/7-discard rules, no domestic trades, and the
 unchanged 20-second search deadline. This compares **AB2 hosted by HexSet via
@@ -61,7 +65,7 @@ balancing; results are an operational sample rather than a significance test.
 HexSet-hosted throughput is 11.7% lower in this larger
 sample. The small serial sample favored HexSet, so it should not be generalized
 into a host-speed advantage. The practical 30-worker result is **1.63 games/s in
-HexSet versus 1.85 games/s directly in Catanatron** for the current AB2 integration.
+HexSet versus 1.85 games/s directly in Catanatron** for the AB2 integration at the measured revision.
 This is the same AB2 implementation/settings hosted in two engines, with
 independently evolving game trajectories; it does not measure identical
 state-transition sequences or separate adapter cost from game-length/search
@@ -102,9 +106,9 @@ and turns. Profile timings are diagnostic and excluded from throughput claims.
   (939 HexSet decisions versus 1210 native decisions), so their aggregate
   profile times cannot assign the entire 120-game gap to adapter/cache costs.
 
-The next concrete candidates are sharing the immutable board mapping across
-AB2 seats and reducing repeated reconstruction of unchanged board/player
-fields. Longest-road and legality updates still need correct invalidation.
+The subsequent [adapter fix](adapter-fix/README.md) shares immutable board
+mappings across AB2 seats and reuses reconstruction of unchanged road networks.
+Player fields continue to be rebuilt each decision. Longest-road and legality updates still need correct invalidation.
 The evidence does not establish that HexSet's native rules primitives are
 intrinsically 12% slower; much of an AB2-hosted game's work remains native
 Catanatron search.

@@ -1,0 +1,64 @@
+{
+  "Id": "f571a49e8a298d517cdc0531ec841f43acfcee9ae66bab321f47399e5b7dfb62",
+  "Image": "sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+  "State": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-09-11T03:51:51.318983629Z",
+    "FinishedAt": "2026-09-11T03:51:57.122972404Z"
+  },
+  "Mounts": [
+    {
+      "Type": "bind",
+      "Source": "/home/bsm/tmp/hexset-ab2-adapter-fix",
+      "Destination": "/study",
+      "Mode": "ro",
+      "RW": false,
+      "Propagation": "rprivate"
+    },
+    {
+      "Type": "bind",
+      "Source": "/home/bsm/tmp/hexset-ab2-host-d450a4e",
+      "Destination": "/baseline",
+      "Mode": "ro",
+      "RW": false,
+      "Propagation": "rprivate"
+    },
+    {
+      "Type": "bind",
+      "Source": "/home/bsm/tmp/hexset-ab2-adapter-fix-results",
+      "Destination": "/out",
+      "Mode": "rw",
+      "RW": true,
+      "Propagation": "rprivate"
+    }
+  ],
+  "command": [
+    "/baseline/profile_host.py",
+    "--host",
+    "hexset",
+    "--seed",
+    "680200000",
+    "--out",
+    "/out/fixed-profile.json"
+  ],
+  "user": "1000:1000",
+  "env": [
+    "PYTHONPATH=/study/src",
+    "PYTHONHASHSEED=0",
+    "OPENBLAS_NUM_THREADS=1",
+    "OMP_NUM_THREADS=1",
+    "MKL_NUM_THREADS=1"
+  ],
+  "runtime": {
+    "NanoCpus": 1000000000,
+    "NetworkMode": "none"
+  }
+}

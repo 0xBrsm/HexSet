@@ -15,6 +15,23 @@ Changes to the HexSet distribution. The project follows
   move, so the page has one notion of whose turn it is again and the extra
   gating is gone.
 
+- `hexset.catanatron.duel`: games were seeded by shard, so a duel's own
+  worker count changed which games it played. Seeded by game index instead
+  -- a run with 4 workers and one with 8 now play the same games.
+
+- **Playing a Knight lost its board-level cancel.** A recent engine change
+  (3034778) made it resolve through the same forced robber phase a seven
+  does, and dropped the client-side arm/cancel path that came with the old
+  one-step version, without a replacement. It's undoable again, through the
+  same `#undo-build` point a build or Road Building already gets, up until
+  the robber move actually lands. Undoing a played dev card also used to
+  leave `dev_card_played` stuck true even after the card was refunded --
+  fixed alongside, since a Knight makes the gap much more likely to bite.
+  The trade-acceptance pane now says just "Accepted" instead of redrawing
+  the offer's own cards a second time, and its check button is colored only
+  for that accept, gray for a counter. The setup-hold banner reads
+  "END TURN" rather than "END YOUR TURN".
+
 ### Added
 
 - `tests/server/test_page_setup_turn.py`: browser coverage for the setup
@@ -23,6 +40,29 @@ Changes to the HexSet distribution. The project follows
   `index.html` and passed the whole Python suite; all three of these fail
   against the unfixed page. It also covers a reopen restoring the hold,
   which nothing else did.
+
+- `hexset.catanatron.duel --game-type=colonist-1v1`: a 15 VP /
+  discard-over-9 rules variant. Rules travel on `GameState` through copies
+  and the Catanatron bridge, so Heximax's win bonus and discard model match
+  the table actually being played.
+
+- `tests/server/test_page_robber_undo.py` and
+  `tests/server/test_page_trade_acceptance_colors.py`: browser coverage for
+  the Knight-undo and trade-pane fixes above, for the same reason the setup
+  hold's own coverage exists -- both are `index.html` rendering/interaction
+  logic the Python suite can't see.
+
+### Changed
+
+- `hexset.catanatron.duel --speedups {basic,cached}`: opt-in accelerations
+  for the pinned Catanatron reference bot -- board copying and a shared
+  feature cache, checked against the pinned upstream implementation's hash
+  before installing.
+- Native state evaluation and dynamically scheduled duel games, speeding up
+  mixed HexSet/Catanatron throughput runs.
+- The Catanatron adapter now shares its board/seat mapping and caches an
+  unchanged board's reconstruction across `CatanatronBot` instances working
+  the same table.
 
 ## 0.48.2
 

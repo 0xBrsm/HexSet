@@ -4,6 +4,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 from enum import IntEnum
+from typing import Sequence
 
 from .board.board import Board
 from .board.terrain import NUM_RESOURCES, TERRAIN_RESOURCE, Terrain
@@ -33,6 +34,129 @@ class Building(IntEnum):
     CITY = 2
 
 
+class HiddenRead(Exception):
+    """A card *identity* was read off a pile that carries only a count.
+
+    Raised by `Hidden` and its subclasses. It is deliberately not a
+    `LookupError` or a `TypeError`: nothing in the engine catches it, so a
+    path that needs to know what somebody holds fails loudly on an observed
+    state instead of quietly reading a fabricated number.
+    """
+
+
+class Hidden:
+    """`count` cards whose types the state's author cannot see.
+
+    A `GameState` is normally written by the referee, who knows everything;
+    then every hand, every development holding and the deck is a list of
+    counts by type. A state written by a *seat* -- the live adapter for a
+    table it is playing at, a replay of a public log -- knows its own hand
+    exactly and knows the rest only as sizes. Those slots hold one of these
+    instead of a list:
+
+    * `HiddenHand(n)` in `hands[seat]` -- n resource cards, types unknown,
+    * `HiddenCards(n)` in `dev_cards[seat]` / `new_dev_cards[seat]`,
+    * `HiddenDeck(n)` in `deck` -- n cards left, order and types unknown.
+
+    What works: `len(pile)` is the count, `pile[:]` copies it (the idiom
+    `copy_state` and `game._snapshot_hands` use), equality and `repr`. A
+    hidden pile is always truthy, exactly as the all-zero list `[0] * 5` it
+    stands in for is.
+
+    What raises `HiddenRead`: indexing a type (`hand[SHEEP]`), iterating
+    (so `sum`, `zip`, `tuple`, `max`, `random.shuffle` all raise), and
+    assignment. Read a size through `hexset.economy.hand_size`,
+    `hexset.devcards.dev_count` or `len` -- never by summing a pile the
+    caller has not established is concrete.
+    """
+
+    __slots__ = ("count",)
+    #: What the pile holds, for the message a refused identity read raises.
+    kind = "cards"
+
+    def __init__(self, count: int) -> None:
+        count = int(count)
+        if count < 0:
+            raise ValueError(f"a hidden pile cannot hold {count} cards")
+        self.count = count
+
+    def __len__(self) -> int:
+        """How many cards, not how many type slots: the count is all there is."""
+        return self.count
+
+    def __bool__(self) -> bool:
+        # Without this, `Hidden(0)` would be falsy while the `[0] * 5` it
+        # replaces is truthy, and `if state.hands[seat]:` would change
+        # meaning between a true and an observed state.
+        return True
+
+    def __getitem__(self, index: object) -> "Hidden":
+        if isinstance(index, slice):
+            return type(self)(self.count)
+        raise HiddenRead(
+            f"{self.count} {self.kind} of unknown type: this state's author "
+            f"cannot see which, so entry {index!r} has no value to read"
+        )
+
+    def __setitem__(self, index: object, value: object) -> None:
+        raise HiddenRead(
+            f"cannot write entry {index!r} of {self.count} hidden {self.kind}"
+        )
+
+    def __iter__(self):
+        raise HiddenRead(
+            f"{self.count} {self.kind} of unknown type: this state's author "
+            f"cannot see the composition, so it cannot be iterated or summed"
+        )
+
+    def __eq__(self, other: object) -> bool:
+        if type(other) is not type(self):
+            return NotImplemented
+        return self.count == other.count
+
+    def __hash__(self) -> int:
+        return hash((type(self).__name__, self.count))
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}({self.count})"
+
+    def copy(self) -> "Hidden":
+        return type(self)(self.count)
+
+
+class HiddenHand(Hidden):
+    """Resource cards held by a seat this state's author cannot see."""
+
+    kind = "resource cards"
+
+
+class HiddenCards(Hidden):
+    """Development cards held by a seat this state's author cannot see."""
+
+    kind = "development cards"
+
+
+class HiddenDeck(Hidden):
+    """A development deck known only by its length."""
+
+    kind = "deck cards"
+
+
+def is_hidden(pile: object) -> bool:
+    """Whether `pile` carries a count instead of a composition."""
+    return isinstance(pile, Hidden)
+
+
+def pile_size(pile: "Hidden | Sequence[int]") -> int:
+    """How many cards `pile` holds, whether or not its types are visible.
+
+    The one primitive every size-only reader goes through
+    (`hexset.economy.hand_size`, `hexset.devcards.dev_count`), so those
+    readers work on a referee's state and on a seat's alike.
+    """
+    return len(pile) if isinstance(pile, Hidden) else sum(pile)
+
+
 @dataclass
 class GameState:
     """Mutable occupancy of a board, plus what each player is holding."""
@@ -43,11 +167,13 @@ class GameState:
     vertex_building: list[int]
     edge_owner: list[int]
     robber: int
-    hands: list[list[int]] = field(default_factory=list)
+    # A seat the state's author cannot see holds a `Hidden` pile -- a count
+    # with no composition -- rather than a list of counts; see `Hidden`.
+    hands: list[list[int] | HiddenHand] = field(default_factory=list)
     bank: list[int] = field(default_factory=list)
-    deck: list[int] = field(default_factory=list)
-    dev_cards: list[list[int]] = field(default_factory=list)
-    new_dev_cards: list[list[int]] = field(default_factory=list)
+    deck: list[int] | HiddenDeck = field(default_factory=list)
+    dev_cards: list[list[int] | HiddenCards] = field(default_factory=list)
+    new_dev_cards: list[list[int] | HiddenCards] = field(default_factory=list)
     knights_played: list[int] = field(default_factory=list)
     longest_road_holder: int = NO_OWNER
     largest_army_holder: int = NO_OWNER
@@ -92,6 +218,10 @@ def copy_state(state: GameState) -> GameState:
 
     The board is shared rather than copied: it is frozen and never changes
     during a game, and it is by far the largest object here.
+
+    Hidden piles copy through the same `[:]` idiom as concrete ones
+    (`Hidden.__getitem__` answers a slice with an equal pile), so an
+    observed state copies exactly like a true one.
     """
     return GameState(
         board=state.board,
@@ -110,6 +240,34 @@ def copy_state(state: GameState) -> GameState:
         largest_army_holder=state.largest_army_holder,
         rules=state.rules,
     )
+
+
+def observed_by(state: GameState, seat: int) -> GameState:
+    """A copy of `state` holding only what `seat` can see.
+
+    `seat`'s own hand and development cards stay exact; every other seat's
+    become a `HiddenHand`/`HiddenCards` of the same size and the deck a
+    `HiddenDeck` of the same length. Public fields -- the board, ownership,
+    the robber, the bank, knights played, the awards -- are copied as they
+    are, because they are public.
+
+    Two uses. It downgrades a true state for a caller that has one, and it
+    is the honesty probe: a path that claims to read nothing it should not
+    must decide the same on the result as on `state` itself. An adapter
+    sitting at a real table has no truth to downgrade and writes the hidden
+    piles itself; that is the case this type exists for.
+    """
+    observed = copy_state(state)
+    for other in range(state.num_players):
+        if other == seat:
+            continue
+        observed.hands[other] = HiddenHand(pile_size(state.hands[other]))
+        observed.dev_cards[other] = HiddenCards(pile_size(state.dev_cards[other]))
+        observed.new_dev_cards[other] = HiddenCards(
+            pile_size(state.new_dev_cards[other])
+        )
+    observed.deck = HiddenDeck(len(state.deck))
+    return observed
 
 
 def settlement_count(state: GameState, player: int) -> int:

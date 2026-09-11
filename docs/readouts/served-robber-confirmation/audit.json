@@ -1,0 +1,42 @@
+{
+  "automatic_exchanges": 0,
+  "bundle_counts": {
+    "1x1": 1073,
+    "1x2": 4827,
+    "1x3": 1899,
+    "2x2": 989,
+    "2x3": 3872,
+    "3x3": 687
+  },
+  "candidate_wins": 272,
+  "control_wins": 120,
+  "counts": {
+    "accept": 14026,
+    "counter": 9481,
+    "decline": 617,
+    "executions": 13347,
+    "nobody": 1726,
+    "offer": 15690,
+    "pass": 23563
+  },
+  "eligible_for_adoption": true,
+  "games": 392,
+  "legal_actions": 102089,
+  "mean_turns": 65.00255102040816,
+  "moves_slider_zero": true,
+  "passed": true,
+  "protocol": "Production GameSession served rounds; current served move slider zero; no custom Clio proposer",
+  "public_observations": 25429,
+  "total_attempts": 404,
+  "total_evaluation_seconds": 135.31459627089626,
+  "wilson95": [
+    0.6465549361911636,
+    0.7374371813925886
+  ],
+  "winners": {
+    "0": 149,
+    "1": 123,
+    "2": 54,
+    "3": 66
+  }
+}

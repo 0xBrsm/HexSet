@@ -45,6 +45,13 @@ matches too, even though AB2 declines player exchanges. Historical zero-exchange
 records remain useful evidence of their recorded configurations, but do not
 establish served-driver equivalence by themselves.
 
+A [bounded served robber confirmation](readouts/served-robber-confirmation/README.md)
+now provides a verified direct GameSession driver for the current embedded
+server policy, with full journal/record checks and no automatic exchanges.
+Its scope explicitly includes the current served move slider staying at zero;
+it is not a validation of adaptive served movement. The stock automatic arena
+remains prohibited for evaluation and fitting.
+
 ## Result identity and historical scope
 
 Every new campaign must record host engine, public-information model, source

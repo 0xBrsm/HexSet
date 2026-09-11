@@ -1,0 +1,21 @@
+{
+  "check": "Promoted default versus frozen served confirmation full action/chance and round-note traces",
+  "default_candidate_instances": 4,
+  "exchange_weights": {
+    "buy_progress": 0.45,
+    "diversity": 0.358,
+    "knight": 0.1041,
+    "port": 0.007373,
+    "production": 7.067,
+    "road": 0.1209,
+    "robber_risk": 0.075,
+    "scarce": 0.1786,
+    "spare_card": 0.15,
+    "victory_point": 1.0
+  },
+  "games": 2,
+  "passed": true,
+  "source_sha256": "58e7e40df19f285da5075be6674e74a991511ad5a088b29e210f184955dffd55",
+  "total_attempts": 406,
+  "total_evaluation_seconds": 141.82859817891267
+}

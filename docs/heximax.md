@@ -32,16 +32,18 @@ its own or the game's trading switch is off. A pinned bot retains its pin.
 
 ## Exchange-weight validation status
 
-The bot retains separate fixed exchange weights, provisionally using main's
-robber_risk = −0.30 and spare_card = 0.15. PR #149's proposed −0.225 and
-+0.075 robber selections are withdrawn: their sweeps used automatic clearing,
-which is research-only and is not permitted for evaluation or fitting.
+Fixed exchange pricing uses robber_risk = +0.075 and spare_card = 0.15.
+The [served confirmation](readouts/served-robber-confirmation/README.md) found
+272/392 wins (69.39%, 95% CI 64.66–73.74%) against −0.30 with only that
+exchange coefficient changed. Production GameSession handled all offers,
+responses, counters and execution; automatic exchanges were forbidden.
 
-The earlier adaptive-versus-fixed exchange comparison also used automatic
-clearing. It does not validate the split for served games. Preserve these
-research candidates for a bounded test only after verifying the served
-protocol; no new optimum is claimed. See the
-[protocol correction](readouts/trading-protocol-correction.md).
+The served implementation currently holds the move slider at zero, and this
+test reproduces that on both sides. It validates the coefficient against its
+baseline under current served behavior, not adaptive movement or a unique
+optimum. Earlier automatic-clearing sweeps and the adaptive-versus-fixed
+exchange comparison remain research-only; their adoption conclusions were
+withdrawn. See the [protocol correction](readouts/trading-protocol-correction.md).
 
 ## Recorded native-arena reference results
 

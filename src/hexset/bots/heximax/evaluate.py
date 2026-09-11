@@ -96,11 +96,13 @@ _PURCHASE_COSTS = np.array(
 # vector confirmed 52.5% [50.7, 54.3] over 3,072 fresh boards against the
 # start. The other seven terms sit within a point and a half of their best
 # ring value, which is the resolution 1,024 paired games buy.
-# Retain the pre-PR149 exchange baseline provisionally. The later -0.225 and
-# +0.075 selections used research-only automatic clearing, not the served
-# offer/response protocol required for evaluation and fitting. Their adoption
-# is withdrawn; see docs/readouts/trading-protocol-correction.md.
-TRADING_WEIGHTS = Weights(robber_risk=-0.30)
+# Served-protocol confirmation (production GameSession): +0.075 beat -0.30
+# in 272/392 fresh games (69.4%, 95% Wilson 64.7-73.7%). Only exchange
+# pricing changed; this reproduces the current served move slider at zero.
+# The earlier automatic-clearing studies remain research-only. This confirms
+# the selected coefficient against the baseline, not a unique optimum.
+# See docs/readouts/served-robber-confirmation/README.md.
+TRADING_WEIGHTS = Weights(robber_risk=0.075)
 
 # The fit that preceded the trading refit, recovered from git: `87d9095`
 # (parent of `1dd9045`, "refit the weights for trading"), `src/catan/evaluate.py`.

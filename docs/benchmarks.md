@@ -41,12 +41,22 @@ Trading is enabled; AB2 declines exchanges, so the adaptive slider stays at
 zero. All 1,600 games finished and passed replay validation, with no reference
 deadline hits. The readout preserves exact source hashes, settings and records.
 
+## Served exchange robber confirmation (September 11, 2026)
+
+Production GameSession confirmation found +0.075 beat −0.30 in **272/392
+fresh games (69.39%, 95% CI 64.66–73.74%)**, with zero automatic exchanges.
+This supports the selected exchange coefficient under current served behavior;
+the served move slider is zero on both sides. It does not validate the old
+sweep grid or adaptive served moves. See the
+[served readout](readouts/served-robber-confirmation/README.md).
+
 ## Withdrawn exchange-weight adoption (September 11, 2026)
 
 The [initial exchange sweep](readouts/exchange-weight-sweep/README.md) and
 [robber follow-up](readouts/exchange-robber-ceiling/README.md) used research-only
 automatic clearing. Their −0.225 and +0.075 adoption conclusions are withdrawn;
-main's preceding −0.30 is retained provisionally. The
+main's preceding −0.30 was restored provisionally before the separate served
+confirmation above. The
 [spare screen](readouts/exchange-spare-ceiling/README.md) and
 [trade-behavior baseline](readouts/current-trade-behavior/README.md) have the
 same protocol limitation. These results do not evaluate served behavior or

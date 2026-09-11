@@ -5,9 +5,9 @@ coefficient selection or adoption, or claims about served Heximax behavior.**
 The required trading protocol is the served offer/response/counter/pick flow
 in native HexSet. Native engine identity alone does not satisfy this contract.
 
-PR #149 is returned to draft and its exchange robber coefficient adoption is
-withdrawn. The code retains main's preceding −0.30 provisionally, not because
-that value has newly passed served-protocol validation. The tested −0.225
+At the correction, PR #149 was returned to draft and its exchange robber
+coefficient adoption was withdrawn. The code restored main's preceding −0.30
+provisionally, not because that value had passed served-protocol validation. The tested −0.225
 and +0.075 remain research candidates only. Move weights are not retuned.
 
 ## Affected evidence
@@ -62,3 +62,16 @@ now identifies that limitation; this correction does not pretend to have
 implemented or validated a replacement runner. Do not launch its stock
 trading-enabled duel, ablation, weight-sweep, fitting or dataset-generation
 paths as evaluation/fitting work.
+
+## Subsequent served confirmation
+
+The user requested a quick revalidation. The
+[production-served confirmation](served-robber-confirmation/README.md) subsequently
+found +0.075 beat −0.30 in 272/392 fresh games (69.39%, 95% CI 64.66–73.74%).
+Its direct GameSession driver passed stock/instrumented trace checks and
+independent full journal/record audit. The +0.075 coefficient is restored on
+that new evidence only; no old automatic-clearing conclusion is relabeled.
+Current served move-slider behavior is explicitly zero on both sides and
+remains a separate wiring issue. Stock automatic-arena eval/fitting remains
+prohibited. The old automatic-clearing behavior baseline remains invalid for
+served behavior.

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""Runs a catanatron duel sharded across worker processes.
+"""Runs a catanatron duel across worker processes.
 
 catanatron-play is single-process -- confirmed by reading it, there is no
 multiprocessing anywhere in `cli/play.py` -- so a duel of any real size needs
@@ -98,7 +98,7 @@ def _ensure_pythonhashseed_zero(argv=None, env=None, execve=os.execve) -> bool:
 
 
 def shard_plan(num_games: int, workers: int) -> tuple[int, int]:
-    """(shard_size, shard_count) exactly as `run_duel` computes them.
+    """(shard_size, shard_count) for the optional static scheduler.
 
     Factored out so the report can state the shard count without restating the
     arithmetic. Shards determine process layout; game indices select seeds.
@@ -157,15 +157,19 @@ class DuelResult:
     wins: dict[Color, int]
     points: dict[Color, list[int]]
     speedups: str = "off"
+    scheduling: str = "dynamic"
+    worker_seconds: float = 0.0
 
     def report(self) -> str:
         rules = GAME_TYPES[self.game_type]
+        task_plan = (f"{self.games} dynamically assigned games" if self.scheduling == "dynamic"
+                     else f"{shard_plan(self.games, self.workers)[1]} static shards "
+                          f"of {shard_plan(self.games, self.workers)[0]}")
         lines = [
             f"{self.games} games, {self.seconds:.1f}s "
             f"({self.games / self.seconds:.2f} games/sec)",
             f"  {provenance()} | seed {self.seed} | workers {self.workers} "
-            f"| {shard_plan(self.games, self.workers)[1]} shards "
-            f"of {shard_plan(self.games, self.workers)[0]}; "
+            f"| {task_plan}; "
             f"game g plays seed {self.seed}+g",
             f"  game type {self.game_type}: "
             f"{rules.winning_points} VP to win, "
@@ -221,7 +225,9 @@ def _play_chunk_native(args: tuple[str, int, int, int, str]) -> tuple[dict, dict
             flush=True,
         )
 
-    heartbeat(0)
+    # A single-game task is reported by the parent to avoid worker log spam.
+    if count > 1:
+        heartbeat(0)
     for g in range(start, start + count):
         random.seed(seed + g)
         game_wins, game_points, _games = play_batch(
@@ -235,11 +241,18 @@ def _play_chunk_native(args: tuple[str, int, int, int, str]) -> tuple[dict, dict
         now = time.time()
         # Check after each game: report every 25 games or after 60 seconds.
         # A single long game can delay a heartbeat beyond that interval.
-        if done % 25 == 0 or now - last_beat >= 60:
+        if count > 1 and (done % 25 == 0 or now - last_beat >= 60):
             heartbeat(done)
             last_beat = now
-    heartbeat(count)
+    if count > 1:
+        heartbeat(count)
     return wins, points
+
+
+def _play_job(args):
+    started = time.perf_counter()
+    wins, points = _play_chunk(args)
+    return args[1], args[2], wins, points, time.perf_counter() - started
 
 
 def run_duel(
@@ -249,7 +262,12 @@ def run_duel(
     seed: int = 0,
     game_type: str = "standard",
     speedups: str = "off",
+    scheduling: str = "dynamic",
 ) -> DuelResult:
+    if num_games < 1 or workers < 1:
+        raise ValueError("games and workers must be positive")
+    if scheduling not in ("dynamic", "static"):
+        raise ValueError(f"unknown scheduling: {scheduling!r}")
     parts = players_spec.split(",")
     colors = list(Color)[: len(parts)]
     labels = {color: f"{i}:{part}" for i, (color, part) in enumerate(zip(colors, parts))}
@@ -261,7 +279,7 @@ def run_duel(
     if speedups != "off":
         verify_runtime()
 
-    shard_size, _ = shard_plan(num_games, workers)
+    shard_size = 1 if scheduling == "dynamic" else shard_plan(num_games, workers)[0]
     chunks = []
     start = 0
     while start < num_games:
@@ -272,10 +290,27 @@ def run_duel(
         chunks.append((players_spec, start, n, seed, game_type, speedups))
         start += n
 
-    start = time.time()
-    with Pool(len(chunks)) as pool:
-        shard_results = pool.map(_play_chunk, chunks)
-    elapsed = time.time() - start
+    started = time.perf_counter()
+    last_beat = started
+    completed = 0
+    worker_seconds = 0.0
+    indexed_results = {}
+    print(f"[duel] 0/{num_games} done ({scheduling})", file=sys.stderr, flush=True)
+    with Pool(min(workers, len(chunks))) as pool:
+        for index, count, wins, points, duration in pool.imap_unordered(_play_job, chunks, chunksize=1):
+            indexed_results[index] = (wins, points)
+            previous = completed
+            completed += count
+            worker_seconds += duration
+            now = time.perf_counter()
+            if completed // 25 > previous // 25 or now - last_beat >= 60 or completed == num_games:
+                print(f"[duel] {completed}/{num_games} done, {now - started:.0f}s elapsed",
+                      file=sys.stderr, flush=True)
+                last_beat = now
+    elapsed = time.perf_counter() - started
+    # Arrival order depends on runtime. Restore game-index order before
+    # aggregation so points remain reproducible across schedules/workers.
+    shard_results = [indexed_results[i] for i in sorted(indexed_results)]
 
     wins: dict[Color, int] = {c: 0 for c in colors}
     points: dict[Color, list[int]] = {c: [] for c in colors}
@@ -296,6 +331,8 @@ def run_duel(
         wins=wins,
         points=points,
         speedups=speedups,
+        scheduling=scheduling,
+        worker_seconds=worker_seconds,
     )
 
 
@@ -324,13 +361,15 @@ def main() -> None:
         "colonist-1v1 (15 VP, discard over 9)",
     )
     parser.add_argument(
-        "--catanatron-speedups", choices=("off", "basic", "cached"), default="off",
+        "--catanatron-speedups", choices=("off", "basic", "cached", "fast"), default="off",
         help="optional reference-engine acceleration; recorded in the report",
     )
+    parser.add_argument("--scheduling", choices=("dynamic", "static"), default="dynamic",
+                        help="assign games as workers finish, or retain fixed shards")
     args = parser.parse_args()
 
     result = run_duel(args.players, args.num, args.workers, args.seed, args.game_type,
-                      args.catanatron_speedups)
+                      args.catanatron_speedups, args.scheduling)
     print(result.report())
 
 

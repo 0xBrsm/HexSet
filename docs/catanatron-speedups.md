@@ -1,6 +1,6 @@
 # Catanatron acceleration
 
-The duel runner supports `--catanatron-speedups cached` for faster native AB
+The duel runner supports `--catanatron-speedups fast` for faster native AB
 and ValueFunction opponents. The default is `off`, preserving the pinned
 reference implementation for historical comparisons. The selected mode is
 printed in every report and passed explicitly to each worker, including when
@@ -10,7 +10,7 @@ Python uses spawn or forkserver.
 python -m hexset.catanatron.duel \
   --players=DC:heximax-notrade,AB:2,AB:2,AB:2 \
   --num=1000 --workers=30 --seed=640000000 \
-  --catanatron-speedups=cached
+  --catanatron-speedups=fast
 ```
 
 `basic` combines structural board copies, elimination of duplicate production
@@ -21,6 +21,12 @@ ordered buildings, roads, connected components, buildable nodes, and robber
 location. Changing maps clears the cache; it retains at most 4096 entries.
 Hands, victory points, development cards, army and longest-road lengths are
 read from each leaf rather than cached. Native board maps are immutable.
+
+`fast` adds structural state copies (removing the remaining pickle round trip),
+reads just the perspective player's hand, and uses a smaller cache key containing
+the actual enemy node/edge blockers. It preserves ordered per-seat production
+inputs and component iteration order. `cached` remains available as the previous
+acceleration baseline.
 
 The implementation verifies the relevant pinned Catanatron source hashes before
 activation. It uses a process-global context intended for single-threaded
@@ -39,7 +45,17 @@ it is not guaranteed for deadline-limited decisions.
 On eight paired four-player AB2 games, `basic` reduced total wall time from
 103.04 to 55.90 seconds (1.84x throughput); `cached` reduced it to 52.19 seconds
 (1.97x). Every ordered action trace and outcome matched. These are one-CPU
-measurements; see the [full readout and raw records](readouts/ab-speedups/README.md).
+measurements; see the [initial readout and raw records](readouts/ab-speedups/README.md).
+
+On a new eight-seed sample, `fast` reduced wall time from 111.00 seconds native
+and 54.98 seconds cached to 35.37 seconds: 3.14x native throughput and 55.46%
+more throughput than cached. All full action traces and outcomes matched. See
+the [follow-up readout and records](readouts/ab-throughput/README.md).
+
+In two 240-game trials per profile on 30 workers, mean batch time fell from
+184.91 seconds cached/static to 121.72 fast/static and 109.15 fast/dynamic.
+Combined throughput increased 69.41%, with every full trace and outcome matching
+across all profiles and repetitions.
 
 ## Verification and measurement
 
@@ -74,3 +90,22 @@ and an exact-value/lower-bound/upper-bound designation. Reusing a cutoff as an
 exact score would change decisions. This change shares board-feature work while
 leaving those search semantics intact. Catanatron also already caches several
 lower-level geometric helpers, so their cost cannot be saved twice.
+
+## Keep workers busy
+
+Duel games are assigned dynamically by default (`--scheduling=dynamic`), one game
+per task. A worker picks up another game as soon as it finishes. Results are
+aggregated in game-index order, so completion order cannot reorder per-seat VP.
+`--scheduling=static` retains the previous fixed-shard assignment for comparisons.
+The parent reports completed games on stderr; each game still starts from
+`random.seed(seed + game_index)` under either scheduler.
+
+The pool benchmark compares cached/static, fast/static, and fast/dynamic with
+a fresh interpreter and pool per trial. Two repetitions reverse trial order;
+all trials use the same 240 seeds and check actual seeds, ordered actions,
+winners and VP for every game. Only one 30-worker pool runs at a time:
+
+```sh
+python -m hexset.catanatron.throughput_benchmark --games=240 --workers=30 \
+  --repeats=2 --seed=650200000 --out=/tmp/ab-throughput.json
+```

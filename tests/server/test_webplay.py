@@ -151,6 +151,47 @@ def test_a_knight_resolves_through_the_session_like_a_seven():
     assert game.phase is Phase.MAIN
 
 
+def test_playing_a_knight_is_undoable_until_the_robber_actually_moves():
+    """The board-level cancel the Knight lost when it stopped being one
+    client-side action (3034778): it's back, through the same undo point a
+    build or Road Building already gets, rather than a bespoke arm/cancel
+    path. Undoable right after PLAY_KNIGHT, gone the instant MOVE_ROBBER
+    lands -- same window Road Building's two free roads get."""
+    game = a_game(seed=7)
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    game._state.dev_cards[0][DevCard.KNIGHT] = 1
+    session = a_session(game, {0})
+
+    knight = next(a for a in legal_actions(game) if a.type is ActionType.PLAY_KNIGHT)
+    session.submit(0, action_to_wire(knight))
+    assert game.phase is Phase.ROBBER
+    assert session.state_view(0)["can_undo"] is True
+
+    session.undo_last_build(0)
+
+    assert game.phase is Phase.MAIN
+    assert game._state.dev_cards[0][DevCard.KNIGHT] == 1
+    # The one field a card play touches that undo_last_build's set_state
+    # swap can't reach on its own -- dev_card_played lives on Game, not
+    # GameState (see _UndoPoint's docstring) -- so it's checked directly
+    # rather than trusted from the card being back.
+    assert game.dev_card_played is False
+    assert session.state_view(0)["can_undo"] is False
+
+    # Refunded, not just visually: playing it again works.
+    knight_again = next(a for a in legal_actions(game) if a.type is ActionType.PLAY_KNIGHT)
+    session.submit(0, action_to_wire(knight_again))
+    assert game.phase is Phase.ROBBER
+
+    move = next(a for a in legal_actions(game) if a.type is ActionType.MOVE_ROBBER)
+    session.submit(0, action_to_wire(move))
+    assert game.phase is Phase.MAIN
+    # A rolled seven's own robber move was never undoable, and a knight's
+    # isn't either once it's landed -- only the card play itself was.
+    assert session.state_view(0)["can_undo"] is False
+
+
 def test_only_bank_trading_exists_and_only_in_the_main_phase():
     """Trading with the bank is a Main-phase act; trading with a player is
     not an act at all any more (`hexset.trading`)."""

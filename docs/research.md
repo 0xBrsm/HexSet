@@ -1,11 +1,20 @@
 # Research workflows
 
-Heximax and Catanatron are the supported handcrafted baselines. The random
+HexSet is the primary game engine and evaluation framework. Heximax is its
+handcrafted baseline; Catanatron supplies external reference opponents. Run
+self-play, ablations and both candidate-validation gates in HexSet. Seat the
+`catanatron` entrant in the arena for an AB2 reference matchup. The random
 policy is useful for engine throughput and control experiments. Learned
 policies use the runtime-independent interfaces in [training.md](training.md).
-Record the engine revision, dependency versions, bot settings, seed, lineup,
-trading mode and unfinished-game count with every comparison. Results from
-HexSet and Catanatron are separate experiments: their rules and adapters differ.
+
+Record the host engine, information model, source revisions, dependency
+versions, effective bot settings, seeds, lineup, trading mode, acceleration
+mode and unfinished-game count with every comparison. A label such as
+"vs shipped Heximax" identifies the opponents, not the engine or information
+model. `hexset.catanatron.duel` runs a separate external compatibility
+experiment; stock `DC:` Heximax there receives a memoryless public ledger.
+Follow the [evaluation protocol and recovery steps](evaluation.md) before
+using results to select or reject native HexSet policies.
 
 ## Implement a bot
 

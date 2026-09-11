@@ -17,6 +17,11 @@ the rules, information sets, encoding, game loops, seating and board pairing,
 records and replay, and trade evaluation. Training projects supply model
 runtimes and learning algorithms through those interfaces.
 
+**HexSet is the primary engine and evaluation framework. Catanatron is an
+external reference opponent.** Run Heximax self-play, ablations and candidate
+validation in HexSet, including matches against Catanatron's AB2 bot. See the
+[evaluation protocol and recovery steps](docs/evaluation.md).
+
 ## Research workflows
 
 - **Implement a bot:** start with the [Python bot example](examples/custom_bot.py)
@@ -37,11 +42,12 @@ runtimes and learning algorithms through those interfaces.
   world by default. It uses iterative deepening, a leaf budget and heuristic
   evaluation, and requires no trained model. `heximax-notrade` disables player
   trading and uses a separate fitted weight profile.
-- **Catanatron** is a separate Python implementation of Catan with its own
-  bots. HexSet's adapter supports both directions: running HexSet bots in
-  Catanatron and running Catanatron bots in HexSet. The `catanatron` opponent
-  uses Catanatron's depth-two alpha-beta player and requires the optional
-  `catanatron` extra.
+- **Catanatron** supplies an **external reference opponent**. The `catanatron`
+  entrant runs its depth-two alpha-beta player (AB2) at a HexSet table and
+  requires the optional `catanatron` extra. AB2's hypothetical search uses
+  Catanatron internally; HexSet runs the real game. The reverse adapter,
+  which runs Heximax inside Catanatron, is for explicitly labeled external
+  compatibility experiments.
 
 Heximax knows its own cards and estimates opponents' cards from the public
 resource ledger. Its default objective converts per-seat heuristic scores to
@@ -55,8 +61,10 @@ In the archived September 7, 2026 benchmark, `heximax-notrade` won **47.3%**
 of 1,000 recorded four-player games against three Catanatron `AB:2` bots.
 For context, an equal share of wins at a four-player table is 25%.
 The games ran in Catanatron with player trading disabled and Heximax's
-no-trade evaluation weights. This is a historical result, not a measurement
-of the current revision. See the [benchmark record](docs/benchmarks.md) for
+no-trade evaluation weights. The stock `DC:` adapter supplied a memoryless
+public hand ledger, so these results do not establish the strength of Heximax
+with native HexSet public history. This is a historical result, not a
+measurement of the current revision. See the [benchmark record](docs/benchmarks.md) for
 run settings and limitations.
 
 ## Installation
@@ -131,11 +139,21 @@ Checkpoint entrants require a registered runtime loader; installing the
 and search implementations. See the [research tools guide](docs/research.md)
 for the benchmark commands and removed legacy interfaces.
 
-With the `catanatron` extra installed, run HexSet bots inside Catanatron:
+With the `catanatron` extra installed, this small wiring check seats one
+Heximax against three external AB2 reference opponents **in HexSet**:
 
 ```sh
-python -m hexset.catanatron.duel --players=DC:heximax-notrade,AB:2,AB:2,AB:2 --num=400 --workers=8
+python -m hexset.bench.duel heximax-notrade catanatron \
+  --geometry abbb --games 8 --workers 1 --duel-seed 700000000 \
+  --records runs/preflight/ab2.jsonl
 ```
+
+Eight games exercise seat rotation; they are not a strength estimate or a
+completed validation of the recovery protocol. This CLI uses the reference
+AB2 search without the optional fast patches. See the
+[evaluation protocol](docs/evaluation.md) for the checks required before
+another campaign. The separate `hexset.catanatron.duel` command hosts games
+in Catanatron and must not be used as the HexSet ablation runner.
 
 For batched policies, `hexset.bench.versus.compete_batched` evaluates multiple
 games per tick using the arena's board and seat-pairing rules. It reports win

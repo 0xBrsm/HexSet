@@ -1,4 +1,13 @@
-# Catanatron acceleration
+# External-reference acceleration
+
+HexSet is the primary engine and evaluation framework; Catanatron is an
+external reference opponent. These patches accelerate Catanatron's AB2 and
+ValueFunction implementations. The examples on this page use the separate
+**Catanatron-hosted** diagnostic runner, not the HexSet ablation framework.
+Use [the native evaluation protocol](evaluation.md) for Heximax policy work.
+Stock `DC:` Heximax in this external runner receives a memoryless public
+ledger; its strength results do not establish native HexSet policy rankings.
+
 
 The duel runner supports `--catanatron-speedups fast` for faster native AB
 and ValueFunction opponents. The default is `off`, preserving the pinned
@@ -33,6 +42,10 @@ activation. It uses a process-global context intended for single-threaded
 workers, restores the original functions on exit (including errors), and rejects
 nested activation or conflicting board/evaluator patches. It is also available
 as `hexset.catanatron.speedups.catanatron_speedups` for other experiment runners.
+The native `hexset.bench.duel` CLI currently has no `--catanatron-speedups`
+option; accelerated native-host studies explicitly enter the context inside
+each worker. The recorded speedups are not automatically enabled by selecting
+the arena's `catanatron` entrant.
 
 This preserves the native evaluator's arithmetic, including its original
 seven-card discard penalty and relative P1 enemy-production term. Native search

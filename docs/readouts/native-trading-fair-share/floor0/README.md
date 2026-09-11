@@ -1,5 +1,11 @@
 # Corrected fair-share comparison: trade floor zero
 
+**Trade census corrected:** the original runner saved only the final turn's
+trade list. The table below now uses all live trade events from exact
+replays. All 800 original action traces and outcomes matched. Original raw
+records and summary.json remain immutable; their trade fields are final-turn
+counts. See [the full census correction](../../native-split-evaluator/CENSUS-CORRECTION.md).
+
 The user clarified that the intended trading floor was zero for all seats.
 These are the requested results, superseding the parent readout's .0197-floor
 run for the weight-profile question. All real games ran in native HexSet.
@@ -11,8 +17,8 @@ Bank/port exchanges are available throughout.
 
 | Three opponents | Candidate wins | Win rate | 95% Wilson interval | Domestic exchanges | Games with exchanges | Candidate exchanges |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Old no-trade weights | 110 / 400 | 27.50% | 23.35–32.07% | 601 | 277 | 316 |
-| Trading weights | 64 / 400 | 16.00% | 12.73–19.91% | 580 | 292 | 281 |
+| Old no-trade weights | 110 / 400 | 27.50% | 23.35–32.07% | 23,258 | 400 | 11,594 |
+| Trading weights | 64 / 400 | 16.00% | 12.73–19.91% | 25,025 | 400 | 12,338 |
 
 The first interval includes 25% fair share; it does not establish an advantage
 or equivalence against the old no-trade profile with active trading. The
@@ -38,7 +44,7 @@ games, tuning, or default-profile changes occurred.
 
 Independent verification checked all 800 complete unique indices, exact
 identities, zero floor, balanced candidate seating, all-seat trade gate calls,
-exchange totals, candidate participation, positive gains on both sides of
+the recorded final-turn exchange totals and participation, positive gains on both sides of
 every executed trade, and Wilson intervals (within the rounding of arena's
 normal quantile). The archive holds all 800 per-game records and the original
 manifest and summary. Its SHA256 is in archive.sha256.

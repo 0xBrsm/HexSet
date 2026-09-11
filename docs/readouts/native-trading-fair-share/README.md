@@ -68,3 +68,11 @@ PYTHONPATH=/study/src python /study/docs/readouts/native-trading-fair-share/run_
 `games.tar.gz` contains all 800 v2 game records, manifest and summary, plus the
 separately identified original preflight. SHA256 is in `archive.sha256`.
 Runtime receipts and `verification.json` are alongside this readout.
+
+## Full-game census audit
+
+The first verification used only the final-turn game.trades list. An exact
+replay of all 800 games now independently confirms zero exchanges over the
+entire game at floor .0197. At floor zero, the old counts were incomplete;
+see the [census correction](../native-split-evaluator/CENSUS-CORRECTION.md).
+All original actions and outcomes matched. Original records remain immutable.

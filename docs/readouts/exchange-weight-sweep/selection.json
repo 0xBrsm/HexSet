@@ -1,0 +1,5 @@
+{
+  "candidate": "robber_risk-x0.75",
+  "rule": "largest screen win count above 64; ties use registered candidate order",
+  "screen_sha256": "9e7106fd53fe80a7bcd3ab835f7042bc784eff84f5f6f9bbb14ba296ab3d7988"
+}

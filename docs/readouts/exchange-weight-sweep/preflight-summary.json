@@ -1,0 +1,8 @@
+{
+  "candidate_check_games": 12,
+  "control_trace_pairs": 4,
+  "games": 20,
+  "independently_checked_gains": 515673,
+  "passed": true,
+  "seconds": 4.520960269961506
+}

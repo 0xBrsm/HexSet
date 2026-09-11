@@ -13,8 +13,8 @@ For controlled tests, pin the slider to an endpoint:
 | `pin_weights=0` | Zero-activity endpoint | .25 VP | Enabled |
 | `pin_weights=1` | Full-activity endpoint | .125 VP | Enabled |
 
-Zero uses `NO_TRADE_WEIGHTS`; one uses `BALANCED_WEIGHTS`, the best validated
-trading move profile. Both use `TRADING_WEIGHTS` to price exchanges. The numeric
+Zero uses `NO_TRADE_WEIGHTS`; one uses `BALANCED_WEIGHTS`, the existing full-activity
+move profile whose served-protocol validation remains outstanding. Both use `TRADING_WEIGHTS` to price exchanges. The numeric
 pin describes a slider position, not whether the bot participates in trading.
 
 ```python
@@ -30,17 +30,24 @@ observed activity or trading restrictions. To decline trades independently,
 pass `max_trades=0`. An unpinned bot immediately uses the zero endpoint when
 its own or the game's trading switch is off. A pinned bot retains its pin.
 
-## Why exchange weights stay fixed
+## Exchange-weight validation status
 
-A native 400-game 2v2 comparison kept adaptive move search identical on both
-sides and varied only the exchange coefficients. The current fixed exchange
-weights won **265/400 games (66.25%, 95% interval 61.5–70.7%)** against using
-the adaptive move coefficients for exchanges. All 400 games passed replay and
-public-activity audits, with 23,382 completed exchanges. This supports the
-split for that matchup; it does not establish optimal weights across all
-opponents. See the [exchange-weight readout](readouts/adaptive-exchange-2v2/README.md).
+Fixed exchange pricing uses robber_risk = +0.075 and spare_card = 0.15.
+The [served confirmation](readouts/served-robber-confirmation/README.md) found
+272/392 wins (69.39%, 95% CI 64.66–73.74%) against −0.30 with only that
+exchange coefficient changed. Production GameSession handled all offers,
+responses, counters and execution; automatic exchanges were forbidden.
 
-## Current reference results
+The confirmation held the move slider at zero on both sides at its recorded
+source revision. The current served session uses `trade_mode="external"`;
+its unpinned slider still starts at zero and receives no completed-exchange
+notifications. The result supports the coefficient under the recorded served
+configuration, not adaptive movement or a unique optimum. See the
+[current scope](readouts/served-robber-confirmation/CURRENT-SCOPE.md). Earlier automatic-clearing sweeps and the adaptive-versus-fixed
+exchange comparison remain research-only; their adoption conclusions were
+withdrawn. See the [protocol correction](readouts/trading-protocol-correction.md).
+
+## Recorded native-arena reference results
 
 With its default unpinned adaptive configuration, Heximax won **590/800
 1v1 games (73.75%)** and **450/800 four-player games (56.25%)** against one
@@ -49,7 +56,10 @@ Trading was enabled; AB2 declined exchanges and the slider remained at zero.
 The [benchmark readout](readouts/current-heximax-ab2/README.md) records exact
 revisions, confidence intervals, settings and replay validation of all 1,600 games.
 
-## Evaluation flags
+## Research flags (engine-driven rounds)
+
+These commands describe research tooling. Before evaluation or fitting,
+verify the driver against the intended served protocol and notifications.
 
 Compare normal Heximax against three copies pinned at one:
 

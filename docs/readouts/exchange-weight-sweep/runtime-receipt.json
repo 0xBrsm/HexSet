@@ -1,0 +1,60 @@
+{
+  "command": [
+    "--signal=KILL",
+    "900s",
+    "python",
+    "/study/docs/readouts/exchange-weight-sweep/run.py",
+    "--out",
+    "/out",
+    "--workers",
+    "30"
+  ],
+  "entrypoint": [
+    "timeout"
+  ],
+  "environment": [
+    "PYTHONPATH=/study/src",
+    "PYTHONDONTWRITEBYTECODE=1",
+    "PYTHONHASHSEED=0",
+    "OMP_NUM_THREADS=1",
+    "OPENBLAS_NUM_THREADS=1",
+    "MKL_NUM_THREADS=1",
+    "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "LANG=C.UTF-8",
+    "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+    "PYTHON_VERSION=3.12.14",
+    "PYTHON_SHA256=5c8462af5790baf43a321a1559dbe0db06d1be4300fb85fb53c40060668e548a",
+    "HOME=/tmp",
+    "PYTHONUNBUFFERED=1",
+    "HEXSET_UI_MODELS_DIR=/app/models",
+    "HEXSET_UI_GAMES_DIR=/app/games"
+  ],
+  "image": "sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+  "memory_bytes": 4294967296,
+  "nano_cpus": 30000000000,
+  "network_mode": "none",
+  "state": {
+    "Dead": false,
+    "Error": "",
+    "ExitCode": 0,
+    "FinishedAt": "2026-09-11T17:55:36.070255305Z",
+    "OOMKilled": false,
+    "Paused": false,
+    "Pid": 0,
+    "Restarting": false,
+    "Running": false,
+    "StartedAt": "2026-09-11T17:51:39.476504521Z",
+    "Status": "exited"
+  },
+  "stats_snapshot": {
+    "BlockIO": "49.2kB / 63.7MB",
+    "CPUPerc": "2985.26%",
+    "Container": "hexset-exchange-sweep",
+    "ID": "dbf2718a257e",
+    "MemPerc": "28.20%",
+    "MemUsage": "1.128GiB / 4GiB",
+    "Name": "hexset-exchange-sweep",
+    "NetIO": "0B / 0B",
+    "PIDs": "35"
+  }
+}

@@ -1,0 +1,113 @@
+{
+  "results": {
+    "buy_progress-x0.75": {
+      "candidate_wins": 43,
+      "control_wins": 85,
+      "exchanges": 7681,
+      "games": 128,
+      "unfinished": 0,
+      "wilson95": [
+        0.2599537722408375,
+        0.42148179168283795
+      ],
+      "win_rate": 0.3359375,
+      "winners": {
+        "0": 15,
+        "1": 28,
+        "2": 44,
+        "3": 41
+      }
+    },
+    "buy_progress-x1.25": {
+      "candidate_wins": 73,
+      "control_wins": 55,
+      "exchanges": 6970,
+      "games": 128,
+      "unfinished": 0,
+      "wilson95": [
+        0.4837393281713537,
+        0.6527882872899283
+      ],
+      "win_rate": 0.5703125,
+      "winners": {
+        "0": 28,
+        "1": 45,
+        "2": 33,
+        "3": 22
+      }
+    },
+    "robber_risk-x0.75": {
+      "candidate_wins": 106,
+      "control_wins": 22,
+      "exchanges": 7044,
+      "games": 128,
+      "unfinished": 0,
+      "wilson95": [
+        0.7534600312712283,
+        0.8836688408814208
+      ],
+      "win_rate": 0.828125,
+      "winners": {
+        "0": 46,
+        "1": 60,
+        "2": 7,
+        "3": 15
+      }
+    },
+    "robber_risk-x1.25": {
+      "candidate_wins": 46,
+      "control_wins": 82,
+      "exchanges": 7236,
+      "games": 128,
+      "unfinished": 0,
+      "wilson95": [
+        0.2814673051884482,
+        0.4454774638889879
+      ],
+      "win_rate": 0.359375,
+      "winners": {
+        "0": 24,
+        "1": 22,
+        "2": 36,
+        "3": 46
+      }
+    },
+    "spare_card-x0.75": {
+      "candidate_wins": 46,
+      "control_wins": 82,
+      "exchanges": 7567,
+      "games": 128,
+      "unfinished": 0,
+      "wilson95": [
+        0.2814673051884482,
+        0.4454774638889879
+      ],
+      "win_rate": 0.359375,
+      "winners": {
+        "0": 16,
+        "1": 30,
+        "2": 45,
+        "3": 37
+      }
+    },
+    "spare_card-x1.25": {
+      "candidate_wins": 83,
+      "control_wins": 45,
+      "exchanges": 7729,
+      "games": 128,
+      "unfinished": 0,
+      "wilson95": [
+        0.5624978382273684,
+        0.725727127746449
+      ],
+      "win_rate": 0.6484375,
+      "winners": {
+        "0": 42,
+        "1": 41,
+        "2": 27,
+        "3": 18
+      }
+    }
+  },
+  "seconds": 115.87110128696077
+}

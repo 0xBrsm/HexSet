@@ -1,0 +1,8 @@
+{
+  "rule": "screen wins descending; ties use registered order",
+  "runoff": [
+    "robber-+0.075",
+    "robber-+0.15"
+  ],
+  "screen_sha256": "0f22836749a2718527f7fb3dedd342cc1d1696e9526858a32786e7eace66de5b"
+}

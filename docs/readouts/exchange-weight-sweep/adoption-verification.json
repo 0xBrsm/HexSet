@@ -1,0 +1,82 @@
+{
+  "adopted_source_sha256": "6b60259813b77ecfca12316ab46de7838b6a93b335f7b79c80955ee385fb2d49",
+  "checks": [
+    {
+      "family": "confirmation",
+      "full_record_match": true,
+      "index": 0,
+      "winner": 1
+    },
+    {
+      "family": "confirmation",
+      "full_record_match": true,
+      "index": 1,
+      "winner": 0
+    },
+    {
+      "family": "confirmation",
+      "full_record_match": true,
+      "index": 2,
+      "winner": 0
+    },
+    {
+      "family": "confirmation",
+      "full_record_match": true,
+      "index": 3,
+      "winner": 0
+    },
+    {
+      "family": "2",
+      "full_record_match": true,
+      "index": 0,
+      "winner": 0
+    },
+    {
+      "family": "2",
+      "full_record_match": true,
+      "index": 1,
+      "winner": 1
+    },
+    {
+      "family": "2",
+      "full_record_match": true,
+      "index": 2,
+      "winner": 0
+    },
+    {
+      "family": "2",
+      "full_record_match": true,
+      "index": 3,
+      "winner": 0
+    },
+    {
+      "family": "4",
+      "full_record_match": true,
+      "index": 0,
+      "winner": 3
+    },
+    {
+      "family": "4",
+      "full_record_match": true,
+      "index": 1,
+      "winner": 0
+    },
+    {
+      "family": "4",
+      "full_record_match": true,
+      "index": 2,
+      "winner": 0
+    },
+    {
+      "family": "4",
+      "full_record_match": true,
+      "index": 3,
+      "winner": 0
+    }
+  ],
+  "games": 12,
+  "passed": true,
+  "seconds": 4.988688040990382,
+  "total_evaluation_games": 1600,
+  "total_evaluation_seconds": 241.17865815688856
+}

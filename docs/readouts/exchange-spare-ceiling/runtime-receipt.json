@@ -1,0 +1,49 @@
+{
+  "command": [
+    "--signal=KILL",
+    "900s",
+    "python",
+    "/study/docs/readouts/exchange-spare-ceiling/run.py",
+    "--out",
+    "/out",
+    "--workers",
+    "30"
+  ],
+  "entrypoint": [
+    "timeout"
+  ],
+  "environment": [
+    "OPENBLAS_NUM_THREADS=1",
+    "MKL_NUM_THREADS=1",
+    "PYTHONPATH=/study/src",
+    "PYTHONDONTWRITEBYTECODE=1",
+    "PYTHONHASHSEED=0",
+    "OMP_NUM_THREADS=1",
+    "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "LANG=C.UTF-8",
+    "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+    "PYTHON_VERSION=3.12.14",
+    "PYTHON_SHA256=5c8462af5790baf43a321a1559dbe0db06d1be4300fb85fb53c40060668e548a",
+    "HOME=/tmp",
+    "PYTHONUNBUFFERED=1",
+    "HEXSET_UI_MODELS_DIR=/app/models",
+    "HEXSET_UI_GAMES_DIR=/app/games"
+  ],
+  "image": "sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+  "memory_bytes": 4294967296,
+  "nano_cpus": 30000000000,
+  "network_mode": "none",
+  "state": {
+    "Dead": false,
+    "Error": "",
+    "ExitCode": 0,
+    "FinishedAt": "2026-09-11T18:35:37.271543637Z",
+    "OOMKilled": false,
+    "Paused": false,
+    "Pid": 0,
+    "Restarting": false,
+    "Running": false,
+    "StartedAt": "2026-09-11T18:34:16.201006423Z",
+    "Status": "exited"
+  }
+}

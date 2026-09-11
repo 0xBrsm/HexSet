@@ -1,5 +1,11 @@
 # Adaptive shape comparison: retain linear
 
+> **Protocol correction (2026-09-11): research-only automatic clearing.**
+> This run does not validate served trading. Its adoption, fitting and served
+> behavior conclusions are withdrawn; frozen results below record what ran.
+> For mixed studies this applies to trading-enabled cells; no-trade cells
+> remain separately scoped. See [the correction](../trading-protocol-correction.md).
+
 Neither nonlinear mapping qualified for fresh confirmation under the frozen
 [plan](PLAN.md). Square finished one win ahead of linear, and square root six
 wins behind, across 448 matched boards per policy. We retain the current linear

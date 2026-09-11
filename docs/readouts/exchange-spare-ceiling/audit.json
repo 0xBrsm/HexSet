@@ -1,0 +1,685 @@
+{
+  "activity_events_reconstructed": 32750,
+  "candidate": null,
+  "eligible_for_adoption": false,
+  "legal_actions": 129496,
+  "passed": true,
+  "preflight_games_excluded": 24,
+  "results": [
+    {
+      "activity_events_reconstructed": 4006,
+      "candidate": "spare-0",
+      "candidate_wins": 4,
+      "control_wins": 60,
+      "cross_policy_net_cards_to_candidate": -2882,
+      "cross_policy_threshold_crossings": [
+        {
+          "crossed_above_7": 39,
+          "crossed_to_7_or_less": 125,
+          "net_cards": -2882,
+          "participations": 2802,
+          "started_above_7": 512
+        },
+        {
+          "crossed_above_7": 378,
+          "crossed_to_7_or_less": 2,
+          "net_cards": 2882,
+          "participations": 2802,
+          "started_above_7": 1204
+        }
+      ],
+      "cross_policy_trades": 2802,
+      "entrant_seats": [
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        },
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        },
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        },
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        }
+      ],
+      "exchanges": 3708,
+      "games": 64,
+      "gate_alpha_counts": [
+        {
+          "0.0": 309,
+          "0.125": 464,
+          "0.25": 927,
+          "0.375": 1700,
+          "0.5": 2573,
+          "0.625": 3345,
+          "0.75": 2581,
+          "0.875": 1719,
+          "1.0": 405
+        },
+        {
+          "0.0": 284,
+          "0.125": 404,
+          "0.25": 908,
+          "0.375": 1662,
+          "0.5": 2446,
+          "0.625": 3232,
+          "0.75": 2502,
+          "0.875": 1697,
+          "1.0": 400
+        }
+      ],
+      "legal_actions": 16100,
+      "opponent": "control",
+      "unfinished": 0,
+      "wilson95": [
+        0.024571201396618017,
+        0.14997485092208662
+      ],
+      "win_rate": 0.0625
+    },
+    {
+      "activity_events_reconstructed": 4153,
+      "candidate": "spare-0.075",
+      "candidate_wins": 22,
+      "control_wins": 42,
+      "cross_policy_net_cards_to_candidate": -1343,
+      "cross_policy_threshold_crossings": [
+        {
+          "crossed_above_7": 66,
+          "crossed_to_7_or_less": 79,
+          "net_cards": -1343,
+          "participations": 2314,
+          "started_above_7": 572
+        },
+        {
+          "crossed_above_7": 252,
+          "crossed_to_7_or_less": 3,
+          "net_cards": 1343,
+          "participations": 2314,
+          "started_above_7": 876
+        }
+      ],
+      "cross_policy_trades": 2314,
+      "entrant_seats": [
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        },
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        },
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        },
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        }
+      ],
+      "exchanges": 3263,
+      "games": 64,
+      "gate_alpha_counts": [
+        {
+          "0.0": 379,
+          "0.125": 662,
+          "0.25": 1263,
+          "0.375": 2588,
+          "0.5": 3548,
+          "0.625": 3042,
+          "0.75": 1757,
+          "0.875": 627,
+          "1.0": 112
+        },
+        {
+          "0.0": 372,
+          "0.125": 635,
+          "0.25": 1247,
+          "0.375": 2586,
+          "0.5": 3558,
+          "0.625": 3077,
+          "0.75": 1792,
+          "0.875": 638,
+          "1.0": 115
+        }
+      ],
+      "legal_actions": 16816,
+      "opponent": "control",
+      "unfinished": 0,
+      "wilson95": [
+        0.23923142078443355,
+        0.46596359790081815
+      ],
+      "win_rate": 0.34375
+    },
+    {
+      "activity_events_reconstructed": 4170,
+      "candidate": "spare-0.1875",
+      "candidate_wins": 28,
+      "control_wins": 36,
+      "cross_policy_net_cards_to_candidate": 648,
+      "cross_policy_threshold_crossings": [
+        {
+          "crossed_above_7": 138,
+          "crossed_to_7_or_less": 7,
+          "net_cards": 648,
+          "participations": 2060,
+          "started_above_7": 712
+        },
+        {
+          "crossed_above_7": 40,
+          "crossed_to_7_or_less": 23,
+          "net_cards": -648,
+          "participations": 2060,
+          "started_above_7": 486
+        }
+      ],
+      "cross_policy_trades": 2060,
+      "entrant_seats": [
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        },
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        },
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        },
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        }
+      ],
+      "exchanges": 2872,
+      "games": 64,
+      "gate_alpha_counts": [
+        {
+          "0.0": 430,
+          "0.125": 688,
+          "0.25": 1797,
+          "0.375": 2895,
+          "0.5": 3544,
+          "0.625": 2690,
+          "0.75": 1287,
+          "0.875": 310,
+          "1.0": 30
+        },
+        {
+          "0.0": 423,
+          "0.125": 673,
+          "0.25": 1768,
+          "0.375": 2829,
+          "0.5": 3459,
+          "0.625": 2629,
+          "0.75": 1277,
+          "0.875": 299,
+          "1.0": 33
+        }
+      ],
+      "legal_actions": 16774,
+      "opponent": "control",
+      "unfinished": 0,
+      "wilson95": [
+        0.3229400970440308,
+        0.5591379104300699
+      ],
+      "win_rate": 0.4375
+    },
+    {
+      "activity_events_reconstructed": 4262,
+      "candidate": "spare-0.225",
+      "candidate_wins": 21,
+      "control_wins": 43,
+      "cross_policy_net_cards_to_candidate": 848,
+      "cross_policy_threshold_crossings": [
+        {
+          "crossed_above_7": 130,
+          "crossed_to_7_or_less": 6,
+          "net_cards": 848,
+          "participations": 2124,
+          "started_above_7": 801
+        },
+        {
+          "crossed_above_7": 23,
+          "crossed_to_7_or_less": 37,
+          "net_cards": -848,
+          "participations": 2124,
+          "started_above_7": 532
+        }
+      ],
+      "cross_policy_trades": 2124,
+      "entrant_seats": [
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        },
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        },
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        },
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        }
+      ],
+      "exchanges": 2912,
+      "games": 64,
+      "gate_alpha_counts": [
+        {
+          "0.0": 388,
+          "0.125": 809,
+          "0.25": 1850,
+          "0.375": 3172,
+          "0.5": 3349,
+          "0.625": 2439,
+          "0.75": 1390,
+          "0.875": 464,
+          "1.0": 36
+        },
+        {
+          "0.0": 388,
+          "0.125": 798,
+          "0.25": 1800,
+          "0.375": 3099,
+          "0.5": 3247,
+          "0.625": 2380,
+          "0.75": 1368,
+          "0.875": 458,
+          "1.0": 34
+        }
+      ],
+      "legal_actions": 17187,
+      "opponent": "control",
+      "unfinished": 0,
+      "wilson95": [
+        0.22570557904469185,
+        0.45000894150908505
+      ],
+      "win_rate": 0.328125
+    },
+    {
+      "activity_events_reconstructed": 4172,
+      "candidate": "spare-0.3",
+      "candidate_wins": 11,
+      "control_wins": 53,
+      "cross_policy_net_cards_to_candidate": 825,
+      "cross_policy_threshold_crossings": [
+        {
+          "crossed_above_7": 120,
+          "crossed_to_7_or_less": 5,
+          "net_cards": 825,
+          "participations": 2429,
+          "started_above_7": 862
+        },
+        {
+          "crossed_above_7": 10,
+          "crossed_to_7_or_less": 31,
+          "net_cards": -825,
+          "participations": 2429,
+          "started_above_7": 652
+        }
+      ],
+      "cross_policy_trades": 2429,
+      "entrant_seats": [
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        },
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        },
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        },
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        }
+      ],
+      "exchanges": 3235,
+      "games": 64,
+      "gate_alpha_counts": [
+        {
+          "0.0": 332,
+          "0.125": 708,
+          "0.25": 1602,
+          "0.375": 2424,
+          "0.5": 3238,
+          "0.625": 3110,
+          "0.75": 2411,
+          "0.875": 551,
+          "1.0": 87
+        },
+        {
+          "0.0": 331,
+          "0.125": 696,
+          "0.25": 1558,
+          "0.375": 2343,
+          "0.5": 3139,
+          "0.625": 2991,
+          "0.75": 2343,
+          "0.875": 534,
+          "1.0": 88
+        }
+      ],
+      "legal_actions": 16768,
+      "opponent": "control",
+      "unfinished": 0,
+      "wilson95": [
+        0.09877742301244645,
+        0.282132116226582
+      ],
+      "win_rate": 0.171875
+    },
+    {
+      "activity_events_reconstructed": 3968,
+      "candidate": "spare-0.45",
+      "candidate_wins": 2,
+      "control_wins": 62,
+      "cross_policy_net_cards_to_candidate": 549,
+      "cross_policy_threshold_crossings": [
+        {
+          "crossed_above_7": 91,
+          "crossed_to_7_or_less": 7,
+          "net_cards": 549,
+          "participations": 2657,
+          "started_above_7": 832
+        },
+        {
+          "crossed_above_7": 11,
+          "crossed_to_7_or_less": 19,
+          "net_cards": -549,
+          "participations": 2657,
+          "started_above_7": 694
+        }
+      ],
+      "cross_policy_trades": 2657,
+      "entrant_seats": [
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        },
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        },
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        },
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        }
+      ],
+      "exchanges": 3294,
+      "games": 64,
+      "gate_alpha_counts": [
+        {
+          "0.0": 352,
+          "0.125": 528,
+          "0.25": 1009,
+          "0.375": 1819,
+          "0.5": 2888,
+          "0.625": 3310,
+          "0.75": 2772,
+          "0.875": 1366,
+          "1.0": 210
+        },
+        {
+          "0.0": 352,
+          "0.125": 514,
+          "0.25": 974,
+          "0.375": 1746,
+          "0.5": 2743,
+          "0.625": 3172,
+          "0.75": 2663,
+          "0.875": 1327,
+          "1.0": 192
+        }
+      ],
+      "legal_actions": 15372,
+      "opponent": "control",
+      "unfinished": 0,
+      "wilson95": [
+        0.008612138346171874,
+        0.10697291770958313
+      ],
+      "win_rate": 0.03125
+    },
+    {
+      "activity_events_reconstructed": 3988,
+      "candidate": "spare-0.6",
+      "candidate_wins": 0,
+      "control_wins": 64,
+      "cross_policy_net_cards_to_candidate": 428,
+      "cross_policy_threshold_crossings": [
+        {
+          "crossed_above_7": 76,
+          "crossed_to_7_or_less": 10,
+          "net_cards": 428,
+          "participations": 3108,
+          "started_above_7": 861
+        },
+        {
+          "crossed_above_7": 19,
+          "crossed_to_7_or_less": 16,
+          "net_cards": -428,
+          "participations": 3108,
+          "started_above_7": 938
+        }
+      ],
+      "cross_policy_trades": 3108,
+      "entrant_seats": [
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        },
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        },
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        },
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        }
+      ],
+      "exchanges": 3705,
+      "games": 64,
+      "gate_alpha_counts": [
+        {
+          "0.0": 316,
+          "0.125": 366,
+          "0.25": 571,
+          "0.375": 1390,
+          "0.5": 2784,
+          "0.625": 3969,
+          "0.75": 3644,
+          "0.875": 1785,
+          "1.0": 247
+        },
+        {
+          "0.0": 317,
+          "0.125": 363,
+          "0.25": 552,
+          "0.375": 1292,
+          "0.5": 2654,
+          "0.625": 3794,
+          "0.75": 3557,
+          "0.875": 1726,
+          "1.0": 220
+        }
+      ],
+      "legal_actions": 15186,
+      "opponent": "control",
+      "unfinished": 0,
+      "wilson95": [
+        0.0,
+        0.05662405979280534
+      ],
+      "win_rate": 0.0
+    },
+    {
+      "activity_events_reconstructed": 4031,
+      "candidate": "spare-1.2",
+      "candidate_wins": 0,
+      "control_wins": 64,
+      "cross_policy_net_cards_to_candidate": 210,
+      "cross_policy_threshold_crossings": [
+        {
+          "crossed_above_7": 57,
+          "crossed_to_7_or_less": 16,
+          "net_cards": 210,
+          "participations": 3002,
+          "started_above_7": 826
+        },
+        {
+          "crossed_above_7": 35,
+          "crossed_to_7_or_less": 6,
+          "net_cards": -210,
+          "participations": 3002,
+          "started_above_7": 901
+        }
+      ],
+      "cross_policy_trades": 3002,
+      "entrant_seats": [
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        },
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        },
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        },
+        {
+          "0": 16,
+          "1": 16,
+          "2": 16,
+          "3": 16
+        }
+      ],
+      "exchanges": 3713,
+      "games": 64,
+      "gate_alpha_counts": [
+        {
+          "0.0": 331,
+          "0.125": 428,
+          "0.25": 716,
+          "0.375": 1344,
+          "0.5": 2778,
+          "0.625": 4269,
+          "0.75": 3535,
+          "0.875": 1474,
+          "1.0": 291
+        },
+        {
+          "0.0": 331,
+          "0.125": 419,
+          "0.25": 680,
+          "0.375": 1289,
+          "0.5": 2700,
+          "0.625": 4093,
+          "0.75": 3413,
+          "0.875": 1415,
+          "1.0": 286
+        }
+      ],
+      "legal_actions": 15293,
+      "opponent": "control",
+      "unfinished": 0,
+      "wilson95": [
+        0.0,
+        0.05662405979280534
+      ],
+      "win_rate": 0.0
+    }
+  ],
+  "selection_verified": true,
+  "strength_games_replayed": 512,
+  "total_evaluation_games": 536
+}

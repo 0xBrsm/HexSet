@@ -1,0 +1,21 @@
+{
+  "candidate": "robber-+0.075",
+  "candidate_wins": 133,
+  "control_wins": 123,
+  "exchanges": 10041,
+  "games": 256,
+  "opponent": "robber-+0.15",
+  "seconds": 38.58088572300039,
+  "unfinished": 0,
+  "wilson95": [
+    0.4584937748697848,
+    0.5799912307296038
+  ],
+  "win_rate": 0.51953125,
+  "winners": {
+    "0": 63,
+    "1": 70,
+    "2": 56,
+    "3": 67
+  }
+}

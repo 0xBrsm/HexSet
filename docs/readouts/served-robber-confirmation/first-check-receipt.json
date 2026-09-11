@@ -1,0 +1,18 @@
+{
+  "seconds": 3.970676,
+  "state": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 1,
+    "Error": "",
+    "StartedAt": "2026-09-11T19:06:16.221978971Z",
+    "FinishedAt": "2026-09-11T19:06:20.192654119Z"
+  },
+  "games_completed": 1,
+  "reason": "Returned tuple round-note bundle compared with JSON list; saved 0000 record and notes match exactly. Resume only unstarted index 1."
+}

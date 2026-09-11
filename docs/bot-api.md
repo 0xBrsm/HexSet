@@ -161,6 +161,9 @@ driven synchronously by the engine with one broadcast per turn by default.
 in `"auto"` mode; `0` disables the engine's driver and `-1` removes its cap.
 External callers manage their own limits. To reproduce the old exhaustive
 clearing behavior, set `trade_mode="auto"` and `max_trades=-1`.
+Automatic clearing is research-only. Evaluation and fitting require a driver
+verified against the intended served proposal policy, budgets and activity
+notifications; see [evaluation](evaluation.md).
 The Gym wrappers have additional limitations described in the
 [README](../README.md#training-environments).
 

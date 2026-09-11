@@ -1,0 +1,143 @@
+{
+  "adaptive_move_both": true,
+  "antithetic": false,
+  "candidate_order": [
+    "spare-0",
+    "spare-0.075",
+    "spare-0.1875",
+    "spare-0.225",
+    "spare-0.3",
+    "spare-0.45",
+    "spare-0.6",
+    "spare-1.2"
+  ],
+  "confirmation_seed": 731200000,
+  "driver_sha256": "edd6475975beed247caf6e9ed68d0bc0750b69e32d0282065854b161f0b0acd7",
+  "evaluation_seconds_cap": 900,
+  "exchange_expansion_both": 0,
+  "floor_both": 0,
+  "games_cap": 1600,
+  "host": "HexSet",
+  "policy_commit": "270b9270ea7684c9db60dd346b1f3444e1b9fd0c",
+  "profiles": {
+    "control": {
+      "buy_progress": 0.45,
+      "diversity": 0.358,
+      "knight": 0.1041,
+      "port": 0.007373,
+      "production": 7.067,
+      "road": 0.1209,
+      "robber_risk": 0.075,
+      "scarce": 0.1786,
+      "spare_card": 0.15,
+      "victory_point": 1.0
+    },
+    "spare-0": {
+      "buy_progress": 0.45,
+      "diversity": 0.358,
+      "knight": 0.1041,
+      "port": 0.007373,
+      "production": 7.067,
+      "road": 0.1209,
+      "robber_risk": 0.075,
+      "scarce": 0.1786,
+      "spare_card": 0.0,
+      "victory_point": 1.0
+    },
+    "spare-0.075": {
+      "buy_progress": 0.45,
+      "diversity": 0.358,
+      "knight": 0.1041,
+      "port": 0.007373,
+      "production": 7.067,
+      "road": 0.1209,
+      "robber_risk": 0.075,
+      "scarce": 0.1786,
+      "spare_card": 0.075,
+      "victory_point": 1.0
+    },
+    "spare-0.1875": {
+      "buy_progress": 0.45,
+      "diversity": 0.358,
+      "knight": 0.1041,
+      "port": 0.007373,
+      "production": 7.067,
+      "road": 0.1209,
+      "robber_risk": 0.075,
+      "scarce": 0.1786,
+      "spare_card": 0.1875,
+      "victory_point": 1.0
+    },
+    "spare-0.225": {
+      "buy_progress": 0.45,
+      "diversity": 0.358,
+      "knight": 0.1041,
+      "port": 0.007373,
+      "production": 7.067,
+      "road": 0.1209,
+      "robber_risk": 0.075,
+      "scarce": 0.1786,
+      "spare_card": 0.225,
+      "victory_point": 1.0
+    },
+    "spare-0.3": {
+      "buy_progress": 0.45,
+      "diversity": 0.358,
+      "knight": 0.1041,
+      "port": 0.007373,
+      "production": 7.067,
+      "road": 0.1209,
+      "robber_risk": 0.075,
+      "scarce": 0.1786,
+      "spare_card": 0.3,
+      "victory_point": 1.0
+    },
+    "spare-0.45": {
+      "buy_progress": 0.45,
+      "diversity": 0.358,
+      "knight": 0.1041,
+      "port": 0.007373,
+      "production": 7.067,
+      "road": 0.1209,
+      "robber_risk": 0.075,
+      "scarce": 0.1786,
+      "spare_card": 0.45,
+      "victory_point": 1.0
+    },
+    "spare-0.6": {
+      "buy_progress": 0.45,
+      "diversity": 0.358,
+      "knight": 0.1041,
+      "port": 0.007373,
+      "production": 7.067,
+      "road": 0.1209,
+      "robber_risk": 0.075,
+      "scarce": 0.1786,
+      "spare_card": 0.6,
+      "victory_point": 1.0
+    },
+    "spare-1.2": {
+      "buy_progress": 0.45,
+      "diversity": 0.358,
+      "knight": 0.1041,
+      "port": 0.007373,
+      "production": 7.067,
+      "road": 0.1209,
+      "robber_risk": 0.075,
+      "scarce": 0.1786,
+      "spare_card": 1.2,
+      "victory_point": 1.0
+    }
+  },
+  "python": "3.12.14",
+  "pythonhashseed": "0",
+  "runoff_seed": 731100000,
+  "screen_seed": 731000000,
+  "source_sha256": "d9cd0c7c833130e401a8d0fbf468a7b6113824e6cb3a88310b47df90410411e2",
+  "threads": {
+    "MKL_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1"
+  },
+  "workers": 30
+}

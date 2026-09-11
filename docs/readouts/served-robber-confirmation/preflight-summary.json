@@ -1,0 +1,7 @@
+{
+  "candidate_games": 2,
+  "checks": "All records match independent journal conversion; zero automatic exchanges",
+  "games": 6,
+  "passed": true,
+  "stock_instrumented_trace_pairs": 2
+}

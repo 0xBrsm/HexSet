@@ -29,16 +29,38 @@ measured 1.689 versus 1.827 games/s. AB2's hypothetical search uses Catanatron
 in both configurations. These workload-specific timings do not establish
 information-model equivalence or select the host for HexSet policy research.
 
-## Current unified Heximax (September 11, 2026)
+## Recorded automatic-arena Heximax vs AB2 (September 11, 2026)
 
 The [current-config benchmark](readouts/current-heximax-ab2/README.md) measures
 stock unpinned adaptive `heximax` against the current pinned Catanatron AB2
 reference, with HexSet hosting every game. Heximax won **590/800 in 1v1
 (73.75%, 95% Wilson interval 70.6–76.7%)** and **450/800 against three AB2
 players (56.25%, 52.8–59.6%)**. Boards are independent and focal seats balanced.
+These are historical automatic-arena results, not a served-driver validation.
 Trading is enabled; AB2 declines exchanges, so the adaptive slider stays at
 zero. All 1,600 games finished and passed replay validation, with no reference
 deadline hits. The readout preserves exact source hashes, settings and records.
+
+## Served exchange robber confirmation (September 11, 2026)
+
+Production GameSession confirmation found +0.075 beat −0.30 in **272/392
+fresh games (69.39%, 95% CI 64.66–73.74%)**, with zero automatic exchanges.
+This supports the selected exchange coefficient under the recorded served
+configuration; the move slider was zero on both sides. It does not validate the old
+sweep grid or adaptive served moves. See the
+[served readout](readouts/served-robber-confirmation/README.md).
+
+## Withdrawn exchange-weight adoption (September 11, 2026)
+
+The [initial exchange sweep](readouts/exchange-weight-sweep/README.md) and
+[robber follow-up](readouts/exchange-robber-ceiling/README.md) used research-only
+automatic clearing. Their −0.225 and +0.075 adoption conclusions are withdrawn;
+main's preceding −0.30 was restored provisionally before the separate served
+confirmation above. The
+[spare screen](readouts/exchange-spare-ceiling/README.md) and
+[trade-behavior baseline](readouts/current-trade-behavior/README.md) have the
+same protocol limitation. These results do not evaluate served behavior or
+justify fitting changes. See the [correction](readouts/trading-protocol-correction.md).
 
 ## Native Heximax improvement (September 11, 2026)
 

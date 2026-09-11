@@ -1,9 +1,19 @@
 # HexSet evaluation protocol
 
-**HexSet is the primary engine and evaluation framework. Catanatron is an
-external reference opponent.** Heximax self-play, ablations, weight/search
-tuning and candidate validation run in HexSet. Use `hexset.arena` and its
-`hexset.bench` runners for both the incumbent and external-reference gates.
+**HexSet is the primary engine; Catanatron is an external reference opponent.
+Evaluation and fitting must use HexSet's served offer/response/counter/pick
+protocol. Automatic clearing is research-only and must never be used for
+evaluation, fitting, weight selection or policy adoption.**
+
+The stock `hexset.arena` loop defaults to engine-driven offer/response rounds.
+Its engine identity, replay checks and protocol name alone do not establish
+served equivalence. Before using its trading-enabled `duel`, `ablate`,
+`weight_sweep`, `fit_duel` or dataset-generation paths for evaluation/fitting,
+verify the driver against the intended served implementation, including
+proposal policy, responses, execution, offer budgets and public activity
+observations. Engine-driven rounds notify trade observers; the current served
+session does not deliver completed exchanges to that observer.
+See the [protocol correction](readouts/trading-protocol-correction.md).
 
 ## Engine and opponent are separate choices
 
@@ -23,37 +33,36 @@ labeled external compatibility studies. They are not the HexSet ablation
 framework. A lineup of four `DC:heximax` players still runs in Catanatron.
 "Self-play" or "vs shipped" alone is never enough to identify an experiment.
 
-## Native reference-matchup example
+## Evaluation launch prerequisite
 
-Install the optional reference dependency with `pip install -e '.[catanatron]'`.
-This command runs one Heximax against three AB2 players in HexSet:
+An arena command alone is not evidence of served-driver equivalence.
+The served driver must freeze native board/chance seeds and seating while
+using the production offer/response protocol. The manifest must explicitly
+identify that protocol; a generic `trading=true` field is insufficient.
+Session-driven games must set `trade_mode="external"` while bot trade gates
+remain on. This disables the engine's synchronous driver without using the
+old `max_trades=0` switch, which also forced an unpinned bot's move slider to
+zero. Record and verify the effective adaptive policy separately.
 
-```sh
-python -m hexset.bench.duel heximax catanatron \
-  --geometry abbb --games 8 --workers 1 --duel-seed 700000000 \
-  --records runs/preflight/ab2.jsonl
-```
+Verify a small recorded trace before a campaign. This applies to AB2 reference
+matches too, even though AB2 declines player exchanges. Historical zero-exchange
+records remain useful evidence of their recorded configurations, but do not
+establish served-driver equivalence by themselves.
 
-`abbb` specifies one candidate seat and three reference seats. The arena
-rotates the lineup and pairs boards. Eight games are a small wiring check,
-not a strength estimate or proof that the full protocol has been validated.
-For a candidate-versus-incumbent gate, register and freeze both Heximax
-entrants and use the same HexSet runner and geometry. Literal identical-policy
-self-play is a control, not evidence that a candidate beats an incumbent.
-
-The native duel CLI does not currently expose `--catanatron-speedups`; this
-example uses the unpatched reference search. The existing fast-mode native
-host benchmarks install `catanatron_speedups('fast')` inside each worker.
-Make the mode explicit and record it when adding acceleration to the native
-campaign runner. Do not switch to the external-host command to obtain speedups.
-See [external-reference acceleration](catanatron-speedups.md) for the measured
-patches and their limits.
+A [bounded served robber confirmation](readouts/served-robber-confirmation/README.md)
+now provides a verified direct GameSession driver for the current embedded
+server policy, with full journal/record checks and no automatic exchanges.
+Its scope is the recorded source revision with the served move slider held at
+zero; it does not validate adaptive served movement or the newer engine-driven
+rounds. See the [current scope](readouts/served-robber-confirmation/CURRENT-SCOPE.md).
+Automatic clearing remains prohibited for evaluation and fitting.
 
 ## Result identity and historical scope
 
 Every new campaign must record host engine, public-information model, source
 and dependency revisions, effective candidate/incumbent settings, rule set,
-trading mode, acceleration mode, lineup and seat schedule, seeds, workers,
+trading protocol, proposal policy, offer budget, per-side card cap, trading mode,
+acceleration mode, lineup and seat schedule, seeds, workers,
 unfinished games and adapter exceptions/fallbacks. Use the arena's result
 metadata and replay records; supplement fields that the current CLI does not
 yet emit. This is the required experiment contract, not a claim that all its
@@ -82,7 +91,8 @@ corrected historical interpretation.
 
 These are the next steps; documenting them does not mean they have passed.
 
-1. **Verify the native evaluation path.** Check both gates use HexSet and pass
+1. **Verify the native served evaluation path.** Confirm automatic clearing
+   never executes and offers/responses/picks match served games. Check both gates use HexSet and pass
    the same native ledger/belief inputs to each Heximax entrant. Cover public
    production/spending, hidden steals/discards and new-game resets. Verify
    legal-action handling and surface adapter failures. Confirm worker count
@@ -94,7 +104,7 @@ These are the next steps; documenting them does not mean they have passed.
    better policy from a handful of games.
 3. **Revalidate a bounded candidate set.** Preregister representative prior
    finalists, previously rejected candidates and a matched shipped control.
-   Evaluate both gates in HexSet on fresh seeds with fixed budgets and a
+   Evaluate both gates through the verified served driver on fresh seeds with fixed budgets and a
    declared selection/confirmation rule. Old selection data are not fresh
    confirmation evidence, and previous adapter rejections do not exclude a
    candidate from this reassessment.

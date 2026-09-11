@@ -1,4 +1,4 @@
-# Current Heximax versus Catanatron AB2
+# Recorded automatic-arena Heximax versus Catanatron AB2
 
 This two-batch benchmark measures the unified **unpinned adaptive `heximax`** from
 PR #147 in the **native HexSet engine**, against Catanatron's depth-two
@@ -25,6 +25,14 @@ Trading is enabled with Heximax's normal zero gain floor. The AB2 adapter
 declines domestic exchanges; the observed activity and slider position are
 reported in the audit. This matchup measures how the current adaptive bot
 plays against AB2; it does not measure adaptation against trading opponents.
+
+## Exchange-only update after this benchmark
+
+The subsequent automatic-clearing exchange-weight studies proposed −0.225
+and then +0.075, with a few exact AB2 trace checks. Those adoption conclusions
+are now withdrawn; see the [protocol correction](../trading-protocol-correction.md).
+This recorded zero-exchange AB2 sample is preserved, but is not a validation
+of the served driver. New evaluation must use the required served protocol.
 
 ## Frozen configuration
 

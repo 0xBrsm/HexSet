@@ -1,0 +1,18 @@
+{
+  "candidate_wins": 272,
+  "control_wins": 120,
+  "counts": {
+    "disabled_automatic_events": 25429,
+    "executions": 13347
+  },
+  "eligible_for_adoption": true,
+  "games": 392,
+  "independent_audit_required": true,
+  "seconds": 134.12501527089626,
+  "total_games": 404,
+  "wilson95": [
+    0.6465549358062058,
+    0.7374371817187587
+  ],
+  "win_rate": 0.6938775510204082
+}

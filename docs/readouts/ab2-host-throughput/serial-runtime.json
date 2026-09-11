@@ -1,0 +1,50 @@
+{
+  "Id": "4bc9b37073f0f405d1f7121f1918ae9e2900a90bdc24d99463cab938ac4069c8",
+  "Image": "sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+  "Mounts": [
+    {
+      "Destination": "/study",
+      "Mode": "ro",
+      "Propagation": "rprivate",
+      "RW": false,
+      "Source": "/home/bsm/tmp/hexset-ab2-host-d450a4e",
+      "Type": "bind"
+    },
+    {
+      "Destination": "/out",
+      "Mode": "rw",
+      "Propagation": "rprivate",
+      "RW": true,
+      "Source": "/home/bsm/tmp/hexset-ab2-host-results-d450a4e",
+      "Type": "bind"
+    }
+  ],
+  "State": {
+    "Dead": false,
+    "Error": "",
+    "ExitCode": 0,
+    "FinishedAt": "2026-09-11T03:15:26.199470643Z",
+    "OOMKilled": false,
+    "Paused": false,
+    "Pid": 0,
+    "Restarting": false,
+    "Running": false,
+    "StartedAt": "2026-09-11T03:09:31.532395977Z",
+    "Status": "exited"
+  },
+  "command": [
+    "/study/run_serial.py"
+  ],
+  "env": [
+    "PYTHONHASHSEED=0",
+    "OMP_NUM_THREADS=1",
+    "OPENBLAS_NUM_THREADS=1",
+    "MKL_NUM_THREADS=1",
+    "PYTHONPATH=/study/src"
+  ],
+  "runtime": {
+    "NanoCpus": 1000000000,
+    "NetworkMode": "none"
+  },
+  "user": "1000:1000"
+}

@@ -16,6 +16,12 @@ It identifies repeated leaf/hand evaluation and longest-road calculations as
 larger targets than raw state copying, and preserves clean timings, decision
 trace checks, source fingerprints and raw cProfile data.
 
+The [four-AB2 host comparison](readouts/ab2-host-throughput/README.md) measures
+AB2 games/second on both hosts using the same supported native pin. With fast
+mode and 30 workers, 120 games per host measured 1.63 games/s through HexSet's
+adapter and 1.85 games/s directly in Catanatron. AB2's hypothetical search uses
+Catanatron in both configurations; this is the current integration's throughput.
+
 ## Heximax against Catanatron: four players
 
 The September 7, 2026 readout records `heximax-notrade` against three

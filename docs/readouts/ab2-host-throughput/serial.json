@@ -1,0 +1,645 @@
+{
+  "complete": true,
+  "rows": [
+    {
+      "action_sha256": "0d6a0847b830c531181552417b2ba69f4a81c9a543f45af90bb054fbce6fd93e",
+      "actions": 279,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 14.732737433,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "hexset",
+      "mode": "off",
+      "points": [
+        3,
+        10,
+        3,
+        4
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 14.741231005871668,
+      "seed": 680100000,
+      "turns": 77,
+      "winner": 1
+    },
+    {
+      "action_sha256": "0640d9f26c7756b6dc42c7ce80da996a5a54723871560527c6173d2c67db378c",
+      "actions": 323,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 16.511434554,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "catanatron",
+      "mode": "off",
+      "points": [
+        5,
+        10,
+        4,
+        5
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 16.515998621005565,
+      "seed": 680100000,
+      "turns": 87,
+      "winner": 1
+    },
+    {
+      "action_sha256": "0d6a0847b830c531181552417b2ba69f4a81c9a543f45af90bb054fbce6fd93e",
+      "actions": 279,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 4.882453358,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "hexset",
+      "mode": "fast",
+      "points": [
+        3,
+        10,
+        3,
+        4
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 4.883284529903904,
+      "seed": 680100000,
+      "turns": 77,
+      "winner": 1
+    },
+    {
+      "action_sha256": "0640d9f26c7756b6dc42c7ce80da996a5a54723871560527c6173d2c67db378c",
+      "actions": 323,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 4.594736898,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "catanatron",
+      "mode": "fast",
+      "points": [
+        5,
+        10,
+        4,
+        5
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 4.595892472891137,
+      "seed": 680100000,
+      "turns": 87,
+      "winner": 1
+    },
+    {
+      "action_sha256": "838b755b9d1ae09a8b26e2cab9dcf32a1f0638200e2c3bdf15d92504b1c3af2d",
+      "actions": 224,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 10.802435997,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "catanatron",
+      "mode": "off",
+      "points": [
+        10,
+        3,
+        4,
+        2
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 10.808335818117484,
+      "seed": 680100001,
+      "turns": 70,
+      "winner": 0
+    },
+    {
+      "action_sha256": "03659060a5a9adf2f07fff3fda12863f9ad627b977ffac3745334db79e72243b",
+      "actions": 295,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 3.720529923,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "hexset",
+      "mode": "fast",
+      "points": [
+        6,
+        10,
+        2,
+        3
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 3.7252670149318874,
+      "seed": 680100001,
+      "turns": 73,
+      "winner": 1
+    },
+    {
+      "action_sha256": "838b755b9d1ae09a8b26e2cab9dcf32a1f0638200e2c3bdf15d92504b1c3af2d",
+      "actions": 224,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 3.3849096860000003,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "catanatron",
+      "mode": "fast",
+      "points": [
+        10,
+        3,
+        4,
+        2
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 3.385734757175669,
+      "seed": 680100001,
+      "turns": 70,
+      "winner": 0
+    },
+    {
+      "action_sha256": "03659060a5a9adf2f07fff3fda12863f9ad627b977ffac3745334db79e72243b",
+      "actions": 295,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 12.386836962,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "hexset",
+      "mode": "off",
+      "points": [
+        6,
+        10,
+        2,
+        3
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 12.401710518170148,
+      "seed": 680100001,
+      "turns": 73,
+      "winner": 1
+    },
+    {
+      "action_sha256": "e43429c0b1730007728af5acaca72e9d65e7d6dec176a2d9fc543f0268135959",
+      "actions": 321,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 4.181648399,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "hexset",
+      "mode": "fast",
+      "points": [
+        7,
+        5,
+        10,
+        6
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 4.187104382086545,
+      "seed": 680100002,
+      "turns": 86,
+      "winner": 2
+    },
+    {
+      "action_sha256": "5672fbcd6fb5ff6c8840178c35e117fb8443eb41a652abfb98c538a059dc1df4",
+      "actions": 396,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 6.958086345,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "catanatron",
+      "mode": "fast",
+      "points": [
+        9,
+        7,
+        8,
+        10
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 6.964222925947979,
+      "seed": 680100002,
+      "turns": 105,
+      "winner": 3
+    },
+    {
+      "action_sha256": "e43429c0b1730007728af5acaca72e9d65e7d6dec176a2d9fc543f0268135959",
+      "actions": 321,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 13.72961401,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "hexset",
+      "mode": "off",
+      "points": [
+        7,
+        5,
+        10,
+        6
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 13.736869584070519,
+      "seed": 680100002,
+      "turns": 86,
+      "winner": 2
+    },
+    {
+      "action_sha256": "5672fbcd6fb5ff6c8840178c35e117fb8443eb41a652abfb98c538a059dc1df4",
+      "actions": 396,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 25.715998285,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "catanatron",
+      "mode": "off",
+      "points": [
+        9,
+        7,
+        8,
+        10
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 25.725215345155448,
+      "seed": 680100002,
+      "turns": 105,
+      "winner": 3
+    },
+    {
+      "action_sha256": "660d507602dd42370079b7d4a76058978eaa84d6f1d3c6c51203397e6cd6afe0",
+      "actions": 433,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 8.892420845,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "catanatron",
+      "mode": "fast",
+      "points": [
+        9,
+        10,
+        9,
+        4
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 8.894119726959616,
+      "seed": 680100003,
+      "turns": 115,
+      "winner": 1
+    },
+    {
+      "action_sha256": "a5119e951f7f110d467562d7a9fb1dd66340da3c6dd78ec4c2878a0ead79802e",
+      "actions": 295,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 20.357084796,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "hexset",
+      "mode": "off",
+      "points": [
+        7,
+        10,
+        5,
+        4
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 20.370420234976336,
+      "seed": 680100003,
+      "turns": 77,
+      "winner": 1
+    },
+    {
+      "action_sha256": "660d507602dd42370079b7d4a76058978eaa84d6f1d3c6c51203397e6cd6afe0",
+      "actions": 433,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 28.568740493,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "catanatron",
+      "mode": "off",
+      "points": [
+        9,
+        10,
+        9,
+        4
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 28.58510601101443,
+      "seed": 680100003,
+      "turns": 115,
+      "winner": 1
+    },
+    {
+      "action_sha256": "a5119e951f7f110d467562d7a9fb1dd66340da3c6dd78ec4c2878a0ead79802e",
+      "actions": 295,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 6.180785633,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "hexset",
+      "mode": "fast",
+      "points": [
+        7,
+        10,
+        5,
+        4
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 6.181772884912789,
+      "seed": 680100003,
+      "turns": 77,
+      "winner": 1
+    },
+    {
+      "action_sha256": "73e8eb8b82310fb9f5fbcbc252ee61c88f89964bb2934aa3c986e2eabaef5b8f",
+      "actions": 297,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 13.469892281,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "hexset",
+      "mode": "off",
+      "points": [
+        10,
+        4,
+        3,
+        7
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 13.478369230870157,
+      "seed": 680100004,
+      "turns": 76,
+      "winner": 0
+    },
+    {
+      "action_sha256": "c5252efff495057f26c4ecd1240f7b786007a58febe339fd18990942605412d1",
+      "actions": 496,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 26.663577861,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "catanatron",
+      "mode": "off",
+      "points": [
+        10,
+        7,
+        5,
+        9
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 26.673433458898216,
+      "seed": 680100004,
+      "turns": 126,
+      "winner": 0
+    },
+    {
+      "action_sha256": "73e8eb8b82310fb9f5fbcbc252ee61c88f89964bb2934aa3c986e2eabaef5b8f",
+      "actions": 297,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 3.959783764,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "hexset",
+      "mode": "fast",
+      "points": [
+        10,
+        4,
+        3,
+        7
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 3.9604674100410193,
+      "seed": 680100004,
+      "turns": 76,
+      "winner": 0
+    },
+    {
+      "action_sha256": "c5252efff495057f26c4ecd1240f7b786007a58febe339fd18990942605412d1",
+      "actions": 496,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 8.191305757,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "catanatron",
+      "mode": "fast",
+      "points": [
+        10,
+        7,
+        5,
+        9
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 8.197468794183806,
+      "seed": 680100004,
+      "turns": 126,
+      "winner": 0
+    },
+    {
+      "action_sha256": "b1532b2693786af413f79b3836a96e7ebbf77fb94ebd698ea7858a036201dbed",
+      "actions": 245,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 8.994976117,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "catanatron",
+      "mode": "off",
+      "points": [
+        10,
+        4,
+        3,
+        6
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 8.99657500302419,
+      "seed": 680100005,
+      "turns": 74,
+      "winner": 0
+    },
+    {
+      "action_sha256": "95806b6782fcb2d8c7d8b75df6c1022e9420592d6134639c5b94319dab31d5f8",
+      "actions": 337,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 4.847610736,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "hexset",
+      "mode": "fast",
+      "points": [
+        10,
+        3,
+        4,
+        6
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 4.848593281116337,
+      "seed": 680100005,
+      "turns": 84,
+      "winner": 0
+    },
+    {
+      "action_sha256": "b1532b2693786af413f79b3836a96e7ebbf77fb94ebd698ea7858a036201dbed",
+      "actions": 245,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 2.633805951,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "catanatron",
+      "mode": "fast",
+      "points": [
+        10,
+        4,
+        3,
+        6
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 2.634192273952067,
+      "seed": 680100005,
+      "turns": 74,
+      "winner": 0
+    },
+    {
+      "action_sha256": "95806b6782fcb2d8c7d8b75df6c1022e9420592d6134639c5b94319dab31d5f8",
+      "actions": 337,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 14.669025948,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "hexset",
+      "mode": "off",
+      "points": [
+        10,
+        3,
+        4,
+        6
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 14.673074464080855,
+      "seed": 680100005,
+      "turns": 84,
+      "winner": 0
+    },
+    {
+      "action_sha256": "37bb58acddc768ed2187d2670ec793f3484ca5dc2199d05e39474cb82618bfee",
+      "actions": 346,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 6.799697166,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "hexset",
+      "mode": "fast",
+      "points": [
+        5,
+        7,
+        10,
+        5
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 6.8015520048793405,
+      "seed": 680100006,
+      "turns": 90,
+      "winner": 2
+    },
+    {
+      "action_sha256": "d39714a0302c0dabff991eb0846bb22829c9b1e69bc95ba35b24fc1794424860",
+      "actions": 303,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 4.477696055,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "catanatron",
+      "mode": "fast",
+      "points": [
+        5,
+        5,
+        10,
+        3
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 4.478431056020781,
+      "seed": 680100006,
+      "turns": 84,
+      "winner": 2
+    },
+    {
+      "action_sha256": "37bb58acddc768ed2187d2670ec793f3484ca5dc2199d05e39474cb82618bfee",
+      "actions": 346,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 23.282939123,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "hexset",
+      "mode": "off",
+      "points": [
+        5,
+        7,
+        10,
+        5
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 23.287278996082023,
+      "seed": 680100006,
+      "turns": 90,
+      "winner": 2
+    },
+    {
+      "action_sha256": "d39714a0302c0dabff991eb0846bb22829c9b1e69bc95ba35b24fc1794424860",
+      "actions": 303,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 15.736196836,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "catanatron",
+      "mode": "off",
+      "points": [
+        5,
+        5,
+        10,
+        3
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 15.747394973179325,
+      "seed": 680100006,
+      "turns": 84,
+      "winner": 2
+    },
+    {
+      "action_sha256": "279106d62ddab32b614b924a6cb211805e2e74bbfc4678b02ad9844fd1be6cc1",
+      "actions": 212,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 2.343936166,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "catanatron",
+      "mode": "fast",
+      "points": [
+        3,
+        10,
+        4,
+        7
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 2.344840057194233,
+      "seed": 680100007,
+      "turns": 63,
+      "winner": 1
+    },
+    {
+      "action_sha256": "d865bc669176a6b5b237f7cd9bba9120a62fb8dc0a1afc0a5b99261f4fb1898e",
+      "actions": 291,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 13.031566906,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "hexset",
+      "mode": "off",
+      "points": [
+        5,
+        4,
+        4,
+        10
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 13.038327445043251,
+      "seed": 680100007,
+      "turns": 75,
+      "winner": 3
+    },
+    {
+      "action_sha256": "279106d62ddab32b614b924a6cb211805e2e74bbfc4678b02ad9844fd1be6cc1",
+      "actions": 212,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 7.5870690960000005,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "catanatron",
+      "mode": "off",
+      "points": [
+        3,
+        10,
+        4,
+        7
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 7.5884132399223745,
+      "seed": 680100007,
+      "turns": 63,
+      "winner": 1
+    },
+    {
+      "action_sha256": "d865bc669176a6b5b237f7cd9bba9120a62fb8dc0a1afc0a5b99261f4fb1898e",
+      "actions": 291,
+      "catanatron_source_sha256": "0968d060809ce8cb0037ec96a65df77c85e14ab802b145b4fe636a65e9c445af",
+      "cpu_seconds": 3.9450441909999996,
+      "hexset_source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "host": "hexset",
+      "mode": "fast",
+      "points": [
+        5,
+        4,
+        4,
+        10
+      ],
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "seconds": 3.9458743759896606,
+      "seed": 680100007,
+      "turns": 75,
+      "winner": 3
+    }
+  ]
+}

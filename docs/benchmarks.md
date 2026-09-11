@@ -22,13 +22,32 @@ mode and 30 workers, 120 games per host measured 1.63 games/s through HexSet's
 adapter and 1.85 games/s directly in Catanatron. AB2's hypothetical search uses
 Catanatron in both configurations; this is the current integration's throughput.
 
+## Information-model correction (September 11, 2026)
+
+Heximax results below using the stock `DC:` Catanatron adapter were measured
+with a **memoryless public hand ledger**. The adapter reconstructs that ledger
+at every decision; native HexSet retains public resource history. Heximax uses
+those beliefs in search, so equal weights and search settings do not make the
+hosted policies equivalent.
+
+These historical results describe the restricted adapter protocol. They do
+not establish rankings, candidate rejection, or optimal weights/hyperparameters
+for native HexSet's normal public-history policy. Native-policy conclusions
+require revalidation in HexSet. A gate against other `DC:heximax` players also
+uses the restricted protocol, even when described as self-play.
+
+This particular defect does not affect pure native HexSet runs or Catanatron
+AB2-versus-ValueFunction games without Heximax. Copy/evaluator equivalence and
+throughput measurements retain their stated implementation/workload scope.
+The raw results below are preserved; their scope is corrected here.
+
 ## Heximax against Catanatron: four players
 
 The September 7, 2026 readout records `heximax-notrade` against three
 Catanatron `AB:2` players. Each `AB:2` is Catanatron's depth-two alpha-beta
 player. The games ran in Catanatron through HexSet's adapter, with
 player-to-player trading disabled. Heximax used its no-trade weight profile
-and its seat's information set.
+and the adapter's memoryless subset of its seat's information set.
 
 | Run seed | Heximax wins | Win rate | Mean Heximax victory points |
 | --- | --- | --- | --- |

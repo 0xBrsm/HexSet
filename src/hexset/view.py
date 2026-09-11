@@ -92,6 +92,8 @@ class View:
                 f"seat {perspective} cannot take a view of a state that hides "
                 f"its own hand"
             )
+        if is_hidden(state.dev_cards[perspective]) or is_hidden(state.new_dev_cards[perspective]):
+            raise HiddenRead(f"seat {perspective} cannot take a view that hides its own development cards")
         # Sizes only, through the helper: an observed state carries opponents'
         # hands as counts, and the same arithmetic has to run on both.
         self.sizes = [hand_size(state, seat) for seat in range(n)]

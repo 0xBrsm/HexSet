@@ -9,7 +9,7 @@ from .cards import (
     DevCard,
 )
 from .economy import Purchase, can_afford, pay
-from .state import GameState, can_place_road, pile_size, place_road
+from .state import GameState, HiddenRead, can_place_road, is_hidden, pile_size, place_road
 
 
 def can_buy(state: GameState, player: int) -> bool:
@@ -20,6 +20,8 @@ def buy(state: GameState, player: int) -> DevCard:
     """Buy the top card. It is held aside until the turn ends."""
     if not state.deck:
         raise ValueError("the development deck is empty")
+    if is_hidden(state.deck):
+        raise HiddenRead("cannot draw an unknown development card; sample a concrete state first")
     pay(state, player, Purchase.DEV_CARD)
     card = DevCard(state.deck.pop())
     state.new_dev_cards[player][card] += 1

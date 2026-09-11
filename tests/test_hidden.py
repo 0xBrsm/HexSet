@@ -230,3 +230,47 @@ def test_the_trade_gate_prices_the_same_on_an_observed_state():
         parties = [other for other, _ in candidates]
         assert on_seen.gains_many(view_seen, received, parties) == pytest.approx(
             on_truth.gains_many(view_truth, received, parties))
+
+
+def test_an_empty_hidden_deck_does_not_allow_a_purchase():
+    from hexset.actions import ActionType
+    from hexset.devcards import can_buy
+    from helpers import give
+
+    game = start(random_base_board(random.Random(0)), 4, random.Random(0))
+    game.phase = Phase.MAIN
+    for resource in (2, 3, 4):
+        give(game._state, 0, resource, 1)
+    game._state.deck = HiddenDeck(0)
+    assert not game._state.deck
+    assert not can_buy(game._state, 0)
+    assert all(action.type is not ActionType.BUY_DEV_CARD for action in legal_actions(game))
+
+
+def test_buying_an_unknown_card_fails_before_spending_resources():
+    from hexset.devcards import buy
+    from helpers import give
+
+    game = start(random_base_board(random.Random(0)), 4, random.Random(0))
+    for resource in (2, 3, 4):
+        give(game._state, 0, resource, 1)
+    game._state.deck = HiddenDeck(1)
+    before = copy_state(game._state)
+    with pytest.raises(HiddenRead):
+        buy(game._state, 0)
+    assert game._state == before
+
+
+@pytest.mark.parametrize("field", ["dev_cards", "new_dev_cards"])
+def test_a_view_rejects_hidden_own_development_cards(field):
+    game = start(random_base_board(random.Random(0)), 4, random.Random(0))
+    getattr(game._state, field)[0] = HiddenCards(1)
+    with pytest.raises(HiddenRead):
+        View.from_game(game, 0)
+
+
+def test_hidden_piles_refuse_partial_slices_and_fractional_counts():
+    with pytest.raises(HiddenRead):
+        HiddenHand(4)[:2]
+    with pytest.raises(TypeError):
+        HiddenHand(1.5)

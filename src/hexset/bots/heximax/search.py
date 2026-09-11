@@ -469,10 +469,25 @@ class Heximax:
         if self._trade_policy is not None:
             self._trade_policy._clear_evaluation_caches()
             return self._trade_policy.estimate_many(view, candidates)
+        if not candidates:
+            return []
         seat = view.perspective
+        if self.evaluator.exact_progress_samples:
+            return [
+                self._delta(view, seat, them, tuple(-n for n in bundle), seat, self._rank)
+                for them, bundle in candidates
+            ]
+        # The same post-trade vectors as gains_many, read from each
+        # counterparty's row. Keep the belief anchored to the offering seat;
+        # pricing another seat's row must not reveal its hidden hand.
+        thems = [them for them, _ in candidates]
+        received = [bundle for _, bundle in candidates]
+        before = self._vector(view.state, view.ledger, seat)
+        hands = self._post_trade_hands(view.state, view.ledger, seat, seat, received, thems)
+        after = self.evaluator.score_many(view.state, seat, hands)
         return [
-            self._delta(view, seat, them, tuple(-n for n in bundle), seat, self._rank)
-            for them, bundle in candidates
+            self._rank(row, them) - self._rank(before, them)
+            for row, them in zip(after.tolist(), thems)
         ]
 
     # -- the valuation the two above are built from --------------------------
@@ -514,12 +529,11 @@ class Heximax:
     ) -> float:
         """`target`'s row after `target` receives `received` from
         `counterparty`, less what it is now, read entirely through
-        `knower`'s own information -- `_delta_many` with one candidate, for
-        the one shape every real caller uses (`target == knower`:
-        `accepts`/`accepts_many` only ever price the acting seat's own row).
-        `target != knower` -- nothing in this repo calls `_delta` that way --
-        falls back to the exact, clone-based reference path rather than
-        extend the fast path to a shape nothing exercises.
+        `knower`'s own information. For `target == knower`, this uses
+        `_delta_many` with one candidate unless exact progress sampling
+        requires the scalar path.
+        `target != knower` falls back to the clone-based reference path,
+        including opponent estimates with exact progress sampling.
         """
         if target != knower:
             return self._delta_reference(view, knower, target, received, counterparty, rank)
@@ -650,10 +664,8 @@ class Heximax:
         rank,
     ) -> float:
         """The exact, clone-based computation `_delta` fast-paths around for
-        `target == knower` -- kept, not deleted, for the one shape (`target
-        != knower`) nothing in this repo's `accepts`/`accepts_many` calls
-        exercises, so a caller with a different shape stays correct instead
-        of silently wrong.
+        `target == knower`. Also serves as the reference for batched
+        opponent estimates and their exact-progress-sampling fallback.
 
         Invariants, both load-bearing for honesty: the ledger is updated from
         `received` directly rather than by diffing hands, so a third party's

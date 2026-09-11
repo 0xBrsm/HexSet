@@ -204,7 +204,7 @@ class PendingGate:
     bookkeeping; `pick` declines -- a person picks through
     `POST .../trade/round/choose`. `gains_many`, the clearing house's
     surface, refuses everything; a served table never reaches it
-    (`game.max_trades = 0`, `api.build_session`).
+    (`game.trade_mode = "external"`, `api.build_session`).
     """
 
     game: "Game"
@@ -1773,7 +1773,7 @@ class GameSession:
             and self.game.phase is Phase.MAIN
         ):
             # MAIN entry -- where the clearing house used to fire for a served
-            # table (`game.max_trades = 0` switches it off, `api.build_session`)
+            # table (`game.trade_mode = "external"`, `api.build_session`)
             # -- opens this turn's round for a bot actor. After this action's own
             # event and journal line, so a trade the round executes at once is
             # recorded once, as its own step (`_execute_round_trade`). Never on

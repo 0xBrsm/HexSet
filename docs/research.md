@@ -8,13 +8,31 @@ policy is useful for engine throughput and control experiments. Learned
 policies use the runtime-independent interfaces in [training.md](training.md).
 
 Record the host engine, information model, source revisions, dependency
-versions, effective bot settings, seeds, lineup, trading mode, acceleration
-mode and unfinished-game count with every comparison. A label such as
-"vs shipped Heximax" identifies the opponents, not the engine or information
-model. `hexset.catanatron.duel` runs a separate external compatibility
-experiment; stock `DC:` Heximax there receives a memoryless public ledger.
-Follow the [evaluation protocol and recovery steps](evaluation.md) before
-using results to select or reject native HexSet policies.
+versions, effective bot settings, seeds, lineup, trading mode, bargaining
+mechanism, acceleration mode and unfinished-game count with every
+comparison. A label such as "vs shipped Heximax" identifies the opponents,
+not the engine or information model. `hexset.catanatron.duel` runs a
+separate external compatibility experiment; stock `DC:` Heximax there
+receives a memoryless public ledger. Follow the [evaluation protocol and
+recovery steps](evaluation.md) before using results to select or reject
+native HexSet policies.
+
+**The bargaining mechanism is part of what a result is about.** Games
+default to one trade round a turn: the actor broadcasts one offer, every
+other seat answers once, the actor picks (`Game.trade_mode="round"`;
+`Game.max_trades` caps broadcasts in round mode and completed exchanges
+in auto mode, `1` by default, `0` disables the engine's trade driver,
+`-1` removes its cap). Whether a seat trades at all is its own
+gate's business, not a table setting. The exhaustive automatic clearing
+house that used to run instead is `Game.trade_mode="auto"`, which
+deals until nothing clears against a counterparty that never holds out and
+never refuses a deal it merely dislikes -- so a policy fitted or trained
+against it learns a game nobody plays. Every study recorded before this
+changed (the fitted presets, the adaptive slider, the trading-condition
+screens) is a clearing result; reproducing one means `trade_mode="auto"` **and**
+`max_trades=-1` -- `"auto"` reads the same cap, so leaving it at the default
+would cap the clearing house at one exchange a turn, which is not what those
+runs recorded -- as well as running from its recorded source revision.
 
 The standard `heximax` now adapts its weights automatically. Pin a testing
 control at slider position 0 or 1 using `--pin-weights-a`/`--pin-weights-b`

@@ -118,6 +118,7 @@ def test_default_offer_falls_back_to_its_own_gain_as_the_estimate():
     gate = Gate(lambda received, counterparty: 5.0)
 
     assert default_offer(gate, game.state(0), candidates) == 0
+    assert gate.gains_calls == 1  # the fallback reuses the same valuation
 
 
 def test_default_offer_never_offers_a_deal_it_would_refuse():
@@ -130,6 +131,7 @@ def test_default_offer_never_offers_a_deal_it_would_refuse():
     gate = Gate(lambda received, counterparty: -1.0, lambda counterparty, received: 1.0)
 
     assert default_offer(gate, game.state(0), candidates) is None
+    assert gate.estimate_calls == 0  # no reason to price offers we refuse
 
 
 def test_default_offer_passes_when_no_estimate_clears():
@@ -226,6 +228,15 @@ def test_default_respond_passes_when_nothing_clears():
     response = default_respond(gate, game.state(1), offer)
 
     assert response == Response(1, RESPONSE_PASS, None)
+
+
+def test_default_counter_reuses_its_own_gain_without_an_opponent_model():
+    game = stocked((0, Resource.WOOD, 1), (0, Resource.SHEEP, 1), (1, Resource.ORE, 1))
+    game.ledger.receive(0, Resource.SHEEP, 1)
+    gate = Gate(lambda received, counterparty: float(received[SHEEP]))
+    response = default_respond(gate, game.state(1), Offer(0, bundle(wood=-1, ore=1)))
+    assert response == Response(1, RESPONSE_COUNTER, bundle(sheep=-1, ore=1))
+    assert gate.gains_calls == 2  # one original offer, one counter batch
 
 
 # --- default_pick ----------------------------------------------------------
@@ -475,3 +486,29 @@ def test_heximax_estimate_many_off_switch():
     view = game.state(0)
 
     assert bot.estimate_many(view, [(1, bundle(wood=-1, ore=1))]) == [-1.0]
+
+
+@pytest.mark.parametrize("budget,expected_trades", [(1, 0), (2, 1), (-1, 1)])
+def test_engine_rounds_try_a_distinct_offer_after_refusal(budget, expected_trades):
+    from hexset.game import run_trade_event
+
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1), (2, Resource.SHEEP, 1))
+    offers = []
+
+    class Actor(Gate):
+        def offer(self, view, candidates):
+            index = default_offer(self, view, candidates)
+            if index is not None:
+                offers.append(candidates[index][1])
+            return index
+
+    actor = Actor(lambda r, c: 10.0 * r[ORE] + 5.0 * r[SHEEP])
+    game.gates = (actor, Gate(lambda r, c: -1.0), Gate(lambda r, c: float(r[WOOD])), None)
+    game.max_trades = budget
+    run_trade_event(game)
+    assert offers[0] == bundle(wood=-1, ore=1)
+    assert len(game.trades) == expected_trades
+    if expected_trades:
+        assert offers[1] == bundle(wood=-1, sheep=1)
+        assert game.trades[0].b == 2
+    assert len(offers) == len(set(offers))

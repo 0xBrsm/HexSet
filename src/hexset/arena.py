@@ -151,8 +151,8 @@ class Entrant:
     # setup picks differing.
     placement: bool = False
     # The trade off switch: `0` means this entrant's gate refuses every
-    # exchange, so it never trades. Not a budget -- the engine
-    # has no cap (`hexset.trading`) -- and self-imposed rather than engine-wide
+    # exchange, so it never trades. Independent of the table's per-turn
+    # budget (`Game.max_trades`), and self-imposed rather than engine-wide
     # so a duel can see what trading is worth: only a bot that declines what
     # its opponent still has can price it.
     max_trades: int | None = None
@@ -394,15 +394,25 @@ def play_game(
     bots: Sequence[Bot],
     *,
     action_cap: int = MAX_ACTIONS,
+    trade_mode: str = "round",
+    max_trades: int = 1,
 ) -> Game:
     """`play`'s loop over a game somebody else dealt (`deal_game`).
 
     Dealing a game and playing it are separate acts: a tournament deals from
     `(seed, index)` and plays it here, while a lockstep environment deals from
     the same law and steps the loop itself, one action per lane per tick.
+
+    `trade_mode`/`max_trades` are the table's bargaining rules, and default to
+    one propose-and-respond round per turn. Pass `trade_mode="auto"` and
+    `max_trades=-1` for the exhaustive automatic house, which is what
+    every study recorded before this defaulted the other way -- see
+    `Game.trade_mode` for why that is a comparability option now rather than
+    the thing to fit against.
     """
     game.gates = tuple(bots)
-    game.max_trades = None
+    game.trade_mode = trade_mode
+    game.max_trades = max_trades
     actions = 0
     while not is_over(game) and actions < action_cap:
         seat = to_move(game)
@@ -544,7 +554,7 @@ def _play_and_record(
 
     game = deal_game(seed, index, len(lineup), board=board, chance=recording)
     game.gates = tuple(lineup)
-    game.max_trades = None
+    game.max_trades = 1
     tape = Tape()
     cleared: list[ClearedTrade] = []
     while not is_over(game) and len(tape.actions) < action_cap:

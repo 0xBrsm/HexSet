@@ -22,7 +22,15 @@ from .economy import Purchase, bank_trade, distribute, hand_size, pay
 from .ledger import PublicLedger
 from .robber import discard, discard_count, move_robber, steal
 from .rules import STANDARD, Rules
-from .trading import TRADE_RULES, Bundle, Trade, execute_trade, trade_event, valued
+from .trading import (
+    TRADE_RULES,
+    Bundle,
+    Trade,
+    execute_trade,
+    trade_event,
+    trade_round,
+    valued,
+)
 from .state import (
     NO_OWNER,
     GameState,
@@ -91,13 +99,45 @@ class Game:
     turns: int = 0
     won_by: int | None = None
     # This turn's executed trades and their count, cleared by `end_turn` the
-    # way the offer counter was. `trades_made` is the recorded statistic;
-    # `max_trades` is the knob, and `0` is the off switch for the no-trade
-    # referents (a mode, not a budget -- `None`, unbounded, is the default:
-    # the event stops when nothing clears, not when a counter runs out).
+    # way the offer counter was. `trades_made` is the recorded statistic.
     trades: list[Trade] = field(default_factory=list)
     trades_made: int = 0
-    max_trades: int | None = None
+    # The automatic driver's per-turn budget: broadcasts in "round" mode,
+    # completed exchanges in "auto" mode. `1` by default, `0` disables the
+    # driver, `-1` removes its cap. "external" callers own their limits.
+    # A seat that should never trade refuses at its own gate instead; this
+    # budget is the table's rule, independent of a seat's willingness.
+    #
+    # `1` because it is both what a table does -- you put one thing to the
+    # table a turn -- and what keeps the engine quick: uncapped rounds
+    # re-enumerate and re-broadcast until the actor runs out of offers, which
+    # measured several times slower per game across the arena, the gym and
+    # the suite. **`"auto"` reads the same cap**, so reproducing a study
+    # recorded under the old unbounded clearing house needs `-1` set
+    # explicitly alongside `trade_mode="auto"`.
+    max_trades: int = 1
+    # How a turn's trading is run.
+    #
+    #   "round"     the default, and what a real table plays: the actor
+    #               broadcasts one offer, every other seat answers once, the
+    #               actor picks (`trading.trade_round`), repeated while it
+    #               still has offers it has not made and the cap allows.
+    #   "auto"      the exhaustive automatic clearing house
+    #               (`trading.trade_event`): every candidate enumerated,
+    #               cleared until nothing clears. A strong approximation of
+    #               bargaining rather than a model of it, so fitting or
+    #               training against it teaches a game nobody plays -- kept
+    #               for reproducing studies recorded under it.
+    #   "external"  somebody else drives, and the engine runs nothing.
+    #               `run_trade_event` fires from `enter_main`/`move_robber_to`
+    #               so no driver can forget to trade, which leaves a served
+    #               table -- whose seats answer over a wire, across many
+    #               requests -- needing to say so
+    #               (`hexset.server.api.build_session`).
+    #
+    # One axis, because these are exclusive: a game driven from outside is
+    # not also running a mechanism of its own.
+    trade_mode: str = "round"
     # The `turns` value the trade event last ran in: `run_trade_event` is
     # once a turn, and a knight played in MAIN re-enters MAIN after its
     # robber move, which used to run it a second time.
@@ -335,6 +375,7 @@ def imagine(
         trades=game.trades[:],
         trades_made=game.trades_made,
         max_trades=game.max_trades,
+        trade_mode=game.trade_mode,
         trade_event_turn=game.trade_event_turn,
         trade_rule=game.trade_rule,
         locked=game.locked,
@@ -759,6 +800,39 @@ def trade_with_bank(game: Game, give: Resource, receive: Resource) -> None:
     game.ledger.apply_hand_diff(before, game._state.hands)
 
 
+def _run_trade_rounds(game: Game, gates) -> list[Trade]:
+    """This turn's trade rounds, under `Game.max_trades`.
+
+    `1`, the default, puts one thing to the table a turn. `-1` keeps
+    broadcasting while the actor still has an offer it has not made, and
+    stops when it runs out -- not at the first refusal, which is the usual
+    reason to put something else up. `already_offered` makes that terminate:
+    `default_offer` is a pure function of the position, so a rerun would repeat the
+    same bundle and collect the same answer for ever.
+
+    A positive budget caps the broadcasts, not the trades: a round clears at
+    most one exchange, so the two only differ when a round passes. Rounds are
+    counted rather than trades so the knob means what a table would mean by
+    it: how many times the actor gets to put something to the table.
+
+    The cap is read the same way under `"auto"`, whose own loop stops at it
+    too, so `0` disables both automatic mechanisms. External callers manage
+    their own limits. A seat that should never trade refuses at its gate.
+    """
+    budget = game.max_trades
+    completed: list[Trade] = []
+    offered: set = set()
+    asked = 0
+    while budget < 0 or asked < budget:
+        asked += 1
+        before = len(offered)
+        cleared = trade_round(game, gates, already_offered=offered)
+        if len(offered) == before:
+            break
+        completed.extend(cleared)
+    return completed
+
+
 def run_trade_event(game: Game) -> None:
     """Clear this turn's one trade event for the current player, if anybody
     is seated to answer a gate.
@@ -776,11 +850,13 @@ def run_trade_event(game: Game) -> None:
     """
     if game.phase is not Phase.MAIN:
         return
+    if game.trade_mode not in ("round", "auto", "external"):
+        raise ValueError(f"unknown trade mode: {game.trade_mode!r}")
     if game.trade_event_turn == game.turns:
         return
     game.trade_event_turn = game.turns
     gates = game.gates
-    if gates is None:
+    if gates is None or game.trade_mode == "external" or game.max_trades == 0:
         return
     observers = [observe for gate in gates
                  if (observe := getattr(gate, "observe_trade", None)) is not None]
@@ -790,10 +866,13 @@ def run_trade_event(game: Game) -> None:
         tuple(hand_size(game._state, s) for s in range(game._state.num_players))
         if observers else ()
     )
-    completed = trade_event(
-        game,
-        lambda seat, view, received, other: valued(gates[seat], view, received, other),
-    )
+    if game.trade_mode == "auto":
+        completed = trade_event(
+            game,
+            lambda seat, view, received, other: valued(gates[seat], view, received, other),
+        )
+    else:
+        completed = _run_trade_rounds(game, gates)
     if observers:
         participants = tuple((trade.a, trade.b) for trade in completed)
         for observe in observers:

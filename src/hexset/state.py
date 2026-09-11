@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import random
+from operator import index as integer_index
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Sequence
@@ -60,8 +61,8 @@ class Hidden:
 
     What works: `len(pile)` is the count, `pile[:]` copies it (the idiom
     `copy_state` and `game._snapshot_hands` use), equality and `repr`. A
-    hidden pile is always truthy, exactly as the all-zero list `[0] * 5` it
-    stands in for is.
+    hidden hand or development holding is always truthy, like its fixed
+    count slots; a hidden deck is truthy only while it has cards.
 
     What raises `HiddenRead`: indexing a type (`hand[SHEEP]`), iterating
     (so `sum`, `zip`, `tuple`, `max`, `random.shuffle` all raise), and
@@ -75,7 +76,7 @@ class Hidden:
     kind = "cards"
 
     def __init__(self, count: int) -> None:
-        count = int(count)
+        count = integer_index(count)
         if count < 0:
             raise ValueError(f"a hidden pile cannot hold {count} cards")
         self.count = count
@@ -91,7 +92,7 @@ class Hidden:
         return True
 
     def __getitem__(self, index: object) -> "Hidden":
-        if isinstance(index, slice):
+        if isinstance(index, slice) and index == slice(None):
             return type(self)(self.count)
         raise HiddenRead(
             f"{self.count} {self.kind} of unknown type: this state's author "
@@ -114,8 +115,9 @@ class Hidden:
             return NotImplemented
         return self.count == other.count
 
-    def __hash__(self) -> int:
-        return hash((type(self).__name__, self.count))
+    # Counts may be updated by an adapter; like concrete piles, these are
+    # mutable and must not be used as dictionary keys.
+    __hash__ = None
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self.count})"
@@ -140,6 +142,11 @@ class HiddenDeck(Hidden):
     """A development deck known only by its length."""
 
     kind = "deck cards"
+
+    def __bool__(self) -> bool:
+        # A concrete deck is a variable-length list, unlike a hand's fixed
+        # five count slots. Empty decks must forbid development-card buys.
+        return self.count > 0
 
 
 def is_hidden(pile: object) -> bool:

@@ -129,6 +129,25 @@ NO_TRADE_WEIGHTS = Weights(
 )
 
 
+# Fixed compromise confirmed in native floor-zero games across six moderate,
+# mixed and changing conditions: 523/1536 versus shared T's 396/1536.
+# Use with expansion_value=.125 and a separate TRADING_WEIGHTS gate.
+# Frozen coefficients preserve the tested policy if either endpoint changes.
+# See docs/readouts/trading-conditions/README.md for scope and uncertainty.
+BALANCED_WEIGHTS = Weights(
+    buy_progress=0.45,
+    diversity=0.358,
+    knight=0.10335,
+    port=0.0190015,
+    production=4.926,
+    road=0.06045,
+    robber_risk=-0.3,
+    scarce=0.12449930555555556,
+    spare_card=0.12825,
+    victory_point=1.0,
+)
+
+
 class HonestEvaluator:
     """`evaluate.Evaluator`'s model, read through a `View`.
 

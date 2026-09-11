@@ -18,6 +18,7 @@ from hexset.arena import Entrant, register_entrant_kind, register_preset
 from hexset.board.board import Board
 
 from .search import Heximax, heximax
+from .evaluate import BALANCED_WEIGHTS, TRADING_WEIGHTS
 
 
 def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Heximax:
@@ -38,6 +39,11 @@ def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Heximax:
     )
     if entrant.stance is not None:
         kwargs["stance"] = entrant.stance
+    if entrant.kind == "heximax-balanced":
+        kwargs.update(
+            weights=BALANCED_WEIGHTS if entrant.weights is None else entrant.weights,
+            expansion_value=.125, trade_weights=TRADING_WEIGHTS, trade_floor=0.0,
+        )
     return heximax(board, rng, **kwargs)
 
 
@@ -61,4 +67,11 @@ register_preset(
     Entrant(
         "heximax-notrade", kind="heximax", depth=2, width=6, max_trades=0, mode="notrade",
     ),
+)
+
+# Validated for uncertain trading conditions under native automatic clearing.
+# Keep the historical heximax preset available as a reproducible reference.
+register_entrant_kind("heximax-balanced", _spawn)
+register_preset(
+    "heximax-balanced", Entrant("heximax-balanced", kind="heximax-balanced", depth=2, width=6),
 )

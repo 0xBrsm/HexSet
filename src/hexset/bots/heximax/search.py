@@ -219,7 +219,7 @@ class Heximax:
         if self.trade_evaluator is not None:
             self._trade_policy = Heximax(
                 self.trade_evaluator, stance=self.stance, temperature=self.temperature,
-                rng=random.Random(0),
+                rng=random.Random(0), trade_floor=self.trade_floor,
             )
 
     def _clear_evaluation_caches(self) -> None:

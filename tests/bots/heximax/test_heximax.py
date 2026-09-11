@@ -560,3 +560,15 @@ def test_split_trade_values_match_the_gate_and_preserve_move_rng(stance, tempera
     split.max_trades = 0
     assert split.gains_many(game.state(0), candidates, partners) == [-1.0, -1.0]
     assert split.estimate_many(game.state(0), offers) == [-1.0, -1.0]
+
+
+def test_balanced_preset_uses_the_validated_move_and_exchange_profiles():
+    from hexset.bots.heximax import BALANCED_WEIGHTS
+    game = after_setup(26)
+    bot = spawn(PRESETS['heximax-balanced'], game._state.board, random.Random(1))
+    assert bot.evaluator.weights == BALANCED_WEIGHTS
+    assert bot.expansion_value == .125
+    assert bot.trade_evaluator.weights == TRADING_WEIGHTS
+    assert bot.trade_evaluator.expansion_value == 0.0
+    assert bot.trade_floor == 0.0 and bot.max_trades is None
+    assert (bot.depth, bot.width, bot.max_nodes, bot.k) == (2, 6, 600, 1)

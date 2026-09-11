@@ -1,5 +1,6 @@
 """Replay frozen validation traces through the public split-evaluator API."""
 import argparse
+from dataclasses import replace
 import hashlib
 import json
 from multiprocessing import get_context
@@ -19,6 +20,10 @@ def factory(entrant,board,rng):
         weights=bot.move.evaluator.weights,expansion_value=bot.move.expansion_value,
         trade_weights=None if same else bot.gate.evaluator.weights,
         trade_expansion_value=bot.gate.expansion_value,trade_floor=0.0)
+    if bot.rule == 'M':
+        # Exercise the actual selectable preset, not a duplicate of its table.
+        integrated=r.arena.spawn(replace(r.arena.PRESETS['heximax-balanced'],
+            temperature=r.PARAMS['temperature']),board,rng)
     bot.move=bot.gate=integrated
     return bot
 

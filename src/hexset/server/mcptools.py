@@ -354,6 +354,15 @@ def _trim_log(view: dict, log_after: int | None) -> dict:
     if not isinstance(lines, list):
         return view
     view["log_total"] = len(lines)
+    # The final read is the one re-render a cursor cannot splice. `state_view`
+    # asks for the transcript with `omniscient or over` once the game is over
+    # (webplay.py), and that lifts redaction across the *whole* history at
+    # once: every earlier steal stops being "a card" and names what it was.
+    # Those are rewrites of lines the caller already holds, arbitrarily far
+    # back, so the cursor is ignored here and the full transcript sent for the
+    # client to replace its copy with -- `log_from: 0` is how it knows to.
+    if log_after is not None and view.get("game_over"):
+        log_after = None
     start = 0 if (log_after is None or not lines) else max(0, min(int(log_after) - 1, len(lines) - 1))
     view["log"] = lines[start:]
     view["log_from"] = start

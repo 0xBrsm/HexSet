@@ -609,3 +609,19 @@ def test_state_log_after_omitted_is_unchanged_for_a_caller_that_never_sends_it(l
     data = client.call_tool("state")
     assert data["log"] == client.call_tool("state")["log"]
     assert data["log_from"] == 0
+
+
+def test_trim_log_ignores_the_cursor_once_the_game_is_over():
+    """`state_view` re-renders the whole transcript with redaction lifted the
+    moment the game ends (`omniscient or over`), so lines the caller already
+    holds change wording arbitrarily far back. A spliced reply would leave it
+    with a stale prefix -- the final read sends everything instead."""
+    view = mcptools._trim_log({"log": ["a", "b", "c", "d"], "game_over": True}, 3)
+    assert view["log"] == ["a", "b", "c", "d"]
+    assert view["log_from"] == 0
+    assert view["log_total"] == 4
+
+
+def test_trim_log_still_trims_while_the_game_is_running():
+    view = mcptools._trim_log({"log": ["a", "b", "c", "d"], "game_over": False}, 3)
+    assert view["log_from"] == 2

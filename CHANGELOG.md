@@ -25,7 +25,12 @@ Changes to the HexSet distribution. The project follows
 
   Omitting `log_after` returns the whole transcript, unchanged, which is
   what a first read and a just-reclaimed seat both want -- so a client that
-  knows nothing about the cursor is unaffected.
+  knows nothing about the cursor is unaffected. The final read of a finished
+  game ignores the cursor for the same reason: `state_view` asks for the
+  transcript with `omniscient or over` once a game is over, which lifts
+  redaction across the whole history at once -- every earlier steal stops
+  being "a card" and names what it was -- and those are rewrites of lines the
+  caller already holds, too far back for any overlap to cover.
 
 ## 0.49.1
 

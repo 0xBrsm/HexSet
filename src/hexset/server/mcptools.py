@@ -50,6 +50,10 @@ class Session:
     # what is new. Reset whenever the session takes a seat (`_seat`,
     # `_resume_game`): a new seat owes a whole transcript.
     log_sent: int | None = None
+    # The annotated board (`_layout`) for the game this seat is at, fetched
+    # once per seat -- it never changes after the deal -- and read by every
+    # reply's `summary`. `None` until the seat is taken.
+    board: dict | None = None
 
 
 def _call_status(tables: Tables, session: Session, method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
@@ -77,6 +81,7 @@ def _seat(session: Session, result: dict) -> dict:
     session.token = result.pop("token")
     session.code = result.get("code")
     session.log_sent = None
+    session.board = None
     return result
 
 
@@ -111,7 +116,9 @@ def _new_game(tables: Tables, session: Session, model: str, opponents: list[str]
         body["bots"] = opponents
     # Translated like every other state reply: the deal is the first view an
     # LLM reads, and it used to be the one that came back raw.
-    return _reply(session, _seat(session, _call_ok(tables, session, "POST", "/api/games", body)))
+    dealt = _seat(session, _call_ok(tables, session, "POST", "/api/games", body))
+    _layout(tables, session)  # the board is fixed from here on; fetch it once now
+    return _reply(session, dealt)
 
 
 def _join(tables: Tables, session: Session, code: str, model: str, name: str | None = None) -> dict:
@@ -120,7 +127,9 @@ def _join(tables: Tables, session: Session, code: str, model: str, name: str | N
     client, _ = _client_of(model)
     session.model = model
     body: dict = {"code": code.strip().lower(), "name": _display_name(name), "client": client}
-    return _reply(session, _seat(session, _call_ok(tables, session, "POST", "/api/join", body)))
+    joined = _seat(session, _call_ok(tables, session, "POST", "/api/join", body))
+    _layout(tables, session)
+    return _reply(session, joined)
 
 
 def _resume_game(tables: Tables, session: Session, code: str, model: str) -> dict:
@@ -138,6 +147,8 @@ def _resume_game(tables: Tables, session: Session, code: str, model: str) -> dic
     session.code = reclaimed.get("code")
     session.model = model
     session.log_sent = None  # a reclaimed seat is owed the whole transcript
+    session.board = None
+    _layout(tables, session)
     return _reply(session, reclaimed)
 
 
@@ -170,6 +181,15 @@ _TERRAIN_RESOURCE = {
 
 def _board(tables: Tables, session: Session) -> dict:
     _seated(session)
+    return _layout(tables, session)
+
+
+def _layout(tables: Tables, session: Session) -> dict:
+    """The annotated board for this session's game, fetched once and kept on
+    the `Session` (`_seat` clears it: a new seat may be a new board). Both
+    the `board` tool and every reply's `summary` read it from here."""
+    if session.board is not None:
+        return session.board
     raw = _call_ok(tables, session, "GET", "/api/board")
     by_vertex: dict[int, list[tuple[str, int]]] = {}
     for hex_ in raw.get("hexes") or []:
@@ -185,6 +205,7 @@ def _board(tables: Tables, session: Session) -> dict:
         touching = by_vertex.get(vertex["id"], [])
         vertex["pips"] = sum(pips for _, pips in touching)
         vertex["resources"] = sorted({resource for resource, _ in touching})
+    session.board = raw
     return raw
 
 
@@ -448,10 +469,182 @@ def _your_move(view: dict) -> tuple[str, list[int]]:
     return "wait", [] if to_move is None else [to_move]
 
 
+# --- summary: the derived facts a turn actually turns on ----------------------
+#
+# `board()` already precomputes per-vertex pips and resources because that
+# join is arithmetic an LLM does unreliably at the board's size. The same was
+# true of everything below, and the first LLM game through these tools redid
+# all of it by hand every turn: what a build costs against the hand, which of
+# the legal spots is any good, which hex the robber hurts most, and how far
+# the awards are. Each is a pure function of the view and the fixed board, so
+# it is computed here once per reply -- engine-free, like `_layout`.
+
+# Build costs, mirrored from `hexset.economy.COSTS` (this module imports no
+# engine; see the module docstring). Keys are the `afford` entries.
+_COSTS = {
+    "road": {"Wood": 1, "Brick": 1},
+    "settlement": {"Wood": 1, "Brick": 1, "Sheep": 1, "Wheat": 1},
+    "city": {"Wheat": 2, "Ore": 3},
+    "dev_card": {"Sheep": 1, "Wheat": 1, "Ore": 1},
+}
+_BUILD_ACTION = {
+    "road": "BUILD_ROAD",
+    "settlement": "BUILD_SETTLEMENT",
+    "city": "BUILD_CITY",
+    "dev_card": "BUY_DEV_CARD",
+}
+# `hexset.roads.MIN_LONGEST_ROAD` and the rulebook's three knights, mirrored.
+_MIN_LONGEST_ROAD = 5
+_MIN_LARGEST_ARMY = 3
+# Setup offers every open vertex -- fifty-odd -- and the tail of that list by
+# pips is never the answer. The count left off is reported as `spots_omitted`.
+_SPOTS_CAP = 15
+_SPOT_ACTIONS = ("SETUP_SETTLEMENT", "BUILD_SETTLEMENT", "BUILD_CITY")
+_CITY = 2  # `hexset.state.Building.CITY`
+
+
+def _afford(hand: dict, legal: list[dict]) -> dict:
+    """Per build: `ok` (the hand covers it), `missing` (what it is short, when
+    not), `legal` (whether `legal_actions` offers it right now -- a build can
+    be affordable with nowhere to put it, or the phase may not allow it)."""
+    offered = {a.get("type") for a in legal}
+    out = {}
+    for build, cost in _COSTS.items():
+        missing = {r: n - hand.get(r, 0) for r, n in cost.items() if hand.get(r, 0) < n}
+        entry: dict = {"ok": not missing, "legal": _BUILD_ACTION[build] in offered}
+        if missing:
+            entry["missing"] = missing
+        out[build] = entry
+    return out
+
+
+def _port_label(port: dict) -> str:
+    return f"{port['ratio']}:1" if port.get("resource") is None else f"{port['resource']} {port['ratio']}:1"
+
+
+def _spots(legal: list[dict], board: dict) -> tuple[list[dict], int]:
+    """Every settlement/city placement in `legal`, joined to the vertex's
+    pips, resources and port, best first. `index` is the `act()` index."""
+    vertices = {v["id"]: v for v in board.get("vertices") or []}
+    ports = {v: p for p in board.get("ports") or [] for v in p.get("vertices") or []}
+    spots = []
+    for index, action in enumerate(legal):
+        if action.get("type") not in _SPOT_ACTIONS:
+            continue
+        vertex_id = action.get("a")
+        vertex = vertices.get(vertex_id, {})
+        spot = {
+            "index": index,
+            "type": action["type"],
+            "vertex": vertex_id,
+            "pips": vertex.get("pips", 0),
+            "resources": vertex.get("resources", []),
+        }
+        port = ports.get(vertex_id)
+        if port is not None:
+            spot["port"] = _port_label(port)
+        spots.append(spot)
+    spots.sort(key=lambda s: (-s["pips"], s["index"]))
+    return spots[:_SPOTS_CAP], max(0, len(spots) - _SPOTS_CAP)
+
+
+def _robber(legal: list[dict], view: dict, board: dict) -> list[dict]:
+    """Every hex `MOVE_ROBBER` may go to, joined to what sits on it: the
+    hex's resource and pips, `hits` (each seat's buildings on it, yours
+    included) and `options` (one `act()` index per victim the engine offers,
+    `victim: null` for nobody to steal from). Most productive hex first."""
+    owner = view.get("vertex_owner") or []
+    building = view.get("vertex_building") or []
+    num_players = len(view.get("players") or [])
+    hexes = {h["id"]: h for h in board.get("hexes") or []}
+    by_hex: dict[int, dict] = {}
+    for index, action in enumerate(legal):
+        if action.get("type") != "MOVE_ROBBER":
+            continue
+        hex_id = action.get("a")
+        entry = by_hex.get(hex_id)
+        if entry is None:
+            hex_ = hexes.get(hex_id, {})
+            hits: dict[int, dict] = {}
+            for v in hex_.get("vertex_ids") or []:
+                if v < len(owner) and owner[v] >= 0:
+                    hit = hits.setdefault(owner[v], {"seat": owner[v], "settlements": 0, "cities": 0})
+                    hit["cities" if v < len(building) and building[v] == _CITY else "settlements"] += 1
+            entry = by_hex[hex_id] = {
+                "hex": hex_id,
+                "resource": hex_.get("resource"),
+                "pips": hex_.get("pips", 0),
+                "hits": [hits[s] for s in sorted(hits)],
+                "options": [],
+            }
+        slot = action.get("b")
+        victim = None if slot is None or slot >= num_players else slot
+        entry["options"].append({"index": index, "victim": victim})
+    return sorted(by_hex.values(), key=lambda e: (-e["pips"], e["hex"]))
+
+
+def _race(view: dict, me: dict) -> dict:
+    """Where this seat stands: points and the distance to the win, the
+    leading opponent by *public* points (hidden victory-point cards are not
+    counted for anyone else), and each award -- yours, who holds it, and
+    `need`, the length or knight count that would take it (strictly more
+    than the holder, or the minimum if nobody holds it yet)."""
+    players = view.get("players") or []
+    seat = me.get("seat")
+    winning = view.get("winning_points") or 10
+    points = me.get("victory_points", 0)
+    others = [p for p in players if p.get("seat") != seat]
+    leader = max(others, key=lambda p: (p.get("victory_points", 0), -p.get("seat", 0)), default=None)
+
+    def award(flag: str, count: str, minimum: int) -> dict:
+        holder = next((p for p in players if p.get(flag)), None)
+        entry: dict = {"yours": me.get(count, 0), "held": holder is not None and holder.get("seat") == seat}
+        if holder is not None:
+            entry["holder"] = holder.get("seat")
+            entry["holder_has"] = holder.get(count, 0)
+        if not entry["held"]:
+            entry["need"] = max(minimum, holder.get(count, 0) + 1) if holder is not None else minimum
+        return entry
+
+    return {
+        "points": points,
+        "to_win": max(0, winning - points),
+        "winning_points": winning,
+        "leader": None if leader is None else {"seat": leader.get("seat"), "points": leader.get("victory_points", 0)},
+        "longest_road": award("longest_road", "road_length", _MIN_LONGEST_ROAD),
+        "largest_army": award("largest_army", "knights_played", _MIN_LARGEST_ARMY),
+    }
+
+
+def _summarize(view: dict, board: dict | None) -> dict:
+    """Adds `summary` to a translated view for a seated reader whose hand
+    the view reveals. `spots` and `robber` need the board and appear only
+    when there is a placement or a robber move to make."""
+    seat = view.get("seat")
+    players = view.get("players") or []
+    me = next((p for p in players if p.get("seat") == seat), None) if seat is not None else None
+    if me is None or "hand" not in me:
+        return view
+    legal = view.get("legal_actions") or []
+    summary: dict = {"afford": _afford(me["hand"], legal), "race": _race(view, me)}
+    if board is not None:
+        spots, omitted = _spots(legal, board)
+        if spots:
+            summary["spots"] = spots
+            if omitted:
+                summary["spots_omitted"] = omitted
+        robber = _robber(legal, view, board)
+        if robber:
+            summary["robber"] = robber
+    view["summary"] = summary
+    return view
+
+
 def _translate(raw: dict) -> dict:
     """Every translation a view gets on its way to the LLM, except the
     transcript trim -- which needs to know what the session already holds
-    (`_trim_for`), or an explicit cursor (`_translate_view`)."""
+    (`_trim_for`), or an explicit cursor (`_translate_view`) -- and the
+    `summary`, which needs the session's board (`_reply`)."""
     raw = _translate_trades(raw)
     raw["legal_actions"] = [_translate_action(a) for a in raw.get("legal_actions") or []]
     raw["your_move"], raw["waiting_on"] = _your_move(raw)
@@ -486,9 +679,10 @@ def _trim_for(session: Session, view: dict, log_after: int | None = None, full_l
 
 
 def _reply(session: Session, raw: dict, log_after: int | None = None, full_log: bool = False) -> dict:
-    """A raw wire view as the tool reply the LLM reads: translated, then
-    trimmed against this session's cursor (`_trim_for`)."""
-    return _trim_for(session, _translate(raw), log_after, full_log)
+    """A raw wire view as the tool reply the LLM reads: translated, given
+    its `summary` (`_summarize`), then trimmed against this session's cursor
+    (`_trim_for`)."""
+    return _trim_for(session, _summarize(_translate(raw), session.board), log_after, full_log)
 
 
 def _get_table(tables: Tables, session: Session, log_after: int | None = None, full_log: bool = False) -> dict:
@@ -747,7 +941,15 @@ _TOOLS: dict[str, tuple] = {
     ),
     "state": (
         _state,
-        "The full current game state. Read `your_move` first: `act`, "
+        "The full current game state. Read `your_move` first, then `summary`: "
+        "`afford` (per build: `ok`, `missing` resources, `legal` right now), "
+        "`race` (your points and `to_win`, the public leader, and for each "
+        "award your count, the holder's, and the `need` that takes it), and "
+        "when there is a placement or robber move to make, `spots` (each legal "
+        "settlement/city vertex with its pips, resources and port, best first, "
+        "with the `index` to act() on) and `robber` (each hex the robber may go "
+        "to with its pips, whose buildings it `hits`, and an `index` per "
+        "victim). `your_move` is `act`, "
         "`discard`, `answer_trade` or `choose_trade` names the tool the table "
         "wants from you now; `wait` means nothing does, and `waiting_on` lists "
         "the seats it is waiting for; `game_over` is the end. Then every seat's "

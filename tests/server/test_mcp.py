@@ -561,6 +561,134 @@ def test_resume_game_reclaims_the_seat_by_code_and_model(live_server):
     assert len(result["log"]) == result["log_total"] >= 1
 
 
+# --- summary: derived tactical facts, computed once server-side -----------
+#
+# The joins an LLM otherwise redoes by hand every turn (see
+# `mcptools._summarize`): costs against the hand, legal spots against the
+# board's pips, robber targets against who is built where, award distances.
+
+
+def test_afford_reports_ok_missing_and_whether_it_is_legal_now():
+    hand = {"Wood": 1, "Brick": 1, "Sheep": 1, "Wheat": 0, "Ore": 3}
+    legal = [{"type": "BUILD_ROAD", "a": 4, "b": 0}, {"type": "END_TURN", "a": 0, "b": 0}]
+    afford = mcptools._afford(hand, legal)
+    assert afford["road"] == {"ok": True, "legal": True}
+    assert afford["settlement"] == {"ok": False, "legal": False, "missing": {"Wheat": 1}}
+    assert afford["city"] == {"ok": False, "legal": False, "missing": {"Wheat": 2}}
+    assert afford["dev_card"] == {"ok": False, "legal": False, "missing": {"Wheat": 1}}
+
+
+TINY_BOARD = {
+    "hexes": [{"id": 3, "resource": "Ore", "pips": 5, "vertex_ids": [0, 1, 2, 3, 4, 5]}],
+    "vertices": [
+        {"id": 0, "pips": 10, "resources": ["Ore", "Wheat"]},
+        {"id": 1, "pips": 4, "resources": ["Ore"]},
+        {"id": 2, "pips": 7, "resources": ["Ore", "Sheep"]},
+    ],
+    "ports": [{"vertices": [1, 9], "resource": None, "ratio": 3}, {"vertices": [2], "resource": "Sheep", "ratio": 2}],
+}
+
+
+def test_spots_joins_legal_placements_to_pips_and_ports_best_first():
+    legal = [
+        {"type": "BUILD_SETTLEMENT", "a": 1, "b": 0},
+        {"type": "END_TURN", "a": 0, "b": 0},
+        {"type": "BUILD_SETTLEMENT", "a": 0, "b": 0},
+        {"type": "BUILD_CITY", "a": 2, "b": 0},
+    ]
+    spots, omitted = mcptools._spots(legal, TINY_BOARD)
+    assert omitted == 0
+    assert [s["vertex"] for s in spots] == [0, 2, 1]
+    assert spots[0] == {"index": 2, "type": "BUILD_SETTLEMENT", "vertex": 0, "pips": 10, "resources": ["Ore", "Wheat"]}
+    assert spots[1]["port"] == "Sheep 2:1" and spots[1]["type"] == "BUILD_CITY"
+    assert spots[2]["port"] == "3:1"
+
+
+def test_spots_caps_the_list_and_counts_what_it_left_off():
+    board = {"vertices": [{"id": v, "pips": v, "resources": []} for v in range(40)], "ports": []}
+    legal = [{"type": "SETUP_SETTLEMENT", "a": v, "b": 0} for v in range(40)]
+    spots, omitted = mcptools._spots(legal, board)
+    assert len(spots) == mcptools._SPOTS_CAP
+    assert omitted == 40 - mcptools._SPOTS_CAP
+    assert spots[0]["vertex"] == 39  # the best, not the first
+
+
+def test_robber_names_whose_buildings_each_hex_hits_and_an_index_per_victim():
+    view = {
+        "players": [{"seat": s} for s in range(4)],
+        "vertex_owner": [1, -1, 2, 2, -1, -1],
+        "vertex_building": [2, 0, 1, 1, 0, 0],
+    }
+    legal = [
+        {"type": "MOVE_ROBBER", "a": 3, "b": 1},
+        {"type": "MOVE_ROBBER", "a": 3, "b": 2},
+        {"type": "MOVE_ROBBER", "a": 7, "b": 4},  # a hex nobody is on: victim slot 4 = nobody
+    ]
+    robber = mcptools._robber(legal, view, TINY_BOARD)
+    assert [r["hex"] for r in robber] == [3, 7]  # 5 pips before an unknown hex's 0
+    assert robber[0]["resource"] == "Ore" and robber[0]["pips"] == 5
+    assert robber[0]["hits"] == [
+        {"seat": 1, "settlements": 0, "cities": 1},
+        {"seat": 2, "settlements": 2, "cities": 0},
+    ]
+    assert robber[0]["options"] == [{"index": 0, "victim": 1}, {"index": 1, "victim": 2}]
+    assert robber[1]["hits"] == [] and robber[1]["options"] == [{"index": 2, "victim": None}]
+
+
+def test_race_measures_the_win_the_leader_and_both_awards():
+    view = {
+        "winning_points": 10,
+        "players": [
+            {"seat": 0, "victory_points": 6, "road_length": 4, "knights_played": 1, "longest_road": False, "largest_army": False},
+            {"seat": 1, "victory_points": 7, "road_length": 6, "knights_played": 0, "longest_road": True, "largest_army": False},
+            {"seat": 2, "victory_points": 3, "road_length": 2, "knights_played": 3, "longest_road": False, "largest_army": True},
+        ],
+    }
+    race = mcptools._race(view, view["players"][0])
+    assert race["points"] == 6 and race["to_win"] == 4 and race["winning_points"] == 10
+    assert race["leader"] == {"seat": 1, "points": 7}
+    assert race["longest_road"] == {"yours": 4, "held": False, "holder": 1, "holder_has": 6, "need": 7}
+    assert race["largest_army"] == {"yours": 1, "held": False, "holder": 2, "holder_has": 3, "need": 4}
+
+
+def test_race_when_you_hold_an_award_and_nobody_holds_the_other():
+    view = {
+        "players": [
+            {"seat": 0, "victory_points": 4, "road_length": 5, "knights_played": 1, "longest_road": True, "largest_army": False},
+            {"seat": 1, "victory_points": 2, "road_length": 3, "knights_played": 2, "longest_road": False, "largest_army": False},
+        ],
+    }
+    race = mcptools._race(view, view["players"][0])
+    assert race["winning_points"] == 10  # the standard rule when the view does not say
+    assert race["longest_road"] == {"yours": 5, "held": True, "holder": 0, "holder_has": 5}
+    assert race["largest_army"] == {"yours": 1, "held": False, "need": 3}
+
+
+def test_summarize_skips_a_view_that_does_not_reveal_a_hand():
+    spectator = {"seat": None, "players": [{"seat": 0}], "legal_actions": []}
+    assert "summary" not in mcptools._summarize(spectator, TINY_BOARD)
+
+
+def test_new_game_summary_ranks_the_setup_spots_it_offers(live_server):
+    _, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    summary = data["summary"]
+    assert summary["race"]["to_win"] == 10 and summary["race"]["winning_points"] == 10
+    assert summary["afford"]["road"] == {"ok": False, "legal": False, "missing": {"Wood": 1, "Brick": 1}}
+    spots = summary["spots"]
+    assert len(spots) == mcptools._SPOTS_CAP
+    assert summary["spots_omitted"] + len(spots) == len(data["legal_actions"])
+    pips = [s["pips"] for s in spots]
+    assert pips == sorted(pips, reverse=True) and pips[0] > 0
+    for spot in spots:
+        chosen = data["legal_actions"][spot["index"]]
+        assert chosen["type"] == "SETUP_SETTLEMENT" and chosen["a"] == spot["vertex"]
+    board = client.call_tool("board")
+    by_id = {v["id"]: v for v in board["vertices"]}
+    assert all(by_id[s["vertex"]]["pips"] == s["pips"] for s in spots)
+
+
 # --- your_move: which tool the table wants from this seat ---------------
 #
 # One field in place of reading `legal_actions`, `pending`, `trade_round`,

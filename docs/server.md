@@ -163,6 +163,18 @@ choice that does not match the exact open offer. The HTTP API's whole-table
 `version` is not exposed as an MCP argument, since it changes whenever any
 seat does anything, including other seats answering the same trade round.
 
+Every state-returning tool also carries `summary`, derived server-side from
+the view and the fixed board: `afford` (per build, whether the hand covers
+it, what it is short, and whether `legal_actions` offers it now), `race`
+(points and distance to the win, the leading opponent by public points, and
+for each award the caller's count, the holder's, and the count that would
+take it), and, only when such a move is legal, `spots` (each settlement or
+city placement with the vertex's pips, resources and port, best first,
+capped with `spots_omitted`) and `robber` (each hex the robber may move to,
+its pips, whose buildings it hits, and an `act` index per victim). Every
+entry names the `legal_actions` index it corresponds to. The state also
+carries `winning_points`, the rule the game is played to.
+
 The transcript `log` is sent incrementally. Each MCP session remembers how
 many lines it has been sent, and every state-returning reply carries only
 the lines added since that session's previous reply plus the one trailing

@@ -34,6 +34,23 @@ so the number stands.
 
 ### Added
 
+- **`summary` on every MCP reply that carries state: the derived facts a
+  turn turns on, computed once server-side.** `board()` already joined hex
+  tokens into per-vertex pips because that arithmetic is what an LLM does
+  unreliably at the board's size; the first LLM game through these tools
+  showed it redoing the rest of that work by hand every turn. `summary`
+  now carries `afford` (per build: whether the hand covers it, what it is
+  short, whether `legal_actions` offers it right now), `race` (points,
+  `to_win`, the public leader, and for longest road and largest army your
+  count, the holder's and the `need` that would take it), and -- only when
+  such a move is legal -- `spots` (each settlement/city placement joined to
+  its vertex's pips, resources and port, best first, capped at fifteen with
+  `spots_omitted`) and `robber` (each hex the robber may go to, its pips,
+  whose buildings it hits, and an `act` index per victim). Every entry
+  names the `legal_actions` index to play. The state view also gains
+  `winning_points`, the rule the game is actually played to, so `to_win`
+  is right for a 15-point variant too.
+
 - **`your_move` and `waiting_on` on every MCP reply that carries state.**
   `your_move` is `act`, `discard`, `answer_trade` or `choose_trade` -- the
   tool the table wants from this seat now -- or `wait`, with `waiting_on`

@@ -528,3 +528,35 @@ def test_a_candidate_temperature_travels_with_the_entrant():
             Entrant("bad", kind="heximax", depth=2, width=6, stance="relative", temperature=1.0),
             board, random.Random(0),
         )
+
+
+@pytest.mark.parametrize('stance,temperature', [('win', 1.7), ('relative', None)])
+def test_split_trade_values_match_the_gate_and_preserve_move_rng(stance, temperature):
+    game = after_setup(26)
+    for seat in range(4):
+        set_known_hand(game, seat, [2, 2, 2, 2, 2])
+    common = dict(stance=stance, temperature=temperature, trade_floor=0.0)
+    split = a_bot(game, 81, weights=NO_TRADE_WEIGHTS, expansion_value=.25,
+                  trade_weights=TRADING_WEIGHTS, **common)
+    move = a_bot(game, 81, weights=NO_TRADE_WEIGHTS, expansion_value=.25, **common)
+    candidates = [one_for_one(0, 4), one_for_one(1, 3)]
+    partners = [1, 2]
+    move_rng = split.rng.getstate()
+    for cards in ([2, 2, 2, 2, 2], [3, 1, 0, 2, 4]):
+        # Reuse the gate across real state/ledger changes: its caches must
+        # produce the same answers as a fresh evaluator on the current view.
+        set_known_hand(game, 0, cards)
+        gate = a_bot(game, 0, weights=TRADING_WEIGHTS, **common)
+        view = game.state(0)
+        expected = gate.gains_many(view, candidates, partners)
+        assert split.gains_many(view, candidates, partners) == expected
+        assert split.accepts(view, candidates[0], partners[0]) == (expected[0] > 0)
+        offers = list(zip(partners, candidates))
+        assert split.estimate_many(view, offers) == gate.estimate_many(view, offers)
+    assert split.rng.getstate() == move_rng
+    assert split.choose(game) == move.choose(game)
+    assert split.rng.getstate() == move.rng.getstate()
+    assert split.trade_floor == 0.0
+    split.max_trades = 0
+    assert split.gains_many(game.state(0), candidates, partners) == [-1.0, -1.0]
+    assert split.estimate_many(game.state(0), offers) == [-1.0, -1.0]

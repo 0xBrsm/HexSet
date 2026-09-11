@@ -5,8 +5,8 @@ Iterative deepening retains the last completed result when the leaf budget
 is exhausted. Each decision node maximizes its mover's objective; chance
 nodes average dice and hidden draws. Opponent actions are expanded from
 sampled beliefs across k determinizations. Setup and discard decisions use
-specialized policies. Trading uses the same evaluator through gains_many,
-accepts and estimate_many.
+specialized policies. Trading uses the move evaluator by default; an optional
+trade evaluator prices gains_many, accepts and estimate_many independently.
 """
 
 from __future__ import annotations
@@ -197,6 +197,11 @@ class Heximax:
     # has to carry its own for a duel against the incumbent to mean anything.
     temperature: float | None = None
 
+    # A separate evaluator decouples long-horizon move priorities from the
+    # marginal exchange gate. None preserves the original shared evaluator.
+    trade_evaluator: HonestEvaluator | None = None
+    _trade_policy: Heximax | None = field(default=None, init=False, repr=False)
+
     def __post_init__(self) -> None:
         if self.stance not in STANCES:
             raise ValueError(f"unknown stance: {self.stance}")
@@ -211,6 +216,17 @@ class Heximax:
         self._spent = 0
         self._budget = self.max_nodes
         self.depth_reached = 0
+        if self.trade_evaluator is not None:
+            self._trade_policy = Heximax(
+                self.trade_evaluator, stance=self.stance, temperature=self.temperature,
+                rng=random.Random(0),
+            )
+
+    def _clear_evaluation_caches(self) -> None:
+        self.evaluator._walk_cache.clear()
+        self.evaluator._expansion_cache.clear()
+        self.evaluator._belief_cache.clear()
+        self.evaluator._evaluate_cache.clear()
 
     @property
     def expansion_value(self) -> float:
@@ -236,10 +252,7 @@ class Heximax:
         self._spent = 0
         self._budget = self.max_nodes
         self.depth_reached = 0
-        self.evaluator._walk_cache.clear()
-        self.evaluator._expansion_cache.clear()
-        self.evaluator._belief_cache.clear()
-        self.evaluator._evaluate_cache.clear()
+        self._clear_evaluation_caches()
 
         if game.phase is Phase.SETUP_SETTLEMENT and self.placement:
             options = options_for(game)
@@ -391,6 +404,11 @@ class Heximax:
         """
         if self.max_trades == 0:
             return [-1.0] * len(received)
+        if self._trade_policy is not None:
+            # This policy never searches: bound caches to one live batch so
+            # mutable view/ledger identities cannot retain earlier positions.
+            self._trade_policy._clear_evaluation_caches()
+            return self._trade_policy.gains_many(view, received, counterparties)
         seat = view.perspective
         if self.evaluator.exact_progress_samples:
             return [
@@ -428,6 +446,9 @@ class Heximax:
         """
         if self.max_trades == 0:
             return [-1.0] * len(candidates)
+        if self._trade_policy is not None:
+            self._trade_policy._clear_evaluation_caches()
+            return self._trade_policy.estimate_many(view, candidates)
         seat = view.perspective
         return [
             self._delta(view, seat, them, tuple(-n for n in bundle), seat, self._rank)
@@ -886,6 +907,8 @@ def heximax(
     max_nodes: int = DEFAULT_MAX_NODES, k: int = 1, stance: str = "win",
     placement: bool = True, exact_progress_samples: int = 0, weights: Weights | None = None,
     temperature: float | None = None, expansion_value: float | None = None,
+    trade_weights: Weights | None = None, trade_expansion_value: float = 0.0,
+    trade_floor: float = HEXIMAX_TRADE_FLOOR,
 ) -> Heximax:
     """The two shipped configurations, by `mode`.
 
@@ -898,6 +921,11 @@ def heximax(
     None uses the mode default: 0.25 VP for `notrade`, zero for `honest`.
     Pass zero explicitly to disable it when replaying an older configuration.
     Values below one VP keep settling worth more than the entire option bonus.
+
+    `trade_weights` optionally gives exchanges their own evaluator, with
+    `trade_expansion_value` (zero by default). Otherwise exchanges share the
+    move evaluator exactly as before. Both use the same stance and temperature.
+    `trade_floor` sets the minimum gain required by the exchange mechanism.
 
     `weights` overrides the mode's own profile (`TRADING_WEIGHTS` or
     `NO_TRADE_WEIGHTS`) with the given vector, and `temperature` the `win`
@@ -917,8 +945,14 @@ def heximax(
         expansion_value = 0.25 if mode == "notrade" else 0.0
     evaluator = HonestEvaluator(board, weights, exact_progress_samples=exact_progress_samples,
                                 expansion_value=expansion_value)
+    trade_evaluator = None if trade_weights is None else HonestEvaluator(
+        board, trade_weights, exact_progress_samples=exact_progress_samples,
+        expansion_value=trade_expansion_value,
+    )
     return Heximax(
         evaluator,
+        trade_evaluator=trade_evaluator,
+        trade_floor=trade_floor,
         depth=depth,
         width=width,
         max_nodes=max_nodes,

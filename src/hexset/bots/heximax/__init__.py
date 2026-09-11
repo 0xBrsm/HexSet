@@ -8,7 +8,9 @@ one determinization, depth two and a bounded leaf budget.
 
 Use ``heximax(board, ...)`` to construct a bot. ``mode="honest"`` enables
 trading with TRADING_WEIGHTS; ``mode="notrade"`` uses NO_TRADE_WEIGHTS and
-declines trades. ``weights=`` overrides the selected profile.
+declines trades. ``weights=`` overrides the move profile. Optional
+``trade_weights=`` prices exchanges separately; ``trade_floor=`` sets their
+minimum gain. By default moves and exchanges share the selected evaluator.
 
 Importing this package registers the heximax and heximax-notrade arena presets.
 Shared evaluation terms live in hexset.bots.evaluate; search objectives live

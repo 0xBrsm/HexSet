@@ -1,0 +1,13 @@
+{
+  "complete": true,
+  "games": 720,
+  "matched_prior_traces": 720,
+  "fields": [
+    "seed",
+    "winner",
+    "points",
+    "turns",
+    "actions",
+    "action_sha256"
+  ]
+}

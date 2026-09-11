@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import random
 from typing import Callable
+from weakref import WeakValueDictionary
 
 from hexset.actions import Action, legal_actions
 from hexset.arena import Entrant, register_entrant_kind, register_preset
@@ -40,7 +41,21 @@ from catanatron.players.minimax import AlphaBetaPlayer
 
 from .actions import to_catanatron
 from .board import catanatron_map, translate_board
-from .state import seating, to_catanatron as state_to_catanatron
+from .state import BoardMirrorCache, seating, to_catanatron as state_to_catanatron
+
+
+class _TableMirror:
+    def __init__(self, board: Board, num_players: int) -> None:
+        self.board = board
+        self.mapping = translate_board(catanatron_map(board))
+        self.seats = seating(tuple(list(Color)[:num_players]))
+        self.cache = BoardMirrorCache(self.mapping, self.seats)
+
+
+# Bots retain their table; the registry does not retain finished games. Key by
+# identity because Board contains unhashable topology dictionaries. The live
+# mirror holds the board, preventing its id from being recycled underneath us.
+_TABLE_MIRRORS: WeakValueDictionary[tuple[int, int], _TableMirror] = WeakValueDictionary()
 
 
 def alpha_beta(depth: int) -> Callable[[Color], Player]:
@@ -61,14 +76,24 @@ class CatanatronBot:
         self._mapping = None
         self._seats = None
         self._players: dict[Color, Player] = {}
+        self._table = None
 
     def choose(self, game: Game) -> Action:
         # true state: `to_catanatron` mirrors the whole table, which is what a
         # catanatron player reads; the board alone is public either way.
         state = game.state(0, hidden=False)
-        if self._mapping is None:
-            self._mapping = translate_board(catanatron_map(state.board))
-            self._seats = seating(tuple(list(Color)[: state.num_players]))
+        key = (id(state.board), state.num_players)
+        if (
+            self._table is None or self._table.board is not state.board
+            or len(self._table.seats.color_of) != state.num_players
+        ):
+            table = _TABLE_MIRRORS.get(key)
+            if table is None:
+                table = _TableMirror(state.board, state.num_players)
+                _TABLE_MIRRORS[key] = table
+            self._table = table
+            self._mapping, self._seats = table.mapping, table.seats
+            self._players.clear()
 
         # One catanatron `Player` per colour, kept across decisions: a
         # `Player` is built with the seat it plays, which is not known here
@@ -76,7 +101,9 @@ class CatanatronBot:
         color = self._seats.color_of[to_move(game)]
         if color not in self._players:
             self._players[color] = self.player(color)
-        mirror = state_to_catanatron(game, self._mapping, self._seats)
+        mirror = state_to_catanatron(
+            game, self._mapping, self._seats, board_cache=self._table.cache,
+        )
 
         offered = self._offer(game, mirror)
         chosen = self._players[color].decide(mirror, mirror.playable_actions)

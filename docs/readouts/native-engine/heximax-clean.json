@@ -1,0 +1,67 @@
+{
+  "catanatron_modules_loaded": [],
+  "decision_ms": {
+    "mean": 3.5566268771643115,
+    "p50": 0.7391110993921757,
+    "p95": 16.2894384120591
+  },
+  "engine": "hexset",
+  "games": [
+    {
+      "action_sha256": "d0c62a0458e4f98513049e1e128085a2f829aac8d509c3097e204cdf25f3cc02",
+      "cpu_seconds": 1.661950004,
+      "decision_seconds": 1.5026105542201549,
+      "decisions": 400,
+      "index": 0,
+      "points": [
+        8,
+        5,
+        10,
+        7
+      ],
+      "seconds": 1.6622344960924238,
+      "turns": 106,
+      "winner": 2
+    },
+    {
+      "action_sha256": "75dc9dd5f9b2e53a2c1b35c489fe0fbde65b76812e82ddc62d1b636139af48ec",
+      "cpu_seconds": 0.6961611479999998,
+      "decision_seconds": 0.6263219036627561,
+      "decisions": 191,
+      "index": 1,
+      "points": [
+        10,
+        4,
+        2,
+        4
+      ],
+      "seconds": 0.6963412771001458,
+      "turns": 52,
+      "winner": 0
+    },
+    {
+      "action_sha256": "a1fdaae8c3078afc74ce09f49ffda4c93ce688cffb04dd9e5fe4db7e13e1b53d",
+      "cpu_seconds": 0.9955880440000002,
+      "decision_seconds": 0.9155401489697397,
+      "decisions": 265,
+      "index": 2,
+      "points": [
+        3,
+        5,
+        7,
+        10
+      ],
+      "seconds": 0.9998439617920667,
+      "turns": 71,
+      "winner": 3
+    }
+  ],
+  "harness_sha256": "f216109e6628eef80af12e77ce68860da854ac4905e1a44f3b0662905ea52e5e",
+  "preset": "heximax",
+  "profiled": false,
+  "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+  "pythonhashseed": "0",
+  "seed": 660000000,
+  "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+  "version": "0.48.2"
+}

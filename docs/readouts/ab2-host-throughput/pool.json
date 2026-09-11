@@ -1,0 +1,4103 @@
+{
+  "complete": true,
+  "rows": [
+    {
+      "host": "catanatron",
+      "mode": "fast",
+      "workers": 30,
+      "seconds": 64.90041361306794,
+      "games_per_second": 1.8489866754229367,
+      "games": [
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200000,
+          "seconds": 15.547582170926034,
+          "cpu_seconds": 15.371163992,
+          "winner": 1,
+          "points": [
+            9,
+            10,
+            7,
+            9
+          ],
+          "turns": 103,
+          "actions": 408,
+          "action_sha256": "3466ec8db463c78bb865fae51834c4a3909ccbb11f56a6c5e67ccc077fbdbc4e"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200001,
+          "seconds": 20.362892927834764,
+          "cpu_seconds": 20.223894697000002,
+          "winner": 2,
+          "points": [
+            7,
+            5,
+            10,
+            7
+          ],
+          "turns": 96,
+          "actions": 363,
+          "action_sha256": "46692492ec96bfb83b05914af98348fd17070781b80e3a5ef607e2ea9cda865f"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200002,
+          "seconds": 29.56154625909403,
+          "cpu_seconds": 29.124284666,
+          "winner": 1,
+          "points": [
+            8,
+            10,
+            9,
+            7
+          ],
+          "turns": 119,
+          "actions": 439,
+          "action_sha256": "557dbd27fff865a5d373adac6aacbeed2115b2c48df81a6e195e2fbe5a466da9"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200003,
+          "seconds": 12.14833704312332,
+          "cpu_seconds": 12.052220324999999,
+          "winner": 0,
+          "points": [
+            10,
+            5,
+            5,
+            5
+          ],
+          "turns": 86,
+          "actions": 287,
+          "action_sha256": "cc67b9ac206338aea011e95f163869e9e4f271733afafd504bd1519d4bc0d29f"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200004,
+          "seconds": 16.024723132140934,
+          "cpu_seconds": 15.775453669,
+          "winner": 2,
+          "points": [
+            8,
+            4,
+            10,
+            5
+          ],
+          "turns": 96,
+          "actions": 333,
+          "action_sha256": "c9f46effbddb6ec3d38ec7ec8bee5e412b6cf2635d392010bbc12631fddd6036"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200005,
+          "seconds": 14.417649690061808,
+          "cpu_seconds": 14.334923111,
+          "winner": 0,
+          "points": [
+            10,
+            5,
+            6,
+            3
+          ],
+          "turns": 90,
+          "actions": 321,
+          "action_sha256": "56f209d5fe09f834a427fafc4388d773d22d867db9d583dda4c69e4289b0662f"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200006,
+          "seconds": 9.264232930028811,
+          "cpu_seconds": 9.144499431,
+          "winner": 3,
+          "points": [
+            6,
+            5,
+            6,
+            10
+          ],
+          "turns": 73,
+          "actions": 262,
+          "action_sha256": "f07434e179b4249a9013045ad341c945bf737908a5ccd03d4abcedf72311bbbf"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200007,
+          "seconds": 6.759882116923109,
+          "cpu_seconds": 6.6800978660000006,
+          "winner": 0,
+          "points": [
+            10,
+            3,
+            4,
+            4
+          ],
+          "turns": 58,
+          "actions": 204,
+          "action_sha256": "0b0a256ef0394285cc487e2de4cdda49bdcae134e68121be4eb32ac0fe615b6f"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200008,
+          "seconds": 8.64405315904878,
+          "cpu_seconds": 8.546450203,
+          "winner": 0,
+          "points": [
+            10,
+            4,
+            6,
+            3
+          ],
+          "turns": 66,
+          "actions": 239,
+          "action_sha256": "539e5f7d9226acb0b59e7c2052a684f98e23724bfdb10d24b68dcb64f7080292"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200009,
+          "seconds": 15.826714653987437,
+          "cpu_seconds": 15.598889592,
+          "winner": 3,
+          "points": [
+            7,
+            4,
+            4,
+            10
+          ],
+          "turns": 97,
+          "actions": 332,
+          "action_sha256": "759af1a85e9ac11994caf42d037d1e78517338f6ba2924b9cc7abda3bc008bf0"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200010,
+          "seconds": 6.747057280037552,
+          "cpu_seconds": 6.690873003,
+          "winner": 0,
+          "points": [
+            10,
+            4,
+            4,
+            4
+          ],
+          "turns": 66,
+          "actions": 222,
+          "action_sha256": "8966b2cc0c74ed0e819650ac7b388eef1150226a2b5b5420ae9ae02b18c06cec"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200011,
+          "seconds": 15.549575320910662,
+          "cpu_seconds": 15.473816415,
+          "winner": 0,
+          "points": [
+            10,
+            3,
+            4,
+            5
+          ],
+          "turns": 106,
+          "actions": 360,
+          "action_sha256": "82d66945d639ad20624e58a6a3a652b0b9a9fb901ef6ca30fea611c0ecfe0667"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200012,
+          "seconds": 21.33850599406287,
+          "cpu_seconds": 20.979789778,
+          "winner": 1,
+          "points": [
+            7,
+            10,
+            8,
+            4
+          ],
+          "turns": 87,
+          "actions": 309,
+          "action_sha256": "c617e342e4151fed5da93f22a3b336be516b79a7d96822937334b5fac059e944"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200013,
+          "seconds": 27.379171640146524,
+          "cpu_seconds": 26.872568084,
+          "winner": 2,
+          "points": [
+            5,
+            9,
+            10,
+            7
+          ],
+          "turns": 108,
+          "actions": 401,
+          "action_sha256": "c0a708dc6205347eb40ef7271d3cd2170d35d76e133d9d08232cb925396b03b1"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200014,
+          "seconds": 13.508638412924483,
+          "cpu_seconds": 13.367873931,
+          "winner": 0,
+          "points": [
+            10,
+            4,
+            4,
+            3
+          ],
+          "turns": 82,
+          "actions": 291,
+          "action_sha256": "4a0f42a7c02f6a854bb9b3476c89eaed37cc3f6b8a28c5460a29d5ce73c5b703"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200015,
+          "seconds": 7.55808543600142,
+          "cpu_seconds": 7.478394945000001,
+          "winner": 1,
+          "points": [
+            5,
+            10,
+            5,
+            4
+          ],
+          "turns": 79,
+          "actions": 251,
+          "action_sha256": "ab5033e17647e090970f2e2a233a2ca1377e28e537cfd71b1366e9b7b5ca7d7f"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200016,
+          "seconds": 15.342470780946314,
+          "cpu_seconds": 15.243511872,
+          "winner": 3,
+          "points": [
+            6,
+            7,
+            7,
+            10
+          ],
+          "turns": 97,
+          "actions": 345,
+          "action_sha256": "72c767a859a9c6b9a0cc8349295e601edbd16147786f78d8bc2991f9ea974abe"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200017,
+          "seconds": 11.315387404989451,
+          "cpu_seconds": 11.294623283999998,
+          "winner": 0,
+          "points": [
+            10,
+            2,
+            6,
+            7
+          ],
+          "turns": 70,
+          "actions": 242,
+          "action_sha256": "e14a4342331ef99949a55bf9cb0050bea29de0ad82d1e479d537219ebd44592c"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200018,
+          "seconds": 4.7314636709634215,
+          "cpu_seconds": 4.715623406,
+          "winner": 3,
+          "points": [
+            2,
+            5,
+            6,
+            10
+          ],
+          "turns": 61,
+          "actions": 202,
+          "action_sha256": "0f3296c7971b411cf8e88adaa9e6951720ed3eaa973a20d88fb35213c5c6688b"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200019,
+          "seconds": 7.982035075081512,
+          "cpu_seconds": 7.935040259,
+          "winner": 3,
+          "points": [
+            6,
+            7,
+            4,
+            10
+          ],
+          "turns": 65,
+          "actions": 241,
+          "action_sha256": "32a2cdb9447c2fee4435df346c097e93020b9faa7f0cca9ad33048fbda1a25a7"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200020,
+          "seconds": 19.555714588146657,
+          "cpu_seconds": 19.318970098,
+          "winner": 1,
+          "points": [
+            8,
+            10,
+            6,
+            3
+          ],
+          "turns": 91,
+          "actions": 325,
+          "action_sha256": "e0ce66303ae1da95e48420bb91638ba5b396eafe28b2bcca7aa3ffa01c9ac2e9"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200021,
+          "seconds": 11.303962915902957,
+          "cpu_seconds": 11.261631549,
+          "winner": 0,
+          "points": [
+            10,
+            8,
+            5,
+            7
+          ],
+          "turns": 70,
+          "actions": 237,
+          "action_sha256": "4ecb0d98c86cb4a9e9b5b094a91916d37d414c278b2f26c83e5f51386d8ffbec"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200022,
+          "seconds": 19.292887730989605,
+          "cpu_seconds": 19.213721816,
+          "winner": 2,
+          "points": [
+            8,
+            7,
+            10,
+            6
+          ],
+          "turns": 100,
+          "actions": 348,
+          "action_sha256": "e2cadcd8879c2f740844d4df77a0b6ef835736be8a062f7bb7d25ffa2c615eeb"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200023,
+          "seconds": 14.887804460944608,
+          "cpu_seconds": 14.763634298000001,
+          "winner": 0,
+          "points": [
+            10,
+            8,
+            4,
+            9
+          ],
+          "turns": 102,
+          "actions": 370,
+          "action_sha256": "8b9261e89879627d23a4fdb5ddf13cf2278ab4f91d5c89597d6063d00fc504cf"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200024,
+          "seconds": 16.450235373107716,
+          "cpu_seconds": 16.360114351,
+          "winner": 2,
+          "points": [
+            8,
+            5,
+            10,
+            4
+          ],
+          "turns": 100,
+          "actions": 356,
+          "action_sha256": "0336cdbfcfdba34263574d65b51b908c02d272717d3ea9f7b5affeb82c9d4736"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200025,
+          "seconds": 12.433036397909746,
+          "cpu_seconds": 12.212322719000001,
+          "winner": 0,
+          "points": [
+            10,
+            3,
+            9,
+            6
+          ],
+          "turns": 94,
+          "actions": 325,
+          "action_sha256": "7e9c569c5f69e08bd5216182ce93ce470ebdb7537fd4688dc422dbbd62bdfc9f"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200026,
+          "seconds": 17.219523558858782,
+          "cpu_seconds": 16.933819104,
+          "winner": 2,
+          "points": [
+            6,
+            5,
+            10,
+            7
+          ],
+          "turns": 100,
+          "actions": 346,
+          "action_sha256": "33af93dd77434765994533aee0a78224834af53f0f7379b9cabda46dcdf9828e"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200027,
+          "seconds": 13.541697195032611,
+          "cpu_seconds": 13.508575228,
+          "winner": 2,
+          "points": [
+            5,
+            5,
+            10,
+            4
+          ],
+          "turns": 80,
+          "actions": 302,
+          "action_sha256": "102f8941a40e76e9247e5b406f29c8ec7163b266cad566ae4a5831dca788e37a"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200028,
+          "seconds": 7.554217874072492,
+          "cpu_seconds": 7.497242523,
+          "winner": 0,
+          "points": [
+            10,
+            3,
+            5,
+            5
+          ],
+          "turns": 66,
+          "actions": 238,
+          "action_sha256": "1f7060cc6871d9945a5a1062fc0d8e66cd831d448442b3cbff141263f73e979d"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200029,
+          "seconds": 13.776359935989603,
+          "cpu_seconds": 13.504222764,
+          "winner": 3,
+          "points": [
+            5,
+            7,
+            8,
+            10
+          ],
+          "turns": 85,
+          "actions": 341,
+          "action_sha256": "ebba41945e1225399e067d4b9536ac2753880967d8c7977f322127727bc5e5a1"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200030,
+          "seconds": 8.864609543932602,
+          "cpu_seconds": 8.848721180000002,
+          "winner": 1,
+          "points": [
+            7,
+            10,
+            5,
+            6
+          ],
+          "turns": 67,
+          "actions": 237,
+          "action_sha256": "4df3acae35dee152166b00546a9ff616f5e8a5c565c6ef567013ba54bf9de1bd"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200031,
+          "seconds": 9.021592039847746,
+          "cpu_seconds": 8.910430816000002,
+          "winner": 1,
+          "points": [
+            7,
+            11,
+            5,
+            3
+          ],
+          "turns": 79,
+          "actions": 258,
+          "action_sha256": "c1c09c3c5f4c03813b67ae799384f6e45e4d4a91599a7234f536e9dbdbe7d670"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200032,
+          "seconds": 17.383360414067283,
+          "cpu_seconds": 17.277685742000003,
+          "winner": 2,
+          "points": [
+            9,
+            7,
+            10,
+            7
+          ],
+          "turns": 100,
+          "actions": 365,
+          "action_sha256": "bf30c925b7aebd34ab9d3be5a133bcc0df18110a4db16a2abacc37cfbf976c8a"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200033,
+          "seconds": 13.809601438930258,
+          "cpu_seconds": 13.550599213999998,
+          "winner": 3,
+          "points": [
+            5,
+            4,
+            5,
+            11
+          ],
+          "turns": 69,
+          "actions": 245,
+          "action_sha256": "1aef310296da176e5730d0eeb85ec3d7eabedc27d8859361a6fd45aad9f219ee"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200034,
+          "seconds": 16.230123763903975,
+          "cpu_seconds": 15.997436045,
+          "winner": 2,
+          "points": [
+            7,
+            3,
+            11,
+            8
+          ],
+          "turns": 80,
+          "actions": 284,
+          "action_sha256": "319dace5a3bb3925f1892292e0ecb1b471182f6652981a43705e78d021aca945"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200035,
+          "seconds": 28.638976727146655,
+          "cpu_seconds": 28.274964255,
+          "winner": 0,
+          "points": [
+            10,
+            5,
+            7,
+            9
+          ],
+          "turns": 102,
+          "actions": 408,
+          "action_sha256": "60a043685e5fed849d88f813421f26c11eabd4966a104e1b4280d3d224104251"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200036,
+          "seconds": 9.177957352017984,
+          "cpu_seconds": 9.066813928,
+          "winner": 0,
+          "points": [
+            10,
+            5,
+            7,
+            5
+          ],
+          "turns": 78,
+          "actions": 272,
+          "action_sha256": "27906eedf7b2ed5926691de7b26af3b64fe317f6c15e493f8e222a4ef59f47f2"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200037,
+          "seconds": 17.77914930204861,
+          "cpu_seconds": 17.650621234,
+          "winner": 0,
+          "points": [
+            10,
+            9,
+            9,
+            4
+          ],
+          "turns": 98,
+          "actions": 342,
+          "action_sha256": "dfa46385f8d4cb8eba3ce08693aafaa1ba348dbe7efec7534fc474e41e0d0825"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200038,
+          "seconds": 29.358731406042352,
+          "cpu_seconds": 29.014998415,
+          "winner": 1,
+          "points": [
+            9,
+            10,
+            9,
+            7
+          ],
+          "turns": 111,
+          "actions": 424,
+          "action_sha256": "6c4320dd4a589755609c53893e4c3e815340114c881c9c4c6e40ca8fee04aa31"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200039,
+          "seconds": 13.179661434842274,
+          "cpu_seconds": 13.104893707,
+          "winner": 2,
+          "points": [
+            8,
+            9,
+            10,
+            7
+          ],
+          "turns": 84,
+          "actions": 312,
+          "action_sha256": "440e7b5a04524e8af6e6b23e3bda1958c08d081fcb6f0e11c32ecbb599f094a4"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200040,
+          "seconds": 4.465871948981658,
+          "cpu_seconds": 4.4423972119999995,
+          "winner": 0,
+          "points": [
+            10,
+            3,
+            4,
+            4
+          ],
+          "turns": 58,
+          "actions": 188,
+          "action_sha256": "2db180ce179c55be842c8a099d65eb74373661efe3cf0e8c0dc1463e7d2cb39b"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200041,
+          "seconds": 10.220781282987446,
+          "cpu_seconds": 10.156741489,
+          "winner": 3,
+          "points": [
+            3,
+            4,
+            5,
+            10
+          ],
+          "turns": 77,
+          "actions": 266,
+          "action_sha256": "4aeef2a30a3d1132521c3c358298d68f9aa5a1038932647cd0486cbad0affb26"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200042,
+          "seconds": 9.556954903062433,
+          "cpu_seconds": 9.394198052,
+          "winner": 2,
+          "points": [
+            2,
+            5,
+            10,
+            3
+          ],
+          "turns": 60,
+          "actions": 204,
+          "action_sha256": "43250d5e77d0a95d99ee168556aa7cc4316f042d5dedb6668942a717faf69545"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200043,
+          "seconds": 20.83319733198732,
+          "cpu_seconds": 20.765415210999997,
+          "winner": 1,
+          "points": [
+            8,
+            10,
+            8,
+            9
+          ],
+          "turns": 91,
+          "actions": 369,
+          "action_sha256": "a258a73ff10756ff608a6b92e826ad3639340e7e427ccfad448971ff2724003d"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200044,
+          "seconds": 17.801018858794123,
+          "cpu_seconds": 17.631051723,
+          "winner": 1,
+          "points": [
+            4,
+            11,
+            4,
+            7
+          ],
+          "turns": 87,
+          "actions": 345,
+          "action_sha256": "3b58d1626b81b1c6b24bf11e4c1776a84427120639c4fce6d382784cafd5e67c"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200045,
+          "seconds": 14.598428433993831,
+          "cpu_seconds": 14.392244984,
+          "winner": 2,
+          "points": [
+            6,
+            4,
+            10,
+            8
+          ],
+          "turns": 88,
+          "actions": 333,
+          "action_sha256": "c162658b2de175522be0d1c6bb4c79142f3f89cc30c9083d77b00a68d9e018b6"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200046,
+          "seconds": 10.898174772970378,
+          "cpu_seconds": 10.720808756,
+          "winner": 0,
+          "points": [
+            10,
+            5,
+            4,
+            5
+          ],
+          "turns": 78,
+          "actions": 276,
+          "action_sha256": "026f78017a43670eac390e5e069a087613084b4efe32b92f2de660655bbe9797"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200047,
+          "seconds": 14.607663105009124,
+          "cpu_seconds": 14.486194841000001,
+          "winner": 3,
+          "points": [
+            9,
+            7,
+            5,
+            10
+          ],
+          "turns": 97,
+          "actions": 372,
+          "action_sha256": "8c725fb5e70656dbb13beb9bdc36b91d046c9e876bf5f0562f41ea1158392733"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200048,
+          "seconds": 20.81914076814428,
+          "cpu_seconds": 20.705203397,
+          "winner": 0,
+          "points": [
+            10,
+            5,
+            7,
+            5
+          ],
+          "turns": 98,
+          "actions": 345,
+          "action_sha256": "4467767bc407b52eb1695747989348d209dd3b1c46a7c340b5d9392b60278b84"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200049,
+          "seconds": 27.273055779980496,
+          "cpu_seconds": 27.004974030999996,
+          "winner": 1,
+          "points": [
+            5,
+            10,
+            7,
+            7
+          ],
+          "turns": 103,
+          "actions": 373,
+          "action_sha256": "4af89578f074c11cbd30c1cdf2566bf71b99b5bf12771a75f07856698feb58a8"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200050,
+          "seconds": 4.5205482200253755,
+          "cpu_seconds": 4.504538005999999,
+          "winner": 1,
+          "points": [
+            5,
+            10,
+            6,
+            7
+          ],
+          "turns": 55,
+          "actions": 194,
+          "action_sha256": "55c14ba3f2f93d2db081db81dcdd669d6b6cb71352d36911e95a83f38d377fc8"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200051,
+          "seconds": 8.989872411126271,
+          "cpu_seconds": 8.895428541000001,
+          "winner": 3,
+          "points": [
+            3,
+            8,
+            4,
+            10
+          ],
+          "turns": 73,
+          "actions": 248,
+          "action_sha256": "fcc98cf8a0015f874c3e028c4e1ece5c63ce1f6a8f03dcb301d40f55093a9cc0"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200052,
+          "seconds": 15.829681974835694,
+          "cpu_seconds": 15.598735675000002,
+          "winner": 0,
+          "points": [
+            10,
+            4,
+            7,
+            6
+          ],
+          "turns": 90,
+          "actions": 314,
+          "action_sha256": "9c41d6513c59e11873ae2006b5f3db48fc024bea88a6b1756d538ec1a9f06a1d"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200053,
+          "seconds": 14.324081982951611,
+          "cpu_seconds": 14.299084877000002,
+          "winner": 2,
+          "points": [
+            5,
+            5,
+            10,
+            2
+          ],
+          "turns": 68,
+          "actions": 233,
+          "action_sha256": "37f04644b444cbe8fa26354a6aa867ef3bb9958545b227409788372ebbcce7e8"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200054,
+          "seconds": 6.4423988331109285,
+          "cpu_seconds": 6.382236372000001,
+          "winner": 0,
+          "points": [
+            11,
+            6,
+            5,
+            5
+          ],
+          "turns": 62,
+          "actions": 210,
+          "action_sha256": "527fcb218cd99f6c1e76433b0a69587d3f593fda41aff19f9df2a25807479ba4"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200055,
+          "seconds": 12.359392889076844,
+          "cpu_seconds": 12.25457441,
+          "winner": 1,
+          "points": [
+            4,
+            10,
+            7,
+            6
+          ],
+          "turns": 91,
+          "actions": 325,
+          "action_sha256": "a308f3e9e30f91cca7d3efe22979ba23620447a8e7d9aa5b13a6ae546d9a0b95"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200056,
+          "seconds": 13.175969497067854,
+          "cpu_seconds": 13.101354118000003,
+          "winner": 3,
+          "points": [
+            4,
+            8,
+            6,
+            10
+          ],
+          "turns": 89,
+          "actions": 313,
+          "action_sha256": "e8fea5ef115ad4dfe94bca580d21617882b76b17bfc316cddce45422363edcff"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200057,
+          "seconds": 7.130849560024217,
+          "cpu_seconds": 6.997676258999999,
+          "winner": 3,
+          "points": [
+            5,
+            4,
+            8,
+            10
+          ],
+          "turns": 53,
+          "actions": 183,
+          "action_sha256": "5d04fbf13f4726636784342c25d7cd8b9dbad11ce00e246faf7dfad58a2f79ea"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200058,
+          "seconds": 8.783969538053498,
+          "cpu_seconds": 8.581302788000002,
+          "winner": 1,
+          "points": [
+            8,
+            10,
+            5,
+            2
+          ],
+          "turns": 59,
+          "actions": 201,
+          "action_sha256": "94c26dcfcfae980ff4194e251566d55f904d29e96ad16db7f1e4894e4ee0c001"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200059,
+          "seconds": 12.113864511949942,
+          "cpu_seconds": 11.972622929,
+          "winner": 0,
+          "points": [
+            10,
+            3,
+            3,
+            4
+          ],
+          "turns": 74,
+          "actions": 263,
+          "action_sha256": "3ae49e21cc5269dc4a0377f4f234b446e56b7dc2edd4bfc2b2edc3821fe0fb38"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200060,
+          "seconds": 10.41845442308113,
+          "cpu_seconds": 10.364222980000001,
+          "winner": 3,
+          "points": [
+            6,
+            6,
+            9,
+            11
+          ],
+          "turns": 81,
+          "actions": 291,
+          "action_sha256": "74bee585bd6051871713bb8e30a88619e88a5a9aa964aecd7b42943a9fc392b3"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200061,
+          "seconds": 19.19810789800249,
+          "cpu_seconds": 18.939289582999997,
+          "winner": 2,
+          "points": [
+            9,
+            9,
+            10,
+            7
+          ],
+          "turns": 104,
+          "actions": 415,
+          "action_sha256": "2910c0efb47db044091cf569dc7b0b47dc6af02d92d45164098e4e123cdb6f7a"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200062,
+          "seconds": 12.221423811046407,
+          "cpu_seconds": 12.055917843,
+          "winner": 2,
+          "points": [
+            5,
+            2,
+            10,
+            5
+          ],
+          "turns": 92,
+          "actions": 324,
+          "action_sha256": "4eb47c32653d330c84d2f6f46646191fa0305b0712e08e0ce739ca921013e30e"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200063,
+          "seconds": 19.793779358966276,
+          "cpu_seconds": 19.623596479000003,
+          "winner": 3,
+          "points": [
+            9,
+            4,
+            4,
+            10
+          ],
+          "turns": 89,
+          "actions": 325,
+          "action_sha256": "057e7c8eb380eee154c1ca806a9f5e752378a4f93a1ed8b8ba39b0a72cc09872"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200064,
+          "seconds": 14.872353355167434,
+          "cpu_seconds": 14.752904946999998,
+          "winner": 3,
+          "points": [
+            7,
+            6,
+            4,
+            11
+          ],
+          "turns": 85,
+          "actions": 315,
+          "action_sha256": "e32992e0d31f5d396f6f475c85bcc1923fa60014bb6617596a9cf516bcf6bfe8"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200065,
+          "seconds": 16.70215860195458,
+          "cpu_seconds": 16.538931744000003,
+          "winner": 3,
+          "points": [
+            5,
+            5,
+            5,
+            10
+          ],
+          "turns": 89,
+          "actions": 298,
+          "action_sha256": "2848c382074415aac921c65d9fbed84d45f8d38045e19902a3bda09179aa8a58"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200066,
+          "seconds": 17.936125729000196,
+          "cpu_seconds": 17.691316673999996,
+          "winner": 3,
+          "points": [
+            5,
+            6,
+            7,
+            10
+          ],
+          "turns": 85,
+          "actions": 328,
+          "action_sha256": "9ed22349feba1a0b74777ac673198b515d2345f4b652d8d680ee34cf78278960"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200067,
+          "seconds": 21.691940814023837,
+          "cpu_seconds": 21.277261106000005,
+          "winner": 3,
+          "points": [
+            8,
+            4,
+            5,
+            10
+          ],
+          "turns": 81,
+          "actions": 276,
+          "action_sha256": "43da3429dc4099a4c5f0bdb7168afc98ede9982bcedb26b8512aa8aadfe10121"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200068,
+          "seconds": 4.966759079834446,
+          "cpu_seconds": 4.958822154,
+          "winner": 3,
+          "points": [
+            6,
+            3,
+            7,
+            10
+          ],
+          "turns": 61,
+          "actions": 202,
+          "action_sha256": "b5dde720656e541f4adb33f8bbb1f5e18202129f3ca06c701786dc7064db062f"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200069,
+          "seconds": 8.31937814806588,
+          "cpu_seconds": 8.306888342999997,
+          "winner": 1,
+          "points": [
+            2,
+            10,
+            3,
+            3
+          ],
+          "turns": 71,
+          "actions": 226,
+          "action_sha256": "45ec852338304aca0d10056940478a144cdd06a99c7778a74f058d10070f3f23"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200070,
+          "seconds": 4.30874422704801,
+          "cpu_seconds": 4.268765208000001,
+          "winner": 1,
+          "points": [
+            2,
+            10,
+            3,
+            3
+          ],
+          "turns": 35,
+          "actions": 109,
+          "action_sha256": "c7f0ef1c06ecd17114ddc7038770ca8e27840b3578d55336e053c86126856058"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200071,
+          "seconds": 18.37671952904202,
+          "cpu_seconds": 18.253264919000003,
+          "winner": 1,
+          "points": [
+            3,
+            10,
+            8,
+            5
+          ],
+          "turns": 83,
+          "actions": 289,
+          "action_sha256": "389cc406ec050dabf20129fc1204a8b1dbe929c98dc5e025a07235eed2d9b00c"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200072,
+          "seconds": 16.648453692905605,
+          "cpu_seconds": 16.517634063000003,
+          "winner": 0,
+          "points": [
+            10,
+            9,
+            9,
+            9
+          ],
+          "turns": 90,
+          "actions": 332,
+          "action_sha256": "ff0759a5cb19b262f3f0f7dde03388239b101ca324afd30f27f7acc7acf118e0"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200073,
+          "seconds": 8.09376369905658,
+          "cpu_seconds": 8.009831358999996,
+          "winner": 0,
+          "points": [
+            10,
+            4,
+            6,
+            5
+          ],
+          "turns": 58,
+          "actions": 195,
+          "action_sha256": "6ce4fdb68659c991a12f4b1bcf75440fa7f02fb545896e05fd8fe602d409302a"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200074,
+          "seconds": 17.487284719012678,
+          "cpu_seconds": 17.134310514000003,
+          "winner": 3,
+          "points": [
+            8,
+            5,
+            7,
+            10
+          ],
+          "turns": 85,
+          "actions": 325,
+          "action_sha256": "7ff6e33035cdae999e1a938f81fceea1ba7fb9a5b62d33949e21cf74e2831fca"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200075,
+          "seconds": 25.36003418499604,
+          "cpu_seconds": 25.211643615,
+          "winner": 0,
+          "points": [
+            10,
+            9,
+            5,
+            4
+          ],
+          "turns": 106,
+          "actions": 400,
+          "action_sha256": "8b1181af461f0f95b6eb490aa640625bc3717949b9ca7b710678505c0d04d90d"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200076,
+          "seconds": 12.37967813713476,
+          "cpu_seconds": 12.288109065000004,
+          "winner": 2,
+          "points": [
+            4,
+            5,
+            10,
+            6
+          ],
+          "turns": 80,
+          "actions": 284,
+          "action_sha256": "af9919caa09583926b4bcb8d9b8d8d5f041cde341008db4e3aae94b623ad452c"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200077,
+          "seconds": 6.031992169097066,
+          "cpu_seconds": 6.021218611999995,
+          "winner": 2,
+          "points": [
+            4,
+            6,
+            10,
+            4
+          ],
+          "turns": 64,
+          "actions": 229,
+          "action_sha256": "503a05adb70349cbfa58346fc2683d76afe6244d310024875d47fc691acde7be"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200078,
+          "seconds": 15.821609688922763,
+          "cpu_seconds": 15.702051116,
+          "winner": 0,
+          "points": [
+            11,
+            9,
+            5,
+            7
+          ],
+          "turns": 78,
+          "actions": 277,
+          "action_sha256": "a46d32afda82af4d4d9eb302f9edceb864c1e465dcb14f1ab20c75cb8eb5d298"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200079,
+          "seconds": 17.15871353307739,
+          "cpu_seconds": 16.999690759000003,
+          "winner": 3,
+          "points": [
+            6,
+            2,
+            7,
+            10
+          ],
+          "turns": 89,
+          "actions": 329,
+          "action_sha256": "fb8f2042577cf57f820bff474bbb6b2236162b36c61d8f6eef074cf0403aec45"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200080,
+          "seconds": 15.218623308930546,
+          "cpu_seconds": 15.09186567,
+          "winner": 3,
+          "points": [
+            3,
+            5,
+            7,
+            10
+          ],
+          "turns": 101,
+          "actions": 337,
+          "action_sha256": "b1b44355342d4938ca42b82475ca6a3dea31404dba9aad8ac0496326f4dc4901"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200081,
+          "seconds": 21.714136437978595,
+          "cpu_seconds": 21.51305199,
+          "winner": 2,
+          "points": [
+            8,
+            9,
+            10,
+            8
+          ],
+          "turns": 108,
+          "actions": 394,
+          "action_sha256": "9a65b77863eefa721a49cb89fac2ff8e31fdc515735823c3dae02fc03890d865"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200082,
+          "seconds": 10.609032481908798,
+          "cpu_seconds": 10.490523404000001,
+          "winner": 2,
+          "points": [
+            4,
+            5,
+            10,
+            7
+          ],
+          "turns": 72,
+          "actions": 250,
+          "action_sha256": "2081ccb3c69fb60f2207b6acd793af213807659bec66659bcfef167a268e633b"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200083,
+          "seconds": 26.250303539913148,
+          "cpu_seconds": 26.131610806999998,
+          "winner": 2,
+          "points": [
+            5,
+            9,
+            10,
+            8
+          ],
+          "turns": 116,
+          "actions": 451,
+          "action_sha256": "77a4fc107b8d1af0221966c25ab2ccaf4e22198f63556c06d4e0997814a546b6"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200084,
+          "seconds": 19.77330233505927,
+          "cpu_seconds": 19.646947102000002,
+          "winner": 2,
+          "points": [
+            6,
+            7,
+            10,
+            9
+          ],
+          "turns": 108,
+          "actions": 415,
+          "action_sha256": "5739e94e5a7ad53e73af40eb9aae00361db44f6cd8a00b1c2bbc071b3acaa61b"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200085,
+          "seconds": 20.179831874091178,
+          "cpu_seconds": 20.099294939,
+          "winner": 2,
+          "points": [
+            5,
+            6,
+            11,
+            6
+          ],
+          "turns": 100,
+          "actions": 379,
+          "action_sha256": "cc25147cf2dfa7febf0a0e56a9a7e8dc73cf77299c55cd110141e2be2b27a336"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200086,
+          "seconds": 21.80912853591144,
+          "cpu_seconds": 21.583856627000003,
+          "winner": 0,
+          "points": [
+            10,
+            7,
+            7,
+            8
+          ],
+          "turns": 90,
+          "actions": 339,
+          "action_sha256": "c296fdcb89c7fd0b9c6ddc2ab73143f91c8df5bf20453814274fa6f43199d51c"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200087,
+          "seconds": 10.919006549054757,
+          "cpu_seconds": 10.859121894000001,
+          "winner": 3,
+          "points": [
+            4,
+            4,
+            5,
+            10
+          ],
+          "turns": 65,
+          "actions": 219,
+          "action_sha256": "3bd26db6190d502a3f524af6eb435089278912bc7244c17b283970468ea84a95"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200088,
+          "seconds": 22.05922816786915,
+          "cpu_seconds": 21.924141153,
+          "winner": 1,
+          "points": [
+            3,
+            10,
+            4,
+            7
+          ],
+          "turns": 91,
+          "actions": 339,
+          "action_sha256": "b4131909b8c6a548c5c308832ae23931d1d487281b8c5cb9f39e8205ba01736b"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200089,
+          "seconds": 15.616569163976237,
+          "cpu_seconds": 15.507643008000002,
+          "winner": 2,
+          "points": [
+            7,
+            7,
+            10,
+            8
+          ],
+          "turns": 96,
+          "actions": 347,
+          "action_sha256": "0e6114ea42ae9dd5868e5cb7543d6e565c67906730f04b0e4a8ca49f7d1b7b77"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200090,
+          "seconds": 19.195333381881937,
+          "cpu_seconds": 19.100740334,
+          "winner": 2,
+          "points": [
+            9,
+            8,
+            10,
+            4
+          ],
+          "turns": 80,
+          "actions": 309,
+          "action_sha256": "541e88af387bce08f41c9ee4a9f1dd8f4c560389b5d0460e7164e09a7f8b760c"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200091,
+          "seconds": 25.053164181066677,
+          "cpu_seconds": 24.738334508999998,
+          "winner": 1,
+          "points": [
+            8,
+            10,
+            7,
+            9
+          ],
+          "turns": 95,
+          "actions": 356,
+          "action_sha256": "41df59585bb058a80aa18bbcea615bc5c5b070002ec3c428e2a5426ef1b07620"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200092,
+          "seconds": 12.215233776951209,
+          "cpu_seconds": 12.000871313000005,
+          "winner": 0,
+          "points": [
+            10,
+            5,
+            5,
+            6
+          ],
+          "turns": 66,
+          "actions": 224,
+          "action_sha256": "54ce0262bb88ad7d849e1bdb28b3c84eab8bc810fb7f8348b378fb9273ca1e91"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200093,
+          "seconds": 13.87119880411774,
+          "cpu_seconds": 13.783706948999999,
+          "winner": 0,
+          "points": [
+            10,
+            9,
+            7,
+            7
+          ],
+          "turns": 98,
+          "actions": 360,
+          "action_sha256": "936f24fa3ec6d3bb216d18f42cf9f0b42f3db529259afccc49ec44cf23c2cfe1"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200094,
+          "seconds": 16.239812168991193,
+          "cpu_seconds": 16.179460532,
+          "winner": 1,
+          "points": [
+            7,
+            10,
+            6,
+            4
+          ],
+          "turns": 107,
+          "actions": 380,
+          "action_sha256": "bfbe043da858d18e8a105df8b63e33f7cd01439bc0a8ace0a6755a7273bdf8d9"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200095,
+          "seconds": 19.789574600057676,
+          "cpu_seconds": 19.660232455,
+          "winner": 2,
+          "points": [
+            9,
+            6,
+            10,
+            8
+          ],
+          "turns": 104,
+          "actions": 413,
+          "action_sha256": "018fba87134de020df56f589169649764437b793fb154c02926116a639d03540"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200096,
+          "seconds": 10.427834145026281,
+          "cpu_seconds": 10.246057688,
+          "winner": 1,
+          "points": [
+            5,
+            10,
+            5,
+            4
+          ],
+          "turns": 67,
+          "actions": 240,
+          "action_sha256": "93a0154d1086c6f02278d55f63dd9425b37fd5a5a137d968af7a9ce6a0007427"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200097,
+          "seconds": 17.375936227850616,
+          "cpu_seconds": 17.233286614999997,
+          "winner": 2,
+          "points": [
+            2,
+            7,
+            10,
+            9
+          ],
+          "turns": 100,
+          "actions": 355,
+          "action_sha256": "517d4ab5c810316be3dc28d8d7b020e6150182001ce8fcb37074f667c0f72a37"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200098,
+          "seconds": 12.205668157199398,
+          "cpu_seconds": 12.049083244999998,
+          "winner": 2,
+          "points": [
+            7,
+            7,
+            10,
+            6
+          ],
+          "turns": 92,
+          "actions": 308,
+          "action_sha256": "532b5d4b95fab0ef5467879f02b431c1f987cbd678066ef1b43acdbe42104364"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200099,
+          "seconds": 10.602666669990867,
+          "cpu_seconds": 10.434142713,
+          "winner": 0,
+          "points": [
+            10,
+            8,
+            7,
+            4
+          ],
+          "turns": 70,
+          "actions": 252,
+          "action_sha256": "b9a0675ec50ec36260a04c1c3e16fdcc2deda7fc605c41f398ba684bdb95b789"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200100,
+          "seconds": 13.910957321058959,
+          "cpu_seconds": 13.741459647999996,
+          "winner": 0,
+          "points": [
+            10,
+            4,
+            7,
+            3
+          ],
+          "turns": 79,
+          "actions": 258,
+          "action_sha256": "6e7feaab2789b9a4a61b1f849ffe03710b09fd9f547b20ad220b176bd5d91538"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200101,
+          "seconds": 9.364029502030462,
+          "cpu_seconds": 9.324246066,
+          "winner": 3,
+          "points": [
+            3,
+            4,
+            2,
+            10
+          ],
+          "turns": 65,
+          "actions": 240,
+          "action_sha256": "e834aaee9e08523862428d8865a96375a39d56e3b1b390c3dd82684fa171676c"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200102,
+          "seconds": 14.345373596064746,
+          "cpu_seconds": 14.311246977000003,
+          "winner": 2,
+          "points": [
+            5,
+            8,
+            10,
+            5
+          ],
+          "turns": 80,
+          "actions": 282,
+          "action_sha256": "837aa2441f5f7087c6d3b601a71d38f6efac207cdb34c2e8b260e956f922d359"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200103,
+          "seconds": 12.422225420828909,
+          "cpu_seconds": 12.259217012999997,
+          "winner": 3,
+          "points": [
+            4,
+            6,
+            6,
+            10
+          ],
+          "turns": 85,
+          "actions": 313,
+          "action_sha256": "d7e88623ef64e97415404dccf454ffd588709d5ad0b2a165fa632fa8ae5e0eef"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200104,
+          "seconds": 14.095895824022591,
+          "cpu_seconds": 13.992999991000005,
+          "winner": 1,
+          "points": [
+            3,
+            11,
+            6,
+            7
+          ],
+          "turns": 99,
+          "actions": 403,
+          "action_sha256": "43c619b3abf76a0302c2b4214110a67d9ccfef9b808f034f9698fba980a139b2"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200105,
+          "seconds": 16.45714890304953,
+          "cpu_seconds": 16.440139078,
+          "winner": 0,
+          "points": [
+            10,
+            3,
+            6,
+            4
+          ],
+          "turns": 107,
+          "actions": 367,
+          "action_sha256": "d5b9e5e0786849951494e6c89c59817b623db84691fb2c05fac49e79a849602b"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200106,
+          "seconds": 20.08914059610106,
+          "cpu_seconds": 19.973213670999996,
+          "winner": 0,
+          "points": [
+            10,
+            6,
+            9,
+            5
+          ],
+          "turns": 102,
+          "actions": 397,
+          "action_sha256": "981ae6f7dce86181b7c154aa191a9528b3796a03263c8f3e31cb05eb45dd452c"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200107,
+          "seconds": 6.904750948073342,
+          "cpu_seconds": 6.799886870999998,
+          "winner": 0,
+          "points": [
+            10,
+            2,
+            5,
+            3
+          ],
+          "turns": 62,
+          "actions": 210,
+          "action_sha256": "fa475029b91a76abcf01c6a78a72239a49eb433645f72fa2ef235c2437022232"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200108,
+          "seconds": 5.739945570938289,
+          "cpu_seconds": 5.703684803000002,
+          "winner": 1,
+          "points": [
+            6,
+            10,
+            7,
+            2
+          ],
+          "turns": 51,
+          "actions": 166,
+          "action_sha256": "a9fab2abe2f1a62a95551a60d02395830d1ecbee5cac16b50b0efb0b0661ec00"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200109,
+          "seconds": 9.883322473149747,
+          "cpu_seconds": 9.852334696,
+          "winner": 2,
+          "points": [
+            4,
+            5,
+            10,
+            7
+          ],
+          "turns": 76,
+          "actions": 254,
+          "action_sha256": "71799d60a1b5d99758042e48a22d00a8325efd33537df1a39e59c94b1821b864"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200110,
+          "seconds": 10.36725739017129,
+          "cpu_seconds": 10.242350146999996,
+          "winner": 1,
+          "points": [
+            3,
+            10,
+            2,
+            7
+          ],
+          "turns": 71,
+          "actions": 261,
+          "action_sha256": "a366c07c02a0e1a62ee2c67e3367239b6fd05ebe8641545ee586e9a053d2dee6"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200111,
+          "seconds": 12.877296095015481,
+          "cpu_seconds": 12.844322454,
+          "winner": 1,
+          "points": [
+            8,
+            11,
+            7,
+            4
+          ],
+          "turns": 87,
+          "actions": 341,
+          "action_sha256": "df0c6006a365256c326e6e97868bcd1145a2cea41489790d8af277fab33b4b1e"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200112,
+          "seconds": 7.083976119058207,
+          "cpu_seconds": 7.011284460999995,
+          "winner": 3,
+          "points": [
+            4,
+            6,
+            4,
+            11
+          ],
+          "turns": 65,
+          "actions": 231,
+          "action_sha256": "67084cbc99d5f96f22e810c024bb16be28022661b398fe62c2ce72d6b3250e31"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200113,
+          "seconds": 8.641472757793963,
+          "cpu_seconds": 8.640442833000002,
+          "winner": 3,
+          "points": [
+            5,
+            6,
+            6,
+            10
+          ],
+          "turns": 77,
+          "actions": 268,
+          "action_sha256": "8c4f036ccb86e196a2bdabb797c5ba93899ae2b0100326e913d744bae267d6c0"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200114,
+          "seconds": 10.89363012299873,
+          "cpu_seconds": 10.854443144000001,
+          "winner": 1,
+          "points": [
+            6,
+            10,
+            5,
+            4
+          ],
+          "turns": 75,
+          "actions": 276,
+          "action_sha256": "75eab6b33a49790f0d35765acb8ac4edc999607f748a370756955f3871c8e8bf"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200115,
+          "seconds": 12.398647628957406,
+          "cpu_seconds": 12.350945814,
+          "winner": 0,
+          "points": [
+            10,
+            4,
+            6,
+            3
+          ],
+          "turns": 86,
+          "actions": 312,
+          "action_sha256": "7d61e2dfce35b10ea7f31a51ecc6f91b39cd596c34d27d7484aa4c208ca9e206"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200116,
+          "seconds": 9.639904697891325,
+          "cpu_seconds": 9.613710526000006,
+          "winner": 1,
+          "points": [
+            4,
+            10,
+            7,
+            8
+          ],
+          "turns": 91,
+          "actions": 323,
+          "action_sha256": "7a618bbc881f73bce73c8ebe8c9d2f100400b9ce33f578394edbe9cb02556cad"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200117,
+          "seconds": 12.876475939992815,
+          "cpu_seconds": 12.874570252999995,
+          "winner": 1,
+          "points": [
+            8,
+            10,
+            6,
+            8
+          ],
+          "turns": 107,
+          "actions": 395,
+          "action_sha256": "baa07521014674a98e8d64691d8e222bc19dbc444fe6808706f6b33468481e2c"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200118,
+          "seconds": 14.104282885789871,
+          "cpu_seconds": 14.099403061000004,
+          "winner": 1,
+          "points": [
+            5,
+            10,
+            8,
+            7
+          ],
+          "turns": 115,
+          "actions": 414,
+          "action_sha256": "48f872aa6690bc2f01bd16b6da81fd8c378e0d39571df716fe1b6a1fa0926f8c"
+        },
+        {
+          "host": "catanatron",
+          "mode": "fast",
+          "seed": 680200119,
+          "seconds": 8.704370724968612,
+          "cpu_seconds": 8.701630484999995,
+          "winner": 1,
+          "points": [
+            4,
+            11,
+            6,
+            6
+          ],
+          "turns": 75,
+          "actions": 270,
+          "action_sha256": "8eb98ea7c068b86142cde571de0d28a637988605738969742356f3aeaff3c86f"
+        }
+      ]
+    },
+    {
+      "host": "hexset",
+      "mode": "fast",
+      "workers": 30,
+      "seconds": 73.51072586514056,
+      "games_per_second": 1.6324148427012755,
+      "games": [
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200000,
+          "seconds": 6.826919152867049,
+          "cpu_seconds": 6.797676117,
+          "winner": 1,
+          "points": [
+            3,
+            10,
+            3,
+            4
+          ],
+          "turns": 49,
+          "actions": 191,
+          "action_sha256": "e67eca004b8c8d5f7b266db564c38a656b79877b9348550c9d51c10f5052ea19"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200001,
+          "seconds": 18.578979447949678,
+          "cpu_seconds": 18.356887397,
+          "winner": 1,
+          "points": [
+            5,
+            10,
+            5,
+            8
+          ],
+          "turns": 89,
+          "actions": 353,
+          "action_sha256": "bb58a0d2ffdb6446e1a289b83a026be17e4451edee63d69d551c6afe4a6a1276"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200002,
+          "seconds": 28.442070598946884,
+          "cpu_seconds": 28.292198103,
+          "winner": 2,
+          "points": [
+            9,
+            5,
+            10,
+            7
+          ],
+          "turns": 98,
+          "actions": 395,
+          "action_sha256": "673135c2ddda97029d22bfda2e1b7ecd915c38ff81af7cf0651dc28b7aef9273"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200003,
+          "seconds": 14.936502679018304,
+          "cpu_seconds": 14.813155527,
+          "winner": 2,
+          "points": [
+            5,
+            6,
+            10,
+            5
+          ],
+          "turns": 70,
+          "actions": 269,
+          "action_sha256": "eac5de95699155990cf4fce9fd9b43222a38297421ddd472cdcf1d120c9aaf7b"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200004,
+          "seconds": 20.98959861206822,
+          "cpu_seconds": 20.918151724,
+          "winner": 0,
+          "points": [
+            10,
+            8,
+            5,
+            5
+          ],
+          "turns": 80,
+          "actions": 306,
+          "action_sha256": "8b1591ae7b9b804c140262ed1d1fc2c1a2496b7e4afaf6ba165f8ffe273739cf"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200005,
+          "seconds": 19.576549879973754,
+          "cpu_seconds": 19.438239387,
+          "winner": 0,
+          "points": [
+            10,
+            9,
+            5,
+            9
+          ],
+          "turns": 96,
+          "actions": 395,
+          "action_sha256": "5b0ba4e1f14db861f9d9e36000f2be01cfa6b4751cbc3b3f7c55c8fd246ee9c7"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200006,
+          "seconds": 19.700026504928246,
+          "cpu_seconds": 19.623874084,
+          "winner": 3,
+          "points": [
+            7,
+            4,
+            7,
+            10
+          ],
+          "turns": 103,
+          "actions": 375,
+          "action_sha256": "ecac93cc53496874a72574bb96b8cc1f214d78a7e97d741f0749904736a1a74d"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200007,
+          "seconds": 12.621867038076743,
+          "cpu_seconds": 12.390437698000001,
+          "winner": 1,
+          "points": [
+            7,
+            10,
+            3,
+            3
+          ],
+          "turns": 77,
+          "actions": 281,
+          "action_sha256": "0111ec6cdbea4fce93979baaf13f36a1421fa71fde1890674723e272af06f4f4"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200008,
+          "seconds": 10.851364878937602,
+          "cpu_seconds": 10.756034892,
+          "winner": 0,
+          "points": [
+            10,
+            4,
+            8,
+            5
+          ],
+          "turns": 80,
+          "actions": 314,
+          "action_sha256": "c2fcf7a4b249fe18db1cc0d87de3c57884e3638676a85ad151b3ce56411c8688"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200009,
+          "seconds": 17.048264999873936,
+          "cpu_seconds": 16.936483302,
+          "winner": 3,
+          "points": [
+            5,
+            5,
+            7,
+            10
+          ],
+          "turns": 103,
+          "actions": 363,
+          "action_sha256": "e697ffd65e9b36fbd8ffcde8b8b5efa33b4c440caa8fe642f003ad692e92ef5d"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200010,
+          "seconds": 9.787382224807516,
+          "cpu_seconds": 9.591620958,
+          "winner": 0,
+          "points": [
+            10,
+            5,
+            8,
+            5
+          ],
+          "turns": 64,
+          "actions": 251,
+          "action_sha256": "0657c8ec511904375163e2f0a656c43c85a010a32439c1231c314773071c5990"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200011,
+          "seconds": 13.51891050604172,
+          "cpu_seconds": 13.395662463999999,
+          "winner": 0,
+          "points": [
+            10,
+            4,
+            7,
+            5
+          ],
+          "turns": 92,
+          "actions": 353,
+          "action_sha256": "3d19594126c85c63ae60587a3b5d079f5883a015b4be598f637264212081c93b"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200012,
+          "seconds": 18.84419758687727,
+          "cpu_seconds": 18.578226486000002,
+          "winner": 1,
+          "points": [
+            6,
+            10,
+            7,
+            5
+          ],
+          "turns": 85,
+          "actions": 340,
+          "action_sha256": "ebfded80552832c449ae8935c0620cf41978f92a784e64b815e8d0e57fe4c2f7"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200013,
+          "seconds": 18.051489198114723,
+          "cpu_seconds": 17.808582595999997,
+          "winner": 2,
+          "points": [
+            9,
+            7,
+            10,
+            4
+          ],
+          "turns": 90,
+          "actions": 365,
+          "action_sha256": "6784b13ae78da69fb4141d93e3422939e9e82efedfe27de83741fce6738b279e"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200014,
+          "seconds": 16.33271803613752,
+          "cpu_seconds": 16.283569834,
+          "winner": 1,
+          "points": [
+            4,
+            10,
+            6,
+            7
+          ],
+          "turns": 85,
+          "actions": 339,
+          "action_sha256": "897a4331e6817bfd11f98bc0c02ecbe29d0f82b622a5334fe4e3b80cca1d7351"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200015,
+          "seconds": 19.817465635947883,
+          "cpu_seconds": 19.659103717,
+          "winner": 0,
+          "points": [
+            10,
+            5,
+            9,
+            6
+          ],
+          "turns": 80,
+          "actions": 302,
+          "action_sha256": "9206ea053e91c5d0b72d1e08d64fbd0c9219866ece49c211bb426309ba8317ee"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200016,
+          "seconds": 20.802363277878612,
+          "cpu_seconds": 20.741763908,
+          "winner": 3,
+          "points": [
+            9,
+            7,
+            7,
+            10
+          ],
+          "turns": 103,
+          "actions": 400,
+          "action_sha256": "541743ca0d49e35c53e21311af9ba13a3a6b5949760da1fe747c5e3f2a026f6e"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200017,
+          "seconds": 24.982353691011667,
+          "cpu_seconds": 24.901155257,
+          "winner": 2,
+          "points": [
+            8,
+            7,
+            10,
+            7
+          ],
+          "turns": 102,
+          "actions": 414,
+          "action_sha256": "b2a854447124e6b3ffd58059e0d80db1f93db222c0072a97a06341921c249921"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200018,
+          "seconds": 13.665169904008508,
+          "cpu_seconds": 13.533220554,
+          "winner": 0,
+          "points": [
+            10,
+            5,
+            4,
+            3
+          ],
+          "turns": 80,
+          "actions": 283,
+          "action_sha256": "8b127955ba514bb39fe35e8244ec02b10872cc0999e11e6b8d4d02850210c7e8"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200019,
+          "seconds": 8.266738301841542,
+          "cpu_seconds": 8.19176255,
+          "winner": 0,
+          "points": [
+            11,
+            2,
+            7,
+            3
+          ],
+          "turns": 76,
+          "actions": 310,
+          "action_sha256": "77844ec2b96e1d736d7ba3cc6b578f4b95bde8308175e0aec5c73181d352ee00"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200020,
+          "seconds": 20.75049398187548,
+          "cpu_seconds": 20.559613864,
+          "winner": 0,
+          "points": [
+            11,
+            6,
+            7,
+            9
+          ],
+          "turns": 96,
+          "actions": 382,
+          "action_sha256": "2b5d197122c1ba445d7b0315bae7b3d58a02993d59e5ac29bce6a450aca8fd7f"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200021,
+          "seconds": 15.097365396097302,
+          "cpu_seconds": 15.039407715,
+          "winner": 0,
+          "points": [
+            10,
+            5,
+            7,
+            5
+          ],
+          "turns": 80,
+          "actions": 300,
+          "action_sha256": "e15470ee64db4fec852458258ad56c9c215f0fca346ba9e31d3e045f443b8d4c"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200022,
+          "seconds": 5.408676126040518,
+          "cpu_seconds": 5.3856155779999995,
+          "winner": 0,
+          "points": [
+            10,
+            5,
+            6,
+            6
+          ],
+          "turns": 64,
+          "actions": 225,
+          "action_sha256": "fff35817543939c47faa954b070a2932b75222ef576502e7932beab13162bb58"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200023,
+          "seconds": 25.049676473950967,
+          "cpu_seconds": 24.923839775999998,
+          "winner": 2,
+          "points": [
+            3,
+            9,
+            10,
+            9
+          ],
+          "turns": 102,
+          "actions": 401,
+          "action_sha256": "6f25a1711886d5126c58ead486a4295300f64a9868ce9b5ef2ff083b046fe92a"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200024,
+          "seconds": 10.169143547071144,
+          "cpu_seconds": 10.119491583,
+          "winner": 2,
+          "points": [
+            3,
+            3,
+            10,
+            3
+          ],
+          "turns": 66,
+          "actions": 252,
+          "action_sha256": "56ff3b946e40d6b07ffe97e43c510233e1a5a7145e0c375500ad144dfe115a69"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200025,
+          "seconds": 16.8587025499437,
+          "cpu_seconds": 16.637178976,
+          "winner": 3,
+          "points": [
+            7,
+            7,
+            9,
+            10
+          ],
+          "turns": 91,
+          "actions": 356,
+          "action_sha256": "38ceda01278111e60164386524c93a52b7a55b512f982d94a78d7672ff4f25b6"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200026,
+          "seconds": 17.0200562980026,
+          "cpu_seconds": 16.876056489000003,
+          "winner": 1,
+          "points": [
+            8,
+            10,
+            7,
+            7
+          ],
+          "turns": 113,
+          "actions": 423,
+          "action_sha256": "749654a08c02e42c1e1e3c39875a71d709fb19d5e492083e26fe838048c0ea37"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200027,
+          "seconds": 11.254816811997443,
+          "cpu_seconds": 11.230268841,
+          "winner": 0,
+          "points": [
+            10,
+            9,
+            8,
+            4
+          ],
+          "turns": 88,
+          "actions": 337,
+          "action_sha256": "f998fbdc8457f328d0c77068e68dff2e247d8b946baf92e0b97c9e0144724683"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200028,
+          "seconds": 14.318449509097263,
+          "cpu_seconds": 14.139613509,
+          "winner": 2,
+          "points": [
+            6,
+            7,
+            10,
+            7
+          ],
+          "turns": 74,
+          "actions": 300,
+          "action_sha256": "f729ef58bc531f921d5dcaa181c18f4ea6e8658bf43e17d31c45317ed2b35722"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200029,
+          "seconds": 15.400608224095777,
+          "cpu_seconds": 15.3802107,
+          "winner": 0,
+          "points": [
+            10,
+            7,
+            4,
+            9
+          ],
+          "turns": 96,
+          "actions": 379,
+          "action_sha256": "170b5b135ae94071a2ba82ecafd58b7be30764f2e65c299e15f7f5c823494f4e"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200030,
+          "seconds": 4.868992308853194,
+          "cpu_seconds": 4.834249411,
+          "winner": 1,
+          "points": [
+            5,
+            10,
+            5,
+            2
+          ],
+          "turns": 53,
+          "actions": 210,
+          "action_sha256": "2a7f74a2f39e8c276aa9e96cc9118899ab56392793330db7d0e0d4ab160a2c2d"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200031,
+          "seconds": 18.264110716059804,
+          "cpu_seconds": 17.942498159,
+          "winner": 1,
+          "points": [
+            5,
+            10,
+            9,
+            8
+          ],
+          "turns": 77,
+          "actions": 286,
+          "action_sha256": "44baa517a513add4371021f8e3e44c445cb723bf52a6088961e53f6b48ea53ea"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200032,
+          "seconds": 13.361134628998116,
+          "cpu_seconds": 13.063744954000002,
+          "winner": 0,
+          "points": [
+            10,
+            4,
+            7,
+            4
+          ],
+          "turns": 80,
+          "actions": 302,
+          "action_sha256": "0a22ade3dc566b89ed5fa3f5cab4f1b442895a744ed2fc822432374afaeb4fd4"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200033,
+          "seconds": 5.670140065951273,
+          "cpu_seconds": 5.647890878,
+          "winner": 3,
+          "points": [
+            3,
+            3,
+            3,
+            10
+          ],
+          "turns": 39,
+          "actions": 138,
+          "action_sha256": "c1409fb091bde64dbf38bbfb185eebf3cc703e14f4767aef41682c87dde2d62a"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200034,
+          "seconds": 4.667667817091569,
+          "cpu_seconds": 4.6387228060000005,
+          "winner": 3,
+          "points": [
+            2,
+            6,
+            5,
+            10
+          ],
+          "turns": 55,
+          "actions": 198,
+          "action_sha256": "fb496a60472aba4edd647bcd947a921dcc46f39f436b1e627dd3ef5511870f7a"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200035,
+          "seconds": 23.615473304875195,
+          "cpu_seconds": 23.48623525,
+          "winner": 1,
+          "points": [
+            5,
+            10,
+            5,
+            9
+          ],
+          "turns": 101,
+          "actions": 389,
+          "action_sha256": "d4fc8d8ad6566f263eefc1941c02d4ae02425d176dc589a777d138b113e87f89"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200036,
+          "seconds": 33.75629460206255,
+          "cpu_seconds": 33.442608787999994,
+          "winner": 3,
+          "points": [
+            5,
+            5,
+            5,
+            10
+          ],
+          "turns": 115,
+          "actions": 451,
+          "action_sha256": "94936ac10a9ae84585a376d7729c6775bef58b9a82c0ee7fca4702c4a6810783"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200037,
+          "seconds": 7.5910860490985215,
+          "cpu_seconds": 7.468384524999999,
+          "winner": 2,
+          "points": [
+            3,
+            3,
+            10,
+            3
+          ],
+          "turns": 46,
+          "actions": 180,
+          "action_sha256": "3cd23cbbe2249cc2edeac104d62cb54d5c9ae44acc8dc8f6b6c16f3594142279"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200038,
+          "seconds": 10.808673557825387,
+          "cpu_seconds": 10.65221086,
+          "winner": 2,
+          "points": [
+            3,
+            3,
+            10,
+            4
+          ],
+          "turns": 62,
+          "actions": 228,
+          "action_sha256": "59a523a713aabac9f70dc8668c61f21e674ded2e7b912c63c0cafbb97000a4e2"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200039,
+          "seconds": 17.18278076685965,
+          "cpu_seconds": 16.965530379,
+          "winner": 1,
+          "points": [
+            6,
+            10,
+            9,
+            6
+          ],
+          "turns": 77,
+          "actions": 301,
+          "action_sha256": "6781be19077f524ee4ca7c8716a54e6ec03c35d701e76f5d9f2f20db8dd3d74c"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200040,
+          "seconds": 14.2299310490489,
+          "cpu_seconds": 14.169501041999998,
+          "winner": 0,
+          "points": [
+            10,
+            3,
+            7,
+            5
+          ],
+          "turns": 84,
+          "actions": 323,
+          "action_sha256": "e3a56d433ecf1b74e6b6529a7e9ad3f71aa59f282ee792f57150b068f28b3017"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200041,
+          "seconds": 6.788271353812888,
+          "cpu_seconds": 6.715427314000001,
+          "winner": 0,
+          "points": [
+            10,
+            5,
+            4,
+            6
+          ],
+          "turns": 52,
+          "actions": 203,
+          "action_sha256": "94af9d737b4b85e013f64363c3ac49ed893a09f06f0c59a997655cbb42213ff1"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200042,
+          "seconds": 6.480528957908973,
+          "cpu_seconds": 6.443529516,
+          "winner": 0,
+          "points": [
+            10,
+            4,
+            2,
+            3
+          ],
+          "turns": 44,
+          "actions": 160,
+          "action_sha256": "525d547fc6eb847132f6f5265cafa11c7d00a6187f7a9b74936ec991ba22587c"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200043,
+          "seconds": 17.933687312994152,
+          "cpu_seconds": 17.798013311,
+          "winner": 1,
+          "points": [
+            3,
+            10,
+            5,
+            8
+          ],
+          "turns": 85,
+          "actions": 320,
+          "action_sha256": "bb5ac4d172eb7f659e7c8210cade531157289a064e1bc10e404205c2314fc20c"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200044,
+          "seconds": 14.476448110071942,
+          "cpu_seconds": 14.323690462,
+          "winner": 0,
+          "points": [
+            10,
+            6,
+            7,
+            5
+          ],
+          "turns": 80,
+          "actions": 318,
+          "action_sha256": "17940a41e7369e2e3487bd6050ba2de730089f790feda126ef5cf003e231c055"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200045,
+          "seconds": 18.046644899994135,
+          "cpu_seconds": 17.967108402999997,
+          "winner": 0,
+          "points": [
+            10,
+            5,
+            8,
+            7
+          ],
+          "turns": 84,
+          "actions": 361,
+          "action_sha256": "7a30f926d84c7d6b5c11a8ec733f15c2fbfd87aa365f108ec9c9422c8f594703"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200046,
+          "seconds": 20.212954457849264,
+          "cpu_seconds": 19.944643166,
+          "winner": 2,
+          "points": [
+            8,
+            9,
+            10,
+            9
+          ],
+          "turns": 94,
+          "actions": 379,
+          "action_sha256": "b114455c0bb4db82a180c9d9aabc17c33c2b74264da2c7b50c6daf68a2fd2519"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200047,
+          "seconds": 9.754216755041853,
+          "cpu_seconds": 9.713408962000003,
+          "winner": 3,
+          "points": [
+            8,
+            6,
+            7,
+            10
+          ],
+          "turns": 67,
+          "actions": 255,
+          "action_sha256": "8b01234a5ecf73c7cc8970fe427b87915dbd56e3f83793480dbb4d068377b8aa"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200048,
+          "seconds": 17.359399787848815,
+          "cpu_seconds": 17.060074452000002,
+          "winner": 1,
+          "points": [
+            8,
+            10,
+            4,
+            3
+          ],
+          "turns": 77,
+          "actions": 286,
+          "action_sha256": "6f4fb38510369142d6cdd05bd276466364913150fe11812b11f71f4ccad97560"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200049,
+          "seconds": 14.934768327977508,
+          "cpu_seconds": 14.706843303,
+          "winner": 0,
+          "points": [
+            10,
+            6,
+            4,
+            8
+          ],
+          "turns": 88,
+          "actions": 325,
+          "action_sha256": "ef498acdc7eae68a90f3d7fa87733ad094cb8b3d466f77a0ec143a5c5a495578"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200050,
+          "seconds": 17.988640076015145,
+          "cpu_seconds": 17.802855094,
+          "winner": 1,
+          "points": [
+            6,
+            10,
+            5,
+            6
+          ],
+          "turns": 85,
+          "actions": 342,
+          "action_sha256": "d8175f3dd0b51db11ab95140898820effb2e5ff04e41b64b098f5152c008c922"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200051,
+          "seconds": 13.405873453011736,
+          "cpu_seconds": 13.381669162000001,
+          "winner": 3,
+          "points": [
+            2,
+            4,
+            3,
+            10
+          ],
+          "turns": 63,
+          "actions": 240,
+          "action_sha256": "2844c74aab7befcbb4ca3623e11a5a042ded48fde766ac6e13c083d06df404a0"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200052,
+          "seconds": 13.345059033948928,
+          "cpu_seconds": 13.252136961000001,
+          "winner": 2,
+          "points": [
+            8,
+            5,
+            10,
+            9
+          ],
+          "turns": 98,
+          "actions": 396,
+          "action_sha256": "8fa1f111b09bec197d7765c5399ae100fd49d9d800ba27d769ce03498e721686"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200053,
+          "seconds": 36.77791739697568,
+          "cpu_seconds": 36.25108193,
+          "winner": 0,
+          "points": [
+            11,
+            9,
+            9,
+            7
+          ],
+          "turns": 116,
+          "actions": 433,
+          "action_sha256": "cd7a4e0c3614d1494893237aa5fe4a7fab0ff039db6aebde020c04b21bd587b7"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200054,
+          "seconds": 10.137166173895821,
+          "cpu_seconds": 9.984470213999998,
+          "winner": 1,
+          "points": [
+            6,
+            10,
+            3,
+            3
+          ],
+          "turns": 57,
+          "actions": 231,
+          "action_sha256": "0872c2a3628df6e9e3ffe7e5413d5c4e54e5220dcb423b07512178cba1d3a271"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200055,
+          "seconds": 16.93300365586765,
+          "cpu_seconds": 16.346869040999998,
+          "winner": 2,
+          "points": [
+            4,
+            5,
+            10,
+            5
+          ],
+          "turns": 66,
+          "actions": 251,
+          "action_sha256": "2c8f3114e31007c062d8c5a60f41d4bb66e51f69048461bbfbb7569408c10a52"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200056,
+          "seconds": 9.080980374012142,
+          "cpu_seconds": 8.997864518,
+          "winner": 2,
+          "points": [
+            3,
+            7,
+            10,
+            5
+          ],
+          "turns": 58,
+          "actions": 219,
+          "action_sha256": "71c81e471b37ba35e27ff81d8c9aee77e54ab51ac404a88fe821f8be72187b3a"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200057,
+          "seconds": 11.303795954911038,
+          "cpu_seconds": 11.222658431,
+          "winner": 2,
+          "points": [
+            8,
+            8,
+            10,
+            4
+          ],
+          "turns": 70,
+          "actions": 263,
+          "action_sha256": "df582f27d636989fd8194aeeb4271dd7546ba54b3c24040f433b5632008625d2"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200058,
+          "seconds": 13.051952710840851,
+          "cpu_seconds": 12.871604675000004,
+          "winner": 1,
+          "points": [
+            9,
+            10,
+            3,
+            3
+          ],
+          "turns": 53,
+          "actions": 225,
+          "action_sha256": "ca6417e821ea615560a8948c51c03db76c6857f192f375f3195428f1e5a3565d"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200059,
+          "seconds": 8.089077719021589,
+          "cpu_seconds": 8.075023623,
+          "winner": 0,
+          "points": [
+            10,
+            4,
+            5,
+            4
+          ],
+          "turns": 68,
+          "actions": 255,
+          "action_sha256": "361767eda5cc7ea7b7cce72ba8d560f1732b4201eb60f7a4d1a0d93a6b6b9124"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200060,
+          "seconds": 11.318765976000577,
+          "cpu_seconds": 11.300541062999997,
+          "winner": 1,
+          "points": [
+            6,
+            10,
+            9,
+            5
+          ],
+          "turns": 81,
+          "actions": 325,
+          "action_sha256": "ba00334e130cfc4f212a5f1e067d6c678a8f24d19fc2a6c95e132532f06af623"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200061,
+          "seconds": 31.834274024004117,
+          "cpu_seconds": 31.657965142,
+          "winner": 1,
+          "points": [
+            9,
+            10,
+            9,
+            6
+          ],
+          "turns": 109,
+          "actions": 417,
+          "action_sha256": "118d8397eafc7373f619da636fe9e965cdc379e2c1b43a8a45edb966659a4497"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200062,
+          "seconds": 13.422128971898928,
+          "cpu_seconds": 13.20868034,
+          "winner": 0,
+          "points": [
+            10,
+            4,
+            6,
+            5
+          ],
+          "turns": 80,
+          "actions": 311,
+          "action_sha256": "d150f2227f281c0568c0fc7eb45769860bacf4c05049d63b897091cd6f9779d5"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200063,
+          "seconds": 9.20875895395875,
+          "cpu_seconds": 9.147544660000001,
+          "winner": 2,
+          "points": [
+            7,
+            4,
+            10,
+            6
+          ],
+          "turns": 66,
+          "actions": 244,
+          "action_sha256": "86d6cb0454afeeab7b236e670d78dbb573d8b64226e450736b69bac7220cff37"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200064,
+          "seconds": 15.295861989958212,
+          "cpu_seconds": 15.130416816000004,
+          "winner": 0,
+          "points": [
+            10,
+            8,
+            7,
+            6
+          ],
+          "turns": 84,
+          "actions": 332,
+          "action_sha256": "7ad8abc9a6a7a2ac83376c82cf407c9a8a9c46588795127579109d02e7c8106e"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200065,
+          "seconds": 19.47955350787379,
+          "cpu_seconds": 19.159021814999996,
+          "winner": 1,
+          "points": [
+            3,
+            10,
+            6,
+            8
+          ],
+          "turns": 89,
+          "actions": 344,
+          "action_sha256": "4b2a22b03c1af1e2e292325b5540e02537b5c9c9c75372bcace1b369f492a208"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200066,
+          "seconds": 7.291772970929742,
+          "cpu_seconds": 7.283713080999998,
+          "winner": 2,
+          "points": [
+            5,
+            3,
+            10,
+            4
+          ],
+          "turns": 58,
+          "actions": 210,
+          "action_sha256": "1a1f2b524f0873822e048311d3ff876ca393c7581ac07a08eae4bd72375026c9"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200067,
+          "seconds": 25.303696715040132,
+          "cpu_seconds": 25.107501815000003,
+          "winner": 3,
+          "points": [
+            5,
+            7,
+            7,
+            10
+          ],
+          "turns": 87,
+          "actions": 335,
+          "action_sha256": "ec0fe8af6cbed5412b82177af445860aa0aed2dc18db36d677eb03bf07413707"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200068,
+          "seconds": 14.826626190915704,
+          "cpu_seconds": 14.717030283000003,
+          "winner": 0,
+          "points": [
+            11,
+            4,
+            6,
+            5
+          ],
+          "turns": 84,
+          "actions": 292,
+          "action_sha256": "16ffadecb5f3e55535700d67d91ce3c591b389acb36d70c7a81affbc98beaab2"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200069,
+          "seconds": 15.060347525170073,
+          "cpu_seconds": 14.969635281999999,
+          "winner": 2,
+          "points": [
+            6,
+            7,
+            10,
+            4
+          ],
+          "turns": 86,
+          "actions": 341,
+          "action_sha256": "8e9743152670a21e2a709f83241c27239056aaf72ddaedf79f5b920f8cbd2a67"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200070,
+          "seconds": 15.167235526023433,
+          "cpu_seconds": 15.025003404,
+          "winner": 1,
+          "points": [
+            4,
+            10,
+            5,
+            6
+          ],
+          "turns": 77,
+          "actions": 277,
+          "action_sha256": "d3d79d58b7cb6975d057bc872855e2b6f888499de5223c8e48bac0cee0936d35"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200071,
+          "seconds": 12.524677915964276,
+          "cpu_seconds": 12.380310921999996,
+          "winner": 1,
+          "points": [
+            3,
+            10,
+            5,
+            5
+          ],
+          "turns": 57,
+          "actions": 212,
+          "action_sha256": "2db267017e8ff30985d1e8e95dc36a1aacf979cb49c8a6ec3dfdda3151e52e35"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200072,
+          "seconds": 9.839752238010988,
+          "cpu_seconds": 9.634172152000001,
+          "winner": 1,
+          "points": [
+            5,
+            10,
+            8,
+            6
+          ],
+          "turns": 65,
+          "actions": 265,
+          "action_sha256": "924a43ff14ed3527acbb09c4eaea9a215750050862e026e190ba007d46868150"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200073,
+          "seconds": 12.659566071117297,
+          "cpu_seconds": 12.457456648000004,
+          "winner": 2,
+          "points": [
+            7,
+            4,
+            10,
+            3
+          ],
+          "turns": 62,
+          "actions": 248,
+          "action_sha256": "86b2fdf0796347192c30230bd2c3327daac9fac77c5c385f2b26cbb652d580f6"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200074,
+          "seconds": 9.345867680152878,
+          "cpu_seconds": 9.206469675999998,
+          "winner": 3,
+          "points": [
+            5,
+            4,
+            3,
+            10
+          ],
+          "turns": 55,
+          "actions": 206,
+          "action_sha256": "a4d541ae39c5cbe49a307c25056ef7fc9e3a20d9f045568b6eddc655a3175863"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200075,
+          "seconds": 13.679983651032671,
+          "cpu_seconds": 13.574062841,
+          "winner": 2,
+          "points": [
+            9,
+            5,
+            10,
+            5
+          ],
+          "turns": 70,
+          "actions": 283,
+          "action_sha256": "0777b244e1d0f84eedb8d72436fecde3f2bf6530c608b12a938b1f64b1cdc284"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200076,
+          "seconds": 12.04371289908886,
+          "cpu_seconds": 11.760367181000003,
+          "winner": 0,
+          "points": [
+            10,
+            3,
+            5,
+            4
+          ],
+          "turns": 68,
+          "actions": 247,
+          "action_sha256": "b2729425f9c4879ffd4d47a06ff928bf472c78c4a2fdb2b434a447c8d9c69061"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200077,
+          "seconds": 13.362868643831462,
+          "cpu_seconds": 13.232799327000002,
+          "winner": 3,
+          "points": [
+            6,
+            6,
+            5,
+            11
+          ],
+          "turns": 67,
+          "actions": 279,
+          "action_sha256": "c7e9835eae046144b3b4468e7c509df42641cf078483498d801e53a167df04c7"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200078,
+          "seconds": 29.503556293202564,
+          "cpu_seconds": 29.141904061,
+          "winner": 3,
+          "points": [
+            9,
+            7,
+            4,
+            10
+          ],
+          "turns": 95,
+          "actions": 367,
+          "action_sha256": "4ab279ed73f46ec05484ea550c2d7309519f7914b5cb6e926604de182dec4c0d"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200079,
+          "seconds": 12.389542946824804,
+          "cpu_seconds": 12.174914938,
+          "winner": 2,
+          "points": [
+            6,
+            4,
+            11,
+            6
+          ],
+          "turns": 74,
+          "actions": 313,
+          "action_sha256": "ee4aafbba6b55d5ef557c5f6381605f931c0f062339cd3957f220667622bf60d"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200080,
+          "seconds": 41.30843670293689,
+          "cpu_seconds": 40.96479901800001,
+          "winner": 1,
+          "points": [
+            9,
+            10,
+            9,
+            9
+          ],
+          "turns": 161,
+          "actions": 761,
+          "action_sha256": "e15f20def165accf9f65c3763a5c4bd97e0ff7317de0eebe42a4c13b444fa301"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200081,
+          "seconds": 13.031891915015876,
+          "cpu_seconds": 12.925860094,
+          "winner": 2,
+          "points": [
+            4,
+            5,
+            10,
+            4
+          ],
+          "turns": 58,
+          "actions": 223,
+          "action_sha256": "e0b063a08f7bdeae2ba0736eb9016984332219fc46f8f7d20d5e36b42e53cae0"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200082,
+          "seconds": 7.0996223541442305,
+          "cpu_seconds": 7.022486255000004,
+          "winner": 3,
+          "points": [
+            5,
+            8,
+            3,
+            10
+          ],
+          "turns": 59,
+          "actions": 227,
+          "action_sha256": "bdb6801ca9140ba19b3552b5490cf5173613b37983472844c89b2c35490f839a"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200083,
+          "seconds": 10.338968268129975,
+          "cpu_seconds": 10.242910006000002,
+          "winner": 1,
+          "points": [
+            3,
+            10,
+            7,
+            4
+          ],
+          "turns": 65,
+          "actions": 245,
+          "action_sha256": "c1748e1328a4b247e387d645df03438f3e361feca296bce6e99a77fdb622074a"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200084,
+          "seconds": 23.177501891972497,
+          "cpu_seconds": 22.9183131,
+          "winner": 3,
+          "points": [
+            4,
+            9,
+            5,
+            10
+          ],
+          "turns": 99,
+          "actions": 380,
+          "action_sha256": "0b579ee7f844f574d4647cdf81bc017a4197438425cc2024f4769de1794c8a91"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200085,
+          "seconds": 13.888777792220935,
+          "cpu_seconds": 13.638647795000004,
+          "winner": 2,
+          "points": [
+            6,
+            4,
+            10,
+            5
+          ],
+          "turns": 70,
+          "actions": 254,
+          "action_sha256": "c6a0a4e3505c0d2b62073dc3558992f226e10f42981b759e2343b8102865cbf2"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200086,
+          "seconds": 30.58520453516394,
+          "cpu_seconds": 30.32706005,
+          "winner": 3,
+          "points": [
+            9,
+            4,
+            8,
+            10
+          ],
+          "turns": 107,
+          "actions": 435,
+          "action_sha256": "7c03415edbb7d441dd127eed95561e174e024a04f91dc3dd38bb74e8260e8ac2"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200087,
+          "seconds": 13.530979902949184,
+          "cpu_seconds": 13.493395600000007,
+          "winner": 3,
+          "points": [
+            9,
+            5,
+            7,
+            10
+          ],
+          "turns": 79,
+          "actions": 304,
+          "action_sha256": "97c8d3ff53425ee7ef626d4548c0501093df92862d294a8777820ca6a9a0ef5c"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200088,
+          "seconds": 23.773006996838376,
+          "cpu_seconds": 23.602177877000003,
+          "winner": 0,
+          "points": [
+            10,
+            6,
+            6,
+            7
+          ],
+          "turns": 108,
+          "actions": 427,
+          "action_sha256": "fa229733c1e1f0fd17af5786f971379d27ebf33b5247502f7db96426e5e83843"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200089,
+          "seconds": 26.354961778968573,
+          "cpu_seconds": 26.183573595,
+          "winner": 0,
+          "points": [
+            10,
+            8,
+            5,
+            5
+          ],
+          "turns": 100,
+          "actions": 402,
+          "action_sha256": "e35d9dbff95dc87aded79289e6010ce4c370370730aabfcdd096915b6b5bc203"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200090,
+          "seconds": 15.36949259787798,
+          "cpu_seconds": 15.141983926999998,
+          "winner": 2,
+          "points": [
+            3,
+            5,
+            10,
+            3
+          ],
+          "turns": 74,
+          "actions": 271,
+          "action_sha256": "0ede9d7d83a8b0341bfc6b8c2652413526ecb5a89699d5a32987372a0aced593"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200091,
+          "seconds": 14.64773063804023,
+          "cpu_seconds": 14.526887946999999,
+          "winner": 0,
+          "points": [
+            10,
+            7,
+            9,
+            2
+          ],
+          "turns": 80,
+          "actions": 298,
+          "action_sha256": "f96f2f6bfe356ded4cfba2dc79e0240c67368c347937dc27ac25193683f9691d"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200092,
+          "seconds": 13.703216548077762,
+          "cpu_seconds": 13.593560894999996,
+          "winner": 0,
+          "points": [
+            10,
+            3,
+            6,
+            5
+          ],
+          "turns": 68,
+          "actions": 254,
+          "action_sha256": "d72fadaba1e592d17d036d637aee8bfa00568a19ab1c22d1388fad001ec517e0"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200093,
+          "seconds": 22.97243083594367,
+          "cpu_seconds": 22.846634422,
+          "winner": 1,
+          "points": [
+            7,
+            10,
+            5,
+            5
+          ],
+          "turns": 97,
+          "actions": 356,
+          "action_sha256": "5380af3cf5bbb2b71e668af9b417c85b0e0eaf71555c4203e056746c6bf55fff"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200094,
+          "seconds": 10.578406502027065,
+          "cpu_seconds": 10.446066719000001,
+          "winner": 3,
+          "points": [
+            3,
+            5,
+            4,
+            10
+          ],
+          "turns": 59,
+          "actions": 230,
+          "action_sha256": "6a3fd913aa9d9825089fecb067d78450daaad4d17fb8e58c0cf343b3981721c1"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200095,
+          "seconds": 15.628197517013177,
+          "cpu_seconds": 15.505417551,
+          "winner": 1,
+          "points": [
+            7,
+            10,
+            5,
+            8
+          ],
+          "turns": 69,
+          "actions": 270,
+          "action_sha256": "bca3d2e9d00e3a815704d9eb12da1ec1063f76dacdc740e1ebde5d64392a9201"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200096,
+          "seconds": 14.083721350179985,
+          "cpu_seconds": 13.901000939,
+          "winner": 1,
+          "points": [
+            7,
+            10,
+            4,
+            3
+          ],
+          "turns": 53,
+          "actions": 206,
+          "action_sha256": "fc25ec919d0ee634c33e84ed5a2c92ce1f50d1144da7e01abdcdf1ec21417635"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200097,
+          "seconds": 11.201266621006653,
+          "cpu_seconds": 11.161790430000003,
+          "winner": 2,
+          "points": [
+            4,
+            3,
+            10,
+            5
+          ],
+          "turns": 70,
+          "actions": 270,
+          "action_sha256": "8eefd15a750f5251f0b1a47a029c1cfec7d20f582704ba34153041f831d00520"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200098,
+          "seconds": 18.55567235290073,
+          "cpu_seconds": 18.438362499,
+          "winner": 0,
+          "points": [
+            10,
+            7,
+            6,
+            6
+          ],
+          "turns": 80,
+          "actions": 320,
+          "action_sha256": "8e087de20984355663539407f05556ff98c036d1011ea50168c88fadbaffcba0"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200099,
+          "seconds": 19.281855253037065,
+          "cpu_seconds": 19.124306327999996,
+          "winner": 0,
+          "points": [
+            10,
+            9,
+            9,
+            4
+          ],
+          "turns": 88,
+          "actions": 370,
+          "action_sha256": "4b48c98f0cd1bf54291697880bc09168ddfa8dc0bcd2c7985d23220ecf534bba"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200100,
+          "seconds": 15.601762095931917,
+          "cpu_seconds": 15.442878336,
+          "winner": 1,
+          "points": [
+            2,
+            10,
+            4,
+            8
+          ],
+          "turns": 69,
+          "actions": 243,
+          "action_sha256": "c20731bacd8195134643951f652614563940e9f00da5c408565ba64802e19ac0"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200101,
+          "seconds": 10.520932611078024,
+          "cpu_seconds": 10.47938962,
+          "winner": 3,
+          "points": [
+            3,
+            4,
+            5,
+            10
+          ],
+          "turns": 59,
+          "actions": 217,
+          "action_sha256": "dd750c4e99fbf275ef802586e563c96ff625f7fc5dbe3dca8b6e6b5ba9f11e72"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200102,
+          "seconds": 18.783880850998685,
+          "cpu_seconds": 18.721356210000003,
+          "winner": 2,
+          "points": [
+            7,
+            9,
+            10,
+            6
+          ],
+          "turns": 82,
+          "actions": 316,
+          "action_sha256": "22786cd57aedda4d2b14938c5d48820186639961f5458f8eb3e56f5919998020"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200103,
+          "seconds": 7.201617779908702,
+          "cpu_seconds": 7.119364873999999,
+          "winner": 1,
+          "points": [
+            5,
+            10,
+            4,
+            5
+          ],
+          "turns": 61,
+          "actions": 212,
+          "action_sha256": "03d568a9e4926220f23b5d24292a293b9eba7d865af52ad5d70ab7ed8c0c79f1"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200104,
+          "seconds": 9.590691396035254,
+          "cpu_seconds": 9.491668216,
+          "winner": 1,
+          "points": [
+            3,
+            11,
+            6,
+            5
+          ],
+          "turns": 69,
+          "actions": 264,
+          "action_sha256": "3deadce2e6cc5cc6168315cc3a89b58d00b749144c09816eb3e18c3aeb502667"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200105,
+          "seconds": 16.2119405628182,
+          "cpu_seconds": 16.044657617,
+          "winner": 0,
+          "points": [
+            10,
+            3,
+            9,
+            5
+          ],
+          "turns": 84,
+          "actions": 340,
+          "action_sha256": "6357306b0b550ac0b42f23031db51d5fa3a978afec6739258ad694570686c77a"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200106,
+          "seconds": 19.47149582603015,
+          "cpu_seconds": 19.445649714000005,
+          "winner": 0,
+          "points": [
+            10,
+            7,
+            3,
+            4
+          ],
+          "turns": 76,
+          "actions": 294,
+          "action_sha256": "b6bace2315a100fca7e28b4ff42d812cd7c7389369874d1d08af8fe246f3e212"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200107,
+          "seconds": 7.921530341962352,
+          "cpu_seconds": 7.763076769000001,
+          "winner": 2,
+          "points": [
+            8,
+            5,
+            10,
+            4
+          ],
+          "turns": 54,
+          "actions": 208,
+          "action_sha256": "4925223d0bcba0553fcf4a1a855daa382de94dabfd6bfbdf2eb9eb9bc9dc8a18"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200108,
+          "seconds": 21.9847433490213,
+          "cpu_seconds": 21.815372089000007,
+          "winner": 2,
+          "points": [
+            4,
+            7,
+            10,
+            5
+          ],
+          "turns": 90,
+          "actions": 358,
+          "action_sha256": "c9f55aa024683e40b3f57e29ae5588e38662a8dfbc715de0dae1a3dfb060dc61"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200109,
+          "seconds": 17.923274328000844,
+          "cpu_seconds": 17.823158688000007,
+          "winner": 3,
+          "points": [
+            9,
+            6,
+            8,
+            10
+          ],
+          "turns": 91,
+          "actions": 352,
+          "action_sha256": "2a33f55d22119c153cf6ceb0ecaf692eb2ad53996f4122d4c09971c75aec1623"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200110,
+          "seconds": 13.853097715880722,
+          "cpu_seconds": 13.829339069,
+          "winner": 1,
+          "points": [
+            3,
+            12,
+            5,
+            5
+          ],
+          "turns": 81,
+          "actions": 311,
+          "action_sha256": "89d25ae4c2ffc28f6c2a6c2977e7662b620aea9c7004a745b01d5b2841482d25"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200111,
+          "seconds": 17.567240020027384,
+          "cpu_seconds": 17.494943649000007,
+          "winner": 3,
+          "points": [
+            5,
+            7,
+            7,
+            10
+          ],
+          "turns": 103,
+          "actions": 405,
+          "action_sha256": "c118d90cda369c2d82f37943febddf009191125caf05e783b9398d93219c164f"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200112,
+          "seconds": 8.435855729971081,
+          "cpu_seconds": 8.373115415000001,
+          "winner": 3,
+          "points": [
+            3,
+            8,
+            7,
+            10
+          ],
+          "turns": 59,
+          "actions": 221,
+          "action_sha256": "a8810b881c59e059141784c28eb979afd4c33ece775d089a5eeb3a0fa930d778"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200113,
+          "seconds": 13.253064062912017,
+          "cpu_seconds": 13.213708810999997,
+          "winner": 3,
+          "points": [
+            3,
+            7,
+            5,
+            10
+          ],
+          "turns": 79,
+          "actions": 307,
+          "action_sha256": "40f03fd6fe66154c76e69f77b900e4c67bbef422e8f60af3b9f140c230585cf4"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200114,
+          "seconds": 11.313631943892688,
+          "cpu_seconds": 11.250950180999993,
+          "winner": 0,
+          "points": [
+            10,
+            4,
+            8,
+            3
+          ],
+          "turns": 60,
+          "actions": 255,
+          "action_sha256": "b38f60f0d006113d90b6f73f3e8c4f3ac7d45461d98813778af0715f2ebcaa5a"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200115,
+          "seconds": 8.30267505091615,
+          "cpu_seconds": 8.292935173000004,
+          "winner": 0,
+          "points": [
+            10,
+            3,
+            4,
+            3
+          ],
+          "turns": 56,
+          "actions": 205,
+          "action_sha256": "afe271ebca5b4065554118ea819194fdc4ca33590143ebcb197016d80f86c381"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200116,
+          "seconds": 9.35365474713035,
+          "cpu_seconds": 9.311351639000002,
+          "winner": 2,
+          "points": [
+            4,
+            7,
+            10,
+            7
+          ],
+          "turns": 62,
+          "actions": 228,
+          "action_sha256": "332fdd9ae23939493f16629845e67f27e1adf85b1e48249c8ba4a623d119a016"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200117,
+          "seconds": 9.962274384917691,
+          "cpu_seconds": 9.954761275000003,
+          "winner": 2,
+          "points": [
+            8,
+            8,
+            10,
+            7
+          ],
+          "turns": 74,
+          "actions": 285,
+          "action_sha256": "4b00961e26e475dbe92ccf745a572d057b1c01dd015ff8ef28605087a03c042c"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200118,
+          "seconds": 13.698003552854061,
+          "cpu_seconds": 13.666433385000005,
+          "winner": 2,
+          "points": [
+            6,
+            7,
+            10,
+            7
+          ],
+          "turns": 86,
+          "actions": 320,
+          "action_sha256": "b06459b695e1171b48b5b7a8dc3c8cc4050a3a0d3a9ca20722ed19e120f66475"
+        },
+        {
+          "host": "hexset",
+          "mode": "fast",
+          "seed": 680200119,
+          "seconds": 15.804087967146188,
+          "cpu_seconds": 15.765014456000003,
+          "winner": 1,
+          "points": [
+            5,
+            10,
+            6,
+            4
+          ],
+          "turns": 101,
+          "actions": 385,
+          "action_sha256": "4510df1121be66f47f85bf1983c77b777b1da739df9bb8f662fcac7d5bb12409"
+        }
+      ]
+    }
+  ]
+}

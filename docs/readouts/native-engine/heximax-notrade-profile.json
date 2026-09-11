@@ -1,0 +1,3130 @@
+{
+  "catanatron_modules_loaded": [],
+  "decision_ms": {
+    "mean": 8.244236870225341,
+    "p50": 1.6178835649043322,
+    "p95": 35.36309765186161
+  },
+  "engine": "hexset",
+  "games": [
+    {
+      "action_sha256": "8ba68fd644725a7e99fb98e98c5b26e34ff25c1fe4994f4047186ac62a4641da",
+      "cpu_seconds": 4.298705196999999,
+      "decision_seconds": 4.131356416037306,
+      "decisions": 459,
+      "index": 0,
+      "points": [
+        7,
+        10,
+        6,
+        5
+      ],
+      "seconds": 4.304208398098126,
+      "turns": 125,
+      "winner": 1
+    },
+    {
+      "action_sha256": "185d343cfe7d0488c7d762338aae9ab1f6496ffae179d44b62d977331085bb5c",
+      "cpu_seconds": 1.535304622,
+      "decision_seconds": 1.4539974578656256,
+      "decisions": 220,
+      "index": 1,
+      "points": [
+        10,
+        4,
+        3,
+        5
+      ],
+      "seconds": 1.5396165871061385,
+      "turns": 60,
+      "winner": 0
+    },
+    {
+      "action_sha256": "5f10c57966c06bc758375656062ddbdfa40dd47904749c4e54ae051df1416771",
+      "cpu_seconds": 3.185114197,
+      "decision_seconds": 3.071094839833677,
+      "decisions": 371,
+      "index": 2,
+      "points": [
+        8,
+        4,
+        10,
+        7
+      ],
+      "seconds": 3.1857038009911776,
+      "turns": 90,
+      "winner": 2
+    }
+  ],
+  "harness_sha256": "f216109e6628eef80af12e77ce68860da854ac4905e1a44f3b0662905ea52e5e",
+  "preset": "heximax-notrade",
+  "profile_functions": [
+    {
+      "calls": 3,
+      "cumulative_seconds": 9.028160802,
+      "file": "/study/src/hexset/bench/profile_heximax.py",
+      "line": 46,
+      "name": "play_one_game",
+      "primitive_calls": 3,
+      "self_seconds": 4.7458000000000005e-05
+    },
+    {
+      "calls": 3,
+      "cumulative_seconds": 9.022067550000001,
+      "file": "/study/src/hexset/arena.py",
+      "line": 390,
+      "name": "play_game",
+      "primitive_calls": 3,
+      "self_seconds": 0.001653507
+    },
+    {
+      "calls": 1050,
+      "cumulative_seconds": 8.665915888,
+      "file": "/study/profile_run.py",
+      "line": 37,
+      "name": "choose",
+      "primitive_calls": 1050,
+      "self_seconds": 0.001707886
+    },
+    {
+      "calls": 1050,
+      "cumulative_seconds": 8.657434028,
+      "file": "/study/src/hexset/bench/profile_heximax.py",
+      "line": 35,
+      "name": "choose",
+      "primitive_calls": 1050,
+      "self_seconds": 0.003817228
+    },
+    {
+      "calls": 1050,
+      "cumulative_seconds": 8.652830340000001,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 222,
+      "name": "choose",
+      "primitive_calls": 1050,
+      "self_seconds": 0.004175506
+    },
+    {
+      "calls": 517,
+      "cumulative_seconds": 8.340212945000001,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 300,
+      "name": "_search",
+      "primitive_calls": 517,
+      "self_seconds": 0.00425831
+    },
+    {
+      "calls": 1034,
+      "cumulative_seconds": 8.317546304,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 346,
+      "name": "_root_values",
+      "primitive_calls": 1034,
+      "self_seconds": 0.016232049000000002
+    },
+    {
+      "calls": 27365,
+      "cumulative_seconds": 8.280630115000001,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 669,
+      "name": "_after",
+      "primitive_calls": 7082,
+      "self_seconds": 0.072279859
+    },
+    {
+      "calls": 48302,
+      "cumulative_seconds": 7.419064653,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 770,
+      "name": "_value",
+      "primitive_calls": 13006,
+      "self_seconds": 0.020783912
+    },
+    {
+      "calls": 4302,
+      "cumulative_seconds": 5.97601053,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 787,
+      "name": "_best_of",
+      "primitive_calls": 4302,
+      "self_seconds": 0.015196825
+    },
+    {
+      "calls": 44000,
+      "cumulative_seconds": 4.672246235,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 663,
+      "name": "_leaf",
+      "primitive_calls": 44000,
+      "self_seconds": 0.017050626000000003
+    },
+    {
+      "calls": 44000,
+      "cumulative_seconds": 4.655195609000001,
+      "file": "/study/src/hexset/bots/heximax/evaluate.py",
+      "line": 538,
+      "name": "evaluate_game",
+      "primitive_calls": 44000,
+      "self_seconds": 0.033033752
+    },
+    {
+      "calls": 44432,
+      "cumulative_seconds": 4.003348453,
+      "file": "/study/src/hexset/bots/heximax/evaluate.py",
+      "line": 454,
+      "name": "evaluate",
+      "primitive_calls": 44432,
+      "self_seconds": 0.34947378
+    },
+    {
+      "calls": 153700,
+      "cumulative_seconds": 3.179923606,
+      "file": "/study/src/hexset/bots/heximax/evaluate.py",
+      "line": 328,
+      "name": "score",
+      "primitive_calls": 153700,
+      "self_seconds": 0.162633532
+    },
+    {
+      "calls": 153700,
+      "cumulative_seconds": 3.0172900740000004,
+      "file": "/study/src/hexset/bots/heximax/evaluate.py",
+      "line": 298,
+      "name": "terms",
+      "primitive_calls": 153700,
+      "self_seconds": 0.198506388
+    },
+    {
+      "calls": 896,
+      "cumulative_seconds": 2.1765163220000003,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 683,
+      "name": "_over_dice",
+      "primitive_calls": 896,
+      "self_seconds": 0.020548183
+    },
+    {
+      "calls": 39496,
+      "cumulative_seconds": 2.068872997,
+      "file": "/study/src/hexset/actions.py",
+      "line": 343,
+      "name": "apply",
+      "primitive_calls": 39496,
+      "self_seconds": 0.035569072
+    },
+    {
+      "calls": 22058,
+      "cumulative_seconds": 2.058486442,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 754,
+      "name": "_plain_child",
+      "primitive_calls": 22058,
+      "self_seconds": 0.012734327
+    },
+    {
+      "calls": 153700,
+      "cumulative_seconds": 1.3872718860000002,
+      "file": "/study/src/hexset/bots/heximax/evaluate.py",
+      "line": 266,
+      "name": "_hand_terms_of",
+      "primitive_calls": 153700,
+      "self_seconds": 0.061541944
+    },
+    {
+      "calls": 153700,
+      "cumulative_seconds": 1.310039431,
+      "file": "/study/src/hexset/bots/heximax/evaluate.py",
+      "line": 253,
+      "name": "hand_terms",
+      "primitive_calls": 153700,
+      "self_seconds": 0.07588333500000001
+    },
+    {
+      "calls": 7066,
+      "cumulative_seconds": 1.220284852,
+      "file": "/study/src/hexset/game.py",
+      "line": 622,
+      "name": "build_road",
+      "primitive_calls": 7066,
+      "self_seconds": 0.014924937000000001
+    },
+    {
+      "calls": 153700,
+      "cumulative_seconds": 1.2201919170000002,
+      "file": "/study/src/hexset/bots/evaluate.py",
+      "line": 84,
+      "name": "hand_terms",
+      "primitive_calls": 153700,
+      "self_seconds": 0.68559831
+    },
+    {
+      "calls": 9955,
+      "cumulative_seconds": 1.178686941,
+      "file": "/study/src/hexset/victory.py",
+      "line": 33,
+      "name": "update_longest_road",
+      "primitive_calls": 9955,
+      "self_seconds": 0.006776310000000001
+    },
+    {
+      "calls": 9955,
+      "cumulative_seconds": 1.1660094280000002,
+      "file": "/study/src/hexset/roads.py",
+      "line": 51,
+      "name": "road_lengths",
+      "primitive_calls": 9955,
+      "self_seconds": 0.01816734
+    },
+    {
+      "calls": 39820,
+      "cumulative_seconds": 1.147842088,
+      "file": "/study/src/hexset/roads.py",
+      "line": 9,
+      "name": "longest_road",
+      "primitive_calls": 39820,
+      "self_seconds": 0.26950385400000004
+    },
+    {
+      "calls": 49254,
+      "cumulative_seconds": 1.137888108,
+      "file": "/study/src/hexset/game.py",
+      "line": 286,
+      "name": "imagine",
+      "primitive_calls": 49254,
+      "self_seconds": 0.165495412
+    },
+    {
+      "calls": 153700,
+      "cumulative_seconds": 1.012249063,
+      "file": "/study/src/hexset/bots/heximax/evaluate.py",
+      "line": 224,
+      "name": "_walk",
+      "primitive_calls": 153700,
+      "self_seconds": 0.15605768
+    },
+    {
+      "calls": 1083253,
+      "cumulative_seconds": 0.943566977,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.max>",
+      "primitive_calls": 1083253,
+      "self_seconds": 0.197580374
+    },
+    {
+      "calls": 290410,
+      "cumulative_seconds": 0.745832948,
+      "file": "/study/src/hexset/roads.py",
+      "line": 48,
+      "name": "<genexpr>",
+      "primitive_calls": 290410,
+      "self_seconds": 0.079766032
+    },
+    {
+      "calls": 4411,
+      "cumulative_seconds": 0.69408185,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 699,
+      "name": "draw_children",
+      "primitive_calls": 4411,
+      "self_seconds": 0.040822088
+    },
+    {
+      "calls": 1865940,
+      "cumulative_seconds": 0.692537461,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.sum>",
+      "primitive_calls": 1713375,
+      "self_seconds": 0.405534494
+    },
+    {
+      "calls": 38592,
+      "cumulative_seconds": 0.6845453340000001,
+      "file": "/study/src/hexset/bots/evaluate.py",
+      "line": 267,
+      "name": "survey",
+      "primitive_calls": 38592,
+      "self_seconds": 0.44254196300000004
+    },
+    {
+      "calls": 1585498,
+      "cumulative_seconds": 0.666066916,
+      "file": "/study/src/hexset/roads.py",
+      "line": 37,
+      "name": "extend",
+      "primitive_calls": 253302,
+      "self_seconds": 0.5628247120000001
+    },
+    {
+      "calls": 44007,
+      "cumulative_seconds": 0.646890319,
+      "file": "/study/src/hexset/bots/heximax/evaluate.py",
+      "line": 208,
+      "name": "belief_from_game",
+      "primitive_calls": 44007,
+      "self_seconds": 0.028738858000000003
+    },
+    {
+      "calls": 44439,
+      "cumulative_seconds": 0.6193153050000001,
+      "file": "/study/src/hexset/bots/heximax/evaluate.py",
+      "line": 156,
+      "name": "belief_for",
+      "primitive_calls": 44439,
+      "self_seconds": 0.16699352
+    },
+    {
+      "calls": 50236,
+      "cumulative_seconds": 0.5083017000000001,
+      "file": "/usr/local/lib/python3.12/random.py",
+      "line": 350,
+      "name": "shuffle",
+      "primitive_calls": 50236,
+      "self_seconds": 0.15055258200000002
+    },
+    {
+      "calls": 31646,
+      "cumulative_seconds": 0.5064218770000001,
+      "file": "/study/src/hexset/view.py",
+      "line": 58,
+      "name": "__init__",
+      "primitive_calls": 31646,
+      "self_seconds": 0.259806929
+    },
+    {
+      "calls": 10134,
+      "cumulative_seconds": 0.44800857000000005,
+      "file": "/study/src/hexset/game.py",
+      "line": 453,
+      "name": "roll_dice",
+      "primitive_calls": 10134,
+      "self_seconds": 0.019827066
+    },
+    {
+      "calls": 115275,
+      "cumulative_seconds": 0.36038380200000003,
+      "file": "/study/src/hexset/bots/heximax/evaluate.py",
+      "line": 52,
+      "name": "expected_card_points",
+      "primitive_calls": 115275,
+      "self_seconds": 0.086699726
+    },
+    {
+      "calls": 698245,
+      "cumulative_seconds": 0.353547467,
+      "file": "/usr/local/lib/python3.12/random.py",
+      "line": 242,
+      "name": "_randbelow_with_getrandbits",
+      "primitive_calls": 698245,
+      "self_seconds": 0.22692498500000002
+    },
+    {
+      "calls": 23069,
+      "cumulative_seconds": 0.32605575600000003,
+      "file": "/study/src/hexset/game.py",
+      "line": 755,
+      "name": "run_trade_event",
+      "primitive_calls": 23069,
+      "self_seconds": 0.006533168000000001
+    },
+    {
+      "calls": 5352,
+      "cumulative_seconds": 0.325012122,
+      "file": "/study/src/hexset/actions.py",
+      "line": 248,
+      "name": "legal_actions",
+      "primitive_calls": 5352,
+      "self_seconds": 0.016585776
+    },
+    {
+      "calls": 5254,
+      "cumulative_seconds": 0.32293459500000005,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 759,
+      "name": "_options_in",
+      "primitive_calls": 5254,
+      "self_seconds": 0.002297206
+    },
+    {
+      "calls": 278,
+      "cumulative_seconds": 0.319522588,
+      "file": "/study/src/hexset/trading.py",
+      "line": 328,
+      "name": "trade_event",
+      "primitive_calls": 278,
+      "self_seconds": 0.002736053
+    },
+    {
+      "calls": 278,
+      "cumulative_seconds": 0.315350734,
+      "file": "/study/src/hexset/trading.py",
+      "line": 510,
+      "name": "_best_clearing",
+      "primitive_calls": 278,
+      "self_seconds": 0.022509013
+    },
+    {
+      "calls": 9187,
+      "cumulative_seconds": 0.280330997,
+      "file": "/study/src/hexset/game.py",
+      "line": 784,
+      "name": "enter_main",
+      "primitive_calls": 9187,
+      "self_seconds": 0.003575295
+    },
+    {
+      "calls": 68593,
+      "cumulative_seconds": 0.275043244,
+      "file": "/study/src/hexset/trading.py",
+      "line": 293,
+      "name": "_candidates",
+      "primitive_calls": 68593,
+      "self_seconds": 0.13091887600000002
+    },
+    {
+      "calls": 489373,
+      "cumulative_seconds": 0.27028948,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.any>",
+      "primitive_calls": 489373,
+      "self_seconds": 0.152277933
+    },
+    {
+      "calls": 242847,
+      "cumulative_seconds": 0.25142087900000004,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'get' of 'dict' objects>",
+      "primitive_calls": 242847,
+      "self_seconds": 0.18290513500000002
+    },
+    {
+      "calls": 49470,
+      "cumulative_seconds": 0.22423584700000002,
+      "file": "/study/src/hexset/ledger.py",
+      "line": 125,
+      "name": "copy",
+      "primitive_calls": 49470,
+      "self_seconds": 0.05512450000000001
+    },
+    {
+      "calls": 1214625,
+      "cumulative_seconds": 0.220408717,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.min>",
+      "primitive_calls": 1205259,
+      "self_seconds": 0.18067801900000002
+    },
+    {
+      "calls": 3843,
+      "cumulative_seconds": 0.21966394900000002,
+      "file": "/study/src/hexset/actions.py",
+      "line": 186,
+      "name": "_building_actions",
+      "primitive_calls": 3843,
+      "self_seconds": 0.005566774
+    },
+    {
+      "calls": 222160,
+      "cumulative_seconds": 0.20014952100000002,
+      "file": "/study/src/hexset/bots/heximax/evaluate.py",
+      "line": 485,
+      "name": "<genexpr>",
+      "primitive_calls": 222160,
+      "self_seconds": 0.20014952100000002
+    },
+    {
+      "calls": 5119,
+      "cumulative_seconds": 0.198513036,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'extend' of 'list' objects>",
+      "primitive_calls": 5119,
+      "self_seconds": 0.0030170020000000004
+    },
+    {
+      "calls": 50206,
+      "cumulative_seconds": 0.194257282,
+      "file": "/study/src/hexset/state.py",
+      "line": 90,
+      "name": "copy_state",
+      "primitive_calls": 50206,
+      "self_seconds": 0.173310617
+    },
+    {
+      "calls": 73330,
+      "cumulative_seconds": 0.169994753,
+      "file": "/study/src/hexset/state.py",
+      "line": 177,
+      "name": "can_place_road",
+      "primitive_calls": 73330,
+      "self_seconds": 0.041634247
+    },
+    {
+      "calls": 372907,
+      "cumulative_seconds": 0.168953382,
+      "file": "/study/src/hexset/devcards.py",
+      "line": 37,
+      "name": "holdings",
+      "primitive_calls": 372907,
+      "self_seconds": 0.168953382
+    },
+    {
+      "calls": 197880,
+      "cumulative_seconds": 0.165191361,
+      "file": "/study/src/hexset/ledger.py",
+      "line": 111,
+      "name": "copy",
+      "primitive_calls": 197880,
+      "self_seconds": 0.099282772
+    },
+    {
+      "calls": 6957,
+      "cumulative_seconds": 0.15072141,
+      "file": "/study/src/hexset/actions.py",
+      "line": 193,
+      "name": "<genexpr>",
+      "primitive_calls": 6957,
+      "self_seconds": 0.012758339
+    },
+    {
+      "calls": 13882,
+      "cumulative_seconds": 0.14822431900000002,
+      "file": "/study/src/hexset/game.py",
+      "line": 572,
+      "name": "move_robber_to",
+      "primitive_calls": 13882,
+      "self_seconds": 0.01798225
+    },
+    {
+      "calls": 29210,
+      "cumulative_seconds": 0.14071271600000002,
+      "file": "/study/src/hexset/ledger.py",
+      "line": 255,
+      "name": "apply_hand_diff",
+      "primitive_calls": 29210,
+      "self_seconds": 0.114816237
+    },
+    {
+      "calls": 203420,
+      "cumulative_seconds": 0.132971942,
+      "file": "/study/src/hexset/bots/heximax/evaluate.py",
+      "line": 71,
+      "name": "<genexpr>",
+      "primitive_calls": 203420,
+      "self_seconds": 0.054321121
+    },
+    {
+      "calls": 3428,
+      "cumulative_seconds": 0.123495108,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'clear' of 'dict' objects>",
+      "primitive_calls": 3428,
+      "self_seconds": 0.123495108
+    },
+    {
+      "calls": 2490,
+      "cumulative_seconds": 0.11503366000000001,
+      "file": "/study/src/hexset/game.py",
+      "line": 421,
+      "name": "place_initial_settlement",
+      "primitive_calls": 2490,
+      "self_seconds": 0.0043263270000000005
+    },
+    {
+      "calls": 614800,
+      "cumulative_seconds": 0.10543286700000001,
+      "file": "/study/src/hexset/bots/evaluate.py",
+      "line": 71,
+      "name": "affordable",
+      "primitive_calls": 614800,
+      "self_seconds": 0.10543286700000001
+    },
+    {
+      "calls": 1412958,
+      "cumulative_seconds": 0.103242204,
+      "file": "/study/src/hexset/roads.py",
+      "line": 33,
+      "name": "passable",
+      "primitive_calls": 1412958,
+      "self_seconds": 0.103242204
+    },
+    {
+      "calls": 119131,
+      "cumulative_seconds": 0.095275354,
+      "file": "/study/src/hexset/view.py",
+      "line": 151,
+      "name": "expected_hand",
+      "primitive_calls": 119131,
+      "self_seconds": 0.095275354
+    },
+    {
+      "calls": 275149,
+      "cumulative_seconds": 0.094523195,
+      "file": "<string>",
+      "line": 2,
+      "name": "__hash__",
+      "primitive_calls": 275149,
+      "self_seconds": 0.064105298
+    },
+    {
+      "calls": 9187,
+      "cumulative_seconds": 0.093470494,
+      "file": "/study/src/hexset/economy.py",
+      "line": 86,
+      "name": "distribute",
+      "primitive_calls": 9187,
+      "self_seconds": 0.058511118
+    },
+    {
+      "calls": 5779,
+      "cumulative_seconds": 0.09067933,
+      "file": "/study/src/hexset/game.py",
+      "line": 748,
+      "name": "trade_with_bank",
+      "primitive_calls": 5779,
+      "self_seconds": 0.005946848
+    },
+    {
+      "calls": 5710,
+      "cumulative_seconds": 0.08876255200000001,
+      "file": "/study/src/hexset/view.py",
+      "line": 104,
+      "name": "from_game",
+      "primitive_calls": 5710,
+      "self_seconds": 0.004696678
+    },
+    {
+      "calls": 49089,
+      "cumulative_seconds": 0.088634083,
+      "file": "/study/src/hexset/state.py",
+      "line": 131,
+      "name": "road_count",
+      "primitive_calls": 49089,
+      "self_seconds": 0.013784659000000001
+    },
+    {
+      "calls": 824020,
+      "cumulative_seconds": 0.088455688,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'append' of 'list' objects>",
+      "primitive_calls": 824020,
+      "self_seconds": 0.088455688
+    },
+    {
+      "calls": 34879,
+      "cumulative_seconds": 0.081437087,
+      "file": "/study/src/hexset/bots/stances.py",
+      "line": 50,
+      "name": "win",
+      "primitive_calls": 34879,
+      "self_seconds": 0.012239558000000001
+    },
+    {
+      "calls": 105067,
+      "cumulative_seconds": 0.080866825,
+      "file": "/study/src/hexset/victory.py",
+      "line": 57,
+      "name": "card_points",
+      "primitive_calls": 105067,
+      "self_seconds": 0.031441925
+    },
+    {
+      "calls": 15787,
+      "cumulative_seconds": 0.079904073,
+      "file": "/study/src/hexset/game.py",
+      "line": 594,
+      "name": "_check_win",
+      "primitive_calls": 15787,
+      "self_seconds": 0.005807016000000001
+    },
+    {
+      "calls": 9622,
+      "cumulative_seconds": 0.077389917,
+      "file": "/study/src/hexset/economy.py",
+      "line": 53,
+      "name": "trade_ratios",
+      "primitive_calls": 9622,
+      "self_seconds": 0.029091992
+    },
+    {
+      "calls": 15787,
+      "cumulative_seconds": 0.07409705700000001,
+      "file": "/study/src/hexset/victory.py",
+      "line": 71,
+      "name": "victory_points",
+      "primitive_calls": 15787,
+      "self_seconds": 0.011373931
+    },
+    {
+      "calls": 952,
+      "cumulative_seconds": 0.070998825,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 258,
+      "name": "worlds",
+      "primitive_calls": 952,
+      "self_seconds": 0.002241798
+    },
+    {
+      "calls": 21729,
+      "cumulative_seconds": 0.06939635200000001,
+      "file": "/study/src/hexset/state.py",
+      "line": 135,
+      "name": "can_place_settlement",
+      "primitive_calls": 21729,
+      "self_seconds": 0.022527338
+    },
+    {
+      "calls": 34879,
+      "cumulative_seconds": 0.06919752900000001,
+      "file": "/study/src/hexset/bots/stances.py",
+      "line": 40,
+      "name": "win_at",
+      "primitive_calls": 34879,
+      "self_seconds": 0.040235940000000005
+    },
+    {
+      "calls": 25914,
+      "cumulative_seconds": 0.068851197,
+      "file": "/study/src/hexset/economy.py",
+      "line": 39,
+      "name": "can_afford",
+      "primitive_calls": 25914,
+      "self_seconds": 0.040666621
+    },
+    {
+      "calls": 1094635,
+      "cumulative_seconds": 0.06768813,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'getrandbits' of '_random.Random' objects>",
+      "primitive_calls": 1094635,
+      "self_seconds": 0.06768813
+    },
+    {
+      "calls": 3352,
+      "cumulative_seconds": 0.064010855,
+      "file": "/study/src/hexset/game.py",
+      "line": 658,
+      "name": "buy_development_card",
+      "primitive_calls": 3352,
+      "self_seconds": 0.003812572
+    },
+    {
+      "calls": 791150,
+      "cumulative_seconds": 0.063910094,
+      "file": "/study/src/hexset/view.py",
+      "line": 93,
+      "name": "<genexpr>",
+      "primitive_calls": 791150,
+      "self_seconds": 0.063910094
+    },
+    {
+      "calls": 952,
+      "cumulative_seconds": 0.063080174,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 277,
+      "name": "_root_options",
+      "primitive_calls": 952,
+      "self_seconds": 0.0023629610000000002
+    },
+    {
+      "calls": 431062,
+      "cumulative_seconds": 0.060283906000000005,
+      "file": "/study/src/hexset/bots/evaluate.py",
+      "line": 340,
+      "name": "<genexpr>",
+      "primitive_calls": 431062,
+      "self_seconds": 0.060283906000000005
+    },
+    {
+      "calls": 698245,
+      "cumulative_seconds": 0.058934352,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'bit_length' of 'int' objects>",
+      "primitive_calls": 698245,
+      "self_seconds": 0.058934352
+    },
+    {
+      "calls": 489410,
+      "cumulative_seconds": 0.05389962500000001,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'add' of 'set' objects>",
+      "primitive_calls": 489410,
+      "self_seconds": 0.05389962500000001
+    },
+    {
+      "calls": 5779,
+      "cumulative_seconds": 0.053394892000000006,
+      "file": "/study/src/hexset/economy.py",
+      "line": 71,
+      "name": "bank_trade",
+      "primitive_calls": 5779,
+      "self_seconds": 0.005627959
+    },
+    {
+      "calls": 10626,
+      "cumulative_seconds": 0.052232451000000006,
+      "file": "/study/src/hexset/economy.py",
+      "line": 44,
+      "name": "pay",
+      "primitive_calls": 10626,
+      "self_seconds": 0.010534950000000001
+    },
+    {
+      "calls": 44432,
+      "cumulative_seconds": 0.051257001,
+      "file": "/study/src/hexset/view.py",
+      "line": 108,
+      "name": "signature",
+      "primitive_calls": 44432,
+      "self_seconds": 0.030526846000000003
+    },
+    {
+      "calls": 381384,
+      "cumulative_seconds": 0.049769275,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'setdefault' of 'dict' objects>",
+      "primitive_calls": 381384,
+      "self_seconds": 0.049769275
+    },
+    {
+      "calls": 13167,
+      "cumulative_seconds": 0.047982967,
+      "file": "/study/src/hexset/game.py",
+      "line": 394,
+      "name": "_record_steal",
+      "primitive_calls": 13167,
+      "self_seconds": 0.0035855270000000002
+    },
+    {
+      "calls": 487984,
+      "cumulative_seconds": 0.046649323,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.len>",
+      "primitive_calls": 487984,
+      "self_seconds": 0.046649323
+    },
+    {
+      "calls": 357933,
+      "cumulative_seconds": 0.046464723,
+      "file": "/study/src/hexset/state.py",
+      "line": 132,
+      "name": "<genexpr>",
+      "primitive_calls": 357933,
+      "self_seconds": 0.046464723
+    },
+    {
+      "calls": 231,
+      "cumulative_seconds": 0.046057439000000006,
+      "file": "/study/src/hexset/game.py",
+      "line": 637,
+      "name": "build_settlement",
+      "primitive_calls": 231,
+      "self_seconds": 0.000563301
+    },
+    {
+      "calls": 691878,
+      "cumulative_seconds": 0.044425367,
+      "file": "/study/src/hexset/trading.py",
+      "line": 314,
+      "name": "<genexpr>",
+      "primitive_calls": 691878,
+      "self_seconds": 0.044425367
+    },
+    {
+      "calls": 13167,
+      "cumulative_seconds": 0.04439744,
+      "file": "/study/src/hexset/ledger.py",
+      "line": 206,
+      "name": "steal",
+      "primitive_calls": 13167,
+      "self_seconds": 0.022361709
+    },
+    {
+      "calls": 15787,
+      "cumulative_seconds": 0.043966564,
+      "file": "/study/src/hexset/victory.py",
+      "line": 47,
+      "name": "building_points",
+      "primitive_calls": 15787,
+      "self_seconds": 0.013305241
+    },
+    {
+      "calls": 3843,
+      "cumulative_seconds": 0.041715569,
+      "file": "/study/src/hexset/actions.py",
+      "line": 236,
+      "name": "_trade_actions",
+      "primitive_calls": 3843,
+      "self_seconds": 0.010208203
+    },
+    {
+      "calls": 216,
+      "cumulative_seconds": 0.041113646000000004,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 250,
+      "name": "<lambda>",
+      "primitive_calls": 216,
+      "self_seconds": 9.628900000000001e-05
+    },
+    {
+      "calls": 216,
+      "cumulative_seconds": 0.041017357000000004,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 451,
+      "name": "_marginal_loss",
+      "primitive_calls": 216,
+      "self_seconds": 0.00042770300000000003
+    },
+    {
+      "calls": 429,
+      "cumulative_seconds": 0.039897861,
+      "file": "/study/src/hexset/actions.py",
+      "line": 199,
+      "name": "<genexpr>",
+      "primitive_calls": 429,
+      "self_seconds": 0.0026891560000000003
+    },
+    {
+      "calls": 432,
+      "cumulative_seconds": 0.039200405,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 440,
+      "name": "_read_row",
+      "primitive_calls": 432,
+      "self_seconds": 0.00022473000000000003
+    },
+    {
+      "calls": 432,
+      "cumulative_seconds": 0.038026512000000005,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 434,
+      "name": "_vector",
+      "primitive_calls": 432,
+      "self_seconds": 0.000354732
+    },
+    {
+      "calls": 952,
+      "cumulative_seconds": 0.036761673,
+      "file": "/study/src/hexset/view.py",
+      "line": 244,
+      "name": "sample",
+      "primitive_calls": 952,
+      "self_seconds": 0.009809595
+    },
+    {
+      "calls": 105721,
+      "cumulative_seconds": 0.036478363,
+      "file": "/study/src/hexset/game.py",
+      "line": 175,
+      "name": "state",
+      "primitive_calls": 105721,
+      "self_seconds": 0.013916478000000001
+    },
+    {
+      "calls": 7234,
+      "cumulative_seconds": 0.034386877,
+      "file": "/study/src/hexset/state.py",
+      "line": 195,
+      "name": "place_road",
+      "primitive_calls": 7234,
+      "self_seconds": 0.0030837900000000003
+    },
+    {
+      "calls": 4201,
+      "cumulative_seconds": 0.034094784,
+      "file": "/study/src/hexset/game.py",
+      "line": 797,
+      "name": "end_turn",
+      "primitive_calls": 4201,
+      "self_seconds": 0.007217131000000001
+    },
+    {
+      "calls": 18289,
+      "cumulative_seconds": 0.032684318000000004,
+      "file": "/study/src/hexset/state.py",
+      "line": 115,
+      "name": "settlement_count",
+      "primitive_calls": 18289,
+      "self_seconds": 0.007391000000000001
+    },
+    {
+      "calls": 222160,
+      "cumulative_seconds": 0.030759648,
+      "file": "/study/src/hexset/bots/heximax/evaluate.py",
+      "line": 490,
+      "name": "<genexpr>",
+      "primitive_calls": 222160,
+      "self_seconds": 0.030759648
+    },
+    {
+      "calls": 275149,
+      "cumulative_seconds": 0.030417897000000003,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.hash>",
+      "primitive_calls": 275149,
+      "self_seconds": 0.030417897000000003
+    },
+    {
+      "calls": 169487,
+      "cumulative_seconds": 0.030118680000000002,
+      "file": "/study/src/hexset/victory.py",
+      "line": 62,
+      "name": "award_points",
+      "primitive_calls": 169487,
+      "self_seconds": 0.030118680000000002
+    },
+    {
+      "calls": 14520,
+      "cumulative_seconds": 0.026693116000000003,
+      "file": "/study/src/hexset/trading.py",
+      "line": 261,
+      "name": "_hand_multisets",
+      "primitive_calls": 14520,
+      "self_seconds": 0.002889637
+    },
+    {
+      "calls": 26274,
+      "cumulative_seconds": 0.026271803000000003,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.all>",
+      "primitive_calls": 26274,
+      "self_seconds": 0.014103745
+    },
+    {
+      "calls": 3352,
+      "cumulative_seconds": 0.025301307000000002,
+      "file": "/study/src/hexset/devcards.py",
+      "line": 19,
+      "name": "buy",
+      "primitive_calls": 3352,
+      "self_seconds": 0.0033290660000000003
+    },
+    {
+      "calls": 409890,
+      "cumulative_seconds": 0.023889559,
+      "file": "/study/src/hexset/trading.py",
+      "line": 316,
+      "name": "<genexpr>",
+      "primitive_calls": 409890,
+      "self_seconds": 0.023889559
+    },
+    {
+      "calls": 84083,
+      "cumulative_seconds": 0.023803479000000002,
+      "file": "/study/src/hexset/trading.py",
+      "line": 279,
+      "name": "walk",
+      "primitive_calls": 14520,
+      "self_seconds": 0.018650913
+    },
+    {
+      "calls": 9187,
+      "cumulative_seconds": 0.023607801,
+      "file": "/study/src/hexset/state.py",
+      "line": 201,
+      "name": "production",
+      "primitive_calls": 9187,
+      "self_seconds": 0.023607801
+    },
+    {
+      "calls": 2721,
+      "cumulative_seconds": 0.021816062,
+      "file": "/study/src/hexset/state.py",
+      "line": 154,
+      "name": "place_settlement",
+      "primitive_calls": 2721,
+      "self_seconds": 0.001277713
+    },
+    {
+      "calls": 5171,
+      "cumulative_seconds": 0.021773193,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.sorted>",
+      "primitive_calls": 5009,
+      "self_seconds": 0.004992065
+    },
+    {
+      "calls": 32040,
+      "cumulative_seconds": 0.021281723000000002,
+      "file": "/study/src/hexset/ledger.py",
+      "line": 137,
+      "name": "spend",
+      "primitive_calls": 32040,
+      "self_seconds": 0.013466946
+    },
+    {
+      "calls": 29210,
+      "cumulative_seconds": 0.021186636000000002,
+      "file": "/study/src/hexset/game.py",
+      "line": 387,
+      "name": "_snapshot_hands",
+      "primitive_calls": 29210,
+      "self_seconds": 0.021186636000000002
+    },
+    {
+      "calls": 153739,
+      "cumulative_seconds": 0.020962111000000002,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'items' of 'dict' objects>",
+      "primitive_calls": 153739,
+      "self_seconds": 0.020962111000000002
+    },
+    {
+      "calls": 129650,
+      "cumulative_seconds": 0.020730155,
+      "file": "/study/src/hexset/view.py",
+      "line": 115,
+      "name": "<genexpr>",
+      "primitive_calls": 129650,
+      "self_seconds": 0.020730155
+    },
+    {
+      "calls": 13167,
+      "cumulative_seconds": 0.020213593000000002,
+      "file": "/study/src/hexset/robber.py",
+      "line": 41,
+      "name": "steal",
+      "primitive_calls": 13167,
+      "self_seconds": 0.010428392
+    },
+    {
+      "calls": 256334,
+      "cumulative_seconds": 0.019641533000000003,
+      "file": "/study/src/hexset/economy.py",
+      "line": 62,
+      "name": "<genexpr>",
+      "primitive_calls": 256334,
+      "self_seconds": 0.019641533000000003
+    },
+    {
+      "calls": 59206,
+      "cumulative_seconds": 0.019517664,
+      "file": "/study/src/hexset/victory.py",
+      "line": 50,
+      "name": "<genexpr>",
+      "primitive_calls": 59206,
+      "self_seconds": 0.019517664
+    },
+    {
+      "calls": 51652,
+      "cumulative_seconds": 0.018674076,
+      "file": "/study/src/hexset/state.py",
+      "line": 116,
+      "name": "<genexpr>",
+      "primitive_calls": 51652,
+      "self_seconds": 0.018674076
+    },
+    {
+      "calls": 231552,
+      "cumulative_seconds": 0.018388207,
+      "file": "/study/src/hexset/bots/evaluate.py",
+      "line": 344,
+      "name": "<genexpr>",
+      "primitive_calls": 231552,
+      "self_seconds": 0.018388207
+    },
+    {
+      "calls": 29476,
+      "cumulative_seconds": 0.017450363,
+      "file": "/usr/local/lib/python3.12/enum.py",
+      "line": 720,
+      "name": "__call__",
+      "primitive_calls": 29476,
+      "self_seconds": 0.010666207
+    },
+    {
+      "calls": 249048,
+      "cumulative_seconds": 0.016304583,
+      "file": "/study/src/hexset/state.py",
+      "line": 188,
+      "name": "<genexpr>",
+      "primitive_calls": 249048,
+      "self_seconds": 0.016304583
+    },
+    {
+      "calls": 231552,
+      "cumulative_seconds": 0.015899280000000002,
+      "file": "/study/src/hexset/bots/evaluate.py",
+      "line": 347,
+      "name": "<genexpr>",
+      "primitive_calls": 231552,
+      "self_seconds": 0.015899280000000002
+    },
+    {
+      "calls": 153700,
+      "cumulative_seconds": 0.015690511,
+      "file": "/study/src/hexset/view.py",
+      "line": 147,
+      "name": "exact",
+      "primitive_calls": 153700,
+      "self_seconds": 0.015690511
+    },
+    {
+      "calls": 127140,
+      "cumulative_seconds": 0.014217655000000001,
+      "file": "/study/src/hexset/economy.py",
+      "line": 41,
+      "name": "<genexpr>",
+      "primitive_calls": 127140,
+      "self_seconds": 0.014217655000000001
+    },
+    {
+      "calls": 66181,
+      "cumulative_seconds": 0.013901872000000001,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method __new__ of type object at 0x7625a4c149c0>",
+      "primitive_calls": 66181,
+      "self_seconds": 0.013901872000000001
+    },
+    {
+      "calls": 139516,
+      "cumulative_seconds": 0.013825762,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method math.exp>",
+      "primitive_calls": 139516,
+      "self_seconds": 0.013825762
+    },
+    {
+      "calls": 8116,
+      "cumulative_seconds": 0.013350385000000001,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 324,
+      "name": "<genexpr>",
+      "primitive_calls": 8116,
+      "self_seconds": 0.001905926
+    },
+    {
+      "calls": 180,
+      "cumulative_seconds": 0.013101589,
+      "file": "/study/src/hexset/actions.py",
+      "line": 172,
+      "name": "_robber_targets",
+      "primitive_calls": 180,
+      "self_seconds": 0.002262524
+    },
+    {
+      "calls": 40744,
+      "cumulative_seconds": 0.011690234,
+      "file": "/study/src/hexset/board/topology.py",
+      "line": 69,
+      "name": "num_edges",
+      "primitive_calls": 40744,
+      "self_seconds": 0.007184836000000001
+    },
+    {
+      "calls": 13882,
+      "cumulative_seconds": 0.011016417,
+      "file": "/study/src/hexset/robber.py",
+      "line": 33,
+      "name": "move_robber",
+      "primitive_calls": 13882,
+      "self_seconds": 0.004201409000000001
+    },
+    {
+      "calls": 26563,
+      "cumulative_seconds": 0.010324419000000001,
+      "file": "<string>",
+      "line": 1,
+      "name": "<lambda>",
+      "primitive_calls": 26563,
+      "self_seconds": 0.005516291
+    },
+    {
+      "calls": 17208,
+      "cumulative_seconds": 0.009600858,
+      "file": "/study/src/hexset/bots/evaluate.py",
+      "line": 66,
+      "name": "seven_before_next_turn",
+      "primitive_calls": 17208,
+      "self_seconds": 0.006417114000000001
+    },
+    {
+      "calls": 1612,
+      "cumulative_seconds": 0.00918013,
+      "file": "/study/src/hexset/view.py",
+      "line": 179,
+      "name": "unseen_dev_cards",
+      "primitive_calls": 1612,
+      "self_seconds": 0.005717613000000001
+    },
+    {
+      "calls": 3843,
+      "cumulative_seconds": 0.008866831,
+      "file": "/study/src/hexset/devcards.py",
+      "line": 15,
+      "name": "can_buy",
+      "primitive_calls": 3843,
+      "self_seconds": 0.002002886
+    },
+    {
+      "calls": 14062,
+      "cumulative_seconds": 0.006981382,
+      "file": "/study/src/hexset/board/board.py",
+      "line": 45,
+      "name": "num_hexes",
+      "primitive_calls": 14062,
+      "self_seconds": 0.0027371260000000003
+    },
+    {
+      "calls": 3240,
+      "cumulative_seconds": 0.006898741000000001,
+      "file": "/study/src/hexset/robber.py",
+      "line": 24,
+      "name": "victims",
+      "primitive_calls": 3240,
+      "self_seconds": 0.002578791
+    },
+    {
+      "calls": 29476,
+      "cumulative_seconds": 0.006784156,
+      "file": "/usr/local/lib/python3.12/enum.py",
+      "line": 1128,
+      "name": "__new__",
+      "primitive_calls": 29476,
+      "self_seconds": 0.006784156
+    },
+    {
+      "calls": 718,
+      "cumulative_seconds": 0.006754817000000001,
+      "file": "/study/src/hexset/game.py",
+      "line": 673,
+      "name": "play_knight_card",
+      "primitive_calls": 718,
+      "self_seconds": 0.0011895080000000001
+    },
+    {
+      "calls": 26469,
+      "cumulative_seconds": 0.0067230020000000005,
+      "file": "/study/src/hexset/mcts.py",
+      "line": 97,
+      "name": "draws_hidden",
+      "primitive_calls": 26469,
+      "self_seconds": 0.006080871000000001
+    },
+    {
+      "calls": 10673,
+      "cumulative_seconds": 0.006421019,
+      "file": "/study/src/hexset/victory.py",
+      "line": 17,
+      "name": "_award",
+      "primitive_calls": 10673,
+      "self_seconds": 0.003222407
+    },
+    {
+      "calls": 276,
+      "cumulative_seconds": 0.006394467,
+      "file": "/study/src/hexset/trading.py",
+      "line": 372,
+      "name": "view",
+      "primitive_calls": 276,
+      "self_seconds": 0.000337686
+    },
+    {
+      "calls": 168,
+      "cumulative_seconds": 0.006171211,
+      "file": "/study/src/hexset/game.py",
+      "line": 442,
+      "name": "place_initial_road",
+      "primitive_calls": 168,
+      "self_seconds": 0.00030207300000000003
+    },
+    {
+      "calls": 3751,
+      "cumulative_seconds": 0.006151925000000001,
+      "file": "/study/src/hexset/view.py",
+      "line": 172,
+      "name": "steal_odds",
+      "primitive_calls": 3751,
+      "self_seconds": 0.002943849
+    },
+    {
+      "calls": 47487,
+      "cumulative_seconds": 0.006064128,
+      "file": "/study/src/hexset/game.py",
+      "line": 338,
+      "name": "_require",
+      "primitive_calls": 47487,
+      "self_seconds": 0.006064128
+    },
+    {
+      "calls": 11264,
+      "cumulative_seconds": 0.005249366,
+      "file": "/study/src/hexset/game.py",
+      "line": 612,
+      "name": "pending_free_roads",
+      "primitive_calls": 11264,
+      "self_seconds": 0.002089861
+    },
+    {
+      "calls": 62345,
+      "cumulative_seconds": 0.005210667,
+      "file": "/study/src/hexset/chance.py",
+      "line": 95,
+      "name": "__init__",
+      "primitive_calls": 62345,
+      "self_seconds": 0.005210667
+    },
+    {
+      "calls": 54682,
+      "cumulative_seconds": 0.005191025,
+      "file": "/study/src/hexset/state.py",
+      "line": 144,
+      "name": "<genexpr>",
+      "primitive_calls": 54682,
+      "self_seconds": 0.005191025
+    },
+    {
+      "calls": 276,
+      "cumulative_seconds": 0.005044949,
+      "file": "/study/src/hexset/trading.py",
+      "line": 548,
+      "name": "ask",
+      "primitive_calls": 276,
+      "self_seconds": 0.00020324400000000002
+    },
+    {
+      "calls": 13167,
+      "cumulative_seconds": 0.0049938890000000005,
+      "file": "/study/src/hexset/ledger.py",
+      "line": 108,
+      "name": "total",
+      "primitive_calls": 13167,
+      "self_seconds": 0.0029895430000000003
+    },
+    {
+      "calls": 4949,
+      "cumulative_seconds": 0.004913405,
+      "file": "/study/src/hexset/actions.py",
+      "line": 213,
+      "name": "_card_actions",
+      "primitive_calls": 4949,
+      "self_seconds": 0.002949966
+    },
+    {
+      "calls": 35275,
+      "cumulative_seconds": 0.004883197000000001,
+      "file": "/study/src/hexset/economy.py",
+      "line": 100,
+      "name": "<genexpr>",
+      "primitive_calls": 35275,
+      "self_seconds": 0.004883197000000001
+    },
+    {
+      "calls": 1050,
+      "cumulative_seconds": 0.004877633,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.repr>",
+      "primitive_calls": 1050,
+      "self_seconds": 0.0007055060000000001
+    },
+    {
+      "calls": 30004,
+      "cumulative_seconds": 0.004863242,
+      "file": "/study/src/hexset/ledger.py",
+      "line": 128,
+      "name": "receive",
+      "primitive_calls": 30004,
+      "self_seconds": 0.004863242
+    },
+    {
+      "calls": 276,
+      "cumulative_seconds": 0.004841705,
+      "file": "/study/src/hexset/trading.py",
+      "line": 200,
+      "name": "valued_many",
+      "primitive_calls": 276,
+      "self_seconds": 0.0040037020000000005
+    },
+    {
+      "calls": 498,
+      "cumulative_seconds": 0.004747969,
+      "file": "/study/src/hexset/game.py",
+      "line": 733,
+      "name": "play_monopoly_card",
+      "primitive_calls": 498,
+      "self_seconds": 0.00068654
+    },
+    {
+      "calls": 98,
+      "cumulative_seconds": 0.004426297,
+      "file": "/study/src/hexset/actions.py",
+      "line": 405,
+      "name": "options_for",
+      "primitive_calls": 98,
+      "self_seconds": 5.1564e-05
+    },
+    {
+      "calls": 660,
+      "cumulative_seconds": 0.004309696,
+      "file": "/study/src/hexset/view.py",
+      "line": 196,
+      "name": "deck_odds",
+      "primitive_calls": 660,
+      "self_seconds": 0.000618058
+    },
+    {
+      "calls": 14065,
+      "cumulative_seconds": 0.004245906000000001,
+      "file": "/study/src/hexset/board/topology.py",
+      "line": 61,
+      "name": "num_hexes",
+      "primitive_calls": 14065,
+      "self_seconds": 0.002782999
+    },
+    {
+      "calls": 1050,
+      "cumulative_seconds": 0.004172127,
+      "file": "/usr/local/lib/python3.12/collections/__init__.py",
+      "line": 466,
+      "name": "__repr__",
+      "primitive_calls": 1050,
+      "self_seconds": 0.0019672310000000003
+    },
+    {
+      "calls": 388,
+      "cumulative_seconds": 0.004144443,
+      "file": "/study/src/hexset/game.py",
+      "line": 723,
+      "name": "play_year_of_plenty_card",
+      "primitive_calls": 388,
+      "self_seconds": 0.000519289
+    },
+    {
+      "calls": 219,
+      "cumulative_seconds": 0.0038330210000000003,
+      "file": "/study/src/hexset/game.py",
+      "line": 649,
+      "name": "build_city",
+      "primitive_calls": 219,
+      "self_seconds": 0.00039809100000000005
+    },
+    {
+      "calls": 24,
+      "cumulative_seconds": 0.0037527640000000004,
+      "file": "/study/src/hexset/placement.py",
+      "line": 71,
+      "name": "best",
+      "primitive_calls": 24,
+      "self_seconds": 3.8862e-05
+    },
+    {
+      "calls": 24,
+      "cumulative_seconds": 0.0037139020000000003,
+      "file": "/study/src/hexset/placement.py",
+      "line": 61,
+      "name": "rank",
+      "primitive_calls": 24,
+      "self_seconds": 9.7773e-05
+    },
+    {
+      "calls": 3,
+      "cumulative_seconds": 0.003592735,
+      "file": "/study/src/hexset/arena.py",
+      "line": 103,
+      "name": "deal_game",
+      "primitive_calls": 3,
+      "self_seconds": 1.5483e-05
+    },
+    {
+      "calls": 4201,
+      "cumulative_seconds": 0.003531391,
+      "file": "/study/src/hexset/devcards.py",
+      "line": 29,
+      "name": "mature",
+      "primitive_calls": 4201,
+      "self_seconds": 0.003531391
+    },
+    {
+      "calls": 3,
+      "cumulative_seconds": 0.0033665880000000002,
+      "file": "/study/src/hexset/arena.py",
+      "line": 98,
+      "name": "deal_board",
+      "primitive_calls": 3,
+      "self_seconds": 2.2766000000000002e-05
+    },
+    {
+      "calls": 68315,
+      "cumulative_seconds": 0.003297832,
+      "file": "/study/src/hexset/trading.py",
+      "line": 553,
+      "name": "gate_of",
+      "primitive_calls": 68315,
+      "self_seconds": 0.003297832
+    },
+    {
+      "calls": 3,
+      "cumulative_seconds": 0.0032339860000000003,
+      "file": "/study/src/hexset/board/board.py",
+      "line": 113,
+      "name": "random_base_board",
+      "primitive_calls": 3,
+      "self_seconds": 0.000101787
+    },
+    {
+      "calls": 68315,
+      "cumulative_seconds": 0.0030612290000000004,
+      "file": "/study/src/hexset/trading.py",
+      "line": 158,
+      "name": "clears_floor",
+      "primitive_calls": 68315,
+      "self_seconds": 0.0030612290000000004
+    },
+    {
+      "calls": 3240,
+      "cumulative_seconds": 0.002842849,
+      "file": "/study/src/hexset/robber.py",
+      "line": 13,
+      "name": "occupants",
+      "primitive_calls": 3240,
+      "self_seconds": 0.001905107
+    },
+    {
+      "calls": 13167,
+      "cumulative_seconds": 0.0028228140000000003,
+      "file": "/study/src/hexset/ledger.py",
+      "line": 197,
+      "name": "gain_unknown",
+      "primitive_calls": 13167,
+      "self_seconds": 0.0028228140000000003
+    },
+    {
+      "calls": 22099,
+      "cumulative_seconds": 0.0027008030000000003,
+      "file": "/study/src/hexset/actions.py",
+      "line": 391,
+      "name": "victim_of",
+      "primitive_calls": 22099,
+      "self_seconds": 0.0027008030000000003
+    },
+    {
+      "calls": 3300,
+      "cumulative_seconds": 0.0026923150000000002,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 850,
+      "name": "_put_on_top",
+      "primitive_calls": 3300,
+      "self_seconds": 0.002402393
+    },
+    {
+      "calls": 1008,
+      "cumulative_seconds": 0.002618029,
+      "file": "/study/src/hexset/placement.py",
+      "line": 66,
+      "name": "<genexpr>",
+      "primitive_calls": 1008,
+      "self_seconds": 0.000293083
+    },
+    {
+      "calls": 4201,
+      "cumulative_seconds": 0.0024120540000000003,
+      "file": "/study/src/hexset/game.py",
+      "line": 371,
+      "name": "_next_unlocked",
+      "primitive_calls": 4201,
+      "self_seconds": 0.0024120540000000003
+    },
+    {
+      "calls": 984,
+      "cumulative_seconds": 0.002324946,
+      "file": "/study/src/hexset/placement.py",
+      "line": 43,
+      "name": "score",
+      "primitive_calls": 984,
+      "self_seconds": 0.001357473
+    },
+    {
+      "calls": 12,
+      "cumulative_seconds": 0.002322649,
+      "file": "/study/src/hexset/arena.py",
+      "line": 187,
+      "name": "spawn",
+      "primitive_calls": 12,
+      "self_seconds": 5.8920000000000005e-06
+    },
+    {
+      "calls": 12,
+      "cumulative_seconds": 0.002316757,
+      "file": "/study/src/hexset/arena.py",
+      "line": 192,
+      "name": "_spawn",
+      "primitive_calls": 12,
+      "self_seconds": 2.8196000000000002e-05
+    },
+    {
+      "calls": 3,
+      "cumulative_seconds": 0.0022997950000000003,
+      "file": "/study/src/hexset/board/topology.py",
+      "line": 74,
+      "name": "build",
+      "primitive_calls": 3,
+      "self_seconds": 0.000503298
+    },
+    {
+      "calls": 12,
+      "cumulative_seconds": 0.00227245,
+      "file": "/study/src/hexset/bots/heximax/presets.py",
+      "line": 23,
+      "name": "_spawn",
+      "primitive_calls": 12,
+      "self_seconds": 2.9605000000000002e-05
+    },
+    {
+      "calls": 5808,
+      "cumulative_seconds": 0.0022720080000000003,
+      "file": "/study/src/hexset/actions.py",
+      "line": 180,
+      "name": "<genexpr>",
+      "primitive_calls": 5808,
+      "self_seconds": 0.001225205
+    },
+    {
+      "calls": 12,
+      "cumulative_seconds": 0.0022428450000000003,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 878,
+      "name": "heximax",
+      "primitive_calls": 12,
+      "self_seconds": 4.0435e-05
+    },
+    {
+      "calls": 1050,
+      "cumulative_seconds": 0.002204896,
+      "file": "/usr/local/lib/python3.12/enum.py",
+      "line": 1227,
+      "name": "__repr__",
+      "primitive_calls": 1050,
+      "self_seconds": 0.002204896
+    },
+    {
+      "calls": 12,
+      "cumulative_seconds": 0.002134408,
+      "file": "/study/src/hexset/bots/heximax/evaluate.py",
+      "line": 144,
+      "name": "__init__",
+      "primitive_calls": 12,
+      "self_seconds": 1.4400000000000001e-05
+    },
+    {
+      "calls": 12,
+      "cumulative_seconds": 0.002120008,
+      "file": "/study/src/hexset/bots/evaluate.py",
+      "line": 236,
+      "name": "__init__",
+      "primitive_calls": 12,
+      "self_seconds": 0.000146475
+    },
+    {
+      "calls": 388,
+      "cumulative_seconds": 0.001767204,
+      "file": "/study/src/hexset/devcards.py",
+      "line": 84,
+      "name": "play_year_of_plenty",
+      "primitive_calls": 388,
+      "self_seconds": 0.00091191
+    },
+    {
+      "calls": 278,
+      "cumulative_seconds": 0.0016247780000000001,
+      "file": "/study/src/hexset/chance.py",
+      "line": 102,
+      "name": "roll",
+      "primitive_calls": 278,
+      "self_seconds": 0.00029861700000000004
+    },
+    {
+      "calls": 16839,
+      "cumulative_seconds": 0.001581888,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 751,
+      "name": "<genexpr>",
+      "primitive_calls": 16839,
+      "self_seconds": 0.001581888
+    },
+    {
+      "calls": 1050,
+      "cumulative_seconds": 0.001496523,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'update' of '_hashlib.HASH' objects>",
+      "primitive_calls": 1050,
+      "self_seconds": 0.001496523
+    },
+    {
+      "calls": 6520,
+      "cumulative_seconds": 0.0014771010000000002,
+      "file": "/study/src/hexset/robber.py",
+      "line": 26,
+      "name": "<genexpr>",
+      "primitive_calls": 6520,
+      "self_seconds": 0.001059552
+    },
+    {
+      "calls": 3788,
+      "cumulative_seconds": 0.0014282860000000002,
+      "file": "/study/src/hexset/robber.py",
+      "line": 56,
+      "name": "discard_count",
+      "primitive_calls": 3788,
+      "self_seconds": 0.0009689340000000001
+    },
+    {
+      "calls": 18118,
+      "cumulative_seconds": 0.001393726,
+      "file": "/study/src/hexset/state.py",
+      "line": 151,
+      "name": "<genexpr>",
+      "primitive_calls": 18118,
+      "self_seconds": 0.001393726
+    },
+    {
+      "calls": 12389,
+      "cumulative_seconds": 0.0013543860000000002,
+      "file": "/study/src/hexset/game.py",
+      "line": 194,
+      "name": "num_players",
+      "primitive_calls": 12389,
+      "self_seconds": 0.0013543860000000002
+    },
+    {
+      "calls": 247,
+      "cumulative_seconds": 0.0013267090000000001,
+      "file": "/study/src/hexset/actions.py",
+      "line": 205,
+      "name": "<genexpr>",
+      "primitive_calls": 247,
+      "self_seconds": 0.000531133
+    },
+    {
+      "calls": 556,
+      "cumulative_seconds": 0.0013261610000000002,
+      "file": "/usr/local/lib/python3.12/random.py",
+      "line": 332,
+      "name": "randint",
+      "primitive_calls": 556,
+      "self_seconds": 0.000289419
+    },
+    {
+      "calls": 6402,
+      "cumulative_seconds": 0.001323341,
+      "file": "/study/src/hexset/game.py",
+      "line": 492,
+      "name": "to_move",
+      "primitive_calls": 6402,
+      "self_seconds": 0.001251139
+    },
+    {
+      "calls": 4269,
+      "cumulative_seconds": 0.001275534,
+      "file": "/study/src/hexset/state.py",
+      "line": 163,
+      "name": "can_upgrade_to_city",
+      "primitive_calls": 4269,
+      "self_seconds": 0.00046296200000000003
+    },
+    {
+      "calls": 1705,
+      "cumulative_seconds": 0.001261292,
+      "file": "/study/src/hexset/devcards.py",
+      "line": 49,
+      "name": "spend_card",
+      "primitive_calls": 1705,
+      "self_seconds": 0.000769978
+    },
+    {
+      "calls": 635,
+      "cumulative_seconds": 0.0012610170000000001,
+      "file": "/usr/local/lib/python3.12/random.py",
+      "line": 291,
+      "name": "randrange",
+      "primitive_calls": 635,
+      "self_seconds": 0.0005811740000000001
+    },
+    {
+      "calls": 2974,
+      "cumulative_seconds": 0.001253468,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 861,
+      "name": "_donor",
+      "primitive_calls": 2974,
+      "self_seconds": 0.001253468
+    },
+    {
+      "calls": 660,
+      "cumulative_seconds": 0.001230764,
+      "file": "/study/src/hexset/bots/evaluate.py",
+      "line": 241,
+      "name": "<genexpr>",
+      "primitive_calls": 660,
+      "self_seconds": 0.000317507
+    },
+    {
+      "calls": 9690,
+      "cumulative_seconds": 0.0012283600000000002,
+      "file": "/usr/local/lib/python3.12/enum.py",
+      "line": 819,
+      "name": "<genexpr>",
+      "primitive_calls": 9690,
+      "self_seconds": 0.0012283600000000002
+    },
+    {
+      "calls": 13088,
+      "cumulative_seconds": 0.001186842,
+      "file": "/study/src/hexset/chance.py",
+      "line": 205,
+      "name": "__init__",
+      "primitive_calls": 13088,
+      "self_seconds": 0.001186842
+    },
+    {
+      "calls": 278,
+      "cumulative_seconds": 0.001173072,
+      "file": "/study/src/hexset/trading.py",
+      "line": 319,
+      "name": "_position_key",
+      "primitive_calls": 278,
+      "self_seconds": 0.000715619
+    },
+    {
+      "calls": 1314,
+      "cumulative_seconds": 0.001145582,
+      "file": "<frozen importlib._bootstrap>",
+      "line": 645,
+      "name": "parent",
+      "primitive_calls": 1314,
+      "self_seconds": 0.0006897670000000001
+    },
+    {
+      "calls": 952,
+      "cumulative_seconds": 0.001108108,
+      "file": "/study/src/hexset/view.py",
+      "line": 241,
+      "name": "_pool_cards",
+      "primitive_calls": 952,
+      "self_seconds": 0.001108108
+    },
+    {
+      "calls": 13088,
+      "cumulative_seconds": 0.0010474100000000001,
+      "file": "/study/src/hexset/chance.py",
+      "line": 208,
+      "name": "steal",
+      "primitive_calls": 13088,
+      "self_seconds": 0.0010474100000000001
+    },
+    {
+      "calls": 1236,
+      "cumulative_seconds": 0.0009674880000000001,
+      "file": "/study/src/hexset/game.py",
+      "line": 411,
+      "name": "_grant_initial_resources",
+      "primitive_calls": 1236,
+      "self_seconds": 0.0009674880000000001
+    },
+    {
+      "calls": 5744,
+      "cumulative_seconds": 0.0009610090000000001,
+      "file": "/study/src/hexset/board/board.py",
+      "line": 30,
+      "name": "pips",
+      "primitive_calls": 5744,
+      "self_seconds": 0.000655662
+    },
+    {
+      "calls": 718,
+      "cumulative_seconds": 0.0009471420000000001,
+      "file": "/study/src/hexset/devcards.py",
+      "line": 55,
+      "name": "play_knight",
+      "primitive_calls": 718,
+      "self_seconds": 0.000370331
+    },
+    {
+      "calls": 5361,
+      "cumulative_seconds": 0.000945973,
+      "file": "/study/src/hexset/game.py",
+      "line": 829,
+      "name": "is_over",
+      "primitive_calls": 5361,
+      "self_seconds": 0.000945973
+    },
+    {
+      "calls": 1944,
+      "cumulative_seconds": 0.0009132570000000001,
+      "file": "/study/src/hexset/bots/evaluate.py",
+      "line": 242,
+      "name": "<genexpr>",
+      "primitive_calls": 1944,
+      "self_seconds": 0.000519772
+    },
+    {
+      "calls": 718,
+      "cumulative_seconds": 0.0009011440000000001,
+      "file": "/study/src/hexset/victory.py",
+      "line": 40,
+      "name": "update_largest_army",
+      "primitive_calls": 718,
+      "self_seconds": 0.000381328
+    },
+    {
+      "calls": 1615,
+      "cumulative_seconds": 0.0008959230000000001,
+      "file": "/usr/local/lib/python3.12/enum.py",
+      "line": 815,
+      "name": "__iter__",
+      "primitive_calls": 1615,
+      "self_seconds": 0.0008959230000000001
+    },
+    {
+      "calls": 384,
+      "cumulative_seconds": 0.0008917700000000001,
+      "file": "/study/src/hexset/actions.py",
+      "line": 228,
+      "name": "<genexpr>",
+      "primitive_calls": 384,
+      "self_seconds": 0.00033818300000000004
+    },
+    {
+      "calls": 498,
+      "cumulative_seconds": 0.000815415,
+      "file": "/study/src/hexset/devcards.py",
+      "line": 99,
+      "name": "play_monopoly",
+      "primitive_calls": 498,
+      "self_seconds": 0.00046835400000000004
+    },
+    {
+      "calls": 391,
+      "cumulative_seconds": 0.000812572,
+      "file": "/study/src/hexset/state.py",
+      "line": 123,
+      "name": "city_count",
+      "primitive_calls": 391,
+      "self_seconds": 0.00019191300000000002
+    },
+    {
+      "calls": 952,
+      "cumulative_seconds": 0.000790222,
+      "file": "/study/src/hexset/game.py",
+      "line": 201,
+      "name": "set_state",
+      "primitive_calls": 952,
+      "self_seconds": 0.000790222
+    },
+    {
+      "calls": 36,
+      "cumulative_seconds": 0.000750462,
+      "file": "/study/src/hexset/board/board.py",
+      "line": 55,
+      "name": "scarce_resources",
+      "primitive_calls": 36,
+      "self_seconds": 0.000155954
+    },
+    {
+      "calls": 517,
+      "cumulative_seconds": 0.000696609,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 332,
+      "name": "_estimate",
+      "primitive_calls": 517,
+      "self_seconds": 0.000609948
+    },
+    {
+      "calls": 219,
+      "cumulative_seconds": 0.000642043,
+      "file": "/study/src/hexset/state.py",
+      "line": 171,
+      "name": "upgrade_to_city",
+      "primitive_calls": 219,
+      "self_seconds": 8.132300000000001e-05
+    },
+    {
+      "calls": 7082,
+      "cumulative_seconds": 0.00063588,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 325,
+      "name": "<lambda>",
+      "primitive_calls": 7082,
+      "self_seconds": 0.00063588
+    },
+    {
+      "calls": 2106,
+      "cumulative_seconds": 0.0005940920000000001,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method time.perf_counter>",
+      "primitive_calls": 2106,
+      "self_seconds": 0.0005940920000000001
+    },
+    {
+      "calls": 399,
+      "cumulative_seconds": 0.000579031,
+      "file": "/study/src/hexset/board/topology.py",
+      "line": 80,
+      "name": "<genexpr>",
+      "primitive_calls": 399,
+      "self_seconds": 5.7908e-05
+    },
+    {
+      "calls": 1026,
+      "cumulative_seconds": 0.000550516,
+      "file": "/study/src/hexset/board/coords.py",
+      "line": 27,
+      "name": "neighbor",
+      "primitive_calls": 1026,
+      "self_seconds": 0.000288795
+    },
+    {
+      "calls": 36,
+      "cumulative_seconds": 0.000532407,
+      "file": "/usr/local/lib/python3.12/collections/__init__.py",
+      "line": 595,
+      "name": "__init__",
+      "primitive_calls": 36,
+      "self_seconds": 0.000137026
+    },
+    {
+      "calls": 672,
+      "cumulative_seconds": 0.000526175,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.getattr>",
+      "primitive_calls": 396,
+      "self_seconds": 0.00043603
+    },
+    {
+      "calls": 342,
+      "cumulative_seconds": 0.0005211230000000001,
+      "file": "/study/src/hexset/board/topology.py",
+      "line": 13,
+      "name": "_corner",
+      "primitive_calls": 342,
+      "self_seconds": 0.000142125
+    },
+    {
+      "calls": 660,
+      "cumulative_seconds": 0.000509312,
+      "file": "/study/src/hexset/bots/evaluate.py",
+      "line": 253,
+      "name": "<genexpr>",
+      "primitive_calls": 660,
+      "self_seconds": 0.00025314
+    },
+    {
+      "calls": 216,
+      "cumulative_seconds": 0.000500302,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 801,
+      "name": "_thin_copy",
+      "primitive_calls": 216,
+      "self_seconds": 0.00041547400000000004
+    },
+    {
+      "calls": 1705,
+      "cumulative_seconds": 0.0004913140000000001,
+      "file": "/study/src/hexset/devcards.py",
+      "line": 45,
+      "name": "can_play",
+      "primitive_calls": 1705,
+      "self_seconds": 0.0004913140000000001
+    },
+    {
+      "calls": 3352,
+      "cumulative_seconds": 0.000488396,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'pop' of 'list' objects>",
+      "primitive_calls": 3352,
+      "self_seconds": 0.000488396
+    },
+    {
+      "calls": 1314,
+      "cumulative_seconds": 0.00045581500000000004,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'rpartition' of 'str' objects>",
+      "primitive_calls": 1314,
+      "self_seconds": 0.00045581500000000004
+    },
+    {
+      "calls": 716,
+      "cumulative_seconds": 0.000454591,
+      "file": "/study/src/hexset/state.py",
+      "line": 124,
+      "name": "<genexpr>",
+      "primitive_calls": 716,
+      "self_seconds": 0.000454591
+    },
+    {
+      "calls": 79,
+      "cumulative_seconds": 0.00045140800000000004,
+      "file": "/study/src/hexset/chance.py",
+      "line": 105,
+      "name": "steal",
+      "primitive_calls": 79,
+      "self_seconds": 0.000208189
+    },
+    {
+      "calls": 125,
+      "cumulative_seconds": 0.00042620300000000005,
+      "file": "/study/src/hexset/game.py",
+      "line": 559,
+      "name": "discard_one",
+      "primitive_calls": 125,
+      "self_seconds": 0.000250748
+    },
+    {
+      "calls": 3,
+      "cumulative_seconds": 0.000421598,
+      "file": "/study/src/hexset/board/ports.py",
+      "line": 36,
+      "name": "place_ports",
+      "primitive_calls": 3,
+      "self_seconds": 5.2373e-05
+    },
+    {
+      "calls": 1068,
+      "cumulative_seconds": 0.000404238,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'encode' of 'str' objects>",
+      "primitive_calls": 1068,
+      "self_seconds": 0.000404238
+    },
+    {
+      "calls": 36,
+      "cumulative_seconds": 0.00039538100000000004,
+      "file": "/usr/local/lib/python3.12/collections/__init__.py",
+      "line": 669,
+      "name": "update",
+      "primitive_calls": 36,
+      "self_seconds": 5.9735e-05
+    },
+    {
+      "calls": 618,
+      "cumulative_seconds": 0.000386276,
+      "file": "/study/src/hexset/actions.py",
+      "line": 226,
+      "name": "<genexpr>",
+      "primitive_calls": 618,
+      "self_seconds": 0.00020432300000000002
+    },
+    {
+      "calls": 2490,
+      "cumulative_seconds": 0.00037508,
+      "file": "/study/src/hexset/game.py",
+      "line": 343,
+      "name": "_in_second_setup_round",
+      "primitive_calls": 2490,
+      "self_seconds": 0.00037508
+    },
+    {
+      "calls": 60,
+      "cumulative_seconds": 0.000346365,
+      "file": "/study/src/hexset/board/topology.py",
+      "line": 106,
+      "name": "<genexpr>",
+      "primitive_calls": 60,
+      "self_seconds": 5.451700000000001e-05
+    },
+    {
+      "calls": 276,
+      "cumulative_seconds": 0.000327732,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 364,
+      "name": "gains_many",
+      "primitive_calls": 276,
+      "self_seconds": 0.00029162700000000003
+    },
+    {
+      "calls": 5544,
+      "cumulative_seconds": 0.00030534700000000003,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.abs>",
+      "primitive_calls": 5544,
+      "self_seconds": 0.00030534700000000003
+    },
+    {
+      "calls": 309,
+      "cumulative_seconds": 0.00029184800000000004,
+      "file": "/study/src/hexset/board/topology.py",
+      "line": 107,
+      "name": "<genexpr>",
+      "primitive_calls": 309,
+      "self_seconds": 6.8111e-05
+    },
+    {
+      "calls": 1705,
+      "cumulative_seconds": 0.000290151,
+      "file": "/study/src/hexset/game.py",
+      "line": 667,
+      "name": "_spend_turn_card",
+      "primitive_calls": 1705,
+      "self_seconds": 0.000290151
+    },
+    {
+      "calls": 960,
+      "cumulative_seconds": 0.000288385,
+      "file": "/study/src/hexset/actions.py",
+      "line": 231,
+      "name": "<genexpr>",
+      "primitive_calls": 960,
+      "self_seconds": 0.000206182
+    },
+    {
+      "calls": 2328,
+      "cumulative_seconds": 0.000277591,
+      "file": "/study/src/hexset/devcards.py",
+      "line": 90,
+      "name": "<genexpr>",
+      "primitive_calls": 2328,
+      "self_seconds": 0.000277591
+    },
+    {
+      "calls": 3,
+      "cumulative_seconds": 0.000273595,
+      "file": "/study/src/hexset/board/topology.py",
+      "line": 151,
+      "name": "coastal_rings",
+      "primitive_calls": 3,
+      "self_seconds": 0.00013417300000000002
+    },
+    {
+      "calls": 864,
+      "cumulative_seconds": 0.00025617200000000004,
+      "file": "/study/src/hexset/bots/evaluate.py",
+      "line": 254,
+      "name": "<genexpr>",
+      "primitive_calls": 864,
+      "self_seconds": 0.00025617200000000004
+    },
+    {
+      "calls": 1390,
+      "cumulative_seconds": 0.00024172,
+      "file": "/study/src/hexset/trading.py",
+      "line": 324,
+      "name": "<genexpr>",
+      "primitive_calls": 1390,
+      "self_seconds": 0.00024172
+    },
+    {
+      "calls": 1747,
+      "cumulative_seconds": 0.00024159000000000002,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method _operator.index>",
+      "primitive_calls": 1747,
+      "self_seconds": 0.00024159000000000002
+    },
+    {
+      "calls": 101,
+      "cumulative_seconds": 0.00023550800000000002,
+      "file": "/study/src/hexset/game.py",
+      "line": 701,
+      "name": "play_road_building_card",
+      "primitive_calls": 101,
+      "self_seconds": 0.000123453
+    },
+    {
+      "calls": 18,
+      "cumulative_seconds": 0.000232777,
+      "file": "/usr/local/lib/python3.12/random.py",
+      "line": 126,
+      "name": "__init__",
+      "primitive_calls": 18,
+      "self_seconds": 1.4722e-05
+    },
+    {
+      "calls": 399,
+      "cumulative_seconds": 0.000223737,
+      "file": "/study/src/hexset/board/topology.py",
+      "line": 109,
+      "name": "<genexpr>",
+      "primitive_calls": 399,
+      "self_seconds": 5.2219e-05
+    },
+    {
+      "calls": 18,
+      "cumulative_seconds": 0.000218055,
+      "file": "/usr/local/lib/python3.12/random.py",
+      "line": 135,
+      "name": "seed",
+      "primitive_calls": 18,
+      "self_seconds": 7.3922e-05
+    },
+    {
+      "calls": 1390,
+      "cumulative_seconds": 0.00021573300000000002,
+      "file": "/study/src/hexset/trading.py",
+      "line": 323,
+      "name": "<genexpr>",
+      "primitive_calls": 1390,
+      "self_seconds": 0.00021573300000000002
+    },
+    {
+      "calls": 36,
+      "cumulative_seconds": 0.00018610000000000002,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method _collections._count_elements>",
+      "primitive_calls": 36,
+      "self_seconds": 0.00011101800000000001
+    },
+    {
+      "calls": 375,
+      "cumulative_seconds": 0.000185636,
+      "file": "/study/src/hexset/game.py",
+      "line": 488,
+      "name": "players_owing_discards",
+      "primitive_calls": 375,
+      "self_seconds": 0.000185636
+    },
+    {
+      "calls": 276,
+      "cumulative_seconds": 0.00018339700000000002,
+      "file": "/study/src/hexset/bench/profile_heximax.py",
+      "line": 42,
+      "name": "__getattr__",
+      "primitive_calls": 276,
+      "self_seconds": 9.014500000000001e-05
+    },
+    {
+      "calls": 457,
+      "cumulative_seconds": 0.00017416500000000002,
+      "file": "/study/src/hexset/board/topology.py",
+      "line": 65,
+      "name": "num_vertices",
+      "primitive_calls": 457,
+      "self_seconds": 0.000127825
+    },
+    {
+      "calls": 168,
+      "cumulative_seconds": 0.000170841,
+      "file": "/study/src/hexset/game.py",
+      "line": 347,
+      "name": "_advance_setup",
+      "primitive_calls": 168,
+      "self_seconds": 0.00013954600000000002
+    },
+    {
+      "calls": 3,
+      "cumulative_seconds": 0.00016754700000000001,
+      "file": "/study/src/hexset/game.py",
+      "line": 225,
+      "name": "start",
+      "primitive_calls": 3,
+      "self_seconds": 3.2554e-05
+    },
+    {
+      "calls": 165,
+      "cumulative_seconds": 0.00016728900000000002,
+      "file": "/study/src/hexset/board/topology.py",
+      "line": 114,
+      "name": "<genexpr>",
+      "primitive_calls": 165,
+      "self_seconds": 5.2471000000000006e-05
+    },
+    {
+      "calls": 87,
+      "cumulative_seconds": 0.000156526,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.isinstance>",
+      "primitive_calls": 87,
+      "self_seconds": 5.3827000000000005e-05
+    },
+    {
+      "calls": 35,
+      "cumulative_seconds": 0.00015365500000000002,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 294,
+      "name": "<lambda>",
+      "primitive_calls": 35,
+      "self_seconds": 1.5112e-05
+    },
+    {
+      "calls": 35,
+      "cumulative_seconds": 0.000138543,
+      "file": "/study/src/hexset/view.py",
+      "line": 164,
+      "name": "table_holding",
+      "primitive_calls": 35,
+      "self_seconds": 1.7232e-05
+    },
+    {
+      "calls": 399,
+      "cumulative_seconds": 0.00012996400000000002,
+      "file": "/study/src/hexset/board/topology.py",
+      "line": 88,
+      "name": "<genexpr>",
+      "primitive_calls": 399,
+      "self_seconds": 0.00010765300000000001
+    },
+    {
+      "calls": 192,
+      "cumulative_seconds": 0.00012047400000000001,
+      "file": "/study/src/hexset/game.py",
+      "line": 433,
+      "name": "legal_initial_roads",
+      "primitive_calls": 192,
+      "self_seconds": 0.00012047400000000001
+    },
+    {
+      "calls": 36,
+      "cumulative_seconds": 0.000102699,
+      "file": "<frozen abc>",
+      "line": 117,
+      "name": "__instancecheck__",
+      "primitive_calls": 36,
+      "self_seconds": 2.6335e-05
+    },
+    {
+      "calls": 140,
+      "cumulative_seconds": 9.7064e-05,
+      "file": "/study/src/hexset/view.py",
+      "line": 166,
+      "name": "<genexpr>",
+      "primitive_calls": 140,
+      "self_seconds": 3.3945e-05
+    },
+    {
+      "calls": 984,
+      "cumulative_seconds": 9.198500000000001e-05,
+      "file": "/study/src/hexset/placement.py",
+      "line": 67,
+      "name": "<lambda>",
+      "primitive_calls": 984,
+      "self_seconds": 9.198500000000001e-05
+    },
+    {
+      "calls": 60,
+      "cumulative_seconds": 8.4139e-05,
+      "file": "/study/src/hexset/board/topology.py",
+      "line": 97,
+      "name": "<genexpr>",
+      "primitive_calls": 60,
+      "self_seconds": 4.7246e-05
+    },
+    {
+      "calls": 600,
+      "cumulative_seconds": 8.2203e-05,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'count' of 'tuple' objects>",
+      "primitive_calls": 600,
+      "self_seconds": 8.2203e-05
+    },
+    {
+      "calls": 3,
+      "cumulative_seconds": 8.008200000000001e-05,
+      "file": "/study/src/hexset/board/board.py",
+      "line": 74,
+      "name": "make_board",
+      "primitive_calls": 3,
+      "self_seconds": 6.236200000000001e-05
+    },
+    {
+      "calls": 36,
+      "cumulative_seconds": 7.6364e-05,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method _abc._abc_instancecheck>",
+      "primitive_calls": 36,
+      "self_seconds": 4.5649e-05
+    },
+    {
+      "calls": 684,
+      "cumulative_seconds": 7.508200000000001e-05,
+      "file": "/study/src/hexset/board/board.py",
+      "line": 63,
+      "name": "<genexpr>",
+      "primitive_calls": 684,
+      "self_seconds": 7.508200000000001e-05
+    },
+    {
+      "calls": 162,
+      "cumulative_seconds": 7.2902e-05,
+      "file": "/study/src/hexset/board/topology.py",
+      "line": 23,
+      "name": "_vertex_sort_key",
+      "primitive_calls": 162,
+      "self_seconds": 3.1591e-05
+    },
+    {
+      "calls": 3,
+      "cumulative_seconds": 7.236200000000001e-05,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'disable' of '_lsprof.Profiler' objects>",
+      "primitive_calls": 3,
+      "self_seconds": 7.236200000000001e-05
+    },
+    {
+      "calls": 125,
+      "cumulative_seconds": 6.124300000000001e-05,
+      "file": "/study/src/hexset/game.py",
+      "line": 543,
+      "name": "_finish_discards",
+      "primitive_calls": 125,
+      "self_seconds": 3.5927000000000003e-05
+    },
+    {
+      "calls": 3,
+      "cumulative_seconds": 5.9520000000000006e-05,
+      "file": "/study/src/hexset/state.py",
+      "line": 62,
+      "name": "new_game",
+      "primitive_calls": 3,
+      "self_seconds": 3.2517e-05
+    },
+    {
+      "calls": 18,
+      "cumulative_seconds": 5.9099000000000005e-05,
+      "file": "~",
+      "line": 0,
+      "name": "<function Random.seed at 0x7625a36a8900>",
+      "primitive_calls": 18,
+      "self_seconds": 5.9099000000000005e-05
+    },
+    {
+      "calls": 165,
+      "cumulative_seconds": 5.7769e-05,
+      "file": "/study/src/hexset/board/topology.py",
+      "line": 135,
+      "name": "<genexpr>",
+      "primitive_calls": 165,
+      "self_seconds": 3.9796e-05
+    },
+    {
+      "calls": 21,
+      "cumulative_seconds": 5.7498000000000004e-05,
+      "file": "/study/src/hexset/board/board.py",
+      "line": 105,
+      "name": "_has_adjacent_reds",
+      "primitive_calls": 21,
+      "self_seconds": 2.8773e-05
+    },
+    {
+      "calls": 18,
+      "cumulative_seconds": 5.614e-05,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'digest' of '_sha2.SHA512Type' objects>",
+      "primitive_calls": 18,
+      "self_seconds": 5.614e-05
+    },
+    {
+      "calls": 219,
+      "cumulative_seconds": 5.542e-05,
+      "file": "/study/src/hexset/board/topology.py",
+      "line": 137,
+      "name": "<genexpr>",
+      "primitive_calls": 219,
+      "self_seconds": 3.4737e-05
+    },
+    {
+      "calls": 504,
+      "cumulative_seconds": 5.3258000000000004e-05,
+      "file": "/study/src/hexset/board/topology.py",
+      "line": 115,
+      "name": "<genexpr>",
+      "primitive_calls": 504,
+      "self_seconds": 5.3258000000000004e-05
+    },
+    {
+      "calls": 12,
+      "cumulative_seconds": 5.1920000000000004e-05,
+      "file": "/study/src/hexset/bots/heximax/search.py",
+      "line": 200,
+      "name": "__post_init__",
+      "primitive_calls": 12,
+      "self_seconds": 5.1920000000000004e-05
+    },
+    {
+      "calls": 3,
+      "cumulative_seconds": 4.6198e-05,
+      "file": "/study/src/hexset/chance.py",
+      "line": 98,
+      "name": "deck_order",
+      "primitive_calls": 3,
+      "self_seconds": 1.641e-06
+    },
+    {
+      "calls": 3,
+      "cumulative_seconds": 4.5778e-05,
+      "file": "/study/src/hexset/board/topology.py",
+      "line": 144,
+      "name": "coastal_edges",
+      "primitive_calls": 3,
+      "self_seconds": 1.2583000000000001e-05
+    },
+    {
+      "calls": 165,
+      "cumulative_seconds": 4.3308e-05,
+      "file": "/study/src/hexset/board/topology.py",
+      "line": 136,
+      "name": "<genexpr>",
+      "primitive_calls": 165,
+      "self_seconds": 2.6745000000000002e-05
+    },
+    {
+      "calls": 3,
+      "cumulative_seconds": 4.0036e-05,
+      "file": "/study/src/hexset/arena.py",
+      "line": 698,
+      "name": "entrant_from_name",
+      "primitive_calls": 3,
+      "self_seconds": 1.0321e-05
+    },
+    {
+      "calls": 132,
+      "cumulative_seconds": 3.7026e-05,
+      "file": "/study/src/hexset/bots/evaluate.py",
+      "line": 238,
+      "name": "<genexpr>",
+      "primitive_calls": 132,
+      "self_seconds": 2.1122000000000002e-05
+    },
+    {
+      "calls": 399,
+      "cumulative_seconds": 3.6893e-05,
+      "file": "/study/src/hexset/board/topology.py",
+      "line": 98,
+      "name": "<genexpr>",
+      "primitive_calls": 399,
+      "self_seconds": 3.6893e-05
+    },
+    {
+      "calls": 93,
+      "cumulative_seconds": 3.2215e-05,
+      "file": "/study/src/hexset/board/topology.py",
+      "line": 146,
+      "name": "<genexpr>",
+      "primitive_calls": 93,
+      "self_seconds": 2.1865e-05
+    },
+    {
+      "calls": 3,
+      "cumulative_seconds": 3.2125e-05,
+      "file": "/study/src/hexset/board/ports.py",
+      "line": 31,
+      "name": "_spread",
+      "primitive_calls": 3,
+      "self_seconds": 2.0823e-05
+    },
+    {
+      "calls": 10,
+      "cumulative_seconds": 3.0715e-05,
+      "file": "<frozen abc>",
+      "line": 121,
+      "name": "__subclasscheck__",
+      "primitive_calls": 1,
+      "self_seconds": 2.21e-06
+    },
+    {
+      "calls": 10,
+      "cumulative_seconds": 2.9905000000000003e-05,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method _abc._abc_subclasscheck>",
+      "primitive_calls": 1,
+      "self_seconds": 2.7015e-05
+    },
+    {
+      "calls": 3,
+      "cumulative_seconds": 2.7164000000000003e-05,
+      "file": "/study/src/hexset/board/ports.py",
+      "line": 27,
+      "name": "base_port_bag",
+      "primitive_calls": 3,
+      "self_seconds": 1.5442000000000002e-05
+    },
+    {
+      "calls": 3,
+      "cumulative_seconds": 2.6845e-05,
+      "file": "/study/src/hexset/arena.py",
+      "line": 685,
+      "name": "_load_presets",
+      "primitive_calls": 3,
+      "self_seconds": 1.7923e-05
+    },
+    {
+      "calls": 6,
+      "cumulative_seconds": 2.5776000000000002e-05,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method time.process_time>",
+      "primitive_calls": 6,
+      "self_seconds": 2.5776000000000002e-05
+    },
+    {
+      "calls": 399,
+      "cumulative_seconds": 2.5615e-05,
+      "file": "/study/src/hexset/board/topology.py",
+      "line": 100,
+      "name": "<genexpr>",
+      "primitive_calls": 399,
+      "self_seconds": 2.5615e-05
+    },
+    {
+      "calls": 90,
+      "cumulative_seconds": 2.4085e-05,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.next>",
+      "primitive_calls": 90,
+      "self_seconds": 1.5423e-05
+    },
+    {
+      "calls": 27,
+      "cumulative_seconds": 2.258e-05,
+      "file": "<string>",
+      "line": 2,
+      "name": "__init__",
+      "primitive_calls": 27,
+      "self_seconds": 2.258e-05
+    },
+    {
+      "calls": 342,
+      "cumulative_seconds": 2.2311e-05,
+      "file": "/study/src/hexset/board/topology.py",
+      "line": 27,
+      "name": "_ordered",
+      "primitive_calls": 342,
+      "self_seconds": 2.2311e-05
+    },
+    {
+      "calls": 177,
+      "cumulative_seconds": 2.0952000000000002e-05,
+      "file": "/study/src/hexset/board/topology.py",
+      "line": 166,
+      "name": "<genexpr>",
+      "primitive_calls": 177,
+      "self_seconds": 2.0952000000000002e-05
+    },
+    {
+      "calls": 3,
+      "cumulative_seconds": 1.9974000000000002e-05,
+      "file": "/study/src/hexset/ledger.py",
+      "line": 121,
+      "name": "new",
+      "primitive_calls": 3,
+      "self_seconds": 1.2383000000000002e-05
+    },
+    {
+      "calls": 108,
+      "cumulative_seconds": 1.9433000000000002e-05,
+      "file": "/study/src/hexset/board/board.py",
+      "line": 71,
+      "name": "<genexpr>",
+      "primitive_calls": 108,
+      "self_seconds": 1.9433000000000002e-05
+    },
+    {
+      "calls": 15,
+      "cumulative_seconds": 1.5362e-05,
+      "file": "<frozen importlib._bootstrap>",
+      "line": 1390,
+      "name": "_handle_fromlist",
+      "primitive_calls": 15,
+      "self_seconds": 9.552000000000001e-06
+    },
+    {
+      "calls": 42,
+      "cumulative_seconds": 1.4304e-05,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'values' of 'dict' objects>",
+      "primitive_calls": 42,
+      "self_seconds": 1.4304e-05
+    },
+    {
+      "calls": 135,
+      "cumulative_seconds": 1.3782000000000001e-05,
+      "file": "/study/src/hexset/board/board.py",
+      "line": 108,
+      "name": "<genexpr>",
+      "primitive_calls": 135,
+      "self_seconds": 1.3782000000000001e-05
+    },
+    {
+      "calls": 18,
+      "cumulative_seconds": 1.2774e-05,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method _sha2.sha512>",
+      "primitive_calls": 18,
+      "self_seconds": 1.2774e-05
+    },
+    {
+      "calls": 27,
+      "cumulative_seconds": 1.1302000000000001e-05,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.round>",
+      "primitive_calls": 27,
+      "self_seconds": 1.1302000000000001e-05
+    },
+    {
+      "calls": 3,
+      "cumulative_seconds": 1.0961e-05,
+      "file": "/study/src/hexset/board/board.py",
+      "line": 49,
+      "name": "desert_hexes",
+      "primitive_calls": 3,
+      "self_seconds": 5.681e-06
+    },
+    {
+      "calls": 90,
+      "cumulative_seconds": 1.0581e-05,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'discard' of 'set' objects>",
+      "primitive_calls": 90,
+      "self_seconds": 1.0581e-05
+    },
+    {
+      "calls": 3,
+      "cumulative_seconds": 9.432e-06,
+      "file": "/study/src/hexset/cards.py",
+      "line": 42,
+      "name": "make_deck",
+      "primitive_calls": 3,
+      "self_seconds": 8.832000000000001e-06
+    },
+    {
+      "calls": 20,
+      "cumulative_seconds": 6.63e-06,
+      "file": "/study/src/hexset/actions.py",
+      "line": 319,
+      "name": "<genexpr>",
+      "primitive_calls": 20,
+      "self_seconds": 6.63e-06
+    },
+    {
+      "calls": 18,
+      "cumulative_seconds": 6.380000000000001e-06,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method from_bytes>",
+      "primitive_calls": 18,
+      "self_seconds": 6.380000000000001e-06
+    },
+    {
+      "calls": 6,
+      "cumulative_seconds": 5.28e-06,
+      "file": "/study/src/hexset/board/board.py",
+      "line": 50,
+      "name": "<genexpr>",
+      "primitive_calls": 6,
+      "self_seconds": 5.28e-06
+    },
+    {
+      "calls": 42,
+      "cumulative_seconds": 4.84e-06,
+      "file": "/study/src/hexset/board/board.py",
+      "line": 100,
+      "name": "<genexpr>",
+      "primitive_calls": 42,
+      "self_seconds": 4.84e-06
+    },
+    {
+      "calls": 15,
+      "cumulative_seconds": 4.15e-06,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.hasattr>",
+      "primitive_calls": 15,
+      "self_seconds": 4.15e-06
+    },
+    {
+      "calls": 3,
+      "cumulative_seconds": 3.5000000000000004e-06,
+      "file": "/study/src/hexset/arena.py",
+      "line": 88,
+      "name": "game_key",
+      "primitive_calls": 3,
+      "self_seconds": 3.5000000000000004e-06
+    },
+    {
+      "calls": 3,
+      "cumulative_seconds": 3.27e-06,
+      "file": "/study/src/hexset/arena.py",
+      "line": 83,
+      "name": "board_key",
+      "primitive_calls": 3,
+      "self_seconds": 3.27e-06
+    },
+    {
+      "calls": 12,
+      "cumulative_seconds": 3.2000000000000003e-06,
+      "file": "/study/src/hexset/bench/profile_heximax.py",
+      "line": 31,
+      "name": "__init__",
+      "primitive_calls": 12,
+      "self_seconds": 3.2000000000000003e-06
+    },
+    {
+      "calls": 3,
+      "cumulative_seconds": 3.062e-06,
+      "file": "/usr/local/lib/python3.12/enum.py",
+      "line": 821,
+      "name": "__len__",
+      "primitive_calls": 3,
+      "self_seconds": 2.562e-06
+    },
+    {
+      "calls": 6,
+      "cumulative_seconds": 2.87e-06,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'startswith' of 'str' objects>",
+      "primitive_calls": 6,
+      "self_seconds": 2.87e-06
+    },
+    {
+      "calls": 12,
+      "cumulative_seconds": 1.9e-06,
+      "file": "/study/src/hexset/ledger.py",
+      "line": 105,
+      "name": "<lambda>",
+      "primitive_calls": 12,
+      "self_seconds": 1.9e-06
+    },
+    {
+      "calls": 10,
+      "cumulative_seconds": 1.4900000000000001e-06,
+      "file": "<frozen _collections_abc>",
+      "line": 435,
+      "name": "__subclasshook__",
+      "primitive_calls": 10,
+      "self_seconds": 1.4900000000000001e-06
+    }
+  ],
+  "profile_total_seconds": 8.866230962,
+  "profiled": true,
+  "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+  "pythonhashseed": "0",
+  "seed": 660000000,
+  "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+  "version": "0.48.2"
+}

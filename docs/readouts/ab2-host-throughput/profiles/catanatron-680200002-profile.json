@@ -1,0 +1,2835 @@
+{
+  "action_sha256": "557dbd27fff865a5d373adac6aacbeed2115b2c48df81a6e195e2fbe5a466da9",
+  "actions": 439,
+  "cache": {
+    "entries": 4096,
+    "hits": 137100,
+    "max_entries": 4096,
+    "misses": 4544
+  },
+  "cpu_seconds": 20.875938352000002,
+  "functions": [
+    {
+      "calls": 1,
+      "cumulative_seconds": 20.899831872,
+      "file": "/study/worker.py",
+      "line": 17,
+      "name": "play",
+      "primitive_calls": 1,
+      "self_seconds": 0.00019749100000000002
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 20.88643179,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/game.py",
+      "line": 132,
+      "name": "play",
+      "primitive_calls": 1,
+      "self_seconds": 0.000399174
+    },
+    {
+      "calls": 439,
+      "cumulative_seconds": 20.884697445,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/game.py",
+      "line": 153,
+      "name": "play_tick",
+      "primitive_calls": 439,
+      "self_seconds": 0.05375408
+    },
+    {
+      "calls": 439,
+      "cumulative_seconds": 20.794822835,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/players/minimax.py",
+      "line": 55,
+      "name": "decide",
+      "primitive_calls": 439,
+      "self_seconds": 0.036648773
+    },
+    {
+      "calls": 146531,
+      "cumulative_seconds": 20.748874973000003,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/players/minimax.py",
+      "line": 84,
+      "name": "alphabeta",
+      "primitive_calls": 247,
+      "self_seconds": 0.7159635520000001
+    },
+    {
+      "calls": 4887,
+      "cumulative_seconds": 14.940805581000001,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/players/tree_search_utils.py",
+      "line": 121,
+      "name": "expand_spectrum",
+      "primitive_calls": 4887,
+      "self_seconds": 0.046295156000000004
+    },
+    {
+      "calls": 48218,
+      "cumulative_seconds": 14.868327299,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/players/tree_search_utils.py",
+      "line": 46,
+      "name": "execute_spectrum",
+      "primitive_calls": 48218,
+      "self_seconds": 0.436431981
+    },
+    {
+      "calls": 147655,
+      "cumulative_seconds": 8.292046752000001,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/game.py",
+      "line": 179,
+      "name": "execute",
+      "primitive_calls": 147655,
+      "self_seconds": 0.064296615
+    },
+    {
+      "calls": 147463,
+      "cumulative_seconds": 6.0059045310000005,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/game.py",
+      "line": 214,
+      "name": "copy",
+      "primitive_calls": 147463,
+      "self_seconds": 0.12445338700000001
+    },
+    {
+      "calls": 147463,
+      "cumulative_seconds": 5.865443330000001,
+      "file": "/study/src/hexset/catanatron/speedups.py",
+      "line": 100,
+      "name": "clone_state_mutable_structures",
+      "primitive_calls": 147463,
+      "self_seconds": 1.249411905
+    },
+    {
+      "calls": 86949,
+      "cumulative_seconds": 5.790286999,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/actions.py",
+      "line": 46,
+      "name": "generate_playable_actions",
+      "primitive_calls": 86949,
+      "self_seconds": 0.349030129
+    },
+    {
+      "calls": 141644,
+      "cumulative_seconds": 4.867807359,
+      "file": "/study/src/hexset/catanatron/speedups.py",
+      "line": 324,
+      "name": "fn",
+      "primitive_calls": 141644,
+      "self_seconds": 0.484441392
+    },
+    {
+      "calls": 23668,
+      "cumulative_seconds": 4.075985876,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/players/tree_search_utils.py",
+      "line": 40,
+      "name": "execute_deterministic",
+      "primitive_calls": 23668,
+      "self_seconds": 0.014923361000000001
+    },
+    {
+      "calls": 141644,
+      "cumulative_seconds": 3.7332782360000003,
+      "file": "/study/src/hexset/catanatron/speedups.py",
+      "line": 233,
+      "name": "terms",
+      "primitive_calls": 141644,
+      "self_seconds": 1.215975633
+    },
+    {
+      "calls": 80354,
+      "cumulative_seconds": 3.2805653830000003,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/actions.py",
+      "line": 147,
+      "name": "road_building_possibilities",
+      "primitive_calls": 80354,
+      "self_seconds": 0.11512393100000001
+    },
+    {
+      "calls": 147463,
+      "cumulative_seconds": 3.163392993,
+      "file": "/study/src/hexset/catanatron/speedups.py",
+      "line": 82,
+      "name": "clone_board_mutable_structures",
+      "primitive_calls": 147463,
+      "self_seconds": 0.34733815100000004
+    },
+    {
+      "calls": 32472,
+      "cumulative_seconds": 3.054640687,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/board.py",
+      "line": 253,
+      "name": "buildable_edges",
+      "primitive_calls": 32472,
+      "self_seconds": 0.30887436
+    },
+    {
+      "calls": 147655,
+      "cumulative_seconds": 2.437202753,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/apply_action.py",
+      "line": 58,
+      "name": "apply_action",
+      "primitive_calls": 147655,
+      "self_seconds": 0.116188861
+    },
+    {
+      "calls": 443304,
+      "cumulative_seconds": 2.145671632,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/reportviews.py",
+      "line": 856,
+      "name": "__iter__",
+      "primitive_calls": 443304,
+      "self_seconds": 0.26407978000000004
+    },
+    {
+      "calls": 8394,
+      "cumulative_seconds": 1.8186753310000001,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/apply_action.py",
+      "line": 170,
+      "name": "apply_build_road",
+      "primitive_calls": 8394,
+      "self_seconds": 0.018352379000000002
+    },
+    {
+      "calls": 8394,
+      "cumulative_seconds": 1.7375284770000001,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/board.py",
+      "line": 192,
+      "name": "build_road",
+      "primitive_calls": 8394,
+      "self_seconds": 0.033996957
+    },
+    {
+      "calls": 147463,
+      "cumulative_seconds": 1.674731951,
+      "file": "/study/src/hexset/catanatron/speedups.py",
+      "line": 61,
+      "name": "clone_connected_components",
+      "primitive_calls": 147463,
+      "self_seconds": 1.525478842
+    },
+    {
+      "calls": 8394,
+      "cumulative_seconds": 1.667669869,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/board.py",
+      "line": 355,
+      "name": "longest_acyclic_path",
+      "primitive_calls": 8394,
+      "self_seconds": 0.742090672
+    },
+    {
+      "calls": 80354,
+      "cumulative_seconds": 1.218966924,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/actions.py",
+      "line": 300,
+      "name": "maritime_trade_possibilities",
+      "primitive_calls": 80354,
+      "self_seconds": 0.18963301700000001
+    },
+    {
+      "calls": 795671,
+      "cumulative_seconds": 1.2144113600000002,
+      "file": "<frozen _collections_abc>",
+      "line": 892,
+      "name": "__iter__",
+      "primitive_calls": 795671,
+      "self_seconds": 0.236844184
+    },
+    {
+      "calls": 6220276,
+      "cumulative_seconds": 1.158207596,
+      "file": "/usr/local/lib/python3.12/enum.py",
+      "line": 1266,
+      "name": "__hash__",
+      "primitive_calls": 6220276,
+      "self_seconds": 0.7411040760000001
+    },
+    {
+      "calls": 2401600,
+      "cumulative_seconds": 1.022540626,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 74,
+      "name": "player_key",
+      "primitive_calls": 2401600,
+      "self_seconds": 0.583731267
+    },
+    {
+      "calls": 2154662,
+      "cumulative_seconds": 0.980902586,
+      "file": "/study/src/hexset/catanatron/speedups.py",
+      "line": 123,
+      "name": "<genexpr>",
+      "primitive_calls": 2154662,
+      "self_seconds": 0.788444392
+    },
+    {
+      "calls": 147463,
+      "cumulative_seconds": 0.792795494,
+      "file": "/study/src/hexset/catanatron/speedups.py",
+      "line": 78,
+      "name": "clone_player_port_resources_cache",
+      "primitive_calls": 147463,
+      "self_seconds": 0.691902415
+    },
+    {
+      "calls": 419310,
+      "cumulative_seconds": 0.683729534,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/coreviews.py",
+      "line": 351,
+      "name": "__getitem__",
+      "primitive_calls": 419310,
+      "self_seconds": 0.36950754500000005
+    },
+    {
+      "calls": 708220,
+      "cumulative_seconds": 0.68109376,
+      "file": "/study/src/hexset/catanatron/speedups.py",
+      "line": 247,
+      "name": "<genexpr>",
+      "primitive_calls": 708220,
+      "self_seconds": 0.474392083
+    },
+    {
+      "calls": 7218726,
+      "cumulative_seconds": 0.605422923,
+      "file": "/study/src/hexset/catanatron/speedups.py",
+      "line": 251,
+      "name": "<genexpr>",
+      "primitive_calls": 7218726,
+      "self_seconds": 0.605422923
+    },
+    {
+      "calls": 22315,
+      "cumulative_seconds": 0.562149864,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/reportviews.py",
+      "line": 779,
+      "name": "<lambda>",
+      "primitive_calls": 22315,
+      "self_seconds": 0.037325225000000004
+    },
+    {
+      "calls": 1214981,
+      "cumulative_seconds": 0.533993703,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/coreviews.py",
+      "line": 354,
+      "name": "new_node_ok",
+      "primitive_calls": 1214981,
+      "self_seconds": 0.40191684
+    },
+    {
+      "calls": 80354,
+      "cumulative_seconds": 0.470019717,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/board.py",
+      "line": 275,
+      "name": "get_player_port_resources",
+      "primitive_calls": 80354,
+      "self_seconds": 0.12646326800000002
+    },
+    {
+      "calls": 4544,
+      "cumulative_seconds": 0.46480244400000004,
+      "file": "/study/src/hexset/catanatron/speedups.py",
+      "line": 197,
+      "name": "_board_terms",
+      "primitive_calls": 4544,
+      "self_seconds": 0.023860523
+    },
+    {
+      "calls": 795671,
+      "cumulative_seconds": 0.453423132,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/coreviews.py",
+      "line": 300,
+      "name": "<genexpr>",
+      "primitive_calls": 795671,
+      "self_seconds": 0.166022035
+    },
+    {
+      "calls": 22315,
+      "cumulative_seconds": 0.42003335,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/reportviews.py",
+      "line": 1102,
+      "name": "__call__",
+      "primitive_calls": 22315,
+      "self_seconds": 0.021201212
+    },
+    {
+      "calls": 559779,
+      "cumulative_seconds": 0.417166077,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 275,
+      "name": "player_num_resource_cards",
+      "primitive_calls": 559779,
+      "self_seconds": 0.18874769100000002
+    },
+    {
+      "calls": 6220313,
+      "cumulative_seconds": 0.41710624,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.hash>",
+      "primitive_calls": 6220313,
+      "self_seconds": 0.41710624
+    },
+    {
+      "calls": 22315,
+      "cumulative_seconds": 0.398832138,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/reportviews.py",
+      "line": 771,
+      "name": "__init__",
+      "primitive_calls": 22315,
+      "self_seconds": 0.028722167000000003
+    },
+    {
+      "calls": 607517,
+      "cumulative_seconds": 0.38156437400000004,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/coreviews.py",
+      "line": 302,
+      "name": "__getitem__",
+      "primitive_calls": 607517,
+      "self_seconds": 0.13497176800000002
+    },
+    {
+      "calls": 424175,
+      "cumulative_seconds": 0.33203634000000004,
+      "file": "/study/src/hexset/catanatron/speedups.py",
+      "line": 253,
+      "name": "<genexpr>",
+      "primitive_calls": 424175,
+      "self_seconds": 0.33203634000000004
+    },
+    {
+      "calls": 2155532,
+      "cumulative_seconds": 0.324923124,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'copy' of 'list' objects>",
+      "primitive_calls": 2155532,
+      "self_seconds": 0.324923124
+    },
+    {
+      "calls": 1117266,
+      "cumulative_seconds": 0.315701049,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/board.py",
+      "line": 351,
+      "name": "is_friendly_road",
+      "primitive_calls": 1117266,
+      "self_seconds": 0.17264431700000002
+    },
+    {
+      "calls": 22315,
+      "cumulative_seconds": 0.30942954100000003,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method fromkeys>",
+      "primitive_calls": 22315,
+      "self_seconds": 0.036672594
+    },
+    {
+      "calls": 125700,
+      "cumulative_seconds": 0.30888449100000004,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.any>",
+      "primitive_calls": 125700,
+      "self_seconds": 0.049223026
+    },
+    {
+      "calls": 122201,
+      "cumulative_seconds": 0.290174064,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/apply_action.py",
+      "line": 344,
+      "name": "apply_move_robber",
+      "primitive_calls": 122201,
+      "self_seconds": 0.09211678400000001
+    },
+    {
+      "calls": 419311,
+      "cumulative_seconds": 0.284092328,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/coreviews.py",
+      "line": 280,
+      "name": "__init__",
+      "primitive_calls": 419311,
+      "self_seconds": 0.284092328
+    },
+    {
+      "calls": 231211,
+      "cumulative_seconds": 0.272760628,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/graph.py",
+      "line": 2059,
+      "name": "bunch_iter",
+      "primitive_calls": 231211,
+      "self_seconds": 0.05671439
+    },
+    {
+      "calls": 333436,
+      "cumulative_seconds": 0.271248459,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 232,
+      "name": "player_can_play_dev",
+      "primitive_calls": 333436,
+      "self_seconds": 0.129735815
+    },
+    {
+      "calls": 491091,
+      "cumulative_seconds": 0.26198756300000003,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/board.py",
+      "line": 282,
+      "name": "<genexpr>",
+      "primitive_calls": 491091,
+      "self_seconds": 0.128981187
+    },
+    {
+      "calls": 231156,
+      "cumulative_seconds": 0.24052313700000003,
+      "file": "<frozen _collections_abc>",
+      "line": 811,
+      "name": "__contains__",
+      "primitive_calls": 231156,
+      "self_seconds": 0.068004455
+    },
+    {
+      "calls": 4544,
+      "cumulative_seconds": 0.23641799900000002,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/features.py",
+      "line": 212,
+      "name": "production_features",
+      "primitive_calls": 4544,
+      "self_seconds": 0.127079827
+    },
+    {
+      "calls": 664803,
+      "cumulative_seconds": 0.228726382,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/board.py",
+      "line": 340,
+      "name": "is_enemy_node",
+      "primitive_calls": 664803,
+      "self_seconds": 0.11118730800000001
+    },
+    {
+      "calls": 1535813,
+      "cumulative_seconds": 0.22415685300000002,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/board.py",
+      "line": 333,
+      "name": "get_edge_color",
+      "primitive_calls": 1535813,
+      "self_seconds": 0.22415685300000002
+    },
+    {
+      "calls": 81157,
+      "cumulative_seconds": 0.21398699100000002,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/actions.py",
+      "line": 164,
+      "name": "settlement_possibilities",
+      "primitive_calls": 81157,
+      "self_seconds": 0.062017476
+    },
+    {
+      "calls": 1358865,
+      "cumulative_seconds": 0.205033183,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.sorted>",
+      "primitive_calls": 1358865,
+      "self_seconds": 0.205033183
+    },
+    {
+      "calls": 232818,
+      "cumulative_seconds": 0.19855977000000002,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 221,
+      "name": "player_resource_freqdeck_contains",
+      "primitive_calls": 232818,
+      "self_seconds": 0.10567195
+    },
+    {
+      "calls": 80354,
+      "cumulative_seconds": 0.19257879800000002,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/actions.py",
+      "line": 314,
+      "name": "inner_maritime_trade_possibilities",
+      "primitive_calls": 80354,
+      "self_seconds": 0.147016648
+    },
+    {
+      "calls": 1030194,
+      "cumulative_seconds": 0.18988975900000002,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/board.py",
+      "line": 326,
+      "name": "get_node_color",
+      "primitive_calls": 1030194,
+      "self_seconds": 0.18988975900000002
+    },
+    {
+      "calls": 442389,
+      "cumulative_seconds": 0.18172396700000001,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'copy' of 'dict' objects>",
+      "primitive_calls": 442389,
+      "self_seconds": 0.18172396700000001
+    },
+    {
+      "calls": 1491924,
+      "cumulative_seconds": 0.17915878100000002,
+      "file": "/study/src/hexset/catanatron/speedups.py",
+      "line": 249,
+      "name": "<genexpr>",
+      "primitive_calls": 1491924,
+      "self_seconds": 0.17915878100000002
+    },
+    {
+      "calls": 1522777,
+      "cumulative_seconds": 0.175837137,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'items' of 'dict' objects>",
+      "primitive_calls": 1522777,
+      "self_seconds": 0.175837137
+    },
+    {
+      "calls": 4544,
+      "cumulative_seconds": 0.16202862,
+      "file": "/study/src/hexset/catanatron/speedups.py",
+      "line": 153,
+      "name": "p0_reachability_features",
+      "primitive_calls": 4544,
+      "self_seconds": 0.057744251
+    },
+    {
+      "calls": 209655,
+      "cumulative_seconds": 0.156193457,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/coreviews.py",
+      "line": 293,
+      "name": "__iter__",
+      "primitive_calls": 209655,
+      "self_seconds": 0.156193457
+    },
+    {
+      "calls": 190385,
+      "cumulative_seconds": 0.155866199,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'get' of 'dict' objects>",
+      "primitive_calls": 190385,
+      "self_seconds": 0.155866199
+    },
+    {
+      "calls": 1155894,
+      "cumulative_seconds": 0.152631431,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'append' of 'list' objects>",
+      "primitive_calls": 1155894,
+      "self_seconds": 0.152631431
+    },
+    {
+      "calls": 80354,
+      "cumulative_seconds": 0.14108372200000002,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/actions.py",
+      "line": 191,
+      "name": "city_possibilities",
+      "primitive_calls": 80354,
+      "self_seconds": 0.032889191000000005
+    },
+    {
+      "calls": 913324,
+      "cumulative_seconds": 0.138965212,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.max>",
+      "primitive_calls": 913324,
+      "self_seconds": 0.138965212
+    },
+    {
+      "calls": 141644,
+      "cumulative_seconds": 0.133176453,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 289,
+      "name": "player_num_dev_cards",
+      "primitive_calls": 141644,
+      "self_seconds": 0.074269524
+    },
+    {
+      "calls": 365391,
+      "cumulative_seconds": 0.133006376,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/board.py",
+      "line": 348,
+      "name": "is_friendly_node",
+      "primitive_calls": 365391,
+      "self_seconds": 0.060655691000000005
+    },
+    {
+      "calls": 117760,
+      "cumulative_seconds": 0.12893636,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 311,
+      "name": "player_deck_draw",
+      "primitive_calls": 117760,
+      "self_seconds": 0.068221249
+    },
+    {
+      "calls": 849800,
+      "cumulative_seconds": 0.126788401,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method __new__ of type object at 0x7817dec3c9c0>",
+      "primitive_calls": 849800,
+      "self_seconds": 0.126788401
+    },
+    {
+      "calls": 1634291,
+      "cumulative_seconds": 0.10590937900000001,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/filters.py",
+      "line": 70,
+      "name": "__call__",
+      "primitive_calls": 1634291,
+      "self_seconds": 0.10590937900000001
+    },
+    {
+      "calls": 141644,
+      "cumulative_seconds": 0.102274684,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 114,
+      "name": "get_longest_road_length",
+      "primitive_calls": 141644,
+      "self_seconds": 0.044409742
+    },
+    {
+      "calls": 87160,
+      "cumulative_seconds": 0.09651986000000001,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/actions.py",
+      "line": 310,
+      "name": "<lambda>",
+      "primitive_calls": 87160,
+      "self_seconds": 0.025291752
+    },
+    {
+      "calls": 383930,
+      "cumulative_seconds": 0.096293298,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/graph.py",
+      "line": 1344,
+      "name": "neighbors",
+      "primitive_calls": 383930,
+      "self_seconds": 0.06409287600000001
+    },
+    {
+      "calls": 141644,
+      "cumulative_seconds": 0.096253668,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 119,
+      "name": "get_played_dev_cards",
+      "primitive_calls": 141644,
+      "self_seconds": 0.038289082
+    },
+    {
+      "calls": 147463,
+      "cumulative_seconds": 0.09574675,
+      "file": "/study/src/hexset/catanatron/speedups.py",
+      "line": 73,
+      "name": "clone_buildable_edges_cache",
+      "primitive_calls": 147463,
+      "self_seconds": 0.073546046
+    },
+    {
+      "calls": 141644,
+      "cumulative_seconds": 0.09432336000000001,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/players/value.py",
+      "line": 186,
+      "name": "get_value_fn",
+      "primitive_calls": 141644,
+      "self_seconds": 0.034162415
+    },
+    {
+      "calls": 204683,
+      "cumulative_seconds": 0.08034197200000001,
+      "file": "<string>",
+      "line": 1,
+      "name": "<lambda>",
+      "primitive_calls": 204683,
+      "self_seconds": 0.046175534000000004
+    },
+    {
+      "calls": 209655,
+      "cumulative_seconds": 0.073921095,
+      "file": "<frozen _collections_abc>",
+      "line": 823,
+      "name": "items",
+      "primitive_calls": 209655,
+      "self_seconds": 0.058476520000000004
+    },
+    {
+      "calls": 737674,
+      "cumulative_seconds": 0.06718745200000001,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.isinstance>",
+      "primitive_calls": 737674,
+      "self_seconds": 0.067169726
+    },
+    {
+      "calls": 84704,
+      "cumulative_seconds": 0.066685045,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 212,
+      "name": "player_can_afford_dev_card",
+      "primitive_calls": 84704,
+      "self_seconds": 0.032151282
+    },
+    {
+      "calls": 192329,
+      "cumulative_seconds": 0.065121624,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 146,
+      "name": "get_player_buildings",
+      "primitive_calls": 192329,
+      "self_seconds": 0.033617604
+    },
+    {
+      "calls": 147463,
+      "cumulative_seconds": 0.062604239,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'copy' of 'collections.defaultdict' objects>",
+      "primitive_calls": 147463,
+      "self_seconds": 0.062604239
+    },
+    {
+      "calls": 22316,
+      "cumulative_seconds": 0.060683860000000006,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/graph.py",
+      "line": 2013,
+      "name": "nbunch_iter",
+      "primitive_calls": 22316,
+      "self_seconds": 0.020172422000000002
+    },
+    {
+      "calls": 141644,
+      "cumulative_seconds": 0.060160945,
+      "file": "/study/src/hexset/catanatron/speedups.py",
+      "line": 312,
+      "name": "<lambda>",
+      "primitive_calls": 141644,
+      "self_seconds": 0.038603599
+    },
+    {
+      "calls": 1172032,
+      "cumulative_seconds": 0.056298745000000004,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/filters.py",
+      "line": 21,
+      "name": "no_filter",
+      "primitive_calls": 1172032,
+      "self_seconds": 0.056298745000000004
+    },
+    {
+      "calls": 83359,
+      "cumulative_seconds": 0.053998765000000004,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 109,
+      "name": "player_has_rolled",
+      "primitive_calls": 83359,
+      "self_seconds": 0.021643642
+    },
+    {
+      "calls": 23274,
+      "cumulative_seconds": 0.053926035000000004,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/board.py",
+      "line": 245,
+      "name": "buildable_node_ids",
+      "primitive_calls": 23274,
+      "self_seconds": 0.026845761000000003
+    },
+    {
+      "calls": 4388,
+      "cumulative_seconds": 0.052178354,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/apply_action.py",
+      "line": 423,
+      "name": "apply_maritime_trade",
+      "primitive_calls": 4388,
+      "self_seconds": 0.013968288
+    },
+    {
+      "calls": 366439,
+      "cumulative_seconds": 0.049738763000000005,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'add' of 'set' objects>",
+      "primitive_calls": 366439,
+      "self_seconds": 0.048612884
+    },
+    {
+      "calls": 147463,
+      "cumulative_seconds": 0.049381307000000006,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'copy' of 'set' objects>",
+      "primitive_calls": 147463,
+      "self_seconds": 0.049381307000000006
+    },
+    {
+      "calls": 371790,
+      "cumulative_seconds": 0.04795593,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'extend' of 'list' objects>",
+      "primitive_calls": 371790,
+      "self_seconds": 0.04795593
+    },
+    {
+      "calls": 1166,
+      "cumulative_seconds": 0.047227937000000005,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/actions.py",
+      "line": 270,
+      "name": "initial_road_possibilities",
+      "primitive_calls": 1166,
+      "self_seconds": 0.002985858
+    },
+    {
+      "calls": 1577,
+      "cumulative_seconds": 0.046474416000000005,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/apply_action.py",
+      "line": 260,
+      "name": "apply_roll",
+      "primitive_calls": 1577,
+      "self_seconds": 0.0064888260000000005
+    },
+    {
+      "calls": 57053,
+      "cumulative_seconds": 0.044459237000000006,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 317,
+      "name": "player_deck_replenish",
+      "primitive_calls": 57053,
+      "self_seconds": 0.019212993
+    },
+    {
+      "calls": 493624,
+      "cumulative_seconds": 0.041795803,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.len>",
+      "primitive_calls": 493624,
+      "self_seconds": 0.041795803
+    },
+    {
+      "calls": 142547,
+      "cumulative_seconds": 0.041585279,
+      "file": "/usr/local/lib/python3.12/enum.py",
+      "line": 202,
+      "name": "__get__",
+      "primitive_calls": 142547,
+      "self_seconds": 0.03037542
+    },
+    {
+      "calls": 376818,
+      "cumulative_seconds": 0.041311544000000006,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'pop' of 'list' objects>",
+      "primitive_calls": 376818,
+      "self_seconds": 0.041311544000000006
+    },
+    {
+      "calls": 22316,
+      "cumulative_seconds": 0.040404321,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/graph.py",
+      "line": 473,
+      "name": "__contains__",
+      "primitive_calls": 22316,
+      "self_seconds": 0.015927422
+    },
+    {
+      "calls": 1980,
+      "cumulative_seconds": 0.036887963,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/apply_action.py",
+      "line": 135,
+      "name": "apply_build_settlement",
+      "primitive_calls": 1980,
+      "self_seconds": 0.004602839
+    },
+    {
+      "calls": 87164,
+      "cumulative_seconds": 0.034285875,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/decks.py",
+      "line": 52,
+      "name": "freqdeck_count",
+      "primitive_calls": 87164,
+      "self_seconds": 0.034285875
+    },
+    {
+      "calls": 81917,
+      "cumulative_seconds": 0.033374279,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.sum>",
+      "primitive_calls": 81917,
+      "self_seconds": 0.019843843
+    },
+    {
+      "calls": 385192,
+      "cumulative_seconds": 0.032376415,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.iter>",
+      "primitive_calls": 385192,
+      "self_seconds": 0.032376415
+    },
+    {
+      "calls": 147464,
+      "cumulative_seconds": 0.031377121,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/board.py",
+      "line": 57,
+      "name": "__init__",
+      "primitive_calls": 147464,
+      "self_seconds": 0.031317601
+    },
+    {
+      "calls": 420989,
+      "cumulative_seconds": 0.031000725000000003,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/reportviews.py",
+      "line": 787,
+      "name": "<lambda>",
+      "primitive_calls": 420989,
+      "self_seconds": 0.031000725000000003
+    },
+    {
+      "calls": 8330,
+      "cumulative_seconds": 0.030888426000000004,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 26,
+      "name": "maintain_longest_road",
+      "primitive_calls": 8330,
+      "self_seconds": 0.014054241
+    },
+    {
+      "calls": 292,
+      "cumulative_seconds": 0.030601763,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/actions.py",
+      "line": 208,
+      "name": "robber_possibilities",
+      "primitive_calls": 292,
+      "self_seconds": 0.000146359
+    },
+    {
+      "calls": 292,
+      "cumulative_seconds": 0.030455404000000002,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/actions.py",
+      "line": 222,
+      "name": "_robber_possibilities_without_friendly_robber",
+      "primitive_calls": 292,
+      "self_seconds": 0.013137736
+    },
+    {
+      "calls": 30227,
+      "cumulative_seconds": 0.029470767000000002,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/features.py",
+      "line": 239,
+      "name": "get_node_production",
+      "primitive_calls": 30227,
+      "self_seconds": 0.008782241000000001
+    },
+    {
+      "calls": 8394,
+      "cumulative_seconds": 0.028797708,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 183,
+      "name": "build_road",
+      "primitive_calls": 8394,
+      "self_seconds": 0.013412592000000001
+    },
+    {
+      "calls": 23547,
+      "cumulative_seconds": 0.028524121000000003,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 150,
+      "name": "get_player_freqdeck",
+      "primitive_calls": 23547,
+      "self_seconds": 0.017366768
+    },
+    {
+      "calls": 4350,
+      "cumulative_seconds": 0.027552515000000003,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/apply_action.py",
+      "line": 236,
+      "name": "apply_buy_development_card",
+      "primitive_calls": 4350,
+      "self_seconds": 0.009772301
+    },
+    {
+      "calls": 1608,
+      "cumulative_seconds": 0.027387267000000003,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/features.py",
+      "line": 281,
+      "name": "iter_level_nodes",
+      "primitive_calls": 1608,
+      "self_seconds": 0.019066963000000003
+    },
+    {
+      "calls": 238120,
+      "cumulative_seconds": 0.025558734000000003,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state.py",
+      "line": 149,
+      "name": "current_color",
+      "primitive_calls": 238120,
+      "self_seconds": 0.025558734000000003
+    },
+    {
+      "calls": 146531,
+      "cumulative_seconds": 0.025161865000000002,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/players/minimax.py",
+      "line": 177,
+      "name": "__init__",
+      "primitive_calls": 146531,
+      "self_seconds": 0.025161865000000002
+    },
+    {
+      "calls": 1293,
+      "cumulative_seconds": 0.023591077000000002,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/apply_action.py",
+      "line": 536,
+      "name": "yield_resources",
+      "primitive_calls": 1293,
+      "self_seconds": 0.015670224
+    },
+    {
+      "calls": 1980,
+      "cumulative_seconds": 0.022947464,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/board.py",
+      "line": 86,
+      "name": "build_settlement",
+      "primitive_calls": 1980,
+      "self_seconds": 0.008788496
+    },
+    {
+      "calls": 5338,
+      "cumulative_seconds": 0.021581047000000003,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/game.py",
+      "line": 197,
+      "name": "winning_color",
+      "primitive_calls": 5338,
+      "self_seconds": 0.011277151000000001
+    },
+    {
+      "calls": 141644,
+      "cumulative_seconds": 0.021557346,
+      "file": "/study/src/hexset/catanatron/speedups.py",
+      "line": 323,
+      "name": "optimized_base_fn",
+      "primitive_calls": 141644,
+      "self_seconds": 0.021557346
+    },
+    {
+      "calls": 4544,
+      "cumulative_seconds": 0.02114268,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/features.py",
+      "line": 327,
+      "name": "get_owned_or_buildable",
+      "primitive_calls": 4544,
+      "self_seconds": 0.017858407
+    },
+    {
+      "calls": 147464,
+      "cumulative_seconds": 0.017791999000000003,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/game.py",
+      "line": 95,
+      "name": "__init__",
+      "primitive_calls": 147464,
+      "self_seconds": 0.016021955
+    },
+    {
+      "calls": 147464,
+      "cumulative_seconds": 0.01770039,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state.py",
+      "line": 88,
+      "name": "__init__",
+      "primitive_calls": 147464,
+      "self_seconds": 0.016046357
+    },
+    {
+      "calls": 9088,
+      "cumulative_seconds": 0.016624305000000002,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/players/value.py",
+      "line": 124,
+      "name": "value_production",
+      "primitive_calls": 9088,
+      "self_seconds": 0.013191037000000001
+    },
+    {
+      "calls": 2929,
+      "cumulative_seconds": 0.015996623,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/apply_action.py",
+      "line": 128,
+      "name": "apply_end_turn",
+      "primitive_calls": 2929,
+      "self_seconds": 0.005067486
+    },
+    {
+      "calls": 209655,
+      "cumulative_seconds": 0.015444575,
+      "file": "<frozen _collections_abc>",
+      "line": 845,
+      "name": "__init__",
+      "primitive_calls": 209655,
+      "self_seconds": 0.015444575
+    },
+    {
+      "calls": 167036,
+      "cumulative_seconds": 0.015065029,
+      "file": "/study/src/hexset/catanatron/speedups.py",
+      "line": 179,
+      "name": "<genexpr>",
+      "primitive_calls": 167036,
+      "self_seconds": 0.015065029
+    },
+    {
+      "calls": 38272,
+      "cumulative_seconds": 0.014887811,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'union' of 'set' objects>",
+      "primitive_calls": 38272,
+      "self_seconds": 0.014887811
+    },
+    {
+      "calls": 18904,
+      "cumulative_seconds": 0.014056449,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/decks.py",
+      "line": 87,
+      "name": "freqdeck_add",
+      "primitive_calls": 18904,
+      "self_seconds": 0.014056449
+    },
+    {
+      "calls": 4544,
+      "cumulative_seconds": 0.013862685000000001,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/features.py",
+      "line": 273,
+      "name": "get_zero_nodes",
+      "primitive_calls": 4544,
+      "self_seconds": 0.008998178
+    },
+    {
+      "calls": 43116,
+      "cumulative_seconds": 0.013524605,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/features.py",
+      "line": 243,
+      "name": "<genexpr>",
+      "primitive_calls": 43116,
+      "self_seconds": 0.009512008
+    },
+    {
+      "calls": 10113,
+      "cumulative_seconds": 0.012913022000000001,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/decks.py",
+      "line": 56,
+      "name": "freqdeck_from_listdeck",
+      "primitive_calls": 10113,
+      "self_seconds": 0.007667742000000001
+    },
+    {
+      "calls": 16838,
+      "cumulative_seconds": 0.012195784000000001,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/board.py",
+      "line": 187,
+      "name": "_get_connected_component_index",
+      "primitive_calls": 16838,
+      "self_seconds": 0.009188109
+    },
+    {
+      "calls": 21796,
+      "cumulative_seconds": 0.011660958,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'update' of 'set' objects>",
+      "primitive_calls": 21796,
+      "self_seconds": 0.009300203
+    },
+    {
+      "calls": 141644,
+      "cumulative_seconds": 0.011157159000000002,
+      "file": "/usr/local/lib/python3.12/enum.py",
+      "line": 1291,
+      "name": "value",
+      "primitive_calls": 141644,
+      "self_seconds": 0.011157159000000002
+    },
+    {
+      "calls": 47714,
+      "cumulative_seconds": 0.010755844,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/players/minimax.py",
+      "line": 185,
+      "name": "__init__",
+      "primitive_calls": 47714,
+      "self_seconds": 0.010755844
+    },
+    {
+      "calls": 771,
+      "cumulative_seconds": 0.010651239,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.next>",
+      "primitive_calls": 769,
+      "self_seconds": 0.010257207
+    },
+    {
+      "calls": 2,
+      "cumulative_seconds": 0.010032072000000001,
+      "file": "/usr/local/lib/python3.12/contextlib.py",
+      "line": 141,
+      "name": "__exit__",
+      "primitive_calls": 1,
+      "self_seconds": 1.4301e-05
+    },
+    {
+      "calls": 823,
+      "cumulative_seconds": 0.009863362,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/features.py",
+      "line": 375,
+      "name": "count_production",
+      "primitive_calls": 823,
+      "self_seconds": 0.001545004
+    },
+    {
+      "calls": 1329,
+      "cumulative_seconds": 0.009171568,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/actions.py",
+      "line": 281,
+      "name": "discard_possibilities",
+      "primitive_calls": 1329,
+      "self_seconds": 0.00282714
+    },
+    {
+      "calls": 13050,
+      "cumulative_seconds": 0.009106495000000001,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 132,
+      "name": "get_dev_cards_in_hand",
+      "primitive_calls": 13050,
+      "self_seconds": 0.0037584140000000003
+    },
+    {
+      "calls": 7723,
+      "cumulative_seconds": 0.009044253,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 241,
+      "name": "player_freqdeck_add",
+      "primitive_calls": 7723,
+      "self_seconds": 0.005515359
+    },
+    {
+      "calls": 1337,
+      "cumulative_seconds": 0.0077781460000000005,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/apply_action.py",
+      "line": 306,
+      "name": "apply_discard",
+      "primitive_calls": 1337,
+      "self_seconds": 0.003193169
+    },
+    {
+      "calls": 16761,
+      "cumulative_seconds": 0.0074174670000000005,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/board.py",
+      "line": 288,
+      "name": "find_connected_components",
+      "primitive_calls": 16761,
+      "self_seconds": 0.004089843
+    },
+    {
+      "calls": 16761,
+      "cumulative_seconds": 0.007290077000000001,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'intersection' of 'set' objects>",
+      "primitive_calls": 16761,
+      "self_seconds": 0.007290077000000001
+    },
+    {
+      "calls": 5725,
+      "cumulative_seconds": 0.007036072000000001,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 250,
+      "name": "player_freqdeck_subtract",
+      "primitive_calls": 5725,
+      "self_seconds": 0.0044010790000000004
+    },
+    {
+      "calls": 1577,
+      "cumulative_seconds": 0.006964505,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/apply_action.py",
+      "line": 527,
+      "name": "roll_dice",
+      "primitive_calls": 1577,
+      "self_seconds": 0.0008051040000000001
+    },
+    {
+      "calls": 3658,
+      "cumulative_seconds": 0.006847736,
+      "file": "/usr/local/lib/python3.12/collections/__init__.py",
+      "line": 924,
+      "name": "__iadd__",
+      "primitive_calls": 3658,
+      "self_seconds": 0.00404763
+    },
+    {
+      "calls": 3154,
+      "cumulative_seconds": 0.006159401,
+      "file": "/usr/local/lib/python3.12/random.py",
+      "line": 332,
+      "name": "randint",
+      "primitive_calls": 3154,
+      "self_seconds": 0.001021854
+    },
+    {
+      "calls": 4350,
+      "cumulative_seconds": 0.006148997000000001,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 259,
+      "name": "buy_dev_card",
+      "primitive_calls": 4350,
+      "self_seconds": 0.004284876
+    },
+    {
+      "calls": 2929,
+      "cumulative_seconds": 0.006076341000000001,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 338,
+      "name": "player_clean_turn",
+      "primitive_calls": 2929,
+      "self_seconds": 0.004481130000000001
+    },
+    {
+      "calls": 38243,
+      "cumulative_seconds": 0.005662681,
+      "file": "/study/src/hexset/catanatron/speedups.py",
+      "line": 176,
+      "name": "<genexpr>",
+      "primitive_calls": 38243,
+      "self_seconds": 0.005662681
+    },
+    {
+      "calls": 3154,
+      "cumulative_seconds": 0.005137547,
+      "file": "/usr/local/lib/python3.12/random.py",
+      "line": 291,
+      "name": "randrange",
+      "primitive_calls": 3154,
+      "self_seconds": 0.002036341
+    },
+    {
+      "calls": 9088,
+      "cumulative_seconds": 0.004729601,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'intersection' of 'frozenset' objects>",
+      "primitive_calls": 9088,
+      "self_seconds": 0.004729601
+    },
+    {
+      "calls": 4388,
+      "cumulative_seconds": 0.004514378,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/decks.py",
+      "line": 95,
+      "name": "freqdeck_contains",
+      "primitive_calls": 4388,
+      "self_seconds": 0.003715949
+    },
+    {
+      "calls": 1980,
+      "cumulative_seconds": 0.0043875780000000005,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 167,
+      "name": "build_settlement",
+      "primitive_calls": 1980,
+      "self_seconds": 0.0026130850000000002
+    },
+    {
+      "calls": 7723,
+      "cumulative_seconds": 0.004001613,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/decks.py",
+      "line": 91,
+      "name": "freqdeck_subtract",
+      "primitive_calls": 7723,
+      "self_seconds": 0.004001613
+    },
+    {
+      "calls": 3619,
+      "cumulative_seconds": 0.003530048,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/apply_action.py",
+      "line": 589,
+      "name": "advance_turn",
+      "primitive_calls": 3619,
+      "self_seconds": 0.001588647
+    },
+    {
+      "calls": 499,
+      "cumulative_seconds": 0.0033565310000000003,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/apply_action.py",
+      "line": 223,
+      "name": "apply_build_city",
+      "primitive_calls": 499,
+      "self_seconds": 0.000798664
+    },
+    {
+      "calls": 17552,
+      "cumulative_seconds": 0.0029612360000000003,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/apply_action.py",
+      "line": 425,
+      "name": "<lambda>",
+      "primitive_calls": 17552,
+      "self_seconds": 0.0029612360000000003
+    },
+    {
+      "calls": 24109,
+      "cumulative_seconds": 0.0027328580000000003,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/decks.py",
+      "line": 48,
+      "name": "freqdeck_replenish",
+      "primitive_calls": 24109,
+      "self_seconds": 0.0027328580000000003
+    },
+    {
+      "calls": 3253,
+      "cumulative_seconds": 0.00260406,
+      "file": "/usr/local/lib/python3.12/random.py",
+      "line": 242,
+      "name": "_randbelow_with_getrandbits",
+      "primitive_calls": 3253,
+      "self_seconds": 0.0016923160000000001
+    },
+    {
+      "calls": 31924,
+      "cumulative_seconds": 0.002360755,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/tiles.py",
+      "line": 20,
+      "name": "__hash__",
+      "primitive_calls": 31924,
+      "self_seconds": 0.002360755
+    },
+    {
+      "calls": 3619,
+      "cumulative_seconds": 0.0019414010000000002,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/apply_action.py",
+      "line": 597,
+      "name": "next_player_index",
+      "primitive_calls": 3619,
+      "self_seconds": 0.001431366
+    },
+    {
+      "calls": 3658,
+      "cumulative_seconds": 0.001854785,
+      "file": "/usr/local/lib/python3.12/collections/__init__.py",
+      "line": 917,
+      "name": "_keep_positive",
+      "primitive_calls": 3658,
+      "self_seconds": 0.0015109020000000002
+    },
+    {
+      "calls": 14460,
+      "cumulative_seconds": 0.001642074,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/map.py",
+      "line": 306,
+      "name": "number_probability",
+      "primitive_calls": 14460,
+      "self_seconds": 0.001642074
+    },
+    {
+      "calls": 5134,
+      "cumulative_seconds": 0.001611421,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method time.time>",
+      "primitive_calls": 5134,
+      "self_seconds": 0.001611421
+    },
+    {
+      "calls": 499,
+      "cumulative_seconds": 0.001609781,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 196,
+      "name": "build_city",
+      "primitive_calls": 499,
+      "self_seconds": 0.0009062260000000001
+    },
+    {
+      "calls": 4351,
+      "cumulative_seconds": 0.001592801,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'count' of 'list' objects>",
+      "primitive_calls": 4351,
+      "self_seconds": 0.001592801
+    },
+    {
+      "calls": 877,
+      "cumulative_seconds": 0.001559485,
+      "file": "/usr/local/lib/python3.12/collections/__init__.py",
+      "line": 595,
+      "name": "__init__",
+      "primitive_calls": 877,
+      "self_seconds": 0.001258521
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 0.001545787,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/map.py",
+      "line": 206,
+      "name": "from_template",
+      "primitive_calls": 1,
+      "self_seconds": 4.79e-06
+    },
+    {
+      "calls": 3335,
+      "cumulative_seconds": 0.0012881400000000001,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/apply_action.py",
+      "line": 551,
+      "name": "<lambda>",
+      "primitive_calls": 3335,
+      "self_seconds": 0.0012881400000000001
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 0.001286756,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/map.py",
+      "line": 310,
+      "name": "initialize_tiles",
+      "primitive_calls": 1,
+      "self_seconds": 6.1784e-05
+    },
+    {
+      "calls": 37,
+      "cumulative_seconds": 0.001078158,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/map.py",
+      "line": 398,
+      "name": "get_nodes_and_edges",
+      "primitive_calls": 37,
+      "self_seconds": 0.00038594300000000003
+    },
+    {
+      "calls": 7970,
+      "cumulative_seconds": 0.001069524,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'discard' of 'set' objects>",
+      "primitive_calls": 7970,
+      "self_seconds": 0.001069524
+    },
+    {
+      "calls": 8423,
+      "cumulative_seconds": 0.000925124,
+      "file": "/usr/local/lib/python3.12/collections/__init__.py",
+      "line": 609,
+      "name": "__missing__",
+      "primitive_calls": 8423,
+      "self_seconds": 0.000925124
+    },
+    {
+      "calls": 7671,
+      "cumulative_seconds": 0.00083825,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'values' of 'dict' objects>",
+      "primitive_calls": 7671,
+      "self_seconds": 0.00083825
+    },
+    {
+      "calls": 5326,
+      "cumulative_seconds": 0.0008027560000000001,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/players/minimax.py",
+      "line": 50,
+      "name": "get_actions",
+      "primitive_calls": 5326,
+      "self_seconds": 0.0008027560000000001
+    },
+    {
+      "calls": 4389,
+      "cumulative_seconds": 0.0008016000000000001,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.all>",
+      "primitive_calls": 4389,
+      "self_seconds": 0.000799209
+    },
+    {
+      "calls": 439,
+      "cumulative_seconds": 0.0007444410000000001,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.repr>",
+      "primitive_calls": 439,
+      "self_seconds": 9.820500000000001e-05
+    },
+    {
+      "calls": 9462,
+      "cumulative_seconds": 0.000667011,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method _operator.index>",
+      "primitive_calls": 9462,
+      "self_seconds": 0.000667011
+    },
+    {
+      "calls": 439,
+      "cumulative_seconds": 0.000646236,
+      "file": "/usr/local/lib/python3.12/collections/__init__.py",
+      "line": 466,
+      "name": "__repr__",
+      "primitive_calls": 439,
+      "self_seconds": 0.00032055200000000004
+    },
+    {
+      "calls": 6465,
+      "cumulative_seconds": 0.0006297010000000001,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/decks.py",
+      "line": 40,
+      "name": "freqdeck_can_draw",
+      "primitive_calls": 6465,
+      "self_seconds": 0.0006297010000000001
+    },
+    {
+      "calls": 4357,
+      "cumulative_seconds": 0.000495378,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'getrandbits' of '_random.Random' objects>",
+      "primitive_calls": 4357,
+      "self_seconds": 0.000495378
+    },
+    {
+      "calls": 870,
+      "cumulative_seconds": 0.0004933720000000001,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 78,
+      "name": "get_enemy_colors",
+      "primitive_calls": 870,
+      "self_seconds": 0.0004933720000000001
+    },
+    {
+      "calls": 25,
+      "cumulative_seconds": 0.0004901160000000001,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 322,
+      "name": "player_deck_random_select",
+      "primitive_calls": 25,
+      "self_seconds": 0.000113095
+    },
+    {
+      "calls": 5174,
+      "cumulative_seconds": 0.00046430600000000005,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/actions.py",
+      "line": 275,
+      "name": "<lambda>",
+      "primitive_calls": 5174,
+      "self_seconds": 0.00046430600000000005
+    },
+    {
+      "calls": 3253,
+      "cumulative_seconds": 0.00041636600000000005,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'bit_length' of 'int' objects>",
+      "primitive_calls": 3253,
+      "self_seconds": 0.00041636600000000005
+    },
+    {
+      "calls": 3480,
+      "cumulative_seconds": 0.00039997100000000005,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 79,
+      "name": "<lambda>",
+      "primitive_calls": 3480,
+      "self_seconds": 0.00039997100000000005
+    },
+    {
+      "calls": 1466,
+      "cumulative_seconds": 0.00039425900000000005,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method math.ceil>",
+      "primitive_calls": 1466,
+      "self_seconds": 0.00039425900000000005
+    },
+    {
+      "calls": 499,
+      "cumulative_seconds": 0.000378525,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/board.py",
+      "line": 238,
+      "name": "build_city",
+      "primitive_calls": 499,
+      "self_seconds": 0.000291113
+    },
+    {
+      "calls": 2,
+      "cumulative_seconds": 0.000353767,
+      "file": "/study/profile_host.py",
+      "line": 20,
+      "name": "capture",
+      "primitive_calls": 2,
+      "self_seconds": 6.852000000000001e-06
+    },
+    {
+      "calls": 2,
+      "cumulative_seconds": 0.00033809400000000005,
+      "file": "/usr/local/lib/python3.12/contextlib.py",
+      "line": 132,
+      "name": "__enter__",
+      "primitive_calls": 1,
+      "self_seconds": 1.67e-06
+    },
+    {
+      "calls": 2,
+      "cumulative_seconds": 0.000334973,
+      "file": "/study/src/hexset/catanatron/speedups.py",
+      "line": 282,
+      "name": "catanatron_speedups",
+      "primitive_calls": 2,
+      "self_seconds": 1.023e-05
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 0.00032348200000000004,
+      "file": "/study/src/hexset/catanatron/speedups.py",
+      "line": 42,
+      "name": "verify_runtime",
+      "primitive_calls": 1,
+      "self_seconds": 2.3712000000000003e-05
+    },
+    {
+      "calls": 877,
+      "cumulative_seconds": 0.00030096400000000003,
+      "file": "/usr/local/lib/python3.12/collections/__init__.py",
+      "line": 669,
+      "name": "update",
+      "primitive_calls": 877,
+      "self_seconds": 0.000262614
+    },
+    {
+      "calls": 439,
+      "cumulative_seconds": 0.00029030900000000004,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/game.py",
+      "line": 22,
+      "name": "is_valid_action",
+      "primitive_calls": 439,
+      "self_seconds": 0.00029030900000000004
+    },
+    {
+      "calls": 1042,
+      "cumulative_seconds": 0.00029002600000000003,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.min>",
+      "primitive_calls": 1042,
+      "self_seconds": 0.00029002600000000003
+    },
+    {
+      "calls": 132,
+      "cumulative_seconds": 0.000275765,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/map.py",
+      "line": 469,
+      "name": "get_edge_nodes",
+      "primitive_calls": 132,
+      "self_seconds": 0.00014100900000000002
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 0.000254241,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/map.py",
+      "line": 215,
+      "name": "from_tiles",
+      "primitive_calls": 1,
+      "self_seconds": 2.2872e-05
+    },
+    {
+      "calls": 25,
+      "cumulative_seconds": 0.00020905200000000002,
+      "file": "/usr/local/lib/python3.12/random.py",
+      "line": 341,
+      "name": "choice",
+      "primitive_calls": 25,
+      "self_seconds": 7.2573e-05
+    },
+    {
+      "calls": 896,
+      "cumulative_seconds": 0.00020621700000000002,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/decks.py",
+      "line": 44,
+      "name": "freqdeck_draw",
+      "primitive_calls": 896,
+      "self_seconds": 0.00020621700000000002
+    },
+    {
+      "calls": 5,
+      "cumulative_seconds": 0.00019906400000000002,
+      "file": "/usr/local/lib/python3.12/pathlib.py",
+      "line": 1015,
+      "name": "read_bytes",
+      "primitive_calls": 5,
+      "self_seconds": 9.082e-06
+    },
+    {
+      "calls": 464,
+      "cumulative_seconds": 0.00017004500000000002,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/player.py",
+      "line": 15,
+      "name": "__repr__",
+      "primitive_calls": 464,
+      "self_seconds": 7.9342e-05
+    },
+    {
+      "calls": 25,
+      "cumulative_seconds": 0.00016796900000000002,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state_functions.py",
+      "line": 300,
+      "name": "player_deck_to_array",
+      "primitive_calls": 25,
+      "self_seconds": 0.00010674000000000001
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 0.000157385,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/map.py",
+      "line": 274,
+      "name": "init_node_production",
+      "primitive_calls": 1,
+      "self_seconds": 1.1384000000000001e-05
+    },
+    {
+      "calls": 439,
+      "cumulative_seconds": 0.000155639,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/enums.py",
+      "line": 108,
+      "name": "__repr__",
+      "primitive_calls": 439,
+      "self_seconds": 7.1265e-05
+    },
+    {
+      "calls": 499,
+      "cumulative_seconds": 0.000147679,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'remove' of 'list' objects>",
+      "primitive_calls": 499,
+      "self_seconds": 0.000147679
+    },
+    {
+      "calls": 54,
+      "cumulative_seconds": 0.000145821,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/map.py",
+      "line": 284,
+      "name": "get_node_counter_production",
+      "primitive_calls": 54,
+      "self_seconds": 4.9276e-05
+    },
+    {
+      "calls": 5,
+      "cumulative_seconds": 0.000145725,
+      "file": "/usr/local/lib/python3.12/pathlib.py",
+      "line": 1005,
+      "name": "open",
+      "primitive_calls": 5,
+      "self_seconds": 3.17e-06
+    },
+    {
+      "calls": 880,
+      "cumulative_seconds": 0.000145243,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'keys' of 'dict' objects>",
+      "primitive_calls": 880,
+      "self_seconds": 0.000145243
+    },
+    {
+      "calls": 5,
+      "cumulative_seconds": 0.00014255500000000002,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method _io.open>",
+      "primitive_calls": 5,
+      "self_seconds": 7.7853e-05
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 0.000112008,
+      "file": "/usr/local/lib/python3.12/json/__init__.py",
+      "line": 183,
+      "name": "dumps",
+      "primitive_calls": 1,
+      "self_seconds": 6.961000000000001e-06
+    },
+    {
+      "calls": 6,
+      "cumulative_seconds": 0.000108349,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method _hashlib.openssl_sha256>",
+      "primitive_calls": 6,
+      "self_seconds": 0.000108349
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 0.00010504700000000001,
+      "file": "/usr/local/lib/python3.12/json/encoder.py",
+      "line": 183,
+      "name": "encode",
+      "primitive_calls": 1,
+      "self_seconds": 9.021e-06
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 9.441500000000001e-05,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'encode' of 'str' objects>",
+      "primitive_calls": 1,
+      "self_seconds": 9.441500000000001e-05
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 9.219500000000001e-05,
+      "file": "/usr/local/lib/python3.12/json/encoder.py",
+      "line": 205,
+      "name": "iterencode",
+      "primitive_calls": 1,
+      "self_seconds": 9.219500000000001e-05
+    },
+    {
+      "calls": 20,
+      "cumulative_seconds": 8.909300000000001e-05,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/spiral.py",
+      "line": 8,
+      "name": "spiral_land_coordinates",
+      "primitive_calls": 20,
+      "self_seconds": 4.0387000000000005e-05
+    },
+    {
+      "calls": 459,
+      "cumulative_seconds": 8.075000000000001e-05,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/apply_action.py",
+      "line": 324,
+      "name": "<genexpr>",
+      "primitive_calls": 459,
+      "self_seconds": 8.075000000000001e-05
+    },
+    {
+      "calls": 273,
+      "cumulative_seconds": 7.855400000000001e-05,
+      "file": "/usr/local/lib/python3.12/enum.py",
+      "line": 819,
+      "name": "<genexpr>",
+      "primitive_calls": 273,
+      "self_seconds": 7.855400000000001e-05
+    },
+    {
+      "calls": 5,
+      "cumulative_seconds": 6.4702e-05,
+      "file": "/usr/local/lib/python3.12/pathlib.py",
+      "line": 447,
+      "name": "__fspath__",
+      "primitive_calls": 5,
+      "self_seconds": 2.571e-06
+    },
+    {
+      "calls": 5,
+      "cumulative_seconds": 6.2131e-05,
+      "file": "/usr/local/lib/python3.12/pathlib.py",
+      "line": 437,
+      "name": "__str__",
+      "primitive_calls": 5,
+      "self_seconds": 1.1854e-05
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 5.7419e-05,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/graph.py",
+      "line": 1794,
+      "name": "subgraph",
+      "primitive_calls": 1,
+      "self_seconds": 1.0853000000000001e-05
+    },
+    {
+      "calls": 903,
+      "cumulative_seconds": 5.27e-05,
+      "file": "/usr/local/lib/python3.12/enum.py",
+      "line": 1286,
+      "name": "name",
+      "primitive_calls": 903,
+      "self_seconds": 5.27e-05
+    },
+    {
+      "calls": 4,
+      "cumulative_seconds": 5.2408000000000004e-05,
+      "file": "/usr/local/lib/python3.12/random.py",
+      "line": 359,
+      "name": "sample",
+      "primitive_calls": 4,
+      "self_seconds": 1.6661000000000002e-05
+    },
+    {
+      "calls": 439,
+      "cumulative_seconds": 4.8595000000000005e-05,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state.py",
+      "line": 145,
+      "name": "current_player",
+      "primitive_calls": 439,
+      "self_seconds": 4.8595000000000005e-05
+    },
+    {
+      "calls": 5,
+      "cumulative_seconds": 4.4786e-05,
+      "file": "/usr/local/lib/python3.12/pathlib.py",
+      "line": 551,
+      "name": "drive",
+      "primitive_calls": 5,
+      "self_seconds": 7.361e-06
+    },
+    {
+      "calls": 5,
+      "cumulative_seconds": 3.7425e-05,
+      "file": "/usr/local/lib/python3.12/pathlib.py",
+      "line": 407,
+      "name": "_load_parts",
+      "primitive_calls": 5,
+      "self_seconds": 5.14e-06
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 3.5336e-05,
+      "file": "/usr/local/lib/python3.12/uuid.py",
+      "line": 723,
+      "name": "uuid4",
+      "primitive_calls": 1,
+      "self_seconds": 8.471e-06
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 3.3775e-05,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/graphviews.py",
+      "line": 136,
+      "name": "subgraph_view",
+      "primitive_calls": 1,
+      "self_seconds": 1.2662e-05
+    },
+    {
+      "calls": 74,
+      "cumulative_seconds": 3.2224e-05,
+      "file": "/usr/local/lib/python3.12/typing.py",
+      "line": 392,
+      "name": "inner",
+      "primitive_calls": 74,
+      "self_seconds": 2.1003000000000002e-05
+    },
+    {
+      "calls": 5,
+      "cumulative_seconds": 3.1414e-05,
+      "file": "/usr/local/lib/python3.12/pathlib.py",
+      "line": 387,
+      "name": "_parse_path",
+      "primitive_calls": 5,
+      "self_seconds": 1.5132e-05
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 3.0655000000000004e-05,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/map.py",
+      "line": 264,
+      "name": "init_adjacent_tiles",
+      "primitive_calls": 1,
+      "self_seconds": 2.0164000000000002e-05
+    },
+    {
+      "calls": 5,
+      "cumulative_seconds": 2.9124e-05,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'read' of '_io.BufferedReader' objects>",
+      "primitive_calls": 5,
+      "self_seconds": 2.9124e-05
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 2.5384000000000003e-05,
+      "file": "/usr/local/lib/python3.12/uuid.py",
+      "line": 139,
+      "name": "__init__",
+      "primitive_calls": 1,
+      "self_seconds": 2.3724000000000002e-05
+    },
+    {
+      "calls": 2,
+      "cumulative_seconds": 2.3664000000000002e-05,
+      "file": "/usr/local/lib/python3.12/functools.py",
+      "line": 982,
+      "name": "__get__",
+      "primitive_calls": 2,
+      "self_seconds": 9.832e-06
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 2.3614e-05,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'disable' of '_lsprof.Profiler' objects>",
+      "primitive_calls": 1,
+      "self_seconds": 2.3614e-05
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 2.3274e-05,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/map.py",
+      "line": 241,
+      "name": "init_port_nodes_cache",
+      "primitive_calls": 1,
+      "self_seconds": 1.3451e-05
+    },
+    {
+      "calls": 257,
+      "cumulative_seconds": 2.1992000000000002e-05,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/coordinate_system.py",
+      "line": 32,
+      "name": "add",
+      "primitive_calls": 257,
+      "self_seconds": 2.1992000000000002e-05
+    },
+    {
+      "calls": 6,
+      "cumulative_seconds": 2.0544000000000002e-05,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'hexdigest' of '_hashlib.HASH' objects>",
+      "primitive_calls": 6,
+      "self_seconds": 2.0544000000000002e-05
+    },
+    {
+      "calls": 4,
+      "cumulative_seconds": 1.8631000000000002e-05,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/features.py",
+      "line": 41,
+      "name": "iter_players",
+      "primitive_calls": 4,
+      "self_seconds": 1.3921000000000001e-05
+    },
+    {
+      "calls": 2,
+      "cumulative_seconds": 1.8473e-05,
+      "file": "/usr/local/lib/python3.12/random.py",
+      "line": 135,
+      "name": "seed",
+      "primitive_calls": 2,
+      "self_seconds": 9.781e-06
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 1.8012e-05,
+      "file": "/usr/local/lib/python3.12/random.py",
+      "line": 350,
+      "name": "shuffle",
+      "primitive_calls": 1,
+      "self_seconds": 6.7e-06
+    },
+    {
+      "calls": 58,
+      "cumulative_seconds": 1.7726000000000003e-05,
+      "file": "<frozen abc>",
+      "line": 117,
+      "name": "__instancecheck__",
+      "primitive_calls": 58,
+      "self_seconds": 8.302000000000001e-06
+    },
+    {
+      "calls": 36,
+      "cumulative_seconds": 1.686e-05,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/spiral.py",
+      "line": 27,
+      "name": "is_land",
+      "primitive_calls": 36,
+      "self_seconds": 1.0120000000000001e-05
+    },
+    {
+      "calls": 56,
+      "cumulative_seconds": 1.5523e-05,
+      "file": "~",
+      "line": 0,
+      "name": "<function Counter.update at 0x7817de129b20>",
+      "primitive_calls": 56,
+      "self_seconds": 1.5523e-05
+    },
+    {
+      "calls": 5,
+      "cumulative_seconds": 1.5133e-05,
+      "file": "~",
+      "line": 0,
+      "name": "<method '__exit__' of '_io._IOBase' objects>",
+      "primitive_calls": 5,
+      "self_seconds": 1.5133e-05
+    },
+    {
+      "calls": 2,
+      "cumulative_seconds": 1.3422000000000001e-05,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/graph.py",
+      "line": 1387,
+      "name": "edges",
+      "primitive_calls": 2,
+      "self_seconds": 6.45e-06
+    },
+    {
+      "calls": 5,
+      "cumulative_seconds": 1.2481000000000001e-05,
+      "file": "/usr/local/lib/python3.12/pathlib.py",
+      "line": 1157,
+      "name": "__init__",
+      "primitive_calls": 5,
+      "self_seconds": 5.241e-06
+    },
+    {
+      "calls": 37,
+      "cumulative_seconds": 1.1221000000000001e-05,
+      "file": "/usr/local/lib/python3.12/typing.py",
+      "line": 1285,
+      "name": "__hash__",
+      "primitive_calls": 37,
+      "self_seconds": 8.501e-06
+    },
+    {
+      "calls": 40,
+      "cumulative_seconds": 9.93e-06,
+      "file": "/usr/local/lib/python3.12/enum.py",
+      "line": 815,
+      "name": "__iter__",
+      "primitive_calls": 40,
+      "self_seconds": 9.93e-06
+    },
+    {
+      "calls": 19,
+      "cumulative_seconds": 9.662e-06,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/map.py",
+      "line": 227,
+      "name": "<lambda>",
+      "primitive_calls": 19,
+      "self_seconds": 8.031e-06
+    },
+    {
+      "calls": 58,
+      "cumulative_seconds": 9.424e-06,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method _abc._abc_instancecheck>",
+      "primitive_calls": 58,
+      "self_seconds": 9.424e-06
+    },
+    {
+      "calls": 2,
+      "cumulative_seconds": 9.392000000000001e-06,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method time.process_time>",
+      "primitive_calls": 2,
+      "self_seconds": 9.392000000000001e-06
+    },
+    {
+      "calls": 4,
+      "cumulative_seconds": 9.051e-06,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/players/minimax.py",
+      "line": 28,
+      "name": "__init__",
+      "primitive_calls": 4,
+      "self_seconds": 7.621e-06
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 9.041e-06,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/filters.py",
+      "line": 67,
+      "name": "__init__",
+      "primitive_calls": 1,
+      "self_seconds": 5.36e-06
+    },
+    {
+      "calls": 38,
+      "cumulative_seconds": 8.831e-06,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method sys.intern>",
+      "primitive_calls": 38,
+      "self_seconds": 8.831e-06
+    },
+    {
+      "calls": 2,
+      "cumulative_seconds": 8.002e-06,
+      "file": "/usr/local/lib/python3.12/contextlib.py",
+      "line": 299,
+      "name": "helper",
+      "primitive_calls": 2,
+      "self_seconds": 3.4610000000000004e-06
+    },
+    {
+      "calls": 2,
+      "cumulative_seconds": 7.462000000000001e-06,
+      "file": "~",
+      "line": 0,
+      "name": "<function Random.seed at 0x7817ddf8dda0>",
+      "primitive_calls": 2,
+      "self_seconds": 7.462000000000001e-06
+    },
+    {
+      "calls": 5,
+      "cumulative_seconds": 7.24e-06,
+      "file": "/usr/local/lib/python3.12/pathlib.py",
+      "line": 358,
+      "name": "__init__",
+      "primitive_calls": 5,
+      "self_seconds": 4.67e-06
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 7.111e-06,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/graph.py",
+      "line": 349,
+      "name": "__init__",
+      "primitive_calls": 1,
+      "self_seconds": 4.8710000000000005e-06
+    },
+    {
+      "calls": 2,
+      "cumulative_seconds": 6.972e-06,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/reportviews.py",
+      "line": 1067,
+      "name": "__init__",
+      "primitive_calls": 2,
+      "self_seconds": 5.832e-06
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 6.761e-06,
+      "file": "<class 'networkx.utils.decorators.argmap'> compilation 4",
+      "line": 1,
+      "name": "argmap___new___1",
+      "primitive_calls": 1,
+      "self_seconds": 2.251e-06
+    },
+    {
+      "calls": 20,
+      "cumulative_seconds": 5.831000000000001e-06,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/spiral.py",
+      "line": 51,
+      "name": "<genexpr>",
+      "primitive_calls": 20,
+      "self_seconds": 3.8110000000000004e-06
+    },
+    {
+      "calls": 5,
+      "cumulative_seconds": 5.101e-06,
+      "file": "<frozen posixpath>",
+      "line": 138,
+      "name": "splitroot",
+      "primitive_calls": 5,
+      "self_seconds": 4.141000000000001e-06
+    },
+    {
+      "calls": 74,
+      "cumulative_seconds": 4.77e-06,
+      "file": "/usr/local/lib/python3.12/typing.py",
+      "line": 2187,
+      "name": "cast",
+      "primitive_calls": 74,
+      "self_seconds": 4.77e-06
+    },
+    {
+      "calls": 5,
+      "cumulative_seconds": 4.631e-06,
+      "file": "/usr/local/lib/python3.12/pathlib.py",
+      "line": 429,
+      "name": "_format_parsed_parts",
+      "primitive_calls": 5,
+      "self_seconds": 2.881e-06
+    },
+    {
+      "calls": 2,
+      "cumulative_seconds": 4.541e-06,
+      "file": "/usr/local/lib/python3.12/contextlib.py",
+      "line": 104,
+      "name": "__init__",
+      "primitive_calls": 2,
+      "self_seconds": 4.011e-06
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 4.51e-06,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/utils/backends.py",
+      "line": 541,
+      "name": "_call_if_no_backends_installed",
+      "primitive_calls": 1,
+      "self_seconds": 2.1000000000000002e-06
+    },
+    {
+      "calls": 2,
+      "cumulative_seconds": 3.9010000000000004e-06,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method time.perf_counter>",
+      "primitive_calls": 2,
+      "self_seconds": 3.9010000000000004e-06
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 3.841e-06,
+      "file": "/usr/local/lib/python3.12/uuid.py",
+      "line": 280,
+      "name": "__str__",
+      "primitive_calls": 1,
+      "self_seconds": 3.841e-06
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 3.661e-06,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/function.py",
+      "line": 174,
+      "name": "freeze",
+      "primitive_calls": 1,
+      "self_seconds": 3.661e-06
+    },
+    {
+      "calls": 5,
+      "cumulative_seconds": 3.2000000000000003e-06,
+      "file": "/usr/local/lib/python3.12/pathlib.py",
+      "line": 1164,
+      "name": "__new__",
+      "primitive_calls": 5,
+      "self_seconds": 2.2200000000000003e-06
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 3.131e-06,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'union' of 'frozenset' objects>",
+      "primitive_calls": 1,
+      "self_seconds": 3.131e-06
+    },
+    {
+      "calls": 2,
+      "cumulative_seconds": 3.0210000000000004e-06,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/spiral.py",
+      "line": 33,
+      "name": "<genexpr>",
+      "primitive_calls": 2,
+      "self_seconds": 1.5810000000000002e-06
+    },
+    {
+      "calls": 6,
+      "cumulative_seconds": 2.9700000000000004e-06,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'join' of 'str' objects>",
+      "primitive_calls": 6,
+      "self_seconds": 2.9700000000000004e-06
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 2.4100000000000002e-06,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/graph.py",
+      "line": 345,
+      "name": "__new__",
+      "primitive_calls": 1,
+      "self_seconds": 2.1400000000000003e-06
+    },
+    {
+      "calls": 5,
+      "cumulative_seconds": 2.35e-06,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'split' of 'str' objects>",
+      "primitive_calls": 5,
+      "self_seconds": 2.35e-06
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 2.33e-06,
+      "file": "/study/src/hexset/catanatron/speedups.py",
+      "line": 277,
+      "name": "stats",
+      "primitive_calls": 1,
+      "self_seconds": 2.11e-06
+    },
+    {
+      "calls": 13,
+      "cumulative_seconds": 2.2410000000000002e-06,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'index' of 'list' objects>",
+      "primitive_calls": 13,
+      "self_seconds": 2.2410000000000002e-06
+    },
+    {
+      "calls": 15,
+      "cumulative_seconds": 1.941e-06,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/board.py",
+      "line": 79,
+      "name": "<lambda>",
+      "primitive_calls": 15,
+      "self_seconds": 1.941e-06
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 1.94e-06,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/decks.py",
+      "line": 68,
+      "name": "starting_devcard_bank",
+      "primitive_calls": 1,
+      "self_seconds": 1.94e-06
+    },
+    {
+      "calls": 3,
+      "cumulative_seconds": 1.9310000000000002e-06,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method math.log>",
+      "primitive_calls": 3,
+      "self_seconds": 1.9310000000000002e-06
+    },
+    {
+      "calls": 5,
+      "cumulative_seconds": 1.8900000000000001e-06,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.hasattr>",
+      "primitive_calls": 5,
+      "self_seconds": 1.8900000000000001e-06
+    },
+    {
+      "calls": 5,
+      "cumulative_seconds": 1.83e-06,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'index' of 'tuple' objects>",
+      "primitive_calls": 5,
+      "self_seconds": 1.83e-06
+    },
+    {
+      "calls": 2,
+      "cumulative_seconds": 1.6600000000000002e-06,
+      "file": "<frozen importlib._bootstrap>",
+      "line": 1390,
+      "name": "_handle_fromlist",
+      "primitive_calls": 2,
+      "self_seconds": 1.0700000000000001e-06
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 1.481e-06,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method posix.urandom>",
+      "primitive_calls": 1,
+      "self_seconds": 1.481e-06
+    },
+    {
+      "calls": 9,
+      "cumulative_seconds": 1.3100000000000002e-06,
+      "file": "<string>",
+      "line": 2,
+      "name": "__init__",
+      "primitive_calls": 9,
+      "self_seconds": 1.3100000000000002e-06
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 1.261e-06,
+      "file": "/study/src/hexset/catanatron/speedups.py",
+      "line": 222,
+      "name": "__init__",
+      "primitive_calls": 1,
+      "self_seconds": 1.261e-06
+    },
+    {
+      "calls": 2,
+      "cumulative_seconds": 1.1800000000000001e-06,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/graph.py",
+      "line": 63,
+      "name": "__set__",
+      "primitive_calls": 2,
+      "self_seconds": 1.1800000000000001e-06
+    },
+    {
+      "calls": 2,
+      "cumulative_seconds": 1.0900000000000002e-06,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/graph.py",
+      "line": 38,
+      "name": "__set__",
+      "primitive_calls": 2,
+      "self_seconds": 1.0900000000000002e-06
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 1.0000000000000002e-06,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/coreviews.py",
+      "line": 328,
+      "name": "__init__",
+      "primitive_calls": 1,
+      "self_seconds": 1.0000000000000002e-06
+    },
+    {
+      "calls": 10,
+      "cumulative_seconds": 9.100000000000001e-07,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method posix.fspath>",
+      "primitive_calls": 10,
+      "self_seconds": 9.100000000000001e-07
+    },
+    {
+      "calls": 4,
+      "cumulative_seconds": 7.900000000000001e-07,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/player.py",
+      "line": 27,
+      "name": "__init__",
+      "primitive_calls": 4,
+      "self_seconds": 7.900000000000001e-07
+    },
+    {
+      "calls": 4,
+      "cumulative_seconds": 6.4e-07,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'lower' of 'str' objects>",
+      "primitive_calls": 4,
+      "self_seconds": 6.4e-07
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 6.3e-07,
+      "file": "/usr/local/lib/python3.12/enum.py",
+      "line": 821,
+      "name": "__len__",
+      "primitive_calls": 1,
+      "self_seconds": 3.7e-07
+    },
+    {
+      "calls": 2,
+      "cumulative_seconds": 5.3e-07,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method builtins.getattr>",
+      "primitive_calls": 2,
+      "self_seconds": 5.3e-07
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 5.1e-07,
+      "file": "<string>",
+      "line": 2,
+      "name": "__eq__",
+      "primitive_calls": 1,
+      "self_seconds": 5.1e-07
+    },
+    {
+      "calls": 5,
+      "cumulative_seconds": 4.7000000000000005e-07,
+      "file": "/usr/local/lib/python3.12/pathlib.py",
+      "line": 560,
+      "name": "root",
+      "primitive_calls": 5,
+      "self_seconds": 4.7000000000000005e-07
+    },
+    {
+      "calls": 5,
+      "cumulative_seconds": 4.6000000000000004e-07,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/state.py",
+      "line": 143,
+      "name": "<genexpr>",
+      "primitive_calls": 5,
+      "self_seconds": 4.6000000000000004e-07
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 4.2e-07,
+      "file": "~",
+      "line": 0,
+      "name": "<built-in method from_bytes>",
+      "primitive_calls": 1,
+      "self_seconds": 4.2e-07
+    },
+    {
+      "calls": 5,
+      "cumulative_seconds": 3.9e-07,
+      "file": "/usr/local/lib/python3.12/pathlib.py",
+      "line": 569,
+      "name": "_tail",
+      "primitive_calls": 5,
+      "self_seconds": 3.9e-07
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 2.8e-07,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/decks.py",
+      "line": 32,
+      "name": "starting_resource_bank",
+      "primitive_calls": 1,
+      "self_seconds": 2.8e-07
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 2.2e-07,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'clear' of 'dict' objects>",
+      "primitive_calls": 1,
+      "self_seconds": 2.2e-07
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 2.0000000000000002e-07,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/graph.py",
+      "line": 1588,
+      "name": "is_directed",
+      "primitive_calls": 1,
+      "self_seconds": 2.0000000000000002e-07
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 2.0000000000000002e-07,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'reverse' of 'list' objects>",
+      "primitive_calls": 1,
+      "self_seconds": 2.0000000000000002e-07
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 1.9e-07,
+      "file": "/usr/local/lib/python3.12/site-packages/networkx/classes/graph.py",
+      "line": 1584,
+      "name": "is_multigraph",
+      "primitive_calls": 1,
+      "self_seconds": 1.9e-07
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 1.9e-07,
+      "file": "~",
+      "line": 0,
+      "name": "<method 'pop' of 'dict' objects>",
+      "primitive_calls": 1,
+      "self_seconds": 1.9e-07
+    },
+    {
+      "calls": 1,
+      "cumulative_seconds": 1.5000000000000002e-07,
+      "file": "/usr/local/lib/python3.12/site-packages/catanatron/models/map.py",
+      "line": 186,
+      "name": "__init__",
+      "primitive_calls": 1,
+      "self_seconds": 1.5000000000000002e-07
+    }
+  ],
+  "host": "catanatron",
+  "mode": "fast",
+  "points": [
+    8,
+    10,
+    9,
+    7
+  ],
+  "profile_total_seconds": 20.734599395999986,
+  "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+  "seconds": 20.88645658409223,
+  "seed": 680200002,
+  "turns": 119,
+  "winner": 1
+}

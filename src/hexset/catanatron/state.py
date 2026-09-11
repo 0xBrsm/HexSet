@@ -360,7 +360,36 @@ def _player_state(game: Game, state: GameState, seats: Seating, board) -> dict:
     return out
 
 
-def to_catanatron(game: Game, mapping: BoardMapping, seats: Seating) -> CatanatronGame:
+class BoardMirrorCache:
+    """Reuse road-network reconstruction until occupancy or its holder changes.
+
+    Keep the template private: native players may mutate the returned board.
+    Hands, turn flags and legal actions are always rebuilt from current state.
+    """
+
+    def __init__(self, mapping: BoardMapping, seats: Seating) -> None:
+        self.mapping = mapping
+        self.seats = seats
+        self._key = None
+        self._board = None
+
+    def board(self, state: GameState):
+        key = (
+            tuple(state.vertex_owner), tuple(state.vertex_building),
+            tuple(state.edge_owner), state.longest_road_holder,
+        )
+        if key != self._key:
+            self._board = _catanatron_board(state, self.mapping, self.seats)
+            self._key = key
+        board = self._board.copy()
+        board.robber_coordinate = self.mapping.coord_of[state.robber]
+        return board
+
+
+def to_catanatron(
+    game: Game, mapping: BoardMapping, seats: Seating,
+    *, board_cache: BoardMirrorCache | None = None,
+) -> CatanatronGame:
     """`translate` backwards: the catanatron `Game` mirroring `game` right now."""
     # true state: a catanatron `Player` reads the whole table, so this adapter
     # reads the true state through the sanctioned path (`Game.state`'s
@@ -374,7 +403,10 @@ def to_catanatron(game: Game, mapping: BoardMapping, seats: Seating) -> Catanatr
     cstate.color_to_index = {color: seat for seat, color in enumerate(colors)}
     cstate.discard_limit = state.rules.discard_limit
     cstate.friendly_robber = False
-    cstate.board = _catanatron_board(state, mapping, seats)
+    cstate.board = (
+        _catanatron_board(state, mapping, seats)
+        if board_cache is None else board_cache.board(state)
+    )
     cstate.player_state = _player_state(game, state, seats, cstate.board)
     cstate.resource_freqdeck = list(state.bank)
     cstate.development_listdeck = [DEV_CARD_NAMES[DevCard(c)] for c in state.deck]

@@ -1,0 +1,50 @@
+{
+  "Id": "91e0d6ed2ae50ea3478dbe189a24e8acd2b4e176307ffae62bedc901029552b9",
+  "Image": "sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+  "Mounts": [
+    {
+      "Destination": "/study",
+      "Mode": "ro",
+      "Propagation": "rprivate",
+      "RW": false,
+      "Source": "/home/bsm/tmp/hexset-native-profile-d450a4e",
+      "Type": "bind"
+    },
+    {
+      "Destination": "/out",
+      "Mode": "rw",
+      "Propagation": "rprivate",
+      "RW": true,
+      "Source": "/home/bsm/tmp/hexset-native-profile-results-d450a4e",
+      "Type": "bind"
+    }
+  ],
+  "State": {
+    "Dead": false,
+    "Error": "",
+    "ExitCode": 0,
+    "FinishedAt": "2026-09-11T02:50:48.786006305Z",
+    "OOMKilled": false,
+    "Paused": false,
+    "Pid": 0,
+    "Restarting": false,
+    "Running": false,
+    "StartedAt": "2026-09-11T02:50:23.871026516Z",
+    "Status": "exited"
+  },
+  "command": [
+    "/study/run-native-profiles.py"
+  ],
+  "env": [
+    "PYTHONPATH=/study/src",
+    "PYTHONHASHSEED=0",
+    "OMP_NUM_THREADS=1",
+    "OPENBLAS_NUM_THREADS=1",
+    "MKL_NUM_THREADS=1"
+  ],
+  "runtime": {
+    "NanoCpus": 1000000000,
+    "NetworkMode": "none"
+  },
+  "user": "1000:1000"
+}

@@ -50,3 +50,11 @@ The earlier 520/1,536 adaptive result used a different interpolation (N to
 legacy T), prior and observation memory. It motivated this work but must not
 be reported as this revised policy's win rate. Frozen scripts and data remain
 unchanged. No new broad ablation sweep is needed to check interpolation.
+
+The [direct-curve validation](../slider-curve/README.md) now confirms this exact
+policy on fresh boards. Across seven equally weighted trading conditions,
+adaptive won 977/3,584 versus global fixed .5's 986/3,584 and condition-selected
+controls' 966/3,584. Both registered lower bounds (-1.51 and -0.99 percentage
+points) exceed the -2-point non-inferiority margin. This supports one automatic
+policy for the tested mixture, without claiming an optimal curve or the same
+margin separately in every condition. All evaluations used native HexSet.

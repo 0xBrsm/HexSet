@@ -21,7 +21,7 @@ def plot(screen,path,confirmation=None):
   ax.errorbar(x,y,yerr=errors,fmt='o-',color='#245985',capsize=3,label='Fixed slider positions')
   a=rows['A'];ax.axhline(100*a['rate'],color='#b95826',linestyle='--',label='Adaptive policy')
   ax.axhspan(100*a['wilson95'][0],100*a['wilson95'][1],color='#b95826',alpha=.10)
-  ax.set_title(regime.title());ax.set_xticks(x);ax.set_ylim(0,60);ax.grid(alpha=.15)
+  ax.set_title(regime.title());ax.set_xticks(x);ax.set_ylim(0,65);ax.grid(alpha=.15)
   ax.set_xlabel('Fixed position: 0 = N, 1 = M');ax.set_ylabel('Focal win rate (%)')
  axes.flat[-1].axis('off')
  handles,labels=axes.flat[0].get_legend_handles_labels()
@@ -43,16 +43,21 @@ def plot(screen,path,confirmation=None):
  fig.suptitle(f"Adaptive response ({data['stage']}): means among games reaching each bin")
  fig.tight_layout();fig.savefig(path/'activity-trajectories.png',dpi=160);fig.savefig(path/'activity-trajectories.svg');plt.close(fig)
  if confirmation:
-  fig,ax=plt.subplots(figsize=(10,6))
+  fig,ax=plt.subplots(figsize=(10,7))
   rows=[r for r in confirmation['per_regime'] if r['comparator']=='conditional']
+  labels=[f"{r['regime']} (fixed {r['control']})" for r in rows]
+  for name,label in [('global','Aggregate: fixed .5'),('conditional','Aggregate: condition controls')]:
+   rows.append(confirmation['primary'][name]);labels.append(label)
   for y,r in enumerate(rows):
    d=100*r['difference'];lo,hi=[100*v for v in r['interval95']]
-   ax.errorbar(d,y,xerr=[[d-lo],[hi-d]],fmt='o',color='#245985',capsize=4)
-  ax.set_yticks(range(len(rows)),[f"{r['regime']} (fixed {r['control']})" for r in rows]);ax.invert_yaxis()
+   ax.errorbar(d,y,xerr=[[d-lo],[hi-d]],fmt='o',color='#245985' if y<7 else '#b95826',capsize=4)
+  ax.set_yticks(range(len(rows)),labels);ax.invert_yaxis()
   ax.axvline(0,color='gray',linewidth=1);ax.axvline(-2,color='#b95826',linestyle='--',label='−2 pp margin')
-  ax.set_xlabel('Adaptive minus screen-selected condition control (percentage points)')
-  ax.set_title('Fresh condition contrasts: descriptive 95% intervals');ax.legend();ax.grid(axis='x',alpha=.15)
-  fig.tight_layout();fig.savefig(path/'confirmation-contrasts.png',dpi=160);fig.savefig(path/'confirmation-contrasts.svg');plt.close(fig)
+  ax.set_xlabel('Adaptive minus fixed win rate (percentage points)')
+  ax.set_title('Fresh adaptive-minus-fixed comparisons');ax.legend();ax.grid(axis='x',alpha=.15)
+  fig.text(.5,.01,'Condition intervals are descriptive; aggregate lower bounds are the registered tests.',ha='center',fontsize=9)
+  fig.tight_layout(rect=(0,.035,1,1));fig.savefig(path/'confirmation-contrasts.png',dpi=160);fig.savefig(path/'confirmation-contrasts.svg');plt.close(fig)
+
 
 
 if __name__=='__main__':

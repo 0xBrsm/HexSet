@@ -56,6 +56,7 @@ def audit_record(row):
  signs=[1 if d>0 else -1 for d in steps if d]
  bins={f'{lo}-{hi-1}':[s['alpha'] for s in trajectory if lo<=s['turn']<hi] for lo,hi in BINS}
  return dict(seed=i['seed'],seating=row['seating'],winner=row['winner'],seat=seat,
+             action_sha256=row['action_sha256'],
              domestic_trades=len(trades),candidate_trades=row['candidate_trades'],
              bins={k:mean(v) for k,v in bins.items() if v},mean_alpha=mean(values),
              final_alpha=values[-1],mean_step=mean(map(abs,steps)) if steps else 0,
@@ -87,6 +88,8 @@ def analyze(archive,stage):
   assert chosen['global_best']==choose(REGIMES)
   assert chosen['conditional_best']=={g:choose([g]) for g in REGIMES}
   assert len(groups)==len(REGIMES)*6
+  assert all(groups['none','A'][i]['action_sha256']==groups['none','0'][i]['action_sha256'] for i in range(n))
+  assert all(r['domestic_trades']==0 for c in ('A','0') for r in groups['none',c].values())
  else:
   assert set(groups)=={(g,c) for g in REGIMES for c in ('A',chosen['global_best'],chosen['conditional_best'][g])}
  rows=[]

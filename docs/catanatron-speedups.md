@@ -9,6 +9,14 @@ Stock `DC:` Heximax in this external runner receives a memoryless public
 ledger; its strength results do not establish native HexSet policy rankings.
 
 
+HexSet's optional dependency remains pinned to `d3f4ad0`, before upstream's
+per-game RNG change (`3d9b462`, #380) and bot registry/lifecycle change
+(`ecf9311`, #386). The adapters and hash-guarded patches documented here target
+that pin. The separate upstream performance PR #389 incorporates both newer
+commits and preserves their RNG sharing and player APIs; it does not upgrade
+HexSet's dependency integration. Migrating that integration still requires
+adapter changes and reproducibility checks against the new APIs.
+
 The duel runner supports `--catanatron-speedups fast` for faster native AB
 and ValueFunction opponents. The default is `off`, preserving the pinned
 reference implementation for historical comparisons. The selected mode is

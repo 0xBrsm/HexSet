@@ -1,0 +1,58 @@
+{
+  "Id": "e3dcff16dd8d6073d44890f4e2b910f4e7ece21b0aa5d3b2997df41aaca1ea0d",
+  "Image": "sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+  "Mounts": [
+    {
+      "Destination": "/study",
+      "Mode": "ro",
+      "Propagation": "rprivate",
+      "RW": false,
+      "Source": "/home/bsm/tmp/hexset-ab-speedups-af44fbe",
+      "Type": "bind"
+    },
+    {
+      "Destination": "/out",
+      "Mode": "rw",
+      "Propagation": "rprivate",
+      "RW": true,
+      "Source": "/home/bsm/tmp/hexset-ab-speedups-results-af44fbe",
+      "Type": "bind"
+    }
+  ],
+  "State": {
+    "Dead": false,
+    "Error": "",
+    "ExitCode": 0,
+    "FinishedAt": "2026-09-11T01:19:08.630355566Z",
+    "OOMKilled": false,
+    "Paused": false,
+    "Pid": 0,
+    "Restarting": false,
+    "Running": false,
+    "StartedAt": "2026-09-11T01:17:51.940627101Z",
+    "Status": "exited"
+  },
+  "command": [
+    "-m",
+    "hexset.catanatron.speed_benchmark",
+    "--audit",
+    "--games",
+    "2",
+    "--seed",
+    "630000000",
+    "--out",
+    "/out/audit.json"
+  ],
+  "env": [
+    "OPENBLAS_NUM_THREADS=1",
+    "MKL_NUM_THREADS=1",
+    "PYTHONPATH=/study/src",
+    "PYTHONHASHSEED=0",
+    "OMP_NUM_THREADS=1"
+  ],
+  "runtime": {
+    "NanoCpus": 1000000000,
+    "NetworkMode": "none"
+  },
+  "user": "1000:1000"
+}

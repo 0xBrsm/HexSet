@@ -34,6 +34,13 @@ and its 20-second deadline are unchanged. A faster implementation can complete
 more search before that deadline, so decision equivalence requires measurement;
 it is not guaranteed for deadline-limited decisions.
 
+## Measured gain
+
+On eight paired four-player AB2 games, `basic` reduced total wall time from
+103.04 to 55.90 seconds (1.84x throughput); `cached` reduced it to 52.19 seconds
+(1.97x). Every ordered action trace and outcome matched. These are one-CPU
+measurements; see the [full readout and raw records](readouts/ab-speedups/README.md).
+
 ## Verification and measurement
 
 The tests compare exact scalar values on real positions from all four

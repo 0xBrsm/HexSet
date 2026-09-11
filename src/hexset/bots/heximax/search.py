@@ -197,6 +197,7 @@ class Heximax:
     # temperature are identified jointly (`hexset.fitting`), so a candidate
     # has to carry its own for a duel against the incumbent to mean anything.
     temperature: float | None = None
+    probability_backups: bool = False
 
     def __post_init__(self) -> None:
         if self.stance not in STANCES:
@@ -209,6 +210,9 @@ class Heximax:
                 raise ValueError("temperature applies to the win stance only")
             temperature = self.temperature
             self._rank = lambda vector, seat: win_at(vector, seat, temperature)
+        if self.probability_backups and self.stance != "win":
+            raise ValueError("probability backups require the win stance")
+        self._search_rank = STANCES["own"] if self.probability_backups else self._rank
         self._spent = 0
         self._budget = self.max_nodes
         self.depth_reached = 0
@@ -334,7 +338,7 @@ class Heximax:
                     best = max(partial, key=lambda pair: pair[0])[1]
                 break
             ranked = sorted(
-                ((self._rank(v, seat), a) for a, v in zip(candidates, totals)),
+                ((self._search_rank(v, seat), a) for a, v in zip(candidates, totals)),
                 key=lambda pair: -pair[0],
             )
             best = ranked[0][1]
@@ -369,7 +373,7 @@ class Heximax:
                 for p, value in enumerate(vector):
                     total[p] += share * value
             totals.append(total)
-            partial.append((self._rank(total, seat), action))
+            partial.append((self._search_rank(total, seat), action))
         return totals
 
     # -- trading (`hexset.trading`) -----------------------------------------
@@ -677,7 +681,13 @@ class Heximax:
         if self._spent >= self._budget:
             raise _Exhausted
         self._spent += 1
-        return self.evaluator.evaluate_game(game, knower)
+        if self.probability_backups and is_over(game):
+            assert game.won_by is not None
+            return [float(seat == game.won_by) for seat in range(game.num_players)]
+        vector = self.evaluator.evaluate_game(game, knower)
+        if self.probability_backups:
+            return [self._rank(vector, seat) for seat in range(game.num_players)]
+        return vector
 
     def _after(
         self, game: Game, action: Action, depth: int, knower: int, ply: int = 0,
@@ -791,7 +801,7 @@ class Heximax:
         if depth == 1 or self.width is None or len(options) <= self.width:
             return self._best_of(game, options, depth, mover, knower, ply)
         ranked = sorted(
-            ((self._rank(self._after(game, a, 1, knower, ply), mover), a) for a in options),
+            ((self._search_rank(self._after(game, a, 1, knower, ply), mover), a) for a in options),
             key=lambda pair: -pair[0],
         )
         beam = [a for _, a in ranked[: self.width]]
@@ -804,7 +814,7 @@ class Heximax:
         best_rank = 0.0
         for action in options:
             vector = self._after(game, action, depth, knower, ply)
-            rank = self._rank(vector, mover)
+            rank = self._search_rank(vector, mover)
             if best is None or rank > best_rank:
                 best, best_rank = vector, rank
         assert best is not None
@@ -895,6 +905,7 @@ def heximax(
     placement: bool = True, exact_progress_samples: int = 0, weights: Weights | None = None,
     temperature: float | None = None, development_value: float = 0.0,
     placement_resource_weight: float = RESOURCE_WEIGHT, expansion_value: float = 0.0,
+    probability_backups: bool = False,
 ) -> Heximax:
     """The two shipped configurations, by `mode`.
 
@@ -909,6 +920,8 @@ def heximax(
     premium in pips; its default retains the fitted prior.
     `expansion_value` optionally caps credit for the best reachable settlement
     site, default zero; experimental positive values should remain below one VP.
+    `probability_backups` experiments with expected leaf win probabilities
+    instead of applying softmax after averaging heuristic scores.
 
     `weights` overrides the mode's own profile (`TRADING_WEIGHTS` or
     `NO_TRADE_WEIGHTS`) with the given vector, and `temperature` the `win`
@@ -939,4 +952,5 @@ def heximax(
         placement_resource_weight=placement_resource_weight,
         mode=mode,
         temperature=temperature,
+        probability_backups=probability_backups,
     )

@@ -1,0 +1,14 @@
+{
+  "comparisons": [
+    "control-ab2-710000000-00000.json",
+    "control-ab2-710000000-00001.json",
+    "control-ab2-710000000-00002.json",
+    "control-ab2-710000000-00003.json",
+    "control-shipped-710000000-00000.json",
+    "control-shipped-710000000-00001.json",
+    "control-shipped-710000000-00002.json",
+    "control-shipped-710000000-00003.json"
+  ],
+  "old_source_sha256": "ce4f1c02424216b525f9ce27728525216ae4872850bb64f444cda35b1ee0eddf",
+  "source_sha256": "efaecd276604bc23c7d16a23a996cc3815064353dd2d453e52f146fc21d347b1"
+}

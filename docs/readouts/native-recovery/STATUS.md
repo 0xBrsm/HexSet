@@ -73,3 +73,19 @@ full traces and outcomes. Focused tests and CI passed. Two manifest-v6 arms
 (.15 and .30 per unused non-VP card) are screening at 64 games/gate in
 `hexset-native-recovery-development64`, output root `screen-development`.
 This screen uses the changed source and never reuses old-source checkpoints.
+
+
+Development .15 extension completed: 108/256 AB2 (42.19%, 95% interval
+36.30–48.31%) and 68/256 shipped (26.56%, 21.53–32.29%). The AB2 upper bound
+is below the endpoint; this arm is stopped, without fresh confirmation.
+
+Opening-variety screen completed: premium 0 gave 19/64 AB2 and 11/64 shipped;
+premium 4 gave 23/64 and 15/64; premium 8 gave 23/64 and 12/64. None earns
+extension. Frozen defaults reproduced all eight prior traces after the
+opening parameter was added. The shipped premium remains 1.19.
+
+Bounded expansion option is now screening two coefficients (.25, .50) at
+64/gate, manifest v8 and source `d3d4618`, in
+`hexset-native-recovery-expansion64`. It first verifies eight frozen-control
+traces. Three new feature tests pass; evaluator/Heximax tests also pass.
+All feature changes remain optional, default zero; no candidate is adopted.

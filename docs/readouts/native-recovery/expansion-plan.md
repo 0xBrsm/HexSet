@@ -17,3 +17,9 @@ Manifest v8, p10-exp025 and p10-exp05, 64 games/gate on seed 711000000.
 Run only after the opening screen and eight default-control trace replays.
 At most two candidates may extend to 256 if their joint target margin beats
 the p10 128-game screen. Fresh confirmation/holdout rules in PLAN.md apply.
+
+
+Completed screen: exp025 won 32/64 AB2 and 20/64 shipped, joint margin zero;
+exp05 won 25/64 and 22/64, joint margin -10.94 points. Extend only exp025 to
+256/gate on the same seed, reusing all 128 records and adding 384 games.
+This decision is recorded before launch. No fresh confirmation yet.

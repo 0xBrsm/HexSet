@@ -25,9 +25,9 @@ from hexset.victory import victory_points
 
 SOURCE='2e7b8d58e7a020723e180374397f3235de213b11bd83aaf4ac799724ba802d85'
 POLICY='36c62009d206f5a04c1db7102a643fb125ef8c96'
-SEED=733000000
-PREFLIGHT_SEED=733900000
-GAMES=400
+SEED=734000000
+PREFLIGHT_SEED=734900000
+GAMES=392
 
 
 def fingerprint(root):
@@ -102,7 +102,7 @@ def play(job):
             executed=[t for ev in events if ev.action is None for t in ev.trades]
             tape.step(action,executed)
             for ev in events:
-                if ev.note is not None:notes.append(dict(turn=game.turns,round=ev.round_num,**asdict(ev.note)))
+                if ev.note is not None:notes.append(dict(turn=game.turns,round=ev.round_num,**ev.note._asdict()))
             counts['executions']+=len(executed)
             assert len(executed)<=1 and session.open_round is None and not session.trade_wait()
         assert game.won_by is not None and not journal._off
@@ -146,7 +146,7 @@ def main():
         candidate_robber=.075,control_robber=-.30,spare_card=.15,trade_floor=0,
         game_max_trades=0,bot_max_trades=None,initial_card_cap=3,counter_card_cap=3,broadcasts_per_turn=1,
         move_slider=0,move_slider_reason='Existing served behavior: game-level automatic-off switch holds slider at zero',
-        game_seed=SEED,preflight_seed=PREFLIGHT_SEED,confirmation_games=GAMES,antithetic=False,
+        game_seed=SEED,preflight_seed=PREFLIGHT_SEED,confirmation_games=GAMES,previous_failed_attempts=6,antithetic=False,
         workers=args.workers,python=platform.python_version(),games_cap=408,seconds_cap=900))
     jobs=[(i,PREFLIGHT_SEED,v,str(root/'preflight'/f'{v}-{i}.json')) for i in range(2) for v in ('stock','wrapped')]
     jobs += [(i,PREFLIGHT_SEED+100,'candidate',str(root/'preflight'/f'candidate-{i}.json')) for i in range(2)]
@@ -162,7 +162,7 @@ def main():
     wins=sum(r['winner']<2 for r in rows);interval=wilson(wins,len(rows))
     atomic(root/'summary.json',dict(candidate_wins=wins,control_wins=GAMES-wins,games=GAMES,win_rate=wins/GAMES,
         wilson95=interval,eligible_for_adoption=interval[0]>.5,independent_audit_required=True,
-        total_games=GAMES+6,seconds=time.monotonic()-started,
+        total_games=GAMES+12,seconds=time.monotonic()-started,
         counts=dict(sum((Counter(r['counts']) for r in rows),Counter()))))
 
 

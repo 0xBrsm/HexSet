@@ -40,6 +40,17 @@ Trading is enabled; AB2 declines exchanges, so the adaptive slider stays at
 zero. All 1,600 games finished and passed replay validation, with no reference
 deadline hits. The readout preserves exact source hashes, settings and records.
 
+## Bounded exchange-weight improvement (September 11, 2026)
+
+The [exchange-only sweep](readouts/exchange-weight-sweep/README.md) adopted
+robber risk −0.225 instead of −0.30 for exchange valuation, leaving move
+search unchanged. A single finalist won **600/800 fresh 2v2 games (75.0%,
+95% Wilson 71.9–77.9%)** against the incumbent. The six-candidate screen,
+confirmation and behavior checks used exactly 1,600 evaluation games and
+241.18 seconds, then stopped. All strength records passed replay and public
+activity audits. Eight original AB2 records also matched the adopted default;
+they are behavior checks, not new reference-strength observations.
+
 ## Native Heximax improvement (September 11, 2026)
 
 The [fixed native holdout](readouts/native-expansion/README.md) passed the

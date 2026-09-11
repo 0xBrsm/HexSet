@@ -26,6 +26,17 @@ declines domestic exchanges; the observed activity and slider position are
 reported in the audit. This matchup measures how the current adaptive bot
 plays against AB2; it does not measure adaptation against trading opponents.
 
+## Exchange-only update after this benchmark
+
+The [bounded exchange-weight sweep](../exchange-weight-sweep/README.md)
+subsequently changed only exchange robber risk from −0.30 to −0.225. Both move
+profiles, adaptation and search remain unchanged. AB2 declines all domestic
+exchanges. Eight reserved adoption replays matched the original full game
+records exactly, including four games in each format. These are behavior
+checks; the 1,600 headline observations remain the original benchmark, not a
+new sample under the updated source. The exact adopted source hash and checks
+are in [the adoption receipt](../exchange-weight-sweep/adoption-verification.json).
+
 ## Frozen configuration
 
 - HexSet policy source: `38ac537e44944a892b881b5c0152d4de6828b2a4`.

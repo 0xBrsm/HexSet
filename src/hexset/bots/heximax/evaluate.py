@@ -7,10 +7,10 @@ since it reads only public state. The three hand terms (`evaluate.hand_terms`
 -- purchase progress, spare cards, robber exposure) are read on the true hand
 for the knower and on `View.expected_hand` for everyone else; victory point cards are exact for
 the knower and an expectation over the unseen pool for everyone else
-(`expected_card_points`). `TRADING_WEIGHTS` and `NO_TRADE_WEIGHTS` are the
-two shipped profiles `heximax()` picks between by mode -- see their own
-comments for provenance; `weights=` overrides either with a candidate
-vector, which is how `hexset.fitting`'s result is played before adoption.
+(`expected_card_points`). `heximax()` adapts move weights between `NO_TRADE_WEIGHTS` and
+`BALANCED_WEIGHTS`, while exchanges use fixed `TRADING_WEIGHTS`. See their
+comments for provenance. Explicit `weights=` supplies a fixed candidate
+move vector for experiments.
 """
 
 from __future__ import annotations
@@ -96,7 +96,12 @@ _PURCHASE_COSTS = np.array(
 # vector confirmed 52.5% [50.7, 54.3] over 3,072 fresh boards against the
 # start. The other seven terms sit within a point and a half of their best
 # ring value, which is the resolution 1,024 paired games buy.
-TRADING_WEIGHTS = Weights(robber_risk=-0.30)
+# Exchange-only bounded sweep, with adaptive move search held fixed:
+# reducing the penalty magnitude by 25% won 600/800 fresh 2v2 games
+# (75.0%, 95% Wilson 71.9-77.9%). Preserve the tested multiplication exactly;
+# move-profile robber penalties remain -0.30 at both endpoints.
+# See docs/readouts/exchange-weight-sweep/README.md.
+TRADING_WEIGHTS = Weights(robber_risk=-0.30 * 0.75)
 
 # The fit that preceded the trading refit, recovered from git: `87d9095`
 # (parent of `1dd9045`, "refit the weights for trading"), `src/catan/evaluate.py`.

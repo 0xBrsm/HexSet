@@ -33,12 +33,19 @@ its own or the game's trading switch is off. A pinned bot retains its pin.
 ## Why exchange weights stay fixed
 
 A native 400-game 2v2 comparison kept adaptive move search identical on both
-sides and varied only the exchange coefficients. The current fixed exchange
-weights won **265/400 games (66.25%, 95% interval 61.5–70.7%)** against using
+sides and varied only the exchange coefficients. The then-current fixed
+exchange weights (robber risk −0.30) won **265/400 games (66.25%, 95% interval 61.5–70.7%)** against using
 the adaptive move coefficients for exchanges. All 400 games passed replay and
 public-activity audits, with 23,382 completed exchanges. This supports the
 split for that matchup; it does not establish optimal weights across all
 opponents. See the [exchange-weight readout](readouts/adaptive-exchange-2v2/README.md).
+
+The subsequent [bounded exchange-only sweep](readouts/exchange-weight-sweep/README.md)
+adopted a smaller exchange robber-risk penalty: **−0.225 instead of −0.30**.
+With move search held fixed, it won **600/800 fresh 2v2 games (75.0%, 95%
+interval 71.9–77.9%)** against the previous exchange vector. All other exchange
+coefficients and both move profiles are unchanged. The full sweep and adoption
+checks stopped at 1,600 games and 4 minutes 1 second of evaluation time.
 
 ## Current reference results
 

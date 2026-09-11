@@ -1,0 +1,8 @@
+{
+  "candidate": "robber_risk-x0.75",
+  "eligible_for_adoption": true,
+  "games": 1588,
+  "rule": "fresh two-sided 95% Wilson lower bound > 50%; independent audit required",
+  "seconds": 236.18997011589818,
+  "status": "complete"
+}

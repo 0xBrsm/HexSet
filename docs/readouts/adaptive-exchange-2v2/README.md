@@ -16,6 +16,11 @@ points below that baseline (interval -20.7 to -11.5 points). This supports
 separate exchange weights in this matchup, without establishing optimal
 coefficients or superiority against every opponent population.
 
+The fixed vector measured here used exchange robber risk −0.30. A later
+[bounded sweep](../exchange-weight-sweep/README.md) adopted −0.225 after fresh
+confirmation. This archived 400-game comparison has not been relabeled as a
+measurement of that later vector.
+
 ## What changed
 
 The candidate updates its exchange coefficients from the current adaptive

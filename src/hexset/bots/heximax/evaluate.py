@@ -143,12 +143,13 @@ class HonestEvaluator:
 
     def __init__(
         self, board: Board, weights: Weights | None = None, *,
-        exact_progress_samples: int = 0,
+        exact_progress_samples: int = 0, development_value: float = 0.0,
     ) -> None:
         self.inner = Evaluator(board, weights)
         self.weights = self.inner.weights
         self.vector = self.inner.vector
         self.exact_progress_samples = exact_progress_samples
+        self.development_value = development_value
         self._walk_cache: dict[tuple, Survey] = {}
         self._belief_cache: dict[tuple, View] = {}
         self._evaluate_cache: dict[tuple, list[float]] = {}
@@ -325,6 +326,18 @@ class HonestEvaluator:
             walk.port_gain,
         )
 
+    def development_bonus(self, state: GameState, seat: int, knower: int | None) -> float:
+        """Optional value for unused non-VP cards, honest about hidden types.
+
+        The holder knows its own VP count. For opponents, subtract only the
+        expected VP count from their public total. Played cards are excluded
+        by holdings(). A zero coefficient preserves the shipped evaluator.
+        """
+        if not self.development_value:
+            return 0.0
+        vp = card_points(state, seat) if seat == knower else expected_card_points(state, seat, knower)
+        return self.development_value * (sum(holdings(state, seat)) - vp)
+
     def score(
         self, state: GameState, seat: int, hand: Sequence[float], *, knower: int | None = None,
         belief: View | None = None,
@@ -337,7 +350,7 @@ class HonestEvaluator:
             total += weight * value
         if values[0] >= state.rules.winning_points:
             total += WIN_SCORE
-        return total
+        return total + self.development_bonus(state, seat, knower)
 
     def score_many(self, state: GameState, knower: int, hands: np.ndarray) -> np.ndarray:
         """`score`, over every row of `hands` at once: `(candidates, seat,
@@ -449,6 +462,9 @@ class HonestEvaluator:
         for weight, value in zip(vector, values):
             total = total + weight * value
         total = total + WIN_SCORE * (points >= state.rules.winning_points)
+        if self.development_value:
+            total = total + np.array([self.development_bonus(state, seat, knower)
+                                     for seat in range(num_players)])
         return total
 
     def evaluate(

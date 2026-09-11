@@ -213,6 +213,10 @@ class Heximax:
         self.depth_reached = 0
 
     @property
+    def development_value(self) -> float:
+        return self.evaluator.development_value
+
+    @property
     def nodes(self) -> int:
         """Leaf evaluations the last `choose` spent."""
         return self._spent
@@ -880,7 +884,7 @@ def heximax(
     width: int | None = 6, max_trades: int | None = BY_MODE,  # type: ignore[assignment]
     max_nodes: int = DEFAULT_MAX_NODES, k: int = 1, stance: str = "win",
     placement: bool = True, exact_progress_samples: int = 0, weights: Weights | None = None,
-    temperature: float | None = None,
+    temperature: float | None = None, development_value: float = 0.0,
 ) -> Heximax:
     """The two shipped configurations, by `mode`.
 
@@ -888,6 +892,9 @@ def heximax(
     honest with the no-trade weights. Left at `BY_MODE`, trading is on for
     `honest` and off (`max_trades=0`) for `notrade`; any explicit value,
     `None` included, is taken as given.
+
+    `development_value` optionally credits unused non-VP development cards;
+    it defaults to zero and is experimental, pending native evaluation.
 
     `weights` overrides the mode's own profile (`TRADING_WEIGHTS` or
     `NO_TRADE_WEIGHTS`) with the given vector, and `temperature` the `win`
@@ -903,7 +910,8 @@ def heximax(
         max_trades = 0 if mode == "notrade" else None
     if weights is None:
         weights = NO_TRADE_WEIGHTS if mode == "notrade" else TRADING_WEIGHTS
-    evaluator = HonestEvaluator(board, weights, exact_progress_samples=exact_progress_samples)
+    evaluator = HonestEvaluator(board, weights, exact_progress_samples=exact_progress_samples,
+                                development_value=development_value)
     return Heximax(
         evaluator,
         depth=depth,

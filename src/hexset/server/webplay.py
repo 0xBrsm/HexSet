@@ -1988,6 +1988,9 @@ class GameSession:
             # is the sidebar log's current-round filter, which now needs
             # this to match the log lines' own round-number tags.
             "round": self.round,
+            # The rule the game is played to, so a client can say how far a
+            # seat is from winning without assuming the standard ten.
+            "winning_points": state.rules.winning_points,
             "last_roll": game.last_roll,
             "robber": state.robber,
             "vertex_owner": state.vertex_owner,

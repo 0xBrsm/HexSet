@@ -3,6 +3,30 @@
 Changes to the HexSet distribution. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.50.0
+
+### Added
+
+- **`log_after`, a transcript cursor on every MCP tool that answers with
+  game state** (`state`, `act`, `wait_for_turn`, `get_table`, and the three
+  trade tools). `log` was otherwise re-rendered and resent whole on every
+  single call, so what an LLM seat paid to read the table grew with the
+  length of the game and was by a wide margin the largest part of each
+  reply. Pass back the `log_total` from the previous reply and only the new
+  lines come across; `log_from` names the index the slice starts at.
+
+  The reply carries one line of overlap on purpose. `render_log` collapses a
+  burst of engine steps into one line that it rewrites *in place* as the
+  burst grows, so the last line a caller holds is the one line that can
+  still change under it -- resending exactly that line is what makes the
+  cursor safe to splice, and is why the cursor counts lines rather than
+  reusing the version number `after` already carries (the transcript is
+  folded from events, and no version maps to a line count).
+
+  Omitting `log_after` returns the whole transcript, unchanged, which is
+  what a first read and a just-reclaimed seat both want -- so a client that
+  knows nothing about the cursor is unaffected.
+
 ## 0.49.1
 
 ### Fixed

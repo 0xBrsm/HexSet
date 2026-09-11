@@ -16,6 +16,14 @@ Changes to the HexSet distribution. The project follows
 
 ### Changed
 
+- **One Heximax policy.** `heximax` now uses the validated adaptive slider
+  everywhere, including the server and Gym defaults. `pin_weights=0` or `1`
+  holds an endpoint for testing without changing trading participation;
+  native duel flags and entrant specs record those settings. The separate
+  adaptive/balanced/notrade presets, `mode`/`adaptive` factory arguments and
+  `BY_MODE`/`MODES` exports are removed. Fixed custom vectors remain supported.
+  See [configuration and migration](docs/heximax.md).
+
 - **Pinned Catanatron to `ecf931181b9a65bb4116a2153fb78c16f1438e00`.**
   The adapter follows two upstream reworks: players now construct as
   `(color, params)` and register through the shared player registry

@@ -143,3 +143,24 @@ def test_weight_cell_preserves_unfinished_and_board_measurements(monkeypatch):
     assert result["unfinished"] == 2
     assert result["boards"] == 2
     assert result["challenger_roads_per_game"] == 3
+
+
+@pytest.mark.parametrize('pin', [0, 1])
+@pytest.mark.parametrize('disabled', [False, True])
+def test_fixed_weight_experiments_separate_endpoint_from_participation(pin, disabled):
+    from hexset.bench import ablate, weight_sweep
+    from hexset.bots.heximax.adaptive import trading_profile
+    from hexset.arena import spawn, deal_game
+    import random
+    weights, expansion = trading_profile(pin)
+    board = deal_game(147, 0, 4).state(0, hidden=False).board
+    entrants = [
+        ablate._entrant_for('control', weights, 2, 6, pin, disabled),
+        weight_sweep.entrant('control', weights, pin, disabled),
+    ]
+    for entrant in entrants:
+        bot = spawn(entrant, board, random.Random(1))
+        assert bot.evaluator.weights == weights
+        assert bot.expansion_value == expansion
+        assert bot.max_trades == (0 if disabled else None)
+        assert bot.trade_floor == 0

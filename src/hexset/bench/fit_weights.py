@@ -116,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--profile", choices=("trading", "notrade"), default="trading",
         help="which shipped profile the incumbent row reads: `TRADING_WEIGHTS` "
-        "for heximax records, `NO_TRADE_WEIGHTS` for heximax-notrade records",
+        "for legacy trading records, `NO_TRADE_WEIGHTS` for zero-activity endpoint records",
     )
     parser.add_argument("--bootstrap", type=int, default=0, help="block-bootstrap replicates by game")
     parser.add_argument("--workers", type=int, default=default_workers())

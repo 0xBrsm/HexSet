@@ -18,18 +18,18 @@ from dataclasses import fields, replace
 from hexset.bench.metrics import side_metrics
 from hexset.bench.throughput import default_workers, environment
 from hexset.arena import Entrant, compete
-from hexset.bots.heximax import TRADING_WEIGHTS, NO_TRADE_WEIGHTS
+from hexset.bots.heximax import BALANCED_WEIGHTS, NO_TRADE_WEIGHTS
 
-WEIGHTS = {"trading": TRADING_WEIGHTS, "notrade": NO_TRADE_WEIGHTS}
+WEIGHTS = {0: NO_TRADE_WEIGHTS, 1: BALANCED_WEIGHTS}
 
 
 def _entrant_for(
-    name: str, weights, depth: int, width: int | None, profile: str
+    name: str, weights, depth: int, width: int | None, pin_weights: int, no_trading: bool = False
 ) -> Entrant:
     return Entrant(
         name=name, kind="heximax", weights=weights, depth=depth, width=width,
-        mode="notrade" if profile == "notrade" else "honest",
-        max_trades=0 if profile == "notrade" else None,
+        expansion_value=.25 if pin_weights == 0 else .125,
+        max_trades=0 if no_trading else None,
     )
 
 
@@ -42,11 +42,11 @@ def _duel(
     depth: int,
     width: int | None,
     workers: int,
-    profile: str,
+    pin_weights: int, no_trading: bool = False,
 ) -> dict:
     """Compare two seats per side on paired boards; include unfinished games."""
-    a = _entrant_for("challenger", challenger, depth, width, profile)
-    b = _entrant_for("incumbent", incumbent, depth, width, profile)
+    a = _entrant_for("challenger", challenger, depth, width, pin_weights, no_trading)
+    b = _entrant_for("incumbent", incumbent, depth, width, pin_weights, no_trading)
     result = compete([a, a, b, b], games, seed=seed, workers=workers)
     return side_metrics(result, (0, 1))
 
@@ -59,9 +59,9 @@ def ablate(
     depth: int,
     width: int | None,
     workers: int,
-    profile: str = "trading",
+    pin_weights: int = 1, no_trading: bool = False,
 ) -> dict:
-    full = WEIGHTS[profile]
+    full = WEIGHTS[pin_weights]
     return _duel(
         replace(full, **{term: 0.0}),
         full,
@@ -70,7 +70,7 @@ def ablate(
         depth=depth,
         width=width,
         workers=workers,
-        profile=profile,
+        pin_weights=pin_weights, no_trading=no_trading,
     )
 
 
@@ -81,11 +81,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--depth", type=int, default=2)
     parser.add_argument("--width", type=int, default=6)
     parser.add_argument("--workers", type=int, default=default_workers())
-    parser.add_argument("--profile", choices=sorted(WEIGHTS), default="trading")
+    parser.add_argument("--pin-weights", type=int, choices=(0, 1), default=1)
+    parser.add_argument("--no-trading", action="store_true")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
-    terms = [f.name for f in fields(WEIGHTS[args.profile])]
+    terms = [f.name for f in fields(WEIGHTS[args.pin_weights])]
     started = time.perf_counter()
     rows = []
     for term in terms:
@@ -96,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
             depth=args.depth,
             width=args.width,
             workers=args.workers,
-            profile=args.profile,
+            pin_weights=args.pin_weights, no_trading=args.no_trading,
         )
         low, high = metrics["interval_95"]
         rows.append(

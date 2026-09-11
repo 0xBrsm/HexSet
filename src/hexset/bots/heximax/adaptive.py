@@ -6,9 +6,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from hexset.bots.evaluate import TERM_NAMES, Weights
-from hexset.game import Game
 from .evaluate import BALANCED_WEIGHTS, NO_TRADE_WEIGHTS
-from .search import Heximax
 
 
 def trading_profile(activity: float) -> tuple[Weights, float]:
@@ -52,21 +50,3 @@ class TradeActivity:
         ):
             return
         self.history.append(any(actor in pair for pair in trade_participants))
-
-
-@dataclass
-class AdaptiveHeximax(Heximax):
-    activity: TradeActivity = field(default_factory=TradeActivity)
-
-    def observe_trade(self, **public_event) -> None:
-        self.activity.observe(**public_event)
-
-    def choose(self, game: Game):
-        alpha = 0.0 if self.max_trades == 0 or game.max_trades == 0 else self.activity.mean
-        weights, expansion = trading_profile(alpha)
-        evaluator = self.evaluator
-        evaluator.weights = evaluator.inner.weights = weights
-        evaluator.vector = evaluator.inner.vector = tuple(getattr(weights, k) for k in TERM_NAMES)
-        evaluator.expansion_value = expansion
-        # Hold this profile throughout the search; choose clears its caches.
-        return super().choose(game)

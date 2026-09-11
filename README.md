@@ -40,8 +40,9 @@ validation in HexSet, including matches against Catanatron's AB2 bot. See the
   outcomes by probability. It samples opponents' holdings from public
   information (Perfect Information Monte Carlo, or PIMC), with one sampled
   world by default. It uses iterative deepening, a leaf budget and heuristic
-  evaluation, and requires no trained model. `heximax-notrade` disables player
-  trading and uses a separate fitted weight profile.
+  evaluation, and requires no trained model. Its weights adapt to public
+  trading activity; testing flags can pin either endpoint. See
+  [Heximax configuration](docs/heximax.md).
 - **Catanatron** supplies an **external reference opponent**. The `catanatron`
   entrant runs its depth-two alpha-beta player (AB2) at a HexSet table and
   requires the optional `catanatron` extra. AB2's hypothetical search uses
@@ -127,17 +128,19 @@ configuration, saved games, HTTP routes, and MCP tools.
 
 ## Evaluate bots
 
-`heximax-adaptive` uses one policy that slides between the current best no-trade
+`heximax` uses one policy that slides between the current best no-trade
 and trading move profiles. Recent public exchange activity sets the slider;
 both endpoints are exact. Its exchange evaluator remains the trading profile,
-with floor zero. The fixed presets remain benchmark controls. See the
+with floor zero. Use `--pin-weights-a 0` or `--pin-weights-b 1` to hold an
+endpoint for testing; pins do not disable trading. See the
+[configuration and migration guide](docs/heximax.md), the
 [slider implementation](docs/readouts/trading-conditions/SLIDER.md) and
 [fresh curve validation](docs/readouts/slider-curve/README.md), which passed the
 registered aggregate 2-percentage-point non-inferiority margin against both
 global and condition-selected fixed controls.
 
 ```sh
-python -m hexset.bench.duel heximax heximax-notrade --games 400 --workers 4
+python -m hexset.bench.duel heximax heximax --pin-weights-b 0 --games 400 --workers 4
 ```
 
 The arena runner reports win rates with Wilson confidence intervals and
@@ -156,7 +159,7 @@ With the `catanatron` extra installed, this small wiring check seats one
 Heximax against three external AB2 reference opponents **in HexSet**:
 
 ```sh
-python -m hexset.bench.duel heximax-notrade catanatron \
+python -m hexset.bench.duel heximax catanatron \
   --geometry abbb --games 8 --workers 1 --duel-seed 700000000 \
   --records runs/preflight/ab2.jsonl
 ```
@@ -246,7 +249,7 @@ For simulations with trade gates installed, the engine evaluates coverable
 bundles when the game enters MAIN after a roll or robber resolution. Builds,
 purchases, and bank trades do not trigger another automatic event. Both sides
 must gain more than their own gate's `trade_floor`, and each side may
-exchange at most three cards. Heximax's floor is `0.0197`; the network gate
+exchange at most three cards. Heximax's floor is `0`; the network gate
 uses `0.0`. There is no engine-wide default floor. The default `egalitarian` rule
 selects the trade with the largest minimum gain; `nash` and `actor` are
 alternative ranking rules. Evaluation repeats after each exchange until no

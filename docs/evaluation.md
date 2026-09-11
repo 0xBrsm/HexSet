@@ -29,7 +29,7 @@ Install the optional reference dependency with `pip install -e '.[catanatron]'`.
 This command runs one Heximax against three AB2 players in HexSet:
 
 ```sh
-python -m hexset.bench.duel heximax-notrade catanatron \
+python -m hexset.bench.duel heximax catanatron \
   --geometry abbb --games 8 --workers 1 --duel-seed 700000000 \
   --records runs/preflight/ab2.jsonl
 ```

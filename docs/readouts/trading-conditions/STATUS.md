@@ -1,4 +1,13 @@
-# Current slider update
+# Final status
+
+The direct linear slider passed fresh aggregate non-inferiority confirmation;
+no nonlinear challenger qualified for confirmation. See
+[the curve results](../slider-curve/README.md) and
+[shape results](../slider-shape/README.md). It is now the single `heximax`
+policy, with numeric endpoint pins for testing. Historical notes below refer
+to the frozen study and its original API and runtime locations.
+
+# Earlier slider update
 
 The user selected direct interpolation between the current best no-trade and
 trading settings. heximax-adaptive now interpolates N to the validated M move

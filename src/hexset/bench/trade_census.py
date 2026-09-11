@@ -257,7 +257,7 @@ def table(summaries: dict[str, BotSummary]) -> str:
 
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("bots", nargs="*", help="entrant names, e.g. heximax heximax heximax-notrade heximax-notrade")
+    parser.add_argument("bots", nargs="*", help="entrant names, e.g. heximax heximax heximax:pin-weights=0 heximax:pin-weights=0")
     parser.add_argument("--games", type=int, default=96)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--workers", type=int, default=1)

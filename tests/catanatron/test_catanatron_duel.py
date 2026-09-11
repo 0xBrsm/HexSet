@@ -214,23 +214,23 @@ def test_build_players_keeps_the_whole_dc_tail():
 def test_build_players_dc_defaults_to_heximax_notrade():
     (player, _) = build_players("DC,AB:2")
     assert isinstance(player, DevCatanPlayer)
-    assert player.params.entrant == "heximax-notrade"
+    assert player.params.entrant == "heximax"
 
 
 def test_dc_is_also_buildable_through_the_registry():
     """The `catanatron-play --bot` path (`REGISTRY.build`), where the spec
     has no structural colons to preserve."""
-    player = REGISTRY.build("DC:heximax-notrade", Color.RED)
+    player = REGISTRY.build("DC:heximax", Color.RED)
     assert isinstance(player, DevCatanPlayer)
-    assert player.params.entrant == "heximax-notrade"
+    assert player.params.entrant == "heximax"
     assert player.color is Color.RED
 
 
 def test_direct_construction_rejoins_colon_split_parts():
     """The pre-registry calling convention -- one positional piece per
     colon-split part -- still works (the tests and duel shards use it)."""
-    assert DevCatanPlayer(Color.RED, "heximax-notrade").params.entrant == (
-        "heximax-notrade"
+    assert DevCatanPlayer(Color.RED, "heximax").params.entrant == (
+        "heximax"
     )
     assert DevCatanPlayer(Color.RED, "network", "/tmp/x.pt").params.entrant == (
         "network:/tmp/x.pt"
@@ -248,7 +248,7 @@ def test_before_resets_the_per_game_state():
     """`play_batch` no longer calls `reset_state()` between games; the
     `before` observer hook is its replacement, fired once per game from
     `Game.__init__`."""
-    player = DevCatanPlayer(Color.RED, "heximax-notrade")
+    player = DevCatanPlayer(Color.RED, "heximax")
     player._mapping = object()
     player._bot = object()
     player._rng = object()
@@ -258,7 +258,7 @@ def test_before_resets_the_per_game_state():
     assert player._rng is None
 
 
-@pytest.mark.parametrize("spec", ["heximax-notrade", "network:/tmp/x.pt"])
+@pytest.mark.parametrize("spec", ["heximax", "network:/tmp/x.pt", "heximax:pin-weights=1:trading=off"])
 def test_build_players_accepts_named_dc_entrant(spec):
     player = build_players(f"DC:entrant={spec},R")[0]
     assert player.params.entrant == spec

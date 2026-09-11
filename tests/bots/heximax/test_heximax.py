@@ -251,7 +251,7 @@ def test_a_no_trade_bot_refuses_everything():
     clears."""
     game = a_game(seed=14)
     board = game._state.board
-    quiet = heximax(board, random.Random(0), mode="notrade", max_nodes=64)
+    quiet = heximax(board, random.Random(0), max_trades=0, max_nodes=64)
     assert quiet.max_trades == 0
     view = game.state(0)
     assert quiet.accepts(view, one_for_one(0, 4), 1) is False
@@ -269,17 +269,15 @@ def test_a_no_trade_bot_refuses_everything():
     assert all(t.a != 0 and t.b != 0 for t in game.trades)
 
 
-def test_heximax_declares_its_measured_floor():
+def test_heximax_declares_the_validated_zero_floor():
     from hexset.bots.heximax import HEXIMAX_TRADE_FLOOR
 
     bot = a_bot(a_game(seed=15), 0)
-    assert bot.trade_floor == HEXIMAX_TRADE_FLOOR == 0.0197
+    assert bot.trade_floor == HEXIMAX_TRADE_FLOOR == 0.0
 
 
 def test_a_trading_bot_trades():
-    # The wiring, not the floor: under its measured floor (0.0197) heximax's
-    # claimed gains almost never clear, which is the floor doing its job.
-    # With each bot's own floor at zero a trading bot must still trade.
+    # The validated zero floor allows positive-gain exchanges to clear.
     game = a_game(seed=15)
     bots = [a_bot(game, s, max_nodes=200) for s in range(4)]
     for bot in bots:
@@ -305,12 +303,12 @@ def test_a_game_finishes_for_any_player_count(players):
     assert is_over(game)
 
 
-def test_an_unknown_stance_or_mode_is_refused():
+def test_an_unknown_stance_or_weight_pin_is_refused():
     game = a_game()
     with pytest.raises(ValueError, match="unknown stance"):
         Heximax(HonestEvaluator(game._state.board), stance="spiteful")
-    with pytest.raises(ValueError, match="unknown heximax mode"):
-        heximax(game._state.board, random.Random(0), mode="clairvoyant")
+    with pytest.raises(ValueError, match="pin_weights"):
+        heximax(game._state.board, random.Random(0), pin_weights="clairvoyant")
 
 
 # --- trading (`hexset.trading`) ------------------------------------------------
@@ -410,19 +408,19 @@ def test_the_vectorised_gate_matches_the_clone_it_replaces_bit_for_bit():
 # --- presets ------------------------------------------------------------------
 
 
-def test_the_heximax_presets_spawn_with_their_documented_modes():
+def test_the_single_heximax_preset_is_adaptive_with_the_validated_gate():
     board = random_base_board(random.Random(0))
-    honest = spawn(PRESETS["heximax"], board, random.Random(0))
-    quiet = spawn(PRESETS["heximax-notrade"], board, random.Random(0))
-    for bot in (honest, quiet):
-        assert isinstance(bot, Heximax)
-        assert bot.placement
-        assert bot.depth == 2 and bot.width == 6
-
-    assert (honest.mode, honest.max_trades) == ("honest", None)
-    assert honest.evaluator.weights == TRADING_WEIGHTS
-    assert (quiet.mode, quiet.max_trades) == ("notrade", 0)
-    assert quiet.evaluator.weights == NO_TRADE_WEIGHTS
+    bot = spawn(PRESETS["heximax"], board, random.Random(0))
+    assert isinstance(bot, Heximax)
+    assert bot.placement
+    assert (bot.depth, bot.width, bot.max_nodes, bot.k) == (2, 6, 600, 1)
+    assert bot.pin_weights is None and bot.max_trades is None
+    assert bot.evaluator.weights == NO_TRADE_WEIGHTS
+    assert bot.expansion_value == .25
+    assert bot.trade_evaluator.weights == TRADING_WEIGHTS
+    assert bot.trade_floor == 0
+    assert set(name for name in PRESETS if name in (
+        "heximax", "heximax-notrade", "heximax-balanced", "heximax-adaptive")) == {"heximax"}
 
 
 # --- honesty of the source ------------------------------------------------------
@@ -562,10 +560,10 @@ def test_split_trade_values_match_the_gate_and_preserve_move_rng(stance, tempera
     assert split.estimate_many(game.state(0), offers) == [-1.0, -1.0]
 
 
-def test_balanced_preset_uses_the_validated_move_and_exchange_profiles():
+def test_pinned_upper_endpoint_uses_the_validated_move_and_exchange_profiles():
     from hexset.bots.heximax import BALANCED_WEIGHTS
     game = after_setup(26)
-    bot = spawn(PRESETS['heximax-balanced'], game._state.board, random.Random(1))
+    bot = heximax(game._state.board, random.Random(1), pin_weights=1)
     assert bot.evaluator.weights == BALANCED_WEIGHTS
     assert bot.expansion_value == .125
     assert bot.trade_evaluator.weights == TRADING_WEIGHTS

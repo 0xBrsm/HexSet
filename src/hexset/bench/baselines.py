@@ -29,7 +29,7 @@ def main(argv: list[str] | None = None) -> int:
         default=list(DEFAULT_LINEUP),
         metavar="BOT",
         help=(
-            "one bot per seat: a preset name (random, heximax, heximax-notrade) or "
+            "one bot per seat: a preset name (random, heximax, heximax:pin-weights=0) or "
             "network:<checkpoint> for a trained network"
         ),
     )

@@ -1,86 +1,24 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""Preset registration: importing `heximax` makes it spawnable.
-
-`hexset.arena` knows heximax only by name, the same way it knows the
-network-backed kinds `hexn.netbot` provides -- it does not import this
-package, so importing `heximax` (directly, or via anything that does:
-`hexset.bench.duel`, `hexset.server`) is what makes the "heximax" entrant
-kind spawnable. A process that never imports `heximax` gets a plain
-"unknown"/`KeyError` on the name rather than this module's numpy and
-`hexset.mcts` imports forced on it.
-"""
-
+"""Register the single adaptive Heximax entrant."""
 from __future__ import annotations
 
 import random
 
 from hexset.arena import Entrant, register_entrant_kind, register_preset
 from hexset.board.board import Board
-
 from .search import Heximax, heximax
-from .evaluate import BALANCED_WEIGHTS, TRADING_WEIGHTS
 
 
 def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Heximax:
-    # `entrant.stance` is `None` unless a caller asked for something else --
-    # `hexset.arena.Entrant`'s own field default -- so `stance` is left out of
-    # this call entirely in that case, and `heximax()`'s own default (`"win"`)
-    # applies. That is the bot stating its own default once, rather than this
-    # module restating it (see the presets below, which used to pass
-    # `stance="win"` explicitly for exactly that reason).
-    kwargs: dict = dict(
-        mode=entrant.mode,
-        depth=entrant.depth,
-        width=entrant.width,
-        max_trades=entrant.max_trades,
-        k=entrant.k,
-        weights=entrant.weights,
-        temperature=entrant.temperature,
+    kwargs = dict(
+        depth=entrant.depth, width=entrant.width, max_trades=entrant.max_trades,
+        k=entrant.k, weights=entrant.weights, temperature=entrant.temperature,
+        pin_weights=entrant.pin_weights, expansion_value=entrant.expansion_value,
     )
     if entrant.stance is not None:
         kwargs["stance"] = entrant.stance
-    if entrant.kind == "heximax-balanced":
-        kwargs.update(
-            weights=BALANCED_WEIGHTS if entrant.weights is None else entrant.weights,
-            expansion_value=.125, trade_weights=TRADING_WEIGHTS, trade_floor=0.0,
-        )
-    if entrant.kind == "heximax-adaptive":
-        kwargs["adaptive"] = True
     return heximax(board, rng, **kwargs)
 
 
 register_entrant_kind("heximax", _spawn)
-
-# The honest handcrafted baseline (design note `heximax.md` §5). The
-# placement prior is composed into the bot rather than wrapped around it, so
-# `placement` stays False here and `spawn` returns the bot itself.
-# `heximax-notrade` plays the no-trade table with the trade switch off.
-#
-# Neither passes `stance` -- `Entrant`'s own field default is
-# `None`, which `_spawn` above leaves out of the `heximax()` call, so
-# `heximax()`'s own default (`"win"`) applies. `agents/reference/heximax.md`,
-# "Registration 2026-09-04: the objective -- a win-probability stance against
-# the relative-VP stance" and its post-data note, ratifying `win` as
-# heximax's default; stated once, on the bot, rather than on every preset
-# that spawns it.
 register_preset("heximax", Entrant("heximax", kind="heximax", depth=2, width=6))
-register_preset(
-    "heximax-notrade",
-    Entrant(
-        "heximax-notrade", kind="heximax", depth=2, width=6, max_trades=0, mode="notrade",
-    ),
-)
-
-# Validated for uncertain trading conditions under native automatic clearing.
-# Keep the historical heximax preset available as a reproducible reference.
-register_entrant_kind("heximax-balanced", _spawn)
-register_preset(
-    "heximax-balanced", Entrant("heximax-balanced", kind="heximax-balanced", depth=2, width=6),
-)
-
-# Direct interpolation of the two current best endpoints; the earlier fixed
-# presets remain useful reproducible controls, not required user mode switches.
-register_entrant_kind("heximax-adaptive", _spawn)
-register_preset(
-    "heximax-adaptive", Entrant("heximax-adaptive", kind="heximax-adaptive", depth=2, width=6),
-)

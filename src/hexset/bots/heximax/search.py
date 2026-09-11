@@ -5,8 +5,8 @@ Iterative deepening retains the last completed result when the leaf budget
 is exhausted. Each decision node maximizes its mover's objective; chance
 nodes average dice and hidden draws. Opponent actions are expanded from
 sampled beliefs across k determinizations. Setup and discard decisions use
-specialized policies. Trading uses the move evaluator by default; an optional
-trade evaluator prices gains_many, accepts and estimate_many independently.
+specialized policies. The factory uses a separate exchange evaluator while
+adapting move weights to recent public trading activity.
 """
 
 from __future__ import annotations
@@ -31,7 +31,9 @@ from hexset.state import GameState
 from hexset.trading import Bundle
 
 from hexset.view import View
-from .evaluate import NO_TRADE_WEIGHTS, TRADING_WEIGHTS, HonestEvaluator, Weights
+from hexset.bots.evaluate import TERM_NAMES
+from .adaptive import TradeActivity, trading_profile
+from .evaluate import TRADING_WEIGHTS, HonestEvaluator, Weights
 
 # Maximum leaf evaluations per decision.
 DEFAULT_MAX_NODES = 600
@@ -131,19 +133,8 @@ def _after_trade_belief(
     return _ShiftedBelief(known, unknown, pool, pool_size, target)
 
 
-# heximax's clearing floor τ: this gate's measured resolution under paired
-# chance (the trade lab's phase 3, `agents/reference/trading-final.md` item 4
-# and its 2026-09-05 amendment). 300 bank positions x 8 paired chance
-# streams, each played traded and untraded to a 600-action cap by four
-# heximax seats under identical dice, steals and draws; no bin of claimed
-# gain showed a realised gain distinguishable from zero, so by the
-# registered rule the floor is the instrument's own resolution -- the
-# half-width of the pooled 95% interval on the acting seat's realised
-# win-rate gain, 0.0197. A gain heximax claims below this is a claim no
-# outcome can verify, and the table does not honour it. Measured on *this*
-# gate; it says nothing about any other bot's (`hexset.trading.
-# trade_floor_of`).
-HEXIMAX_TRADE_FLOOR: float = 0.0197
+# The validated adaptive policy and both endpoints clear positive-gain trades.
+HEXIMAX_TRADE_FLOOR: float = 0.0
 
 
 @dataclass
@@ -185,11 +176,15 @@ class Heximax:
     # has no cap.
     max_trades: int | None = None
     # This gate's clearing floor (`hexset.trading.trade_floor_of`): the
-    # measured `HEXIMAX_TRADE_FLOOR`, in the win-probability units the `win`
+    # default `HEXIMAX_TRADE_FLOOR`, in the win-probability units the `win`
     # stance's gains are read in.
     trade_floor: float = HEXIMAX_TRADE_FLOOR
     placement: bool = True
-    mode: str = "honest"
+    pin_weights: float | None = None
+    # Explicit evaluator construction is fixed; the public factory enables
+    # the standard adaptive profile unless given a custom weight vector.
+    _adaptive: bool = False
+    activity: TradeActivity = field(default_factory=TradeActivity)
     exact_roll_plies: int = EXACT_ROLL_PLIES
     # `win` stance only: the temperature the per-seat vector is read at,
     # `None` meaning `stances.WIN_TEMPERATURE`. A fitted vector and its
@@ -203,6 +198,10 @@ class Heximax:
     _trade_policy: Heximax | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
+        if self.pin_weights not in (None, 0, 1):
+            raise ValueError("pin_weights must be 0, 1, or None")
+        if self.pin_weights is not None and not self._adaptive:
+            raise ValueError("pin_weights cannot override an explicit evaluator")
         if self.stance not in STANCES:
             raise ValueError(f"unknown stance: {self.stance}")
         if self.k < 1:
@@ -237,6 +236,25 @@ class Heximax:
         """Leaf evaluations the last `choose` spent."""
         return self._spent
 
+    def observe_trade(self, **public_event) -> None:
+        if self._adaptive:
+            self.activity.observe(**public_event)
+
+    def _update_profile(self, game: Game) -> None:
+        if not self._adaptive:
+            return
+        if self.pin_weights is not None:
+            alpha = self.pin_weights
+        elif self.max_trades == 0 or game.max_trades == 0:
+            alpha = 0.0
+        else:
+            alpha = self.activity.mean
+        weights, expansion = trading_profile(alpha)
+        evaluator = self.evaluator
+        evaluator.weights = evaluator.inner.weights = weights
+        evaluator.vector = evaluator.inner.vector = tuple(getattr(weights, k) for k in TERM_NAMES)
+        evaluator.expansion_value = expansion
+
     # -- the decision --------------------------------------------------------
 
     def choose(self, game: Game) -> Action:
@@ -248,6 +266,7 @@ class Heximax:
         options (`_root_options`) and either returns the one option
         available or hands the rest to `_search`.
         """
+        self._update_profile(game)
         seat = to_move(game)
         self._spent = 0
         self._budget = self.max_nodes
@@ -895,88 +914,53 @@ def _donor(hand: list[int], known: list[int]) -> int | None:
     return None
 
 
-MODES = ("honest", "notrade")
-
-# Sentinel for `heximax(max_trades=...)`: "whatever the mode's own setting is".
-BY_MODE: int = object()  # type: ignore[assignment]
-
-
 def heximax(
-    board: Board, rng: random.Random | None = None, *, mode: str = "honest", depth: int = 2,
-    width: int | None = 6, max_trades: int | None = BY_MODE,  # type: ignore[assignment]
+    board: Board, rng: random.Random | None = None, *, depth: int = 2,
+    width: int | None = 6, max_trades: int | None = None,
     max_nodes: int = DEFAULT_MAX_NODES, k: int = 1, stance: str = "win",
     placement: bool = True, exact_progress_samples: int = 0, weights: Weights | None = None,
     temperature: float | None = None, expansion_value: float | None = None,
     trade_weights: Weights | None = None, trade_expansion_value: float = 0.0,
-    trade_floor: float | None = None, adaptive: bool = False,
+    trade_floor: float = HEXIMAX_TRADE_FLOOR, pin_weights: float | None = None,
 ) -> Heximax:
-    """The two shipped configurations, by `mode`.
+    """One adaptive Heximax, optionally pinned to an endpoint for testing.
 
-    `honest` reads the ledger and the trading-table weights; `notrade` is
-    honest with the no-trade weights. Left at `BY_MODE`, trading is on for
-    `honest` and off (`max_trades=0`) for `notrade`; any explicit value,
-    `None` included, is taken as given.
+    ``pin_weights=None`` follows recent public trading activity. ``0``
+    holds the no-trade move weights and .25 expansion credit; ``1`` holds
+    the full-trade endpoint and .125 credit. A pin takes precedence over
+    activity and trading-off switches. It never disables trading itself:
+    use ``max_trades=0`` to decline exchanges independently.
 
-    `expansion_value` caps credit for the best nearby legal settlement site.
-    None uses the mode default: 0.25 VP for `notrade`, zero for `honest`.
-    Pass zero explicitly to disable it when replaying an older configuration.
-    Values below one VP keep settling worth more than the entire option bonus.
-
-    `adaptive=True` slides the current no-trade move profile toward the
-    balanced trading profile using recent public exchange activity. It uses
-    a separate trading-profile gate and floor zero by default; explicit
-    trading-off switches still apply. Fixed weight overrides are incompatible.
-
-    `trade_weights` optionally gives exchanges their own evaluator, with
-    `trade_expansion_value` (zero by default). Otherwise exchanges share the
-    move evaluator exactly as before. Both use the same stance and temperature.
-    `trade_floor` sets the minimum gain required by the exchange mechanism.
-
-    `weights` overrides the mode's own profile (`TRADING_WEIGHTS` or
-    `NO_TRADE_WEIGHTS`) with the given vector, and `temperature` the `win`
-    stance's `stances.WIN_TEMPERATURE`, leaving everything else about the
-    mode -- the trade switch -- unchanged. This is how a fit
-    (`hexset.fitting`) is played before adoption: a candidate and the
-    incumbent are otherwise identical heximax bots, differing only in the
-    vector and the temperature it was fitted with.
+    Exchanges use TRADING_WEIGHTS and floor zero at every slider position.
+    Search settings and the opening prior are unchanged. For fitting and
+    historical replay, explicit ``weights`` builds a fixed custom evaluator;
+    ``expansion_value`` defaults to zero for that custom vector. It cannot
+    be combined with a pin. Archived runs require their recorded settings
+    and source revision, including the old .0197 trade floor where applicable.
     """
+    if pin_weights not in (None, 0, 1):
+        raise ValueError("pin_weights must be 0, 1, or None")
+    adaptive = weights is None
+    if not adaptive and pin_weights is not None:
+        raise ValueError("pin_weights cannot be combined with custom weights")
     if adaptive:
-        if weights is not None or expansion_value is not None or trade_weights is not None:
-            raise ValueError("adaptive uses the current no-trade and balanced endpoints")
-        weights, expansion_value = NO_TRADE_WEIGHTS, .25
-        trade_weights, trade_expansion_value = TRADING_WEIGHTS, 0.0
-    if trade_floor is None:
-        trade_floor = 0.0 if adaptive else HEXIMAX_TRADE_FLOOR
-    if mode not in MODES:
-        raise ValueError(f"unknown heximax mode: {mode}")
-    if max_trades is BY_MODE:
-        max_trades = 0 if mode == "notrade" else None
-    if weights is None:
-        weights = NO_TRADE_WEIGHTS if mode == "notrade" else TRADING_WEIGHTS
-    if expansion_value is None:
-        expansion_value = 0.25 if mode == "notrade" else 0.0
+        if expansion_value is not None:
+            raise ValueError("expansion_value requires custom weights; endpoint bonuses are fixed")
+        weights, expansion_value = trading_profile(0.0 if pin_weights is None else pin_weights)
+    elif expansion_value is None:
+        expansion_value = 0.0
+    if trade_weights is None:
+        trade_weights = TRADING_WEIGHTS
     evaluator = HonestEvaluator(board, weights, exact_progress_samples=exact_progress_samples,
                                 expansion_value=expansion_value)
-    trade_evaluator = None if trade_weights is None else HonestEvaluator(
+    trade_evaluator = HonestEvaluator(
         board, trade_weights, exact_progress_samples=exact_progress_samples,
         expansion_value=trade_expansion_value,
     )
-    cls = Heximax
-    if adaptive:
-        from .adaptive import AdaptiveHeximax
-        cls = AdaptiveHeximax
-    return cls(
-        evaluator,
-        trade_evaluator=trade_evaluator,
-        trade_floor=trade_floor,
-        depth=depth,
-        width=width,
-        max_nodes=max_nodes,
-        k=k,
-        rng=rng or random.Random(),
-        stance=stance,
-        max_trades=max_trades,
-        placement=placement,
-        mode=mode,
-        temperature=temperature,
+    return Heximax(
+        evaluator, trade_evaluator=trade_evaluator, trade_floor=trade_floor,
+        depth=depth, width=width, max_nodes=max_nodes, k=k,
+        rng=rng if rng is not None else random.Random(), stance=stance,
+        max_trades=max_trades, placement=placement, temperature=temperature,
+        pin_weights=pin_weights, _adaptive=adaptive,
     )

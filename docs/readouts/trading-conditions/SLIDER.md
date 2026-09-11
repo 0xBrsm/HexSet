@@ -1,5 +1,9 @@
 # One Heximax policy between the current best endpoints
 
+Current API: this validated policy is now the default `heximax`. Endpoint
+controls use `pin_weights=0` or `1`; see the [migration guide](../../heximax.md).
+Names and commands below describe the original frozen study revision.
+
 Use `heximax-adaptive`, or `heximax(board, rng, adaptive=True)`:
 
     move_weights = (1 - activity) * NO_TRADE_WEIGHTS + activity * BALANCED_WEIGHTS

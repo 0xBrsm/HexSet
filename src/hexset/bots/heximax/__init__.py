@@ -6,13 +6,10 @@ ledger. Search expands opponents from sampled beliefs and averages dice,
 steals and development-card draws over their distributions. The default uses
 one determinization, depth two and a bounded leaf budget.
 
-Use ``heximax(board, ...)`` to construct a bot. ``mode="honest"`` enables
-trading with TRADING_WEIGHTS; ``mode="notrade"`` uses NO_TRADE_WEIGHTS and
-declines trades. ``weights=`` overrides the move profile. Optional
-``trade_weights=`` prices exchanges separately; ``trade_floor=`` sets their
-minimum gain. By default moves and exchanges share the selected evaluator.
-
-Importing this package registers the heximax and heximax-notrade arena presets.
+Use ``heximax(board, ...)`` for the adaptive policy. ``pin_weights=0``
+or ``pin_weights=1`` holds an endpoint for testing; ``max_trades=0``
+independently disables trading. Explicit ``weights`` supports fixed custom
+experiments. Importing this package registers the single ``heximax`` preset.
 Shared evaluation terms live in hexset.bots.evaluate; search objectives live
 in hexset.bots.stances, and the engine owns the information-set View.
 """
@@ -21,19 +18,17 @@ from __future__ import annotations
 
 from hexset.view import View
 from .evaluate import BALANCED_WEIGHTS, NO_TRADE_WEIGHTS, TRADING_WEIGHTS, HonestEvaluator, Weights
-from .search import BY_MODE, DEFAULT_MAX_NODES, HEXIMAX_TRADE_FLOOR, MODES, Heximax, heximax
+from .search import DEFAULT_MAX_NODES, HEXIMAX_TRADE_FLOOR, Heximax, heximax
 
-# Import-time side effect only: registers "heximax"/"heximax-notrade" with `hexset.arena`. See `presets`'s own docstring.
+# Import-time registration of the single Heximax preset.
 from . import presets  # noqa: F401
 
 __all__ = [
     "BALANCED_WEIGHTS",
-    "BY_MODE",
     "DEFAULT_MAX_NODES",
     "HEXIMAX_TRADE_FLOOR",
     "Heximax",
     "HonestEvaluator",
-    "MODES",
     "NO_TRADE_WEIGHTS",
     "TRADING_WEIGHTS",
     "View",

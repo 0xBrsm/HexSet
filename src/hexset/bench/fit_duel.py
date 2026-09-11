@@ -27,7 +27,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import hexset.bots  # noqa: F401 -- registers the heximax presets
-from hexset.arena import Entrant, register_preset
+from hexset.arena import Entrant, entrant_from_name, register_preset
 from hexset.bench.duel import ARENA_GEOMETRY, _via_arena
 from hexset.bench.throughput import default_workers, environment
 from hexset.bots.evaluate import TERM_NAMES, Weights
@@ -51,9 +51,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fit", required=True, help="hexset.bench.fit_weights --out file")
     parser.add_argument("--variant", default="standard")
     parser.add_argument(
-        "--against", default="heximax",
-        help="the incumbent preset; `heximax-notrade` to read the no-trade table "
-        "(the candidate then plays with trading off too)",
+        "--against", default="heximax:pin-weights=1",
+        help="incumbent entrant; pin it with heximax:pin-weights=0 or =1",
     )
     parser.add_argument("--games", type=int, default=3072)
     parser.add_argument("--seed", type=int, default=42000, help="duel seed")
@@ -68,18 +67,20 @@ def main(argv: list[str] | None = None) -> int:
 
     fit = json.loads(Path(args.fit).read_text())
     weights, temperature = candidate_from(fit, args.variant)
-    notrade = args.against == "heximax-notrade"
+    incumbent = entrant_from_name(args.against)
+    notrade = incumbent.max_trades == 0
     register_preset(
         CANDIDATE,
         Entrant(
             CANDIDATE, kind="heximax", depth=2, width=6, weights=weights,
             temperature=temperature,
-            mode="notrade" if notrade else "honest", max_trades=0 if notrade else None,
+            expansion_value=.25 if incumbent.pin_weights == 0 else .125,
+            max_trades=0 if notrade else None,
         ),
     )
     ns = SimpleNamespace(
         a=CANDIDATE, b=args.against, games=args.games, duel_seed=args.seed,
-        workers=args.workers, records=None,
+        workers=args.workers, records=None, runtime=None,
     )
     result = _via_arena(ns, f"{CANDIDATE}:{args.variant}", args.against, geometry=args.geometry)
     result.update(

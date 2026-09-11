@@ -25,10 +25,10 @@ from dataclasses import replace
 from hexset.arena import entrant_from_name, spawn
 
 import hexset.bots  # noqa: F401 -- registers the bot presets ("heximax"/
-# "heximax-notrade" among them) with `hexset.arena.PRESETS`
+# "heximax" among them) with `hexset.arena.PRESETS`
 # before `entrant_from_name`, below, ever looks one up. Neither this module
 # nor `hexset.catanatron.duel` imported it before, so a worker process asking
-# for `DC:heximax-notrade` got a bare `KeyError` on the name -- every other
+# for `DC:heximax` got a bare `KeyError` on the name -- every other
 # entry point into an entrant by name (`hexset.bench.duel`, `hexset.server`)
 # imports `hexset.bots` itself or imports something that does; this bridge
 # was the one that didn't. A module-level import, so it runs once whichever
@@ -49,7 +49,7 @@ _SEAT_INDEX = {color: i for i, color in enumerate(Color)}
 
 
 class DevCatanPlayer(Player):
-    """`--players=DC:<entrant>`, e.g. `DC:heximax-notrade` or `DC:network:<path>`.
+    """`--players=DC:<entrant>`, e.g. `DC:heximax` or `DC:network:<path>`.
 
     catanatron's player registry splits a spec on every `:` and binds the
     pieces to the player's `Params` positionally, so an entrant spec that
@@ -80,7 +80,7 @@ class DevCatanPlayer(Player):
             params = entrant_parts[0]
         else:
             params = DevCatanPlayer.Params(
-                entrant=":".join(entrant_parts) if entrant_parts else "heximax-notrade"
+                entrant=":".join(entrant_parts) if entrant_parts else "heximax"
             )
         super().__init__(color, params)
         self.fallbacks = 0
@@ -93,7 +93,7 @@ class DevCatanPlayer(Player):
     class Params:
         """The registry-facing configuration: which entrant sits this seat."""
 
-        entrant: str = "heximax-notrade"
+        entrant: str = "heximax"
 
     def before(self, game):
         """`GameObserver` hook: reset the per-game state.

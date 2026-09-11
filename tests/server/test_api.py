@@ -774,3 +774,20 @@ def test_action_with_a_stale_version_409s_and_the_current_one_acts():
     # the right version still acts
     acted = registry.handle("POST", "/api/action", {"action": action, "version": current}, token)
     assert acted["version"] > current
+
+
+@pytest.mark.parametrize('disabled', [False, True])
+def test_served_heximax_uses_adaptive_weights_and_respects_trade_switch(disabled):
+    from hexset.arena import deal_game
+    from hexset.bots.heximax import BALANCED_WEIGHTS, NO_TRADE_WEIGHTS
+    from hexset.server.api import spawn_bot
+    game = deal_game(147, 0, 4)
+    board = game.state(0, hidden=False).board
+    bot = spawn_bot('heximax', board, random.Random(1),
+                    Config(max_trades=0 if disabled else None))
+    for turn in range(8):
+        bot.observe_trade(turn=turn, actor=0, hand_sizes=(2, 2, 2, 2),
+                          trade_participants=((0, 1),))
+    bot.choose(game)
+    assert bot.evaluator.weights == (NO_TRADE_WEIGHTS if disabled else BALANCED_WEIGHTS)
+    assert bot.pin_weights is None and bot.trade_floor == 0

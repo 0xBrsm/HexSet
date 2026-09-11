@@ -2,7 +2,7 @@
 """The file to pass to `catanatron-play --bot`.
 
     catanatron-play --bot DC=path/to/register.py#DevCatanPlayer \
-        --players=DC:heximax-notrade,AB:2
+        --players=DC:heximax,AB:2
 
 `--bot` loads the file via catanatron's `sources.load_class` (under a
 synthetic module name, so the import below has to be absolute -- a relative

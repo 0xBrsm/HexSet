@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from hexset.board.board import random_base_board
-from hexset.bots.heximax import heximax
+from hexset.bots.heximax import heximax, TRADING_WEIGHTS
 from hexset.game import start
 from hexset.state import (can_place_road, can_place_settlement, place_road,
                           place_settlement, MAX_SETTLEMENTS, Building)
@@ -30,7 +30,7 @@ def position():
 def test_option_is_bounded_and_building_cannot_lose_to_its_option_credit():
     game, places = position()
     state = game._state
-    bot = heximax(state.board, expansion_value=.5)
+    bot = heximax(state.board, weights=TRADING_WEIGHTS, expansion_value=.5)
     before = bot.evaluator.score(state, 0, [0]*5, knower=0)
     assert 0 < bot.evaluator.expansion_bonus(state, 0) <= .5
     place_settlement(state, 0, places[0])
@@ -46,13 +46,13 @@ def test_no_piece_supply_means_no_expansion_credit():
     for v in [v for v,x in enumerate(state.vertex_owner) if x<0][:MAX_SETTLEMENTS-len(owned)]:
         state.vertex_owner[v]=0
         state.vertex_building[v]=Building.SETTLEMENT
-    assert heximax(state.board, expansion_value=.5).evaluator.expansion_bonus(state, 0)==0
+    assert heximax(state.board, weights=TRADING_WEIGHTS, expansion_value=.5).evaluator.expansion_bonus(state, 0)==0
 
 
 def test_scalar_batch_and_hidden_hand_invariance():
     game, _ = position()
     state = game._state
-    bot = heximax(state.board, expansion_value=.5)
+    bot = heximax(state.board, weights=TRADING_WEIGHTS, expansion_value=.5)
     bonus=bot.evaluator.expansion_bonus(state,0)
     state.hands[1]=[5,0,0,0,0]
     assert bot.evaluator.expansion_bonus(state,0)==bonus
@@ -60,7 +60,7 @@ def test_scalar_batch_and_hidden_hand_invariance():
     scalar=[bot.evaluator.score(state,s,hands[0,s],knower=0) for s in range(4)]
     np.testing.assert_allclose(bot.evaluator.score_many(state,0,hands)[0],scalar,rtol=0,atol=1e-12)
     assert bot.expansion_value == .5
-    assert heximax(state.board).expansion_value == 0
+    assert heximax(state.board).expansion_value == .25
 
 
 def test_adopted_notrade_defaults_and_explicit_legacy_override():
@@ -69,12 +69,12 @@ def test_adopted_notrade_defaults_and_explicit_legacy_override():
     from hexset.arena import PRESETS, spawn
 
     board = random_base_board(random.Random(11))
-    adopted = spawn(PRESETS["heximax-notrade"], board, random.Random(12))
+    adopted = heximax(board, random.Random(12), pin_weights=0)
     assert adopted.expansion_value == .25
     assert adopted.evaluator.weights.road == 0
-    assert adopted.max_trades == 0
-    legacy = heximax(board, mode="notrade", expansion_value=0,
+    assert adopted.max_trades is None
+    legacy = heximax(board, max_trades=0, expansion_value=0,
                      weights=replace(NO_TRADE_WEIGHTS, road=.1237))
     assert legacy.expansion_value == 0
     assert legacy.evaluator.weights.road == .1237
-    assert heximax(board, mode="honest").expansion_value == 0
+    assert heximax(board, pin_weights=1).expansion_value == .125

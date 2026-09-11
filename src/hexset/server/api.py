@@ -157,7 +157,6 @@ API_VERSION = 4
 # a checkpoint, and what it does is the checkpoint's business.
 #
 # Built through the arena registry so served and benchmarked bots agree.
-HANDCRAFTED = "heximax"
 HANDCRAFTED_ENTRANTS = ("heximax", "catanatron")
 
 REPO_ROOT = Path(__file__).resolve().parents[3]

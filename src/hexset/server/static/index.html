@@ -1509,6 +1509,21 @@ function robberMove(g) {
 
 // --- Sending actions --------------------------------------------------
 
+// Nothing left for the loop to wait on: the game is over, or the move is
+// this seat's and so the table cannot change without it.
+//
+// That second half stops being true the moment this seat broadcasts a trade
+// offer. `to_move` stays here for the whole round while the other seats
+// answer, and their answers are exactly what the page is waiting for — so a
+// round with anyone still to answer is watched like anybody else's turn.
+// Without this the offer goes out, settle() returns on its first line, and
+// the accepts land on the server with nothing left running to fetch them.
+function nothingToWatch() {
+  if (state.game_over) return true;
+  if (watching() || state.to_move !== state.seat) return false;
+  return !((state.trade_round || {}).awaiting || []).length;
+}
+
 // Waiting for somebody else — a bot, or another person at this table.
 //
 // This used to be settle(), a loop of POST /api/advance that walked the bot
@@ -1537,7 +1552,7 @@ function settle() {
   const mine = ++watchSeq;  // retires whatever loop was already running
   // Watching, every move is somebody else's, so this never stops until the
   // game does — that is the whole of what a spectator's page does.
-  if (state.game_over || (!watching() && state.to_move === state.seat)) return;
+  if (nothingToWatch()) return;
   (async () => {
     while (mine === watchSeq) {
       // A seat reads its own view; a spectator has no token to read one
@@ -1559,7 +1574,7 @@ function settle() {
         state = next;
         render();
       }
-      if (state.game_over || (!watching() && state.to_move === state.seat)) return;
+      if (nothingToWatch()) return;
     }
   })();
 }

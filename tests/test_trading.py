@@ -686,6 +686,14 @@ def test_an_imagined_game_carries_the_trade_rule():
     assert child.trade_rule == "nash"
 
 
+@pytest.mark.parametrize("mode", ["round", "auto", "external"])
+def test_an_imagined_game_preserves_the_trade_mode(mode):
+    game = a_game()
+    game.trade_mode = mode
+    child = imagine(game, random.Random(1))
+    assert child.trade_mode == mode
+
+
 def test_an_imagined_game_carries_the_trade_switch_and_the_log():
     game = stocked((0, Resource.WOOD, 1))
     game.max_trades = 0

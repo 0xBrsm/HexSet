@@ -102,10 +102,11 @@ class Game:
     # way the offer counter was. `trades_made` is the recorded statistic.
     trades: list[Trade] = field(default_factory=list)
     trades_made: int = 0
-    # How many exchanges a turn may clear, in every mode alike: `1` by
-    # default, `0` for no trading at all, `-1` for no cap. A seat that should
-    # never trade refuses at its own gate instead -- this is the table's
-    # rule, not a seat's willingness.
+    # The automatic driver's per-turn budget: broadcasts in "round" mode,
+    # completed exchanges in "auto" mode. `1` by default, `0` disables the
+    # driver, `-1` removes its cap. "external" callers own their limits.
+    # A seat that should never trade refuses at its own gate instead; this
+    # budget is the table's rule, independent of a seat's willingness.
     #
     # `1` because it is both what a table does -- you put one thing to the
     # table a turn -- and what keeps the engine quick: uncapped rounds
@@ -367,6 +368,7 @@ def imagine(
         trades=game.trades[:],
         trades_made=game.trades_made,
         max_trades=game.max_trades,
+        trade_mode=game.trade_mode,
         trade_event_turn=game.trade_event_turn,
         trade_rule=game.trade_rule,
         locked=game.locked,
@@ -797,8 +799,8 @@ def _run_trade_rounds(game: Game, gates) -> list[Trade]:
     `1`, the default, puts one thing to the table a turn. `-1` keeps
     broadcasting while the actor still has an offer it has not made, and
     stops when it runs out -- not at the first refusal, which is the usual
-    reason to put something else up. `already_offered` is what makes that terminate: `default_offer` is
-    a pure function of the position, so without it a rerun would repeat the
+    reason to put something else up. `already_offered` makes that terminate:
+    `default_offer` is a pure function of the position, so a rerun would repeat the
     same bundle and collect the same answer for ever.
 
     A positive budget caps the broadcasts, not the trades: a round clears at
@@ -807,8 +809,8 @@ def _run_trade_rounds(game: Game, gates) -> list[Trade]:
     it: how many times the actor gets to put something to the table.
 
     The cap is read the same way under `"auto"`, whose own loop stops at it
-    too, so `0` is "nobody trades" everywhere and needs no per-mechanism
-    mute. A seat that should never trade still refuses at its own gate.
+    too, so `0` disables both automatic mechanisms. External callers manage
+    their own limits. A seat that should never trade refuses at its gate.
     """
     budget = game.max_trades
     completed: list[Trade] = []
@@ -841,6 +843,8 @@ def run_trade_event(game: Game) -> None:
     """
     if game.phase is not Phase.MAIN:
         return
+    if game.trade_mode not in ("round", "auto", "external"):
+        raise ValueError(f"unknown trade mode: {game.trade_mode!r}")
     if game.trade_event_turn == game.turns:
         return
     game.trade_event_turn = game.turns

@@ -35,8 +35,9 @@ Registered `agents/reference/trading-final.md`, superseding the shipped
   and every floor is non-negative), and a gate that is not -- one that
   scores candidates in a world sampled from its belief, as the network gate
   and heximax do -- ends the event at the first revisit rather than cycling.
-  `Game.max_trades` caps a turn's exchanges in every mode: `1` by
-  default, `0` no trading, `-1` no cap.
+  `Game.max_trades` caps completed exchanges in automatic clearing and
+  broadcasts in round mode: `1` by default, `0` disables the engine's
+  trade driver, `-1` no cap. External callers manage their own limits.
 
 There are no trade actions -- no propose, respond, accept or decline -- so
 nothing here reads an opponent's hand on an actor's behalf and the action
@@ -375,11 +376,11 @@ def trade_event(game: "Game", gate: Gate) -> list[Trade]:
     for the acting seat over every coverable candidate, then once per
     distinct counterparty over the acting seat's subset that clears the
     floor with it. Among the candidates both sides clear their own floor on,
-    `game.trade_rule` picks the winner (`_best_clearing`). No budget: the
-    loop runs until nothing clears.
+    `game.trade_rule` picks the winner (`_best_clearing`). The loop stops at
+    `game.max_trades` exchanges, or when nothing clears; `-1` is uncapped.
 
-    The single engine limit is the revisit check below: an event ends the
-    moment a position (every seat's hand plus the public ledger) comes
+    The revisit check also ends an event the moment a position (every
+    seat's hand plus the public ledger) comes
     back. For a gate that is a strict function of the position that never
     happens -- the acting seat's own gain exceeds its floor at every
     clearing, strictly positive since every floor is non-negative -- and it
@@ -708,22 +709,21 @@ def _belief_candidates(view: "View", me: int, counterparty: int) -> list[Bundle]
 
 
 def _estimate_many(
-    gate: object, view: "View", candidates: Sequence[tuple[int, Bundle]]
+    gate: object, view: "View", candidates: Sequence[tuple[int, Bundle]],
+    own_gains: list[float],
 ) -> list[float]:
     """`gate`'s best estimate of each `(counterparty, bundle)` candidate's
     *counterparty*-side gain -- `gate.estimate_many(view, candidates)` when
-    the gate provides one (Heximax uses this seat's belief), else this gate's own gain on every
-    candidate (`valued_many`), "so a plain gate offers what is best for
-    itself" (`hexset.trading`'s "the trade round", item 1). Never reaches a
+    the gate provides one (Heximax uses this seat's belief), else the
+    already computed `own_gains`: a plain gate offers what is best for
+    itself (`hexset.trading`'s "the trade round", item 1). Never reaches a
     hidden hand either way: the fallback reads only the gate's own
     information, the same as `gains_many` always has.
     """
     fn = getattr(gate, "estimate_many", None)
     if fn is not None:
         return [float(x) for x in fn(view, list(candidates))]
-    receiveds = [b for _, b in candidates]
-    counterparties = [c for c, _ in candidates]
-    return valued_many(gate, view, receiveds, counterparties)
+    return own_gains
 
 
 def default_offer(
@@ -758,7 +758,9 @@ def default_offer(
     receiveds = [b for _, b in candidates]
     thems = [c for c, _ in candidates]
     own_gains = valued_many(gate, view, receiveds, thems)
-    estimates = _estimate_many(gate, view, candidates)
+    if not any(clears_floor(gain, gate) for gain in own_gains):
+        return None
+    estimates = _estimate_many(gate, view, candidates, own_gains)
     eligible = [
         i for i in range(len(candidates))
         if clears_floor(estimates[i], gate) and clears_floor(own_gains[i], gate)
@@ -806,7 +808,9 @@ def default_respond(gate: object, view: "View", offer: Offer) -> Response:
     if candidates:
         counterparties = [actor] * len(candidates)
         own_gains = valued_many(gate, view, candidates, counterparties)
-        estimates = _estimate_many(gate, view, list(zip(counterparties, candidates)))
+        if not any(clears_floor(gain, gate) for gain in own_gains):
+            return Response(me, RESPONSE_PASS)
+        estimates = _estimate_many(gate, view, list(zip(counterparties, candidates)), own_gains)
         eligible = [
             i
             for i in range(len(candidates))

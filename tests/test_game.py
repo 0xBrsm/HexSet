@@ -884,3 +884,16 @@ def test_an_externally_driven_game_runs_no_mechanism_at_all(monkeypatch):
         )
         run_trade_event(game)
         assert rounds["n"] == 0 and cleared["n"] == 0
+
+
+def test_invalid_trade_mode_fails_without_consuming_the_turn(monkeypatch):
+    game = _in_main_with_gates(monkeypatch)
+    game.trade_mode = "rounds"
+    calls = _fake_rounds(monkeypatch, [], offers=1)
+    with pytest.raises(ValueError, match="unknown trade mode"):
+        run_trade_event(game)
+    assert calls["n"] == 0
+    assert game.trade_event_turn == -1
+    game.trade_mode = "round"
+    run_trade_event(game)
+    assert calls["n"] == 1

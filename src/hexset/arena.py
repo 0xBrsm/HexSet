@@ -150,8 +150,8 @@ class Entrant:
     # setup picks differing.
     placement: bool = False
     # The trade off switch: `0` means this entrant's gate refuses every
-    # exchange, so it never trades. Not a budget -- the engine
-    # has no cap (`hexset.trading`) -- and self-imposed rather than engine-wide
+    # exchange, so it never trades. Independent of the table's per-turn
+    # budget (`Game.max_trades`), and self-imposed rather than engine-wide
     # so a duel can see what trading is worth: only a bot that declines what
     # its opponent still has can price it.
     max_trades: int | None = None
@@ -403,8 +403,8 @@ def play_game(
     the same law and steps the loop itself, one action per lane per tick.
 
     `trade_mode`/`max_trades` are the table's bargaining rules, and default to
-    what a real table plays: propose-and-respond rounds, uncapped. Pass
-    `trade_mode="auto"` for the exhaustive automatic house, which is what
+    one propose-and-respond round per turn. Pass `trade_mode="auto"` and
+    `max_trades=-1` for the exhaustive automatic house, which is what
     every study recorded before this defaulted the other way -- see
     `Game.trade_mode` for why that is a comparability option now rather than
     the thing to fit against.

@@ -20,8 +20,9 @@ native HexSet policies.
 **The bargaining mechanism is part of what a result is about.** Games
 default to one trade round a turn: the actor broadcasts one offer, every
 other seat answers once, the actor picks (`Game.trade_mode="round"`;
-`Game.max_trades` caps a turn's exchanges, `1` by default, `0` for none at
-all, `-1` for no cap). Whether a seat trades at all is its own
+`Game.max_trades` caps broadcasts in round mode and completed exchanges
+in auto mode, `1` by default, `0` disables the engine's trade driver,
+`-1` removes its cap). Whether a seat trades at all is its own
 gate's business, not a table setting. The exhaustive automatic clearing
 house that used to run instead is `Game.trade_mode="auto"`, which
 deals until nothing clears against a counterparty that never holds out and

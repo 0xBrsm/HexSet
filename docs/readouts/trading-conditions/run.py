@@ -166,6 +166,16 @@ def verify_old(row,path):
 def main():
  p=argparse.ArgumentParser();p.add_argument('--out',type=Path,required=True);args=p.parse_args();out=args.out
  base=base_identity();initialize();start=time.perf_counter();n=64
+ for c in ['N:T:0.0','T:T:0.0']:
+  for index in range(2):
+   identity={**base,'purpose':'condition-control-preflight','seed':719000000,'index':index,
+             'candidate':c,'opponent':'T:T:0.0','floor':0.0,'regime':'full'}
+   path=out/'preflight'/c.replace(':','-')/f'{index:05d}.json'
+   play((identity,str(path)));row=json.loads(path.read_text())
+   old=json.loads((Path('/old/confirmation/games')/c.replace(':','-')/f'{index:05d}.json').read_text())
+   keys=['winner','seating','candidate_seat','turns','points','actions','action_sha256','trades','trade_gate_calls_by_seat']
+   assert {k:row[k] for k in keys}=={k:old[k] for k in keys}
+ print('Four full-participation control traces and all trade events matched exactly.',flush=True)
  jobs=[]
  for ri,regime in enumerate(REGIMES):
   for c in ['N:T:0.0','M:T:0.0','T:T:0.0']:

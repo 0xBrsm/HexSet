@@ -4,6 +4,18 @@ These results provide context for the bots' playing strength. They describe
 the revisions and configurations measured, rather than a performance
 guarantee for the current code.
 
+## Primary evaluation and profiling framework
+
+Use HexSet's own `hexset.arena` / `hexset.bench.duel` path for native
+self-play, ablations and performance profiling. Catanatron matchups provide
+external reference comparisons and must identify which engine hosted them.
+
+The [September 11 native-engine profile](readouts/native-engine/README.md)
+measures trading and no-trade Heximax self-play without importing Catanatron.
+It identifies repeated leaf/hand evaluation and longest-road calculations as
+larger targets than raw state copying, and preserves clean timings, decision
+trace checks, source fingerprints and raw cProfile data.
+
 ## Heximax against Catanatron: four players
 
 The September 7, 2026 readout records `heximax-notrade` against three

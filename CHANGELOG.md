@@ -46,13 +46,21 @@ so the number stands.
   shape as every other state reply (they used to come back raw, without
   the named trade dicts or the transcript cursor fields).
 
-- **`log_after`, a transcript cursor on every MCP tool that answers with
-  game state** (`state`, `act`, `wait_for_turn`, `get_table`, and the three
-  trade tools). `log` was otherwise re-rendered and resent whole on every
-  single call, so what an LLM seat paid to read the table grew with the
-  length of the game and was by a wide margin the largest part of each
-  reply. Pass back the `log_total` from the previous reply and only the new
-  lines come across; `log_from` names the index the slice starts at.
+- **The transcript is sent incrementally, by default, on every MCP tool
+  that answers with game state** (`state`, `act`, `wait_for_turn`,
+  `get_table`, and the three trade tools). `log` was otherwise re-rendered
+  and resent whole on every single call, so what an LLM seat paid to read
+  the table grew with the length of the game and was by a wide margin the
+  largest part of each reply. Each MCP session now remembers how many lines
+  it has been sent and every reply carries only what is new; `log_from`
+  names the index the slice starts at and `log_total` the whole length.
+  Nothing has to be passed back for this to happen -- an optional argument
+  on seven tools is one an LLM forgets, and the first game through these
+  tools showed exactly that. Two overrides: `full_log: true` sends the whole
+  transcript (for a reply that went missing -- `log_from` past the lines
+  you hold is the tell), and `log_after: <n>` names an explicit line count
+  to cut at instead of the session's own. A failed call sends no transcript
+  and so does not move the cursor.
 
   The reply carries one line of overlap on purpose. `render_log` collapses a
   burst of engine steps into one line that it rewrites *in place* as the
@@ -62,10 +70,9 @@ so the number stands.
   reusing the version number `after` already carries (the transcript is
   folded from events, and no version maps to a line count).
 
-  Omitting `log_after` returns the whole transcript, unchanged, which is
-  what a first read and a just-reclaimed seat both want -- so a client that
-  knows nothing about the cursor is unaffected. The final read of a finished
-  game ignores the cursor for the same reason: `state_view` asks for the
+  A session's first read after `new_game`, `join` or `resume_game` is the
+  whole transcript, which is what a fresh seat and a just-reclaimed seat
+  both want. The final read of a finished game ignores the cursor too: `state_view` asks for the
   transcript with `omniscient or over` once a game is over, which lifts
   redaction across the whole history at once -- every earlier steal stops
   being "a card" and names what it was -- and those are rewrites of lines the

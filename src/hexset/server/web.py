@@ -351,6 +351,7 @@ class Handler(BaseHTTPRequestHandler):
         so nothing further is needed to make that happen cleanly."""
         timeout = arguments.get("timeout")
         log_after = arguments.get("log_after")
+        full_log = bool(arguments.get("full_log", False))
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
@@ -358,7 +359,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             for item in mcptools._wait_for_turn_events(
-                self.server.tables, session, timeout=timeout, log_after=log_after
+                self.server.tables, session, timeout=timeout, log_after=log_after, full_log=full_log
             ):
                 if item is mcptools._KEEPALIVE:
                     self.wfile.write(b": keepalive\n\n")

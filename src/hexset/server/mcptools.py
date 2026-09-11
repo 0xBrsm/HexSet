@@ -44,6 +44,12 @@ class Session:
     token: str | None = None
     code: str | None = None
     model: str | None = None
+    # How many transcript lines this session has been sent so far, or `None`
+    # for none yet -- the automatic cursor `_trim_for` trims the next reply's
+    # `log` against, so a caller that never sends `log_after` still gets only
+    # what is new. Reset whenever the session takes a seat (`_seat`,
+    # `_resume_game`): a new seat owes a whole transcript.
+    log_sent: int | None = None
 
 
 def _call_status(tables: Tables, session: Session, method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
@@ -70,6 +76,7 @@ def _seat(session: Session, result: dict) -> dict:
     the LLM never needs to see it, it is sent on its behalf by `_call_ok`."""
     session.token = result.pop("token")
     session.code = result.get("code")
+    session.log_sent = None
     return result
 
 
@@ -104,7 +111,7 @@ def _new_game(tables: Tables, session: Session, model: str, opponents: list[str]
         body["bots"] = opponents
     # Translated like every other state reply: the deal is the first view an
     # LLM reads, and it used to be the one that came back raw.
-    return _translate_view(_seat(session, _call_ok(tables, session, "POST", "/api/games", body)))
+    return _reply(session, _seat(session, _call_ok(tables, session, "POST", "/api/games", body)))
 
 
 def _join(tables: Tables, session: Session, code: str, model: str, name: str | None = None) -> dict:
@@ -113,7 +120,7 @@ def _join(tables: Tables, session: Session, code: str, model: str, name: str | N
     client, _ = _client_of(model)
     session.model = model
     body: dict = {"code": code.strip().lower(), "name": _display_name(name), "client": client}
-    return _translate_view(_seat(session, _call_ok(tables, session, "POST", "/api/join", body)))
+    return _reply(session, _seat(session, _call_ok(tables, session, "POST", "/api/join", body)))
 
 
 def _resume_game(tables: Tables, session: Session, code: str, model: str) -> dict:
@@ -130,7 +137,8 @@ def _resume_game(tables: Tables, session: Session, code: str, model: str) -> dic
     session.token = reclaimed.pop("token")
     session.code = reclaimed.get("code")
     session.model = model
-    return _translate_view(reclaimed)
+    session.log_sent = None  # a reclaimed seat is owed the whole transcript
+    return _reply(session, reclaimed)
 
 
 #  --- Board summary -----------------------------------------------------------
@@ -180,9 +188,9 @@ def _board(tables: Tables, session: Session) -> dict:
     return raw
 
 
-def _state(tables: Tables, session: Session, log_after: int | None = None) -> dict:
+def _state(tables: Tables, session: Session, log_after: int | None = None, full_log: bool = False) -> dict:
     _seated(session)
-    return _translate_view(_call_ok(tables, session, "GET", "/api/state"), log_after)
+    return _reply(session, _call_ok(tables, session, "GET", "/api/state"), log_after, full_log)
 
 
 # --- Guarding an index against a table that moved ----------------------------
@@ -221,6 +229,7 @@ def _act(
     index: int,
     expect: dict | None = None,
     log_after: int | None = None,
+    full_log: bool = False,
 ) -> dict:
     _seated(session)
     # The raw list, not the translated one: only `index` is resolved here, and
@@ -234,19 +243,19 @@ def _act(
             else "index out of range — state()'s legal_actions is empty; it is not your turn"
         )
     _expect_check(options[index], expect)
-    return _translate_view(
-        _call_ok(tables, session, "POST", "/api/action", {"action": options[index]}), log_after
+    return _reply(
+        session, _call_ok(tables, session, "POST", "/api/action", {"action": options[index]}), log_after, full_log
     )
 
 
 def _undo(tables: Tables, session: Session) -> dict:
     _seated(session)
-    return _translate_view(_call_ok(tables, session, "POST", "/api/undo"))
+    return _reply(session, _call_ok(tables, session, "POST", "/api/undo"))
 
 
 def _leave_game(tables: Tables, session: Session) -> dict:
     _seated(session)
-    return _translate_view(_call_ok(tables, session, "POST", "/api/leave"))
+    return _reply(session, _call_ok(tables, session, "POST", "/api/leave"))
 
 
 # --- Trading (docs/bot-api.md §3; the human/LLM surface, `agents/reference/
@@ -439,24 +448,65 @@ def _your_move(view: dict) -> tuple[str, list[int]]:
     return "wait", [] if to_move is None else [to_move]
 
 
-def _translate_view(raw: dict, log_after: int | None = None) -> dict:
+def _translate(raw: dict) -> dict:
+    """Every translation a view gets on its way to the LLM, except the
+    transcript trim -- which needs to know what the session already holds
+    (`_trim_for`), or an explicit cursor (`_translate_view`)."""
     raw = _translate_trades(raw)
     raw["legal_actions"] = [_translate_action(a) for a in raw.get("legal_actions") or []]
     raw["your_move"], raw["waiting_on"] = _your_move(raw)
-    return _trim_log(raw, log_after)
+    return raw
 
 
-def _get_table(tables: Tables, session: Session, log_after: int | None = None) -> dict:
-    return _state(tables, session, log_after)
+def _translate_view(raw: dict, log_after: int | None = None) -> dict:
+    """`_translate` plus a trim against an explicit cursor -- no session, so
+    nothing here remembers what was sent. `_reply` is the one every tool
+    answers through; this is for the polls `wait_for_turn` reads and throws
+    away, and for tests of the translation alone."""
+    return _trim_log(_translate(raw), log_after)
+
+
+def _trim_for(session: Session, view: dict, log_after: int | None = None, full_log: bool = False) -> dict:
+    """The transcript trim every tool reply gets, against the cursor the
+    caller meant: `log_after` if it sent one, otherwise how many lines this
+    session has already been sent (`Session.log_sent`), or nothing at all for
+    `full_log`. The caller does not have to remember a thing -- which is the
+    point: a caller that forgets an optional argument on one of seven tools
+    for forty calls is the caller this API actually has.
+
+    `full_log` is the reset for a reply that went missing (a dropped stream):
+    `log_from` coming back larger than the lines a client holds is how it
+    notices. Records what was sent afterwards, so the next reply continues
+    from here -- a reply that errors before this point records nothing."""
+    cursor = None if full_log else (log_after if log_after is not None else session.log_sent)
+    view = _trim_log(view, cursor)
+    if "log_total" in view:
+        session.log_sent = view["log_total"]
+    return view
+
+
+def _reply(session: Session, raw: dict, log_after: int | None = None, full_log: bool = False) -> dict:
+    """A raw wire view as the tool reply the LLM reads: translated, then
+    trimmed against this session's cursor (`_trim_for`)."""
+    return _trim_for(session, _translate(raw), log_after, full_log)
+
+
+def _get_table(tables: Tables, session: Session, log_after: int | None = None, full_log: bool = False) -> dict:
+    return _state(tables, session, log_after, full_log)
 
 
 def _offer_trade(
-    tables: Tables, session: Session, give: dict, want: dict, log_after: int | None = None
+    tables: Tables,
+    session: Session,
+    give: dict,
+    want: dict,
+    log_after: int | None = None,
+    full_log: bool = False,
 ) -> dict:
     _seated(session)
     body = {"give": _positional(give), "want": _positional(want)}
-    return _translate_view(
-        _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round", body), log_after
+    return _reply(
+        session, _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round", body), log_after, full_log
     )
 
 
@@ -468,6 +518,7 @@ def _answer_trade(
     give: dict | None = None,
     receive: dict | None = None,
     log_after: int | None = None,
+    full_log: bool = False,
 ) -> dict:
     _seated(session)
     # No `version` here on purpose: the wire refuses anything but the exact
@@ -486,8 +537,11 @@ def _answer_trade(
     body = {"actor": offer["actor"], "received": offer["bundle"], "kind": kind}
     if kind == "counter":
         body["bundle"] = _bundle_towards_actor(give, receive)
-    return _translate_view(
-        _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/answer", body), log_after
+    return _reply(
+        session,
+        _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/answer", body),
+        log_after,
+        full_log,
     )
 
 
@@ -497,15 +551,18 @@ def _choose_trade(
     index: int | None = None,
     decline: bool = False,
     log_after: int | None = None,
+    full_log: bool = False,
 ) -> dict:
     _seated(session)
     # No `version` (see `_answer_trade`): the wire matches the chosen answer
     # by `seat` + `bundle` exactly (`GameSession.execute_round_choice`).
     raw = _call_ok(tables, session, "GET", "/api/state")
     if decline:
-        return _translate_view(
+        return _reply(
+            session,
             _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/choose", {"decline": True}),
             log_after,
+            full_log,
         )
     responses = ((raw.get("trade_round") or {}).get("responses")) or []
     if not isinstance(index, int) or not (0 <= index < len(responses)):
@@ -523,8 +580,11 @@ def _choose_trade(
             "choose an accept or counter, or `decline: true`"
         )
     body = {"seat": response["seat"], "bundle": response["bundle"]}
-    return _translate_view(
-        _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/choose", body), log_after
+    return _reply(
+        session,
+        _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/choose", body),
+        log_after,
+        full_log,
     )
 
 
@@ -552,22 +612,28 @@ def _turn_ready(view: dict) -> bool:
 
 def _poll_state(tables: Tables, session: Session, after: int | None = None, wait: float = 0.0) -> dict:
     query = "" if after is None else f"?after={after}&wait={wait}"
-    return _translate_view(_call_ok(tables, session, "GET", f"/api/state{query}"))
+    # `_translate`, not `_reply`: these polls are never seen by the caller,
+    # so they must not move the session's cursor (`Session.log_sent`).
+    return _translate(_call_ok(tables, session, "GET", f"/api/state{query}"))
 
 
 def _wait_for_turn_events(
-    tables: Tables, session: Session, timeout: float | None = None, log_after: int | None = None
+    tables: Tables,
+    session: Session,
+    timeout: float | None = None,
+    log_after: int | None = None,
+    full_log: bool = False,
 ):
     """Yields `_KEEPALIVE` for each wait tick that doesn't resolve, then the
     final translated view -- immediately, if it's already true.
 
-    Only the view that is actually yielded is trimmed against `log_after`.
-    The polls in between are read for `version` and `_turn_ready` alone and
-    are never seen by the caller, so there is nothing there to trim."""
+    Only the view that is actually yielded is trimmed (`_trim_for`), and only
+    it moves the session's cursor. The polls in between are read for
+    `version` and `_turn_ready` alone and are never seen by the caller."""
     _seated(session)
     view = _poll_state(tables, session)
     if _turn_ready(view):
-        yield _trim_log(view, log_after)
+        yield _trim_for(session, view, log_after, full_log)
         return
     elapsed = 0.0
     while timeout is None or elapsed < timeout:
@@ -576,20 +642,39 @@ def _wait_for_turn_events(
         view = _poll_state(tables, session, after=view.get("version"), wait=remaining)
         elapsed += remaining
         if _turn_ready(view) or (timeout is not None and elapsed >= timeout):
-            yield _trim_log(view, log_after)
+            yield _trim_for(session, view, log_after, full_log)
             return
-    yield _trim_log(view, log_after)
+    yield _trim_for(session, view, log_after, full_log)
 
 
 def _wait_for_turn(
-    tables: Tables, session: Session, timeout: float | None = None, log_after: int | None = None
+    tables: Tables,
+    session: Session,
+    timeout: float | None = None,
+    log_after: int | None = None,
+    full_log: bool = False,
 ) -> dict:
     result: dict = {}
-    for item in _wait_for_turn_events(tables, session, timeout=timeout, log_after=log_after):
+    for item in _wait_for_turn_events(tables, session, timeout=timeout, log_after=log_after, full_log=full_log):
         if item is not _KEEPALIVE:
             result = item
     return result
 
+
+# The transcript-cursor arguments every state-returning tool takes, spelled
+# once. The cursor itself is automatic (`_trim_for`): these are the overrides.
+_CURSOR_ARGS = {
+    "log_after": {
+        "type": "integer",
+        "description": "Optional override of the automatic transcript cursor: how many "
+        "`log` lines you hold (a `log_total` from an earlier reply). Normally omit it.",
+    },
+    "full_log": {
+        "type": "boolean",
+        "description": "Optional: send the whole transcript, ignoring the cursor -- for "
+        "when a reply went missing (`log_from` came back past the lines you hold).",
+    },
+}
 
 # name -> (handler, description, JSON Schema for `arguments`)
 _TOOLS: dict[str, tuple] = {
@@ -677,22 +762,19 @@ _TOOLS: dict[str, tuple] = {
         "to block until it's worth polling again. A legal_actions entry that "
         "spends a resource names it too, alongside the raw `a`/`b` act() "
         "replays: BANK_TRADE has `give`/`want`, PLAY_MONOPOLY/DISCARD have "
-        "`resource`, PLAY_YEAR_OF_PLENTY has `resources` (a 2-list).",
+        "`resource`, PLAY_YEAR_OF_PLENTY has `resources` (a 2-list). The "
+        "transcript `log` is sent incrementally without you doing anything: "
+        "each reply carries only the lines added since this session's previous "
+        "reply, plus the one trailing line that may have been rewritten since "
+        "(a burst of builds collapses into a single line that grows), with "
+        "`log_from` naming the index the slice starts at and `log_total` the "
+        "whole length. Keep your own copy and splice at `log_from`. A fresh "
+        "seat, a resumed seat and the final read of a finished game get the "
+        "whole transcript; pass `full_log: true` to force that at any time.",
         {
             "type": "object",
             "properties": {
-                "log_after": {
-                    "type": "integer",
-                    "description": "Optional: how many transcript lines you already hold — "
-                    "pass back the `log_total` from your last reply. `log` then comes back "
-                    "trimmed to what is new, plus the one trailing line that may have been "
-                    "rewritten since (a burst of builds collapses into a single line that "
-                    "grows), with `log_from` naming the index it starts at. Omit it to get "
-                    "the whole transcript, which is what a fresh session or a just-resumed "
-                    "seat wants. Sending it on every call is the single biggest saving "
-                    "available on this API: the transcript is otherwise resent in full every "
-                    "time and grows for the whole game.",
-                },
+                **_CURSOR_ARGS,
             },
         },
     ),
@@ -713,18 +795,7 @@ _TOOLS: dict[str, tuple] = {
                     "description": "Give up and return the current state after this many "
                     "seconds. Omit to wait indefinitely.",
                 },
-                "log_after": {
-                    "type": "integer",
-                    "description": "Optional: how many transcript lines you already hold — "
-                    "pass back the `log_total` from your last reply. `log` then comes back "
-                    "trimmed to what is new, plus the one trailing line that may have been "
-                    "rewritten since (a burst of builds collapses into a single line that "
-                    "grows), with `log_from` naming the index it starts at. Omit it to get "
-                    "the whole transcript, which is what a fresh session or a just-resumed "
-                    "seat wants. Sending it on every call is the single biggest saving "
-                    "available on this API: the transcript is otherwise resent in full every "
-                    "time and grows for the whole game.",
-                },
+                **_CURSOR_ARGS,
             },
         },
     ),
@@ -744,18 +815,7 @@ _TOOLS: dict[str, tuple] = {
                     "and `a`/`b` if you have them). If legal_actions[index] no longer matches "
                     "it, act() refuses instead of playing whatever now sits at that index.",
                 },
-                "log_after": {
-                    "type": "integer",
-                    "description": "Optional: how many transcript lines you already hold — "
-                    "pass back the `log_total` from your last reply. `log` then comes back "
-                    "trimmed to what is new, plus the one trailing line that may have been "
-                    "rewritten since (a burst of builds collapses into a single line that "
-                    "grows), with `log_from` naming the index it starts at. Omit it to get "
-                    "the whole transcript, which is what a fresh session or a just-resumed "
-                    "seat wants. Sending it on every call is the single biggest saving "
-                    "available on this API: the transcript is otherwise resent in full every "
-                    "time and grows for the whole game.",
-                },
+                **_CURSOR_ARGS,
             },
             "required": ["index"],
         },
@@ -795,18 +855,7 @@ _TOOLS: dict[str, tuple] = {
         {
             "type": "object",
             "properties": {
-                "log_after": {
-                    "type": "integer",
-                    "description": "Optional: how many transcript lines you already hold — "
-                    "pass back the `log_total` from your last reply. `log` then comes back "
-                    "trimmed to what is new, plus the one trailing line that may have been "
-                    "rewritten since (a burst of builds collapses into a single line that "
-                    "grows), with `log_from` naming the index it starts at. Omit it to get "
-                    "the whole transcript, which is what a fresh session or a just-resumed "
-                    "seat wants. Sending it on every call is the single biggest saving "
-                    "available on this API: the transcript is otherwise resent in full every "
-                    "time and grows for the whole game.",
-                },
+                **_CURSOR_ARGS,
             },
         },
     ),
@@ -829,18 +878,7 @@ _TOOLS: dict[str, tuple] = {
                     "additionalProperties": {"type": "integer"},
                     "description": "Resource name -> count you want.",
                 },
-                "log_after": {
-                    "type": "integer",
-                    "description": "Optional: how many transcript lines you already hold — "
-                    "pass back the `log_total` from your last reply. `log` then comes back "
-                    "trimmed to what is new, plus the one trailing line that may have been "
-                    "rewritten since (a burst of builds collapses into a single line that "
-                    "grows), with `log_from` naming the index it starts at. Omit it to get "
-                    "the whole transcript, which is what a fresh session or a just-resumed "
-                    "seat wants. Sending it on every call is the single biggest saving "
-                    "available on this API: the transcript is otherwise resent in full every "
-                    "time and grows for the whole game.",
-                },
+                **_CURSOR_ARGS,
             },
             "required": ["give", "want"],
         },
@@ -867,18 +905,7 @@ _TOOLS: dict[str, tuple] = {
                     "additionalProperties": {"type": "integer"},
                     "description": "Only for kind=counter: resource -> count you'd receive.",
                 },
-                "log_after": {
-                    "type": "integer",
-                    "description": "Optional: how many transcript lines you already hold — "
-                    "pass back the `log_total` from your last reply. `log` then comes back "
-                    "trimmed to what is new, plus the one trailing line that may have been "
-                    "rewritten since (a burst of builds collapses into a single line that "
-                    "grows), with `log_from` naming the index it starts at. Omit it to get "
-                    "the whole transcript, which is what a fresh session or a just-resumed "
-                    "seat wants. Sending it on every call is the single biggest saving "
-                    "available on this API: the transcript is otherwise resent in full every "
-                    "time and grows for the whole game.",
-                },
+                **_CURSOR_ARGS,
             },
             "required": ["index", "kind"],
         },
@@ -893,18 +920,7 @@ _TOOLS: dict[str, tuple] = {
             "properties": {
                 "index": {"type": "integer", "description": "Index into trade_round.responses."},
                 "decline": {"type": "boolean"},
-                "log_after": {
-                    "type": "integer",
-                    "description": "Optional: how many transcript lines you already hold — "
-                    "pass back the `log_total` from your last reply. `log` then comes back "
-                    "trimmed to what is new, plus the one trailing line that may have been "
-                    "rewritten since (a burst of builds collapses into a single line that "
-                    "grows), with `log_from` naming the index it starts at. Omit it to get "
-                    "the whole transcript, which is what a fresh session or a just-resumed "
-                    "seat wants. Sending it on every call is the single biggest saving "
-                    "available on this API: the transcript is otherwise resent in full every "
-                    "time and grows for the whole game.",
-                },
+                **_CURSOR_ARGS,
             },
         },
     ),

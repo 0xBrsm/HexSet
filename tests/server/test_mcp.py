@@ -239,6 +239,31 @@ def _setup_settlement_index(view: dict) -> int:
     return next(i for i, a in enumerate(view["legal_actions"]) if a["type"] == "SETUP_SETTLEMENT")
 
 
+def _wait_for_turn_streamed(client: MCPClient, **arguments) -> tuple[str, dict]:
+    """`wait_for_turn` the way a real client receives it: as an SSE stream.
+    Returns the response's Content-Type and the tool payload out of the one
+    `data:` line."""
+    body = {
+        "jsonrpc": "2.0",
+        "id": 999,
+        "method": "tools/call",
+        "params": {"name": "wait_for_turn", "arguments": arguments},
+    }
+    request = urllib.request.Request(
+        client.url,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json", "Mcp-Session-Id": client.session_id},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        content_type = response.headers.get("Content-Type", "")
+        raw = response.read().decode("utf-8")
+    data_line = next(line for line in raw.splitlines() if line.startswith("data: "))
+    result = json.loads(data_line[len("data: "):])["result"]
+    assert result["isError"] is False, result
+    return content_type, json.loads(result["content"][0]["text"])
+
+
 def test_act_with_an_expect_that_no_longer_matches_is_an_error(live_server):
     """`expect` is the guard against an index that now names a different
     action. It replaced a whole-table `version`, which bumped on every other
@@ -307,29 +332,15 @@ def test_wait_for_turn_streams_and_returns_once_it_is_our_turn_again(live_server
     assert after_road["your_move"] == "wait"
     assert after_road["waiting_on"] == [1]
 
-    body = {
-        "jsonrpc": "2.0",
-        "id": 999,
-        "method": "tools/call",
-        "params": {"name": "wait_for_turn", "arguments": {}},
-    }
-    request = urllib.request.Request(
-        client.url,
-        data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json", "Mcp-Session-Id": client.session_id},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        content_type = response.headers.get("Content-Type", "")
-        raw = response.read().decode("utf-8")
+    content_type, payload = _wait_for_turn_streamed(client)
 
     assert content_type.startswith("text/event-stream")
-    data_line = next(line for line in raw.splitlines() if line.startswith("data: "))
-    message = json.loads(data_line[len("data: "):])
-    result = message["result"]
-    assert result["isError"] is False
-    payload = json.loads(result["content"][0]["text"])
     assert payload["legal_actions"]  # our own turn again (round 2 of setup)
+    assert payload["your_move"] == "act"
+    # The streamed reply is trimmed against the session's automatic cursor
+    # like any other: it continues from the last line the `act` reply sent.
+    assert payload["log_from"] == max(0, after_road["log_total"] - 1)
+    assert payload["log_total"] > after_road["log_total"]  # the bots' placements
 
 
 # --- Trade-round responses are named dicts, the same as state()/get_table() --
@@ -538,12 +549,16 @@ def test_resume_game_reclaims_the_seat_by_code_and_model(live_server):
     creator = connected(base)
     data = creator.call_tool("new_game", model=MODEL, opponents=SOLO)
     seat, code = data["seat"], data["code"]
+    creator.call_tool("act", index=_setup_settlement_index(data))  # so there is a transcript to owe
 
     # A fresh session -- as if the server had restarted, or this were simply
     # a new MCP connection with no seat of its own yet.
     fresh = connected(base)
     result = fresh.call_tool("resume_game", code=code, model=MODEL)
     assert result["seat"] == seat
+    # A reclaimed seat knows nothing yet, so it is owed the whole transcript.
+    assert result["log_from"] == 0
+    assert len(result["log"]) == result["log_total"] >= 1
 
 
 # --- your_move: which tool the table wants from this seat ---------------
@@ -670,7 +685,7 @@ def test_state_log_after_trims_the_transcript_it_sends_back(live_server):
     # there are lines for the cursor to be about.
     client.call_tool("act", index=_setup_settlement_index(data))
 
-    full = client.call_tool("state")
+    full = client.call_tool("state", full_log=True)
     assert full["log_from"] == 0
     assert full["log_total"] == len(full["log"]) > 0
 
@@ -693,15 +708,72 @@ def test_act_log_after_sends_only_the_lines_the_action_added(live_server):
     assert result["log_from"] == max(0, before["log_total"] - 1)
 
 
-def test_state_log_after_omitted_is_unchanged_for_a_caller_that_never_sends_it(live_server):
-    """The cursor is opt-in: a client that knows nothing about it still gets
-    the entire transcript, which is also what a resumed seat needs."""
+def test_the_cursor_is_automatic_for_a_caller_that_never_sends_log_after(live_server):
+    """The session remembers how much transcript it has sent, so a caller
+    that forgets `log_after` (every caller, on some call) still pays only
+    for what is new. The first read after taking a seat is the whole thing;
+    the next plain read is the rewritable tail only."""
     _, base = live_server
     client = connected(base)
-    client.call_tool("new_game", model=MODEL, opponents=SOLO)
-    data = client.call_tool("state")
-    assert data["log"] == client.call_tool("state")["log"]
-    assert data["log_from"] == 0
+    dealt = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    assert dealt["log_from"] == 0
+    # Our first settlement and road, then the bots' -- then our second
+    # settlement, after which the table is ours (the road is still owed) and
+    # the transcript holds still for the rest of the test.
+    for _ in range(2):
+        data = client.call_tool("state")
+        client.call_tool("act", index=next(i for i, a in enumerate(data["legal_actions"]) if a["type"].startswith("SETUP")))
+    _, data = _wait_for_turn_streamed(client)
+    client.call_tool("act", index=_setup_settlement_index(data))
+
+    first = client.call_tool("state", full_log=True)
+    assert first["log_from"] == 0
+    assert first["log_total"] == len(first["log"]) >= 1
+
+    again = client.call_tool("state")
+    assert again["log_total"] == first["log_total"]
+    assert again["log_from"] == first["log_total"] - 1
+    assert again["log"] == first["log"][-1:]
+
+
+def test_an_explicit_log_after_overrides_the_automatic_cursor(live_server):
+    _, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    client.call_tool("act", index=_setup_settlement_index(data))
+    client.call_tool("state")  # the session now holds everything
+
+    rewound = client.call_tool("state", log_after=1)
+    assert rewound["log_from"] == 0
+    assert len(rewound["log"]) == rewound["log_total"]
+
+
+def test_full_log_resets_a_session_that_is_already_caught_up(live_server):
+    _, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    client.call_tool("act", index=_setup_settlement_index(data))
+    client.call_tool("state")
+
+    whole = client.call_tool("state", full_log=True)
+    assert whole["log_from"] == 0
+    assert len(whole["log"]) == whole["log_total"] >= 1
+    # ...and the cursor carries on from there, not from before the reset.
+    assert client.call_tool("state")["log_from"] == whole["log_total"] - 1
+
+
+def test_a_failed_call_does_not_move_the_cursor(live_server):
+    _, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    client.call_tool("act", index=_setup_settlement_index(data))
+    before = client.call_tool("state", full_log=True)
+
+    status, _, response = client.call_tool_raw("act", index=999)
+    assert status == 200 and response["result"]["isError"]
+    # The error reply carried no transcript, so the next read continues from
+    # where the last successful one left off.
+    assert client.call_tool("state")["log_from"] == before["log_total"] - 1
 
 
 def test_trim_log_ignores_the_cursor_once_the_game_is_over():

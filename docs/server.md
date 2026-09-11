@@ -163,6 +163,15 @@ choice that does not match the exact open offer. The HTTP API's whole-table
 `version` is not exposed as an MCP argument, since it changes whenever any
 seat does anything, including other seats answering the same trade round.
 
+The transcript `log` is sent incrementally. Each MCP session remembers how
+many lines it has been sent, and every state-returning reply carries only
+the lines added since that session's previous reply plus the one trailing
+line that may have been rewritten in place, with `log_from` naming the
+index the slice starts at and `log_total` the whole length. A new seat, a
+reclaimed seat and the final read of a finished game get the whole
+transcript. `full_log: true` forces that on any call, for a client that lost
+a reply; `log_after: <n>` overrides the cursor with an explicit line count.
+
 Every state-returning tool answers with `your_move`: `act`, `discard`,
 `answer_trade` or `choose_trade` names the tool the table wants from the
 caller now, `wait` means none does and `waiting_on` lists the seats it is

@@ -1,0 +1,1145 @@
+{
+  "baseline": "off",
+  "comparisons": [
+    {
+      "differences": [],
+      "mode": "cached",
+      "seed": 650100000
+    },
+    {
+      "differences": [],
+      "mode": "fast",
+      "seed": 650100000
+    },
+    {
+      "differences": [],
+      "mode": "cached",
+      "seed": 650100001
+    },
+    {
+      "differences": [],
+      "mode": "fast",
+      "seed": 650100001
+    },
+    {
+      "differences": [],
+      "mode": "fast",
+      "seed": 650100002
+    },
+    {
+      "differences": [],
+      "mode": "cached",
+      "seed": 650100002
+    },
+    {
+      "differences": [],
+      "mode": "cached",
+      "seed": 650100003
+    },
+    {
+      "differences": [],
+      "mode": "fast",
+      "seed": 650100003
+    },
+    {
+      "differences": [],
+      "mode": "cached",
+      "seed": 650100004
+    },
+    {
+      "differences": [],
+      "mode": "fast",
+      "seed": 650100004
+    },
+    {
+      "differences": [],
+      "mode": "fast",
+      "seed": 650100005
+    },
+    {
+      "differences": [],
+      "mode": "cached",
+      "seed": 650100005
+    },
+    {
+      "differences": [],
+      "mode": "cached",
+      "seed": 650100006
+    },
+    {
+      "differences": [],
+      "mode": "fast",
+      "seed": 650100006
+    },
+    {
+      "differences": [],
+      "mode": "cached",
+      "seed": 650100007
+    },
+    {
+      "differences": [],
+      "mode": "fast",
+      "seed": 650100007
+    }
+  ],
+  "complete": true,
+  "equivalent": true,
+  "rows": [
+    {
+      "action_count": 235,
+      "action_sha256": "073d126261187265c7d8d7351039361eda90fb2819a17b45e1bd4929300339b2",
+      "audit": false,
+      "cache": null,
+      "cpu_seconds": 2.3808503930000002,
+      "deadline_observations": null,
+      "game_seed": 7216827118396912138,
+      "game_type": "standard",
+      "leaf_sha256": null,
+      "leaves": null,
+      "mode": "off",
+      "native_deadline_seconds": 20,
+      "players": "DC:heximax-notrade,AB:2,AB:2,AB:2",
+      "points": {
+        "Color.BLUE": [
+          4
+        ],
+        "Color.ORANGE": [
+          6
+        ],
+        "Color.RED": [
+          10
+        ],
+        "Color.WHITE": [
+          5
+        ]
+      },
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "pythonhashseed": "0",
+      "seed": 650100000,
+      "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "wall_seconds": 2.3860809709876776,
+      "wins": {
+        "Color.BLUE": 0,
+        "Color.ORANGE": 0,
+        "Color.RED": 1,
+        "Color.WHITE": 0
+      }
+    },
+    {
+      "action_count": 235,
+      "action_sha256": "073d126261187265c7d8d7351039361eda90fb2819a17b45e1bd4929300339b2",
+      "audit": false,
+      "cache": {
+        "entries": 1506,
+        "hits": 6824,
+        "max_entries": 4096,
+        "misses": 1506
+      },
+      "cpu_seconds": 1.309260082,
+      "deadline_observations": null,
+      "game_seed": 7216827118396912138,
+      "game_type": "standard",
+      "leaf_sha256": null,
+      "leaves": null,
+      "mode": "cached",
+      "native_deadline_seconds": 20,
+      "players": "DC:heximax-notrade,AB:2,AB:2,AB:2",
+      "points": {
+        "Color.BLUE": [
+          4
+        ],
+        "Color.ORANGE": [
+          6
+        ],
+        "Color.RED": [
+          10
+        ],
+        "Color.WHITE": [
+          5
+        ]
+      },
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "pythonhashseed": "0",
+      "seed": 650100000,
+      "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "wall_seconds": 1.3130484509747475,
+      "wins": {
+        "Color.BLUE": 0,
+        "Color.ORANGE": 0,
+        "Color.RED": 1,
+        "Color.WHITE": 0
+      }
+    },
+    {
+      "action_count": 235,
+      "action_sha256": "073d126261187265c7d8d7351039361eda90fb2819a17b45e1bd4929300339b2",
+      "audit": false,
+      "cache": {
+        "entries": 1382,
+        "hits": 6948,
+        "max_entries": 4096,
+        "misses": 1382
+      },
+      "cpu_seconds": 1.0226968589999998,
+      "deadline_observations": null,
+      "game_seed": 7216827118396912138,
+      "game_type": "standard",
+      "leaf_sha256": null,
+      "leaves": null,
+      "mode": "fast",
+      "native_deadline_seconds": 20,
+      "players": "DC:heximax-notrade,AB:2,AB:2,AB:2",
+      "points": {
+        "Color.BLUE": [
+          4
+        ],
+        "Color.ORANGE": [
+          6
+        ],
+        "Color.RED": [
+          10
+        ],
+        "Color.WHITE": [
+          5
+        ]
+      },
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "pythonhashseed": "0",
+      "seed": 650100000,
+      "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "wall_seconds": 1.0243847728706896,
+      "wins": {
+        "Color.BLUE": 0,
+        "Color.ORANGE": 0,
+        "Color.RED": 1,
+        "Color.WHITE": 0
+      }
+    },
+    {
+      "action_count": 262,
+      "action_sha256": "c40597a5594a4fb3f26f1ed5cd4f8f53143cfcb5186b56c2c3ab6e53feb83283",
+      "audit": false,
+      "cache": {
+        "entries": 3220,
+        "hits": 51796,
+        "max_entries": 4096,
+        "misses": 3220
+      },
+      "cpu_seconds": 5.886329182,
+      "deadline_observations": null,
+      "game_seed": 4209344049440889226,
+      "game_type": "standard",
+      "leaf_sha256": null,
+      "leaves": null,
+      "mode": "cached",
+      "native_deadline_seconds": 20,
+      "players": "DC:heximax-notrade,AB:2,AB:2,AB:2",
+      "points": {
+        "Color.BLUE": [
+          10
+        ],
+        "Color.ORANGE": [
+          5
+        ],
+        "Color.RED": [
+          4
+        ],
+        "Color.WHITE": [
+          7
+        ]
+      },
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "pythonhashseed": "0",
+      "seed": 650100001,
+      "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "wall_seconds": 5.887702677864581,
+      "wins": {
+        "Color.BLUE": 1,
+        "Color.ORANGE": 0,
+        "Color.RED": 0,
+        "Color.WHITE": 0
+      }
+    },
+    {
+      "action_count": 262,
+      "action_sha256": "c40597a5594a4fb3f26f1ed5cd4f8f53143cfcb5186b56c2c3ab6e53feb83283",
+      "audit": false,
+      "cache": {
+        "entries": 2572,
+        "hits": 52444,
+        "max_entries": 4096,
+        "misses": 2572
+      },
+      "cpu_seconds": 3.8486837389999997,
+      "deadline_observations": null,
+      "game_seed": 4209344049440889226,
+      "game_type": "standard",
+      "leaf_sha256": null,
+      "leaves": null,
+      "mode": "fast",
+      "native_deadline_seconds": 20,
+      "players": "DC:heximax-notrade,AB:2,AB:2,AB:2",
+      "points": {
+        "Color.BLUE": [
+          10
+        ],
+        "Color.ORANGE": [
+          5
+        ],
+        "Color.RED": [
+          4
+        ],
+        "Color.WHITE": [
+          7
+        ]
+      },
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "pythonhashseed": "0",
+      "seed": 650100001,
+      "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "wall_seconds": 3.849393761018291,
+      "wins": {
+        "Color.BLUE": 1,
+        "Color.ORANGE": 0,
+        "Color.RED": 0,
+        "Color.WHITE": 0
+      }
+    },
+    {
+      "action_count": 262,
+      "action_sha256": "c40597a5594a4fb3f26f1ed5cd4f8f53143cfcb5186b56c2c3ab6e53feb83283",
+      "audit": false,
+      "cache": null,
+      "cpu_seconds": 12.149436263,
+      "deadline_observations": null,
+      "game_seed": 4209344049440889226,
+      "game_type": "standard",
+      "leaf_sha256": null,
+      "leaves": null,
+      "mode": "off",
+      "native_deadline_seconds": 20,
+      "players": "DC:heximax-notrade,AB:2,AB:2,AB:2",
+      "points": {
+        "Color.BLUE": [
+          10
+        ],
+        "Color.ORANGE": [
+          5
+        ],
+        "Color.RED": [
+          4
+        ],
+        "Color.WHITE": [
+          7
+        ]
+      },
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "pythonhashseed": "0",
+      "seed": 650100001,
+      "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "wall_seconds": 12.152018579887226,
+      "wins": {
+        "Color.BLUE": 1,
+        "Color.ORANGE": 0,
+        "Color.RED": 0,
+        "Color.WHITE": 0
+      }
+    },
+    {
+      "action_count": 294,
+      "action_sha256": "37690b91b0052495e69ea114af54f078e0d63cdd756a421c5780e04031658db4",
+      "audit": false,
+      "cache": {
+        "entries": 2078,
+        "hits": 38016,
+        "max_entries": 4096,
+        "misses": 2078
+      },
+      "cpu_seconds": 3.057178985,
+      "deadline_observations": null,
+      "game_seed": 1104362867435427150,
+      "game_type": "standard",
+      "leaf_sha256": null,
+      "leaves": null,
+      "mode": "fast",
+      "native_deadline_seconds": 20,
+      "players": "DC:heximax-notrade,AB:2,AB:2,AB:2",
+      "points": {
+        "Color.BLUE": [
+          7
+        ],
+        "Color.ORANGE": [
+          7
+        ],
+        "Color.RED": [
+          10
+        ],
+        "Color.WHITE": [
+          4
+        ]
+      },
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "pythonhashseed": "0",
+      "seed": 650100002,
+      "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "wall_seconds": 3.062528013950214,
+      "wins": {
+        "Color.BLUE": 0,
+        "Color.ORANGE": 0,
+        "Color.RED": 1,
+        "Color.WHITE": 0
+      }
+    },
+    {
+      "action_count": 294,
+      "action_sha256": "37690b91b0052495e69ea114af54f078e0d63cdd756a421c5780e04031658db4",
+      "audit": false,
+      "cache": null,
+      "cpu_seconds": 9.44436956,
+      "deadline_observations": null,
+      "game_seed": 1104362867435427150,
+      "game_type": "standard",
+      "leaf_sha256": null,
+      "leaves": null,
+      "mode": "off",
+      "native_deadline_seconds": 20,
+      "players": "DC:heximax-notrade,AB:2,AB:2,AB:2",
+      "points": {
+        "Color.BLUE": [
+          7
+        ],
+        "Color.ORANGE": [
+          7
+        ],
+        "Color.RED": [
+          10
+        ],
+        "Color.WHITE": [
+          4
+        ]
+      },
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "pythonhashseed": "0",
+      "seed": 650100002,
+      "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "wall_seconds": 9.446132203098387,
+      "wins": {
+        "Color.BLUE": 0,
+        "Color.ORANGE": 0,
+        "Color.RED": 1,
+        "Color.WHITE": 0
+      }
+    },
+    {
+      "action_count": 294,
+      "action_sha256": "37690b91b0052495e69ea114af54f078e0d63cdd756a421c5780e04031658db4",
+      "audit": false,
+      "cache": {
+        "entries": 2468,
+        "hits": 37626,
+        "max_entries": 4096,
+        "misses": 2468
+      },
+      "cpu_seconds": 4.8209098610000005,
+      "deadline_observations": null,
+      "game_seed": 1104362867435427150,
+      "game_type": "standard",
+      "leaf_sha256": null,
+      "leaves": null,
+      "mode": "cached",
+      "native_deadline_seconds": 20,
+      "players": "DC:heximax-notrade,AB:2,AB:2,AB:2",
+      "points": {
+        "Color.BLUE": [
+          7
+        ],
+        "Color.ORANGE": [
+          7
+        ],
+        "Color.RED": [
+          10
+        ],
+        "Color.WHITE": [
+          4
+        ]
+      },
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "pythonhashseed": "0",
+      "seed": 650100002,
+      "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "wall_seconds": 4.8260625479742885,
+      "wins": {
+        "Color.BLUE": 0,
+        "Color.ORANGE": 0,
+        "Color.RED": 1,
+        "Color.WHITE": 0
+      }
+    },
+    {
+      "action_count": 354,
+      "action_sha256": "dd3e31a2c27652733db4e29fd9cc4e2ea7e13c78e7d40f9f57e41d1a544df380",
+      "audit": false,
+      "cache": null,
+      "cpu_seconds": 16.572819864,
+      "deadline_observations": null,
+      "game_seed": 8783207804480033987,
+      "game_type": "standard",
+      "leaf_sha256": null,
+      "leaves": null,
+      "mode": "off",
+      "native_deadline_seconds": 20,
+      "players": "DC:heximax-notrade,AB:2,AB:2,AB:2",
+      "points": {
+        "Color.BLUE": [
+          4
+        ],
+        "Color.ORANGE": [
+          8
+        ],
+        "Color.RED": [
+          11
+        ],
+        "Color.WHITE": [
+          8
+        ]
+      },
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "pythonhashseed": "0",
+      "seed": 650100003,
+      "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "wall_seconds": 16.58514938899316,
+      "wins": {
+        "Color.BLUE": 0,
+        "Color.ORANGE": 0,
+        "Color.RED": 1,
+        "Color.WHITE": 0
+      }
+    },
+    {
+      "action_count": 354,
+      "action_sha256": "dd3e31a2c27652733db4e29fd9cc4e2ea7e13c78e7d40f9f57e41d1a544df380",
+      "audit": false,
+      "cache": {
+        "entries": 2808,
+        "hits": 71567,
+        "max_entries": 4096,
+        "misses": 2808
+      },
+      "cpu_seconds": 7.931601146,
+      "deadline_observations": null,
+      "game_seed": 8783207804480033987,
+      "game_type": "standard",
+      "leaf_sha256": null,
+      "leaves": null,
+      "mode": "cached",
+      "native_deadline_seconds": 20,
+      "players": "DC:heximax-notrade,AB:2,AB:2,AB:2",
+      "points": {
+        "Color.BLUE": [
+          4
+        ],
+        "Color.ORANGE": [
+          8
+        ],
+        "Color.RED": [
+          11
+        ],
+        "Color.WHITE": [
+          8
+        ]
+      },
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "pythonhashseed": "0",
+      "seed": 650100003,
+      "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "wall_seconds": 7.9338841589633375,
+      "wins": {
+        "Color.BLUE": 0,
+        "Color.ORANGE": 0,
+        "Color.RED": 1,
+        "Color.WHITE": 0
+      }
+    },
+    {
+      "action_count": 354,
+      "action_sha256": "dd3e31a2c27652733db4e29fd9cc4e2ea7e13c78e7d40f9f57e41d1a544df380",
+      "audit": false,
+      "cache": {
+        "entries": 2424,
+        "hits": 71951,
+        "max_entries": 4096,
+        "misses": 2424
+      },
+      "cpu_seconds": 5.064418898,
+      "deadline_observations": null,
+      "game_seed": 8783207804480033987,
+      "game_type": "standard",
+      "leaf_sha256": null,
+      "leaves": null,
+      "mode": "fast",
+      "native_deadline_seconds": 20,
+      "players": "DC:heximax-notrade,AB:2,AB:2,AB:2",
+      "points": {
+        "Color.BLUE": [
+          4
+        ],
+        "Color.ORANGE": [
+          8
+        ],
+        "Color.RED": [
+          11
+        ],
+        "Color.WHITE": [
+          8
+        ]
+      },
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "pythonhashseed": "0",
+      "seed": 650100003,
+      "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "wall_seconds": 5.065405472880229,
+      "wins": {
+        "Color.BLUE": 0,
+        "Color.ORANGE": 0,
+        "Color.RED": 1,
+        "Color.WHITE": 0
+      }
+    },
+    {
+      "action_count": 326,
+      "action_sha256": "3c80211fed75981fce02554b983a64a27f8c707a15cc7ace71d95e68accfb597",
+      "audit": false,
+      "cache": {
+        "entries": 3004,
+        "hits": 83246,
+        "max_entries": 4096,
+        "misses": 3004
+      },
+      "cpu_seconds": 9.244146170999999,
+      "deadline_observations": null,
+      "game_seed": 8619952932012705058,
+      "game_type": "standard",
+      "leaf_sha256": null,
+      "leaves": null,
+      "mode": "cached",
+      "native_deadline_seconds": 20,
+      "players": "DC:heximax-notrade,AB:2,AB:2,AB:2",
+      "points": {
+        "Color.BLUE": [
+          4
+        ],
+        "Color.ORANGE": [
+          9
+        ],
+        "Color.RED": [
+          10
+        ],
+        "Color.WHITE": [
+          8
+        ]
+      },
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "pythonhashseed": "0",
+      "seed": 650100004,
+      "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "wall_seconds": 9.24925820203498,
+      "wins": {
+        "Color.BLUE": 0,
+        "Color.ORANGE": 0,
+        "Color.RED": 1,
+        "Color.WHITE": 0
+      }
+    },
+    {
+      "action_count": 326,
+      "action_sha256": "3c80211fed75981fce02554b983a64a27f8c707a15cc7ace71d95e68accfb597",
+      "audit": false,
+      "cache": {
+        "entries": 2699,
+        "hits": 83551,
+        "max_entries": 4096,
+        "misses": 2699
+      },
+      "cpu_seconds": 6.334191896,
+      "deadline_observations": null,
+      "game_seed": 8619952932012705058,
+      "game_type": "standard",
+      "leaf_sha256": null,
+      "leaves": null,
+      "mode": "fast",
+      "native_deadline_seconds": 20,
+      "players": "DC:heximax-notrade,AB:2,AB:2,AB:2",
+      "points": {
+        "Color.BLUE": [
+          4
+        ],
+        "Color.ORANGE": [
+          9
+        ],
+        "Color.RED": [
+          10
+        ],
+        "Color.WHITE": [
+          8
+        ]
+      },
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "pythonhashseed": "0",
+      "seed": 650100004,
+      "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "wall_seconds": 6.3388538679573685,
+      "wins": {
+        "Color.BLUE": 0,
+        "Color.ORANGE": 0,
+        "Color.RED": 1,
+        "Color.WHITE": 0
+      }
+    },
+    {
+      "action_count": 326,
+      "action_sha256": "3c80211fed75981fce02554b983a64a27f8c707a15cc7ace71d95e68accfb597",
+      "audit": false,
+      "cache": null,
+      "cpu_seconds": 19.026556764000002,
+      "deadline_observations": null,
+      "game_seed": 8619952932012705058,
+      "game_type": "standard",
+      "leaf_sha256": null,
+      "leaves": null,
+      "mode": "off",
+      "native_deadline_seconds": 20,
+      "players": "DC:heximax-notrade,AB:2,AB:2,AB:2",
+      "points": {
+        "Color.BLUE": [
+          4
+        ],
+        "Color.ORANGE": [
+          9
+        ],
+        "Color.RED": [
+          10
+        ],
+        "Color.WHITE": [
+          8
+        ]
+      },
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "pythonhashseed": "0",
+      "seed": 650100004,
+      "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "wall_seconds": 19.034341629128903,
+      "wins": {
+        "Color.BLUE": 0,
+        "Color.ORANGE": 0,
+        "Color.RED": 1,
+        "Color.WHITE": 0
+      }
+    },
+    {
+      "action_count": 308,
+      "action_sha256": "8b685bbb7d7360f6d1bed7f98830142e31c3c48a888882c6956db4bc7a9a118a",
+      "audit": false,
+      "cache": {
+        "entries": 2487,
+        "hits": 59852,
+        "max_entries": 4096,
+        "misses": 2487
+      },
+      "cpu_seconds": 4.184960588,
+      "deadline_observations": null,
+      "game_seed": 7398246028605879210,
+      "game_type": "standard",
+      "leaf_sha256": null,
+      "leaves": null,
+      "mode": "fast",
+      "native_deadline_seconds": 20,
+      "players": "DC:heximax-notrade,AB:2,AB:2,AB:2",
+      "points": {
+        "Color.BLUE": [
+          10
+        ],
+        "Color.ORANGE": [
+          6
+        ],
+        "Color.RED": [
+          8
+        ],
+        "Color.WHITE": [
+          4
+        ]
+      },
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "pythonhashseed": "0",
+      "seed": 650100005,
+      "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "wall_seconds": 4.190357684157789,
+      "wins": {
+        "Color.BLUE": 1,
+        "Color.ORANGE": 0,
+        "Color.RED": 0,
+        "Color.WHITE": 0
+      }
+    },
+    {
+      "action_count": 308,
+      "action_sha256": "8b685bbb7d7360f6d1bed7f98830142e31c3c48a888882c6956db4bc7a9a118a",
+      "audit": false,
+      "cache": null,
+      "cpu_seconds": 13.522485061,
+      "deadline_observations": null,
+      "game_seed": 7398246028605879210,
+      "game_type": "standard",
+      "leaf_sha256": null,
+      "leaves": null,
+      "mode": "off",
+      "native_deadline_seconds": 20,
+      "players": "DC:heximax-notrade,AB:2,AB:2,AB:2",
+      "points": {
+        "Color.BLUE": [
+          10
+        ],
+        "Color.ORANGE": [
+          6
+        ],
+        "Color.RED": [
+          8
+        ],
+        "Color.WHITE": [
+          4
+        ]
+      },
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "pythonhashseed": "0",
+      "seed": 650100005,
+      "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "wall_seconds": 13.52616694313474,
+      "wins": {
+        "Color.BLUE": 1,
+        "Color.ORANGE": 0,
+        "Color.RED": 0,
+        "Color.WHITE": 0
+      }
+    },
+    {
+      "action_count": 308,
+      "action_sha256": "8b685bbb7d7360f6d1bed7f98830142e31c3c48a888882c6956db4bc7a9a118a",
+      "audit": false,
+      "cache": {
+        "entries": 2777,
+        "hits": 59562,
+        "max_entries": 4096,
+        "misses": 2777
+      },
+      "cpu_seconds": 6.446594859,
+      "deadline_observations": null,
+      "game_seed": 7398246028605879210,
+      "game_type": "standard",
+      "leaf_sha256": null,
+      "leaves": null,
+      "mode": "cached",
+      "native_deadline_seconds": 20,
+      "players": "DC:heximax-notrade,AB:2,AB:2,AB:2",
+      "points": {
+        "Color.BLUE": [
+          10
+        ],
+        "Color.ORANGE": [
+          6
+        ],
+        "Color.RED": [
+          8
+        ],
+        "Color.WHITE": [
+          4
+        ]
+      },
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "pythonhashseed": "0",
+      "seed": 650100005,
+      "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "wall_seconds": 6.4480180779937655,
+      "wins": {
+        "Color.BLUE": 1,
+        "Color.ORANGE": 0,
+        "Color.RED": 0,
+        "Color.WHITE": 0
+      }
+    },
+    {
+      "action_count": 423,
+      "action_sha256": "509a7067d906d8acf72140bd69badc1584663469ee7463d93e9aaf26122cde35",
+      "audit": false,
+      "cache": null,
+      "cpu_seconds": 21.756398171,
+      "deadline_observations": null,
+      "game_seed": 3964811508561727583,
+      "game_type": "standard",
+      "leaf_sha256": null,
+      "leaves": null,
+      "mode": "off",
+      "native_deadline_seconds": 20,
+      "players": "DC:heximax-notrade,AB:2,AB:2,AB:2",
+      "points": {
+        "Color.BLUE": [
+          7
+        ],
+        "Color.ORANGE": [
+          7
+        ],
+        "Color.RED": [
+          10
+        ],
+        "Color.WHITE": [
+          9
+        ]
+      },
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "pythonhashseed": "0",
+      "seed": 650100006,
+      "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "wall_seconds": 21.762203126214445,
+      "wins": {
+        "Color.BLUE": 0,
+        "Color.ORANGE": 0,
+        "Color.RED": 1,
+        "Color.WHITE": 0
+      }
+    },
+    {
+      "action_count": 423,
+      "action_sha256": "509a7067d906d8acf72140bd69badc1584663469ee7463d93e9aaf26122cde35",
+      "audit": false,
+      "cache": {
+        "entries": 3459,
+        "hits": 80400,
+        "max_entries": 4096,
+        "misses": 3459
+      },
+      "cpu_seconds": 11.632822418,
+      "deadline_observations": null,
+      "game_seed": 3964811508561727583,
+      "game_type": "standard",
+      "leaf_sha256": null,
+      "leaves": null,
+      "mode": "cached",
+      "native_deadline_seconds": 20,
+      "players": "DC:heximax-notrade,AB:2,AB:2,AB:2",
+      "points": {
+        "Color.BLUE": [
+          7
+        ],
+        "Color.ORANGE": [
+          7
+        ],
+        "Color.RED": [
+          10
+        ],
+        "Color.WHITE": [
+          9
+        ]
+      },
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "pythonhashseed": "0",
+      "seed": 650100006,
+      "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "wall_seconds": 11.635593036888167,
+      "wins": {
+        "Color.BLUE": 0,
+        "Color.ORANGE": 0,
+        "Color.RED": 1,
+        "Color.WHITE": 0
+      }
+    },
+    {
+      "action_count": 423,
+      "action_sha256": "509a7067d906d8acf72140bd69badc1584663469ee7463d93e9aaf26122cde35",
+      "audit": false,
+      "cache": {
+        "entries": 2907,
+        "hits": 80952,
+        "max_entries": 4096,
+        "misses": 2907
+      },
+      "cpu_seconds": 7.146721006,
+      "deadline_observations": null,
+      "game_seed": 3964811508561727583,
+      "game_type": "standard",
+      "leaf_sha256": null,
+      "leaves": null,
+      "mode": "fast",
+      "native_deadline_seconds": 20,
+      "players": "DC:heximax-notrade,AB:2,AB:2,AB:2",
+      "points": {
+        "Color.BLUE": [
+          7
+        ],
+        "Color.ORANGE": [
+          7
+        ],
+        "Color.RED": [
+          10
+        ],
+        "Color.WHITE": [
+          9
+        ]
+      },
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "pythonhashseed": "0",
+      "seed": 650100006,
+      "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "wall_seconds": 7.1480624719988555,
+      "wins": {
+        "Color.BLUE": 0,
+        "Color.ORANGE": 0,
+        "Color.RED": 1,
+        "Color.WHITE": 0
+      }
+    },
+    {
+      "action_count": 304,
+      "action_sha256": "fb6c78cb104626487c05b67d4b0b1c98baed384dff9a771937f6f1761e4ada8a",
+      "audit": false,
+      "cache": {
+        "entries": 2827,
+        "hits": 69305,
+        "max_entries": 4096,
+        "misses": 2827
+      },
+      "cpu_seconds": 7.683552246,
+      "deadline_observations": null,
+      "game_seed": 1530639886481614216,
+      "game_type": "standard",
+      "leaf_sha256": null,
+      "leaves": null,
+      "mode": "cached",
+      "native_deadline_seconds": 20,
+      "players": "DC:heximax-notrade,AB:2,AB:2,AB:2",
+      "points": {
+        "Color.BLUE": [
+          3
+        ],
+        "Color.ORANGE": [
+          7
+        ],
+        "Color.RED": [
+          10
+        ],
+        "Color.WHITE": [
+          3
+        ]
+      },
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "pythonhashseed": "0",
+      "seed": 650100007,
+      "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "wall_seconds": 7.684879457112402,
+      "wins": {
+        "Color.BLUE": 0,
+        "Color.ORANGE": 0,
+        "Color.RED": 1,
+        "Color.WHITE": 0
+      }
+    },
+    {
+      "action_count": 304,
+      "action_sha256": "fb6c78cb104626487c05b67d4b0b1c98baed384dff9a771937f6f1761e4ada8a",
+      "audit": false,
+      "cache": {
+        "entries": 2483,
+        "hits": 69649,
+        "max_entries": 4096,
+        "misses": 2483
+      },
+      "cpu_seconds": 4.685350052,
+      "deadline_observations": null,
+      "game_seed": 1530639886481614216,
+      "game_type": "standard",
+      "leaf_sha256": null,
+      "leaves": null,
+      "mode": "fast",
+      "native_deadline_seconds": 20,
+      "players": "DC:heximax-notrade,AB:2,AB:2,AB:2",
+      "points": {
+        "Color.BLUE": [
+          3
+        ],
+        "Color.ORANGE": [
+          7
+        ],
+        "Color.RED": [
+          10
+        ],
+        "Color.WHITE": [
+          3
+        ]
+      },
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "pythonhashseed": "0",
+      "seed": 650100007,
+      "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "wall_seconds": 4.686151043977588,
+      "wins": {
+        "Color.BLUE": 0,
+        "Color.ORANGE": 0,
+        "Color.RED": 1,
+        "Color.WHITE": 0
+      }
+    },
+    {
+      "action_count": 304,
+      "action_sha256": "fb6c78cb104626487c05b67d4b0b1c98baed384dff9a771937f6f1761e4ada8a",
+      "audit": false,
+      "cache": null,
+      "cpu_seconds": 16.100782335,
+      "deadline_observations": null,
+      "game_seed": 1530639886481614216,
+      "game_type": "standard",
+      "leaf_sha256": null,
+      "leaves": null,
+      "mode": "off",
+      "native_deadline_seconds": 20,
+      "players": "DC:heximax-notrade,AB:2,AB:2,AB:2",
+      "points": {
+        "Color.BLUE": [
+          3
+        ],
+        "Color.ORANGE": [
+          7
+        ],
+        "Color.RED": [
+          10
+        ],
+        "Color.WHITE": [
+          3
+        ]
+      },
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]",
+      "pythonhashseed": "0",
+      "seed": 650100007,
+      "source_sha256": "8df53df693c6bc279618d775b388d132295f9224870d9a974b79efe28ee7fdd0",
+      "wall_seconds": 16.107860473915935,
+      "wins": {
+        "Color.BLUE": 0,
+        "Color.ORANGE": 0,
+        "Color.RED": 1,
+        "Color.WHITE": 0
+      }
+    }
+  ],
+  "totals": {
+    "cached": {
+      "baseline_wall_seconds": 110.99995331536047,
+      "candidate_wall_seconds": 54.97844660980627,
+      "pairs": 8,
+      "speedup": 2.0189721638217746,
+      "wall_reduction": 0.5046984708758593
+    },
+    "fast": {
+      "baseline_wall_seconds": 110.99995331536047,
+      "candidate_wall_seconds": 35.365137088811025,
+      "pairs": 8,
+      "speedup": 3.138682964429371,
+      "wall_reduction": 0.6813950273624385
+    }
+  }
+}

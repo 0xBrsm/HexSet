@@ -45,7 +45,17 @@ it is not guaranteed for deadline-limited decisions.
 On eight paired four-player AB2 games, `basic` reduced total wall time from
 103.04 to 55.90 seconds (1.84x throughput); `cached` reduced it to 52.19 seconds
 (1.97x). Every ordered action trace and outcome matched. These are one-CPU
-measurements; see the [full readout and raw records](readouts/ab-speedups/README.md).
+measurements; see the [initial readout and raw records](readouts/ab-speedups/README.md).
+
+On a new eight-seed sample, `fast` reduced wall time from 111.00 seconds native
+and 54.98 seconds cached to 35.37 seconds: 3.14x native throughput and 55.46%
+more throughput than cached. All full action traces and outcomes matched. See
+the [follow-up readout and records](readouts/ab-throughput/README.md).
+
+In two 240-game trials per profile on 30 workers, mean batch time fell from
+184.91 seconds cached/static to 121.72 fast/static and 109.15 fast/dynamic.
+Combined throughput increased 69.41%, with every full trace and outcome matching
+across all profiles and repetitions.
 
 ## Verification and measurement
 

@@ -2,7 +2,8 @@
 """Optional accelerations for the pinned Catanatron reference implementation.
 
 The base evaluator below is derived from Catanatron players/value.py at
-d3f4ad05bb78d8b2309631d6d3cfa8fcb6fda816 (GPL-3.0). Arithmetic, including
+ecf931181b9a65bb4116a2153fb78c16f1438e00 (GPL-3.0; `base_fn` is unchanged
+from d3f4ad05bb78d8b2309631d6d3cfa8fcb6fda816). Arithmetic, including
 its fixed seven-card penalty and relative P1 opponent, is preserved exactly.
 The scoped context is process-global and intended for single-threaded workers.
 """
@@ -47,11 +48,11 @@ def verify_runtime() -> None:
     from catanatron.models import board
     from catanatron.players import minimax
     expected = (
-        (native_state, "a4df080ed45210feecbae21b72bbc6f9b067d2a3030c3b77d98cda8574a416e2"),
+        (native_state, "be1e4da790b21589a171aed8068a847594cdde8da9818c35c89988b4ae5f2e15"),
         (features, "f6ec7fd7f30f740a75c978c9a8166512c6514052a79802992216dbd812553746"),
-        (native_value, "e25e6e15ff38141568119b912474761fee47a289ad3735a25913b8635f58a56b"),
+        (native_value, "22d207049f55247e314513adfa5a23c52e998578a81cdff44094f91429903e6b"),
         (board, "f22f004b5894d4002575dd2c5dad8feecec96d1557b140d057550701229f9d1a"),
-        (minimax, "97a6bf10e5fac7f6655ad5b1614f268926ed86976ee59815d93f24a1b0e048dd"),
+        (minimax, "45499973edf091a7a7bf2c0fa02958dd39ca9bb3a7301d57c3bb7292e83f454d"),
     )
     for module, digest in expected:
         if hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest() != digest:
@@ -105,6 +106,9 @@ def clone_state_mutable_structures(self):
         State: State copy.
     """
     state_copy = State([], None, initialize=False)
+    # Shared by reference, like the native copy: simulations on copies must
+    # advance the same per-game stream (upstream `State.copy` does this).
+    state_copy.random = self.random
     state_copy.players = self.players
     state_copy.discard_limit = self.discard_limit  # immutable
     state_copy.friendly_robber = self.friendly_robber  # immutable

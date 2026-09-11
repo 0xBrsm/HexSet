@@ -389,3 +389,50 @@ def test_stranded_road_building_credit_does_not_deadlock_reference(phase):
     reference = spawn(entrant_from_name("catanatron"), board, random.Random(5))
     assert reference.choose(game) == Action(expected)
     assert game.free_roads == 1  # the mirror never mutates the real game
+
+
+@pytest.mark.parametrize("mode", ["off", "fast"])
+def test_mirror_rng_is_picklable_shared_by_copies_and_isolated_from_live_game(mode):
+    import pickle
+    from hexset.arena import deal_game
+    from hexset.catanatron.speedups import catanatron_speedups
+    game = deal_game(145, 0, 4)
+    board = game.state(0, hidden=False).board
+    mapping = translate_board(catanatron_map(board))
+    live_before, global_before = game.rng.getstate(), random.getstate()
+    with catanatron_speedups(mode):
+        mirror = to_catanatron(game, mapping, seating(tuple(Color)))
+        copied = mirror.copy()
+        assert copied.random is copied.state.random is mirror.random is mirror.state.random
+        assert mirror.random is not game.rng
+        copied.random.random()
+        restored = pickle.loads(pickle.dumps(mirror))
+        assert restored.random is restored.state.random
+        assert restored.random.getstate() == mirror.random.getstate()
+    assert game.rng.getstate() == live_before
+    assert random.getstate() == global_before
+
+
+def test_arena_reference_bots_use_independent_seeded_search_streams():
+    from catanatron.models.player import Player
+    from hexset.arena import Entrant, deal_game
+    game = deal_game(145, 0, 4)
+    board = game.state(0, hidden=False).board
+    draws = []
+
+    class RecordingPlayer(Player):
+        def decide(self, mirror, actions):
+            draws.append(mirror.copy().random.random())
+            return actions[0]
+
+    bot = spawn(Entrant('catanatron', kind='catanatron'), board, random.Random(145))
+    other = spawn(Entrant('catanatron', kind='catanatron'), board, random.Random(99))
+    bot.player = other.player = RecordingPlayer
+    live_before, global_before = game.rng.getstate(), random.getstate()
+    bot.choose(game)
+    other.choose(game)
+    bot.choose(game)
+    expected = random.Random(145)
+    assert draws == [expected.random(), random.Random(99).random(), expected.random()]
+    assert game.rng.getstate() == live_before
+    assert random.getstate() == global_before

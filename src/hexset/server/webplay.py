@@ -361,13 +361,16 @@ class _Snapshot:
 # Building's free roads need no special case: they still arrive as ordinary
 # BUILD_ROAD
 # actions (see game.build_road), so restoring game.free_roads alongside the
-# board covers them too. PLAY_ROAD_BUILDING itself is in here too, for the
-# instant right after the card is played but before either free road has
-# landed — the only way to give the card back once it's already spent
-# server-side (unlike a Knight, which now resolves through the same forced
-# robber phase a seven does the instant it is played, and is no more
-# undoable than that: a seven's own robber move has never had an undo point
-# either).
+# board covers them too. PLAY_ROAD_BUILDING and PLAY_KNIGHT are both in here
+# for the same reason: the instant right after the card is played but before
+# what it opens (a free road, the forced robber move) has landed -- the only
+# way to give either card back once it's already spent server-side. A
+# Knight resolves through the same forced robber phase a seven does, but a
+# seven itself is never in this set: there is no card to hand back and
+# nothing before the roll to restore to, so its own robber move has never
+# had an undo point and still doesn't. Playing a Knight that immediately wins
+# the game is excluded the same way any other winning action is -- see the
+# is_over check below, in _apply.
 _UNDOABLE_BUILDS: frozenset[ActionType] = frozenset(
     {
         ActionType.SETUP_SETTLEMENT,
@@ -377,6 +380,7 @@ _UNDOABLE_BUILDS: frozenset[ActionType] = frozenset(
         ActionType.BUILD_CITY,
         ActionType.BANK_TRADE,
         ActionType.PLAY_ROAD_BUILDING,
+        ActionType.PLAY_KNIGHT,
     }
 )
 
@@ -393,7 +397,14 @@ class _UndoPoint:
     setup_step/last_settlement only ever move during setup (see
     game.place_initial_settlement/place_initial_road) and are otherwise
     exactly what they were, so restoring them unconditionally is correct
-    either way rather than needing two separate cases."""
+    either way rather than needing two separate cases. dev_card_played is
+    the one piece of this a card play touches that state doesn't: it lives
+    on Game, not GameState, so set_state's swap in undo_last_build would
+    otherwise leave it stuck true and lock the seat out of every dev card
+    for the rest of the turn even though the one it "spent" just came back
+    (caught writing this test for the Knight -- Road Building had carried
+    the same gap silently since undo could reach it, just never enough
+    seconds for anyone to run into it)."""
 
     state: GameState
     # The public-knowledge ledger, snapshotted with the state and restored
@@ -409,6 +420,7 @@ class _UndoPoint:
     current_player: int
     setup_step: int
     last_settlement: int
+    dev_card_played: bool
     events: int
     steps: int
     # Whose action this would take back. Only its own actor may undo it: with
@@ -1650,6 +1662,7 @@ class GameSession:
                 current_player=self.game.current_player,
                 setup_step=self.game.setup_step,
                 last_settlement=self.game.last_settlement,
+                dev_card_played=self.game.dev_card_played,
                 events=len(self.events),
                 steps=self._steps,
                 actor=actor,
@@ -1769,14 +1782,16 @@ class GameSession:
 
     def undo_last_build(self, seat: int) -> None:
         """Reverts `seat`'s most recent placement, bank/port trade, or Road
-        Building play back to exactly how the session stood the instant
-        before it: piece removed and resources refunded (including a second
-        setup settlement's grant) or traded resources returned, or the card
-        handed back and free_roads zeroed, longest road/largest army
-        recomputed from the restored board, whose turn it is un-advanced if
-        the action handed off to someone else, the event (and so its log
-        line) dropped, step count wound back. Only ever available since that
-        seat's own last qualifying action — see _apply.
+        Building/Knight play back to exactly how the session stood the
+        instant before it: piece removed and resources refunded (including a
+        second setup settlement's grant) or traded resources returned, or the
+        card handed back — free_roads zeroed for Road Building, largest army
+        and the robber phase itself undone for a Knight (game.set_state
+        restores its holder and victory points along with everything else) —
+        longest road/largest army recomputed from the restored board, whose
+        turn it is un-advanced if the action handed off to someone else, the
+        event (and so its log line) dropped, step count wound back. Only ever
+        available since that seat's own last qualifying action — see _apply.
 
         Somebody else's undoable action is not offered here even though the
         session only ever holds one: at a table with several people, the most
@@ -1798,6 +1813,7 @@ class GameSession:
         self.game.current_player = point.current_player
         self.game.setup_step = point.setup_step
         self.game.last_settlement = point.last_settlement
+        self.game.dev_card_played = point.dev_card_played
         del self.events[point.events :]
         self._steps = point.steps
         if self.journal is not None:

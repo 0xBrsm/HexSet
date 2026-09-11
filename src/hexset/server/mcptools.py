@@ -589,8 +589,10 @@ _TOOLS: dict[str, tuple] = {
     ),
     "undo": (
         _undo,
-        "Undo your own most recent build or bank trade, if state()'s can_undo is "
-        "true. Anything else (another seat's move, a played development card) "
+        "Undo your own most recent build, bank trade, Road Building, or Knight, "
+        "if state()'s can_undo is true. A Knight stays undoable up through the "
+        "forced robber move it opens, until that move is actually made. "
+        "Anything else (another seat's move, a rolled seven's own robber move) "
         "cannot be undone.",
         {"type": "object", "properties": {}},
     ),

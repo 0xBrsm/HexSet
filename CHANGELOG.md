@@ -5,6 +5,27 @@ Changes to the HexSet distribution. The project follows
 
 ## Unreleased
 
+### Added
+
+- `hexset.catanatron.duel --game-type=colonist-1v1`: a 15 VP /
+  discard-over-9 rules variant. Rules travel on `GameState` through copies
+  and the Catanatron bridge, so Heximax's win bonus and discard model match
+  the table actually being played.
+
+### Changed
+
+- `hexset.catanatron.duel --speedups {basic,cached}`: opt-in accelerations
+  for the pinned Catanatron reference bot -- board copying and a shared
+  feature cache, checked against the pinned upstream implementation's hash
+  before installing.
+- Native state evaluation and dynamically scheduled duel games, speeding up
+  mixed HexSet/Catanatron throughput runs.
+- The Catanatron adapter now shares its board/seat mapping and caches an
+  unchanged board's reconstruction across `CatanatronBot` instances working
+  the same table.
+
+## 0.48.3
+
 ### Fixed
 
 - **The board's setup-turn controls were gated twice, on two different
@@ -41,28 +62,11 @@ Changes to the HexSet distribution. The project follows
   against the unfixed page. It also covers a reopen restoring the hold,
   which nothing else did.
 
-- `hexset.catanatron.duel --game-type=colonist-1v1`: a 15 VP /
-  discard-over-9 rules variant. Rules travel on `GameState` through copies
-  and the Catanatron bridge, so Heximax's win bonus and discard model match
-  the table actually being played.
-
 - `tests/server/test_page_robber_undo.py` and
   `tests/server/test_page_trade_acceptance_colors.py`: browser coverage for
   the Knight-undo and trade-pane fixes above, for the same reason the setup
   hold's own coverage exists -- both are `index.html` rendering/interaction
   logic the Python suite can't see.
-
-### Changed
-
-- `hexset.catanatron.duel --speedups {basic,cached}`: opt-in accelerations
-  for the pinned Catanatron reference bot -- board copying and a shared
-  feature cache, checked against the pinned upstream implementation's hash
-  before installing.
-- Native state evaluation and dynamically scheduled duel games, speeding up
-  mixed HexSet/Catanatron throughput runs.
-- The Catanatron adapter now shares its board/seat mapping and caches an
-  unchanged board's reconstruction across `CatanatronBot` instances working
-  the same table.
 
 ## 0.48.2
 

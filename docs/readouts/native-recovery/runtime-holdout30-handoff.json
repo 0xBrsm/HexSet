@@ -1,0 +1,144 @@
+[
+  {
+    "id": "d2881ae1103eca977641a1f9d8c79f89ad76659f732def47906bf555a51527cf",
+    "name": "/hexset-native-recovery-local-followon",
+    "image": "sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+    "created": "2026-09-11T05:31:53.716310505Z",
+    "state": {
+      "Status": "exited",
+      "Running": false,
+      "Paused": false,
+      "Restarting": false,
+      "OOMKilled": false,
+      "Dead": false,
+      "Pid": 0,
+      "ExitCode": 137,
+      "Error": "",
+      "StartedAt": "2026-09-11T05:31:53.832938614Z",
+      "FinishedAt": "2026-09-11T05:44:42.313308457Z"
+    },
+    "command": [
+      "/configs/run_local_followon.py"
+    ],
+    "entrypoint": [
+      "python"
+    ],
+    "env": [
+      "OMP_NUM_THREADS=1",
+      "MKL_NUM_THREADS=1",
+      "PYTHONPATH=/study/src",
+      "PYTHONHASHSEED=0",
+      "OPENBLAS_NUM_THREADS=1",
+      "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "LANG=C.UTF-8",
+      "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+      "PYTHON_VERSION=3.12.14",
+      "PYTHON_SHA256=5c8462af5790baf43a321a1559dbe0db06d1be4300fb85fb53c40060668e548a",
+      "HOME=/tmp",
+      "PYTHONDONTWRITEBYTECODE=1",
+      "PYTHONUNBUFFERED=1",
+      "HEXSET_UI_MODELS_DIR=/app/models",
+      "HEXSET_UI_GAMES_DIR=/app/games"
+    ],
+    "user": "1000:1000",
+    "mounts": [
+      {
+        "Type": "bind",
+        "Source": "/home/bsm/tmp/hexset-native-recovery-configs",
+        "Destination": "/configs",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/bsm/tmp/hexset-native-recovery-results",
+        "Destination": "/out",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/bsm/tmp/hexset-native-recovery-d3d4618",
+        "Destination": "/study",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      }
+    ],
+    "nano_cpus": 16000000000,
+    "network": "none"
+  },
+  {
+    "id": "0db232baf20cbd7dcebd7b7eed1fbf165925943cc9f1d80c30760b1540c08e0f",
+    "name": "/hexset-native-recovery-holdout30",
+    "image": "sha256:58c092875440c770999bada97e0ec7c5178b68fbe640bf3f5a131bc8a624f7be",
+    "created": "2026-09-11T05:44:42.691142335Z",
+    "state": {
+      "Status": "running",
+      "Running": true,
+      "Paused": false,
+      "Restarting": false,
+      "OOMKilled": false,
+      "Dead": false,
+      "Pid": 95309,
+      "ExitCode": 0,
+      "Error": "",
+      "StartedAt": "2026-09-11T05:44:42.842909487Z",
+      "FinishedAt": "0001-01-01T00:00:00Z"
+    },
+    "command": [
+      "/configs/resume_holdout30.py"
+    ],
+    "entrypoint": [
+      "python"
+    ],
+    "env": [
+      "PYTHONPATH=/study/src",
+      "PYTHONHASHSEED=0",
+      "OPENBLAS_NUM_THREADS=1",
+      "OMP_NUM_THREADS=1",
+      "MKL_NUM_THREADS=1",
+      "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "LANG=C.UTF-8",
+      "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+      "PYTHON_VERSION=3.12.14",
+      "PYTHON_SHA256=5c8462af5790baf43a321a1559dbe0db06d1be4300fb85fb53c40060668e548a",
+      "HOME=/tmp",
+      "PYTHONDONTWRITEBYTECODE=1",
+      "PYTHONUNBUFFERED=1",
+      "HEXSET_UI_MODELS_DIR=/app/models",
+      "HEXSET_UI_GAMES_DIR=/app/games"
+    ],
+    "user": "1000:1000",
+    "mounts": [
+      {
+        "Type": "bind",
+        "Source": "/home/bsm/tmp/hexset-native-recovery-results",
+        "Destination": "/out",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/bsm/tmp/hexset-native-recovery-d3d4618",
+        "Destination": "/study",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/bsm/tmp/hexset-native-recovery-configs",
+        "Destination": "/configs",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      }
+    ],
+    "nano_cpus": 30000000000,
+    "network": "none"
+  }
+]

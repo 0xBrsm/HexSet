@@ -1,0 +1,36 @@
+{
+  "protocol": "native-hexset-public-ledger-v1-independent-boards",
+  "source_sha256": "efaecd276604bc23c7d16a23a996cc3815064353dd2d453e52f146fc21d347b1",
+  "seed": 715000000,
+  "games_per_gate": 512,
+  "workers": 16,
+  "audit": false,
+  "speedups": "fast",
+  "seconds": 364.33007601997815,
+  "rows": [
+    {
+      "candidate": "road-zero-exp025",
+      "gate": "ab2",
+      "games": 512,
+      "wins": 273,
+      "rate": 0.533203125,
+      "wilson95": [
+        0.4899024627427137,
+        0.5760092615179452
+      ],
+      "seconds": 4262.491611566627
+    },
+    {
+      "candidate": "road-zero-exp025",
+      "gate": "shipped",
+      "games": 512,
+      "wins": 171,
+      "rate": 0.333984375,
+      "wilson95": [
+        0.294501837033951,
+        0.3759395416627544
+      ],
+      "seconds": 1536.4576913884375
+    }
+  ]
+}

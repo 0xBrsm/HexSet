@@ -1,0 +1,1 @@
+2026-09-11T05:44:23.188274904Z {"stage": "holdout", "candidate": "road-zero-exp025", "games_per_gate": 2048, "seed": 716000000, "attempt": 1, "alpha": 0.025}

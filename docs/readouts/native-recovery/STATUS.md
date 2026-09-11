@@ -128,3 +128,15 @@ hexset-native-recovery-local-followon. It may advance to the registered
 2048/gate first holdout at seed 716000000 only with 269 AB2 and 144 shipped
 confirmation wins. The earlier failed p10-exp025 confirmation remains in
 the evidence; it is not combined into this candidate's fresh result.
+
+
+Road-zero-exp025 fresh confirmation passed the advancement rule: 273/512
+AB2 (53.32%, interval 48.99–57.60%) and 171/512 shipped (33.40%, 29.45–37.59%).
+The first fixed holdout is underway: seed 716000000, 2048 games/gate,
+attempt 1, alpha .025 in addition to ordinary 95% intervals. It initially
+started in the 16-worker controller. Following the user's correction about
+available capacity, confirmation was allowed to finish and the holdout was
+resumed with 30 workers, retaining completed per-game checkpoints. Wintermute
+reports 32 CPUs, negligible competing CPU, and the new pool uses about 30 CPUs.
+Current container: hexset-native-recovery-holdout30. Source and statistical
+rules are unchanged. Do not interpret interim holdout wins or stop for success.

@@ -32,3 +32,8 @@ SHA256: `ac970a959c54d5340a4731ffd00a10913540d4d7f67455d632a5ea4fa6b70392`.
 `expansion-local-screen.tar.gz` contains the fresh local selection block,
 seed 714000000: five arms at 64/gate, three extended to 256/gate (1,792
 unique exploratory games). SHA256: `43035a8ea63a37b918e936a3f13958f80e38cb3c624fdaf87a8d5c6c2cf2d0d3`.
+
+`confirmation-road-zero-exp025.tar.gz` contains its 1,024 fresh confirmation
+games, seed 715000000. Both advancement criteria passed (273 AB2 and 171
+shipped wins out of 512 each), authorizing the first fixed holdout.
+SHA256: `c623b2d83b7c922e4ad7e090a46b4ab5f077b4018a0c1a439e46a1f83178ac03`.

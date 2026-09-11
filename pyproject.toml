@@ -20,7 +20,7 @@ server = ["onnxruntime>=1.18"]
 clients = ["onnxruntime>=1.18"]
 export = ["onnx>=1.16", "onnxruntime>=1.18"]
 # Pin the reference engine so comparison results identify an exact implementation.
-catanatron = ["catanatron @ git+https://github.com/bcollazo/catanatron.git@d3f4ad05bb78d8b2309631d6d3cfa8fcb6fda816"]
+catanatron = ["catanatron @ git+https://github.com/bcollazo/catanatron.git@ecf931181b9a65bb4116a2153fb78c16f1438e00"]
 # hexset.gym: a PettingZoo AEC environment (`HexSetAEC`) and a Gymnasium
 # wrapper (`HexSetEnv`, registered as "HexSet-v0"). `import hexset` stays
 # numpy-only, and so does `hexset.gym.lanes` -- only the two environments

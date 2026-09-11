@@ -1,0 +1,122 @@
+{
+  "ranking": [
+    {
+      "candidate": "M:T:0.0",
+      "wins": 130,
+      "games": 320,
+      "rate": 0.40625
+    },
+    {
+      "candidate": "A:T:0.0",
+      "wins": 117,
+      "games": 320,
+      "rate": 0.365625
+    },
+    {
+      "candidate": "H:T:0.0",
+      "wins": 110,
+      "games": 320,
+      "rate": 0.34375
+    },
+    {
+      "candidate": "P:T:0.0",
+      "wins": 106,
+      "games": 320,
+      "rate": 0.33125
+    },
+    {
+      "candidate": "N:T:0.0",
+      "wins": 99,
+      "games": 320,
+      "rate": 0.309375
+    },
+    {
+      "candidate": "T:T:0.0",
+      "wins": 88,
+      "games": 320,
+      "rate": 0.275
+    }
+  ],
+  "contrasts_against_trading": [
+    {
+      "a": "A:T:0.0",
+      "b": "T:T:0.0",
+      "regimes": [
+        "quiet",
+        "moderate",
+        "active",
+        "mixed",
+        "rising"
+      ],
+      "difference": 0.090625,
+      "interval95": [
+        0.02558975977960745,
+        0.15566024022039254
+      ]
+    },
+    {
+      "a": "H:T:0.0",
+      "b": "T:T:0.0",
+      "regimes": [
+        "quiet",
+        "moderate",
+        "active",
+        "mixed",
+        "rising"
+      ],
+      "difference": 0.06875,
+      "interval95": [
+        0.007832571289520043,
+        0.12966742871047998
+      ]
+    },
+    {
+      "a": "M:T:0.0",
+      "b": "T:T:0.0",
+      "regimes": [
+        "quiet",
+        "moderate",
+        "active",
+        "mixed",
+        "rising"
+      ],
+      "difference": 0.13125,
+      "interval95": [
+        0.06436855755760218,
+        0.19813144244239783
+      ]
+    },
+    {
+      "a": "N:T:0.0",
+      "b": "T:T:0.0",
+      "regimes": [
+        "quiet",
+        "moderate",
+        "active",
+        "mixed",
+        "rising"
+      ],
+      "difference": 0.034375,
+      "interval95": [
+        -0.0303849769637501,
+        0.09913497696375011
+      ]
+    },
+    {
+      "a": "P:T:0.0",
+      "b": "T:T:0.0",
+      "regimes": [
+        "quiet",
+        "moderate",
+        "active",
+        "mixed",
+        "rising"
+      ],
+      "difference": 0.05625,
+      "interval95": [
+        -0.006601489590095107,
+        0.11910148959009512
+      ]
+    }
+  ]
+}

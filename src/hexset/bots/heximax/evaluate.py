@@ -39,7 +39,8 @@ from hexset.devcards import holdings
 from hexset.economy import COSTS
 from hexset.game import Game
 from hexset.ledger import PublicLedger
-from hexset.state import GameState
+from hexset.state import (GameState, MAX_SETTLEMENTS, MAX_ROADS,
+                          can_place_road, can_place_settlement)
 from hexset.victory import award_points, card_points
 
 from hexset.view import View
@@ -118,11 +119,32 @@ NO_TRADE_WEIGHTS = Weights(
     # confirmed 52.9% [51.1, 54.7] over 3,072 fresh boards against the start.
     # The six other terms held at every ring value.
     buy_progress=Weights.buy_progress,
-    road=0.1237,
+    # Native holdout: useful expansion credit replaces unconditional road value.
+    # See docs/readouts/native-expansion/README.md.
+    road=0.0,
     knight=0.1026,
     spare_card=0.1065,
     robber_risk=-0.30,
     port=0.03063,
+)
+
+
+# Fixed compromise confirmed in native floor-zero games across six moderate,
+# mixed and changing conditions: 523/1536 versus shared T's 396/1536.
+# Use with expansion_value=.125 and a separate TRADING_WEIGHTS gate.
+# Frozen coefficients preserve the tested policy if either endpoint changes.
+# See docs/readouts/trading-conditions/README.md for scope and uncertainty.
+BALANCED_WEIGHTS = Weights(
+    buy_progress=0.45,
+    diversity=0.358,
+    knight=0.10335,
+    port=0.0190015,
+    production=4.926,
+    road=0.06045,
+    robber_risk=-0.3,
+    scarce=0.12449930555555556,
+    spare_card=0.12825,
+    victory_point=1.0,
 )
 
 
@@ -143,12 +165,14 @@ class HonestEvaluator:
 
     def __init__(
         self, board: Board, weights: Weights | None = None, *,
-        exact_progress_samples: int = 0,
+        exact_progress_samples: int = 0, expansion_value: float = 0.0,
     ) -> None:
         self.inner = Evaluator(board, weights)
         self.weights = self.inner.weights
         self.vector = self.inner.vector
         self.exact_progress_samples = exact_progress_samples
+        self.expansion_value = expansion_value
+        self._expansion_cache: dict[tuple, float] = {}
         self._walk_cache: dict[tuple, Survey] = {}
         self._belief_cache: dict[tuple, View] = {}
         self._evaluate_cache: dict[tuple, list[float]] = {}
@@ -325,6 +349,51 @@ class HonestEvaluator:
             walk.port_gain,
         )
 
+    def expansion_bonus(self, state: GameState, seat: int) -> float:
+        """Bounded option value of the best settlement site at 0 or 1 roads.
+
+        Public board facts only. Taking a maximum avoids credit for many
+        mutually incompatible sites. The coefficient caps the total bonus:
+        below one VP, losing the entire option can never offset the actual
+        point earned by settling it (before considering hand costs).
+        """
+        if not self.expansion_value:
+            return 0.0
+        key = (tuple(state.vertex_owner), tuple(state.vertex_building),
+               tuple(state.edge_owner), seat)
+        if key in self._expansion_cache:
+            return self._expansion_cache[key]
+        walk = self._walk(state, seat)
+        if walk.settlements >= MAX_SETTLEMENTS:
+            self._expansion_cache[key] = 0.0
+            return 0.0
+        edges = state.board.topology.edges
+        sites: dict[int, float] = {}
+        for edge, owner in enumerate(state.edge_owner):
+            if owner == seat:
+                for vertex in edges[edge]:
+                    sites[vertex] = 1.0
+        if walk.roads < MAX_ROADS:
+            frontier = set(sites) | {v for v, owner in enumerate(state.vertex_owner)
+                                     if owner == seat}
+            possible = {edge for vertex in frontier
+                        if state.vertex_owner[vertex] in (-1, seat)
+                        for edge in state.board.topology.vertex_edges[vertex]}
+            for edge in possible:
+                if can_place_road(state, seat, edge):
+                    for vertex in edges[edge]:
+                        sites.setdefault(vertex, 0.5)
+        best = 0.0
+        for vertex, discount in sites.items():
+            if can_place_settlement(state, seat, vertex, connected=False):
+                # A future site is priced by its unblocked long-run yield;
+                # temporary robber placement does not change its geography.
+                production = sum(p for _, _, p in self.inner.yields[vertex])
+                best = max(best, discount * min(1.0, production / 15.0))
+        bonus = self.expansion_value * best
+        self._expansion_cache[key] = bonus
+        return bonus
+
     def score(
         self, state: GameState, seat: int, hand: Sequence[float], *, knower: int | None = None,
         belief: View | None = None,
@@ -337,7 +406,7 @@ class HonestEvaluator:
             total += weight * value
         if values[0] >= state.rules.winning_points:
             total += WIN_SCORE
-        return total
+        return total + self.expansion_bonus(state, seat)
 
     def score_many(self, state: GameState, knower: int, hands: np.ndarray) -> np.ndarray:
         """`score`, over every row of `hands` at once: `(candidates, seat,
@@ -449,6 +518,9 @@ class HonestEvaluator:
         for weight, value in zip(vector, values):
             total = total + weight * value
         total = total + WIN_SCORE * (points >= state.rules.winning_points)
+        if self.expansion_value:
+            total = total + np.array([self.expansion_bonus(state, seat)
+                                     for seat in range(num_players)])
         return total
 
     def evaluate(

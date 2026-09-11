@@ -1,0 +1,324 @@
+{
+  "source_sha256": "d2df60dd0abeb72f1bd0ae4222716ce1b4246ac249c64cd2d76aeb0aa611b001",
+  "games": 12,
+  "exact_no_trade_pairs": 4,
+  "complete_trading_smoke_games": 4,
+  "rows": [
+    {
+      "regime": "none",
+      "index": 0,
+      "adaptive": {
+        "winner": 1,
+        "points": [
+          6,
+          10,
+          7,
+          5
+        ],
+        "seating": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "turns": 53,
+        "actions": 205,
+        "action_sha256": "d8380ece2f8c20fa9139cbb9e1ce9986d74c6e5b6a2c8a1f114a0a1fa3a01447",
+        "observations": 53,
+        "activities": [
+          0.0
+        ]
+      },
+      "fixed": {
+        "winner": 1,
+        "points": [
+          6,
+          10,
+          7,
+          5
+        ],
+        "seating": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "turns": 53,
+        "actions": 205,
+        "action_sha256": "d8380ece2f8c20fa9139cbb9e1ce9986d74c6e5b6a2c8a1f114a0a1fa3a01447",
+        "observations": 0,
+        "activities": []
+      }
+    },
+    {
+      "regime": "none",
+      "index": 1,
+      "adaptive": {
+        "winner": 1,
+        "points": [
+          7,
+          10,
+          6,
+          9
+        ],
+        "seating": [
+          1,
+          2,
+          3,
+          0
+        ],
+        "turns": 94,
+        "actions": 364,
+        "action_sha256": "ac5dfd32f0c8850e10064405303949e31dcb148bac73aea312c911df72b7153a",
+        "observations": 95,
+        "activities": [
+          0.0
+        ]
+      },
+      "fixed": {
+        "winner": 1,
+        "points": [
+          7,
+          10,
+          6,
+          9
+        ],
+        "seating": [
+          1,
+          2,
+          3,
+          0
+        ],
+        "turns": 94,
+        "actions": 364,
+        "action_sha256": "ac5dfd32f0c8850e10064405303949e31dcb148bac73aea312c911df72b7153a",
+        "observations": 0,
+        "activities": []
+      }
+    },
+    {
+      "regime": "none",
+      "index": 2,
+      "adaptive": {
+        "winner": 1,
+        "points": [
+          7,
+          10,
+          6,
+          5
+        ],
+        "seating": [
+          2,
+          3,
+          0,
+          1
+        ],
+        "turns": 67,
+        "actions": 244,
+        "action_sha256": "3db360afe1dc6edb01dbb85f26d008e5686ee66cacacd784d8a2be159a234aa9",
+        "observations": 67,
+        "activities": [
+          0.0
+        ]
+      },
+      "fixed": {
+        "winner": 1,
+        "points": [
+          7,
+          10,
+          6,
+          5
+        ],
+        "seating": [
+          2,
+          3,
+          0,
+          1
+        ],
+        "turns": 67,
+        "actions": 244,
+        "action_sha256": "3db360afe1dc6edb01dbb85f26d008e5686ee66cacacd784d8a2be159a234aa9",
+        "observations": 0,
+        "activities": []
+      }
+    },
+    {
+      "regime": "none",
+      "index": 3,
+      "adaptive": {
+        "winner": 2,
+        "points": [
+          3,
+          5,
+          10,
+          8
+        ],
+        "seating": [
+          3,
+          0,
+          1,
+          2
+        ],
+        "turns": 73,
+        "actions": 270,
+        "action_sha256": "591be34980a64174783e623233550a6e698fe88c5b1a798beb74013650fe574a",
+        "observations": 74,
+        "activities": [
+          0.0
+        ]
+      },
+      "fixed": {
+        "winner": 2,
+        "points": [
+          3,
+          5,
+          10,
+          8
+        ],
+        "seating": [
+          3,
+          0,
+          1,
+          2
+        ],
+        "turns": 73,
+        "actions": 270,
+        "action_sha256": "591be34980a64174783e623233550a6e698fe88c5b1a798beb74013650fe574a",
+        "observations": 0,
+        "activities": []
+      }
+    },
+    {
+      "regime": "trading-smoke",
+      "index": 0,
+      "adaptive": {
+        "winner": 1,
+        "points": [
+          9,
+          10,
+          7,
+          7
+        ],
+        "seating": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "turns": 61,
+        "actions": 261,
+        "action_sha256": "ae1e840164e07b58e6b45d3da2a2bc7902a60b6bee5006f3147044fc76577a56",
+        "observations": 62,
+        "activities": [
+          0.0,
+          0.125,
+          0.25,
+          0.375,
+          0.5,
+          0.625,
+          0.75,
+          0.875,
+          1.0
+        ]
+      }
+    },
+    {
+      "regime": "trading-smoke",
+      "index": 1,
+      "adaptive": {
+        "winner": 3,
+        "points": [
+          8,
+          8,
+          7,
+          10
+        ],
+        "seating": [
+          1,
+          2,
+          3,
+          0
+        ],
+        "turns": 64,
+        "actions": 274,
+        "action_sha256": "10920b7afcac5b2955e5d39eef965472a964e1116266f37a376372d5f895a3fc",
+        "observations": 65,
+        "activities": [
+          0.125,
+          0.25,
+          0.375,
+          0.5,
+          0.625,
+          0.75,
+          0.875
+        ]
+      }
+    },
+    {
+      "regime": "trading-smoke",
+      "index": 2,
+      "adaptive": {
+        "winner": 0,
+        "points": [
+          10,
+          6,
+          6,
+          8
+        ],
+        "seating": [
+          2,
+          3,
+          0,
+          1
+        ],
+        "turns": 74,
+        "actions": 280,
+        "action_sha256": "aa3b6e9d684037520c469912303a03cbb12363e488c043d25ba3f52cdd84cd8d",
+        "observations": 75,
+        "activities": [
+          0.125,
+          0.25,
+          0.375,
+          0.5,
+          0.625,
+          0.75,
+          0.875,
+          1.0
+        ]
+      }
+    },
+    {
+      "regime": "trading-smoke",
+      "index": 3,
+      "adaptive": {
+        "winner": 1,
+        "points": [
+          6,
+          10,
+          6,
+          7
+        ],
+        "seating": [
+          3,
+          0,
+          1,
+          2
+        ],
+        "turns": 48,
+        "actions": 193,
+        "action_sha256": "2c32685bfda4e2ae84b4250833d51696d0b8114c709128d9f2801bb45fe9e681",
+        "observations": 49,
+        "activities": [
+          0.125,
+          0.25,
+          0.375,
+          0.5,
+          0.625,
+          0.75,
+          0.875,
+          1.0
+        ]
+      }
+    }
+  ]
+}

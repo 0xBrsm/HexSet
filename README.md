@@ -55,6 +55,10 @@ an estimated win probability. Catanatron's adapter and search have different
 information assumptions; comparisons must identify which engine hosted the
 games and whether trading was enabled.
 
+Model and search callbacks can opt into [cached sampled-world voting](docs/determinized-worlds.md).
+The helper reuses duplicate-world answers while preserving their vote frequency;
+it does not change any arena preset.
+
 ### Recorded Catanatron result
 
 In the archived September 7, 2026 benchmark, `heximax-notrade` won **47.3%**
@@ -122,6 +126,15 @@ See [Server operation and client interfaces](docs/server.md) for Docker,
 configuration, saved games, HTTP routes, and MCP tools.
 
 ## Evaluate bots
+
+`heximax-adaptive` uses one policy that slides between the current best no-trade
+and trading move profiles. Recent public exchange activity sets the slider;
+both endpoints are exact. Its exchange evaluator remains the trading profile,
+with floor zero. The fixed presets remain benchmark controls. See the
+[slider implementation](docs/readouts/trading-conditions/SLIDER.md) and
+[fresh curve validation](docs/readouts/slider-curve/README.md), which passed the
+registered aggregate 2-percentage-point non-inferiority margin against both
+global and condition-selected fixed controls.
 
 ```sh
 python -m hexset.bench.duel heximax heximax-notrade --games 400 --workers 4

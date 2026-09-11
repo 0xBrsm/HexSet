@@ -3,6 +3,36 @@
 Changes to the HexSet distribution. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
+## Unreleased
+
+### Added
+
+- Opt-in sampled-world voting for model/search callbacks, with a decision-local
+  cache and frequency-weighted votes (`hexset.bots.determinized`). The default
+  key includes the sampled development deck; models that cannot observe it can
+  explicitly use `holdings_signature` for greater reuse. `CatanatronBot` exposes
+  the same optional vote while preserving its default reference behavior.
+  See [the cache contract and examples](docs/determinized-worlds.md).
+
+### Changed
+
+- **Pinned Catanatron to `ecf931181b9a65bb4116a2153fb78c16f1438e00`.**
+  The adapter follows two upstream reworks: players now construct as
+  `(color, params)` and register through the shared player registry
+  (`parse_cli_string`/`register_cli_player` are gone), and each game owns
+  its `random.Random` instead of reseeding the global module. `duel.py`
+  builds players via `REGISTRY` (`DC:` specs keep their whole
+  colon-containing tail), `DevCatanPlayer` declares a `Params` model and
+  resets per-game state on the `before` observer hook, and the
+  `catanatron-play` bridge file targets `--bot` instead of the removed
+  `--code`. The optional speedups follow the new source (updated
+  verification digests; the structural `State` copy shares the per-game
+  RNG like the native one) and the speed benchmark builds players through
+  `build_players`. Reference bots hosted by HexSet use their seeded entrant
+  RNG for search; mirrored games and copies share that stream, independently
+  of live chance draws and other games.
+
 ## 0.50.0
 
 This release changes the MCP tool contract in ways an existing MCP client
@@ -108,6 +138,7 @@ so the number stands.
   redaction across the whole history at once -- every earlier steal stops
   being "a card" and names what it was -- and those are rewrites of lines the
   caller already holds, too far back for any overlap to cover.
+
 
 ## 0.49.1
 

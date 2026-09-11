@@ -1,0 +1,112 @@
+{
+  "finished_at": "2026-09-11T06:45:09.346214+00:00",
+  "manifest": {
+    "action_cap": 20000,
+    "antithetic": false,
+    "games_per_matchup": 400,
+    "host": "hexset",
+    "information_model": "native-public-history",
+    "parameters": {
+      "depth": 2,
+      "k": 1,
+      "max_nodes": 600,
+      "max_trades": null,
+      "mode": "honest",
+      "placement": true,
+      "stance": "win",
+      "temperature": 2.476644394795811,
+      "width": 6
+    },
+    "profiles": {
+      "new-notrade": {
+        "expansion_value": 0.25,
+        "weights": {
+          "buy_progress": 0.45,
+          "diversity": 0.358,
+          "knight": 0.1026,
+          "port": 0.03063,
+          "production": 2.785,
+          "road": 0.0,
+          "robber_risk": -0.3,
+          "scarce": 0.07039861111111112,
+          "spare_card": 0.1065,
+          "victory_point": 1.0
+        }
+      },
+      "old-notrade": {
+        "expansion_value": 0.0,
+        "weights": {
+          "buy_progress": 0.45,
+          "diversity": 0.358,
+          "knight": 0.1026,
+          "port": 0.03063,
+          "production": 2.785,
+          "road": 0.1237,
+          "robber_risk": -0.3,
+          "scarce": 0.07039861111111112,
+          "spare_card": 0.1065,
+          "victory_point": 1.0
+        }
+      },
+      "trading": {
+        "expansion_value": 0.0,
+        "weights": {
+          "buy_progress": 0.45,
+          "diversity": 0.358,
+          "knight": 0.1041,
+          "port": 0.007373,
+          "production": 7.067,
+          "road": 0.1209,
+          "robber_risk": -0.3,
+          "scarce": 0.1786,
+          "spare_card": 0.15,
+          "victory_point": 1.0
+        }
+      }
+    },
+    "protocol": "native-trading-fair-share-v1",
+    "rule_set": "standard",
+    "runner_sha256": "960b4a0a23138d6cbf7d31c5a9586d10f2eb79bc97ebe768b71308700086a3ca",
+    "runtime": {
+      "numpy": "2.5.2",
+      "python": "3.12.14 (main, Sep  1 2026, 00:10:07) [GCC 14.2.0]"
+    },
+    "seed": 717000000,
+    "source_sha256": "0254eb3dbe0d14bea1b2d9eb42ec18a553d38c2f9100dd3477edb62347778c3e",
+    "trade_floor": 0.0197,
+    "trading": "enabled-all-seats"
+  },
+  "rows": [
+    {
+      "candidate_trades": 0,
+      "domestic_trades": 0,
+      "games": 400,
+      "games_with_domestic_trades": 0,
+      "mean_turns": 82.68,
+      "opponent": "old-notrade",
+      "rate": 0.345,
+      "wilson95": [
+        0.30008782765308767,
+        0.3928609836366214
+      ],
+      "wins": 138
+    },
+    {
+      "candidate_trades": 0,
+      "domestic_trades": 0,
+      "games": 400,
+      "games_with_domestic_trades": 0,
+      "mean_turns": 84.2025,
+      "opponent": "trading",
+      "rate": 0.3225,
+      "wilson95": [
+        0.2785679577421379,
+        0.3698089067993033
+      ],
+      "wins": 129
+    }
+  ],
+  "started_at": "2026-09-11T06:43:12.999466+00:00",
+  "wall_seconds": 116.3615089179948,
+  "workers": 30
+}

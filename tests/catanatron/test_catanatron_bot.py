@@ -361,3 +361,109 @@ def test_cached_board_matches_fresh_and_isolates_mutation(positions, mode):
             assert cached.state.player_state == fresh.state.player_state
             assert cached.state.buildings_by_color == fresh.state.buildings_by_color
             assert cached.playable_actions == fresh.playable_actions
+
+
+@pytest.mark.parametrize("phase", [Phase.MAIN, Phase.ROLL])
+def test_stranded_road_building_credit_does_not_deadlock_reference(phase):
+    from hexset.state import can_place_road, place_road, place_settlement
+    from hexset.game import pending_free_roads
+
+    board = random_base_board(random.Random(3))
+    game = start(board, 4, random.Random(4))
+    place_settlement(game._state, 0, 0, connected=False)
+    for _ in range(15):
+        edge = next(e for e in range(len(game._state.edge_owner))
+                    if can_place_road(game._state, 0, e))
+        place_road(game._state, 0, edge)
+    game.phase = phase
+    game.current_player = 0
+    game.free_roads = 1
+    game.dev_card_played = True
+    assert not pending_free_roads(game)
+    seats = seating(tuple(list(Color)[:4]))
+    mapping = translate_board(catanatron_map(board))
+    mirror = to_catanatron(game, mapping, seats)
+    assert not mirror.state.is_road_building
+    assert mirror.state.free_roads_available == 0
+    expected = ActionType.END_TURN if phase is Phase.MAIN else ActionType.ROLL
+    reference = spawn(entrant_from_name("catanatron"), board, random.Random(5))
+    assert reference.choose(game) == Action(expected)
+    assert game.free_roads == 1  # the mirror never mutates the real game
+
+
+@pytest.mark.parametrize("mode", ["off", "fast"])
+def test_mirror_rng_is_picklable_shared_by_copies_and_isolated_from_live_game(mode):
+    import pickle
+    from hexset.arena import deal_game
+    from hexset.catanatron.speedups import catanatron_speedups
+    game = deal_game(145, 0, 4)
+    board = game.state(0, hidden=False).board
+    mapping = translate_board(catanatron_map(board))
+    live_before, global_before = game.rng.getstate(), random.getstate()
+    with catanatron_speedups(mode):
+        mirror = to_catanatron(game, mapping, seating(tuple(Color)))
+        copied = mirror.copy()
+        assert copied.random is copied.state.random is mirror.random is mirror.state.random
+        assert mirror.random is not game.rng
+        copied.random.random()
+        restored = pickle.loads(pickle.dumps(mirror))
+        assert restored.random is restored.state.random
+        assert restored.random.getstate() == mirror.random.getstate()
+    assert game.rng.getstate() == live_before
+    assert random.getstate() == global_before
+
+
+def test_arena_reference_bots_use_independent_seeded_search_streams():
+    from catanatron.models.player import Player
+    from hexset.arena import Entrant, deal_game
+    game = deal_game(145, 0, 4)
+    board = game.state(0, hidden=False).board
+    draws = []
+
+    class RecordingPlayer(Player):
+        def decide(self, mirror, actions):
+            draws.append(mirror.copy().random.random())
+            return actions[0]
+
+    bot = spawn(Entrant('catanatron', kind='catanatron'), board, random.Random(145))
+    other = spawn(Entrant('catanatron', kind='catanatron'), board, random.Random(99))
+    bot.player = other.player = RecordingPlayer
+    live_before, global_before = game.rng.getstate(), random.getstate()
+    bot.choose(game)
+    other.choose(game)
+    bot.choose(game)
+    expected = random.Random(145)
+    assert draws == [expected.random(), random.Random(99).random(), expected.random()]
+    assert game.rng.getstate() == live_before
+    assert random.getstate() == global_before
+
+
+@pytest.mark.parametrize("worlds, expected", [(0, 2), (40, 2)])
+def test_world_vote_is_opt_in_and_reuses_reference_answers_per_decision(worlds, expected):
+    from catanatron.models.player import Player
+    from hexset.arena import deal_game
+    from hexset.bots.determinized import holdings_signature
+    game = deal_game(96, 0, 4)
+    calls = []
+    class FirstPlayer(Player):
+        def decide(self, mirror, actions):
+            calls.append(mirror)
+            return actions[0]
+    rng = random.Random(7)
+    before = rng.getstate(), game.rng.getstate()
+    bot = CatanatronBot(FirstPlayer, worlds=worlds, rng=rng,
+                       world_key=holdings_signature)
+    assert bot.choose(game) in legal_actions(game)
+    assert bot.choose(game) in legal_actions(game)
+    assert len(calls) == expected
+    assert (rng.getstate(), game.rng.getstate()) == before
+
+
+def test_reference_world_vote_uses_current_pinned_ab2_and_reproduces(positions):
+    game = positions[-1]
+    before = game.rng.getstate()
+    first = CatanatronBot(worlds=3, rng=random.Random(7)).choose(game)
+    again = CatanatronBot(worlds=3, rng=random.Random(7)).choose(game)
+    assert first == again
+    assert first in legal_actions(game)
+    assert game.rng.getstate() == before

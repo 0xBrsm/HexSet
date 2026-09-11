@@ -30,8 +30,9 @@ def atomic_json(path, data):
 def worker(args):
     from catanatron.models.player import Color
     from catanatron.players import value, minimax
-    from .duel import game_config_for, parse_cli_string, play_batch
+    from .duel import build_players, game_config_for
     from .speedups import catanatron_speedups, verify_runtime
+    from catanatron.cli.play import play_batch
     verify_runtime()
     root = Path(__file__).resolve().parents[1]
     source = hashlib.sha256()
@@ -67,7 +68,7 @@ def worker(args):
             minimax.AlphaBetaPlayer.alphabeta = trace_alpha
         try:
             random.seed(args.seed)
-            players = parse_cli_string(args.players)
+            players = build_players(args.players)
             t0, c0 = time.perf_counter(), time.process_time()
             wins, points, games = play_batch(1, players, game_config=game_config_for(args.game_type), quiet=True)
             cpu, wall = time.process_time() - c0, time.perf_counter() - t0

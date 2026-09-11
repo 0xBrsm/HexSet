@@ -1,0 +1,11 @@
+{
+  "exact_trace_replays": [
+    0,
+    511,
+    1023,
+    1535
+  ],
+  "legacy_records": 1978,
+  "original_source": "efaecd276604bc23c7d16a23a996cc3815064353dd2d453e52f146fc21d347b1",
+  "patched_source": "8c677b8f7475ec45fe02ecd5e1ba1d9e18415956b0f594666d7da4a3de8ddafe"
+}

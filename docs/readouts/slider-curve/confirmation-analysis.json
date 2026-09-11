@@ -1,0 +1,718 @@
+{
+  "stage": "confirmation",
+  "archive_sha256": "b2d92acef26852a613423d3422e63cf55524ee0c9a2c644fcec300ec78b123bf",
+  "records_audited": 9216,
+  "public_trajectory_replay": "all values match exactly",
+  "selection": {
+    "conditional_best": {
+      "falling": "0",
+      "full": ".5",
+      "heavy": ".5",
+      "mixed": ".25",
+      "moderate": "1",
+      "none": ".5",
+      "rising": "0"
+    },
+    "confirmation_n": 512,
+    "estimated_variance": 0.1631590136054422,
+    "global_best": ".5",
+    "power_cap_applied": false,
+    "uncapped_target_per_regime": 457.3626697729078
+  },
+  "primary": {
+    "global": {
+      "difference": -0.0025111607142857145,
+      "se": 0.006417007119226512,
+      "interval95": [
+        -0.015088263556506798,
+        0.01006594212793537
+      ],
+      "lower975": -0.015088263556506798,
+      "passes_margin": true,
+      "adaptive_wins": 977,
+      "control_wins": 986,
+      "games_per_policy": 3584
+    },
+    "conditional": {
+      "difference": 0.0030691964285714285,
+      "se": 0.006636289353387545,
+      "interval95": [
+        -0.009937691695054759,
+        0.016076084552197615
+      ],
+      "lower975": -0.009937691695054759,
+      "passes_margin": true,
+      "adaptive_wins": 977,
+      "control_wins": 966,
+      "games_per_policy": 3584
+    }
+  },
+  "per_regime": [
+    {
+      "comparator": "global",
+      "regime": "none",
+      "control": ".5",
+      "difference": 0.001953125,
+      "variance": 0.20156173556751467,
+      "se": 0.01984125159309014,
+      "interval95": [
+        -0.036935013530654634,
+        0.040841263530654634
+      ]
+    },
+    {
+      "comparator": "global",
+      "regime": "moderate",
+      "control": ".5",
+      "difference": -0.021484375,
+      "variance": 0.1815336044520548,
+      "se": 0.018829705818079568,
+      "interval95": [
+        -0.05838992024292026,
+        0.015421170242920258
+      ]
+    },
+    {
+      "comparator": "global",
+      "regime": "heavy",
+      "control": ".5",
+      "difference": -0.015625,
+      "variance": 0.0976027397260274,
+      "se": 0.013806895053827173,
+      "interval95": [
+        -0.042686017043825464,
+        0.01143601704382546
+      ]
+    },
+    {
+      "comparator": "global",
+      "regime": "full",
+      "control": ".5",
+      "difference": 0.01171875,
+      "variance": 0.10945144324853229,
+      "se": 0.014620955854347882,
+      "interval95": [
+        -0.016937796894071894,
+        0.04037529689407189
+      ]
+    },
+    {
+      "comparator": "global",
+      "regime": "mixed",
+      "control": ".5",
+      "difference": 0.015625,
+      "variance": 0.14456947162426614,
+      "se": 0.01680363797712105,
+      "interval95": [
+        -0.017309525244406737,
+        0.04855952524440674
+      ]
+    },
+    {
+      "comparator": "global",
+      "regime": "rising",
+      "control": ".5",
+      "difference": -0.02734375,
+      "variance": 0.15972052348336596,
+      "se": 0.017662223739621497,
+      "interval95": [
+        -0.06196107241654647,
+        0.00727357241654647
+      ]
+    },
+    {
+      "comparator": "global",
+      "regime": "falling",
+      "control": ".5",
+      "difference": 0.017578125,
+      "variance": 0.13863365337573386,
+      "se": 0.016455055583299627,
+      "interval95": [
+        -0.014673191306871988,
+        0.04982944130687199
+      ]
+    },
+    {
+      "comparator": "conditional",
+      "regime": "none",
+      "control": ".5",
+      "difference": 0.001953125,
+      "variance": 0.20156173556751467,
+      "se": 0.01984125159309014,
+      "interval95": [
+        -0.036935013530654634,
+        0.040841263530654634
+      ]
+    },
+    {
+      "comparator": "conditional",
+      "regime": "moderate",
+      "control": "1",
+      "difference": 0.001953125,
+      "variance": 0.2720118334148728,
+      "se": 0.02304936251045619,
+      "interval95": [
+        -0.043222795387101845,
+        0.047129045387101845
+      ]
+    },
+    {
+      "comparator": "conditional",
+      "regime": "heavy",
+      "control": ".5",
+      "difference": -0.015625,
+      "variance": 0.0976027397260274,
+      "se": 0.013806895053827173,
+      "interval95": [
+        -0.042686017043825464,
+        0.01143601704382546
+      ]
+    },
+    {
+      "comparator": "conditional",
+      "regime": "full",
+      "control": ".5",
+      "difference": 0.01171875,
+      "variance": 0.10945144324853229,
+      "se": 0.014620955854347882,
+      "interval95": [
+        -0.016937796894071894,
+        0.04037529689407189
+      ]
+    },
+    {
+      "comparator": "conditional",
+      "regime": "mixed",
+      "control": ".25",
+      "difference": 0.01953125,
+      "variance": 0.08180956457925637,
+      "se": 0.012640581704132927,
+      "interval95": [
+        -0.005243834883736469,
+        0.04430633488373647
+      ]
+    },
+    {
+      "comparator": "conditional",
+      "regime": "rising",
+      "control": "0",
+      "difference": -0.001953125,
+      "variance": 0.13502553204500978,
+      "se": 0.016239511762223942,
+      "interval95": [
+        -0.0337819831804735,
+        0.0298757331804735
+      ]
+    },
+    {
+      "comparator": "conditional",
+      "regime": "falling",
+      "control": "0",
+      "difference": 0.00390625,
+      "variance": 0.20742111056751467,
+      "se": 0.020127577017047458,
+      "interval95": [
+        -0.03554307604946914,
+        0.04335557604946914
+      ]
+    }
+  ],
+  "rows": [
+    {
+      "regime": "falling",
+      "candidate": ".5",
+      "wins": 161,
+      "games": 512,
+      "rate": 0.314453125,
+      "wilson95": [
+        0.27574409886185997,
+        0.3559256772853035
+      ],
+      "mean_trades": 28.1796875,
+      "mean_candidate_trades": 17.080078125
+    },
+    {
+      "regime": "falling",
+      "candidate": "0",
+      "wins": 168,
+      "games": 512,
+      "rate": 0.328125,
+      "wilson95": [
+        0.28886619004373243,
+        0.36994370786100855
+      ],
+      "mean_trades": 28.19140625,
+      "mean_candidate_trades": 17.11328125
+    },
+    {
+      "regime": "falling",
+      "candidate": "A",
+      "wins": 170,
+      "games": 512,
+      "rate": 0.33203125,
+      "wilson95": [
+        0.2926225061232757,
+        0.3739417122836302
+      ],
+      "mean_trades": 28.21484375,
+      "mean_candidate_trades": 17.11328125
+    },
+    {
+      "regime": "full",
+      "candidate": ".5",
+      "wins": 115,
+      "games": 512,
+      "rate": 0.224609375,
+      "wilson95": [
+        0.19058845141550826,
+        0.26273195318186077
+      ],
+      "mean_trades": 56.5390625,
+      "mean_candidate_trades": 28.20703125
+    },
+    {
+      "regime": "full",
+      "candidate": "A",
+      "wins": 121,
+      "games": 512,
+      "rate": 0.236328125,
+      "wilson95": [
+        0.201578409461584,
+        0.2750049566422799
+      ],
+      "mean_trades": 56.296875,
+      "mean_candidate_trades": 28.232421875
+    },
+    {
+      "regime": "heavy",
+      "candidate": ".5",
+      "wins": 139,
+      "games": 512,
+      "rate": 0.271484375,
+      "wilson95": [
+        0.23477045990317527,
+        0.31160179072017347
+      ],
+      "mean_trades": 39.0,
+      "mean_candidate_trades": 23.375
+    },
+    {
+      "regime": "heavy",
+      "candidate": "A",
+      "wins": 131,
+      "games": 512,
+      "rate": 0.255859375,
+      "wilson95": [
+        0.2199790080840174,
+        0.29537596053067144
+      ],
+      "mean_trades": 39.025390625,
+      "mean_candidate_trades": 23.341796875
+    },
+    {
+      "regime": "mixed",
+      "candidate": ".25",
+      "wins": 130,
+      "games": 512,
+      "rate": 0.25390625,
+      "wilson95": [
+        0.21813441226903243,
+        0.2933433960945739
+      ],
+      "mean_trades": 27.162109375,
+      "mean_candidate_trades": 20.373046875
+    },
+    {
+      "regime": "mixed",
+      "candidate": ".5",
+      "wins": 132,
+      "games": 512,
+      "rate": 0.2578125,
+      "wilson95": [
+        0.22182458372235042,
+        0.2974075451434209
+      ],
+      "mean_trades": 26.892578125,
+      "mean_candidate_trades": 20.23828125
+    },
+    {
+      "regime": "mixed",
+      "candidate": "A",
+      "wins": 140,
+      "games": 512,
+      "rate": 0.2734375,
+      "wilson95": [
+        0.236623626088204,
+        0.31362578478622727
+      ],
+      "mean_trades": 26.96875,
+      "mean_candidate_trades": 20.267578125
+    },
+    {
+      "regime": "moderate",
+      "candidate": ".5",
+      "wins": 161,
+      "games": 512,
+      "rate": 0.314453125,
+      "wilson95": [
+        0.27574409886185997,
+        0.3559256772853035
+      ],
+      "mean_trades": 20.048828125,
+      "mean_candidate_trades": 15.515625
+    },
+    {
+      "regime": "moderate",
+      "candidate": "1",
+      "wins": 149,
+      "games": 512,
+      "rate": 0.291015625,
+      "wilson95": [
+        0.25334281371732637,
+        0.33180103941684724
+      ],
+      "mean_trades": 20.2890625,
+      "mean_candidate_trades": 15.72265625
+    },
+    {
+      "regime": "moderate",
+      "candidate": "A",
+      "wins": 150,
+      "games": 512,
+      "rate": 0.29296875,
+      "wilson95": [
+        0.2552049202048361,
+        0.33381609318042005
+      ],
+      "mean_trades": 20.23828125,
+      "mean_candidate_trades": 15.611328125
+    },
+    {
+      "regime": "none",
+      "candidate": ".5",
+      "wins": 128,
+      "games": 512,
+      "rate": 0.25,
+      "wilson95": [
+        0.21444818972233134,
+        0.28927529813911
+      ],
+      "mean_trades": 0.0,
+      "mean_candidate_trades": 0
+    },
+    {
+      "regime": "none",
+      "candidate": "A",
+      "wins": 129,
+      "games": 512,
+      "rate": 0.251953125,
+      "wilson95": [
+        0.2162908036425667,
+        0.2913098444699571
+      ],
+      "mean_trades": 0.0,
+      "mean_candidate_trades": 0
+    },
+    {
+      "regime": "rising",
+      "candidate": ".5",
+      "wins": 150,
+      "games": 512,
+      "rate": 0.29296875,
+      "wilson95": [
+        0.2552049202048361,
+        0.33381609318042005
+      ],
+      "mean_trades": 27.9375,
+      "mean_candidate_trades": 17.3984375
+    },
+    {
+      "regime": "rising",
+      "candidate": "0",
+      "wins": 137,
+      "games": 512,
+      "rate": 0.267578125,
+      "wilson95": [
+        0.23106691169223634,
+        0.3075510184289474
+      ],
+      "mean_trades": 27.61328125,
+      "mean_candidate_trades": 17.00390625
+    },
+    {
+      "regime": "rising",
+      "candidate": "A",
+      "wins": 136,
+      "games": 512,
+      "rate": 0.265625,
+      "wilson95": [
+        0.22921654233512778,
+        0.30552422753497355
+      ],
+      "mean_trades": 27.416015625,
+      "mean_candidate_trades": 16.982421875
+    }
+  ],
+  "diagnostics": [
+    {
+      "regime": "none",
+      "bins": {
+        "0-19": {
+          "games": 512,
+          "mean_alpha": 0.0
+        },
+        "20-39": {
+          "games": 512,
+          "mean_alpha": 0.0
+        },
+        "40-59": {
+          "games": 511,
+          "mean_alpha": 0.0
+        },
+        "60-79": {
+          "games": 452,
+          "mean_alpha": 0.0
+        },
+        "80-99": {
+          "games": 223,
+          "mean_alpha": 0.0
+        },
+        "100-19999": {
+          "games": 42,
+          "mean_alpha": 0.0
+        }
+      },
+      "mean_alpha": 0.0,
+      "mean_final_alpha": 0.0,
+      "mean_absolute_step": 0.0,
+      "mean_reversals": 0,
+      "fraction_alpha_zero": 1,
+      "fraction_alpha_one": 0,
+      "paired_pre_post_change": 0.0,
+      "paired_pre_post_games": 452
+    },
+    {
+      "regime": "moderate",
+      "bins": {
+        "0-19": {
+          "games": 512,
+          "mean_alpha": 0.13316824776785716
+        },
+        "20-39": {
+          "games": 512,
+          "mean_alpha": 0.22725713820684523
+        },
+        "40-59": {
+          "games": 504,
+          "mean_alpha": 0.2403199995275888
+        },
+        "60-79": {
+          "games": 366,
+          "mean_alpha": 0.24015986859224564
+        },
+        "80-99": {
+          "games": 100,
+          "mean_alpha": 0.25127083333333333
+        },
+        "100-19999": {
+          "games": 12,
+          "mean_alpha": 0.18489583333333334
+        }
+      },
+      "mean_alpha": 0.20387911968192965,
+      "mean_final_alpha": 0.244140625,
+      "mean_absolute_step": 0.10016916882280716,
+      "mean_reversals": 5.67578125,
+      "fraction_alpha_zero": 0.19421008155300998,
+      "fraction_alpha_one": 0,
+      "paired_pre_post_change": 0.019614396304970076,
+      "paired_pre_post_games": 366
+    },
+    {
+      "regime": "heavy",
+      "bins": {
+        "0-19": {
+          "games": 512,
+          "mean_alpha": 0.2582449776785714
+        },
+        "20-39": {
+          "games": 512,
+          "mean_alpha": 0.4424685523623512
+        },
+        "40-59": {
+          "games": 494,
+          "mean_alpha": 0.48238685656448815
+        },
+        "60-79": {
+          "games": 286,
+          "mean_alpha": 0.4689341908091908
+        },
+        "80-99": {
+          "games": 48,
+          "mean_alpha": 0.475
+        },
+        "100-19999": {
+          "games": 3,
+          "mean_alpha": 0.4722222222222222
+        }
+      },
+      "mean_alpha": 0.39192374024613635,
+      "mean_final_alpha": 0.491943359375,
+      "mean_absolute_step": 0.13033370406475514,
+      "mean_reversals": 5.30078125,
+      "fraction_alpha_zero": 0.08607677707552869,
+      "fraction_alpha_one": 0.001267796386646764,
+      "paired_pre_post_change": 0.04365894522144522,
+      "paired_pre_post_games": 286
+    },
+    {
+      "regime": "full",
+      "bins": {
+        "0-19": {
+          "games": 512,
+          "mean_alpha": 0.366552734375
+        },
+        "20-39": {
+          "games": 512,
+          "mean_alpha": 0.6436662946428572
+        },
+        "40-59": {
+          "games": 495,
+          "mean_alpha": 0.6879803992303992
+        },
+        "60-79": {
+          "games": 232,
+          "mean_alpha": 0.7005798440065681
+        },
+        "80-99": {
+          "games": 24,
+          "mean_alpha": 0.6909722222222222
+        },
+        "100-19999": {
+          "games": 1,
+          "mean_alpha": 0.875
+        }
+      },
+      "mean_alpha": 0.5610070821510784,
+      "mean_final_alpha": 0.71240234375,
+      "mean_absolute_step": 0.1408157113085528,
+      "mean_reversals": 4.90234375,
+      "fraction_alpha_zero": 0.07019541607442964,
+      "fraction_alpha_one": 0.03483446988421752,
+      "paired_pre_post_change": 0.08039562807881774,
+      "paired_pre_post_games": 232
+    },
+    {
+      "regime": "mixed",
+      "bins": {
+        "0-19": {
+          "games": 512,
+          "mean_alpha": 0.1882382347470238
+        },
+        "20-39": {
+          "games": 512,
+          "mean_alpha": 0.3130801246279762
+        },
+        "40-59": {
+          "games": 503,
+          "mean_alpha": 0.3329753621130361
+        },
+        "60-79": {
+          "games": 362,
+          "mean_alpha": 0.3225245001315443
+        },
+        "80-99": {
+          "games": 86,
+          "mean_alpha": 0.33636143410852715
+        },
+        "100-19999": {
+          "games": 16,
+          "mean_alpha": 0.305859375
+        }
+      },
+      "mean_alpha": 0.28060605207117356,
+      "mean_final_alpha": 0.3291015625,
+      "mean_absolute_step": 0.10943032437449263,
+      "mean_reversals": 5.78125,
+      "fraction_alpha_zero": 0.11276917448846806,
+      "fraction_alpha_one": 0,
+      "paired_pre_post_change": 0.017677091554853985,
+      "paired_pre_post_games": 362
+    },
+    {
+      "regime": "rising",
+      "bins": {
+        "0-19": {
+          "games": 512,
+          "mean_alpha": 0.0487944103422619
+        },
+        "20-39": {
+          "games": 512,
+          "mean_alpha": 0.08389892578125
+        },
+        "40-59": {
+          "games": 509,
+          "mean_alpha": 0.4336870848535878
+        },
+        "60-79": {
+          "games": 380,
+          "mean_alpha": 0.5500289786967418
+        },
+        "80-99": {
+          "games": 76,
+          "mean_alpha": 0.5531524122807018
+        },
+        "100-19999": {
+          "games": 5,
+          "mean_alpha": 0.56875
+        }
+      },
+      "mean_alpha": 0.22825399581252448,
+      "mean_final_alpha": 0.559326171875,
+      "mean_absolute_step": 0.09003438451571792,
+      "mean_reversals": 4.576171875,
+      "fraction_alpha_zero": 0.36589335288330305,
+      "fraction_alpha_one": 0.002333114615140318,
+      "paired_pre_post_change": 0.4681187343358396,
+      "paired_pre_post_games": 380
+    },
+    {
+      "regime": "falling",
+      "bins": {
+        "0-19": {
+          "games": 512,
+          "mean_alpha": 0.2908679780505952
+        },
+        "20-39": {
+          "games": 512,
+          "mean_alpha": 0.5089227585565477
+        },
+        "40-59": {
+          "games": 501,
+          "mean_alpha": 0.20311460412508317
+        },
+        "60-79": {
+          "games": 341,
+          "mean_alpha": 0.08033008658008658
+        },
+        "80-99": {
+          "games": 90,
+          "mean_alpha": 0.07563492063492064
+        },
+        "100-19999": {
+          "games": 12,
+          "mean_alpha": 0.058506944444444445
+        }
+      },
+      "mean_alpha": 0.3039086530899245,
+      "mean_final_alpha": 0.10009765625,
+      "mean_absolute_step": 0.12488442183818739,
+      "mean_reversals": 4.8203125,
+      "fraction_alpha_zero": 0.2190852999795686,
+      "fraction_alpha_one": 0.001507205806650708,
+      "paired_pre_post_change": -0.4171091677140064,
+      "paired_pre_post_games": 341
+    }
+  ],
+  "seconds": 1420.5327432069462
+}

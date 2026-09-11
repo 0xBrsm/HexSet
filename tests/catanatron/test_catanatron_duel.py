@@ -3,6 +3,8 @@
 
 `--game-type` selects the catanatron `GameConfigOptions` for the whole duel;
 these tests pin the mapping and the plumbing without playing real games.
+They also pin `build_players`, which routes player specs through catanatron's
+shared player registry (`parse_cli_string` is gone upstream).
 """
 
 from __future__ import annotations
@@ -15,8 +17,13 @@ import pytest
 # itself named `catanatron`, so a bare `import catanatron` can resolve to it.
 pytest.importorskip("catanatron.game")
 
+from catanatron.models.player import Color, RandomPlayer
+from catanatron.players.minimax import AlphaBetaPlayer
+from catanatron.registry import REGISTRY, SpecError
+
 from hexset.catanatron import duel
-from hexset.catanatron.duel import game_config_for, run_duel
+from hexset.catanatron.duel import build_players, game_config_for, run_duel
+from hexset.catanatron.player import DevCatanPlayer
 from hexset.rules import COLONIST_1V1
 
 
@@ -58,7 +65,7 @@ def test_colonist_duel_games_are_built_with_colonist_rules(monkeypatch):
         return {}, {}, 1
 
     monkeypatch.setattr(duel, "play_batch", fake_play_batch)
-    monkeypatch.setattr(duel, "parse_cli_string", lambda spec: [])
+    monkeypatch.setattr(duel, "build_players", lambda spec: [])
     monkeypatch.setattr(duel, "Pool", _InlinePool)
 
     run_duel("DC:heximax,AB:2", 3, 2, seed=0, game_type="colonist-1v1")
@@ -110,7 +117,7 @@ def first_draws(monkeypatch):
         return {}, {}, 1
 
     monkeypatch.setattr(duel, "play_batch", fake_play_batch)
-    monkeypatch.setattr(duel, "parse_cli_string", lambda spec: [])
+    monkeypatch.setattr(duel, "build_players", lambda spec: [])
     monkeypatch.setattr(duel, "Pool", _InlinePool)
     return draws
 
@@ -146,7 +153,7 @@ def test_speedups_are_scoped_to_worker_and_reported(monkeypatch, speedups):
 
     before = Board.copy
     monkeypatch.setattr(duel, 'play_batch', fake_play_batch)
-    monkeypatch.setattr(duel, 'parse_cli_string', lambda spec: [])
+    monkeypatch.setattr(duel, "build_players", lambda spec: [])
     monkeypatch.setattr(duel, 'Pool', _InlinePool)
     result = run_duel('DC:heximax,AB:2', 3, 2, speedups=speedups)
     assert observed == [speedups != 'off'] * 3
@@ -180,3 +187,87 @@ def test_dynamic_results_are_ordered_by_game_index_not_completion(monkeypatch):
 def test_invalid_game_or_worker_count_fails_before_pool(games, workers):
     with pytest.raises(ValueError, match='positive'):
         run_duel('F,F', games, workers)
+
+
+# `build_players` and the registry-era `DevCatanPlayer`: the seams the
+# catanatron ecf93118 upgrade touched.
+
+
+def test_build_players_routes_builtins_through_the_registry():
+    players = build_players("AB:2,R")
+    assert isinstance(players[0], AlphaBetaPlayer)
+    assert players[0].params.depth == 2
+    assert players[0].color is Color.RED
+    assert isinstance(players[1], RandomPlayer)
+    assert players[1].color is Color.BLUE
+
+
+def test_build_players_keeps_the_whole_dc_tail():
+    """An entrant spec may itself contain colons (`network:<path>`); the
+    registry's own colon-splitting cannot round-trip those, so `DC` is built
+    directly from the unsplit tail."""
+    players = build_players("DC:network:/tmp/x.pt,AB:2")
+    assert isinstance(players[0], DevCatanPlayer)
+    assert players[0].params.entrant == "network:/tmp/x.pt"
+
+
+def test_build_players_dc_defaults_to_heximax_notrade():
+    (player, _) = build_players("DC,AB:2")
+    assert isinstance(player, DevCatanPlayer)
+    assert player.params.entrant == "heximax-notrade"
+
+
+def test_dc_is_also_buildable_through_the_registry():
+    """The `catanatron-play --bot` path (`REGISTRY.build`), where the spec
+    has no structural colons to preserve."""
+    player = REGISTRY.build("DC:heximax-notrade", Color.RED)
+    assert isinstance(player, DevCatanPlayer)
+    assert player.params.entrant == "heximax-notrade"
+    assert player.color is Color.RED
+
+
+def test_direct_construction_rejoins_colon_split_parts():
+    """The pre-registry calling convention -- one positional piece per
+    colon-split part -- still works (the tests and duel shards use it)."""
+    assert DevCatanPlayer(Color.RED, "heximax-notrade").params.entrant == (
+        "heximax-notrade"
+    )
+    assert DevCatanPlayer(Color.RED, "network", "/tmp/x.pt").params.entrant == (
+        "network:/tmp/x.pt"
+    )
+
+
+def test_build_players_rejects_wrong_seat_counts():
+    with pytest.raises(SpecError):
+        build_players("AB:2")
+    with pytest.raises(SpecError):
+        build_players("AB:2,R,AB:2,R,AB:2")
+
+
+def test_before_resets_the_per_game_state():
+    """`play_batch` no longer calls `reset_state()` between games; the
+    `before` observer hook is its replacement, fired once per game from
+    `Game.__init__`."""
+    player = DevCatanPlayer(Color.RED, "heximax-notrade")
+    player._mapping = object()
+    player._bot = object()
+    player._rng = object()
+    player.before(None)
+    assert player._mapping is None
+    assert player._bot is None
+    assert player._rng is None
+
+
+@pytest.mark.parametrize("spec", ["heximax-notrade", "network:/tmp/x.pt"])
+def test_build_players_accepts_named_dc_entrant(spec):
+    player = build_players(f"DC:entrant={spec},R")[0]
+    assert player.params.entrant == spec
+
+
+def test_game_construction_resets_reused_dc_player():
+    from catanatron.game import Game
+    player = DevCatanPlayer(Color.RED)
+    for seed in (1451, 1452):
+        player._mapping = player._bot = player._rng = object()
+        Game([player, RandomPlayer(Color.BLUE)], seed=seed)
+        assert player._mapping is player._bot is player._rng is None

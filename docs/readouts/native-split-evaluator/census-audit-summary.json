@@ -1,0 +1,42 @@
+[
+  {
+    "all_traces_match": true,
+    "candidate_trades": 0,
+    "domestic_trades": 0,
+    "floor": 0.0197,
+    "games": 400,
+    "games_with_trades": 0,
+    "opponent": "old-notrade",
+    "wins": 138
+  },
+  {
+    "all_traces_match": true,
+    "candidate_trades": 0,
+    "domestic_trades": 0,
+    "floor": 0.0197,
+    "games": 400,
+    "games_with_trades": 0,
+    "opponent": "trading",
+    "wins": 129
+  },
+  {
+    "all_traces_match": true,
+    "candidate_trades": 11594,
+    "domestic_trades": 23258,
+    "floor": 0.0,
+    "games": 400,
+    "games_with_trades": 400,
+    "opponent": "old-notrade",
+    "wins": 110
+  },
+  {
+    "all_traces_match": true,
+    "candidate_trades": 12338,
+    "domestic_trades": 25025,
+    "floor": 0.0,
+    "games": 400,
+    "games_with_trades": 400,
+    "opponent": "trading",
+    "wins": 64
+  }
+]

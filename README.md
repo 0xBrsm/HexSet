@@ -123,6 +123,15 @@ configuration, saved games, HTTP routes, and MCP tools.
 
 ## Evaluate bots
 
+`heximax-balanced` is a selectable compromise for uncertain trading conditions,
+with separate move and exchange weights and a zero trade floor. It improved
+on the trading profile in fresh native tests across moderate, mixed and changing
+participation. Those comparisons used floor zero on every seat; the historical
+`heximax` preset retains its .0197 floor. See the
+[trading-condition readout](docs/readouts/trading-conditions/README.md) for
+results, configuration and limits. `heximax-notrade` remains the explicit
+non-trading option.
+
 ```sh
 python -m hexset.bench.duel heximax heximax-notrade --games 400 --workers 4
 ```

@@ -1,0 +1,262 @@
+{
+  "archive_sha256": "bd6696b6fa356b15526fe1ad049a922a223680849fdcecdc4d781bff2f1245f3",
+  "records": 5632,
+  "seat_metadata_corrections": 2816,
+  "public_activity_replay": "every logged value reproduced exactly from public events",
+  "primary": [
+    {
+      "a": "M:T:0.0",
+      "b": "T:T:0.0",
+      "difference": 0.08268229166666667,
+      "interval": [
+        0.04926199074194215,
+        0.11610259259139119
+      ]
+    },
+    {
+      "a": "A:T:0.0",
+      "b": "M:T:0.0",
+      "difference": -0.001953125,
+      "interval": [
+        -0.02873790184335037,
+        0.02483165184335037
+      ]
+    }
+  ],
+  "rows": [
+    {
+      "regime": "quiet",
+      "candidate": "M:T:0.0",
+      "games": 256,
+      "wins": 97,
+      "domestic_trades": 2062,
+      "candidate_trades": 1882,
+      "mean_final_activity": 0.1278674495004937
+    },
+    {
+      "regime": "quiet",
+      "candidate": "A:T:0.0",
+      "games": 256,
+      "wins": 101,
+      "domestic_trades": 2063,
+      "candidate_trades": 1871,
+      "mean_final_activity": 0.13107669129637115
+    },
+    {
+      "regime": "quiet",
+      "candidate": "T:T:0.0",
+      "games": 256,
+      "wins": 71,
+      "domestic_trades": 2153,
+      "candidate_trades": 1973,
+      "mean_final_activity": 0.13000432924504451
+    },
+    {
+      "regime": "moderate",
+      "candidate": "M:T:0.0",
+      "games": 256,
+      "wins": 103,
+      "domestic_trades": 5296,
+      "candidate_trades": 4128,
+      "mean_final_activity": 0.241165133220794
+    },
+    {
+      "regime": "moderate",
+      "candidate": "A:T:0.0",
+      "games": 256,
+      "wins": 95,
+      "domestic_trades": 5366,
+      "candidate_trades": 4166,
+      "mean_final_activity": 0.2489186164878398
+    },
+    {
+      "regime": "moderate",
+      "candidate": "T:T:0.0",
+      "games": 256,
+      "wins": 68,
+      "domestic_trades": 5329,
+      "candidate_trades": 4146,
+      "mean_final_activity": 0.2370727248458897
+    },
+    {
+      "regime": "active",
+      "candidate": "M:T:0.0",
+      "games": 256,
+      "wins": 90,
+      "domestic_trades": 10445,
+      "candidate_trades": 6346,
+      "mean_final_activity": 0.4261153262718302
+    },
+    {
+      "regime": "active",
+      "candidate": "A:T:0.0",
+      "games": 256,
+      "wins": 103,
+      "domestic_trades": 10482,
+      "candidate_trades": 6383,
+      "mean_final_activity": 0.42233372533080554
+    },
+    {
+      "regime": "active",
+      "candidate": "T:T:0.0",
+      "games": 256,
+      "wins": 67,
+      "domestic_trades": 10657,
+      "candidate_trades": 6453,
+      "mean_final_activity": 0.431290435960761
+    },
+    {
+      "regime": "mixed",
+      "candidate": "M:T:0.0",
+      "games": 256,
+      "wins": 63,
+      "domestic_trades": 7010,
+      "candidate_trades": 5295,
+      "mean_final_activity": 0.32006962082066776
+    },
+    {
+      "regime": "mixed",
+      "candidate": "A:T:0.0",
+      "games": 256,
+      "wins": 65,
+      "domestic_trades": 7011,
+      "candidate_trades": 5268,
+      "mean_final_activity": 0.32424718783704887
+    },
+    {
+      "regime": "mixed",
+      "candidate": "T:T:0.0",
+      "games": 256,
+      "wins": 63,
+      "domestic_trades": 7053,
+      "candidate_trades": 5355,
+      "mean_final_activity": 0.3227070845081958
+    },
+    {
+      "regime": "rising",
+      "candidate": "M:T:0.0",
+      "games": 256,
+      "wins": 81,
+      "domestic_trades": 7321,
+      "candidate_trades": 4484,
+      "mean_final_activity": 0.4237025901092021
+    },
+    {
+      "regime": "rising",
+      "candidate": "A:T:0.0",
+      "games": 256,
+      "wins": 72,
+      "domestic_trades": 7191,
+      "candidate_trades": 4453,
+      "mean_final_activity": 0.42756731625962363
+    },
+    {
+      "regime": "rising",
+      "candidate": "T:T:0.0",
+      "games": 256,
+      "wins": 73,
+      "domestic_trades": 7329,
+      "candidate_trades": 4549,
+      "mean_final_activity": 0.4210401936766647
+    },
+    {
+      "regime": "falling",
+      "candidate": "M:T:0.0",
+      "games": 256,
+      "wins": 89,
+      "domestic_trades": 7162,
+      "candidate_trades": 4275,
+      "mean_final_activity": 0.18914546757193493
+    },
+    {
+      "regime": "falling",
+      "candidate": "A:T:0.0",
+      "games": 256,
+      "wins": 84,
+      "domestic_trades": 7180,
+      "candidate_trades": 4307,
+      "mean_final_activity": 0.18899468537129777
+    },
+    {
+      "regime": "falling",
+      "candidate": "T:T:0.0",
+      "games": 256,
+      "wins": 54,
+      "domestic_trades": 7233,
+      "candidate_trades": 4416,
+      "mean_final_activity": 0.1962787088267356
+    },
+    {
+      "regime": "none",
+      "candidate": "M:T:0.0",
+      "games": 128,
+      "wins": 34,
+      "domestic_trades": 0,
+      "candidate_trades": 0,
+      "mean_final_activity": 0.06243214820538363
+    },
+    {
+      "regime": "none",
+      "candidate": "A:T:0.0",
+      "games": 128,
+      "wins": 34,
+      "domestic_trades": 0,
+      "candidate_trades": 0,
+      "mean_final_activity": 0.06241456404549413
+    },
+    {
+      "regime": "none",
+      "candidate": "T:T:0.0",
+      "games": 128,
+      "wins": 34,
+      "domestic_trades": 0,
+      "candidate_trades": 0,
+      "mean_final_activity": 0.06244098639836082
+    },
+    {
+      "regime": "none",
+      "candidate": "N:T:0.0",
+      "games": 128,
+      "wins": 43,
+      "domestic_trades": 0,
+      "candidate_trades": 0,
+      "mean_final_activity": 0.062417039080956624
+    },
+    {
+      "regime": "full",
+      "candidate": "M:T:0.0",
+      "games": 128,
+      "wins": 39,
+      "domestic_trades": 7300,
+      "candidate_trades": 3628,
+      "mean_final_activity": 0.5871814302009356
+    },
+    {
+      "regime": "full",
+      "candidate": "A:T:0.0",
+      "games": 128,
+      "wins": 43,
+      "domestic_trades": 7278,
+      "candidate_trades": 3581,
+      "mean_final_activity": 0.58679116241322
+    },
+    {
+      "regime": "full",
+      "candidate": "T:T:0.0",
+      "games": 128,
+      "wins": 30,
+      "domestic_trades": 7774,
+      "candidate_trades": 3902,
+      "mean_final_activity": 0.5934330684171094
+    },
+    {
+      "regime": "full",
+      "candidate": "N:T:0.0",
+      "games": 128,
+      "wins": 33,
+      "domestic_trades": 7250,
+      "candidate_trades": 3552,
+      "mean_final_activity": 0.5853674064192601
+    }
+  ]
+}

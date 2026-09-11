@@ -51,6 +51,12 @@ confirmation and behavior checks used exactly 1,600 evaluation games and
 activity audits. Eight original AB2 records also matched the adopted default;
 they are behavior checks, not new reference-strength observations.
 
+The [robber sign/range follow-up](readouts/exchange-robber-ceiling/README.md)
+subsequently adopted exchange weight +0.075: **608/800 wins (76.0%, 95% CI
+72.9–78.8%)** against the −0.225 incumbent. The screen weakened at larger
+positive values, but a +0.075-versus-+0.15 runoff was inconclusive. All strength
+records passed audit. Total evaluation stayed at 1,600 games and 250.38 seconds.
+
 ## Native Heximax improvement (September 11, 2026)
 
 The [fixed native holdout](readouts/native-expansion/README.md) passed the

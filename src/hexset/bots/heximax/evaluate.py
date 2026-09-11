@@ -96,12 +96,13 @@ _PURCHASE_COSTS = np.array(
 # vector confirmed 52.5% [50.7, 54.3] over 3,072 fresh boards against the
 # start. The other seven terms sit within a point and a half of their best
 # ring value, which is the resolution 1,024 paired games buy.
-# Exchange-only bounded sweep, with adaptive move search held fixed:
-# reducing the penalty magnitude by 25% won 600/800 fresh 2v2 games
-# (75.0%, 95% Wilson 71.9-77.9%). Preserve the tested multiplication exactly;
-# move-profile robber penalties remain -0.30 at both endpoints.
-# See docs/readouts/exchange-weight-sweep/README.md.
-TRADING_WEIGHTS = Weights(robber_risk=-0.30 * 0.75)
+# Exchange-only bounded sweeps, with adaptive move search held fixed:
+# -0.225 first beat -0.30 (600/800). The sign/range follow-up selected +0.075,
+# which beat -0.225 in fresh confirmation (608/800, 76.0%, CI 72.9-78.8%).
+# This is an empirical exchange-pricing coefficient, not a claim that actual
+# robber exposure is beneficial. Both move endpoints retain -0.30.
+# See docs/readouts/exchange-robber-ceiling/README.md for scope and provenance.
+TRADING_WEIGHTS = Weights(robber_risk=0.075)
 
 # The fit that preceded the trading refit, recovered from git: `87d9095`
 # (parent of `1dd9045`, "refit the weights for trading"), `src/catan/evaluate.py`.

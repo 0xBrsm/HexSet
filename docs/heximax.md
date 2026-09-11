@@ -47,6 +47,15 @@ interval 71.9–77.9%)** against the previous exchange vector. All other exchang
 coefficients and both move profiles are unchanged. The full sweep and adoption
 checks stopped at 1,600 games and 4 minutes 1 second of evaluation time.
 
+The [sign/range follow-up](readouts/exchange-robber-ceiling/README.md) now adopts
+**+0.075 for exchange robber risk**, with both move penalties still −0.30.
+It won **608/800 fresh games (76.0%, 95% interval 72.9–78.8%)** against −0.225.
+A direct +0.075-versus-+0.15 runoff was inconclusive, so this is a supported
+candidate rather than a precisely identified optimum. Exchange records show
+large net card transfers from the negative-weight incumbent to the positive
+candidate; this motivates further behavioral analysis without claiming that
+actual robber exposure is beneficial. The bounded follow-up is complete.
+
 ## Current reference results
 
 With its default unpinned adaptive configuration, Heximax won **590/800

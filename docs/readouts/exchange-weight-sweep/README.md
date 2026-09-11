@@ -11,6 +11,10 @@ Only the exchange coefficient changes. Both move endpoints retain their
 robber-risk weight of −0.30. Exchange expansion credit stays zero; move
 expansion continues to adapt. No other candidate changes were combined.
 
+A later [sign/range experiment](../exchange-robber-ceiling/README.md) selected
++0.075 against this study's −0.225 result. The measurements here remain the
+original −0.225-versus-−0.30 study, with their original source and records.
+
 ## Fixed budget and result
 
 The [plan](PLAN.md) and [runner](run.py) were frozen in `a7c6777` before launch.

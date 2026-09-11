@@ -37,6 +37,11 @@ checks; the 1,600 headline observations remain the original benchmark, not a
 new sample under the updated source. The exact adopted source hash and checks
 are in [the adoption receipt](../exchange-weight-sweep/adoption-verification.json).
 
+The subsequent [positive exchange-weight follow-up](../exchange-robber-ceiling/README.md)
+changed that exchange coefficient to +0.075. Four more reserved adoption games
+(two per format) matched original AB2 records exactly. Move weights and search
+remain unchanged. These checks also remain separate from the headline sample.
+
 ## Frozen configuration
 
 - HexSet policy source: `38ac537e44944a892b881b5c0152d4de6828b2a4`.

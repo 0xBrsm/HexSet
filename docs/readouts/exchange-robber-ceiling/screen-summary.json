@@ -1,0 +1,149 @@
+{
+  "results": {
+    "robber-+0": {
+      "candidate_wins": 50,
+      "control_wins": 14,
+      "exchanges": 3263,
+      "games": 64,
+      "unfinished": 0,
+      "wilson95": [
+        0.6656721594362567,
+        0.8649768064562686
+      ],
+      "win_rate": 0.78125,
+      "winners": {
+        "0": 31,
+        "1": 19,
+        "2": 4,
+        "3": 10
+      }
+    },
+    "robber-+0.075": {
+      "candidate_wins": 57,
+      "control_wins": 7,
+      "exchanges": 3367,
+      "games": 64,
+      "unfinished": 0,
+      "wilson95": [
+        0.7910135857782373,
+        0.94599886685027
+      ],
+      "win_rate": 0.890625,
+      "winners": {
+        "0": 28,
+        "1": 29,
+        "2": 4,
+        "3": 3
+      }
+    },
+    "robber-+0.15": {
+      "candidate_wins": 51,
+      "control_wins": 13,
+      "exchanges": 3520,
+      "games": 64,
+      "unfinished": 0,
+      "wilson95": [
+        0.6828636416947513,
+        0.8772658223029142
+      ],
+      "win_rate": 0.796875,
+      "winners": {
+        "0": 28,
+        "1": 23,
+        "2": 8,
+        "3": 5
+      }
+    },
+    "robber-+0.3": {
+      "candidate_wins": 50,
+      "control_wins": 14,
+      "exchanges": 3597,
+      "games": 64,
+      "unfinished": 0,
+      "wilson95": [
+        0.6656721594362567,
+        0.8649768064562686
+      ],
+      "win_rate": 0.78125,
+      "winners": {
+        "0": 25,
+        "1": 25,
+        "2": 11,
+        "3": 3
+      }
+    },
+    "robber-+0.6": {
+      "candidate_wins": 47,
+      "control_wins": 17,
+      "exchanges": 3608,
+      "games": 64,
+      "unfinished": 0,
+      "wilson95": [
+        0.6151712617161998,
+        0.8270362098609046
+      ],
+      "win_rate": 0.734375,
+      "winners": {
+        "0": 25,
+        "1": 22,
+        "2": 9,
+        "3": 8
+      }
+    },
+    "robber-+1.2": {
+      "candidate_wins": 44,
+      "control_wins": 20,
+      "exchanges": 3560,
+      "games": 64,
+      "unfinished": 0,
+      "wilson95": [
+        0.566076641982406,
+        0.7876893352792774
+      ],
+      "win_rate": 0.6875,
+      "winners": {
+        "0": 23,
+        "1": 21,
+        "2": 8,
+        "3": 12
+      }
+    },
+    "robber-+2.4": {
+      "candidate_wins": 32,
+      "control_wins": 32,
+      "exchanges": 3668,
+      "games": 64,
+      "unfinished": 0,
+      "wilson95": [
+        0.3810209465541197,
+        0.6189790534458803
+      ],
+      "win_rate": 0.5,
+      "winners": {
+        "0": 21,
+        "1": 11,
+        "2": 18,
+        "3": 14
+      }
+    },
+    "robber--0.15": {
+      "candidate_wins": 50,
+      "control_wins": 14,
+      "exchanges": 3391,
+      "games": 64,
+      "unfinished": 0,
+      "wilson95": [
+        0.6656721594362567,
+        0.8649768064562686
+      ],
+      "win_rate": 0.78125,
+      "winners": {
+        "0": 26,
+        "1": 24,
+        "2": 4,
+        "3": 10
+      }
+    }
+  },
+  "seconds": 80.76813740306534
+}

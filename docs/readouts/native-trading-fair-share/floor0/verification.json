@@ -1,0 +1,10 @@
+{
+  "games": 800,
+  "trade_floor": 0.0,
+  "complete_unique_indices": true,
+  "candidate_games_per_seat_per_matchup": 100,
+  "all_trade_gates_exercised": true,
+  "trade_counts_verified": true,
+  "every_executed_trade_positive_for_both_gates": true,
+  "wilson_intervals_independently_verified": true
+}

@@ -20,8 +20,8 @@ every exchange for the same reason.
 table (`bot.py`): the catanatron `Game` a catanatron `Player` would see at this
 decision, rebuilt fresh the same way and off the same tables. It writes the
 `State` fields directly rather than replaying a game into them, because
-`State.__init__` reseats the players at random and reseeds the global `random`
-module -- neither of which a mirror may do.
+`State.__init__` shuffles seating and the deck -- neither of which a mirror
+may do. Search has a separate RNG shared by the mirror and its copies.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ import random
 from hexset.board.terrain import NUM_RESOURCES, Resource
 from hexset.cards import DevCard, NUM_DEV_CARDS
 from hexset.chance import Live
-from hexset.game import Game, Phase, to_move
+from hexset.game import Game, Phase, to_move, pending_free_roads
 from hexset.ledger import PublicLedger, SeatLedger
 from hexset.rules import Rules
 from hexset.state import NO_OWNER, Building, GameState
@@ -388,7 +388,7 @@ class BoardMirrorCache:
 
 def to_catanatron(
     game: Game, mapping: BoardMapping, seats: Seating,
-    *, board_cache: BoardMirrorCache | None = None,
+    *, board_cache: BoardMirrorCache | None = None, rng: random.Random | None = None,
 ) -> CatanatronGame:
     """`translate` backwards: the catanatron `Game` mirroring `game` right now."""
     # true state: a catanatron `Player` reads the whole table, so this adapter
@@ -443,9 +443,24 @@ def to_catanatron(
 
     cgame = CatanatronGame([], initialize=False)
     cgame.seed = 0
+    # Arena callers supply the entrant's independent stream. Standalone
+    # translation clones the host stream without advancing live chance draws.
+    # Game, State and search copies intentionally share this search stream.
+    if rng is None:
+        rng = random.Random(0)
+        rng.setstate(game.rng.getstate())
+    cgame.random = cstate.random = rng
     cgame.id = ""
     cgame.vps_to_win = state.rules.winning_points
     cgame.friendly_robber = False
     cgame.state = cstate
     cgame.playable_actions = generate_playable_actions(cstate)
+    if not cgame.playable_actions and cstate.is_road_building and not pending_free_roads(game):
+        # HexSet lets unplaceable credit expire: exhausting road pieces or
+        # legal sites must not prevent rolling/ending the turn. Catanatron's
+        # road-building prompt otherwise has no actions. Repair only that
+        # previously deadlocked mirror; ordinary offers remain unchanged.
+        cstate.is_road_building = False
+        cstate.free_roads_available = 0
+        cgame.playable_actions = generate_playable_actions(cstate)
     return cgame

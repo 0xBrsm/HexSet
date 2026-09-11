@@ -1,0 +1,35 @@
+{
+  "adapter_repair": "stranded-road-building-empty-offer-v1",
+  "alpha": 0.025,
+  "attempt": 1,
+  "candidate": "road-zero-exp025",
+  "endpoints_passed": true,
+  "legacy_records": 1978,
+  "new_records": 2118,
+  "original_source_sha256": "efaecd276604bc23c7d16a23a996cc3815064353dd2d453e52f146fc21d347b1",
+  "patched_source_sha256": "8c677b8f7475ec45fe02ecd5e1ba1d9e18415956b0f594666d7da4a3de8ddafe",
+  "seed": 716000000,
+  "stage": "holdout-complete",
+  "verdict": [
+    {
+      "adjusted_lower": 0.5055107061820392,
+      "games": 2048,
+      "gate": "ab2",
+      "lower95": 0.5086219099961733,
+      "passed": true,
+      "rate": 0.5302734375,
+      "threshold": 0.5,
+      "wins": 1086
+    },
+    {
+      "adjusted_lower": 0.32542703097628023,
+      "games": 2048,
+      "gate": "shipped",
+      "lower95": 0.3282949861484275,
+      "passed": true,
+      "rate": 0.3486328125,
+      "threshold": 0.25,
+      "wins": 714
+    }
+  ]
+}

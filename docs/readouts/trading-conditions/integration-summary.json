@@ -1,0 +1,286 @@
+{
+  "all_actions_and_trades_identical": true,
+  "replayed": 40,
+  "rows": [
+    {
+      "action_sha256": "0580a2e8871c348b5533b2ab470ea23e279276fb16babc1a4c6e8b3f96c37a13",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 26,
+      "index": 0,
+      "regime": "falling"
+    },
+    {
+      "action_sha256": "153a262446d7b45cc8f6389ba860be01e830666e70805e7482a947baa596f3d6",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 38,
+      "index": 2,
+      "regime": "active"
+    },
+    {
+      "action_sha256": "40b733d7b605db88164b7d7caaacebb77a7fb3de41ec2c5f422cb4b27b2faf65",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 32,
+      "index": 0,
+      "regime": "active"
+    },
+    {
+      "action_sha256": "7d7d92bfac350bccb23565907c739e951a11eee067c8b7baa01f56d4cdd2a1b6",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 39,
+      "index": 1,
+      "regime": "active"
+    },
+    {
+      "action_sha256": "0dd73d8bf3e5b93fad7bd8bf43794eba96dee48111d75e4168fdd8e890e4aa06",
+      "candidate": "T:T:0.0",
+      "domestic_trades": 16,
+      "index": 2,
+      "regime": "moderate"
+    },
+    {
+      "action_sha256": "b2d9b38fa428ca78abfbd2ba48791b3cc7aae013538040c676a539b72c2e3ef0",
+      "candidate": "T:T:0.0",
+      "domestic_trades": 21,
+      "index": 3,
+      "regime": "moderate"
+    },
+    {
+      "action_sha256": "cba7ef52ad40808ed587b086fc1bd143a883dc47e4cbd19dc5a95cfae59524e3",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 10,
+      "index": 1,
+      "regime": "quiet"
+    },
+    {
+      "action_sha256": "da691299abc135958b6d36bd2fb81b0003b541e225420c903f6fb9482d1dca02",
+      "candidate": "T:T:0.0",
+      "domestic_trades": 23,
+      "index": 1,
+      "regime": "moderate"
+    },
+    {
+      "action_sha256": "2f6bff68ac48721d080078942424f77ea4a468491f112e6a9035b963975e13e2",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 30,
+      "index": 1,
+      "regime": "falling"
+    },
+    {
+      "action_sha256": "5a742ae7be7b8107bb740601953bd5f3ffc8d33ec0dd951cb33ac522e3b604a8",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 35,
+      "index": 1,
+      "regime": "rising"
+    },
+    {
+      "action_sha256": "7164049fffe476a42230d6f1aa05b2e17180a3d87e2e0f2ad4a89444efaa241d",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 7,
+      "index": 3,
+      "regime": "quiet"
+    },
+    {
+      "action_sha256": "9d330fc7efcf900b2ef026fc177924b789ae301921b5bf90dd000ec507237b39",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 3,
+      "index": 0,
+      "regime": "quiet"
+    },
+    {
+      "action_sha256": "9fa1a5508a0f19556664715c80c68840cca40ac3321685d69388b015aa1656b4",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 24,
+      "index": 0,
+      "regime": "mixed"
+    },
+    {
+      "action_sha256": "adb18f3b958f6d697bae83fcbc118cefda25e138f54b1bf8bc98e1ca3fc0a08b",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 26,
+      "index": 3,
+      "regime": "rising"
+    },
+    {
+      "action_sha256": "4eed854cac8a891952b5322d7d351279ae5f61a300f65784420d1e4e6f7308f6",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 36,
+      "index": 1,
+      "regime": "mixed"
+    },
+    {
+      "action_sha256": "f8f7571c244e21da456578b78e7b382c044712893588dd1c3d26baaf609d1d78",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 25,
+      "index": 1,
+      "regime": "moderate"
+    },
+    {
+      "action_sha256": "cd0bab74d7e723567d52d24ba8f2f6c15e5c2a1d3a6c481dedefc8472460f1f2",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 5,
+      "index": 2,
+      "regime": "quiet"
+    },
+    {
+      "action_sha256": "7bec412bd47ef25098aad58c08251d8c60b0b6b27b3262f932f6c585f0ab9c22",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 26,
+      "index": 0,
+      "regime": "moderate"
+    },
+    {
+      "action_sha256": "b84fb04e6b5bcd59a437c91da1ecac97330e94e0d4ad06a8e76dfe5b687a1038",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 0,
+      "index": 0,
+      "regime": "none"
+    },
+    {
+      "action_sha256": "a897181c6191a13fa304b7b541021d4f775a59aa290cb1db799fb3d5be9ebe43",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 23,
+      "index": 2,
+      "regime": "moderate"
+    },
+    {
+      "action_sha256": "68a240e6a179be54d2414720a5d6f81bf459d19a22344ff09263210cce4b2422",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 38,
+      "index": 3,
+      "regime": "mixed"
+    },
+    {
+      "action_sha256": "67594be644a4a0f989024b84bdbcc92076ea42b9d528d1fa7619156628fea364",
+      "candidate": "T:T:0.0",
+      "domestic_trades": 28,
+      "index": 0,
+      "regime": "moderate"
+    },
+    {
+      "action_sha256": "d276791da59dba924eaeb1ef3157fad6597045370bd68e78369da4052e2e9d7a",
+      "candidate": "T:T:0.0",
+      "domestic_trades": 40,
+      "index": 1,
+      "regime": "full"
+    },
+    {
+      "action_sha256": "5deb724cd711e3e9a082b3ae1eec280acc85a7b12ca611f59ab4b8a57f3dd75a",
+      "candidate": "T:T:0.0",
+      "domestic_trades": 40,
+      "index": 0,
+      "regime": "full"
+    },
+    {
+      "action_sha256": "5796a28970ac5b1c715f04164ea23f61be06f85f1c67e8ca53a860121ad71bc2",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 30,
+      "index": 3,
+      "regime": "moderate"
+    },
+    {
+      "action_sha256": "7f050b9aa36f03f4dcc4955740c34f5a0f18c70b04ed48ed8531604c3a39094e",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 36,
+      "index": 2,
+      "regime": "rising"
+    },
+    {
+      "action_sha256": "806febadc95f20e6deceda8faa29746d7622372cfa2371c5de133b6258e21336",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 34,
+      "index": 3,
+      "regime": "falling"
+    },
+    {
+      "action_sha256": "4487b062e2a12441e0b91faee9a1708f8c6c00068d08db332406b9268808d618",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 0,
+      "index": 1,
+      "regime": "none"
+    },
+    {
+      "action_sha256": "628f06debae2537378512d1d642f653301ac942ee0d9d105ab6aaa6680c5a252",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 49,
+      "index": 3,
+      "regime": "full"
+    },
+    {
+      "action_sha256": "1c8c61c789f09b3543a8af6f0e513251abe3d2aa43c1845d55f4519c0f81e71e",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 36,
+      "index": 0,
+      "regime": "rising"
+    },
+    {
+      "action_sha256": "06ec9f7954dc0b7789710411066de9a79304222db6c0f43d081c73327a6f258d",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 41,
+      "index": 0,
+      "regime": "full"
+    },
+    {
+      "action_sha256": "42adeddbebf7f7f75cd5b49c4b728b6393bc2a2cc51788b17bd424a3c4362c48",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 48,
+      "index": 3,
+      "regime": "active"
+    },
+    {
+      "action_sha256": "6c5c3f33ba7f7a37837ef1e15fad8a4fa4f09ec1224caef30dfbdb3849f46e46",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 24,
+      "index": 2,
+      "regime": "falling"
+    },
+    {
+      "action_sha256": "a771fe8f1d7c60a2ecff2453d07e010a8a1fe7edbaac9b61852e27fe6551ff86",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 0,
+      "index": 3,
+      "regime": "none"
+    },
+    {
+      "action_sha256": "c972a12ba34acaf37789a7b55369d6044219d3e81fec810bab00a8b3f9e72a74",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 52,
+      "index": 2,
+      "regime": "full"
+    },
+    {
+      "action_sha256": "b9830e8614888aefa3fba510a525c857b1b4e73c5dc11b1e5329417e87723134",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 0,
+      "index": 2,
+      "regime": "none"
+    },
+    {
+      "action_sha256": "47e2353f1f9533bc169db516c96d9f9d397d32d46c29ece6e7521e07e4361897",
+      "candidate": "T:T:0.0",
+      "domestic_trades": 63,
+      "index": 2,
+      "regime": "full"
+    },
+    {
+      "action_sha256": "5ed1bd7d594d7bd3b5eca72f4dc1894d9f81db639fcc00a35923e5767dbb9202",
+      "candidate": "T:T:0.0",
+      "domestic_trades": 62,
+      "index": 3,
+      "regime": "full"
+    },
+    {
+      "action_sha256": "db9c3232f44f2eba059858cc236e343fed3fc30a145697b15c65de7e234ff7f0",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 34,
+      "index": 2,
+      "regime": "mixed"
+    },
+    {
+      "action_sha256": "500ddbd130a33c94a47e05231abd2977a84ab39b002ab86d56bf5925f310ed4c",
+      "candidate": "M:T:0.0",
+      "domestic_trades": 65,
+      "index": 1,
+      "regime": "full"
+    }
+  ]
+}

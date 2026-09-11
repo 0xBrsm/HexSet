@@ -1,0 +1,30 @@
+[
+  {
+    "floor": 0.0,
+    "opponent": "O:O:0.0",
+    "games": 400,
+    "trades": 23258,
+    "candidate": 11773
+  },
+  {
+    "floor": 0.0,
+    "opponent": "T:T:0.0",
+    "games": 400,
+    "trades": 25025,
+    "candidate": 12146
+  },
+  {
+    "floor": 0.0197,
+    "opponent": "O:O:0.0197",
+    "games": 400,
+    "trades": 0,
+    "candidate": 0
+  },
+  {
+    "floor": 0.0197,
+    "opponent": "T:T:0.0197",
+    "games": 400,
+    "trades": 0,
+    "candidate": 0
+  }
+]

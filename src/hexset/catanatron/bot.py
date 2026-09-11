@@ -31,13 +31,11 @@ import random
 from typing import Callable
 from weakref import WeakValueDictionary
 
-import numpy as np
-
 from hexset.actions import Action, legal_actions
 from hexset.arena import Entrant, register_entrant_kind, register_preset
 from hexset.board.board import Board
-from hexset.game import Game, imagine, to_move
-from hexset.mcts import visit_policy
+from hexset.bots.determinized import WorldKey, determinized, world_signature
+from hexset.game import Game, to_move
 
 from catanatron.models.player import Color, Player
 from catanatron.players.minimax import AlphaBetaPlayer
@@ -64,120 +62,51 @@ _TABLE_MIRRORS: WeakValueDictionary[tuple[int, int], _TableMirror] = WeakValueDi
 def alpha_beta(depth: int) -> Callable[[Color], Player]:
     """`catanatron-play --players=AB:<depth>`, seat for seat.
 
-    Its CLI splits the spec on `:` and passes the pieces positionally
-    (`cli_players.parse_cli_string`), so `AB:2` was `AlphaBetaPlayer(color,
-    "2")` -- depth two, no pruning, the default value function.
-
-    Catanatron has since replaced that positional string with a `Params`
-    dataclass carrying the same fields in the same order. Which one this
-    build has is asked of the class rather than assumed, because passing
-    the wrong one does not fail at construction: the string is accepted and
-    only raises later, inside the search, as
-    `'str' object has no attribute 'prunning'`.
+    catanatron's registry-era players construct as `(color, params)`, with
+    the tunables declared on a nested `Params` model -- so `AB:2` is
+    `AlphaBetaPlayer(color, AlphaBetaPlayer.Params(depth=2))`: depth two,
+    no pruning, the default value function.
     """
-    params = getattr(AlphaBetaPlayer, "Params", None)
-    if params is None:
-        return lambda color: AlphaBetaPlayer(color, str(depth))
-    return lambda color: AlphaBetaPlayer(color, params(depth=depth))
-
-
-def _world_signature(state, perspective: int) -> tuple:
-    """What makes two sampled worlds the same one, for reuse purposes.
-
-    Every other seat's hidden holdings, and nothing else. The perspective's
-    own hand is not sampled and the board is shared, so neither can tell two
-    draws apart. The deck's order is deliberately excluded: it is a chance
-    stream rather than something hidden about an opponent, and it is
-    reshuffled on every draw, so including it would make every draw unique
-    and defeat the reuse entirely.
-    """
-    return tuple(
-        (tuple(state.hands[seat]), tuple(state.dev_cards[seat]),
-         tuple(state.new_dev_cards[seat]))
-        for seat in range(len(state.hands)) if seat != perspective
-    )
+    return lambda color: AlphaBetaPlayer(color, AlphaBetaPlayer.Params(depth=int(depth)))
 
 
 class CatanatronBot:
     """A catanatron `Player` playing a hexset seat. `player(color) -> Player`.
 
-    A catanatron `Player` cannot hold a belief: its state is fully typed
-    fields with no way to say "unknown", and `AlphaBetaPlayer` uses
-    randomness only for epsilon exploration, so it does not determinize for
-    itself. Handed a position whose hidden parts are a stand-in, it plays as
-    though the stand-in were certain.
-
-    So `worlds` draws that many determinizations of the mover's information
-    set and takes the vote, the way `bots.heximax.search.worlds` already
-    does: `View.sample` keeps every public count and redraws the identities
-    from what is genuinely unseen. It is a **cap, not a quota** -- draws are
-    deduplicated and the search runs once per distinct world, its answer
-    reused for later draws landing there, so the vote stays weighted by how
-    likely each world is while costing only the worlds that differ. Where
-    the belief admits one world, which is the common case once a ledger is
-    doing its job, a high cap costs nothing.
-
-    `worlds=0` is the default and the stock behaviour: read the true state
-    and search it once. That is right wherever the state really is true --
-    self-play, the arena, a bench -- and wrong wherever it is a
-    reconstruction of a game seen from one seat.
-
-    The vote is read the way a search's visit counts are
-    (`hexset.mcts.visit_policy`): `temperature` 1 is proportional to vote
-    share and 0 is argmax with ties split evenly, and `select` then takes
-    that distribution's best or draws from it.
+    ``worlds=0`` retains the reference's single search of the supplied state.
+    Positive ``worlds`` samples the mover's information set and votes, caching
+    one answer per distinct sampled state within this decision. ``world_key``
+    may explicitly ignore deck order for a chooser that does not read it;
+    see :mod:`hexset.bots.determinized` for the cache contract.
     """
 
-    def __init__(self, player: Callable[[Color], Player] | None = None, *,
-                 worlds: int = 0, temperature: float = 0.0,
-                 select: str = "argmax",
-                 rng: random.Random | None = None) -> None:
-        if select not in ("argmax", "sample"):
-            raise ValueError(f"select is 'argmax' or 'sample', not {select!r}")
+    def __init__(
+        self, player: Callable[[Color], Player] | None = None,
+        *, rng: random.Random | None = None, worlds: int = 0,
+        temperature: float = 0.0, select: str = "argmax",
+        world_key: WorldKey = world_signature,
+    ) -> None:
         self.player = player or alpha_beta(2)
-        self.worlds = worlds
-        self.temperature = temperature
-        self.select = select
-        self.rng = rng or random.Random(0)
+        self._rng = rng
         self._mapping = None
         self._seats = None
         self._players: dict[Color, Player] = {}
         self._table = None
+        # Sampling must not consume the reference player's search stream.
+        # Cloning also preserves the exact worlds=0 entrant RNG sequence.
+        sampling_rng = random.Random(0)
+        if rng is not None:
+            sampling_rng.setstate(rng.getstate())
+        self._choose = determinized(
+            self._decide, worlds, sampling_rng, temperature=temperature,
+            select=select, world_key=world_key,
+        )
 
     def choose(self, game: Game) -> Action:
-        """The move, determinized over `worlds` if asked for."""
-        if self.worlds <= 0:
-            return self._decide(game)
-
-        seat = to_move(game)
-        belief = game.state(seat)
-        answered: dict[tuple, Action] = {}
-        votes: dict[tuple, int] = {}
-        for _ in range(self.worlds):
-            sampled = belief.sample(self.rng)
-            key = _world_signature(sampled, seat)
-            action = answered.get(key)
-            if action is None:
-                world = imagine(game, self.rng, randomize_deck=False)
-                world.set_state(sampled)
-                action = self._decide(world)
-                answered[key] = action
-            vote = (int(action.type), action.a, action.b)
-            votes[vote] = votes.get(vote, 0) + 1
-
-        # Sorted keys, never dict order, so a seed reproduces a game exactly.
-        keys = sorted(votes)
-        policy = visit_policy(np.array([votes[k] for k in keys], dtype=float),
-                              self.temperature)
-        if self.select == "sample":
-            index = self.rng.choices(range(len(keys)), weights=list(policy))[0]
-        else:
-            index = int(np.argmax(policy))
-        chosen = keys[index]
-        for action in answered.values():
-            if (int(action.type), action.a, action.b) == chosen:
-                return action
-        raise AssertionError("the winning vote came from no searched world")
+        action = self._choose(game)
+        if action is None:
+            raise ValueError("catanatron returned no action in any sampled world")
+        return action
 
     def _decide(self, game: Game) -> Action:
         # true state: `to_catanatron` mirrors the whole table, which is what a
@@ -203,9 +132,10 @@ class CatanatronBot:
         if color not in self._players:
             self._players[color] = self.player(color)
         mirror = state_to_catanatron(
-            game, self._mapping, self._seats, board_cache=self._table.cache,
+            game, self._mapping, self._seats, board_cache=self._table.cache, rng=self._rng,
         )
 
+        self._rng = mirror.random
         offered = self._offer(game, mirror)
         chosen = self._players[color].decide(mirror, mirror.playable_actions)
         return offered[chosen]
@@ -236,14 +166,7 @@ class CatanatronBot:
 
 
 def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> CatanatronBot:
-    # The arena plays the true state, so determinization stays off unless an
-    # entrant asks for it; `rng` is the arena's, so a seeded run reproduces.
-    return CatanatronBot(
-        alpha_beta(entrant.depth),
-        worlds=int(getattr(entrant, "worlds", 0) or 0),
-        temperature=float(getattr(entrant, "temperature", 0.0) or 0.0),
-        rng=rng,
-    )
+    return CatanatronBot(alpha_beta(entrant.depth), rng=rng)
 
 
 register_entrant_kind("catanatron", _spawn)

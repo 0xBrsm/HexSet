@@ -775,10 +775,20 @@ def run_trade_event(game: Game) -> None:
     gates = game.gates
     if gates is None:
         return
-    trade_event(
+    observers = [observe for gate in gates
+                 if (observe := getattr(gate, "observe_trade", None)) is not None]
+    # Counts and completed participants are public. Publish after clearing,
+    # once per live event; imagine() deliberately carries no seated gates.
+    hand_sizes = tuple(map(sum, game._state.hands)) if observers else ()
+    completed = trade_event(
         game,
         lambda seat, view, received, other: valued(gates[seat], view, received, other),
     )
+    if observers:
+        participants = tuple((trade.a, trade.b) for trade in completed)
+        for observe in observers:
+            observe(turn=game.turns, actor=game.current_player,
+                    hand_sizes=hand_sizes, trade_participants=participants)
 
 
 def enter_main(game: Game) -> None:

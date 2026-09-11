@@ -1,0 +1,42 @@
+[
+  {
+    "a": "N:T:0.0",
+    "b": "N:N:0.0",
+    "paired_difference": 0.1171875,
+    "interval95": [
+      0.020889370067079582,
+      0.21348562993292042
+    ],
+    "exploratory": true
+  },
+  {
+    "a": "T:T:0.0",
+    "b": "T:N:0.0",
+    "paired_difference": 0.0703125,
+    "interval95": [
+      -0.017144329861071547,
+      0.15776932986107156
+    ],
+    "exploratory": true
+  },
+  {
+    "a": "N:T:0.0",
+    "b": "T:T:0.0",
+    "paired_difference": 0.0859375,
+    "interval95": [
+      -0.01375177882579827,
+      0.18562677882579826
+    ],
+    "exploratory": true
+  },
+  {
+    "a": "N:N:0.0",
+    "b": "T:N:0.0",
+    "paired_difference": 0.0390625,
+    "interval95": [
+      -0.034347176766527,
+      0.112472176766527
+    ],
+    "exploratory": true
+  }
+]

@@ -3,6 +3,20 @@
 Changes to the HexSet distribution. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.49.1
+
+### Fixed
+
+- **A trade round you opened yourself went unwatched.** `settle()` stops
+  polling when the move belongs to this seat, on the assumption that the
+  table cannot change until that seat acts. A trade round breaks the
+  assumption: `to_move` stays on the offering seat for the whole round while
+  everyone else answers. So `postRound()` broadcast the offer, called
+  `settle()`, and `settle()` returned on its first line -- the accepts and
+  counters then sat on the server unseen until something else forced a full
+  reload. A round with anyone still to answer is now watched like any other
+  seat's turn.
+
 ## 0.49.0
 
 ### Added

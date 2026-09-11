@@ -70,7 +70,8 @@ for i in range(GAMES):
     assert len({e['turn'] for e in events})==len(events)
     assert sum(participations)==2*len(rec.trades)
     assert sum(int(k)*v for k,v in participant_sizes.items())==sum(cards_given)
-    reports.append(dict(index=i,exchanges=len(rec.trades),player_turns_with_event=len(events),
+    reports.append(dict(index=i,completed_player_turns=game.turns,player_turns_started=game.turns+1,
+        exchanges=len(rec.trades),player_turns_with_event=len(events),
         eligible_events=sum(e['eligible'] for e in events),
         events_with_trade=sum(e['exchanges']>0 for e in events),
         events_with_multiple_trades=sum(e['exchanges']>1 for e in events),
@@ -104,6 +105,8 @@ exchanges=summed('exchanges');turns=summed('player_turns_with_event');bundles=co
 report=dict(passed=True,games=GAMES,source_sha256=SOURCE,protocol=manifest['protocol'],
     legal_actions=summed('legal_actions'),evaluation_seconds=completion['seconds'],
     exchanges=exchanges,player_turns_with_event=turns,eligible_events=summed('eligible_events'),
+    completed_player_turns_per_game=distribution([r['completed_player_turns'] for r in reports]),
+    player_turns_started_per_game=distribution([r['player_turns_started'] for r in reports]),
     events_with_trade=summed('events_with_trade'),events_with_multiple_trades=summed('events_with_multiple_trades'),
     exchanges_per_player_turn=exchanges/turns,
     fraction_turns_with_trade=summed('events_with_trade')/turns,

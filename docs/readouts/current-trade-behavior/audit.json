@@ -30,6 +30,18 @@
     "p95": 209,
     "p99": 246
   },
+  "completed_player_turns_per_game": {
+    "max": 98,
+    "mean": 61.835,
+    "mean_ci95_normal": [
+      60.64022802156762,
+      63.02977197843238
+    ],
+    "median": 61.0,
+    "p90": 78,
+    "p95": 85,
+    "p99": 95
+  },
   "eligible_events": 24576,
   "evaluation_seconds": 60.39895832887851,
   "events_with_multiple_trades": 2995,
@@ -66,6 +78,18 @@
     "3": 7158
   },
   "passed": true,
+  "player_turns_started_per_game": {
+    "max": 99,
+    "mean": 62.835,
+    "mean_ci95_normal": [
+      61.64022802156762,
+      64.02977197843238
+    ],
+    "median": 62.0,
+    "p90": 79,
+    "p95": 86,
+    "p99": 96
+  },
   "player_turns_with_event": 25098,
   "protocol": "native automatic clearing",
   "source_sha256": "d9cd0c7c833130e401a8d0fbf468a7b6113824e6cb3a88310b47df90410411e2",

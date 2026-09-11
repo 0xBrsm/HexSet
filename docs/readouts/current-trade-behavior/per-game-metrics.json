@@ -14,6 +14,7 @@
       48
     ],
     "cards_moved": 170,
+    "completed_player_turns": 72,
     "eligible_events": 71,
     "events_with_multiple_trades": 11,
     "events_with_trade": 31,
@@ -37,6 +38,7 @@
       22,
       25
     ],
+    "player_turns_started": 73,
     "player_turns_with_event": 73,
     "trades_per_event": {
       "0": 42,
@@ -58,6 +60,7 @@
       11
     ],
     "cards_moved": 78,
+    "completed_player_turns": 41,
     "eligible_events": 42,
     "events_with_multiple_trades": 2,
     "events_with_trade": 21,
@@ -81,6 +84,7 @@
       15,
       7
     ],
+    "player_turns_started": 42,
     "player_turns_with_event": 42,
     "trades_per_event": {
       "0": 21,
@@ -102,6 +106,7 @@
       56
     ],
     "cards_moved": 162,
+    "completed_player_turns": 55,
     "eligible_events": 56,
     "events_with_multiple_trades": 10,
     "events_with_trade": 28,
@@ -125,6 +130,7 @@
       16,
       26
     ],
+    "player_turns_started": 56,
     "player_turns_with_event": 56,
     "trades_per_event": {
       "0": 28,
@@ -148,6 +154,7 @@
       33
     ],
     "cards_moved": 132,
+    "completed_player_turns": 44,
     "eligible_events": 45,
     "events_with_multiple_trades": 8,
     "events_with_trade": 23,
@@ -171,6 +178,7 @@
       17,
       19
     ],
+    "player_turns_started": 45,
     "player_turns_with_event": 45,
     "trades_per_event": {
       "0": 22,
@@ -195,6 +203,7 @@
       25
     ],
     "cards_moved": 131,
+    "completed_player_turns": 62,
     "eligible_events": 62,
     "events_with_multiple_trades": 7,
     "events_with_trade": 26,
@@ -218,6 +227,7 @@
       24,
       12
     ],
+    "player_turns_started": 63,
     "player_turns_with_event": 63,
     "trades_per_event": {
       "0": 37,
@@ -241,6 +251,7 @@
       44
     ],
     "cards_moved": 147,
+    "completed_player_turns": 58,
     "eligible_events": 59,
     "events_with_multiple_trades": 10,
     "events_with_trade": 26,
@@ -264,6 +275,7 @@
       12,
       21
     ],
+    "player_turns_started": 59,
     "player_turns_with_event": 59,
     "trades_per_event": {
       "0": 33,
@@ -288,6 +300,7 @@
       28
     ],
     "cards_moved": 113,
+    "completed_player_turns": 65,
     "eligible_events": 64,
     "events_with_multiple_trades": 3,
     "events_with_trade": 28,
@@ -311,6 +324,7 @@
       15,
       17
     ],
+    "player_turns_started": 66,
     "player_turns_with_event": 65,
     "trades_per_event": {
       "0": 37,
@@ -334,6 +348,7 @@
       37
     ],
     "cards_moved": 150,
+    "completed_player_turns": 58,
     "eligible_events": 59,
     "events_with_multiple_trades": 3,
     "events_with_trade": 35,
@@ -357,6 +372,7 @@
       24,
       16
     ],
+    "player_turns_started": 59,
     "player_turns_with_event": 59,
     "trades_per_event": {
       "0": 24,
@@ -380,6 +396,7 @@
       43
     ],
     "cards_moved": 143,
+    "completed_player_turns": 68,
     "eligible_events": 67,
     "events_with_multiple_trades": 7,
     "events_with_trade": 28,
@@ -403,6 +420,7 @@
       18,
       19
     ],
+    "player_turns_started": 69,
     "player_turns_with_event": 69,
     "trades_per_event": {
       "0": 41,
@@ -426,6 +444,7 @@
       63
     ],
     "cards_moved": 234,
+    "completed_player_turns": 73,
     "eligible_events": 71,
     "events_with_multiple_trades": 12,
     "events_with_trade": 41,
@@ -449,6 +468,7 @@
       31,
       32
     ],
+    "player_turns_started": 74,
     "player_turns_with_event": 74,
     "trades_per_event": {
       "0": 33,
@@ -473,6 +493,7 @@
       39
     ],
     "cards_moved": 153,
+    "completed_player_turns": 52,
     "eligible_events": 51,
     "events_with_multiple_trades": 9,
     "events_with_trade": 27,
@@ -496,6 +517,7 @@
       12,
       23
     ],
+    "player_turns_started": 53,
     "player_turns_with_event": 52,
     "trades_per_event": {
       "0": 25,
@@ -519,6 +541,7 @@
       28
     ],
     "cards_moved": 142,
+    "completed_player_turns": 54,
     "eligible_events": 55,
     "events_with_multiple_trades": 9,
     "events_with_trade": 28,
@@ -542,6 +565,7 @@
       16,
       15
     ],
+    "player_turns_started": 55,
     "player_turns_with_event": 55,
     "trades_per_event": {
       "0": 27,
@@ -565,6 +589,7 @@
       43
     ],
     "cards_moved": 190,
+    "completed_player_turns": 70,
     "eligible_events": 68,
     "events_with_multiple_trades": 10,
     "events_with_trade": 35,
@@ -588,6 +613,7 @@
       20,
       24
     ],
+    "player_turns_started": 71,
     "player_turns_with_event": 71,
     "trades_per_event": {
       "0": 36,
@@ -611,6 +637,7 @@
       22
     ],
     "cards_moved": 103,
+    "completed_player_turns": 48,
     "eligible_events": 49,
     "events_with_multiple_trades": 8,
     "events_with_trade": 17,
@@ -634,6 +661,7 @@
       14,
       11
     ],
+    "player_turns_started": 49,
     "player_turns_with_event": 49,
     "trades_per_event": {
       "0": 32,
@@ -657,6 +685,7 @@
       46
     ],
     "cards_moved": 149,
+    "completed_player_turns": 63,
     "eligible_events": 63,
     "events_with_multiple_trades": 6,
     "events_with_trade": 30,
@@ -680,6 +709,7 @@
       16,
       22
     ],
+    "player_turns_started": 64,
     "player_turns_with_event": 64,
     "trades_per_event": {
       "0": 34,
@@ -703,6 +733,7 @@
       46
     ],
     "cards_moved": 158,
+    "completed_player_turns": 51,
     "eligible_events": 51,
     "events_with_multiple_trades": 13,
     "events_with_trade": 30,
@@ -726,6 +757,7 @@
       24,
       25
     ],
+    "player_turns_started": 52,
     "player_turns_with_event": 52,
     "trades_per_event": {
       "0": 22,
@@ -749,6 +781,7 @@
       30
     ],
     "cards_moved": 107,
+    "completed_player_turns": 49,
     "eligible_events": 49,
     "events_with_multiple_trades": 4,
     "events_with_trade": 21,
@@ -772,6 +805,7 @@
       12,
       16
     ],
+    "player_turns_started": 50,
     "player_turns_with_event": 50,
     "trades_per_event": {
       "0": 29,
@@ -795,6 +829,7 @@
       41
     ],
     "cards_moved": 147,
+    "completed_player_turns": 62,
     "eligible_events": 60,
     "events_with_multiple_trades": 6,
     "events_with_trade": 31,
@@ -818,6 +853,7 @@
       20,
       20
     ],
+    "player_turns_started": 63,
     "player_turns_with_event": 63,
     "trades_per_event": {
       "0": 32,
@@ -841,6 +877,7 @@
       40
     ],
     "cards_moved": 169,
+    "completed_player_turns": 71,
     "eligible_events": 72,
     "events_with_multiple_trades": 8,
     "events_with_trade": 33,
@@ -864,6 +901,7 @@
       21,
       20
     ],
+    "player_turns_started": 72,
     "player_turns_with_event": 72,
     "trades_per_event": {
       "0": 39,
@@ -887,6 +925,7 @@
       30
     ],
     "cards_moved": 102,
+    "completed_player_turns": 47,
     "eligible_events": 47,
     "events_with_multiple_trades": 6,
     "events_with_trade": 20,
@@ -910,6 +949,7 @@
       13,
       15
     ],
+    "player_turns_started": 48,
     "player_turns_with_event": 48,
     "trades_per_event": {
       "0": 28,
@@ -933,6 +973,7 @@
       40
     ],
     "cards_moved": 139,
+    "completed_player_turns": 44,
     "eligible_events": 44,
     "events_with_multiple_trades": 8,
     "events_with_trade": 28,
@@ -956,6 +997,7 @@
       18,
       21
     ],
+    "player_turns_started": 45,
     "player_turns_with_event": 45,
     "trades_per_event": {
       "0": 17,
@@ -979,6 +1021,7 @@
       41
     ],
     "cards_moved": 137,
+    "completed_player_turns": 67,
     "eligible_events": 66,
     "events_with_multiple_trades": 7,
     "events_with_trade": 26,
@@ -1002,6 +1045,7 @@
       21,
       19
     ],
+    "player_turns_started": 68,
     "player_turns_with_event": 67,
     "trades_per_event": {
       "0": 41,
@@ -1025,6 +1069,7 @@
       45
     ],
     "cards_moved": 185,
+    "completed_player_turns": 89,
     "eligible_events": 89,
     "events_with_multiple_trades": 9,
     "events_with_trade": 37,
@@ -1048,6 +1093,7 @@
       28,
       24
     ],
+    "player_turns_started": 90,
     "player_turns_with_event": 90,
     "trades_per_event": {
       "0": 53,
@@ -1071,6 +1117,7 @@
       47
     ],
     "cards_moved": 189,
+    "completed_player_turns": 64,
     "eligible_events": 63,
     "events_with_multiple_trades": 9,
     "events_with_trade": 32,
@@ -1094,6 +1141,7 @@
       16,
       25
     ],
+    "player_turns_started": 65,
     "player_turns_with_event": 64,
     "trades_per_event": {
       "0": 32,
@@ -1117,6 +1165,7 @@
       39
     ],
     "cards_moved": 175,
+    "completed_player_turns": 60,
     "eligible_events": 60,
     "events_with_multiple_trades": 10,
     "events_with_trade": 30,
@@ -1140,6 +1189,7 @@
       16,
       20
     ],
+    "player_turns_started": 61,
     "player_turns_with_event": 61,
     "trades_per_event": {
       "0": 31,
@@ -1161,6 +1211,7 @@
       37
     ],
     "cards_moved": 151,
+    "completed_player_turns": 70,
     "eligible_events": 69,
     "events_with_multiple_trades": 8,
     "events_with_trade": 33,
@@ -1184,6 +1235,7 @@
       15,
       21
     ],
+    "player_turns_started": 71,
     "player_turns_with_event": 71,
     "trades_per_event": {
       "0": 38,
@@ -1207,6 +1259,7 @@
       34
     ],
     "cards_moved": 141,
+    "completed_player_turns": 67,
     "eligible_events": 67,
     "events_with_multiple_trades": 6,
     "events_with_trade": 31,
@@ -1230,6 +1283,7 @@
       15,
       16
     ],
+    "player_turns_started": 68,
     "player_turns_with_event": 68,
     "trades_per_event": {
       "0": 37,
@@ -1252,6 +1306,7 @@
       36
     ],
     "cards_moved": 118,
+    "completed_player_turns": 56,
     "eligible_events": 55,
     "events_with_multiple_trades": 4,
     "events_with_trade": 24,
@@ -1275,6 +1330,7 @@
       14,
       17
     ],
+    "player_turns_started": 57,
     "player_turns_with_event": 57,
     "trades_per_event": {
       "0": 33,
@@ -1298,6 +1354,7 @@
       37
     ],
     "cards_moved": 137,
+    "completed_player_turns": 63,
     "eligible_events": 62,
     "events_with_multiple_trades": 10,
     "events_with_trade": 25,
@@ -1321,6 +1378,7 @@
       21,
       21
     ],
+    "player_turns_started": 64,
     "player_turns_with_event": 64,
     "trades_per_event": {
       "0": 39,
@@ -1345,6 +1403,7 @@
       32
     ],
     "cards_moved": 114,
+    "completed_player_turns": 47,
     "eligible_events": 45,
     "events_with_multiple_trades": 5,
     "events_with_trade": 23,
@@ -1368,6 +1427,7 @@
       18,
       16
     ],
+    "player_turns_started": 48,
     "player_turns_with_event": 48,
     "trades_per_event": {
       "0": 25,
@@ -1391,6 +1451,7 @@
       41
     ],
     "cards_moved": 161,
+    "completed_player_turns": 57,
     "eligible_events": 57,
     "events_with_multiple_trades": 9,
     "events_with_trade": 28,
@@ -1414,6 +1475,7 @@
       20,
       24
     ],
+    "player_turns_started": 58,
     "player_turns_with_event": 58,
     "trades_per_event": {
       "0": 30,
@@ -1436,6 +1498,7 @@
       43
     ],
     "cards_moved": 145,
+    "completed_player_turns": 53,
     "eligible_events": 54,
     "events_with_multiple_trades": 5,
     "events_with_trade": 30,
@@ -1459,6 +1522,7 @@
       14,
       21
     ],
+    "player_turns_started": 54,
     "player_turns_with_event": 54,
     "trades_per_event": {
       "0": 24,
@@ -1482,6 +1546,7 @@
       26
     ],
     "cards_moved": 145,
+    "completed_player_turns": 66,
     "eligible_events": 66,
     "events_with_multiple_trades": 8,
     "events_with_trade": 29,
@@ -1505,6 +1570,7 @@
       22,
       14
     ],
+    "player_turns_started": 67,
     "player_turns_with_event": 67,
     "trades_per_event": {
       "0": 38,
@@ -1528,6 +1594,7 @@
       32
     ],
     "cards_moved": 139,
+    "completed_player_turns": 49,
     "eligible_events": 50,
     "events_with_multiple_trades": 8,
     "events_with_trade": 24,
@@ -1551,6 +1618,7 @@
       19,
       14
     ],
+    "player_turns_started": 50,
     "player_turns_with_event": 50,
     "trades_per_event": {
       "0": 26,
@@ -1575,6 +1643,7 @@
       29
     ],
     "cards_moved": 151,
+    "completed_player_turns": 53,
     "eligible_events": 53,
     "events_with_multiple_trades": 9,
     "events_with_trade": 31,
@@ -1598,6 +1667,7 @@
       19,
       20
     ],
+    "player_turns_started": 54,
     "player_turns_with_event": 53,
     "trades_per_event": {
       "0": 22,
@@ -1621,6 +1691,7 @@
       38
     ],
     "cards_moved": 146,
+    "completed_player_turns": 66,
     "eligible_events": 66,
     "events_with_multiple_trades": 8,
     "events_with_trade": 30,
@@ -1644,6 +1715,7 @@
       25,
       21
     ],
+    "player_turns_started": 67,
     "player_turns_with_event": 67,
     "trades_per_event": {
       "0": 37,
@@ -1668,6 +1740,7 @@
       41
     ],
     "cards_moved": 173,
+    "completed_player_turns": 91,
     "eligible_events": 88,
     "events_with_multiple_trades": 10,
     "events_with_trade": 34,
@@ -1691,6 +1764,7 @@
       18,
       21
     ],
+    "player_turns_started": 92,
     "player_turns_with_event": 92,
     "trades_per_event": {
       "0": 58,
@@ -1714,6 +1788,7 @@
       19
     ],
     "cards_moved": 82,
+    "completed_player_turns": 53,
     "eligible_events": 54,
     "events_with_multiple_trades": 3,
     "events_with_trade": 21,
@@ -1737,6 +1812,7 @@
       16,
       12
     ],
+    "player_turns_started": 54,
     "player_turns_with_event": 54,
     "trades_per_event": {
       "0": 33,
@@ -1759,6 +1835,7 @@
       33
     ],
     "cards_moved": 147,
+    "completed_player_turns": 59,
     "eligible_events": 59,
     "events_with_multiple_trades": 7,
     "events_with_trade": 29,
@@ -1782,6 +1859,7 @@
       20,
       17
     ],
+    "player_turns_started": 60,
     "player_turns_with_event": 60,
     "trades_per_event": {
       "0": 31,
@@ -1804,6 +1882,7 @@
       57
     ],
     "cards_moved": 219,
+    "completed_player_turns": 65,
     "eligible_events": 64,
     "events_with_multiple_trades": 15,
     "events_with_trade": 37,
@@ -1827,6 +1906,7 @@
       30,
       25
     ],
+    "player_turns_started": 66,
     "player_turns_with_event": 65,
     "trades_per_event": {
       "0": 28,
@@ -1850,6 +1930,7 @@
       42
     ],
     "cards_moved": 160,
+    "completed_player_turns": 72,
     "eligible_events": 72,
     "events_with_multiple_trades": 8,
     "events_with_trade": 33,
@@ -1873,6 +1954,7 @@
       21,
       19
     ],
+    "player_turns_started": 73,
     "player_turns_with_event": 73,
     "trades_per_event": {
       "0": 40,
@@ -1894,6 +1976,7 @@
       34
     ],
     "cards_moved": 163,
+    "completed_player_turns": 63,
     "eligible_events": 64,
     "events_with_multiple_trades": 9,
     "events_with_trade": 32,
@@ -1917,6 +2000,7 @@
       25,
       17
     ],
+    "player_turns_started": 64,
     "player_turns_with_event": 64,
     "trades_per_event": {
       "0": 32,
@@ -1940,6 +2024,7 @@
       30
     ],
     "cards_moved": 117,
+    "completed_player_turns": 53,
     "eligible_events": 53,
     "events_with_multiple_trades": 4,
     "events_with_trade": 26,
@@ -1963,6 +2048,7 @@
       16,
       16
     ],
+    "player_turns_started": 54,
     "player_turns_with_event": 54,
     "trades_per_event": {
       "0": 28,
@@ -1985,6 +2071,7 @@
       35
     ],
     "cards_moved": 161,
+    "completed_player_turns": 59,
     "eligible_events": 58,
     "events_with_multiple_trades": 9,
     "events_with_trade": 28,
@@ -2008,6 +2095,7 @@
       19,
       17
     ],
+    "player_turns_started": 60,
     "player_turns_with_event": 60,
     "trades_per_event": {
       "0": 32,
@@ -2031,6 +2119,7 @@
       41
     ],
     "cards_moved": 135,
+    "completed_player_turns": 53,
     "eligible_events": 54,
     "events_with_multiple_trades": 7,
     "events_with_trade": 27,
@@ -2054,6 +2143,7 @@
       16,
       23
     ],
+    "player_turns_started": 54,
     "player_turns_with_event": 54,
     "trades_per_event": {
       "0": 27,
@@ -2077,6 +2167,7 @@
       46
     ],
     "cards_moved": 165,
+    "completed_player_turns": 67,
     "eligible_events": 66,
     "events_with_multiple_trades": 9,
     "events_with_trade": 32,
@@ -2100,6 +2191,7 @@
       24,
       23
     ],
+    "player_turns_started": 68,
     "player_turns_with_event": 68,
     "trades_per_event": {
       "0": 36,
@@ -2123,6 +2215,7 @@
       29
     ],
     "cards_moved": 126,
+    "completed_player_turns": 55,
     "eligible_events": 53,
     "events_with_multiple_trades": 6,
     "events_with_trade": 29,
@@ -2146,6 +2239,7 @@
       16,
       14
     ],
+    "player_turns_started": 56,
     "player_turns_with_event": 56,
     "trades_per_event": {
       "0": 27,
@@ -2169,6 +2263,7 @@
       36
     ],
     "cards_moved": 133,
+    "completed_player_turns": 57,
     "eligible_events": 58,
     "events_with_multiple_trades": 4,
     "events_with_trade": 26,
@@ -2192,6 +2287,7 @@
       18,
       16
     ],
+    "player_turns_started": 58,
     "player_turns_with_event": 58,
     "trades_per_event": {
       "0": 32,
@@ -2215,6 +2311,7 @@
       13
     ],
     "cards_moved": 102,
+    "completed_player_turns": 51,
     "eligible_events": 51,
     "events_with_multiple_trades": 4,
     "events_with_trade": 22,
@@ -2238,6 +2335,7 @@
       13,
       6
     ],
+    "player_turns_started": 52,
     "player_turns_with_event": 52,
     "trades_per_event": {
       "0": 30,
@@ -2260,6 +2358,7 @@
       37
     ],
     "cards_moved": 130,
+    "completed_player_turns": 74,
     "eligible_events": 73,
     "events_with_multiple_trades": 3,
     "events_with_trade": 31,
@@ -2283,6 +2382,7 @@
       14,
       19
     ],
+    "player_turns_started": 75,
     "player_turns_with_event": 75,
     "trades_per_event": {
       "0": 44,
@@ -2305,6 +2405,7 @@
       30
     ],
     "cards_moved": 98,
+    "completed_player_turns": 49,
     "eligible_events": 50,
     "events_with_multiple_trades": 3,
     "events_with_trade": 23,
@@ -2328,6 +2429,7 @@
       12,
       16
     ],
+    "player_turns_started": 50,
     "player_turns_with_event": 50,
     "trades_per_event": {
       "0": 27,
@@ -2350,6 +2452,7 @@
       40
     ],
     "cards_moved": 166,
+    "completed_player_turns": 60,
     "eligible_events": 60,
     "events_with_multiple_trades": 7,
     "events_with_trade": 36,
@@ -2373,6 +2476,7 @@
       24,
       20
     ],
+    "player_turns_started": 61,
     "player_turns_with_event": 61,
     "trades_per_event": {
       "0": 25,
@@ -2397,6 +2501,7 @@
       42
     ],
     "cards_moved": 165,
+    "completed_player_turns": 68,
     "eligible_events": 66,
     "events_with_multiple_trades": 4,
     "events_with_trade": 35,
@@ -2420,6 +2525,7 @@
       19,
       19
     ],
+    "player_turns_started": 69,
     "player_turns_with_event": 69,
     "trades_per_event": {
       "0": 34,
@@ -2443,6 +2549,7 @@
       63
     ],
     "cards_moved": 242,
+    "completed_player_turns": 87,
     "eligible_events": 85,
     "events_with_multiple_trades": 15,
     "events_with_trade": 42,
@@ -2466,6 +2573,7 @@
       32,
       32
     ],
+    "player_turns_started": 88,
     "player_turns_with_event": 88,
     "trades_per_event": {
       "0": 46,
@@ -2488,6 +2596,7 @@
       17
     ],
     "cards_moved": 81,
+    "completed_player_turns": 46,
     "eligible_events": 46,
     "events_with_multiple_trades": 5,
     "events_with_trade": 17,
@@ -2511,6 +2620,7 @@
       13,
       9
     ],
+    "player_turns_started": 47,
     "player_turns_with_event": 47,
     "trades_per_event": {
       "0": 30,
@@ -2534,6 +2644,7 @@
       41
     ],
     "cards_moved": 145,
+    "completed_player_turns": 70,
     "eligible_events": 70,
     "events_with_multiple_trades": 5,
     "events_with_trade": 36,
@@ -2557,6 +2668,7 @@
       21,
       24
     ],
+    "player_turns_started": 71,
     "player_turns_with_event": 71,
     "trades_per_event": {
       "0": 35,
@@ -2579,6 +2691,7 @@
       36
     ],
     "cards_moved": 127,
+    "completed_player_turns": 66,
     "eligible_events": 67,
     "events_with_multiple_trades": 4,
     "events_with_trade": 29,
@@ -2602,6 +2715,7 @@
       16,
       19
     ],
+    "player_turns_started": 67,
     "player_turns_with_event": 67,
     "trades_per_event": {
       "0": 38,
@@ -2624,6 +2738,7 @@
       53
     ],
     "cards_moved": 210,
+    "completed_player_turns": 73,
     "eligible_events": 72,
     "events_with_multiple_trades": 12,
     "events_with_trade": 41,
@@ -2647,6 +2762,7 @@
       26,
       28
     ],
+    "player_turns_started": 74,
     "player_turns_with_event": 73,
     "trades_per_event": {
       "0": 32,
@@ -2670,6 +2786,7 @@
       35
     ],
     "cards_moved": 131,
+    "completed_player_turns": 66,
     "eligible_events": 67,
     "events_with_multiple_trades": 7,
     "events_with_trade": 26,
@@ -2693,6 +2810,7 @@
       16,
       21
     ],
+    "player_turns_started": 67,
     "player_turns_with_event": 67,
     "trades_per_event": {
       "0": 41,
@@ -2716,6 +2834,7 @@
       50
     ],
     "cards_moved": 162,
+    "completed_player_turns": 61,
     "eligible_events": 60,
     "events_with_multiple_trades": 9,
     "events_with_trade": 28,
@@ -2739,6 +2858,7 @@
       18,
       25
     ],
+    "player_turns_started": 62,
     "player_turns_with_event": 62,
     "trades_per_event": {
       "0": 34,
@@ -2762,6 +2882,7 @@
       33
     ],
     "cards_moved": 176,
+    "completed_player_turns": 68,
     "eligible_events": 69,
     "events_with_multiple_trades": 8,
     "events_with_trade": 30,
@@ -2785,6 +2906,7 @@
       26,
       15
     ],
+    "player_turns_started": 69,
     "player_turns_with_event": 69,
     "trades_per_event": {
       "0": 39,
@@ -2808,6 +2930,7 @@
       31
     ],
     "cards_moved": 99,
+    "completed_player_turns": 59,
     "eligible_events": 58,
     "events_with_multiple_trades": 4,
     "events_with_trade": 26,
@@ -2831,6 +2954,7 @@
       13,
       17
     ],
+    "player_turns_started": 60,
     "player_turns_with_event": 60,
     "trades_per_event": {
       "0": 34,
@@ -2853,6 +2977,7 @@
       36
     ],
     "cards_moved": 139,
+    "completed_player_turns": 74,
     "eligible_events": 73,
     "events_with_multiple_trades": 9,
     "events_with_trade": 28,
@@ -2876,6 +3001,7 @@
       18,
       20
     ],
+    "player_turns_started": 75,
     "player_turns_with_event": 75,
     "trades_per_event": {
       "0": 47,
@@ -2898,6 +3024,7 @@
       47
     ],
     "cards_moved": 150,
+    "completed_player_turns": 57,
     "eligible_events": 57,
     "events_with_multiple_trades": 9,
     "events_with_trade": 29,
@@ -2921,6 +3048,7 @@
       14,
       25
     ],
+    "player_turns_started": 58,
     "player_turns_with_event": 58,
     "trades_per_event": {
       "0": 29,
@@ -2945,6 +3073,7 @@
       60
     ],
     "cards_moved": 194,
+    "completed_player_turns": 53,
     "eligible_events": 54,
     "events_with_multiple_trades": 11,
     "events_with_trade": 32,
@@ -2968,6 +3097,7 @@
       22,
       30
     ],
+    "player_turns_started": 54,
     "player_turns_with_event": 54,
     "trades_per_event": {
       "0": 22,
@@ -2992,6 +3122,7 @@
       36
     ],
     "cards_moved": 141,
+    "completed_player_turns": 61,
     "eligible_events": 61,
     "events_with_multiple_trades": 7,
     "events_with_trade": 29,
@@ -3015,6 +3146,7 @@
       18,
       19
     ],
+    "player_turns_started": 62,
     "player_turns_with_event": 62,
     "trades_per_event": {
       "0": 33,
@@ -3038,6 +3170,7 @@
       22
     ],
     "cards_moved": 137,
+    "completed_player_turns": 54,
     "eligible_events": 55,
     "events_with_multiple_trades": 6,
     "events_with_trade": 25,
@@ -3061,6 +3194,7 @@
       16,
       11
     ],
+    "player_turns_started": 55,
     "player_turns_with_event": 55,
     "trades_per_event": {
       "0": 30,
@@ -3084,6 +3218,7 @@
       48
     ],
     "cards_moved": 153,
+    "completed_player_turns": 63,
     "eligible_events": 63,
     "events_with_multiple_trades": 6,
     "events_with_trade": 33,
@@ -3107,6 +3242,7 @@
       15,
       26
     ],
+    "player_turns_started": 64,
     "player_turns_with_event": 64,
     "trades_per_event": {
       "0": 31,
@@ -3130,6 +3266,7 @@
       32
     ],
     "cards_moved": 109,
+    "completed_player_turns": 52,
     "eligible_events": 52,
     "events_with_multiple_trades": 6,
     "events_with_trade": 24,
@@ -3153,6 +3290,7 @@
       11,
       16
     ],
+    "player_turns_started": 53,
     "player_turns_with_event": 53,
     "trades_per_event": {
       "0": 29,
@@ -3176,6 +3314,7 @@
       54
     ],
     "cards_moved": 185,
+    "completed_player_turns": 89,
     "eligible_events": 89,
     "events_with_multiple_trades": 11,
     "events_with_trade": 33,
@@ -3199,6 +3338,7 @@
       18,
       27
     ],
+    "player_turns_started": 90,
     "player_turns_with_event": 90,
     "trades_per_event": {
       "0": 57,
@@ -3223,6 +3363,7 @@
       54
     ],
     "cards_moved": 203,
+    "completed_player_turns": 78,
     "eligible_events": 77,
     "events_with_multiple_trades": 10,
     "events_with_trade": 41,
@@ -3246,6 +3387,7 @@
       31,
       29
     ],
+    "player_turns_started": 79,
     "player_turns_with_event": 79,
     "trades_per_event": {
       "0": 38,
@@ -3269,6 +3411,7 @@
       28
     ],
     "cards_moved": 154,
+    "completed_player_turns": 57,
     "eligible_events": 58,
     "events_with_multiple_trades": 7,
     "events_with_trade": 29,
@@ -3292,6 +3435,7 @@
       18,
       16
     ],
+    "player_turns_started": 58,
     "player_turns_with_event": 58,
     "trades_per_event": {
       "0": 29,
@@ -3316,6 +3460,7 @@
       39
     ],
     "cards_moved": 151,
+    "completed_player_turns": 61,
     "eligible_events": 60,
     "events_with_multiple_trades": 7,
     "events_with_trade": 27,
@@ -3339,6 +3484,7 @@
       19,
       20
     ],
+    "player_turns_started": 62,
     "player_turns_with_event": 62,
     "trades_per_event": {
       "0": 35,
@@ -3362,6 +3508,7 @@
       40
     ],
     "cards_moved": 125,
+    "completed_player_turns": 53,
     "eligible_events": 54,
     "events_with_multiple_trades": 8,
     "events_with_trade": 24,
@@ -3385,6 +3532,7 @@
       18,
       23
     ],
+    "player_turns_started": 54,
     "player_turns_with_event": 54,
     "trades_per_event": {
       "0": 30,
@@ -3408,6 +3556,7 @@
       20
     ],
     "cards_moved": 120,
+    "completed_player_turns": 64,
     "eligible_events": 63,
     "events_with_multiple_trades": 8,
     "events_with_trade": 25,
@@ -3431,6 +3580,7 @@
       24,
       11
     ],
+    "player_turns_started": 65,
     "player_turns_with_event": 64,
     "trades_per_event": {
       "0": 39,
@@ -3453,6 +3603,7 @@
       57
     ],
     "cards_moved": 189,
+    "completed_player_turns": 87,
     "eligible_events": 88,
     "events_with_multiple_trades": 9,
     "events_with_trade": 41,
@@ -3476,6 +3627,7 @@
       24,
       29
     ],
+    "player_turns_started": 88,
     "player_turns_with_event": 88,
     "trades_per_event": {
       "0": 47,
@@ -3499,6 +3651,7 @@
       32
     ],
     "cards_moved": 153,
+    "completed_player_turns": 54,
     "eligible_events": 54,
     "events_with_multiple_trades": 9,
     "events_with_trade": 26,
@@ -3522,6 +3675,7 @@
       20,
       16
     ],
+    "player_turns_started": 55,
     "player_turns_with_event": 55,
     "trades_per_event": {
       "0": 29,
@@ -3545,6 +3699,7 @@
       32
     ],
     "cards_moved": 134,
+    "completed_player_turns": 57,
     "eligible_events": 56,
     "events_with_multiple_trades": 5,
     "events_with_trade": 30,
@@ -3568,6 +3723,7 @@
       16,
       16
     ],
+    "player_turns_started": 58,
     "player_turns_with_event": 58,
     "trades_per_event": {
       "0": 28,
@@ -3592,6 +3748,7 @@
       76
     ],
     "cards_moved": 248,
+    "completed_player_turns": 68,
     "eligible_events": 68,
     "events_with_multiple_trades": 14,
     "events_with_trade": 40,
@@ -3615,6 +3772,7 @@
       31,
       34
     ],
+    "player_turns_started": 69,
     "player_turns_with_event": 69,
     "trades_per_event": {
       "0": 29,
@@ -3639,6 +3797,7 @@
       31
     ],
     "cards_moved": 150,
+    "completed_player_turns": 77,
     "eligible_events": 77,
     "events_with_multiple_trades": 8,
     "events_with_trade": 31,
@@ -3662,6 +3821,7 @@
       25,
       15
     ],
+    "player_turns_started": 78,
     "player_turns_with_event": 77,
     "trades_per_event": {
       "0": 46,
@@ -3686,6 +3846,7 @@
       42
     ],
     "cards_moved": 160,
+    "completed_player_turns": 62,
     "eligible_events": 62,
     "events_with_multiple_trades": 6,
     "events_with_trade": 31,
@@ -3709,6 +3870,7 @@
       22,
       20
     ],
+    "player_turns_started": 63,
     "player_turns_with_event": 63,
     "trades_per_event": {
       "0": 32,
@@ -3733,6 +3895,7 @@
       26
     ],
     "cards_moved": 112,
+    "completed_player_turns": 78,
     "eligible_events": 76,
     "events_with_multiple_trades": 3,
     "events_with_trade": 26,
@@ -3756,6 +3919,7 @@
       15,
       14
     ],
+    "player_turns_started": 79,
     "player_turns_with_event": 79,
     "trades_per_event": {
       "0": 53,
@@ -3777,6 +3941,7 @@
       29
     ],
     "cards_moved": 111,
+    "completed_player_turns": 60,
     "eligible_events": 60,
     "events_with_multiple_trades": 7,
     "events_with_trade": 25,
@@ -3800,6 +3965,7 @@
       13,
       17
     ],
+    "player_turns_started": 61,
     "player_turns_with_event": 61,
     "trades_per_event": {
       "0": 36,
@@ -3822,6 +3988,7 @@
       68
     ],
     "cards_moved": 246,
+    "completed_player_turns": 87,
     "eligible_events": 87,
     "events_with_multiple_trades": 13,
     "events_with_trade": 48,
@@ -3845,6 +4012,7 @@
       27,
       38
     ],
+    "player_turns_started": 88,
     "player_turns_with_event": 88,
     "trades_per_event": {
       "0": 40,
@@ -3868,6 +4036,7 @@
       20
     ],
     "cards_moved": 117,
+    "completed_player_turns": 58,
     "eligible_events": 59,
     "events_with_multiple_trades": 5,
     "events_with_trade": 26,
@@ -3891,6 +4060,7 @@
       17,
       13
     ],
+    "player_turns_started": 59,
     "player_turns_with_event": 59,
     "trades_per_event": {
       "0": 33,
@@ -3914,6 +4084,7 @@
       46
     ],
     "cards_moved": 191,
+    "completed_player_turns": 68,
     "eligible_events": 69,
     "events_with_multiple_trades": 13,
     "events_with_trade": 39,
@@ -3937,6 +4108,7 @@
       28,
       28
     ],
+    "player_turns_started": 69,
     "player_turns_with_event": 69,
     "trades_per_event": {
       "0": 30,
@@ -3960,6 +4132,7 @@
       48
     ],
     "cards_moved": 133,
+    "completed_player_turns": 51,
     "eligible_events": 51,
     "events_with_multiple_trades": 6,
     "events_with_trade": 29,
@@ -3983,6 +4156,7 @@
       12,
       24
     ],
+    "player_turns_started": 52,
     "player_turns_with_event": 52,
     "trades_per_event": {
       "0": 23,
@@ -4006,6 +4180,7 @@
       35
     ],
     "cards_moved": 150,
+    "completed_player_turns": 46,
     "eligible_events": 45,
     "events_with_multiple_trades": 6,
     "events_with_trade": 27,
@@ -4029,6 +4204,7 @@
       19,
       17
     ],
+    "player_turns_started": 47,
     "player_turns_with_event": 47,
     "trades_per_event": {
       "0": 20,
@@ -4052,6 +4228,7 @@
       42
     ],
     "cards_moved": 178,
+    "completed_player_turns": 53,
     "eligible_events": 51,
     "events_with_multiple_trades": 11,
     "events_with_trade": 32,
@@ -4075,6 +4252,7 @@
       25,
       22
     ],
+    "player_turns_started": 54,
     "player_turns_with_event": 53,
     "trades_per_event": {
       "0": 21,
@@ -4097,6 +4275,7 @@
       33
     ],
     "cards_moved": 129,
+    "completed_player_turns": 55,
     "eligible_events": 55,
     "events_with_multiple_trades": 3,
     "events_with_trade": 32,
@@ -4120,6 +4299,7 @@
       13,
       17
     ],
+    "player_turns_started": 56,
     "player_turns_with_event": 56,
     "trades_per_event": {
       "0": 24,
@@ -4142,6 +4322,7 @@
       35
     ],
     "cards_moved": 134,
+    "completed_player_turns": 62,
     "eligible_events": 62,
     "events_with_multiple_trades": 6,
     "events_with_trade": 23,
@@ -4165,6 +4346,7 @@
       18,
       16
     ],
+    "player_turns_started": 63,
     "player_turns_with_event": 63,
     "trades_per_event": {
       "0": 40,
@@ -4186,6 +4368,7 @@
       13
     ],
     "cards_moved": 60,
+    "completed_player_turns": 28,
     "eligible_events": 29,
     "events_with_multiple_trades": 3,
     "events_with_trade": 10,
@@ -4209,6 +4392,7 @@
       8,
       6
     ],
+    "player_turns_started": 29,
     "player_turns_with_event": 29,
     "trades_per_event": {
       "0": 19,
@@ -4232,6 +4416,7 @@
       21
     ],
     "cards_moved": 98,
+    "completed_player_turns": 44,
     "eligible_events": 44,
     "events_with_multiple_trades": 5,
     "events_with_trade": 20,
@@ -4255,6 +4440,7 @@
       14,
       11
     ],
+    "player_turns_started": 45,
     "player_turns_with_event": 44,
     "trades_per_event": {
       "0": 24,
@@ -4277,6 +4463,7 @@
       28
     ],
     "cards_moved": 120,
+    "completed_player_turns": 53,
     "eligible_events": 54,
     "events_with_multiple_trades": 7,
     "events_with_trade": 21,
@@ -4300,6 +4487,7 @@
       15,
       14
     ],
+    "player_turns_started": 54,
     "player_turns_with_event": 54,
     "trades_per_event": {
       "0": 33,
@@ -4322,6 +4510,7 @@
       24
     ],
     "cards_moved": 102,
+    "completed_player_turns": 56,
     "eligible_events": 56,
     "events_with_multiple_trades": 6,
     "events_with_trade": 21,
@@ -4345,6 +4534,7 @@
       13,
       11
     ],
+    "player_turns_started": 57,
     "player_turns_with_event": 57,
     "trades_per_event": {
       "0": 36,
@@ -4367,6 +4557,7 @@
       43
     ],
     "cards_moved": 158,
+    "completed_player_turns": 79,
     "eligible_events": 79,
     "events_with_multiple_trades": 7,
     "events_with_trade": 30,
@@ -4390,6 +4581,7 @@
       17,
       19
     ],
+    "player_turns_started": 80,
     "player_turns_with_event": 80,
     "trades_per_event": {
       "0": 50,
@@ -4413,6 +4605,7 @@
       49
     ],
     "cards_moved": 154,
+    "completed_player_turns": 49,
     "eligible_events": 47,
     "events_with_multiple_trades": 8,
     "events_with_trade": 27,
@@ -4436,6 +4629,7 @@
       17,
       22
     ],
+    "player_turns_started": 50,
     "player_turns_with_event": 50,
     "trades_per_event": {
       "0": 23,
@@ -4460,6 +4654,7 @@
       47
     ],
     "cards_moved": 186,
+    "completed_player_turns": 71,
     "eligible_events": 69,
     "events_with_multiple_trades": 12,
     "events_with_trade": 33,
@@ -4483,6 +4678,7 @@
       24,
       25
     ],
+    "player_turns_started": 72,
     "player_turns_with_event": 71,
     "trades_per_event": {
       "0": 38,
@@ -4506,6 +4702,7 @@
       47
     ],
     "cards_moved": 156,
+    "completed_player_turns": 69,
     "eligible_events": 67,
     "events_with_multiple_trades": 9,
     "events_with_trade": 27,
@@ -4529,6 +4726,7 @@
       15,
       22
     ],
+    "player_turns_started": 70,
     "player_turns_with_event": 70,
     "trades_per_event": {
       "0": 43,
@@ -4552,6 +4750,7 @@
       36
     ],
     "cards_moved": 190,
+    "completed_player_turns": 54,
     "eligible_events": 54,
     "events_with_multiple_trades": 12,
     "events_with_trade": 36,
@@ -4575,6 +4774,7 @@
       25,
       23
     ],
+    "player_turns_started": 55,
     "player_turns_with_event": 55,
     "trades_per_event": {
       "0": 19,
@@ -4597,6 +4797,7 @@
       18
     ],
     "cards_moved": 107,
+    "completed_player_turns": 43,
     "eligible_events": 43,
     "events_with_multiple_trades": 4,
     "events_with_trade": 24,
@@ -4620,6 +4821,7 @@
       16,
       10
     ],
+    "player_turns_started": 44,
     "player_turns_with_event": 44,
     "trades_per_event": {
       "0": 20,
@@ -4642,6 +4844,7 @@
       39
     ],
     "cards_moved": 136,
+    "completed_player_turns": 59,
     "eligible_events": 60,
     "events_with_multiple_trades": 7,
     "events_with_trade": 26,
@@ -4665,6 +4868,7 @@
       15,
       22
     ],
+    "player_turns_started": 60,
     "player_turns_with_event": 60,
     "trades_per_event": {
       "0": 34,
@@ -4687,6 +4891,7 @@
       23
     ],
     "cards_moved": 127,
+    "completed_player_turns": 69,
     "eligible_events": 70,
     "events_with_multiple_trades": 6,
     "events_with_trade": 28,
@@ -4710,6 +4915,7 @@
       22,
       13
     ],
+    "player_turns_started": 70,
     "player_turns_with_event": 70,
     "trades_per_event": {
       "0": 42,
@@ -4734,6 +4940,7 @@
       33
     ],
     "cards_moved": 154,
+    "completed_player_turns": 59,
     "eligible_events": 60,
     "events_with_multiple_trades": 8,
     "events_with_trade": 28,
@@ -4757,6 +4964,7 @@
       18,
       14
     ],
+    "player_turns_started": 60,
     "player_turns_with_event": 60,
     "trades_per_event": {
       "0": 32,
@@ -4780,6 +4988,7 @@
       25
     ],
     "cards_moved": 164,
+    "completed_player_turns": 72,
     "eligible_events": 72,
     "events_with_multiple_trades": 8,
     "events_with_trade": 29,
@@ -4803,6 +5012,7 @@
       28,
       13
     ],
+    "player_turns_started": 73,
     "player_turns_with_event": 73,
     "trades_per_event": {
       "0": 44,
@@ -4827,6 +5037,7 @@
       36
     ],
     "cards_moved": 126,
+    "completed_player_turns": 61,
     "eligible_events": 61,
     "events_with_multiple_trades": 6,
     "events_with_trade": 28,
@@ -4850,6 +5061,7 @@
       16,
       20
     ],
+    "player_turns_started": 62,
     "player_turns_with_event": 62,
     "trades_per_event": {
       "0": 34,
@@ -4873,6 +5085,7 @@
       38
     ],
     "cards_moved": 122,
+    "completed_player_turns": 51,
     "eligible_events": 51,
     "events_with_multiple_trades": 5,
     "events_with_trade": 21,
@@ -4896,6 +5109,7 @@
       12,
       18
     ],
+    "player_turns_started": 52,
     "player_turns_with_event": 52,
     "trades_per_event": {
       "0": 31,
@@ -4919,6 +5133,7 @@
       54
     ],
     "cards_moved": 173,
+    "completed_player_turns": 70,
     "eligible_events": 71,
     "events_with_multiple_trades": 11,
     "events_with_trade": 32,
@@ -4942,6 +5157,7 @@
       22,
       26
     ],
+    "player_turns_started": 71,
     "player_turns_with_event": 71,
     "trades_per_event": {
       "0": 39,
@@ -4964,6 +5180,7 @@
       29
     ],
     "cards_moved": 107,
+    "completed_player_turns": 47,
     "eligible_events": 47,
     "events_with_multiple_trades": 8,
     "events_with_trade": 19,
@@ -4987,6 +5204,7 @@
       13,
       14
     ],
+    "player_turns_started": 48,
     "player_turns_with_event": 47,
     "trades_per_event": {
       "0": 28,
@@ -5010,6 +5228,7 @@
       16
     ],
     "cards_moved": 124,
+    "completed_player_turns": 62,
     "eligible_events": 61,
     "events_with_multiple_trades": 5,
     "events_with_trade": 28,
@@ -5033,6 +5252,7 @@
       20,
       11
     ],
+    "player_turns_started": 63,
     "player_turns_with_event": 63,
     "trades_per_event": {
       "0": 35,
@@ -5056,6 +5276,7 @@
       26
     ],
     "cards_moved": 113,
+    "completed_player_turns": 57,
     "eligible_events": 56,
     "events_with_multiple_trades": 3,
     "events_with_trade": 26,
@@ -5079,6 +5300,7 @@
       18,
       15
     ],
+    "player_turns_started": 58,
     "player_turns_with_event": 58,
     "trades_per_event": {
       "0": 32,
@@ -5103,6 +5325,7 @@
       25
     ],
     "cards_moved": 89,
+    "completed_player_turns": 52,
     "eligible_events": 52,
     "events_with_multiple_trades": 2,
     "events_with_trade": 23,
@@ -5126,6 +5349,7 @@
       11,
       14
     ],
+    "player_turns_started": 53,
     "player_turns_with_event": 53,
     "trades_per_event": {
       "0": 30,
@@ -5149,6 +5373,7 @@
       47
     ],
     "cards_moved": 177,
+    "completed_player_turns": 55,
     "eligible_events": 55,
     "events_with_multiple_trades": 11,
     "events_with_trade": 34,
@@ -5172,6 +5397,7 @@
       26,
       23
     ],
+    "player_turns_started": 56,
     "player_turns_with_event": 56,
     "trades_per_event": {
       "0": 22,
@@ -5195,6 +5421,7 @@
       35
     ],
     "cards_moved": 125,
+    "completed_player_turns": 55,
     "eligible_events": 54,
     "events_with_multiple_trades": 8,
     "events_with_trade": 23,
@@ -5218,6 +5445,7 @@
       15,
       21
     ],
+    "player_turns_started": 56,
     "player_turns_with_event": 56,
     "trades_per_event": {
       "0": 33,
@@ -5242,6 +5470,7 @@
       51
     ],
     "cards_moved": 199,
+    "completed_player_turns": 66,
     "eligible_events": 66,
     "events_with_multiple_trades": 12,
     "events_with_trade": 36,
@@ -5265,6 +5494,7 @@
       26,
       25
     ],
+    "player_turns_started": 67,
     "player_turns_with_event": 67,
     "trades_per_event": {
       "0": 31,
@@ -5288,6 +5518,7 @@
       44
     ],
     "cards_moved": 137,
+    "completed_player_turns": 59,
     "eligible_events": 59,
     "events_with_multiple_trades": 9,
     "events_with_trade": 22,
@@ -5311,6 +5542,7 @@
       15,
       22
     ],
+    "player_turns_started": 60,
     "player_turns_with_event": 60,
     "trades_per_event": {
       "0": 38,
@@ -5334,6 +5566,7 @@
       39
     ],
     "cards_moved": 179,
+    "completed_player_turns": 69,
     "eligible_events": 70,
     "events_with_multiple_trades": 9,
     "events_with_trade": 32,
@@ -5357,6 +5590,7 @@
       21,
       19
     ],
+    "player_turns_started": 70,
     "player_turns_with_event": 70,
     "trades_per_event": {
       "0": 38,
@@ -5380,6 +5614,7 @@
       28
     ],
     "cards_moved": 91,
+    "completed_player_turns": 40,
     "eligible_events": 41,
     "events_with_multiple_trades": 5,
     "events_with_trade": 18,
@@ -5403,6 +5638,7 @@
       9,
       15
     ],
+    "player_turns_started": 41,
     "player_turns_with_event": 41,
     "trades_per_event": {
       "0": 23,
@@ -5426,6 +5662,7 @@
       32
     ],
     "cards_moved": 159,
+    "completed_player_turns": 61,
     "eligible_events": 61,
     "events_with_multiple_trades": 8,
     "events_with_trade": 37,
@@ -5449,6 +5686,7 @@
       20,
       20
     ],
+    "player_turns_started": 62,
     "player_turns_with_event": 62,
     "trades_per_event": {
       "0": 25,
@@ -5471,6 +5709,7 @@
       16
     ],
     "cards_moved": 94,
+    "completed_player_turns": 56,
     "eligible_events": 53,
     "events_with_multiple_trades": 6,
     "events_with_trade": 20,
@@ -5494,6 +5733,7 @@
       14,
       8
     ],
+    "player_turns_started": 57,
     "player_turns_with_event": 57,
     "trades_per_event": {
       "0": 37,
@@ -5517,6 +5757,7 @@
       42
     ],
     "cards_moved": 169,
+    "completed_player_turns": 56,
     "eligible_events": 56,
     "events_with_multiple_trades": 10,
     "events_with_trade": 29,
@@ -5540,6 +5781,7 @@
       20,
       20
     ],
+    "player_turns_started": 57,
     "player_turns_with_event": 57,
     "trades_per_event": {
       "0": 28,
@@ -5562,6 +5804,7 @@
       31
     ],
     "cards_moved": 138,
+    "completed_player_turns": 46,
     "eligible_events": 46,
     "events_with_multiple_trades": 3,
     "events_with_trade": 26,
@@ -5585,6 +5828,7 @@
       10,
       13
     ],
+    "player_turns_started": 47,
     "player_turns_with_event": 47,
     "trades_per_event": {
       "0": 21,
@@ -5607,6 +5851,7 @@
       35
     ],
     "cards_moved": 112,
+    "completed_player_turns": 47,
     "eligible_events": 48,
     "events_with_multiple_trades": 4,
     "events_with_trade": 24,
@@ -5630,6 +5875,7 @@
       11,
       19
     ],
+    "player_turns_started": 48,
     "player_turns_with_event": 48,
     "trades_per_event": {
       "0": 24,
@@ -5653,6 +5899,7 @@
       42
     ],
     "cards_moved": 164,
+    "completed_player_turns": 64,
     "eligible_events": 64,
     "events_with_multiple_trades": 11,
     "events_with_trade": 31,
@@ -5676,6 +5923,7 @@
       20,
       21
     ],
+    "player_turns_started": 65,
     "player_turns_with_event": 65,
     "trades_per_event": {
       "0": 34,
@@ -5699,6 +5947,7 @@
       22
     ],
     "cards_moved": 120,
+    "completed_player_turns": 53,
     "eligible_events": 52,
     "events_with_multiple_trades": 6,
     "events_with_trade": 24,
@@ -5722,6 +5971,7 @@
       17,
       13
     ],
+    "player_turns_started": 54,
     "player_turns_with_event": 54,
     "trades_per_event": {
       "0": 30,
@@ -5745,6 +5995,7 @@
       31
     ],
     "cards_moved": 117,
+    "completed_player_turns": 48,
     "eligible_events": 48,
     "events_with_multiple_trades": 7,
     "events_with_trade": 22,
@@ -5768,6 +6019,7 @@
       9,
       16
     ],
+    "player_turns_started": 49,
     "player_turns_with_event": 49,
     "trades_per_event": {
       "0": 27,
@@ -5791,6 +6043,7 @@
       27
     ],
     "cards_moved": 122,
+    "completed_player_turns": 58,
     "eligible_events": 59,
     "events_with_multiple_trades": 7,
     "events_with_trade": 24,
@@ -5814,6 +6067,7 @@
       20,
       17
     ],
+    "player_turns_started": 59,
     "player_turns_with_event": 59,
     "trades_per_event": {
       "0": 35,
@@ -5837,6 +6091,7 @@
       40
     ],
     "cards_moved": 161,
+    "completed_player_turns": 47,
     "eligible_events": 48,
     "events_with_multiple_trades": 9,
     "events_with_trade": 28,
@@ -5860,6 +6115,7 @@
       25,
       20
     ],
+    "player_turns_started": 48,
     "player_turns_with_event": 48,
     "trades_per_event": {
       "0": 20,
@@ -5883,6 +6139,7 @@
       35
     ],
     "cards_moved": 117,
+    "completed_player_turns": 65,
     "eligible_events": 64,
     "events_with_multiple_trades": 4,
     "events_with_trade": 29,
@@ -5906,6 +6163,7 @@
       10,
       19
     ],
+    "player_turns_started": 66,
     "player_turns_with_event": 66,
     "trades_per_event": {
       "0": 37,
@@ -5928,6 +6186,7 @@
       40
     ],
     "cards_moved": 161,
+    "completed_player_turns": 70,
     "eligible_events": 70,
     "events_with_multiple_trades": 9,
     "events_with_trade": 33,
@@ -5951,6 +6210,7 @@
       18,
       24
     ],
+    "player_turns_started": 71,
     "player_turns_with_event": 70,
     "trades_per_event": {
       "0": 37,
@@ -5974,6 +6234,7 @@
       36
     ],
     "cards_moved": 132,
+    "completed_player_turns": 44,
     "eligible_events": 44,
     "events_with_multiple_trades": 6,
     "events_with_trade": 24,
@@ -5997,6 +6258,7 @@
       19,
       17
     ],
+    "player_turns_started": 45,
     "player_turns_with_event": 45,
     "trades_per_event": {
       "0": 21,
@@ -6020,6 +6282,7 @@
       19
     ],
     "cards_moved": 80,
+    "completed_player_turns": 39,
     "eligible_events": 38,
     "events_with_multiple_trades": 3,
     "events_with_trade": 19,
@@ -6043,6 +6306,7 @@
       14,
       9
     ],
+    "player_turns_started": 40,
     "player_turns_with_event": 40,
     "trades_per_event": {
       "0": 21,
@@ -6065,6 +6329,7 @@
       44
     ],
     "cards_moved": 200,
+    "completed_player_turns": 74,
     "eligible_events": 72,
     "events_with_multiple_trades": 9,
     "events_with_trade": 39,
@@ -6088,6 +6353,7 @@
       28,
       26
     ],
+    "player_turns_started": 75,
     "player_turns_with_event": 75,
     "trades_per_event": {
       "0": 36,
@@ -6112,6 +6378,7 @@
       42
     ],
     "cards_moved": 153,
+    "completed_player_turns": 62,
     "eligible_events": 60,
     "events_with_multiple_trades": 9,
     "events_with_trade": 29,
@@ -6135,6 +6402,7 @@
       18,
       21
     ],
+    "player_turns_started": 63,
     "player_turns_with_event": 62,
     "trades_per_event": {
       "0": 33,
@@ -6158,6 +6426,7 @@
       29
     ],
     "cards_moved": 125,
+    "completed_player_turns": 55,
     "eligible_events": 55,
     "events_with_multiple_trades": 7,
     "events_with_trade": 25,
@@ -6181,6 +6450,7 @@
       20,
       14
     ],
+    "player_turns_started": 56,
     "player_turns_with_event": 56,
     "trades_per_event": {
       "0": 31,
@@ -6203,6 +6473,7 @@
       49
     ],
     "cards_moved": 186,
+    "completed_player_turns": 74,
     "eligible_events": 74,
     "events_with_multiple_trades": 11,
     "events_with_trade": 34,
@@ -6226,6 +6497,7 @@
       23,
       27
     ],
+    "player_turns_started": 75,
     "player_turns_with_event": 74,
     "trades_per_event": {
       "0": 40,
@@ -6251,6 +6523,7 @@
       35
     ],
     "cards_moved": 133,
+    "completed_player_turns": 64,
     "eligible_events": 63,
     "events_with_multiple_trades": 8,
     "events_with_trade": 30,
@@ -6274,6 +6547,7 @@
       20,
       19
     ],
+    "player_turns_started": 65,
     "player_turns_with_event": 65,
     "trades_per_event": {
       "0": 35,
@@ -6297,6 +6571,7 @@
       37
     ],
     "cards_moved": 167,
+    "completed_player_turns": 92,
     "eligible_events": 90,
     "events_with_multiple_trades": 9,
     "events_with_trade": 35,
@@ -6320,6 +6595,7 @@
       26,
       22
     ],
+    "player_turns_started": 93,
     "player_turns_with_event": 93,
     "trades_per_event": {
       "0": 58,
@@ -6344,6 +6620,7 @@
       50
     ],
     "cards_moved": 166,
+    "completed_player_turns": 66,
     "eligible_events": 65,
     "events_with_multiple_trades": 7,
     "events_with_trade": 33,
@@ -6367,6 +6644,7 @@
       19,
       22
     ],
+    "player_turns_started": 67,
     "player_turns_with_event": 67,
     "trades_per_event": {
       "0": 34,
@@ -6389,6 +6667,7 @@
       21
     ],
     "cards_moved": 106,
+    "completed_player_turns": 40,
     "eligible_events": 40,
     "events_with_multiple_trades": 8,
     "events_with_trade": 23,
@@ -6412,6 +6691,7 @@
       17,
       12
     ],
+    "player_turns_started": 41,
     "player_turns_with_event": 41,
     "trades_per_event": {
       "0": 18,
@@ -6434,6 +6714,7 @@
       41
     ],
     "cards_moved": 125,
+    "completed_player_turns": 47,
     "eligible_events": 48,
     "events_with_multiple_trades": 8,
     "events_with_trade": 21,
@@ -6457,6 +6738,7 @@
       16,
       18
     ],
+    "player_turns_started": 48,
     "player_turns_with_event": 48,
     "trades_per_event": {
       "0": 27,
@@ -6480,6 +6762,7 @@
       26
     ],
     "cards_moved": 154,
+    "completed_player_turns": 57,
     "eligible_events": 58,
     "events_with_multiple_trades": 8,
     "events_with_trade": 27,
@@ -6503,6 +6786,7 @@
       23,
       15
     ],
+    "player_turns_started": 58,
     "player_turns_with_event": 58,
     "trades_per_event": {
       "0": 31,
@@ -6526,6 +6810,7 @@
       48
     ],
     "cards_moved": 227,
+    "completed_player_turns": 73,
     "eligible_events": 73,
     "events_with_multiple_trades": 12,
     "events_with_trade": 37,
@@ -6549,6 +6834,7 @@
       27,
       23
     ],
+    "player_turns_started": 74,
     "player_turns_with_event": 74,
     "trades_per_event": {
       "0": 37,
@@ -6572,6 +6858,7 @@
       29
     ],
     "cards_moved": 103,
+    "completed_player_turns": 42,
     "eligible_events": 42,
     "events_with_multiple_trades": 2,
     "events_with_trade": 20,
@@ -6595,6 +6882,7 @@
       11,
       13
     ],
+    "player_turns_started": 43,
     "player_turns_with_event": 43,
     "trades_per_event": {
       "0": 23,
@@ -6618,6 +6906,7 @@
       35
     ],
     "cards_moved": 174,
+    "completed_player_turns": 77,
     "eligible_events": 77,
     "events_with_multiple_trades": 9,
     "events_with_trade": 37,
@@ -6641,6 +6930,7 @@
       23,
       18
     ],
+    "player_turns_started": 78,
     "player_turns_with_event": 78,
     "trades_per_event": {
       "0": 41,
@@ -6665,6 +6955,7 @@
       45
     ],
     "cards_moved": 163,
+    "completed_player_turns": 65,
     "eligible_events": 62,
     "events_with_multiple_trades": 7,
     "events_with_trade": 34,
@@ -6688,6 +6979,7 @@
       23,
       22
     ],
+    "player_turns_started": 66,
     "player_turns_with_event": 66,
     "trades_per_event": {
       "0": 32,
@@ -6711,6 +7003,7 @@
       29
     ],
     "cards_moved": 103,
+    "completed_player_turns": 48,
     "eligible_events": 46,
     "events_with_multiple_trades": 8,
     "events_with_trade": 18,
@@ -6734,6 +7027,7 @@
       11,
       15
     ],
+    "player_turns_started": 49,
     "player_turns_with_event": 49,
     "trades_per_event": {
       "0": 31,
@@ -6756,6 +7050,7 @@
       43
     ],
     "cards_moved": 125,
+    "completed_player_turns": 51,
     "eligible_events": 49,
     "events_with_multiple_trades": 6,
     "events_with_trade": 29,
@@ -6779,6 +7074,7 @@
       12,
       24
     ],
+    "player_turns_started": 52,
     "player_turns_with_event": 52,
     "trades_per_event": {
       "0": 23,
@@ -6802,6 +7098,7 @@
       33
     ],
     "cards_moved": 163,
+    "completed_player_turns": 63,
     "eligible_events": 60,
     "events_with_multiple_trades": 9,
     "events_with_trade": 36,
@@ -6825,6 +7122,7 @@
       23,
       20
     ],
+    "player_turns_started": 64,
     "player_turns_with_event": 64,
     "trades_per_event": {
       "0": 28,
@@ -6849,6 +7147,7 @@
       41
     ],
     "cards_moved": 188,
+    "completed_player_turns": 83,
     "eligible_events": 82,
     "events_with_multiple_trades": 5,
     "events_with_trade": 39,
@@ -6872,6 +7171,7 @@
       28,
       20
     ],
+    "player_turns_started": 84,
     "player_turns_with_event": 84,
     "trades_per_event": {
       "0": 45,
@@ -6895,6 +7195,7 @@
       39
     ],
     "cards_moved": 147,
+    "completed_player_turns": 74,
     "eligible_events": 72,
     "events_with_multiple_trades": 7,
     "events_with_trade": 36,
@@ -6918,6 +7219,7 @@
       16,
       23
     ],
+    "player_turns_started": 75,
     "player_turns_with_event": 75,
     "trades_per_event": {
       "0": 39,
@@ -6941,6 +7243,7 @@
       32
     ],
     "cards_moved": 117,
+    "completed_player_turns": 44,
     "eligible_events": 44,
     "events_with_multiple_trades": 6,
     "events_with_trade": 22,
@@ -6964,6 +7267,7 @@
       16,
       15
     ],
+    "player_turns_started": 45,
     "player_turns_with_event": 45,
     "trades_per_event": {
       "0": 23,
@@ -6987,6 +7291,7 @@
       42
     ],
     "cards_moved": 141,
+    "completed_player_turns": 63,
     "eligible_events": 64,
     "events_with_multiple_trades": 8,
     "events_with_trade": 29,
@@ -7010,6 +7315,7 @@
       15,
       21
     ],
+    "player_turns_started": 64,
     "player_turns_with_event": 64,
     "trades_per_event": {
       "0": 35,
@@ -7032,6 +7338,7 @@
       46
     ],
     "cards_moved": 160,
+    "completed_player_turns": 55,
     "eligible_events": 53,
     "events_with_multiple_trades": 5,
     "events_with_trade": 30,
@@ -7055,6 +7362,7 @@
       20,
       24
     ],
+    "player_turns_started": 56,
     "player_turns_with_event": 56,
     "trades_per_event": {
       "0": 26,
@@ -7078,6 +7386,7 @@
       22
     ],
     "cards_moved": 128,
+    "completed_player_turns": 69,
     "eligible_events": 68,
     "events_with_multiple_trades": 2,
     "events_with_trade": 32,
@@ -7101,6 +7410,7 @@
       13,
       12
     ],
+    "player_turns_started": 70,
     "player_turns_with_event": 70,
     "trades_per_event": {
       "0": 38,
@@ -7124,6 +7434,7 @@
       51
     ],
     "cards_moved": 205,
+    "completed_player_turns": 92,
     "eligible_events": 92,
     "events_with_multiple_trades": 5,
     "events_with_trade": 43,
@@ -7147,6 +7458,7 @@
       29,
       23
     ],
+    "player_turns_started": 93,
     "player_turns_with_event": 93,
     "trades_per_event": {
       "0": 50,
@@ -7170,6 +7482,7 @@
       30
     ],
     "cards_moved": 118,
+    "completed_player_turns": 44,
     "eligible_events": 43,
     "events_with_multiple_trades": 5,
     "events_with_trade": 24,
@@ -7193,6 +7506,7 @@
       12,
       16
     ],
+    "player_turns_started": 45,
     "player_turns_with_event": 45,
     "trades_per_event": {
       "0": 21,
@@ -7215,6 +7529,7 @@
       27
     ],
     "cards_moved": 111,
+    "completed_player_turns": 45,
     "eligible_events": 46,
     "events_with_multiple_trades": 8,
     "events_with_trade": 22,
@@ -7238,6 +7553,7 @@
       15,
       18
     ],
+    "player_turns_started": 46,
     "player_turns_with_event": 46,
     "trades_per_event": {
       "0": 24,
@@ -7261,6 +7577,7 @@
       23
     ],
     "cards_moved": 103,
+    "completed_player_turns": 43,
     "eligible_events": 43,
     "events_with_multiple_trades": 3,
     "events_with_trade": 23,
@@ -7284,6 +7601,7 @@
       12,
       14
     ],
+    "player_turns_started": 44,
     "player_turns_with_event": 44,
     "trades_per_event": {
       "0": 21,
@@ -7306,6 +7624,7 @@
       44
     ],
     "cards_moved": 144,
+    "completed_player_turns": 54,
     "eligible_events": 55,
     "events_with_multiple_trades": 12,
     "events_with_trade": 25,
@@ -7329,6 +7648,7 @@
       17,
       25
     ],
+    "player_turns_started": 55,
     "player_turns_with_event": 55,
     "trades_per_event": {
       "0": 30,
@@ -7352,6 +7672,7 @@
       22
     ],
     "cards_moved": 118,
+    "completed_player_turns": 54,
     "eligible_events": 54,
     "events_with_multiple_trades": 6,
     "events_with_trade": 24,
@@ -7375,6 +7696,7 @@
       19,
       10
     ],
+    "player_turns_started": 55,
     "player_turns_with_event": 55,
     "trades_per_event": {
       "0": 31,
@@ -7397,6 +7719,7 @@
       47
     ],
     "cards_moved": 204,
+    "completed_player_turns": 66,
     "eligible_events": 65,
     "events_with_multiple_trades": 15,
     "events_with_trade": 34,
@@ -7420,6 +7743,7 @@
       27,
       25
     ],
+    "player_turns_started": 67,
     "player_turns_with_event": 67,
     "trades_per_event": {
       "0": 33,
@@ -7444,6 +7768,7 @@
       24
     ],
     "cards_moved": 145,
+    "completed_player_turns": 68,
     "eligible_events": 68,
     "events_with_multiple_trades": 5,
     "events_with_trade": 32,
@@ -7467,6 +7792,7 @@
       16,
       12
     ],
+    "player_turns_started": 69,
     "player_turns_with_event": 69,
     "trades_per_event": {
       "0": 37,
@@ -7488,6 +7814,7 @@
       47
     ],
     "cards_moved": 151,
+    "completed_player_turns": 68,
     "eligible_events": 68,
     "events_with_multiple_trades": 6,
     "events_with_trade": 39,
@@ -7511,6 +7838,7 @@
       24,
       27
     ],
+    "player_turns_started": 69,
     "player_turns_with_event": 69,
     "trades_per_event": {
       "0": 30,
@@ -7533,6 +7861,7 @@
       59
     ],
     "cards_moved": 180,
+    "completed_player_turns": 70,
     "eligible_events": 64,
     "events_with_multiple_trades": 7,
     "events_with_trade": 37,
@@ -7556,6 +7885,7 @@
       20,
       30
     ],
+    "player_turns_started": 71,
     "player_turns_with_event": 71,
     "trades_per_event": {
       "0": 34,
@@ -7580,6 +7910,7 @@
       33
     ],
     "cards_moved": 154,
+    "completed_player_turns": 59,
     "eligible_events": 59,
     "events_with_multiple_trades": 9,
     "events_with_trade": 33,
@@ -7603,6 +7934,7 @@
       23,
       14
     ],
+    "player_turns_started": 60,
     "player_turns_with_event": 60,
     "trades_per_event": {
       "0": 27,
@@ -7625,6 +7957,7 @@
       54
     ],
     "cards_moved": 203,
+    "completed_player_turns": 78,
     "eligible_events": 76,
     "events_with_multiple_trades": 13,
     "events_with_trade": 35,
@@ -7648,6 +7981,7 @@
       37,
       29
     ],
+    "player_turns_started": 79,
     "player_turns_with_event": 79,
     "trades_per_event": {
       "0": 44,
@@ -7672,6 +8006,7 @@
       41
     ],
     "cards_moved": 198,
+    "completed_player_turns": 61,
     "eligible_events": 62,
     "events_with_multiple_trades": 8,
     "events_with_trade": 38,
@@ -7695,6 +8030,7 @@
       28,
       22
     ],
+    "player_turns_started": 62,
     "player_turns_with_event": 62,
     "trades_per_event": {
       "0": 24,
@@ -7719,6 +8055,7 @@
       39
     ],
     "cards_moved": 189,
+    "completed_player_turns": 81,
     "eligible_events": 82,
     "events_with_multiple_trades": 11,
     "events_with_trade": 38,
@@ -7742,6 +8079,7 @@
       28,
       21
     ],
+    "player_turns_started": 82,
     "player_turns_with_event": 82,
     "trades_per_event": {
       "0": 44,
@@ -7765,6 +8103,7 @@
       50
     ],
     "cards_moved": 147,
+    "completed_player_turns": 66,
     "eligible_events": 65,
     "events_with_multiple_trades": 5,
     "events_with_trade": 36,
@@ -7788,6 +8127,7 @@
       20,
       29
     ],
+    "player_turns_started": 67,
     "player_turns_with_event": 66,
     "trades_per_event": {
       "0": 30,
@@ -7811,6 +8151,7 @@
       43
     ],
     "cards_moved": 172,
+    "completed_player_turns": 72,
     "eligible_events": 67,
     "events_with_multiple_trades": 7,
     "events_with_trade": 35,
@@ -7834,6 +8175,7 @@
       24,
       25
     ],
+    "player_turns_started": 73,
     "player_turns_with_event": 73,
     "trades_per_event": {
       "0": 38,
@@ -7856,6 +8198,7 @@
       36
     ],
     "cards_moved": 140,
+    "completed_player_turns": 49,
     "eligible_events": 49,
     "events_with_multiple_trades": 9,
     "events_with_trade": 26,
@@ -7879,6 +8222,7 @@
       17,
       18
     ],
+    "player_turns_started": 50,
     "player_turns_with_event": 50,
     "trades_per_event": {
       "0": 24,
@@ -7901,6 +8245,7 @@
       42
     ],
     "cards_moved": 137,
+    "completed_player_turns": 56,
     "eligible_events": 57,
     "events_with_multiple_trades": 8,
     "events_with_trade": 27,
@@ -7924,6 +8269,7 @@
       13,
       23
     ],
+    "player_turns_started": 57,
     "player_turns_with_event": 57,
     "trades_per_event": {
       "0": 30,
@@ -7948,6 +8294,7 @@
       48
     ],
     "cards_moved": 159,
+    "completed_player_turns": 58,
     "eligible_events": 56,
     "events_with_multiple_trades": 10,
     "events_with_trade": 28,
@@ -7971,6 +8318,7 @@
       17,
       28
     ],
+    "player_turns_started": 59,
     "player_turns_with_event": 59,
     "trades_per_event": {
       "0": 31,
@@ -7995,6 +8343,7 @@
       40
     ],
     "cards_moved": 188,
+    "completed_player_turns": 69,
     "eligible_events": 65,
     "events_with_multiple_trades": 12,
     "events_with_trade": 34,
@@ -8018,6 +8367,7 @@
       25,
       21
     ],
+    "player_turns_started": 70,
     "player_turns_with_event": 69,
     "trades_per_event": {
       "0": 35,
@@ -8042,6 +8392,7 @@
       34
     ],
     "cards_moved": 112,
+    "completed_player_turns": 61,
     "eligible_events": 60,
     "events_with_multiple_trades": 4,
     "events_with_trade": 26,
@@ -8065,6 +8416,7 @@
       12,
       17
     ],
+    "player_turns_started": 62,
     "player_turns_with_event": 62,
     "trades_per_event": {
       "0": 36,
@@ -8087,6 +8439,7 @@
       58
     ],
     "cards_moved": 218,
+    "completed_player_turns": 70,
     "eligible_events": 68,
     "events_with_multiple_trades": 16,
     "events_with_trade": 42,
@@ -8110,6 +8463,7 @@
       31,
       30
     ],
+    "player_turns_started": 71,
     "player_turns_with_event": 70,
     "trades_per_event": {
       "0": 28,
@@ -8134,6 +8488,7 @@
       35
     ],
     "cards_moved": 207,
+    "completed_player_turns": 83,
     "eligible_events": 83,
     "events_with_multiple_trades": 8,
     "events_with_trade": 44,
@@ -8157,6 +8512,7 @@
       28,
       21
     ],
+    "player_turns_started": 84,
     "player_turns_with_event": 83,
     "trades_per_event": {
       "0": 39,
@@ -8181,6 +8537,7 @@
       35
     ],
     "cards_moved": 138,
+    "completed_player_turns": 77,
     "eligible_events": 76,
     "events_with_multiple_trades": 7,
     "events_with_trade": 29,
@@ -8204,6 +8561,7 @@
       11,
       20
     ],
+    "player_turns_started": 78,
     "player_turns_with_event": 78,
     "trades_per_event": {
       "0": 49,
@@ -8225,6 +8583,7 @@
       26
     ],
     "cards_moved": 125,
+    "completed_player_turns": 56,
     "eligible_events": 56,
     "events_with_multiple_trades": 7,
     "events_with_trade": 26,
@@ -8248,6 +8607,7 @@
       15,
       13
     ],
+    "player_turns_started": 57,
     "player_turns_with_event": 57,
     "trades_per_event": {
       "0": 31,
@@ -8270,6 +8630,7 @@
       46
     ],
     "cards_moved": 180,
+    "completed_player_turns": 54,
     "eligible_events": 53,
     "events_with_multiple_trades": 7,
     "events_with_trade": 35,
@@ -8293,6 +8654,7 @@
       25,
       22
     ],
+    "player_turns_started": 55,
     "player_turns_with_event": 55,
     "trades_per_event": {
       "0": 20,
@@ -8317,6 +8679,7 @@
       62
     ],
     "cards_moved": 209,
+    "completed_player_turns": 65,
     "eligible_events": 66,
     "events_with_multiple_trades": 14,
     "events_with_trade": 37,
@@ -8340,6 +8703,7 @@
       17,
       32
     ],
+    "player_turns_started": 66,
     "player_turns_with_event": 66,
     "trades_per_event": {
       "0": 29,
@@ -8363,6 +8727,7 @@
       48
     ],
     "cards_moved": 256,
+    "completed_player_turns": 86,
     "eligible_events": 84,
     "events_with_multiple_trades": 16,
     "events_with_trade": 46,
@@ -8386,6 +8751,7 @@
       35,
       28
     ],
+    "player_turns_started": 87,
     "player_turns_with_event": 87,
     "trades_per_event": {
       "0": 41,
@@ -8409,6 +8775,7 @@
       19
     ],
     "cards_moved": 123,
+    "completed_player_turns": 69,
     "eligible_events": 65,
     "events_with_multiple_trades": 6,
     "events_with_trade": 27,
@@ -8432,6 +8799,7 @@
       17,
       12
     ],
+    "player_turns_started": 70,
     "player_turns_with_event": 70,
     "trades_per_event": {
       "0": 43,
@@ -8455,6 +8823,7 @@
       36
     ],
     "cards_moved": 155,
+    "completed_player_turns": 60,
     "eligible_events": 61,
     "events_with_multiple_trades": 9,
     "events_with_trade": 29,
@@ -8478,6 +8847,7 @@
       22,
       21
     ],
+    "player_turns_started": 61,
     "player_turns_with_event": 61,
     "trades_per_event": {
       "0": 32,
@@ -8502,6 +8872,7 @@
       46
     ],
     "cards_moved": 205,
+    "completed_player_turns": 66,
     "eligible_events": 66,
     "events_with_multiple_trades": 9,
     "events_with_trade": 37,
@@ -8525,6 +8896,7 @@
       25,
       20
     ],
+    "player_turns_started": 67,
     "player_turns_with_event": 67,
     "trades_per_event": {
       "0": 30,
@@ -8548,6 +8920,7 @@
       37
     ],
     "cards_moved": 132,
+    "completed_player_turns": 73,
     "eligible_events": 72,
     "events_with_multiple_trades": 4,
     "events_with_trade": 32,
@@ -8571,6 +8944,7 @@
       15,
       21
     ],
+    "player_turns_started": 74,
     "player_turns_with_event": 74,
     "trades_per_event": {
       "0": 42,
@@ -8593,6 +8967,7 @@
       44
     ],
     "cards_moved": 196,
+    "completed_player_turns": 88,
     "eligible_events": 86,
     "events_with_multiple_trades": 7,
     "events_with_trade": 43,
@@ -8616,6 +8991,7 @@
       29,
       22
     ],
+    "player_turns_started": 89,
     "player_turns_with_event": 89,
     "trades_per_event": {
       "0": 46,
@@ -8637,6 +9013,7 @@
       29
     ],
     "cards_moved": 111,
+    "completed_player_turns": 56,
     "eligible_events": 54,
     "events_with_multiple_trades": 5,
     "events_with_trade": 23,
@@ -8660,6 +9037,7 @@
       14,
       14
     ],
+    "player_turns_started": 57,
     "player_turns_with_event": 57,
     "trades_per_event": {
       "0": 34,
@@ -8684,6 +9062,7 @@
       43
     ],
     "cards_moved": 216,
+    "completed_player_turns": 79,
     "eligible_events": 79,
     "events_with_multiple_trades": 12,
     "events_with_trade": 41,
@@ -8707,6 +9086,7 @@
       30,
       25
     ],
+    "player_turns_started": 80,
     "player_turns_with_event": 80,
     "trades_per_event": {
       "0": 39,
@@ -8730,6 +9110,7 @@
       35
     ],
     "cards_moved": 153,
+    "completed_player_turns": 66,
     "eligible_events": 67,
     "events_with_multiple_trades": 4,
     "events_with_trade": 32,
@@ -8753,6 +9134,7 @@
       23,
       18
     ],
+    "player_turns_started": 67,
     "player_turns_with_event": 67,
     "trades_per_event": {
       "0": 35,
@@ -8776,6 +9158,7 @@
       36
     ],
     "cards_moved": 189,
+    "completed_player_turns": 54,
     "eligible_events": 54,
     "events_with_multiple_trades": 9,
     "events_with_trade": 30,
@@ -8799,6 +9182,7 @@
       31,
       16
     ],
+    "player_turns_started": 55,
     "player_turns_with_event": 54,
     "trades_per_event": {
       "0": 24,
@@ -8823,6 +9207,7 @@
       36
     ],
     "cards_moved": 165,
+    "completed_player_turns": 64,
     "eligible_events": 65,
     "events_with_multiple_trades": 9,
     "events_with_trade": 33,
@@ -8846,6 +9231,7 @@
       19,
       18
     ],
+    "player_turns_started": 65,
     "player_turns_with_event": 65,
     "trades_per_event": {
       "0": 32,
@@ -8869,6 +9255,7 @@
       21
     ],
     "cards_moved": 110,
+    "completed_player_turns": 36,
     "eligible_events": 37,
     "events_with_multiple_trades": 6,
     "events_with_trade": 20,
@@ -8892,6 +9279,7 @@
       12,
       9
     ],
+    "player_turns_started": 37,
     "player_turns_with_event": 37,
     "trades_per_event": {
       "0": 17,
@@ -8914,6 +9302,7 @@
       40
     ],
     "cards_moved": 189,
+    "completed_player_turns": 81,
     "eligible_events": 81,
     "events_with_multiple_trades": 11,
     "events_with_trade": 36,
@@ -8937,6 +9326,7 @@
       26,
       21
     ],
+    "player_turns_started": 82,
     "player_turns_with_event": 82,
     "trades_per_event": {
       "0": 46,
@@ -8962,6 +9352,7 @@
       32
     ],
     "cards_moved": 147,
+    "completed_player_turns": 72,
     "eligible_events": 69,
     "events_with_multiple_trades": 4,
     "events_with_trade": 34,
@@ -8985,6 +9376,7 @@
       18,
       16
     ],
+    "player_turns_started": 73,
     "player_turns_with_event": 73,
     "trades_per_event": {
       "0": 39,
@@ -9007,6 +9399,7 @@
       58
     ],
     "cards_moved": 219,
+    "completed_player_turns": 85,
     "eligible_events": 84,
     "events_with_multiple_trades": 11,
     "events_with_trade": 41,
@@ -9030,6 +9423,7 @@
       28,
       29
     ],
+    "player_turns_started": 86,
     "player_turns_with_event": 86,
     "trades_per_event": {
       "0": 45,
@@ -9053,6 +9447,7 @@
       33
     ],
     "cards_moved": 127,
+    "completed_player_turns": 52,
     "eligible_events": 53,
     "events_with_multiple_trades": 5,
     "events_with_trade": 27,
@@ -9076,6 +9471,7 @@
       14,
       18
     ],
+    "player_turns_started": 53,
     "player_turns_with_event": 53,
     "trades_per_event": {
       "0": 26,
@@ -9099,6 +9495,7 @@
       52
     ],
     "cards_moved": 176,
+    "completed_player_turns": 68,
     "eligible_events": 66,
     "events_with_multiple_trades": 10,
     "events_with_trade": 29,
@@ -9122,6 +9519,7 @@
       20,
       22
     ],
+    "player_turns_started": 69,
     "player_turns_with_event": 68,
     "trades_per_event": {
       "0": 39,
@@ -9145,6 +9543,7 @@
       32
     ],
     "cards_moved": 119,
+    "completed_player_turns": 62,
     "eligible_events": 57,
     "events_with_multiple_trades": 4,
     "events_with_trade": 29,
@@ -9168,6 +9567,7 @@
       18,
       17
     ],
+    "player_turns_started": 63,
     "player_turns_with_event": 63,
     "trades_per_event": {
       "0": 34,
@@ -9191,6 +9591,7 @@
       33
     ],
     "cards_moved": 155,
+    "completed_player_turns": 68,
     "eligible_events": 67,
     "events_with_multiple_trades": 8,
     "events_with_trade": 34,
@@ -9214,6 +9615,7 @@
       23,
       20
     ],
+    "player_turns_started": 69,
     "player_turns_with_event": 69,
     "trades_per_event": {
       "0": 35,
@@ -9238,6 +9640,7 @@
       29
     ],
     "cards_moved": 166,
+    "completed_player_turns": 82,
     "eligible_events": 82,
     "events_with_multiple_trades": 9,
     "events_with_trade": 34,
@@ -9261,6 +9664,7 @@
       24,
       16
     ],
+    "player_turns_started": 83,
     "player_turns_with_event": 83,
     "trades_per_event": {
       "0": 49,
@@ -9283,6 +9687,7 @@
       58
     ],
     "cards_moved": 182,
+    "completed_player_turns": 68,
     "eligible_events": 66,
     "events_with_multiple_trades": 7,
     "events_with_trade": 36,
@@ -9306,6 +9711,7 @@
       17,
       31
     ],
+    "player_turns_started": 69,
     "player_turns_with_event": 69,
     "trades_per_event": {
       "0": 33,
@@ -9330,6 +9736,7 @@
       31
     ],
     "cards_moved": 145,
+    "completed_player_turns": 67,
     "eligible_events": 66,
     "events_with_multiple_trades": 6,
     "events_with_trade": 28,
@@ -9353,6 +9760,7 @@
       25,
       16
     ],
+    "player_turns_started": 68,
     "player_turns_with_event": 68,
     "trades_per_event": {
       "0": 40,
@@ -9376,6 +9784,7 @@
       36
     ],
     "cards_moved": 171,
+    "completed_player_turns": 58,
     "eligible_events": 59,
     "events_with_multiple_trades": 10,
     "events_with_trade": 31,
@@ -9399,6 +9808,7 @@
       26,
       21
     ],
+    "player_turns_started": 59,
     "player_turns_with_event": 59,
     "trades_per_event": {
       "0": 28,
@@ -9422,6 +9832,7 @@
       22
     ],
     "cards_moved": 95,
+    "completed_player_turns": 48,
     "eligible_events": 47,
     "events_with_multiple_trades": 3,
     "events_with_trade": 24,
@@ -9445,6 +9856,7 @@
       13,
       14
     ],
+    "player_turns_started": 49,
     "player_turns_with_event": 48,
     "trades_per_event": {
       "0": 24,
@@ -9467,6 +9879,7 @@
       47
     ],
     "cards_moved": 177,
+    "completed_player_turns": 66,
     "eligible_events": 66,
     "events_with_multiple_trades": 9,
     "events_with_trade": 31,
@@ -9490,6 +9903,7 @@
       21,
       25
     ],
+    "player_turns_started": 67,
     "player_turns_with_event": 67,
     "trades_per_event": {
       "0": 36,
@@ -9515,6 +9929,7 @@
       38
     ],
     "cards_moved": 148,
+    "completed_player_turns": 60,
     "eligible_events": 61,
     "events_with_multiple_trades": 8,
     "events_with_trade": 31,
@@ -9538,6 +9953,7 @@
       23,
       19
     ],
+    "player_turns_started": 61,
     "player_turns_with_event": 61,
     "trades_per_event": {
       "0": 30,
@@ -9562,6 +9978,7 @@
       35
     ],
     "cards_moved": 175,
+    "completed_player_turns": 73,
     "eligible_events": 71,
     "events_with_multiple_trades": 10,
     "events_with_trade": 35,
@@ -9585,6 +10002,7 @@
       29,
       18
     ],
+    "player_turns_started": 74,
     "player_turns_with_event": 74,
     "trades_per_event": {
       "0": 39,
@@ -9607,6 +10025,7 @@
       41
     ],
     "cards_moved": 157,
+    "completed_player_turns": 76,
     "eligible_events": 75,
     "events_with_multiple_trades": 9,
     "events_with_trade": 31,
@@ -9630,6 +10049,7 @@
       23,
       23
     ],
+    "player_turns_started": 77,
     "player_turns_with_event": 77,
     "trades_per_event": {
       "0": 46,
@@ -9652,6 +10072,7 @@
       28
     ],
     "cards_moved": 128,
+    "completed_player_turns": 58,
     "eligible_events": 59,
     "events_with_multiple_trades": 7,
     "events_with_trade": 29,
@@ -9675,6 +10096,7 @@
       17,
       18
     ],
+    "player_turns_started": 59,
     "player_turns_with_event": 59,
     "trades_per_event": {
       "0": 30,
@@ -9698,6 +10120,7 @@
       37
     ],
     "cards_moved": 155,
+    "completed_player_turns": 56,
     "eligible_events": 57,
     "events_with_multiple_trades": 10,
     "events_with_trade": 29,
@@ -9721,6 +10144,7 @@
       24,
       20
     ],
+    "player_turns_started": 57,
     "player_turns_with_event": 57,
     "trades_per_event": {
       "0": 28,
@@ -9744,6 +10168,7 @@
       36
     ],
     "cards_moved": 163,
+    "completed_player_turns": 52,
     "eligible_events": 53,
     "events_with_multiple_trades": 10,
     "events_with_trade": 28,
@@ -9767,6 +10192,7 @@
       23,
       16
     ],
+    "player_turns_started": 53,
     "player_turns_with_event": 53,
     "trades_per_event": {
       "0": 25,
@@ -9790,6 +10216,7 @@
       40
     ],
     "cards_moved": 175,
+    "completed_player_turns": 68,
     "eligible_events": 68,
     "events_with_multiple_trades": 7,
     "events_with_trade": 35,
@@ -9813,6 +10240,7 @@
       28,
       18
     ],
+    "player_turns_started": 69,
     "player_turns_with_event": 69,
     "trades_per_event": {
       "0": 34,
@@ -9838,6 +10266,7 @@
       25
     ],
     "cards_moved": 76,
+    "completed_player_turns": 34,
     "eligible_events": 33,
     "events_with_multiple_trades": 3,
     "events_with_trade": 16,
@@ -9861,6 +10290,7 @@
       9,
       12
     ],
+    "player_turns_started": 35,
     "player_turns_with_event": 35,
     "trades_per_event": {
       "0": 19,
@@ -9884,6 +10314,7 @@
       24
     ],
     "cards_moved": 128,
+    "completed_player_turns": 64,
     "eligible_events": 62,
     "events_with_multiple_trades": 6,
     "events_with_trade": 29,
@@ -9907,6 +10338,7 @@
       21,
       14
     ],
+    "player_turns_started": 65,
     "player_turns_with_event": 65,
     "trades_per_event": {
       "0": 36,
@@ -9930,6 +10362,7 @@
       33
     ],
     "cards_moved": 159,
+    "completed_player_turns": 61,
     "eligible_events": 56,
     "events_with_multiple_trades": 7,
     "events_with_trade": 31,
@@ -9953,6 +10386,7 @@
       19,
       19
     ],
+    "player_turns_started": 62,
     "player_turns_with_event": 62,
     "trades_per_event": {
       "0": 31,
@@ -9977,6 +10411,7 @@
       57
     ],
     "cards_moved": 220,
+    "completed_player_turns": 73,
     "eligible_events": 74,
     "events_with_multiple_trades": 9,
     "events_with_trade": 43,
@@ -10000,6 +10435,7 @@
       27,
       25
     ],
+    "player_turns_started": 74,
     "player_turns_with_event": 74,
     "trades_per_event": {
       "0": 31,
@@ -10025,6 +10461,7 @@
       44
     ],
     "cards_moved": 175,
+    "completed_player_turns": 71,
     "eligible_events": 72,
     "events_with_multiple_trades": 9,
     "events_with_trade": 33,
@@ -10048,6 +10485,7 @@
       23,
       22
     ],
+    "player_turns_started": 72,
     "player_turns_with_event": 72,
     "trades_per_event": {
       "0": 39,
@@ -10071,6 +10509,7 @@
       46
     ],
     "cards_moved": 191,
+    "completed_player_turns": 67,
     "eligible_events": 68,
     "events_with_multiple_trades": 13,
     "events_with_trade": 30,
@@ -10094,6 +10533,7 @@
       24,
       24
     ],
+    "player_turns_started": 68,
     "player_turns_with_event": 68,
     "trades_per_event": {
       "0": 38,
@@ -10117,6 +10557,7 @@
       46
     ],
     "cards_moved": 191,
+    "completed_player_turns": 58,
     "eligible_events": 59,
     "events_with_multiple_trades": 9,
     "events_with_trade": 31,
@@ -10140,6 +10581,7 @@
       23,
       27
     ],
+    "player_turns_started": 59,
     "player_turns_with_event": 59,
     "trades_per_event": {
       "0": 28,
@@ -10164,6 +10606,7 @@
       47
     ],
     "cards_moved": 202,
+    "completed_player_turns": 84,
     "eligible_events": 82,
     "events_with_multiple_trades": 7,
     "events_with_trade": 44,
@@ -10187,6 +10630,7 @@
       24,
       27
     ],
+    "player_turns_started": 85,
     "player_turns_with_event": 84,
     "trades_per_event": {
       "0": 40,
@@ -10209,6 +10653,7 @@
       44
     ],
     "cards_moved": 144,
+    "completed_player_turns": 59,
     "eligible_events": 60,
     "events_with_multiple_trades": 7,
     "events_with_trade": 28,
@@ -10232,6 +10677,7 @@
       17,
       22
     ],
+    "player_turns_started": 60,
     "player_turns_with_event": 60,
     "trades_per_event": {
       "0": 32,
@@ -10255,6 +10701,7 @@
       25
     ],
     "cards_moved": 106,
+    "completed_player_turns": 51,
     "eligible_events": 51,
     "events_with_multiple_trades": 1,
     "events_with_trade": 24,
@@ -10278,6 +10725,7 @@
       12,
       12
     ],
+    "player_turns_started": 52,
     "player_turns_with_event": 52,
     "trades_per_event": {
       "0": 28,
@@ -10300,6 +10748,7 @@
       44
     ],
     "cards_moved": 181,
+    "completed_player_turns": 64,
     "eligible_events": 65,
     "events_with_multiple_trades": 10,
     "events_with_trade": 38,
@@ -10323,6 +10772,7 @@
       22,
       24
     ],
+    "player_turns_started": 65,
     "player_turns_with_event": 65,
     "trades_per_event": {
       "0": 27,
@@ -10346,6 +10796,7 @@
       21
     ],
     "cards_moved": 96,
+    "completed_player_turns": 64,
     "eligible_events": 61,
     "events_with_multiple_trades": 5,
     "events_with_trade": 20,
@@ -10369,6 +10820,7 @@
       10,
       10
     ],
+    "player_turns_started": 65,
     "player_turns_with_event": 65,
     "trades_per_event": {
       "0": 45,
@@ -10391,6 +10843,7 @@
       31
     ],
     "cards_moved": 144,
+    "completed_player_turns": 57,
     "eligible_events": 58,
     "events_with_multiple_trades": 4,
     "events_with_trade": 29,
@@ -10414,6 +10867,7 @@
       17,
       15
     ],
+    "player_turns_started": 58,
     "player_turns_with_event": 58,
     "trades_per_event": {
       "0": 29,
@@ -10437,6 +10891,7 @@
       52
     ],
     "cards_moved": 169,
+    "completed_player_turns": 53,
     "eligible_events": 54,
     "events_with_multiple_trades": 9,
     "events_with_trade": 30,
@@ -10460,6 +10915,7 @@
       23,
       23
     ],
+    "player_turns_started": 54,
     "player_turns_with_event": 54,
     "trades_per_event": {
       "0": 24,
@@ -10484,6 +10940,7 @@
       51
     ],
     "cards_moved": 173,
+    "completed_player_turns": 94,
     "eligible_events": 95,
     "events_with_multiple_trades": 7,
     "events_with_trade": 35,
@@ -10507,6 +10964,7 @@
       15,
       26
     ],
+    "player_turns_started": 95,
     "player_turns_with_event": 95,
     "trades_per_event": {
       "0": 60,
@@ -10530,6 +10988,7 @@
       29
     ],
     "cards_moved": 147,
+    "completed_player_turns": 66,
     "eligible_events": 67,
     "events_with_multiple_trades": 7,
     "events_with_trade": 28,
@@ -10553,6 +11012,7 @@
       21,
       16
     ],
+    "player_turns_started": 67,
     "player_turns_with_event": 67,
     "trades_per_event": {
       "0": 39,
@@ -10576,6 +11036,7 @@
       32
     ],
     "cards_moved": 125,
+    "completed_player_turns": 62,
     "eligible_events": 60,
     "events_with_multiple_trades": 6,
     "events_with_trade": 28,
@@ -10599,6 +11060,7 @@
       17,
       19
     ],
+    "player_turns_started": 63,
     "player_turns_with_event": 63,
     "trades_per_event": {
       "0": 35,
@@ -10622,6 +11084,7 @@
       36
     ],
     "cards_moved": 156,
+    "completed_player_turns": 69,
     "eligible_events": 69,
     "events_with_multiple_trades": 8,
     "events_with_trade": 29,
@@ -10645,6 +11108,7 @@
       19,
       19
     ],
+    "player_turns_started": 70,
     "player_turns_with_event": 70,
     "trades_per_event": {
       "0": 41,
@@ -10669,6 +11133,7 @@
       47
     ],
     "cards_moved": 169,
+    "completed_player_turns": 63,
     "eligible_events": 64,
     "events_with_multiple_trades": 10,
     "events_with_trade": 34,
@@ -10692,6 +11157,7 @@
       19,
       25
     ],
+    "player_turns_started": 64,
     "player_turns_with_event": 64,
     "trades_per_event": {
       "0": 30,
@@ -10715,6 +11181,7 @@
       25
     ],
     "cards_moved": 90,
+    "completed_player_turns": 54,
     "eligible_events": 50,
     "events_with_multiple_trades": 4,
     "events_with_trade": 21,
@@ -10738,6 +11205,7 @@
       10,
       15
     ],
+    "player_turns_started": 55,
     "player_turns_with_event": 55,
     "trades_per_event": {
       "0": 34,
@@ -10760,6 +11228,7 @@
       55
     ],
     "cards_moved": 207,
+    "completed_player_turns": 62,
     "eligible_events": 58,
     "events_with_multiple_trades": 11,
     "events_with_trade": 35,
@@ -10783,6 +11252,7 @@
       26,
       29
     ],
+    "player_turns_started": 63,
     "player_turns_with_event": 63,
     "trades_per_event": {
       "0": 28,
@@ -10807,6 +11277,7 @@
       27
     ],
     "cards_moved": 142,
+    "completed_player_turns": 59,
     "eligible_events": 60,
     "events_with_multiple_trades": 5,
     "events_with_trade": 27,
@@ -10830,6 +11301,7 @@
       18,
       13
     ],
+    "player_turns_started": 60,
     "player_turns_with_event": 60,
     "trades_per_event": {
       "0": 33,
@@ -10852,6 +11324,7 @@
       33
     ],
     "cards_moved": 158,
+    "completed_player_turns": 57,
     "eligible_events": 58,
     "events_with_multiple_trades": 7,
     "events_with_trade": 27,
@@ -10875,6 +11348,7 @@
       21,
       16
     ],
+    "player_turns_started": 58,
     "player_turns_with_event": 58,
     "trades_per_event": {
       "0": 31,
@@ -10896,6 +11370,7 @@
       39
     ],
     "cards_moved": 160,
+    "completed_player_turns": 55,
     "eligible_events": 55,
     "events_with_multiple_trades": 11,
     "events_with_trade": 30,
@@ -10919,6 +11394,7 @@
       24,
       23
     ],
+    "player_turns_started": 56,
     "player_turns_with_event": 56,
     "trades_per_event": {
       "0": 26,
@@ -10942,6 +11418,7 @@
       24
     ],
     "cards_moved": 111,
+    "completed_player_turns": 50,
     "eligible_events": 51,
     "events_with_multiple_trades": 5,
     "events_with_trade": 24,
@@ -10965,6 +11442,7 @@
       12,
       15
     ],
+    "player_turns_started": 51,
     "player_turns_with_event": 51,
     "trades_per_event": {
       "0": 27,
@@ -10988,6 +11466,7 @@
       43
     ],
     "cards_moved": 186,
+    "completed_player_turns": 67,
     "eligible_events": 65,
     "events_with_multiple_trades": 10,
     "events_with_trade": 37,
@@ -11011,6 +11490,7 @@
       25,
       23
     ],
+    "player_turns_started": 68,
     "player_turns_with_event": 68,
     "trades_per_event": {
       "0": 31,
@@ -11034,6 +11514,7 @@
       32
     ],
     "cards_moved": 142,
+    "completed_player_turns": 48,
     "eligible_events": 48,
     "events_with_multiple_trades": 8,
     "events_with_trade": 26,
@@ -11057,6 +11538,7 @@
       16,
       17
     ],
+    "player_turns_started": 49,
     "player_turns_with_event": 49,
     "trades_per_event": {
       "0": 23,
@@ -11080,6 +11562,7 @@
       50
     ],
     "cards_moved": 168,
+    "completed_player_turns": 59,
     "eligible_events": 60,
     "events_with_multiple_trades": 8,
     "events_with_trade": 27,
@@ -11103,6 +11586,7 @@
       16,
       21
     ],
+    "player_turns_started": 60,
     "player_turns_with_event": 60,
     "trades_per_event": {
       "0": 33,
@@ -11126,6 +11610,7 @@
       29
     ],
     "cards_moved": 111,
+    "completed_player_turns": 58,
     "eligible_events": 57,
     "events_with_multiple_trades": 1,
     "events_with_trade": 33,
@@ -11149,6 +11634,7 @@
       20,
       17
     ],
+    "player_turns_started": 59,
     "player_turns_with_event": 59,
     "trades_per_event": {
       "0": 26,
@@ -11171,6 +11657,7 @@
       45
     ],
     "cards_moved": 199,
+    "completed_player_turns": 78,
     "eligible_events": 77,
     "events_with_multiple_trades": 9,
     "events_with_trade": 44,
@@ -11194,6 +11681,7 @@
       25,
       25
     ],
+    "player_turns_started": 79,
     "player_turns_with_event": 78,
     "trades_per_event": {
       "0": 34,
@@ -11217,6 +11705,7 @@
       29
     ],
     "cards_moved": 112,
+    "completed_player_turns": 49,
     "eligible_events": 50,
     "events_with_multiple_trades": 6,
     "events_with_trade": 23,
@@ -11240,6 +11729,7 @@
       16,
       17
     ],
+    "player_turns_started": 50,
     "player_turns_with_event": 50,
     "trades_per_event": {
       "0": 27,
@@ -11262,6 +11752,7 @@
       44
     ],
     "cards_moved": 158,
+    "completed_player_turns": 64,
     "eligible_events": 64,
     "events_with_multiple_trades": 7,
     "events_with_trade": 29,
@@ -11285,6 +11776,7 @@
       14,
       23
     ],
+    "player_turns_started": 65,
     "player_turns_with_event": 65,
     "trades_per_event": {
       "0": 36,
@@ -11309,6 +11801,7 @@
       36
     ],
     "cards_moved": 150,
+    "completed_player_turns": 67,
     "eligible_events": 67,
     "events_with_multiple_trades": 4,
     "events_with_trade": 36,
@@ -11332,6 +11825,7 @@
       19,
       20
     ],
+    "player_turns_started": 68,
     "player_turns_with_event": 68,
     "trades_per_event": {
       "0": 32,
@@ -11355,6 +11849,7 @@
       34
     ],
     "cards_moved": 132,
+    "completed_player_turns": 49,
     "eligible_events": 49,
     "events_with_multiple_trades": 8,
     "events_with_trade": 26,
@@ -11378,6 +11873,7 @@
       17,
       15
     ],
+    "player_turns_started": 50,
     "player_turns_with_event": 50,
     "trades_per_event": {
       "0": 24,
@@ -11401,6 +11897,7 @@
       16
     ],
     "cards_moved": 126,
+    "completed_player_turns": 46,
     "eligible_events": 47,
     "events_with_multiple_trades": 7,
     "events_with_trade": 23,
@@ -11424,6 +11921,7 @@
       17,
       8
     ],
+    "player_turns_started": 47,
     "player_turns_with_event": 47,
     "trades_per_event": {
       "0": 24,
@@ -11446,6 +11944,7 @@
       34
     ],
     "cards_moved": 142,
+    "completed_player_turns": 63,
     "eligible_events": 61,
     "events_with_multiple_trades": 8,
     "events_with_trade": 29,
@@ -11469,6 +11968,7 @@
       24,
       19
     ],
+    "player_turns_started": 64,
     "player_turns_with_event": 64,
     "trades_per_event": {
       "0": 35,
@@ -11492,6 +11992,7 @@
       55
     ],
     "cards_moved": 182,
+    "completed_player_turns": 75,
     "eligible_events": 76,
     "events_with_multiple_trades": 8,
     "events_with_trade": 35,
@@ -11515,6 +12016,7 @@
       25,
       26
     ],
+    "player_turns_started": 76,
     "player_turns_with_event": 76,
     "trades_per_event": {
       "0": 41,
@@ -11538,6 +12040,7 @@
       37
     ],
     "cards_moved": 153,
+    "completed_player_turns": 59,
     "eligible_events": 60,
     "events_with_multiple_trades": 6,
     "events_with_trade": 32,
@@ -11561,6 +12064,7 @@
       21,
       18
     ],
+    "player_turns_started": 60,
     "player_turns_with_event": 60,
     "trades_per_event": {
       "0": 28,
@@ -11583,6 +12087,7 @@
       35
     ],
     "cards_moved": 147,
+    "completed_player_turns": 65,
     "eligible_events": 66,
     "events_with_multiple_trades": 7,
     "events_with_trade": 32,
@@ -11606,6 +12111,7 @@
       20,
       20
     ],
+    "player_turns_started": 66,
     "player_turns_with_event": 66,
     "trades_per_event": {
       "0": 34,
@@ -11629,6 +12135,7 @@
       41
     ],
     "cards_moved": 152,
+    "completed_player_turns": 57,
     "eligible_events": 58,
     "events_with_multiple_trades": 9,
     "events_with_trade": 30,
@@ -11652,6 +12159,7 @@
       24,
       19
     ],
+    "player_turns_started": 58,
     "player_turns_with_event": 58,
     "trades_per_event": {
       "0": 28,
@@ -11674,6 +12182,7 @@
       35
     ],
     "cards_moved": 119,
+    "completed_player_turns": 70,
     "eligible_events": 71,
     "events_with_multiple_trades": 4,
     "events_with_trade": 27,
@@ -11697,6 +12206,7 @@
       14,
       17
     ],
+    "player_turns_started": 71,
     "player_turns_with_event": 71,
     "trades_per_event": {
       "0": 44,
@@ -11719,6 +12229,7 @@
       37
     ],
     "cards_moved": 114,
+    "completed_player_turns": 47,
     "eligible_events": 45,
     "events_with_multiple_trades": 4,
     "events_with_trade": 23,
@@ -11742,6 +12253,7 @@
       7,
       19
     ],
+    "player_turns_started": 48,
     "player_turns_with_event": 48,
     "trades_per_event": {
       "0": 25,
@@ -11766,6 +12278,7 @@
       59
     ],
     "cards_moved": 259,
+    "completed_player_turns": 80,
     "eligible_events": 81,
     "events_with_multiple_trades": 15,
     "events_with_trade": 48,
@@ -11789,6 +12302,7 @@
       32,
       31
     ],
+    "player_turns_started": 81,
     "player_turns_with_event": 81,
     "trades_per_event": {
       "0": 33,
@@ -11813,6 +12327,7 @@
       41
     ],
     "cards_moved": 161,
+    "completed_player_turns": 51,
     "eligible_events": 52,
     "events_with_multiple_trades": 8,
     "events_with_trade": 27,
@@ -11836,6 +12351,7 @@
       16,
       23
     ],
+    "player_turns_started": 52,
     "player_turns_with_event": 52,
     "trades_per_event": {
       "0": 25,
@@ -11859,6 +12375,7 @@
       48
     ],
     "cards_moved": 185,
+    "completed_player_turns": 73,
     "eligible_events": 71,
     "events_with_multiple_trades": 9,
     "events_with_trade": 40,
@@ -11882,6 +12399,7 @@
       24,
       27
     ],
+    "player_turns_started": 74,
     "player_turns_with_event": 74,
     "trades_per_event": {
       "0": 34,
@@ -11905,6 +12423,7 @@
       39
     ],
     "cards_moved": 152,
+    "completed_player_turns": 51,
     "eligible_events": 52,
     "events_with_multiple_trades": 10,
     "events_with_trade": 28,
@@ -11928,6 +12447,7 @@
       24,
       19
     ],
+    "player_turns_started": 52,
     "player_turns_with_event": 52,
     "trades_per_event": {
       "0": 24,
@@ -11949,6 +12469,7 @@
       28
     ],
     "cards_moved": 118,
+    "completed_player_turns": 50,
     "eligible_events": 51,
     "events_with_multiple_trades": 7,
     "events_with_trade": 22,
@@ -11972,6 +12493,7 @@
       14,
       15
     ],
+    "player_turns_started": 51,
     "player_turns_with_event": 51,
     "trades_per_event": {
       "0": 29,
@@ -11994,6 +12516,7 @@
       27
     ],
     "cards_moved": 110,
+    "completed_player_turns": 56,
     "eligible_events": 56,
     "events_with_multiple_trades": 3,
     "events_with_trade": 29,
@@ -12017,6 +12540,7 @@
       19,
       15
     ],
+    "player_turns_started": 57,
     "player_turns_with_event": 57,
     "trades_per_event": {
       "0": 28,
@@ -12039,6 +12563,7 @@
       39
     ],
     "cards_moved": 147,
+    "completed_player_turns": 49,
     "eligible_events": 48,
     "events_with_multiple_trades": 12,
     "events_with_trade": 24,
@@ -12062,6 +12587,7 @@
       18,
       18
     ],
+    "player_turns_started": 50,
     "player_turns_with_event": 50,
     "trades_per_event": {
       "0": 26,
@@ -12083,6 +12609,7 @@
       23
     ],
     "cards_moved": 117,
+    "completed_player_turns": 62,
     "eligible_events": 61,
     "events_with_multiple_trades": 4,
     "events_with_trade": 27,
@@ -12106,6 +12633,7 @@
       18,
       11
     ],
+    "player_turns_started": 63,
     "player_turns_with_event": 62,
     "trades_per_event": {
       "0": 35,
@@ -12128,6 +12656,7 @@
       27
     ],
     "cards_moved": 129,
+    "completed_player_turns": 43,
     "eligible_events": 44,
     "events_with_multiple_trades": 4,
     "events_with_trade": 28,
@@ -12151,6 +12680,7 @@
       22,
       13
     ],
+    "player_turns_started": 44,
     "player_turns_with_event": 44,
     "trades_per_event": {
       "0": 16,
@@ -12173,6 +12703,7 @@
       45
     ],
     "cards_moved": 166,
+    "completed_player_turns": 66,
     "eligible_events": 67,
     "events_with_multiple_trades": 5,
     "events_with_trade": 36,
@@ -12196,6 +12727,7 @@
       22,
       22
     ],
+    "player_turns_started": 67,
     "player_turns_with_event": 67,
     "trades_per_event": {
       "0": 31,
@@ -12219,6 +12751,7 @@
       62
     ],
     "cards_moved": 232,
+    "completed_player_turns": 98,
     "eligible_events": 94,
     "events_with_multiple_trades": 12,
     "events_with_trade": 50,
@@ -12242,6 +12775,7 @@
       25,
       35
     ],
+    "player_turns_started": 99,
     "player_turns_with_event": 99,
     "trades_per_event": {
       "0": 49,
@@ -12264,6 +12798,7 @@
       57
     ],
     "cards_moved": 222,
+    "completed_player_turns": 86,
     "eligible_events": 84,
     "events_with_multiple_trades": 12,
     "events_with_trade": 44,
@@ -12287,6 +12822,7 @@
       31,
       30
     ],
+    "player_turns_started": 87,
     "player_turns_with_event": 87,
     "trades_per_event": {
       "0": 43,
@@ -12310,6 +12846,7 @@
       22
     ],
     "cards_moved": 138,
+    "completed_player_turns": 64,
     "eligible_events": 65,
     "events_with_multiple_trades": 4,
     "events_with_trade": 29,
@@ -12333,6 +12870,7 @@
       14,
       12
     ],
+    "player_turns_started": 65,
     "player_turns_with_event": 65,
     "trades_per_event": {
       "0": 36,
@@ -12356,6 +12894,7 @@
       42
     ],
     "cards_moved": 155,
+    "completed_player_turns": 74,
     "eligible_events": 70,
     "events_with_multiple_trades": 10,
     "events_with_trade": 32,
@@ -12379,6 +12918,7 @@
       15,
       23
     ],
+    "player_turns_started": 75,
     "player_turns_with_event": 75,
     "trades_per_event": {
       "0": 43,
@@ -12402,6 +12942,7 @@
       27
     ],
     "cards_moved": 132,
+    "completed_player_turns": 71,
     "eligible_events": 72,
     "events_with_multiple_trades": 4,
     "events_with_trade": 33,
@@ -12425,6 +12966,7 @@
       15,
       17
     ],
+    "player_turns_started": 72,
     "player_turns_with_event": 72,
     "trades_per_event": {
       "0": 39,
@@ -12448,6 +12990,7 @@
       38
     ],
     "cards_moved": 141,
+    "completed_player_turns": 41,
     "eligible_events": 42,
     "events_with_multiple_trades": 8,
     "events_with_trade": 27,
@@ -12471,6 +13014,7 @@
       15,
       19
     ],
+    "player_turns_started": 42,
     "player_turns_with_event": 42,
     "trades_per_event": {
       "0": 15,
@@ -12494,6 +13038,7 @@
       45
     ],
     "cards_moved": 182,
+    "completed_player_turns": 80,
     "eligible_events": 79,
     "events_with_multiple_trades": 10,
     "events_with_trade": 37,
@@ -12517,6 +13062,7 @@
       23,
       25
     ],
+    "player_turns_started": 81,
     "player_turns_with_event": 81,
     "trades_per_event": {
       "0": 44,
@@ -12539,6 +13085,7 @@
       34
     ],
     "cards_moved": 131,
+    "completed_player_turns": 70,
     "eligible_events": 67,
     "events_with_multiple_trades": 6,
     "events_with_trade": 24,
@@ -12562,6 +13109,7 @@
       21,
       16
     ],
+    "player_turns_started": 71,
     "player_turns_with_event": 71,
     "trades_per_event": {
       "0": 47,
@@ -12586,6 +13134,7 @@
       48
     ],
     "cards_moved": 188,
+    "completed_player_turns": 77,
     "eligible_events": 78,
     "events_with_multiple_trades": 10,
     "events_with_trade": 39,
@@ -12609,6 +13158,7 @@
       24,
       27
     ],
+    "player_turns_started": 78,
     "player_turns_with_event": 78,
     "trades_per_event": {
       "0": 39,
@@ -12631,6 +13181,7 @@
       61
     ],
     "cards_moved": 212,
+    "completed_player_turns": 85,
     "eligible_events": 85,
     "events_with_multiple_trades": 7,
     "events_with_trade": 41,
@@ -12654,6 +13205,7 @@
       23,
       26
     ],
+    "player_turns_started": 86,
     "player_turns_with_event": 86,
     "trades_per_event": {
       "0": 45,
@@ -12678,6 +13230,7 @@
       33
     ],
     "cards_moved": 137,
+    "completed_player_turns": 57,
     "eligible_events": 58,
     "events_with_multiple_trades": 4,
     "events_with_trade": 31,
@@ -12701,6 +13254,7 @@
       20,
       19
     ],
+    "player_turns_started": 58,
     "player_turns_with_event": 58,
     "trades_per_event": {
       "0": 27,
@@ -12723,6 +13277,7 @@
       37
     ],
     "cards_moved": 133,
+    "completed_player_turns": 64,
     "eligible_events": 65,
     "events_with_multiple_trades": 5,
     "events_with_trade": 31,
@@ -12746,6 +13301,7 @@
       15,
       20
     ],
+    "player_turns_started": 65,
     "player_turns_with_event": 65,
     "trades_per_event": {
       "0": 34,
@@ -12768,6 +13324,7 @@
       40
     ],
     "cards_moved": 162,
+    "completed_player_turns": 57,
     "eligible_events": 57,
     "events_with_multiple_trades": 9,
     "events_with_trade": 26,
@@ -12791,6 +13348,7 @@
       18,
       18
     ],
+    "player_turns_started": 58,
     "player_turns_with_event": 58,
     "trades_per_event": {
       "0": 32,
@@ -12814,6 +13372,7 @@
       26
     ],
     "cards_moved": 94,
+    "completed_player_turns": 58,
     "eligible_events": 55,
     "events_with_multiple_trades": 5,
     "events_with_trade": 20,
@@ -12837,6 +13396,7 @@
       10,
       14
     ],
+    "player_turns_started": 59,
     "player_turns_with_event": 59,
     "trades_per_event": {
       "0": 39,
@@ -12860,6 +13420,7 @@
       33
     ],
     "cards_moved": 138,
+    "completed_player_turns": 59,
     "eligible_events": 60,
     "events_with_multiple_trades": 6,
     "events_with_trade": 27,
@@ -12883,6 +13444,7 @@
       18,
       14
     ],
+    "player_turns_started": 60,
     "player_turns_with_event": 60,
     "trades_per_event": {
       "0": 33,
@@ -12906,6 +13468,7 @@
       40
     ],
     "cards_moved": 143,
+    "completed_player_turns": 62,
     "eligible_events": 60,
     "events_with_multiple_trades": 5,
     "events_with_trade": 30,
@@ -12929,6 +13492,7 @@
       21,
       20
     ],
+    "player_turns_started": 63,
     "player_turns_with_event": 63,
     "trades_per_event": {
       "0": 33,
@@ -12952,6 +13516,7 @@
       40
     ],
     "cards_moved": 161,
+    "completed_player_turns": 58,
     "eligible_events": 59,
     "events_with_multiple_trades": 11,
     "events_with_trade": 31,
@@ -12975,6 +13540,7 @@
       22,
       21
     ],
+    "player_turns_started": 59,
     "player_turns_with_event": 59,
     "trades_per_event": {
       "0": 28,
@@ -12997,6 +13563,7 @@
       33
     ],
     "cards_moved": 163,
+    "completed_player_turns": 75,
     "eligible_events": 72,
     "events_with_multiple_trades": 8,
     "events_with_trade": 33,
@@ -13020,6 +13587,7 @@
       23,
       20
     ],
+    "player_turns_started": 76,
     "player_turns_with_event": 75,
     "trades_per_event": {
       "0": 42,
@@ -13043,6 +13611,7 @@
       34
     ],
     "cards_moved": 112,
+    "completed_player_turns": 59,
     "eligible_events": 59,
     "events_with_multiple_trades": 8,
     "events_with_trade": 22,
@@ -13066,6 +13635,7 @@
       15,
       17
     ],
+    "player_turns_started": 60,
     "player_turns_with_event": 60,
     "trades_per_event": {
       "0": 38,
@@ -13089,6 +13659,7 @@
       30
     ],
     "cards_moved": 153,
+    "completed_player_turns": 69,
     "eligible_events": 68,
     "events_with_multiple_trades": 10,
     "events_with_trade": 28,
@@ -13112,6 +13683,7 @@
       26,
       18
     ],
+    "player_turns_started": 70,
     "player_turns_with_event": 70,
     "trades_per_event": {
       "0": 42,
@@ -13135,6 +13707,7 @@
       44
     ],
     "cards_moved": 148,
+    "completed_player_turns": 51,
     "eligible_events": 52,
     "events_with_multiple_trades": 9,
     "events_with_trade": 28,
@@ -13158,6 +13731,7 @@
       16,
       20
     ],
+    "player_turns_started": 52,
     "player_turns_with_event": 52,
     "trades_per_event": {
       "0": 24,
@@ -13182,6 +13756,7 @@
       41
     ],
     "cards_moved": 209,
+    "completed_player_turns": 72,
     "eligible_events": 71,
     "events_with_multiple_trades": 11,
     "events_with_trade": 38,
@@ -13205,6 +13780,7 @@
       28,
       21
     ],
+    "player_turns_started": 73,
     "player_turns_with_event": 72,
     "trades_per_event": {
       "0": 34,
@@ -13229,6 +13805,7 @@
       22
     ],
     "cards_moved": 129,
+    "completed_player_turns": 58,
     "eligible_events": 58,
     "events_with_multiple_trades": 10,
     "events_with_trade": 25,
@@ -13252,6 +13829,7 @@
       18,
       13
     ],
+    "player_turns_started": 59,
     "player_turns_with_event": 59,
     "trades_per_event": {
       "0": 34,
@@ -13274,6 +13852,7 @@
       51
     ],
     "cards_moved": 198,
+    "completed_player_turns": 95,
     "eligible_events": 94,
     "events_with_multiple_trades": 11,
     "events_with_trade": 37,
@@ -13297,6 +13876,7 @@
       30,
       25
     ],
+    "player_turns_started": 96,
     "player_turns_with_event": 96,
     "trades_per_event": {
       "0": 59,
@@ -13320,6 +13900,7 @@
       23
     ],
     "cards_moved": 101,
+    "completed_player_turns": 62,
     "eligible_events": 58,
     "events_with_multiple_trades": 6,
     "events_with_trade": 23,
@@ -13343,6 +13924,7 @@
       17,
       13
     ],
+    "player_turns_started": 63,
     "player_turns_with_event": 63,
     "trades_per_event": {
       "0": 40,
@@ -13365,6 +13947,7 @@
       33
     ],
     "cards_moved": 128,
+    "completed_player_turns": 61,
     "eligible_events": 61,
     "events_with_multiple_trades": 6,
     "events_with_trade": 24,
@@ -13388,6 +13971,7 @@
       17,
       14
     ],
+    "player_turns_started": 62,
     "player_turns_with_event": 62,
     "trades_per_event": {
       "0": 38,
@@ -13410,6 +13994,7 @@
       49
     ],
     "cards_moved": 189,
+    "completed_player_turns": 81,
     "eligible_events": 80,
     "events_with_multiple_trades": 8,
     "events_with_trade": 42,
@@ -13433,6 +14018,7 @@
       23,
       25
     ],
+    "player_turns_started": 82,
     "player_turns_with_event": 82,
     "trades_per_event": {
       "0": 40,
@@ -13456,6 +14042,7 @@
       29
     ],
     "cards_moved": 109,
+    "completed_player_turns": 59,
     "eligible_events": 60,
     "events_with_multiple_trades": 4,
     "events_with_trade": 24,
@@ -13479,6 +14066,7 @@
       12,
       15
     ],
+    "player_turns_started": 60,
     "player_turns_with_event": 60,
     "trades_per_event": {
       "0": 36,
@@ -13500,6 +14088,7 @@
       24
     ],
     "cards_moved": 105,
+    "completed_player_turns": 46,
     "eligible_events": 46,
     "events_with_multiple_trades": 7,
     "events_with_trade": 23,
@@ -13523,6 +14112,7 @@
       12,
       16
     ],
+    "player_turns_started": 47,
     "player_turns_with_event": 47,
     "trades_per_event": {
       "0": 24,
@@ -13547,6 +14137,7 @@
       32
     ],
     "cards_moved": 101,
+    "completed_player_turns": 54,
     "eligible_events": 54,
     "events_with_multiple_trades": 7,
     "events_with_trade": 21,
@@ -13570,6 +14161,7 @@
       15,
       17
     ],
+    "player_turns_started": 55,
     "player_turns_with_event": 55,
     "trades_per_event": {
       "0": 34,
@@ -13593,6 +14185,7 @@
       24
     ],
     "cards_moved": 100,
+    "completed_player_turns": 42,
     "eligible_events": 43,
     "events_with_multiple_trades": 3,
     "events_with_trade": 21,
@@ -13616,6 +14209,7 @@
       14,
       11
     ],
+    "player_turns_started": 43,
     "player_turns_with_event": 43,
     "trades_per_event": {
       "0": 22,
@@ -13638,6 +14232,7 @@
       39
     ],
     "cards_moved": 147,
+    "completed_player_turns": 55,
     "eligible_events": 56,
     "events_with_multiple_trades": 8,
     "events_with_trade": 25,
@@ -13661,6 +14256,7 @@
       19,
       21
     ],
+    "player_turns_started": 56,
     "player_turns_with_event": 56,
     "trades_per_event": {
       "0": 31,
@@ -13684,6 +14280,7 @@
       25
     ],
     "cards_moved": 104,
+    "completed_player_turns": 50,
     "eligible_events": 51,
     "events_with_multiple_trades": 4,
     "events_with_trade": 25,
@@ -13707,6 +14304,7 @@
       14,
       15
     ],
+    "player_turns_started": 51,
     "player_turns_with_event": 51,
     "trades_per_event": {
       "0": 26,
@@ -13728,6 +14326,7 @@
       28
     ],
     "cards_moved": 140,
+    "completed_player_turns": 60,
     "eligible_events": 60,
     "events_with_multiple_trades": 4,
     "events_with_trade": 26,
@@ -13751,6 +14350,7 @@
       14,
       12
     ],
+    "player_turns_started": 61,
     "player_turns_with_event": 61,
     "trades_per_event": {
       "0": 35,
@@ -13775,6 +14375,7 @@
       23
     ],
     "cards_moved": 120,
+    "completed_player_turns": 50,
     "eligible_events": 51,
     "events_with_multiple_trades": 6,
     "events_with_trade": 24,
@@ -13798,6 +14399,7 @@
       16,
       14
     ],
+    "player_turns_started": 51,
     "player_turns_with_event": 51,
     "trades_per_event": {
       "0": 27,
@@ -13819,6 +14421,7 @@
       30
     ],
     "cards_moved": 144,
+    "completed_player_turns": 69,
     "eligible_events": 68,
     "events_with_multiple_trades": 8,
     "events_with_trade": 32,
@@ -13842,6 +14445,7 @@
       11,
       16
     ],
+    "player_turns_started": 70,
     "player_turns_with_event": 70,
     "trades_per_event": {
       "0": 38,
@@ -13864,6 +14468,7 @@
       34
     ],
     "cards_moved": 137,
+    "completed_player_turns": 51,
     "eligible_events": 52,
     "events_with_multiple_trades": 9,
     "events_with_trade": 29,
@@ -13887,6 +14492,7 @@
       20,
       19
     ],
+    "player_turns_started": 52,
     "player_turns_with_event": 52,
     "trades_per_event": {
       "0": 23,
@@ -13908,6 +14514,7 @@
       27
     ],
     "cards_moved": 124,
+    "completed_player_turns": 62,
     "eligible_events": 59,
     "events_with_multiple_trades": 6,
     "events_with_trade": 25,
@@ -13931,6 +14538,7 @@
       15,
       13
     ],
+    "player_turns_started": 63,
     "player_turns_with_event": 63,
     "trades_per_event": {
       "0": 38,
@@ -13955,6 +14563,7 @@
       53
     ],
     "cards_moved": 195,
+    "completed_player_turns": 66,
     "eligible_events": 65,
     "events_with_multiple_trades": 11,
     "events_with_trade": 40,
@@ -13978,6 +14587,7 @@
       33,
       27
     ],
+    "player_turns_started": 67,
     "player_turns_with_event": 67,
     "trades_per_event": {
       "0": 27,
@@ -14001,6 +14611,7 @@
       49
     ],
     "cards_moved": 183,
+    "completed_player_turns": 71,
     "eligible_events": 67,
     "events_with_multiple_trades": 8,
     "events_with_trade": 40,
@@ -14024,6 +14635,7 @@
       26,
       25
     ],
+    "player_turns_started": 72,
     "player_turns_with_event": 72,
     "trades_per_event": {
       "0": 32,
@@ -14046,6 +14658,7 @@
       35
     ],
     "cards_moved": 146,
+    "completed_player_turns": 51,
     "eligible_events": 52,
     "events_with_multiple_trades": 11,
     "events_with_trade": 28,
@@ -14069,6 +14682,7 @@
       23,
       19
     ],
+    "player_turns_started": 52,
     "player_turns_with_event": 52,
     "trades_per_event": {
       "0": 24,
@@ -14091,6 +14705,7 @@
       29
     ],
     "cards_moved": 132,
+    "completed_player_turns": 60,
     "eligible_events": 61,
     "events_with_multiple_trades": 6,
     "events_with_trade": 28,
@@ -14114,6 +14729,7 @@
       20,
       18
     ],
+    "player_turns_started": 61,
     "player_turns_with_event": 61,
     "trades_per_event": {
       "0": 33,
@@ -14137,6 +14753,7 @@
       62
     ],
     "cards_moved": 206,
+    "completed_player_turns": 77,
     "eligible_events": 76,
     "events_with_multiple_trades": 12,
     "events_with_trade": 39,
@@ -14160,6 +14777,7 @@
       22,
       29
     ],
+    "player_turns_started": 78,
     "player_turns_with_event": 78,
     "trades_per_event": {
       "0": 39,
@@ -14183,6 +14801,7 @@
       47
     ],
     "cards_moved": 182,
+    "completed_player_turns": 67,
     "eligible_events": 68,
     "events_with_multiple_trades": 10,
     "events_with_trade": 35,
@@ -14206,6 +14825,7 @@
       22,
       27
     ],
+    "player_turns_started": 68,
     "player_turns_with_event": 68,
     "trades_per_event": {
       "0": 33,
@@ -14229,6 +14849,7 @@
       50
     ],
     "cards_moved": 185,
+    "completed_player_turns": 66,
     "eligible_events": 66,
     "events_with_multiple_trades": 12,
     "events_with_trade": 32,
@@ -14252,6 +14873,7 @@
       22,
       25
     ],
+    "player_turns_started": 67,
     "player_turns_with_event": 67,
     "trades_per_event": {
       "0": 35,
@@ -14277,6 +14899,7 @@
       23
     ],
     "cards_moved": 113,
+    "completed_player_turns": 45,
     "eligible_events": 46,
     "events_with_multiple_trades": 8,
     "events_with_trade": 20,
@@ -14300,6 +14923,7 @@
       15,
       13
     ],
+    "player_turns_started": 46,
     "player_turns_with_event": 46,
     "trades_per_event": {
       "0": 26,
@@ -14323,6 +14947,7 @@
       22
     ],
     "cards_moved": 79,
+    "completed_player_turns": 43,
     "eligible_events": 44,
     "events_with_multiple_trades": 3,
     "events_with_trade": 18,
@@ -14346,6 +14971,7 @@
       12,
       13
     ],
+    "player_turns_started": 44,
     "player_turns_with_event": 44,
     "trades_per_event": {
       "0": 26,
@@ -14369,6 +14995,7 @@
       30
     ],
     "cards_moved": 132,
+    "completed_player_turns": 60,
     "eligible_events": 58,
     "events_with_multiple_trades": 7,
     "events_with_trade": 24,
@@ -14392,6 +15019,7 @@
       17,
       13
     ],
+    "player_turns_started": 61,
     "player_turns_with_event": 61,
     "trades_per_event": {
       "0": 37,
@@ -14415,6 +15043,7 @@
       50
     ],
     "cards_moved": 211,
+    "completed_player_turns": 81,
     "eligible_events": 82,
     "events_with_multiple_trades": 12,
     "events_with_trade": 39,
@@ -14438,6 +15067,7 @@
       27,
       28
     ],
+    "player_turns_started": 82,
     "player_turns_with_event": 82,
     "trades_per_event": {
       "0": 43,
@@ -14462,6 +15092,7 @@
       27
     ],
     "cards_moved": 122,
+    "completed_player_turns": 56,
     "eligible_events": 56,
     "events_with_multiple_trades": 4,
     "events_with_trade": 30,
@@ -14485,6 +15116,7 @@
       18,
       16
     ],
+    "player_turns_started": 57,
     "player_turns_with_event": 57,
     "trades_per_event": {
       "0": 27,
@@ -14508,6 +15140,7 @@
       27
     ],
     "cards_moved": 131,
+    "completed_player_turns": 64,
     "eligible_events": 61,
     "events_with_multiple_trades": 7,
     "events_with_trade": 28,
@@ -14531,6 +15164,7 @@
       20,
       15
     ],
+    "player_turns_started": 65,
     "player_turns_with_event": 65,
     "trades_per_event": {
       "0": 37,
@@ -14553,6 +15187,7 @@
       41
     ],
     "cards_moved": 160,
+    "completed_player_turns": 59,
     "eligible_events": 58,
     "events_with_multiple_trades": 8,
     "events_with_trade": 32,
@@ -14576,6 +15211,7 @@
       22,
       24
     ],
+    "player_turns_started": 60,
     "player_turns_with_event": 59,
     "trades_per_event": {
       "0": 27,
@@ -14600,6 +15236,7 @@
       50
     ],
     "cards_moved": 199,
+    "completed_player_turns": 53,
     "eligible_events": 54,
     "events_with_multiple_trades": 10,
     "events_with_trade": 33,
@@ -14623,6 +15260,7 @@
       29,
       25
     ],
+    "player_turns_started": 54,
     "player_turns_with_event": 54,
     "trades_per_event": {
       "0": 21,
@@ -14648,6 +15286,7 @@
       29
     ],
     "cards_moved": 102,
+    "completed_player_turns": 36,
     "eligible_events": 36,
     "events_with_multiple_trades": 4,
     "events_with_trade": 21,
@@ -14671,6 +15310,7 @@
       13,
       15
     ],
+    "player_turns_started": 37,
     "player_turns_with_event": 36,
     "trades_per_event": {
       "0": 15,
@@ -14693,6 +15333,7 @@
       38
     ],
     "cards_moved": 139,
+    "completed_player_turns": 58,
     "eligible_events": 58,
     "events_with_multiple_trades": 5,
     "events_with_trade": 30,
@@ -14716,6 +15357,7 @@
       17,
       22
     ],
+    "player_turns_started": 59,
     "player_turns_with_event": 59,
     "trades_per_event": {
       "0": 29,
@@ -14741,6 +15383,7 @@
       43
     ],
     "cards_moved": 142,
+    "completed_player_turns": 59,
     "eligible_events": 59,
     "events_with_multiple_trades": 4,
     "events_with_trade": 31,
@@ -14764,6 +15407,7 @@
       15,
       20
     ],
+    "player_turns_started": 60,
     "player_turns_with_event": 60,
     "trades_per_event": {
       "0": 29,
@@ -14787,6 +15431,7 @@
       32
     ],
     "cards_moved": 129,
+    "completed_player_turns": 69,
     "eligible_events": 69,
     "events_with_multiple_trades": 5,
     "events_with_trade": 29,
@@ -14810,6 +15455,7 @@
       16,
       19
     ],
+    "player_turns_started": 70,
     "player_turns_with_event": 70,
     "trades_per_event": {
       "0": 41,
@@ -14833,6 +15479,7 @@
       34
     ],
     "cards_moved": 185,
+    "completed_player_turns": 81,
     "eligible_events": 82,
     "events_with_multiple_trades": 8,
     "events_with_trade": 39,
@@ -14856,6 +15503,7 @@
       24,
       20
     ],
+    "player_turns_started": 82,
     "player_turns_with_event": 82,
     "trades_per_event": {
       "0": 43,
@@ -14879,6 +15527,7 @@
       29
     ],
     "cards_moved": 126,
+    "completed_player_turns": 50,
     "eligible_events": 48,
     "events_with_multiple_trades": 7,
     "events_with_trade": 26,
@@ -14902,6 +15551,7 @@
       20,
       16
     ],
+    "player_turns_started": 51,
     "player_turns_with_event": 51,
     "trades_per_event": {
       "0": 25,
@@ -14925,6 +15575,7 @@
       63
     ],
     "cards_moved": 210,
+    "completed_player_turns": 82,
     "eligible_events": 83,
     "events_with_multiple_trades": 8,
     "events_with_trade": 45,
@@ -14948,6 +15599,7 @@
       22,
       33
     ],
+    "player_turns_started": 83,
     "player_turns_with_event": 83,
     "trades_per_event": {
       "0": 38,
@@ -14971,6 +15623,7 @@
       25
     ],
     "cards_moved": 104,
+    "completed_player_turns": 44,
     "eligible_events": 45,
     "events_with_multiple_trades": 8,
     "events_with_trade": 17,
@@ -14994,6 +15647,7 @@
       12,
       14
     ],
+    "player_turns_started": 45,
     "player_turns_with_event": 45,
     "trades_per_event": {
       "0": 28,
@@ -15016,6 +15670,7 @@
       25
     ],
     "cards_moved": 123,
+    "completed_player_turns": 46,
     "eligible_events": 45,
     "events_with_multiple_trades": 8,
     "events_with_trade": 20,
@@ -15039,6 +15694,7 @@
       15,
       12
     ],
+    "player_turns_started": 47,
     "player_turns_with_event": 47,
     "trades_per_event": {
       "0": 27,
@@ -15062,6 +15718,7 @@
       45
     ],
     "cards_moved": 134,
+    "completed_player_turns": 59,
     "eligible_events": 57,
     "events_with_multiple_trades": 4,
     "events_with_trade": 29,
@@ -15085,6 +15742,7 @@
       15,
       21
     ],
+    "player_turns_started": 60,
     "player_turns_with_event": 60,
     "trades_per_event": {
       "0": 31,
@@ -15107,6 +15765,7 @@
       38
     ],
     "cards_moved": 151,
+    "completed_player_turns": 58,
     "eligible_events": 56,
     "events_with_multiple_trades": 6,
     "events_with_trade": 35,
@@ -15130,6 +15789,7 @@
       27,
       18
     ],
+    "player_turns_started": 59,
     "player_turns_with_event": 58,
     "trades_per_event": {
       "0": 23,
@@ -15152,6 +15812,7 @@
       39
     ],
     "cards_moved": 130,
+    "completed_player_turns": 59,
     "eligible_events": 58,
     "events_with_multiple_trades": 5,
     "events_with_trade": 25,
@@ -15175,6 +15836,7 @@
       12,
       20
     ],
+    "player_turns_started": 60,
     "player_turns_with_event": 60,
     "trades_per_event": {
       "0": 35,
@@ -15197,6 +15859,7 @@
       41
     ],
     "cards_moved": 166,
+    "completed_player_turns": 70,
     "eligible_events": 70,
     "events_with_multiple_trades": 8,
     "events_with_trade": 32,
@@ -15220,6 +15883,7 @@
       20,
       20
     ],
+    "player_turns_started": 71,
     "player_turns_with_event": 71,
     "trades_per_event": {
       "0": 39,
@@ -15244,6 +15908,7 @@
       42
     ],
     "cards_moved": 187,
+    "completed_player_turns": 89,
     "eligible_events": 88,
     "events_with_multiple_trades": 8,
     "events_with_trade": 41,
@@ -15267,6 +15932,7 @@
       28,
       20
     ],
+    "player_turns_started": 90,
     "player_turns_with_event": 90,
     "trades_per_event": {
       "0": 49,
@@ -15290,6 +15956,7 @@
       33
     ],
     "cards_moved": 124,
+    "completed_player_turns": 52,
     "eligible_events": 52,
     "events_with_multiple_trades": 6,
     "events_with_trade": 28,
@@ -15313,6 +15980,7 @@
       20,
       22
     ],
+    "player_turns_started": 53,
     "player_turns_with_event": 53,
     "trades_per_event": {
       "0": 25,
@@ -15337,6 +16005,7 @@
       31
     ],
     "cards_moved": 105,
+    "completed_player_turns": 43,
     "eligible_events": 43,
     "events_with_multiple_trades": 7,
     "events_with_trade": 16,
@@ -15360,6 +16029,7 @@
       10,
       15
     ],
+    "player_turns_started": 44,
     "player_turns_with_event": 44,
     "trades_per_event": {
       "0": 28,
@@ -15382,6 +16052,7 @@
       27
     ],
     "cards_moved": 119,
+    "completed_player_turns": 52,
     "eligible_events": 52,
     "events_with_multiple_trades": 6,
     "events_with_trade": 25,
@@ -15405,6 +16076,7 @@
       19,
       16
     ],
+    "player_turns_started": 53,
     "player_turns_with_event": 53,
     "trades_per_event": {
       "0": 28,
@@ -15430,6 +16102,7 @@
       44
     ],
     "cards_moved": 186,
+    "completed_player_turns": 63,
     "eligible_events": 63,
     "events_with_multiple_trades": 10,
     "events_with_trade": 38,
@@ -15453,6 +16126,7 @@
       26,
       25
     ],
+    "player_turns_started": 64,
     "player_turns_with_event": 64,
     "trades_per_event": {
       "0": 26,
@@ -15476,6 +16150,7 @@
       50
     ],
     "cards_moved": 170,
+    "completed_player_turns": 73,
     "eligible_events": 74,
     "events_with_multiple_trades": 9,
     "events_with_trade": 33,
@@ -15499,6 +16174,7 @@
       23,
       32
     ],
+    "player_turns_started": 74,
     "player_turns_with_event": 74,
     "trades_per_event": {
       "0": 41,
@@ -15523,6 +16199,7 @@
       38
     ],
     "cards_moved": 153,
+    "completed_player_turns": 56,
     "eligible_events": 54,
     "events_with_multiple_trades": 5,
     "events_with_trade": 31,
@@ -15546,6 +16223,7 @@
       24,
       22
     ],
+    "player_turns_started": 57,
     "player_turns_with_event": 57,
     "trades_per_event": {
       "0": 26,
@@ -15570,6 +16248,7 @@
       28
     ],
     "cards_moved": 127,
+    "completed_player_turns": 45,
     "eligible_events": 45,
     "events_with_multiple_trades": 5,
     "events_with_trade": 26,
@@ -15593,6 +16272,7 @@
       20,
       14
     ],
+    "player_turns_started": 46,
     "player_turns_with_event": 45,
     "trades_per_event": {
       "0": 19,
@@ -15616,6 +16296,7 @@
       25
     ],
     "cards_moved": 131,
+    "completed_player_turns": 48,
     "eligible_events": 49,
     "events_with_multiple_trades": 5,
     "events_with_trade": 25,
@@ -15639,6 +16320,7 @@
       18,
       11
     ],
+    "player_turns_started": 49,
     "player_turns_with_event": 49,
     "trades_per_event": {
       "0": 24,
@@ -15660,6 +16342,7 @@
       19
     ],
     "cards_moved": 123,
+    "completed_player_turns": 55,
     "eligible_events": 54,
     "events_with_multiple_trades": 8,
     "events_with_trade": 24,
@@ -15683,6 +16366,7 @@
       15,
       10
     ],
+    "player_turns_started": 56,
     "player_turns_with_event": 56,
     "trades_per_event": {
       "0": 32,
@@ -15707,6 +16391,7 @@
       41
     ],
     "cards_moved": 176,
+    "completed_player_turns": 72,
     "eligible_events": 72,
     "events_with_multiple_trades": 10,
     "events_with_trade": 35,
@@ -15730,6 +16415,7 @@
       21,
       23
     ],
+    "player_turns_started": 73,
     "player_turns_with_event": 73,
     "trades_per_event": {
       "0": 38,
@@ -15753,6 +16439,7 @@
       17
     ],
     "cards_moved": 130,
+    "completed_player_turns": 47,
     "eligible_events": 47,
     "events_with_multiple_trades": 9,
     "events_with_trade": 25,
@@ -15776,6 +16463,7 @@
       22,
       10
     ],
+    "player_turns_started": 48,
     "player_turns_with_event": 48,
     "trades_per_event": {
       "0": 23,
@@ -15799,6 +16487,7 @@
       39
     ],
     "cards_moved": 192,
+    "completed_player_turns": 73,
     "eligible_events": 73,
     "events_with_multiple_trades": 8,
     "events_with_trade": 44,
@@ -15822,6 +16511,7 @@
       26,
       23
     ],
+    "player_turns_started": 74,
     "player_turns_with_event": 74,
     "trades_per_event": {
       "0": 30,
@@ -15846,6 +16536,7 @@
       29
     ],
     "cards_moved": 145,
+    "completed_player_turns": 48,
     "eligible_events": 48,
     "events_with_multiple_trades": 6,
     "events_with_trade": 30,
@@ -15869,6 +16560,7 @@
       21,
       15
     ],
+    "player_turns_started": 49,
     "player_turns_with_event": 48,
     "trades_per_event": {
       "0": 18,
@@ -15893,6 +16585,7 @@
       32
     ],
     "cards_moved": 129,
+    "completed_player_turns": 45,
     "eligible_events": 46,
     "events_with_multiple_trades": 7,
     "events_with_trade": 25,
@@ -15916,6 +16609,7 @@
       14,
       16
     ],
+    "player_turns_started": 46,
     "player_turns_with_event": 46,
     "trades_per_event": {
       "0": 21,
@@ -15939,6 +16633,7 @@
       51
     ],
     "cards_moved": 175,
+    "completed_player_turns": 59,
     "eligible_events": 60,
     "events_with_multiple_trades": 10,
     "events_with_trade": 31,
@@ -15962,6 +16657,7 @@
       21,
       25
     ],
+    "player_turns_started": 60,
     "player_turns_with_event": 60,
     "trades_per_event": {
       "0": 29,
@@ -15984,6 +16680,7 @@
       38
     ],
     "cards_moved": 139,
+    "completed_player_turns": 73,
     "eligible_events": 72,
     "events_with_multiple_trades": 5,
     "events_with_trade": 30,
@@ -16007,6 +16704,7 @@
       17,
       22
     ],
+    "player_turns_started": 74,
     "player_turns_with_event": 74,
     "trades_per_event": {
       "0": 44,
@@ -16030,6 +16728,7 @@
       41
     ],
     "cards_moved": 133,
+    "completed_player_turns": 49,
     "eligible_events": 50,
     "events_with_multiple_trades": 5,
     "events_with_trade": 25,
@@ -16053,6 +16752,7 @@
       15,
       18
     ],
+    "player_turns_started": 50,
     "player_turns_with_event": 50,
     "trades_per_event": {
       "0": 25,
@@ -16076,6 +16776,7 @@
       35
     ],
     "cards_moved": 138,
+    "completed_player_turns": 54,
     "eligible_events": 54,
     "events_with_multiple_trades": 6,
     "events_with_trade": 27,
@@ -16099,6 +16800,7 @@
       14,
       17
     ],
+    "player_turns_started": 55,
     "player_turns_with_event": 55,
     "trades_per_event": {
       "0": 28,
@@ -16123,6 +16825,7 @@
       42
     ],
     "cards_moved": 143,
+    "completed_player_turns": 65,
     "eligible_events": 65,
     "events_with_multiple_trades": 7,
     "events_with_trade": 29,
@@ -16146,6 +16849,7 @@
       12,
       20
     ],
+    "player_turns_started": 66,
     "player_turns_with_event": 66,
     "trades_per_event": {
       "0": 37,
@@ -16168,6 +16872,7 @@
       35
     ],
     "cards_moved": 148,
+    "completed_player_turns": 59,
     "eligible_events": 59,
     "events_with_multiple_trades": 7,
     "events_with_trade": 25,
@@ -16191,6 +16896,7 @@
       20,
       16
     ],
+    "player_turns_started": 60,
     "player_turns_with_event": 60,
     "trades_per_event": {
       "0": 35,
@@ -16215,6 +16921,7 @@
       70
     ],
     "cards_moved": 282,
+    "completed_player_turns": 95,
     "eligible_events": 94,
     "events_with_multiple_trades": 14,
     "events_with_trade": 50,
@@ -16238,6 +16945,7 @@
       36,
       34
     ],
+    "player_turns_started": 96,
     "player_turns_with_event": 95,
     "trades_per_event": {
       "0": 45,
@@ -16263,6 +16971,7 @@
       46
     ],
     "cards_moved": 204,
+    "completed_player_turns": 84,
     "eligible_events": 81,
     "events_with_multiple_trades": 12,
     "events_with_trade": 45,
@@ -16286,6 +16995,7 @@
       33,
       29
     ],
+    "player_turns_started": 85,
     "player_turns_with_event": 85,
     "trades_per_event": {
       "0": 40,
@@ -16309,6 +17019,7 @@
       32
     ],
     "cards_moved": 133,
+    "completed_player_turns": 61,
     "eligible_events": 59,
     "events_with_multiple_trades": 7,
     "events_with_trade": 28,
@@ -16332,6 +17043,7 @@
       17,
       17
     ],
+    "player_turns_started": 62,
     "player_turns_with_event": 62,
     "trades_per_event": {
       "0": 34,
@@ -16353,6 +17065,7 @@
       23
     ],
     "cards_moved": 154,
+    "completed_player_turns": 78,
     "eligible_events": 77,
     "events_with_multiple_trades": 7,
     "events_with_trade": 35,
@@ -16376,6 +17089,7 @@
       21,
       14
     ],
+    "player_turns_started": 79,
     "player_turns_with_event": 79,
     "trades_per_event": {
       "0": 44,
@@ -16398,6 +17112,7 @@
       32
     ],
     "cards_moved": 141,
+    "completed_player_turns": 62,
     "eligible_events": 62,
     "events_with_multiple_trades": 7,
     "events_with_trade": 27,
@@ -16421,6 +17136,7 @@
       22,
       17
     ],
+    "player_turns_started": 63,
     "player_turns_with_event": 63,
     "trades_per_event": {
       "0": 36,
@@ -16443,6 +17159,7 @@
       31
     ],
     "cards_moved": 109,
+    "completed_player_turns": 56,
     "eligible_events": 57,
     "events_with_multiple_trades": 6,
     "events_with_trade": 24,
@@ -16466,6 +17183,7 @@
       13,
       16
     ],
+    "player_turns_started": 57,
     "player_turns_with_event": 57,
     "trades_per_event": {
       "0": 33,
@@ -16488,6 +17206,7 @@
       44
     ],
     "cards_moved": 180,
+    "completed_player_turns": 83,
     "eligible_events": 83,
     "events_with_multiple_trades": 7,
     "events_with_trade": 40,
@@ -16511,6 +17230,7 @@
       27,
       26
     ],
+    "player_turns_started": 84,
     "player_turns_with_event": 84,
     "trades_per_event": {
       "0": 44,
@@ -16533,6 +17253,7 @@
       35
     ],
     "cards_moved": 144,
+    "completed_player_turns": 64,
     "eligible_events": 62,
     "events_with_multiple_trades": 6,
     "events_with_trade": 29,
@@ -16556,6 +17277,7 @@
       20,
       18
     ],
+    "player_turns_started": 65,
     "player_turns_with_event": 64,
     "trades_per_event": {
       "0": 35,
@@ -16579,6 +17301,7 @@
       40
     ],
     "cards_moved": 172,
+    "completed_player_turns": 61,
     "eligible_events": 62,
     "events_with_multiple_trades": 9,
     "events_with_trade": 28,
@@ -16602,6 +17325,7 @@
       21,
       19
     ],
+    "player_turns_started": 62,
     "player_turns_with_event": 62,
     "trades_per_event": {
       "0": 34,
@@ -16625,6 +17349,7 @@
       25
     ],
     "cards_moved": 114,
+    "completed_player_turns": 45,
     "eligible_events": 46,
     "events_with_multiple_trades": 10,
     "events_with_trade": 20,
@@ -16648,6 +17373,7 @@
       13,
       13
     ],
+    "player_turns_started": 46,
     "player_turns_with_event": 46,
     "trades_per_event": {
       "0": 26,
@@ -16671,6 +17397,7 @@
       34
     ],
     "cards_moved": 156,
+    "completed_player_turns": 52,
     "eligible_events": 50,
     "events_with_multiple_trades": 9,
     "events_with_trade": 27,
@@ -16694,6 +17421,7 @@
       19,
       18
     ],
+    "player_turns_started": 53,
     "player_turns_with_event": 53,
     "trades_per_event": {
       "0": 26,
@@ -16717,6 +17445,7 @@
       40
     ],
     "cards_moved": 164,
+    "completed_player_turns": 65,
     "eligible_events": 65,
     "events_with_multiple_trades": 8,
     "events_with_trade": 30,
@@ -16740,6 +17469,7 @@
       22,
       21
     ],
+    "player_turns_started": 66,
     "player_turns_with_event": 66,
     "trades_per_event": {
       "0": 36,
@@ -16764,6 +17494,7 @@
       33
     ],
     "cards_moved": 152,
+    "completed_player_turns": 65,
     "eligible_events": 66,
     "events_with_multiple_trades": 7,
     "events_with_trade": 32,
@@ -16787,6 +17518,7 @@
       23,
       20
     ],
+    "player_turns_started": 66,
     "player_turns_with_event": 66,
     "trades_per_event": {
       "0": 34,
@@ -16811,6 +17543,7 @@
       35
     ],
     "cards_moved": 160,
+    "completed_player_turns": 59,
     "eligible_events": 60,
     "events_with_multiple_trades": 9,
     "events_with_trade": 29,
@@ -16834,6 +17567,7 @@
       22,
       20
     ],
+    "player_turns_started": 60,
     "player_turns_with_event": 60,
     "trades_per_event": {
       "0": 31,
@@ -16858,6 +17592,7 @@
       52
     ],
     "cards_moved": 196,
+    "completed_player_turns": 67,
     "eligible_events": 67,
     "events_with_multiple_trades": 11,
     "events_with_trade": 39,
@@ -16881,6 +17616,7 @@
       26,
       29
     ],
+    "player_turns_started": 68,
     "player_turns_with_event": 68,
     "trades_per_event": {
       "0": 29,
@@ -16904,6 +17640,7 @@
       34
     ],
     "cards_moved": 122,
+    "completed_player_turns": 47,
     "eligible_events": 48,
     "events_with_multiple_trades": 5,
     "events_with_trade": 26,
@@ -16927,6 +17664,7 @@
       13,
       16
     ],
+    "player_turns_started": 48,
     "player_turns_with_event": 48,
     "trades_per_event": {
       "0": 22,
@@ -16950,6 +17688,7 @@
       38
     ],
     "cards_moved": 138,
+    "completed_player_turns": 51,
     "eligible_events": 47,
     "events_with_multiple_trades": 7,
     "events_with_trade": 25,
@@ -16973,6 +17712,7 @@
       16,
       18
     ],
+    "player_turns_started": 52,
     "player_turns_with_event": 52,
     "trades_per_event": {
       "0": 27,
@@ -16996,6 +17736,7 @@
       24
     ],
     "cards_moved": 128,
+    "completed_player_turns": 49,
     "eligible_events": 47,
     "events_with_multiple_trades": 5,
     "events_with_trade": 27,
@@ -17019,6 +17760,7 @@
       17,
       14
     ],
+    "player_turns_started": 50,
     "player_turns_with_event": 50,
     "trades_per_event": {
       "0": 23,
@@ -17042,6 +17784,7 @@
       40
     ],
     "cards_moved": 142,
+    "completed_player_turns": 62,
     "eligible_events": 63,
     "events_with_multiple_trades": 7,
     "events_with_trade": 31,
@@ -17065,6 +17808,7 @@
       17,
       21
     ],
+    "player_turns_started": 63,
     "player_turns_with_event": 63,
     "trades_per_event": {
       "0": 32,
@@ -17087,6 +17831,7 @@
       29
     ],
     "cards_moved": 109,
+    "completed_player_turns": 54,
     "eligible_events": 52,
     "events_with_multiple_trades": 9,
     "events_with_trade": 21,
@@ -17110,6 +17855,7 @@
       23,
       14
     ],
+    "player_turns_started": 55,
     "player_turns_with_event": 55,
     "trades_per_event": {
       "0": 34,
@@ -17134,6 +17880,7 @@
       29
     ],
     "cards_moved": 154,
+    "completed_player_turns": 63,
     "eligible_events": 63,
     "events_with_multiple_trades": 9,
     "events_with_trade": 26,
@@ -17157,6 +17904,7 @@
       22,
       16
     ],
+    "player_turns_started": 64,
     "player_turns_with_event": 64,
     "trades_per_event": {
       "0": 38,
@@ -17179,6 +17927,7 @@
       42
     ],
     "cards_moved": 177,
+    "completed_player_turns": 84,
     "eligible_events": 82,
     "events_with_multiple_trades": 12,
     "events_with_trade": 36,
@@ -17202,6 +17951,7 @@
       28,
       21
     ],
+    "player_turns_started": 85,
     "player_turns_with_event": 85,
     "trades_per_event": {
       "0": 49,
@@ -17224,6 +17974,7 @@
       35
     ],
     "cards_moved": 132,
+    "completed_player_turns": 57,
     "eligible_events": 54,
     "events_with_multiple_trades": 8,
     "events_with_trade": 26,
@@ -17247,6 +17998,7 @@
       20,
       17
     ],
+    "player_turns_started": 58,
     "player_turns_with_event": 58,
     "trades_per_event": {
       "0": 32,
@@ -17269,6 +18021,7 @@
       29
     ],
     "cards_moved": 148,
+    "completed_player_turns": 53,
     "eligible_events": 51,
     "events_with_multiple_trades": 7,
     "events_with_trade": 28,
@@ -17292,6 +18045,7 @@
       17,
       15
     ],
+    "player_turns_started": 54,
     "player_turns_with_event": 54,
     "trades_per_event": {
       "0": 26,
@@ -17314,6 +18068,7 @@
       45
     ],
     "cards_moved": 231,
+    "completed_player_turns": 96,
     "eligible_events": 96,
     "events_with_multiple_trades": 15,
     "events_with_trade": 38,
@@ -17337,6 +18092,7 @@
       25,
       24
     ],
+    "player_turns_started": 97,
     "player_turns_with_event": 97,
     "trades_per_event": {
       "0": 59,
@@ -17361,6 +18117,7 @@
       21
     ],
     "cards_moved": 93,
+    "completed_player_turns": 42,
     "eligible_events": 43,
     "events_with_multiple_trades": 6,
     "events_with_trade": 15,
@@ -17384,6 +18141,7 @@
       16,
       13
     ],
+    "player_turns_started": 43,
     "player_turns_with_event": 43,
     "trades_per_event": {
       "0": 28,
@@ -17407,6 +18165,7 @@
       39
     ],
     "cards_moved": 123,
+    "completed_player_turns": 70,
     "eligible_events": 69,
     "events_with_multiple_trades": 5,
     "events_with_trade": 27,
@@ -17430,6 +18189,7 @@
       15,
       19
     ],
+    "player_turns_started": 71,
     "player_turns_with_event": 71,
     "trades_per_event": {
       "0": 44,
@@ -17452,6 +18212,7 @@
       45
     ],
     "cards_moved": 185,
+    "completed_player_turns": 73,
     "eligible_events": 73,
     "events_with_multiple_trades": 11,
     "events_with_trade": 36,
@@ -17475,6 +18236,7 @@
       25,
       27
     ],
+    "player_turns_started": 74,
     "player_turns_with_event": 74,
     "trades_per_event": {
       "0": 38,
@@ -17499,6 +18261,7 @@
       45
     ],
     "cards_moved": 147,
+    "completed_player_turns": 68,
     "eligible_events": 69,
     "events_with_multiple_trades": 7,
     "events_with_trade": 32,
@@ -17522,6 +18285,7 @@
       24,
       21
     ],
+    "player_turns_started": 69,
     "player_turns_with_event": 69,
     "trades_per_event": {
       "0": 37,
@@ -17544,6 +18308,7 @@
       21
     ],
     "cards_moved": 124,
+    "completed_player_turns": 55,
     "eligible_events": 52,
     "events_with_multiple_trades": 8,
     "events_with_trade": 25,
@@ -17567,6 +18332,7 @@
       19,
       10
     ],
+    "player_turns_started": 56,
     "player_turns_with_event": 56,
     "trades_per_event": {
       "0": 31,
@@ -17589,6 +18355,7 @@
       41
     ],
     "cards_moved": 150,
+    "completed_player_turns": 57,
     "eligible_events": 58,
     "events_with_multiple_trades": 7,
     "events_with_trade": 24,
@@ -17612,6 +18379,7 @@
       11,
       20
     ],
+    "player_turns_started": 58,
     "player_turns_with_event": 58,
     "trades_per_event": {
       "0": 34,
@@ -17635,6 +18403,7 @@
       23
     ],
     "cards_moved": 89,
+    "completed_player_turns": 64,
     "eligible_events": 62,
     "events_with_multiple_trades": 2,
     "events_with_trade": 24,
@@ -17658,6 +18427,7 @@
       16,
       12
     ],
+    "player_turns_started": 65,
     "player_turns_with_event": 65,
     "trades_per_event": {
       "0": 41,
@@ -17680,6 +18450,7 @@
       37
     ],
     "cards_moved": 159,
+    "completed_player_turns": 80,
     "eligible_events": 79,
     "events_with_multiple_trades": 7,
     "events_with_trade": 34,
@@ -17703,6 +18474,7 @@
       20,
       20
     ],
+    "player_turns_started": 81,
     "player_turns_with_event": 80,
     "trades_per_event": {
       "0": 46,
@@ -17724,6 +18496,7 @@
       35
     ],
     "cards_moved": 148,
+    "completed_player_turns": 74,
     "eligible_events": 74,
     "events_with_multiple_trades": 4,
     "events_with_trade": 34,
@@ -17747,6 +18520,7 @@
       21,
       18
     ],
+    "player_turns_started": 75,
     "player_turns_with_event": 75,
     "trades_per_event": {
       "0": 41,
@@ -17771,6 +18545,7 @@
       37
     ],
     "cards_moved": 156,
+    "completed_player_turns": 60,
     "eligible_events": 61,
     "events_with_multiple_trades": 7,
     "events_with_trade": 27,
@@ -17794,6 +18569,7 @@
       19,
       17
     ],
+    "player_turns_started": 61,
     "player_turns_with_event": 61,
     "trades_per_event": {
       "0": 34,
@@ -17816,6 +18592,7 @@
       32
     ],
     "cards_moved": 133,
+    "completed_player_turns": 64,
     "eligible_events": 60,
     "events_with_multiple_trades": 5,
     "events_with_trade": 27,
@@ -17839,6 +18616,7 @@
       19,
       15
     ],
+    "player_turns_started": 65,
     "player_turns_with_event": 65,
     "trades_per_event": {
       "0": 38,
@@ -17861,6 +18639,7 @@
       16
     ],
     "cards_moved": 73,
+    "completed_player_turns": 39,
     "eligible_events": 40,
     "events_with_multiple_trades": 3,
     "events_with_trade": 14,
@@ -17884,6 +18663,7 @@
       10,
       9
     ],
+    "player_turns_started": 40,
     "player_turns_with_event": 40,
     "trades_per_event": {
       "0": 26,
@@ -17907,6 +18687,7 @@
       33
     ],
     "cards_moved": 138,
+    "completed_player_turns": 61,
     "eligible_events": 60,
     "events_with_multiple_trades": 3,
     "events_with_trade": 29,
@@ -17930,6 +18711,7 @@
       19,
       14
     ],
+    "player_turns_started": 62,
     "player_turns_with_event": 62,
     "trades_per_event": {
       "0": 33,
@@ -17953,6 +18735,7 @@
       29
     ],
     "cards_moved": 116,
+    "completed_player_turns": 58,
     "eligible_events": 58,
     "events_with_multiple_trades": 3,
     "events_with_trade": 28,
@@ -17976,6 +18759,7 @@
       14,
       14
     ],
+    "player_turns_started": 59,
     "player_turns_with_event": 59,
     "trades_per_event": {
       "0": 31,
@@ -17998,6 +18782,7 @@
       45
     ],
     "cards_moved": 203,
+    "completed_player_turns": 75,
     "eligible_events": 76,
     "events_with_multiple_trades": 9,
     "events_with_trade": 41,
@@ -18021,6 +18806,7 @@
       35,
       24
     ],
+    "player_turns_started": 76,
     "player_turns_with_event": 76,
     "trades_per_event": {
       "0": 35,
@@ -18044,6 +18830,7 @@
       25
     ],
     "cards_moved": 135,
+    "completed_player_turns": 57,
     "eligible_events": 57,
     "events_with_multiple_trades": 10,
     "events_with_trade": 23,
@@ -18067,6 +18854,7 @@
       22,
       15
     ],
+    "player_turns_started": 58,
     "player_turns_with_event": 58,
     "trades_per_event": {
       "0": 35,
@@ -18090,6 +18878,7 @@
       57
     ],
     "cards_moved": 203,
+    "completed_player_turns": 68,
     "eligible_events": 68,
     "events_with_multiple_trades": 9,
     "events_with_trade": 34,
@@ -18113,6 +18902,7 @@
       25,
       29
     ],
+    "player_turns_started": 69,
     "player_turns_with_event": 69,
     "trades_per_event": {
       "0": 35,
@@ -18137,6 +18927,7 @@
       48
     ],
     "cards_moved": 175,
+    "completed_player_turns": 88,
     "eligible_events": 84,
     "events_with_multiple_trades": 11,
     "events_with_trade": 36,
@@ -18160,6 +18951,7 @@
       26,
       25
     ],
+    "player_turns_started": 89,
     "player_turns_with_event": 89,
     "trades_per_event": {
       "0": 53,
@@ -18182,6 +18974,7 @@
       39
     ],
     "cards_moved": 180,
+    "completed_player_turns": 68,
     "eligible_events": 65,
     "events_with_multiple_trades": 9,
     "events_with_trade": 37,
@@ -18205,6 +18998,7 @@
       18,
       24
     ],
+    "player_turns_started": 69,
     "player_turns_with_event": 69,
     "trades_per_event": {
       "0": 32,
@@ -18229,6 +19023,7 @@
       35
     ],
     "cards_moved": 132,
+    "completed_player_turns": 52,
     "eligible_events": 51,
     "events_with_multiple_trades": 4,
     "events_with_trade": 29,
@@ -18252,6 +19047,7 @@
       15,
       16
     ],
+    "player_turns_started": 53,
     "player_turns_with_event": 53,
     "trades_per_event": {
       "0": 24,
@@ -18274,6 +19070,7 @@
       41
     ],
     "cards_moved": 178,
+    "completed_player_turns": 97,
     "eligible_events": 95,
     "events_with_multiple_trades": 10,
     "events_with_trade": 34,
@@ -18297,6 +19094,7 @@
       21,
       21
     ],
+    "player_turns_started": 98,
     "player_turns_with_event": 98,
     "trades_per_event": {
       "0": 64,
@@ -18319,6 +19117,7 @@
       27
     ],
     "cards_moved": 113,
+    "completed_player_turns": 51,
     "eligible_events": 48,
     "events_with_multiple_trades": 7,
     "events_with_trade": 20,
@@ -18342,6 +19141,7 @@
       17,
       11
     ],
+    "player_turns_started": 52,
     "player_turns_with_event": 52,
     "trades_per_event": {
       "0": 32,

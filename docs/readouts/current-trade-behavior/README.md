@@ -16,6 +16,9 @@ mix and is not an estimate of human or mixed-opponent games.
 | Metric | Result |
 | --- | ---: |
 | Games / executed exchanges | 400 / 15,586 |
+| Player-turns per game, including final turn | 62.84 |
+| Player-turns per game, median / range | 62 / 29–99 |
+| Four-player table rounds per game, equivalent average | 15.71 |
 | Exchanges per game, whole table | 38.97 |
 | Exchanges per game, median / 90th / 95th percentile | 38 / 51 / 55 |
 | Largest game exchange count | 73 |
@@ -26,6 +29,11 @@ mix and is not an estimate of human or mixed-opponent games.
 | Player-turns with multiple exchanges | 11.93% |
 | Exchanges per turn that traded | 1.31 |
 | Most exchanges in a single event | 6 |
+
+The engine counter averages 61.835 completed turns; adding the final
+winning turn gives 62.835 turns started per game. In 36 games the last turn
+ended before its trade event, so the trade-event denominator is slightly
+smaller (62.745 per game).
 
 An exchange has two participants; the per-player average includes trading
 during another player's turn. Player-turn denominators count turns reaching

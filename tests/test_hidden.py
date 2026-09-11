@@ -206,3 +206,27 @@ def test_reading_a_hidden_seats_cards_fails_loudly():
         View.from_game(seen, mover)
 
 
+
+
+def test_the_trade_gate_prices_the_same_on_an_observed_state():
+    """The first live smoke game after the hidden piles landed died in the
+    gate, not the search: `default_offer` prices every candidate through
+    `estimate_many`, whose hand fold summed an opponent's `HiddenHand`.
+    Both gate entry points must read an opponent's pile by size only."""
+    from hexset.trading import _belief_candidates
+
+    for truth, seen, seat in positions():
+        board = truth.state(seat, hidden=False).board
+        on_truth, on_seen = Heximax(HonestEvaluator(board)), Heximax(HonestEvaluator(board))
+        view_truth, view_seen = truth.state(seat), seen.state(seat)
+        others = [s for s in range(view_seen.num_players) if s != seat]
+        candidates = [(other, bundle) for other in others
+                      for bundle in _belief_candidates(view_seen, seat, other)][:40]
+        if not candidates:
+            continue
+        assert on_seen.estimate_many(view_seen, candidates) == pytest.approx(
+            on_truth.estimate_many(view_truth, candidates))
+        received = [bundle for _, bundle in candidates]
+        parties = [other for other, _ in candidates]
+        assert on_seen.gains_many(view_seen, received, parties) == pytest.approx(
+            on_truth.gains_many(view_truth, received, parties))

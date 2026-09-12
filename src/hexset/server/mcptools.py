@@ -787,10 +787,6 @@ def _reply(session: Session, raw: dict, log_after: int | None = None, full_log: 
     return _finish(session, _translate(raw), log_after, full_log)
 
 
-def _get_table(tables: Tables, session: Session, log_after: int | None = None, full_log: bool = False) -> dict:
-    return _state(tables, session, log_after, full_log)
-
-
 def _offer_trade(
     tables: Tables,
     session: Session,
@@ -824,10 +820,10 @@ def _answer_trade(
     pending = raw.get("pending") or []
     if not isinstance(index, int) or not (0 <= index < len(pending)):
         raise ToolError(
-            f"index {index!r} out of range — get_table()'s pending has "
+            f"index {index!r} out of range — state()'s pending has "
             f"{len(pending)} offer(s) right now (0..{len(pending) - 1})"
             if pending
-            else "index out of range — get_table()'s pending is empty; nobody has an open offer against you"
+            else "index out of range — state()'s pending is empty; nobody has an open offer against you"
         )
     offer = pending[index]
     body = {"actor": offer["actor"], "received": offer["bundle"], "kind": kind}
@@ -863,10 +859,10 @@ def _choose_trade(
     responses = ((raw.get("trade_round") or {}).get("responses")) or []
     if not isinstance(index, int) or not (0 <= index < len(responses)):
         raise ToolError(
-            f"index {index!r} out of range — get_table()'s trade_round.responses has "
+            f"index {index!r} out of range — state()'s trade_round.responses has "
             f"{len(responses)} answer(s) right now (0..{len(responses) - 1})"
             if responses
-            else "index out of range — get_table()'s trade_round.responses is empty; "
+            else "index out of range — state()'s trade_round.responses is empty; "
             "nobody has answered your offer yet"
         )
     response = responses[index]
@@ -968,147 +964,118 @@ def _wait_for_turn(
 _CURSOR_ARGS = {
     "log_after": {
         "type": "integer",
-        "description": "Optional override of the automatic transcript cursor: how many "
-        "`log` lines you hold (a `log_total` from an earlier reply). Normally omit it.",
+        "description": "Override the automatic `log` cursor with the line count you hold. Normally omit.",
     },
     "full_log": {
         "type": "boolean",
-        "description": "Optional: send the whole transcript, ignoring the cursor -- for "
-        "when a reply went missing (`log_from` came back past the lines you hold).",
+        "description": "Send the whole `log`, ignoring the cursor. For when a reply was lost.",
     },
 }
 
+_MODEL_ARG = {
+    "type": "string",
+    "description": "Your model identifier, e.g. claude-opus-5. Also your key for resume_game().",
+}
+_CODE_ARG = {"type": "string", "description": "The game's six-character code."}
+_NAME_ARG = {"type": "string", "description": "Display name, up to 40 characters."}
+
+
+def _resource_dict(description: str) -> dict:
+    return {"type": "object", "additionalProperties": {"type": "integer"}, "description": description}
+
+
+# Every tool but `models`/`board` answers with the same state reply, documented
+# once, on `state`. The other descriptions say only what differs.
+#
 # name -> (handler, description, JSON Schema for `arguments`)
 _TOOLS: dict[str, tuple] = {
     "models": (
         _models,
-        "List the opponent names new_game's `opponents` argument accepts.",
+        "Bot names new_game's `opponents` accepts.",
         {"type": "object", "properties": {}},
     ),
     "new_game": (
         _new_game,
-        "Deal a new game, playable immediately: you at one random seat, any "
-        "named opponents at others, everything else open for other people (or "
-        "other bots) to join by the code this returns. There is no separate "
-        "start — the board is live from the first response. Nothing is ever "
-        "traded on your behalf: offers to you wait in get_table()'s `pending` "
-        "for answer_trade(). `model` identifies you for resume_game() -- keep "
-        "it exactly as given if you ever mean to reclaim this seat.",
+        "Deal a new game and take a random seat; play starts at once. `opponents` "
+        "fill bot seats; any other seat stays open for others to join by the "
+        "returned `code`. Nothing is traded on your behalf. Reply as state().",
         {
             "type": "object",
             "properties": {
-                "model": {
-                    "type": "string",
-                    "description": "Your exact model identifier, e.g. claude-opus-5.",
-                },
+                "model": _MODEL_ARG,
                 "opponents": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": (
-                        "Names from models(), one per bot seat to fill at the deal. "
-                        "Omit for no bots at all — every other seat stays open."
-                    ),
+                    "description": "Names from models(), one per bot seat. Omit for no bots.",
                 },
-                "name": {"type": "string", "description": "Your display name, up to 40 characters."},
+                "name": _NAME_ARG,
             },
             "required": ["model"],
         },
     ),
     "join": (
         _join,
-        "Take a random open seat at an existing game by its six-character code. "
-        "Fails if every seat is taken or has locked out (see state()'s `locked`) "
-        "— a seat somebody closed outright is retired for the rest of that "
-        "game, so join before that happens. Your seat is gated the same way "
-        "new_game()'s is — see its description. `model` identifies you for "
-        "resume_game() the same way it does there.",
+        "Take a random open seat at an existing game. Fails when none is open "
+        "(a seat left or locked out stays closed for that game). Reply as state().",
         {
             "type": "object",
-            "properties": {
-                "code": {"type": "string", "description": "The game's six-character code."},
-                "model": {
-                    "type": "string",
-                    "description": "Your exact model identifier, e.g. claude-opus-5.",
-                },
-                "name": {"type": "string", "description": "Your display name, up to 40 characters."},
-            },
+            "properties": {"code": _CODE_ARG, "model": _MODEL_ARG, "name": _NAME_ARG},
             "required": ["code", "model"],
         },
     ),
     "board": (
         _board,
-        "The board's fixed layout: hex positions/terrain/numbers and vertex/edge "
-        "adjacency. Unlike state(), this never changes once a game is dealt, so it "
-        "only needs reading once per game. Each hex also carries `resource` (its "
-        "terrain's payout, e.g. `FOREST` -> `Wood`; `null` for desert/sea/gold, "
-        "which pay nothing fixed) and `pips` (its 2d6 odds: 5 for a 6 or 8 down to "
-        "1 for a 2 or 12, 0 for none). Each vertex carries the same two, summed "
-        "and de-duplicated over every hex it touches -- `pips`/`resources` there "
-        "are the settlement-value numbers a placement decision actually turns on.",
+        "The fixed board; read once per game. `hexes`: terrain, number `token`, "
+        "`resource` it pays (null for desert/sea/gold) and `pips` (2d6 ways to "
+        "roll the token: 5 for 6/8 down to 1 for 2/12). `vertices`: `pips` summed "
+        "and `resources` de-duplicated over touching hexes, i.e. settlement value. "
+        "`edges` (v0/v1), `ports` (vertices, resource or null for 3:1, ratio).",
         {"type": "object", "properties": {}},
     ),
     "state": (
         _state,
-        "The full current game state. Read `your_move` first, then `summary`: "
-        "`afford` (per build: `ok`, `missing` resources, `legal` right now), "
-        "`race` (your points and `to_win`, the public leader, and for each "
-        "award your count, the holder's, and the `need` that takes it), and "
-        "when there is a placement or robber move to make, `spots` (each legal "
-        "settlement/city vertex with its pips, resources and port, best first, "
-        "with the `index` to act() on) and `robber` (each hex the robber may go "
-        "to with its pips, whose buildings it `hits`, and an `index` per "
-        "victim). `your_move` is `act`, "
-        "`discard`, `answer_trade` or `choose_trade` names the tool the table "
-        "wants from you now; `wait` means nothing does, and `waiting_on` lists "
-        "the seats it is waiting for; `game_over` is the end. Then every seat's "
-        "public info (hand size, and "
-        "your own hand; the public resource-count ledger for everyone else — "
-        "counting isn't hidden information here, only a steal's identity and "
-        "dev-card types are), the board's contents as `buildings` (vertex, "
-        "seat, kind) and `roads` (edge ids, one list per seat), and "
-        "`legal_actions` — what act() currently accepts, grouped by action "
-        "type, each entry carrying the `index` to act() on plus its operand: "
-        "`edge` (BUILD_ROAD/SETUP_ROAD), `vertex` (BUILD_SETTLEMENT/"
-        "SETUP_SETTLEMENT/BUILD_CITY), `hex` and `victim` (MOVE_ROBBER, null "
-        "victim = nobody to rob), `give`/`want` (BANK_TRADE), `resource` "
-        "(PLAY_MONOPOLY/DISCARD), `resources` (PLAY_YEAR_OF_PLENTY); ROLL, "
-        "END_TURN, BUY_DEV_CARD, PLAY_KNIGHT and PLAY_ROAD_BUILDING carry only "
-        "`index`. Empty when it is not your turn; `legal_count` is the flat "
-        "total. Pass the entry you pick, with its group key as `type`, as "
-        "act()'s `expect` to have it refuse instead of guessing if the list "
-        "moved under you. Poll this while another seat is thinking, or call "
-        "wait_for_turn() instead to block until it's worth polling again. The "
-        "transcript `log` is sent incrementally without you doing anything: "
-        "each reply carries only the lines added since this session's previous "
-        "reply, plus the one trailing line that may have been rewritten since "
-        "(a burst of builds collapses into a single line that grows), with "
-        "`log_from` naming the index the slice starts at and `log_total` the "
-        "whole length. Keep your own copy and splice at `log_from`. A fresh "
-        "seat, a resumed seat and the final read of a finished game get the "
-        "whole transcript; pass `full_log: true` to force that at any time.",
-        {
-            "type": "object",
-            "properties": {
-                **_CURSOR_ARGS,
-            },
-        },
+        "Current game state, the reply every playing tool returns. Read in order:\n"
+        "`your_move`: `act`, `discard`, `answer_trade` or `choose_trade` names the "
+        "tool to call now; `wait` means nothing to do (`waiting_on` lists the seats "
+        "being waited for; use wait_for_turn()); `game_over`.\n"
+        "`summary`: `afford` per build (`ok`, `missing`, `legal` now); `race` "
+        "(`points`, `to_win`, public `leader`, and per award your count, the "
+        "holder's, and the `need` that takes it); when offered, `spots` (each legal "
+        "settlement/city vertex with pips, resources, port; best first, capped with "
+        "`spots_omitted`) and `robber` "
+        "(each hex with pips, whose buildings it `hits`, and an `index` per victim).\n"
+        "`legal_actions`: what act() accepts, grouped by type; each entry has the "
+        "`index` for act() plus its operand: `edge` (BUILD_ROAD/SETUP_ROAD), "
+        "`vertex` (BUILD_SETTLEMENT/SETUP_SETTLEMENT/BUILD_CITY), `hex`+`victim` "
+        "(MOVE_ROBBER; null victim = nobody), `give`/`want` (BANK_TRADE), "
+        "`resource` (PLAY_MONOPOLY/DISCARD), `resources` (PLAY_YEAR_OF_PLENTY); "
+        "ROLL, END_TURN, BUY_DEV_CARD, PLAY_KNIGHT, PLAY_ROAD_BUILDING have index "
+        "only. Empty when not your turn.\n"
+        "`players`: your own `hand` and `dev_cards`; for every seat the public "
+        "ledger, `known` counts all can deduce and `unknown` the rest. `buildings` "
+        "(vertex, seat, kind), `roads` (edge ids per seat), `bank`, `trade_ratios`, "
+        "`robber` (hex id).\n"
+        "Trading: `pending` = offers to you (`actor`, `you_give`, `you_receive`), "
+        "answer with answer_trade(index); `trade_round` = your own open offer "
+        "(`responses` each `seat`, `kind` accept/counter/pass with "
+        "`you_would_give`/`you_would_receive`; `awaiting` seats), settle with "
+        "choose_trade(index); `trades` = done this turn. Zero counts omitted.\n"
+        "`log`: transcript lines since your previous reply, plus the last one you "
+        "hold (it may have been rewritten); `log_from` is the index to splice at, "
+        "`log_total` the full length. Whole transcript on a new or resumed seat "
+        "and at game over.",
+        {"type": "object", "properties": {**_CURSOR_ARGS}},
     ),
     "wait_for_turn": (
         _wait_for_turn,
-        "Block until there is something for you to do: legal_actions is "
-        "non-empty, an offer is waiting for answer_trade(), your own open "
-        "trade_round has an answer from everyone, or the game is over. "
-        "Returns immediately if any of that is already true. Streamed as "
-        "Server-Sent Events with a keepalive roughly every 15 seconds while "
-        "it waits, so a long turn from another seat doesn't look like a dead "
-        "connection.",
+        "Block until `your_move` is not `wait`, then reply as state(). Returns at "
+        "once if already so.",
         {
             "type": "object",
             "properties": {
                 "timeout": {
                     "type": "number",
-                    "description": "Give up and return the current state after this many "
-                    "seconds. Omit to wait indefinitely.",
+                    "description": "Seconds before returning the state regardless. Omit to wait indefinitely.",
                 },
                 **_CURSOR_ARGS,
             },
@@ -1116,22 +1083,18 @@ _TOOLS: dict[str, tuple] = {
     ),
     "act": (
         _act,
-        "Play the legal_actions entry with this `index` from the most recent "
-        "state() (call state() first if unsure what's legal right now; "
-        "`summary.spots`/`summary.robber` carry the same indexes). Returns the "
-        "state right after "
-        "that one action — ending your own turn is END_TURN, an action like any "
-        "other, not something act() infers.",
+        "Play `legal_actions` entry `index` from the latest state() (same indexes "
+        "in `summary.spots`/`robber`). END_TURN is an action like any other. "
+        "Reply as state().",
         {
             "type": "object",
             "properties": {
                 "index": {"type": "integer", "description": "Index into legal_actions."},
                 "expect": {
                     "type": "object",
-                    "description": "Optional: the legal_actions entry you chose, with its group "
-                    "key as `type` (e.g. {\"type\": \"BUILD_ROAD\", \"edge\": 17}). If that index "
-                    "no longer matches it, act() refuses instead of playing whatever now sits "
-                    "there.",
+                    "description": "The entry you chose with its group key as `type`, e.g. "
+                    '{"type": "BUILD_ROAD", "edge": 17}. Refuses if that index now names '
+                    "something else.",
                 },
                 **_CURSOR_ARGS,
             },
@@ -1140,62 +1103,32 @@ _TOOLS: dict[str, tuple] = {
     ),
     "undo": (
         _undo,
-        "Undo your own most recent build, bank trade, Road Building, or Knight, "
-        "if state()'s can_undo is true. A Knight stays undoable up through the "
-        "forced robber move it opens, until that move is actually made. "
-        "Anything else (another seat's move, a rolled seven's own robber move) "
-        "cannot be undone.",
+        "Undo your own last build, bank trade, Road Building or Knight while "
+        "`can_undo` is true (a Knight until its robber move is made). Nothing else "
+        "can be undone.",
         {"type": "object", "properties": {}},
     ),
     "leave_game": (
         _leave_game,
-        "Give up your seat for the rest of this game — permanent, and the only "
-        "way to do it (there is no re-join). Your pieces and hand stay on the "
-        "board exactly as they are; only your turn is skipped from now on, and "
-        "the game carries on without you. Refuses while a trade round is open "
-        "naming you as its actor or as a seat still owed an answer — resolve it "
-        "with answer_trade()/choose_trade() first.",
+        "Give up your seat for good; pieces and hand stay, your turns are skipped. "
+        "Refuses while a trade round involving you is open.",
         {"type": "object", "properties": {}},
     ),
     "get_table": (
-        _get_table,
-        "Everything the table has said about trading, alongside state(): this "
-        "turn's `trades` (each as `a`/`b` seats plus `a_gave`/`a_got`, named "
-        "resource -> count); `pending` -- offers broadcast to you, unanswered, "
-        "each as `actor` plus `you_give`/`you_receive` (what answering `accept` "
-        "would cost/pay you); `trade_round` -- your own open offer, only when "
-        "you're the one who broadcast it, as `you_give`/`you_receive` plus "
-        "`responses` (each an accept or counter with `you_would_give`/"
-        "`you_would_receive` if chosen, or a `pass` with neither) and "
-        "`awaiting`, the seats still to answer. Resource dicts omit zero counts. "
-        "Use a `pending`/`responses` list's index with answer_trade()/"
-        "choose_trade() -- never hand-build a trade from these dicts.",
-        {
-            "type": "object",
-            "properties": {
-                **_CURSOR_ARGS,
-            },
-        },
+        _state,
+        "Same as state().",
+        {"type": "object", "properties": {**_CURSOR_ARGS}},
     ),
     "offer_trade": (
         _offer_trade,
-        "On your own turn in MAIN, broadcast one offer to every other seat: "
-        "`give` and `want` are named resource -> count, 1-3 cards a side on "
-        "different resources. Bots answer at once (accept, counter or pass); "
-        "read the answers in get_table()'s `trade_round`, then choose_trade().",
+        "On your own turn in MAIN, offer a trade to every other seat: 1-3 cards a "
+        "side, no resource on both sides. Bots answer at once; read "
+        "`trade_round.responses`, then choose_trade().",
         {
             "type": "object",
             "properties": {
-                "give": {
-                    "type": "object",
-                    "additionalProperties": {"type": "integer"},
-                    "description": "Resource name -> count you give, e.g. {\"Wood\": 1}.",
-                },
-                "want": {
-                    "type": "object",
-                    "additionalProperties": {"type": "integer"},
-                    "description": "Resource name -> count you want.",
-                },
+                "give": _resource_dict('Resource -> count you give, e.g. {"Wood": 1}.'),
+                "want": _resource_dict("Resource -> count you want."),
                 **_CURSOR_ARGS,
             },
             "required": ["give", "want"],
@@ -1203,26 +1136,15 @@ _TOOLS: dict[str, tuple] = {
     ),
     "answer_trade": (
         _answer_trade,
-        "Answer one of get_table()'s `pending` offers by its index there. "
-        "`kind` is `accept` (its `you_give`/`you_receive` as offered), "
-        "`counter` (then pass your own `give`/`receive`, named resource -> "
-        "count, as the counter-offer) or `pass`. The actor picks among every "
-        "seat's answer once all have answered, via choose_trade() on their side.",
+        "Answer `pending[index]`: `accept` as offered, `counter` with your own "
+        "`give`/`receive`, or `pass`. The actor then picks one answer.",
         {
             "type": "object",
             "properties": {
-                "index": {"type": "integer", "description": "Index into get_table()'s pending."},
+                "index": {"type": "integer", "description": "Index into pending."},
                 "kind": {"type": "string", "enum": ["accept", "counter", "pass"]},
-                "give": {
-                    "type": "object",
-                    "additionalProperties": {"type": "integer"},
-                    "description": "Only for kind=counter: resource -> count you'd give.",
-                },
-                "receive": {
-                    "type": "object",
-                    "additionalProperties": {"type": "integer"},
-                    "description": "Only for kind=counter: resource -> count you'd receive.",
-                },
+                "give": _resource_dict("counter only: resource -> count you give."),
+                "receive": _resource_dict("counter only: resource -> count you receive."),
                 **_CURSOR_ARGS,
             },
             "required": ["index", "kind"],
@@ -1230,9 +1152,8 @@ _TOOLS: dict[str, tuple] = {
     ),
     "choose_trade": (
         _choose_trade,
-        "Execute one answer to your own open offer, by its index into "
-        "get_table()'s `trade_round.responses` -- or `decline: true` to close "
-        "the round with nothing traded.",
+        "Execute `trade_round.responses[index]`, or `decline: true` to close your "
+        "round with no trade.",
         {
             "type": "object",
             "properties": {
@@ -1244,20 +1165,14 @@ _TOOLS: dict[str, tuple] = {
     ),
     "resume_game": (
         _resume_game,
-        "Reclaim a seat by its game `code` and the `model` new_game()/join() "
-        "were called with — the same way a browser reclaims one after losing "
-        "its token, via POST /api/reclaim. Use this after a fresh MCP "
-        "connection (a new Mcp-Session-Id starts with no seat at all) or "
-        "after a 404 on a request that used to work. Fails if no seat's "
-        "client matches that `model`'s secret, or the seat has locked out.",
+        "Reclaim your seat with the `code` and the exact `model` you gave "
+        "new_game()/join(). Use after a new MCP session, which starts seatless. "
+        "Reply as state().",
         {
             "type": "object",
             "properties": {
-                "code": {"type": "string", "description": "The game's six-character code."},
-                "model": {
-                    "type": "string",
-                    "description": "The exact model identifier new_game()/join() were called with.",
-                },
+                "code": _CODE_ARG,
+                "model": {"type": "string", "description": "The model identifier new_game()/join() was called with."},
             },
             "required": ["code", "model"],
         },

@@ -31,6 +31,16 @@ Changes to the HexSet distribution. The project follows
 
 ### Changed
 
+- **MCP tool text cut by half.** The `tools/list` descriptions and argument
+  schemas an LLM seat re-reads on every call went from 13.5 KB to 8.9 KB
+  (descriptions 7.2 KB to 3.7 KB). The state reply's shape is now documented
+  once, on `state`; every other playing tool says only what differs and
+  "reply as state()". `get_table` is described as what it always was, an
+  alias of `state`, and its trade-field reference moved into `state`'s. The
+  three `get_table()'s ...` index errors now say `state()'s ...`. Transport
+  detail (SSE keepalives) and design history left the descriptions; nothing
+  a caller acts on did.
+
 - Size-only readers go through `hexset.economy.hand_size` and
   `hexset.devcards.dev_count` rather than summing a hand or a
   development holding, so the robber, the discard rule, the encoding, the

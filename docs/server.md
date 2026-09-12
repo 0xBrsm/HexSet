@@ -162,8 +162,9 @@ the flat total. Board occupancy comes as `buildings` (vertex, seat, kind)
 and `roads` (edge ids, one list per seat) rather than the HTTP API's dense
 `vertex_owner`, `vertex_building` and `edge_owner` arrays.
 
-Trading tools use resource-name dictionaries and indices into `get_table()`
-results, translating them to signed HTTP bundles. Pass the chosen
+`get_table` returns the same reply as `state`. Trading tools use
+resource-name dictionaries and indices into that reply's `pending` and
+`trade_round.responses`, translating them to signed HTTP bundles. Pass the chosen
 `legal_actions` entry, with its group key as `type`, as `act`'s `expect` to
 refuse if that index now names a different action. The trade tools take no
 staleness guard: the server already rejects an answer or a choice that does

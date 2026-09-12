@@ -668,6 +668,9 @@ def test_a_tile_transfer_does_not_win_for_a_seat_off_the_move():
     p2_path = ring[10:16]
     for e in p2_path:
         state.edge_owner[e] = 2
+    # Direct mutation, like the edges above: keep the cache honest for the
+    # road we just fabricated without going through `place_road`.
+    state.road_lengths[2] = len(p2_path)
     cities = [v for v in independent_vertices(state.board, 6)
               if v not in topology.vertex_neighbors[break_vertex] and v != break_vertex]
     for v in cities[:4]:
@@ -724,6 +727,9 @@ def test_a_seat_that_crosses_ten_off_turn_wins_at_the_start_of_its_own_turn():
     p1_path = ring[10:16]
     for e in p1_path:
         state.edge_owner[e] = 1
+    # Direct mutation, like the edges above: keep the cache honest for the
+    # road we just fabricated without going through `place_road`.
+    state.road_lengths[1] = len(p1_path)
     spots = [
         v
         for v in independent_vertices(state.board, 8)

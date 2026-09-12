@@ -474,7 +474,9 @@ def place_initial_settlement(game: Game, vertex: int) -> None:
     if _in_second_setup_round(game):
         _grant_initial_resources(game, vertex)
     game.ledger.apply_hand_diff(before, game._state.hands)
-    update_longest_road(game._state)
+    update_longest_road(
+        game._state, settlement_vertex=vertex, settlement_owner=game.current_player
+    )
     game.phase = Phase.SETUP_ROAD
 
 
@@ -492,7 +494,7 @@ def place_initial_road(game: Game, edge: int) -> None:
     if edge not in legal_initial_roads(game):
         raise ValueError("the opening road must touch the settlement just placed")
     place_road(game._state, game.current_player, edge)
-    update_longest_road(game._state)
+    update_longest_road(game._state, road_owner=game.current_player)
 
     game.setup_step += 1
     _advance_setup(game)
@@ -678,7 +680,7 @@ def build_road(game: Game, edge: int) -> None:
         pay(game._state, game.current_player, Purchase.ROAD)
     game.ledger.apply_hand_diff(before, game._state.hands)
     place_road(game._state, game.current_player, edge)
-    update_longest_road(game._state)
+    update_longest_road(game._state, road_owner=game.current_player)
     _check_win(game)
 
 
@@ -690,7 +692,9 @@ def build_settlement(game: Game, vertex: int) -> None:
     place_settlement(game._state, game.current_player, vertex)
     # A new settlement can cut an opponent's route, so this is not only the
     # builder's own longest road that may change.
-    update_longest_road(game._state)
+    update_longest_road(
+        game._state, settlement_vertex=vertex, settlement_owner=game.current_player
+    )
     _check_win(game)
 
 

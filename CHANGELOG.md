@@ -8,6 +8,25 @@ Changes to the HexSet distribution. The project follows
 
 ### Changed
 
+- **Longest Road no longer recounts every seat's roads on every placement.**
+  `victory.update_longest_road` called `roads.road_lengths` -- an exhaustive
+  route search over every seat's edges, from scratch -- after each of the
+  four places a road or settlement can go down
+  (`game.place_initial_settlement`/`build_settlement`/
+  `place_initial_road`/`build_road`), measured at ~25% of a 4-seat
+  self-play game (9.2M recursive calls a game). Roads are edge-disjoint, so
+  a road just placed by seat `p` can only extend `p`'s own route; a
+  settlement can only *cut* a route passing through its vertex, and only a
+  foreign one, since a builder's own building never blocks the builder's
+  own route. `GameState.road_lengths` now caches each seat's length, and
+  `update_longest_road` recomputes only the seat(s) a placement could have
+  changed before awarding from the cache -- unchanged for any caller that
+  mutates `edge_owner`/`vertex_owner` directly rather than through
+  `place_road`/`place_settlement`, which still gets the historical
+  from-scratch recompute. `hexset.catanatron.state.translate` (rebuilt
+  fresh from a mirrored catanatron game every decision, so it inherits no
+  running cache) computes the field once off its own topology instead.
+
 - **The trade gate is 5.5x cheaper a turn, answering exactly the same.**
   Two pieces of waste, neither of them a change to what the gate sees.
   `hexset.clients.netbot.NetworkBot` serves a repeated ask from its last

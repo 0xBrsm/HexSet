@@ -35,6 +35,7 @@ from hexset.cards import DevCard, NUM_DEV_CARDS
 from hexset.chance import Live
 from hexset.game import Game, Phase, to_move, pending_free_roads
 from hexset.ledger import PublicLedger, SeatLedger
+from hexset.roads import road_lengths
 from hexset.rules import Rules
 from hexset.state import NO_OWNER, Building, GameState, pile_size
 
@@ -206,6 +207,13 @@ def translate(catanatron_game, mapping: BoardMapping, rng: random.Random) -> tup
             discard_limit=catanatron_game.state.discard_limit,
         ),
     )
+    # This state is rebuilt fresh from catanatron's own board rather than
+    # carried forward incrementally (see the module docstring), so there is
+    # no prior cache to inherit: `road_lengths` is computed from scratch off
+    # our own topology, not read from catanatron's `board.road_lengths`,
+    # to stay independent of any difference between the two engines' route
+    # algorithms.
+    state.road_lengths = road_lengths(state)
 
     current_color = cstate.current_color()
     phase = _phase(cstate, current_color)

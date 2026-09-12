@@ -1085,19 +1085,40 @@ def _trim_for(session: Session, view: dict, log_after: int | None = None, full_l
     return view
 
 
+def _can_offer(view: dict) -> bool:
+    """Whether `offer_trade()` would be accepted right now: `TableApi.
+    open_round` (`api.py`) requires `Phase.MAIN` and `game.current_player
+    == seat` (matched here as `to_move == seat`, `_public_mover` for a
+    live game); this adds the two conditions a caller can't tell from
+    those alone -- something actually legal to do (a phase can be MAIN
+    with an empty `legal_actions`, e.g. a closed-out seat) and no round
+    of this seat's own already open (the wire itself would just replace
+    it, but inviting a caller to clobber its own open offer is not the
+    same as it being ready to open a fresh one)."""
+    return (
+        view.get("phase") == "MAIN"
+        and view.get("to_move") == view.get("seat")
+        and bool(view.get("legal_actions"))
+        and view.get("trade_round") is None
+    )
+
+
 def _finish(session: Session, view: dict, log_after: int | None = None, full_log: bool = False) -> dict:
     """The one seam every view crosses on its way out, whichever tool is
-    answering: `summary` (`_summarize`, against the board cached on the
-    session), then the compact shape (`_compact`), then the transcript trim
-    against this session's cursor (`_trim_for`). `view` is already
-    `_translate`d -- `_reply` does that for a fresh wire dict, and
-    `wait_for_turn` for the poll it decided to hand over.
+    answering: `can_offer`, then `summary` (`_summarize`, against the board
+    cached on the session), then the compact shape (`_compact`), then the
+    transcript trim against this session's cursor (`_trim_for`). `view` is
+    already `_translate`d -- `_reply` does that for a fresh wire dict, and
+    `wait_for_turn` for the poll it decided to hand over. `can_offer` reads
+    the flat `legal_actions` and the translated `trade_round`, so it runs
+    before `_compact` reshapes either.
 
     Two call sites used to apply these steps separately and drifted twice:
     the streamed view first lacked `summary`, then came back with the flat
     `legal_actions` while `state()` grouped them. The shape of a reply must
     not depend on which tool returned it, so the steps live here and nowhere
     else."""
+    view["can_offer"] = _can_offer(view)
     return _trim_for(session, _compact(_summarize(view, session.board)), log_after, full_log)
 
 
@@ -1419,10 +1440,11 @@ _TOOLS: dict[str, tuple] = {
         "`players`: `kind`, your `hand`/`dev_cards`, public ledger `known`/`unknown`. "
         "`buildings`, `roads` (edge ids per seat), `bank`, `trade_ratios`, `robber` "
         "hex. Resource dicts omit zeros.\n"
-        "`pending`: offers to you (`actor`, `you_give`, `you_receive`) -> "
-        "answer_trade(index). `trade_round`: your open offer's `responses` (`seat`, "
-        "`kind`, `you_would_give`/`you_would_receive`) -> choose_trade(index). "
-        "`trades`: done this turn.\n"
+        "`can_offer`: true if offer_trade() would be accepted now. `pending`: "
+        "offers to you (`actor`, `you_give`, `you_receive`) -> answer_trade(index). "
+        "`trade_round`: your open offer's `responses` (`seat`, `kind`, "
+        "`you_would_give`/`you_would_receive`) -> choose_trade(index). `trades`: "
+        "done this turn.\n"
         "`log`: new transcript lines plus the last one you hold (it may be "
         "rewritten); splice at `log_from`. Full on a new/resumed seat and at "
         "game over.",
@@ -1489,8 +1511,9 @@ _TOOLS: dict[str, tuple] = {
     "offer_trade": (
         _offer_trade,
         "On your own turn in MAIN, offer a trade to every other seat: 1-3 cards a "
-        "side, no resource on both sides. Replies once every seat has answered, "
-        "with `trade_round.responses` for choose_trade().",
+        "side, no resource on both sides. Accepted only while `can_offer` is true. "
+        "Replies once every seat has answered, with `trade_round.responses` for "
+        "choose_trade().",
         {
             "type": "object",
             "properties": {

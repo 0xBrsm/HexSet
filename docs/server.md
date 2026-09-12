@@ -203,9 +203,14 @@ and per-player `last_roll`; fold `seats` into `players` as each entry's
 `kind`; and send `hand`, `known`, `dev_cards` and `bank` sparse, a missing
 name meaning zero.
 
-`get_table` returns the same reply as `state`. Trading tools use
-resource-name dictionaries and indices into that reply's `pending` and
-`trade_round.responses`, translating them to signed HTTP bundles. Pass the chosen
+`get_table` returns the same reply as `state`. Every reply carries
+`can_offer`, true exactly when `offer_trade` would be accepted: this
+seat's own turn, `Phase.MAIN`, at least one legal action, and no trade
+round of its own already open (`TableApi.open_round`'s preconditions,
+`hexset/server/api.py`, plus the one a caller can't read off those alone).
+Trading tools use resource-name dictionaries and indices into that reply's
+`pending` and `trade_round.responses`, translating them to signed HTTP
+bundles. Pass the chosen
 `legal_actions` entry, with its group key as `type`, as `act`'s `expect` to
 refuse if that index now names a different action. The trade tools take no
 staleness guard: the server already rejects an answer or a choice that does

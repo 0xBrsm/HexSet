@@ -1064,6 +1064,56 @@ def test_setup_road_summary_names_the_far_vertex_and_keeps_its_legal_group(live_
     assert played["phase"] != "SETUP_ROAD"  # settled to the next decision
 
 
+# --- can_offer: whether offer_trade() would be accepted --------------------
+
+
+def test_can_offer_true_only_on_your_own_turn_in_main_with_something_legal():
+    base = {"phase": "MAIN", "to_move": 0, "seat": 0, "legal_actions": [{"type": "END_TURN"}], "trade_round": None}
+    assert mcptools._can_offer(base) is True
+    assert mcptools._can_offer({**base, "phase": "SETUP_ROAD"}) is False
+    assert mcptools._can_offer({**base, "to_move": 1}) is False
+    assert mcptools._can_offer({**base, "legal_actions": []}) is False
+    assert mcptools._can_offer({**base, "trade_round": {"offer": {}, "responses": [], "awaiting": [1]}}) is False
+
+
+def _park_in_main(server, code: str, seat: int, hand: dict | None = None) -> None:
+    """Force a live table straight into `Phase.MAIN` on `seat`'s turn --
+    the same forcing shortcut `_park_in_discard`/`_park_in_robber` use.
+    END_TURN is always legal in MAIN, so this is enough for `can_offer`
+    without needing a real hand; `hand` fills one in for a caller that
+    also wants to offer a trade (`open_round` refuses an offer this
+    seat's hand can't cover)."""
+    from hexset.board.terrain import NUM_RESOURCES, Resource
+    from hexset.game import Phase
+
+    game = server.tables.get(code).session.game
+    game.phase = Phase.MAIN
+    game.current_player = seat
+    if hand is not None:
+        game._state.hands[seat] = [0] * NUM_RESOURCES
+        for name, count in hand.items():
+            game._state.hands[seat][Resource[name.upper()]] = count
+
+
+def test_can_offer_is_true_in_main_and_false_while_your_own_round_is_open(live_server):
+    server, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    seat = data["seat"]
+    assert data["can_offer"] is False  # still SETUP_SETTLEMENT
+
+    _park_in_main(server, data["code"], seat, hand={"Wood": 1})
+    state = client.call_tool("state")
+    assert state["can_offer"] is True
+
+    offered = client.call_tool("offer_trade", give={"Wood": 1}, want={"Ore": 1}, timeout=0)
+    if offered["trade_round"] is not None:  # the bots answered at once
+        assert offered["can_offer"] is False
+        offered = client.call_tool("choose_trade", decline=True)
+    assert offered["trade_round"] is None
+    assert offered["can_offer"] is True  # the round is closed; still our MAIN turn
+
+
 # --- legal_actions drops what summary already covers ----------------------
 
 

@@ -53,6 +53,14 @@ Changes to the HexSet distribution. The project follows
 
 ### Changed
 
+- **MCP replies carry `can_offer`.** True exactly when `offer_trade()`
+  would be accepted: this seat's own turn, `MAIN`, a legal action to take,
+  and no trade round of its own already open. Reading `phase`/`to_move`
+  alone can't tell a caller the last two -- an empty seat can sit in MAIN
+  with nothing legal, and the wire would silently replace an open round
+  rather than refuse a second offer -- so this checks the same
+  preconditions `TableApi.open_round` (`api.py`) does.
+
 - **MCP `summary.roads` joins a legal road to the vertex it reaches.**
   Every legal BUILD_ROAD/SETUP_ROAD edge gets `to` -- the endpoint this
   seat's own network doesn't already touch, so the vertex the road

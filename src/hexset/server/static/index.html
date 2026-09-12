@@ -89,8 +89,12 @@
   #players { padding: 0.7rem 0.8rem; border-bottom: 1px solid var(--border); flex: none; }
   #hand {
     padding: 0.5rem 0.8rem 0.6rem; border-bottom: 1px solid var(--border); flex: none;
-    display: flex; gap: 0.7rem;
+    display: flex; flex-direction: column; gap: 0.3rem;
   }
+  /* The two card columns, wrapped so the banner above them (browsing only —
+     see renderHand) can sit in #hand's own flex-column without also having
+     to be a third column beside them. */
+  .hand-cols { display: flex; gap: 0.7rem; }
   .hand-col { flex: 1; min-width: 0; }
   #hand .player-meta { margin-bottom: 0.1rem; }
   .hand-col-header { display: flex; align-items: center; gap: 0.3rem; }
@@ -117,10 +121,16 @@
      without spending the accent, which belongs to no seat while watching. */
   .player-row-openable { cursor: pointer; }
   .player-row-open { box-shadow: inset 0 0 0 2px var(--open-ring); }
-  /* Standing in for the hand area while watching and no row is open — the
-     one place the page has to say what a click does, since a row that opens
-     looks like any other until you try it. */
-  .hand-hint { color: var(--muted); font-size: 0.82rem; padding: 0.3rem 0.2rem; }
+  /* Browsing only (see renderHand): names whose cards the columns below are
+     showing, or -- nobody picked yet -- says what a click does, since a row
+     that opens looks like any other until you try it. Always present while
+     browsing, columns and all (renderHand renders both, empty or full), so
+     picking a row never adds or removes this element and never changes the
+     pane's height by more than that row's own card count does -- it used to
+     be the pane's *only* content until a row was picked, which made picking
+     one balloon #hand from one line to a full two-column grid and shove the
+     log down under it. */
+  .hand-banner { color: var(--muted); font-size: 0.82rem; padding: 0.1rem 0.2rem; }
   .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.35); }
   /* No fixed width any more — the name column itself (minmax(0, 1fr) above)
      is what sizes this, and shrinks first when the row's tight. Overflow is
@@ -1929,66 +1939,85 @@ function renderHand() {
   container.innerHTML = "";
   const own = watching() ? null : state.seat;
   const seat = browsing() && openSeat !== null ? openSeat : own;
-  if (seat === null) {
-    container.appendChild(html("div", {class: "hand-hint"}, "Click a player to see their cards."));
-    return;
+  const p = seat === null ? null : state.players.find((pp) => pp.seat === seat);
+  const hasHand = Boolean(p && p.hand !== undefined);
+
+  // Browsing carries no hand of its own to fall back to (own is null), so
+  // this is the only place that ever names whose cards the columns below are
+  // showing. Rendered before the columns and every time renderHand runs --
+  // never only on the empty/hint path -- so picking a row swaps this line's
+  // text and fills the columns in the same repaint, instead of the hint
+  // disappearing and the columns appearing as two separate size changes.
+  if (browsing()) {
+    const banner = html("div", {class: "hand-banner"});
+    banner.textContent = hasHand
+      ? (seat === state.seat ? "Your cards" : `${seatLabel(seat)}'s cards`)
+      : "Click a player to see their cards.";
+    container.appendChild(banner);
   }
-  const p = state.players.find((p) => p.seat === seat);
-  if (!p || p.hand === undefined) return;
 
   // What a click on a card does is decided by what's actually legal, which
   // is to say by the phase — and in most phases it does nothing at all.
   // legal_actions arrives empty unless the human is the one to move (see
   // GameSession.legal_wire_actions), so reading it is the whole test; there's
   // no separate game_over/to_move check to keep in sync with it.
-  const g = groupActions(state.legal_actions);
+  const g = hasHand ? groupActions(state.legal_actions) : null;
   // A card is clickable when there is a trade to make with it, which now
   // means the bank or a port and nothing else: offers between seats left the
   // engine with the one-event mechanic, so `bankTrade` is the whole of it.
   // Discarding is the other thing a resource card can do, but it happens in
   // the modal that DISCARD opens over the whole page (see syncModal), not
   // here — these cards aren't reachable while that's up.
-  const canTrade = !robberMove(g) && state.phase === "MAIN" && state.to_move === state.seat;
+  const canTrade = hasHand && !robberMove(g) && state.phase === "MAIN" && state.to_move === state.seat;
 
-  // Two columns, side by side, both always present — the header and the
-  // row's height hold their place even at zero cards, so buying a first dev
-  // card doesn't shove the resources column around.
+  // Two columns, side by side, both always present regardless of hasHand —
+  // the header and the row's height hold their place even at zero cards, so
+  // buying a first dev card doesn't shove the resources column around, and
+  // (browsing, nobody picked yet) the pane's height doesn't change the
+  // instant somebody is. Wrapped in .hand-cols so the banner above sits in
+  // #hand's own column instead of squeezed in as a third side-by-side column.
+  const cols = html("div", {class: "hand-cols"});
   const resCol = html("div", {class: "hand-col"});
   resCol.appendChild(handColHeader("card", "Resource Cards"));
   const resHand = html("div", {class: "hand"});
-  for (const r of board.resources) {
-    const n = p.hand[r];
-    if (!n) continue;
-    const idx = board.resources.indexOf(r);
-    const card = resourceCardTile(r, {title: `${r}: ${n}`});
-    card.appendChild(html("div", {class: "count"}, String(n)));
-    if (canTrade) {
-      card.classList.add("hand-card-clickable");
-      card.addEventListener("click", () => openModal("trade", {give: idx}));
+  if (hasHand) {
+    for (const r of board.resources) {
+      const n = p.hand[r];
+      if (!n) continue;
+      const idx = board.resources.indexOf(r);
+      const card = resourceCardTile(r, {title: `${r}: ${n}`});
+      card.appendChild(html("div", {class: "count"}, String(n)));
+      if (canTrade) {
+        card.classList.add("hand-card-clickable");
+        card.addEventListener("click", () => openModal("trade", {give: idx}));
+      }
+      resHand.appendChild(card);
     }
-    resHand.appendChild(card);
   }
   resCol.appendChild(resHand);
-  container.appendChild(resCol);
+  cols.appendChild(resCol);
 
   const devCol = html("div", {class: "hand-col"});
   devCol.appendChild(handColHeader("dev-card", "Development Cards"));
   const devHand = html("div", {class: "hand"});
-  for (const c of board.dev_cards) {
-    const n = p.dev_cards[c];
-    if (!n) continue;
-    const play = devCardPlay(c, g);
-    const classes = ["card"];
-    if (play) classes.push("hand-card-clickable");
-    const card = html("div", {class: classes.join(" "), title: play ? play.title : `${c}: ${n}`});
-    card.style.background = "var(--dev-card-bg)";
-    card.appendChild(iconSvg(DEV_CARD_ICONS[c], {fill: DEV_CARD_INK}));
-    card.appendChild(html("div", {class: "count"}, String(n)));
-    if (play) card.addEventListener("click", play.run);
-    devHand.appendChild(card);
+  if (hasHand) {
+    for (const c of board.dev_cards) {
+      const n = p.dev_cards[c];
+      if (!n) continue;
+      const play = devCardPlay(c, g);
+      const classes = ["card"];
+      if (play) classes.push("hand-card-clickable");
+      const card = html("div", {class: classes.join(" "), title: play ? play.title : `${c}: ${n}`});
+      card.style.background = "var(--dev-card-bg)";
+      card.appendChild(iconSvg(DEV_CARD_ICONS[c], {fill: DEV_CARD_INK}));
+      card.appendChild(html("div", {class: "count"}, String(n)));
+      if (play) card.addEventListener("click", play.run);
+      devHand.appendChild(card);
+    }
   }
   devCol.appendChild(devHand);
-  container.appendChild(devCol);
+  cols.appendChild(devCol);
+  container.appendChild(cols);
 }
 
 // How many of each piece the human still has to place — supply caps come

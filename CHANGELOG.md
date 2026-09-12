@@ -6,6 +6,20 @@ Changes to the HexSet distribution. The project follows
 
 ## Unreleased
 
+### Fixed
+
+- **Clicking a player at a finished game to read their cards moved the rest
+  of the page.** `renderHand` had exactly two shapes: a one-line hint when
+  nobody was picked, or the full two-column card grid once somebody was.
+  `#hand` sits in `#play-area`, sized to its own content, with `#log` taking
+  whatever's left below it, so swapping one shape for the other shoved `#log`
+  up or down by however much a header row and a card grid cost over a single
+  line of text. The pane now always carries a banner naming whose cards are
+  on screen (or, nobody picked yet, what a click does) above the same two
+  columns the viewer's own hand uses during play, filled or empty -- clicking
+  a row swaps what's inside them instead of adding or removing the skeleton
+  around them.
+
 ### Changed
 
 - **Heximax's `k` is a cap on distinct worlds, not a quota of searches.**

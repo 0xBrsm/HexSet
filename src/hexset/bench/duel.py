@@ -74,6 +74,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--runtime", default=None,
                    help="import this module before spawning, so it can register the "
                         "entrant kinds it provides (e.g. hexn.netbot for network:/mcts:)")
+    p.add_argument("--trade-mode", choices=("round", "auto"), default="round",
+                   help="the table's bargaining rule: one propose-and-respond round a "
+                        "turn (default), or the automatic clearing house studies before "
+                        "HexSet 0.50 were recorded under")
+    p.add_argument("--max-trades", type=int, default=1,
+                   help="completed exchanges a turn; -1 for the unbounded clearing house")
     p.add_argument("--json", default=None, help="append verdict to this JSON Lines file")
     p.add_argument("--verdicts", default="runs/eval", help="default verdict directory")
     p.add_argument("--no-json", action="store_true", help="print without writing a verdict file")
@@ -202,6 +208,8 @@ def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY)
         # entrant is spawned and nowhere else.
         worker_initializer=load_runtime if args.runtime else None,
         worker_initargs=(args.runtime,) if args.runtime else (),
+        trade_mode=args.trade_mode,
+        max_trades=args.max_trades,
     )
     seconds = time.monotonic() - started
 
@@ -237,6 +245,7 @@ def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY)
         "games": tournament.games, "duel_seed": args.duel_seed,
         "workers": args.workers, "seconds": seconds, "via": "arena.compete",
         "geometry": geometry,
+        "trade_mode": args.trade_mode, "max_trades": args.max_trades,
         "unfinished": tournament.unfinished,
         "wins": wins, "win_rate": wins / tournament.games if tournament.games else 0.0,
         "wilson_low": low, "wilson_high": high,

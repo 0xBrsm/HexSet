@@ -131,9 +131,12 @@ def _fake_compete(seen: dict, points, turns=None, winners=None):
     """
 
     def compete(lineup, games, *, seed, workers, records=False,
-                worker_initializer=None, worker_initargs=()):
+                worker_initializer=None, worker_initargs=(),
+                trade_mode="round", max_trades=1):
         seen["worker_initializer"] = worker_initializer
         seen["worker_initargs"] = worker_initargs
+        seen["trade_mode"] = trade_mode
+        seen["max_trades"] = max_trades
         seen["lineup"] = [entrant.weights for entrant in lineup]
         seen["names"] = [entrant.name for entrant in lineup]
         seen["records"] = records
@@ -159,7 +162,8 @@ def _fake_compete(seen: dict, points, turns=None, winners=None):
 
 
 def _arena_args(**overrides):
-    base = dict(a=A, b=B, games=4, duel_seed=20_000, workers=2, records=None, runtime=None)
+    base = dict(a=A, b=B, games=4, duel_seed=20_000, workers=2, records=None, runtime=None,
+                trade_mode="round", max_trades=1)
     base.update(overrides)
     return SimpleNamespace(**base)
 

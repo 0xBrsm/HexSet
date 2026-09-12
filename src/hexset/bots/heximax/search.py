@@ -26,6 +26,7 @@ from hexset.board.board import Board
 from hexset.board.terrain import NUM_RESOURCES
 from hexset.economy import hand_size
 from hexset.chance import Forced, Live
+from ..determinized import distinct_worlds, holdings_signature
 from ..stances import STANCES, win_at
 from ...actions import options_for
 from hexset.game import ROLL_ODDS, Game, Phase, imagine, is_over, roll_dice, to_move
@@ -51,17 +52,6 @@ EXACT_ROLL_PLIES = 2
 
 class _Exhausted(Exception):
     """The leaf budget ran out mid-search; the caller falls back."""
-
-
-def world_signature(state: GameState, perspective: int) -> tuple:
-    """What makes two sampled worlds the same one: every other seat's hidden
-    holdings. The perspective's own hand is never sampled and the board is
-    shared, so neither can tell two draws apart; the deck's order is a
-    chance stream and is deliberately excluded."""
-    return tuple(
-        (tuple(state.hands[seat]), tuple(state.dev_cards[seat]), tuple(state.new_dev_cards[seat]))
-        for seat in range(state.num_players) if seat != perspective
-    )
 
 
 class _ShiftedBelief:
@@ -311,31 +301,24 @@ class Heximax:
     def worlds(self, game: Game, seat: int) -> list[Game]:
         """The distinct determinizations this decision is searched in.
 
-        `k` draws from the belief; two draws are the same world when every
-        other seat's hidden holdings match (the deck's order is a chance
-        stream, redrawn every sample, and does not distinguish a world). One
+        `k` draws from the belief through `hexset.bots.determinized.
+        distinct_worlds` -- the one place that decides when two draws are
+        the same world -- keyed on every other seat's hidden holdings. One
         `imagine` copy is built per distinct world, and `world_weights`
         carries each one's share of the draws, so a world drawn twice as
         often counts twice in the root average while being searched once.
         In a duel, or wherever the ledger has pinned every card, that is one
         world however large `k` is.
         """
-        belief = game.state(seat)
-        drawn: dict[tuple, tuple[GameState, int]] = {}
-        for _ in range(self.k):
-            state = belief.sample(self.rng)
-            key = world_signature(state, seat)
-            if key in drawn:
-                drawn[key] = (drawn[key][0], drawn[key][1] + 1)
-            else:
-                drawn[key] = (state, 1)
-        out = []
-        weights = []
-        for state, count in drawn.values():
+        # `holdings_signature`, not the default key: the deck's order is a
+        # chance stream this search redraws anyway, so it does not make two
+        # draws different worlds.
+        out, weights = [], []
+        for share, state in distinct_worlds(game.state(seat), self.rng, self.k, holdings_signature):
             world = imagine(game, self.rng, randomize_deck=False)
             world.set_state(state)
             out.append(world)
-            weights.append(count / self.k)
+            weights.append(share)
         self.world_weights = weights
         return out
 

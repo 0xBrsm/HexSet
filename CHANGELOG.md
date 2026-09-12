@@ -9,10 +9,13 @@ Changes to the HexSet distribution. The project follows
 ### Changed
 
 - **Heximax's `k` is a cap on distinct worlds, not a quota of searches.**
-  `Heximax.worlds` draws `k` samples from the belief, deduplicates them on
-  every other seat's hidden holdings (`world_signature`; the deck's order is
-  a chance stream and does not distinguish a world) and weights each distinct
-  world by its share of the draws in the root average (`world_weights`). A
+  `Heximax.worlds` draws `k` samples from the belief through the new
+  `hexset.bots.determinized.distinct_worlds` -- the one place that decides
+  when two draws are the same world, which `determinized` now reads too --
+  keyed on every other seat's hidden holdings (`holdings_signature`; the
+  deck's order is a chance stream and does not distinguish a world), and
+  weights each distinct world by its share of the draws in the root average
+  (`world_weights`). A
   belief the ledger has pinned to one world -- every duel, and most
   four-seat positions -- is searched once however large `k` is. Before, `k`
   identical worlds shared one leaf budget, and at `k=100` the budget was gone

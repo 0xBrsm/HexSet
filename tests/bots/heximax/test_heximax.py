@@ -660,6 +660,6 @@ def test_k_is_a_cap_on_distinct_worlds_not_a_quota_of_searches():
     assert abs(sum(bot.world_weights) - 1.0) < 1e-9
     assert all(w >= 1 / 50 - 1e-12 for w in bot.world_weights)
     # Distinct means distinct: no two worlds share their hidden holdings.
-    from hexset.bots.heximax.search import world_signature
-    keys = [world_signature(w.state(hidden, hidden=False), hidden) for w in worlds]
+    from hexset.bots.determinized import holdings_signature
+    keys = [holdings_signature(w.state(hidden, hidden=False), hidden) for w in worlds]
     assert len(set(keys)) == len(keys)

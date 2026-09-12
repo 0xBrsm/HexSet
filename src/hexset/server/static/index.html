@@ -346,11 +346,16 @@
      robber move now: a self-played Knight is undoable up until the robber
      actually lands (see _UNDOABLE_BUILDS), and roll/end-turn are never on
      offer in Phase.ROBBER to begin with, so nothing else ever needs the
-     spot at the same time. Above #modal's z-index:55, same as the old
-     cancel-robber corner was: a hex with more than one victim opens the
-     "Steal from" modal on top of the board, and undo has to reach through
-     that too, not just the board underneath it. */
-  #undo-build { bottom: 76px; z-index: 60; }
+     spot at the same time. Below #modal's z-index:55 by default -- a trade,
+     discard or dev-card modal covers it like it covers the rest of the
+     board, same as any other board control. The one exception is the old
+     cancel-robber corner's own case, given back by the .reach-modal class
+     (openModal/closeModal, toggled only for modalMode "steal"): a hex with
+     more than one victim opens the "Steal from" modal on top of the board,
+     and undo has to reach through that one, not just the board underneath
+     it, since it is itself the way out of the Knight that opened it. */
+  #undo-build { bottom: 76px; z-index: 40; }
+  #undo-build.reach-modal { z-index: 60; }
   /* Buying a development card is the one purchase with nothing on the board
      to click for it, so the button *is* the thing being bought: the same
      face the hand's dev cards wear (see .card and --dev-card-bg), scaled up
@@ -2452,6 +2457,10 @@ function openModal(mode, {give = null} = {}) {
   modalDrag = {x: 0, y: 0};
   document.getElementById("modal-inner").style.transform = "";
   document.getElementById("modal").classList.add("show");
+  // See the CSS comment on #undo-build.reach-modal: every other mode leaves
+  // the corner button behind the backdrop like any other board control, only
+  // "steal" needs it reaching through.
+  document.getElementById("undo-build").classList.toggle("reach-modal", mode === "steal");
   renderModal();
 }
 
@@ -2463,6 +2472,7 @@ function closeModal() {
   if (modalMode === "steal") pendingRobberHex = null;
   modalMode = null;
   document.getElementById("modal").classList.remove("show");
+  document.getElementById("undo-build").classList.remove("reach-modal");
 }
 
 // Called every render(). The three MODAL_AUTO modes are conditions rather

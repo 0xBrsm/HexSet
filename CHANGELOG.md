@@ -20,6 +20,15 @@ Changes to the HexSet distribution. The project follows
   a row swaps what's inside them instead of adding or removing the skeleton
   around them.
 
+- **The Undo corner button painted over an open modal instead of under it.**
+  `#undo-build` carried a flat `z-index: 60`, above `#modal`'s `55`, so it
+  would reach through *any* modal -- a purpose it only ever needed for the
+  "Steal from" robber-victim modal, whose own hex a self-played Knight
+  stays undoable behind. Every other modal (trade, discard, Monopoly, Year
+  of Plenty) now covers it like it covers the rest of the board: the corner
+  sits at `z-index: 40` by default and only gets `.reach-modal`'s `60` back
+  while `modalMode` is `"steal"`.
+
 ### Changed
 
 - **Heximax's `k` is a cap on distinct worlds, not a quota of searches.**

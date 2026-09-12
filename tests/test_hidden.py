@@ -19,7 +19,7 @@ import pytest
 
 from hexset.actions import legal_actions, options_for, space_for
 from hexset.board.board import random_base_board
-from hexset.bots.heximax import Heximax, HonestEvaluator
+from hexset.bots.heximax import Heximax, ViewEvaluator
 from hexset.devcards import dev_count, holdings
 from hexset.economy import hand_size
 from hexset.encoding import encode
@@ -143,7 +143,7 @@ def test_sampling_an_observed_view_gives_a_fully_concrete_state():
 def test_heximax_decides_the_same_on_an_observed_state():
     """The load-bearing check: the searcher reads the information set only."""
     for truth, seen, seat in positions():
-        bot = Heximax(HonestEvaluator(truth.state(seat, hidden=False).board))
+        bot = Heximax(ViewEvaluator(truth.state(seat, hidden=False).board))
         bot.rng = random.Random(0)
         expected = bot.choose(truth)
         bot.rng = random.Random(0)
@@ -151,13 +151,13 @@ def test_heximax_decides_the_same_on_an_observed_state():
 
 
 def test_the_honest_evaluation_matches_on_an_observed_state():
-    """`HonestEvaluator` reads opponents through the belief only, so its
+    """`ViewEvaluator` reads opponents through the belief only, so its
     scores -- and the caches keyed for them -- carry over unchanged."""
     for truth, seen, seat in positions():
         board = truth.state(seat, hidden=False).board
         # One evaluator each: a shared one would answer the second call from
         # its cache, which the two positions legitimately share.
-        on_truth, on_observed = HonestEvaluator(board), HonestEvaluator(board)
+        on_truth, on_observed = ViewEvaluator(board), ViewEvaluator(board)
         assert on_observed.evaluate_game(seen, seat) == on_truth.evaluate_game(
             truth, seat
         )
@@ -217,7 +217,7 @@ def test_the_trade_gate_prices_the_same_on_an_observed_state():
 
     for truth, seen, seat in positions():
         board = truth.state(seat, hidden=False).board
-        on_truth, on_seen = Heximax(HonestEvaluator(board)), Heximax(HonestEvaluator(board))
+        on_truth, on_seen = Heximax(ViewEvaluator(board)), Heximax(ViewEvaluator(board))
         view_truth, view_seen = truth.state(seat), seen.state(seat)
         others = [s for s in range(view_seen.num_players) if s != seat]
         candidates = [(other, bundle) for other in others

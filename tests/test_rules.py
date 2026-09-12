@@ -16,7 +16,7 @@ import pytest
 from helpers import independent_vertices, mini_board
 
 from hexset.bots.evaluate import WIN_SCORE, Evaluator
-from hexset.bots.heximax.evaluate import HonestEvaluator
+from hexset.bots.heximax.evaluate import ViewEvaluator
 from hexset.game import Phase, _check_win, roll_dice, start
 from hexset.robber import discard_count
 from hexset.rules import COLONIST_1V1, GAME_TYPES, STANDARD, Rules
@@ -131,7 +131,7 @@ def test_heximax_win_bonus_uses_the_game_types_threshold():
     col = new_game(mini_board(), 2, random.Random(0), rules=COLONIST_1V1)
     _cities(std, 0, 5)
     _cities(col, 0, 5)
-    evaluator = HonestEvaluator(std.board)
+    evaluator = ViewEvaluator(std.board)
     hand = [float(c) for c in std.hands[0]]
     assert evaluator.score(col, 0, hand) == pytest.approx(
         evaluator.score(std, 0, hand) - WIN_SCORE
@@ -143,8 +143,8 @@ def test_heximax_evaluation_cache_distinguishes_rules():
     _cities(std, 0, 5)
     col = copy_state(std)
     col.rules = COLONIST_1V1
-    evaluator = HonestEvaluator(std.board)
+    evaluator = ViewEvaluator(std.board)
     standard_scores = evaluator.evaluate(std)
     colonist_scores = evaluator.evaluate(col)
     assert colonist_scores[0] == pytest.approx(standard_scores[0] - WIN_SCORE)
-    assert colonist_scores == pytest.approx(HonestEvaluator(col.board).evaluate(col))
+    assert colonist_scores == pytest.approx(ViewEvaluator(col.board).evaluate(col))

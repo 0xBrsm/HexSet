@@ -1005,6 +1005,13 @@ def test_roads_joins_legal_edges_to_the_vertex_they_reach_settle_first():
     # Sorted settle first, then pips descending within each: 12 (6 pips)
     # before 11 (3 pips), both settleable; 10 last, not settleable at all.
     assert [r["edge"] for r in roads] == [12, 11, 10]
+    assert not any("link" in r for r in roads)
+
+    # Both ends already ours (0 by settlement, 1 by road): a joining road.
+    edge_owner = [-1] * 13
+    edge_owner[11] = 0  # our road on 1-2 makes vertex 1 ours too
+    joined = mcptools._roads(legal[:1], {"seat": 0, "vertex_owner": [0, -1, -1, -1], "edge_owner": edge_owner}, ROAD_BOARD)
+    assert joined[0]["link"] is True and joined[0]["settle"] is False
 
 
 def test_spots_say_whether_a_port_matches_what_the_vertex_yields():

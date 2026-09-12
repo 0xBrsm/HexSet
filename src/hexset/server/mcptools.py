@@ -771,8 +771,9 @@ def _roads(legal: list[dict], view: dict, board: dict) -> list[dict]:
     vertex it neighbors -- the standard two-road minimum distance), and
     `then`: the best settleable vertex one road further on, with its pips
     as `then_pips` -- the two-road plan every setup road and most early
-    ones are, done here instead of from a board read. Best (a settleable
-    end, then the best `then`) first."""
+    ones are, done here instead of from a board read. A road with both
+    ends already this seat's is flagged `link`: it joins the network and
+    reaches nothing. Best (a settleable end, then the best `then`) first."""
     edges = {e["id"]: e for e in board.get("edges") or []}
     vertices = {v["id"]: v for v in board.get("vertices") or []}
     ports = {v: p for p in board.get("ports") or [] for v in p.get("vertices") or []}
@@ -813,6 +814,11 @@ def _roads(legal: list[dict], view: dict, board: dict) -> list[dict]:
             "resources": vertex.get("resources", []),
             "settle": settleable(to),
         }
+        if v0 in own and v1 in own:
+            # Both ends already ours: this road joins two parts of the
+            # network (a loop, or a longest-road splice) and reaches nothing
+            # new, so `to`/`pips` describe a vertex the seat already holds.
+            row["link"] = True
         port = ports.get(to)
         if port is not None:
             row["port"] = _port_label(port)
@@ -1535,13 +1541,14 @@ _TOOLS: dict[str, tuple] = {
         "your own offer when all pass or a clean accept matches offer_trade's `to`.\n"
         "`your_move`: `act`, `discard`->discard(cards), `answer_trade` or "
         "`choose_trade`: the tool; `game_over`; `wait` only after `timeout` or "
-        "while seats open (`waiting_on`; wait_for_turn()).\n"
+        "with seats open (`waiting_on`; wait_for_turn()).\n"
         "`summary.afford` per build: `ok`, `missing`, `legal`. `summary.race`: "
         "`points`, `to_win`, `leader`, awards yours/holder's/`need`. When legal: "
         "`spots` (settlement/city vertices, pips/resources/port/`port_matches`, best "
         "first) and `robber` (hexes, pips, `hits` seat:Ns+Nc, `options` "
         "index:victim), each replacing its `legal_actions` group; `roads` (`to` "
-        "vertex, pips/resources/port, `settle`, `then` = best vertex one road on).\n"
+        "vertex, pips/resources/port, `settle`, `then` = best vertex one road on, "
+        "`link` = joins your network).\n"
         "Tables are `(keys):row|row`, cells comma-separated, `-` null, 1/0 bool, "
         "`;` in a list. `legal_actions`: per type, `index` for act() plus `edge` (roads), "
         "`vertex` (settlement/city), `hex`+`victim` (MOVE_ROBBER), `give`/`want` "

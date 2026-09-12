@@ -53,6 +53,10 @@ Changes to the HexSet distribution. The project follows
 
 ### Changed
 
+- **`summary.roads` flags a network-joining road.** A legal road with both
+  ends already the seat's own carries `link`; its `to` is a vertex the seat
+  holds, not ground it reaches.
+
 - **The MCP `game_over` reply no longer pushes the whole transcript.** It
   used to, so the client could replace its copy with the redaction-lifted
   history -- 5-6k tokens a seat rarely reads. The final reply now carries

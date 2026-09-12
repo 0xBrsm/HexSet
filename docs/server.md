@@ -140,7 +140,10 @@ client with that Streamable HTTP URL; no separate stdio command is provided.
 An `initialize` request returns an `Mcp-Session-Id` header. Send it with all
 subsequent requests. A missing session ID returns 400; an unknown ID returns
 404 and requires reinitialization. `DELETE /mcp` ends the session.
-`GET /mcp` returns 405; events are streamed in response to requests.
+`GET /mcp` returns 405. Every `tools/call` is answered as an SSE stream
+(`text/event-stream`): `: keepalive` comment lines while the call waits,
+then one `message` event carrying the JSON-RPC response. `initialize`,
+`tools/list` and `ping` are plain JSON responses.
 
 Available tools are `bots`, `new_game`, `join`, `resume_game`, `board`,
 `state`, `wait_for_turn`, `act`, `undo`, `leave_game`, `get_table`,
@@ -155,7 +158,15 @@ after an MCP session or server restart. There is no local session cache.
 The identity is whatever string the caller supplies; nothing verifies it.
 
 `act(index)` submits one entry from the latest `state().legal_actions`.
-Ending a turn requires `END_TURN`. In MCP replies `legal_actions` is grouped
+Ending a turn requires `END_TURN`. Every acting tool (`new_game`, `join`,
+`resume_game`, `act`, `undo`, `offer_trade`, `answer_trade`,
+`choose_trade`) replies at the caller's next decision, not the instant
+after the action: it blocks until `your_move` is something other than
+`wait`, for at most `timeout` seconds (default and cap 600; `0` replies at
+once), so a seat that ends its turn gets back the table as it stands when
+play returns to it. `wait_for_turn` does only the waiting, and is needed
+only after a reply whose `timeout` ran out. `state`, `get_table`, `board`,
+`bots` and `leave_game` reply immediately. In MCP replies `legal_actions` is grouped
 by action type; each entry carries the flat `index` to act on and a named
 operand (`edge`, `vertex`, `hex` and `victim`, or the resource names for
 bank trades, discards, Monopoly and Year of Plenty), and `legal_count` is
@@ -200,8 +211,9 @@ a reply; `log_after: <n>` overrides the cursor with an explicit line count.
 
 Every state-returning tool answers with `your_move`: `act`, `discard`,
 `answer_trade` or `choose_trade` names the tool the table wants from the
-caller now, `wait` means none does and `waiting_on` lists the seats it is
-waiting for, and `game_over` is the end. It is derived from `legal_actions`,
+caller now, `wait` means none does (only after a `timeout` ran out, or
+while seats are still open) and `waiting_on` lists the seats it is waiting
+for, and `game_over` is the end. It is derived from `legal_actions`,
 `pending`, `trade_round`, `discard_quota` and `to_move`, which remain
 available, and from `waiting_for` and `trade_wait`, which do not.
 

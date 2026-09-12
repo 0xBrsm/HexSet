@@ -18,7 +18,9 @@ sessions at once, so that state now lives in a `Session` object -- one per
 from __future__ import annotations
 
 import hashlib
+import time
 from dataclasses import dataclass
+from typing import Iterator
 
 from .api import ApiError, Tables
 
@@ -109,8 +111,15 @@ def _display_name(name: str | None) -> str | None:
 
 
 def _new_game(
-    tables: Tables, session: Session, identity: str, opponents: list[str] | None = None, name: str | None = None
-) -> dict:
+    tables: Tables,
+    session: Session,
+    identity: str,
+    opponents: list[str] | None = None,
+    name: str | None = None,
+    timeout: float | None = None,
+    log_after: int | None = None,
+    full_log: bool = False,
+) -> Iterator:
     client, _ = _client_of(identity)
     session.identity = identity
     body: dict = {"name": _display_name(name), "client": client}
@@ -120,10 +129,19 @@ def _new_game(
     # LLM reads, and it used to be the one that came back raw.
     dealt = _seat(session, _call_ok(tables, session, "POST", "/api/games", body))
     _layout(tables, session)  # the board is fixed from here on; fetch it once now
-    return _reply(session, dealt)
+    return _settle(tables, session, dealt, timeout, log_after, full_log)
 
 
-def _join(tables: Tables, session: Session, code: str, identity: str, name: str | None = None) -> dict:
+def _join(
+    tables: Tables,
+    session: Session,
+    code: str,
+    identity: str,
+    name: str | None = None,
+    timeout: float | None = None,
+    log_after: int | None = None,
+    full_log: bool = False,
+) -> Iterator:
     if not isinstance(code, str) or not code.strip():
         raise ToolError("code must be a game's six-character code")
     client, _ = _client_of(identity)
@@ -131,10 +149,18 @@ def _join(tables: Tables, session: Session, code: str, identity: str, name: str 
     body: dict = {"code": code.strip().lower(), "name": _display_name(name), "client": client}
     joined = _seat(session, _call_ok(tables, session, "POST", "/api/join", body))
     _layout(tables, session)
-    return _reply(session, joined)
+    return _settle(tables, session, joined, timeout, log_after, full_log)
 
 
-def _resume_game(tables: Tables, session: Session, code: str, identity: str) -> dict:
+def _resume_game(
+    tables: Tables,
+    session: Session,
+    code: str,
+    identity: str,
+    timeout: float | None = None,
+    log_after: int | None = None,
+    full_log: bool = False,
+) -> Iterator:
     """Reclaims a seat by `POST /api/reclaim`, the same way a browser's own
     reclaim works -- no local cache file any more (there is nothing left to
     cache: a session dies with its `Mcp-Session-Id`, and a fresh MCP
@@ -151,7 +177,7 @@ def _resume_game(tables: Tables, session: Session, code: str, identity: str) -> 
     session.log_sent = None  # a reclaimed seat is owed the whole transcript
     session.board = None
     _layout(tables, session)
-    return _reply(session, reclaimed)
+    return _settle(tables, session, reclaimed, timeout, log_after, full_log)
 
 
 #  --- Board summary -----------------------------------------------------------
@@ -254,9 +280,10 @@ def _act(
     session: Session,
     index: int,
     expect: dict | None = None,
+    timeout: float | None = None,
     log_after: int | None = None,
     full_log: bool = False,
-) -> dict:
+) -> Iterator:
     _seated(session)
     # The raw list, not the translated one: only `index` is resolved here, and
     # `POST /api/action` reads `type`/`a`/`b` alone (`wire_to_action`).
@@ -270,14 +297,13 @@ def _act(
             else "index out of range — state()'s legal_actions is empty; it is not your turn"
         )
     _expect_check(index, options[index], expect, len(raw.get("players") or []))
-    return _reply(
-        session, _call_ok(tables, session, "POST", "/api/action", {"action": options[index]}), log_after, full_log
-    )
+    played = _call_ok(tables, session, "POST", "/api/action", {"action": options[index]})
+    return _settle(tables, session, played, timeout, log_after, full_log)
 
 
-def _undo(tables: Tables, session: Session) -> dict:
+def _undo(tables: Tables, session: Session, timeout: float | None = None) -> Iterator:
     _seated(session)
-    return _reply(session, _call_ok(tables, session, "POST", "/api/undo"))
+    return _settle(tables, session, _call_ok(tables, session, "POST", "/api/undo"), timeout)
 
 
 def _leave_game(tables: Tables, session: Session) -> dict:
@@ -591,7 +617,8 @@ def _robber(legal: list[dict], view: dict, board: dict) -> list[dict]:
 
 def _race(view: dict, me: dict) -> dict:
     """Where this seat stands: points and the distance to the win (the
-    rule itself is the view's top-level `winning_points`), the leading opponent by *public* points (hidden victory-point cards are not
+    rule itself is the view's top-level `winning_points`), the leading
+    opponent by *public* points (hidden victory-point cards are not
     counted for anyone else), and each award -- yours, who holds it, and
     `need`, the length or knight count that would take it (strictly more
     than the holder, or the minimum if nobody holds it yet)."""
@@ -831,14 +858,14 @@ def _offer_trade(
     session: Session,
     give: dict,
     want: dict,
+    timeout: float | None = None,
     log_after: int | None = None,
     full_log: bool = False,
-) -> dict:
+) -> Iterator:
     _seated(session)
     body = {"give": _positional(give), "want": _positional(want)}
-    return _reply(
-        session, _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round", body), log_after, full_log
-    )
+    offered = _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round", body)
+    return _settle(tables, session, offered, timeout, log_after, full_log)
 
 
 def _answer_trade(
@@ -848,9 +875,10 @@ def _answer_trade(
     kind: str,
     give: dict | None = None,
     receive: dict | None = None,
+    timeout: float | None = None,
     log_after: int | None = None,
     full_log: bool = False,
-) -> dict:
+) -> Iterator:
     _seated(session)
     # No `version` here on purpose: the wire refuses anything but the exact
     # open offer by `actor` + `received` (`GameSession.answer_round`), which is
@@ -868,12 +896,8 @@ def _answer_trade(
     body = {"actor": offer["actor"], "received": offer["bundle"], "kind": kind}
     if kind == "counter":
         body["bundle"] = _bundle_towards_actor(give, receive)
-    return _reply(
-        session,
-        _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/answer", body),
-        log_after,
-        full_log,
-    )
+    answered = _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/answer", body)
+    return _settle(tables, session, answered, timeout, log_after, full_log)
 
 
 def _choose_trade(
@@ -881,20 +905,17 @@ def _choose_trade(
     session: Session,
     index: int | None = None,
     decline: bool = False,
+    timeout: float | None = None,
     log_after: int | None = None,
     full_log: bool = False,
-) -> dict:
+) -> Iterator:
     _seated(session)
     # No `version` (see `_answer_trade`): the wire matches the chosen answer
     # by `seat` + `bundle` exactly (`GameSession.execute_round_choice`).
     raw = _call_ok(tables, session, "GET", "/api/state")
     if decline:
-        return _reply(
-            session,
-            _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/choose", {"decline": True}),
-            log_after,
-            full_log,
-        )
+        declined = _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/choose", {"decline": True})
+        return _settle(tables, session, declined, timeout, log_after, full_log)
     responses = ((raw.get("trade_round") or {}).get("responses")) or []
     if not isinstance(index, int) or not (0 <= index < len(responses)):
         raise ToolError(
@@ -911,28 +932,35 @@ def _choose_trade(
             "choose an accept or counter, or `decline: true`"
         )
     body = {"seat": response["seat"], "bundle": response["bundle"]}
-    return _reply(
-        session,
-        _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/choose", body),
-        log_after,
-        full_log,
-    )
+    chosen = _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/choose", body)
+    return _settle(tables, session, chosen, timeout, log_after, full_log)
 
 
-# --- wait_for_turn: a long poll, exposed as an SSE stream (web.py) -----------
+# --- Settling: every acting tool returns at this seat's next decision ---------
 #
-# `web.py`'s `POST /mcp` answers a `tools/call` for this one tool with
-# `text/event-stream` instead of one JSON object, writing a keepalive
-# between each 15s wait so the connection (and whatever proxy sits in front
-# of it) doesn't decide the server has gone quiet. The generator below is
-# the shared loop: `_wait_for_turn_events` yields `_KEEPALIVE` for every tick
-# that doesn't resolve the wait and the final translated view once it does
-# (or once `timeout` runs out); `web.py` drives it directly for the SSE
-# framing, and `_wait_for_turn` (registered as the tool, for tools/list and
-# any caller that wants one blocking call) just drains it.
+# A reply that comes back the instant after an action leaves the caller to
+# decide when to look again -- and the one LLM game played through the
+# earlier tools showed what that costs: a seat that reads `wait`, does
+# something else, and stalls its own turn. So no acting tool answers until
+# there is something for this seat to do. `act(END_TURN)` returns when the
+# other seats have played round to you (or an offer lands against you, or
+# the game ends); `act(BUILD_ROAD)` returns at once, since it is still your
+# turn. The loop a seat runs is then act -> act -> act, and `your_move` is
+# never `wait` unless the wait was cut short by `timeout` or `_MAX_WAIT`.
+#
+# `web.py` answers every `tools/call` as `text/event-stream`, writing a
+# keepalive for each `_KEEPALIVE` yielded here so the connection (and
+# whatever proxy sits in front of it) does not decide the server has gone
+# quiet during a long wait. `call_tool_events` is what it drives;
+# `call_tool` drains the same generator for any caller that wants one
+# blocking call.
 
 _KEEPALIVE = object()
 _WAIT_TICK = 15.0
+# The most any one call blocks, whatever `timeout` says: a human seat that
+# walked away must not hold a connection open for ever. On expiry the reply
+# is whatever the table looks like then, `your_move: wait` included.
+_MAX_WAIT = 600.0
 
 
 def _turn_ready(view: dict) -> bool:
@@ -943,44 +971,36 @@ def _turn_ready(view: dict) -> bool:
 
 def _poll_state(tables: Tables, session: Session, after: int | None = None, wait: float = 0.0) -> dict:
     query = "" if after is None else f"?after={after}&wait={wait}"
-    # `_translate`, not `_reply`: these polls are never seen by the caller,
+    # `_translate`, not `_finish`: these polls are never seen by the caller,
     # so they must not move the session's cursor (`Session.log_sent`).
     return _translate(_call_ok(tables, session, "GET", f"/api/state{query}"))
 
 
-def _wait_for_turn_events(
+def _settle(
     tables: Tables,
     session: Session,
+    raw: dict,
     timeout: float | None = None,
     log_after: int | None = None,
     full_log: bool = False,
-):
-    """Yields `_KEEPALIVE` for each wait tick that doesn't resolve, then the
-    final translated view -- immediately, if it's already true.
+) -> Iterator:
+    """From `raw` -- the wire view an action (or a seat, or a plain read)
+    just handed back -- yields `_KEEPALIVE` per wait tick until this seat has
+    something to do, then the one `_finish`ed reply. Immediately, if `raw`
+    already says so. Only that final view moves the session's cursor.
 
-    Only the view that is actually yielded goes through `_finish` -- the same
-    seam `_reply` uses, so it comes back in the same shape as a `state()`
-    reply: summarised, grouped, and trimmed against the session's cursor,
-    which only it moves. The polls in between are read for `version` and
-    `_turn_ready` alone and are never seen by the caller.
-
-    This is the call a seat makes to reach its own turn, so the view it
-    returns is the one `afford`/`spots`/`robber` are for; it is the reply
-    that must least of all differ from the others."""
-    _seated(session)
-    view = _poll_state(tables, session)
-    if _turn_ready(view):
-        yield _finish(session, view, log_after, full_log)
-        return
-    elapsed = 0.0
-    while timeout is None or elapsed < timeout:
+    Every acting tool ends here, so every reply is the same shape as
+    `state()`'s: summarised, grouped, trimmed. The polls in between are read
+    for `version` and `_turn_ready` alone."""
+    view = _translate(raw)
+    limit = _MAX_WAIT if timeout is None else max(0.0, min(float(timeout), _MAX_WAIT))
+    deadline = time.monotonic() + limit
+    while not _turn_ready(view):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
         yield _KEEPALIVE
-        remaining = _WAIT_TICK if timeout is None else max(0.0, min(_WAIT_TICK, timeout - elapsed))
-        view = _poll_state(tables, session, after=view.get("version"), wait=remaining)
-        elapsed += remaining
-        if _turn_ready(view) or (timeout is not None and elapsed >= timeout):
-            yield _finish(session, view, log_after, full_log)
-            return
+        view = _poll_state(tables, session, after=view.get("version"), wait=min(_WAIT_TICK, remaining))
     yield _finish(session, view, log_after, full_log)
 
 
@@ -990,25 +1010,30 @@ def _wait_for_turn(
     timeout: float | None = None,
     log_after: int | None = None,
     full_log: bool = False,
-) -> dict:
-    result: dict = {}
-    for item in _wait_for_turn_events(tables, session, timeout=timeout, log_after=log_after, full_log=full_log):
-        if item is not _KEEPALIVE:
-            result = item
-    return result
+) -> Iterator:
+    _seated(session)
+    return _settle(tables, session, _call_ok(tables, session, "GET", "/api/state"), timeout, log_after, full_log)
 
 
 # The transcript-cursor arguments every state-returning tool takes, spelled
 # once. The cursor itself is automatic (`_trim_for`): these are the overrides.
+# `_WAIT_ARGS` adds the one every settling tool takes (`_settle`).
 _CURSOR_ARGS = {
     "log_after": {
         "type": "integer",
-        "description": "Override the automatic `log` cursor with the line count you hold. Normally omit.",
+        "description": "Override the automatic `log` cursor: the line count you hold. Normally omit.",
     },
     "full_log": {
         "type": "boolean",
-        "description": "Send the whole `log`, ignoring the cursor. For when a reply was lost.",
+        "description": "Send the whole `log` (after a lost reply).",
     },
+}
+_WAIT_ARGS = {
+    "timeout": {
+        "type": "number",
+        "description": "Max seconds to wait for your next move (default/cap 600; 0 = reply now).",
+    },
+    **_CURSOR_ARGS,
 }
 
 _IDENTITY_ARG = {
@@ -1037,7 +1062,8 @@ _TOOLS: dict[str, tuple] = {
         _new_game,
         "Deal a new game and take a random seat; play starts at once. `opponents` "
         "fill bot seats; any other seat stays open for others to join by the "
-        "returned `code`. Nothing is traded on your behalf. Reply as state().",
+        "returned `code`. Nothing is traded on your behalf. Replies at your first "
+        "move, as state().",
         {
             "type": "object",
             "properties": {
@@ -1048,6 +1074,7 @@ _TOOLS: dict[str, tuple] = {
                     "description": "Names from bots(), one per bot seat. Omit for no bots.",
                 },
                 "name": _NAME_ARG,
+                **_WAIT_ARGS,
             },
             "required": ["identity"],
         },
@@ -1055,10 +1082,11 @@ _TOOLS: dict[str, tuple] = {
     "join": (
         _join,
         "Take a random open seat at an existing game. Fails when none is open "
-        "(a seat left or locked out stays closed for that game). Reply as state().",
+        "(a seat left or locked out stays closed for that game). Replies at your "
+        "first move, as state().",
         {
             "type": "object",
-            "properties": {"code": _CODE_ARG, "identity": _IDENTITY_ARG, "name": _NAME_ARG},
+            "properties": {"code": _CODE_ARG, "identity": _IDENTITY_ARG, "name": _NAME_ARG, **_WAIT_ARGS},
             "required": ["code", "identity"],
         },
     ),
@@ -1073,10 +1101,12 @@ _TOOLS: dict[str, tuple] = {
     ),
     "state": (
         _state,
-        "Current game state, the reply every playing tool returns. Read in order:\n"
+        "Current game state, the reply every playing tool returns. Acting tools "
+        "reply at your next move: after END_TURN, once the table has come round to "
+        "you (or an offer needs your answer, or the game ends). Read in order:\n"
         "`your_move`: `act`, `discard`, `answer_trade` or `choose_trade` names the "
-        "tool to call now; `wait` means nothing to do (`waiting_on` lists the seats "
-        "being waited for; use wait_for_turn()); `game_over`.\n"
+        "tool to call now; `game_over`; `wait` only when a `timeout` ran out or "
+        "seats are still open (`waiting_on` lists them; call wait_for_turn()).\n"
         "`summary`: `afford` per build (`ok`, `missing`, `legal` now); `race` "
         "(`points`, `to_win`, public `leader`, and per award your count, the "
         "holder's, and the `need` that takes it); when offered, `spots` (each legal "
@@ -1107,24 +1137,15 @@ _TOOLS: dict[str, tuple] = {
     ),
     "wait_for_turn": (
         _wait_for_turn,
-        "Block until `your_move` is not `wait`, then reply as state(). Returns at "
-        "once if already so.",
-        {
-            "type": "object",
-            "properties": {
-                "timeout": {
-                    "type": "number",
-                    "description": "Seconds before returning the state regardless. Omit to wait indefinitely.",
-                },
-                **_CURSOR_ARGS,
-            },
-        },
+        "Wait until `your_move` is not `wait`, then reply as state(). Only needed "
+        "after a reply whose `timeout` ran out.",
+        {"type": "object", "properties": {**_WAIT_ARGS}},
     ),
     "act": (
         _act,
         "Play `legal_actions` entry `index` from the latest state() (same indexes "
         "in `summary.spots`/`robber`). END_TURN is an action like any other. "
-        "Reply as state().",
+        "Replies at your next move, as state().",
         {
             "type": "object",
             "properties": {
@@ -1135,7 +1156,7 @@ _TOOLS: dict[str, tuple] = {
                     '{"type": "BUILD_ROAD", "edge": 17}. Refuses if that index now names '
                     "something else.",
                 },
-                **_CURSOR_ARGS,
+                **_WAIT_ARGS,
             },
             "required": ["index"],
         },
@@ -1145,7 +1166,7 @@ _TOOLS: dict[str, tuple] = {
         "Undo your own last build, bank trade, Road Building or Knight while "
         "`can_undo` is true (a Knight until its robber move is made). Nothing else "
         "can be undone.",
-        {"type": "object", "properties": {}},
+        {"type": "object", "properties": {"timeout": _WAIT_ARGS["timeout"]}},
     ),
     "leave_game": (
         _leave_game,
@@ -1161,14 +1182,14 @@ _TOOLS: dict[str, tuple] = {
     "offer_trade": (
         _offer_trade,
         "On your own turn in MAIN, offer a trade to every other seat: 1-3 cards a "
-        "side, no resource on both sides. Bots answer at once; read "
-        "`trade_round.responses`, then choose_trade().",
+        "side, no resource on both sides. Replies once every seat has answered, "
+        "with `trade_round.responses` for choose_trade().",
         {
             "type": "object",
             "properties": {
                 "give": _resource_dict('Resource -> count you give, e.g. {"Wood": 1}.'),
                 "want": _resource_dict("Resource -> count you want."),
-                **_CURSOR_ARGS,
+                **_WAIT_ARGS,
             },
             "required": ["give", "want"],
         },
@@ -1176,7 +1197,8 @@ _TOOLS: dict[str, tuple] = {
     "answer_trade": (
         _answer_trade,
         "Answer `pending[index]`: `accept` as offered, `counter` with your own "
-        "`give`/`receive`, or `pass`. The actor then picks one answer.",
+        "`give`/`receive`, or `pass`. The actor then picks one answer. Replies at "
+        "your next move.",
         {
             "type": "object",
             "properties": {
@@ -1184,7 +1206,7 @@ _TOOLS: dict[str, tuple] = {
                 "kind": {"type": "string", "enum": ["accept", "counter", "pass"]},
                 "give": _resource_dict("counter only: resource -> count you give."),
                 "receive": _resource_dict("counter only: resource -> count you receive."),
-                **_CURSOR_ARGS,
+                **_WAIT_ARGS,
             },
             "required": ["index", "kind"],
         },
@@ -1192,13 +1214,13 @@ _TOOLS: dict[str, tuple] = {
     "choose_trade": (
         _choose_trade,
         "Execute `trade_round.responses[index]`, or `decline: true` to close your "
-        "round with no trade.",
+        "round with no trade. Replies at your next move.",
         {
             "type": "object",
             "properties": {
                 "index": {"type": "integer", "description": "Index into trade_round.responses."},
                 "decline": {"type": "boolean"},
-                **_CURSOR_ARGS,
+                **_WAIT_ARGS,
             },
         },
     ),
@@ -1206,12 +1228,13 @@ _TOOLS: dict[str, tuple] = {
         _resume_game,
         "Reclaim your seat with the `code` and the exact `identity` you gave "
         "new_game()/join(). Use after a new MCP session, which starts seatless. "
-        "Reply as state().",
+        "Replies at your next move, as state().",
         {
             "type": "object",
             "properties": {
                 "code": _CODE_ARG,
                 "identity": {"type": "string", "description": "The identity new_game()/join() was called with."},
+                **_WAIT_ARGS,
             },
             "required": ["code", "identity"],
         },
@@ -1226,16 +1249,29 @@ def tool_list() -> list[dict]:
     ]
 
 
-def call_tool(tables: Tables, session: Session, name: str, arguments: dict) -> dict:
-    """One tool call -> its raw result dict, or a raised `ToolError`. The
-    `{"content": [...], "isError": ...}` MCP result envelope is `web.py`'s
-    job, not this module's — it's the one thing that differs between a plain
-    JSON response and `wait_for_turn`'s streamed one."""
+def call_tool_events(tables: Tables, session: Session, name: str, arguments: dict) -> Iterator:
+    """One tool call as `web.py` streams it: `_KEEPALIVE` for every wait
+    tick, then the one raw result dict -- or a raised `ToolError`, before or
+    between items. The `{"content": [...], "isError": ...}` MCP result
+    envelope is `web.py`'s job, not this module's."""
     entry = _TOOLS.get(name)
     if entry is None:
         raise ToolError(f"unknown tool: {name}")
     handler, _, _ = entry
     try:
-        return handler(tables, session, **arguments)
+        result = handler(tables, session, **arguments)
     except TypeError as error:
         raise ToolError(f"bad arguments for {name}: {error}") from error
+    if isinstance(result, dict):
+        yield result
+    else:
+        yield from result
+
+
+def call_tool(tables: Tables, session: Session, name: str, arguments: dict) -> dict:
+    """`call_tool_events` drained: one blocking call -> its result dict."""
+    result: dict = {}
+    for item in call_tool_events(tables, session, name, arguments):
+        if item is not _KEEPALIVE:
+            result = item
+    return result

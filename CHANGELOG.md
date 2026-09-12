@@ -41,6 +41,20 @@ Changes to the HexSet distribution. The project follows
   detail (SSE keepalives) and design history left the descriptions; nothing
   a caller acts on did.
 
+- **MCP acting tools reply at the caller's next move.** `new_game`, `join`,
+  `resume_game`, `act`, `undo`, `offer_trade`, `answer_trade` and
+  `choose_trade` no longer answer the instant after the action: each blocks
+  until `your_move` is something other than `wait` -- `act(END_TURN)` comes
+  back when the table has played round to the caller, an offer needs its
+  answer, or the game is over -- for at most `timeout` seconds (a new
+  argument on each; default and cap 600, `0` for the state right now). The
+  loop an LLM seat runs is act -> act -> act, with nothing to poll and no
+  moment at which it has to decide to wait; `wait_for_turn` remains for a
+  reply whose `timeout` ran out. Every `tools/call` is now answered as an
+  SSE stream with keepalives, not only `wait_for_turn` (`web.py` has one
+  response path instead of two). `state`, `get_table`, `board`, `bots` and
+  `leave_game` still reply immediately.
+
 - **MCP `models` tool is `bots`; the `model` argument is `identity`.** The
   HTTP API's `model` is a bot engine (`/api/models`, `POST /api/bot`), while
   the MCP argument was a free string naming the caller for `resume_game`;

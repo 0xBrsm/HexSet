@@ -42,6 +42,14 @@ def live_server():
 
 
 @pytest.fixture(autouse=True)
+def _short_settle_cap(monkeypatch):
+    """A test that stalls a table by mistake fails on a `wait` reply within
+    seconds instead of holding the call for `mcptools._MAX_WAIT`."""
+    monkeypatch.setattr(mcptools, "_MAX_WAIT", 10.0)
+    monkeypatch.setattr(mcptools, "_WAIT_TICK", 0.5)
+
+
+@pytest.fixture(autouse=True)
 def _creator_at_seat_zero(monkeypatch):
     """Pin the creator to seat 0 so no bot seat is on move before the test
     acts (same race and same fix as `test_web.py`: `Tables.create` deals
@@ -83,6 +91,8 @@ class MCPClient:
                 if sid:
                     self.session_id = sid
                 raw = response.read()
+                if response.headers.get("Content-Type", "").startswith("text/event-stream"):
+                    return status, response.headers, _sse_message(raw.decode("utf-8"))
                 return status, response.headers, (json.loads(raw) if raw else None)
         except urllib.error.HTTPError as error:
             raw = error.read()
@@ -101,10 +111,16 @@ class MCPClient:
         status, _, data = self.call_tool_raw(tool, **arguments)
         assert status == 200, data
         result = data["result"]
-        payload = json.loads(result["content"][0]["text"])
         if result["isError"]:
-            raise AssertionError(f"{tool}({arguments}) failed: {payload}")
-        return payload
+            raise AssertionError(f"{tool}({arguments}) failed: {result['content'][0]['text']}")
+        return json.loads(result["content"][0]["text"])
+
+
+def _sse_message(raw: str) -> dict:
+    """The one JSON-RPC message out of a `tools/call` stream, ignoring the
+    `: keepalive` comment lines before it."""
+    data_line = next(line for line in raw.splitlines() if line.startswith("data: "))
+    return json.loads(data_line[len("data: "):])
 
 
 def connected(base: str) -> MCPClient:
@@ -243,31 +259,6 @@ def _setup_road_index(view: dict) -> int:
     return view["legal_actions"]["SETUP_ROAD"][0]["index"]
 
 
-def _wait_for_turn_streamed(client: MCPClient, **arguments) -> tuple[str, dict]:
-    """`wait_for_turn` the way a real client receives it: as an SSE stream.
-    Returns the response's Content-Type and the tool payload out of the one
-    `data:` line."""
-    body = {
-        "jsonrpc": "2.0",
-        "id": 999,
-        "method": "tools/call",
-        "params": {"name": "wait_for_turn", "arguments": arguments},
-    }
-    request = urllib.request.Request(
-        client.url,
-        data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json", "Mcp-Session-Id": client.session_id},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        content_type = response.headers.get("Content-Type", "")
-        raw = response.read().decode("utf-8")
-    data_line = next(line for line in raw.splitlines() if line.startswith("data: "))
-    result = json.loads(data_line[len("data: "):])["result"]
-    assert result["isError"] is False, result
-    return content_type, json.loads(result["content"][0]["text"])
-
-
 def test_act_with_an_expect_that_no_longer_matches_is_an_error(live_server):
     """`expect` is the guard against an index that now names a different
     action. It replaced a whole-table `version`, which bumped on every other
@@ -343,33 +334,60 @@ def test_act_no_longer_takes_a_version(live_server):
     assert "bad arguments" in response["result"]["content"][0]["text"]
 
 
-# --- wait_for_turn: streamed as SSE, blocks through a bot's turn --------
+# --- Settling: every acting tool replies at this seat's next move ---------
 
 
-def test_wait_for_turn_streams_and_returns_once_it_is_our_turn_again(live_server):
+def test_act_settles_through_the_bots_turns_to_our_next_move(live_server):
+    """`act` on the move that hands the table to the bots does not come
+    back until it is ours again: the reply is the next decision, not the
+    instant after the action, so a seat never has to decide to wait."""
     server, base = live_server
     client = connected(base)
     data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     assert data["seat"] == 0
 
-    settlement = _setup_settlement_index(data)
-    after_settlement = client.call_tool("act", index=settlement)
+    after_settlement = client.call_tool("act", index=_setup_settlement_index(data))
+    assert after_settlement["your_move"] == "act"  # still our turn: the road
     road = after_settlement["legal_actions"]["SETUP_ROAD"][0]["index"]
     after_road = client.call_tool("act", index=road)
-    assert after_road["legal_actions"] == {}  # a bot (seat 1) is on move now
-    assert after_road["legal_count"] == 0
-    assert after_road["your_move"] == "wait"
-    assert after_road["waiting_on"] == [1]
 
-    content_type, payload = _wait_for_turn_streamed(client)
+    assert after_road["your_move"] == "act"  # round 2 of setup, ours again
+    assert after_road["legal_actions"]["SETUP_SETTLEMENT"]
+    assert after_road["waiting_on"] == []
+    # The log slice covers what happened in between: the bots' placements.
+    assert after_road["log_from"] == max(0, after_settlement["log_total"] - 1)
+    assert after_road["log_total"] > after_settlement["log_total"] + 3
 
-    assert content_type.startswith("text/event-stream")
-    assert payload["legal_actions"]  # our own turn again (round 2 of setup)
-    assert payload["your_move"] == "act"
-    # The streamed reply is trimmed against the session's automatic cursor
-    # like any other: it continues from the last line the `act` reply sent.
-    assert payload["log_from"] == max(0, after_road["log_total"] - 1)
-    assert payload["log_total"] > after_road["log_total"]  # the bots' placements
+
+def test_a_timeout_that_runs_out_replies_with_wait(live_server):
+    """`timeout` (and `_MAX_WAIT`) is the one way a reply says `wait`."""
+    _, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=["heximax", "heximax"])
+    # A second MCP seat that never moves: the table stalls at its placement.
+    idle = connected(base)
+    idle.call_tool("join", code=data["code"], identity="idle", timeout=0)
+    client.call_tool("act", index=_setup_settlement_index(data))
+    road = client.call_tool("state")["legal_actions"]["SETUP_ROAD"][0]["index"]
+    stalled = client.call_tool("act", index=road, timeout=0.2)
+    assert stalled["your_move"] == "wait"
+    assert stalled["legal_actions"] == {}
+    assert stalled["waiting_on"]
+    waited = client.call_tool("wait_for_turn", timeout=0.2)
+    assert waited["your_move"] == "wait"
+
+
+def test_every_tool_call_is_streamed(live_server):
+    _, base = live_server
+    client = connected(base)
+    for name, arguments in (("bots", {}), ("new_game", {"identity": IDENTITY, "opponents": SOLO}), ("state", {})):
+        status, headers, data = client.call_tool_raw(name, **arguments)
+        assert status == 200
+        assert headers.get("Content-Type", "").startswith("text/event-stream"), name
+        assert data["result"]["isError"] is False, name
+    status, headers, data = client.call_tool_raw("act", index=10**6)
+    assert headers.get("Content-Type", "").startswith("text/event-stream")
+    assert data["result"]["isError"] is True  # a ToolError is a message on the same stream
 
 
 # --- Trade-round responses are named dicts, the same as state()/get_table() --
@@ -410,7 +428,7 @@ def test_offer_trade_translates_its_own_response():
     }
     tables = FakeTables({("POST", "/api/games/abcdef/trade/round"): raw})
     data = mcptools.call_tool(
-        tables, _session_for_trade(), "offer_trade", {"give": {"Brick": 1}, "want": {"Wheat": 1}}
+        tables, _session_for_trade(), "offer_trade", {"give": {"Brick": 1}, "want": {"Wheat": 1}, "timeout": 0}
     )
     assert data["trade_round"]["you_give"] == {"Brick": 1}
     assert data["trade_round"]["you_receive"] == {"Wheat": 1}
@@ -426,7 +444,7 @@ def test_answer_trade_translates_its_own_response():
         }
     )
     data = mcptools.call_tool(
-        tables, _session_for_trade(), "answer_trade", {"index": 0, "kind": "accept"}
+        tables, _session_for_trade(), "answer_trade", {"index": 0, "kind": "accept", "timeout": 0}
     )
     assert data["pending"] == []
     assert data["trade_round"] is None
@@ -444,7 +462,7 @@ def test_choose_trade_translates_its_own_response():
             ("POST", "/api/games/abcdef/trade/round/choose"): chosen,
         }
     )
-    data = mcptools.call_tool(tables, _session_for_trade(), "choose_trade", {"decline": True})
+    data = mcptools.call_tool(tables, _session_for_trade(), "choose_trade", {"decline": True, "timeout": 0})
     assert data["trades"] == [{"a": 2, "b": 0, "a_gave": {"Brick": 1}, "a_got": {"Wheat": 1}}]
     assert data["trade_round"] is None
 
@@ -537,7 +555,9 @@ def test_join_defaults_the_seat_name_to_mcp(live_server):
     creator = connected(base)
     created = creator.call_tool("new_game", identity=IDENTITY)
     joiner = connected(base)
-    joined = joiner.call_tool("join", code=created["code"], identity=IDENTITY)
+    # `timeout=0`: the creator is to move, so a settling join would wait.
+    joined = joiner.call_tool("join", code=created["code"], identity=IDENTITY, timeout=0)
+    assert joined["your_move"] == "wait"
     assert server.tables.get(created["code"]).seats[joined["seat"]].name == "mcp"
 
 
@@ -996,9 +1016,8 @@ def test_the_cursor_is_automatic_for_a_caller_that_never_sends_log_after(live_se
     # the transcript holds still for the rest of the test.
     for _ in range(2):
         data = client.call_tool("state")
-        client.call_tool("act", index=next(iter(data["legal_actions"].values()))[0]["index"])
-    _, data = _wait_for_turn_streamed(client)
-    client.call_tool("act", index=_setup_settlement_index(data))
+        data = client.call_tool("act", index=next(iter(data["legal_actions"].values()))[0]["index"])
+    client.call_tool("act", index=_setup_settlement_index(data))  # settled: ours again
 
     first = client.call_tool("state", full_log=True)
     assert first["log_from"] == 0
@@ -1080,7 +1099,7 @@ def test_wait_for_turn_carries_the_summary_too(live_server):
             break
         client.call_tool("act", index=0)
 
-    _, waited = _wait_for_turn_streamed(client)
+    waited = client.call_tool("wait_for_turn")
     assert "summary" in waited
     assert "afford" in waited["summary"]
     assert waited["summary"] == client.call_tool("state", full_log=True)["summary"]
@@ -1095,10 +1114,9 @@ def test_wait_for_turn_returns_the_same_shape_as_state(live_server):
     client = connected(base)
     data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     client.call_tool("act", index=_setup_settlement_index(data))
-    after_road = client.call_tool("act", index=_setup_road_index(client.call_tool("state")))
-    assert after_road["your_move"] == "wait"
+    waited = client.call_tool("act", index=_setup_road_index(client.call_tool("state")))
+    assert waited["your_move"] == "act"  # settled through the bots' placements
 
-    _, waited = _wait_for_turn_streamed(client)
     plain = client.call_tool("state")
     assert set(waited) == set(plain)
     assert isinstance(waited["legal_actions"], dict) and waited["legal_actions"]

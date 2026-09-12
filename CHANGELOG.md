@@ -53,6 +53,15 @@ Changes to the HexSet distribution. The project follows
 
 ### Changed
 
+- **MCP `summary.roads` joins a legal road to the vertex it reaches.**
+  Every legal BUILD_ROAD/SETUP_ROAD edge gets `to` -- the endpoint this
+  seat's own network doesn't already touch, so the vertex the road
+  actually opens up, not the stub it grows from -- that vertex's pips,
+  resources and port, and `settle` (a settlement could go there). `board`
+  drops its `edges` block: an edge id was opaque without the vertex pair
+  anyway, and only the legal ones (which `summary.roads` now names) were
+  ever worth resolving.
+
 - **MCP `legal_actions` drops what `summary` already covers.** Once
   `summary.spots` is non-empty, its SETUP_SETTLEMENT/BUILD_SETTLEMENT/
   BUILD_CITY groups leave `legal_actions`; once `summary.robber` is,

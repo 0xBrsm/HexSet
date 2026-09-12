@@ -255,6 +255,8 @@ def test_new_game_records_the_clients_id_and_kind_mcp(live_server):
 def _num(cell: str):
     if cell == "-":
         return None
+    if cell in ("True", "False"):  # `_cell(bool)` -> str(value); read it back as one
+        return cell == "True"
     try:
         return int(cell)
     except ValueError:
@@ -453,16 +455,17 @@ def test_a_settled_turn_arrives_rolled(live_server):
 
 def test_board_is_incidence_text_and_leaves_the_browsers_layout_alone(live_server):
     """`board()` is text: each hex with its vertices, each vertex with its
-    yield, port and neighbors, the edge ids act()'s road entries name. It
-    is built from a copy -- `GET /api/board` is the table's own `layout`,
-    the dict the browser draws from, and its `x`/`y` must survive."""
+    yield, port and neighbors -- no edge list; a legal edge's destination
+    comes from `summary.roads` instead. It is built from a copy -- `GET
+    /api/board` is the table's own `layout`, the dict the browser draws
+    from, and its `x`/`y` must survive."""
     server, base = live_server
     client = connected(base)
     data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     text = client.call_tool("board")
     assert text.startswith("hexes: id resource pips vertices\n")
     assert "\nvertices: id pips resources port neighbors\n" in text
-    assert "\nedges: id v0-v1\n" in text
+    assert "\nedges:" not in text
     assert "x" not in text.split("\n")[1] and "y" not in text.split("\n")[1]
     layout = server.tables.get(data["code"]).layout
     assert "x" in layout["hexes"][0] and "y" in layout["vertices"][0] and "size" in layout
@@ -474,7 +477,7 @@ def test_board_text_annotates_hexes_and_vertices(live_server):
     client = connected(base)
     client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     text = client.call_tool("board")
-    hex_block, vertex_block, edge_block = text.split("\n\n")[:3]
+    hex_block, vertex_block = text.split("\n\n")[:2]
     hexes = {}
     for line in hex_block.splitlines()[1:]:
         hid, label, pips, verts = line.split()
@@ -487,8 +490,6 @@ def test_board_text_annotates_hexes_and_vertices(live_server):
         assert int(pips) == sum(v[1] for v in touching)
         assert resources == (",".join(sorted({v[0] for v in touching})) or "-")
         assert nbrs and all(int(n) != int(vid) for n in nbrs.split(","))
-    edges = edge_block.splitlines()[1].split()
-    assert edges[0] == "0:0-1" and len(edges) > 60
 
 
 def test_a_timeout_that_runs_out_replies_with_wait(live_server):
@@ -884,6 +885,58 @@ def test_robber_names_whose_buildings_each_hex_hits_and_an_index_per_victim():
     assert robber[1]["hits"] == [] and robber[1]["options"] == [{"index": 2, "victim": None}]
 
 
+ROAD_BOARD = {
+    "vertices": [
+        {"id": 0, "pips": 5, "resources": ["Wood"]},
+        {"id": 1, "pips": 8, "resources": ["Ore", "Wheat"]},
+        {"id": 2, "pips": 3, "resources": ["Sheep"]},
+        {"id": 3, "pips": 6, "resources": ["Brick"]},
+    ],
+    "edges": [
+        {"id": 10, "v0": 0, "v1": 1},
+        {"id": 11, "v0": 1, "v1": 2},
+        {"id": 12, "v0": 2, "v1": 3},
+    ],
+    "ports": [{"vertices": [3], "resource": "Brick", "ratio": 2}],
+}
+
+
+def test_far_endpoint_prefers_the_end_this_seats_network_does_not_touch():
+    neighbors = {0: {1}, 1: {0, 2}, 2: {1, 3}, 3: {2}}
+    # One end already ours: the other is the new ground.
+    assert mcptools._far_endpoint(0, 1, {0}, neighbors) == 1
+    assert mcptools._far_endpoint(1, 0, {0}, neighbors) == 1
+    # Both new, but 1 is a neighbor of the owned vertex 0 and 2 is not:
+    # 2 is the more frontier-ish end.
+    assert mcptools._far_endpoint(1, 2, {0}, neighbors) == 2
+    # Both new and neither adjacent to anything owned: either end, by
+    # convention the second one named.
+    assert mcptools._far_endpoint(2, 3, set(), neighbors) == 3
+
+
+def test_roads_joins_legal_edges_to_the_vertex_they_reach_settle_first():
+    legal = [
+        {"type": "BUILD_ROAD", "a": 10, "b": 0},
+        {"type": "BUILD_ROAD", "a": 11, "b": 0},
+        {"type": "BUILD_ROAD", "a": 12, "b": 0},
+    ]
+    view = {"seat": 0, "vertex_owner": [0, -1, -1, -1], "edge_owner": [-1, -1, -1]}
+    roads = mcptools._roads(legal, view, ROAD_BOARD)
+    by_edge = {r["edge"]: r for r in roads}
+    # Edge 10 (0-1): 0 is ours, so it reaches 1 -- but 1 neighbors our own
+    # vertex 0, so no settlement could go there.
+    assert by_edge[10] == {"index": 0, "edge": 10, "to": 1, "pips": 8, "resources": ["Ore", "Wheat"], "settle": False}
+    # Edge 11 (1-2): both new, but 1 is adjacent to our vertex 0 and 2 is
+    # not -- 2 is the frontier, and it is open two roads clear.
+    assert by_edge[11] == {"index": 1, "edge": 11, "to": 2, "pips": 3, "resources": ["Sheep"], "settle": True}
+    # Edge 12 (2-3): both new, neither adjacent to anything owned -- picks
+    # 3, which carries its port.
+    assert by_edge[12]["to"] == 3 and by_edge[12]["port"] == "Brick 2:1" and by_edge[12]["settle"] is True
+    # Sorted settle first, then pips descending within each: 12 (6 pips)
+    # before 11 (3 pips), both settleable; 10 last, not settleable at all.
+    assert [r["edge"] for r in roads] == [12, 11, 10]
+
+
 def test_race_measures_the_win_the_leader_and_both_awards():
     view = {
         "winning_points": 10,
@@ -986,6 +1039,29 @@ def test_new_game_summary_ranks_the_setup_spots_it_offers(live_server):
     vertex_rows = board.split("vertices: id pips resources port neighbors\n")[1].split("\n\n")[0].splitlines()
     by_id = {int(line.split()[0]): int(line.split()[1]) for line in vertex_rows}
     assert all(by_id[s["vertex"]] == s["pips"] for s in spots)
+    assert "roads" not in summary  # no road is legal yet: still SETUP_SETTLEMENT
+
+
+def test_setup_road_summary_names_the_far_vertex_and_keeps_its_legal_group(live_server):
+    _, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    settlement = rows(data["summary"]["spots"])[0]
+    after = client.call_tool("act", index=settlement["index"])
+    assert after["phase"] == "SETUP_ROAD"
+
+    roads = rows(after["summary"]["roads"])
+    assert roads
+    assert list(after["legal_actions"]) == ["SETUP_ROAD"]  # summary.roads does not drop this group
+    assert {r["index"] for r in roads} == {r["index"] for r in legal(after, "SETUP_ROAD")}
+    # Every first road reaches a vertex one edge from the settlement just
+    # placed, so none of them could take a settlement of their own (the
+    # standard two-road minimum distance) and none names that vertex itself.
+    assert all(not r["settle"] for r in roads)
+    assert all(r["to"] != settlement["vertex"] for r in roads)
+
+    played = client.call_tool("act", index=roads[0]["index"])
+    assert played["phase"] != "SETUP_ROAD"  # settled to the next decision
 
 
 # --- legal_actions drops what summary already covers ----------------------

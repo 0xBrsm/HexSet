@@ -178,9 +178,12 @@ each matched against the freshest `legal_actions` after the previous one
 landed.
 
 `board` replies as text, not JSON: an incidence encoding with one line per
-hex (id, resource, pips, vertex ids), one per vertex (id, pips, resources,
-port, neighboring vertex ids) and the edge ids as `id:v0-v1`, with render
-geometry and the constant name tables left out. In every state reply
+hex (id, resource, pips, vertex ids) and one per vertex (id, pips,
+resources, port, neighboring vertex ids), with render geometry and the
+constant name tables left out. There is no edge list: an edge id is opaque
+without knowing the two vertices it joins, and only the legal ones are
+worth resolving -- `state()`'s `summary.roads` names each one's destination
+vertex directly. In every state reply
 `legal_actions`' per-type groups and `summary.spots`/`summary.robber` are
 tables, `(keys):row|row` with comma-separated cells (`-` null, `;`
 between list items; `robber` hits as `seat:Ns+Nc`, options as
@@ -216,15 +219,19 @@ it, what it is short, and whether `legal_actions` offers it now), `race`
 (points and distance to the win, the leading opponent by public points, and
 for each award the caller's count, the holder's, and the count that would
 take it), and, only when such a move is legal, `spots` (every settlement or
-city placement with the vertex's pips, resources and port, best first) and
+city placement with the vertex's pips, resources and port, best first),
 `robber` (each hex the robber may move to, its pips, whose buildings it
-hits, and an `act` index per victim). Every entry names the `legal_actions`
-index it corresponds to. Whichever of `legal_actions`'
+hits, and an `act` index per victim), and `roads` (every legal road, with
+`to` -- the vertex it reaches that isn't already this seat's own network,
+that vertex's pips/resources/port, and `settle`, whether a settlement
+could go there -- best, a settleable end, first). Every entry names the
+`legal_actions` index it corresponds to. Whichever of `legal_actions`'
 SETUP_SETTLEMENT/BUILD_SETTLEMENT/BUILD_CITY or MOVE_ROBBER groups `spots`
 or `robber` covers is then dropped from `legal_actions` -- the same
 entries, indexed the same way, so keeping both said nothing twice;
-`legal_count` still counts them. The state also carries `winning_points`,
-the rule the game is played to.
+`legal_count` still counts them. `summary.roads` does not drop
+BUILD_ROAD/SETUP_ROAD from `legal_actions`; both stay. The state also
+carries `winning_points`, the rule the game is played to.
 
 The transcript `log` is sent incrementally. Each MCP session remembers how
 many lines it has been sent, and every state-returning reply carries only

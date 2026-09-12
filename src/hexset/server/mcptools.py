@@ -264,7 +264,13 @@ def _board_text(board: dict) -> str:
     beats a flat edge list by a wide margin on LLM graph-reasoning tasks.
     One header per table instead of every row repeating its keys is the
     smaller saving on top. First written client-side in the Terra bridge
-    (hexset-terra/terra_bot.py); here so every MCP client gets it."""
+    (hexset-terra/terra_bot.py); here so every MCP client gets it.
+
+    No `edges` block: an edge id is opaque without knowing which two
+    vertices it joins, and the only edges worth resolving are the legal
+    ones -- `summary.roads` (`_roads`) names each legal edge's destination
+    vertex directly, in the reply that has it. Vertex neighbors (below)
+    are enough for the fixed board read once."""
     port_of: dict[int, str] = {}
     for port in board.get("ports") or []:
         for v in port.get("vertices") or []:
@@ -284,9 +290,6 @@ def _board_text(board: dict) -> str:
         resources = ",".join(vertex.get("resources") or []) or "-"
         nbrs = ",".join(map(str, sorted(neighbors.get(vid, ()))))
         lines.append(f"{vid} {vertex.get('pips', 0)} {resources} {port_of.get(vid, '-')} {nbrs}")
-    lines.append("")
-    lines.append("edges: id v0-v1")
-    lines.append(" ".join(f"{e['id']}:{e['v0']}-{e['v1']}" for e in board.get("edges") or []))
     supply = board.get("piece_supply") or {}
     if supply:
         lines.append("")
@@ -636,6 +639,7 @@ _BUILD_ACTION = {
 _MIN_LONGEST_ROAD = 5
 _MIN_LARGEST_ARMY = 3
 _SPOT_ACTIONS = ("SETUP_SETTLEMENT", "BUILD_SETTLEMENT", "BUILD_CITY")
+_ROAD_ACTIONS = ("BUILD_ROAD", "SETUP_ROAD")
 _CITY = 2  # `hexset.state.Building.CITY`
 
 
@@ -720,6 +724,76 @@ def _robber(legal: list[dict], view: dict, board: dict) -> list[dict]:
     return sorted(by_hex.values(), key=lambda e: (-e["pips"], e["hex"]))
 
 
+def _far_endpoint(v0: int, v1: int, own: set[int], neighbors: dict[int, set[int]]) -> int:
+    """Which of an edge's two vertices `_roads` calls its `to`: the one this
+    seat's network doesn't already touch -- the ground a new road actually
+    reaches, not the stub it grows from. When neither end is touched yet
+    (a first road, or one that closes no loop to anything of ours), prefer
+    whichever end isn't itself a neighbor of an owned vertex either, since
+    that one is the newer frontier; failing that distinction too, either
+    end is as good as the other."""
+    v0_own, v1_own = v0 in own, v1 in own
+    if v0_own != v1_own:
+        return v1 if v0_own else v0
+    if not v0_own:  # both new
+        v0_adj = any(n in own for n in neighbors.get(v0, ()))
+        v1_adj = any(n in own for n in neighbors.get(v1, ()))
+        if v0_adj != v1_adj:
+            return v1 if v0_adj else v0
+    return v1  # both already touched, or tied either way: either end
+
+
+def _roads(legal: list[dict], view: dict, board: dict) -> list[dict]:
+    """Every legal road placement, joined to the vertex it actually reaches
+    (`_far_endpoint`): that vertex's pips, resources, port and whether a
+    settlement could go there right now (empty, with no building on any
+    vertex it neighbors -- the standard two-road minimum distance). Best
+    (a settleable end) first, then most pips."""
+    edges = {e["id"]: e for e in board.get("edges") or []}
+    vertices = {v["id"]: v for v in board.get("vertices") or []}
+    ports = {v: p for p in board.get("ports") or [] for v in p.get("vertices") or []}
+    neighbors: dict[int, set[int]] = {}
+    for edge in board.get("edges") or []:
+        neighbors.setdefault(edge["v0"], set()).add(edge["v1"])
+        neighbors.setdefault(edge["v1"], set()).add(edge["v0"])
+    seat = view.get("seat")
+    owner = view.get("vertex_owner") or []
+    own: set[int] = {v for v, s in enumerate(owner) if s == seat}
+    for edge_id, s in enumerate(view.get("edge_owner") or []):
+        if s == seat:
+            edge = edges.get(edge_id)
+            if edge is not None:
+                own.add(edge["v0"])
+                own.add(edge["v1"])
+
+    def built_on(vid: int) -> bool:
+        return vid < len(owner) and owner[vid] >= 0
+
+    roads = []
+    for index, action in enumerate(legal):
+        if action.get("type") not in _ROAD_ACTIONS:
+            continue
+        edge_id = action.get("a")
+        edge = edges.get(edge_id, {})
+        v0, v1 = edge.get("v0"), edge.get("v1")
+        to = _far_endpoint(v0, v1, own, neighbors) if v0 is not None and v1 is not None else v1
+        vertex = vertices.get(to, {})
+        row: dict = {
+            "index": index,
+            "edge": edge_id,
+            "to": to,
+            "pips": vertex.get("pips", 0),
+            "resources": vertex.get("resources", []),
+            "settle": not built_on(to) and not any(built_on(n) for n in neighbors.get(to, ())),
+        }
+        port = ports.get(to)
+        if port is not None:
+            row["port"] = _port_label(port)
+        roads.append(row)
+    roads.sort(key=lambda r: (not r["settle"], -r["pips"], r["index"]))
+    return roads
+
+
 def _race(view: dict, me: dict) -> dict:
     """Where this seat stands: points and the distance to the win (the
     rule itself is the view's top-level `winning_points`), the leading
@@ -755,8 +829,9 @@ def _race(view: dict, me: dict) -> dict:
 
 def _summarize(view: dict, board: dict | None) -> dict:
     """Adds `summary` to a translated view for a seated reader whose hand
-    the view reveals. `spots` and `robber` need the board and appear only
-    when there is a placement or a robber move to make."""
+    the view reveals. `spots`, `robber` and `roads` need the board and
+    appear only when there is a placement, a robber move or a road to
+    make."""
     seat = view.get("seat")
     players = view.get("players") or []
     me = next((p for p in players if p.get("seat") == seat), None) if seat is not None else None
@@ -771,6 +846,9 @@ def _summarize(view: dict, board: dict | None) -> dict:
         robber = _robber(legal, view, board)
         if robber:
             summary["robber"] = robber
+        roads = _roads(legal, view, board)
+        if roads:
+            summary["roads"] = roads
     view["summary"] = summary
     return view
 
@@ -932,6 +1010,12 @@ def _tabulate_summary(summary: dict) -> None:
             for r in robber
         ]
         summary["robber"] = _tabulate(rows)
+    roads = summary.get("roads")
+    if roads:
+        # No `type` to strip: BUILD_ROAD and SETUP_ROAD never overlap
+        # (setup and mid-game are different phases), so a road entry is
+        # never ambiguous about which one placed it the way a spot is.
+        summary["roads"] = _tabulate(roads)
 
 
 # `summary.spots`/`summary.robber` already name every SETUP_SETTLEMENT/
@@ -1308,8 +1392,8 @@ _TOOLS: dict[str, tuple] = {
         "(DESERT/SEA/GOLD pay nothing fixed), pips (2d6 ways to roll its token: 5 "
         "for 6/8 down to 1 for 2/12), vertex ids. `vertices`: id, pips summed and "
         "resources de-duplicated over touching hexes (settlement value), port "
-        "(e.g. Wheat2:1, 3:1, -), neighbor vertex ids a road reaches. `edges`: "
-        "id:v0-v1, the ids act()'s road entries use.",
+        "(e.g. Wheat2:1, 3:1, -), neighbor vertex ids a road reaches. No edge list: "
+        "state()'s `summary.roads` names each legal edge's destination vertex.",
         {"type": "object", "properties": {}},
     ),
     "state": (
@@ -1324,8 +1408,9 @@ _TOOLS: dict[str, tuple] = {
         "`points`, `to_win`, `leader`, per award yours/holder's/`need`. When "
         "offered: `spots` (every legal settlement/city vertex, pips/resources/port, "
         "best first) and `robber` (hexes with pips, `hits` as seat:Ns+Nc, `options` "
-        "as index:victim) -- each then drops its own group from `legal_actions`, "
-        "same indexes, so nothing is said twice.\n"
+        "as index:victim) -- each drops its matching `legal_actions` group (same "
+        "indexes). `summary.roads`, when a road is legal: `to` (vertex it "
+        "reaches), pips/resources/port, `settle` (a settlement could go there).\n"
         "Tables are `(keys):row|row`, cells comma-separated, `-` null, `;` in a "
         "list. `legal_actions`: per type, `index` for act() plus `edge` (roads), "
         "`vertex` (settlement/city), `hex`+`victim` (MOVE_ROBBER), `give`/`want` "

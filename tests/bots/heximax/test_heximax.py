@@ -614,3 +614,52 @@ def test_opponent_estimates_keep_exact_progress_sampling_reference():
     received = one_for_one(0, 4)
     expected = bot._delta_reference(view, 0, 1, tuple(-n for n in received), 0, bot._rank)
     assert bot.estimate_many(view, [(1, received)]) == pytest.approx([expected])
+
+
+
+def test_k_is_a_cap_on_distinct_worlds_not_a_quota_of_searches():
+    """A belief with every card pinned is one world however large `k` is,
+    and the weights of the distinct worlds always sum to one."""
+    import random
+
+    from hexset.board.board import random_base_board
+    from hexset.bots.heximax import Heximax, HonestEvaluator
+    from hexset.game import Phase, is_over, start, to_move
+    from hexset.play import step_randomly
+    from hexset.view import View
+
+    rng = random.Random(5)
+    board = random_base_board(rng)
+    game = start(board, 2, rng)            # a duel: the ledger sees every flow
+    for _ in range(60):
+        if is_over(game):
+            break
+        step_randomly(game, rng)
+    seat = to_move(game)
+    assert sum(View.from_game(game, seat).unknown) == 0, "a duel's belief should be pinned"
+    bot = Heximax(HonestEvaluator(board), k=100, rng=random.Random(0))
+    worlds = bot.worlds(game, seat)
+    assert len(worlds) == 1 and bot.world_weights == [1.0]
+
+    rng = random.Random(11)
+    board = random_base_board(rng)
+    game = start(board, 4, rng)
+    hidden = None
+    for step in range(600):
+        if is_over(game):
+            break
+        seat = to_move(game)
+        if step > 40 and game.phase is Phase.MAIN and sum(View.from_game(game, seat).unknown) >= 3:
+            hidden = seat
+            break
+        step_randomly(game, rng)
+    assert hidden is not None, "no four-seat position with hidden cards reached"
+    bot = Heximax(HonestEvaluator(board), k=50, rng=random.Random(0))
+    worlds = bot.worlds(game, hidden)
+    assert 1 <= len(worlds) <= 50 and len(worlds) == len(bot.world_weights)
+    assert abs(sum(bot.world_weights) - 1.0) < 1e-9
+    assert all(w >= 1 / 50 - 1e-12 for w in bot.world_weights)
+    # Distinct means distinct: no two worlds share their hidden holdings.
+    from hexset.bots.determinized import holdings_signature
+    keys = [holdings_signature(w.state(hidden, hidden=False), hidden) for w in worlds]
+    assert len(set(keys)) == len(keys)

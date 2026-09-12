@@ -416,11 +416,6 @@ def _discard(
     return _settle(tables, session, raw, timeout, log_after, full_log)
 
 
-def _undo(tables: Tables, session: Session, timeout: float | None = None) -> Iterator:
-    _seated(session)
-    return _settle(tables, session, _call_ok(tables, session, "POST", "/api/undo"), timeout)
-
-
 def _leave_game(tables: Tables, session: Session) -> dict:
     _seated(session)
     return _reply(session, _call_ok(tables, session, "POST", "/api/leave"))
@@ -957,7 +952,15 @@ def _compact_board(view: dict) -> dict:
 # `version`: the whole-table counter no MCP tool takes (see `_expect_check`).
 # `claimed_seats`: `players[].kind != "empty"`. `waiting_for`/`trade_wait`:
 # `_your_move` has already folded them into `waiting_on`.
-_DEAD = ("version", "claimed_seats", "waiting_for", "trade_wait")
+# `to_move`: folded into `your_move`/`waiting_on` too. `awaiting_confirm`: the
+# browser's setup-turn hold, which an MCP seat never sees (its road settles
+# straight on). `can_undo`: the undo tool is not offered here -- a session
+# convenience for a person, and a settling reply leaves no moment for it.
+_DEAD = ("version", "claimed_seats", "waiting_for", "trade_wait", "to_move", "awaiting_confirm", "can_undo")
+# Dropped only while trivially so: a seat left/locked, a winner, a trade this
+# turn are worth a line when they exist and nothing when they don't.
+_DEAD_WHEN_EMPTY = ("locked", "trades")
+_DEAD_WHEN_FALSE = ("winner",)
 # Per-player fields dropped the same way: `last_roll` is stale off the
 # roller, `longest_road`/`largest_army` repeat `summary.race`'s `held`.
 _PLAYER_DEAD = ("last_roll", "longest_road", "largest_army")
@@ -981,6 +984,11 @@ def _prune(view: dict) -> dict:
     say nobody owes anything."""
     for key in _DEAD:
         view.pop(key, None)
+    for key in _DEAD_WHEN_EMPTY + _DEAD_WHEN_FALSE:
+        if key in view and not view[key]:
+            del view[key]
+    if view.get("started"):
+        del view["started"]  # only an unstarted table (seats still open) is worth saying
     if not any(view.get("discard_quota") or []):
         view.pop("discard_quota", None)
     kinds = {s.get("seat"): s.get("kind") for s in view.pop("seats", None) or []}
@@ -1058,9 +1066,8 @@ def _tabulate_summary(summary: dict) -> None:
 # BUILD_SETTLEMENT/BUILD_CITY or MOVE_ROBBER entry, joined to the vertex or
 # hex it targets -- the bare group in `legal_actions` told a reader nothing
 # `summary` didn't, once `summary` existed at all. Dropped here rather than
-# left for the reader to notice are the same thing twice; `legal_count`
-# stays the flat total regardless, and `act()`/`_expect_check` still resolve
-# against the raw list, never this grouped one.
+# left for the reader to notice are the same thing twice; `act()`/
+# `_expect_check` still resolve against the raw list, never this grouped one.
 def _drop_superseded(grouped: dict[str, list[dict]], summary: dict) -> None:
     if summary.get("spots"):
         for kind in _SPOT_ACTIONS:
@@ -1090,7 +1097,6 @@ def _compact(view: dict, session: Session) -> dict:
     the flat list, the dense arrays or the fields `_prune` drops
     (`_your_move`, `_summarize`) has run."""
     legal = view.get("legal_actions") or []
-    view["legal_count"] = len(legal)
     grouped = _group_actions(legal, len(view.get("players") or []))
     _drop_superseded(grouped, view.get("summary") or {})
     view["legal_actions"] = {kind: _tabulate(rows) for kind, rows in grouped.items()}
@@ -1309,18 +1315,43 @@ def _poll_raw(tables: Tables, session: Session, after: int | None = None, wait: 
 _FORCED_CAP = 8
 
 
+def _settled_round(raw: dict) -> dict | None:
+    """The `.../trade/round/choose` body for an own round nobody is still
+    to answer and nothing is left to decide -- `{"decline": true}` for all
+    passes, the one accept for a lone accept -- or `None`."""
+    trade_round = raw.get("trade_round")
+    if not trade_round or trade_round.get("awaiting"):
+        return None
+    responses = trade_round.get("responses") or []
+    kinds = [r.get("kind") for r in responses]
+    if all(k == "pass" for k in kinds):
+        return {"decline": True}
+    if kinds.count("accept") == 1 and "counter" not in kinds:
+        accept = next(r for r in responses if r.get("kind") == "accept")
+        return {"seat": accept["seat"], "bundle": accept["bundle"]}
+    return None
+
+
 def _forced(tables: Tables, session: Session, raw: dict) -> dict:
     """Plays what no seat would decide differently, so no reply asks: a
     lone `ROLL` (with a Knight also legal the seat chooses, so that is
     left alone), and a `pass` on an offer while the hand is empty. Only
     then: an offer the hand cannot *cover* is still one it can counter --
     the first game's one counter against such an offer was taken -- so
-    those reach the seat, flagged `can_accept: false` on `pending`.
+    those reach the seat, flagged `can_accept: false` on `pending`. And
+    the seat's own offer once everyone has answered, when there is nothing
+    to choose: every answer a pass closes the round; exactly one accept as
+    offered and no counter executes it (the seat already agreed to those
+    terms by offering). Any counter, or two accepts, is the seat's call.
     Returns the latest raw view."""
     for _ in range(_FORCED_CAP):
         legal = raw.get("legal_actions") or []
         if len(legal) == 1 and legal[0].get("type") == "ROLL":
             raw = _call_ok(tables, session, "POST", "/api/action", {"action": legal[0]})
+            continue
+        settled = _settled_round(raw)
+        if settled is not None and session.code:
+            raw = _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/choose", settled)
             continue
         me = next((p for p in raw.get("players") or [] if p.get("seat") == raw.get("seat")), None)
         hand = None if me is None else me.get("hand")
@@ -1466,8 +1497,8 @@ _TOOLS: dict[str, tuple] = {
     "state": (
         _state,
         "Game state; every playing tool replies with it at your next decision. "
-        "Forced moves are played for you: a lone ROLL, and passing offers while "
-        "your hand is empty.\n"
+        "Played for you: a lone ROLL; passing offers while your hand is empty; "
+        "your own offer when all pass or exactly one accepts as offered.\n"
         "`your_move`: `act`, `discard`->discard(cards), `answer_trade` or "
         "`choose_trade`: the tool; `game_over`; `wait` only after `timeout` or "
         "while seats open (`waiting_on`; wait_for_turn()).\n"
@@ -1537,23 +1568,11 @@ _TOOLS: dict[str, tuple] = {
             "required": ["cards"],
         },
     ),
-    "undo": (
-        _undo,
-        "Undo your own last build, bank trade, Road Building or Knight while "
-        "`can_undo` is true (a Knight until its robber move is made). Nothing else "
-        "can be undone.",
-        {"type": "object", "properties": {"timeout": _WAIT_ARGS["timeout"]}},
-    ),
     "leave_game": (
         _leave_game,
         "Give up your seat for good; pieces and hand stay, your turns are skipped. "
         "Refuses while a trade round involving you is open.",
         {"type": "object", "properties": {}},
-    ),
-    "get_table": (
-        _state,
-        "Same as state().",
-        {"type": "object", "properties": {**_CURSOR_ARGS}},
     ),
     "offer_trade": (
         _offer_trade,

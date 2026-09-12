@@ -146,8 +146,10 @@ then one `message` event carrying the JSON-RPC response. `initialize`,
 `tools/list` and `ping` are plain JSON responses.
 
 Available tools are `bots`, `new_game`, `join`, `resume_game`, `board`,
-`state`, `wait_for_turn`, `act`, `discard`, `undo`, `leave_game`,
-`get_table`, `offer_trade`, `answer_trade`, and `choose_trade`. `bots` lists
+`state`, `wait_for_turn`, `act`, `discard`, `leave_game`, `offer_trade`,
+`answer_trade`, and `choose_trade`. There is no `undo` (the HTTP API's is a
+convenience for a person at the browser; a settling reply leaves no moment
+for it) and `can_undo` is not carried. `bots` lists
 the opponent names `new_game`'s `opponents` accepts (`GET /api/models`).
 
 `new_game` and `join` require an `identity` string naming the caller (an
@@ -159,7 +161,7 @@ The identity is whatever string the caller supplies; nothing verifies it.
 
 `act(index)` submits one entry from the latest `state().legal_actions`.
 Ending a turn requires `END_TURN`. Every acting tool (`new_game`, `join`,
-`resume_game`, `act`, `discard`, `undo`, `offer_trade`, `answer_trade`,
+`resume_game`, `act`, `discard`, `offer_trade`, `answer_trade`,
 `choose_trade`) replies at the caller's next decision, not the instant
 after the action: it blocks until `your_move` is something other than
 `wait`, for at most `timeout` seconds (default and cap 600; `0` replies at
@@ -169,6 +171,10 @@ than handed back to decide: a `ROLL` that is the only legal action (a
 seat holding a Knight still chooses), and a `pass` on a broadcast offer
 only while the seat's hand is empty -- an offer the hand cannot cover can
 still be countered, and each `pending` entry says so with `can_accept`.
+The seat's own trade round is settled the same way once everyone has
+answered and nothing is left to choose: all passes close it, exactly one
+accept as offered with no counter executes it; any counter, or two
+accepts, comes back as `your_move: choose_trade`.
 
 `discard(cards)` plays a whole seven's worth of discards in one call:
 `cards` is a resource -> count dictionary that must total exactly this
@@ -191,12 +197,11 @@ between list items; `robber` hits as `seat:Ns+Nc`, options as
 `index:victim`), and JSON is written without spaces. The MCP layer
 annotates a copy of the table's layout; the HTTP `GET /api/board` the
 browser draws from is untouched. `wait_for_turn` does only the waiting, and is needed
-only after a reply whose `timeout` ran out. `state`, `get_table`, `board`,
-`bots` and `leave_game` reply immediately. In MCP replies `legal_actions` is grouped
+only after a reply whose `timeout` ran out. `state`, `board`, `bots` and
+`leave_game` reply immediately. In MCP replies `legal_actions` is grouped
 by action type; each entry carries the flat `index` to act on and a named
 operand (`edge`, `vertex`, `hex` and `victim`, or the resource names for
-bank trades, discards, Monopoly and Year of Plenty), and `legal_count` is
-the flat total. Board occupancy comes as `buildings` (vertex, seat, kind)
+bank trades, discards, Monopoly and Year of Plenty). Board occupancy comes as `buildings` (vertex, seat, kind)
 and `roads` (edge ids, one list per seat) rather than the HTTP API's dense
 `vertex_owner`, `vertex_building` and `edge_owner` arrays. MCP replies also
 drop the HTTP view's `version`, `claimed_seats`, `waiting_for`, `trade_wait`
@@ -209,8 +214,7 @@ when `legal_actions` itself is empty (every build would read `false` for
 the same reason). `trade_ratios` is sent only when it differs from the
 last reply this session was sent -- always on a new or reclaimed seat.
 
-`get_table` returns the same reply as `state`. Every reply carries
-`can_offer`, true exactly when `offer_trade` would be accepted: this
+Every reply carries `can_offer`, true exactly when `offer_trade` would be accepted: this
 seat's own turn, `Phase.MAIN`, at least one legal action, and no trade
 round of its own already open (`TableApi.open_round`'s preconditions,
 `hexset/server/api.py`, plus the one a caller can't read off those alone).
@@ -239,8 +243,8 @@ could go there -- best, a settleable end, first). Every entry names the
 `legal_actions` index it corresponds to. Whichever of `legal_actions`'
 SETUP_SETTLEMENT/BUILD_SETTLEMENT/BUILD_CITY or MOVE_ROBBER groups `spots`
 or `robber` covers is then dropped from `legal_actions` -- the same
-entries, indexed the same way, so keeping both said nothing twice;
-`legal_count` still counts them. `summary.roads` does not drop
+entries, indexed the same way, so keeping both said nothing twice.
+`summary.roads` does not drop
 BUILD_ROAD/SETUP_ROAD from `legal_actions`; both stay. The state also
 carries `winning_points`, the rule the game is played to.
 
@@ -258,8 +262,10 @@ Every state-returning tool answers with `your_move`: `act`, `discard`,
 caller now, `wait` means none does (only after a `timeout` ran out, or
 while seats are still open) and `waiting_on` lists the seats it is waiting
 for, and `game_over` is the end. It is derived from `legal_actions`,
-`pending`, `trade_round`, `discard_quota` and `to_move`, which remain
-available, and from `waiting_for` and `trade_wait`, which do not.
+`pending`, `trade_round` and `discard_quota`, which remain available, and
+from `to_move`, `waiting_for` and `trade_wait`, which do not. Also dropped
+from every reply: `awaiting_confirm` (the browser's setup-turn hold), and
+`locked`, `trades` and `winner` while empty or null, `started` while true.
 
 `wait_for_turn(timeout=...)` waits until `your_move` is anything but
 `wait`: legal actions, a pending offer, a fully answered round, or game

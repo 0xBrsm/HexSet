@@ -443,6 +443,44 @@ def test_forced_leaves_an_uncoverable_offer_to_the_seat_that_can_still_counter()
     assert view["pending"] == [{"actor": 0, "you_give": {"Wood": 2}, "you_receive": {"Ore": 1}, "can_accept": False}]
 
 
+def test_forced_settles_an_own_round_with_nothing_to_choose():
+    bundle = [1, 0, 0, 0, -1]
+    def view(responses):
+        return {"seat": 1, "players": [{"seat": 1, "hand": {"Wood": 1}}], "legal_actions": [{"type": "END_TURN"}],
+                "trade_round": {"offer": {"actor": 1, "bundle": bundle}, "responses": responses, "awaiting": []}}
+    all_pass = view([{"seat": 0, "kind": "pass", "bundle": None}, {"seat": 2, "kind": "pass", "bundle": None}])
+    assert mcptools._settled_round(all_pass) == {"decline": True}
+    one_accept = view([{"seat": 0, "kind": "accept", "bundle": bundle}, {"seat": 2, "kind": "pass", "bundle": None}])
+    assert mcptools._settled_round(one_accept) == {"seat": 0, "bundle": bundle}
+    with_counter = view([{"seat": 0, "kind": "accept", "bundle": bundle}, {"seat": 2, "kind": "counter", "bundle": [2, 0, 0, 0, -1]}])
+    assert mcptools._settled_round(with_counter) is None
+    two_accepts = view([{"seat": 0, "kind": "accept", "bundle": bundle}, {"seat": 2, "kind": "accept", "bundle": bundle}])
+    assert mcptools._settled_round(two_accepts) is None
+    still_waiting = view([{"seat": 0, "kind": "pass", "bundle": None}]); still_waiting["trade_round"]["awaiting"] = [2]
+    assert mcptools._settled_round(still_waiting) is None
+
+    closed = {**all_pass, "trade_round": None}
+    tables = RecordingTables({("POST", "/api/games/abcdef/trade/round/choose"): closed})
+    out = mcptools._forced(tables, mcptools.Session(token="tok", code="abcdef"), all_pass)
+    assert tables.calls == [("POST", "/api/games/abcdef/trade/round/choose", {"decline": True})]
+    assert out is closed
+
+
+def test_the_tool_list_has_no_undo_or_get_table():
+    names = {t["name"] for t in mcptools.tool_list()}
+    assert "undo" not in names and "get_table" not in names
+    assert {"state", "act", "discard", "offer_trade", "answer_trade", "choose_trade"} <= names
+
+
+def test_prune_drops_trivial_table_fields():
+    view = {"to_move": 1, "awaiting_confirm": None, "can_undo": False, "locked": [], "trades": [], "winner": None,
+            "started": True, "players": []}
+    pruned = mcptools._prune(view)
+    assert not {"to_move", "awaiting_confirm", "can_undo", "locked", "trades", "winner", "started"} & set(pruned)
+    kept = mcptools._prune({"locked": [2], "trades": [{"a": 0}], "winner": 3, "started": False, "players": []})
+    assert kept == {"locked": [2], "trades": [{"a": 0}], "winner": 3, "started": False, "players": []}
+
+
 def test_forced_leaves_a_roll_alone_when_a_knight_is_also_legal():
     tables = RecordingTables({})
     start = {"seat": 1, "players": [{"seat": 1, "hand": {}}], "legal_actions": [{"type": "PLAY_KNIGHT"}, {"type": "ROLL"}]}
@@ -809,7 +847,7 @@ def test_new_game_reply_is_compact(live_server):
     assert data["roads"] == [[], [], [], []]
     # SETUP_SETTLEMENT itself has left legal_actions: summary.spots covers it.
     assert data["legal_actions"] == {}
-    assert data["legal_count"] == len(rows(data["summary"]["spots"])) > 0
+    assert len(rows(data["summary"]["spots"])) > 0 and "legal_count" not in data
     assert data["summary"]["spots"].startswith("SETUP_SETTLEMENT:(index,vertex,pips,resources")
 
     spot = rows(data["summary"]["spots"])[0]
@@ -1104,7 +1142,7 @@ def test_trade_ratios_is_sent_once_then_omitted_while_unchanged(live_server):
 
 
 def test_new_game_summary_ranks_the_setup_spots_it_offers(live_server):
-    _, base = live_server
+    server, base = live_server
     client = connected(base)
     data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     summary = data["summary"]
@@ -1113,7 +1151,8 @@ def test_new_game_summary_ranks_the_setup_spots_it_offers(live_server):
     assert summary["spots"].startswith("SETUP_SETTLEMENT:(index,vertex,pips,resources")
     spots = rows(summary["spots"])
     assert "spots_omitted" not in summary  # uncapped: every legal vertex is here
-    assert len(spots) == data["legal_count"]
+    raw_legal = server.tables.get(data["code"]).view(data["seat"])["legal_actions"]
+    assert len(spots) == len(raw_legal) > 30
     pips = [s["pips"] for s in spots]
     assert pips == sorted(pips, reverse=True) and pips[0] > 0
     assert list(data["legal_actions"]) == []  # SETUP_SETTLEMENT dropped: spots covers it
@@ -1229,7 +1268,7 @@ def test_move_robber_group_is_dropped_once_summary_robber_covers_it(live_server)
     state = client.call_tool("state")
     assert "MOVE_ROBBER" not in state["legal_actions"]
     assert state["summary"]["robber"]
-    assert state["legal_count"] == len(rows(state["summary"]["robber"]))
+    assert "legal_count" not in state
 
 
 def test_act_and_expect_still_resolve_a_robber_index_from_the_summary(live_server):
@@ -1665,6 +1704,6 @@ def test_wait_for_turn_returns_the_same_shape_as_state(live_server):
     assert set(waited) == set(plain)
     assert isinstance(waited["legal_actions"], dict) and waited["summary"]["spots"]
     assert waited["legal_actions"] == plain["legal_actions"]
-    assert waited["legal_count"] == plain["legal_count"]
+    assert "legal_count" not in waited
     assert waited["buildings"] == plain["buildings"] and waited["roads"] == plain["roads"]
     assert not {"vertex_owner", "vertex_building", "edge_owner"} & set(waited)

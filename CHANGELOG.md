@@ -53,6 +53,15 @@ Changes to the HexSet distribution. The project follows
 
 ### Changed
 
+- **Fewer MCP round-trips that decide nothing.** A seat's own trade round
+  is settled inside the wait once everyone has answered and there is
+  nothing to choose: every answer a pass closes it, exactly one accept as
+  offered with no counter executes it. The `undo` tool and `can_undo` are
+  gone from MCP (a browser convenience; a settling reply leaves no moment
+  for it), as is `get_table` (an alias of `state` since the first pass).
+  Replies drop `to_move`, `awaiting_confirm` and `legal_count`, and
+  `locked`/`trades`/`winner`/`started` while they say nothing.
+
 - **Uncoverable offers reach the MCP seat again.** The auto-pass added
   earlier today fired on any broadcast offer the hand could not cover;
   a seat can still counter such an offer (and did, successfully), so the

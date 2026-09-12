@@ -4,7 +4,11 @@
 Iterative deepening retains the last completed result when the leaf budget
 is exhausted. Each decision node maximizes its mover's objective; chance
 nodes average dice and hidden draws. Opponent actions are expanded from
-sampled beliefs across k determinizations. Setup and discard decisions use
+sampled beliefs across up to `k` determinizations: `k` draws from the
+belief, deduplicated on every seat's hidden holdings and weighted by how
+often each distinct world was drawn -- a cap on distinct worlds searched,
+not a quota of searches. With the ledger pinning most cards the belief is
+usually one world, and `k` then costs nothing. Setup and discard decisions use
 specialized policies. The factory uses a separate exchange evaluator while
 adapting move weights to recent public trading activity.
 """
@@ -47,6 +51,17 @@ EXACT_ROLL_PLIES = 2
 
 class _Exhausted(Exception):
     """The leaf budget ran out mid-search; the caller falls back."""
+
+
+def world_signature(state: GameState, perspective: int) -> tuple:
+    """What makes two sampled worlds the same one: every other seat's hidden
+    holdings. The perspective's own hand is never sampled and the board is
+    shared, so neither can tell two draws apart; the deck's order is a
+    chance stream and is deliberately excluded."""
+    return tuple(
+        (tuple(state.hands[seat]), tuple(state.dev_cards[seat]), tuple(state.new_dev_cards[seat]))
+        for seat in range(state.num_players) if seat != perspective
+    )
 
 
 class _ShiftedBelief:
@@ -294,17 +309,34 @@ class Heximax:
         return self._search(worlds, options, seat)
 
     def worlds(self, game: Game, seat: int) -> list[Game]:
-        """The determinizations this decision is searched in.
+        """The distinct determinizations this decision is searched in.
 
-        Each is an `imagine` copy whose hidden hands and cards are one draw
-        from the belief.
+        `k` draws from the belief; two draws are the same world when every
+        other seat's hidden holdings match (the deck's order is a chance
+        stream, redrawn every sample, and does not distinguish a world). One
+        `imagine` copy is built per distinct world, and `world_weights`
+        carries each one's share of the draws, so a world drawn twice as
+        often counts twice in the root average while being searched once.
+        In a duel, or wherever the ledger has pinned every card, that is one
+        world however large `k` is.
         """
         belief = game.state(seat)
-        out = []
+        drawn: dict[tuple, tuple[GameState, int]] = {}
         for _ in range(self.k):
+            state = belief.sample(self.rng)
+            key = world_signature(state, seat)
+            if key in drawn:
+                drawn[key] = (drawn[key][0], drawn[key][1] + 1)
+            else:
+                drawn[key] = (state, 1)
+        out = []
+        weights = []
+        for state, count in drawn.values():
             world = imagine(game, self.rng, randomize_deck=False)
-            world.set_state(belief.sample(self.rng))
+            world.set_state(state)
             out.append(world)
+            weights.append(count / self.k)
+        self.world_weights = weights
         return out
 
     def root_options(self, game: Game) -> list[Action]:
@@ -385,11 +417,13 @@ class Heximax:
         self, worlds: list[Game], candidates: list[Action], depth: int, seat: int,
         partial: list[tuple[float, Action]],
     ) -> list[list[float]]:
-        share = 1.0 / len(worlds)
+        weights = getattr(self, "world_weights", None)
+        if weights is None or len(weights) != len(worlds):
+            weights = [1.0 / len(worlds)] * len(worlds)
         totals = []
         for action in candidates:
             total = [0.0] * worlds[0].num_players
-            for world in worlds:
+            for world, share in zip(worlds, weights):
                 vector = self._after(world, action, depth, seat)
                 for p, value in enumerate(vector):
                     total[p] += share * value

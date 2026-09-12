@@ -6,6 +6,20 @@ Changes to the HexSet distribution. The project follows
 
 ## Unreleased
 
+### Changed
+
+- **Heximax's `k` is a cap on distinct worlds, not a quota of searches.**
+  `Heximax.worlds` draws `k` samples from the belief, deduplicates them on
+  every other seat's hidden holdings (`world_signature`; the deck's order is
+  a chance stream and does not distinguish a world) and weights each distinct
+  world by its share of the draws in the root average (`world_weights`). A
+  belief the ledger has pinned to one world -- every duel, and most
+  four-seat positions -- is searched once however large `k` is. Before, `k`
+  identical worlds shared one leaf budget, and at `k=100` the budget was gone
+  after the first few root options: heximax then chose among those, and lost
+  eleven of eleven 1v1 games against colonist's bot on 2026-09-12 building
+  almost nothing.
+
 ### Added
 
 - **Hidden hands and cards in `GameState`.** A state written by a seat rather

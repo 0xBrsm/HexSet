@@ -485,6 +485,7 @@ def test_prune_drops_trivial_table_fields():
     assert not {"to_move", "awaiting_confirm", "can_undo", "locked", "trades", "winner", "started"} & set(pruned)
     kept = mcptools._prune({"locked": [2], "trades": [{"a": 0}], "winner": 3, "started": False, "players": []})
     assert kept == {"locked": [2], "trades": [{"a": 0}], "winner": 3, "started": False, "players": []}
+    assert mcptools._prune({"winner": 0, "players": []})["winner"] == 0  # seat 0 is a winner, not nothing
 
 
 def test_forced_leaves_a_roll_alone_when_a_knight_is_also_legal():

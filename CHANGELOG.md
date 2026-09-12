@@ -53,6 +53,10 @@ Changes to the HexSet distribution. The project follows
 
 ### Changed
 
+- **MCP replies kept `winner` when seat 0 won.** The trim that drops a null
+  `winner` dropped seat 0 as well; caught by the first Terra game, which
+  seat 0 won.
+
 - **MCP `game_over` reply reports `usage`.** `calls` and `bytes`, what this
   session was sent over the game as the client received it, counted
   server-side so a seat's payload cost can be compared across clients

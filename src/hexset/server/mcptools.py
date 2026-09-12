@@ -985,7 +985,7 @@ _DEAD = ("version", "claimed_seats", "waiting_for", "trade_wait", "to_move", "aw
 # Dropped only while trivially so: a seat left/locked, a winner, a trade this
 # turn are worth a line when they exist and nothing when they don't.
 _DEAD_WHEN_EMPTY = ("locked", "trades")
-_DEAD_WHEN_FALSE = ("winner",)
+_DEAD_WHEN_NONE = ("winner",)  # seat 0 wins too: only null is nothing to say
 # Per-player fields dropped the same way: `last_roll` is stale off the
 # roller, `longest_road`/`largest_army` repeat `summary.race`'s `held`.
 _PLAYER_DEAD = ("last_roll", "longest_road", "largest_army")
@@ -1009,8 +1009,11 @@ def _prune(view: dict) -> dict:
     say nobody owes anything."""
     for key in _DEAD:
         view.pop(key, None)
-    for key in _DEAD_WHEN_EMPTY + _DEAD_WHEN_FALSE:
+    for key in _DEAD_WHEN_EMPTY:
         if key in view and not view[key]:
+            del view[key]
+    for key in _DEAD_WHEN_NONE:
+        if key in view and view[key] is None:
             del view[key]
     if view.get("started"):
         del view["started"]  # only an unstarted table (seats still open) is worth saying

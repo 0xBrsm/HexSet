@@ -623,7 +623,7 @@ def test_k_is_a_cap_on_distinct_worlds_not_a_quota_of_searches():
     import random
 
     from hexset.board.board import random_base_board
-    from hexset.bots.heximax import Heximax, HonestEvaluator
+    from hexset.bots.heximax import Heximax, ViewEvaluator
     from hexset.game import Phase, is_over, start, to_move
     from hexset.play import step_randomly
     from hexset.view import View
@@ -637,7 +637,7 @@ def test_k_is_a_cap_on_distinct_worlds_not_a_quota_of_searches():
         step_randomly(game, rng)
     seat = to_move(game)
     assert sum(View.from_game(game, seat).unknown) == 0, "a duel's belief should be pinned"
-    bot = Heximax(HonestEvaluator(board), k=100, rng=random.Random(0))
+    bot = Heximax(ViewEvaluator(board), k=100, rng=random.Random(0))
     worlds = bot.worlds(game, seat)
     assert len(worlds) == 1 and bot.world_weights == [1.0]
 
@@ -654,7 +654,7 @@ def test_k_is_a_cap_on_distinct_worlds_not_a_quota_of_searches():
             break
         step_randomly(game, rng)
     assert hidden is not None, "no four-seat position with hidden cards reached"
-    bot = Heximax(HonestEvaluator(board), k=50, rng=random.Random(0))
+    bot = Heximax(ViewEvaluator(board), k=50, rng=random.Random(0))
     worlds = bot.worlds(game, hidden)
     assert 1 <= len(worlds) <= 50 and len(worlds) == len(bot.world_weights)
     assert abs(sum(bot.world_weights) - 1.0) < 1e-9

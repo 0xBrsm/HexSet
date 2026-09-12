@@ -53,6 +53,13 @@ Changes to the HexSet distribution. The project follows
 
 ### Changed
 
+- **Uncoverable offers reach the MCP seat again.** The auto-pass added
+  earlier today fired on any broadcast offer the hand could not cover;
+  a seat can still counter such an offer (and did, successfully), so the
+  server now passes only while the hand is empty. Each `pending` entry
+  carries `can_accept` so the reader sees at once whether `accept` is
+  possible or only `counter`/`pass`.
+
 - **`summary.spots` says whether a port matches.** A spot on a port carries
   `port_matches`: true for a 3:1, or a 2:1 in a resource the vertex itself
   yields -- the join a reader had to make by hand to value the port.

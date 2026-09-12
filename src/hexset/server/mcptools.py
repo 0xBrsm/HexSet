@@ -443,6 +443,10 @@ def _named(counts: list[int]) -> dict[str, int]:
     return {name: n for name, n in zip(RESOURCES, counts) if n}
 
 
+def _covers(hand: dict, cost: dict) -> bool:
+    return all(hand.get(name, 0) >= n for name, n in cost.items())
+
+
 def _positional(counts: dict | None) -> list[int]:
     counts = counts or {}
     unknown = set(counts) - set(RESOURCES)
@@ -478,10 +482,17 @@ def _translate_trades(raw: dict) -> dict:
         {"a": t["a"], "b": t["b"], "a_gave": _named(t["gave"]), "a_got": _named(t["got"])}
         for t in raw.get("trades") or []
     ]
-    raw["pending"] = [
-        {"actor": t["actor"], **dict(zip(("you_give", "you_receive"), _counterparty_view(t["bundle"])))}
-        for t in raw.get("pending") or []
-    ]
+    me = next((p for p in raw.get("players") or [] if p.get("seat") == raw.get("seat")), None)
+    hand = None if me is None else me.get("hand")
+    pending = []
+    for t in raw.get("pending") or []:
+        you_give, you_receive = _counterparty_view(t["bundle"])
+        entry = {"actor": t["actor"], "you_give": you_give, "you_receive": you_receive}
+        if hand is not None:
+            # Whether `accept` is even possible; a counter always is.
+            entry["can_accept"] = _covers(hand, you_give)
+        pending.append(entry)
+    raw["pending"] = pending
     trade_round = raw.get("trade_round")
     if trade_round is not None:
         you_give, you_receive = _actor_view(trade_round["offer"]["bundle"])
@@ -1292,10 +1303,6 @@ def _poll_raw(tables: Tables, session: Session, after: int | None = None, wait: 
     return _call_ok(tables, session, "GET", f"/api/state{query}")
 
 
-def _covers(hand: dict, cost: dict) -> bool:
-    return all(hand.get(name, 0) >= n for name, n in cost.items())
-
-
 # The most forced moves one `_forced` pass plays before handing the view
 # over regardless -- a bound, not a budget; a turn has at most one roll
 # and one open offer per other seat.
@@ -1305,9 +1312,11 @@ _FORCED_CAP = 8
 def _forced(tables: Tables, session: Session, raw: dict) -> dict:
     """Plays what no seat would decide differently, so no reply asks: a
     lone `ROLL` (with a Knight also legal the seat chooses, so that is
-    left alone), and a `pass` on any offer this hand cannot cover -- the
-    first game through these tools spent one round-trip per bot turn
-    passing on those. Returns the latest raw view."""
+    left alone), and a `pass` on an offer while the hand is empty. Only
+    then: an offer the hand cannot *cover* is still one it can counter --
+    the first game's one counter against such an offer was taken -- so
+    those reach the seat, flagged `can_accept: false` on `pending`.
+    Returns the latest raw view."""
     for _ in range(_FORCED_CAP):
         legal = raw.get("legal_actions") or []
         if len(legal) == 1 and legal[0].get("type") == "ROLL":
@@ -1315,16 +1324,10 @@ def _forced(tables: Tables, session: Session, raw: dict) -> dict:
             continue
         me = next((p for p in raw.get("players") or [] if p.get("seat") == raw.get("seat")), None)
         hand = None if me is None else me.get("hand")
-        unaffordable = next(
-            (
-                offer
-                for offer in raw.get("pending") or []
-                if hand is not None and not _covers(hand, _counterparty_view(offer["bundle"])[0])
-            ),
-            None,
-        )
-        if unaffordable is not None and session.code:
-            body = {"actor": unaffordable["actor"], "received": unaffordable["bundle"], "kind": "pass"}
+        pending = raw.get("pending") or []
+        unanswerable = pending[0] if pending and hand is not None and not any(hand.values()) else None
+        if unanswerable is not None and session.code:
+            body = {"actor": unanswerable["actor"], "received": unanswerable["bundle"], "kind": "pass"}
             raw = _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/answer", body)
             continue
         return raw
@@ -1463,8 +1466,8 @@ _TOOLS: dict[str, tuple] = {
     "state": (
         _state,
         "Game state; every playing tool replies with it at your next decision. "
-        "Forced moves are played for you: a lone ROLL, and passing offers your "
-        "hand can't cover.\n"
+        "Forced moves are played for you: a lone ROLL, and passing offers while "
+        "your hand is empty.\n"
         "`your_move`: `act`, `discard`->discard(cards), `answer_trade` or "
         "`choose_trade`: the tool; `game_over`; `wait` only after `timeout` or "
         "while seats open (`waiting_on`; wait_for_turn()).\n"
@@ -1485,7 +1488,8 @@ _TOOLS: dict[str, tuple] = {
         "`bank`, `robber` hex, `trade_ratios` (only when changed; always on a "
         "new/resumed seat). Resource dicts omit zeros.\n"
         "`can_offer`: true if offer_trade() would be accepted now. `pending`: "
-        "offers to you (`actor`, `you_give`, `you_receive`) -> answer_trade(index). "
+        "offers to you (`actor`, `you_give`, `you_receive`, `can_accept`; countering "
+        "is always possible) -> answer_trade(index). "
         "`trade_round`: your open offer's `responses` (`seat`, `kind`, "
         "`you_would_give`/`you_would_receive`) -> choose_trade(index). `trades`: "
         "done this turn.\n"

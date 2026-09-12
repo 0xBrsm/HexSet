@@ -408,28 +408,39 @@ def test_act_settles_through_the_bots_turns_to_our_next_move(live_server):
     assert after_road["log_total"] > after_settlement["log_total"] + 3
 
 
-def test_forced_rolls_a_lone_roll_and_passes_an_unaffordable_offer():
-    hand = {"Wood": 1, "Brick": 0, "Sheep": 0, "Wheat": 0, "Ore": 0}
-    rolled = {"seat": 1, "players": [{"seat": 1, "hand": hand}], "legal_actions": [], "pending": [
-        # Signed towards the actor: positive is what the actor gets, i.e. what we give.
-        {"actor": 0, "bundle": [2, 0, 0, 0, -1]},  # actor gives 1 Ore, wants 2 Wood: unaffordable
-        {"actor": 2, "bundle": [1, 0, 0, 0, -1]},  # actor gives 1 Ore, wants 1 Wood: affordable
-    ]}
-    passed = {**rolled, "pending": rolled["pending"][1:]}
+def test_forced_rolls_a_lone_roll_and_passes_only_with_an_empty_hand():
+    empty = {"Wood": 0, "Brick": 0, "Sheep": 0, "Wheat": 0, "Ore": 0}
+    # Signed towards the actor: positive is what the actor gets, i.e. what we give.
+    offers = [{"actor": 0, "bundle": [2, 0, 0, 0, -1]}, {"actor": 2, "bundle": [1, 0, 0, 0, -1]}]
+    rolled = {"seat": 1, "players": [{"seat": 1, "hand": empty}], "legal_actions": [], "pending": offers}
+    passed_one = {**rolled, "pending": offers[1:]}
+    passed_both = {**rolled, "pending": []}
     tables = RecordingTables({
         ("POST", "/api/action"): rolled,
-        ("POST", "/api/games/abcdef/trade/round/answer"): passed,
+        ("POST", "/api/games/abcdef/trade/round/answer"): [passed_one, passed_both],
     })
     session = mcptools.Session(token="tok", code="abcdef")
-    start = {"seat": 1, "players": [{"seat": 1, "hand": hand}], "legal_actions": [{"type": "ROLL", "a": 0, "b": 0}]}
+    start = {"seat": 1, "players": [{"seat": 1, "hand": empty}], "legal_actions": [{"type": "ROLL", "a": 0, "b": 0}]}
     view = mcptools._forced(tables, session, start)
     assert [(m, p) for m, p, _ in tables.calls] == [
         ("POST", "/api/action"),
         ("POST", "/api/games/abcdef/trade/round/answer"),
+        ("POST", "/api/games/abcdef/trade/round/answer"),
     ]
     assert tables.calls[0][2] == {"action": {"type": "ROLL", "a": 0, "b": 0}}
     assert tables.calls[1][2] == {"actor": 0, "received": [2, 0, 0, 0, -1], "kind": "pass"}
-    assert view["pending"] == [{"actor": 2, "bundle": [1, 0, 0, 0, -1]}]  # left for the seat to answer
+    assert view["pending"] == []
+
+
+def test_forced_leaves_an_uncoverable_offer_to_the_seat_that_can_still_counter():
+    hand = {"Wood": 1, "Brick": 0, "Sheep": 0, "Wheat": 0, "Ore": 0}
+    start = {"seat": 1, "players": [{"seat": 1, "hand": hand}], "legal_actions": [],
+             "pending": [{"actor": 0, "bundle": [2, 0, 0, 0, -1]}]}  # wants 2 Wood; we hold 1
+    tables = RecordingTables({})
+    assert mcptools._forced(tables, mcptools.Session(token="tok", code="abcdef"), start) is start
+    assert tables.calls == []
+    view = mcptools._translate(dict(start))
+    assert view["pending"] == [{"actor": 0, "you_give": {"Wood": 2}, "you_receive": {"Ore": 1}, "can_accept": False}]
 
 
 def test_forced_leaves_a_roll_alone_when_a_knight_is_also_legal():

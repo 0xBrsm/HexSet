@@ -166,8 +166,9 @@ after the action: it blocks until `your_move` is something other than
 once), so a seat that ends its turn gets back the table as it stands when
 play returns to it. Two forced moves are played inside that wait rather
 than handed back to decide: a `ROLL` that is the only legal action (a
-seat holding a Knight still chooses), and a `pass` on any broadcast offer
-the seat's hand cannot cover.
+seat holding a Knight still chooses), and a `pass` on a broadcast offer
+only while the seat's hand is empty -- an offer the hand cannot cover can
+still be countered, and each `pending` entry says so with `can_accept`.
 
 `discard(cards)` plays a whole seven's worth of discards in one call:
 `cards` is a resource -> count dictionary that must total exactly this

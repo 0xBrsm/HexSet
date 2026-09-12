@@ -143,3 +143,25 @@ def test_invalid_heximax_spec_is_rejected(spec):
     from hexset.arena import lineup_from_names
     with pytest.raises(ValueError):
         lineup_from_names([spec])
+
+
+def test_the_tables_bargaining_rule_reaches_every_game(monkeypatch):
+    """`compete(trade_mode=, max_trades=)` is handed to `play_game` for each
+    game: `"auto"` with `-1` is the unbounded clearing house studies before
+    0.50 were recorded under, and a policy trained against it is read in
+    that environment only if the rule travels with the job."""
+    import hexset.arena as arena
+
+    seen = []
+    original = arena.play_game
+
+    def spy(game, bots, **kwargs):
+        seen.append((kwargs.get("trade_mode"), kwargs.get("max_trades")))
+        return original(game, bots, **kwargs)
+
+    monkeypatch.setattr(arena, "play_game", spy)
+    compete(lineup_from_names(["random"] * 2), 2, workers=1, trade_mode="auto", max_trades=-1)
+    assert seen == [("auto", -1)] * 2
+    seen.clear()
+    compete(lineup_from_names(["random"] * 2), 2, workers=1)
+    assert seen == [("round", 1)] * 2

@@ -4,6 +4,19 @@ Changes to the HexSet distribution. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## Unreleased
+
+### Added
+
+- **A duel can be played under the automatic clearing house.**
+  `hexset.arena.compete` takes `trade_mode`/`max_trades` and hands them to
+  every game it plays, and `hexset.bench.duel` exposes them as
+  `--trade-mode {round,auto}` and `--max-trades` (`-1` for the unbounded
+  house studies before 0.50 were recorded under), recording both in the
+  verdict -- so a policy trained against the clearing house can be read in
+  its native environment.
+
+
 ## 0.52.0
 
 ### Changed

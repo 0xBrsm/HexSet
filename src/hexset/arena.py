@@ -446,7 +446,7 @@ class Outcome:
 
 
 def _play_one(
-    job: tuple[tuple[Entrant, ...], int, int, int, bool, bool],
+    job: tuple[tuple[Entrant, ...], int, int, int, bool, bool, str, int],
 ) -> Outcome:
     """Play game `index` and return its `Outcome`.
 
@@ -460,7 +460,7 @@ def _play_one(
     Every random stream is derived from the seed and the game index, so a game
     plays identically whichever worker draws it and however many there are.
     """
-    entrants, index, seed, action_cap, antithetic, records = job
+    entrants, index, seed, action_cap, antithetic, records, trade_mode, max_trades = job
     seats = len(entrants)
     # Antithetic pairing: the board comes from the pair, the rotation from the
     # position within it, so the two halves of a pair are the same board played
@@ -499,13 +499,16 @@ def _play_one(
     cleared: tuple[ClearedTrade, ...] = ()
     if records:
         game, record, cleared = _play_and_record(
-            lineup, board, seed, board_index, action_cap
+            lineup, board, seed, board_index, action_cap,
+            trade_mode=trade_mode, max_trades=max_trades,
         )
     else:
         game = play_game(
             deal_game(seed, board_index, seats, board=board),
             lineup,
             action_cap=action_cap,
+            trade_mode=trade_mode,
+            max_trades=max_trades,
         )
     # true state: the verdict's own victory points include hidden
     # victory-point dev cards, so the final score and the build census are
@@ -534,6 +537,9 @@ def _play_and_record(
     seed: int,
     index: int,
     action_cap: int,
+    *,
+    trade_mode: str = "round",
+    max_trades: int = 1,
 ) -> tuple[Game, "Record", tuple[ClearedTrade, ...]]:
     """`play`'s own loop, with a `hexset.record.Tape` running alongside it.
 
@@ -554,7 +560,8 @@ def _play_and_record(
 
     game = deal_game(seed, index, len(lineup), board=board, chance=recording)
     game.gates = tuple(lineup)
-    game.max_trades = 1
+    game.trade_mode = trade_mode
+    game.max_trades = max_trades
     tape = Tape()
     cleared: list[ClearedTrade] = []
     while not is_over(game) and len(tape.actions) < action_cap:
@@ -606,8 +613,16 @@ def compete(
     worker_initializer: Callable | None = None,
     worker_initargs: tuple = (),
     start_method: str | None = None,
+    trade_mode: str = "round",
+    max_trades: int = 1,
 ) -> Tournament:
     """Run `games` games, rotating the lineup so every entrant sits every seat.
+
+    `trade_mode`/`max_trades` are the table's bargaining rules for every game
+    (`play_game`): the default is one propose-and-respond round a turn;
+    `trade_mode="auto"` with `max_trades=-1` is the unbounded automatic
+    clearing house every study before HexSet 0.50 was recorded under, kept
+    so a policy trained against it can be read in its native environment.
 
     `games` must be a multiple of the lineup size, otherwise the rotation is
     incomplete and the seat bias it exists to cancel leaks into the result.
@@ -644,7 +659,10 @@ def compete(
         raise ValueError("antithetic runs with odd seat counts require games divisible by twice the seat count")
 
     lineup = tuple(entrants)
-    jobs = [(lineup, i, seed, action_cap, antithetic, records) for i in range(games)]
+    jobs = [
+        (lineup, i, seed, action_cap, antithetic, records, trade_mode, max_trades)
+        for i in range(games)
+    ]
     started = time.perf_counter()
     if workers > 1:
         with ProcessPoolExecutor(

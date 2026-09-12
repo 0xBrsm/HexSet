@@ -83,7 +83,7 @@ def scripted_kind():
 
 def played_by_the_arena(entrant, index, players=4, cap=CAP):
     """The same `(seed, index)` game, played by `hexset.arena` with a record."""
-    return _play_one(((entrant,) * players, index, SEED, cap, False, True))
+    return _play_one(((entrant,) * players, index, SEED, cap, False, True, "round", 1))
 
 
 def test_a_lane_plays_the_arenas_game_for_the_same_seed_and_index(scripted_kind):

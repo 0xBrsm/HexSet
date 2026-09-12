@@ -334,6 +334,58 @@ def test_the_after_position_moves_the_counterpartys_ledger_row_too(board, monkey
     # The live game -- its state and its ledger both -- is untouched.
     assert game.state(0, hidden=False).hands[1] == [0, 0, 0, 2, 3]
     assert game.ledger.seats[1].known == [0, 0, 0, 2, 3]
+
+
+def test_the_after_position_keeps_the_cards_this_seat_cannot_name(board, monkeypatch):
+    """`View.from_game` hands the true state through, so `_after` sees the
+    counterparty's concrete hand. It must move that hand by the bundle,
+    not replace it with the known row: the size is public, and a
+    counterparty shrunk by every card this seat cannot name would price
+    poorer on every candidate, trade or no trade, and the two-sided test
+    would refuse every offer."""
+    from hexset.clients.netbot import NetworkBot
+    from hexset.ledger import PublicLedger
+    from hexset.view import View
+
+    space = stub_checkpoint(board).space
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS)
+    game = start(board, PLAYERS, random.Random(2))
+    while game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
+        apply(game, bot.choose(game))
+    state = game.state(0, hidden=False)
+    state.hands[0] = [0, 1, 0, 1, 3]
+    state.hands[1] = [0, 0, 0, 2, 3]
+    state.deck = []
+    ledger = PublicLedger.new(state.num_players)
+    ledger.apply_hand_diff([[0] * 5 for _ in state.hands], state.hands)
+    # Seat 0 can name only one wheat and one ore of seat 1's five cards.
+    ledger.seats[1].known = [0, 0, 0, 1, 1]
+    ledger.seats[1].unknown = 3
+    game.ledger = ledger
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    bot.seat_at(game)
+    view = game.state(0)
+    assert view.unknown[1] == 3 and view.sizes[1] == 5
+    bundle = (0, -1, 0, 1, 0)  # seat 0 gives a brick, receives a wheat
+
+    captured = []
+    original = HandValuePolicy.value_rows
+
+    def capture(self, rows):
+        captured.extend(rows)
+        return original(self, rows)
+
+    monkeypatch.setattr(HandValuePolicy, "value_rows", capture)
+
+    bot.gains_many(view, [bundle], [1])
+    after_game, _ = captured[1]
+    after_view = View.from_game(after_game, 0)
+    assert after_view.sizes[1] == 5  # one card out, one card in
+    assert after_view.known[1] == [0, 1, 0, 0, 1]
+    assert after_view.unknown[1] == 3
+    assert sum(after_view.known[1]) + after_view.unknown[1] == after_view.sizes[1]
+    assert game.ledger.seats[1].known == [0, 0, 0, 1, 1]  # live ledger untouched
     assert game.ledger is not after_game.ledger
 
 

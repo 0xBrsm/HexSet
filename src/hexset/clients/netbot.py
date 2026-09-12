@@ -401,13 +401,18 @@ class NetworkBot:
         their_known = [k - d for k, d in zip(certified.known[them], bundle)]
 
         # Composition beyond `known` is never read for a seat that is not
-        # the perspective (`View` only reads it for `hand_size`), so a
-        # `HiddenHand` need only carry the right size; a concrete hand is
-        # resized the same way a real cleared trade would leave it.
+        # the perspective (`View` reads `state.hands[them]` for its size
+        # alone), so a `HiddenHand` need only carry the right size, and a
+        # concrete hand -- `View.from_game` hands the true state through,
+        # so this is the usual case -- is the true hand moved by the bundle,
+        # as a cleared trade would leave it: the size is public, the
+        # composition stays unread. Replacing it with the known row would
+        # shrink `them` by every card this seat cannot name and price the
+        # counterparty poorer on every candidate, trade or no trade.
         if is_hidden(state.hands[them]):
             state.hands[them] = HiddenHand(view.sizes[them] - sum(bundle))
         else:
-            state.hands[them] = their_known
+            state.hands[them] = [max(0, n - d) for n, d in zip(state.hands[them], bundle)]
 
         ledger = view.ledger.copy()
         ledger.seats[them].known = their_known

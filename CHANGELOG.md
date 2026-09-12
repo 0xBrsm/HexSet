@@ -53,6 +53,12 @@ Changes to the HexSet distribution. The project follows
 
 ### Changed
 
+- **`summary.roads` plans two roads.** Each legal road also names `then`,
+  the best settleable vertex one road further on, with `then_pips` -- the
+  two-road plan every setup road and most early ones are, so a seat no
+  longer reads the board to make it. Booleans in reply tables print as
+  `1`/`0`.
+
 - **Fewer MCP round-trips that decide nothing.** A seat's own trade round
   is settled inside the wait once everyone has answered and there is
   nothing to choose: every answer a pass closes it, exactly one accept as

@@ -992,13 +992,16 @@ def test_roads_joins_legal_edges_to_the_vertex_they_reach_settle_first():
     by_edge = {r["edge"]: r for r in roads}
     # Edge 10 (0-1): 0 is ours, so it reaches 1 -- but 1 neighbors our own
     # vertex 0, so no settlement could go there.
-    assert by_edge[10] == {"index": 0, "edge": 10, "to": 1, "pips": 8, "resources": ["Ore", "Wheat"], "settle": False}
+    assert by_edge[10] == {"index": 0, "edge": 10, "to": 1, "pips": 8, "resources": ["Ore", "Wheat"], "settle": False,
+                           "then": 2, "then_pips": 3}
     # Edge 11 (1-2): both new, but 1 is adjacent to our vertex 0 and 2 is
     # not -- 2 is the frontier, and it is open two roads clear.
-    assert by_edge[11] == {"index": 1, "edge": 11, "to": 2, "pips": 3, "resources": ["Sheep"], "settle": True}
+    assert by_edge[11] == {"index": 1, "edge": 11, "to": 2, "pips": 3, "resources": ["Sheep"], "settle": True,
+                           "then": 3, "then_pips": 6}
     # Edge 12 (2-3): both new, neither adjacent to anything owned -- picks
     # 3, which carries its port.
     assert by_edge[12]["to"] == 3 and by_edge[12]["port"] == "Brick 2:1" and by_edge[12]["settle"] is True
+    assert "then" not in by_edge[12]  # 3 is the end of the line: nothing settleable beyond it
     # Sorted settle first, then pips descending within each: 12 (6 pips)
     # before 11 (3 pips), both settleable; 10 last, not settleable at all.
     assert [r["edge"] for r in roads] == [12, 11, 10]
@@ -1186,8 +1189,9 @@ def test_setup_road_summary_names_the_far_vertex_and_keeps_its_legal_group(live_
     # Every first road reaches a vertex one edge from the settlement just
     # placed, so none of them could take a settlement of their own (the
     # standard two-road minimum distance) and none names that vertex itself.
-    assert all(not r["settle"] for r in roads)
+    assert all(r["settle"] == 0 for r in roads)
     assert all(r["to"] != settlement["vertex"] for r in roads)
+    assert any(r.get("then") is not None and r["then_pips"] > 0 for r in roads)  # the two-road plan is named
 
     played = client.call_tool("act", index=roads[0]["index"])
     assert played["phase"] != "SETUP_ROAD"  # settled to the next decision

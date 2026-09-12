@@ -247,7 +247,8 @@ could go there -- best, a settleable end, first). Every entry names the
 SETUP_SETTLEMENT/BUILD_SETTLEMENT/BUILD_CITY or MOVE_ROBBER groups `spots`
 or `robber` covers is then dropped from `legal_actions` -- the same
 entries, indexed the same way, so keeping both said nothing twice.
-`summary.roads` does not drop
+Each `summary.roads` row also carries `then`, the best settleable vertex
+one road beyond `to`, with `then_pips`. `summary.roads` does not drop
 BUILD_ROAD/SETUP_ROAD from `legal_actions`; both stay. The state also
 carries `winning_points`, the rule the game is played to.
 

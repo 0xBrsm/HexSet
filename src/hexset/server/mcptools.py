@@ -771,8 +771,11 @@ def _roads(legal: list[dict], view: dict, board: dict) -> list[dict]:
     """Every legal road placement, joined to the vertex it actually reaches
     (`_far_endpoint`): that vertex's pips, resources, port and whether a
     settlement could go there right now (empty, with no building on any
-    vertex it neighbors -- the standard two-road minimum distance). Best
-    (a settleable end) first, then most pips."""
+    vertex it neighbors -- the standard two-road minimum distance), and
+    `then`: the best settleable vertex one road further on, with its pips
+    as `then_pips` -- the two-road plan every setup road and most early
+    ones are, done here instead of from a board read. Best (a settleable
+    end, then the best `then`) first."""
     edges = {e["id"]: e for e in board.get("edges") or []}
     vertices = {v["id"]: v for v in board.get("vertices") or []}
     ports = {v: p for p in board.get("ports") or [] for v in p.get("vertices") or []}
@@ -793,6 +796,9 @@ def _roads(legal: list[dict], view: dict, board: dict) -> list[dict]:
     def built_on(vid: int) -> bool:
         return vid < len(owner) and owner[vid] >= 0
 
+    def settleable(vid: int) -> bool:
+        return not built_on(vid) and not any(built_on(n) for n in neighbors.get(vid, ()))
+
     roads = []
     for index, action in enumerate(legal):
         if action.get("type") not in _ROAD_ACTIONS:
@@ -808,13 +814,19 @@ def _roads(legal: list[dict], view: dict, board: dict) -> list[dict]:
             "to": to,
             "pips": vertex.get("pips", 0),
             "resources": vertex.get("resources", []),
-            "settle": not built_on(to) and not any(built_on(n) for n in neighbors.get(to, ())),
+            "settle": settleable(to),
         }
         port = ports.get(to)
         if port is not None:
             row["port"] = _port_label(port)
+        near = v0 if to == v1 else v1
+        beyond = [n for n in neighbors.get(to, ()) if n != near and n not in own and settleable(n)]
+        if beyond:
+            best = max(beyond, key=lambda n: (vertices.get(n, {}).get("pips", 0), -n))
+            row["then"] = best
+            row["then_pips"] = vertices.get(best, {}).get("pips", 0)
         roads.append(row)
-    roads.sort(key=lambda r: (not r["settle"], -r["pips"], r["index"]))
+    roads.sort(key=lambda r: (not r["settle"], -r["pips"], -r.get("then_pips", 0), r["index"]))
     return roads
 
 
@@ -1023,6 +1035,8 @@ def _prune(view: dict) -> dict:
 def _cell(value) -> str:
     if value is None:
         return "-"
+    if isinstance(value, bool):
+        return "1" if value else "0"
     if isinstance(value, list):
         return ";".join(_cell(v) for v in value)
     if isinstance(value, dict):
@@ -1521,18 +1535,18 @@ _TOOLS: dict[str, tuple] = {
         "`choose_trade`: the tool; `game_over`; `wait` only after `timeout` or "
         "while seats open (`waiting_on`; wait_for_turn()).\n"
         "`summary.afford` per build: `ok`, `missing`, `legal`. `summary.race`: "
-        "`points`, `to_win`, `leader`, per award yours/holder's/`need`. When legal: "
+        "`points`, `to_win`, `leader`, awards yours/holder's/`need`. When legal: "
         "`spots` (settlement/city vertices, pips/resources/port/`port_matches`, best "
         "first) and `robber` (hexes, pips, `hits` seat:Ns+Nc, `options` "
         "index:victim), each replacing its `legal_actions` group; `roads` (`to` "
-        "vertex, pips/resources/port, `settle`).\n"
-        "Tables are `(keys):row|row`, cells comma-separated, `-` null, `;` in a "
-        "list. `legal_actions`: per type, `index` for act() plus `edge` (roads), "
+        "vertex, pips/resources/port, `settle`, `then` = best vertex one road on).\n"
+        "Tables are `(keys):row|row`, cells comma-separated, `-` null, 1/0 bool, "
+        "`;` in a list. `legal_actions`: per type, `index` for act() plus `edge` (roads), "
         "`vertex` (settlement/city), `hex`+`victim` (MOVE_ROBBER), `give`/`want` "
         "(BANK_TRADE), `resource` (MONOPOLY/DISCARD), `resources` (YEAR_OF_PLENTY); "
-        "ROLL, END_TURN, BUY_DEV_CARD, PLAY_KNIGHT, PLAY_ROAD_BUILDING index only.\n"
-        "`players`: `kind`, your `hand`/`dev_cards`, public ledger `known`/`unknown` "
-        "(`summary.race` has the awards). `buildings`, `roads` (edge ids per seat), "
+        "the rest index only.\n"
+        "`players`: `kind`, your `hand`/`dev_cards`, public ledger `known`/`unknown`. "
+        "`buildings`, `roads` (edge ids per seat), "
         "`bank`, `robber` hex, `trade_ratios` (only when changed). Resource dicts "
         "omit zeros.\n"
         "`can_offer`: true if offer_trade() would be accepted now. `pending`: "

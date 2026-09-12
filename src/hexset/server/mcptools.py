@@ -409,9 +409,8 @@ def _discard(
     remaining = dict(zip(RESOURCES, counts))
     while any(remaining.values()):
         resource = next(name for name, left in remaining.items() if left)
-        entry = next(
-            a for a in raw.get("legal_actions") or [] if a.get("type") == "DISCARD" and a.get("a") == RESOURCES.index(resource)
-        )
+        wanted = RESOURCES.index(resource)
+        entry = next(a for a in raw.get("legal_actions") or [] if a.get("type") == "DISCARD" and a.get("a") == wanted)
         raw = _call_ok(tables, session, "POST", "/api/action", {"action": entry})
         remaining[resource] -= 1
     return _settle(tables, session, raw, timeout, log_after, full_log)
@@ -672,7 +671,8 @@ def _afford(hand: dict, legal: list[dict]) -> dict:
 
 def _spots(legal: list[dict], board: dict) -> list[dict]:
     """Every settlement/city placement in `legal`, joined to the vertex's
-    pips, resources and port, best first. `index` is the `act()` index.
+    pips, resources and port (with `port_matches`: a 3:1, or a 2:1 in a
+    resource the vertex yields), best first. `index` is the `act()` index.
 
     Every one of them, uncapped: `spots` is the reason `legal_actions`
     drops its own SETUP_SETTLEMENT/BUILD_SETTLEMENT/BUILD_CITY groups
@@ -696,6 +696,9 @@ def _spots(legal: list[dict], board: dict) -> list[dict]:
         port = ports.get(vertex_id)
         if port is not None:
             spot["port"] = _port_label(port)
+            # A 2:1 port is worth what the vertex produces of that resource;
+            # a 3:1 takes anything. Said here so the reader need not join it.
+            spot["port_matches"] = port.get("resource") is None or port["resource"] in spot["resources"]
         spots.append(spot)
     spots.sort(key=lambda s: (-s["pips"], s["index"]))
     return spots
@@ -1468,7 +1471,7 @@ _TOOLS: dict[str, tuple] = {
         "`summary.afford` per build: `ok`, `missing`, `legal` (omitted if "
         "legal_actions is empty). `summary.race`: `points`, `to_win`, `leader`, "
         "per award yours/holder's/`need`. When legal: `spots` (settlement/city "
-        "vertices, pips/resources/port, best first) and `robber` (hexes, pips, "
+        "vertices, pips/resources/port/`port_matches`, best first) and `robber` (hexes, pips, "
         "`hits` seat:Ns+Nc, `options` index:victim) -- both drop their "
         "`legal_actions` group. `summary.roads`: `to` (vertex a road reaches), "
         "pips/resources/port, `settle` (settlement could go there).\n"

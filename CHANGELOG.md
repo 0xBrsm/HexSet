@@ -53,6 +53,10 @@ Changes to the HexSet distribution. The project follows
 
 ### Changed
 
+- **`summary.spots` says whether a port matches.** A spot on a port carries
+  `port_matches`: true for a 3:1, or a 2:1 in a resource the vertex itself
+  yields -- the join a reader had to make by hand to value the port.
+
 - **MCP replies trim four more repeats.** Per-player `longest_road` and
   `largest_army` are gone (`summary.race` already names the holder and
   this seat's own count); each `summary.afford` build's `legal` key is

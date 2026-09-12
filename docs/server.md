@@ -229,7 +229,7 @@ it, what it is short, and whether `legal_actions` offers it now), `race`
 (points and distance to the win, the leading opponent by public points, and
 for each award the caller's count, the holder's, and the count that would
 take it), and, only when such a move is legal, `spots` (every settlement or
-city placement with the vertex's pips, resources and port, best first),
+city placement with the vertex's pips, resources, port and `port_matches`, best first),
 `robber` (each hex the robber may move to, its pips, whose buildings it
 hits, and an `act` index per victim), and `roads` (every legal road, with
 `to` -- the vertex it reaches that isn't already this seat's own network,

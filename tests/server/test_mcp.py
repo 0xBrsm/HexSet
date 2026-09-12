@@ -947,6 +947,28 @@ def test_roads_joins_legal_edges_to_the_vertex_they_reach_settle_first():
     assert [r["edge"] for r in roads] == [12, 11, 10]
 
 
+def test_spots_say_whether_a_port_matches_what_the_vertex_yields():
+    board = {
+        "vertices": [
+            {"id": 0, "pips": 5, "resources": ["Wheat"]},
+            {"id": 1, "pips": 4, "resources": ["Ore"]},
+            {"id": 2, "pips": 3, "resources": ["Wood"]},
+            {"id": 3, "pips": 2, "resources": ["Brick"]},
+        ],
+        "ports": [
+            {"vertices": [0, 1], "resource": "Wheat", "ratio": 2},
+            {"vertices": [2], "resource": None, "ratio": 3},
+        ],
+    }
+    legal = [{"type": "BUILD_SETTLEMENT", "a": v, "b": 0} for v in range(4)]
+    spots = mcptools._spots(legal, board)
+    by_vertex = {s["vertex"]: s for s in spots}
+    assert by_vertex[0]["port"] == "Wheat 2:1" and by_vertex[0]["port_matches"] is True
+    assert by_vertex[1]["port"] == "Wheat 2:1" and by_vertex[1]["port_matches"] is False
+    assert by_vertex[2]["port"] == "3:1" and by_vertex[2]["port_matches"] is True
+    assert "port" not in by_vertex[3] and "port_matches" not in by_vertex[3]
+
+
 def test_race_measures_the_win_the_leader_and_both_awards():
     view = {
         "winning_points": 10,

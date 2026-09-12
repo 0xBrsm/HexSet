@@ -32,7 +32,7 @@ from hexset.clients.netbot import (
 )
 from hexset.game import Phase, run_trade_event, start, to_move
 from hexset.actions import options_for
-from hexset.clients.modelmeta import DEFAULT_GATE_ROWS, DEFAULT_TRADE_FLOOR, MAX_GATE_ROWS
+from hexset.clients.modelmeta import DEFAULT_TRADE_FLOOR
 from hexset.trading import _candidates, valued_many
 
 # Five distinct weights, as in `fixtures/build_stub.py --valued`, but read
@@ -89,7 +89,6 @@ class StubCheckpoint:
     players: int = PLAYERS
     max_trades: int | None = None
     trade_floor: float = DEFAULT_TRADE_FLOOR
-    gate_rows: int = DEFAULT_GATE_ROWS
 
 
 def stub_checkpoint(board) -> StubCheckpoint:
@@ -136,10 +135,8 @@ def check_gate_is_self_consistent(bot, game):
     # `valued_many` is what the clearing house and the trade round read.
     assert valued_many(bot, view, received, thems) == gains
     assert bot.accepts_many(view, received, thems) == [g > 0.0 for g in gains]
-    # One at a time agrees with the batch, for a handful of candidates the
-    # batch actually scored (one past the gate's `gate_rows` reads `-1.0` in the
-    # batch and is scored for real when asked alone, which is the cap's
-    # documented behaviour, not a disagreement).
+    # One at a time agrees with the batch, for every candidate the seat can
+    # cover (a candidate it cannot reads `-1.0` in both and is excluded here).
     spot = [(i, r, c) for i, (r, c) in enumerate(zip(received, thems)) if gains[i] != -1.0]
     assert spot, "no candidate was scored at all"
     assert [bot.accepts(view, r, c) for _, r, c in spot[:8]] == [
@@ -158,27 +155,25 @@ def check_gate_is_self_consistent(bot, game):
 
 def test_the_gate_settings_are_the_checkpoints_own_not_the_adapters(board):
     """A floor measured against one value head says nothing about another's,
-    and the row bound prices one checkpoint's forward. Both ride on the
-    checkpoint (`hexset.clients.modelmeta.gate_config` reads them off the
-    file), so `bot_for` must carry them over rather than seat every
-    checkpoint alike at this module's defaults."""
+    so it rides on the checkpoint (`hexset.clients.modelmeta.gate_config`
+    reads it off the file), and `bot_for` must carry it over rather than
+    seat every checkpoint alike at this module's default."""
     default = bot_for(stub_checkpoint(board))
-    assert (default.trade_floor, default.gate_rows) == (DEFAULT_TRADE_FLOOR, DEFAULT_GATE_ROWS)
+    assert default.trade_floor == DEFAULT_TRADE_FLOOR
 
     from dataclasses import replace
 
-    declared = replace(stub_checkpoint(board), trade_floor=0.0197, gate_rows=4)
+    declared = replace(stub_checkpoint(board), trade_floor=0.0197)
     bot = bot_for(declared)
     assert bot.trade_floor == 0.0197
-    assert bot.gate_rows == 4
     # And the search built over the same checkpoint reads the same floor.
     assert searcher_for(declared, simulations=2, wave=2).trade_floor == 0.0197
 
 
-def test_a_checkpoint_predating_these_keys_still_seats_and_trades(board):
-    """The two keys are read by name, not required by inheritance: a loader
-    in another repo that has never heard of them still spawns a bot, at the
-    behaviour it had before they existed. This is the training repo's own
+def test_a_checkpoint_predating_this_key_still_seats_and_trades(board):
+    """The key is read by name, not required by inheritance: a loader in
+    another repo that has never heard of it still spawns a bot, at the
+    behaviour it had before it existed. This is the training repo's own
     checkpoint class, which `bot_for` must keep accepting."""
     @dataclass(frozen=True)
     class OlderCheckpoint:
@@ -189,29 +184,8 @@ def test_a_checkpoint_predating_these_keys_still_seats_and_trades(board):
 
     space = stub_checkpoint(board).space
     bot = bot_for(OlderCheckpoint(policy=HandValuePolicy(space=space), space=space))
-    assert (bot.trade_floor, bot.gate_rows) == (DEFAULT_TRADE_FLOOR, DEFAULT_GATE_ROWS)
+    assert bot.trade_floor == DEFAULT_TRADE_FLOOR
     check_gate_is_self_consistent(bot, seated(bot, board))
-
-
-def test_the_row_bound_is_what_actually_caps_the_batch(board):
-    """`gate_rows` is a real cost bound, not a recorded number: a gate given
-    a small one scores fewer candidates for real, and the rest read `-1.0`.
-    Every candidate two cards or fewer a side is scored regardless, so the
-    cap is measured against the large ones."""
-    def large_unscored(rows: int) -> int:
-        from dataclasses import replace
-
-        bot = bot_for(replace(stub_checkpoint(board), gate_rows=rows))
-        game = seated(bot, board)
-        seat = to_move(game)
-        view = game.state(seat)
-        candidates = list(_candidates(game.state(seat, hidden=False), seat, frozenset()))
-        received = [b for _, b in candidates]
-        thems = [c for c, _ in candidates]
-        gains = bot.gains_many(view, received, thems)
-        return sum(1 for g in gains if g == -1.0)
-
-    assert large_unscored(1) > large_unscored(MAX_GATE_ROWS)
 
 
 def test_a_runtime_free_policy_drives_the_bot_and_its_gate(board):
@@ -229,7 +203,12 @@ def test_a_runtime_free_policy_drives_the_bot_and_its_gate(board):
     view = game.state(seat)
     candidates = list(_candidates(game.state(seat, hidden=False), seat, frozenset()))
     estimates = bot.estimate_many(view, candidates)
-    hands = game.state(seat, hidden=False).hands
+    state = game.state(seat, hidden=False)
+    hands = state.hands
+    from hexset.clients.netbot import _geometry_for, _kinds_of
+
+    geometry = _geometry_for(state, seat)
+    current_kinds = _kinds_of(hands[seat], geometry)
     for i, (them, bundle) in enumerate(candidates):
         if gains[i] == -1.0:
             continue
@@ -237,14 +216,21 @@ def test_a_runtime_free_policy_drives_the_bot_and_its_gate(board):
         # counterparty's the other, each priced in that seat's own weights.
         mine = [n + d for n, d in zip(hands[seat], bundle)]
         theirs = [n - d for n, d in zip(hands[them], bundle)]
+        if _kinds_of(mine, geometry) == current_kinds:
+            # The affordability filter never lets this one reach the head.
+            assert gains[i] == 0.0
+            assert estimates[i] == 0.0
+            continue
         assert gains[i] == pytest.approx(
             value_of_hand(mine, seat) - value_of_hand(hands[seat], seat)
         )
         assert estimates[i] == pytest.approx(
             value_of_hand(theirs, them) - value_of_hand(hands[them], them)
         )
-    # Not vacuous: the gate says yes to something.
-    assert any(g > 0.0 for g in gains)
+    # Not vacuous: the gate actually engages with at least one candidate --
+    # whether the affordability filter prices it at `0.0` or the head reads
+    # it for real, rather than refusing everything as uncoverable.
+    assert any(g != -1.0 for g in gains)
 
 
 def test_a_trade_event_clears_through_the_runtime_free_gate(board):
@@ -258,12 +244,17 @@ def test_a_trade_event_clears_through_the_runtime_free_gate(board):
         apply(game, bots[seat].choose(game))
 
     # Seat 0 holds only what seat 1 prices highly and vice versa, so an
-    # exchange exists that both gates price above their floor.
+    # exchange exists that both gates price above their floor -- and it is
+    # built to survive the affordability filter too: seat 0 is one wheat
+    # short of a city (it already holds the ore), seat 1 already affords one
+    # and gives up the very wheat that pays for it, so the trade both sides
+    # want also changes what each can build.
     state = game.state(0, hidden=False)
-    state.hands[0] = [0, 0, 0, 0, 3]
-    state.hands[1] = [0, 0, 0, 3, 0]
+    state.hands[0] = [0, 1, 0, 1, 3]
+    state.hands[1] = [0, 0, 0, 2, 3]
     state.hands[2] = [0, 0, 0, 0, 0]
     state.hands[3] = [0, 0, 0, 0, 0]
+    state.deck = []  # dev cards off the table: only the city kind is in play
     game.phase = Phase.MAIN
     game.current_player = 0
     game.trade_event_turn = -1
@@ -279,6 +270,123 @@ def test_a_trade_event_clears_through_the_runtime_free_gate(board):
         assert trade.gain_a > 0.0 and trade.gain_b > 0.0
     assert state.hands[0] != before[0]
     assert value_of_hand(state.hands[0], 0) > value_of_hand(before[0], 0)
+
+
+def test_the_after_position_moves_the_counterpartys_ledger_row_too(board, monkeypatch):
+    """`_after` copies `game`, not just its state: a bare `copy.copy(game)`
+    shares the live ledger, and `View` reads a seat that is not the
+    perspective from the *ledger*, not from `state.hands` -- so a copy that
+    only rewrote the state answered every ask about the counterparty from
+    the position before the trade, with only their hand's *size* having
+    moved. That mismatch is exactly what the affordability filter exists to
+    keep away from the head, reintroduced one layer down if the ledger is
+    never rewritten to match.
+    """
+    from hexset.clients.netbot import NetworkBot
+    from hexset.ledger import PublicLedger
+    from hexset.view import View
+
+    space = stub_checkpoint(board).space
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS)
+    game = start(board, PLAYERS, random.Random(2))
+    while game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
+        apply(game, bot.choose(game))
+    state = game.state(0, hidden=False)
+    # Same kind-changing exchange as the trade-event test above: seat 0 is
+    # one wheat short of a city, seat 1 already affords one and gives up
+    # the wheat that pays for it -- guaranteed to survive the affordability
+    # filter and reach the head.
+    state.hands[0] = [0, 1, 0, 1, 3]
+    state.hands[1] = [0, 0, 0, 2, 3]
+    state.deck = []
+    # Every hand is public knowledge here, so the belief is exact and the
+    # expected numbers below are exact too.
+    ledger = PublicLedger.new(state.num_players)
+    ledger.apply_hand_diff([[0] * 5 for _ in state.hands], state.hands)
+    game.ledger = ledger
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    bot.seat_at(game)
+    view = game.state(0)
+    bundle = (0, -1, 0, 1, 0)  # seat 0 gives a brick, receives a wheat
+
+    captured = []
+    original = HandValuePolicy.value_rows
+
+    def capture(self, rows):
+        captured.extend(rows)
+        return original(self, rows)
+
+    monkeypatch.setattr(HandValuePolicy, "value_rows", capture)
+
+    bot.gains_many(view, [bundle], [1])
+    assert len(captured) == 2  # the live position, plus this one candidate
+    after_game, after_seat = captured[1]
+    assert after_seat == 0
+
+    after_view = View.from_game(after_game, 0)
+    assert after_view.known[0] == [0, 0, 0, 2, 3]  # seat 0's own hand, exact
+    assert after_view.known[1] == [0, 1, 0, 1, 3]  # seat 1's known row moved too
+    assert after_view.sizes[1] == view.sizes[1] - sum(bundle) == 5
+    assert all(k >= 0 for k in after_view.known[1])  # never below zero
+    assert sum(after_view.known[1]) + after_view.unknown[1] == after_view.sizes[1]
+
+    # The live game -- its state and its ledger both -- is untouched.
+    assert game.state(0, hidden=False).hands[1] == [0, 0, 0, 2, 3]
+    assert game.ledger.seats[1].known == [0, 0, 0, 2, 3]
+
+
+def test_the_after_position_keeps_the_cards_this_seat_cannot_name(board, monkeypatch):
+    """`View.from_game` hands the true state through, so `_after` sees the
+    counterparty's concrete hand. It must move that hand by the bundle,
+    not replace it with the known row: the size is public, and a
+    counterparty shrunk by every card this seat cannot name would price
+    poorer on every candidate, trade or no trade, and the two-sided test
+    would refuse every offer."""
+    from hexset.clients.netbot import NetworkBot
+    from hexset.ledger import PublicLedger
+    from hexset.view import View
+
+    space = stub_checkpoint(board).space
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS)
+    game = start(board, PLAYERS, random.Random(2))
+    while game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
+        apply(game, bot.choose(game))
+    state = game.state(0, hidden=False)
+    state.hands[0] = [0, 1, 0, 1, 3]
+    state.hands[1] = [0, 0, 0, 2, 3]
+    state.deck = []
+    ledger = PublicLedger.new(state.num_players)
+    ledger.apply_hand_diff([[0] * 5 for _ in state.hands], state.hands)
+    # Seat 0 can name only one wheat and one ore of seat 1's five cards.
+    ledger.seats[1].known = [0, 0, 0, 1, 1]
+    ledger.seats[1].unknown = 3
+    game.ledger = ledger
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    bot.seat_at(game)
+    view = game.state(0)
+    assert view.unknown[1] == 3 and view.sizes[1] == 5
+    bundle = (0, -1, 0, 1, 0)  # seat 0 gives a brick, receives a wheat
+
+    captured = []
+    original = HandValuePolicy.value_rows
+
+    def capture(self, rows):
+        captured.extend(rows)
+        return original(self, rows)
+
+    monkeypatch.setattr(HandValuePolicy, "value_rows", capture)
+
+    bot.gains_many(view, [bundle], [1])
+    after_game, _ = captured[1]
+    after_view = View.from_game(after_game, 0)
+    assert after_view.sizes[1] == 5  # one card out, one card in
+    assert after_view.known[1] == [0, 1, 0, 0, 1]
+    assert after_view.unknown[1] == 3
+    assert sum(after_view.known[1]) + after_view.unknown[1] == after_view.sizes[1]
+    assert game.ledger.seats[1].known == [0, 0, 0, 1, 1]  # live ledger untouched
+    assert game.ledger is not after_game.ledger
 
 
 def test_a_searched_runtime_free_policy_plays_and_gates_like_the_plain_bot(board):
@@ -305,16 +413,12 @@ def test_a_searched_runtime_free_policy_plays_and_gates_like_the_plain_bot(board
 
     assert search.trade_floor == plain.trade_floor == 0.0
 
-    # Each gate scores candidates in worlds drawn from its own belief; the
-    # two answer identically once they draw the same worlds.
-    def alike(ask):
-        search.gate.rng, search.gate._salt = random.Random(7), None
-        plain.rng, plain._salt = random.Random(7), None
-        return ask(search) == ask(plain)
-
-    assert alike(lambda bot: bot.gains_many(view, received, thems))
-    assert alike(lambda bot: bot.accepts_many(view, received, thems))
-    assert alike(lambda bot: bot.estimate_many(view, candidates))
+    # The gate is a pure function of the position and the ask, with no
+    # random stream of its own any more, so the searched and plain bots over
+    # the same checkpoint answer identically outright.
+    assert search.gains_many(view, received, thems) == plain.gains_many(view, received, thems)
+    assert search.accepts_many(view, received, thems) == plain.accepts_many(view, received, thems)
+    assert search.estimate_many(view, candidates) == plain.estimate_many(view, candidates)
 
 
 
@@ -400,42 +504,31 @@ def test_the_onnx_policy_satisfies_the_same_protocol():
         bot = netbot_bot_for(checkpoint)
         game = seated(bot, onnx_board)
         assert bot.choose(game) in options_for(game)
-        gains = check_gate_is_self_consistent(bot, game)
-        assert any(g != 0.0 for g in gains), "the valued stub is not a constant head"
+        check_gate_is_self_consistent(bot, game)
+
+        # The valued stub is not a constant head: a hand mutation the
+        # affordability filter has no reason to zero out at this particular
+        # position still moves the raw value read directly (independent of
+        # the trade gate, which may legitimately price every coverable
+        # candidate here at zero if none of them change a kind).
+        import copy as copy_module
+
+        from hexset.state import copy_state
+
+        seat = to_move(game)
+        state = game.state(seat, hidden=False)
+        richer = copy_state(state)
+        richer.hands[seat] = [n + 3 for n in richer.hands[seat]]
+        richer_game = copy_module.copy(game)
+        richer_game.set_state(richer)
+        before_value = bot.policy.value_rows([(game, seat)])[0]
+        after_value = bot.policy.value_rows([(richer_game, seat)])[0]
+        assert before_value != after_value, "the valued stub is not a constant head"
     finally:
         _load_cached.cache_clear()
 
 
-# --- continuations: the gate prices what a seat can do, not what it holds ------
-
-
-@dataclass
-class BuildPolicy:
-    """A `Policy` that builds a settlement whenever it can and otherwise ends
-    the turn, and values a seat by its settlements alone -- so a trade that
-    leaves the build possible is worth exactly nothing and one that takes it
-    away is worth exactly one settlement. Closed form, no hand term, which is
-    what lets the test say "exactly zero" rather than "small"."""
-
-    space: ActionSpace
-
-    def act_rows(self, rows):
-        out = []
-        for _, _, options in rows:
-            builds = [a for a in options if a.type is ActionType.BUILD_SETTLEMENT]
-            ends = [a for a in options if a.type is ActionType.END_TURN]
-            out.append(builds[0] if builds else (ends[0] if ends else min(options, key=self.space.index)))
-        return out
-
-    def value_rows(self, rows):
-        return [self._value(game) for game, _ in rows]
-
-    def score_rows(self, rows):
-        return [([1.0 / len(options)] * len(options), self._value(game)) for game, _, options in rows]
-
-    def _value(self, game):
-        state = game.state(0, hidden=False)
-        return tuple(0.1 * state.vertex_owner.count(seat) for seat in range(state.num_players))
+# --- the affordability filter: the gate prices what a trade lets a seat buy ---
 
 
 def _position_with_a_settlement_in_hand(board):
@@ -456,101 +549,109 @@ def _position_with_a_settlement_in_hand(board):
     raise AssertionError("no position with a settlement spot came up")
 
 
-def test_the_gate_prices_a_trade_by_what_it_leaves_the_seat_able_to_do(board):
-    from hexset.clients.netbot import CONTINUATION_PLIES, NetworkBot
-
-    space = stub_checkpoint(board).space
-    bot = NetworkBot(policy=BuildPolicy(space), players=PLAYERS, rng=random.Random(0))
-    game = _position_with_a_settlement_in_hand(board)
-    bot.seat_at(game)
-    view = game.state(0)
-    keeps = (1, 0, 0, 0, 1)      # +1 wood +1 ore: the settlement is still affordable
-    breaks = (2, 0, -1, 0, 0)    # +2 wood for the sheep: it is not
-    gains = bot.gains_many(view, [keeps, breaks], [1, 1])
-    assert gains[0] == pytest.approx(0.0), "a trade that leaves the build possible is worth nothing"
-    assert gains[1] == pytest.approx(-0.1), "a trade that takes the build away is worth minus the build"
-    assert CONTINUATION_PLIES >= 2
-    # The live game is untouched by the rollouts.
-    assert game.state(0, hidden=False).hands[0] == [1, 1, 1, 1, 0]
-
-
-def test_a_won_position_prices_every_trade_at_zero_or_below(board):
-    """With the winning build in hand the position is worth 1.0 after best
-    play, before and after any trade that keeps the build; a trade that takes
-    it away is worth the difference; and the counterparty's row reads the
-    actor's win either way, so it is estimated to gain nothing. Nothing
-    clears, so `default_offer` broadcasts nothing."""
-    from dataclasses import replace
+def test_a_trade_that_changes_no_affordable_kind_prices_at_zero(board, monkeypatch):
+    """A trade that neither adds nor removes anything the seat could not
+    already buy is priced at exactly `0.0` in both readings, without the
+    candidate ever reaching the head. This is the defect the affordability
+    filter replaces the continuation rollout with: two raw readings of
+    near-identical hands differ by the head's own noise, and noise near
+    zero used to read as a real, if tiny, trade."""
     from hexset.clients.netbot import NetworkBot
-    from hexset.trading import _candidates, default_offer
-    from hexset.victory import victory_points
+    from hexset.trading import default_offer
 
     space = stub_checkpoint(board).space
-    bot = NetworkBot(policy=BuildPolicy(space), players=PLAYERS, rng=random.Random(0))
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS)
     game = _position_with_a_settlement_in_hand(board)
     state = game.state(0, hidden=False)
-    state.rules = replace(state.rules, winning_points=victory_points(state, 0) + 1)
+    state.deck = []  # dev cards off the table: an ore alone cannot unlock a kind
     bot.seat_at(game)
     view = game.state(0)
-    keeps, breaks = (1, 0, 0, 0, 1), (2, 0, -1, 0, 0)
-    gains = bot.gains_many(view, [keeps, breaks], [1, 1])
-    assert gains[0] == pytest.approx(0.0)
-    assert gains[1] < -0.5, "losing the winning build costs the win itself, not a settlement's worth"
-    estimates = bot.estimate_many(view, [(1, keeps), (1, breaks)])
-    assert estimates[0] == pytest.approx(0.0), "the partner gains nothing: the actor wins regardless"
-    candidates = list(_candidates(state, 0, frozenset()))
-    assert default_offer(bot, view, candidates) is None, "a won seat has nothing to offer"
+    unchanged = (0, 0, 0, 0, 1)  # +1 ore: the road and the settlement were and
+                                 # stay affordable, the city and a dev card stay out of reach
+
+    calls: list[int] = []
+    original = HandValuePolicy.value_rows
+
+    def counted(self, rows):
+        calls.append(len(rows))
+        return original(self, rows)
+
+    monkeypatch.setattr(HandValuePolicy, "value_rows", counted)
+
+    assert bot.gains_many(view, [unchanged], [1]) == [0.0]
+    assert bot.estimate_many(view, [(1, unchanged)]) == [0.0]
+    assert not calls, "a kind-preserving candidate must never reach the head"
+    assert default_offer(bot, view, [(1, unchanged)]) is None
 
 
-def test_a_responder_prices_what_the_actor_will_do_with_the_cards(board):
-    """Asked about an exchange on the actor's turn, a responder's gate rolls
-    out the *actor's* best play from the post-trade hand it can see (the
-    ledger, plus what the offer certifies). Handing a seat the card that
-    completes its winning build reads as that seat's win: negative for the
-    responder, the win itself for the estimate of the actor's side -- so the
-    default response is a pass, never a counter into it."""
-    from dataclasses import replace
+def test_a_trade_that_changes_an_affordable_kind_reaches_the_head(board, monkeypatch):
+    """Making a new kind buyable -- or taking one away -- is a real
+    deduction the arithmetic filter cannot make on its own, so it is the one
+    case that still costs a forward, and the head's own reading stands."""
     from hexset.clients.netbot import NetworkBot
-    from hexset.ledger import PublicLedger
-    from hexset.trading import Offer, default_respond
-    from hexset.victory import victory_points
 
     space = stub_checkpoint(board).space
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS)
+    # Reuses the position that guarantees a *reachable* settlement spot
+    # (`options_for` already found one legal there): seat 0 is one wheat
+    # short of the hand that built it.
     game = _position_with_a_settlement_in_hand(board)
     state = game.state(0, hidden=False)
-    state.hands[0] = [1, 1, 0, 1, 1]  # one sheep short of the settlement, an ore to spare
-    state.hands[1] = [2, 2, 2, 2, 2]
-    # Everything about seat 0's hand is public knowledge, so the responder's
-    # belief is exact and the test is deterministic.
-    ledger = PublicLedger.new(state.num_players)
-    ledger.apply_hand_diff([[0] * 5 for _ in state.hands], state.hands)
-    game.ledger = ledger
-    state.rules = replace(state.rules, winning_points=victory_points(state, 0) + 1)
+    state.hands[0] = [1, 1, 1, 0, 0]
+    bot.seat_at(game)
+    view = game.state(0)
+    unlocks_settlement = (0, 0, 0, 1, 0)  # +1 wheat: the settlement is now affordable
 
-    responder = NetworkBot(policy=BuildPolicy(space), players=PLAYERS, seat=1, rng=random.Random(0))
-    responder.seat_at(game)
-    view = game.state(1)
-    gives_the_sheep = (0, 0, -1, 0, 1)  # seat 1 gives a sheep, gets an ore
+    calls: list[int] = []
+    original = HandValuePolicy.value_rows
 
-    own = responder.gains_many(view, [gives_the_sheep], [0])[0]
-    est = responder.estimate_many(view, [(0, gives_the_sheep)])[0]
-    assert own < 0, "helping the actor win costs the responder its own chances"
-    assert est > 0.5, "the actor's side reads as the win it completes"
+    def counted(self, rows):
+        calls.append(len(rows))
+        return original(self, rows)
 
-    offer = Offer(0, (0, 0, 1, 0, -1))  # the actor asks for the sheep, offering an ore
-    assert default_respond(responder, view, offer).kind == "pass"
+    monkeypatch.setattr(HandValuePolicy, "value_rows", counted)
+
+    gain = bot.gains_many(view, [unlocks_settlement], [1])[0]
+    assert calls == [2]  # one forward: the live position plus this one candidate
+    assert gain == pytest.approx(
+        value_of_hand([1, 1, 1, 1, 0], 0) - value_of_hand([1, 1, 1, 0, 0], 0)
+    )
+
+
+def test_a_won_position_offers_nothing_it_could_not_already_buy(board):
+    """The g4 defect this replaces the rollout for, found 2026-09-08: at a
+    won position (the winning settlement already in hand and placeable), a
+    raw value-head reading of two near-identical hands differs by the
+    head's own noise, so the old gate priced a trade that changed nothing
+    about what the seat could do at a small nonzero value. Nothing here
+    changes what seat 0 can buy, so nothing reaches the head, and
+    `default_offer` confirms nothing is offered."""
+    from hexset.clients.netbot import NetworkBot
+    from hexset.trading import default_offer
+
+    space = stub_checkpoint(board).space
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS)
+    game = _position_with_a_settlement_in_hand(board)
+    state = game.state(0, hidden=False)
+    state.deck = []  # dev cards off the table for the same reason as above
+    bot.seat_at(game)
+    view = game.state(0)
+    unchanged = (0, 0, 0, 0, 1)  # +1 ore, same reasoning as the kind-preserving case above
+
+    assert bot.gains_many(view, [unchanged], [1]) == [0.0]
+    assert bot.estimate_many(view, [(1, unchanged)]) == [0.0]
+    assert default_offer(bot, view, [(1, unchanged)]) is None
 
 
 def test_the_gate_is_a_pure_function_of_the_ask(board):
-    """Asked twice about the same candidate at the same position, a gate
-    draws the same world and answers the same -- so a round's own gain and
-    its estimate of the other side, computed in two calls, are one
-    judgement rather than two draws. A different bot draws differently."""
+    """Asked twice about the same candidates at the same position, a gate
+    answers exactly the same both times -- there is no random stream of its
+    own left to disturb it."""
     from hexset.clients.netbot import NetworkBot
     from hexset.trading import _candidates
 
     space = stub_checkpoint(board).space
-    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, rng=random.Random(3))
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS)
     game = seated(bot, board)
     seat = to_move(game)
     view = game.state(seat)
@@ -558,7 +659,6 @@ def test_the_gate_is_a_pure_function_of_the_ask(board):
     received = [b for _, b in candidates]
     thems = [c for c, _ in candidates]
     first = bot.gains_many(view, received, thems)
-    bot.rng = random.Random(99)  # a later rng state must not move the answer
     assert bot.gains_many(view, received, thems) == first
     assert bot.estimate_many(view, candidates) == bot.estimate_many(view, candidates)
 
@@ -568,15 +668,15 @@ def test_a_repeated_ask_is_answered_without_re_evaluating(board, monkeypatch):
 
     `hexset.trading.default_offer` and `default_respond` each ask for both,
     back to back, over the identical candidates at the identical position --
-    so the second ask must serve itself from the first's worlds rather than
-    rebuilding every one of them. The numbers must be exactly what an
-    unmemoised gate answers, which is what the second half checks.
+    so the second ask must serve itself from the first's forward rather than
+    rebuilding it. The numbers must be exactly what an unmemoised gate
+    answers, which is what the second half checks.
     """
     from hexset.clients.netbot import NetworkBot
     from hexset.trading import _candidates
 
     space = stub_checkpoint(board).space
-    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, rng=random.Random(3))
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS)
     game = seated(bot, board)
     seat = to_move(game)
     view = game.state(seat)
@@ -613,7 +713,7 @@ def test_the_memo_misses_when_the_board_moves_without_a_hand(board, monkeypatch)
     from hexset.trading import _candidates
 
     space = stub_checkpoint(board).space
-    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, rng=random.Random(3))
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS)
     game = seated(bot, board)
     seat = to_move(game)
     candidates = list(_candidates(game.state(seat, hidden=False), seat, frozenset()))[:8]
@@ -694,28 +794,3 @@ def test_a_policy_policy_gate_is_seated_where_it_is_installed(board):
     gate = PolicyPolicy(checkpoint.policy, checkpoint).gate(game, 2, 3)
     assert isinstance(gate, NetworkBot)
     assert gate._seated is game and gate.seat == 2 and gate.max_trades == 3
-
-
-def test_seeded_search_also_reproduces_the_trade_gate_worlds(board):
-    checkpoint = stub_checkpoint(board)
-    searches = [searcher_for(checkpoint, simulations=4, rng=random.Random(37))
-                for _ in range(2)]
-    game = seated(searches[0].gate, board)
-    seat = to_move(game)
-    view = game.state(seat)
-    candidates = list(_candidates(game.state(seat, hidden=False), seat, frozenset()))[:3]
-    assert candidates
-    for counterparty, bundle in candidates:
-        # These draws determine the gate's hidden worlds and chance stream.
-        worlds = [search.gate._world_rng(view, counterparty, bundle) for search in searches]
-        assert [worlds[0].random() for _ in range(10)] == [worlds[1].random() for _ in range(10)]
-
-
-def test_plain_checkpoint_adapter_accepts_a_seeded_trade_generator(board):
-    checkpoint = stub_checkpoint(board)
-    bots = [bot_for(checkpoint, rng=random.Random(41)) for _ in range(2)]
-    game = seated(bots[0], board)
-    seat = to_move(game)
-    view = game.state(seat)
-    counterparty, bundle = next(iter(_candidates(game.state(seat, hidden=False), seat, frozenset())))
-    assert bots[0]._world_rng(view, counterparty, bundle).getstate() == bots[1]._world_rng(view, counterparty, bundle).getstate()

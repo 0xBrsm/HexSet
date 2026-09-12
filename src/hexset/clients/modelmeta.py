@@ -36,10 +36,6 @@ DEFAULT_TRADE_FLOOR = 0.0
 # gets the nearest floor that says so.
 MAX_TRADE_FLOOR = 1.0
 
-# The most candidates a network gate scores in its one batched forward.
-DEFAULT_GATE_ROWS = 32
-MAX_GATE_ROWS = 512
-
 
 @dataclass(frozen=True)
 class SearchConfig:
@@ -84,29 +80,28 @@ class GateConfig:
     """How a checkpoint asks its trade gate to be run.
 
     `trade_floor` is the gate's own measured clearing resolution
-    (`hexset.trading.trade_floor_of`) and `rows` its own cost bound on one
-    trade event. Both are properties of the exported model — a floor
-    measured against one checkpoint's value head says nothing about
-    another's — so both are read off the file rather than hardcoded for
+    (`hexset.trading.trade_floor_of`) -- a property of the exported model,
+    a floor measured against one checkpoint's value head says nothing
+    about another's, so it is read off the file rather than hardcoded for
     every checkpoint alike.
     """
 
     trade_floor: float = DEFAULT_TRADE_FLOOR
-    rows: int = DEFAULT_GATE_ROWS
 
 
 def gate_config(meta: dict[str, str]) -> GateConfig:
     """The trade gate a checkpoint's metadata asks for.
 
-    Absent keys give the shipped defaults: a floor of `0.0` (unmeasured, so
-    strict positivity is the whole gate) and `DEFAULT_GATE_ROWS` candidates.
+    An absent `trade_floor` gives the shipped default: `0.0`, unmeasured, so
+    strict positivity is the whole gate. A `gate_rows` key left behind by an
+    older export names a bound this gate no longer has -- read without
+    complaint, and ignored, the same as any other key this module has never
+    heard of.
     """
     return GateConfig(
         trade_floor=_clamp_float(
             meta.get("trade_floor"), DEFAULT_TRADE_FLOOR, MAX_TRADE_FLOOR
         ),
-        rows=_clamp(meta.get("gate_rows"), DEFAULT_GATE_ROWS, MAX_GATE_ROWS)
-        or DEFAULT_GATE_ROWS,
     )
 
 
@@ -114,17 +109,17 @@ def gate_config_of(checkpoint: object) -> GateConfig:
     """The gate settings `checkpoint` declares, read by name.
 
     Structural, not by inheritance -- the convention `hexset.trading` already
-    uses to read a gate's own surface. A loader that predates these keys, or
-    one in another repo that has not adopted them, carries neither attribute
-    and is read at the unmeasured defaults: the behaviour it had before the
-    keys existed. Values are taken as given; a negative floor is refused
-    where every other floor is, `hexset.trading.trade_floor_of`.
+    uses to read a gate's own surface. A loader that predates this key, or
+    one in another repo that has not adopted it, carries no such attribute
+    and is read at the unmeasured default: the behaviour it had before the
+    key existed. A checkpoint still carrying `gate_rows` is likewise read
+    without complaint; the field is simply never looked at. The floor is
+    taken as given; a negative one is refused where every other floor is,
+    `hexset.trading.trade_floor_of`.
     """
     floor = getattr(checkpoint, "trade_floor", None)
-    rows = getattr(checkpoint, "gate_rows", None)
     return GateConfig(
         trade_floor=DEFAULT_TRADE_FLOOR if floor is None else float(floor),
-        rows=DEFAULT_GATE_ROWS if rows is None else int(rows),
     )
 
 

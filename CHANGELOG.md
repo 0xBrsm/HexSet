@@ -4,6 +4,34 @@ Changes to the HexSet distribution. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## Unreleased
+
+### Changed
+
+- **The network trade gate values a candidate exchange in one forward
+  again, filtered by what it lets the seat buy.** `NetworkBot` no longer
+  samples a belief world, imagines two games or rolls a mover's greedy
+  policy forward a few plies to price a trade -- the continuation rollout,
+  and the paired belief worlds it drew, are gone. Every candidate the
+  asking seat can cover is read from its own frame -- its own hand exactly,
+  the counterparty's known lower bound moved the same way -- and an
+  affordability filter decides first whether the trade changes anything the
+  seat can buy (a road, a settlement, a city, a development card): a
+  candidate that leaves every one of those exactly as it was is priced at
+  `0.0` outright and never reaches the head at all, so it can never be
+  offered, accepted or countered with. `gate_rows` -- the cap on how many
+  candidates one batched forward scored -- is gone with the rollout it used
+  to bound; every candidate a seat can cover is now considered, since the
+  filter is the bound.
+
+### Removed
+
+- `NetworkBot.gate_rows` and the checkpoint metadata key of the same name
+  (`hexset.clients.modelmeta.GateConfig.rows`, `DEFAULT_GATE_ROWS`,
+  `MAX_GATE_ROWS`). A checkpoint exported with `gate_rows` in its metadata
+  still loads without complaint; the field is simply never read.
+
+
 ## 0.51.0
 
 ### Changed

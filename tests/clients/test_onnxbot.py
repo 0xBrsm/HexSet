@@ -239,12 +239,22 @@ def _seated_at_main(path: str, board, seat: int = 0, hand=(1, 2, 0, 1, 3)):
     game `choose` last handed the bot (see `NetworkBot._seated`'s
     docstring), so every trading test needs one `choose` first, exactly as
     the server's own `Tables.act` does before it ever asks the gate.
+
+    A settlement at vertex 0 gives `seat` a city to upgrade to -- the
+    affordability filter (`hexset.clients.netbot._kinds_of`) needs at least
+    one purchase kind reachable, or every candidate reads as changing
+    nothing regardless of the hand.
     """
+    from hexset.state import Building
+
     bot = network_bot(path, board)
     game = start(board, 4, random.Random(1))
     game.phase = Phase.MAIN
     game.current_player = seat
-    game.state(seat, hidden=False).hands[seat] = list(hand)
+    state = game.state(seat, hidden=False)
+    state.hands[seat] = list(hand)
+    state.vertex_owner[0] = seat
+    state.vertex_building[0] = Building.SETTLEMENT
     bot.choose(game)
     return bot, game
 

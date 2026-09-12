@@ -263,22 +263,20 @@ def test_one_board_batched_metrics_are_strict_json():
     json.dumps(metrics, allow_nan=False)
 
 
-def test_policy_adapter_gate_seeds_are_repeatable_without_game_rng(monkeypatch):
+def test_policy_adapter_gate_is_the_checkpoints_own_bot(monkeypatch):
     from hexset.bench.versus import PolicyPolicy
 
-    salts = []
+    seated = []
+
     class Gate:
         def seat_at(self, game):
-            pass
+            seated.append(game)
 
-    def bot_for(checkpoint, *, max_trades, rng):
-        salts.append(rng.getrandbits(64))
+    def bot_for(checkpoint, *, max_trades):
         return Gate()
 
     monkeypatch.setattr("hexset.clients.netbot.bot_for", bot_for)
-    adapter = PolicyPolicy(None, object(), gate_seed=17)
-    adapter.gate(object(), 0)
-    adapter.gate(object(), 1)
-    adapter.gate(object(), 0)
-    assert salts[0] == salts[2]
-    assert salts[0] != salts[1]
+    adapter = PolicyPolicy(None, object())
+    gate = adapter.gate("a game", 0)
+    assert isinstance(gate, Gate)
+    assert seated == ["a game"]

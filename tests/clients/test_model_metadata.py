@@ -11,8 +11,6 @@ from __future__ import annotations
 import pytest
 
 from hexset.clients.modelmeta import (
-    DEFAULT_GATE_ROWS,
-    MAX_GATE_ROWS,
     MAX_SIMULATIONS,
     MAX_TRADE_FLOOR,
     MAX_WAVE,
@@ -81,31 +79,36 @@ def test_a_checkpoint_that_declares_no_gate_is_read_as_unmeasured():
     the whole gate (`hexset.trading.clears_floor`)."""
     assert gate_config({}) == GateConfig()
     assert gate_config({}).trade_floor == 0.0
-    assert gate_config({}).rows == DEFAULT_GATE_ROWS
 
 
-def test_a_checkpoint_carries_its_own_measured_floor_and_row_bound():
+def test_a_checkpoint_carries_its_own_measured_floor():
+    config = gate_config({"trade_floor": "0.0197"})
+    assert config.trade_floor == pytest.approx(0.0197)
+
+
+def test_a_stale_row_bound_is_read_without_complaint_and_ignored():
+    """`gate_rows` named the most candidates one batched forward scored --
+    gone with the continuation rollout it used to bound, since every
+    coverable candidate is filtered arithmetically now. A file exported
+    before that carries the key regardless; it is simply never read."""
     config = gate_config({"trade_floor": "0.0197", "gate_rows": "64"})
     assert config.trade_floor == pytest.approx(0.0197)
-    assert config.rows == 64
 
 
 @pytest.mark.parametrize(
-    "meta, floor, rows",
+    "meta, floor",
     [
-        ({"trade_floor": "9.5"}, MAX_TRADE_FLOOR, DEFAULT_GATE_ROWS),
-        ({"trade_floor": "-0.5"}, 0.0, DEFAULT_GATE_ROWS),
-        ({"gate_rows": "10000000"}, 0.0, MAX_GATE_ROWS),
+        ({"trade_floor": "9.5"}, MAX_TRADE_FLOOR),
+        ({"trade_floor": "-0.5"}, 0.0),
     ],
 )
-def test_an_absurd_gate_setting_is_clamped_rather_than_honoured(meta, floor, rows):
+def test_an_absurd_gate_setting_is_clamped_rather_than_honoured(meta, floor):
     """A negative floor is refused outright by `hexset.trading.trade_floor_of`,
     so it is pulled to zero here rather than loaded and raised on at the first
     trade event; gains are win probabilities, so nothing above 1.0 is a floor
     any gain could clear."""
     config = gate_config(meta)
     assert config.trade_floor == floor
-    assert config.rows == rows
 
 
 @pytest.mark.parametrize("value", ["", "not-a-number", "nan"])

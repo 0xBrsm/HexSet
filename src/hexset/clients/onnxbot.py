@@ -235,10 +235,6 @@ class Loaded:
     def trade_floor(self) -> float:
         return self.gate.trade_floor
 
-    @property
-    def gate_rows(self) -> int:
-        return self.gate.rows
-
 
 @lru_cache(maxsize=4)
 def _load_cached(

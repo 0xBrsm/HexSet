@@ -31,6 +31,27 @@ Changes to the HexSet distribution. The project follows
 
 ### Changed
 
+- **The trade gate is 5.5x cheaper a turn, answering exactly the same.**
+  Two pieces of waste, neither of them a change to what the gate sees.
+  `hexset.clients.netbot.NetworkBot` serves a repeated ask from its last
+  evaluation: `gains_many` and `estimate_many` are the seat's own row and the
+  counterparty's row of one evaluation, and `hexset.trading.default_offer`
+  and `default_respond` each ask for both, back to back, over the identical
+  candidates at the identical position -- so the second ask was rebuilding
+  every imagined world and every continuation to arrive at numbers the first
+  already had, half the gate's whole cost. And enumerating a board's
+  buildings was quadratic in it: `can_place_road` rescanned every edge to
+  count the player's roads, once per candidate edge, and
+  `can_place_settlement`/`can_upgrade_to_city` did the same over vertices --
+  13.2M road scans a game inside the gate's rollouts. The piece limit is a
+  property of the player, so `actions._building_actions` now reads it once
+  and calls the new `state.road_placeable`/`settlement_placeable`/
+  `city_upgradeable` -- exactly the public predicates without that check --
+  per placement. Measured over a 4-seat self-play game under
+  `trade_mode="round"`: 147.3 ms a turn to 26.8 ms, and 1,777 network rows a
+  turn to 861.
+
+
 - **Heximax's `k` is a cap on distinct worlds, not a quota of searches.**
   `Heximax.worlds` draws `k` samples from the belief through the new
   `hexset.bots.determinized.distinct_worlds` -- the one place that decides

@@ -563,6 +563,87 @@ def test_the_gate_is_a_pure_function_of_the_ask(board):
     assert bot.estimate_many(view, candidates) == bot.estimate_many(view, candidates)
 
 
+def test_a_repeated_ask_is_answered_without_re_evaluating(board, monkeypatch):
+    """`gains_many` and `estimate_many` are two readings of one evaluation.
+
+    `hexset.trading.default_offer` and `default_respond` each ask for both,
+    back to back, over the identical candidates at the identical position --
+    so the second ask must serve itself from the first's worlds rather than
+    rebuilding every one of them. The numbers must be exactly what an
+    unmemoised gate answers, which is what the second half checks.
+    """
+    from hexset.clients.netbot import NetworkBot
+    from hexset.trading import _candidates
+
+    space = stub_checkpoint(board).space
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, rng=random.Random(3))
+    game = seated(bot, board)
+    seat = to_move(game)
+    view = game.state(seat)
+    candidates = list(_candidates(game.state(seat, hidden=False), seat, frozenset()))[:12]
+    received = [b for _, b in candidates]
+    thems = [c for c, _ in candidates]
+
+    calls: list[int] = []
+    original = NetworkBot._evaluate
+
+    def counted(self, *args, **kwargs):
+        calls.append(1)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(NetworkBot, "_evaluate", counted)
+
+    gains = bot.gains_many(view, received, thems)
+    estimates = bot.estimate_many(view, candidates)
+    assert len(calls) == 1  # one evaluation served both readings
+
+    bot._memo = None
+    assert bot.gains_many(view, received, thems) == gains
+    bot._memo = None
+    assert bot.estimate_many(view, candidates) == estimates
+    assert len(calls) == 3
+
+
+def test_the_memo_misses_when_the_board_moves_without_a_hand(board, monkeypatch):
+    """Road Building places roads without spending a card, so a key built
+    from hands alone would answer the previous table. The board is in the
+    key, and a road moves it."""
+    from hexset.clients.netbot import NetworkBot
+    from hexset.state import road_placeable
+    from hexset.trading import _candidates
+
+    space = stub_checkpoint(board).space
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, rng=random.Random(3))
+    game = seated(bot, board)
+    seat = to_move(game)
+    candidates = list(_candidates(game.state(seat, hidden=False), seat, frozenset()))[:8]
+    received = [b for _, b in candidates]
+    thems = [c for c, _ in candidates]
+
+    calls: list[int] = []
+    original = NetworkBot._evaluate
+
+    def counted(self, *args, **kwargs):
+        calls.append(1)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(NetworkBot, "_evaluate", counted)
+
+    bot.gains_many(game.state(seat), received, thems)
+    assert len(calls) == 1
+    bot.gains_many(game.state(seat), received, thems)
+    assert len(calls) == 1  # nothing moved: served from the memo
+
+    state = game._state
+    edge = next(
+        e for e in range(state.board.topology.num_edges) if road_placeable(state, seat, e)
+    )
+    state.edge_owner[edge] = seat  # a free road, no card spent
+
+    bot.gains_many(game.state(seat), received, thems)
+    assert len(calls) == 2  # the board moved: evaluated afresh
+
+
 def test_a_policy_duels_through_compete_batched(board):
     """`PolicyPolicy` is the whole adapter between a runtime and an evaluation.
 

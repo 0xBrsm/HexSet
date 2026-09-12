@@ -36,7 +36,8 @@ from .game import (
 )
 from .robber import victims
 from .state import (
-    MAX_ROADS, can_place_road, can_place_settlement, can_upgrade_to_city, road_count,
+    MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS, can_place_settlement, city_count,
+    city_upgradeable, road_count, road_placeable, settlement_count, settlement_placeable,
 )
 
 YEAR_OF_PLENTY_PAIRS: tuple[tuple[int, int], ...] = tuple(
@@ -190,23 +191,34 @@ def _building_actions(game: Game) -> list[Action]:
     topology = state.board.topology
     out: list[Action] = []
 
-    if game.free_roads > 0 or can_afford(state, player, Purchase.ROAD):
+    # Each piece limit is a property of the player, so it is read once here
+    # rather than rescanned inside every per-edge/per-vertex predicate --
+    # `state.road_placeable`/`settlement_placeable`/`city_upgradeable` are
+    # exactly the public predicates without that check. Enumerating a board
+    # was quadratic in it, which the trade gate's continuation rollouts paid
+    # tens of millions of times a game.
+    if (game.free_roads > 0 or can_afford(state, player, Purchase.ROAD)) and (
+        road_count(state, player) < MAX_ROADS
+    ):
         out.extend(
             Action(ActionType.BUILD_ROAD, e)
             for e in range(topology.num_edges)
-            if can_place_road(state, player, e)
+            if road_placeable(state, player, e)
         )
-    if can_afford(state, player, Purchase.SETTLEMENT):
+    if (
+        can_afford(state, player, Purchase.SETTLEMENT)
+        and settlement_count(state, player) < MAX_SETTLEMENTS
+    ):
         out.extend(
             Action(ActionType.BUILD_SETTLEMENT, v)
             for v in range(topology.num_vertices)
-            if can_place_settlement(state, player, v)
+            if settlement_placeable(state, player, v)
         )
-    if can_afford(state, player, Purchase.CITY):
+    if can_afford(state, player, Purchase.CITY) and city_count(state, player) < MAX_CITIES:
         out.extend(
             Action(ActionType.BUILD_CITY, v)
             for v in range(topology.num_vertices)
-            if can_upgrade_to_city(state, player, v)
+            if city_upgradeable(state, player, v)
         )
     return out
 

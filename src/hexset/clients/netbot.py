@@ -103,6 +103,17 @@ class NetworkBot:
     # in play (the trade event runs after every seat has moved through
     # setup) but is the right answer for the gate regardless.
     _seated: Game | None = field(default=None, repr=False, compare=False)
+    # The one ask `_score` last answered, and its answer. `gains_many` and
+    # `estimate_many` are two readings of one evaluation -- the seat's own row
+    # and the counterparty's -- and `hexset.trading.default_offer` and
+    # `default_respond` each ask for both, back to back, over the identical
+    # candidate set at the identical position. `_score` is a pure function of
+    # that ask (its worlds are seeded from it by `_world_rng`), so the second
+    # ask recomputed every world and every continuation to arrive at the
+    # numbers the first one already had: half the gate's whole cost. One entry
+    # is enough because the pair is always consecutive; the key carries the
+    # position, so a changed table misses rather than answering stale.
+    _memo: tuple[tuple, dict] | None = field(default=None, repr=False, compare=False)
 
     def seat_at(self, game: Game) -> None:
         """Seat this bot at `game` without asking it to move: the position
@@ -111,6 +122,7 @@ class NetworkBot:
         seat) calls it in place of poking `_seated`."""
         _check_players(game, self.players)
         self._seated = game
+        self._memo = None
 
     def choose(self, game: Game) -> Action:
         self.seat_at(game)
@@ -176,6 +188,38 @@ class NetworkBot:
         return [gain > 0.0 for gain in self.gains_many(view, received, counterparties)]
 
     def _score(
+        self, seat: int, view: View, received: Sequence[Bundle], counterparties: Sequence[int]
+    ) -> dict[int, tuple[tuple[float, ...], tuple[float, ...]]]:
+        """`_evaluate`, answering a repeat of the last ask from `_memo`.
+
+        See `_memo`'s own comment for why the repeat is worth catching. The
+        key is the whole of what `_evaluate` reads: the seated position
+        (turn, phase, mover, free roads, and the board itself -- Road
+        Building moves the board without touching a hand), the asking
+        seat's information set (`View.signature`, every hand size -- the
+        same identity `_world_rng` already seeds worlds from), and the
+        candidates asked about. A miss on any of it evaluates afresh.
+        """
+        game = self._seated
+        assert game is not None  # callers check this first
+        state = view.state
+        key = (
+            game.turns, game.phase, game.current_player, game.free_roads,
+            seat, view.perspective, tuple(view.sizes), view.signature(),
+            # The board as well as the belief: Road Building places roads
+            # without spending a card, so a hand-only key would answer a
+            # changed table from the previous one.
+            tuple(state.edge_owner), tuple(state.vertex_building),
+            tuple(received), tuple(counterparties),
+        )
+        memo = self._memo
+        if memo is not None and memo[0] == key:
+            return memo[1]
+        scored = self._evaluate(seat, view, received, counterparties)
+        self._memo = (key, scored)
+        return scored
+
+    def _evaluate(
         self, seat: int, view: View, received: Sequence[Bundle], counterparties: Sequence[int]
     ) -> dict[int, tuple[tuple[float, ...], tuple[float, ...]]]:
         """For each scored candidate, the value vector of the position without

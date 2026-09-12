@@ -566,15 +566,12 @@ def _trim_log(view: dict, log_after: int | None) -> dict:
     if not isinstance(lines, list):
         return view
     view["log_total"] = len(lines)
-    # The final read is the one re-render a cursor cannot splice. `state_view`
-    # asks for the transcript with `omniscient or over` once the game is over
-    # (webplay.py), and that lifts redaction across the *whole* history at
-    # once: every earlier steal stops being "a card" and names what it was.
-    # Those are rewrites of lines the caller already holds, arbitrarily far
-    # back, so the cursor is ignored here and the full transcript sent for the
-    # client to replace its copy with -- `log_from: 0` is how it knows to.
-    if log_after is not None and view.get("game_over"):
-        log_after = None
+    # The game's end re-renders the whole transcript with redaction lifted
+    # (`state_view` asks for it with `omniscient or over`): every earlier
+    # steal stops being "a card" and names what it was, arbitrarily far back.
+    # That used to force the full transcript on the final reply -- 5-6k
+    # tokens a seat rarely wants -- so it now arrives like any other, and a
+    # seat that does want the lifted history asks with `full_log`.
     start = 0 if (log_after is None or not lines) else max(0, min(int(log_after) - 1, len(lines) - 1))
     view["log"] = lines[start:]
     view["log_from"] = start
@@ -1561,8 +1558,8 @@ _TOOLS: dict[str, tuple] = {
         "`you_would_give`/`you_would_receive`) -> choose_trade(index). `trades`: "
         "done this turn.\n"
         "`log`: new transcript lines plus the last one you hold (it may be "
-        "rewritten); splice at `log_from`. Full on a new/resumed seat and at "
-        "game over.",
+        "rewritten); splice at `log_from`. Full on a new/resumed seat; at game "
+        "over, `full_log` gets the un-redacted whole.",
         {"type": "object", "properties": {**_CURSOR_ARGS}},
     ),
     "wait_for_turn": (

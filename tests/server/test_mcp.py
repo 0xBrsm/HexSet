@@ -1676,15 +1676,16 @@ def test_a_failed_call_does_not_move_the_cursor(live_server):
     assert client.call_tool("state")["log_from"] == before["log_total"] - 1
 
 
-def test_trim_log_ignores_the_cursor_once_the_game_is_over():
-    """`state_view` re-renders the whole transcript with redaction lifted the
-    moment the game ends (`omniscient or over`), so lines the caller already
-    holds change wording arbitrarily far back. A spliced reply would leave it
-    with a stale prefix -- the final read sends everything instead."""
+def test_trim_log_keeps_the_cursor_once_the_game_is_over():
+    """The game's end lifts redaction across the whole transcript, but the
+    final reply no longer pushes it all: the seat gets the usual slice and
+    asks with `full_log` if it wants the un-redacted history."""
     view = mcptools._trim_log({"log": ["a", "b", "c", "d"], "game_over": True}, 3)
-    assert view["log"] == ["a", "b", "c", "d"]
-    assert view["log_from"] == 0
+    assert view["log"] == ["c", "d"]
+    assert view["log_from"] == 2
     assert view["log_total"] == 4
+    whole = mcptools._trim_log({"log": ["a", "b", "c", "d"], "game_over": True}, None)
+    assert whole["log"] == ["a", "b", "c", "d"] and whole["log_from"] == 0
 
 
 def test_trim_log_still_trims_while_the_game_is_running():

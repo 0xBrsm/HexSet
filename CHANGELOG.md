@@ -53,6 +53,12 @@ Changes to the HexSet distribution. The project follows
 
 ### Changed
 
+- **The MCP `game_over` reply no longer pushes the whole transcript.** It
+  used to, so the client could replace its copy with the redaction-lifted
+  history -- 5-6k tokens a seat rarely reads. The final reply now carries
+  the usual slice; `state(full_log=true)` fetches the un-redacted whole on
+  request.
+
 - **`summary.spots` keeps `type` when settlements and cities mix.** The
   table's `KIND:` prefix assumed one kind per list; mid-game, once both are
   affordable, a settlement spot was labelled `BUILD_CITY:`. A mixed list

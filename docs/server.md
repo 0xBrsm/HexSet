@@ -256,10 +256,13 @@ The transcript `log` is sent incrementally. Each MCP session remembers how
 many lines it has been sent, and every state-returning reply carries only
 the lines added since that session's previous reply plus the one trailing
 line that may have been rewritten in place, with `log_from` naming the
-index the slice starts at and `log_total` the whole length. A new seat, a
-reclaimed seat and the final read of a finished game get the whole
-transcript. `full_log: true` forces that on any call, for a client that lost
-a reply; `log_after: <n>` overrides the cursor with an explicit line count.
+index the slice starts at and `log_total` the whole length. A new seat and
+a reclaimed seat get the whole transcript. The game's end lifts redaction
+across the whole history (every earlier steal names its card); that is not
+pushed -- the final reply carries the usual slice -- and `full_log: true`
+fetches the un-redacted whole on request, as it does on any call for a
+client that lost a reply. `log_after: <n>` overrides the cursor with an
+explicit line count.
 
 Every state-returning tool answers with `your_move`: `act`, `discard`,
 `answer_trade` or `choose_trade` names the tool the table wants from the

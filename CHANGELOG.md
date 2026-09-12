@@ -6,6 +6,29 @@ Changes to the HexSet distribution. The project follows
 
 ## Unreleased
 
+### Fixed
+
+- **Clicking a player at a finished game to read their cards moved the rest
+  of the page.** `renderHand` had exactly two shapes: a one-line hint when
+  nobody was picked, or the full two-column card grid once somebody was.
+  `#hand` sits in `#play-area`, sized to its own content, with `#log` taking
+  whatever's left below it, so swapping one shape for the other shoved `#log`
+  up or down by however much a header row and a card grid cost over a single
+  line of text. The pane now always carries a banner naming whose cards are
+  on screen (or, nobody picked yet, what a click does) above the same two
+  columns the viewer's own hand uses during play, filled or empty -- clicking
+  a row swaps what's inside them instead of adding or removing the skeleton
+  around them.
+
+- **The Undo corner button painted over an open modal instead of under it.**
+  `#undo-build` carried a flat `z-index: 60`, above `#modal`'s `55`, so it
+  would reach through *any* modal -- a purpose it only ever needed for the
+  "Steal from" robber-victim modal, whose own hex a self-played Knight
+  stays undoable behind. Every other modal (trade, discard, Monopoly, Year
+  of Plenty) now covers it like it covers the rest of the board: the corner
+  sits at `z-index: 40` by default and only gets `.reach-modal`'s `60` back
+  while `modalMode` is `"steal"`.
+
 ### Changed
 
 - **Heximax's `k` is a cap on distinct worlds, not a quota of searches.**

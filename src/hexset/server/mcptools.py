@@ -655,10 +655,17 @@ _ROAD_ACTIONS = ("BUILD_ROAD", "SETUP_ROAD")
 _CITY = 2  # `hexset.state.Building.CITY`
 
 
-def _afford(hand: dict, legal: list[dict]) -> dict:
+# What `_afford` counts a seat's pieces as, against `piece_supply`.
+_PIECE_OF = {"road": "road", "settlement": "settlement", "city": "city"}
+
+
+def _afford(hand: dict, legal: list[dict], view: dict | None = None, board: dict | None = None) -> dict:
     """Per build: `ok` (the hand covers it), `missing` (what it is short, when
-    not), `legal` (whether `legal_actions` offers it right now -- a build can
-    be affordable with nowhere to put it, or the phase may not allow it).
+    not), `legal` (whether `legal_actions` offers it right now), and when
+    the hand covers it but it is not offered, `why`: `phase` (not the main
+    phase of this seat's turn), `pieces` (none of that piece left to place),
+    `deck` (no development card left), or `spot` (a place to put it is what
+    is missing -- no reachable vertex or edge, no settlement to upgrade).
     `legal` is omitted entirely when `legal_actions` itself is empty: every
     build would read `legal: false` for the same reason (`your_move: wait`
     already says so), and four repeats of the one fact were never the point
@@ -670,10 +677,32 @@ def _afford(hand: dict, legal: list[dict]) -> dict:
         entry: dict = {"ok": not missing}
         if legal:
             entry["legal"] = _BUILD_ACTION[build] in offered
+            if not missing and not entry["legal"] and view is not None:
+                entry["why"] = _why_not(build, view, board)
         if missing:
             entry["missing"] = missing
         out[build] = entry
     return out
+
+
+def _why_not(build: str, view: dict, board: dict | None) -> str:
+    if view.get("phase") != "MAIN":
+        return "phase"
+    if build == "dev_card":
+        return "deck" if not view.get("dev_cards_remaining") else "spot"
+    supply = ((board or {}).get("piece_supply") or {}).get(_PIECE_OF[build])
+    if supply is not None:
+        seat = view.get("seat")
+        owner, kind = view.get("vertex_owner") or [], view.get("vertex_building") or []
+        if build == "road":
+            placed = sum(1 for s in view.get("edge_owner") or [] if s == seat)
+        elif build == "city":
+            placed = sum(1 for v, s in enumerate(owner) if s == seat and v < len(kind) and kind[v] == _CITY)
+        else:
+            placed = sum(1 for v, s in enumerate(owner) if s == seat and not (v < len(kind) and kind[v] == _CITY))
+        if placed >= supply:
+            return "pieces"
+    return "spot"
 
 
 def _spots(legal: list[dict], board: dict) -> list[dict]:
@@ -878,7 +907,7 @@ def _summarize(view: dict, board: dict | None) -> dict:
     if me is None or "hand" not in me:
         return view
     legal = view.get("legal_actions") or []
-    summary: dict = {"afford": _afford(me["hand"], legal), "race": _race(view, me)}
+    summary: dict = {"afford": _afford(me["hand"], legal, view, board), "race": _race(view, me)}
     if board is not None:
         spots = _spots(legal, board)
         if spots:
@@ -1529,12 +1558,12 @@ _TOOLS: dict[str, tuple] = {
     "state": (
         _state,
         "Game state; every acting tool replies with it at your next decision. "
-        "Played for you: a lone ROLL; passing offers while your hand is empty; "
-        "your own offer when all pass or a clean accept matches offer_trade's `to`.\n"
+        "Played for you: a lone ROLL; passing offers with an empty hand; your own "
+        "offer when all pass or one clean accept fits `to`.\n"
         "`your_move`: `act`, `discard`->discard(cards), `answer_trade` or "
         "`choose_trade`: the tool; `game_over`; `wait` only after `timeout` or "
         "with seats open (`waiting_on`; wait_for_turn()).\n"
-        "`summary.afford` per build: `ok`, `missing`, `legal`. `summary.race`: "
+        "`summary.afford` per build: `ok`, `missing`, `legal`, `why` (phase/spot/pieces/deck). `summary.race`: "
         "`points`, `to_win`, `top_opponent`, awards yours/holder's/`need`. When legal: "
         "`spots` (settlement/city vertices, pips/resources/port/`port_matches`, best "
         "first) and `robber` (hexes, pips, `hits` seat:Ns+Nc = settlements+cities, "

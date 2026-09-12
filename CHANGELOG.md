@@ -76,6 +76,12 @@ Changes to the HexSet distribution. The project follows
 
 ### Changed
 
+- **`summary.afford` says why an affordable build is not offered.** `why`:
+  `phase` (not this seat's main phase), `pieces` (none of that piece left),
+  `deck` (no development card left) or `spot` (nowhere to put it). Asked
+  for by the first Sonnet seat, which met `ok: true, legal: false` with no
+  way to tell a distance-rule dead end from a wrong phase.
+
 - **MCP `trade_ratios` on every reply; `race.leader` is `top_opponent`.** The
   first Sonnet seat, sent its ratios only when they changed, assumed 4:1 and
   missed its own port for several turns -- 60 bytes a reply was the wrong

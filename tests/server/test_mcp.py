@@ -1095,6 +1095,30 @@ def test_spots_keep_their_type_column_when_settlements_and_cities_mix():
     assert mixed["spots"] == "(index,type,vertex,pips,resources):0,BUILD_CITY,3,5,Ore|4,BUILD_SETTLEMENT,9,4,Wood"
 
 
+def test_afford_says_why_an_affordable_build_is_not_offered():
+    hand = {"Wood": 2, "Brick": 2, "Sheep": 2, "Wheat": 3, "Ore": 3}
+    board = {"piece_supply": {"road": 15, "settlement": 5, "city": 4}}
+    main = {"seat": 0, "phase": "MAIN", "dev_cards_remaining": 3,
+            "vertex_owner": [0, 0, -1], "vertex_building": [2, 1, 0], "edge_owner": [0, -1]}
+    legal = [{"type": "END_TURN"}]  # affordable, nothing offered
+    out = mcptools._afford(hand, legal, main, board)
+    assert out["road"] == {"ok": True, "legal": False, "why": "spot"}
+    assert out["settlement"]["why"] == "spot" and out["city"]["why"] == "spot"
+    assert out["dev_card"]["why"] == "spot"
+    # Not the main phase: every one says so.
+    rolling = {**main, "phase": "ROLL"}
+    assert {b: e["why"] for b, e in mcptools._afford(hand, [{"type": "ROLL"}], rolling, board).items()} == dict.fromkeys(mcptools._COSTS, "phase")
+    # Out of pieces, out of cards.
+    capped = {**main, "vertex_owner": [0] * 5, "vertex_building": [1] * 5, "edge_owner": [0] * 15, "dev_cards_remaining": 0}
+    out = mcptools._afford(hand, legal, capped, board)
+    assert out["settlement"]["why"] == "pieces" and out["road"]["why"] == "pieces"
+    assert out["city"]["why"] == "spot"  # four cities allowed, none built: a place is what's missing
+    assert out["dev_card"]["why"] == "deck"
+    # Offered, or unaffordable: no why.
+    assert "why" not in mcptools._afford(hand, [{"type": "BUILD_ROAD"}], main, board)["road"]
+    assert "why" not in mcptools._afford({"Wood": 1}, legal, main, board)["road"]
+
+
 def test_race_measures_the_win_the_leader_and_both_awards():
     view = {
         "winning_points": 10,

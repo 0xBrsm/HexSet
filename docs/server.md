@@ -232,7 +232,8 @@ anything, including other seats answering the same trade round.
 
 Every state-returning tool also carries `summary`, derived server-side from
 the view and the fixed board: `afford` (per build, whether the hand covers
-it, what it is short, and whether `legal_actions` offers it now), `race`
+it, what it is short, whether `legal_actions` offers it now, and if not
+while affordable, `why`: `phase`, `pieces`, `deck` or `spot`), `race`
 (points and distance to the win, the leading opponent (`top_opponent`) by public points, and
 for each award the caller's count, the holder's, and the count that would
 take it), and, only when such a move is legal, `spots` (every settlement or

@@ -35,8 +35,9 @@ from .game import (
     trade_with_bank,
 )
 from .robber import victims
-from .state import can_place_road, can_place_settlement, can_upgrade_to_city
-
+from .state import (
+    MAX_ROADS, can_place_road, can_place_settlement, can_upgrade_to_city, road_count,
+)
 
 YEAR_OF_PLENTY_PAIRS: tuple[tuple[int, int], ...] = tuple(
     combinations_with_replacement(range(NUM_RESOURCES), 2)
@@ -220,7 +221,10 @@ def _card_actions(game: Game) -> list[Action]:
     held = state.dev_cards[player]
     if held[DevCard.KNIGHT]:
         out.append(Action(ActionType.PLAY_KNIGHT))
-    if held[DevCard.ROAD_BUILDING]:
+    if held[DevCard.ROAD_BUILDING] and road_count(state, player) < MAX_ROADS:
+        # A player with no road pieces left has nothing to place: the card
+        # is unplayable, not a free pass. colonist refuses it outright
+        # (2026-09-12, three live games at fifteen roads).
         out.append(Action(ActionType.PLAY_ROAD_BUILDING))
     if held[DevCard.MONOPOLY]:
         out.extend(Action(ActionType.PLAY_MONOPOLY, r) for r in range(NUM_RESOURCES))

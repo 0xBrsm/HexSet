@@ -60,6 +60,32 @@ def world_signature(state: GameState, perspective: int) -> tuple:
     return holdings_signature(state, perspective), tuple(state.deck)
 
 
+def distinct_worlds(
+    belief, rng: random.Random, draws: int, world_key: WorldKey = world_signature,
+) -> list[tuple[float, GameState]]:
+    """`draws` samples from `belief`, folded to the distinct worlds among them.
+
+    Each distinct world comes back once with its share of the draws, so a
+    caller searches it once and weights it by how often the belief produced
+    it. `draws` bounds sampling work; it is a cap on distinct worlds, not a
+    quota. A belief the ledger has pinned yields one world with weight 1.0
+    however large `draws` is. `Heximax.worlds` and `determinized` both read
+    their worlds through here, so the one rule for "the same world" lives
+    in `world_key`.
+    """
+    draws = operator.index(draws)
+    if draws < 1:
+        raise ValueError("at least one draw is needed")
+    seat = belief.perspective
+    found: dict[Hashable, tuple[GameState, int]] = {}
+    for _ in range(draws):
+        sampled = belief.sample(rng)
+        key = world_key(sampled, seat)
+        state, count = found.get(key, (sampled, 0))
+        found[key] = (state, count + 1)
+    return [(count / draws, state) for state, count in found.values()]
+
+
 def determinized(
     choose: Chooser, worlds: int, rng: random.Random | None = None, *,
     temperature: float = 0.0, select: str = "argmax",
@@ -90,18 +116,13 @@ def determinized(
         # One seed per decision, independent of the number of cache misses and
         # of any chance draws made inside the callback.
         search_rng = random.Random(rng.getrandbits(128))
-        answered: dict[Hashable, Action | None] = {}
         votes: Counter[Action] = Counter()
-        for _ in range(worlds):
-            sampled = belief.sample(rng)
-            key = world_key(sampled, seat)
-            if key not in answered:
-                world = imagine(game, search_rng, randomize_deck=False)
-                world.set_state(sampled)
-                answered[key] = choose(world)
-            action = answered[key]
+        for share, sampled in distinct_worlds(belief, rng, worlds, world_key):
+            world = imagine(game, search_rng, randomize_deck=False)
+            world.set_state(sampled)
+            action = choose(world)
             if action is not None:
-                votes[action] += 1
+                votes[action] += share
         if not votes:
             return None
         actions = sorted(votes)

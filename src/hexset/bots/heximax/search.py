@@ -4,7 +4,11 @@
 Iterative deepening retains the last completed result when the leaf budget
 is exhausted. Each decision node maximizes its mover's objective; chance
 nodes average dice and hidden draws. Opponent actions are expanded from
-sampled beliefs across k determinizations. Setup and discard decisions use
+sampled beliefs across up to `k` determinizations: `k` draws from the
+belief, deduplicated on every seat's hidden holdings and weighted by how
+often each distinct world was drawn -- a cap on distinct worlds searched,
+not a quota of searches. With the ledger pinning most cards the belief is
+usually one world, and `k` then costs nothing. Setup and discard decisions use
 specialized policies. The factory uses a separate exchange evaluator while
 adapting move weights to recent public trading activity.
 """
@@ -22,6 +26,7 @@ from hexset.board.board import Board
 from hexset.board.terrain import NUM_RESOURCES
 from hexset.economy import hand_size
 from hexset.chance import Forced, Live
+from ..determinized import distinct_worlds, holdings_signature
 from ..stances import STANCES, win_at
 from ...actions import options_for
 from hexset.game import ROLL_ODDS, Game, Phase, imagine, is_over, roll_dice, to_move
@@ -294,17 +299,27 @@ class Heximax:
         return self._search(worlds, options, seat)
 
     def worlds(self, game: Game, seat: int) -> list[Game]:
-        """The determinizations this decision is searched in.
+        """The distinct determinizations this decision is searched in.
 
-        Each is an `imagine` copy whose hidden hands and cards are one draw
-        from the belief.
+        `k` draws from the belief through `hexset.bots.determinized.
+        distinct_worlds` -- the one place that decides when two draws are
+        the same world -- keyed on every other seat's hidden holdings. One
+        `imagine` copy is built per distinct world, and `world_weights`
+        carries each one's share of the draws, so a world drawn twice as
+        often counts twice in the root average while being searched once.
+        In a duel, or wherever the ledger has pinned every card, that is one
+        world however large `k` is.
         """
-        belief = game.state(seat)
-        out = []
-        for _ in range(self.k):
+        # `holdings_signature`, not the default key: the deck's order is a
+        # chance stream this search redraws anyway, so it does not make two
+        # draws different worlds.
+        out, weights = [], []
+        for share, state in distinct_worlds(game.state(seat), self.rng, self.k, holdings_signature):
             world = imagine(game, self.rng, randomize_deck=False)
-            world.set_state(belief.sample(self.rng))
+            world.set_state(state)
             out.append(world)
+            weights.append(share)
+        self.world_weights = weights
         return out
 
     def root_options(self, game: Game) -> list[Action]:
@@ -385,11 +400,13 @@ class Heximax:
         self, worlds: list[Game], candidates: list[Action], depth: int, seat: int,
         partial: list[tuple[float, Action]],
     ) -> list[list[float]]:
-        share = 1.0 / len(worlds)
+        weights = getattr(self, "world_weights", None)
+        if weights is None or len(weights) != len(worlds):
+            weights = [1.0 / len(worlds)] * len(worlds)
         totals = []
         for action in candidates:
             total = [0.0] * worlds[0].num_players
-            for world in worlds:
+            for world, share in zip(worlds, weights):
                 vector = self._after(world, action, depth, seat)
                 for p, value in enumerate(vector):
                     total[p] += share * value

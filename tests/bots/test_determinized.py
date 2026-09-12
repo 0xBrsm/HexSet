@@ -215,3 +215,43 @@ def test_invalid_configuration_is_rejected_even_if_disabled(kwargs):
 def test_noninteger_draw_count_is_rejected():
     with pytest.raises(TypeError):
         determinized(lambda game: None, 1.5)
+
+
+
+def test_distinct_worlds_folds_the_draws_and_weights_them():
+    """The one sampler both `determinized` and `Heximax.worlds` read: a pinned
+    belief is one world with weight 1.0, and shares always sum to one."""
+    import random
+
+    from hexset.board.board import random_base_board
+    from hexset.bots.determinized import distinct_worlds, holdings_signature
+    from hexset.game import is_over, start, to_move
+    from hexset.play import step_randomly
+    from hexset.view import View
+
+    rng = random.Random(5)
+    board = random_base_board(rng)
+    game = start(board, 2, rng)
+    for _ in range(60):
+        if is_over(game):
+            break
+        step_randomly(game, rng)
+    seat = to_move(game)
+    assert sum(View.from_game(game, seat).unknown) == 0
+    worlds = distinct_worlds(game.state(seat), random.Random(0), 100, holdings_signature)
+    assert len(worlds) == 1 and worlds[0][0] == 1.0
+
+    rng = random.Random(11)
+    board = random_base_board(rng)
+    game = start(board, 4, rng)
+    for step in range(600):
+        if is_over(game):
+            break
+        seat = to_move(game)
+        if step > 40 and sum(View.from_game(game, seat).unknown) >= 3:
+            break
+        step_randomly(game, rng)
+    worlds = distinct_worlds(game.state(seat), random.Random(0), 50, holdings_signature)
+    assert 1 <= len(worlds) <= 50 and abs(sum(w for w, _ in worlds) - 1.0) < 1e-9
+    keys = [holdings_signature(state, seat) for _, state in worlds]
+    assert len(set(keys)) == len(keys)

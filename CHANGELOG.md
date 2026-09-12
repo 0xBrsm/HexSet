@@ -6,6 +6,28 @@ Changes to the HexSet distribution. The project follows
 
 ## Unreleased
 
+### Changed
+
+- **Heximax's `k` is a cap on distinct worlds, not a quota of searches.**
+  `Heximax.worlds` draws `k` samples from the belief through the new
+  `hexset.bots.determinized.distinct_worlds` -- the one place that decides
+  when two draws are the same world, which `determinized` now reads too --
+  keyed on every other seat's hidden holdings (`holdings_signature`; the
+  deck's order is a chance stream and does not distinguish a world), and
+  weights each distinct world by its share of the draws in the root average
+  (`world_weights`). A
+  belief the ledger has pinned to one world -- every duel, and most
+  four-seat positions -- is searched once however large `k` is. Before, `k`
+  identical worlds shared one leaf budget, and at `k=100` the budget was gone
+  after the first few root options: heximax then chose among those, and lost
+  eleven of eleven 1v1 games against colonist's bot on 2026-09-12 building
+  almost nothing.
+
+- **Road Building is not offered to a seat with no road pieces left.** The
+  card places roads; at fifteen on the board there is nothing to place.
+  colonist refuses the play outright, and a live seat that took the engine's
+  word for it was refused and abandoned three games on 2026-09-12.
+
 ### Added
 
 - **Hidden hands and cards in `GameState`.** A state written by a seat rather

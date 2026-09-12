@@ -58,10 +58,6 @@ class Session:
     # once per seat -- it never changes after the deal -- and read by every
     # reply's `summary`. `None` until the seat is taken.
     board: dict | None = None
-    # The last `trade_ratios` this session was sent, or `None` for never --
-    # reset alongside `log_sent`/`board` on a new seat. `_trade_ratios_repeat`
-    # omits the field from a reply that would only repeat it.
-    trade_ratios_sent: dict | None = None
     # The ranked seats the open `offer_trade` may be settled with, or `None`
     # for anyone -- read by `_settled_round` while that round is open.
     offer_to: list[int] | None = None
@@ -99,7 +95,6 @@ def _seat(session: Session, result: dict) -> dict:
     session.code = result.get("code")
     session.log_sent = None
     session.board = None
-    session.trade_ratios_sent = None
     return result
 
 
@@ -192,7 +187,6 @@ def _resume_game(
     session.identity = identity
     session.log_sent = None  # a reclaimed seat is owed the whole transcript
     session.board = None
-    session.trade_ratios_sent = None
     _layout(tables, session)
     return _settle(tables, session, reclaimed, timeout, log_after, full_log)
 
@@ -843,7 +837,7 @@ def _roads(legal: list[dict], view: dict, board: dict) -> list[dict]:
 def _race(view: dict, me: dict) -> dict:
     """Where this seat stands: points and the distance to the win (the
     rule itself is the view's top-level `winning_points`), the leading
-    opponent by *public* points (hidden victory-point cards are not
+    opponent (`top_opponent`, never this seat) by *public* points (hidden victory-point cards are not
     counted for anyone else), and each award -- yours, who holds it, and
     `need`, the length or knight count that would take it (strictly more
     than the holder, or the minimum if nobody holds it yet)."""
@@ -867,7 +861,7 @@ def _race(view: dict, me: dict) -> dict:
     return {
         "points": points,
         "to_win": max(0, winning - points),
-        "leader": None if leader is None else {"seat": leader.get("seat"), "points": leader.get("victory_points", 0)},
+        "top_opponent": None if leader is None else {"seat": leader.get("seat"), "points": leader.get("victory_points", 0)},
         "longest_road": award("longest_road", "road_length", _MIN_LONGEST_ROAD),
         "largest_army": award("largest_army", "knights_played", _MIN_LARGEST_ARMY),
     }
@@ -1111,22 +1105,6 @@ def _drop_superseded(grouped: dict[str, list[dict]], summary: dict) -> None:
         grouped.pop("MOVE_ROBBER", None)
 
 
-def _trade_ratios_repeat(view: dict, session: Session) -> None:
-    """Drop `trade_ratios` from a reply that would only repeat exactly what
-    this session was already sent -- ratios change only when a port
-    settlement/city is built or lost, rarer than most replies, so most
-    would otherwise resend the same five ints for nothing. A new or
-    reclaimed seat (`session.trade_ratios_sent` reset by `_seat`/
-    `_resume_game`) always gets it once, to have a starting value."""
-    ratios = view.get("trade_ratios")
-    if ratios is None:
-        return
-    if ratios == session.trade_ratios_sent:
-        del view["trade_ratios"]
-    else:
-        session.trade_ratios_sent = dict(ratios)
-
-
 def _compact(view: dict, session: Session) -> dict:
     """The last step before a reply goes out: everything above that reads
     the flat list, the dense arrays or the fields `_prune` drops
@@ -1137,9 +1115,7 @@ def _compact(view: dict, session: Session) -> dict:
     view["legal_actions"] = {kind: _tabulate(rows) for kind, rows in grouped.items()}
     if view.get("summary"):
         _tabulate_summary(view["summary"])
-    view = _prune(_compact_board(view))
-    _trade_ratios_repeat(view, session)
-    return view
+    return _prune(_compact_board(view))
 
 
 def _translate(raw: dict) -> dict:
@@ -1552,17 +1528,17 @@ _TOOLS: dict[str, tuple] = {
     ),
     "state": (
         _state,
-        "Game state; every playing tool replies with it at your next decision. "
+        "Game state; every acting tool replies with it at your next decision. "
         "Played for you: a lone ROLL; passing offers while your hand is empty; "
         "your own offer when all pass or a clean accept matches offer_trade's `to`.\n"
         "`your_move`: `act`, `discard`->discard(cards), `answer_trade` or "
         "`choose_trade`: the tool; `game_over`; `wait` only after `timeout` or "
         "with seats open (`waiting_on`; wait_for_turn()).\n"
         "`summary.afford` per build: `ok`, `missing`, `legal`. `summary.race`: "
-        "`points`, `to_win`, `leader`, awards yours/holder's/`need`. When legal: "
+        "`points`, `to_win`, `top_opponent`, awards yours/holder's/`need`. When legal: "
         "`spots` (settlement/city vertices, pips/resources/port/`port_matches`, best "
-        "first) and `robber` (hexes, pips, `hits` seat:Ns+Nc, `options` "
-        "index:victim), each replacing its `legal_actions` group; `roads` (`to` "
+        "first) and `robber` (hexes, pips, `hits` seat:Ns+Nc = settlements+cities, "
+        "`options` actIndex:victimSeat), each replacing its `legal_actions` group; `roads` (`to` "
         "vertex, pips/resources/port, `settle`, `then` = best vertex one road on, "
         "`link` = joins your network).\n"
         "Tables are `(keys):row|row`, cells comma-separated, `-` null, 1/0 bool, "
@@ -1572,17 +1548,16 @@ _TOOLS: dict[str, tuple] = {
         "the rest index only.\n"
         "`players`: `kind`, your `hand`/`dev_cards`, public ledger `known`/`unknown`. "
         "`buildings`, `roads` (edge ids per seat), "
-        "`bank`, `robber` hex, `trade_ratios` (only when changed). Resource dicts "
-        "omit zeros.\n"
+        "`bank`, `robber` hex, `trade_ratios` (your bank rate; 3 or 2 = a port). "
+        "Resource dicts omit zeros.\n"
         "`can_offer`: true if offer_trade() would be accepted now. `pending`: "
         "offers to you (`actor`, `you_give`, `you_receive`, `can_accept`; a counter "
         "is always allowed) -> answer_trade(index). "
         "`trade_round`: your open offer's `responses` (`seat`, `kind`, "
         "`you_would_give`/`you_would_receive`) -> choose_trade(index). `trades`: "
         "done this turn.\n"
-        "`log`: new transcript lines plus the last one you hold (it may be "
-        "rewritten); splice at `log_from`. Full on a new/resumed seat; at game "
-        "over, `full_log` gets the un-redacted whole.",
+        "`log`: new lines plus the last you hold (it may be rewritten); splice at "
+        "`log_from`. Full on a new/resumed seat; `full_log` for the whole.",
         {"type": "object", "properties": {**_CURSOR_ARGS}},
     ),
     "wait_for_turn": (

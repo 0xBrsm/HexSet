@@ -76,6 +76,13 @@ Changes to the HexSet distribution. The project follows
 
 ### Changed
 
+- **MCP `trade_ratios` on every reply; `race.leader` is `top_opponent`.** The
+  first Sonnet seat, sent its ratios only when they changed, assumed 4:1 and
+  missed its own port for several turns -- 60 bytes a reply was the wrong
+  saving. `leader` named the leading *opponent* and read as the overall
+  leader; the new name says what it is. The `robber` table's `hits` and
+  `options` encodings are restated in the `state` description.
+
 - **MCP replies kept `winner` when seat 0 won.** The trim that drops a null
   `winner` dropped seat 0 as well; caught by the first Terra game, which
   seat 0 won.

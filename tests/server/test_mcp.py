@@ -1106,7 +1106,7 @@ def test_race_measures_the_win_the_leader_and_both_awards():
     }
     race = mcptools._race(view, view["players"][0])
     assert race["points"] == 6 and race["to_win"] == 4
-    assert race["leader"] == {"seat": 1, "points": 7}
+    assert race["top_opponent"] == {"seat": 1, "points": 7}
     assert race["longest_road"] == {"yours": 4, "held": False, "holder": 1, "holder_has": 6, "need": 7}
     assert race["largest_army"] == {"yours": 1, "held": False, "holder": 2, "holder_has": 3, "need": 4}
 
@@ -1171,24 +1171,6 @@ def test_prune_keeps_discard_quota_while_any_seat_owes():
     assert mcptools._prune(view)["discard_quota"] == [0, 3, 0, 0]
 
 
-def test_trade_ratios_repeat_sends_once_then_omits_the_unchanged_value():
-    session = mcptools.Session()
-    ratios = {"Wood": 4, "Brick": 4, "Sheep": 4, "Wheat": 4, "Ore": 4}
-    first = {"trade_ratios": dict(ratios)}
-    mcptools._trade_ratios_repeat(first, session)
-    assert first["trade_ratios"] == ratios  # new seat: sent once
-    assert session.trade_ratios_sent == ratios
-
-    second = {"trade_ratios": dict(ratios)}
-    mcptools._trade_ratios_repeat(second, session)
-    assert "trade_ratios" not in second  # unchanged since last time: omitted
-
-    changed = {"trade_ratios": {**ratios, "Wood": 2}}
-    mcptools._trade_ratios_repeat(changed, session)
-    assert changed["trade_ratios"]["Wood"] == 2  # a port arrived: sent again
-    assert session.trade_ratios_sent["Wood"] == 2
-
-
 def test_a_live_reply_is_pruned_and_still_playable(live_server):
     _, base = live_server
     client = connected(base)
@@ -1208,14 +1190,14 @@ def test_a_live_reply_is_pruned_and_still_playable(live_server):
     assert result["phase"] == "SETUP_ROAD" and "version" not in result
 
 
-def test_trade_ratios_is_sent_once_then_omitted_while_unchanged(live_server):
+def test_trade_ratios_are_on_every_reply(live_server):
+    """Sent every time: the one game that got them only when changed missed
+    its own port for several turns."""
     _, base = live_server
     client = connected(base)
     data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
-    assert "trade_ratios" in data  # a new seat always gets a starting value
-
-    again = client.call_tool("state")
-    assert "trade_ratios" not in again  # nothing changed since the last reply
+    assert data["trade_ratios"] == {"Wood": 4, "Brick": 4, "Sheep": 4, "Wheat": 4, "Ore": 4}
+    assert client.call_tool("state")["trade_ratios"] == data["trade_ratios"]
 
 
 def test_new_game_summary_ranks_the_setup_spots_it_offers(live_server):

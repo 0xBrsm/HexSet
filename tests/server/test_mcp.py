@@ -25,7 +25,7 @@ from hexset.server import mcptools
 from hexset.server.web import HexSetServer
 
 SOLO = ["heximax", "heximax", "heximax"]
-MODEL = "claude-test-model"
+IDENTITY = "claude-test-model"
 
 
 @pytest.fixture
@@ -135,7 +135,7 @@ def test_initialize_echoes_a_known_protocol_version(live_server):
 def test_tools_call_without_a_session_id_is_400(live_server):
     _, base = live_server
     client = MCPClient(base)  # never initialized -- no session id to send
-    status, _, data = client.call_tool_raw("models")
+    status, _, data = client.call_tool_raw("bots")
     assert status == 400
     assert "error" in data
 
@@ -145,7 +145,7 @@ def test_tools_call_with_an_unknown_session_id_is_404(live_server):
     client = MCPClient(base)
     client.initialize()
     client.session_id = "not-a-real-session"
-    status, _, data = client.call_tool_raw("models")
+    status, _, data = client.call_tool_raw("bots")
     assert status == 404
 
 
@@ -216,17 +216,17 @@ def test_delete_ends_the_session(live_server):
     )
     with urllib.request.urlopen(request, timeout=5) as response:
         assert response.status == 200
-    status, _, _ = client.call_tool_raw("models")
+    status, _, _ = client.call_tool_raw("bots")
     assert status == 404  # the session is gone
 
 
-# --- Identity: model -> client, over the real /mcp route ----------------
+# --- Identity: identity string -> client, over the real /mcp route -------
 
 
 def test_new_game_records_the_clients_id_and_kind_mcp(live_server):
     server, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=" Claude-Opus-5 ", opponents=SOLO)
+    data = client.call_tool("new_game", identity=" Claude-Opus-5 ", opponents=SOLO)
     expected_id = hashlib.sha256(b"claude-opus-5").hexdigest()
     seat = server.tables.get(data["code"]).seats[data["seat"]]
     assert seat.client == {"id": expected_id, "kind": "mcp"}
@@ -274,7 +274,7 @@ def test_act_with_an_expect_that_no_longer_matches_is_an_error(live_server):
     seat's move and every trade answer, and so was stale by design."""
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     index = _setup_settlement_index(data)
     chosen = data["legal_actions"]["SETUP_SETTLEMENT"][0]
 
@@ -291,7 +291,7 @@ def test_act_with_an_expect_that_no_longer_matches_is_an_error(live_server):
 def test_act_with_a_matching_expect_acts(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     index = _setup_settlement_index(data)
 
     entry = data["legal_actions"]["SETUP_SETTLEMENT"][0]
@@ -325,7 +325,7 @@ def test_expect_check_compares_named_operands_raw_operands_and_resources():
 def test_act_expect_may_name_only_the_type(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     index = _setup_settlement_index(data)
 
     result = client.call_tool("act", index=index, expect={"type": "SETUP_SETTLEMENT"})
@@ -335,7 +335,7 @@ def test_act_expect_may_name_only_the_type(live_server):
 def test_act_no_longer_takes_a_version(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
 
     status, _, response = client.call_tool_raw("act", index=_setup_settlement_index(data), version=1)
     assert status == 200
@@ -349,7 +349,7 @@ def test_act_no_longer_takes_a_version(live_server):
 def test_wait_for_turn_streams_and_returns_once_it_is_our_turn_again(live_server):
     server, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     assert data["seat"] == 0
 
     settlement = _setup_settlement_index(data)
@@ -500,7 +500,7 @@ def test_translate_view_translates_every_legal_action():
 def test_board_annotates_hexes_and_vertices_with_resource_and_pips(live_server):
     _, base = live_server
     client = connected(base)
-    client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     data = client.call_tool("board")
 
     for hex_ in data["hexes"]:
@@ -521,23 +521,23 @@ def test_board_annotates_hexes_and_vertices_with_resource_and_pips(live_server):
 def test_new_game_defaults_the_seat_name_to_mcp(live_server):
     server, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     assert server.tables.get(data["code"]).seats[data["seat"]].name == "mcp"
 
 
 def test_new_game_keeps_an_explicit_name(live_server):
     server, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO, name="Ada")
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO, name="Ada")
     assert server.tables.get(data["code"]).seats[data["seat"]].name == "Ada"
 
 
 def test_join_defaults_the_seat_name_to_mcp(live_server):
     server, base = live_server
     creator = connected(base)
-    created = creator.call_tool("new_game", model=MODEL)
+    created = creator.call_tool("new_game", identity=IDENTITY)
     joiner = connected(base)
-    joined = joiner.call_tool("join", code=created["code"], model=MODEL)
+    joined = joiner.call_tool("join", code=created["code"], identity=IDENTITY)
     assert server.tables.get(created["code"]).seats[joined["seat"]].name == "mcp"
 
 
@@ -549,7 +549,7 @@ def test_new_game_always_installs_a_pending_gate_for_the_llm_seat(live_server):
     with no argument required to ask for it."""
     server, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     seat = data["seat"]
     table = server.tables.get(data["code"])
     assert seat in table.session.confirm_seats
@@ -564,7 +564,7 @@ def test_new_game_always_installs_a_pending_gate_for_the_llm_seat(live_server):
 def test_leave_game_locks_the_seat(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     seat = data["seat"]
     result = client.call_tool("leave_game")
     assert result["locked"] == [seat]
@@ -573,17 +573,17 @@ def test_leave_game_locks_the_seat(live_server):
 # --- resume_game: POST /api/reclaim, no cache file left ---------------------
 
 
-def test_resume_game_reclaims_the_seat_by_code_and_model(live_server):
+def test_resume_game_reclaims_the_seat_by_code_and_identity(live_server):
     server, base = live_server
     creator = connected(base)
-    data = creator.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = creator.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     seat, code = data["seat"], data["code"]
     creator.call_tool("act", index=_setup_settlement_index(data))  # so there is a transcript to owe
 
     # A fresh session -- as if the server had restarted, or this were simply
     # a new MCP connection with no seat of its own yet.
     fresh = connected(base)
-    result = fresh.call_tool("resume_game", code=code, model=MODEL)
+    result = fresh.call_tool("resume_game", code=code, identity=IDENTITY)
     assert result["seat"] == seat
     # A reclaimed seat knows nothing yet, so it is owed the whole transcript.
     assert result["log_from"] == 0
@@ -643,7 +643,7 @@ def test_compact_board_leaves_a_view_without_the_arrays_alone():
 def test_new_game_reply_is_compact(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     assert not {"vertex_owner", "vertex_building", "edge_owner"} & set(data)
     assert data["buildings"] == []
     assert data["roads"] == [[], [], [], []]
@@ -800,7 +800,7 @@ def test_prune_drops_what_a_reader_never_acts_on():
 def test_a_live_reply_is_pruned_and_still_playable(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     for gone in ("version", "claimed_seats", "waiting_for", "trade_wait", "seats"):
         assert gone not in data
     assert [p["kind"] for p in data["players"]] == ["player", "bot", "bot", "bot"]
@@ -817,7 +817,7 @@ def test_a_live_reply_is_pruned_and_still_playable(live_server):
 def test_new_game_summary_ranks_the_setup_spots_it_offers(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     summary = data["summary"]
     assert summary["race"]["to_win"] == 10 and data["winning_points"] == 10
     assert summary["afford"]["road"] == {"ok": False, "legal": False, "missing": {"Wood": 1, "Brick": 1}}
@@ -844,7 +844,7 @@ def test_new_game_summary_ranks_the_setup_spots_it_offers(live_server):
 def test_your_move_is_act_on_your_own_turn(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     assert data["your_move"] == "act"
     assert data["waiting_on"] == []
 
@@ -954,7 +954,7 @@ def test_trim_log_leaves_a_view_carrying_no_log_alone():
 def test_state_log_after_trims_the_transcript_it_sends_back(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     # A freshly dealt game has an empty transcript -- place something so
     # there are lines for the cursor to be about.
     client.call_tool("act", index=_setup_settlement_index(data))
@@ -972,7 +972,7 @@ def test_state_log_after_trims_the_transcript_it_sends_back(live_server):
 def test_act_log_after_sends_only_the_lines_the_action_added(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     before = client.call_tool("state")
 
     result = client.call_tool("act", index=_setup_settlement_index(data), log_after=before["log_total"])
@@ -989,7 +989,7 @@ def test_the_cursor_is_automatic_for_a_caller_that_never_sends_log_after(live_se
     the next plain read is the rewritable tail only."""
     _, base = live_server
     client = connected(base)
-    dealt = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    dealt = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     assert dealt["log_from"] == 0
     # Our first settlement and road, then the bots' -- then our second
     # settlement, after which the table is ours (the road is still owed) and
@@ -1013,7 +1013,7 @@ def test_the_cursor_is_automatic_for_a_caller_that_never_sends_log_after(live_se
 def test_an_explicit_log_after_overrides_the_automatic_cursor(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     client.call_tool("act", index=_setup_settlement_index(data))
     client.call_tool("state")  # the session now holds everything
 
@@ -1025,7 +1025,7 @@ def test_an_explicit_log_after_overrides_the_automatic_cursor(live_server):
 def test_full_log_resets_a_session_that_is_already_caught_up(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     client.call_tool("act", index=_setup_settlement_index(data))
     client.call_tool("state")
 
@@ -1039,7 +1039,7 @@ def test_full_log_resets_a_session_that_is_already_caught_up(live_server):
 def test_a_failed_call_does_not_move_the_cursor(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     client.call_tool("act", index=_setup_settlement_index(data))
     before = client.call_tool("state", full_log=True)
 
@@ -1073,7 +1073,7 @@ def test_wait_for_turn_carries_the_summary_too(live_server):
     yield -- it was missing here while `state` had it."""
     _, base = live_server
     client = connected(base)
-    client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     for _ in range(4):
         view = client.call_tool("state")
         if not view.get("legal_actions"):
@@ -1093,7 +1093,7 @@ def test_wait_for_turn_returns_the_same_shape_as_state(live_server):
     grouped them -- so the whole key set is pinned equal here, not one field."""
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     client.call_tool("act", index=_setup_settlement_index(data))
     after_road = client.call_tool("act", index=_setup_road_index(client.call_tool("state")))
     assert after_road["your_move"] == "wait"

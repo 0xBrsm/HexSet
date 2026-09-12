@@ -142,16 +142,17 @@ subsequent requests. A missing session ID returns 400; an unknown ID returns
 404 and requires reinitialization. `DELETE /mcp` ends the session.
 `GET /mcp` returns 405; events are streamed in response to requests.
 
-Available tools are `models`, `new_game`, `join`, `resume_game`, `board`,
+Available tools are `bots`, `new_game`, `join`, `resume_game`, `board`,
 `state`, `wait_for_turn`, `act`, `undo`, `leave_game`, `get_table`,
-`offer_trade`, `answer_trade`, and `choose_trade`.
+`offer_trade`, `answer_trade`, and `choose_trade`. `bots` lists the
+opponent names `new_game`'s `opponents` accepts (`GET /api/models`).
 
-`new_game` and `join` require a `model` string identifying the client model.
-The server trims and lowercases that string, then hashes it as the seat's
-client identity. `resume_game(code, model)` uses the same string to reclaim
-the seat after an MCP session or server restart. There is no local session
-cache. This identity is derived from the supplied identifier, not from
-independently verified model credentials.
+`new_game` and `join` require an `identity` string naming the caller (an
+LLM would typically pass its model id). The server trims and lowercases
+that string, then hashes it as the seat's client identity.
+`resume_game(code, identity)` uses the same string to reclaim the seat
+after an MCP session or server restart. There is no local session cache.
+The identity is whatever string the caller supplies; nothing verifies it.
 
 `act(index)` submits one entry from the latest `state().legal_actions`.
 Ending a turn requires `END_TURN`. In MCP replies `legal_actions` is grouped

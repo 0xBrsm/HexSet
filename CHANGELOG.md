@@ -41,6 +41,14 @@ Changes to the HexSet distribution. The project follows
   detail (SSE keepalives) and design history left the descriptions; nothing
   a caller acts on did.
 
+- **MCP `models` tool is `bots`; the `model` argument is `identity`.** The
+  HTTP API's `model` is a bot engine (`/api/models`, `POST /api/bot`), while
+  the MCP argument was a free string naming the caller for `resume_game`;
+  one word for both misread. `new_game(identity=...)`,
+  `join(code, identity=...)`, `resume_game(code, identity)`; `bots()` lists
+  the names `opponents` accepts. No compatibility shim: `model` is now a
+  bad argument.
+
 - **MCP replies pruned.** Every state-returning MCP reply drops the wire
   fields a reader never acts on: `version` (no MCP tool takes it),
   `claimed_seats`, `waiting_for` and `trade_wait` (all folded into

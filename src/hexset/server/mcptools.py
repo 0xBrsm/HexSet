@@ -9,7 +9,7 @@ payload, token)` -- the same in-process seam `web.py` and
 directly. `ApiError` becomes `ToolError`, the shape `_call_tool`/`web.py`
 report back to the LLM as a normal (not protocol-level) tool result.
 
-Identity used to be a handful of module globals (`_token`/`_code`/`_model`)
+Identity used to be a handful of module globals (`_token`/`_code`/`_identity`)
 because one stdio process was one seat. An HTTP server serves many MCP
 sessions at once, so that state now lives in a `Session` object -- one per
 `Mcp-Session-Id` -- threaded through every call instead.
@@ -36,14 +36,14 @@ class ToolError(Exception):
 @dataclass
 class Session:
     """One MCP session's seat: the token `tables.handle` acts with, the game
-    code the trade routes are addressed by, and the `model` string identity
-    was minted from (needed if `resume_game` is ever called with it again).
+    code the trade routes are addressed by, and the `identity` string the seat's
+    client id was minted from (needed if `resume_game` is ever called with it again).
     Scoped to one `Mcp-Session-Id`, held in memory by `web.py` for as long as
     that session lives -- nothing here ever touches disk."""
 
     token: str | None = None
     code: str | None = None
-    model: str | None = None
+    identity: str | None = None
     # How many transcript lines this session has been sent so far, or `None`
     # for none yet -- the automatic cursor `_trim_for` trims the next reply's
     # `log` against, so a caller that never sends `log_after` still gets only
@@ -85,18 +85,18 @@ def _seat(session: Session, result: dict) -> dict:
     return result
 
 
-def _client_of(model: str) -> tuple[dict, str]:
-    """The `client` wire field and the secret behind it, from a model
-    string: `secret = model.strip().lower()`, `id = sha256(secret)`, kind
-    `"mcp"` -- no env-var override, the model supplies its own string."""
-    if not isinstance(model, str) or not model.strip():
-        raise ToolError("model must be a non-empty string identifying you, e.g. claude-opus-5")
-    secret = model.strip().lower()
+def _client_of(identity: str) -> tuple[dict, str]:
+    """The `client` wire field and the secret behind it, from an identity
+    string: `secret = identity.strip().lower()`, `id = sha256(secret)`, kind
+    `"mcp"` -- no env-var override, the caller supplies its own string."""
+    if not isinstance(identity, str) or not identity.strip():
+        raise ToolError("identity must be a non-empty string naming you, e.g. claude-opus-5")
+    secret = identity.strip().lower()
     client = {"id": hashlib.sha256(secret.encode("utf-8")).hexdigest(), "kind": "mcp"}
     return client, secret
 
 
-def _models(tables: Tables, session: Session) -> dict:
+def _bots(tables: Tables, session: Session) -> dict:
     return _call_ok(tables, session, "GET", "/api/models")
 
 
@@ -108,9 +108,11 @@ def _display_name(name: str | None) -> str | None:
     return str(name).strip()[:40] if name else None
 
 
-def _new_game(tables: Tables, session: Session, model: str, opponents: list[str] | None = None, name: str | None = None) -> dict:
-    client, _ = _client_of(model)
-    session.model = model
+def _new_game(
+    tables: Tables, session: Session, identity: str, opponents: list[str] | None = None, name: str | None = None
+) -> dict:
+    client, _ = _client_of(identity)
+    session.identity = identity
     body: dict = {"name": _display_name(name), "client": client}
     if opponents:
         body["bots"] = opponents
@@ -121,31 +123,31 @@ def _new_game(tables: Tables, session: Session, model: str, opponents: list[str]
     return _reply(session, dealt)
 
 
-def _join(tables: Tables, session: Session, code: str, model: str, name: str | None = None) -> dict:
+def _join(tables: Tables, session: Session, code: str, identity: str, name: str | None = None) -> dict:
     if not isinstance(code, str) or not code.strip():
         raise ToolError("code must be a game's six-character code")
-    client, _ = _client_of(model)
-    session.model = model
+    client, _ = _client_of(identity)
+    session.identity = identity
     body: dict = {"code": code.strip().lower(), "name": _display_name(name), "client": client}
     joined = _seat(session, _call_ok(tables, session, "POST", "/api/join", body))
     _layout(tables, session)
     return _reply(session, joined)
 
 
-def _resume_game(tables: Tables, session: Session, code: str, model: str) -> dict:
+def _resume_game(tables: Tables, session: Session, code: str, identity: str) -> dict:
     """Reclaims a seat by `POST /api/reclaim`, the same way a browser's own
     reclaim works -- no local cache file any more (there is nothing left to
     cache: a session dies with its `Mcp-Session-Id`, and a fresh MCP
-    connection just calls this again with the `code`/`model` it already
-    knows). `secret = model.strip().lower()`, the same secret `new_game`/
-    `join` mint from `model`."""
+    connection just calls this again with the `code`/`identity` it already
+    knows). `secret = identity.strip().lower()`, the same secret `new_game`/
+    `join` mint from `identity`."""
     if not isinstance(code, str) or not code.strip():
         raise ToolError("code must be a game's six-character code")
-    _, secret = _client_of(model)
+    _, secret = _client_of(identity)
     reclaimed = _call_ok(tables, session, "POST", "/api/reclaim", {"code": code.strip().lower(), "secret": secret})
     session.token = reclaimed.pop("token")
     session.code = reclaimed.get("code")
-    session.model = model
+    session.identity = identity
     session.log_sent = None  # a reclaimed seat is owed the whole transcript
     session.board = None
     _layout(tables, session)
@@ -1009,9 +1011,9 @@ _CURSOR_ARGS = {
     },
 }
 
-_MODEL_ARG = {
+_IDENTITY_ARG = {
     "type": "string",
-    "description": "Your model identifier, e.g. claude-opus-5. Also your key for resume_game().",
+    "description": "A string naming you, e.g. claude-opus-5. It is your key for resume_game().",
 }
 _CODE_ARG = {"type": "string", "description": "The game's six-character code."}
 _NAME_ARG = {"type": "string", "description": "Display name, up to 40 characters."}
@@ -1021,13 +1023,13 @@ def _resource_dict(description: str) -> dict:
     return {"type": "object", "additionalProperties": {"type": "integer"}, "description": description}
 
 
-# Every tool but `models`/`board` answers with the same state reply, documented
+# Every tool but `bots`/`board` answers with the same state reply, documented
 # once, on `state`. The other descriptions say only what differs.
 #
 # name -> (handler, description, JSON Schema for `arguments`)
 _TOOLS: dict[str, tuple] = {
-    "models": (
-        _models,
+    "bots": (
+        _bots,
         "Bot names new_game's `opponents` accepts.",
         {"type": "object", "properties": {}},
     ),
@@ -1039,15 +1041,15 @@ _TOOLS: dict[str, tuple] = {
         {
             "type": "object",
             "properties": {
-                "model": _MODEL_ARG,
+                "identity": _IDENTITY_ARG,
                 "opponents": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Names from models(), one per bot seat. Omit for no bots.",
+                    "description": "Names from bots(), one per bot seat. Omit for no bots.",
                 },
                 "name": _NAME_ARG,
             },
-            "required": ["model"],
+            "required": ["identity"],
         },
     ),
     "join": (
@@ -1056,8 +1058,8 @@ _TOOLS: dict[str, tuple] = {
         "(a seat left or locked out stays closed for that game). Reply as state().",
         {
             "type": "object",
-            "properties": {"code": _CODE_ARG, "model": _MODEL_ARG, "name": _NAME_ARG},
-            "required": ["code", "model"],
+            "properties": {"code": _CODE_ARG, "identity": _IDENTITY_ARG, "name": _NAME_ARG},
+            "required": ["code", "identity"],
         },
     ),
     "board": (
@@ -1202,16 +1204,16 @@ _TOOLS: dict[str, tuple] = {
     ),
     "resume_game": (
         _resume_game,
-        "Reclaim your seat with the `code` and the exact `model` you gave "
+        "Reclaim your seat with the `code` and the exact `identity` you gave "
         "new_game()/join(). Use after a new MCP session, which starts seatless. "
         "Reply as state().",
         {
             "type": "object",
             "properties": {
                 "code": _CODE_ARG,
-                "model": {"type": "string", "description": "The model identifier new_game()/join() was called with."},
+                "identity": {"type": "string", "description": "The identity new_game()/join() was called with."},
             },
-            "required": ["code", "model"],
+            "required": ["code", "identity"],
         },
     ),
 }

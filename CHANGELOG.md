@@ -53,6 +53,11 @@ Changes to the HexSet distribution. The project follows
 
 ### Changed
 
+- **`summary.spots` keeps `type` when settlements and cities mix.** The
+  table's `KIND:` prefix assumed one kind per list; mid-game, once both are
+  affordable, a settlement spot was labelled `BUILD_CITY:`. A mixed list
+  now carries `type` as a column.
+
 - **`summary.roads` plans two roads.** Each legal road also names `then`,
   the best settleable vertex one road further on, with `then_pips` -- the
   two-road plan every setup road and most early ones are, so a seat no

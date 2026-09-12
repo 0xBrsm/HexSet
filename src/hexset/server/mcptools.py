@@ -1055,9 +1055,14 @@ def _tabulate(rows: list[dict]) -> str:
 def _tabulate_summary(summary: dict) -> None:
     spots = summary.get("spots")
     if spots:
-        # `type` never varies within one list: named once, up front.
-        kind = spots[0].get("type")
-        summary["spots"] = f"{kind}:" + _tabulate([{k: v for k, v in r.items() if k != "type"} for r in spots])
+        # One kind (every setup placement, say) is named once, up front; a
+        # list mixing settlement and city spots -- the common mid-game case
+        # once both are affordable -- keeps `type` as a column instead.
+        kinds = {r.get("type") for r in spots}
+        if len(kinds) == 1:
+            summary["spots"] = f"{kinds.pop()}:" + _tabulate([{k: v for k, v in r.items() if k != "type"} for r in spots])
+        else:
+            summary["spots"] = _tabulate(spots)
     robber = summary.get("robber")
     if robber:
         rows = [

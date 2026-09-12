@@ -1029,6 +1029,18 @@ def test_spots_say_whether_a_port_matches_what_the_vertex_yields():
     assert "port" not in by_vertex[3] and "port_matches" not in by_vertex[3]
 
 
+def test_spots_keep_their_type_column_when_settlements_and_cities_mix():
+    uniform = {"spots": [{"index": 0, "type": "BUILD_CITY", "vertex": 3, "pips": 5, "resources": ["Ore"]}]}
+    mcptools._tabulate_summary(uniform)
+    assert uniform["spots"] == "BUILD_CITY:(index,vertex,pips,resources):0,3,5,Ore"
+    mixed = {"spots": [
+        {"index": 0, "type": "BUILD_CITY", "vertex": 3, "pips": 5, "resources": ["Ore"]},
+        {"index": 4, "type": "BUILD_SETTLEMENT", "vertex": 9, "pips": 4, "resources": ["Wood"]},
+    ]}
+    mcptools._tabulate_summary(mixed)
+    assert mixed["spots"] == "(index,type,vertex,pips,resources):0,BUILD_CITY,3,5,Ore|4,BUILD_SETTLEMENT,9,4,Wood"
+
+
 def test_race_measures_the_win_the_leader_and_both_awards():
     view = {
         "winning_points": 10,

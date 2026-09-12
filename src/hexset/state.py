@@ -301,9 +301,26 @@ def can_place_settlement(
     state: GameState, player: int, vertex: int, *, connected: bool = True
 ) -> bool:
     """`connected` is False during initial placement, when roads are not required."""
-    if state.vertex_building[vertex] != Building.NONE:
-        return False
     if settlement_count(state, player) >= MAX_SETTLEMENTS:
+        return False
+    return settlement_placeable(state, player, vertex, connected=connected)
+
+
+def settlement_placeable(
+    state: GameState, player: int, vertex: int, *, connected: bool = True
+) -> bool:
+    """`can_place_settlement` without its piece-limit check: everything about
+    *this vertex*, and nothing about how many settlements the player has left.
+
+    Split out because the limit is a property of the player, not of the
+    vertex, and `actions._building_actions` asks about every vertex on the
+    board at once -- so it reads the limit once and calls this per vertex,
+    rather than rescanning all `vertex_owner` inside each of the ~54 calls.
+    That rescan was 4.7M `settlement_count` scans a game inside the trade
+    gate's continuation rollouts. Callers with a single vertex in hand want
+    `can_place_settlement`, which is this plus the limit.
+    """
+    if state.vertex_building[vertex] != Building.NONE:
         return False
     topology = state.board.topology
     if any(
@@ -326,10 +343,17 @@ def place_settlement(
 
 
 def can_upgrade_to_city(state: GameState, player: int, vertex: int) -> bool:
+    return city_count(state, player) < MAX_CITIES and city_upgradeable(
+        state, player, vertex
+    )
+
+
+def city_upgradeable(state: GameState, player: int, vertex: int) -> bool:
+    """`can_upgrade_to_city` without its piece-limit check. Split for the same
+    reason as `settlement_placeable`."""
     return (
         state.vertex_owner[vertex] == player
         and state.vertex_building[vertex] == Building.SETTLEMENT
-        and city_count(state, player) < MAX_CITIES
     )
 
 
@@ -340,9 +364,17 @@ def upgrade_to_city(state: GameState, player: int, vertex: int) -> None:
 
 
 def can_place_road(state: GameState, player: int, edge: int) -> bool:
-    if state.edge_owner[edge] != NO_OWNER:
-        return False
     if road_count(state, player) >= MAX_ROADS:
+        return False
+    return road_placeable(state, player, edge)
+
+
+def road_placeable(state: GameState, player: int, edge: int) -> bool:
+    """`can_place_road` without its piece-limit check. Split for the same
+    reason as `settlement_placeable`: `road_count` is a scan of every edge,
+    and asking it once per candidate edge made enumeration quadratic in the
+    board -- 13.2M scans a game inside the trade gate's rollouts."""
+    if state.edge_owner[edge] != NO_OWNER:
         return False
     topology = state.board.topology
     for v in topology.edges[edge]:

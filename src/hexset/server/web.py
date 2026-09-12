@@ -350,7 +350,8 @@ class Handler(BaseHTTPRequestHandler):
                 if item is mcptools._KEEPALIVE:
                     self.wfile.write(b": keepalive\n\n")
                 else:
-                    payload = {"content": [{"type": "text", "text": json.dumps(item)}], "isError": False}
+                    text = item if isinstance(item, str) else json.dumps(item, separators=(",", ":"))
+                    payload = {"content": [{"type": "text", "text": text}], "isError": False}
                     response = {"jsonrpc": "2.0", "id": request_id, "result": payload}
                     self.wfile.write(f"event: message\ndata: {json.dumps(response)}\n\n".encode("utf-8"))
                 self.wfile.flush()

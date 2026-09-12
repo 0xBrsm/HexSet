@@ -77,6 +77,18 @@ Changes to the HexSet distribution. The project follows
   response path instead of two). `state`, `get_table`, `board`, `bots` and
   `leave_game` still reply immediately.
 
+- **MCP replies compacted server-side.** `board` is text: an incidence
+  encoding (each hex with its vertices; each vertex with pips, resources,
+  port and the vertices a road reaches; edge ids as `id:v0-v1`), 10 KB to
+  2.7 KB. `legal_actions` groups and `summary.spots`/`robber` are
+  `(keys):row|row` tables instead of one dict per entry, and JSON carries
+  no spaces: a `new_game` reply halves, a robber-move state drops by half.
+  This is the compaction first written client-side in the Terra bridge
+  (hexset-terra) on 2026-09-11, moved into the server so every MCP client
+  gets it. Also fixes the MCP layer annotating -- and, since this morning,
+  stripping `x`/`y` from -- the table's own `layout` dict in place, which
+  the browser draws from; it works on a copy now.
+
 - **MCP forced moves are played inside the settle.** A lone `ROLL` (no
   Knight to choose over it) and a `pass` on every broadcast offer the seat's
   hand cannot cover are played by the server before a reply is handed back

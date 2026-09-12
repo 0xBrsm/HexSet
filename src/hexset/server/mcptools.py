@@ -17,6 +17,7 @@ sessions at once, so that state now lives in a `Session` object -- one per
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import time
 from dataclasses import dataclass
@@ -208,9 +209,9 @@ _TERRAIN_RESOURCE = {
 _BOARD_DEAD = ("size", "resources", "dev_cards", "year_of_plenty_pairs")
 
 
-def _board(tables: Tables, session: Session) -> dict:
+def _board(tables: Tables, session: Session) -> str:
     _seated(session)
-    return _layout(tables, session)
+    return _board_text(_layout(tables, session))
 
 
 def _layout(tables: Tables, session: Session) -> dict:
@@ -219,7 +220,9 @@ def _layout(tables: Tables, session: Session) -> dict:
     the `board` tool and every reply's `summary` read it from here."""
     if session.board is not None:
         return session.board
-    raw = _call_ok(tables, session, "GET", "/api/board")
+    # A copy: `GET /api/board` hands back the table's own `layout` dict, the
+    # one the browser draws from, and everything below rewrites it.
+    raw = copy.deepcopy(_call_ok(tables, session, "GET", "/api/board"))
     # Render geometry and constant tables (`hexset.board`'s own lists, the
     # Year of Plenty pairs `_translate_action` already names) are the
     # browser's; a seat reads ids, terrain, tokens and adjacency.
@@ -245,6 +248,50 @@ def _layout(tables: Tables, session: Session) -> dict:
         vertex["resources"] = sorted({resource for resource, _ in touching})
     session.board = raw
     return raw
+
+
+def _port_label(port: dict) -> str:
+    return f"{port['ratio']}:1" if port.get("resource") is None else f"{port['resource']} {port['ratio']}:1"
+
+
+def _board_text(board: dict) -> str:
+    """The annotated board as an incidence encoding: each hex with the
+    vertices touching it, each vertex with its yield, port and the vertices
+    a road from it reaches -- `edges` and `ports` folded into the vertex
+    rows rather than left as parallel arrays for the reader to rejoin.
+    Fatemi, Halcrow & Perozzi, "Talk like a Graph" (ICLR 2024,
+    arXiv:2310.04560) found a node described together with what touches it
+    beats a flat edge list by a wide margin on LLM graph-reasoning tasks.
+    One header per table instead of every row repeating its keys is the
+    smaller saving on top. First written client-side in the Terra bridge
+    (hexset-terra/terra_bot.py); here so every MCP client gets it."""
+    port_of: dict[int, str] = {}
+    for port in board.get("ports") or []:
+        for v in port.get("vertices") or []:
+            port_of[v] = _port_label(port).replace(" ", "")
+    neighbors: dict[int, set[int]] = {}
+    for edge in board.get("edges") or []:
+        neighbors.setdefault(edge["v0"], set()).add(edge["v1"])
+        neighbors.setdefault(edge["v1"], set()).add(edge["v0"])
+    lines = ["hexes: id resource pips vertices"]
+    for hex_ in board.get("hexes") or []:
+        label = hex_.get("resource") or hex_.get("terrain")
+        lines.append(f"{hex_['id']} {label} {hex_.get('pips', 0)} {','.join(map(str, hex_.get('vertex_ids') or []))}")
+    lines.append("")
+    lines.append("vertices: id pips resources port neighbors")
+    for vertex in board.get("vertices") or []:
+        vid = vertex["id"]
+        resources = ",".join(vertex.get("resources") or []) or "-"
+        nbrs = ",".join(map(str, sorted(neighbors.get(vid, ()))))
+        lines.append(f"{vid} {vertex.get('pips', 0)} {resources} {port_of.get(vid, '-')} {nbrs}")
+    lines.append("")
+    lines.append("edges: id v0-v1")
+    lines.append(" ".join(f"{e['id']}:{e['v0']}-{e['v1']}" for e in board.get("edges") or []))
+    supply = board.get("piece_supply") or {}
+    if supply:
+        lines.append("")
+        lines.append("piece_supply: " + " ".join(f"{k}={v}" for k, v in supply.items()))
+    return "\n".join(lines)
 
 
 def _state(tables: Tables, session: Session, log_after: int | None = None, full_log: bool = False) -> dict:
@@ -560,10 +607,6 @@ def _afford(hand: dict, legal: list[dict]) -> dict:
     return out
 
 
-def _port_label(port: dict) -> str:
-    return f"{port['ratio']}:1" if port.get("resource") is None else f"{port['resource']} {port['ratio']}:1"
-
-
 def _spots(legal: list[dict], board: dict) -> tuple[list[dict], int]:
     """Every settlement/city placement in `legal`, joined to the vertex's
     pips, resources and port, best first. `index` is the `act()` index."""
@@ -793,13 +836,64 @@ def _prune(view: dict) -> dict:
     return view
 
 
+# --- Tables: one header, then rows -------------------------------------------
+#
+# `legal_actions`' groups and `summary`'s `spots`/`robber` are lists of small
+# dicts that all repeat the same keys -- measured at 60% of a 6 KB reply in
+# the first Terra game. Each becomes one string: `(k1,k2):v,v|v,v`, the keys
+# named once. Nested lists inside a cell join with `;`, nested dicts with
+# `:` between key and value and `+` between fields; `-` is null.
+
+
+def _cell(value) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, list):
+        return ";".join(_cell(v) for v in value)
+    if isinstance(value, dict):
+        return "+".join(f"{k}:{_cell(v)}" for k, v in value.items())
+    return str(value)
+
+
+def _tabulate(rows: list[dict]) -> str:
+    keys: list[str] = []
+    for row in rows:
+        keys.extend(k for k in row if k not in keys)
+    body = "|".join(",".join(_cell(row.get(k)) for k in keys) for row in rows)
+    return f"({','.join(keys)}):{body}"
+
+
+def _tabulate_summary(summary: dict) -> None:
+    spots = summary.get("spots")
+    if spots:
+        # `type` never varies within one list: named once, up front.
+        kind = spots[0].get("type")
+        summary["spots"] = f"{kind}:" + _tabulate([{k: v for k, v in r.items() if k != "type"} for r in spots])
+    robber = summary.get("robber")
+    if robber:
+        rows = [
+            {
+                **{k: v for k, v in r.items() if k not in ("hits", "options")},
+                # seat:settlements+cities, e.g. `0:1s+1c`; `-` for nobody.
+                "hits": [f"{h['seat']}:{h['settlements']}s+{h['cities']}c" for h in r["hits"]] or None,
+                # act() index:victim, e.g. `12:0`; `12:-` for nobody to rob.
+                "options": [f"{o['index']}:{_cell(o['victim'])}" for o in r["options"]],
+            }
+            for r in robber
+        ]
+        summary["robber"] = _tabulate(rows)
+
+
 def _compact(view: dict) -> dict:
     """The last step before a reply goes out: everything above that reads
     the flat list, the dense arrays or the fields `_prune` drops
     (`_your_move`, `_summarize`) has run."""
     legal = view.get("legal_actions") or []
     view["legal_count"] = len(legal)
-    view["legal_actions"] = _group_actions(legal, len(view.get("players") or []))
+    grouped = _group_actions(legal, len(view.get("players") or []))
+    view["legal_actions"] = {kind: _tabulate(rows) for kind, rows in grouped.items()}
+    if view.get("summary"):
+        _tabulate_summary(view["summary"])
     return _prune(_compact_board(view))
 
 
@@ -1144,11 +1238,12 @@ _TOOLS: dict[str, tuple] = {
     ),
     "board": (
         _board,
-        "The fixed board; read once per game. `hexes`: terrain, number `token`, "
-        "`resource` it pays (null for desert/sea/gold) and `pips` (2d6 ways to "
-        "roll the token: 5 for 6/8 down to 1 for 2/12). `vertices`: `pips` summed "
-        "and `resources` de-duplicated over touching hexes, i.e. settlement value. "
-        "`edges` (v0/v1), `ports` (vertices, resource or null for 3:1, ratio).",
+        "The fixed board as text; read once per game. `hexes`: id, resource "
+        "(DESERT/SEA/GOLD pay nothing fixed), pips (2d6 ways to roll its token: 5 "
+        "for 6/8 down to 1 for 2/12), vertex ids. `vertices`: id, pips summed and "
+        "resources de-duplicated over touching hexes (settlement value), port "
+        "(e.g. Wheat2:1, 3:1, -), neighbor vertex ids a road reaches. `edges`: "
+        "id:v0-v1, the ids act()'s road entries use.",
         {"type": "object", "properties": {}},
     ),
     "state": (
@@ -1162,13 +1257,13 @@ _TOOLS: dict[str, tuple] = {
         "`summary.afford` per build: `ok`, `missing`, `legal` now. `summary.race`: "
         "`points`, `to_win`, `leader`, per award yours/holder's/`need`. When "
         "offered: `spots` (legal settlement/city vertices with pips, resources, "
-        "port; best first) and `robber` (hexes with pips, `hits`, an `index` per "
-        "victim).\n"
-        "`legal_actions`: grouped by type, each entry an `index` for act() plus "
-        "`edge` (roads), `vertex` (settlement/city), `hex`+`victim` (MOVE_ROBBER, "
-        "null = nobody), `give`/`want` (BANK_TRADE), `resource` (MONOPOLY/DISCARD), "
-        "`resources` (YEAR_OF_PLENTY); ROLL, END_TURN, BUY_DEV_CARD, PLAY_KNIGHT, "
-        "PLAY_ROAD_BUILDING index only.\n"
+        "port; best first) and `robber` (hexes with pips, `hits` as seat:Ns+Nc, "
+        "`options` as index:victim).\n"
+        "Tables are `(keys):row|row`, cells comma-separated, `-` null, `;` in a "
+        "list. `legal_actions`: per type, `index` for act() plus `edge` (roads), "
+        "`vertex` (settlement/city), `hex`+`victim` (MOVE_ROBBER), `give`/`want` "
+        "(BANK_TRADE), `resource` (MONOPOLY/DISCARD), `resources` (YEAR_OF_PLENTY); "
+        "ROLL, END_TURN, BUY_DEV_CARD, PLAY_KNIGHT, PLAY_ROAD_BUILDING index only.\n"
         "`players`: `kind`, your `hand`/`dev_cards`, public ledger `known`/`unknown`. "
         "`buildings`, `roads` (edge ids per seat), `bank`, `trade_ratios`, `robber` "
         "hex. Resource dicts omit zeros.\n"
@@ -1308,15 +1403,16 @@ def call_tool_events(tables: Tables, session: Session, name: str, arguments: dic
         result = handler(tables, session, **arguments)
     except TypeError as error:
         raise ToolError(f"bad arguments for {name}: {error}") from error
-    if isinstance(result, dict):
+    if isinstance(result, (dict, str)):
         yield result
     else:
         yield from result
 
 
-def call_tool(tables: Tables, session: Session, name: str, arguments: dict) -> dict:
-    """`call_tool_events` drained: one blocking call -> its result dict."""
-    result: dict = {}
+def call_tool(tables: Tables, session: Session, name: str, arguments: dict) -> dict | str:
+    """`call_tool_events` drained: one blocking call -> its result (a dict,
+    or `board`'s text)."""
+    result: dict | str = {}
     for item in call_tool_events(tables, session, name, arguments):
         if item is not _KEEPALIVE:
             result = item

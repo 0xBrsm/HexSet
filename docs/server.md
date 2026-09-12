@@ -167,8 +167,18 @@ once), so a seat that ends its turn gets back the table as it stands when
 play returns to it. Two forced moves are played inside that wait rather
 than handed back to decide: a `ROLL` that is the only legal action (a
 seat holding a Knight still chooses), and a `pass` on any broadcast offer
-the seat's hand cannot cover. The `board` reply omits render geometry
-(`x`/`y`, `size`) and the constant name tables. `wait_for_turn` does only the waiting, and is needed
+the seat's hand cannot cover.
+
+`board` replies as text, not JSON: an incidence encoding with one line per
+hex (id, resource, pips, vertex ids), one per vertex (id, pips, resources,
+port, neighboring vertex ids) and the edge ids as `id:v0-v1`, with render
+geometry and the constant name tables left out. In every state reply
+`legal_actions`' per-type groups and `summary.spots`/`summary.robber` are
+tables, `(keys):row|row` with comma-separated cells (`-` null, `;`
+between list items; `robber` hits as `seat:Ns+Nc`, options as
+`index:victim`), and JSON is written without spaces. The MCP layer
+annotates a copy of the table's layout; the HTTP `GET /api/board` the
+browser draws from is untouched. `wait_for_turn` does only the waiting, and is needed
 only after a reply whose `timeout` ran out. `state`, `get_table`, `board`,
 `bots` and `leave_game` reply immediately. In MCP replies `legal_actions` is grouped
 by action type; each entry carries the flat `index` to act on and a named

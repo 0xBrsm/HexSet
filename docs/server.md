@@ -164,7 +164,11 @@ Ending a turn requires `END_TURN`. Every acting tool (`new_game`, `join`,
 after the action: it blocks until `your_move` is something other than
 `wait`, for at most `timeout` seconds (default and cap 600; `0` replies at
 once), so a seat that ends its turn gets back the table as it stands when
-play returns to it. `wait_for_turn` does only the waiting, and is needed
+play returns to it. Two forced moves are played inside that wait rather
+than handed back to decide: a `ROLL` that is the only legal action (a
+seat holding a Knight still chooses), and a `pass` on any broadcast offer
+the seat's hand cannot cover. The `board` reply omits render geometry
+(`x`/`y`, `size`) and the constant name tables. `wait_for_turn` does only the waiting, and is needed
 only after a reply whose `timeout` ran out. `state`, `get_table`, `board`,
 `bots` and `leave_game` reply immediately. In MCP replies `legal_actions` is grouped
 by action type; each entry carries the flat `index` to act on and a named

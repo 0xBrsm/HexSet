@@ -205,6 +205,7 @@ _TERRAIN_RESOURCE = {
     "FIELDS": "Wheat",
     "MOUNTAINS": "Ore",
 }
+_BOARD_DEAD = ("size", "resources", "dev_cards", "year_of_plenty_pairs")
 
 
 def _board(tables: Tables, session: Session) -> dict:
@@ -219,8 +220,15 @@ def _layout(tables: Tables, session: Session) -> dict:
     if session.board is not None:
         return session.board
     raw = _call_ok(tables, session, "GET", "/api/board")
+    # Render geometry and constant tables (`hexset.board`'s own lists, the
+    # Year of Plenty pairs `_translate_action` already names) are the
+    # browser's; a seat reads ids, terrain, tokens and adjacency.
+    for key in _BOARD_DEAD:
+        raw.pop(key, None)
     by_vertex: dict[int, list[tuple[str, int]]] = {}
     for hex_ in raw.get("hexes") or []:
+        hex_.pop("x", None)
+        hex_.pop("y", None)
         resource = _TERRAIN_RESOURCE.get(hex_["terrain"])
         pips = _PIPS.get(hex_["token"], 0)
         hex_["resource"] = resource
@@ -230,6 +238,8 @@ def _layout(tables: Tables, session: Session) -> dict:
         for v in hex_["vertex_ids"]:
             by_vertex.setdefault(v, []).append((resource, pips))
     for vertex in raw.get("vertices") or []:
+        vertex.pop("x", None)
+        vertex.pop("y", None)
         touching = by_vertex.get(vertex["id"], [])
         vertex["pips"] = sum(pips for _, pips in touching)
         vertex["resources"] = sorted({resource for resource, _ in touching})
@@ -969,11 +979,48 @@ def _turn_ready(view: dict) -> bool:
     return _your_move(view)[0] != "wait"
 
 
-def _poll_state(tables: Tables, session: Session, after: int | None = None, wait: float = 0.0) -> dict:
+def _poll_raw(tables: Tables, session: Session, after: int | None = None, wait: float = 0.0) -> dict:
     query = "" if after is None else f"?after={after}&wait={wait}"
-    # `_translate`, not `_finish`: these polls are never seen by the caller,
-    # so they must not move the session's cursor (`Session.log_sent`).
-    return _translate(_call_ok(tables, session, "GET", f"/api/state{query}"))
+    return _call_ok(tables, session, "GET", f"/api/state{query}")
+
+
+def _covers(hand: dict, cost: dict) -> bool:
+    return all(hand.get(name, 0) >= n for name, n in cost.items())
+
+
+# The most forced moves one `_forced` pass plays before handing the view
+# over regardless -- a bound, not a budget; a turn has at most one roll
+# and one open offer per other seat.
+_FORCED_CAP = 8
+
+
+def _forced(tables: Tables, session: Session, raw: dict) -> dict:
+    """Plays what no seat would decide differently, so no reply asks: a
+    lone `ROLL` (with a Knight also legal the seat chooses, so that is
+    left alone), and a `pass` on any offer this hand cannot cover -- the
+    first game through these tools spent one round-trip per bot turn
+    passing on those. Returns the latest raw view."""
+    for _ in range(_FORCED_CAP):
+        legal = raw.get("legal_actions") or []
+        if len(legal) == 1 and legal[0].get("type") == "ROLL":
+            raw = _call_ok(tables, session, "POST", "/api/action", {"action": legal[0]})
+            continue
+        me = next((p for p in raw.get("players") or [] if p.get("seat") == raw.get("seat")), None)
+        hand = None if me is None else me.get("hand")
+        unaffordable = next(
+            (
+                offer
+                for offer in raw.get("pending") or []
+                if hand is not None and not _covers(hand, _counterparty_view(offer["bundle"])[0])
+            ),
+            None,
+        )
+        if unaffordable is not None and session.code:
+            body = {"actor": unaffordable["actor"], "received": unaffordable["bundle"], "kind": "pass"}
+            raw = _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/answer", body)
+            continue
+        return raw
+    return raw
 
 
 def _settle(
@@ -985,14 +1032,18 @@ def _settle(
     full_log: bool = False,
 ) -> Iterator:
     """From `raw` -- the wire view an action (or a seat, or a plain read)
-    just handed back -- yields `_KEEPALIVE` per wait tick until this seat has
-    something to do, then the one `_finish`ed reply. Immediately, if `raw`
-    already says so. Only that final view moves the session's cursor.
+    just handed back -- plays the forced moves (`_forced`), then yields
+    `_KEEPALIVE` per wait tick until this seat has something to decide, then
+    the one `_finish`ed reply. Immediately, if `raw` already says so. Only
+    that final view moves the session's cursor.
 
     Every acting tool ends here, so every reply is the same shape as
     `state()`'s: summarised, grouped, trimmed. The polls in between are read
     for `version` and `_turn_ready` alone."""
-    view = _translate(raw)
+    # `_translate`, not `_finish`, until the last line: the views in between
+    # are never seen by the caller, so they must not move the session's
+    # cursor (`Session.log_sent`).
+    view = _translate(_forced(tables, session, raw))
     limit = _MAX_WAIT if timeout is None else max(0.0, min(float(timeout), _MAX_WAIT))
     deadline = time.monotonic() + limit
     while not _turn_ready(view):
@@ -1000,7 +1051,8 @@ def _settle(
         if remaining <= 0:
             break
         yield _KEEPALIVE
-        view = _poll_state(tables, session, after=view.get("version"), wait=min(_WAIT_TICK, remaining))
+        raw = _poll_raw(tables, session, after=view.get("version"), wait=min(_WAIT_TICK, remaining))
+        view = _translate(_forced(tables, session, raw))
     yield _finish(session, view, log_after, full_log)
 
 
@@ -1101,38 +1153,32 @@ _TOOLS: dict[str, tuple] = {
     ),
     "state": (
         _state,
-        "Current game state, the reply every playing tool returns. Acting tools "
-        "reply at your next move: after END_TURN, once the table has come round to "
-        "you (or an offer needs your answer, or the game ends). Read in order:\n"
-        "`your_move`: `act`, `discard`, `answer_trade` or `choose_trade` names the "
-        "tool to call now; `game_over`; `wait` only when a `timeout` ran out or "
-        "seats are still open (`waiting_on` lists them; call wait_for_turn()).\n"
-        "`summary`: `afford` per build (`ok`, `missing`, `legal` now); `race` "
-        "(`points`, `to_win`, public `leader`, and per award your count, the "
-        "holder's, and the `need` that takes it); when offered, `spots` (each legal "
-        "settlement/city vertex with pips, resources, port; best first, capped with "
-        "`spots_omitted`) and `robber` "
-        "(each hex with pips, whose buildings it `hits`, and an `index` per victim).\n"
-        "`legal_actions`: what act() accepts, grouped by type; each entry has the "
-        "`index` for act() plus its operand: `edge` (BUILD_ROAD/SETUP_ROAD), "
-        "`vertex` (BUILD_SETTLEMENT/SETUP_SETTLEMENT/BUILD_CITY), `hex`+`victim` "
-        "(MOVE_ROBBER; null victim = nobody), `give`/`want` (BANK_TRADE), "
-        "`resource` (PLAY_MONOPOLY/DISCARD), `resources` (PLAY_YEAR_OF_PLENTY); "
-        "ROLL, END_TURN, BUY_DEV_CARD, PLAY_KNIGHT, PLAY_ROAD_BUILDING have index "
-        "only. Empty when not your turn.\n"
-        "`players`: `kind` player/bot/empty; your own `hand` and `dev_cards`; for "
-        "every seat the public ledger, `known` counts all can deduce and `unknown` "
-        "the rest. `buildings` (vertex, seat, kind), `roads` (edge ids per seat), "
-        "`bank`, `trade_ratios`, `robber` (hex id). Resource dicts omit zeros.\n"
-        "Trading: `pending` = offers to you (`actor`, `you_give`, `you_receive`), "
-        "answer with answer_trade(index); `trade_round` = your own open offer "
-        "(`responses` each `seat`, `kind` accept/counter/pass with "
-        "`you_would_give`/`you_would_receive`; `awaiting` seats), settle with "
-        "choose_trade(index); `trades` = done this turn.\n"
-        "`log`: transcript lines since your previous reply, plus the last one you "
-        "hold (it may have been rewritten); `log_from` is the index to splice at, "
-        "`log_total` the full length. Whole transcript on a new or resumed seat "
-        "and at game over.",
+        "Game state; every playing tool replies with it at your next decision. "
+        "Forced moves are played for you: a lone ROLL, and passing offers your "
+        "hand can't cover.\n"
+        "`your_move`: `act`, `discard`, `answer_trade` or `choose_trade` = the tool "
+        "to call; `game_over`; `wait` only after a `timeout` or while seats are open "
+        "(`waiting_on`; call wait_for_turn()).\n"
+        "`summary.afford` per build: `ok`, `missing`, `legal` now. `summary.race`: "
+        "`points`, `to_win`, `leader`, per award yours/holder's/`need`. When "
+        "offered: `spots` (legal settlement/city vertices with pips, resources, "
+        "port; best first) and `robber` (hexes with pips, `hits`, an `index` per "
+        "victim).\n"
+        "`legal_actions`: grouped by type, each entry an `index` for act() plus "
+        "`edge` (roads), `vertex` (settlement/city), `hex`+`victim` (MOVE_ROBBER, "
+        "null = nobody), `give`/`want` (BANK_TRADE), `resource` (MONOPOLY/DISCARD), "
+        "`resources` (YEAR_OF_PLENTY); ROLL, END_TURN, BUY_DEV_CARD, PLAY_KNIGHT, "
+        "PLAY_ROAD_BUILDING index only.\n"
+        "`players`: `kind`, your `hand`/`dev_cards`, public ledger `known`/`unknown`. "
+        "`buildings`, `roads` (edge ids per seat), `bank`, `trade_ratios`, `robber` "
+        "hex. Resource dicts omit zeros.\n"
+        "`pending`: offers to you (`actor`, `you_give`, `you_receive`) -> "
+        "answer_trade(index). `trade_round`: your open offer's `responses` (`seat`, "
+        "`kind`, `you_would_give`/`you_would_receive`) -> choose_trade(index). "
+        "`trades`: done this turn.\n"
+        "`log`: new transcript lines plus the last one you hold (it may be "
+        "rewritten); splice at `log_from`. Full on a new/resumed seat and at "
+        "game over.",
         {"type": "object", "properties": {**_CURSOR_ARGS}},
     ),
     "wait_for_turn": (

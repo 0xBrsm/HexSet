@@ -359,6 +359,62 @@ def test_act_settles_through_the_bots_turns_to_our_next_move(live_server):
     assert after_road["log_total"] > after_settlement["log_total"] + 3
 
 
+def test_forced_rolls_a_lone_roll_and_passes_an_unaffordable_offer():
+    hand = {"Wood": 1, "Brick": 0, "Sheep": 0, "Wheat": 0, "Ore": 0}
+    rolled = {"seat": 1, "players": [{"seat": 1, "hand": hand}], "legal_actions": [], "pending": [
+        # Signed towards the actor: positive is what the actor gets, i.e. what we give.
+        {"actor": 0, "bundle": [2, 0, 0, 0, -1]},  # actor gives 1 Ore, wants 2 Wood: unaffordable
+        {"actor": 2, "bundle": [1, 0, 0, 0, -1]},  # actor gives 1 Ore, wants 1 Wood: affordable
+    ]}
+    passed = {**rolled, "pending": rolled["pending"][1:]}
+    tables = RecordingTables({
+        ("POST", "/api/action"): rolled,
+        ("POST", "/api/games/abcdef/trade/round/answer"): passed,
+    })
+    session = mcptools.Session(token="tok", code="abcdef")
+    start = {"seat": 1, "players": [{"seat": 1, "hand": hand}], "legal_actions": [{"type": "ROLL", "a": 0, "b": 0}]}
+    view = mcptools._forced(tables, session, start)
+    assert [(m, p) for m, p, _ in tables.calls] == [
+        ("POST", "/api/action"),
+        ("POST", "/api/games/abcdef/trade/round/answer"),
+    ]
+    assert tables.calls[0][2] == {"action": {"type": "ROLL", "a": 0, "b": 0}}
+    assert tables.calls[1][2] == {"actor": 0, "received": [2, 0, 0, 0, -1], "kind": "pass"}
+    assert view["pending"] == [{"actor": 2, "bundle": [1, 0, 0, 0, -1]}]  # left for the seat to answer
+
+
+def test_forced_leaves_a_roll_alone_when_a_knight_is_also_legal():
+    tables = RecordingTables({})
+    start = {"seat": 1, "players": [{"seat": 1, "hand": {}}], "legal_actions": [{"type": "PLAY_KNIGHT"}, {"type": "ROLL"}]}
+    assert mcptools._forced(tables, mcptools.Session(token="tok", code="abcdef"), start) is start
+    assert tables.calls == []
+
+
+def test_a_settled_turn_arrives_rolled(live_server):
+    """Setup over, the seat's first real turn comes back past its ROLL: the
+    lone forced action was played inside the settle."""
+    _, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    for _ in range(4):  # two settlements, two roads; each settles to our next placement
+        data = client.call_tool("act", index=next(iter(data["legal_actions"].values()))[0]["index"])
+    assert data["round"] >= 1
+    assert data["phase"] != "ROLL" and "ROLL" not in data["legal_actions"]
+    assert data["your_move"] in ("act", "discard", "answer_trade")
+    assert any("(mcp) rolled" in line for line in client.call_tool("state", full_log=True)["log"])
+
+
+def test_board_drops_render_geometry(live_server):
+    _, base = live_server
+    client = connected(base)
+    client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    board = client.call_tool("board")
+    assert not {"size", "resources", "dev_cards", "year_of_plenty_pairs"} & set(board)
+    assert all("x" not in h and "y" not in h for h in board["hexes"])
+    assert all("x" not in v and "y" not in v for v in board["vertices"])
+    assert board["hexes"][0]["vertex_ids"] and "pips" in board["vertices"][0]
+
+
 def test_a_timeout_that_runs_out_replies_with_wait(live_server):
     """`timeout` (and `_MAX_WAIT`) is the one way a reply says `wait`."""
     _, base = live_server
@@ -412,6 +468,20 @@ class FakeTables:
 
     def handle(self, method, path, payload, token):
         return self.responses[(method, path)]
+
+
+class RecordingTables(FakeTables):
+    """`FakeTables` that also remembers every call, and can answer a
+    `(method, path)` with a queue of responses, one per call."""
+
+    def __init__(self, responses):
+        super().__init__(responses)
+        self.calls: list[tuple[str, str, dict]] = []
+
+    def handle(self, method, path, payload, token):
+        self.calls.append((method, path, payload))
+        answer = self.responses[(method, path)]
+        return answer.pop(0) if isinstance(answer, list) else answer
 
 
 def _session_for_trade() -> mcptools.Session:

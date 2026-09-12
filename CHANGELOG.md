@@ -55,6 +55,15 @@ Changes to the HexSet distribution. The project follows
   response path instead of two). `state`, `get_table`, `board`, `bots` and
   `leave_game` still reply immediately.
 
+- **MCP forced moves are played inside the settle.** A lone `ROLL` (no
+  Knight to choose over it) and a `pass` on every broadcast offer the seat's
+  hand cannot cover are played by the server before a reply is handed back
+  -- the first live game through the settling tools spent one round-trip
+  per bot turn passing on unaffordable offers and one per own turn rolling.
+  `board` drops `x`/`y`, `size` and the constant name tables (a quarter of
+  the reply); `state`'s description is shortened to fit a client cap that
+  truncated it.
+
 - **MCP `models` tool is `bots`; the `model` argument is `identity`.** The
   HTTP API's `model` is a bot engine (`/api/models`, `POST /api/bot`), while
   the MCP argument was a free string naming the caller for `resume_game`;

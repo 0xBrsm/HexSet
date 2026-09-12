@@ -214,8 +214,7 @@ into `players` as each entry's `kind`; and send `hand`, `known`, `dev_cards`
 and `bank` sparse, a missing name meaning zero. `discard_quota` is omitted
 when every seat's is zero, and each `summary.afford` build's `legal` key
 when `legal_actions` itself is empty (every build would read `false` for
-the same reason). `trade_ratios` is sent only when it differs from the
-last reply this session was sent -- always on a new or reclaimed seat.
+the same reason). `trade_ratios` is on every reply.
 
 Every reply carries `can_offer`, true exactly when `offer_trade` would be accepted: this
 seat's own turn, `Phase.MAIN`, at least one legal action, and no trade

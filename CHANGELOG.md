@@ -143,9 +143,8 @@ Changes to the HexSet distribution. The project follows
   this seat's own count); each `summary.afford` build's `legal` key is
   omitted once `legal_actions` itself is empty, rather than reading
   `false` four times for the one reason; `discard_quota` is omitted when
-  every seat's is zero; and `trade_ratios` is sent only when it differs
-  from the last reply this session was sent, tracked in a new `Session`
-  field -- a new or reclaimed seat always gets it once.
+  every seat's is zero; and `trade_ratios` was sent only when it differed
+  from the last reply -- reverted below, after a seat missed its port.
 
 - **MCP replies carry `can_offer`.** True exactly when `offer_trade()`
   would be accepted: this seat's own turn, `MAIN`, a legal action to take,

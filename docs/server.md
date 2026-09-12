@@ -215,12 +215,16 @@ the view and the fixed board: `afford` (per build, whether the hand covers
 it, what it is short, and whether `legal_actions` offers it now), `race`
 (points and distance to the win, the leading opponent by public points, and
 for each award the caller's count, the holder's, and the count that would
-take it), and, only when such a move is legal, `spots` (each settlement or
-city placement with the vertex's pips, resources and port, best first,
-capped with `spots_omitted`) and `robber` (each hex the robber may move to,
-its pips, whose buildings it hits, and an `act` index per victim). Every
-entry names the `legal_actions` index it corresponds to. The state also
-carries `winning_points`, the rule the game is played to.
+take it), and, only when such a move is legal, `spots` (every settlement or
+city placement with the vertex's pips, resources and port, best first) and
+`robber` (each hex the robber may move to, its pips, whose buildings it
+hits, and an `act` index per victim). Every entry names the `legal_actions`
+index it corresponds to. Whichever of `legal_actions`'
+SETUP_SETTLEMENT/BUILD_SETTLEMENT/BUILD_CITY or MOVE_ROBBER groups `spots`
+or `robber` covers is then dropped from `legal_actions` -- the same
+entries, indexed the same way, so keeping both said nothing twice;
+`legal_count` still counts them. The state also carries `winning_points`,
+the rule the game is played to.
 
 The transcript `log` is sent incrementally. Each MCP session remembers how
 many lines it has been sent, and every state-returning reply carries only

@@ -53,6 +53,15 @@ Changes to the HexSet distribution. The project follows
 
 ### Changed
 
+- **MCP `legal_actions` drops what `summary` already covers.** Once
+  `summary.spots` is non-empty, its SETUP_SETTLEMENT/BUILD_SETTLEMENT/
+  BUILD_CITY groups leave `legal_actions`; once `summary.robber` is,
+  MOVE_ROBBER does too -- the same entries, the same `index`, joined to the
+  board either way, so keeping both groups said nothing a reader used
+  twice. `spots` also lists every legal placement now, not the best 15:
+  the cap (and `spots_omitted`) existed only because the raw group next to
+  it repeated the tail for nothing; `legal_count` is unaffected.
+
 - **MCP `discard(cards)` plays a whole seven in one call.** A nine-card
   hand on a seven used to cost four `act(index)` round-trips, one DISCARD
   at a time; `discard({"Wood": 2, "Ore": 1, ...})` posts them all, checked

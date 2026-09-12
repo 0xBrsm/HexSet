@@ -635,9 +635,6 @@ _BUILD_ACTION = {
 # `hexset.roads.MIN_LONGEST_ROAD` and the rulebook's three knights, mirrored.
 _MIN_LONGEST_ROAD = 5
 _MIN_LARGEST_ARMY = 3
-# Setup offers every open vertex -- fifty-odd -- and the tail of that list by
-# pips is never the answer. The count left off is reported as `spots_omitted`.
-_SPOTS_CAP = 15
 _SPOT_ACTIONS = ("SETUP_SETTLEMENT", "BUILD_SETTLEMENT", "BUILD_CITY")
 _CITY = 2  # `hexset.state.Building.CITY`
 
@@ -657,9 +654,14 @@ def _afford(hand: dict, legal: list[dict]) -> dict:
     return out
 
 
-def _spots(legal: list[dict], board: dict) -> tuple[list[dict], int]:
+def _spots(legal: list[dict], board: dict) -> list[dict]:
     """Every settlement/city placement in `legal`, joined to the vertex's
-    pips, resources and port, best first. `index` is the `act()` index."""
+    pips, resources and port, best first. `index` is the `act()` index.
+
+    Every one of them, uncapped: `spots` is the reason `legal_actions`
+    drops its own SETUP_SETTLEMENT/BUILD_SETTLEMENT/BUILD_CITY groups
+    (`_compact`) once this is non-empty, so trimming the tail here would
+    throw options away with nowhere else for them to be read back from."""
     vertices = {v["id"]: v for v in board.get("vertices") or []}
     ports = {v: p for p in board.get("ports") or [] for v in p.get("vertices") or []}
     spots = []
@@ -680,7 +682,7 @@ def _spots(legal: list[dict], board: dict) -> tuple[list[dict], int]:
             spot["port"] = _port_label(port)
         spots.append(spot)
     spots.sort(key=lambda s: (-s["pips"], s["index"]))
-    return spots[:_SPOTS_CAP], max(0, len(spots) - _SPOTS_CAP)
+    return spots
 
 
 def _robber(legal: list[dict], view: dict, board: dict) -> list[dict]:
@@ -763,11 +765,9 @@ def _summarize(view: dict, board: dict | None) -> dict:
     legal = view.get("legal_actions") or []
     summary: dict = {"afford": _afford(me["hand"], legal), "race": _race(view, me)}
     if board is not None:
-        spots, omitted = _spots(legal, board)
+        spots = _spots(legal, board)
         if spots:
             summary["spots"] = spots
-            if omitted:
-                summary["spots_omitted"] = omitted
         robber = _robber(legal, view, board)
         if robber:
             summary["robber"] = robber
@@ -934,6 +934,21 @@ def _tabulate_summary(summary: dict) -> None:
         summary["robber"] = _tabulate(rows)
 
 
+# `summary.spots`/`summary.robber` already name every SETUP_SETTLEMENT/
+# BUILD_SETTLEMENT/BUILD_CITY or MOVE_ROBBER entry, joined to the vertex or
+# hex it targets -- the bare group in `legal_actions` told a reader nothing
+# `summary` didn't, once `summary` existed at all. Dropped here rather than
+# left for the reader to notice are the same thing twice; `legal_count`
+# stays the flat total regardless, and `act()`/`_expect_check` still resolve
+# against the raw list, never this grouped one.
+def _drop_superseded(grouped: dict[str, list[dict]], summary: dict) -> None:
+    if summary.get("spots"):
+        for kind in _SPOT_ACTIONS:
+            grouped.pop(kind, None)
+    if summary.get("robber"):
+        grouped.pop("MOVE_ROBBER", None)
+
+
 def _compact(view: dict) -> dict:
     """The last step before a reply goes out: everything above that reads
     the flat list, the dense arrays or the fields `_prune` drops
@@ -941,6 +956,7 @@ def _compact(view: dict) -> dict:
     legal = view.get("legal_actions") or []
     view["legal_count"] = len(legal)
     grouped = _group_actions(legal, len(view.get("players") or []))
+    _drop_superseded(grouped, view.get("summary") or {})
     view["legal_actions"] = {kind: _tabulate(rows) for kind, rows in grouped.items()}
     if view.get("summary"):
         _tabulate_summary(view["summary"])
@@ -1306,9 +1322,10 @@ _TOOLS: dict[str, tuple] = {
         "`timeout` or while seats are open (`waiting_on`; call wait_for_turn()).\n"
         "`summary.afford` per build: `ok`, `missing`, `legal` now. `summary.race`: "
         "`points`, `to_win`, `leader`, per award yours/holder's/`need`. When "
-        "offered: `spots` (legal settlement/city vertices with pips, resources, "
-        "port; best first) and `robber` (hexes with pips, `hits` as seat:Ns+Nc, "
-        "`options` as index:victim).\n"
+        "offered: `spots` (every legal settlement/city vertex, pips/resources/port, "
+        "best first) and `robber` (hexes with pips, `hits` as seat:Ns+Nc, `options` "
+        "as index:victim) -- each then drops its own group from `legal_actions`, "
+        "same indexes, so nothing is said twice.\n"
         "Tables are `(keys):row|row`, cells comma-separated, `-` null, `;` in a "
         "list. `legal_actions`: per type, `index` for act() plus `edge` (roads), "
         "`vertex` (settlement/city), `hex`+`victim` (MOVE_ROBBER), `give`/`want` "

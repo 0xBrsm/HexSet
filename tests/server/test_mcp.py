@@ -284,11 +284,25 @@ def legal(view: dict, kind: str) -> list[dict]:
 
 
 def _setup_settlement_index(view: dict) -> int:
-    return legal(view, "SETUP_SETTLEMENT")[0]["index"]
+    """SETUP_SETTLEMENT leaves `legal_actions` once `summary.spots` covers
+    it (`mcptools._drop_superseded`) -- `spots` is where its `index` lives
+    now, best (not first) placement."""
+    return rows(view["summary"]["spots"])[0]["index"]
 
 
 def _setup_road_index(view: dict) -> int:
     return legal(view, "SETUP_ROAD")[0]["index"]
+
+
+def _next_setup_index(view: dict) -> int:
+    """Either half of a setup placement, whichever this reply offers: the
+    settlement half now lives in `summary.spots` (its `legal_actions` group
+    is dropped once spots covers it); the road half is still the lone
+    `legal_actions` group."""
+    spots = (view.get("summary") or {}).get("spots")
+    if spots:
+        return rows(spots)[0]["index"]
+    return rows(next(iter(view["legal_actions"].values())))[0]["index"]
 
 
 def test_act_with_an_expect_that_no_longer_matches_is_an_error(live_server):
@@ -299,7 +313,7 @@ def test_act_with_an_expect_that_no_longer_matches_is_an_error(live_server):
     client = connected(base)
     data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     index = _setup_settlement_index(data)
-    chosen = legal(data, "SETUP_SETTLEMENT")[0]
+    chosen = rows(data["summary"]["spots"])[0]
 
     status, _, response = client.call_tool_raw(
         "act", index=index, expect={"type": "SETUP_SETTLEMENT", "vertex": chosen["vertex"] + 1}
@@ -317,7 +331,7 @@ def test_act_with_a_matching_expect_acts(live_server):
     data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     index = _setup_settlement_index(data)
 
-    entry = legal(data, "SETUP_SETTLEMENT")[0]
+    entry = rows(data["summary"]["spots"])[0]
     result = client.call_tool("act", index=index, expect={"type": "SETUP_SETTLEMENT", **entry})
     assert result["phase"] == "SETUP_ROAD"
 
@@ -384,7 +398,8 @@ def test_act_settles_through_the_bots_turns_to_our_next_move(live_server):
     after_road = client.call_tool("act", index=road)
 
     assert after_road["your_move"] == "act"  # round 2 of setup, ours again
-    assert after_road["legal_actions"]["SETUP_SETTLEMENT"]
+    assert "SETUP_SETTLEMENT" not in after_road["legal_actions"]  # summary.spots covers it
+    assert after_road["summary"]["spots"]
     assert after_road["waiting_on"] == []
     # The log slice covers what happened in between: the bots' placements.
     assert after_road["log_from"] == max(0, after_settlement["log_total"] - 1)
@@ -429,7 +444,7 @@ def test_a_settled_turn_arrives_rolled(live_server):
     client = connected(base)
     data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     for _ in range(4):  # two settlements, two roads; each settles to our next placement
-        data = client.call_tool("act", index=rows(next(iter(data["legal_actions"].values())))[0]["index"])
+        data = client.call_tool("act", index=_next_setup_index(data))
     assert data["round"] >= 1
     assert data["phase"] != "ROLL" and "ROLL" not in data["legal_actions"]
     assert data["your_move"] in ("act", "discard", "answer_trade")
@@ -780,11 +795,14 @@ def test_new_game_reply_is_compact(live_server):
     assert not {"vertex_owner", "vertex_building", "edge_owner"} & set(data)
     assert data["buildings"] == []
     assert data["roads"] == [[], [], [], []]
-    assert data["legal_count"] == len(legal(data, "SETUP_SETTLEMENT")) > 0
-    assert data["legal_actions"]["SETUP_SETTLEMENT"].startswith("(index,vertex):")
+    # SETUP_SETTLEMENT itself has left legal_actions: summary.spots covers it.
+    assert data["legal_actions"] == {}
+    assert data["legal_count"] == len(rows(data["summary"]["spots"])) > 0
+    assert data["summary"]["spots"].startswith("SETUP_SETTLEMENT:(index,vertex,pips,resources")
 
-    after = client.call_tool("act", index=_setup_settlement_index(data))
-    assert after["buildings"] == [{"vertex": legal(data, "SETUP_SETTLEMENT")[0]["vertex"], "seat": 0, "kind": "settlement"}]
+    spot = rows(data["summary"]["spots"])[0]
+    after = client.call_tool("act", index=spot["index"])
+    assert after["buildings"] == [{"vertex": spot["vertex"], "seat": 0, "kind": "settlement"}]
     assert list(after["legal_actions"]) == ["SETUP_ROAD"]
     assert after["legal_actions"]["SETUP_ROAD"].startswith("(index,edge):")
 
@@ -824,21 +842,24 @@ def test_spots_joins_legal_placements_to_pips_and_ports_best_first():
         {"type": "BUILD_SETTLEMENT", "a": 0, "b": 0},
         {"type": "BUILD_CITY", "a": 2, "b": 0},
     ]
-    spots, omitted = mcptools._spots(legal, TINY_BOARD)
-    assert omitted == 0
+    spots = mcptools._spots(legal, TINY_BOARD)
     assert [s["vertex"] for s in spots] == [0, 2, 1]
     assert spots[0] == {"index": 2, "type": "BUILD_SETTLEMENT", "vertex": 0, "pips": 10, "resources": ["Ore", "Wheat"]}
     assert spots[1]["port"] == "Sheep 2:1" and spots[1]["type"] == "BUILD_CITY"
     assert spots[2]["port"] == "3:1"
 
 
-def test_spots_caps_the_list_and_counts_what_it_left_off():
+def test_spots_lists_every_placement_uncapped():
+    """Setup offers every open vertex -- fifty-odd -- and `spots` used to
+    cap that list at fifteen. It doesn't any more: the raw group next to it
+    that once justified trimming a repeat is gone (`_drop_superseded`), so
+    the tail is the only place any of these vertices is read back from."""
     board = {"vertices": [{"id": v, "pips": v, "resources": []} for v in range(40)], "ports": []}
     legal = [{"type": "SETUP_SETTLEMENT", "a": v, "b": 0} for v in range(40)]
-    spots, omitted = mcptools._spots(legal, board)
-    assert len(spots) == mcptools._SPOTS_CAP
-    assert omitted == 40 - mcptools._SPOTS_CAP
+    spots = mcptools._spots(legal, board)
+    assert len(spots) == 40
     assert spots[0]["vertex"] == 39  # the best, not the first
+    assert spots[-1]["vertex"] == 0
 
 
 def test_robber_names_whose_buildings_each_hex_hits_and_an_index_per_victim():
@@ -956,17 +977,74 @@ def test_new_game_summary_ranks_the_setup_spots_it_offers(live_server):
     assert summary["afford"]["road"] == {"ok": False, "legal": False, "missing": {"Wood": 1, "Brick": 1}}
     assert summary["spots"].startswith("SETUP_SETTLEMENT:(index,vertex,pips,resources")
     spots = rows(summary["spots"])
-    assert len(spots) == mcptools._SPOTS_CAP
-    assert summary["spots_omitted"] + len(spots) == data["legal_count"]
+    assert "spots_omitted" not in summary  # uncapped: every legal vertex is here
+    assert len(spots) == data["legal_count"]
     pips = [s["pips"] for s in spots]
     assert pips == sorted(pips, reverse=True) and pips[0] > 0
-    assert list(data["legal_actions"]) == ["SETUP_SETTLEMENT"]
-    for spot in spots:
-        assert {"index": spot["index"], "vertex": spot["vertex"]} in legal(data, "SETUP_SETTLEMENT")
+    assert list(data["legal_actions"]) == []  # SETUP_SETTLEMENT dropped: spots covers it
     board = client.call_tool("board")
     vertex_rows = board.split("vertices: id pips resources port neighbors\n")[1].split("\n\n")[0].splitlines()
     by_id = {int(line.split()[0]): int(line.split()[1]) for line in vertex_rows}
     assert all(by_id[s["vertex"]] == s["pips"] for s in spots)
+
+
+# --- legal_actions drops what summary already covers ----------------------
+
+
+def _park_in_robber(server, code: str, seat: int) -> None:
+    """Force a live table straight into `Phase.ROBBER` on `seat`'s move --
+    the same forcing shortcut `_park_in_discard` uses, for the same reason:
+    nothing about reaching the phase honestly matters to what this checks."""
+    from hexset.game import Phase
+
+    game = server.tables.get(code).session.game
+    game.phase = Phase.ROBBER
+    game.current_player = seat
+
+
+def _robber_index(view: dict) -> int:
+    """The `act()` index out of `summary.robber`'s first hex's `options`
+    cell (`index:victim`, `;`-joined per victim -- see `_tabulate_summary`).
+    `rows()` only splits the `resources` column, so this one cell is parsed
+    by hand."""
+    row = rows(view["summary"]["robber"])[0]
+    return int(str(row["options"]).split(";")[0].split(":")[0])
+
+
+def test_move_robber_group_is_dropped_once_summary_robber_covers_it(live_server):
+    server, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    seat = data["seat"]
+    _park_in_robber(server, data["code"], seat)
+
+    state = client.call_tool("state")
+    assert "MOVE_ROBBER" not in state["legal_actions"]
+    assert state["summary"]["robber"]
+    assert state["legal_count"] == len(rows(state["summary"]["robber"]))
+
+
+def test_act_and_expect_still_resolve_a_robber_index_from_the_summary(live_server):
+    """Dropping the MOVE_ROBBER group from `legal_actions` must not touch
+    `act(index)`/`expect`: both resolve against the raw list `_act` fetches
+    fresh, never the grouped one."""
+    server, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    seat = data["seat"]
+    _park_in_robber(server, data["code"], seat)
+
+    state = client.call_tool("state")
+    hex_id = rows(state["summary"]["robber"])[0]["hex"]
+    index = _robber_index(state)
+
+    stale = client.call_tool_raw(
+        "act", index=index, expect={"type": "MOVE_ROBBER", "hex": hex_id + 1, "victim": None}
+    )
+    assert stale[2]["result"]["isError"] is True
+
+    result = client.call_tool("act", index=index, expect={"type": "MOVE_ROBBER", "hex": hex_id, "victim": None})
+    assert result["robber"] == hex_id
 
 
 # --- discard: every DISCARD in one call ----------------------------------
@@ -1274,7 +1352,7 @@ def test_the_cursor_is_automatic_for_a_caller_that_never_sends_log_after(live_se
     # the transcript holds still for the rest of the test.
     for _ in range(2):
         data = client.call_tool("state")
-        data = client.call_tool("act", index=rows(next(iter(data["legal_actions"].values())))[0]["index"])
+        data = client.call_tool("act", index=_next_setup_index(data))
     client.call_tool("act", index=_setup_settlement_index(data))  # settled: ours again
 
     first = client.call_tool("state", full_log=True)
@@ -1377,7 +1455,7 @@ def test_wait_for_turn_returns_the_same_shape_as_state(live_server):
 
     plain = client.call_tool("state")
     assert set(waited) == set(plain)
-    assert isinstance(waited["legal_actions"], dict) and waited["legal_actions"]
+    assert isinstance(waited["legal_actions"], dict) and waited["summary"]["spots"]
     assert waited["legal_actions"] == plain["legal_actions"]
     assert waited["legal_count"] == plain["legal_count"]
     assert waited["buildings"] == plain["buildings"] and waited["roads"] == plain["roads"]

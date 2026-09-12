@@ -298,3 +298,28 @@ def test_naming_no_seat_is_exactly_the_old_behaviour():
             break
         assert legal_actions(game) == legal_actions(game, to_move(game))
         step_randomly(game, rng)
+
+
+def test_road_building_is_not_offered_with_no_road_pieces_left():
+    """The card places roads; with fifteen on the board there is nothing to
+    place, and colonist refuses the play outright."""
+    import random
+
+    from hexset.actions import Action, ActionType, legal_actions
+    from hexset.board.board import random_base_board
+    from hexset.cards import DevCard
+    from hexset.game import Phase, start
+    from hexset.state import MAX_ROADS, NO_OWNER
+
+    rng = random.Random(3)
+    game = start(random_base_board(rng), 2, rng)
+    state = game._state
+    seat = game.current_player
+    game.phase = Phase.MAIN
+    state.dev_cards[seat][DevCard.ROAD_BUILDING] = 1
+    assert Action(ActionType.PLAY_ROAD_BUILDING) in legal_actions(game)
+    free = [e for e in range(state.board.topology.num_edges) if state.edge_owner[e] == NO_OWNER]
+    owned = sum(1 for e in range(state.board.topology.num_edges) if state.edge_owner[e] == seat)
+    for e in free[: MAX_ROADS - owned]:
+        state.edge_owner[e] = seat
+    assert Action(ActionType.PLAY_ROAD_BUILDING) not in legal_actions(game)

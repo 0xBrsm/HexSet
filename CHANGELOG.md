@@ -23,6 +23,11 @@ Changes to the HexSet distribution. The project follows
   eleven of eleven 1v1 games against colonist's bot on 2026-09-12 building
   almost nothing.
 
+- **Road Building is not offered to a seat with no road pieces left.** The
+  card places roads; at fifteen on the board there is nothing to place.
+  colonist refuses the play outright, and a live seat that took the engine's
+  word for it was refused and abandoned three games on 2026-09-12.
+
 ### Added
 
 - **Hidden hands and cards in `GameState`.** A state written by a seat rather

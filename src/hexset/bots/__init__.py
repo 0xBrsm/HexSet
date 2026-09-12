@@ -7,12 +7,12 @@ available from ``hexset.bots.heximax`` without shadowing that submodule.
 from .base import Bot, RandomBot, TradeGate
 from .stances import STANCES, own, paranoid, relative
 from .heximax import (
-    Heximax, HonestEvaluator, NO_TRADE_WEIGHTS,
+    Heximax, ViewEvaluator, NO_TRADE_WEIGHTS,
     TRADING_WEIGHTS, View, Weights,
 )
 
 __all__ = [
     "Bot", "RandomBot", "TradeGate", "STANCES", "own", "paranoid", "relative",
-    "Heximax", "HonestEvaluator", "NO_TRADE_WEIGHTS",
+    "Heximax", "ViewEvaluator", "NO_TRADE_WEIGHTS",
     "TRADING_WEIGHTS", "View", "Weights",
 ]

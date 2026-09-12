@@ -460,14 +460,14 @@ def test_trade_round_manual_actor_never_auto_broadcasts():
 
 
 def test_heximax_estimate_many_reads_the_counterpartys_row_through_belief():
-    from hexset.bots.heximax import Heximax, HonestEvaluator
+    from hexset.bots.heximax import Heximax, ViewEvaluator
 
     game = a_game()
     give(game._state, 0, Resource.WOOD, 1)
     give(game._state, 1, Resource.ORE, 1)
     game.ledger.receive(0, Resource.WOOD, 1)
     game.ledger.receive(1, Resource.ORE, 1)
-    bot = Heximax(HonestEvaluator(game._state.board), rng=random.Random(0))
+    bot = Heximax(ViewEvaluator(game._state.board), rng=random.Random(0))
     view = game.state(0)
     candidates = [(1, bundle(wood=-1, ore=1))]
 
@@ -479,10 +479,10 @@ def test_heximax_estimate_many_reads_the_counterpartys_row_through_belief():
 
 
 def test_heximax_estimate_many_off_switch():
-    from hexset.bots.heximax import Heximax, HonestEvaluator
+    from hexset.bots.heximax import Heximax, ViewEvaluator
 
     game = a_game()
-    bot = Heximax(HonestEvaluator(game._state.board), rng=random.Random(0), max_trades=0)
+    bot = Heximax(ViewEvaluator(game._state.board), rng=random.Random(0), max_trades=0)
     view = game.state(0)
 
     assert bot.estimate_many(view, [(1, bundle(wood=-1, ore=1))]) == [-1.0]

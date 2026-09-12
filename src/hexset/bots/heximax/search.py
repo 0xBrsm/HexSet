@@ -39,7 +39,7 @@ from hexset.trading import Bundle
 from hexset.view import View
 from hexset.bots.evaluate import TERM_NAMES
 from .adaptive import TradeActivity, trading_profile
-from .evaluate import TRADING_WEIGHTS, HonestEvaluator, Weights
+from .evaluate import TRADING_WEIGHTS, ViewEvaluator, Weights
 
 # Maximum leaf evaluations per decision.
 DEFAULT_MAX_NODES = 600
@@ -145,7 +145,7 @@ HEXIMAX_TRADE_FLOOR: float = 0.0
 
 @dataclass
 class Heximax:
-    """Max^n over the honest evaluation, within a leaf budget.
+    """Max^n over the view-based evaluation, within a leaf budget.
 
     `depth` counts decisions, `width` beams the branching, and `max_nodes`
     caps the leaf evaluations one `choose` may spend: the search deepens one
@@ -170,7 +170,7 @@ class Heximax:
     Every random draw comes from `rng`; the real game's stream is never read.
     """
 
-    evaluator: HonestEvaluator
+    evaluator: ViewEvaluator
     depth: int = 2
     width: int | None = 6
     max_nodes: int = DEFAULT_MAX_NODES
@@ -200,7 +200,7 @@ class Heximax:
 
     # A separate evaluator decouples long-horizon move priorities from the
     # marginal exchange gate. None preserves the original shared evaluator.
-    trade_evaluator: HonestEvaluator | None = None
+    trade_evaluator: ViewEvaluator | None = None
     _trade_policy: Heximax | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -432,11 +432,11 @@ class Heximax:
         in one pass (`_delta_many`) rather than looping `_delta` -- a trade
         candidate only ever moves two hands, so every candidate's post-trade
         position differs from every other's only in `target`'s and its own
-        counterparty's hand (and, honest only, the shared residual pool the
+        counterparty's hand (and, when trading, the shared residual pool the
         rest of the table's `expected_hand` draws from); everything else
-        `HonestEvaluator.terms` reads -- the board terms, VP cards, points --
+        `ViewEvaluator.terms` reads -- the board terms, VP cards, points --
         is the same real `state` for the whole event and is computed once
-        per seat (`HonestEvaluator.score_many`) instead of once per
+        per seat (`ViewEvaluator.score_many`) instead of once per
         candidate.
         """
         if self.max_trades == 0:
@@ -449,7 +449,7 @@ class Heximax:
         seat = view.perspective
         if self.evaluator.exact_progress_samples:
             return [
-                self._delta_scalar_honest(view, seat, r, c, self._rank)
+                self._delta_scalar(view, seat, r, c, self._rank)
                 for r, c in zip(received, counterparties)
             ]
         return self._delta_many(view, seat, seat, list(received), list(counterparties), self._rank)
@@ -555,7 +555,7 @@ class Heximax:
         if target != knower:
             return self._delta_reference(view, knower, target, received, counterparty, rank)
         if self.evaluator.exact_progress_samples:
-            return self._delta_scalar_honest(view, knower, received, counterparty, rank)
+            return self._delta_scalar(view, knower, received, counterparty, rank)
         return self._delta_many(view, knower, target, [received], [counterparty], rank)[0]
 
     def _delta_many(
@@ -564,7 +564,7 @@ class Heximax:
     ) -> list[float]:
         """`_delta`, batched over every candidate at once: one shared
         pre-trade row (`before`, unchanged by any candidate) and one
-        vectorised post-trade score (`HonestEvaluator.score_many`) over
+        vectorised post-trade score (`ViewEvaluator.score_many`) over
         every candidate's hands (`_post_trade_hands`), rather than a fresh
         `score` per seat per candidate.
 
@@ -646,11 +646,11 @@ class Heximax:
         )
         return known + share[:, :, None] * pool[:, None, :]
 
-    def _delta_scalar_honest(
+    def _delta_scalar(
         self, view: View, knower: int, received: Bundle, counterparty: int, rank,
     ) -> float:
-        """The exact, per-candidate honest computation `_delta_many` fast-
-        paths around whenever `HonestEvaluator.exact_progress_samples` is
+        """The exact, per-candidate computation `_delta_many` fast-
+        paths around whenever `ViewEvaluator.exact_progress_samples` is
         nonzero: `_progress_of` then resamples a belief per non-exact seat,
         which `_post_trade_hands`'s plain array has no belief left to
         resample from. Nothing shipped sets it above zero -- `target ==
@@ -717,7 +717,7 @@ class Heximax:
         Exact, per resource, when `seat == knower` -- its own hand is read
         verbatim, so it must reflect the exchange precisely. Otherwise only
         the total moves, folded into one resource slot: a non-knower's hand
-        reaches the honest evaluation only through `View.expected_hand`,
+        reaches the view-based evaluation only through `View.expected_hand`,
         which reads `known`/`unknown`/`pool` off the ledger and the bank,
         and the one thing it takes from `state.hands` is the *size* -- which
         the fold preserves and a per-resource move, clamped at zero when the
@@ -894,7 +894,7 @@ def _thin_copy(state: GameState, *, copy_bank: bool = False) -> GameState:
     knows exactly which one or two fields the check ahead will touch.
 
     Safe only because nothing downstream reads `.state` off a `belief_for`
-    cache hit for one of these calls: `HonestEvaluator.evaluate`'s own
+    cache hit for one of these calls: `ViewEvaluator.evaluate`'s own
     cache stores a plain list of scores, not a state reference, and
     `belief_for`'s returned `View` is read here only through
     `expected_hand`/`exact`/`unknown`/`_pool_cards`, all copied off `state`/
@@ -985,9 +985,9 @@ def heximax(
         expansion_value = 0.0
     if trade_weights is None:
         trade_weights = TRADING_WEIGHTS
-    evaluator = HonestEvaluator(board, weights, exact_progress_samples=exact_progress_samples,
+    evaluator = ViewEvaluator(board, weights, exact_progress_samples=exact_progress_samples,
                                 expansion_value=expansion_value)
-    trade_evaluator = HonestEvaluator(
+    trade_evaluator = ViewEvaluator(
         board, trade_weights, exact_progress_samples=exact_progress_samples,
         expansion_value=trade_expansion_value,
     )

@@ -18,7 +18,7 @@ construction. The `ledger` a view was built from rides along for exactly
 that reason -- pricing a hypothetical exchange means re-reading the position
 with the transfer certified, and the certification is a ledger operation.
 
-Every opponent quantity `HonestEvaluator` (`bots/heximax/evaluate.py`)
+Every opponent quantity `ViewEvaluator` (`bots/heximax/evaluate.py`)
 reads comes through a `View` -- never through `state.hands[opponent]` or
 `state.dev_cards[opponent]` directly. See `View`'s own docstring for the
 model (`known`/`unknown`/the shared residual `pool`).
@@ -155,7 +155,7 @@ class View:
 
         Compares `perspective`/`num_players` and `signature()`
         -- everything a caller of `expected_hand`/`table_holding`/`steal_odds`/
-        `p_holds` can see -- the same fields `HonestEvaluator.belief_for`
+        `p_holds` can see -- the same fields `ViewEvaluator.belief_for`
         already treats as the whole of what a `View` is a pure function of.
         Deliberately not `self.state`: two `View`s built from independently
         replayed-but-identical games hold different `GameState` objects with
@@ -184,7 +184,7 @@ class View:
         """`known` plus the hidden cards spread in the pool's proportions.
 
         Exact in expectation for every linear term; the nonlinear `progress`
-        term read on it is an approximation, see `HonestEvaluator`.
+        term read on it is an approximation, see `ViewEvaluator`.
         """
         known = self.known[seat]
         hidden = self.unknown[seat]

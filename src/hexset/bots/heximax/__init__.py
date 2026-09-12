@@ -17,7 +17,7 @@ in hexset.bots.stances, and the engine owns the information-set View.
 from __future__ import annotations
 
 from hexset.view import View
-from .evaluate import BALANCED_WEIGHTS, NO_TRADE_WEIGHTS, TRADING_WEIGHTS, HonestEvaluator, Weights
+from .evaluate import BALANCED_WEIGHTS, NO_TRADE_WEIGHTS, TRADING_WEIGHTS, ViewEvaluator, Weights
 from .search import DEFAULT_MAX_NODES, HEXIMAX_TRADE_FLOOR, Heximax, heximax
 
 # Import-time registration of the single Heximax preset.
@@ -28,7 +28,7 @@ __all__ = [
     "DEFAULT_MAX_NODES",
     "HEXIMAX_TRADE_FLOOR",
     "Heximax",
-    "HonestEvaluator",
+    "ViewEvaluator",
     "NO_TRADE_WEIGHTS",
     "TRADING_WEIGHTS",
     "View",

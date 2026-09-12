@@ -27,3 +27,4 @@ compose.yaml
 # building the engine. Someone else's copyrighted text: never tracked, never
 # redistributed, and nothing in the code reads them.
 /rules/
+.claude/worktrees/

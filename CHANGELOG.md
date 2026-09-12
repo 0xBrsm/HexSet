@@ -4,7 +4,7 @@ Changes to the HexSet distribution. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## Unreleased
+## 0.51.0
 
 ### Changed
 

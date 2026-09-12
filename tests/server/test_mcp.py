@@ -969,6 +969,150 @@ def test_new_game_summary_ranks_the_setup_spots_it_offers(live_server):
     assert all(by_id[s["vertex"]] == s["pips"] for s in spots)
 
 
+# --- discard: every DISCARD in one call ----------------------------------
+#
+# A seven with a nine-card hand used to be four act(index) round-trips.
+# `discard(cards)` posts them all, re-reading the fresh legal_actions
+# between each the way `_act` resolves an index (`mcptools._discard`).
+
+
+def _park_in_discard(server, code: str, seat: int, hand: dict, current_player: int | None = None) -> None:
+    """Force a live table straight into `Phase.DISCARD` owing exactly half
+    of `hand` from `seat`, the same shortcut `test_api.py`/`test_webplay.py`
+    use to reach the phase without a real seven -- discarding is not a
+    turn (`hexset.game.may_act`), so nothing about reaching it honestly
+    matters to what these tests check."""
+    from hexset.board.terrain import NUM_RESOURCES, Resource
+    from hexset.game import Phase
+
+    game = server.tables.get(code).session.game
+    game.phase = Phase.DISCARD
+    if current_player is not None:
+        game.current_player = current_player
+    game._state.hands[seat] = [0] * NUM_RESOURCES
+    total = 0
+    for name, count in hand.items():
+        game._state.hands[seat][Resource[name.upper()]] = count
+        total += count
+    game.discard_quota = [0] * game._state.num_players
+    game.discard_quota[seat] = total
+
+
+def test_discard_zeroes_the_quota_and_settles_to_the_robber(live_server):
+    server, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    seat = data["seat"]
+    _park_in_discard(server, data["code"], seat, {"Wood": 2, "Brick": 2}, current_player=seat)
+
+    result = client.call_tool("discard", cards={"Wood": 2, "Brick": 2})
+    assert "DISCARD" not in result["legal_actions"]
+    assert result["phase"] == "ROBBER"
+    assert result["your_move"] == "act"  # the robber move is ours: same seat rolled
+
+
+def test_discard_rejects_a_total_that_does_not_match_the_quota(live_server):
+    server, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    seat = data["seat"]
+    _park_in_discard(server, data["code"], seat, {"Wood": 2, "Brick": 2}, current_player=seat)
+
+    status, _, response = client.call_tool_raw("discard", cards={"Wood": 1})
+    assert status == 200 and response["result"]["isError"]
+    assert "discard_quota of 4" in response["result"]["content"][0]["text"]
+    assert client.call_tool("state")["phase"] == "DISCARD"  # nothing was played
+
+
+def test_discard_rejects_more_than_the_hand_holds(live_server):
+    server, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    seat = data["seat"]
+    _park_in_discard(server, data["code"], seat, {"Wood": 2, "Brick": 2}, current_player=seat)
+
+    status, _, response = client.call_tool_raw("discard", cards={"Wood": 3, "Brick": 1})
+    assert status == 200 and response["result"]["isError"]
+    assert "short" in response["result"]["content"][0]["text"]
+
+
+def test_discard_rejects_an_unknown_resource(live_server):
+    server, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    seat = data["seat"]
+    _park_in_discard(server, data["code"], seat, {"Wood": 4}, current_player=seat)
+
+    status, _, response = client.call_tool_raw("discard", cards={"Gold": 4})
+    assert status == 200 and response["result"]["isError"]
+    assert "not a resource name" in response["result"]["content"][0]["text"]
+
+
+def test_discard_only_works_during_the_discard_phase(live_server):
+    _, base = live_server
+    client = connected(base)
+    client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)  # setup phase, not DISCARD
+
+    status, _, response = client.call_tool_raw("discard", cards={"Wood": 1})
+    assert status == 200 and response["result"]["isError"]
+    assert "DISCARD phase" in response["result"]["content"][0]["text"]
+
+
+def test_act_still_plays_a_single_discard(live_server):
+    """The bulk `discard(cards)` tool is new; `act(index)` on one DISCARD
+    entry at a time -- the only way to discard before it existed -- must
+    keep working."""
+    server, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    seat = data["seat"]
+    _park_in_discard(server, data["code"], seat, {"Wood": 2, "Brick": 2}, current_player=seat)
+
+    state = client.call_tool("state")
+    index = legal(state, "DISCARD")[0]["index"]
+    after = client.call_tool("act", index=index)
+    assert after["phase"] == "DISCARD"
+    assert sum((after["players"][seat].get("hand") or {}).values()) == 3
+
+
+def test_discard_posts_one_action_per_card_re_reading_between_them():
+    """Unit-level: exactly the DISCARD wire actions land, one per card, and
+    each is matched against the `legal_actions` the previous POST just
+    returned -- never a stale one from the initial GET."""
+    state = {
+        "phase": "DISCARD",
+        "seat": 1,
+        "discard_quota": [0, 4, 0, 0],
+        "players": [{"seat": 1, "hand": {"Wood": 2, "Brick": 2}}],
+        "legal_actions": [{"type": "DISCARD", "a": 0, "b": 0}, {"type": "DISCARD", "a": 1, "b": 0}],
+    }
+    after_wood = {**state, "discard_quota": [0, 3, 0, 0], "players": [{"seat": 1, "hand": {"Wood": 1, "Brick": 2}}]}
+    after_both_wood = {
+        **state,
+        "discard_quota": [0, 2, 0, 0],
+        "players": [{"seat": 1, "hand": {"Wood": 0, "Brick": 2}}],
+        "legal_actions": [{"type": "DISCARD", "a": 1, "b": 0}],
+    }
+    after_one_brick = {**after_both_wood, "discard_quota": [0, 1, 0, 0], "players": [{"seat": 1, "hand": {"Brick": 1}}]}
+    settled = {**after_one_brick, "discard_quota": [0, 0, 0, 0], "phase": "ROBBER", "legal_actions": []}
+    tables = RecordingTables(
+        {
+            ("GET", "/api/state"): state,
+            ("POST", "/api/action"): [after_wood, after_both_wood, after_one_brick, settled],
+        }
+    )
+    data = mcptools.call_tool(
+        tables, mcptools.Session(token="tok", code="abcdef"), "discard", {"cards": {"Wood": 2, "Brick": 2}, "timeout": 0}
+    )
+    assert [call[2] for call in tables.calls if call[1] == "/api/action"] == [
+        {"action": {"type": "DISCARD", "a": 0, "b": 0}},
+        {"action": {"type": "DISCARD", "a": 0, "b": 0}},
+        {"action": {"type": "DISCARD", "a": 1, "b": 0}},
+        {"action": {"type": "DISCARD", "a": 1, "b": 0}},
+    ]
+    assert data["phase"] == "ROBBER"
+
+
 # --- your_move: which tool the table wants from this seat ---------------
 #
 # One field in place of reading `legal_actions`, `pending`, `trade_round`,

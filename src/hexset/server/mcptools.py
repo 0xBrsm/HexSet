@@ -358,6 +358,56 @@ def _act(
     return _settle(tables, session, played, timeout, log_after, full_log)
 
 
+def _discard(
+    tables: Tables,
+    session: Session,
+    cards: dict,
+    timeout: float | None = None,
+    log_after: int | None = None,
+    full_log: bool = False,
+) -> Iterator:
+    """Discard `cards` (resource -> count) in one call instead of one
+    `act(index)` per card -- a seven with a nine-card hand used to cost four
+    round-trips, and `hexset.actions.legal_actions`'s `Phase.DISCARD` branch
+    only ever offers one card at a time; that is the engine's own contract,
+    not a wire limit worth handing the caller. `cards` must total exactly
+    this seat's `discard_quota` -- neither more nor less, so a caller that
+    miscounts is told so before anything is spent, not left owing a
+    remainder. Each card is then posted as its own `/api/action`, matched
+    against the freshest `legal_actions` after the previous card landed --
+    the same freshness `_act` resolves an `index` against -- so a later card
+    in the same call is never played against a hand the first card changed."""
+    _seated(session)
+    raw = _call_ok(tables, session, "GET", "/api/state")
+    if raw.get("phase") != "DISCARD":
+        raise ToolError(f"discard() is only for a DISCARD phase; phase is {raw.get('phase')} right now")
+    seat = raw.get("seat")
+    quota_list = raw.get("discard_quota") or []
+    quota = quota_list[seat] if seat is not None and seat < len(quota_list) else 0
+    counts = _positional(cards)
+    total = sum(counts)
+    if total != quota:
+        raise ToolError(f"cards must total your discard_quota of {quota} exactly, not {total}")
+    me = next((p for p in raw.get("players") or [] if p.get("seat") == seat), None)
+    hand = (me or {}).get("hand") or {}
+    short = {
+        RESOURCES[i]: counts[i] - hand.get(RESOURCES[i], 0)
+        for i in range(len(RESOURCES))
+        if counts[i] > hand.get(RESOURCES[i], 0)
+    }
+    if short:
+        raise ToolError(f"you don't hold that many to discard: short {short}")
+    remaining = dict(zip(RESOURCES, counts))
+    while any(remaining.values()):
+        resource = next(name for name, left in remaining.items() if left)
+        entry = next(
+            a for a in raw.get("legal_actions") or [] if a.get("type") == "DISCARD" and a.get("a") == RESOURCES.index(resource)
+        )
+        raw = _call_ok(tables, session, "POST", "/api/action", {"action": entry})
+        remaining[resource] -= 1
+    return _settle(tables, session, raw, timeout, log_after, full_log)
+
+
 def _undo(tables: Tables, session: Session, timeout: float | None = None) -> Iterator:
     _seated(session)
     return _settle(tables, session, _call_ok(tables, session, "POST", "/api/undo"), timeout)
@@ -1251,9 +1301,9 @@ _TOOLS: dict[str, tuple] = {
         "Game state; every playing tool replies with it at your next decision. "
         "Forced moves are played for you: a lone ROLL, and passing offers your "
         "hand can't cover.\n"
-        "`your_move`: `act`, `discard`, `answer_trade` or `choose_trade` = the tool "
-        "to call; `game_over`; `wait` only after a `timeout` or while seats are open "
-        "(`waiting_on`; call wait_for_turn()).\n"
+        "`your_move`: `act`, `discard` (-> discard(cards)), `answer_trade` or "
+        "`choose_trade` = the tool to call; `game_over`; `wait` only after a "
+        "`timeout` or while seats are open (`waiting_on`; call wait_for_turn()).\n"
         "`summary.afford` per build: `ok`, `missing`, `legal` now. `summary.race`: "
         "`points`, `to_win`, `leader`, per award yours/holder's/`need`. When "
         "offered: `spots` (legal settlement/city vertices with pips, resources, "
@@ -1300,6 +1350,20 @@ _TOOLS: dict[str, tuple] = {
                 **_WAIT_ARGS,
             },
             "required": ["index"],
+        },
+    ),
+    "discard": (
+        _discard,
+        "On a seven, discard `cards` (resource -> count) in one call instead of "
+        "one act() per card. Must total your discard_quota exactly. Replies at "
+        "your next move, as state().",
+        {
+            "type": "object",
+            "properties": {
+                "cards": _resource_dict('Resource -> count to discard, e.g. {"Wood": 2, "Ore": 1}.'),
+                **_WAIT_ARGS,
+            },
+            "required": ["cards"],
         },
     ),
     "undo": (

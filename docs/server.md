@@ -146,9 +146,9 @@ then one `message` event carrying the JSON-RPC response. `initialize`,
 `tools/list` and `ping` are plain JSON responses.
 
 Available tools are `bots`, `new_game`, `join`, `resume_game`, `board`,
-`state`, `wait_for_turn`, `act`, `undo`, `leave_game`, `get_table`,
-`offer_trade`, `answer_trade`, and `choose_trade`. `bots` lists the
-opponent names `new_game`'s `opponents` accepts (`GET /api/models`).
+`state`, `wait_for_turn`, `act`, `discard`, `undo`, `leave_game`,
+`get_table`, `offer_trade`, `answer_trade`, and `choose_trade`. `bots` lists
+the opponent names `new_game`'s `opponents` accepts (`GET /api/models`).
 
 `new_game` and `join` require an `identity` string naming the caller (an
 LLM would typically pass its model id). The server trims and lowercases
@@ -159,7 +159,7 @@ The identity is whatever string the caller supplies; nothing verifies it.
 
 `act(index)` submits one entry from the latest `state().legal_actions`.
 Ending a turn requires `END_TURN`. Every acting tool (`new_game`, `join`,
-`resume_game`, `act`, `undo`, `offer_trade`, `answer_trade`,
+`resume_game`, `act`, `discard`, `undo`, `offer_trade`, `answer_trade`,
 `choose_trade`) replies at the caller's next decision, not the instant
 after the action: it blocks until `your_move` is something other than
 `wait`, for at most `timeout` seconds (default and cap 600; `0` replies at
@@ -168,6 +168,14 @@ play returns to it. Two forced moves are played inside that wait rather
 than handed back to decide: a `ROLL` that is the only legal action (a
 seat holding a Knight still chooses), and a `pass` on any broadcast offer
 the seat's hand cannot cover.
+
+`discard(cards)` plays a whole seven's worth of discards in one call:
+`cards` is a resource -> count dictionary that must total exactly this
+seat's `discard_quota`, no more and no less. The engine still takes one
+card at a time (`act(index)` on a single `DISCARD` entry still works, one
+card per call); `discard` is the same submissions made for the caller,
+each matched against the freshest `legal_actions` after the previous one
+landed.
 
 `board` replies as text, not JSON: an incidence encoding with one line per
 hex (id, resource, pips, vertex ids), one per vertex (id, pips, resources,

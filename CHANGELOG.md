@@ -53,6 +53,13 @@ Changes to the HexSet distribution. The project follows
 
 ### Changed
 
+- **MCP `discard(cards)` plays a whole seven in one call.** A nine-card
+  hand on a seven used to cost four `act(index)` round-trips, one DISCARD
+  at a time; `discard({"Wood": 2, "Ore": 1, ...})` posts them all, checked
+  up front against `discard_quota` and the hand, and matched one at a time
+  against the freshest `legal_actions` after each lands. `act(index)` on a
+  single `DISCARD` entry still works.
+
 - **MCP tool text cut by half.** The `tools/list` descriptions and argument
   schemas an LLM seat re-reads on every call went from 13.5 KB to 8.9 KB
   (descriptions 7.2 KB to 3.7 KB). The state reply's shape is now documented

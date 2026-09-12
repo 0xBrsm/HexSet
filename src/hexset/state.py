@@ -182,6 +182,16 @@ class GameState:
     dev_cards: list[list[int] | HiddenCards] = field(default_factory=list)
     new_dev_cards: list[list[int] | HiddenCards] = field(default_factory=list)
     knights_played: list[int] = field(default_factory=list)
+    # Each seat's longest-road length, cached so `victory.update_longest_road`
+    # need only recompute the one or two seats a placement could have
+    # changed rather than every seat's routes from scratch
+    # (`hexset.roads.road_lengths` remains the from-scratch reference it is
+    # checked against). `new_game` fills this with zeros; any other path
+    # that builds a `GameState` from field data outside `copy_state` -- a
+    # foreign mirror such as `hexset.catanatron.state.translate`, chiefly --
+    # must compute it fresh rather than default it, since a stale or absent
+    # cache would silently mis-award the card.
+    road_lengths: list[int] = field(default_factory=list)
     longest_road_holder: int = NO_OWNER
     largest_army_holder: int = NO_OWNER
     # The game type this position is played under. Read by the win check,
@@ -216,6 +226,7 @@ def new_game(
         dev_cards=[[0] * NUM_DEV_CARDS for _ in range(num_players)],
         new_dev_cards=[[0] * NUM_DEV_CARDS for _ in range(num_players)],
         knights_played=[0] * num_players,
+        road_lengths=[0] * num_players,
         rules=rules,
     )
 
@@ -243,6 +254,7 @@ def copy_state(state: GameState) -> GameState:
         dev_cards=[held[:] for held in state.dev_cards],
         new_dev_cards=[held[:] for held in state.new_dev_cards],
         knights_played=state.knights_played[:],
+        road_lengths=state.road_lengths[:],
         longest_road_holder=state.longest_road_holder,
         largest_army_holder=state.largest_army_holder,
         rules=state.rules,

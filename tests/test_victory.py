@@ -5,10 +5,13 @@ import random
 
 from helpers import independent_vertices, mini_board
 
+from hexset.board.board import random_base_board
 from hexset.board.topology import coastal_rings
 from hexset.cards import DevCard
-from hexset.roads import MIN_LONGEST_ROAD
-from hexset.state import NO_OWNER, Building, new_game
+from hexset.game import is_over, start
+from hexset.play import step_randomly
+from hexset.roads import MIN_LONGEST_ROAD, road_lengths
+from hexset.state import NO_OWNER, Building, copy_state, new_game
 from hexset.victory import (
     LARGEST_ARMY_VP,
     LONGEST_ROAD_VP,
@@ -152,3 +155,74 @@ def test_a_game_is_won_at_ten_points():
 
     assert victory_points(state, 0) == WINNING_POINTS
     assert winner(state) == 0
+
+
+# --- `road_lengths` cache: `update_longest_road` recomputes only the seat(s)
+# --- a placement could have changed rather than every seat from scratch
+# --- (`hexset.game`'s four call sites), so these check the cache never
+# --- drifts from a full recount, on real games as well as by construction.
+
+
+def test_cached_road_lengths_never_drift_from_a_from_scratch_recount():
+    """30 seeded random 4-seat games, checked after every single action.
+
+    `_award`'s tie-breaking is unchanged code; if the cache it reads
+    (`state.road_lengths`) matches a full recount
+    (`hexset.roads.road_lengths`) at every step, `state.longest_road_holder`
+    is correct by induction from the empty board (where both trivially
+    agree) without a separate holder check.
+    """
+    for seed in range(30):
+        rng = random.Random(seed)
+        board = random_base_board(rng)
+        game = start(board, 4, rng)
+        steps = 0
+        while not is_over(game) and steps < 2000:
+            step_randomly(game, rng)
+            steps += 1
+            state = game._state
+            assert state.road_lengths == road_lengths(state), (
+                f"seed {seed}, step {steps}: cache drifted from a full recount"
+            )
+
+
+def test_a_settlement_that_splits_a_route_drops_only_that_seats_length():
+    """A foreign building at a through-junction cuts the route passing under
+    it (`roads.longest_road`'s `passable` check); the cached length for the
+    seat that owned it must drop to match, and nobody else's cached length
+    should have been touched by the recompute."""
+    state = a_game(players=2)
+    path = chain(state, 0, MIN_LONGEST_ROAD + 1, start=0)
+    update_longest_road(state)
+    assert state.longest_road_holder == 0
+    assert state.road_lengths[0] == MIN_LONGEST_ROAD + 1
+
+    # The junction shared by the path's middle two edges splits it into two
+    # 3-segment halves once an opponent settles there.
+    shared = set(state.board.topology.edges[path[2]]) & set(
+        state.board.topology.edges[path[3]]
+    )
+    break_vertex = shared.pop()
+    other_length = state.road_lengths[1]
+
+    occupy(state, 1, break_vertex)
+    update_longest_road(state, settlement_vertex=break_vertex, settlement_owner=1)
+
+    assert state.road_lengths == road_lengths(state)
+    assert state.road_lengths[0] == 3
+    assert state.road_lengths[1] == other_length  # untouched: player 1 owns no road here
+    assert state.longest_road_holder == NO_OWNER  # 3 < MIN_LONGEST_ROAD
+
+
+def test_copy_state_carries_the_cache_and_copies_are_independent():
+    state = a_game(players=2)
+    chain(state, 0, MIN_LONGEST_ROAD)
+    update_longest_road(state)
+    assert state.road_lengths[0] == MIN_LONGEST_ROAD
+
+    copy = copy_state(state)
+    assert copy.road_lengths == state.road_lengths
+    assert copy.road_lengths is not state.road_lengths
+
+    copy.road_lengths[0] = 0
+    assert state.road_lengths[0] == MIN_LONGEST_ROAD

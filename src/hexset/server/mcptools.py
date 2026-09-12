@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import time
 from dataclasses import dataclass
 from typing import Iterator
@@ -64,6 +65,12 @@ class Session:
     # The ranked seats the open `offer_trade` may be settled with, or `None`
     # for anyone -- read by `_settled_round` while that round is open.
     offer_to: list[int] | None = None
+    # What this session has been sent so far: replies and their bytes as
+    # the client received them. Reported as `usage` on the `game_over`
+    # reply -- the payload half of what a seat costs, measured server-side
+    # so any client (or its model) can be compared on the same number.
+    calls: int = 0
+    bytes: int = 0
 
 
 def _call_status(tables: Tables, session: Session, method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
@@ -1204,7 +1211,11 @@ def _finish(session: Session, view: dict, log_after: int | None = None, full_log
     not depend on which tool returned it, so the steps live here and nowhere
     else."""
     view["can_offer"] = _can_offer(view)
-    return _trim_for(session, _compact(_summarize(view, session.board), session), log_after, full_log)
+    view = _trim_for(session, _compact(_summarize(view, session.board), session), log_after, full_log)
+    if view.get("game_over"):
+        this = len(json.dumps(view, separators=(",", ":")))
+        view["usage"] = {"calls": session.calls + 1, "bytes": session.bytes + this}
+    return view
 
 
 def _reply(session: Session, raw: dict, log_after: int | None = None, full_log: bool = False) -> dict:
@@ -1526,7 +1537,9 @@ _TOOLS: dict[str, tuple] = {
     ),
     "board": (
         _board,
-        "The fixed board as text; read once per game. `hexes`: id, resource "
+        "The fixed board as text. Read it once, right after taking a seat, to "
+        "plan expansion beyond what `summary` shows (one or two roads out). "
+        "`hexes`: id, resource "
         "(DESERT/SEA/GOLD pay nothing fixed), pips (2d6 ways to roll its token: 5 "
         "for 6/8 down to 1 for 2/12), vertex ids. `vertices`: id, pips summed and "
         "resources de-duplicated over touching hexes (settlement value), port "
@@ -1706,9 +1719,18 @@ def call_tool_events(tables: Tables, session: Session, name: str, arguments: dic
     except TypeError as error:
         raise ToolError(f"bad arguments for {name}: {error}") from error
     if isinstance(result, (dict, str)):
+        _count(session, result)
         yield result
     else:
-        yield from result
+        for item in result:
+            if item is not _KEEPALIVE:
+                _count(session, item)
+            yield item
+
+
+def _count(session: Session, result) -> None:
+    session.calls += 1
+    session.bytes += len(result) if isinstance(result, str) else len(json.dumps(result, separators=(",", ":")))
 
 
 def call_tool(tables: Tables, session: Session, name: str, arguments: dict) -> dict | str:

@@ -53,6 +53,13 @@ Changes to the HexSet distribution. The project follows
 
 ### Changed
 
+- **MCP `game_over` reply reports `usage`.** `calls` and `bytes`, what this
+  session was sent over the game as the client received it, counted
+  server-side so a seat's payload cost can be compared across clients
+  independently of what the model spends reasoning. `board`'s description
+  now says to read it once after taking a seat, before planning beyond what
+  `summary` shows.
+
 - **`summary.roads` flags a network-joining road.** A legal road with both
   ends already the seat's own carries `link`; its `to` is a vertex the seat
   holds, not ground it reaches.

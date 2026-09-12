@@ -547,6 +547,52 @@ def test_board_text_annotates_hexes_and_vertices(live_server):
         assert nbrs and all(int(n) != int(vid) for n in nbrs.split(","))
 
 
+def test_the_game_over_reply_reports_what_the_session_was_sent(live_server):
+    """Every tool reply is counted on the session; the last one carries the
+    totals, itself included, as `usage`."""
+    _, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    assert "usage" not in data
+    for _ in range(300):
+        if data.get("game_over"):
+            break
+        move = data["your_move"]
+        if move == "answer_trade":
+            data = client.call_tool("answer_trade", index=0, kind="pass")
+        elif move == "choose_trade":
+            data = client.call_tool("choose_trade", decline=True)
+        elif move == "discard":
+            hand = next(p for p in data["players"] if p["seat"] == data["seat"])["hand"]
+            owed = data["discard_quota"][data["seat"]]
+            cards = {}
+            for name, n in hand.items():
+                take = min(n, owed - sum(cards.values()))
+                if take:
+                    cards[name] = take
+            data = client.call_tool("discard", cards=cards)
+        elif move == "wait":
+            data = client.call_tool("wait_for_turn", timeout=5)
+        else:
+            groups = data["legal_actions"]
+            summary = data["summary"]
+            if summary.get("spots"):
+                index = rows(summary["spots"])[0]["index"]
+            elif summary.get("robber"):
+                index = int(rows(summary["robber"])[0]["options"].split(";")[0].split(":")[0])
+            elif "END_TURN" in groups:
+                index = legal(data, "END_TURN")[0]["index"]
+            else:
+                index = rows(next(iter(groups.values())))[0]["index"]
+            data = client.call_tool("act", index=index)
+    assert data["game_over"]
+    usage = data["usage"]
+    assert usage["calls"] >= 20 and usage["bytes"] > usage["calls"] * 1000
+    # The final reply is itself counted; a re-read after the end is not part of the game's number.
+    again = client.call_tool("state")
+    assert again["usage"]["calls"] == usage["calls"] + 1
+
+
 def test_a_timeout_that_runs_out_replies_with_wait(live_server):
     """`timeout` (and `_MAX_WAIT`) is the one way a reply says `wait`."""
     _, base = live_server

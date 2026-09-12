@@ -262,7 +262,10 @@ across the whole history (every earlier steal names its card); that is not
 pushed -- the final reply carries the usual slice -- and `full_log: true`
 fetches the un-redacted whole on request, as it does on any call for a
 client that lost a reply. `log_after: <n>` overrides the cursor with an
-explicit line count.
+explicit line count. The `game_over` reply also carries `usage`, the number of
+replies this MCP session was sent and their total bytes as the client
+received them (the final reply included) -- the payload half of what a seat
+costs, measured server-side so any client can be compared on the same number.
 
 Every state-returning tool answers with `your_move`: `act`, `discard`,
 `answer_trade` or `choose_trade` names the tool the table wants from the

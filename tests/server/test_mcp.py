@@ -337,7 +337,7 @@ def test_act_no_longer_takes_a_version(live_server):
     client = connected(base)
     data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
 
-    status, _, response = client.call_tool_raw("act", index=_setup_settlement_index(data), version=data["version"])
+    status, _, response = client.call_tool_raw("act", index=_setup_settlement_index(data), version=1)
     assert status == 200
     assert response["result"]["isError"] is True
     assert "bad arguments" in response["result"]["content"][0]["text"]
@@ -740,7 +740,7 @@ def test_race_measures_the_win_the_leader_and_both_awards():
         ],
     }
     race = mcptools._race(view, view["players"][0])
-    assert race["points"] == 6 and race["to_win"] == 4 and race["winning_points"] == 10
+    assert race["points"] == 6 and race["to_win"] == 4
     assert race["leader"] == {"seat": 1, "points": 7}
     assert race["longest_road"] == {"yours": 4, "held": False, "holder": 1, "holder_has": 6, "need": 7}
     assert race["largest_army"] == {"yours": 1, "held": False, "holder": 2, "holder_has": 3, "need": 4}
@@ -754,7 +754,7 @@ def test_race_when_you_hold_an_award_and_nobody_holds_the_other():
         ],
     }
     race = mcptools._race(view, view["players"][0])
-    assert race["winning_points"] == 10  # the standard rule when the view does not say
+    assert race["to_win"] == 6  # the standard ten when the view does not say
     assert race["longest_road"] == {"yours": 5, "held": True, "holder": 0, "holder_has": 5}
     assert race["largest_army"] == {"yours": 1, "held": False, "need": 3}
 
@@ -764,12 +764,62 @@ def test_summarize_skips_a_view_that_does_not_reveal_a_hand():
     assert "summary" not in mcptools._summarize(spectator, TINY_BOARD)
 
 
+def test_prune_drops_what_a_reader_never_acts_on():
+    view = {
+        "version": 9,
+        "claimed_seats": [0, 1],
+        "waiting_for": [1],
+        "trade_wait": [],
+        "seats": [{"seat": 0, "kind": "player", "name": "mcp"}, {"seat": 1, "kind": "empty", "name": None}],
+        "bank": {"Wood": 0, "Brick": 19, "Sheep": 0, "Wheat": 1, "Ore": 0},
+        "players": [
+            {
+                "seat": 0,
+                "last_roll": 7,
+                "known": {"Wood": 1, "Brick": 0, "Sheep": 0, "Wheat": 0, "Ore": 0},
+                "hand": {"Wood": 1, "Brick": 0, "Sheep": 2, "Wheat": 0, "Ore": 0},
+                "dev_cards": {"Knight": 1, "Victory Point": 0, "Road Building": 0, "Year Of Plenty": 0, "Monopoly": 0},
+            },
+            {"seat": 1, "last_roll": None, "known": {"Wood": 0, "Brick": 0, "Sheep": 0, "Wheat": 0, "Ore": 0}},
+        ],
+    }
+    pruned = mcptools._prune(view)
+    for gone in ("version", "claimed_seats", "waiting_for", "trade_wait", "seats"):
+        assert gone not in pruned
+    assert pruned["bank"] == {"Brick": 19, "Wheat": 1}
+    assert pruned["players"][0] == {
+        "seat": 0,
+        "kind": "player",
+        "known": {"Wood": 1},
+        "hand": {"Wood": 1, "Sheep": 2},
+        "dev_cards": {"Knight": 1},
+    }
+    assert pruned["players"][1] == {"seat": 1, "kind": "empty", "known": {}}
+
+
+def test_a_live_reply_is_pruned_and_still_playable(live_server):
+    _, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    for gone in ("version", "claimed_seats", "waiting_for", "trade_wait", "seats"):
+        assert gone not in data
+    assert [p["kind"] for p in data["players"]] == ["player", "bot", "bot", "bot"]
+    assert all("last_roll" not in p for p in data["players"])
+    assert "last_roll" in data and "winning_points" in data
+    me = data["players"][data["seat"]]
+    assert me["hand"] == {} and all(me["known"].values()) and all(data["bank"].values())
+    # A summary computed against the same hand is unaffected by sparse counts.
+    assert data["summary"]["afford"]["road"]["missing"] == {"Wood": 1, "Brick": 1}
+    result = client.call_tool("act", index=data["summary"]["spots"][0]["index"])
+    assert result["phase"] == "SETUP_ROAD" and "version" not in result
+
+
 def test_new_game_summary_ranks_the_setup_spots_it_offers(live_server):
     _, base = live_server
     client = connected(base)
     data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
     summary = data["summary"]
-    assert summary["race"]["to_win"] == 10 and summary["race"]["winning_points"] == 10
+    assert summary["race"]["to_win"] == 10 and data["winning_points"] == 10
     assert summary["afford"]["road"] == {"ok": False, "legal": False, "missing": {"Wood": 1, "Brick": 1}}
     spots = summary["spots"]
     assert len(spots) == mcptools._SPOTS_CAP

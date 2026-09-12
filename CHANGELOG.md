@@ -41,6 +41,16 @@ Changes to the HexSet distribution. The project follows
   detail (SSE keepalives) and design history left the descriptions; nothing
   a caller acts on did.
 
+- **MCP replies pruned.** Every state-returning MCP reply drops the wire
+  fields a reader never acts on: `version` (no MCP tool takes it),
+  `claimed_seats`, `waiting_for` and `trade_wait` (all folded into
+  `your_move`/`waiting_on` already), each player's `last_roll` (the table's
+  own `last_roll` is the current one), `seats` (its `kind` moves onto each
+  `players` entry) and `summary.race.winning_points` (the top-level field).
+  `hand`, `known`, `dev_cards` and `bank` come sparse, a missing name
+  meaning zero, as the trade dicts always have. A mid-game reply is about
+  a sixth smaller. The HTTP API is untouched.
+
 - Size-only readers go through `hexset.economy.hand_size` and
   `hexset.devcards.dev_count` rather than summing a hand or a
   development holding, so the robber, the discard rule, the encoding, the

@@ -588,8 +588,8 @@ def _robber(legal: list[dict], view: dict, board: dict) -> list[dict]:
 
 
 def _race(view: dict, me: dict) -> dict:
-    """Where this seat stands: points and the distance to the win, the
-    leading opponent by *public* points (hidden victory-point cards are not
+    """Where this seat stands: points and the distance to the win (the
+    rule itself is the view's top-level `winning_points`), the leading opponent by *public* points (hidden victory-point cards are not
     counted for anyone else), and each award -- yours, who holds it, and
     `need`, the length or knight count that would take it (strictly more
     than the holder, or the minimum if nobody holds it yet)."""
@@ -613,7 +613,6 @@ def _race(view: dict, me: dict) -> dict:
     return {
         "points": points,
         "to_win": max(0, winning - points),
-        "winning_points": winning,
         "leader": None if leader is None else {"seat": leader.get("seat"), "points": leader.get("victory_points", 0)},
         "longest_road": award("longest_road", "road_length", _MIN_LONGEST_ROAD),
         "largest_army": award("largest_army", "knights_played", _MIN_LARGEST_ARMY),
@@ -718,13 +717,51 @@ def _compact_board(view: dict) -> dict:
     return view
 
 
+# Wire fields a reader never acts on, dropped from every reply (`_prune`).
+# `version`: the whole-table counter no MCP tool takes (see `_expect_check`).
+# `claimed_seats`: `players[].kind != "empty"`. `waiting_for`/`trade_wait`:
+# `_your_move` has already folded them into `waiting_on`.
+_DEAD = ("version", "claimed_seats", "waiting_for", "trade_wait")
+# Per-seat counts sent sparse: a missing name is a zero, the convention the
+# trade dicts already use (`_named`).
+_SPARSE_COUNTS = ("hand", "known", "dev_cards")
+
+
+def _sparse(counts: dict | None) -> dict:
+    return {name: n for name, n in (counts or {}).items() if n}
+
+
+def _prune(view: dict) -> dict:
+    """The wire's redundancies, removed once per reply. `seats` (seat, kind,
+    name) repeats `players` but for `kind`, which moves onto each player
+    entry instead; a seat's `last_roll` is the table's own `last_roll`
+    for the roller and stale for everyone else."""
+    for key in _DEAD:
+        view.pop(key, None)
+    kinds = {s.get("seat"): s.get("kind") for s in view.pop("seats", None) or []}
+    players = []
+    for player in view.get("players") or []:
+        player.pop("last_roll", None)
+        for key in _SPARSE_COUNTS:
+            if key in player:
+                player[key] = _sparse(player[key])
+        seat = player.get("seat")
+        players.append({"seat": seat, "kind": kinds[seat], **player} if seat in kinds else player)
+    if players:
+        view["players"] = players
+    if "bank" in view:
+        view["bank"] = _sparse(view["bank"])
+    return view
+
+
 def _compact(view: dict) -> dict:
     """The last step before a reply goes out: everything above that reads
-    the flat list or the dense arrays (`_your_move`, `_summarize`) has run."""
+    the flat list, the dense arrays or the fields `_prune` drops
+    (`_your_move`, `_summarize`) has run."""
     legal = view.get("legal_actions") or []
     view["legal_count"] = len(legal)
     view["legal_actions"] = _group_actions(legal, len(view.get("players") or []))
-    return _compact_board(view)
+    return _prune(_compact_board(view))
 
 
 def _translate(raw: dict) -> dict:
@@ -1051,15 +1088,15 @@ _TOOLS: dict[str, tuple] = {
         "`resource` (PLAY_MONOPOLY/DISCARD), `resources` (PLAY_YEAR_OF_PLENTY); "
         "ROLL, END_TURN, BUY_DEV_CARD, PLAY_KNIGHT, PLAY_ROAD_BUILDING have index "
         "only. Empty when not your turn.\n"
-        "`players`: your own `hand` and `dev_cards`; for every seat the public "
-        "ledger, `known` counts all can deduce and `unknown` the rest. `buildings` "
-        "(vertex, seat, kind), `roads` (edge ids per seat), `bank`, `trade_ratios`, "
-        "`robber` (hex id).\n"
+        "`players`: `kind` player/bot/empty; your own `hand` and `dev_cards`; for "
+        "every seat the public ledger, `known` counts all can deduce and `unknown` "
+        "the rest. `buildings` (vertex, seat, kind), `roads` (edge ids per seat), "
+        "`bank`, `trade_ratios`, `robber` (hex id). Resource dicts omit zeros.\n"
         "Trading: `pending` = offers to you (`actor`, `you_give`, `you_receive`), "
         "answer with answer_trade(index); `trade_round` = your own open offer "
         "(`responses` each `seat`, `kind` accept/counter/pass with "
         "`you_would_give`/`you_would_receive`; `awaiting` seats), settle with "
-        "choose_trade(index); `trades` = done this turn. Zero counts omitted.\n"
+        "choose_trade(index); `trades` = done this turn.\n"
         "`log`: transcript lines since your previous reply, plus the last one you "
         "hold (it may have been rewritten); `log_from` is the index to splice at, "
         "`log_total` the full length. Whole transcript on a new or resumed seat "

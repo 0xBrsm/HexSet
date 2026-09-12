@@ -160,7 +160,11 @@ operand (`edge`, `vertex`, `hex` and `victim`, or the resource names for
 bank trades, discards, Monopoly and Year of Plenty), and `legal_count` is
 the flat total. Board occupancy comes as `buildings` (vertex, seat, kind)
 and `roads` (edge ids, one list per seat) rather than the HTTP API's dense
-`vertex_owner`, `vertex_building` and `edge_owner` arrays.
+`vertex_owner`, `vertex_building` and `edge_owner` arrays. MCP replies also
+drop the HTTP view's `version`, `claimed_seats`, `waiting_for`, `trade_wait`
+and per-player `last_roll`; fold `seats` into `players` as each entry's
+`kind`; and send `hand`, `known`, `dev_cards` and `bank` sparse, a missing
+name meaning zero.
 
 `get_table` returns the same reply as `state`. Trading tools use
 resource-name dictionaries and indices into that reply's `pending` and
@@ -197,7 +201,8 @@ Every state-returning tool answers with `your_move`: `act`, `discard`,
 `answer_trade` or `choose_trade` names the tool the table wants from the
 caller now, `wait` means none does and `waiting_on` lists the seats it is
 waiting for, and `game_over` is the end. It is derived from `legal_actions`,
-`pending`, `trade_round`, `trade_wait` and `to_move`, which remain available.
+`pending`, `trade_round`, `discard_quota` and `to_move`, which remain
+available, and from `waiting_for` and `trade_wait`, which do not.
 
 `wait_for_turn(timeout=...)` waits until `your_move` is anything but
 `wait`: legal actions, a pending offer, a fully answered round, or game

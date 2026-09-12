@@ -27,9 +27,11 @@ from hexset.state import (
     MAX_ROADS,
     MAX_SETTLEMENTS,
     GameState,
+    HiddenHand,
     city_count,
     city_upgradeable,
     copy_state,
+    is_hidden,
     pile_size,
     road_count,
     road_placeable,
@@ -364,21 +366,58 @@ class NetworkBot:
         self, seat: int, them: int, hand: Sequence[int], bundle: Bundle, view: View
     ) -> Game:
         """The position `bundle` leaves, read from `seat`'s own frame: a
-        shallow copy of the seated game over a copied state, so nothing here
-        mutates the live table. `seat`'s hand becomes `hand` plus the
-        bundle, exactly -- it is this seat's own, known regardless. `them`'s
-        hand becomes its known lower bound (`view.known[them]`) moved the
-        same way and floored at zero: the best this seat is entitled to
-        claim about a hand it does not hold, standing in for the true one
-        the way `view.known` always does."""
+        shallow copy of the seated game over a copied state *and* a copied
+        ledger, so nothing here mutates the live table. `seat`'s hand
+        becomes `hand` plus the bundle, exactly -- it is this seat's own,
+        known regardless.
+
+        `them`'s known row is raised first to cover what the bundle says
+        they give (`certified`: an offer is evidence of the cards behind
+        it, the same certification a sampled belief world used to rest on)
+        and only then moved by the bundle -- never the true hand, which
+        this seat may not read, and never a flooring guess: the
+        certification guarantees the subtraction cannot go negative. The
+        residual uncertainty (`certified.unknown[them]`) is untouched by a
+        trade that only moves named, certified cards.
+
+        A bare `copy.copy(game)` shares the live ledger, and `View` reads
+        `them`'s known cards from the ledger, not from `state.hands` -- so
+        a copy that only rewrote the state answered every ask about `them`
+        from the position *before* the trade, with only `them`'s hand
+        *size* having moved: precisely the stale-known-against-a-new-size
+        mismatch the affordability filter exists to keep away from the
+        head, reintroduced one layer down. The ledger is copied and its
+        `them` row rewritten to match.
+        """
         game = self._seated
         assert game is not None  # callers check this first
         state = copy_state(view.state)
         state.hands[seat] = [n + d for n, d in zip(hand, bundle)]
-        moved = [max(0, k - d) for k, d in zip(view.known[them], bundle)]
-        state.hands[them] = moved
+
+        certified = View(
+            view.state, view.ledger, seat,
+            certify=[(them, [max(0, n) for n in bundle])],
+        )
+        their_known = [k - d for k, d in zip(certified.known[them], bundle)]
+
+        # Composition beyond `known` is never read for a seat that is not
+        # the perspective (`View` only reads it for `hand_size`), so a
+        # `HiddenHand` need only carry the right size; a concrete hand is
+        # resized the same way a real cleared trade would leave it.
+        if is_hidden(state.hands[them]):
+            state.hands[them] = HiddenHand(view.sizes[them] - sum(bundle))
+        else:
+            state.hands[them] = their_known
+
+        ledger = view.ledger.copy()
+        ledger.seats[them].known = their_known
+        ledger.seats[them].unknown = certified.unknown[them]
+        ledger.seats[seat].known = list(state.hands[seat])
+        ledger.seats[seat].unknown = 0
+
         after = copy.copy(game)
         after.set_state(state)
+        after.ledger = ledger
         return after
 
 

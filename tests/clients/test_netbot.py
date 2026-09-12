@@ -272,6 +272,71 @@ def test_a_trade_event_clears_through_the_runtime_free_gate(board):
     assert value_of_hand(state.hands[0], 0) > value_of_hand(before[0], 0)
 
 
+def test_the_after_position_moves_the_counterpartys_ledger_row_too(board, monkeypatch):
+    """`_after` copies `game`, not just its state: a bare `copy.copy(game)`
+    shares the live ledger, and `View` reads a seat that is not the
+    perspective from the *ledger*, not from `state.hands` -- so a copy that
+    only rewrote the state answered every ask about the counterparty from
+    the position before the trade, with only their hand's *size* having
+    moved. That mismatch is exactly what the affordability filter exists to
+    keep away from the head, reintroduced one layer down if the ledger is
+    never rewritten to match.
+    """
+    from hexset.clients.netbot import NetworkBot
+    from hexset.ledger import PublicLedger
+    from hexset.view import View
+
+    space = stub_checkpoint(board).space
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS)
+    game = start(board, PLAYERS, random.Random(2))
+    while game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
+        apply(game, bot.choose(game))
+    state = game.state(0, hidden=False)
+    # Same kind-changing exchange as the trade-event test above: seat 0 is
+    # one wheat short of a city, seat 1 already affords one and gives up
+    # the wheat that pays for it -- guaranteed to survive the affordability
+    # filter and reach the head.
+    state.hands[0] = [0, 1, 0, 1, 3]
+    state.hands[1] = [0, 0, 0, 2, 3]
+    state.deck = []
+    # Every hand is public knowledge here, so the belief is exact and the
+    # expected numbers below are exact too.
+    ledger = PublicLedger.new(state.num_players)
+    ledger.apply_hand_diff([[0] * 5 for _ in state.hands], state.hands)
+    game.ledger = ledger
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    bot.seat_at(game)
+    view = game.state(0)
+    bundle = (0, -1, 0, 1, 0)  # seat 0 gives a brick, receives a wheat
+
+    captured = []
+    original = HandValuePolicy.value_rows
+
+    def capture(self, rows):
+        captured.extend(rows)
+        return original(self, rows)
+
+    monkeypatch.setattr(HandValuePolicy, "value_rows", capture)
+
+    bot.gains_many(view, [bundle], [1])
+    assert len(captured) == 2  # the live position, plus this one candidate
+    after_game, after_seat = captured[1]
+    assert after_seat == 0
+
+    after_view = View.from_game(after_game, 0)
+    assert after_view.known[0] == [0, 0, 0, 2, 3]  # seat 0's own hand, exact
+    assert after_view.known[1] == [0, 1, 0, 1, 3]  # seat 1's known row moved too
+    assert after_view.sizes[1] == view.sizes[1] - sum(bundle) == 5
+    assert all(k >= 0 for k in after_view.known[1])  # never below zero
+    assert sum(after_view.known[1]) + after_view.unknown[1] == after_view.sizes[1]
+
+    # The live game -- its state and its ledger both -- is untouched.
+    assert game.state(0, hidden=False).hands[1] == [0, 0, 0, 2, 3]
+    assert game.ledger.seats[1].known == [0, 0, 0, 2, 3]
+    assert game.ledger is not after_game.ledger
+
+
 def test_a_searched_runtime_free_policy_plays_and_gates_like_the_plain_bot(board):
     """`GatedSearch` is `hexset.mcts.Search` over the same policy with the
     plain bot's gate: it plays legally through the leaf evaluation, and its

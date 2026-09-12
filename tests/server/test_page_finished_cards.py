@@ -164,8 +164,15 @@ def test_clicking_a_player_reveals_cards_in_place(running_server):
             # Nobody picked yet: the hint, and no actual cards -- whether the
             # pane also carries the two (empty) columns at this point is the
             # fix's own business, not something this test pins down.
-            assert "Click a player" in page.locator("#hand").inner_text()
+            hint = page.locator("#hand .hand-hint")
+            # inner_text is the rendered text, so the all-caps requirement is checked as such.
+            assert hint.inner_text() == "CLICK A PLAYER TO SEE THEIR CARDS"
+            # Centred in the pane, not a line above the columns.
+            pane_box, hint_box = page.locator("#hand").bounding_box(), hint.bounding_box()
+            assert abs((hint_box["x"] + hint_box["width"] / 2) - (pane_box["x"] + pane_box["width"] / 2)) < 2
+            assert abs((hint_box["y"] + hint_box["height"] / 2) - (pane_box["y"] + pane_box["height"] / 2)) < 2
             assert page.locator("#hand .card").count() == 0
+            assert page.locator("#hand .hand-banner").count() == 0
 
             rows = page.locator(".player-row")
             assert rows.count() == 4
@@ -182,9 +189,11 @@ def test_clicking_a_player_reveals_cards_in_place(running_server):
             headers = hand.locator(".hand-col-header").all_inner_texts()
             assert any("Resource Cards" in h for h in headers)
             assert any("Development Cards" in h for h in headers)
-            # And the pane says whose they are.
-            banner = hand.locator(".hand-banner").inner_text()
-            assert "heximax" in banner, f"banner does not name the seat: {banner!r}"
+            # No title over the columns -- the highlighted roster row says whose
+            # they are -- and no hint either.
+            assert hand.locator(".hand-banner").count() == 0
+            assert hand.locator(".hand-hint").count() == 0
+            assert hand.locator(".hand-cols-hidden").count() == 0
 
             # Close it again -- back to the hint, and back to the original
             # geometry, not just close to it.
@@ -192,7 +201,7 @@ def test_clicking_a_player_reveals_cards_in_place(running_server):
             assert page.locator(".player-row-open").count() == 0
             after_close = _boxes(page)
             _assert_boxes_unchanged(initial, after_close)
-            assert "Click a player" in page.locator("#hand").inner_text()
+            assert page.locator("#hand .hand-hint").count() == 1
 
             # A different row now.
             rows.nth(2).click()

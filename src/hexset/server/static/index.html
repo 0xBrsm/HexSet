@@ -89,12 +89,18 @@
   #players { padding: 0.7rem 0.8rem; border-bottom: 1px solid var(--border); flex: none; }
   #hand {
     padding: 0.5rem 0.8rem 0.6rem; border-bottom: 1px solid var(--border); flex: none;
-    display: flex; flex-direction: column; gap: 0.3rem;
+    display: flex; flex-direction: column; gap: 0.3rem; position: relative;
   }
-  /* The two card columns, wrapped so the banner above them (browsing only —
-     see renderHand) can sit in #hand's own flex-column without also having
-     to be a third column beside them. */
+  /* The two card columns. While browsing with nobody picked they stay in the
+     flow but invisible, so the pane keeps exactly the height the cards will
+     take and the hint below can sit centred over that space (see renderHand). */
   .hand-cols { display: flex; gap: 0.7rem; }
+  .hand-cols-hidden { visibility: hidden; }
+  .hand-hint {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase;
+    text-align: center; padding: 0 0.8rem; pointer-events: none;
+  }
   .hand-col { flex: 1; min-width: 0; }
   #hand .player-meta { margin-bottom: 0.1rem; }
   .hand-col-header { display: flex; align-items: center; gap: 0.3rem; }
@@ -121,16 +127,6 @@
      without spending the accent, which belongs to no seat while watching. */
   .player-row-openable { cursor: pointer; }
   .player-row-open { box-shadow: inset 0 0 0 2px var(--open-ring); }
-  /* Browsing only (see renderHand): names whose cards the columns below are
-     showing, or -- nobody picked yet -- says what a click does, since a row
-     that opens looks like any other until you try it. Always present while
-     browsing, columns and all (renderHand renders both, empty or full), so
-     picking a row never adds or removes this element and never changes the
-     pane's height by more than that row's own card count does -- it used to
-     be the pane's *only* content until a row was picked, which made picking
-     one balloon #hand from one line to a full two-column grid and shove the
-     log down under it. */
-  .hand-banner { color: var(--muted); font-size: 0.82rem; padding: 0.1rem 0.2rem; }
   .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.35); }
   /* No fixed width any more — the name column itself (minmax(0, 1fr) above)
      is what sizes this, and shrinks first when the row's tight. Overflow is
@@ -1947,18 +1943,13 @@ function renderHand() {
   const p = seat === null ? null : state.players.find((pp) => pp.seat === seat);
   const hasHand = Boolean(p && p.hand !== undefined);
 
-  // Browsing carries no hand of its own to fall back to (own is null), so
-  // this is the only place that ever names whose cards the columns below are
-  // showing. Rendered before the columns and every time renderHand runs --
-  // never only on the empty/hint path -- so picking a row swaps this line's
-  // text and fills the columns in the same repaint, instead of the hint
-  // disappearing and the columns appearing as two separate size changes.
-  if (browsing()) {
-    const banner = html("div", {class: "hand-banner"});
-    banner.textContent = hasHand
-      ? (seat === state.seat ? "Your cards" : `${seatLabel(seat)}'s cards`)
-      : "Click a player to see their cards.";
-    container.appendChild(banner);
+  // Browsing with nobody picked: the columns are still laid out, invisible,
+  // so the pane holds the height the cards will take, and the hint sits
+  // centred over that space. Picking a row reveals the columns in the same
+  // repaint -- no title names the seat; the highlighted roster row does.
+  const hint = browsing() && !hasHand;
+  if (hint) {
+    container.appendChild(html("div", {class: "hand-hint"}, "Click a player to see their cards"));
   }
 
   // What a click on a card does is decided by what's actually legal, which
@@ -1979,9 +1970,8 @@ function renderHand() {
   // the header and the row's height hold their place even at zero cards, so
   // buying a first dev card doesn't shove the resources column around, and
   // (browsing, nobody picked yet) the pane's height doesn't change the
-  // instant somebody is. Wrapped in .hand-cols so the banner above sits in
-  // #hand's own column instead of squeezed in as a third side-by-side column.
-  const cols = html("div", {class: "hand-cols"});
+  // instant somebody is.
+  const cols = html("div", {class: hint ? "hand-cols hand-cols-hidden" : "hand-cols"});
   const resCol = html("div", {class: "hand-col"});
   resCol.appendChild(handColHeader("card", "Resource Cards"));
   const resHand = html("div", {class: "hand"});

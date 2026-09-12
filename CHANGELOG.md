@@ -14,11 +14,11 @@ Changes to the HexSet distribution. The project follows
   `#hand` sits in `#play-area`, sized to its own content, with `#log` taking
   whatever's left below it, so swapping one shape for the other shoved `#log`
   up or down by however much a header row and a card grid cost over a single
-  line of text. The pane now always carries a banner naming whose cards are
-  on screen (or, nobody picked yet, what a click does) above the same two
-  columns the viewer's own hand uses during play, filled or empty -- clicking
-  a row swaps what's inside them instead of adding or removing the skeleton
-  around them.
+  line of text. The pane now always lays out the same two columns the
+  viewer's own hand uses during play; with nobody picked they are invisible
+  and CLICK A PLAYER TO SEE THEIR CARDS sits centred over the space they
+  hold, and picking a row reveals them -- no title over the cards, the
+  highlighted roster row says whose they are.
 
 - **The Undo corner button painted over an open modal instead of under it.**
   `#undo-build` carried a flat `z-index: 60`, above `#modal`'s `55`, so it

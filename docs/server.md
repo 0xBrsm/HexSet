@@ -172,9 +172,12 @@ seat holding a Knight still chooses), and a `pass` on a broadcast offer
 only while the seat's hand is empty -- an offer the hand cannot cover can
 still be countered, and each `pending` entry says so with `can_accept`.
 The seat's own trade round is settled the same way once everyone has
-answered and nothing is left to choose: all passes close it, exactly one
-accept as offered with no counter executes it; any counter, or two
-accepts, comes back as `your_move: choose_trade`.
+answered and nothing is left to choose. `offer_trade` takes an optional
+`to`, the seats the offerer would trade with, best first: the best-ranked
+listed seat's accept as offered is executed, an unlisted seat's accept is
+refused, and no listed accept closes the round. Without `to`, one accept
+executes, none closes, and two or more come back as `your_move:
+choose_trade`. A counter from any seat always comes back.
 
 `discard(cards)` plays a whole seven's worth of discards in one call:
 `cards` is a resource -> count dictionary that must total exactly this

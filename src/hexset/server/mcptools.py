@@ -61,6 +61,9 @@ class Session:
     # reset alongside `log_sent`/`board` on a new seat. `_trade_ratios_repeat`
     # omits the field from a reply that would only repeat it.
     trade_ratios_sent: dict | None = None
+    # The ranked seats the open `offer_trade` may be settled with, or `None`
+    # for anyone -- read by `_settled_round` while that round is open.
+    offer_to: list[int] | None = None
 
 
 def _call_status(tables: Tables, session: Session, method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
@@ -1193,13 +1196,19 @@ def _offer_trade(
     session: Session,
     give: dict,
     want: dict,
+    to: list[int] | None = None,
     timeout: float | None = None,
     log_after: int | None = None,
     full_log: bool = False,
 ) -> Iterator:
     _seated(session)
+    if to is not None:
+        if not isinstance(to, list) or not all(isinstance(seat, int) for seat in to):
+            raise ToolError("to must be a list of seat numbers, best first")
+        to = list(dict.fromkeys(to))  # ranked, no repeats
     body = {"give": _positional(give), "want": _positional(want)}
     offered = _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round", body)
+    session.offer_to = to
     return _settle(tables, session, offered, timeout, log_after, full_log)
 
 
@@ -1248,6 +1257,7 @@ def _choose_trade(
     # No `version` (see `_answer_trade`): the wire matches the chosen answer
     # by `seat` + `bundle` exactly (`GameSession.execute_round_choice`).
     raw = _call_ok(tables, session, "GET", "/api/state")
+    session.offer_to = None
     if decline:
         declined = _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/choose", {"decline": True})
         return _settle(tables, session, declined, timeout, log_after, full_log)
@@ -1315,21 +1325,28 @@ def _poll_raw(tables: Tables, session: Session, after: int | None = None, wait: 
 _FORCED_CAP = 8
 
 
-def _settled_round(raw: dict) -> dict | None:
+def _settled_round(raw: dict, to: list[int] | None = None) -> dict | None:
     """The `.../trade/round/choose` body for an own round nobody is still
-    to answer and nothing is left to decide -- `{"decline": true}` for all
-    passes, the one accept for a lone accept -- or `None`."""
+    to answer and nothing is left to decide, or `None`. A counter from
+    anyone is always the seat's to weigh. Otherwise, with `to` (the ranked
+    seats `offer_trade` named): the best-ranked listed seat's accept
+    executes, and no listed accept closes the round -- an unlisted seat's
+    accept is not a trade the offerer wanted. Without `to`: one accept
+    executes, none closes, two or more are the seat's call."""
     trade_round = raw.get("trade_round")
     if not trade_round or trade_round.get("awaiting"):
         return None
     responses = trade_round.get("responses") or []
-    kinds = [r.get("kind") for r in responses]
-    if all(k == "pass" for k in kinds):
+    if any(r.get("kind") == "counter" for r in responses):
+        return None
+    accepts = [r for r in responses if r.get("kind") == "accept"]
+    if to is not None:
+        accepts = sorted((a for a in accepts if a.get("seat") in to), key=lambda a: to.index(a["seat"]))
+    elif len(accepts) > 1:
+        return None
+    if not accepts:
         return {"decline": True}
-    if kinds.count("accept") == 1 and "counter" not in kinds:
-        accept = next(r for r in responses if r.get("kind") == "accept")
-        return {"seat": accept["seat"], "bundle": accept["bundle"]}
-    return None
+    return {"seat": accepts[0]["seat"], "bundle": accepts[0]["bundle"]}
 
 
 def _forced(tables: Tables, session: Session, raw: dict) -> dict:
@@ -1349,9 +1366,10 @@ def _forced(tables: Tables, session: Session, raw: dict) -> dict:
         if len(legal) == 1 and legal[0].get("type") == "ROLL":
             raw = _call_ok(tables, session, "POST", "/api/action", {"action": legal[0]})
             continue
-        settled = _settled_round(raw)
+        settled = _settled_round(raw, session.offer_to)
         if settled is not None and session.code:
             raw = _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/choose", settled)
+            session.offer_to = None
             continue
         me = next((p for p in raw.get("players") or [] if p.get("seat") == raw.get("seat")), None)
         hand = None if me is None else me.get("hand")
@@ -1498,7 +1516,7 @@ _TOOLS: dict[str, tuple] = {
         _state,
         "Game state; every playing tool replies with it at your next decision. "
         "Played for you: a lone ROLL; passing offers while your hand is empty; "
-        "your own offer when all pass or exactly one accepts as offered.\n"
+        "your own offer when all pass or a clean accept matches offer_trade's `to`.\n"
         "`your_move`: `act`, `discard`->discard(cards), `answer_trade` or "
         "`choose_trade`: the tool; `game_over`; `wait` only after `timeout` or "
         "while seats open (`waiting_on`; wait_for_turn()).\n"
@@ -1577,14 +1595,20 @@ _TOOLS: dict[str, tuple] = {
     "offer_trade": (
         _offer_trade,
         "On your own turn in MAIN, offer a trade to every other seat: 1-3 cards a "
-        "side, no resource on both sides. Accepted only while `can_offer` is true. "
-        "Replies once every seat has answered, with `trade_round.responses` for "
-        "choose_trade().",
+        "side, no resource on both sides; only while `can_offer`. A lone clean "
+        "accept is executed for you; with `to`, the best-ranked listed accepter "
+        "is and others are refused. Counters, or several accepts without `to`, "
+        "come back for choose_trade().",
         {
             "type": "object",
             "properties": {
                 "give": _resource_dict('Resource -> count you give, e.g. {"Wood": 1}.'),
                 "want": _resource_dict("Resource -> count you want."),
+                "to": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Seats you would trade with, best first. Omit for anyone.",
+                },
                 **_WAIT_ARGS,
             },
             "required": ["give", "want"],

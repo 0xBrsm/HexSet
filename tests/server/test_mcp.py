@@ -456,6 +456,12 @@ def test_forced_settles_an_own_round_with_nothing_to_choose():
     assert mcptools._settled_round(with_counter) is None
     two_accepts = view([{"seat": 0, "kind": "accept", "bundle": bundle}, {"seat": 2, "kind": "accept", "bundle": bundle}])
     assert mcptools._settled_round(two_accepts) is None
+    # `to` ranks and filters: the best-ranked listed accepter wins, an unlisted one is refused.
+    assert mcptools._settled_round(two_accepts, to=[2, 0]) == {"seat": 2, "bundle": bundle}
+    assert mcptools._settled_round(two_accepts, to=[3]) == {"decline": True}
+    assert mcptools._settled_round(one_accept, to=[0]) == {"seat": 0, "bundle": bundle}
+    assert mcptools._settled_round(one_accept, to=[2]) == {"decline": True}
+    assert mcptools._settled_round(with_counter, to=[0]) is None  # a counter is always the seat's call
     still_waiting = view([{"seat": 0, "kind": "pass", "bundle": None}]); still_waiting["trade_round"]["awaiting"] = [2]
     assert mcptools._settled_round(still_waiting) is None
 
@@ -623,9 +629,11 @@ def test_offer_trade_translates_its_own_response():
         }
     }
     tables = FakeTables({("POST", "/api/games/abcdef/trade/round"): raw})
+    session = _session_for_trade()
     data = mcptools.call_tool(
-        tables, _session_for_trade(), "offer_trade", {"give": {"Brick": 1}, "want": {"Wheat": 1}, "timeout": 0}
+        tables, session, "offer_trade", {"give": {"Brick": 1}, "want": {"Wheat": 1}, "to": [3, 1, 3], "timeout": 0}
     )
+    assert session.offer_to == [3, 1]  # ranked, de-duplicated, kept for the settle
     assert data["trade_round"]["you_give"] == {"Brick": 1}
     assert data["trade_round"]["you_receive"] == {"Wheat": 1}
 

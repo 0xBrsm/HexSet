@@ -825,6 +825,16 @@ def test_afford_reports_ok_missing_and_whether_it_is_legal_now():
     assert afford["dev_card"] == {"ok": False, "legal": False, "missing": {"Wheat": 1}}
 
 
+def test_afford_omits_legal_when_legal_actions_is_empty():
+    """`your_move: wait` already says nothing is legal; `legal: false` on
+    all four builds for the same reason is the one fact repeated."""
+    hand = {"Wood": 1, "Brick": 1, "Sheep": 1, "Wheat": 0, "Ore": 3}
+    afford = mcptools._afford(hand, [])
+    assert afford["road"] == {"ok": True}
+    assert afford["settlement"] == {"ok": False, "missing": {"Wheat": 1}}
+    assert all("legal" not in entry for entry in afford.values())
+
+
 TINY_BOARD = {
     "hexes": [{"id": 3, "resource": "Ore", "pips": 5, "vertex_ids": [0, 1, 2, 3, 4, 5]}],
     "vertices": [
@@ -979,19 +989,23 @@ def test_prune_drops_what_a_reader_never_acts_on():
         "trade_wait": [],
         "seats": [{"seat": 0, "kind": "player", "name": "mcp"}, {"seat": 1, "kind": "empty", "name": None}],
         "bank": {"Wood": 0, "Brick": 19, "Sheep": 0, "Wheat": 1, "Ore": 0},
+        "discard_quota": [0, 0, 0, 0],
         "players": [
             {
                 "seat": 0,
                 "last_roll": 7,
+                "longest_road": True,
+                "largest_army": False,
                 "known": {"Wood": 1, "Brick": 0, "Sheep": 0, "Wheat": 0, "Ore": 0},
                 "hand": {"Wood": 1, "Brick": 0, "Sheep": 2, "Wheat": 0, "Ore": 0},
                 "dev_cards": {"Knight": 1, "Victory Point": 0, "Road Building": 0, "Year Of Plenty": 0, "Monopoly": 0},
             },
-            {"seat": 1, "last_roll": None, "known": {"Wood": 0, "Brick": 0, "Sheep": 0, "Wheat": 0, "Ore": 0}},
+            {"seat": 1, "last_roll": None, "longest_road": False, "largest_army": False,
+             "known": {"Wood": 0, "Brick": 0, "Sheep": 0, "Wheat": 0, "Ore": 0}},
         ],
     }
     pruned = mcptools._prune(view)
-    for gone in ("version", "claimed_seats", "waiting_for", "trade_wait", "seats"):
+    for gone in ("version", "claimed_seats", "waiting_for", "trade_wait", "seats", "discard_quota"):
         assert gone not in pruned
     assert pruned["bank"] == {"Brick": 19, "Wheat": 1}
     assert pruned["players"][0] == {
@@ -1004,6 +1018,29 @@ def test_prune_drops_what_a_reader_never_acts_on():
     assert pruned["players"][1] == {"seat": 1, "kind": "empty", "known": {}}
 
 
+def test_prune_keeps_discard_quota_while_any_seat_owes():
+    view = {"discard_quota": [0, 3, 0, 0], "players": []}
+    assert mcptools._prune(view)["discard_quota"] == [0, 3, 0, 0]
+
+
+def test_trade_ratios_repeat_sends_once_then_omits_the_unchanged_value():
+    session = mcptools.Session()
+    ratios = {"Wood": 4, "Brick": 4, "Sheep": 4, "Wheat": 4, "Ore": 4}
+    first = {"trade_ratios": dict(ratios)}
+    mcptools._trade_ratios_repeat(first, session)
+    assert first["trade_ratios"] == ratios  # new seat: sent once
+    assert session.trade_ratios_sent == ratios
+
+    second = {"trade_ratios": dict(ratios)}
+    mcptools._trade_ratios_repeat(second, session)
+    assert "trade_ratios" not in second  # unchanged since last time: omitted
+
+    changed = {"trade_ratios": {**ratios, "Wood": 2}}
+    mcptools._trade_ratios_repeat(changed, session)
+    assert changed["trade_ratios"]["Wood"] == 2  # a port arrived: sent again
+    assert session.trade_ratios_sent["Wood"] == 2
+
+
 def test_a_live_reply_is_pruned_and_still_playable(live_server):
     _, base = live_server
     client = connected(base)
@@ -1012,13 +1049,25 @@ def test_a_live_reply_is_pruned_and_still_playable(live_server):
         assert gone not in data
     assert [p["kind"] for p in data["players"]] == ["player", "bot", "bot", "bot"]
     assert all("last_roll" not in p for p in data["players"])
+    assert all("longest_road" not in p and "largest_army" not in p for p in data["players"])
     assert "last_roll" in data and "winning_points" in data
+    assert "discard_quota" not in data  # nobody owes anything yet
     me = data["players"][data["seat"]]
     assert me["hand"] == {} and all(me["known"].values()) and all(data["bank"].values())
     # A summary computed against the same hand is unaffected by sparse counts.
     assert data["summary"]["afford"]["road"]["missing"] == {"Wood": 1, "Brick": 1}
     result = client.call_tool("act", index=rows(data["summary"]["spots"])[0]["index"])
     assert result["phase"] == "SETUP_ROAD" and "version" not in result
+
+
+def test_trade_ratios_is_sent_once_then_omitted_while_unchanged(live_server):
+    _, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    assert "trade_ratios" in data  # a new seat always gets a starting value
+
+    again = client.call_tool("state")
+    assert "trade_ratios" not in again  # nothing changed since the last reply
 
 
 def test_new_game_summary_ranks_the_setup_spots_it_offers(live_server):

@@ -199,9 +199,14 @@ the flat total. Board occupancy comes as `buildings` (vertex, seat, kind)
 and `roads` (edge ids, one list per seat) rather than the HTTP API's dense
 `vertex_owner`, `vertex_building` and `edge_owner` arrays. MCP replies also
 drop the HTTP view's `version`, `claimed_seats`, `waiting_for`, `trade_wait`
-and per-player `last_roll`; fold `seats` into `players` as each entry's
-`kind`; and send `hand`, `known`, `dev_cards` and `bank` sparse, a missing
-name meaning zero.
+and per-player `last_roll`, `longest_road` and `largest_army` (`summary.race`
+already names the award's holder and this seat's own count); fold `seats`
+into `players` as each entry's `kind`; and send `hand`, `known`, `dev_cards`
+and `bank` sparse, a missing name meaning zero. `discard_quota` is omitted
+when every seat's is zero, and each `summary.afford` build's `legal` key
+when `legal_actions` itself is empty (every build would read `false` for
+the same reason). `trade_ratios` is sent only when it differs from the
+last reply this session was sent -- always on a new or reclaimed seat.
 
 `get_table` returns the same reply as `state`. Every reply carries
 `can_offer`, true exactly when `offer_trade` would be accepted: this

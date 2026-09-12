@@ -57,6 +57,10 @@ class Session:
     # once per seat -- it never changes after the deal -- and read by every
     # reply's `summary`. `None` until the seat is taken.
     board: dict | None = None
+    # The last `trade_ratios` this session was sent, or `None` for never --
+    # reset alongside `log_sent`/`board` on a new seat. `_trade_ratios_repeat`
+    # omits the field from a reply that would only repeat it.
+    trade_ratios_sent: dict | None = None
 
 
 def _call_status(tables: Tables, session: Session, method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
@@ -85,6 +89,7 @@ def _seat(session: Session, result: dict) -> dict:
     session.code = result.get("code")
     session.log_sent = None
     session.board = None
+    session.trade_ratios_sent = None
     return result
 
 
@@ -177,6 +182,7 @@ def _resume_game(
     session.identity = identity
     session.log_sent = None  # a reclaimed seat is owed the whole transcript
     session.board = None
+    session.trade_ratios_sent = None
     _layout(tables, session)
     return _settle(tables, session, reclaimed, timeout, log_after, full_log)
 
@@ -646,12 +652,18 @@ _CITY = 2  # `hexset.state.Building.CITY`
 def _afford(hand: dict, legal: list[dict]) -> dict:
     """Per build: `ok` (the hand covers it), `missing` (what it is short, when
     not), `legal` (whether `legal_actions` offers it right now -- a build can
-    be affordable with nowhere to put it, or the phase may not allow it)."""
+    be affordable with nowhere to put it, or the phase may not allow it).
+    `legal` is omitted entirely when `legal_actions` itself is empty: every
+    build would read `legal: false` for the same reason (`your_move: wait`
+    already says so), and four repeats of the one fact were never the point
+    of asking whether the hand covers a build."""
     offered = {a.get("type") for a in legal}
     out = {}
     for build, cost in _COSTS.items():
         missing = {r: n - hand.get(r, 0) for r, n in cost.items() if hand.get(r, 0) < n}
-        entry: dict = {"ok": not missing, "legal": _BUILD_ACTION[build] in offered}
+        entry: dict = {"ok": not missing}
+        if legal:
+            entry["legal"] = _BUILD_ACTION[build] in offered
         if missing:
             entry["missing"] = missing
         out[build] = entry
@@ -932,6 +944,9 @@ def _compact_board(view: dict) -> dict:
 # `claimed_seats`: `players[].kind != "empty"`. `waiting_for`/`trade_wait`:
 # `_your_move` has already folded them into `waiting_on`.
 _DEAD = ("version", "claimed_seats", "waiting_for", "trade_wait")
+# Per-player fields dropped the same way: `last_roll` is stale off the
+# roller, `longest_road`/`largest_army` repeat `summary.race`'s `held`.
+_PLAYER_DEAD = ("last_roll", "longest_road", "largest_army")
 # Per-seat counts sent sparse: a missing name is a zero, the convention the
 # trade dicts already use (`_named`).
 _SPARSE_COUNTS = ("hand", "known", "dev_cards")
@@ -944,14 +959,21 @@ def _sparse(counts: dict | None) -> dict:
 def _prune(view: dict) -> dict:
     """The wire's redundancies, removed once per reply. `seats` (seat, kind,
     name) repeats `players` but for `kind`, which moves onto each player
-    entry instead; a seat's `last_roll` is the table's own `last_roll`
-    for the roller and stale for everyone else."""
+    entry instead; a seat's `last_roll` is the table's own `last_roll` for
+    the roller and stale for everyone else; `longest_road`/`largest_army`
+    repeat what `summary.race` already says (`held`, `holder`) for every
+    seat, not just this one. `discard_quota` is dropped when every entry is
+    zero -- the common case outside a seven, and `your_move`/`phase` already
+    say nobody owes anything."""
     for key in _DEAD:
         view.pop(key, None)
+    if not any(view.get("discard_quota") or []):
+        view.pop("discard_quota", None)
     kinds = {s.get("seat"): s.get("kind") for s in view.pop("seats", None) or []}
     players = []
     for player in view.get("players") or []:
-        player.pop("last_roll", None)
+        for key in _PLAYER_DEAD:
+            player.pop(key, None)
         for key in _SPARSE_COUNTS:
             if key in player:
                 player[key] = _sparse(player[key])
@@ -1033,7 +1055,23 @@ def _drop_superseded(grouped: dict[str, list[dict]], summary: dict) -> None:
         grouped.pop("MOVE_ROBBER", None)
 
 
-def _compact(view: dict) -> dict:
+def _trade_ratios_repeat(view: dict, session: Session) -> None:
+    """Drop `trade_ratios` from a reply that would only repeat exactly what
+    this session was already sent -- ratios change only when a port
+    settlement/city is built or lost, rarer than most replies, so most
+    would otherwise resend the same five ints for nothing. A new or
+    reclaimed seat (`session.trade_ratios_sent` reset by `_seat`/
+    `_resume_game`) always gets it once, to have a starting value."""
+    ratios = view.get("trade_ratios")
+    if ratios is None:
+        return
+    if ratios == session.trade_ratios_sent:
+        del view["trade_ratios"]
+    else:
+        session.trade_ratios_sent = dict(ratios)
+
+
+def _compact(view: dict, session: Session) -> dict:
     """The last step before a reply goes out: everything above that reads
     the flat list, the dense arrays or the fields `_prune` drops
     (`_your_move`, `_summarize`) has run."""
@@ -1044,7 +1082,9 @@ def _compact(view: dict) -> dict:
     view["legal_actions"] = {kind: _tabulate(rows) for kind, rows in grouped.items()}
     if view.get("summary"):
         _tabulate_summary(view["summary"])
-    return _prune(_compact_board(view))
+    view = _prune(_compact_board(view))
+    _trade_ratios_repeat(view, session)
+    return view
 
 
 def _translate(raw: dict) -> dict:
@@ -1119,7 +1159,7 @@ def _finish(session: Session, view: dict, log_after: int | None = None, full_log
     not depend on which tool returned it, so the steps live here and nowhere
     else."""
     view["can_offer"] = _can_offer(view)
-    return _trim_for(session, _compact(_summarize(view, session.board)), log_after, full_log)
+    return _trim_for(session, _compact(_summarize(view, session.board), session), log_after, full_log)
 
 
 def _reply(session: Session, raw: dict, log_after: int | None = None, full_log: bool = False) -> dict:
@@ -1422,24 +1462,25 @@ _TOOLS: dict[str, tuple] = {
         "Game state; every playing tool replies with it at your next decision. "
         "Forced moves are played for you: a lone ROLL, and passing offers your "
         "hand can't cover.\n"
-        "`your_move`: `act`, `discard` (-> discard(cards)), `answer_trade` or "
-        "`choose_trade` = the tool to call; `game_over`; `wait` only after a "
-        "`timeout` or while seats are open (`waiting_on`; call wait_for_turn()).\n"
-        "`summary.afford` per build: `ok`, `missing`, `legal` now. `summary.race`: "
-        "`points`, `to_win`, `leader`, per award yours/holder's/`need`. When "
-        "offered: `spots` (every legal settlement/city vertex, pips/resources/port, "
-        "best first) and `robber` (hexes with pips, `hits` as seat:Ns+Nc, `options` "
-        "as index:victim) -- each drops its matching `legal_actions` group (same "
-        "indexes). `summary.roads`, when a road is legal: `to` (vertex it "
-        "reaches), pips/resources/port, `settle` (a settlement could go there).\n"
+        "`your_move`: `act`, `discard`->discard(cards), `answer_trade` or "
+        "`choose_trade`: the tool; `game_over`; `wait` only after `timeout` or "
+        "while seats open (`waiting_on`; wait_for_turn()).\n"
+        "`summary.afford` per build: `ok`, `missing`, `legal` (omitted if "
+        "legal_actions is empty). `summary.race`: `points`, `to_win`, `leader`, "
+        "per award yours/holder's/`need`. When legal: `spots` (settlement/city "
+        "vertices, pips/resources/port, best first) and `robber` (hexes, pips, "
+        "`hits` seat:Ns+Nc, `options` index:victim) -- both drop their "
+        "`legal_actions` group. `summary.roads`: `to` (vertex a road reaches), "
+        "pips/resources/port, `settle` (settlement could go there).\n"
         "Tables are `(keys):row|row`, cells comma-separated, `-` null, `;` in a "
         "list. `legal_actions`: per type, `index` for act() plus `edge` (roads), "
         "`vertex` (settlement/city), `hex`+`victim` (MOVE_ROBBER), `give`/`want` "
         "(BANK_TRADE), `resource` (MONOPOLY/DISCARD), `resources` (YEAR_OF_PLENTY); "
         "ROLL, END_TURN, BUY_DEV_CARD, PLAY_KNIGHT, PLAY_ROAD_BUILDING index only.\n"
-        "`players`: `kind`, your `hand`/`dev_cards`, public ledger `known`/`unknown`. "
-        "`buildings`, `roads` (edge ids per seat), `bank`, `trade_ratios`, `robber` "
-        "hex. Resource dicts omit zeros.\n"
+        "`players`: `kind`, your `hand`/`dev_cards`, public ledger `known`/`unknown` "
+        "(`summary.race` has the awards). `buildings`, `roads` (edge ids per seat), "
+        "`bank`, `robber` hex, `trade_ratios` (only when changed; always on a "
+        "new/resumed seat). Resource dicts omit zeros.\n"
         "`can_offer`: true if offer_trade() would be accepted now. `pending`: "
         "offers to you (`actor`, `you_give`, `you_receive`) -> answer_trade(index). "
         "`trade_round`: your open offer's `responses` (`seat`, `kind`, "

@@ -53,6 +53,15 @@ Changes to the HexSet distribution. The project follows
 
 ### Changed
 
+- **MCP replies trim four more repeats.** Per-player `longest_road` and
+  `largest_army` are gone (`summary.race` already names the holder and
+  this seat's own count); each `summary.afford` build's `legal` key is
+  omitted once `legal_actions` itself is empty, rather than reading
+  `false` four times for the one reason; `discard_quota` is omitted when
+  every seat's is zero; and `trade_ratios` is sent only when it differs
+  from the last reply this session was sent, tracked in a new `Session`
+  field -- a new or reclaimed seat always gets it once.
+
 - **MCP replies carry `can_offer`.** True exactly when `offer_trade()`
   would be accepted: this seat's own turn, `MAIN`, a legal action to take,
   and no trade round of its own already open. Reading `phase`/`to_move`

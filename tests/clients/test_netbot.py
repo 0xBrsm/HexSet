@@ -273,15 +273,21 @@ def test_a_trade_event_clears_through_the_runtime_free_gate(board):
     assert value_of_hand(state.hands[0], 0) > value_of_hand(before[0], 0)
 
 
-def test_the_after_position_moves_the_counterpartys_ledger_row_too(board, monkeypatch):
+def test_the_after_position_moves_the_counterpartys_ledger_row_too(board):
     """`_after` copies `game`, not just its state: a bare `copy.copy(game)`
     shares the live ledger, and `View` reads a seat that is not the
     perspective from the *ledger*, not from `state.hands` -- so a copy that
     only rewrote the state answered every ask about the counterparty from
     the position before the trade, with only their hand's *size* having
-    moved. That mismatch is exactly what the affordability filter exists to
-    keep away from the head, reintroduced one layer down if the ledger is
-    never rewritten to match.
+    moved. That mismatch is exactly what the reachable-purchase gate's
+    filter exists to keep away from the head, reintroduced one layer down
+    if the ledger is never rewritten to match.
+
+    Called directly rather than through `gains_many`: `_after` only builds
+    the *seed* the reachable-purchase gate's plans start from now (this
+    same hand also unlocks a reachable city, so a live ask would go on to
+    place one), and this test is about `_after` itself, not what is built
+    on top of it.
     """
     from hexset.clients.netbot import NetworkBot
     from hexset.ledger import PublicLedger
@@ -295,8 +301,8 @@ def test_the_after_position_moves_the_counterpartys_ledger_row_too(board, monkey
     state = game.state(0, hidden=False)
     # Same kind-changing exchange as the trade-event test above: seat 0 is
     # one wheat short of a city, seat 1 already affords one and gives up
-    # the wheat that pays for it -- guaranteed to survive the affordability
-    # filter and reach the head.
+    # the wheat that pays for it -- guaranteed to survive the gate's filter
+    # and reach the head.
     state.hands[0] = [0, 1, 0, 1, 3]
     state.hands[1] = [0, 0, 0, 2, 3]
     state.deck = []
@@ -311,19 +317,7 @@ def test_the_after_position_moves_the_counterpartys_ledger_row_too(board, monkey
     view = game.state(0)
     bundle = (0, -1, 0, 1, 0)  # seat 0 gives a brick, receives a wheat
 
-    captured = []
-    original = HandValuePolicy.value_rows
-
-    def capture(self, rows):
-        captured.extend(rows)
-        return original(self, rows)
-
-    monkeypatch.setattr(HandValuePolicy, "value_rows", capture)
-
-    bot.gains_many(view, [bundle], [1])
-    assert len(captured) == 2  # the live position, plus this one candidate
-    after_game, after_seat = captured[1]
-    assert after_seat == 0
+    after_game = bot._after(0, 1, list(view.known[0]), bundle, view)
 
     after_view = View.from_game(after_game, 0)
     assert after_view.known[0] == [0, 0, 0, 2, 3]  # seat 0's own hand, exact
@@ -587,21 +581,31 @@ def test_a_trade_that_changes_no_affordable_kind_prices_at_zero(board, monkeypat
 
 def test_a_trade_that_changes_an_affordable_kind_reaches_the_head(board, monkeypatch):
     """Making a new kind buyable -- or taking one away -- is a real
-    deduction the arithmetic filter cannot make on its own, so it is the one
-    case that still costs a forward, and the head's own reading stands."""
+    deduction the reachable-purchase gate's filter cannot make on its own,
+    so it is the one case that still costs a forward, and the head's own
+    reading of the best position each side builds stands.
+
+    Seat 0 holds nothing that could ever afford a `ROAD` or `SETTLEMENT`
+    (no wood, brick or sheep at all) and the deck is emptied, so the only
+    dimension either hand's reachable set can move on is `CITY` -- one
+    wheat short of it before the bundle, exactly affording it after. Seat 0
+    owns exactly two settlements straight out of setup
+    (`_position_with_a_settlement_in_hand`), so the candidate's one
+    maximal multiset -- a city -- has exactly two legal vertices, and every
+    row it builds leaves the same hand (upgrading a settlement moves no
+    card), so the two rows tie and the row count is exact.
+    """
     from hexset.clients.netbot import NetworkBot
 
     space = stub_checkpoint(board).space
     bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS)
-    # Reuses the position that guarantees a *reachable* settlement spot
-    # (`options_for` already found one legal there): seat 0 is one wheat
-    # short of the hand that built it.
     game = _position_with_a_settlement_in_hand(board)
     state = game.state(0, hidden=False)
-    state.hands[0] = [1, 1, 1, 0, 0]
+    state.hands[0] = [0, 0, 0, 1, 3]
+    state.deck = []
     bot.seat_at(game)
     view = game.state(0)
-    unlocks_settlement = (0, 0, 0, 1, 0)  # +1 wheat: the settlement is now affordable
+    unlocks_city = (0, 0, 0, 1, 0)  # +1 wheat: the city is now affordable
 
     calls: list[int] = []
     original = HandValuePolicy.value_rows
@@ -612,27 +616,29 @@ def test_a_trade_that_changes_an_affordable_kind_reaches_the_head(board, monkeyp
 
     monkeypatch.setattr(HandValuePolicy, "value_rows", counted)
 
-    gain = bot.gains_many(view, [unlocks_settlement], [1])[0]
-    assert calls == [2]  # one forward: the live position plus this one candidate
+    gain = bot.gains_many(view, [unlocks_city], [1])[0]
+    # One forward: the unbuilt baseline, plus one row per legal city vertex.
+    assert calls == [3]
     assert gain == pytest.approx(
-        value_of_hand([1, 1, 1, 1, 0], 0) - value_of_hand([1, 1, 1, 0, 0], 0)
+        value_of_hand([0, 0, 0, 0, 0], 0) - value_of_hand([0, 0, 0, 1, 3], 0)
     )
 
 
 def test_gate_plies_zero_reads_the_survivor_in_one_forward(board, monkeypatch):
-    """The shipped default: no continuation, one forward over the position
-    the affordability filter already built -- exactly today's behaviour,
-    whatever `gate_plies` a checkpoint has never heard of would have got."""
+    """The shipped default: no continuation, one forward over the best
+    position the reachable-purchase gate finds for the baseline and for
+    the one survivor -- same fixture as the test above."""
     from hexset.clients.netbot import NetworkBot
 
     space = stub_checkpoint(board).space
     bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, gate_plies=0)
     game = _position_with_a_settlement_in_hand(board)
     state = game.state(0, hidden=False)
-    state.hands[0] = [1, 1, 1, 0, 0]
+    state.hands[0] = [0, 0, 0, 1, 3]
+    state.deck = []
     bot.seat_at(game)
     view = game.state(0)
-    unlocks_settlement = (0, 0, 0, 1, 0)  # +1 wheat: the settlement is now affordable
+    unlocks_city = (0, 0, 0, 1, 0)  # +1 wheat: the city is now affordable
 
     value_calls: list[int] = []
     original_value = HandValuePolicy.value_rows
@@ -652,8 +658,8 @@ def test_gate_plies_zero_reads_the_survivor_in_one_forward(board, monkeypatch):
 
     monkeypatch.setattr(HandValuePolicy, "act_rows", counted_act)
 
-    bot.gains_many(view, [unlocks_settlement], [1])
-    assert value_calls == [2]  # the live position, plus this one candidate
+    bot.gains_many(view, [unlocks_city], [1])
+    assert value_calls == [3]  # the unbuilt baseline, plus each legal city vertex
     assert not act_calls, "gate_plies=0 must never roll a continuation"
 
 
@@ -944,3 +950,110 @@ def test_a_policy_policy_gate_is_seated_where_it_is_installed(board):
     gate = PolicyPolicy(checkpoint.policy, checkpoint).gate(game, 2, 3)
     assert isinstance(gate, NetworkBot)
     assert gate._seated is game and gate.seat == 2 and gate.max_trades == 3
+
+
+def test_the_reachable_gate_stays_within_its_row_and_forward_budget(board, monkeypatch):
+    """`_run_plans` never hands any one `value_rows` call more rows than
+    `_MAX_ROWS` -- patched down here so a modest fixture can exercise the
+    cap without standing up hundreds of legal edges -- and never spends
+    more than three forwards doing it.
+
+    Seat 0 can afford exactly two roads (no sheep or wheat to spare, so no
+    bank trade stretches the hand into anything else); the fixture's board
+    always leaves seat 0 more than three legal edges open this early, so
+    the first road alone already exceeds the patched budget. A spare wheat
+    also lets it afford one road *and* a settlement jointly, so the
+    survivor carries two incomparable maximal multisets (`2 roads` and `1
+    road, 1 settlement`) needing more than one `value_rows` call between
+    them and the baseline's own two-road plan.
+    """
+    from hexset.clients import netbot
+    from hexset.clients.netbot import NetworkBot
+
+    monkeypatch.setattr(netbot, "_MAX_ROWS", 3)
+
+    space = stub_checkpoint(board).space
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS)
+    game = _position_with_a_settlement_in_hand(board)
+    state = game.state(0, hidden=False)
+    state.hands[0] = [2, 2, 1, 0, 0]
+    state.deck = []
+    bot.seat_at(game)
+    view = game.state(0)
+    unlocks_settlement = (0, 0, 0, 1, 0)  # +1 wheat: a road-and-settlement combo joins the roads
+
+    calls: list[int] = []
+    original = HandValuePolicy.value_rows
+
+    def counted(self, rows):
+        calls.append(len(rows))
+        return original(self, rows)
+
+    monkeypatch.setattr(HandValuePolicy, "value_rows", counted)
+
+    gain = bot.gains_many(view, [unlocks_settlement], [1])[0]
+    assert gain != -1.0  # the bundle was covered and reached the gate
+    assert 1 <= len(calls) <= 3, "no more than three forwards"
+    assert all(n <= 3 for n in calls), "no forward exceeded the patched row budget"
+
+
+def test_the_monopoly_branch_never_reads_a_true_hand_it_cannot_name(board):
+    """Built with `bot._make_plan`, directly: seat 1's *true* hand holds far
+    more wheat than seat 0's ledger can name, so a Monopoly branch that
+    read the true hand would credit seat 0 with all of it. The built
+    position must credit only the known amount, leave seat 1's excess
+    exactly where it was, and never touch the live game or its ledger at
+    all -- `_evaluate_reachable` never mutates what it was handed, only
+    copies of it.
+    """
+    from hexset.clients.netbot import NetworkBot
+    from hexset.ledger import PublicLedger
+
+    space = stub_checkpoint(board).space
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS)
+    game = start(board, PLAYERS, random.Random(2))
+    while game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
+        apply(game, bot.choose(game))
+    state = game.state(0, hidden=False)
+    # One wheat short of a city; seat 1's true hand holds five wheat, but
+    # seat 0's ledger can only name one of them.
+    state.hands[0] = [0, 0, 0, 1, 3]
+    state.hands[1] = [0, 0, 0, 5, 0]
+    state.hands[2] = [0, 0, 0, 0, 0]
+    state.hands[3] = [0, 0, 0, 0, 0]
+    state.dev_cards[0] = [0, 0, 0, 0, 1]  # one matured Monopoly
+    state.deck = []
+    ledger = PublicLedger.new(state.num_players)
+    ledger.apply_hand_diff([[0] * 5 for _ in state.hands], state.hands)
+    ledger.seats[1].known = [0, 0, 0, 1, 0]  # only one of the five wheat named
+    ledger.seats[1].unknown = 4
+    game.ledger = ledger
+    game.phase = Phase.MAIN
+    game.current_player = 0
+    game.dev_card_played = False
+    bot.seat_at(game)
+    view = game.state(0)
+    true_hand_1 = state.hands[1][:]
+    true_ledger_1_known = list(ledger.seats[1].known)
+
+    from hexset.clients.reachable import reachable_recipes
+
+    hand = tuple(view.known[0])
+    ctx = bot._reach_context(0, view)
+    recipes = reachable_recipes(hand, **ctx)
+    recipe = recipes[(0, 0, 1, 0)]
+    assert recipe.branch == "monopoly"
+    # Credited with the one known wheat, not the four seat 1 truly has
+    # beyond it.
+    assert recipe.hand == (0, 0, 0, 2, 3)
+
+    seed = bot._seeded(0, hand, view)
+    plan = bot._make_plan(seed, 0, recipe.purchases, recipe)
+    built_state = plan.game._state
+    assert built_state.hands[0] == [0, 0, 0, 0, 0]  # paid the city off in full
+    # Seat 1 loses exactly the known wheat -- five minus one -- never more.
+    assert built_state.hands[1] == [0, 0, 0, 4, 0]
+
+    # The live game -- its state and its ledger both -- is untouched.
+    assert game.state(0, hidden=False).hands[1] == true_hand_1
+    assert game.ledger.seats[1].known == true_ledger_1_known

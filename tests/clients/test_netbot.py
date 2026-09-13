@@ -697,6 +697,77 @@ def test_gate_plies_rolls_a_continuation_without_touching_the_live_table(board, 
     assert game.chance is before_chance
 
 
+def test_gate_plies_rolls_on_a_belief_world_not_the_live_tables_true_hands(board, monkeypatch):
+    """The rollout ACTS on the positions it is handed -- a Knight steal
+    mid-turn would resolve against whatever hand the world it runs on
+    actually holds -- so `gate_plies > 0` must never roll forward on the
+    live table's own true hands, only a world sampled from the asking
+    seat's belief (`View.sample`), certified so a survivor's own exchange
+    cannot go negative.
+
+    Seat 0 asks the gate as a *responder* while seat 1 (the actor) is to
+    move -- exactly the shape the class docstring's `mover` distinction
+    describes -- and seat 0's ledger can name only one of seat 1's five
+    cards; the bundle's certification only pins the wheat it names, never
+    the 3 ore seat 1 truly holds. `View.sample` is stubbed to hand back a
+    hand for seat 1 nothing like its true one; every world the rollout
+    hands to `act_rows` must carry that stand-in, never the true hand."""
+    from hexset.clients.netbot import NetworkBot
+    from hexset.ledger import PublicLedger
+    from hexset.view import View
+
+    space = stub_checkpoint(board).space
+    bot = NetworkBot(
+        policy=HandValuePolicy(space), players=PLAYERS, gate_plies=8, rng=random.Random(7)
+    )
+    # Reuses the position that guarantees a *reachable* settlement spot
+    # (`options_for` already found one legal there), same as the
+    # affordability-filter tests above.
+    game = _position_with_a_settlement_in_hand(board)
+    true_hand_1 = [0, 0, 3, 2, 3]  # 3 ore this ledger never certified
+    state = game.state(0, hidden=False)
+    state.hands[0] = [1, 1, 1, 0, 0]  # one wheat short of a settlement
+    state.hands[1] = true_hand_1
+    state.deck = []
+    ledger = PublicLedger.new(state.num_players)
+    ledger.apply_hand_diff([[0] * 5 for _ in state.hands], state.hands)
+    ledger.seats[1].known = [0, 0, 0, 1, 1]  # names one wheat, one ore -- never the other two ore
+    ledger.seats[1].unknown = 6
+    game.ledger = ledger
+    game.phase = Phase.MAIN
+    game.current_player = 1  # seat 1, the counterparty, is the mover
+    bot.seat_at(game)
+    view = game.state(0)
+    unlocks_settlement = (0, 0, 0, 1, 0)  # +1 wheat: the settlement is now affordable
+
+    original_sample = View.sample
+
+    def fake_sample(self, rng):
+        sampled = original_sample(self, rng)
+        sampled.hands[1] = [9, 9, 9, 9, 9]  # unlike true_hand_1 in every way
+        return sampled
+
+    monkeypatch.setattr(View, "sample", fake_sample)
+
+    act_rows_calls = []
+    original_act = HandValuePolicy.act_rows
+
+    def capture_act(self, rows):
+        act_rows_calls.extend(rows)
+        return original_act(self, rows)
+
+    monkeypatch.setattr(HandValuePolicy, "act_rows", capture_act)
+
+    bot.gains_many(view, [unlocks_settlement], [1])
+    assert act_rows_calls, "gate_plies > 0 must roll at least one ply"
+    for world, mover, _ in act_rows_calls:
+        assert mover == 1
+        assert world.state(1, hidden=False).hands[1] != true_hand_1
+
+    # The live game itself was never read into the rollout.
+    assert game.state(0, hidden=False).hands[1] == true_hand_1
+
+
 def test_a_won_position_offers_nothing_it_could_not_already_buy(board):
     """The g4 defect this replaces the rollout for, found 2026-09-08: at a
     won position (the winning settlement already in hand and placeable), a

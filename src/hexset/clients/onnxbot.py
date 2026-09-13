@@ -236,8 +236,8 @@ class Loaded:
         return self.gate.trade_floor
 
     @property
-    def gate_rows(self) -> int:
-        return self.gate.rows
+    def gate_plies(self) -> int:
+        return self.gate.plies
 
 
 @lru_cache(maxsize=4)

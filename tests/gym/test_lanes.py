@@ -83,7 +83,7 @@ def scripted_kind():
 
 def played_by_the_arena(entrant, index, players=4, cap=CAP):
     """The same `(seed, index)` game, played by `hexset.arena` with a record."""
-    return _play_one(((entrant,) * players, index, SEED, cap, False, True))
+    return _play_one(((entrant,) * players, index, SEED, cap, False, True, "round", 1))
 
 
 def test_a_lane_plays_the_arenas_game_for_the_same_seed_and_index(scripted_kind):
@@ -347,7 +347,6 @@ def test_illegal_scripted_bot_action_does_not_advance_other_lanes():
 
 def test_lightweight_policy_collects_batched_training_rows_and_replayable_episodes():
     """Exercise the collection contract without a model or optional runtime."""
-    import random
     import numpy as np
     from hexset.actions import mask_of, space_for
     from hexset.clients.netbot import NetworkBot
@@ -385,8 +384,7 @@ def test_lightweight_policy_collects_batched_training_rows_and_replayable_episod
     gates = []
 
     def gate(game, seat):
-        bot = NetworkBot(policy, players=2, seat=seat,
-                         rng=random.Random(19 + len(gates)))
+        bot = NetworkBot(policy, players=2, seat=seat)
         bot.seat_at(game)  # The collector calls the policy directly, not bot.choose.
         gates.append(bot)
         return bot
@@ -404,8 +402,10 @@ def test_lightweight_policy_collects_batched_training_rows_and_replayable_episod
         episodes.extend(env.step(actions))
 
     assert max(collector_batches) == 3 and min(collector_batches) == 1
-    # The same runtime also services batched imagined continuations for gates.
-    assert len(policy.batch_sizes) > len(collector_batches)
+    # The gate reads `value_rows`, not `act_rows` -- there is no imagined
+    # continuation to roll forward any more -- so `act_rows` is called only
+    # by the collector loop above, once per tick.
+    assert len(policy.batch_sizes) == len(collector_batches)
     assert len(gates) == 8  # A new, correctly seated gate for every game/seat.
     assert sorted(e.index for e in episodes) == list(range(4))
     assert env.steps == len(retained) == 4 * 48

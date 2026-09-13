@@ -886,7 +886,7 @@ def _thin_copy(state: GameState, *, copy_bank: bool = False) -> GameState:
     touch nothing but a hand (`_move_hand`, or a direct `hands[seat][r] +=`)
     and, for the two marginal checks, one bank slot; nothing here ever
     touches `vertex_owner`/`vertex_building`/`edge_owner`/`deck`/
-    `dev_cards`/`new_dev_cards`/`knights_played` on the copy, so sharing
+    `dev_cards`/`new_dev_cards`/`knights_played`/`road_lengths` on the copy, so sharing
     them costs nothing today and cannot make `after` diverge from `state`
     on a field neither of them mutates. `copy_state` remains the one used
     everywhere a real, fully independent `GameState` is needed (`imagine`'s
@@ -920,6 +920,7 @@ def _thin_copy(state: GameState, *, copy_bank: bool = False) -> GameState:
         dev_cards=state.dev_cards,
         new_dev_cards=state.new_dev_cards,
         knights_played=state.knights_played,
+        road_lengths=state.road_lengths,
         longest_road_holder=state.longest_road_holder,
         largest_army_holder=state.largest_army_holder,
         rules=state.rules,

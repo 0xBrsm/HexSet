@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from .cards import DevCard
 from .devcards import holdings
-from .roads import MIN_LONGEST_ROAD, road_lengths
+from .roads import MIN_LONGEST_ROAD, longest_road, road_lengths
 from .state import NO_OWNER, GameState
 
 MIN_LARGEST_ARMY = 3
@@ -30,9 +30,47 @@ def _award(counts: list[int], holder: int, minimum: int) -> int:
     return leaders[0] if len(leaders) == 1 else NO_OWNER
 
 
-def update_longest_road(state: GameState) -> int:
+def update_longest_road(
+    state: GameState,
+    *,
+    road_owner: int | None = None,
+    settlement_vertex: int | None = None,
+    settlement_owner: int | None = None,
+) -> int:
+    """Refresh `state.road_lengths` and award the card from it.
+
+    Roads are edge-disjoint, so a road just placed by `road_owner` can only
+    extend `road_owner`'s own route -- no other seat's edges moved, so no
+    other seat's length can have changed. A settlement just placed at
+    `settlement_vertex` cannot extend anyone (a new building never adds a
+    road), but it can *cut* a route passing through that junction, so every
+    seat other than `settlement_owner` who owns a road on an edge touching
+    the vertex is recomputed; `settlement_owner`'s own length cannot drop,
+    since a builder's own building never blocks the builder's own route
+    (`roads.longest_road`'s `passable` check).
+
+    With neither `road_owner` nor `settlement_vertex` given, every seat is
+    recomputed from scratch -- the historical behaviour, still exercised by
+    tests and any other caller that mutated `edge_owner`/`vertex_owner`
+    directly rather than through `place_road`/`place_settlement`.
+    """
+    if road_owner is not None:
+        state.road_lengths[road_owner] = longest_road(state, road_owner)
+    elif settlement_vertex is not None:
+        topology = state.board.topology
+        affected = {
+            state.edge_owner[e]
+            for e in topology.vertex_edges[settlement_vertex]
+            if state.edge_owner[e] != NO_OWNER
+            and state.edge_owner[e] != settlement_owner
+        }
+        for seat in affected:
+            state.road_lengths[seat] = longest_road(state, seat)
+    else:
+        state.road_lengths[:] = road_lengths(state)
+
     state.longest_road_holder = _award(
-        road_lengths(state), state.longest_road_holder, MIN_LONGEST_ROAD
+        state.road_lengths, state.longest_road_holder, MIN_LONGEST_ROAD
     )
     return state.longest_road_holder
 

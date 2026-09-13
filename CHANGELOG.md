@@ -4,7 +4,31 @@ Changes to the HexSet distribution. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## Unreleased
+## 0.53.0
+
+### Added
+
+- **The network trade gate's continuation rollout is back, as a
+  per-checkpoint setting.** `gate_plies` (metadata key `gate_plies`,
+  default `0`) asks `NetworkBot` to roll the mover's own greedy policy
+  forward that many plies from each surviving candidate before valuing
+  it, same footing as `search`/`simulations` is for `hexset.mcts.Search`:
+  search on the trade decision, read off the file the same way. `0`, the
+  default every checkpoint gets unless it asks otherwise, is today's
+  single forward over the affordability filter's own after-position --
+  training collection runs at the default, and a served file that wants
+  the rollout asks for it in its own metadata.
+
+- **A duel can be played under the automatic clearing house.**
+  `hexset.arena.compete` takes `trade_mode`/`max_trades` and hands them to
+  every game it plays, and `hexset.bench.duel` exposes them as
+  `--trade-mode {round,auto}` and `--max-trades` (`-1` for the unbounded
+  house studies before 0.50 were recorded under), recording both in the
+  verdict -- so a policy trained against the clearing house can be read in
+  its native environment.
+
+
+## 0.52.0
 
 ### Fixed
 
@@ -30,6 +54,53 @@ Changes to the HexSet distribution. The project follows
   while `modalMode` is `"steal"`.
 
 ### Changed
+
+- **The network trade gate values a candidate exchange in one forward
+  again, filtered by what it lets the seat buy.** `NetworkBot` no longer
+  samples a belief world, imagines two games or rolls a mover's greedy
+  policy forward a few plies to price a trade -- the continuation rollout,
+  and the paired belief worlds it drew, are gone. Every candidate the
+  asking seat can cover is read from its own frame -- its own hand exactly,
+  the counterparty's known lower bound moved the same way -- and an
+  affordability filter decides first whether the trade changes anything the
+  seat can buy (a road, a settlement, a city, a development card): a
+  candidate that leaves every one of those exactly as it was is priced at
+  `0.0` outright and never reaches the head at all, so it can never be
+  offered, accepted or countered with. `gate_rows` -- the cap on how many
+  candidates one batched forward scored -- is gone with the rollout it used
+  to bound; every candidate a seat can cover is now considered, since the
+  filter is the bound.
+
+### Removed
+
+- `NetworkBot.gate_rows` and the checkpoint metadata key of the same name
+  (`hexset.clients.modelmeta.GateConfig.rows`, `DEFAULT_GATE_ROWS`,
+  `MAX_GATE_ROWS`). A checkpoint exported with `gate_rows` in its metadata
+  still loads without complaint; the field is simply never read.
+
+
+## 0.51.0
+
+### Changed
+
+- **Longest Road no longer recounts every seat's roads on every placement.**
+  `victory.update_longest_road` called `roads.road_lengths` -- an exhaustive
+  route search over every seat's edges, from scratch -- after each of the
+  four places a road or settlement can go down
+  (`game.place_initial_settlement`/`build_settlement`/
+  `place_initial_road`/`build_road`), measured at ~25% of a 4-seat
+  self-play game (9.2M recursive calls a game). Roads are edge-disjoint, so
+  a road just placed by seat `p` can only extend `p`'s own route; a
+  settlement can only *cut* a route passing through its vertex, and only a
+  foreign one, since a builder's own building never blocks the builder's
+  own route. `GameState.road_lengths` now caches each seat's length, and
+  `update_longest_road` recomputes only the seat(s) a placement could have
+  changed before awarding from the cache -- unchanged for any caller that
+  mutates `edge_owner`/`vertex_owner` directly rather than through
+  `place_road`/`place_settlement`, which still gets the historical
+  from-scratch recompute. `hexset.catanatron.state.translate` (rebuilt
+  fresh from a mirrored catanatron game every decision, so it inherits no
+  running cache) computes the field once off its own topology instead.
 
 - **The trade gate is 5.5x cheaper a turn, answering exactly the same.**
   Two pieces of waste, neither of them a change to what the gate sees.

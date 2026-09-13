@@ -11,7 +11,6 @@ have. Request episodes and records to inspect individual outcomes.
 from __future__ import annotations
 
 import inspect
-import random
 import statistics
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -103,17 +102,13 @@ class PolicyPolicy:
     a value-only yardstick and wrong for measuring a checkpoint on the game
     it learned. Pass the `checkpoint` as well and the seat is gated by
     `hexset.clients.netbot.bot_for`, the one trade gate a checkpoint has --
-    priced on the run's own trade budget, since `gate` takes it.
-    `gate_seed` fixes each seat's belief-sampling salt without consuming game
-    randomness. Custom policy action sampling must be seeded by its caller.
+    priced on the run's own trade budget, since `gate` takes it. Custom
+    policy action sampling must be seeded by its caller.
     """
 
-    def __init__(
-        self, policy: Policy, checkpoint: Checkpoint | None = None, *, gate_seed: int = 0,
-    ) -> None:
+    def __init__(self, policy: Policy, checkpoint: Checkpoint | None = None) -> None:
         self.policy = policy
         self.checkpoint = checkpoint
-        self.gate_seed = gate_seed
 
     def act(self, requests: Sequence[Request]) -> list[Action]:
         return self.policy.act_rows([(r.game, r.seat, r.options) for r in requests])
@@ -124,14 +119,10 @@ class PolicyPolicy:
             return None
         from ..clients.netbot import bot_for
 
-        # Seated where it is installed: a gate's worlds are drawn from the
-        # game it is asked about, and an unseated NetworkBot prices every
+        # Seated where it is installed: an unseated NetworkBot prices every
         # candidate at -1.0 (the training repo found a network duellist that
         # never traded for exactly this reason).
-        bot = bot_for(
-            self.checkpoint, max_trades=max_trades,
-            rng=random.Random(f"{self.gate_seed}:{seat}:trade"),
-        )
+        bot = bot_for(self.checkpoint, max_trades=max_trades)
         bot.seat = seat
         bot.seat_at(game)
         return bot

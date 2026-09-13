@@ -63,9 +63,9 @@ class Checkpoint(Protocol):
     Two of those are read by name when present, structurally rather than by
     inheritance, the same way `hexset.trading` reads a gate's own surface:
     `trade_floor` (this checkpoint's measured clearing floor, in the win
-    probability its value head answers in) and `gate_rows` (the most
-    candidates its trade gate scores in one event). Both describe the
-    exported value head rather than the adapter, so a loader that has them
+    probability its value head answers in) and `gate_plies` (this
+    checkpoint's own trade-gate continuation budget). Both describe the
+    exported model rather than the adapter, so a loader that has either
     should say so; a checkpoint that declares neither is read at
     `hexset.clients.modelmeta`'s unmeasured defaults and trades exactly as
     it did before the keys existed.

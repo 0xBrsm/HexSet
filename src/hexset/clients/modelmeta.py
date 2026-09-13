@@ -13,6 +13,16 @@ A checkpoint carrying its own settings is the point: dropping `mcts256.onnx`
 into `models/` should be the whole of configuring it, with no spec grammar,
 no flag, and nothing outside `hexset.clients` that knows what a simulation
 is.
+
+`gate_plies` is the trade gate's own search: `0`, the default, values the
+exchanged hand in one forward, exactly what the affordability filter already
+built; a file asking for `N` instead rolls the mover's own greedy policy up
+to `N` plies forward from each surviving position before that forward runs,
+a finished game reading as its one-hot winner rather than a value read at
+all. Training collection runs at the default -- the rollout is search on the
+trade decision, and a collector should not pay for it -- and a served file
+asks for it in its own metadata, the same as `search`/`simulations` asks for
+MCTS.
 """
 
 from __future__ import annotations
@@ -36,9 +46,13 @@ DEFAULT_TRADE_FLOOR = 0.0
 # gets the nearest floor that says so.
 MAX_TRADE_FLOOR = 1.0
 
-# The most candidates a network gate scores in its one batched forward.
-DEFAULT_GATE_ROWS = 32
-MAX_GATE_ROWS = 512
+# A file that says nothing rolls no continuation: one forward over the
+# exchanged hand, exactly what training collection runs.
+DEFAULT_GATE_PLIES = 0
+# Bounded for the same reason `MAX_SIMULATIONS` is: the rollout runs
+# synchronously inside a trade ask, and a file naming an unbounded budget
+# would hang the seat rather than gate it.
+MAX_GATE_PLIES = 16
 
 
 @dataclass(frozen=True)
@@ -84,29 +98,36 @@ class GateConfig:
     """How a checkpoint asks its trade gate to be run.
 
     `trade_floor` is the gate's own measured clearing resolution
-    (`hexset.trading.trade_floor_of`) and `rows` its own cost bound on one
-    trade event. Both are properties of the exported model — a floor
-    measured against one checkpoint's value head says nothing about
-    another's — so both are read off the file rather than hardcoded for
+    (`hexset.trading.trade_floor_of`) -- a property of the exported model,
+    a floor measured against one checkpoint's value head says nothing
+    about another's, so it is read off the file rather than hardcoded for
     every checkpoint alike.
+
+    `plies` is the gate's own continuation budget (`hexset.clients.netbot`'s
+    `_continue`): `0` means the gate reads the exchanged hand in one
+    forward, same footing as `SearchConfig.simulations` -- search on the
+    trade decision, asked for by the file that wants it paid for.
     """
 
     trade_floor: float = DEFAULT_TRADE_FLOOR
-    rows: int = DEFAULT_GATE_ROWS
+    plies: int = DEFAULT_GATE_PLIES
 
 
 def gate_config(meta: dict[str, str]) -> GateConfig:
     """The trade gate a checkpoint's metadata asks for.
 
-    Absent keys give the shipped defaults: a floor of `0.0` (unmeasured, so
-    strict positivity is the whole gate) and `DEFAULT_GATE_ROWS` candidates.
+    An absent `trade_floor` gives the shipped default: `0.0`, unmeasured, so
+    strict positivity is the whole gate. An absent `gate_plies` gives `0`:
+    no rollout, the one forward the affordability filter already built. A
+    `gate_rows` key left behind by an older export names a bound this gate
+    no longer has -- read without complaint, and ignored, the same as any
+    other key this module has never heard of.
     """
     return GateConfig(
         trade_floor=_clamp_float(
             meta.get("trade_floor"), DEFAULT_TRADE_FLOOR, MAX_TRADE_FLOOR
         ),
-        rows=_clamp(meta.get("gate_rows"), DEFAULT_GATE_ROWS, MAX_GATE_ROWS)
-        or DEFAULT_GATE_ROWS,
+        plies=_clamp(meta.get("gate_plies"), DEFAULT_GATE_PLIES, MAX_GATE_PLIES),
     )
 
 
@@ -115,16 +136,18 @@ def gate_config_of(checkpoint: object) -> GateConfig:
 
     Structural, not by inheritance -- the convention `hexset.trading` already
     uses to read a gate's own surface. A loader that predates these keys, or
-    one in another repo that has not adopted them, carries neither attribute
+    one in another repo that has not adopted them, carries no such attribute
     and is read at the unmeasured defaults: the behaviour it had before the
-    keys existed. Values are taken as given; a negative floor is refused
-    where every other floor is, `hexset.trading.trade_floor_of`.
+    keys existed. A checkpoint still carrying `gate_rows` is likewise read
+    without complaint; the field is simply never looked at. The floor and
+    the ply count are each taken as given; a negative floor is refused where
+    every other floor is, `hexset.trading.trade_floor_of`.
     """
     floor = getattr(checkpoint, "trade_floor", None)
-    rows = getattr(checkpoint, "gate_rows", None)
+    plies = getattr(checkpoint, "gate_plies", None)
     return GateConfig(
         trade_floor=DEFAULT_TRADE_FLOOR if floor is None else float(floor),
-        rows=DEFAULT_GATE_ROWS if rows is None else int(rows),
+        plies=DEFAULT_GATE_PLIES if plies is None else int(plies),
     )
 
 

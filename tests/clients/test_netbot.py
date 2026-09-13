@@ -32,7 +32,7 @@ from hexset.clients.netbot import (
 )
 from hexset.game import Phase, run_trade_event, start, to_move
 from hexset.actions import options_for
-from hexset.clients.modelmeta import DEFAULT_TRADE_FLOOR
+from hexset.clients.modelmeta import DEFAULT_GATE_PLIES, DEFAULT_TRADE_FLOOR
 from hexset.trading import _candidates, valued_many
 
 # Five distinct weights, as in `fixtures/build_stub.py --valued`, but read
@@ -89,6 +89,7 @@ class StubCheckpoint:
     players: int = PLAYERS
     max_trades: int | None = None
     trade_floor: float = DEFAULT_TRADE_FLOOR
+    gate_plies: int = DEFAULT_GATE_PLIES
 
 
 def stub_checkpoint(board) -> StubCheckpoint:
@@ -616,6 +617,84 @@ def test_a_trade_that_changes_an_affordable_kind_reaches_the_head(board, monkeyp
     assert gain == pytest.approx(
         value_of_hand([1, 1, 1, 1, 0], 0) - value_of_hand([1, 1, 1, 0, 0], 0)
     )
+
+
+def test_gate_plies_zero_reads_the_survivor_in_one_forward(board, monkeypatch):
+    """The shipped default: no continuation, one forward over the position
+    the affordability filter already built -- exactly today's behaviour,
+    whatever `gate_plies` a checkpoint has never heard of would have got."""
+    from hexset.clients.netbot import NetworkBot
+
+    space = stub_checkpoint(board).space
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, gate_plies=0)
+    game = _position_with_a_settlement_in_hand(board)
+    state = game.state(0, hidden=False)
+    state.hands[0] = [1, 1, 1, 0, 0]
+    bot.seat_at(game)
+    view = game.state(0)
+    unlocks_settlement = (0, 0, 0, 1, 0)  # +1 wheat: the settlement is now affordable
+
+    value_calls: list[int] = []
+    original_value = HandValuePolicy.value_rows
+
+    def counted_value(self, rows):
+        value_calls.append(len(rows))
+        return original_value(self, rows)
+
+    monkeypatch.setattr(HandValuePolicy, "value_rows", counted_value)
+
+    act_calls: list[int] = []
+    original_act = HandValuePolicy.act_rows
+
+    def counted_act(self, rows):
+        act_calls.append(len(rows))
+        return original_act(self, rows)
+
+    monkeypatch.setattr(HandValuePolicy, "act_rows", counted_act)
+
+    bot.gains_many(view, [unlocks_settlement], [1])
+    assert value_calls == [2]  # the live position, plus this one candidate
+    assert not act_calls, "gate_plies=0 must never roll a continuation"
+
+
+def test_gate_plies_rolls_a_continuation_without_touching_the_live_table(board, monkeypatch):
+    """A checkpoint asking for `gate_plies > 0` rolls the mover's own greedy
+    policy forward from the survivor before it is valued (`_continue`) --
+    at least one `act_rows` call -- and does so on copies: the live game's
+    state, ledger and chance are exactly what they were before the ask."""
+    from hexset.clients.netbot import NetworkBot
+
+    space = stub_checkpoint(board).space
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, gate_plies=8)
+    game = _position_with_a_settlement_in_hand(board)
+    state = game.state(0, hidden=False)
+    state.hands[0] = [1, 1, 1, 0, 0]
+    bot.seat_at(game)
+    view = game.state(0)
+    unlocks_settlement = (0, 0, 0, 1, 0)  # +1 wheat: the settlement is now affordable
+
+    before_hands = [hand[:] for hand in game.state(0, hidden=False).hands]
+    before_known = [list(seat.known) for seat in game.ledger.seats]
+    before_unknown = [seat.unknown for seat in game.ledger.seats]
+    before_chance = game.chance
+
+    act_calls: list[int] = []
+    original_act = HandValuePolicy.act_rows
+
+    def counted_act(self, rows):
+        act_calls.append(len(rows))
+        return original_act(self, rows)
+
+    monkeypatch.setattr(HandValuePolicy, "act_rows", counted_act)
+
+    bot.gains_many(view, [unlocks_settlement], [1])
+    assert act_calls, "gate_plies > 0 must roll at least one ply"
+
+    after_state = game.state(0, hidden=False)
+    assert after_state.hands == before_hands
+    assert [list(seat.known) for seat in game.ledger.seats] == before_known
+    assert [seat.unknown for seat in game.ledger.seats] == before_unknown
+    assert game.chance is before_chance
 
 
 def test_a_won_position_offers_nothing_it_could_not_already_buy(board):

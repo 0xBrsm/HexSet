@@ -12,7 +12,10 @@ Changes to the HexSet distribution. The project follows
   per-checkpoint setting.** `gate_plies` (metadata key `gate_plies`,
   default `0`) asks `NetworkBot` to roll the mover's own greedy policy
   forward that many plies from each surviving candidate before valuing
-  it, same footing as `search`/`simulations` is for `hexset.mcts.Search`:
+  it, in one belief world drawn per ask from the asking seat's own
+  information set (certified to cover what each candidate says the
+  counterparty gives) -- never on a hand the seat cannot read -- same
+  footing as `search`/`simulations` is for `hexset.mcts.Search`:
   search on the trade decision, read off the file the same way. `0`, the
   default every checkpoint gets unless it asks otherwise, is today's
   single forward over the affordability filter's own after-position --
@@ -31,6 +34,25 @@ Changes to the HexSet distribution. The project follows
 ## 0.52.0
 
 ### Changed
+
+- **Longest Road no longer recounts every seat's roads on every placement.**
+  `victory.update_longest_road` called `roads.road_lengths` -- an exhaustive
+  route search over every seat's edges, from scratch -- after each of the
+  four places a road or settlement can go down
+  (`game.place_initial_settlement`/`build_settlement`/
+  `place_initial_road`/`build_road`), measured at ~25% of a 4-seat
+  self-play game (9.2M recursive calls a game). Roads are edge-disjoint, so
+  a road just placed by seat `p` can only extend `p`'s own route; a
+  settlement can only *cut* a route passing through its vertex, and only a
+  foreign one, since a builder's own building never blocks the builder's
+  own route. `GameState.road_lengths` now caches each seat's length, and
+  `update_longest_road` recomputes only the seat(s) a placement could have
+  changed before awarding from the cache -- unchanged for any caller that
+  mutates `edge_owner`/`vertex_owner` directly rather than through
+  `place_road`/`place_settlement`, which still gets the historical
+  from-scratch recompute. `hexset.catanatron.state.translate` (rebuilt
+  fresh from a mirrored catanatron game every decision, so it inherits no
+  running cache) computes the field once off its own topology instead.
 
 - **The network trade gate values a candidate exchange in one forward
   again, filtered by what it lets the seat buy.** `NetworkBot` no longer
@@ -60,44 +82,21 @@ Changes to the HexSet distribution. The project follows
 
 ### Changed
 
-- **Longest Road no longer recounts every seat's roads on every placement.**
-  `victory.update_longest_road` called `roads.road_lengths` -- an exhaustive
-  route search over every seat's edges, from scratch -- after each of the
-  four places a road or settlement can go down
-  (`game.place_initial_settlement`/`build_settlement`/
-  `place_initial_road`/`build_road`), measured at ~25% of a 4-seat
-  self-play game (9.2M recursive calls a game). Roads are edge-disjoint, so
-  a road just placed by seat `p` can only extend `p`'s own route; a
-  settlement can only *cut* a route passing through its vertex, and only a
-  foreign one, since a builder's own building never blocks the builder's
-  own route. `GameState.road_lengths` now caches each seat's length, and
-  `update_longest_road` recomputes only the seat(s) a placement could have
-  changed before awarding from the cache -- unchanged for any caller that
-  mutates `edge_owner`/`vertex_owner` directly rather than through
-  `place_road`/`place_settlement`, which still gets the historical
-  from-scratch recompute. `hexset.catanatron.state.translate` (rebuilt
-  fresh from a mirrored catanatron game every decision, so it inherits no
-  running cache) computes the field once off its own topology instead.
-
-- **The trade gate is 5.5x cheaper a turn, answering exactly the same.**
-  Two pieces of waste, neither of them a change to what the gate sees.
-  `hexset.clients.netbot.NetworkBot` serves a repeated ask from its last
-  evaluation: `gains_many` and `estimate_many` are the seat's own row and the
+- **The trade gate answers a repeated ask from its last evaluation, and
+  enumerating a board is no longer quadratic in its piece limits.**
+  `gains_many` and `estimate_many` are the seat's own row and the
   counterparty's row of one evaluation, and `hexset.trading.default_offer`
   and `default_respond` each ask for both, back to back, over the identical
-  candidates at the identical position -- so the second ask was rebuilding
-  every imagined world and every continuation to arrive at numbers the first
-  already had, half the gate's whole cost. And enumerating a board's
-  buildings was quadratic in it: `can_place_road` rescanned every edge to
-  count the player's roads, once per candidate edge, and
-  `can_place_settlement`/`can_upgrade_to_city` did the same over vertices --
-  13.2M road scans a game inside the gate's rollouts. The piece limit is a
-  property of the player, so `actions._building_actions` now reads it once
-  and calls the new `state.road_placeable`/`settlement_placeable`/
-  `city_upgradeable` -- exactly the public predicates without that check --
-  per placement. Measured over a 4-seat self-play game under
-  `trade_mode="round"`: 147.3 ms a turn to 26.8 ms, and 1,777 network rows a
-  turn to 861.
+  candidates at the identical position -- `hexset.clients.netbot.NetworkBot`
+  now serves the second ask from a one-entry memo keyed on the position and
+  the ask, instead of rebuilding every imagined world and continuation.
+  And `can_place_road` rescanned every edge to count the player's roads once
+  per candidate edge (`can_place_settlement`/`can_upgrade_to_city` the same
+  over vertices); the piece limit is a property of the player, so
+  `actions._building_actions` reads it once and calls the new
+  `state.road_placeable`/`settlement_placeable`/`city_upgradeable` -- the
+  public predicates without that check -- per placement. Neither changes
+  what the gate sees.
 
 
 - **Heximax's `k` is a cap on distinct worlds, not a quota of searches.**
@@ -107,18 +106,13 @@ Changes to the HexSet distribution. The project follows
   keyed on every other seat's hidden holdings (`holdings_signature`; the
   deck's order is a chance stream and does not distinguish a world), and
   weights each distinct world by its share of the draws in the root average
-  (`world_weights`). A
-  belief the ledger has pinned to one world -- every duel, and most
-  four-seat positions -- is searched once however large `k` is. Before, `k`
-  identical worlds shared one leaf budget, and at `k=100` the budget was gone
-  after the first few root options: heximax then chose among those, and lost
-  eleven of eleven 1v1 games against colonist's bot on 2026-09-12 building
-  almost nothing.
+  (`world_weights`). A belief the ledger has pinned to one world -- every
+  duel, and most four-seat positions -- is searched once however large `k`
+  is. Before, `k` identical worlds shared one leaf budget, and at `k=100`
+  the budget was gone after the first few root options.
 
 - **Road Building is not offered to a seat with no road pieces left.** The
   card places roads; at fifteen on the board there is nothing to place.
-  colonist refuses the play outright, and a live seat that took the engine's
-  word for it was refused and abandoned three games on 2026-09-12.
 
 ### Added
 

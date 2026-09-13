@@ -9,6 +9,34 @@ Changes to the HexSet distribution. The project follows
 ### Changed
 
 
+- **A finished game reads as an observer's, seat or no seat.** Holding a seat
+  at a game that was over left the page still dressed as that seat's: its
+  colour on the accent, its hand pinned open in the card pane, its piece
+  supply still counted out. Every hand is revealed once a game is over, so
+  the seat's holder now reads the table the way a spectator does -- nobody's
+  cards until a row is picked. The seat is still theirs, and it is still what
+  keeps their own name on their own row; it just stops being the view's
+  default.
+
+- **The trade modal remembers where it was dragged.** The offset reset to
+  centre every time a mode opened, which made moving the box a per-decision
+  convenience rather than a preference. It now survives both the next open
+  and a reload (`hexset.modaldrag`), and is clamped against the viewport on
+  the way in, so a position saved on a wide window cannot strand the box off
+  the edge of a narrow one.
+
+- **The seat picker lists its models by name.** The options came out in
+  whatever order `/api/models` returned them, which is `MODEL_OPTIONS` order,
+  and finding one by eye is the whole job the control has. `(empty)` and
+  `(closed)` stay pinned above the list: they are what the seat *is*, not
+  something that could be seated in it.
+
+- **The trade modal's buttons are smaller and its close glyph larger.** The
+  action squares go 44px to 40px and their glyphs 22px to 20px (16px on the
+  bank/port square, which gives up room to the rate printed under it); the
+  close X goes the other way, 20px to 24px over a 19px glyph. The body
+  carries more vertical padding to go with it.
+
 - **`summary.afford` says why an affordable build is not offered.** `why`:
   `phase` (not this seat's main phase), `pieces` (none of that piece left),
   `deck` (no development card left) or `spot` (nowhere to put it). Asked

@@ -137,31 +137,6 @@ Changes to the HexSet distribution. The project follows
 - **Road Building is not offered to a seat with no road pieces left.** The
   card places roads; at fifteen on the board there is nothing to place.
 
-### Added
-
-- **Hidden hands and cards in `GameState`.** A state written by a seat rather
-  than by the referee can now say "n cards, types unknown": `hands[seat]`,
-  `dev_cards[seat]` and `new_dev_cards[seat]` accept a `HiddenHand`/
-  `HiddenCards` count and `deck` a `HiddenDeck` length
-  (`hexset.state`). Sizes, `len` and the `[:]` copy idiom work; indexing,
-  iterating or summing one raises `HiddenRead` instead of returning a
-  fabricated number. `observed_by(state, seat)` downgrades a true state to
-  what one seat can see. A `View`, `View.sample`, `Heximax`, `HonestEvaluator`,
-  `hexset.encoding` and `hexset.onnx_record` all read the same off an observed
-  state as off the truth it was observed from; an identity read -- an
-  opponent's `holdings`, `card_points`, `victory_points`, `is_over`, or
-  `legal_actions` for a seat whose hand is hidden -- raises. A live adapter
-  therefore needs no placeholder composition for the hands it cannot see.
-
-- Opt-in sampled-world voting for model/search callbacks, with a decision-local
-  cache and frequency-weighted votes (`hexset.bots.determinized`). The default
-  key includes the sampled development deck; models that cannot observe it can
-  explicitly use `holdings_signature` for greater reuse. `CatanatronBot` exposes
-  the same optional vote while preserving its default reference behavior.
-  See [the cache contract and examples](docs/determinized-worlds.md).
-
-### Changed
-
 - **`summary.afford` says why an affordable build is not offered.** `why`:
   `phase` (not this seat's main phase), `pieces` (none of that piece left),
   `deck` (no development card left) or `spot` (nowhere to put it). Asked
@@ -365,6 +340,31 @@ Changes to the HexSet distribution. The project follows
   `build_players`. Reference bots hosted by HexSet use their seeded entrant
   RNG for search; mirrored games and copies share that stream, independently
   of live chance draws and other games.
+
+
+### Added
+
+- **Hidden hands and cards in `GameState`.** A state written by a seat rather
+  than by the referee can now say "n cards, types unknown": `hands[seat]`,
+  `dev_cards[seat]` and `new_dev_cards[seat]` accept a `HiddenHand`/
+  `HiddenCards` count and `deck` a `HiddenDeck` length
+  (`hexset.state`). Sizes, `len` and the `[:]` copy idiom work; indexing,
+  iterating or summing one raises `HiddenRead` instead of returning a
+  fabricated number. `observed_by(state, seat)` downgrades a true state to
+  what one seat can see. A `View`, `View.sample`, `Heximax`, `HonestEvaluator`,
+  `hexset.encoding` and `hexset.onnx_record` all read the same off an observed
+  state as off the truth it was observed from; an identity read -- an
+  opponent's `holdings`, `card_points`, `victory_points`, `is_over`, or
+  `legal_actions` for a seat whose hand is hidden -- raises. A live adapter
+  therefore needs no placeholder composition for the hands it cannot see.
+
+- Opt-in sampled-world voting for model/search callbacks, with a decision-local
+  cache and frequency-weighted votes (`hexset.bots.determinized`). The default
+  key includes the sampled development deck; models that cannot observe it can
+  explicitly use `holdings_signature` for greater reuse. `CatanatronBot` exposes
+  the same optional vote while preserving its default reference behavior.
+  See [the cache contract and examples](docs/determinized-worlds.md).
+
 
 ## 0.50.0
 

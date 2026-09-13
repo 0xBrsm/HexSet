@@ -25,7 +25,7 @@ from hexset.server import mcptools
 from hexset.server.web import HexSetServer
 
 SOLO = ["heximax", "heximax", "heximax"]
-MODEL = "claude-test-model"
+IDENTITY = "claude-test-model"
 
 
 @pytest.fixture
@@ -39,6 +39,14 @@ def live_server():
         server.shutdown()
         thread.join(timeout=5)
         server.server_close()
+
+
+@pytest.fixture(autouse=True)
+def _short_settle_cap(monkeypatch):
+    """A test that stalls a table by mistake fails on a `wait` reply within
+    seconds instead of holding the call for `mcptools._MAX_WAIT`."""
+    monkeypatch.setattr(mcptools, "_MAX_WAIT", 10.0)
+    monkeypatch.setattr(mcptools, "_WAIT_TICK", 0.5)
 
 
 @pytest.fixture(autouse=True)
@@ -83,6 +91,8 @@ class MCPClient:
                 if sid:
                     self.session_id = sid
                 raw = response.read()
+                if response.headers.get("Content-Type", "").startswith("text/event-stream"):
+                    return status, response.headers, _sse_message(raw.decode("utf-8"))
                 return status, response.headers, (json.loads(raw) if raw else None)
         except urllib.error.HTTPError as error:
             raw = error.read()
@@ -101,10 +111,17 @@ class MCPClient:
         status, _, data = self.call_tool_raw(tool, **arguments)
         assert status == 200, data
         result = data["result"]
-        payload = json.loads(result["content"][0]["text"])
+        text = result["content"][0]["text"]
         if result["isError"]:
-            raise AssertionError(f"{tool}({arguments}) failed: {payload}")
-        return payload
+            raise AssertionError(f"{tool}({arguments}) failed: {text}")
+        return text if tool == "board" else json.loads(text)
+
+
+def _sse_message(raw: str) -> dict:
+    """The one JSON-RPC message out of a `tools/call` stream, ignoring the
+    `: keepalive` comment lines before it."""
+    data_line = next(line for line in raw.splitlines() if line.startswith("data: "))
+    return json.loads(data_line[len("data: "):])
 
 
 def connected(base: str) -> MCPClient:
@@ -135,7 +152,7 @@ def test_initialize_echoes_a_known_protocol_version(live_server):
 def test_tools_call_without_a_session_id_is_400(live_server):
     _, base = live_server
     client = MCPClient(base)  # never initialized -- no session id to send
-    status, _, data = client.call_tool_raw("models")
+    status, _, data = client.call_tool_raw("bots")
     assert status == 400
     assert "error" in data
 
@@ -145,7 +162,7 @@ def test_tools_call_with_an_unknown_session_id_is_404(live_server):
     client = MCPClient(base)
     client.initialize()
     client.session_id = "not-a-real-session"
-    status, _, data = client.call_tool_raw("models")
+    status, _, data = client.call_tool_raw("bots")
     assert status == 404
 
 
@@ -216,17 +233,17 @@ def test_delete_ends_the_session(live_server):
     )
     with urllib.request.urlopen(request, timeout=5) as response:
         assert response.status == 200
-    status, _, _ = client.call_tool_raw("models")
+    status, _, _ = client.call_tool_raw("bots")
     assert status == 404  # the session is gone
 
 
-# --- Identity: model -> client, over the real /mcp route ----------------
+# --- Identity: identity string -> client, over the real /mcp route -------
 
 
 def test_new_game_records_the_clients_id_and_kind_mcp(live_server):
     server, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=" Claude-Opus-5 ", opponents=SOLO)
+    data = client.call_tool("new_game", identity=" Claude-Opus-5 ", opponents=SOLO)
     expected_id = hashlib.sha256(b"claude-opus-5").hexdigest()
     seat = server.tables.get(data["code"]).seats[data["seat"]]
     assert seat.client == {"id": expected_id, "kind": "mcp"}
@@ -235,37 +252,59 @@ def test_new_game_records_the_clients_id_and_kind_mcp(live_server):
 # --- Version guard: act(index, version) -----------------------------------
 
 
+def _num(cell: str):
+    if cell == "-":
+        return None
+    if cell in ("True", "False"):  # `_cell(bool)` -> str(value); read it back as one
+        return cell == "True"
+    try:
+        return int(cell)
+    except ValueError:
+        return cell
+
+
+def rows(table: str) -> list[dict]:
+    """A reply's `(keys):row|row` table back into the dicts it was built
+    from (`mcptools._tabulate`), enough for the tests to pick indexes and
+    compare entries. A `KIND:` prefix (summary.spots) is dropped."""
+    if ":(" in table:
+        table = table[table.index(":(") + 1:]
+    header, _, body = table.partition(":")
+    keys = header.strip("()").split(",")
+    out = []
+    for row in body.split("|") if body else []:
+        cells = row.split(",")
+        entry = {}
+        for k, cell in zip(keys, cells):
+            entry[k] = [_num(c) for c in cell.split(";")] if k == "resources" else _num(cell)
+        out.append(entry)
+    return out
+
+
+def legal(view: dict, kind: str) -> list[dict]:
+    return rows(view["legal_actions"][kind])
+
+
 def _setup_settlement_index(view: dict) -> int:
-    return view["legal_actions"]["SETUP_SETTLEMENT"][0]["index"]
+    """SETUP_SETTLEMENT leaves `legal_actions` once `summary.spots` covers
+    it (`mcptools._drop_superseded`) -- `spots` is where its `index` lives
+    now, best (not first) placement."""
+    return rows(view["summary"]["spots"])[0]["index"]
 
 
 def _setup_road_index(view: dict) -> int:
-    return view["legal_actions"]["SETUP_ROAD"][0]["index"]
+    return legal(view, "SETUP_ROAD")[0]["index"]
 
 
-def _wait_for_turn_streamed(client: MCPClient, **arguments) -> tuple[str, dict]:
-    """`wait_for_turn` the way a real client receives it: as an SSE stream.
-    Returns the response's Content-Type and the tool payload out of the one
-    `data:` line."""
-    body = {
-        "jsonrpc": "2.0",
-        "id": 999,
-        "method": "tools/call",
-        "params": {"name": "wait_for_turn", "arguments": arguments},
-    }
-    request = urllib.request.Request(
-        client.url,
-        data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json", "Mcp-Session-Id": client.session_id},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        content_type = response.headers.get("Content-Type", "")
-        raw = response.read().decode("utf-8")
-    data_line = next(line for line in raw.splitlines() if line.startswith("data: "))
-    result = json.loads(data_line[len("data: "):])["result"]
-    assert result["isError"] is False, result
-    return content_type, json.loads(result["content"][0]["text"])
+def _next_setup_index(view: dict) -> int:
+    """Either half of a setup placement, whichever this reply offers: the
+    settlement half now lives in `summary.spots` (its `legal_actions` group
+    is dropped once spots covers it); the road half is still the lone
+    `legal_actions` group."""
+    spots = (view.get("summary") or {}).get("spots")
+    if spots:
+        return rows(spots)[0]["index"]
+    return rows(next(iter(view["legal_actions"].values())))[0]["index"]
 
 
 def test_act_with_an_expect_that_no_longer_matches_is_an_error(live_server):
@@ -274,9 +313,9 @@ def test_act_with_an_expect_that_no_longer_matches_is_an_error(live_server):
     seat's move and every trade answer, and so was stale by design."""
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     index = _setup_settlement_index(data)
-    chosen = data["legal_actions"]["SETUP_SETTLEMENT"][0]
+    chosen = rows(data["summary"]["spots"])[0]
 
     status, _, response = client.call_tool_raw(
         "act", index=index, expect={"type": "SETUP_SETTLEMENT", "vertex": chosen["vertex"] + 1}
@@ -291,10 +330,10 @@ def test_act_with_an_expect_that_no_longer_matches_is_an_error(live_server):
 def test_act_with_a_matching_expect_acts(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     index = _setup_settlement_index(data)
 
-    entry = data["legal_actions"]["SETUP_SETTLEMENT"][0]
+    entry = rows(data["summary"]["spots"])[0]
     result = client.call_tool("act", index=index, expect={"type": "SETUP_SETTLEMENT", **entry})
     assert result["phase"] == "SETUP_ROAD"
 
@@ -325,7 +364,7 @@ def test_expect_check_compares_named_operands_raw_operands_and_resources():
 def test_act_expect_may_name_only_the_type(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     index = _setup_settlement_index(data)
 
     result = client.call_tool("act", index=index, expect={"type": "SETUP_SETTLEMENT"})
@@ -335,41 +374,255 @@ def test_act_expect_may_name_only_the_type(live_server):
 def test_act_no_longer_takes_a_version(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
 
-    status, _, response = client.call_tool_raw("act", index=_setup_settlement_index(data), version=data["version"])
+    status, _, response = client.call_tool_raw("act", index=_setup_settlement_index(data), version=1)
     assert status == 200
     assert response["result"]["isError"] is True
     assert "bad arguments" in response["result"]["content"][0]["text"]
 
 
-# --- wait_for_turn: streamed as SSE, blocks through a bot's turn --------
+# --- Settling: every acting tool replies at this seat's next move ---------
 
 
-def test_wait_for_turn_streams_and_returns_once_it_is_our_turn_again(live_server):
+def test_act_settles_through_the_bots_turns_to_our_next_move(live_server):
+    """`act` on the move that hands the table to the bots does not come
+    back until it is ours again: the reply is the next decision, not the
+    instant after the action, so a seat never has to decide to wait."""
     server, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     assert data["seat"] == 0
 
-    settlement = _setup_settlement_index(data)
-    after_settlement = client.call_tool("act", index=settlement)
-    road = after_settlement["legal_actions"]["SETUP_ROAD"][0]["index"]
+    after_settlement = client.call_tool("act", index=_setup_settlement_index(data))
+    assert after_settlement["your_move"] == "act"  # still our turn: the road
+    road = _setup_road_index(after_settlement)
     after_road = client.call_tool("act", index=road)
-    assert after_road["legal_actions"] == {}  # a bot (seat 1) is on move now
-    assert after_road["legal_count"] == 0
-    assert after_road["your_move"] == "wait"
-    assert after_road["waiting_on"] == [1]
 
-    content_type, payload = _wait_for_turn_streamed(client)
+    assert after_road["your_move"] == "act"  # round 2 of setup, ours again
+    assert "SETUP_SETTLEMENT" not in after_road["legal_actions"]  # summary.spots covers it
+    assert after_road["summary"]["spots"]
+    assert after_road["waiting_on"] == []
+    # The log slice covers what happened in between: the bots' placements.
+    assert after_road["log_from"] == max(0, after_settlement["log_total"] - 1)
+    assert after_road["log_total"] > after_settlement["log_total"] + 3
 
-    assert content_type.startswith("text/event-stream")
-    assert payload["legal_actions"]  # our own turn again (round 2 of setup)
-    assert payload["your_move"] == "act"
-    # The streamed reply is trimmed against the session's automatic cursor
-    # like any other: it continues from the last line the `act` reply sent.
-    assert payload["log_from"] == max(0, after_road["log_total"] - 1)
-    assert payload["log_total"] > after_road["log_total"]  # the bots' placements
+
+def test_forced_rolls_a_lone_roll_and_passes_only_with_an_empty_hand():
+    empty = {"Wood": 0, "Brick": 0, "Sheep": 0, "Wheat": 0, "Ore": 0}
+    # Signed towards the actor: positive is what the actor gets, i.e. what we give.
+    offers = [{"actor": 0, "bundle": [2, 0, 0, 0, -1]}, {"actor": 2, "bundle": [1, 0, 0, 0, -1]}]
+    rolled = {"seat": 1, "players": [{"seat": 1, "hand": empty}], "legal_actions": [], "pending": offers}
+    passed_one = {**rolled, "pending": offers[1:]}
+    passed_both = {**rolled, "pending": []}
+    tables = RecordingTables({
+        ("POST", "/api/action"): rolled,
+        ("POST", "/api/games/abcdef/trade/round/answer"): [passed_one, passed_both],
+    })
+    session = mcptools.Session(token="tok", code="abcdef")
+    start = {"seat": 1, "players": [{"seat": 1, "hand": empty}], "legal_actions": [{"type": "ROLL", "a": 0, "b": 0}]}
+    view = mcptools._forced(tables, session, start)
+    assert [(m, p) for m, p, _ in tables.calls] == [
+        ("POST", "/api/action"),
+        ("POST", "/api/games/abcdef/trade/round/answer"),
+        ("POST", "/api/games/abcdef/trade/round/answer"),
+    ]
+    assert tables.calls[0][2] == {"action": {"type": "ROLL", "a": 0, "b": 0}}
+    assert tables.calls[1][2] == {"actor": 0, "received": [2, 0, 0, 0, -1], "kind": "pass"}
+    assert view["pending"] == []
+
+
+def test_forced_leaves_an_uncoverable_offer_to_the_seat_that_can_still_counter():
+    hand = {"Wood": 1, "Brick": 0, "Sheep": 0, "Wheat": 0, "Ore": 0}
+    start = {"seat": 1, "players": [{"seat": 1, "hand": hand}], "legal_actions": [],
+             "pending": [{"actor": 0, "bundle": [2, 0, 0, 0, -1]}]}  # wants 2 Wood; we hold 1
+    tables = RecordingTables({})
+    assert mcptools._forced(tables, mcptools.Session(token="tok", code="abcdef"), start) is start
+    assert tables.calls == []
+    view = mcptools._translate(dict(start))
+    assert view["pending"] == [{"actor": 0, "you_give": {"Wood": 2}, "you_receive": {"Ore": 1}, "can_accept": False}]
+
+
+def test_forced_settles_an_own_round_with_nothing_to_choose():
+    bundle = [1, 0, 0, 0, -1]
+    def view(responses):
+        return {"seat": 1, "players": [{"seat": 1, "hand": {"Wood": 1}}], "legal_actions": [{"type": "END_TURN"}],
+                "trade_round": {"offer": {"actor": 1, "bundle": bundle}, "responses": responses, "awaiting": []}}
+    all_pass = view([{"seat": 0, "kind": "pass", "bundle": None}, {"seat": 2, "kind": "pass", "bundle": None}])
+    assert mcptools._settled_round(all_pass) == {"decline": True}
+    one_accept = view([{"seat": 0, "kind": "accept", "bundle": bundle}, {"seat": 2, "kind": "pass", "bundle": None}])
+    assert mcptools._settled_round(one_accept) == {"seat": 0, "bundle": bundle}
+    with_counter = view([{"seat": 0, "kind": "accept", "bundle": bundle}, {"seat": 2, "kind": "counter", "bundle": [2, 0, 0, 0, -1]}])
+    assert mcptools._settled_round(with_counter) is None
+    two_accepts = view([{"seat": 0, "kind": "accept", "bundle": bundle}, {"seat": 2, "kind": "accept", "bundle": bundle}])
+    assert mcptools._settled_round(two_accepts) is None
+    # `to` ranks and filters: the best-ranked listed accepter wins, an unlisted one is refused.
+    assert mcptools._settled_round(two_accepts, to=[2, 0]) == {"seat": 2, "bundle": bundle}
+    assert mcptools._settled_round(two_accepts, to=[3]) == {"decline": True}
+    assert mcptools._settled_round(one_accept, to=[0]) == {"seat": 0, "bundle": bundle}
+    assert mcptools._settled_round(one_accept, to=[2]) == {"decline": True}
+    assert mcptools._settled_round(with_counter, to=[0]) is None  # a counter is always the seat's call
+    still_waiting = view([{"seat": 0, "kind": "pass", "bundle": None}]); still_waiting["trade_round"]["awaiting"] = [2]
+    assert mcptools._settled_round(still_waiting) is None
+
+    closed = {**all_pass, "trade_round": None}
+    tables = RecordingTables({("POST", "/api/games/abcdef/trade/round/choose"): closed})
+    out = mcptools._forced(tables, mcptools.Session(token="tok", code="abcdef"), all_pass)
+    assert tables.calls == [("POST", "/api/games/abcdef/trade/round/choose", {"decline": True})]
+    assert out is closed
+
+
+def test_the_tool_list_has_no_undo_or_get_table():
+    names = {t["name"] for t in mcptools.tool_list()}
+    assert "undo" not in names and "get_table" not in names
+    assert {"state", "act", "discard", "offer_trade", "answer_trade", "choose_trade"} <= names
+
+
+def test_prune_drops_trivial_table_fields():
+    view = {"to_move": 1, "awaiting_confirm": None, "can_undo": False, "locked": [], "trades": [], "winner": None,
+            "started": True, "players": []}
+    pruned = mcptools._prune(view)
+    assert not {"to_move", "awaiting_confirm", "can_undo", "locked", "trades", "winner", "started"} & set(pruned)
+    kept = mcptools._prune({"locked": [2], "trades": [{"a": 0}], "winner": 3, "started": False, "players": []})
+    assert kept == {"locked": [2], "trades": [{"a": 0}], "winner": 3, "started": False, "players": []}
+    assert mcptools._prune({"winner": 0, "players": []})["winner"] == 0  # seat 0 is a winner, not nothing
+
+
+def test_forced_leaves_a_roll_alone_when_a_knight_is_also_legal():
+    tables = RecordingTables({})
+    start = {"seat": 1, "players": [{"seat": 1, "hand": {}}], "legal_actions": [{"type": "PLAY_KNIGHT"}, {"type": "ROLL"}]}
+    assert mcptools._forced(tables, mcptools.Session(token="tok", code="abcdef"), start) is start
+    assert tables.calls == []
+
+
+def test_a_settled_turn_arrives_rolled(live_server):
+    """Setup over, the seat's first real turn comes back past its ROLL: the
+    lone forced action was played inside the settle."""
+    _, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    for _ in range(4):  # two settlements, two roads; each settles to our next placement
+        data = client.call_tool("act", index=_next_setup_index(data))
+    assert data["round"] >= 1
+    assert data["phase"] != "ROLL" and "ROLL" not in data["legal_actions"]
+    assert data["your_move"] in ("act", "discard", "answer_trade")
+    assert any("(mcp) rolled" in line for line in client.call_tool("state", full_log=True)["log"])
+
+
+def test_board_is_incidence_text_and_leaves_the_browsers_layout_alone(live_server):
+    """`board()` is text: each hex with its vertices, each vertex with its
+    yield, port and neighbors -- no edge list; a legal edge's destination
+    comes from `summary.roads` instead. It is built from a copy -- `GET
+    /api/board` is the table's own `layout`, the dict the browser draws
+    from, and its `x`/`y` must survive."""
+    server, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    text = client.call_tool("board")
+    assert text.startswith("hexes: id resource pips vertices\n")
+    assert "\nvertices: id pips resources port neighbors\n" in text
+    assert "\nedges:" not in text
+    assert "x" not in text.split("\n")[1] and "y" not in text.split("\n")[1]
+    layout = server.tables.get(data["code"]).layout
+    assert "x" in layout["hexes"][0] and "y" in layout["vertices"][0] and "size" in layout
+    assert "pips" not in layout["hexes"][0]  # the annotation never touched the shared dict either
+
+
+def test_board_text_annotates_hexes_and_vertices(live_server):
+    _, base = live_server
+    client = connected(base)
+    client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    text = client.call_tool("board")
+    hex_block, vertex_block = text.split("\n\n")[:2]
+    hexes = {}
+    for line in hex_block.splitlines()[1:]:
+        hid, label, pips, verts = line.split()
+        hexes[int(hid)] = (label, int(pips), [int(v) for v in verts.split(",")])
+    resourced = {h: v for h, v in hexes.items() if v[0] in mcptools.RESOURCES}
+    assert resourced, "a real board has at least one resource-paying hex"
+    for line in vertex_block.splitlines()[1:]:
+        vid, pips, resources, port, nbrs = line.split()
+        touching = [v for v in resourced.values() if int(vid) in v[2]]
+        assert int(pips) == sum(v[1] for v in touching)
+        assert resources == (",".join(sorted({v[0] for v in touching})) or "-")
+        assert nbrs and all(int(n) != int(vid) for n in nbrs.split(","))
+
+
+def test_the_game_over_reply_reports_what_the_session_was_sent(live_server):
+    """Every tool reply is counted on the session; the last one carries the
+    totals, itself included, as `usage`."""
+    _, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    assert "usage" not in data
+    for _ in range(300):
+        if data.get("game_over"):
+            break
+        move = data["your_move"]
+        if move == "answer_trade":
+            data = client.call_tool("answer_trade", index=0, kind="pass")
+        elif move == "choose_trade":
+            data = client.call_tool("choose_trade", decline=True)
+        elif move == "discard":
+            hand = next(p for p in data["players"] if p["seat"] == data["seat"])["hand"]
+            owed = data["discard_quota"][data["seat"]]
+            cards = {}
+            for name, n in hand.items():
+                take = min(n, owed - sum(cards.values()))
+                if take:
+                    cards[name] = take
+            data = client.call_tool("discard", cards=cards)
+        elif move == "wait":
+            data = client.call_tool("wait_for_turn", timeout=5)
+        else:
+            groups = data["legal_actions"]
+            summary = data["summary"]
+            if summary.get("spots"):
+                index = rows(summary["spots"])[0]["index"]
+            elif summary.get("robber"):
+                index = int(rows(summary["robber"])[0]["options"].split(";")[0].split(":")[0])
+            elif "END_TURN" in groups:
+                index = legal(data, "END_TURN")[0]["index"]
+            else:
+                index = rows(next(iter(groups.values())))[0]["index"]
+            data = client.call_tool("act", index=index)
+    assert data["game_over"]
+    usage = data["usage"]
+    assert usage["calls"] >= 20 and usage["bytes"] > usage["calls"] * 1000
+    # The final reply is itself counted; a re-read after the end is not part of the game's number.
+    again = client.call_tool("state")
+    assert again["usage"]["calls"] == usage["calls"] + 1
+
+
+def test_a_timeout_that_runs_out_replies_with_wait(live_server):
+    """`timeout` (and `_MAX_WAIT`) is the one way a reply says `wait`."""
+    _, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=["heximax", "heximax"])
+    # A second MCP seat that never moves: the table stalls at its placement.
+    idle = connected(base)
+    idle.call_tool("join", code=data["code"], identity="idle", timeout=0)
+    client.call_tool("act", index=_setup_settlement_index(data))
+    road = _setup_road_index(client.call_tool("state"))
+    stalled = client.call_tool("act", index=road, timeout=0.2)
+    assert stalled["your_move"] == "wait"
+    assert stalled["legal_actions"] == {}
+    assert stalled["waiting_on"]
+    waited = client.call_tool("wait_for_turn", timeout=0.2)
+    assert waited["your_move"] == "wait"
+
+
+def test_every_tool_call_is_streamed(live_server):
+    _, base = live_server
+    client = connected(base)
+    for name, arguments in (("bots", {}), ("new_game", {"identity": IDENTITY, "opponents": SOLO}), ("state", {})):
+        status, headers, data = client.call_tool_raw(name, **arguments)
+        assert status == 200
+        assert headers.get("Content-Type", "").startswith("text/event-stream"), name
+        assert data["result"]["isError"] is False, name
+    status, headers, data = client.call_tool_raw("act", index=10**6)
+    assert headers.get("Content-Type", "").startswith("text/event-stream")
+    assert data["result"]["isError"] is True  # a ToolError is a message on the same stream
 
 
 # --- Trade-round responses are named dicts, the same as state()/get_table() --
@@ -396,6 +649,20 @@ class FakeTables:
         return self.responses[(method, path)]
 
 
+class RecordingTables(FakeTables):
+    """`FakeTables` that also remembers every call, and can answer a
+    `(method, path)` with a queue of responses, one per call."""
+
+    def __init__(self, responses):
+        super().__init__(responses)
+        self.calls: list[tuple[str, str, dict]] = []
+
+    def handle(self, method, path, payload, token):
+        self.calls.append((method, path, payload))
+        answer = self.responses[(method, path)]
+        return answer.pop(0) if isinstance(answer, list) else answer
+
+
 def _session_for_trade() -> mcptools.Session:
     return mcptools.Session(token="tok", code="abcdef")
 
@@ -409,9 +676,11 @@ def test_offer_trade_translates_its_own_response():
         }
     }
     tables = FakeTables({("POST", "/api/games/abcdef/trade/round"): raw})
+    session = _session_for_trade()
     data = mcptools.call_tool(
-        tables, _session_for_trade(), "offer_trade", {"give": {"Brick": 1}, "want": {"Wheat": 1}}
+        tables, session, "offer_trade", {"give": {"Brick": 1}, "want": {"Wheat": 1}, "to": [3, 1, 3], "timeout": 0}
     )
+    assert session.offer_to == [3, 1]  # ranked, de-duplicated, kept for the settle
     assert data["trade_round"]["you_give"] == {"Brick": 1}
     assert data["trade_round"]["you_receive"] == {"Wheat": 1}
 
@@ -426,7 +695,7 @@ def test_answer_trade_translates_its_own_response():
         }
     )
     data = mcptools.call_tool(
-        tables, _session_for_trade(), "answer_trade", {"index": 0, "kind": "accept"}
+        tables, _session_for_trade(), "answer_trade", {"index": 0, "kind": "accept", "timeout": 0}
     )
     assert data["pending"] == []
     assert data["trade_round"] is None
@@ -444,7 +713,7 @@ def test_choose_trade_translates_its_own_response():
             ("POST", "/api/games/abcdef/trade/round/choose"): chosen,
         }
     )
-    data = mcptools.call_tool(tables, _session_for_trade(), "choose_trade", {"decline": True})
+    data = mcptools.call_tool(tables, _session_for_trade(), "choose_trade", {"decline": True, "timeout": 0})
     assert data["trades"] == [{"a": 2, "b": 0, "a_gave": {"Brick": 1}, "a_got": {"Wheat": 1}}]
     assert data["trade_round"] is None
 
@@ -497,47 +766,31 @@ def test_translate_view_translates_every_legal_action():
 # --- Board summary: per-hex/vertex resource and pip-count annotations --------
 
 
-def test_board_annotates_hexes_and_vertices_with_resource_and_pips(live_server):
-    _, base = live_server
-    client = connected(base)
-    client.call_tool("new_game", model=MODEL, opponents=SOLO)
-    data = client.call_tool("board")
-
-    for hex_ in data["hexes"]:
-        assert hex_["resource"] == mcptools._TERRAIN_RESOURCE.get(hex_["terrain"])
-        assert hex_["pips"] == mcptools._PIPS.get(hex_["token"], 0)
-    resourced = [h for h in data["hexes"] if h["resource"] is not None]
-    assert resourced, "a real board has at least one resource-paying hex"
-
-    for vertex in data["vertices"]:
-        touching = [h for h in resourced if vertex["id"] in h["vertex_ids"]]
-        assert vertex["pips"] == sum(h["pips"] for h in touching)
-        assert vertex["resources"] == sorted({h["resource"] for h in touching})
-
-
 # --- Seat name defaults to "mcp" when the LLM doesn't give one ---------------
 
 
 def test_new_game_defaults_the_seat_name_to_mcp(live_server):
     server, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     assert server.tables.get(data["code"]).seats[data["seat"]].name == "mcp"
 
 
 def test_new_game_keeps_an_explicit_name(live_server):
     server, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO, name="Ada")
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO, name="Ada")
     assert server.tables.get(data["code"]).seats[data["seat"]].name == "Ada"
 
 
 def test_join_defaults_the_seat_name_to_mcp(live_server):
     server, base = live_server
     creator = connected(base)
-    created = creator.call_tool("new_game", model=MODEL)
+    created = creator.call_tool("new_game", identity=IDENTITY)
     joiner = connected(base)
-    joined = joiner.call_tool("join", code=created["code"], model=MODEL)
+    # `timeout=0`: the creator is to move, so a settling join would wait.
+    joined = joiner.call_tool("join", code=created["code"], identity=IDENTITY, timeout=0)
+    assert joined["your_move"] == "wait"
     assert server.tables.get(created["code"]).seats[joined["seat"]].name == "mcp"
 
 
@@ -549,7 +802,7 @@ def test_new_game_always_installs_a_pending_gate_for_the_llm_seat(live_server):
     with no argument required to ask for it."""
     server, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     seat = data["seat"]
     table = server.tables.get(data["code"])
     assert seat in table.session.confirm_seats
@@ -564,7 +817,7 @@ def test_new_game_always_installs_a_pending_gate_for_the_llm_seat(live_server):
 def test_leave_game_locks_the_seat(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     seat = data["seat"]
     result = client.call_tool("leave_game")
     assert result["locked"] == [seat]
@@ -573,17 +826,17 @@ def test_leave_game_locks_the_seat(live_server):
 # --- resume_game: POST /api/reclaim, no cache file left ---------------------
 
 
-def test_resume_game_reclaims_the_seat_by_code_and_model(live_server):
+def test_resume_game_reclaims_the_seat_by_code_and_identity(live_server):
     server, base = live_server
     creator = connected(base)
-    data = creator.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = creator.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     seat, code = data["seat"], data["code"]
     creator.call_tool("act", index=_setup_settlement_index(data))  # so there is a transcript to owe
 
     # A fresh session -- as if the server had restarted, or this were simply
     # a new MCP connection with no seat of its own yet.
     fresh = connected(base)
-    result = fresh.call_tool("resume_game", code=code, model=MODEL)
+    result = fresh.call_tool("resume_game", code=code, identity=IDENTITY)
     assert result["seat"] == seat
     # A reclaimed seat knows nothing yet, so it is owed the whole transcript.
     assert result["log_from"] == 0
@@ -643,17 +896,20 @@ def test_compact_board_leaves_a_view_without_the_arrays_alone():
 def test_new_game_reply_is_compact(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     assert not {"vertex_owner", "vertex_building", "edge_owner"} & set(data)
     assert data["buildings"] == []
     assert data["roads"] == [[], [], [], []]
-    assert data["legal_count"] == len(data["legal_actions"]["SETUP_SETTLEMENT"]) > 0
-    assert all(set(e) == {"index", "vertex"} for e in data["legal_actions"]["SETUP_SETTLEMENT"])
+    # SETUP_SETTLEMENT itself has left legal_actions: summary.spots covers it.
+    assert data["legal_actions"] == {}
+    assert len(rows(data["summary"]["spots"])) > 0 and "legal_count" not in data
+    assert data["summary"]["spots"].startswith("SETUP_SETTLEMENT:(index,vertex,pips,resources")
 
-    after = client.call_tool("act", index=_setup_settlement_index(data))
-    assert after["buildings"] == [{"vertex": data["legal_actions"]["SETUP_SETTLEMENT"][0]["vertex"], "seat": 0, "kind": "settlement"}]
+    spot = rows(data["summary"]["spots"])[0]
+    after = client.call_tool("act", index=spot["index"])
+    assert after["buildings"] == [{"vertex": spot["vertex"], "seat": 0, "kind": "settlement"}]
     assert list(after["legal_actions"]) == ["SETUP_ROAD"]
-    assert all(set(e) == {"index", "edge"} for e in after["legal_actions"]["SETUP_ROAD"])
+    assert after["legal_actions"]["SETUP_ROAD"].startswith("(index,edge):")
 
 
 # --- summary: derived tactical facts, computed once server-side -----------
@@ -671,6 +927,16 @@ def test_afford_reports_ok_missing_and_whether_it_is_legal_now():
     assert afford["settlement"] == {"ok": False, "legal": False, "missing": {"Wheat": 1}}
     assert afford["city"] == {"ok": False, "legal": False, "missing": {"Wheat": 2}}
     assert afford["dev_card"] == {"ok": False, "legal": False, "missing": {"Wheat": 1}}
+
+
+def test_afford_omits_legal_when_legal_actions_is_empty():
+    """`your_move: wait` already says nothing is legal; `legal: false` on
+    all four builds for the same reason is the one fact repeated."""
+    hand = {"Wood": 1, "Brick": 1, "Sheep": 1, "Wheat": 0, "Ore": 3}
+    afford = mcptools._afford(hand, [])
+    assert afford["road"] == {"ok": True}
+    assert afford["settlement"] == {"ok": False, "missing": {"Wheat": 1}}
+    assert all("legal" not in entry for entry in afford.values())
 
 
 TINY_BOARD = {
@@ -691,21 +957,24 @@ def test_spots_joins_legal_placements_to_pips_and_ports_best_first():
         {"type": "BUILD_SETTLEMENT", "a": 0, "b": 0},
         {"type": "BUILD_CITY", "a": 2, "b": 0},
     ]
-    spots, omitted = mcptools._spots(legal, TINY_BOARD)
-    assert omitted == 0
+    spots = mcptools._spots(legal, TINY_BOARD)
     assert [s["vertex"] for s in spots] == [0, 2, 1]
     assert spots[0] == {"index": 2, "type": "BUILD_SETTLEMENT", "vertex": 0, "pips": 10, "resources": ["Ore", "Wheat"]}
     assert spots[1]["port"] == "Sheep 2:1" and spots[1]["type"] == "BUILD_CITY"
     assert spots[2]["port"] == "3:1"
 
 
-def test_spots_caps_the_list_and_counts_what_it_left_off():
+def test_spots_lists_every_placement_uncapped():
+    """Setup offers every open vertex -- fifty-odd -- and `spots` used to
+    cap that list at fifteen. It doesn't any more: the raw group next to it
+    that once justified trimming a repeat is gone (`_drop_superseded`), so
+    the tail is the only place any of these vertices is read back from."""
     board = {"vertices": [{"id": v, "pips": v, "resources": []} for v in range(40)], "ports": []}
     legal = [{"type": "SETUP_SETTLEMENT", "a": v, "b": 0} for v in range(40)]
-    spots, omitted = mcptools._spots(legal, board)
-    assert len(spots) == mcptools._SPOTS_CAP
-    assert omitted == 40 - mcptools._SPOTS_CAP
+    spots = mcptools._spots(legal, board)
+    assert len(spots) == 40
     assert spots[0]["vertex"] == 39  # the best, not the first
+    assert spots[-1]["vertex"] == 0
 
 
 def test_robber_names_whose_buildings_each_hex_hits_and_an_index_per_victim():
@@ -730,6 +999,126 @@ def test_robber_names_whose_buildings_each_hex_hits_and_an_index_per_victim():
     assert robber[1]["hits"] == [] and robber[1]["options"] == [{"index": 2, "victim": None}]
 
 
+ROAD_BOARD = {
+    "vertices": [
+        {"id": 0, "pips": 5, "resources": ["Wood"]},
+        {"id": 1, "pips": 8, "resources": ["Ore", "Wheat"]},
+        {"id": 2, "pips": 3, "resources": ["Sheep"]},
+        {"id": 3, "pips": 6, "resources": ["Brick"]},
+    ],
+    "edges": [
+        {"id": 10, "v0": 0, "v1": 1},
+        {"id": 11, "v0": 1, "v1": 2},
+        {"id": 12, "v0": 2, "v1": 3},
+    ],
+    "ports": [{"vertices": [3], "resource": "Brick", "ratio": 2}],
+}
+
+
+def test_far_endpoint_prefers_the_end_this_seats_network_does_not_touch():
+    neighbors = {0: {1}, 1: {0, 2}, 2: {1, 3}, 3: {2}}
+    # One end already ours: the other is the new ground.
+    assert mcptools._far_endpoint(0, 1, {0}, neighbors) == 1
+    assert mcptools._far_endpoint(1, 0, {0}, neighbors) == 1
+    # Both new, but 1 is a neighbor of the owned vertex 0 and 2 is not:
+    # 2 is the more frontier-ish end.
+    assert mcptools._far_endpoint(1, 2, {0}, neighbors) == 2
+    # Both new and neither adjacent to anything owned: either end, by
+    # convention the second one named.
+    assert mcptools._far_endpoint(2, 3, set(), neighbors) == 3
+
+
+def test_roads_joins_legal_edges_to_the_vertex_they_reach_settle_first():
+    legal = [
+        {"type": "BUILD_ROAD", "a": 10, "b": 0},
+        {"type": "BUILD_ROAD", "a": 11, "b": 0},
+        {"type": "BUILD_ROAD", "a": 12, "b": 0},
+    ]
+    view = {"seat": 0, "vertex_owner": [0, -1, -1, -1], "edge_owner": [-1, -1, -1]}
+    roads = mcptools._roads(legal, view, ROAD_BOARD)
+    by_edge = {r["edge"]: r for r in roads}
+    # Edge 10 (0-1): 0 is ours, so it reaches 1 -- but 1 neighbors our own
+    # vertex 0, so no settlement could go there.
+    assert by_edge[10] == {"index": 0, "edge": 10, "to": 1, "pips": 8, "resources": ["Ore", "Wheat"], "settle": False,
+                           "then": 2, "then_pips": 3}
+    # Edge 11 (1-2): both new, but 1 is adjacent to our vertex 0 and 2 is
+    # not -- 2 is the frontier, and it is open two roads clear.
+    assert by_edge[11] == {"index": 1, "edge": 11, "to": 2, "pips": 3, "resources": ["Sheep"], "settle": True,
+                           "then": 3, "then_pips": 6}
+    # Edge 12 (2-3): both new, neither adjacent to anything owned -- picks
+    # 3, which carries its port.
+    assert by_edge[12]["to"] == 3 and by_edge[12]["port"] == "Brick 2:1" and by_edge[12]["settle"] is True
+    assert "then" not in by_edge[12]  # 3 is the end of the line: nothing settleable beyond it
+    # Sorted settle first, then pips descending within each: 12 (6 pips)
+    # before 11 (3 pips), both settleable; 10 last, not settleable at all.
+    assert [r["edge"] for r in roads] == [12, 11, 10]
+    assert not any("link" in r for r in roads)
+
+    # Both ends already ours (0 by settlement, 1 by road): a joining road.
+    edge_owner = [-1] * 13
+    edge_owner[11] = 0  # our road on 1-2 makes vertex 1 ours too
+    joined = mcptools._roads(legal[:1], {"seat": 0, "vertex_owner": [0, -1, -1, -1], "edge_owner": edge_owner}, ROAD_BOARD)
+    assert joined[0]["link"] is True and joined[0]["settle"] is False
+
+
+def test_spots_say_whether_a_port_matches_what_the_vertex_yields():
+    board = {
+        "vertices": [
+            {"id": 0, "pips": 5, "resources": ["Wheat"]},
+            {"id": 1, "pips": 4, "resources": ["Ore"]},
+            {"id": 2, "pips": 3, "resources": ["Wood"]},
+            {"id": 3, "pips": 2, "resources": ["Brick"]},
+        ],
+        "ports": [
+            {"vertices": [0, 1], "resource": "Wheat", "ratio": 2},
+            {"vertices": [2], "resource": None, "ratio": 3},
+        ],
+    }
+    legal = [{"type": "BUILD_SETTLEMENT", "a": v, "b": 0} for v in range(4)]
+    spots = mcptools._spots(legal, board)
+    by_vertex = {s["vertex"]: s for s in spots}
+    assert by_vertex[0]["port"] == "Wheat 2:1" and by_vertex[0]["port_matches"] is True
+    assert by_vertex[1]["port"] == "Wheat 2:1" and by_vertex[1]["port_matches"] is False
+    assert by_vertex[2]["port"] == "3:1" and by_vertex[2]["port_matches"] is True
+    assert "port" not in by_vertex[3] and "port_matches" not in by_vertex[3]
+
+
+def test_spots_keep_their_type_column_when_settlements_and_cities_mix():
+    uniform = {"spots": [{"index": 0, "type": "BUILD_CITY", "vertex": 3, "pips": 5, "resources": ["Ore"]}]}
+    mcptools._tabulate_summary(uniform)
+    assert uniform["spots"] == "BUILD_CITY:(index,vertex,pips,resources):0,3,5,Ore"
+    mixed = {"spots": [
+        {"index": 0, "type": "BUILD_CITY", "vertex": 3, "pips": 5, "resources": ["Ore"]},
+        {"index": 4, "type": "BUILD_SETTLEMENT", "vertex": 9, "pips": 4, "resources": ["Wood"]},
+    ]}
+    mcptools._tabulate_summary(mixed)
+    assert mixed["spots"] == "(index,type,vertex,pips,resources):0,BUILD_CITY,3,5,Ore|4,BUILD_SETTLEMENT,9,4,Wood"
+
+
+def test_afford_says_why_an_affordable_build_is_not_offered():
+    hand = {"Wood": 2, "Brick": 2, "Sheep": 2, "Wheat": 3, "Ore": 3}
+    board = {"piece_supply": {"road": 15, "settlement": 5, "city": 4}}
+    main = {"seat": 0, "phase": "MAIN", "dev_cards_remaining": 3,
+            "vertex_owner": [0, 0, -1], "vertex_building": [2, 1, 0], "edge_owner": [0, -1]}
+    legal = [{"type": "END_TURN"}]  # affordable, nothing offered
+    out = mcptools._afford(hand, legal, main, board)
+    assert out["road"] == {"ok": True, "legal": False, "why": "spot"}
+    assert out["settlement"]["why"] == "spot" and out["city"]["why"] == "spot"
+    assert out["dev_card"]["why"] == "spot"
+    # Not the main phase: every one says so.
+    rolling = {**main, "phase": "ROLL"}
+    assert {b: e["why"] for b, e in mcptools._afford(hand, [{"type": "ROLL"}], rolling, board).items()} == dict.fromkeys(mcptools._COSTS, "phase")
+    # Out of pieces, out of cards.
+    capped = {**main, "vertex_owner": [0] * 5, "vertex_building": [1] * 5, "edge_owner": [0] * 15, "dev_cards_remaining": 0}
+    out = mcptools._afford(hand, legal, capped, board)
+    assert out["settlement"]["why"] == "pieces" and out["road"]["why"] == "pieces"
+    assert out["city"]["why"] == "spot"  # four cities allowed, none built: a place is what's missing
+    assert out["dev_card"]["why"] == "deck"
+    # Offered, or unaffordable: no why.
+    assert "why" not in mcptools._afford(hand, [{"type": "BUILD_ROAD"}], main, board)["road"]
+    assert "why" not in mcptools._afford({"Wood": 1}, legal, main, board)["road"]
+
+
 def test_race_measures_the_win_the_leader_and_both_awards():
     view = {
         "winning_points": 10,
@@ -740,8 +1129,8 @@ def test_race_measures_the_win_the_leader_and_both_awards():
         ],
     }
     race = mcptools._race(view, view["players"][0])
-    assert race["points"] == 6 and race["to_win"] == 4 and race["winning_points"] == 10
-    assert race["leader"] == {"seat": 1, "points": 7}
+    assert race["points"] == 6 and race["to_win"] == 4
+    assert race["top_opponent"] == {"seat": 1, "points": 7}
     assert race["longest_road"] == {"yours": 4, "held": False, "holder": 1, "holder_has": 6, "need": 7}
     assert race["largest_army"] == {"yours": 1, "held": False, "holder": 2, "holder_has": 3, "need": 4}
 
@@ -754,7 +1143,7 @@ def test_race_when_you_hold_an_award_and_nobody_holds_the_other():
         ],
     }
     race = mcptools._race(view, view["players"][0])
-    assert race["winning_points"] == 10  # the standard rule when the view does not say
+    assert race["to_win"] == 6  # the standard ten when the view does not say
     assert race["longest_road"] == {"yours": 5, "held": True, "holder": 0, "holder_has": 5}
     assert race["largest_army"] == {"yours": 1, "held": False, "need": 3}
 
@@ -764,25 +1153,373 @@ def test_summarize_skips_a_view_that_does_not_reveal_a_hand():
     assert "summary" not in mcptools._summarize(spectator, TINY_BOARD)
 
 
-def test_new_game_summary_ranks_the_setup_spots_it_offers(live_server):
+def test_prune_drops_what_a_reader_never_acts_on():
+    view = {
+        "version": 9,
+        "claimed_seats": [0, 1],
+        "waiting_for": [1],
+        "trade_wait": [],
+        "seats": [{"seat": 0, "kind": "player", "name": "mcp"}, {"seat": 1, "kind": "empty", "name": None}],
+        "bank": {"Wood": 0, "Brick": 19, "Sheep": 0, "Wheat": 1, "Ore": 0},
+        "discard_quota": [0, 0, 0, 0],
+        "players": [
+            {
+                "seat": 0,
+                "last_roll": 7,
+                "longest_road": True,
+                "largest_army": False,
+                "known": {"Wood": 1, "Brick": 0, "Sheep": 0, "Wheat": 0, "Ore": 0},
+                "hand": {"Wood": 1, "Brick": 0, "Sheep": 2, "Wheat": 0, "Ore": 0},
+                "dev_cards": {"Knight": 1, "Victory Point": 0, "Road Building": 0, "Year Of Plenty": 0, "Monopoly": 0},
+            },
+            {"seat": 1, "last_roll": None, "longest_road": False, "largest_army": False,
+             "known": {"Wood": 0, "Brick": 0, "Sheep": 0, "Wheat": 0, "Ore": 0}},
+        ],
+    }
+    pruned = mcptools._prune(view)
+    for gone in ("version", "claimed_seats", "waiting_for", "trade_wait", "seats", "discard_quota"):
+        assert gone not in pruned
+    assert pruned["bank"] == {"Brick": 19, "Wheat": 1}
+    assert pruned["players"][0] == {
+        "seat": 0,
+        "kind": "player",
+        "known": {"Wood": 1},
+        "hand": {"Wood": 1, "Sheep": 2},
+        "dev_cards": {"Knight": 1},
+    }
+    assert pruned["players"][1] == {"seat": 1, "kind": "empty", "known": {}}
+
+
+def test_prune_keeps_discard_quota_while_any_seat_owes():
+    view = {"discard_quota": [0, 3, 0, 0], "players": []}
+    assert mcptools._prune(view)["discard_quota"] == [0, 3, 0, 0]
+
+
+def test_a_live_reply_is_pruned_and_still_playable(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    for gone in ("version", "claimed_seats", "waiting_for", "trade_wait", "seats"):
+        assert gone not in data
+    assert [p["kind"] for p in data["players"]] == ["player", "bot", "bot", "bot"]
+    assert all("last_roll" not in p for p in data["players"])
+    assert all("longest_road" not in p and "largest_army" not in p for p in data["players"])
+    assert "last_roll" in data and "winning_points" in data
+    assert "discard_quota" not in data  # nobody owes anything yet
+    me = data["players"][data["seat"]]
+    assert me["hand"] == {} and all(me["known"].values()) and all(data["bank"].values())
+    # A summary computed against the same hand is unaffected by sparse counts.
+    assert data["summary"]["afford"]["road"]["missing"] == {"Wood": 1, "Brick": 1}
+    result = client.call_tool("act", index=rows(data["summary"]["spots"])[0]["index"])
+    assert result["phase"] == "SETUP_ROAD" and "version" not in result
+
+
+def test_trade_ratios_are_on_every_reply(live_server):
+    """Sent every time: the one game that got them only when changed missed
+    its own port for several turns."""
+    _, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    assert data["trade_ratios"] == {"Wood": 4, "Brick": 4, "Sheep": 4, "Wheat": 4, "Ore": 4}
+    assert client.call_tool("state")["trade_ratios"] == data["trade_ratios"]
+
+
+def test_new_game_summary_ranks_the_setup_spots_it_offers(live_server):
+    server, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     summary = data["summary"]
-    assert summary["race"]["to_win"] == 10 and summary["race"]["winning_points"] == 10
+    assert summary["race"]["to_win"] == 10 and data["winning_points"] == 10
     assert summary["afford"]["road"] == {"ok": False, "legal": False, "missing": {"Wood": 1, "Brick": 1}}
-    spots = summary["spots"]
-    assert len(spots) == mcptools._SPOTS_CAP
-    assert summary["spots_omitted"] + len(spots) == data["legal_count"]
+    assert summary["spots"].startswith("SETUP_SETTLEMENT:(index,vertex,pips,resources")
+    spots = rows(summary["spots"])
+    assert "spots_omitted" not in summary  # uncapped: every legal vertex is here
+    raw_legal = server.tables.get(data["code"]).view(data["seat"])["legal_actions"]
+    assert len(spots) == len(raw_legal) > 30
     pips = [s["pips"] for s in spots]
     assert pips == sorted(pips, reverse=True) and pips[0] > 0
-    assert list(data["legal_actions"]) == ["SETUP_SETTLEMENT"]
-    for spot in spots:
-        assert spot["type"] == "SETUP_SETTLEMENT"
-        assert {"index": spot["index"], "vertex": spot["vertex"]} in data["legal_actions"]["SETUP_SETTLEMENT"]
+    assert list(data["legal_actions"]) == []  # SETUP_SETTLEMENT dropped: spots covers it
     board = client.call_tool("board")
-    by_id = {v["id"]: v for v in board["vertices"]}
-    assert all(by_id[s["vertex"]]["pips"] == s["pips"] for s in spots)
+    vertex_rows = board.split("vertices: id pips resources port neighbors\n")[1].split("\n\n")[0].splitlines()
+    by_id = {int(line.split()[0]): int(line.split()[1]) for line in vertex_rows}
+    assert all(by_id[s["vertex"]] == s["pips"] for s in spots)
+    assert "roads" not in summary  # no road is legal yet: still SETUP_SETTLEMENT
+
+
+def test_setup_road_summary_names_the_far_vertex_and_keeps_its_legal_group(live_server):
+    _, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    settlement = rows(data["summary"]["spots"])[0]
+    after = client.call_tool("act", index=settlement["index"])
+    assert after["phase"] == "SETUP_ROAD"
+
+    roads = rows(after["summary"]["roads"])
+    assert roads
+    assert list(after["legal_actions"]) == ["SETUP_ROAD"]  # summary.roads does not drop this group
+    assert {r["index"] for r in roads} == {r["index"] for r in legal(after, "SETUP_ROAD")}
+    # Every first road reaches a vertex one edge from the settlement just
+    # placed, so none of them could take a settlement of their own (the
+    # standard two-road minimum distance) and none names that vertex itself.
+    assert all(r["settle"] == 0 for r in roads)
+    assert all(r["to"] != settlement["vertex"] for r in roads)
+    assert any(r.get("then") is not None and r["then_pips"] > 0 for r in roads)  # the two-road plan is named
+
+    played = client.call_tool("act", index=roads[0]["index"])
+    assert played["phase"] != "SETUP_ROAD"  # settled to the next decision
+
+
+# --- can_offer: whether offer_trade() would be accepted --------------------
+
+
+def test_can_offer_true_only_on_your_own_turn_in_main_with_something_legal():
+    base = {"phase": "MAIN", "to_move": 0, "seat": 0, "legal_actions": [{"type": "END_TURN"}], "trade_round": None}
+    assert mcptools._can_offer(base) is True
+    assert mcptools._can_offer({**base, "phase": "SETUP_ROAD"}) is False
+    assert mcptools._can_offer({**base, "to_move": 1}) is False
+    assert mcptools._can_offer({**base, "legal_actions": []}) is False
+    assert mcptools._can_offer({**base, "trade_round": {"offer": {}, "responses": [], "awaiting": [1]}}) is False
+
+
+def _park_in_main(server, code: str, seat: int, hand: dict | None = None) -> None:
+    """Force a live table straight into `Phase.MAIN` on `seat`'s turn --
+    the same forcing shortcut `_park_in_discard`/`_park_in_robber` use.
+    END_TURN is always legal in MAIN, so this is enough for `can_offer`
+    without needing a real hand; `hand` fills one in for a caller that
+    also wants to offer a trade (`open_round` refuses an offer this
+    seat's hand can't cover)."""
+    from hexset.board.terrain import NUM_RESOURCES, Resource
+    from hexset.game import Phase
+
+    game = server.tables.get(code).session.game
+    game.phase = Phase.MAIN
+    game.current_player = seat
+    if hand is not None:
+        game._state.hands[seat] = [0] * NUM_RESOURCES
+        for name, count in hand.items():
+            game._state.hands[seat][Resource[name.upper()]] = count
+
+
+def test_can_offer_is_true_in_main_and_false_while_your_own_round_is_open(live_server):
+    server, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    seat = data["seat"]
+    assert data["can_offer"] is False  # still SETUP_SETTLEMENT
+
+    _park_in_main(server, data["code"], seat, hand={"Wood": 1})
+    state = client.call_tool("state")
+    assert state["can_offer"] is True
+
+    offered = client.call_tool("offer_trade", give={"Wood": 1}, want={"Ore": 1}, timeout=0)
+    if offered["trade_round"] is not None:  # the bots answered at once
+        assert offered["can_offer"] is False
+        offered = client.call_tool("choose_trade", decline=True)
+    assert offered["trade_round"] is None
+    assert offered["can_offer"] is True  # the round is closed; still our MAIN turn
+
+
+# --- legal_actions drops what summary already covers ----------------------
+
+
+def _park_in_robber(server, code: str, seat: int) -> None:
+    """Force a live table straight into `Phase.ROBBER` on `seat`'s move --
+    the same forcing shortcut `_park_in_discard` uses, for the same reason:
+    nothing about reaching the phase honestly matters to what this checks."""
+    from hexset.game import Phase
+
+    game = server.tables.get(code).session.game
+    game.phase = Phase.ROBBER
+    game.current_player = seat
+
+
+def _robber_index(view: dict) -> int:
+    """The `act()` index out of `summary.robber`'s first hex's `options`
+    cell (`index:victim`, `;`-joined per victim -- see `_tabulate_summary`).
+    `rows()` only splits the `resources` column, so this one cell is parsed
+    by hand."""
+    row = rows(view["summary"]["robber"])[0]
+    return int(str(row["options"]).split(";")[0].split(":")[0])
+
+
+def test_move_robber_group_is_dropped_once_summary_robber_covers_it(live_server):
+    server, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    seat = data["seat"]
+    _park_in_robber(server, data["code"], seat)
+
+    state = client.call_tool("state")
+    assert "MOVE_ROBBER" not in state["legal_actions"]
+    assert state["summary"]["robber"]
+    assert "legal_count" not in state
+
+
+def test_act_and_expect_still_resolve_a_robber_index_from_the_summary(live_server):
+    """Dropping the MOVE_ROBBER group from `legal_actions` must not touch
+    `act(index)`/`expect`: both resolve against the raw list `_act` fetches
+    fresh, never the grouped one."""
+    server, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    seat = data["seat"]
+    _park_in_robber(server, data["code"], seat)
+
+    state = client.call_tool("state")
+    hex_id = rows(state["summary"]["robber"])[0]["hex"]
+    index = _robber_index(state)
+
+    stale = client.call_tool_raw(
+        "act", index=index, expect={"type": "MOVE_ROBBER", "hex": hex_id + 1, "victim": None}
+    )
+    assert stale[2]["result"]["isError"] is True
+
+    result = client.call_tool("act", index=index, expect={"type": "MOVE_ROBBER", "hex": hex_id, "victim": None})
+    assert result["robber"] == hex_id
+
+
+# --- discard: every DISCARD in one call ----------------------------------
+#
+# A seven with a nine-card hand used to be four act(index) round-trips.
+# `discard(cards)` posts them all, re-reading the fresh legal_actions
+# between each the way `_act` resolves an index (`mcptools._discard`).
+
+
+def _park_in_discard(server, code: str, seat: int, hand: dict, current_player: int | None = None) -> None:
+    """Force a live table straight into `Phase.DISCARD` owing exactly half
+    of `hand` from `seat`, the same shortcut `test_api.py`/`test_webplay.py`
+    use to reach the phase without a real seven -- discarding is not a
+    turn (`hexset.game.may_act`), so nothing about reaching it honestly
+    matters to what these tests check."""
+    from hexset.board.terrain import NUM_RESOURCES, Resource
+    from hexset.game import Phase
+
+    game = server.tables.get(code).session.game
+    game.phase = Phase.DISCARD
+    if current_player is not None:
+        game.current_player = current_player
+    game._state.hands[seat] = [0] * NUM_RESOURCES
+    total = 0
+    for name, count in hand.items():
+        game._state.hands[seat][Resource[name.upper()]] = count
+        total += count
+    game.discard_quota = [0] * game._state.num_players
+    game.discard_quota[seat] = total
+
+
+def test_discard_zeroes_the_quota_and_settles_to_the_robber(live_server):
+    server, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    seat = data["seat"]
+    _park_in_discard(server, data["code"], seat, {"Wood": 2, "Brick": 2}, current_player=seat)
+
+    result = client.call_tool("discard", cards={"Wood": 2, "Brick": 2})
+    assert "DISCARD" not in result["legal_actions"]
+    assert result["phase"] == "ROBBER"
+    assert result["your_move"] == "act"  # the robber move is ours: same seat rolled
+
+
+def test_discard_rejects_a_total_that_does_not_match_the_quota(live_server):
+    server, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    seat = data["seat"]
+    _park_in_discard(server, data["code"], seat, {"Wood": 2, "Brick": 2}, current_player=seat)
+
+    status, _, response = client.call_tool_raw("discard", cards={"Wood": 1})
+    assert status == 200 and response["result"]["isError"]
+    assert "discard_quota of 4" in response["result"]["content"][0]["text"]
+    assert client.call_tool("state")["phase"] == "DISCARD"  # nothing was played
+
+
+def test_discard_rejects_more_than_the_hand_holds(live_server):
+    server, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    seat = data["seat"]
+    _park_in_discard(server, data["code"], seat, {"Wood": 2, "Brick": 2}, current_player=seat)
+
+    status, _, response = client.call_tool_raw("discard", cards={"Wood": 3, "Brick": 1})
+    assert status == 200 and response["result"]["isError"]
+    assert "short" in response["result"]["content"][0]["text"]
+
+
+def test_discard_rejects_an_unknown_resource(live_server):
+    server, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    seat = data["seat"]
+    _park_in_discard(server, data["code"], seat, {"Wood": 4}, current_player=seat)
+
+    status, _, response = client.call_tool_raw("discard", cards={"Gold": 4})
+    assert status == 200 and response["result"]["isError"]
+    assert "not a resource name" in response["result"]["content"][0]["text"]
+
+
+def test_discard_only_works_during_the_discard_phase(live_server):
+    _, base = live_server
+    client = connected(base)
+    client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)  # setup phase, not DISCARD
+
+    status, _, response = client.call_tool_raw("discard", cards={"Wood": 1})
+    assert status == 200 and response["result"]["isError"]
+    assert "DISCARD phase" in response["result"]["content"][0]["text"]
+
+
+def test_act_still_plays_a_single_discard(live_server):
+    """The bulk `discard(cards)` tool is new; `act(index)` on one DISCARD
+    entry at a time -- the only way to discard before it existed -- must
+    keep working."""
+    server, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
+    seat = data["seat"]
+    _park_in_discard(server, data["code"], seat, {"Wood": 2, "Brick": 2}, current_player=seat)
+
+    state = client.call_tool("state")
+    index = legal(state, "DISCARD")[0]["index"]
+    after = client.call_tool("act", index=index)
+    assert after["phase"] == "DISCARD"
+    assert sum((after["players"][seat].get("hand") or {}).values()) == 3
+
+
+def test_discard_posts_one_action_per_card_re_reading_between_them():
+    """Unit-level: exactly the DISCARD wire actions land, one per card, and
+    each is matched against the `legal_actions` the previous POST just
+    returned -- never a stale one from the initial GET."""
+    state = {
+        "phase": "DISCARD",
+        "seat": 1,
+        "discard_quota": [0, 4, 0, 0],
+        "players": [{"seat": 1, "hand": {"Wood": 2, "Brick": 2}}],
+        "legal_actions": [{"type": "DISCARD", "a": 0, "b": 0}, {"type": "DISCARD", "a": 1, "b": 0}],
+    }
+    after_wood = {**state, "discard_quota": [0, 3, 0, 0], "players": [{"seat": 1, "hand": {"Wood": 1, "Brick": 2}}]}
+    after_both_wood = {
+        **state,
+        "discard_quota": [0, 2, 0, 0],
+        "players": [{"seat": 1, "hand": {"Wood": 0, "Brick": 2}}],
+        "legal_actions": [{"type": "DISCARD", "a": 1, "b": 0}],
+    }
+    after_one_brick = {**after_both_wood, "discard_quota": [0, 1, 0, 0], "players": [{"seat": 1, "hand": {"Brick": 1}}]}
+    settled = {**after_one_brick, "discard_quota": [0, 0, 0, 0], "phase": "ROBBER", "legal_actions": []}
+    tables = RecordingTables(
+        {
+            ("GET", "/api/state"): state,
+            ("POST", "/api/action"): [after_wood, after_both_wood, after_one_brick, settled],
+        }
+    )
+    data = mcptools.call_tool(
+        tables, mcptools.Session(token="tok", code="abcdef"), "discard", {"cards": {"Wood": 2, "Brick": 2}, "timeout": 0}
+    )
+    assert [call[2] for call in tables.calls if call[1] == "/api/action"] == [
+        {"action": {"type": "DISCARD", "a": 0, "b": 0}},
+        {"action": {"type": "DISCARD", "a": 0, "b": 0}},
+        {"action": {"type": "DISCARD", "a": 1, "b": 0}},
+        {"action": {"type": "DISCARD", "a": 1, "b": 0}},
+    ]
+    assert data["phase"] == "ROBBER"
 
 
 # --- your_move: which tool the table wants from this seat ---------------
@@ -794,7 +1531,7 @@ def test_new_game_summary_ranks_the_setup_spots_it_offers(live_server):
 def test_your_move_is_act_on_your_own_turn(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     assert data["your_move"] == "act"
     assert data["waiting_on"] == []
 
@@ -904,7 +1641,7 @@ def test_trim_log_leaves_a_view_carrying_no_log_alone():
 def test_state_log_after_trims_the_transcript_it_sends_back(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     # A freshly dealt game has an empty transcript -- place something so
     # there are lines for the cursor to be about.
     client.call_tool("act", index=_setup_settlement_index(data))
@@ -922,7 +1659,7 @@ def test_state_log_after_trims_the_transcript_it_sends_back(live_server):
 def test_act_log_after_sends_only_the_lines_the_action_added(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     before = client.call_tool("state")
 
     result = client.call_tool("act", index=_setup_settlement_index(data), log_after=before["log_total"])
@@ -939,16 +1676,15 @@ def test_the_cursor_is_automatic_for_a_caller_that_never_sends_log_after(live_se
     the next plain read is the rewritable tail only."""
     _, base = live_server
     client = connected(base)
-    dealt = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    dealt = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     assert dealt["log_from"] == 0
     # Our first settlement and road, then the bots' -- then our second
     # settlement, after which the table is ours (the road is still owed) and
     # the transcript holds still for the rest of the test.
     for _ in range(2):
         data = client.call_tool("state")
-        client.call_tool("act", index=next(iter(data["legal_actions"].values()))[0]["index"])
-    _, data = _wait_for_turn_streamed(client)
-    client.call_tool("act", index=_setup_settlement_index(data))
+        data = client.call_tool("act", index=_next_setup_index(data))
+    client.call_tool("act", index=_setup_settlement_index(data))  # settled: ours again
 
     first = client.call_tool("state", full_log=True)
     assert first["log_from"] == 0
@@ -963,7 +1699,7 @@ def test_the_cursor_is_automatic_for_a_caller_that_never_sends_log_after(live_se
 def test_an_explicit_log_after_overrides_the_automatic_cursor(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     client.call_tool("act", index=_setup_settlement_index(data))
     client.call_tool("state")  # the session now holds everything
 
@@ -975,7 +1711,7 @@ def test_an_explicit_log_after_overrides_the_automatic_cursor(live_server):
 def test_full_log_resets_a_session_that_is_already_caught_up(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     client.call_tool("act", index=_setup_settlement_index(data))
     client.call_tool("state")
 
@@ -989,7 +1725,7 @@ def test_full_log_resets_a_session_that_is_already_caught_up(live_server):
 def test_a_failed_call_does_not_move_the_cursor(live_server):
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     client.call_tool("act", index=_setup_settlement_index(data))
     before = client.call_tool("state", full_log=True)
 
@@ -1000,15 +1736,16 @@ def test_a_failed_call_does_not_move_the_cursor(live_server):
     assert client.call_tool("state")["log_from"] == before["log_total"] - 1
 
 
-def test_trim_log_ignores_the_cursor_once_the_game_is_over():
-    """`state_view` re-renders the whole transcript with redaction lifted the
-    moment the game ends (`omniscient or over`), so lines the caller already
-    holds change wording arbitrarily far back. A spliced reply would leave it
-    with a stale prefix -- the final read sends everything instead."""
+def test_trim_log_keeps_the_cursor_once_the_game_is_over():
+    """The game's end lifts redaction across the whole transcript, but the
+    final reply no longer pushes it all: the seat gets the usual slice and
+    asks with `full_log` if it wants the un-redacted history."""
     view = mcptools._trim_log({"log": ["a", "b", "c", "d"], "game_over": True}, 3)
-    assert view["log"] == ["a", "b", "c", "d"]
-    assert view["log_from"] == 0
+    assert view["log"] == ["c", "d"]
+    assert view["log_from"] == 2
     assert view["log_total"] == 4
+    whole = mcptools._trim_log({"log": ["a", "b", "c", "d"], "game_over": True}, None)
+    assert whole["log"] == ["a", "b", "c", "d"] and whole["log_from"] == 0
 
 
 def test_trim_log_still_trims_while_the_game_is_running():
@@ -1023,14 +1760,14 @@ def test_wait_for_turn_carries_the_summary_too(live_server):
     yield -- it was missing here while `state` had it."""
     _, base = live_server
     client = connected(base)
-    client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     for _ in range(4):
         view = client.call_tool("state")
         if not view.get("legal_actions"):
             break
         client.call_tool("act", index=0)
 
-    _, waited = _wait_for_turn_streamed(client)
+    waited = client.call_tool("wait_for_turn")
     assert "summary" in waited
     assert "afford" in waited["summary"]
     assert waited["summary"] == client.call_tool("state", full_log=True)["summary"]
@@ -1043,16 +1780,15 @@ def test_wait_for_turn_returns_the_same_shape_as_state(live_server):
     grouped them -- so the whole key set is pinned equal here, not one field."""
     _, base = live_server
     client = connected(base)
-    data = client.call_tool("new_game", model=MODEL, opponents=SOLO)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=SOLO)
     client.call_tool("act", index=_setup_settlement_index(data))
-    after_road = client.call_tool("act", index=_setup_road_index(client.call_tool("state")))
-    assert after_road["your_move"] == "wait"
+    waited = client.call_tool("act", index=_setup_road_index(client.call_tool("state")))
+    assert waited["your_move"] == "act"  # settled through the bots' placements
 
-    _, waited = _wait_for_turn_streamed(client)
     plain = client.call_tool("state")
     assert set(waited) == set(plain)
-    assert isinstance(waited["legal_actions"], dict) and waited["legal_actions"]
+    assert isinstance(waited["legal_actions"], dict) and waited["summary"]["spots"]
     assert waited["legal_actions"] == plain["legal_actions"]
-    assert waited["legal_count"] == plain["legal_count"]
+    assert "legal_count" not in waited
     assert waited["buildings"] == plain["buildings"] and waited["roads"] == plain["roads"]
     assert not {"vertex_owner", "vertex_building", "edge_owner"} & set(waited)

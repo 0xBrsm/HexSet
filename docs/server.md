@@ -140,30 +140,89 @@ client with that Streamable HTTP URL; no separate stdio command is provided.
 An `initialize` request returns an `Mcp-Session-Id` header. Send it with all
 subsequent requests. A missing session ID returns 400; an unknown ID returns
 404 and requires reinitialization. `DELETE /mcp` ends the session.
-`GET /mcp` returns 405; events are streamed in response to requests.
+`GET /mcp` returns 405. Every `tools/call` is answered as an SSE stream
+(`text/event-stream`): `: keepalive` comment lines while the call waits,
+then one `message` event carrying the JSON-RPC response. `initialize`,
+`tools/list` and `ping` are plain JSON responses.
 
-Available tools are `models`, `new_game`, `join`, `resume_game`, `board`,
-`state`, `wait_for_turn`, `act`, `undo`, `leave_game`, `get_table`,
-`offer_trade`, `answer_trade`, and `choose_trade`.
+Available tools are `bots`, `new_game`, `join`, `resume_game`, `board`,
+`state`, `wait_for_turn`, `act`, `discard`, `leave_game`, `offer_trade`,
+`answer_trade`, and `choose_trade`. There is no `undo` (the HTTP API's is a
+convenience for a person at the browser; a settling reply leaves no moment
+for it) and `can_undo` is not carried. `bots` lists
+the opponent names `new_game`'s `opponents` accepts (`GET /api/models`).
 
-`new_game` and `join` require a `model` string identifying the client model.
-The server trims and lowercases that string, then hashes it as the seat's
-client identity. `resume_game(code, model)` uses the same string to reclaim
-the seat after an MCP session or server restart. There is no local session
-cache. This identity is derived from the supplied identifier, not from
-independently verified model credentials.
+`new_game` and `join` require an `identity` string naming the caller (an
+LLM would typically pass its model id). The server trims and lowercases
+that string, then hashes it as the seat's client identity.
+`resume_game(code, identity)` uses the same string to reclaim the seat
+after an MCP session or server restart. There is no local session cache.
+The identity is whatever string the caller supplies; nothing verifies it.
 
 `act(index)` submits one entry from the latest `state().legal_actions`.
-Ending a turn requires `END_TURN`. In MCP replies `legal_actions` is grouped
+Ending a turn requires `END_TURN`. Every acting tool (`new_game`, `join`,
+`resume_game`, `act`, `discard`, `offer_trade`, `answer_trade`,
+`choose_trade`) replies at the caller's next decision, not the instant
+after the action: it blocks until `your_move` is something other than
+`wait`, for at most `timeout` seconds (default and cap 600; `0` replies at
+once), so a seat that ends its turn gets back the table as it stands when
+play returns to it. Two forced moves are played inside that wait rather
+than handed back to decide: a `ROLL` that is the only legal action (a
+seat holding a Knight still chooses), and a `pass` on a broadcast offer
+only while the seat's hand is empty -- an offer the hand cannot cover can
+still be countered, and each `pending` entry says so with `can_accept`.
+The seat's own trade round is settled the same way once everyone has
+answered and nothing is left to choose. `offer_trade` takes an optional
+`to`, the seats the offerer would trade with, best first: the best-ranked
+listed seat's accept as offered is executed, an unlisted seat's accept is
+refused, and no listed accept closes the round. Without `to`, one accept
+executes, none closes, and two or more come back as `your_move:
+choose_trade`. A counter from any seat always comes back.
+
+`discard(cards)` plays a whole seven's worth of discards in one call:
+`cards` is a resource -> count dictionary that must total exactly this
+seat's `discard_quota`, no more and no less. The engine still takes one
+card at a time (`act(index)` on a single `DISCARD` entry still works, one
+card per call); `discard` is the same submissions made for the caller,
+each matched against the freshest `legal_actions` after the previous one
+landed.
+
+`board` replies as text, not JSON: an incidence encoding with one line per
+hex (id, resource, pips, vertex ids) and one per vertex (id, pips,
+resources, port, neighboring vertex ids), with render geometry and the
+constant name tables left out. There is no edge list: an edge id is opaque
+without knowing the two vertices it joins, and only the legal ones are
+worth resolving -- `state()`'s `summary.roads` names each one's destination
+vertex directly. In every state reply
+`legal_actions`' per-type groups and `summary.spots`/`summary.robber` are
+tables, `(keys):row|row` with comma-separated cells (`-` null, `;`
+between list items; `robber` hits as `seat:Ns+Nc`, options as
+`index:victim`), and JSON is written without spaces. The MCP layer
+annotates a copy of the table's layout; the HTTP `GET /api/board` the
+browser draws from is untouched. `wait_for_turn` does only the waiting, and is needed
+only after a reply whose `timeout` ran out. `state`, `board`, `bots` and
+`leave_game` reply immediately. In MCP replies `legal_actions` is grouped
 by action type; each entry carries the flat `index` to act on and a named
 operand (`edge`, `vertex`, `hex` and `victim`, or the resource names for
-bank trades, discards, Monopoly and Year of Plenty), and `legal_count` is
-the flat total. Board occupancy comes as `buildings` (vertex, seat, kind)
+bank trades, discards, Monopoly and Year of Plenty). Board occupancy comes as `buildings` (vertex, seat, kind)
 and `roads` (edge ids, one list per seat) rather than the HTTP API's dense
-`vertex_owner`, `vertex_building` and `edge_owner` arrays.
+`vertex_owner`, `vertex_building` and `edge_owner` arrays. MCP replies also
+drop the HTTP view's `version`, `claimed_seats`, `waiting_for`, `trade_wait`
+and per-player `last_roll`, `longest_road` and `largest_army` (`summary.race`
+already names the award's holder and this seat's own count); fold `seats`
+into `players` as each entry's `kind`; and send `hand`, `known`, `dev_cards`
+and `bank` sparse, a missing name meaning zero. `discard_quota` is omitted
+when every seat's is zero, and each `summary.afford` build's `legal` key
+when `legal_actions` itself is empty (every build would read `false` for
+the same reason). `trade_ratios` is on every reply.
 
-Trading tools use resource-name dictionaries and indices into `get_table()`
-results, translating them to signed HTTP bundles. Pass the chosen
+Every reply carries `can_offer`, true exactly when `offer_trade` would be accepted: this
+seat's own turn, `Phase.MAIN`, at least one legal action, and no trade
+round of its own already open (`TableApi.open_round`'s preconditions,
+`hexset/server/api.py`, plus the one a caller can't read off those alone).
+Trading tools use resource-name dictionaries and indices into that reply's
+`pending` and `trade_round.responses`, translating them to signed HTTP
+bundles. Pass the chosen
 `legal_actions` entry, with its group key as `type`, as `act`'s `expect` to
 refuse if that index now names a different action. The trade tools take no
 staleness guard: the server already rejects an answer or a choice that does
@@ -173,30 +232,50 @@ anything, including other seats answering the same trade round.
 
 Every state-returning tool also carries `summary`, derived server-side from
 the view and the fixed board: `afford` (per build, whether the hand covers
-it, what it is short, and whether `legal_actions` offers it now), `race`
-(points and distance to the win, the leading opponent by public points, and
+it, what it is short, whether `legal_actions` offers it now, and if not
+while affordable, `why`: `phase`, `pieces`, `deck` or `spot`), `race`
+(points and distance to the win, the leading opponent (`top_opponent`) by public points, and
 for each award the caller's count, the holder's, and the count that would
-take it), and, only when such a move is legal, `spots` (each settlement or
-city placement with the vertex's pips, resources and port, best first,
-capped with `spots_omitted`) and `robber` (each hex the robber may move to,
-its pips, whose buildings it hits, and an `act` index per victim). Every
-entry names the `legal_actions` index it corresponds to. The state also
+take it), and, only when such a move is legal, `spots` (every settlement or
+city placement with the vertex's pips, resources, port and `port_matches`, best first),
+`robber` (each hex the robber may move to, its pips, whose buildings it
+hits, and an `act` index per victim), and `roads` (every legal road, with
+`to` -- the vertex it reaches that isn't already this seat's own network,
+that vertex's pips/resources/port, and `settle`, whether a settlement
+could go there -- best, a settleable end, first). Every entry names the
+`legal_actions` index it corresponds to. Whichever of `legal_actions`'
+SETUP_SETTLEMENT/BUILD_SETTLEMENT/BUILD_CITY or MOVE_ROBBER groups `spots`
+or `robber` covers is then dropped from `legal_actions` -- the same
+entries, indexed the same way, so keeping both said nothing twice.
+Each `summary.roads` row also carries `then`, the best settleable vertex
+one road beyond `to`, with `then_pips`. `summary.roads` does not drop
+BUILD_ROAD/SETUP_ROAD from `legal_actions`; both stay. The state also
 carries `winning_points`, the rule the game is played to.
 
 The transcript `log` is sent incrementally. Each MCP session remembers how
 many lines it has been sent, and every state-returning reply carries only
 the lines added since that session's previous reply plus the one trailing
 line that may have been rewritten in place, with `log_from` naming the
-index the slice starts at and `log_total` the whole length. A new seat, a
-reclaimed seat and the final read of a finished game get the whole
-transcript. `full_log: true` forces that on any call, for a client that lost
-a reply; `log_after: <n>` overrides the cursor with an explicit line count.
+index the slice starts at and `log_total` the whole length. A new seat and
+a reclaimed seat get the whole transcript. The game's end lifts redaction
+across the whole history (every earlier steal names its card); that is not
+pushed -- the final reply carries the usual slice -- and `full_log: true`
+fetches the un-redacted whole on request, as it does on any call for a
+client that lost a reply. `log_after: <n>` overrides the cursor with an
+explicit line count. The `game_over` reply also carries `usage`, the number of
+replies this MCP session was sent and their total bytes as the client
+received them (the final reply included) -- the payload half of what a seat
+costs, measured server-side so any client can be compared on the same number.
 
 Every state-returning tool answers with `your_move`: `act`, `discard`,
 `answer_trade` or `choose_trade` names the tool the table wants from the
-caller now, `wait` means none does and `waiting_on` lists the seats it is
-waiting for, and `game_over` is the end. It is derived from `legal_actions`,
-`pending`, `trade_round`, `trade_wait` and `to_move`, which remain available.
+caller now, `wait` means none does (only after a `timeout` ran out, or
+while seats are still open) and `waiting_on` lists the seats it is waiting
+for, and `game_over` is the end. It is derived from `legal_actions`,
+`pending`, `trade_round` and `discard_quota`, which remain available, and
+from `to_move`, `waiting_for` and `trade_wait`, which do not. Also dropped
+from every reply: `awaiting_confirm` (the browser's setup-turn hold), and
+`locked`, `trades` and `winner` while empty or null, `started` while true.
 
 `wait_for_turn(timeout=...)` waits until `your_move` is anything but
 `wait`: legal actions, a pending offer, a fully answered round, or game

@@ -30,6 +30,29 @@ Changes to the HexSet distribution. The project follows
 
 ## 0.52.0
 
+### Fixed
+
+- **Clicking a player at a finished game to read their cards moved the rest
+  of the page.** `renderHand` had exactly two shapes: a one-line hint when
+  nobody was picked, or the full two-column card grid once somebody was.
+  `#hand` sits in `#play-area`, sized to its own content, with `#log` taking
+  whatever's left below it, so swapping one shape for the other shoved `#log`
+  up or down by however much a header row and a card grid cost over a single
+  line of text. The pane now always lays out the same two columns the
+  viewer's own hand uses during play; with nobody picked they are invisible
+  and CLICK A PLAYER TO SEE THEIR CARDS sits centred over the space they
+  hold, and picking a row reveals them -- no title over the cards, the
+  highlighted roster row says whose they are.
+
+- **The Undo corner button painted over an open modal instead of under it.**
+  `#undo-build` carried a flat `z-index: 60`, above `#modal`'s `55`, so it
+  would reach through *any* modal -- a purpose it only ever needed for the
+  "Steal from" robber-victim modal, whose own hex a self-played Knight
+  stays undoable behind. Every other modal (trade, discard, Monopoly, Year
+  of Plenty) now covers it like it covers the rest of the board: the corner
+  sits at `z-index: 40` by default and only gets `.reach-modal`'s `60` back
+  while `modalMode` is `"steal"`.
+
 ### Changed
 
 - **The network trade gate values a candidate exchange in one forward
@@ -144,6 +167,178 @@ Changes to the HexSet distribution. The project follows
   See [the cache contract and examples](docs/determinized-worlds.md).
 
 ### Changed
+
+- **`summary.afford` says why an affordable build is not offered.** `why`:
+  `phase` (not this seat's main phase), `pieces` (none of that piece left),
+  `deck` (no development card left) or `spot` (nowhere to put it). Asked
+  for by the first Sonnet seat, which met `ok: true, legal: false` with no
+  way to tell a distance-rule dead end from a wrong phase.
+
+- **MCP `trade_ratios` on every reply; `race.leader` is `top_opponent`.** The
+  first Sonnet seat, sent its ratios only when they changed, assumed 4:1 and
+  missed its own port for several turns -- 60 bytes a reply was the wrong
+  saving. `leader` named the leading *opponent* and read as the overall
+  leader; the new name says what it is. The `robber` table's `hits` and
+  `options` encodings are restated in the `state` description.
+
+- **MCP replies kept `winner` when seat 0 won.** The trim that drops a null
+  `winner` dropped seat 0 as well; caught by the first Terra game, which
+  seat 0 won.
+
+- **MCP `game_over` reply reports `usage`.** `calls` and `bytes`, what this
+  session was sent over the game as the client received it, counted
+  server-side so a seat's payload cost can be compared across clients
+  independently of what the model spends reasoning. `board`'s description
+  now says to read it once after taking a seat, before planning beyond what
+  `summary` shows.
+
+- **`summary.roads` flags a network-joining road.** A legal road with both
+  ends already the seat's own carries `link`; its `to` is a vertex the seat
+  holds, not ground it reaches.
+
+- **The MCP `game_over` reply no longer pushes the whole transcript.** It
+  used to, so the client could replace its copy with the redaction-lifted
+  history -- 5-6k tokens a seat rarely reads. The final reply now carries
+  the usual slice; `state(full_log=true)` fetches the un-redacted whole on
+  request.
+
+- **`summary.spots` keeps `type` when settlements and cities mix.** The
+  table's `KIND:` prefix assumed one kind per list; mid-game, once both are
+  affordable, a settlement spot was labelled `BUILD_CITY:`. A mixed list
+  now carries `type` as a column.
+
+- **`summary.roads` plans two roads.** Each legal road also names `then`,
+  the best settleable vertex one road further on, with `then_pips` -- the
+  two-road plan every setup road and most early ones are, so a seat no
+  longer reads the board to make it. Booleans in reply tables print as
+  `1`/`0`.
+
+- **Fewer MCP round-trips that decide nothing.** A seat's own trade round
+  is settled inside the wait once everyone has answered and there is
+  nothing to choose: every answer a pass closes it, exactly one accept as
+  offered with no counter executes it. `offer_trade` takes `to`, the seats
+  the offerer would trade with best first, and then the best-ranked listed
+  accepter is executed and an unlisted one (the leader, say) refused; a
+  counter from anyone always comes back. The `undo` tool and `can_undo` are
+  gone from MCP (a browser convenience; a settling reply leaves no moment
+  for it), as is `get_table` (an alias of `state` since the first pass).
+  Replies drop `to_move`, `awaiting_confirm` and `legal_count`, and
+  `locked`/`trades`/`winner`/`started` while they say nothing.
+
+- **Uncoverable offers reach the MCP seat again.** The auto-pass added
+  earlier today fired on any broadcast offer the hand could not cover;
+  a seat can still counter such an offer (and did, successfully), so the
+  server now passes only while the hand is empty. Each `pending` entry
+  carries `can_accept` so the reader sees at once whether `accept` is
+  possible or only `counter`/`pass`.
+
+- **`summary.spots` says whether a port matches.** A spot on a port carries
+  `port_matches`: true for a 3:1, or a 2:1 in a resource the vertex itself
+  yields -- the join a reader had to make by hand to value the port.
+
+- **MCP replies trim four more repeats.** Per-player `longest_road` and
+  `largest_army` are gone (`summary.race` already names the holder and
+  this seat's own count); each `summary.afford` build's `legal` key is
+  omitted once `legal_actions` itself is empty, rather than reading
+  `false` four times for the one reason; `discard_quota` is omitted when
+  every seat's is zero; and `trade_ratios` was sent only when it differed
+  from the last reply -- reverted below, after a seat missed its port.
+
+- **MCP replies carry `can_offer`.** True exactly when `offer_trade()`
+  would be accepted: this seat's own turn, `MAIN`, a legal action to take,
+  and no trade round of its own already open. Reading `phase`/`to_move`
+  alone can't tell a caller the last two -- an empty seat can sit in MAIN
+  with nothing legal, and the wire would silently replace an open round
+  rather than refuse a second offer -- so this checks the same
+  preconditions `TableApi.open_round` (`api.py`) does.
+
+- **MCP `summary.roads` joins a legal road to the vertex it reaches.**
+  Every legal BUILD_ROAD/SETUP_ROAD edge gets `to` -- the endpoint this
+  seat's own network doesn't already touch, so the vertex the road
+  actually opens up, not the stub it grows from -- that vertex's pips,
+  resources and port, and `settle` (a settlement could go there). `board`
+  drops its `edges` block: an edge id was opaque without the vertex pair
+  anyway, and only the legal ones (which `summary.roads` now names) were
+  ever worth resolving.
+
+- **MCP `legal_actions` drops what `summary` already covers.** Once
+  `summary.spots` is non-empty, its SETUP_SETTLEMENT/BUILD_SETTLEMENT/
+  BUILD_CITY groups leave `legal_actions`; once `summary.robber` is,
+  MOVE_ROBBER does too -- the same entries, the same `index`, joined to the
+  board either way, so keeping both groups said nothing a reader used
+  twice. `spots` also lists every legal placement now, not the best 15:
+  the cap (and `spots_omitted`) existed only because the raw group next to
+  it repeated the tail for nothing; `legal_count` is unaffected.
+
+- **MCP `discard(cards)` plays a whole seven in one call.** A nine-card
+  hand on a seven used to cost four `act(index)` round-trips, one DISCARD
+  at a time; `discard({"Wood": 2, "Ore": 1, ...})` posts them all, checked
+  up front against `discard_quota` and the hand, and matched one at a time
+  against the freshest `legal_actions` after each lands. `act(index)` on a
+  single `DISCARD` entry still works.
+
+- **MCP tool text cut by half.** The `tools/list` descriptions and argument
+  schemas an LLM seat re-reads on every call went from 13.5 KB to 8.9 KB
+  (descriptions 7.2 KB to 3.7 KB). The state reply's shape is now documented
+  once, on `state`; every other playing tool says only what differs and
+  "reply as state()". `get_table` is described as what it always was, an
+  alias of `state`, and its trade-field reference moved into `state`'s. The
+  three `get_table()'s ...` index errors now say `state()'s ...`. Transport
+  detail (SSE keepalives) and design history left the descriptions; nothing
+  a caller acts on did.
+
+- **MCP acting tools reply at the caller's next move.** `new_game`, `join`,
+  `resume_game`, `act`, `undo`, `offer_trade`, `answer_trade` and
+  `choose_trade` no longer answer the instant after the action: each blocks
+  until `your_move` is something other than `wait` -- `act(END_TURN)` comes
+  back when the table has played round to the caller, an offer needs its
+  answer, or the game is over -- for at most `timeout` seconds (a new
+  argument on each; default and cap 600, `0` for the state right now). The
+  loop an LLM seat runs is act -> act -> act, with nothing to poll and no
+  moment at which it has to decide to wait; `wait_for_turn` remains for a
+  reply whose `timeout` ran out. Every `tools/call` is now answered as an
+  SSE stream with keepalives, not only `wait_for_turn` (`web.py` has one
+  response path instead of two). `state`, `get_table`, `board`, `bots` and
+  `leave_game` still reply immediately.
+
+- **MCP replies compacted server-side.** `board` is text: an incidence
+  encoding (each hex with its vertices; each vertex with pips, resources,
+  port and the vertices a road reaches; edge ids as `id:v0-v1`), 10 KB to
+  2.7 KB. `legal_actions` groups and `summary.spots`/`robber` are
+  `(keys):row|row` tables instead of one dict per entry, and JSON carries
+  no spaces: a `new_game` reply halves, a robber-move state drops by half.
+  This is the compaction first written client-side in the Terra bridge
+  (hexset-terra) on 2026-09-11, moved into the server so every MCP client
+  gets it. Also fixes the MCP layer annotating -- and, since this morning,
+  stripping `x`/`y` from -- the table's own `layout` dict in place, which
+  the browser draws from; it works on a copy now.
+
+- **MCP forced moves are played inside the settle.** A lone `ROLL` (no
+  Knight to choose over it) and a `pass` on every broadcast offer the seat's
+  hand cannot cover are played by the server before a reply is handed back
+  -- the first live game through the settling tools spent one round-trip
+  per bot turn passing on unaffordable offers and one per own turn rolling.
+  `board` drops `x`/`y`, `size` and the constant name tables (a quarter of
+  the reply); `state`'s description is shortened to fit a client cap that
+  truncated it.
+
+- **MCP `models` tool is `bots`; the `model` argument is `identity`.** The
+  HTTP API's `model` is a bot engine (`/api/models`, `POST /api/bot`), while
+  the MCP argument was a free string naming the caller for `resume_game`;
+  one word for both misread. `new_game(identity=...)`,
+  `join(code, identity=...)`, `resume_game(code, identity)`; `bots()` lists
+  the names `opponents` accepts. No compatibility shim: `model` is now a
+  bad argument.
+
+- **MCP replies pruned.** Every state-returning MCP reply drops the wire
+  fields a reader never acts on: `version` (no MCP tool takes it),
+  `claimed_seats`, `waiting_for` and `trade_wait` (all folded into
+  `your_move`/`waiting_on` already), each player's `last_roll` (the table's
+  own `last_roll` is the current one), `seats` (its `kind` moves onto each
+  `players` entry) and `summary.race.winning_points` (the top-level field).
+  `hand`, `known`, `dev_cards` and `bank` come sparse, a missing name
+  meaning zero, as the trade dicts always have. A mid-game reply is about
+  a sixth smaller. The HTTP API is untouched.
 
 - Size-only readers go through `hexset.economy.hand_size` and
   `hexset.devcards.dev_count` rather than summing a hand or a

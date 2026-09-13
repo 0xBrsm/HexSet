@@ -89,7 +89,17 @@
   #players { padding: 0.7rem 0.8rem; border-bottom: 1px solid var(--border); flex: none; }
   #hand {
     padding: 0.5rem 0.8rem 0.6rem; border-bottom: 1px solid var(--border); flex: none;
-    display: flex; gap: 0.7rem;
+    display: flex; flex-direction: column; gap: 0.3rem; position: relative;
+  }
+  /* The two card columns. While browsing with nobody picked they stay in the
+     flow but invisible, so the pane keeps exactly the height the cards will
+     take and the hint below can sit centred over that space (see renderHand). */
+  .hand-cols { display: flex; gap: 0.7rem; }
+  .hand-cols-hidden { visibility: hidden; }
+  .hand-hint {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase;
+    text-align: center; padding: 0 0.8rem; pointer-events: none;
   }
   .hand-col { flex: 1; min-width: 0; }
   #hand .player-meta { margin-bottom: 0.1rem; }
@@ -117,10 +127,6 @@
      without spending the accent, which belongs to no seat while watching. */
   .player-row-openable { cursor: pointer; }
   .player-row-open { box-shadow: inset 0 0 0 2px var(--open-ring); }
-  /* Standing in for the hand area while watching and no row is open — the
-     one place the page has to say what a click does, since a row that opens
-     looks like any other until you try it. */
-  .hand-hint { color: var(--muted); font-size: 0.82rem; padding: 0.3rem 0.2rem; }
   .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.35); }
   /* No fixed width any more — the name column itself (minmax(0, 1fr) above)
      is what sizes this, and shrinks first when the row's tight. Overflow is
@@ -336,11 +342,16 @@
      robber move now: a self-played Knight is undoable up until the robber
      actually lands (see _UNDOABLE_BUILDS), and roll/end-turn are never on
      offer in Phase.ROBBER to begin with, so nothing else ever needs the
-     spot at the same time. Above #modal's z-index:55, same as the old
-     cancel-robber corner was: a hex with more than one victim opens the
-     "Steal from" modal on top of the board, and undo has to reach through
-     that too, not just the board underneath it. */
-  #undo-build { bottom: 76px; z-index: 60; }
+     spot at the same time. Below #modal's z-index:55 by default -- a trade,
+     discard or dev-card modal covers it like it covers the rest of the
+     board, same as any other board control. The one exception is the old
+     cancel-robber corner's own case, given back by the .reach-modal class
+     (openModal/closeModal, toggled only for modalMode "steal"): a hex with
+     more than one victim opens the "Steal from" modal on top of the board,
+     and undo has to reach through that one, not just the board underneath
+     it, since it is itself the way out of the Knight that opened it. */
+  #undo-build { bottom: 76px; z-index: 40; }
+  #undo-build.reach-modal { z-index: 60; }
   /* Buying a development card is the one purchase with nothing on the board
      to click for it, so the button *is* the thing being bought: the same
      face the hand's dev cards wear (see .card and --dev-card-bg), scaled up
@@ -1929,66 +1940,79 @@ function renderHand() {
   container.innerHTML = "";
   const own = watching() ? null : state.seat;
   const seat = browsing() && openSeat !== null ? openSeat : own;
-  if (seat === null) {
-    container.appendChild(html("div", {class: "hand-hint"}, "Click a player to see their cards."));
-    return;
+  const p = seat === null ? null : state.players.find((pp) => pp.seat === seat);
+  const hasHand = Boolean(p && p.hand !== undefined);
+
+  // Browsing with nobody picked: the columns are still laid out, invisible,
+  // so the pane holds the height the cards will take, and the hint sits
+  // centred over that space. Picking a row reveals the columns in the same
+  // repaint -- no title names the seat; the highlighted roster row does.
+  const hint = browsing() && !hasHand;
+  if (hint) {
+    container.appendChild(html("div", {class: "hand-hint"}, "Click a player to see their cards"));
   }
-  const p = state.players.find((p) => p.seat === seat);
-  if (!p || p.hand === undefined) return;
 
   // What a click on a card does is decided by what's actually legal, which
   // is to say by the phase — and in most phases it does nothing at all.
   // legal_actions arrives empty unless the human is the one to move (see
   // GameSession.legal_wire_actions), so reading it is the whole test; there's
   // no separate game_over/to_move check to keep in sync with it.
-  const g = groupActions(state.legal_actions);
+  const g = hasHand ? groupActions(state.legal_actions) : null;
   // A card is clickable when there is a trade to make with it, which now
   // means the bank or a port and nothing else: offers between seats left the
   // engine with the one-event mechanic, so `bankTrade` is the whole of it.
   // Discarding is the other thing a resource card can do, but it happens in
   // the modal that DISCARD opens over the whole page (see syncModal), not
   // here — these cards aren't reachable while that's up.
-  const canTrade = !robberMove(g) && state.phase === "MAIN" && state.to_move === state.seat;
+  const canTrade = hasHand && !robberMove(g) && state.phase === "MAIN" && state.to_move === state.seat;
 
-  // Two columns, side by side, both always present — the header and the
-  // row's height hold their place even at zero cards, so buying a first dev
-  // card doesn't shove the resources column around.
+  // Two columns, side by side, both always present regardless of hasHand —
+  // the header and the row's height hold their place even at zero cards, so
+  // buying a first dev card doesn't shove the resources column around, and
+  // (browsing, nobody picked yet) the pane's height doesn't change the
+  // instant somebody is.
+  const cols = html("div", {class: hint ? "hand-cols hand-cols-hidden" : "hand-cols"});
   const resCol = html("div", {class: "hand-col"});
   resCol.appendChild(handColHeader("card", "Resource Cards"));
   const resHand = html("div", {class: "hand"});
-  for (const r of board.resources) {
-    const n = p.hand[r];
-    if (!n) continue;
-    const idx = board.resources.indexOf(r);
-    const card = resourceCardTile(r, {title: `${r}: ${n}`});
-    card.appendChild(html("div", {class: "count"}, String(n)));
-    if (canTrade) {
-      card.classList.add("hand-card-clickable");
-      card.addEventListener("click", () => openModal("trade", {give: idx}));
+  if (hasHand) {
+    for (const r of board.resources) {
+      const n = p.hand[r];
+      if (!n) continue;
+      const idx = board.resources.indexOf(r);
+      const card = resourceCardTile(r, {title: `${r}: ${n}`});
+      card.appendChild(html("div", {class: "count"}, String(n)));
+      if (canTrade) {
+        card.classList.add("hand-card-clickable");
+        card.addEventListener("click", () => openModal("trade", {give: idx}));
+      }
+      resHand.appendChild(card);
     }
-    resHand.appendChild(card);
   }
   resCol.appendChild(resHand);
-  container.appendChild(resCol);
+  cols.appendChild(resCol);
 
   const devCol = html("div", {class: "hand-col"});
   devCol.appendChild(handColHeader("dev-card", "Development Cards"));
   const devHand = html("div", {class: "hand"});
-  for (const c of board.dev_cards) {
-    const n = p.dev_cards[c];
-    if (!n) continue;
-    const play = devCardPlay(c, g);
-    const classes = ["card"];
-    if (play) classes.push("hand-card-clickable");
-    const card = html("div", {class: classes.join(" "), title: play ? play.title : `${c}: ${n}`});
-    card.style.background = "var(--dev-card-bg)";
-    card.appendChild(iconSvg(DEV_CARD_ICONS[c], {fill: DEV_CARD_INK}));
-    card.appendChild(html("div", {class: "count"}, String(n)));
-    if (play) card.addEventListener("click", play.run);
-    devHand.appendChild(card);
+  if (hasHand) {
+    for (const c of board.dev_cards) {
+      const n = p.dev_cards[c];
+      if (!n) continue;
+      const play = devCardPlay(c, g);
+      const classes = ["card"];
+      if (play) classes.push("hand-card-clickable");
+      const card = html("div", {class: classes.join(" "), title: play ? play.title : `${c}: ${n}`});
+      card.style.background = "var(--dev-card-bg)";
+      card.appendChild(iconSvg(DEV_CARD_ICONS[c], {fill: DEV_CARD_INK}));
+      card.appendChild(html("div", {class: "count"}, String(n)));
+      if (play) card.addEventListener("click", play.run);
+      devHand.appendChild(card);
+    }
   }
   devCol.appendChild(devHand);
-  container.appendChild(devCol);
+  cols.appendChild(devCol);
+  container.appendChild(cols);
 }
 
 // How many of each piece the human still has to place — supply caps come
@@ -2423,6 +2447,10 @@ function openModal(mode, {give = null} = {}) {
   modalDrag = {x: 0, y: 0};
   document.getElementById("modal-inner").style.transform = "";
   document.getElementById("modal").classList.add("show");
+  // See the CSS comment on #undo-build.reach-modal: every other mode leaves
+  // the corner button behind the backdrop like any other board control, only
+  // "steal" needs it reaching through.
+  document.getElementById("undo-build").classList.toggle("reach-modal", mode === "steal");
   renderModal();
 }
 
@@ -2434,6 +2462,7 @@ function closeModal() {
   if (modalMode === "steal") pendingRobberHex = null;
   modalMode = null;
   document.getElementById("modal").classList.remove("show");
+  document.getElementById("undo-build").classList.remove("reach-modal");
 }
 
 // Called every render(). The three MODAL_AUTO modes are conditions rather

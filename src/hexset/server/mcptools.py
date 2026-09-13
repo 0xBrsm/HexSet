@@ -9,7 +9,7 @@ payload, token)` -- the same in-process seam `web.py` and
 directly. `ApiError` becomes `ToolError`, the shape `_call_tool`/`web.py`
 report back to the LLM as a normal (not protocol-level) tool result.
 
-Identity used to be a handful of module globals (`_token`/`_code`/`_model`)
+Identity used to be a handful of module globals (`_token`/`_code`/`_identity`)
 because one stdio process was one seat. An HTTP server serves many MCP
 sessions at once, so that state now lives in a `Session` object -- one per
 `Mcp-Session-Id` -- threaded through every call instead.
@@ -17,8 +17,12 @@ sessions at once, so that state now lives in a `Session` object -- one per
 
 from __future__ import annotations
 
+import copy
 import hashlib
+import json
+import time
 from dataclasses import dataclass
+from typing import Iterator
 
 from .api import ApiError, Tables
 
@@ -36,14 +40,14 @@ class ToolError(Exception):
 @dataclass
 class Session:
     """One MCP session's seat: the token `tables.handle` acts with, the game
-    code the trade routes are addressed by, and the `model` string identity
-    was minted from (needed if `resume_game` is ever called with it again).
+    code the trade routes are addressed by, and the `identity` string the seat's
+    client id was minted from (needed if `resume_game` is ever called with it again).
     Scoped to one `Mcp-Session-Id`, held in memory by `web.py` for as long as
     that session lives -- nothing here ever touches disk."""
 
     token: str | None = None
     code: str | None = None
-    model: str | None = None
+    identity: str | None = None
     # How many transcript lines this session has been sent so far, or `None`
     # for none yet -- the automatic cursor `_trim_for` trims the next reply's
     # `log` against, so a caller that never sends `log_after` still gets only
@@ -54,6 +58,15 @@ class Session:
     # once per seat -- it never changes after the deal -- and read by every
     # reply's `summary`. `None` until the seat is taken.
     board: dict | None = None
+    # The ranked seats the open `offer_trade` may be settled with, or `None`
+    # for anyone -- read by `_settled_round` while that round is open.
+    offer_to: list[int] | None = None
+    # What this session has been sent so far: replies and their bytes as
+    # the client received them. Reported as `usage` on the `game_over`
+    # reply -- the payload half of what a seat costs, measured server-side
+    # so any client (or its model) can be compared on the same number.
+    calls: int = 0
+    bytes: int = 0
 
 
 def _call_status(tables: Tables, session: Session, method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
@@ -85,18 +98,18 @@ def _seat(session: Session, result: dict) -> dict:
     return result
 
 
-def _client_of(model: str) -> tuple[dict, str]:
-    """The `client` wire field and the secret behind it, from a model
-    string: `secret = model.strip().lower()`, `id = sha256(secret)`, kind
-    `"mcp"` -- no env-var override, the model supplies its own string."""
-    if not isinstance(model, str) or not model.strip():
-        raise ToolError("model must be a non-empty string identifying you, e.g. claude-opus-5")
-    secret = model.strip().lower()
+def _client_of(identity: str) -> tuple[dict, str]:
+    """The `client` wire field and the secret behind it, from an identity
+    string: `secret = identity.strip().lower()`, `id = sha256(secret)`, kind
+    `"mcp"` -- no env-var override, the caller supplies its own string."""
+    if not isinstance(identity, str) or not identity.strip():
+        raise ToolError("identity must be a non-empty string naming you, e.g. claude-opus-5")
+    secret = identity.strip().lower()
     client = {"id": hashlib.sha256(secret.encode("utf-8")).hexdigest(), "kind": "mcp"}
     return client, secret
 
 
-def _models(tables: Tables, session: Session) -> dict:
+def _bots(tables: Tables, session: Session) -> dict:
     return _call_ok(tables, session, "GET", "/api/models")
 
 
@@ -108,9 +121,18 @@ def _display_name(name: str | None) -> str | None:
     return str(name).strip()[:40] if name else None
 
 
-def _new_game(tables: Tables, session: Session, model: str, opponents: list[str] | None = None, name: str | None = None) -> dict:
-    client, _ = _client_of(model)
-    session.model = model
+def _new_game(
+    tables: Tables,
+    session: Session,
+    identity: str,
+    opponents: list[str] | None = None,
+    name: str | None = None,
+    timeout: float | None = None,
+    log_after: int | None = None,
+    full_log: bool = False,
+) -> Iterator:
+    client, _ = _client_of(identity)
+    session.identity = identity
     body: dict = {"name": _display_name(name), "client": client}
     if opponents:
         body["bots"] = opponents
@@ -118,38 +140,55 @@ def _new_game(tables: Tables, session: Session, model: str, opponents: list[str]
     # LLM reads, and it used to be the one that came back raw.
     dealt = _seat(session, _call_ok(tables, session, "POST", "/api/games", body))
     _layout(tables, session)  # the board is fixed from here on; fetch it once now
-    return _reply(session, dealt)
+    return _settle(tables, session, dealt, timeout, log_after, full_log)
 
 
-def _join(tables: Tables, session: Session, code: str, model: str, name: str | None = None) -> dict:
+def _join(
+    tables: Tables,
+    session: Session,
+    code: str,
+    identity: str,
+    name: str | None = None,
+    timeout: float | None = None,
+    log_after: int | None = None,
+    full_log: bool = False,
+) -> Iterator:
     if not isinstance(code, str) or not code.strip():
         raise ToolError("code must be a game's six-character code")
-    client, _ = _client_of(model)
-    session.model = model
+    client, _ = _client_of(identity)
+    session.identity = identity
     body: dict = {"code": code.strip().lower(), "name": _display_name(name), "client": client}
     joined = _seat(session, _call_ok(tables, session, "POST", "/api/join", body))
     _layout(tables, session)
-    return _reply(session, joined)
+    return _settle(tables, session, joined, timeout, log_after, full_log)
 
 
-def _resume_game(tables: Tables, session: Session, code: str, model: str) -> dict:
+def _resume_game(
+    tables: Tables,
+    session: Session,
+    code: str,
+    identity: str,
+    timeout: float | None = None,
+    log_after: int | None = None,
+    full_log: bool = False,
+) -> Iterator:
     """Reclaims a seat by `POST /api/reclaim`, the same way a browser's own
     reclaim works -- no local cache file any more (there is nothing left to
     cache: a session dies with its `Mcp-Session-Id`, and a fresh MCP
-    connection just calls this again with the `code`/`model` it already
-    knows). `secret = model.strip().lower()`, the same secret `new_game`/
-    `join` mint from `model`."""
+    connection just calls this again with the `code`/`identity` it already
+    knows). `secret = identity.strip().lower()`, the same secret `new_game`/
+    `join` mint from `identity`."""
     if not isinstance(code, str) or not code.strip():
         raise ToolError("code must be a game's six-character code")
-    _, secret = _client_of(model)
+    _, secret = _client_of(identity)
     reclaimed = _call_ok(tables, session, "POST", "/api/reclaim", {"code": code.strip().lower(), "secret": secret})
     session.token = reclaimed.pop("token")
     session.code = reclaimed.get("code")
-    session.model = model
+    session.identity = identity
     session.log_sent = None  # a reclaimed seat is owed the whole transcript
     session.board = None
     _layout(tables, session)
-    return _reply(session, reclaimed)
+    return _settle(tables, session, reclaimed, timeout, log_after, full_log)
 
 
 #  --- Board summary -----------------------------------------------------------
@@ -177,11 +216,12 @@ _TERRAIN_RESOURCE = {
     "FIELDS": "Wheat",
     "MOUNTAINS": "Ore",
 }
+_BOARD_DEAD = ("size", "resources", "dev_cards", "year_of_plenty_pairs")
 
 
-def _board(tables: Tables, session: Session) -> dict:
+def _board(tables: Tables, session: Session) -> str:
     _seated(session)
-    return _layout(tables, session)
+    return _board_text(_layout(tables, session))
 
 
 def _layout(tables: Tables, session: Session) -> dict:
@@ -190,9 +230,18 @@ def _layout(tables: Tables, session: Session) -> dict:
     the `board` tool and every reply's `summary` read it from here."""
     if session.board is not None:
         return session.board
-    raw = _call_ok(tables, session, "GET", "/api/board")
+    # A copy: `GET /api/board` hands back the table's own `layout` dict, the
+    # one the browser draws from, and everything below rewrites it.
+    raw = copy.deepcopy(_call_ok(tables, session, "GET", "/api/board"))
+    # Render geometry and constant tables (`hexset.board`'s own lists, the
+    # Year of Plenty pairs `_translate_action` already names) are the
+    # browser's; a seat reads ids, terrain, tokens and adjacency.
+    for key in _BOARD_DEAD:
+        raw.pop(key, None)
     by_vertex: dict[int, list[tuple[str, int]]] = {}
     for hex_ in raw.get("hexes") or []:
+        hex_.pop("x", None)
+        hex_.pop("y", None)
         resource = _TERRAIN_RESOURCE.get(hex_["terrain"])
         pips = _PIPS.get(hex_["token"], 0)
         hex_["resource"] = resource
@@ -202,11 +251,60 @@ def _layout(tables: Tables, session: Session) -> dict:
         for v in hex_["vertex_ids"]:
             by_vertex.setdefault(v, []).append((resource, pips))
     for vertex in raw.get("vertices") or []:
+        vertex.pop("x", None)
+        vertex.pop("y", None)
         touching = by_vertex.get(vertex["id"], [])
         vertex["pips"] = sum(pips for _, pips in touching)
         vertex["resources"] = sorted({resource for resource, _ in touching})
     session.board = raw
     return raw
+
+
+def _port_label(port: dict) -> str:
+    return f"{port['ratio']}:1" if port.get("resource") is None else f"{port['resource']} {port['ratio']}:1"
+
+
+def _board_text(board: dict) -> str:
+    """The annotated board as an incidence encoding: each hex with the
+    vertices touching it, each vertex with its yield, port and the vertices
+    a road from it reaches -- `edges` and `ports` folded into the vertex
+    rows rather than left as parallel arrays for the reader to rejoin.
+    Fatemi, Halcrow & Perozzi, "Talk like a Graph" (ICLR 2024,
+    arXiv:2310.04560) found a node described together with what touches it
+    beats a flat edge list by a wide margin on LLM graph-reasoning tasks.
+    One header per table instead of every row repeating its keys is the
+    smaller saving on top. First written client-side in the Terra bridge
+    (hexset-terra/terra_bot.py); here so every MCP client gets it.
+
+    No `edges` block: an edge id is opaque without knowing which two
+    vertices it joins, and the only edges worth resolving are the legal
+    ones -- `summary.roads` (`_roads`) names each legal edge's destination
+    vertex directly, in the reply that has it. Vertex neighbors (below)
+    are enough for the fixed board read once."""
+    port_of: dict[int, str] = {}
+    for port in board.get("ports") or []:
+        for v in port.get("vertices") or []:
+            port_of[v] = _port_label(port).replace(" ", "")
+    neighbors: dict[int, set[int]] = {}
+    for edge in board.get("edges") or []:
+        neighbors.setdefault(edge["v0"], set()).add(edge["v1"])
+        neighbors.setdefault(edge["v1"], set()).add(edge["v0"])
+    lines = ["hexes: id resource pips vertices"]
+    for hex_ in board.get("hexes") or []:
+        label = hex_.get("resource") or hex_.get("terrain")
+        lines.append(f"{hex_['id']} {label} {hex_.get('pips', 0)} {','.join(map(str, hex_.get('vertex_ids') or []))}")
+    lines.append("")
+    lines.append("vertices: id pips resources port neighbors")
+    for vertex in board.get("vertices") or []:
+        vid = vertex["id"]
+        resources = ",".join(vertex.get("resources") or []) or "-"
+        nbrs = ",".join(map(str, sorted(neighbors.get(vid, ()))))
+        lines.append(f"{vid} {vertex.get('pips', 0)} {resources} {port_of.get(vid, '-')} {nbrs}")
+    supply = board.get("piece_supply") or {}
+    if supply:
+        lines.append("")
+        lines.append("piece_supply: " + " ".join(f"{k}={v}" for k, v in supply.items()))
+    return "\n".join(lines)
 
 
 def _state(tables: Tables, session: Session, log_after: int | None = None, full_log: bool = False) -> dict:
@@ -252,9 +350,10 @@ def _act(
     session: Session,
     index: int,
     expect: dict | None = None,
+    timeout: float | None = None,
     log_after: int | None = None,
     full_log: bool = False,
-) -> dict:
+) -> Iterator:
     _seated(session)
     # The raw list, not the translated one: only `index` is resolved here, and
     # `POST /api/action` reads `type`/`a`/`b` alone (`wire_to_action`).
@@ -268,14 +367,57 @@ def _act(
             else "index out of range — state()'s legal_actions is empty; it is not your turn"
         )
     _expect_check(index, options[index], expect, len(raw.get("players") or []))
-    return _reply(
-        session, _call_ok(tables, session, "POST", "/api/action", {"action": options[index]}), log_after, full_log
-    )
+    played = _call_ok(tables, session, "POST", "/api/action", {"action": options[index]})
+    return _settle(tables, session, played, timeout, log_after, full_log)
 
 
-def _undo(tables: Tables, session: Session) -> dict:
+def _discard(
+    tables: Tables,
+    session: Session,
+    cards: dict,
+    timeout: float | None = None,
+    log_after: int | None = None,
+    full_log: bool = False,
+) -> Iterator:
+    """Discard `cards` (resource -> count) in one call instead of one
+    `act(index)` per card -- a seven with a nine-card hand used to cost four
+    round-trips, and `hexset.actions.legal_actions`'s `Phase.DISCARD` branch
+    only ever offers one card at a time; that is the engine's own contract,
+    not a wire limit worth handing the caller. `cards` must total exactly
+    this seat's `discard_quota` -- neither more nor less, so a caller that
+    miscounts is told so before anything is spent, not left owing a
+    remainder. Each card is then posted as its own `/api/action`, matched
+    against the freshest `legal_actions` after the previous card landed --
+    the same freshness `_act` resolves an `index` against -- so a later card
+    in the same call is never played against a hand the first card changed."""
     _seated(session)
-    return _reply(session, _call_ok(tables, session, "POST", "/api/undo"))
+    raw = _call_ok(tables, session, "GET", "/api/state")
+    if raw.get("phase") != "DISCARD":
+        raise ToolError(f"discard() is only for a DISCARD phase; phase is {raw.get('phase')} right now")
+    seat = raw.get("seat")
+    quota_list = raw.get("discard_quota") or []
+    quota = quota_list[seat] if seat is not None and seat < len(quota_list) else 0
+    counts = _positional(cards)
+    total = sum(counts)
+    if total != quota:
+        raise ToolError(f"cards must total your discard_quota of {quota} exactly, not {total}")
+    me = next((p for p in raw.get("players") or [] if p.get("seat") == seat), None)
+    hand = (me or {}).get("hand") or {}
+    short = {
+        RESOURCES[i]: counts[i] - hand.get(RESOURCES[i], 0)
+        for i in range(len(RESOURCES))
+        if counts[i] > hand.get(RESOURCES[i], 0)
+    }
+    if short:
+        raise ToolError(f"you don't hold that many to discard: short {short}")
+    remaining = dict(zip(RESOURCES, counts))
+    while any(remaining.values()):
+        resource = next(name for name, left in remaining.items() if left)
+        wanted = RESOURCES.index(resource)
+        entry = next(a for a in raw.get("legal_actions") or [] if a.get("type") == "DISCARD" and a.get("a") == wanted)
+        raw = _call_ok(tables, session, "POST", "/api/action", {"action": entry})
+        remaining[resource] -= 1
+    return _settle(tables, session, raw, timeout, log_after, full_log)
 
 
 def _leave_game(tables: Tables, session: Session) -> dict:
@@ -298,6 +440,10 @@ def _leave_game(tables: Tables, session: Session) -> dict:
 
 def _named(counts: list[int]) -> dict[str, int]:
     return {name: n for name, n in zip(RESOURCES, counts) if n}
+
+
+def _covers(hand: dict, cost: dict) -> bool:
+    return all(hand.get(name, 0) >= n for name, n in cost.items())
 
 
 def _positional(counts: dict | None) -> list[int]:
@@ -335,10 +481,17 @@ def _translate_trades(raw: dict) -> dict:
         {"a": t["a"], "b": t["b"], "a_gave": _named(t["gave"]), "a_got": _named(t["got"])}
         for t in raw.get("trades") or []
     ]
-    raw["pending"] = [
-        {"actor": t["actor"], **dict(zip(("you_give", "you_receive"), _counterparty_view(t["bundle"])))}
-        for t in raw.get("pending") or []
-    ]
+    me = next((p for p in raw.get("players") or [] if p.get("seat") == raw.get("seat")), None)
+    hand = None if me is None else me.get("hand")
+    pending = []
+    for t in raw.get("pending") or []:
+        you_give, you_receive = _counterparty_view(t["bundle"])
+        entry = {"actor": t["actor"], "you_give": you_give, "you_receive": you_receive}
+        if hand is not None:
+            # Whether `accept` is even possible; a counter always is.
+            entry["can_accept"] = _covers(hand, you_give)
+        pending.append(entry)
+    raw["pending"] = pending
     trade_round = raw.get("trade_round")
     if trade_round is not None:
         you_give, you_receive = _actor_view(trade_round["offer"]["bundle"])
@@ -414,15 +567,12 @@ def _trim_log(view: dict, log_after: int | None) -> dict:
     if not isinstance(lines, list):
         return view
     view["log_total"] = len(lines)
-    # The final read is the one re-render a cursor cannot splice. `state_view`
-    # asks for the transcript with `omniscient or over` once the game is over
-    # (webplay.py), and that lifts redaction across the *whole* history at
-    # once: every earlier steal stops being "a card" and names what it was.
-    # Those are rewrites of lines the caller already holds, arbitrarily far
-    # back, so the cursor is ignored here and the full transcript sent for the
-    # client to replace its copy with -- `log_from: 0` is how it knows to.
-    if log_after is not None and view.get("game_over"):
-        log_after = None
+    # The game's end re-renders the whole transcript with redaction lifted
+    # (`state_view` asks for it with `omniscient or over`): every earlier
+    # steal stops being "a card" and names what it was, arbitrarily far back.
+    # That used to force the full transcript on the final reply -- 5-6k
+    # tokens a seat rarely wants -- so it now arrives like any other, and a
+    # seat that does want the lifted history asks with `full_log`.
     start = 0 if (log_after is None or not lines) else max(0, min(int(log_after) - 1, len(lines) - 1))
     view["log"] = lines[start:]
     view["log_from"] = start
@@ -500,35 +650,70 @@ _BUILD_ACTION = {
 # `hexset.roads.MIN_LONGEST_ROAD` and the rulebook's three knights, mirrored.
 _MIN_LONGEST_ROAD = 5
 _MIN_LARGEST_ARMY = 3
-# Setup offers every open vertex -- fifty-odd -- and the tail of that list by
-# pips is never the answer. The count left off is reported as `spots_omitted`.
-_SPOTS_CAP = 15
 _SPOT_ACTIONS = ("SETUP_SETTLEMENT", "BUILD_SETTLEMENT", "BUILD_CITY")
+_ROAD_ACTIONS = ("BUILD_ROAD", "SETUP_ROAD")
 _CITY = 2  # `hexset.state.Building.CITY`
 
 
-def _afford(hand: dict, legal: list[dict]) -> dict:
+# What `_afford` counts a seat's pieces as, against `piece_supply`.
+_PIECE_OF = {"road": "road", "settlement": "settlement", "city": "city"}
+
+
+def _afford(hand: dict, legal: list[dict], view: dict | None = None, board: dict | None = None) -> dict:
     """Per build: `ok` (the hand covers it), `missing` (what it is short, when
-    not), `legal` (whether `legal_actions` offers it right now -- a build can
-    be affordable with nowhere to put it, or the phase may not allow it)."""
+    not), `legal` (whether `legal_actions` offers it right now), and when
+    the hand covers it but it is not offered, `why`: `phase` (not the main
+    phase of this seat's turn), `pieces` (none of that piece left to place),
+    `deck` (no development card left), or `spot` (a place to put it is what
+    is missing -- no reachable vertex or edge, no settlement to upgrade).
+    `legal` is omitted entirely when `legal_actions` itself is empty: every
+    build would read `legal: false` for the same reason (`your_move: wait`
+    already says so), and four repeats of the one fact were never the point
+    of asking whether the hand covers a build."""
     offered = {a.get("type") for a in legal}
     out = {}
     for build, cost in _COSTS.items():
         missing = {r: n - hand.get(r, 0) for r, n in cost.items() if hand.get(r, 0) < n}
-        entry: dict = {"ok": not missing, "legal": _BUILD_ACTION[build] in offered}
+        entry: dict = {"ok": not missing}
+        if legal:
+            entry["legal"] = _BUILD_ACTION[build] in offered
+            if not missing and not entry["legal"] and view is not None:
+                entry["why"] = _why_not(build, view, board)
         if missing:
             entry["missing"] = missing
         out[build] = entry
     return out
 
 
-def _port_label(port: dict) -> str:
-    return f"{port['ratio']}:1" if port.get("resource") is None else f"{port['resource']} {port['ratio']}:1"
+def _why_not(build: str, view: dict, board: dict | None) -> str:
+    if view.get("phase") != "MAIN":
+        return "phase"
+    if build == "dev_card":
+        return "deck" if not view.get("dev_cards_remaining") else "spot"
+    supply = ((board or {}).get("piece_supply") or {}).get(_PIECE_OF[build])
+    if supply is not None:
+        seat = view.get("seat")
+        owner, kind = view.get("vertex_owner") or [], view.get("vertex_building") or []
+        if build == "road":
+            placed = sum(1 for s in view.get("edge_owner") or [] if s == seat)
+        elif build == "city":
+            placed = sum(1 for v, s in enumerate(owner) if s == seat and v < len(kind) and kind[v] == _CITY)
+        else:
+            placed = sum(1 for v, s in enumerate(owner) if s == seat and not (v < len(kind) and kind[v] == _CITY))
+        if placed >= supply:
+            return "pieces"
+    return "spot"
 
 
-def _spots(legal: list[dict], board: dict) -> tuple[list[dict], int]:
+def _spots(legal: list[dict], board: dict) -> list[dict]:
     """Every settlement/city placement in `legal`, joined to the vertex's
-    pips, resources and port, best first. `index` is the `act()` index."""
+    pips, resources and port (with `port_matches`: a 3:1, or a 2:1 in a
+    resource the vertex yields), best first. `index` is the `act()` index.
+
+    Every one of them, uncapped: `spots` is the reason `legal_actions`
+    drops its own SETUP_SETTLEMENT/BUILD_SETTLEMENT/BUILD_CITY groups
+    (`_compact`) once this is non-empty, so trimming the tail here would
+    throw options away with nowhere else for them to be read back from."""
     vertices = {v["id"]: v for v in board.get("vertices") or []}
     ports = {v: p for p in board.get("ports") or [] for v in p.get("vertices") or []}
     spots = []
@@ -547,9 +732,12 @@ def _spots(legal: list[dict], board: dict) -> tuple[list[dict], int]:
         port = ports.get(vertex_id)
         if port is not None:
             spot["port"] = _port_label(port)
+            # A 2:1 port is worth what the vertex produces of that resource;
+            # a 3:1 takes anything. Said here so the reader need not join it.
+            spot["port_matches"] = port.get("resource") is None or port["resource"] in spot["resources"]
         spots.append(spot)
     spots.sort(key=lambda s: (-s["pips"], s["index"]))
-    return spots[:_SPOTS_CAP], max(0, len(spots) - _SPOTS_CAP)
+    return spots
 
 
 def _robber(legal: list[dict], view: dict, board: dict) -> list[dict]:
@@ -587,9 +775,98 @@ def _robber(legal: list[dict], view: dict, board: dict) -> list[dict]:
     return sorted(by_hex.values(), key=lambda e: (-e["pips"], e["hex"]))
 
 
+def _far_endpoint(v0: int, v1: int, own: set[int], neighbors: dict[int, set[int]]) -> int:
+    """Which of an edge's two vertices `_roads` calls its `to`: the one this
+    seat's network doesn't already touch -- the ground a new road actually
+    reaches, not the stub it grows from. When neither end is touched yet
+    (a first road, or one that closes no loop to anything of ours), prefer
+    whichever end isn't itself a neighbor of an owned vertex either, since
+    that one is the newer frontier; failing that distinction too, either
+    end is as good as the other."""
+    v0_own, v1_own = v0 in own, v1 in own
+    if v0_own != v1_own:
+        return v1 if v0_own else v0
+    if not v0_own:  # both new
+        v0_adj = any(n in own for n in neighbors.get(v0, ()))
+        v1_adj = any(n in own for n in neighbors.get(v1, ()))
+        if v0_adj != v1_adj:
+            return v1 if v0_adj else v0
+    return v1  # both already touched, or tied either way: either end
+
+
+def _roads(legal: list[dict], view: dict, board: dict) -> list[dict]:
+    """Every legal road placement, joined to the vertex it actually reaches
+    (`_far_endpoint`): that vertex's pips, resources, port and whether a
+    settlement could go there right now (empty, with no building on any
+    vertex it neighbors -- the standard two-road minimum distance), and
+    `then`: the best settleable vertex one road further on, with its pips
+    as `then_pips` -- the two-road plan every setup road and most early
+    ones are, done here instead of from a board read. A road with both
+    ends already this seat's is flagged `link`: it joins the network and
+    reaches nothing. Best (a settleable end, then the best `then`) first."""
+    edges = {e["id"]: e for e in board.get("edges") or []}
+    vertices = {v["id"]: v for v in board.get("vertices") or []}
+    ports = {v: p for p in board.get("ports") or [] for v in p.get("vertices") or []}
+    neighbors: dict[int, set[int]] = {}
+    for edge in board.get("edges") or []:
+        neighbors.setdefault(edge["v0"], set()).add(edge["v1"])
+        neighbors.setdefault(edge["v1"], set()).add(edge["v0"])
+    seat = view.get("seat")
+    owner = view.get("vertex_owner") or []
+    own: set[int] = {v for v, s in enumerate(owner) if s == seat}
+    for edge_id, s in enumerate(view.get("edge_owner") or []):
+        if s == seat:
+            edge = edges.get(edge_id)
+            if edge is not None:
+                own.add(edge["v0"])
+                own.add(edge["v1"])
+
+    def built_on(vid: int) -> bool:
+        return vid < len(owner) and owner[vid] >= 0
+
+    def settleable(vid: int) -> bool:
+        return not built_on(vid) and not any(built_on(n) for n in neighbors.get(vid, ()))
+
+    roads = []
+    for index, action in enumerate(legal):
+        if action.get("type") not in _ROAD_ACTIONS:
+            continue
+        edge_id = action.get("a")
+        edge = edges.get(edge_id, {})
+        v0, v1 = edge.get("v0"), edge.get("v1")
+        to = _far_endpoint(v0, v1, own, neighbors) if v0 is not None and v1 is not None else v1
+        vertex = vertices.get(to, {})
+        row: dict = {
+            "index": index,
+            "edge": edge_id,
+            "to": to,
+            "pips": vertex.get("pips", 0),
+            "resources": vertex.get("resources", []),
+            "settle": settleable(to),
+        }
+        if v0 in own and v1 in own:
+            # Both ends already ours: this road joins two parts of the
+            # network (a loop, or a longest-road splice) and reaches nothing
+            # new, so `to`/`pips` describe a vertex the seat already holds.
+            row["link"] = True
+        port = ports.get(to)
+        if port is not None:
+            row["port"] = _port_label(port)
+        near = v0 if to == v1 else v1
+        beyond = [n for n in neighbors.get(to, ()) if n != near and n not in own and settleable(n)]
+        if beyond:
+            best = max(beyond, key=lambda n: (vertices.get(n, {}).get("pips", 0), -n))
+            row["then"] = best
+            row["then_pips"] = vertices.get(best, {}).get("pips", 0)
+        roads.append(row)
+    roads.sort(key=lambda r: (not r["settle"], -r["pips"], -r.get("then_pips", 0), r["index"]))
+    return roads
+
+
 def _race(view: dict, me: dict) -> dict:
-    """Where this seat stands: points and the distance to the win, the
-    leading opponent by *public* points (hidden victory-point cards are not
+    """Where this seat stands: points and the distance to the win (the
+    rule itself is the view's top-level `winning_points`), the leading
+    opponent (`top_opponent`, never this seat) by *public* points (hidden victory-point cards are not
     counted for anyone else), and each award -- yours, who holds it, and
     `need`, the length or knight count that would take it (strictly more
     than the holder, or the minimum if nobody holds it yet)."""
@@ -613,8 +890,7 @@ def _race(view: dict, me: dict) -> dict:
     return {
         "points": points,
         "to_win": max(0, winning - points),
-        "winning_points": winning,
-        "leader": None if leader is None else {"seat": leader.get("seat"), "points": leader.get("victory_points", 0)},
+        "top_opponent": None if leader is None else {"seat": leader.get("seat"), "points": leader.get("victory_points", 0)},
         "longest_road": award("longest_road", "road_length", _MIN_LONGEST_ROAD),
         "largest_army": award("largest_army", "knights_played", _MIN_LARGEST_ARMY),
     }
@@ -622,24 +898,26 @@ def _race(view: dict, me: dict) -> dict:
 
 def _summarize(view: dict, board: dict | None) -> dict:
     """Adds `summary` to a translated view for a seated reader whose hand
-    the view reveals. `spots` and `robber` need the board and appear only
-    when there is a placement or a robber move to make."""
+    the view reveals. `spots`, `robber` and `roads` need the board and
+    appear only when there is a placement, a robber move or a road to
+    make."""
     seat = view.get("seat")
     players = view.get("players") or []
     me = next((p for p in players if p.get("seat") == seat), None) if seat is not None else None
     if me is None or "hand" not in me:
         return view
     legal = view.get("legal_actions") or []
-    summary: dict = {"afford": _afford(me["hand"], legal), "race": _race(view, me)}
+    summary: dict = {"afford": _afford(me["hand"], legal, view, board), "race": _race(view, me)}
     if board is not None:
-        spots, omitted = _spots(legal, board)
+        spots = _spots(legal, board)
         if spots:
             summary["spots"] = spots
-            if omitted:
-                summary["spots_omitted"] = omitted
         robber = _robber(legal, view, board)
         if robber:
             summary["robber"] = robber
+        roads = _roads(legal, view, board)
+        if roads:
+            summary["roads"] = roads
     view["summary"] = summary
     return view
 
@@ -718,13 +996,155 @@ def _compact_board(view: dict) -> dict:
     return view
 
 
-def _compact(view: dict) -> dict:
+# Wire fields a reader never acts on, dropped from every reply (`_prune`).
+# `version`: the whole-table counter no MCP tool takes (see `_expect_check`).
+# `claimed_seats`: `players[].kind != "empty"`. `waiting_for`/`trade_wait`:
+# `_your_move` has already folded them into `waiting_on`.
+# `to_move`: folded into `your_move`/`waiting_on` too. `awaiting_confirm`: the
+# browser's setup-turn hold, which an MCP seat never sees (its road settles
+# straight on). `can_undo`: the undo tool is not offered here -- a session
+# convenience for a person, and a settling reply leaves no moment for it.
+_DEAD = ("version", "claimed_seats", "waiting_for", "trade_wait", "to_move", "awaiting_confirm", "can_undo")
+# Dropped only while trivially so: a seat left/locked, a winner, a trade this
+# turn are worth a line when they exist and nothing when they don't.
+_DEAD_WHEN_EMPTY = ("locked", "trades")
+_DEAD_WHEN_NONE = ("winner",)  # seat 0 wins too: only null is nothing to say
+# Per-player fields dropped the same way: `last_roll` is stale off the
+# roller, `longest_road`/`largest_army` repeat `summary.race`'s `held`.
+_PLAYER_DEAD = ("last_roll", "longest_road", "largest_army")
+# Per-seat counts sent sparse: a missing name is a zero, the convention the
+# trade dicts already use (`_named`).
+_SPARSE_COUNTS = ("hand", "known", "dev_cards")
+
+
+def _sparse(counts: dict | None) -> dict:
+    return {name: n for name, n in (counts or {}).items() if n}
+
+
+def _prune(view: dict) -> dict:
+    """The wire's redundancies, removed once per reply. `seats` (seat, kind,
+    name) repeats `players` but for `kind`, which moves onto each player
+    entry instead; a seat's `last_roll` is the table's own `last_roll` for
+    the roller and stale for everyone else; `longest_road`/`largest_army`
+    repeat what `summary.race` already says (`held`, `holder`) for every
+    seat, not just this one. `discard_quota` is dropped when every entry is
+    zero -- the common case outside a seven, and `your_move`/`phase` already
+    say nobody owes anything."""
+    for key in _DEAD:
+        view.pop(key, None)
+    for key in _DEAD_WHEN_EMPTY:
+        if key in view and not view[key]:
+            del view[key]
+    for key in _DEAD_WHEN_NONE:
+        if key in view and view[key] is None:
+            del view[key]
+    if view.get("started"):
+        del view["started"]  # only an unstarted table (seats still open) is worth saying
+    if not any(view.get("discard_quota") or []):
+        view.pop("discard_quota", None)
+    kinds = {s.get("seat"): s.get("kind") for s in view.pop("seats", None) or []}
+    players = []
+    for player in view.get("players") or []:
+        for key in _PLAYER_DEAD:
+            player.pop(key, None)
+        for key in _SPARSE_COUNTS:
+            if key in player:
+                player[key] = _sparse(player[key])
+        seat = player.get("seat")
+        players.append({"seat": seat, "kind": kinds[seat], **player} if seat in kinds else player)
+    if players:
+        view["players"] = players
+    if "bank" in view:
+        view["bank"] = _sparse(view["bank"])
+    return view
+
+
+# --- Tables: one header, then rows -------------------------------------------
+#
+# `legal_actions`' groups and `summary`'s `spots`/`robber` are lists of small
+# dicts that all repeat the same keys -- measured at 60% of a 6 KB reply in
+# the first Terra game. Each becomes one string: `(k1,k2):v,v|v,v`, the keys
+# named once. Nested lists inside a cell join with `;`, nested dicts with
+# `:` between key and value and `+` between fields; `-` is null.
+
+
+def _cell(value) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    if isinstance(value, list):
+        return ";".join(_cell(v) for v in value)
+    if isinstance(value, dict):
+        return "+".join(f"{k}:{_cell(v)}" for k, v in value.items())
+    return str(value)
+
+
+def _tabulate(rows: list[dict]) -> str:
+    keys: list[str] = []
+    for row in rows:
+        keys.extend(k for k in row if k not in keys)
+    body = "|".join(",".join(_cell(row.get(k)) for k in keys) for row in rows)
+    return f"({','.join(keys)}):{body}"
+
+
+def _tabulate_summary(summary: dict) -> None:
+    spots = summary.get("spots")
+    if spots:
+        # One kind (every setup placement, say) is named once, up front; a
+        # list mixing settlement and city spots -- the common mid-game case
+        # once both are affordable -- keeps `type` as a column instead.
+        kinds = {r.get("type") for r in spots}
+        if len(kinds) == 1:
+            summary["spots"] = f"{kinds.pop()}:" + _tabulate([{k: v for k, v in r.items() if k != "type"} for r in spots])
+        else:
+            summary["spots"] = _tabulate(spots)
+    robber = summary.get("robber")
+    if robber:
+        rows = [
+            {
+                **{k: v for k, v in r.items() if k not in ("hits", "options")},
+                # seat:settlements+cities, e.g. `0:1s+1c`; `-` for nobody.
+                "hits": [f"{h['seat']}:{h['settlements']}s+{h['cities']}c" for h in r["hits"]] or None,
+                # act() index:victim, e.g. `12:0`; `12:-` for nobody to rob.
+                "options": [f"{o['index']}:{_cell(o['victim'])}" for o in r["options"]],
+            }
+            for r in robber
+        ]
+        summary["robber"] = _tabulate(rows)
+    roads = summary.get("roads")
+    if roads:
+        # No `type` to strip: BUILD_ROAD and SETUP_ROAD never overlap
+        # (setup and mid-game are different phases), so a road entry is
+        # never ambiguous about which one placed it the way a spot is.
+        summary["roads"] = _tabulate(roads)
+
+
+# `summary.spots`/`summary.robber` already name every SETUP_SETTLEMENT/
+# BUILD_SETTLEMENT/BUILD_CITY or MOVE_ROBBER entry, joined to the vertex or
+# hex it targets -- the bare group in `legal_actions` told a reader nothing
+# `summary` didn't, once `summary` existed at all. Dropped here rather than
+# left for the reader to notice are the same thing twice; `act()`/
+# `_expect_check` still resolve against the raw list, never this grouped one.
+def _drop_superseded(grouped: dict[str, list[dict]], summary: dict) -> None:
+    if summary.get("spots"):
+        for kind in _SPOT_ACTIONS:
+            grouped.pop(kind, None)
+    if summary.get("robber"):
+        grouped.pop("MOVE_ROBBER", None)
+
+
+def _compact(view: dict, session: Session) -> dict:
     """The last step before a reply goes out: everything above that reads
-    the flat list or the dense arrays (`_your_move`, `_summarize`) has run."""
+    the flat list, the dense arrays or the fields `_prune` drops
+    (`_your_move`, `_summarize`) has run."""
     legal = view.get("legal_actions") or []
-    view["legal_count"] = len(legal)
-    view["legal_actions"] = _group_actions(legal, len(view.get("players") or []))
-    return _compact_board(view)
+    grouped = _group_actions(legal, len(view.get("players") or []))
+    _drop_superseded(grouped, view.get("summary") or {})
+    view["legal_actions"] = {kind: _tabulate(rows) for kind, rows in grouped.items()}
+    if view.get("summary"):
+        _tabulate_summary(view["summary"])
+    return _prune(_compact_board(view))
 
 
 def _translate(raw: dict) -> dict:
@@ -765,20 +1185,45 @@ def _trim_for(session: Session, view: dict, log_after: int | None = None, full_l
     return view
 
 
+def _can_offer(view: dict) -> bool:
+    """Whether `offer_trade()` would be accepted right now: `TableApi.
+    open_round` (`api.py`) requires `Phase.MAIN` and `game.current_player
+    == seat` (matched here as `to_move == seat`, `_public_mover` for a
+    live game); this adds the two conditions a caller can't tell from
+    those alone -- something actually legal to do (a phase can be MAIN
+    with an empty `legal_actions`, e.g. a closed-out seat) and no round
+    of this seat's own already open (the wire itself would just replace
+    it, but inviting a caller to clobber its own open offer is not the
+    same as it being ready to open a fresh one)."""
+    return (
+        view.get("phase") == "MAIN"
+        and view.get("to_move") == view.get("seat")
+        and bool(view.get("legal_actions"))
+        and view.get("trade_round") is None
+    )
+
+
 def _finish(session: Session, view: dict, log_after: int | None = None, full_log: bool = False) -> dict:
     """The one seam every view crosses on its way out, whichever tool is
-    answering: `summary` (`_summarize`, against the board cached on the
-    session), then the compact shape (`_compact`), then the transcript trim
-    against this session's cursor (`_trim_for`). `view` is already
-    `_translate`d -- `_reply` does that for a fresh wire dict, and
-    `wait_for_turn` for the poll it decided to hand over.
+    answering: `can_offer`, then `summary` (`_summarize`, against the board
+    cached on the session), then the compact shape (`_compact`), then the
+    transcript trim against this session's cursor (`_trim_for`). `view` is
+    already `_translate`d -- `_reply` does that for a fresh wire dict, and
+    `wait_for_turn` for the poll it decided to hand over. `can_offer` reads
+    the flat `legal_actions` and the translated `trade_round`, so it runs
+    before `_compact` reshapes either.
 
     Two call sites used to apply these steps separately and drifted twice:
     the streamed view first lacked `summary`, then came back with the flat
     `legal_actions` while `state()` grouped them. The shape of a reply must
     not depend on which tool returned it, so the steps live here and nowhere
     else."""
-    return _trim_for(session, _compact(_summarize(view, session.board)), log_after, full_log)
+    view["can_offer"] = _can_offer(view)
+    view = _trim_for(session, _compact(_summarize(view, session.board), session), log_after, full_log)
+    if view.get("game_over"):
+        this = len(json.dumps(view, separators=(",", ":")))
+        view["usage"] = {"calls": session.calls + 1, "bytes": session.bytes + this}
+    return view
 
 
 def _reply(session: Session, raw: dict, log_after: int | None = None, full_log: bool = False) -> dict:
@@ -787,23 +1232,25 @@ def _reply(session: Session, raw: dict, log_after: int | None = None, full_log: 
     return _finish(session, _translate(raw), log_after, full_log)
 
 
-def _get_table(tables: Tables, session: Session, log_after: int | None = None, full_log: bool = False) -> dict:
-    return _state(tables, session, log_after, full_log)
-
-
 def _offer_trade(
     tables: Tables,
     session: Session,
     give: dict,
     want: dict,
+    to: list[int] | None = None,
+    timeout: float | None = None,
     log_after: int | None = None,
     full_log: bool = False,
-) -> dict:
+) -> Iterator:
     _seated(session)
+    if to is not None:
+        if not isinstance(to, list) or not all(isinstance(seat, int) for seat in to):
+            raise ToolError("to must be a list of seat numbers, best first")
+        to = list(dict.fromkeys(to))  # ranked, no repeats
     body = {"give": _positional(give), "want": _positional(want)}
-    return _reply(
-        session, _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round", body), log_after, full_log
-    )
+    offered = _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round", body)
+    session.offer_to = to
+    return _settle(tables, session, offered, timeout, log_after, full_log)
 
 
 def _answer_trade(
@@ -813,9 +1260,10 @@ def _answer_trade(
     kind: str,
     give: dict | None = None,
     receive: dict | None = None,
+    timeout: float | None = None,
     log_after: int | None = None,
     full_log: bool = False,
-) -> dict:
+) -> Iterator:
     _seated(session)
     # No `version` here on purpose: the wire refuses anything but the exact
     # open offer by `actor` + `received` (`GameSession.answer_round`), which is
@@ -824,21 +1272,17 @@ def _answer_trade(
     pending = raw.get("pending") or []
     if not isinstance(index, int) or not (0 <= index < len(pending)):
         raise ToolError(
-            f"index {index!r} out of range — get_table()'s pending has "
+            f"index {index!r} out of range — state()'s pending has "
             f"{len(pending)} offer(s) right now (0..{len(pending) - 1})"
             if pending
-            else "index out of range — get_table()'s pending is empty; nobody has an open offer against you"
+            else "index out of range — state()'s pending is empty; nobody has an open offer against you"
         )
     offer = pending[index]
     body = {"actor": offer["actor"], "received": offer["bundle"], "kind": kind}
     if kind == "counter":
         body["bundle"] = _bundle_towards_actor(give, receive)
-    return _reply(
-        session,
-        _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/answer", body),
-        log_after,
-        full_log,
-    )
+    answered = _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/answer", body)
+    return _settle(tables, session, answered, timeout, log_after, full_log)
 
 
 def _choose_trade(
@@ -846,27 +1290,25 @@ def _choose_trade(
     session: Session,
     index: int | None = None,
     decline: bool = False,
+    timeout: float | None = None,
     log_after: int | None = None,
     full_log: bool = False,
-) -> dict:
+) -> Iterator:
     _seated(session)
     # No `version` (see `_answer_trade`): the wire matches the chosen answer
     # by `seat` + `bundle` exactly (`GameSession.execute_round_choice`).
     raw = _call_ok(tables, session, "GET", "/api/state")
+    session.offer_to = None
     if decline:
-        return _reply(
-            session,
-            _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/choose", {"decline": True}),
-            log_after,
-            full_log,
-        )
+        declined = _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/choose", {"decline": True})
+        return _settle(tables, session, declined, timeout, log_after, full_log)
     responses = ((raw.get("trade_round") or {}).get("responses")) or []
     if not isinstance(index, int) or not (0 <= index < len(responses)):
         raise ToolError(
-            f"index {index!r} out of range — get_table()'s trade_round.responses has "
+            f"index {index!r} out of range — state()'s trade_round.responses has "
             f"{len(responses)} answer(s) right now (0..{len(responses) - 1})"
             if responses
-            else "index out of range — get_table()'s trade_round.responses is empty; "
+            else "index out of range — state()'s trade_round.responses is empty; "
             "nobody has answered your offer yet"
         )
     response = responses[index]
@@ -876,28 +1318,35 @@ def _choose_trade(
             "choose an accept or counter, or `decline: true`"
         )
     body = {"seat": response["seat"], "bundle": response["bundle"]}
-    return _reply(
-        session,
-        _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/choose", body),
-        log_after,
-        full_log,
-    )
+    chosen = _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/choose", body)
+    return _settle(tables, session, chosen, timeout, log_after, full_log)
 
 
-# --- wait_for_turn: a long poll, exposed as an SSE stream (web.py) -----------
+# --- Settling: every acting tool returns at this seat's next decision ---------
 #
-# `web.py`'s `POST /mcp` answers a `tools/call` for this one tool with
-# `text/event-stream` instead of one JSON object, writing a keepalive
-# between each 15s wait so the connection (and whatever proxy sits in front
-# of it) doesn't decide the server has gone quiet. The generator below is
-# the shared loop: `_wait_for_turn_events` yields `_KEEPALIVE` for every tick
-# that doesn't resolve the wait and the final translated view once it does
-# (or once `timeout` runs out); `web.py` drives it directly for the SSE
-# framing, and `_wait_for_turn` (registered as the tool, for tools/list and
-# any caller that wants one blocking call) just drains it.
+# A reply that comes back the instant after an action leaves the caller to
+# decide when to look again -- and the one LLM game played through the
+# earlier tools showed what that costs: a seat that reads `wait`, does
+# something else, and stalls its own turn. So no acting tool answers until
+# there is something for this seat to do. `act(END_TURN)` returns when the
+# other seats have played round to you (or an offer lands against you, or
+# the game ends); `act(BUILD_ROAD)` returns at once, since it is still your
+# turn. The loop a seat runs is then act -> act -> act, and `your_move` is
+# never `wait` unless the wait was cut short by `timeout` or `_MAX_WAIT`.
+#
+# `web.py` answers every `tools/call` as `text/event-stream`, writing a
+# keepalive for each `_KEEPALIVE` yielded here so the connection (and
+# whatever proxy sits in front of it) does not decide the server has gone
+# quiet during a long wait. `call_tool_events` is what it drives;
+# `call_tool` drains the same generator for any caller that wants one
+# blocking call.
 
 _KEEPALIVE = object()
 _WAIT_TICK = 15.0
+# The most any one call blocks, whatever `timeout` says: a human seat that
+# walked away must not hold a connection open for ever. On expiry the reply
+# is whatever the table looks like then, `your_move: wait` included.
+_MAX_WAIT = 600.0
 
 
 def _turn_ready(view: dict) -> bool:
@@ -906,46 +1355,105 @@ def _turn_ready(view: dict) -> bool:
     return _your_move(view)[0] != "wait"
 
 
-def _poll_state(tables: Tables, session: Session, after: int | None = None, wait: float = 0.0) -> dict:
+def _poll_raw(tables: Tables, session: Session, after: int | None = None, wait: float = 0.0) -> dict:
     query = "" if after is None else f"?after={after}&wait={wait}"
-    # `_translate`, not `_reply`: these polls are never seen by the caller,
-    # so they must not move the session's cursor (`Session.log_sent`).
-    return _translate(_call_ok(tables, session, "GET", f"/api/state{query}"))
+    return _call_ok(tables, session, "GET", f"/api/state{query}")
 
 
-def _wait_for_turn_events(
+# The most forced moves one `_forced` pass plays before handing the view
+# over regardless -- a bound, not a budget; a turn has at most one roll
+# and one open offer per other seat.
+_FORCED_CAP = 8
+
+
+def _settled_round(raw: dict, to: list[int] | None = None) -> dict | None:
+    """The `.../trade/round/choose` body for an own round nobody is still
+    to answer and nothing is left to decide, or `None`. A counter from
+    anyone is always the seat's to weigh. Otherwise, with `to` (the ranked
+    seats `offer_trade` named): the best-ranked listed seat's accept
+    executes, and no listed accept closes the round -- an unlisted seat's
+    accept is not a trade the offerer wanted. Without `to`: one accept
+    executes, none closes, two or more are the seat's call."""
+    trade_round = raw.get("trade_round")
+    if not trade_round or trade_round.get("awaiting"):
+        return None
+    responses = trade_round.get("responses") or []
+    if any(r.get("kind") == "counter" for r in responses):
+        return None
+    accepts = [r for r in responses if r.get("kind") == "accept"]
+    if to is not None:
+        accepts = sorted((a for a in accepts if a.get("seat") in to), key=lambda a: to.index(a["seat"]))
+    elif len(accepts) > 1:
+        return None
+    if not accepts:
+        return {"decline": True}
+    return {"seat": accepts[0]["seat"], "bundle": accepts[0]["bundle"]}
+
+
+def _forced(tables: Tables, session: Session, raw: dict) -> dict:
+    """Plays what no seat would decide differently, so no reply asks: a
+    lone `ROLL` (with a Knight also legal the seat chooses, so that is
+    left alone), and a `pass` on an offer while the hand is empty. Only
+    then: an offer the hand cannot *cover* is still one it can counter --
+    the first game's one counter against such an offer was taken -- so
+    those reach the seat, flagged `can_accept: false` on `pending`. And
+    the seat's own offer once everyone has answered, when there is nothing
+    to choose: every answer a pass closes the round; exactly one accept as
+    offered and no counter executes it (the seat already agreed to those
+    terms by offering). Any counter, or two accepts, is the seat's call.
+    Returns the latest raw view."""
+    for _ in range(_FORCED_CAP):
+        legal = raw.get("legal_actions") or []
+        if len(legal) == 1 and legal[0].get("type") == "ROLL":
+            raw = _call_ok(tables, session, "POST", "/api/action", {"action": legal[0]})
+            continue
+        settled = _settled_round(raw, session.offer_to)
+        if settled is not None and session.code:
+            raw = _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/choose", settled)
+            session.offer_to = None
+            continue
+        me = next((p for p in raw.get("players") or [] if p.get("seat") == raw.get("seat")), None)
+        hand = None if me is None else me.get("hand")
+        pending = raw.get("pending") or []
+        unanswerable = pending[0] if pending and hand is not None and not any(hand.values()) else None
+        if unanswerable is not None and session.code:
+            body = {"actor": unanswerable["actor"], "received": unanswerable["bundle"], "kind": "pass"}
+            raw = _call_ok(tables, session, "POST", f"/api/games/{session.code}/trade/round/answer", body)
+            continue
+        return raw
+    return raw
+
+
+def _settle(
     tables: Tables,
     session: Session,
+    raw: dict,
     timeout: float | None = None,
     log_after: int | None = None,
     full_log: bool = False,
-):
-    """Yields `_KEEPALIVE` for each wait tick that doesn't resolve, then the
-    final translated view -- immediately, if it's already true.
+) -> Iterator:
+    """From `raw` -- the wire view an action (or a seat, or a plain read)
+    just handed back -- plays the forced moves (`_forced`), then yields
+    `_KEEPALIVE` per wait tick until this seat has something to decide, then
+    the one `_finish`ed reply. Immediately, if `raw` already says so. Only
+    that final view moves the session's cursor.
 
-    Only the view that is actually yielded goes through `_finish` -- the same
-    seam `_reply` uses, so it comes back in the same shape as a `state()`
-    reply: summarised, grouped, and trimmed against the session's cursor,
-    which only it moves. The polls in between are read for `version` and
-    `_turn_ready` alone and are never seen by the caller.
-
-    This is the call a seat makes to reach its own turn, so the view it
-    returns is the one `afford`/`spots`/`robber` are for; it is the reply
-    that must least of all differ from the others."""
-    _seated(session)
-    view = _poll_state(tables, session)
-    if _turn_ready(view):
-        yield _finish(session, view, log_after, full_log)
-        return
-    elapsed = 0.0
-    while timeout is None or elapsed < timeout:
+    Every acting tool ends here, so every reply is the same shape as
+    `state()`'s: summarised, grouped, trimmed. The polls in between are read
+    for `version` and `_turn_ready` alone."""
+    # `_translate`, not `_finish`, until the last line: the views in between
+    # are never seen by the caller, so they must not move the session's
+    # cursor (`Session.log_sent`).
+    view = _translate(_forced(tables, session, raw))
+    limit = _MAX_WAIT if timeout is None else max(0.0, min(float(timeout), _MAX_WAIT))
+    deadline = time.monotonic() + limit
+    while not _turn_ready(view):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
         yield _KEEPALIVE
-        remaining = _WAIT_TICK if timeout is None else max(0.0, min(_WAIT_TICK, timeout - elapsed))
-        view = _poll_state(tables, session, after=view.get("version"), wait=remaining)
-        elapsed += remaining
-        if _turn_ready(view) or (timeout is not None and elapsed >= timeout):
-            yield _finish(session, view, log_after, full_log)
-            return
+        raw = _poll_raw(tables, session, after=view.get("version"), wait=min(_WAIT_TICK, remaining))
+        view = _translate(_forced(tables, session, raw))
     yield _finish(session, view, log_after, full_log)
 
 
@@ -955,311 +1463,243 @@ def _wait_for_turn(
     timeout: float | None = None,
     log_after: int | None = None,
     full_log: bool = False,
-) -> dict:
-    result: dict = {}
-    for item in _wait_for_turn_events(tables, session, timeout=timeout, log_after=log_after, full_log=full_log):
-        if item is not _KEEPALIVE:
-            result = item
-    return result
+) -> Iterator:
+    _seated(session)
+    return _settle(tables, session, _call_ok(tables, session, "GET", "/api/state"), timeout, log_after, full_log)
 
 
 # The transcript-cursor arguments every state-returning tool takes, spelled
 # once. The cursor itself is automatic (`_trim_for`): these are the overrides.
+# `_WAIT_ARGS` adds the one every settling tool takes (`_settle`).
 _CURSOR_ARGS = {
     "log_after": {
         "type": "integer",
-        "description": "Optional override of the automatic transcript cursor: how many "
-        "`log` lines you hold (a `log_total` from an earlier reply). Normally omit it.",
+        "description": "Override the automatic `log` cursor: the line count you hold. Normally omit.",
     },
     "full_log": {
         "type": "boolean",
-        "description": "Optional: send the whole transcript, ignoring the cursor -- for "
-        "when a reply went missing (`log_from` came back past the lines you hold).",
+        "description": "Send the whole `log` (after a lost reply).",
     },
 }
+_WAIT_ARGS = {
+    "timeout": {
+        "type": "number",
+        "description": "Max seconds to wait for your next move (default/cap 600; 0 = reply now).",
+    },
+    **_CURSOR_ARGS,
+}
 
+_IDENTITY_ARG = {
+    "type": "string",
+    "description": "A string naming you, e.g. claude-opus-5. It is your key for resume_game().",
+}
+_CODE_ARG = {"type": "string", "description": "The game's six-character code."}
+_NAME_ARG = {"type": "string", "description": "Display name, up to 40 characters."}
+
+
+def _resource_dict(description: str) -> dict:
+    return {"type": "object", "additionalProperties": {"type": "integer"}, "description": description}
+
+
+# Every tool but `bots`/`board` answers with the same state reply, documented
+# once, on `state`. The other descriptions say only what differs.
+#
 # name -> (handler, description, JSON Schema for `arguments`)
 _TOOLS: dict[str, tuple] = {
-    "models": (
-        _models,
-        "List the opponent names new_game's `opponents` argument accepts.",
+    "bots": (
+        _bots,
+        "Bot names new_game's `opponents` accepts.",
         {"type": "object", "properties": {}},
     ),
     "new_game": (
         _new_game,
-        "Deal a new game, playable immediately: you at one random seat, any "
-        "named opponents at others, everything else open for other people (or "
-        "other bots) to join by the code this returns. There is no separate "
-        "start — the board is live from the first response. Nothing is ever "
-        "traded on your behalf: offers to you wait in get_table()'s `pending` "
-        "for answer_trade(). `model` identifies you for resume_game() -- keep "
-        "it exactly as given if you ever mean to reclaim this seat.",
+        "Deal a new game and take a random seat; play starts at once. `opponents` "
+        "fill bot seats; any other seat stays open for others to join by the "
+        "returned `code`. Nothing is traded on your behalf. Replies at your first "
+        "move, as state().",
         {
             "type": "object",
             "properties": {
-                "model": {
-                    "type": "string",
-                    "description": "Your exact model identifier, e.g. claude-opus-5.",
-                },
+                "identity": _IDENTITY_ARG,
                 "opponents": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": (
-                        "Names from models(), one per bot seat to fill at the deal. "
-                        "Omit for no bots at all — every other seat stays open."
-                    ),
+                    "description": "Names from bots(), one per bot seat. Omit for no bots.",
                 },
-                "name": {"type": "string", "description": "Your display name, up to 40 characters."},
+                "name": _NAME_ARG,
+                **_WAIT_ARGS,
             },
-            "required": ["model"],
+            "required": ["identity"],
         },
     ),
     "join": (
         _join,
-        "Take a random open seat at an existing game by its six-character code. "
-        "Fails if every seat is taken or has locked out (see state()'s `locked`) "
-        "— a seat somebody closed outright is retired for the rest of that "
-        "game, so join before that happens. Your seat is gated the same way "
-        "new_game()'s is — see its description. `model` identifies you for "
-        "resume_game() the same way it does there.",
+        "Take a random open seat at an existing game. Fails when none is open "
+        "(a seat left or locked out stays closed for that game). Replies at your "
+        "first move, as state().",
         {
             "type": "object",
-            "properties": {
-                "code": {"type": "string", "description": "The game's six-character code."},
-                "model": {
-                    "type": "string",
-                    "description": "Your exact model identifier, e.g. claude-opus-5.",
-                },
-                "name": {"type": "string", "description": "Your display name, up to 40 characters."},
-            },
-            "required": ["code", "model"],
+            "properties": {"code": _CODE_ARG, "identity": _IDENTITY_ARG, "name": _NAME_ARG, **_WAIT_ARGS},
+            "required": ["code", "identity"],
         },
     ),
     "board": (
         _board,
-        "The board's fixed layout: hex positions/terrain/numbers and vertex/edge "
-        "adjacency. Unlike state(), this never changes once a game is dealt, so it "
-        "only needs reading once per game. Each hex also carries `resource` (its "
-        "terrain's payout, e.g. `FOREST` -> `Wood`; `null` for desert/sea/gold, "
-        "which pay nothing fixed) and `pips` (its 2d6 odds: 5 for a 6 or 8 down to "
-        "1 for a 2 or 12, 0 for none). Each vertex carries the same two, summed "
-        "and de-duplicated over every hex it touches -- `pips`/`resources` there "
-        "are the settlement-value numbers a placement decision actually turns on.",
+        "The fixed board as text. Read it once, right after taking a seat, to "
+        "plan expansion beyond what `summary` shows (one or two roads out). "
+        "`hexes`: id, resource "
+        "(DESERT/SEA/GOLD pay nothing fixed), pips (2d6 ways to roll its token: 5 "
+        "for 6/8 down to 1 for 2/12), vertex ids. `vertices`: id, pips summed and "
+        "resources de-duplicated over touching hexes (settlement value), port "
+        "(e.g. Wheat2:1, 3:1, -), neighbor vertex ids a road reaches. No edge list: "
+        "state()'s `summary.roads` names each legal edge's destination vertex.",
         {"type": "object", "properties": {}},
     ),
     "state": (
         _state,
-        "The full current game state. Read `your_move` first, then `summary`: "
-        "`afford` (per build: `ok`, `missing` resources, `legal` right now), "
-        "`race` (your points and `to_win`, the public leader, and for each "
-        "award your count, the holder's, and the `need` that takes it), and "
-        "when there is a placement or robber move to make, `spots` (each legal "
-        "settlement/city vertex with its pips, resources and port, best first, "
-        "with the `index` to act() on) and `robber` (each hex the robber may go "
-        "to with its pips, whose buildings it `hits`, and an `index` per "
-        "victim). `your_move` is `act`, "
-        "`discard`, `answer_trade` or `choose_trade` names the tool the table "
-        "wants from you now; `wait` means nothing does, and `waiting_on` lists "
-        "the seats it is waiting for; `game_over` is the end. Then every seat's "
-        "public info (hand size, and "
-        "your own hand; the public resource-count ledger for everyone else — "
-        "counting isn't hidden information here, only a steal's identity and "
-        "dev-card types are), the board's contents as `buildings` (vertex, "
-        "seat, kind) and `roads` (edge ids, one list per seat), and "
-        "`legal_actions` — what act() currently accepts, grouped by action "
-        "type, each entry carrying the `index` to act() on plus its operand: "
-        "`edge` (BUILD_ROAD/SETUP_ROAD), `vertex` (BUILD_SETTLEMENT/"
-        "SETUP_SETTLEMENT/BUILD_CITY), `hex` and `victim` (MOVE_ROBBER, null "
-        "victim = nobody to rob), `give`/`want` (BANK_TRADE), `resource` "
-        "(PLAY_MONOPOLY/DISCARD), `resources` (PLAY_YEAR_OF_PLENTY); ROLL, "
-        "END_TURN, BUY_DEV_CARD, PLAY_KNIGHT and PLAY_ROAD_BUILDING carry only "
-        "`index`. Empty when it is not your turn; `legal_count` is the flat "
-        "total. Pass the entry you pick, with its group key as `type`, as "
-        "act()'s `expect` to have it refuse instead of guessing if the list "
-        "moved under you. Poll this while another seat is thinking, or call "
-        "wait_for_turn() instead to block until it's worth polling again. The "
-        "transcript `log` is sent incrementally without you doing anything: "
-        "each reply carries only the lines added since this session's previous "
-        "reply, plus the one trailing line that may have been rewritten since "
-        "(a burst of builds collapses into a single line that grows), with "
-        "`log_from` naming the index the slice starts at and `log_total` the "
-        "whole length. Keep your own copy and splice at `log_from`. A fresh "
-        "seat, a resumed seat and the final read of a finished game get the "
-        "whole transcript; pass `full_log: true` to force that at any time.",
-        {
-            "type": "object",
-            "properties": {
-                **_CURSOR_ARGS,
-            },
-        },
+        "Game state; every acting tool replies with it at your next decision. "
+        "Played for you: a lone ROLL; passing offers with an empty hand; your own "
+        "offer when all pass or one clean accept fits `to`.\n"
+        "`your_move`: `act`, `discard`->discard(cards), `answer_trade` or "
+        "`choose_trade`: the tool; `game_over`; `wait` only after `timeout` or "
+        "with seats open (`waiting_on`; wait_for_turn()).\n"
+        "`summary.afford` per build: `ok`, `missing`, `legal`, `why` (phase/spot/pieces/deck). `summary.race`: "
+        "`points`, `to_win`, `top_opponent`, awards yours/holder's/`need`. When legal: "
+        "`spots` (settlement/city vertices, pips/resources/port/`port_matches`, best "
+        "first) and `robber` (hexes, pips, `hits` seat:Ns+Nc = settlements+cities, "
+        "`options` actIndex:victimSeat), each replacing its `legal_actions` group; `roads` (`to` "
+        "vertex, pips/resources/port, `settle`, `then` = best vertex one road on, "
+        "`link` = joins your network).\n"
+        "Tables are `(keys):row|row`, cells comma-separated, `-` null, 1/0 bool, "
+        "`;` in a list. `legal_actions`: per type, `index` for act() plus `edge` (roads), "
+        "`vertex` (settlement/city), `hex`+`victim` (MOVE_ROBBER), `give`/`want` "
+        "(BANK_TRADE), `resource` (MONOPOLY/DISCARD), `resources` (YEAR_OF_PLENTY); "
+        "the rest index only.\n"
+        "`players`: `kind`, your `hand`/`dev_cards`, public ledger `known`/`unknown`. "
+        "`buildings`, `roads` (edge ids per seat), "
+        "`bank`, `robber` hex, `trade_ratios` (your bank rate; 3 or 2 = a port). "
+        "Resource dicts omit zeros.\n"
+        "`can_offer`: true if offer_trade() would be accepted now. `pending`: "
+        "offers to you (`actor`, `you_give`, `you_receive`, `can_accept`; a counter "
+        "is always allowed) -> answer_trade(index). "
+        "`trade_round`: your open offer's `responses` (`seat`, `kind`, "
+        "`you_would_give`/`you_would_receive`) -> choose_trade(index). `trades`: "
+        "done this turn.\n"
+        "`log`: new lines plus the last you hold (it may be rewritten); splice at "
+        "`log_from`. Full on a new/resumed seat; `full_log` for the whole.",
+        {"type": "object", "properties": {**_CURSOR_ARGS}},
     ),
     "wait_for_turn": (
         _wait_for_turn,
-        "Block until there is something for you to do: legal_actions is "
-        "non-empty, an offer is waiting for answer_trade(), your own open "
-        "trade_round has an answer from everyone, or the game is over. "
-        "Returns immediately if any of that is already true. Streamed as "
-        "Server-Sent Events with a keepalive roughly every 15 seconds while "
-        "it waits, so a long turn from another seat doesn't look like a dead "
-        "connection.",
-        {
-            "type": "object",
-            "properties": {
-                "timeout": {
-                    "type": "number",
-                    "description": "Give up and return the current state after this many "
-                    "seconds. Omit to wait indefinitely.",
-                },
-                **_CURSOR_ARGS,
-            },
-        },
+        "Wait until `your_move` is not `wait`, then reply as state(). Only needed "
+        "after a reply whose `timeout` ran out.",
+        {"type": "object", "properties": {**_WAIT_ARGS}},
     ),
     "act": (
         _act,
-        "Play the legal_actions entry with this `index` from the most recent "
-        "state() (call state() first if unsure what's legal right now; "
-        "`summary.spots`/`summary.robber` carry the same indexes). Returns the "
-        "state right after "
-        "that one action — ending your own turn is END_TURN, an action like any "
-        "other, not something act() infers.",
+        "Play `legal_actions` entry `index` from the latest state() (same indexes "
+        "in `summary.spots`/`robber`). END_TURN is an action like any other. "
+        "Replies at your next move, as state().",
         {
             "type": "object",
             "properties": {
                 "index": {"type": "integer", "description": "Index into legal_actions."},
                 "expect": {
                     "type": "object",
-                    "description": "Optional: the legal_actions entry you chose, with its group "
-                    "key as `type` (e.g. {\"type\": \"BUILD_ROAD\", \"edge\": 17}). If that index "
-                    "no longer matches it, act() refuses instead of playing whatever now sits "
-                    "there.",
+                    "description": "The entry you chose with its group key as `type`, e.g. "
+                    '{"type": "BUILD_ROAD", "edge": 17}. Refuses if that index now names '
+                    "something else.",
                 },
-                **_CURSOR_ARGS,
+                **_WAIT_ARGS,
             },
             "required": ["index"],
         },
     ),
-    "undo": (
-        _undo,
-        "Undo your own most recent build, bank trade, Road Building, or Knight, "
-        "if state()'s can_undo is true. A Knight stays undoable up through the "
-        "forced robber move it opens, until that move is actually made. "
-        "Anything else (another seat's move, a rolled seven's own robber move) "
-        "cannot be undone.",
-        {"type": "object", "properties": {}},
+    "discard": (
+        _discard,
+        "On a seven, discard `cards` (resource -> count) in one call instead of "
+        "one act() per card. Must total your discard_quota exactly. Replies at "
+        "your next move, as state().",
+        {
+            "type": "object",
+            "properties": {
+                "cards": _resource_dict('Resource -> count to discard, e.g. {"Wood": 2, "Ore": 1}.'),
+                **_WAIT_ARGS,
+            },
+            "required": ["cards"],
+        },
     ),
     "leave_game": (
         _leave_game,
-        "Give up your seat for the rest of this game — permanent, and the only "
-        "way to do it (there is no re-join). Your pieces and hand stay on the "
-        "board exactly as they are; only your turn is skipped from now on, and "
-        "the game carries on without you. Refuses while a trade round is open "
-        "naming you as its actor or as a seat still owed an answer — resolve it "
-        "with answer_trade()/choose_trade() first.",
+        "Give up your seat for good; pieces and hand stay, your turns are skipped. "
+        "Refuses while a trade round involving you is open.",
         {"type": "object", "properties": {}},
-    ),
-    "get_table": (
-        _get_table,
-        "Everything the table has said about trading, alongside state(): this "
-        "turn's `trades` (each as `a`/`b` seats plus `a_gave`/`a_got`, named "
-        "resource -> count); `pending` -- offers broadcast to you, unanswered, "
-        "each as `actor` plus `you_give`/`you_receive` (what answering `accept` "
-        "would cost/pay you); `trade_round` -- your own open offer, only when "
-        "you're the one who broadcast it, as `you_give`/`you_receive` plus "
-        "`responses` (each an accept or counter with `you_would_give`/"
-        "`you_would_receive` if chosen, or a `pass` with neither) and "
-        "`awaiting`, the seats still to answer. Resource dicts omit zero counts. "
-        "Use a `pending`/`responses` list's index with answer_trade()/"
-        "choose_trade() -- never hand-build a trade from these dicts.",
-        {
-            "type": "object",
-            "properties": {
-                **_CURSOR_ARGS,
-            },
-        },
     ),
     "offer_trade": (
         _offer_trade,
-        "On your own turn in MAIN, broadcast one offer to every other seat: "
-        "`give` and `want` are named resource -> count, 1-3 cards a side on "
-        "different resources. Bots answer at once (accept, counter or pass); "
-        "read the answers in get_table()'s `trade_round`, then choose_trade().",
+        "On your own turn in MAIN, offer a trade to every other seat: 1-3 cards a "
+        "side, no resource on both sides; only while `can_offer`. A lone clean "
+        "accept is executed for you; with `to`, the best-ranked listed accepter "
+        "is and others are refused. Counters, or several accepts without `to`, "
+        "come back for choose_trade().",
         {
             "type": "object",
             "properties": {
-                "give": {
-                    "type": "object",
-                    "additionalProperties": {"type": "integer"},
-                    "description": "Resource name -> count you give, e.g. {\"Wood\": 1}.",
+                "give": _resource_dict('Resource -> count you give, e.g. {"Wood": 1}.'),
+                "want": _resource_dict("Resource -> count you want."),
+                "to": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Seats you would trade with, best first. Omit for anyone.",
                 },
-                "want": {
-                    "type": "object",
-                    "additionalProperties": {"type": "integer"},
-                    "description": "Resource name -> count you want.",
-                },
-                **_CURSOR_ARGS,
+                **_WAIT_ARGS,
             },
             "required": ["give", "want"],
         },
     ),
     "answer_trade": (
         _answer_trade,
-        "Answer one of get_table()'s `pending` offers by its index there. "
-        "`kind` is `accept` (its `you_give`/`you_receive` as offered), "
-        "`counter` (then pass your own `give`/`receive`, named resource -> "
-        "count, as the counter-offer) or `pass`. The actor picks among every "
-        "seat's answer once all have answered, via choose_trade() on their side.",
+        "Answer `pending[index]`: `accept` as offered, `counter` with your own "
+        "`give`/`receive`, or `pass`. The actor then picks one answer. Replies at "
+        "your next move.",
         {
             "type": "object",
             "properties": {
-                "index": {"type": "integer", "description": "Index into get_table()'s pending."},
+                "index": {"type": "integer", "description": "Index into pending."},
                 "kind": {"type": "string", "enum": ["accept", "counter", "pass"]},
-                "give": {
-                    "type": "object",
-                    "additionalProperties": {"type": "integer"},
-                    "description": "Only for kind=counter: resource -> count you'd give.",
-                },
-                "receive": {
-                    "type": "object",
-                    "additionalProperties": {"type": "integer"},
-                    "description": "Only for kind=counter: resource -> count you'd receive.",
-                },
-                **_CURSOR_ARGS,
+                "give": _resource_dict("counter only: resource -> count you give."),
+                "receive": _resource_dict("counter only: resource -> count you receive."),
+                **_WAIT_ARGS,
             },
             "required": ["index", "kind"],
         },
     ),
     "choose_trade": (
         _choose_trade,
-        "Execute one answer to your own open offer, by its index into "
-        "get_table()'s `trade_round.responses` -- or `decline: true` to close "
-        "the round with nothing traded.",
+        "Execute `trade_round.responses[index]`, or `decline: true` to close your "
+        "round with no trade. Replies at your next move.",
         {
             "type": "object",
             "properties": {
                 "index": {"type": "integer", "description": "Index into trade_round.responses."},
                 "decline": {"type": "boolean"},
-                **_CURSOR_ARGS,
+                **_WAIT_ARGS,
             },
         },
     ),
     "resume_game": (
         _resume_game,
-        "Reclaim a seat by its game `code` and the `model` new_game()/join() "
-        "were called with — the same way a browser reclaims one after losing "
-        "its token, via POST /api/reclaim. Use this after a fresh MCP "
-        "connection (a new Mcp-Session-Id starts with no seat at all) or "
-        "after a 404 on a request that used to work. Fails if no seat's "
-        "client matches that `model`'s secret, or the seat has locked out.",
+        "Reclaim your seat with the `code` and the exact `identity` you gave "
+        "new_game()/join(). Use after a new MCP session, which starts seatless. "
+        "Replies at your next move, as state().",
         {
             "type": "object",
             "properties": {
-                "code": {"type": "string", "description": "The game's six-character code."},
-                "model": {
-                    "type": "string",
-                    "description": "The exact model identifier new_game()/join() were called with.",
-                },
+                "code": _CODE_ARG,
+                "identity": {"type": "string", "description": "The identity new_game()/join() was called with."},
+                **_WAIT_ARGS,
             },
-            "required": ["code", "model"],
+            "required": ["code", "identity"],
         },
     ),
 }
@@ -1272,16 +1712,39 @@ def tool_list() -> list[dict]:
     ]
 
 
-def call_tool(tables: Tables, session: Session, name: str, arguments: dict) -> dict:
-    """One tool call -> its raw result dict, or a raised `ToolError`. The
-    `{"content": [...], "isError": ...}` MCP result envelope is `web.py`'s
-    job, not this module's — it's the one thing that differs between a plain
-    JSON response and `wait_for_turn`'s streamed one."""
+def call_tool_events(tables: Tables, session: Session, name: str, arguments: dict) -> Iterator:
+    """One tool call as `web.py` streams it: `_KEEPALIVE` for every wait
+    tick, then the one raw result dict -- or a raised `ToolError`, before or
+    between items. The `{"content": [...], "isError": ...}` MCP result
+    envelope is `web.py`'s job, not this module's."""
     entry = _TOOLS.get(name)
     if entry is None:
         raise ToolError(f"unknown tool: {name}")
     handler, _, _ = entry
     try:
-        return handler(tables, session, **arguments)
+        result = handler(tables, session, **arguments)
     except TypeError as error:
         raise ToolError(f"bad arguments for {name}: {error}") from error
+    if isinstance(result, (dict, str)):
+        _count(session, result)
+        yield result
+    else:
+        for item in result:
+            if item is not _KEEPALIVE:
+                _count(session, item)
+            yield item
+
+
+def _count(session: Session, result) -> None:
+    session.calls += 1
+    session.bytes += len(result) if isinstance(result, str) else len(json.dumps(result, separators=(",", ":")))
+
+
+def call_tool(tables: Tables, session: Session, name: str, arguments: dict) -> dict | str:
+    """`call_tool_events` drained: one blocking call -> its result (a dict,
+    or `board`'s text)."""
+    result: dict | str = {}
+    for item in call_tool_events(tables, session, name, arguments):
+        if item is not _KEEPALIVE:
+            result = item
+    return result

@@ -21,10 +21,11 @@ header back: a missing one is a 400, an unknown one a 404 (a client that sees
 a 404 just calls `initialize` again — a fresh Mcp-Session-Id, an unseated `Session`,
 same as a fresh process used to be). `DELETE /mcp` drops a session early;
 `GET /mcp` is 405 -- this server never pushes anything to a client outside of
-one `tools/call`'s own response. A `tools/call` for `wait_for_turn` is the one
-tool answered as `text/event-stream` rather than one JSON object (see
-`_mcp_wait_for_turn_stream` below); everything else is a single JSON-RPC
-response, same as `initialize`/`tools/list`.
+one `tools/call`'s own response. Every `tools/call` is answered as
+`text/event-stream` (see `_mcp_stream_tool` below): acting tools block until
+the seat's next move (`mcptools._settle`), so any of them may sit for minutes
+and needs the keepalives, and one response shape for all of them is one path
+to keep right. `initialize`/`tools/list`/`ping` are single JSON-RPC responses.
 
 `Origin` is checked the way the spec's security section asks: present and not
 127.0.0.1/localhost/::1/this server's own `--host` is a 403; absent (every
@@ -308,10 +309,7 @@ class Handler(BaseHTTPRequestHandler):
             name = params.get("name")
             arguments = params.get("arguments")
             arguments = arguments if isinstance(arguments, dict) else {}
-            if name == "wait_for_turn":
-                self._mcp_wait_for_turn_stream(request_id, session, arguments)
-            else:
-                self._mcp_call_tool(request_id, session, name, arguments)
+            self._mcp_stream_tool(request_id, session, name, arguments)
         else:
             self._json({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32601, "message": f"method not found: {method}"}})
 
@@ -335,36 +333,25 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _mcp_call_tool(self, request_id, session: mcptools.Session, name: str, arguments: dict) -> None:
-        try:
-            result = mcptools.call_tool(self.server.tables, session, name, arguments)
-            payload = {"content": [{"type": "text", "text": json.dumps(result)}], "isError": False}
-        except mcptools.ToolError as error:
-            payload = {"content": [{"type": "text", "text": str(error)}], "isError": True}
-        self._mcp_result(request_id, payload)
-
-    def _mcp_wait_for_turn_stream(self, request_id, session: mcptools.Session, arguments: dict) -> None:
-        """The one tool answered as `text/event-stream`: a `: keepalive`
-        comment between each 15s wait tick (`mcptools._wait_for_turn_events`),
-        then one `event: message` carrying the JSON-RPC response, then the
-        connection closes -- this server defaults to HTTP/1.0 (no keep-alive)
-        so nothing further is needed to make that happen cleanly."""
-        timeout = arguments.get("timeout")
-        log_after = arguments.get("log_after")
-        full_log = bool(arguments.get("full_log", False))
+    def _mcp_stream_tool(self, request_id, session: mcptools.Session, name: str, arguments: dict) -> None:
+        """Every tool, answered as `text/event-stream`: a `: keepalive`
+        comment for each wait tick `mcptools.call_tool_events` yields, then
+        one `event: message` carrying the JSON-RPC response (a `ToolError`
+        is that same message with `isError`), then the connection closes --
+        this server defaults to HTTP/1.0 (no keep-alive) so nothing further
+        is needed to make that happen cleanly."""
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "close")
         self.end_headers()
         try:
-            for item in mcptools._wait_for_turn_events(
-                self.server.tables, session, timeout=timeout, log_after=log_after, full_log=full_log
-            ):
+            for item in mcptools.call_tool_events(self.server.tables, session, name, arguments):
                 if item is mcptools._KEEPALIVE:
                     self.wfile.write(b": keepalive\n\n")
                 else:
-                    payload = {"content": [{"type": "text", "text": json.dumps(item)}], "isError": False}
+                    text = item if isinstance(item, str) else json.dumps(item, separators=(",", ":"))
+                    payload = {"content": [{"type": "text", "text": text}], "isError": False}
                     response = {"jsonrpc": "2.0", "id": request_id, "result": payload}
                     self.wfile.write(f"event: message\ndata: {json.dumps(response)}\n\n".encode("utf-8"))
                 self.wfile.flush()

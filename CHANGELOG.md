@@ -8,6 +8,17 @@ Changes to the HexSet distribution. The project follows
 
 ### Added
 
+- **The network trade gate's continuation rollout is back, as a
+  per-checkpoint setting.** `gate_plies` (metadata key `gate_plies`,
+  default `0`) asks `NetworkBot` to roll the mover's own greedy policy
+  forward that many plies from each surviving candidate before valuing
+  it, same footing as `search`/`simulations` is for `hexset.mcts.Search`:
+  search on the trade decision, read off the file the same way. `0`, the
+  default every checkpoint gets unless it asks otherwise, is today's
+  single forward over the affordability filter's own after-position --
+  training collection runs at the default, and a served file that wants
+  the rollout asks for it in its own metadata.
+
 - **A duel can be played under the automatic clearing house.**
   `hexset.arena.compete` takes `trade_mode`/`max_trades` and hands them to
   every game it plays, and `hexset.bench.duel` exposes them as

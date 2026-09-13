@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from hexset.clients.modelmeta import (
+    MAX_GATE_PLIES,
     MAX_SIMULATIONS,
     MAX_TRADE_FLOOR,
     MAX_WAVE,
@@ -76,14 +77,42 @@ def test_an_unreadable_budget_falls_back_instead_of_failing_the_load(value):
 def test_a_checkpoint_that_declares_no_gate_is_read_as_unmeasured():
     """The floor is a property of the value head that was exported, and an
     unmeasured one has no resolution to express: strict positivity is then
-    the whole gate (`hexset.trading.clears_floor`)."""
+    the whole gate (`hexset.trading.clears_floor`). Likewise `gate_plies`:
+    a file that says nothing rolls no continuation, one forward over the
+    exchanged hand, the training-collection default."""
     assert gate_config({}) == GateConfig()
     assert gate_config({}).trade_floor == 0.0
+    assert gate_config({}).plies == 0
 
 
 def test_a_checkpoint_carries_its_own_measured_floor():
     config = gate_config({"trade_floor": "0.0197"})
     assert config.trade_floor == pytest.approx(0.0197)
+
+
+def test_a_checkpoint_carries_its_own_gate_plies():
+    """The rollout is search on the trade decision, same footing as
+    `simulations`: a served file asks for it in its own metadata."""
+    config = gate_config({"gate_plies": "8"})
+    assert config.plies == 8
+
+
+@pytest.mark.parametrize(
+    "meta, plies",
+    [
+        ({"gate_plies": "10000"}, MAX_GATE_PLIES),
+        ({"gate_plies": "-5"}, 0),
+    ],
+)
+def test_an_absurd_gate_plies_is_clamped_rather_than_honoured(meta, plies):
+    """The rollout runs synchronously inside a trade ask; an unbounded
+    budget would hang the seat rather than gate it."""
+    assert gate_config(meta).plies == plies
+
+
+@pytest.mark.parametrize("value", ["", "not-a-number", "3.5"])
+def test_an_unreadable_gate_plies_falls_back_instead_of_failing_the_load(value):
+    assert gate_config({"gate_plies": value}).plies == 0
 
 
 def test_a_stale_row_bound_is_read_without_complaint_and_ignored():

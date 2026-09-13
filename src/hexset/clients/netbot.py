@@ -15,12 +15,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from hexset.actions import Action
+from hexset.actions import Action, ActionType, apply
 from hexset.clients.policy import Checkpoint, Policy
-from hexset.game import Game, is_over, to_move
+from hexset.game import Game, imagine, is_over, to_move
 from hexset.mcts import Search
 from hexset.actions import options_for
-from hexset.clients.modelmeta import DEFAULT_TRADE_FLOOR, gate_config_of
+from hexset.clients.modelmeta import DEFAULT_GATE_PLIES, DEFAULT_TRADE_FLOOR, gate_config_of
 from hexset.economy import COSTS, Purchase
 from hexset.state import (
     MAX_CITIES,
@@ -38,6 +38,7 @@ from hexset.state import (
     settlement_count,
     settlement_placeable,
 )
+from hexset.trading import exchange
 from hexset.view import View
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -129,8 +130,11 @@ class NetworkBot:
     parameters. The value head scores a candidate exchange from both
     sides at once (`_score`): the live position and the position after
     the cards move -- each read from this seat's own frame, so nothing here
-    reads a hand this seat may not know. The head answers with one win
-    probability per seat, and that vector is the whole gate:
+    reads a hand this seat may not know, at `gate_plies == 0`. A checkpoint
+    asking for a continuation (`gate_plies > 0`) rolls a mover's actions
+    forward first, which is play, not a read -- see `gate_plies` below for
+    why that changes what a position is built from. The head answers with
+    one win probability per seat, and that vector is the whole gate:
 
     * `gains_many` -- this seat's own row, after minus before: its private
       gain in win probability, `hexset.trading.trade_event`'s gate and the
@@ -174,6 +178,24 @@ class NetworkBot:
     `bot_for`. A floor measured against one value head says nothing about
     another's, so it is not a constant of this module: the default below is
     what a checkpoint that declares nothing gets.
+
+    `gate_plies` is that same checkpoint's own continuation budget
+    (`hexset.clients.modelmeta.GateConfig.plies`): `0`, the default, prices
+    every survivor in the one forward `_evaluate` already builds, exactly
+    as `hand` plus the bundle, this seat's own frame, and nothing more. `N`
+    rolls the mover's own greedy policy up to `N` plies forward from each
+    survivor first (`_continue`) -- search on the trade decision, the same
+    footing as `simulations` is for `hexset.mcts.Search`. That rollout
+    *acts*: a Knight steal mid-turn resolves against whatever hand the
+    position it runs on actually holds, so the position handed to it can
+    never be the live table's own hands (a fact this seat may not have) --
+    it must be a world this seat could plausibly believe true, sampled
+    from its own belief (`View.sample`) the same way the 0.51.0 gate that
+    `gate_plies` restores did, certified so a candidate's exchange can
+    never go negative. `rng` is that sampling's own stream, independent of
+    whatever a runtime seeds policy inference with.
+
+    `rng` is not read at `gate_plies == 0`: nothing is sampled there.
     """
 
     policy: Policy
@@ -182,6 +204,15 @@ class NetworkBot:
     # This gate's clearing floor (`hexset.trading.trade_floor_of`). The
     # default is the unmeasured case: strict positivity is the whole gate.
     trade_floor: float = DEFAULT_TRADE_FLOOR
+    # This gate's own continuation budget (`hexset.clients.modelmeta.GateConfig.plies`).
+    # `0` is the unmeasured case: no rollout, one forward over the exchanged hand.
+    gate_plies: int = DEFAULT_GATE_PLIES
+    # The belief-sampled worlds `gate_plies > 0` rolls forward on
+    # (`_world_rng`), own stream and salt: two bots draw different worlds,
+    # and one bot asked twice about the same position draws the same one.
+    # Unused, and never consulted, at `gate_plies == 0`.
+    rng: random.Random = field(default_factory=random.Random, repr=False, compare=False)
+    _salt: int | None = field(default=None, repr=False, compare=False)
     # Which seat this bot is installed at, or `None` for a bot that answers
     # whatever seat the view names (the arena spawns one bot per seat and
     # never asks it about another). When set, the view must agree: a gate
@@ -321,13 +352,31 @@ class NetworkBot:
     ) -> tuple[tuple[float, ...], dict[int, tuple[float, ...]], frozenset[int]]:
         """The live position's value vector, the value vector of every
         candidate that survives the affordability filter, and the set that
-        does not -- each candidate's post-trade position read from `seat`'s
-        own frame: its own hand exactly (`hand` plus the bundle) and the
-        counterparty's known lower bound moved the same way
-        (`view.known[them]`), never the true hand, which this seat may not
-        read. No world is sampled and nothing is rolled forward -- see the
-        class docstring for why a paired reading at all, and why the filter
-        below is what makes most of those readings unnecessary.
+        does not.
+
+        At `gate_plies == 0`, the shipped default, each candidate's
+        post-trade position is read from `seat`'s own frame -- its own
+        hand exactly (`hand` plus the bundle) and the counterparty's known
+        lower bound moved the same way (`view.known[them]`), never the true
+        hand, which this seat may not read (`_after`) -- and read in one
+        forward, exactly as it stands. No world is sampled: see the class
+        docstring for why a paired reading at all, and why the filter below
+        is what makes most of those readings unnecessary.
+
+        A checkpoint asking for `gate_plies > 0` rolls the mover's own
+        greedy policy that many plies forward from each survivor first
+        (`_continue`) before that forward runs -- the trade decision's own
+        search, same footing as `simulations` is for `hexset.mcts.Search`.
+        That rollout *acts*, so `_after`'s hand-edited position (which
+        leaves every other seat's true hand sitting right there, merely
+        unread) is not safe to hand it: a Knight steal mid-turn would
+        resolve against those real cards. Every world here is instead
+        sampled from `seat`'s own belief (`View.sample`), certified so each
+        survivor's own exchange can never go negative -- one shared draw:
+        `before` and every survivor's `after` come from the same sampled
+        state, so the pair stays paired the way the class docstring
+        describes, and a single shared `before` (`values[0]`) prices every
+        survivor exactly as the `gate_plies == 0` return does.
 
         A candidate `seat` cannot cover is skipped outright (`gains_many`/
         `estimate_many` answer it `-1.0`); every other candidate is
@@ -344,7 +393,7 @@ class NetworkBot:
         current = _kinds_of(hand, geometry)
 
         zeros: set[int] = set()
-        survivors: list[tuple[int, Game]] = []
+        survivors: list[tuple[int, int, Bundle]] = []  # (candidate index, them, bundle)
         for i, bundle in enumerate(received):
             if any(n + d < 0 for n, d in zip(hand, bundle)):
                 continue
@@ -352,15 +401,121 @@ class NetworkBot:
             if _kinds_of(candidate_hand, geometry) == current:
                 zeros.add(i)
                 continue
-            them = counterparties[i]
-            survivors.append((i, self._after(seat, them, hand, bundle, view)))
+            survivors.append((i, counterparties[i], bundle))
 
         if not survivors:
             return (), {}, frozenset(zeros)
-        rows: list[tuple[Game, int]] = [(game, seat)] + [(after, seat) for _, after in survivors]
-        values = self.policy.value_rows(rows)
-        afters = {i: values[row] for row, (i, _) in enumerate(survivors, start=1)}
-        return values[0], afters, frozenset(zeros)
+
+        if self.gate_plies == 0:
+            afters = {
+                i: self._after(seat, them, hand, bundle, view)
+                for i, them, bundle in survivors
+            }
+            rows: list[tuple[Game, int]] = [(game, seat)] + [
+                (after, seat) for after in afters.values()
+            ]
+            values = self.policy.value_rows(rows)
+            afters_values = {i: values[row] for row, i in enumerate(afters, start=1)}
+            return values[0], afters_values, frozenset(zeros)
+
+        # `gate_plies > 0`: one belief world, sampled from this seat's own
+        # information set and certified to cover every survivor's bundle at
+        # once (`View.certify` combines repeat counterparties by taking the
+        # per-resource max), so no survivor's exchange can go negative. The
+        # rollout below plays on copies of this same sampled state --
+        # never the live table's, and never a different draw per survivor.
+        certified = View(
+            view.state, view.ledger, seat,
+            certify=[(them, [max(0, n) for n in bundle]) for _, them, bundle in survivors],
+        )
+        rng = self._world_rng(view, seat)
+        sampled = certified.sample(rng)
+        before = imagine(game, rng, randomize_deck=True)
+        before.set_state(sampled)
+
+        afters: dict[int, Game] = {}
+        for i, them, bundle in survivors:
+            after = imagine(game, rng, randomize_deck=True)
+            exchanged = copy_state(sampled)
+            hands_before = [h[:] for h in exchanged.hands]
+            exchange(exchanged, seat, them, bundle)
+            after.set_state(exchanged)
+            after.ledger.apply_hand_diff(hands_before, exchanged.hands)
+            afters[i] = after
+
+        worlds = [before] + list(afters.values())
+        values = self._continue(to_move(game), seat, worlds, self.gate_plies)
+        afters_values = {i: values[row] for row, i in enumerate(afters, start=1)}
+        return values[0], afters_values, frozenset(zeros)
+
+    def _world_rng(self, view: View, seat: int) -> random.Random:
+        """The draw behind `gate_plies > 0`'s belief-sampled worlds: seeded
+        by the information set (`View.signature`, every hand size, the
+        perspective) alone, salted by this bot's own `rng` once at
+        construction -- no candidate in the key, unlike the 0.51.0 gate's
+        own `_world_rng`, so every survivor scored at the same ask and the
+        shared `before` all draw from one stream, and two asks about the
+        same position agree while two bots draw different worlds."""
+        if self._salt is None:
+            self._salt = self.rng.getrandbits(64)
+        key = (self._salt, view.perspective, tuple(view.sizes), view.signature())
+        return random.Random(hash(key))
+
+    def _continue(
+        self, mover: int, seat: int, worlds: Sequence[Game], plies: int
+    ) -> list[tuple[float, ...]]:
+        """Each world's value vector, from `seat`'s frame, after `mover`'s
+        best play from it, `plies` deep -- the trade gate's own search,
+        run only when a checkpoint's `gate_plies` asks for it.
+
+        Restored from the 0.51.0 continuation gate (`git show
+        6593b7d:src/hexset/clients/netbot.py`), verbatim in how it plays:
+        in lockstep across all worlds, the policy picks `mover`'s next
+        action wherever it is still `mover`'s turn (`act_rows`, one batched
+        forward a ply) -- the bot's own policy standing in for whoever
+        moves, acting on the hand the world gives that seat; an `END_TURN`
+        pick stops that world where it stands, a finished world stops as
+        its winner, and `plies` bounds the rest. What is left is valued in
+        one forward; a finished world is the one-hot winner, board-seat
+        order, exactly as `LeafEvaluator.terminal` reads it. The worlds
+        handed in here are always belief-sampled copies (`_evaluate`),
+        never the live table's own state -- see its docstring for why.
+
+        Written for the g4 game of 2026-09-08 19:47Z, round 19: a won
+        position (the winning settlement already in hand) where a raw
+        value-head reading of two near-identical hands differed by the
+        head's own noise and priced a trade that changed nothing. The
+        affordability filter now catches that particular case for free;
+        this only runs at all when a checkpoint asks for a continuation on
+        top of it.
+        """
+        live = [i for i, g in enumerate(worlds) if not is_over(g) and to_move(g) == mover]
+        for _ in range(plies):
+            if not live:
+                break
+            rows = [(worlds[i], mover, tuple(options_for(worlds[i]))) for i in live]
+            chosen = self.policy.act_rows(rows)
+            still: list[int] = []
+            for i, action in zip(live, chosen):
+                if action.type is ActionType.END_TURN:
+                    continue
+                apply(worlds[i], action)
+                g = worlds[i]
+                if not is_over(g) and to_move(g) == mover:
+                    still.append(i)
+            live = still
+        out: list[tuple[float, ...] | None] = [None] * len(worlds)
+        pending = []
+        for i, g in enumerate(worlds):
+            if is_over(g):
+                out[i] = tuple(1.0 if s == g.won_by else 0.0 for s in range(self.players))
+            else:
+                pending.append(i)
+        if pending:
+            values = self.policy.value_rows([(worlds[i], seat) for i in pending])
+            for i, v in zip(pending, values):
+                out[i] = tuple(v)
+        return out  # type: ignore[return-value]
 
     def _after(
         self, seat: int, them: int, hand: Sequence[int], bundle: Bundle, view: View
@@ -479,6 +634,7 @@ class GatedSearch(Search):
         super().__init__(evaluator, **kwargs)
         self.gate = gate
         self.trade_floor = gate.trade_floor
+        self.gate_plies = gate.gate_plies
 
     def choose(self, game: Game) -> Action:
         self.gate.seat_at(game)
@@ -501,16 +657,23 @@ class GatedSearch(Search):
         return self.gate.estimate_many(view, candidates)
 
 
-def bot_for(checkpoint: Checkpoint, *, max_trades: int | None = None) -> NetworkBot:
+def bot_for(
+    checkpoint: Checkpoint, *, max_trades: int | None = None,
+    rng: random.Random | None = None,
+) -> NetworkBot:
     """`checkpoint`, playing one position at a time.
 
     `max_trades` of `None` means the trade switch the checkpoint recorded
     training under -- the default that measures a policy on the game it
-    learned. Pass `0` to disable this bot's trading.
+    learned. Pass `0` to disable this bot's trading. `rng` seeds the
+    belief-sampled worlds a `gate_plies > 0` checkpoint's continuation rolls
+    forward on (`NetworkBot._world_rng`); a checkpoint asking for none never
+    reads it.
 
-    The gate's floor comes from the checkpoint too, for the same reason: it
-    describes the exported model, not this adapter. A checkpoint that
-    declares neither is read at the unmeasured default.
+    The gate's floor and its continuation budget both come from the
+    checkpoint too, for the same reason: they describe the exported model,
+    not this adapter. A checkpoint that declares none of it is read at the
+    unmeasured defaults.
     """
     gate = gate_config_of(checkpoint)
     return NetworkBot(
@@ -518,6 +681,8 @@ def bot_for(checkpoint: Checkpoint, *, max_trades: int | None = None) -> Network
         players=checkpoint.players,
         max_trades=checkpoint.max_trades if max_trades is None else max_trades,
         trade_floor=gate.trade_floor,
+        gate_plies=gate.plies,
+        rng=random.Random() if rng is None else rng,
     )
 
 
@@ -533,16 +698,20 @@ def searcher_for(
     """`checkpoint` as a batched PUCT search, trading through its own
     value-head gate (`GatedSearch`).
 
-    `rng` seeds the search itself (`hexset.mcts.Search`); the trade gate
-    below it needs no random stream of its own any more.
+    A supplied `rng` seeds both the search itself (`hexset.mcts.Search`)
+    and, independently, the trade gate's own belief-sampling stream
+    (`gate_rng`, derived from `rng` so the whole entrant is reproducible
+    from one seed) -- a checkpoint whose `gate_plies` is `0` never reads
+    the latter.
     """
+    gate_rng = None if rng is None else random.Random(rng.getrandbits(128))
     budget = checkpoint.max_trades if max_trades is None else max_trades
     return GatedSearch(
         LeafEvaluator(
             policy=checkpoint.policy,
             pad_to=inference_batch,
         ),
-        bot_for(checkpoint, max_trades=budget),
+        bot_for(checkpoint, max_trades=budget, rng=gate_rng),
         simulations=simulations,
         wave=wave,
         max_trades=budget,
@@ -575,6 +744,7 @@ def register_entrants(loader) -> None:
         return bot_for(
             loader(_checkpoint_path(entrant.weights, "network"), board.topology),
             max_trades=entrant.max_trades,
+            rng=rng,
         )
 
     def spawn_mcts(entrant, board: Board, rng) -> GatedSearch:

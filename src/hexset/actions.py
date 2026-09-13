@@ -325,18 +325,22 @@ def legal_actions(game: Game, seat: int | None = None) -> list[Action]:
     if game.phase is Phase.ROBBER:
         return _robber_targets(game, ActionType.MOVE_ROBBER)
 
+    if game.free_roads > 0:
+        # A Road Building card resolves when played: both roads are placed
+        # before anything else, exactly as before the roll. While roads are
+        # owed no other action is legal -- colonist's server takes none, and
+        # two live games were lost sending a settlement and a dev-card buy
+        # past the debt. With nowhere legal to put them the credit is
+        # unusable and the turn continues as normal.
+        roads = pending_free_roads(game)
+        if roads:
+            return [Action(ActionType.BUILD_ROAD, edge) for edge in roads]
+
     building = _building_actions(game)
     out = building + _card_actions(game) + _trade_actions(game)
     if can_buy(state, player):
         out.append(Action(ActionType.BUY_DEV_CARD))
-
-    # Free roads must be placed before ending the turn, unless there is nowhere
-    # legal to put them — otherwise the player would have no legal action at all.
-    owed_roads = game.free_roads > 0 and any(
-        a.type is ActionType.BUILD_ROAD for a in building
-    )
-    if not owed_roads:
-        out.append(Action(ActionType.END_TURN))
+    out.append(Action(ActionType.END_TURN))
     return out
 
 

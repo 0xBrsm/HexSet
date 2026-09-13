@@ -13,17 +13,21 @@ Changes to the HexSet distribution. The project follows
   candidate's post-trade hand directly against an affordability filter
   coarsened to four purchase kinds; it works out, exactly, every
   `ROAD`/`SETTLEMENT`/`CITY`/`DEV_CARD` multiset the hand can pay for
-  jointly through this seat's own bank trades and the one development card
-  in hand this turn allows (Year of Plenty, Monopoly on what this seat's
-  own ledger can name -- never a true hand it cannot read), and values the
-  best position reachable this way in one forward. A candidate that
-  reaches exactly the same set of multisets as the hand it would replace is
-  still priced at `0.0` outright and never reaches the head; one that adds
-  or loses a multiset now always does, where the old kind filter's count
-  within a kind (a second road bought instead of one) could not tell the
-  difference. No world is sampled and no continuation is rolled at the
-  shipped default of `0` plies; `gate_plies > 0` keeps its own
-  continuation, unchanged.
+  jointly through this seat's own bank trades, its one development card in
+  hand this turn allows (Year of Plenty; Monopoly on what this seat's own
+  ledger can name, never a true hand it cannot read; Road Building, its two
+  free roads placed by the same expansion rule a bought road is), and
+  values exactly one built position per side -- the baseline's and each
+  survivor's single best-ranked reachable multiset (most victory points,
+  then dev cards, then roads), placed by production-pip arithmetic alone,
+  never a maximum over every placement of every reachable multiset. A
+  candidate that reaches exactly the same set of multisets as the hand it
+  would replace is still priced at `0.0` outright and never reaches the
+  head; one that adds or loses a multiset now always does, where the old
+  kind filter's count within a kind (a second road bought instead of one)
+  could not tell the difference. No world is sampled and no continuation is
+  rolled at the shipped default of `0` plies; `gate_plies > 0` keeps its
+  own continuation, unchanged.
 
 - **A finished game reads as an observer's, seat or no seat.** Holding a seat
   at a game that was over left the page still dressed as that seat's: its

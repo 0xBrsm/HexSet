@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 from hexset.actions import Action, ActionType, apply
 from hexset.board.board import pips
 from hexset.board.terrain import NUM_RESOURCES, Resource
-from hexset.cards import DevCard
+from hexset.cards import DevCard, ROAD_BUILDING_ROADS
 from hexset.clients.policy import Checkpoint, Policy
 from hexset.clients.reachable import Hand, Purchases, Recipe, maximal, reachable_recipes
 from hexset.devcards import play_year_of_plenty, spend_card
@@ -136,48 +136,9 @@ def _kinds_of(hand: Sequence[int], geometry: _Geometry) -> frozenset[Purchase]:
     return frozenset(out)
 
 
-class _Plan:
-    """One maximal reachable purchase multiset's own build in progress: a
-    working copy of a position (`game`) and the spatial pieces still to
-    place on it (`remaining` -- `ROAD`/`SETTLEMENT`/`CITY` only, first to
-    place at index 0; `DEV_CARD` needs no placement and is already paid for
-    by `NetworkBot._make_plan`). `final_values` is filled in by
-    `NetworkBot._run_plans` once no piece is left to place."""
-
-    __slots__ = ("game", "remaining", "final_values")
-
-    def __init__(self, game: Game, remaining: list[Purchase]) -> None:
-        self.game = game
-        self.remaining = remaining
-        self.final_values: tuple[float, ...] | None = None
-
-
-def _fill_budget(candidate_lists: Sequence[Sequence[object]], budget: int) -> list[tuple[int, object]]:
-    """Round-robin up to `budget` items off the front of `candidate_lists`,
-    each already ranked best-first: every list gives up its own best
-    candidate before any list gives up a second, so a plan with many legal
-    placements never crowds out a plan with few. Returns `(list_index,
-    item)` pairs in the order filled -- `NetworkBot._run_plans`'s own way
-    of keeping a forward under `_MAX_ROWS` without favouring whichever plan
-    happened to be built first."""
-    out: list[tuple[int, object]] = []
-    remaining = [list(c) for c in candidate_lists]
-    while len(out) < budget and any(remaining):
-        progressed = False
-        for i, items in enumerate(remaining):
-            if len(out) >= budget:
-                break
-            if items:
-                out.append((i, items.pop(0)))
-                progressed = True
-        if not progressed:
-            break
-    return out
-
-
-# The reachable-purchase gate's own budget (`NetworkBot._run_plans`): at
-# most this many rows in either of its at most two `value_rows` calls, one
-# of the three forwards a checkpoint's own continuation gate is allowed.
+# The reachable-purchase gate builds exactly one row per side -- the
+# baseline and each survivor -- so one ask almost never approaches this;
+# it only chunks `value_rows` if it somehow does (`NetworkBot._evaluate_reachable`).
 _MAX_ROWS = 512
 
 
@@ -510,31 +471,29 @@ class NetworkBot:
         """`_evaluate`'s `gate_plies == 0` path: the reachable-purchase gate.
 
         Filters every coverable candidate by comparing `R(hand)` to
-        `R(hand + bundle)` (`hexset.clients.reachable.reachable_recipes`,
-        compared as the set of keys) -- a bundle that changes neither is
-        priced `0.0` outright, exactly as `_kinds_of` did for `gate_plies >
-        0`, only exact rather than coarsened to four kinds (a bundle that
-        swaps which two roads are affordable for one road and one
-        settlement now survives, where the old kind set could not tell
-        them apart).
+        `R(hand + bundle)` (`_recipes_with_road_building`, compared as the
+        set of keys) -- a bundle that changes neither is priced `0.0`
+        outright, exactly as `_kinds_of` did for `gate_plies > 0`, only
+        exact rather than coarsened to four kinds.
 
-        Every survivor is then valued by the best position its own
-        reachable purchases can build, not by its raw exchanged hand: for
-        the baseline hand and each survivor, every *maximal* reachable
-        purchase multiset (`hexset.clients.reachable.maximal` -- affording
-        the bigger one affords the smaller for free, so only the biggest
-        are worth building) becomes a `_Plan` (`_make_plan`) and is played
-        out and valued (`_run_plans`). A candidate's worth is the best of
-        its own rows' `values[seat]`; the baseline's likewise -- so
-        `gains_many` reads as the change in the *best reachable position*,
-        not in the raw hand the affordability filter used to read
-        directly, which is the resolution problem the class docstring
-        describes. `estimate_many` reads `values[them]` off that same
-        winning row, exactly as `gains_many`'s `_evaluate` always has.
+        Every survivor is then valued by exactly one built position, not
+        the maximum over every placement of every maximal multiset: a
+        maximum over many noisy value-head rows drifts up with how many
+        options a hand happens to have, which is its own version of the
+        resolution problem the class docstring describes. `_choose_multiset`
+        picks one maximal reachable multiset by a fixed rule (most
+        settlements and cities, then dev cards, then roads, then total
+        pieces, ties broken by the tuple itself), and `_build_row` places
+        it by arithmetic alone (`_place_deterministic` -- no value read
+        chooses a placement). The baseline and every survivor go into one
+        `value_rows` forward together; `gains_many` reads the change in
+        `values[seat]` between two single, deterministic rows, and
+        `estimate_many` reads `values[them]` off the same pair.
         """
-        base_hand: Hand = tuple(hand)
         ctx = self._reach_context(seat, view)
-        base_recipes = reachable_recipes(base_hand, **ctx)
+        rb_context = self._road_building_context(seat, view, ctx)
+        base_hand: Hand = tuple(hand)
+        base_recipes = self._recipes_with_road_building(base_hand, ctx, rb_context)
         base_R = frozenset(base_recipes)
 
         zeros: set[int] = set()
@@ -546,7 +505,7 @@ class NetworkBot:
             candidate_hand: Hand = tuple(n + d for n, d in zip(hand, bundle))
             recipes = recipe_cache.get(candidate_hand)
             if recipes is None:
-                recipes = reachable_recipes(candidate_hand, **ctx)
+                recipes = self._recipes_with_road_building(candidate_hand, ctx, rb_context)
                 recipe_cache[candidate_hand] = recipes
             if frozenset(recipes) == base_R:
                 zeros.add(i)
@@ -557,28 +516,114 @@ class NetworkBot:
             return (), {}, frozenset(zeros)
 
         baseline_seed = self._seeded(seat, base_hand, view)
-        owners: dict[int | None, list[_Plan]] = {
-            None: [
-                self._make_plan(baseline_seed, seat, m, base_recipes[m])
-                for m in maximal(base_R)
-            ]
-        }
+        baseline_recipe = base_recipes[self._choose_multiset(base_recipes)]
+        rows: list[tuple[Game, int]] = [
+            (self._build_row(baseline_seed, seat, baseline_recipe), seat)
+        ]
+        row_index: dict[int, int] = {}
         for i, them, bundle, recipes in survivors:
             seed = self._after(seat, them, hand, bundle, view)
-            owners[i] = [
-                self._make_plan(seed, seat, m, recipes[m]) for m in maximal(frozenset(recipes))
-            ]
+            recipe = recipes[self._choose_multiset(recipes)]
+            rows.append((self._build_row(seed, seat, recipe), seat))
+            row_index[i] = len(rows) - 1
 
-        self._run_plans(seat, owners)
+        values: list[tuple[float, ...]] = []
+        for start in range(0, len(rows), _MAX_ROWS):
+            values.extend(self.policy.value_rows(rows[start : start + _MAX_ROWS]))
 
-        baseline_row = max(
-            (plan.final_values for plan in owners[None]), key=lambda values: values[seat]
+        baseline_values = values[0]
+        afters_values = {i: values[row_index[i]] for i, _, _, _ in survivors}
+        return baseline_values, afters_values, frozenset(zeros)
+
+    def _recipes_with_road_building(
+        self, hand: Hand, ctx: dict, rb_context: tuple | None
+    ) -> dict[Purchases, Recipe]:
+        """`reachable_recipes(hand, **ctx)`, plus whatever a Road Building
+        branch reaches that the ordinary hand-only search does not.
+
+        Road Building spends no resource and touches no other seat's row,
+        so it never changes `hand` itself -- only the board (`rb_context`,
+        `_road_building_context`: the room and legal counts this seat would
+        have after its two free roads). A second `reachable_recipes` call
+        against that room/legal, `dev_card_played` forced true (Road
+        Building already spent this turn's one card), finds whatever a
+        corner the free roads opened newly affords; a multiset the plain
+        search already reaches keeps its plain recipe, since a hand that
+        can buy it either way owes nothing to the free roads for it.
+        """
+        recipes = reachable_recipes(hand, **ctx)
+        if rb_context is not None:
+            edges, room, legal = rb_context
+            rb_ctx = dict(ctx, dev_card_played=True, room=room, legal=legal)
+            for multiset, recipe in reachable_recipes(hand, **rb_ctx).items():
+                if multiset not in recipes:
+                    recipes[multiset] = Recipe("road_building", edges, recipe.hand, multiset)
+        return recipes
+
+    def _road_building_context(
+        self, seat: int, view: View, ctx: dict
+    ) -> tuple[tuple[int, ...], tuple[int, int, int], tuple[int, int, int]] | None:
+        """If `seat` may still play Road Building this turn, the edges its
+        two free roads would land on (`_far_endpoint_pips`, the same
+        expansion rule a bought road places by) and the room/legal this
+        seat would have afterwards -- `None` if the card is not held,
+        already played this turn, or has nowhere to place even one road.
+
+        Placed on a throwaway copy of the *true* board (`view.state`:
+        occupancy is public regardless of any hand), never the live game.
+        """
+        if ctx["dev_card_played"] or ctx["dev_cards_held"][DevCard.ROAD_BUILDING] <= 0:
+            return None
+        state = copy_state(view.state)
+        placed: list[int] = []
+        room_left = ctx["room"][0]
+        for _ in range(ROAD_BUILDING_ROADS):
+            if room_left <= 0:
+                break
+            legal = self._legal_for(state, seat, Purchase.ROAD)
+            if not legal:
+                break
+            edge = max(legal, key=lambda e: self._far_endpoint_pips(state, seat, e))
+            place_road(state, seat, edge)
+            placed.append(edge)
+            room_left -= 1
+        if not placed:
+            return None
+        topology = state.board.topology
+        legal = (
+            sum(1 for e in range(topology.num_edges) if road_placeable(state, seat, e)),
+            sum(1 for v in range(topology.num_vertices) if settlement_placeable(state, seat, v)),
+            sum(1 for v in range(topology.num_vertices) if city_upgradeable(state, seat, v)),
         )
-        afters_values = {
-            i: max((plan.final_values for plan in owners[i]), key=lambda values: values[seat])
-            for i, _, _, _ in survivors
-        }
-        return baseline_row, afters_values, frozenset(zeros)
+        room = (room_left, ctx["room"][1], ctx["room"][2])
+        return tuple(placed), room, legal
+
+    def _choose_multiset(self, recipes: dict[Purchases, Recipe]) -> Purchases:
+        """The one maximal reachable multiset a plan is built from: most
+        settlements and cities first (each is a victory point), then most
+        development cards, then most roads, then more total pieces, ties
+        broken by the multiset's own tuple order -- fixed and arithmetic,
+        so the baseline and every survivor are compared on the same
+        footing rather than on however many placements each happens to
+        have (see `_evaluate_reachable`)."""
+
+        def key(multiset: Purchases) -> tuple:
+            nr, ns, nc, nd = multiset
+            return (-(ns + nc), -nd, -nr, -(nr + ns + nc + nd), multiset)
+
+        return min(maximal(frozenset(recipes)), key=key)
+
+    def _build_row(self, seed: Game, seat: int, recipe: Recipe) -> Game:
+        """The one position `recipe` builds from `seed`: its development-card
+        branch and bank trades applied (`_apply_branch`), paid for
+        (`_pay_purchases`), and every piece placed by arithmetic alone
+        (`_place_deterministic`) -- no value read chooses among placements.
+        """
+        plan_game = self._copy_position(seed)
+        self._apply_branch(plan_game, seat, recipe)
+        self._pay_purchases(plan_game, seat, recipe.purchases)
+        self._place_deterministic(plan_game, seat, recipe.purchases)
+        return plan_game
 
     def _reach_context(self, seat: int, view: View) -> dict:
         """The reachable-purchase gate's inputs that do not vary candidate
@@ -643,22 +688,6 @@ class NetworkBot:
         new.ledger = game.ledger.copy()
         return new
 
-    def _make_plan(self, seed: Game, seat: int, purchases: Purchases, recipe: Recipe) -> _Plan:
-        """One maximal multiset's own working copy: `seed` (the baseline's
-        `_seeded` position, or a survivor's `_after`) with `recipe`'s
-        development-card branch and bank trades applied
-        (`_apply_branch`), then paid for (`_pay_purchases`) -- everything
-        before a piece needs a place put on it."""
-        plan_game = self._copy_position(seed)
-        self._apply_branch(plan_game, seat, recipe)
-        self._pay_purchases(plan_game, seat, purchases)
-        remaining = (
-            [Purchase.ROAD] * purchases[0]
-            + [Purchase.SETTLEMENT] * purchases[1]
-            + [Purchase.CITY] * purchases[2]
-        )
-        return _Plan(plan_game, remaining)
-
     def _apply_branch(self, plan_game: Game, seat: int, recipe: Recipe) -> None:
         """Mutate `plan_game`'s own copied state (and ledger) to reflect
         `recipe`'s development-card branch, if any, then the bank trades
@@ -670,7 +699,9 @@ class NetworkBot:
         this seat's own hand, both already this seat's own to know;
         Monopoly (`_apply_known_monopoly`) moves only what the ledger
         already certifies as known, never a true hand this seat cannot
-        read.
+        read; Road Building places the two free roads
+        `_road_building_context` already chose (`recipe.param`, edges),
+        moving no card at all.
 
         The bank trades themselves are applied as one net vector rather
         than replayed step by step: a bank trade only ever moves a
@@ -685,6 +716,12 @@ class NetworkBot:
             plan_game.dev_card_played = True
         elif recipe.branch == "monopoly":
             self._apply_known_monopoly(plan_game, seat, recipe.param)
+            plan_game.dev_card_played = True
+        elif recipe.branch == "road_building":
+            for edge in recipe.param:
+                place_road(state, seat, edge)
+            update_longest_road(state)
+            spend_card(state, seat, DevCard.ROAD_BUILDING)
             plan_game.dev_card_played = True
 
         branch_hand = state.hands[seat]
@@ -767,136 +804,48 @@ class NetworkBot:
         update_longest_road(state)
 
     def _vertex_pips(self, state: GameState, vertex: int) -> int:
-        topology = state.board.topology
-        return sum(pips(state.board.tokens[h]) for h in topology.vertex_hexes[vertex])
+        return sum(
+            pips(state.board.tokens[h]) for h in state.board.topology.vertex_hexes[vertex]
+        )
 
-    def _placement_pips(self, state: GameState, piece: Purchase, spot: int) -> int:
-        """The static ranking a placement is picked by once the forward
-        budget runs out: total production pips of a vertex's own adjacent
-        hexes, or the better of an edge's two endpoints -- cheap,
-        board-only, and blind to anything the value head would have read.
+    def _far_endpoint_pips(self, state: GameState, seat: int, edge: int) -> int:
+        """The expansion ranking a bought or free road is placed by: the
+        pip value of whichever endpoint is *not* already this seat's own --
+        the direction a road actually reaches new production in, rather
+        than the endpoint it is anchored from. Both endpoints count if
+        neither is owned yet (the seat's very first road)."""
+        a, b = state.board.topology.edges[edge]
+        far = [v for v in (a, b) if state.vertex_owner[v] != seat] or [a, b]
+        return max(self._vertex_pips(state, v) for v in far)
+
+    def _place_deterministic(self, plan_game: Game, seat: int, purchases: Purchases) -> None:
+        """Place every piece in `purchases` by arithmetic alone -- no
+        value read chooses among placements: a settlement or city at the
+        legal vertex with the highest production pip sum
+        (`_vertex_pips`), a road at the legal edge whose far endpoint has
+        the highest (`_far_endpoint_pips`, expansion), one piece at a time
+        so a second road or settlement sees whatever the first opened.
         """
-        if piece is Purchase.ROAD:
-            a, b = state.board.topology.edges[spot]
-            return max(self._vertex_pips(state, a), self._vertex_pips(state, b))
-        return self._vertex_pips(state, spot)
-
-    def _run_plans(self, seat: int, owners: dict[int | None, list[_Plan]]) -> None:
-        """Fill in every plan's `final_values`, in at most `_MAX_ROWS` rows
-        a `value_rows` call, ordinarily across just two such calls (of the
-        three a checkpoint's own continuation gate is allowed).
-
-        Round one prices every plan with no piece left to place outright
-        (a multiset that was only ever `DEV_CARD`s, or empty) and the
-        first placement of every plan that still has one, in one forward
-        batched across the baseline and every survivor together -- "value
-        the first piece's placements in a forward, keep the best" from the
-        class docstring. Whichever plan is still short a piece after that
-        places every one it has left by the static ranking
-        (`_placement_pips`) rather than a further forward -- "place the
-        next" -- and a closing forward reads the finished position, in
-        `_MAX_ROWS`-sized chunks on the rare hand with enough incomparable
-        maximal multisets to need more than one. Rows beyond `_MAX_ROWS` in
-        the first forward are dropped round-robin across plans
-        (`_fill_budget`), never favouring whichever plan happened to be
-        built first.
-        """
-        plans = [p for group in owners.values() for p in group]
-
-        rows: list[tuple[Game, int]] = []
-        finished: list[tuple[_Plan, int]] = []
-        choosing: list[tuple[_Plan, Purchase, list[int]]] = []
-        for plan in plans:
-            if not plan.remaining:
-                finished.append((plan, len(rows)))
-                rows.append((plan.game, seat))
-            else:
-                piece = plan.remaining[0]
-                plan_state = plan.game.state(seat, hidden=False)
-                legal = self._legal_for(plan_state, seat, piece)
-                ranked = sorted(
-                    legal,
-                    key=lambda spot, piece=piece, plan_state=plan_state: -self._placement_pips(
-                        plan_state, piece, spot
-                    ),
-                )
-                choosing.append((plan, piece, ranked))
-
-        budget = _MAX_ROWS - len(rows)
-        choice_rows: dict[int, list[int]] = {}
-        choice_games: dict[int, list[Game]] = {}
-        if budget > 0 and choosing:
-            candidate_lists = [
-                [(plan, piece, spot) for spot in ranked] for plan, piece, ranked in choosing
-            ]
-            for _, (plan, piece, spot) in _fill_budget(candidate_lists, budget):
-                candidate_game = self._copy_position(plan.game)
-                self._place_piece(candidate_game, seat, piece, spot)
-                choice_rows.setdefault(id(plan), []).append(len(rows))
-                choice_games.setdefault(id(plan), []).append(candidate_game)
-                rows.append((candidate_game, seat))
-
-        values = self.policy.value_rows(rows) if rows else []
-
-        for plan, row in finished:
-            plan.final_values = values[row]
-
-        pending: list[_Plan] = []
-        for plan, piece, ranked in choosing:
-            indices = choice_rows.get(id(plan))
-            if not indices:
-                # The budget never reached this plan at all: it falls
-                # through to the closing round with every piece it started
-                # with still unplaced.
-                pending.append(plan)
-                continue
-            games = choice_games[id(plan)]
-            best = max(range(len(indices)), key=lambda k: values[indices[k]][seat])
-            plan.game = games[best]
-            plan.remaining = plan.remaining[1:]
-            if plan.remaining:
-                pending.append(plan)
-            else:
-                plan.final_values = values[indices[best]]
-
-        if not pending:
-            return
-
-        close_rows: list[tuple[Game, int]] = []
-        for plan in pending:
-            state = plan.game.state(seat, hidden=False)
-            for piece in plan.remaining:
-                legal = self._legal_for(state, seat, piece)
-                if not legal:
-                    # Should not happen -- `reachable_recipes`' own `legal`
-                    # count already guaranteed a spot for this piece kind
-                    # -- but a plan that cannot place what it paid for is
-                    # left as it stands rather than crashing the ask.
-                    continue
-                best_spot = max(legal, key=lambda spot: self._placement_pips(state, piece, spot))
-                self._place_piece(plan.game, seat, piece, best_spot)
-            plan.remaining = []
-            close_rows.append((plan.game, seat))
-
-        # `close_rows` holds one row per still-pending plan -- the number
-        # of maximal multisets across the baseline and every survivor,
-        # never the number of placements any one of them has, so unlike
-        # the first round it is not bounded by `_MAX_ROWS` from the
-        # placements alone: a hand rich enough to reach many *incomparable*
-        # maximal multisets (typically through many different bank-trade
-        # chains) can still leave more pending plans than one forward
-        # should take. Chunked at `_MAX_ROWS` a call, so no closing forward
-        # ever exceeds it either; two such calls plus round one is exactly
-        # the three-forward budget. A plan count deep enough to spill past
-        # a third forward is not expected from any real hand -- every
-        # fixture and self-play game this was checked against needed one --
-        # so the last chunk is still read rather than left without a value.
-        for start in range(0, len(close_rows), _MAX_ROWS):
-            chunk_rows = close_rows[start : start + _MAX_ROWS]
-            chunk_plans = pending[start : start + _MAX_ROWS]
-            chunk_values = self.policy.value_rows(chunk_rows)
-            for plan, row_values in zip(chunk_plans, chunk_values):
-                plan.final_values = row_values
+        nr, ns, nc, _ = purchases
+        state = plan_game.state(seat, hidden=False)
+        for _ in range(nr):
+            legal = self._legal_for(state, seat, Purchase.ROAD)
+            if not legal:
+                break
+            edge = max(legal, key=lambda e: self._far_endpoint_pips(state, seat, e))
+            self._place_piece(plan_game, seat, Purchase.ROAD, edge)
+        for _ in range(ns):
+            legal = self._legal_for(state, seat, Purchase.SETTLEMENT)
+            if not legal:
+                break
+            vertex = max(legal, key=lambda v: self._vertex_pips(state, v))
+            self._place_piece(plan_game, seat, Purchase.SETTLEMENT, vertex)
+        for _ in range(nc):
+            legal = self._legal_for(state, seat, Purchase.CITY)
+            if not legal:
+                break
+            vertex = max(legal, key=lambda v: self._vertex_pips(state, v))
+            self._place_piece(plan_game, seat, Purchase.CITY, vertex)
 
     def _world_rng(self, view: View, seat: int) -> random.Random:
         """The draw behind `gate_plies > 0`'s belief-sampled worlds: seeded

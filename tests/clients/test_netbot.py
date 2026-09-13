@@ -583,17 +583,15 @@ def test_a_trade_that_changes_an_affordable_kind_reaches_the_head(board, monkeyp
     """Making a new kind buyable -- or taking one away -- is a real
     deduction the reachable-purchase gate's filter cannot make on its own,
     so it is the one case that still costs a forward, and the head's own
-    reading of the best position each side builds stands.
+    reading of the one position each side builds stands.
 
     Seat 0 holds nothing that could ever afford a `ROAD` or `SETTLEMENT`
     (no wood, brick or sheep at all) and the deck is emptied, so the only
     dimension either hand's reachable set can move on is `CITY` -- one
-    wheat short of it before the bundle, exactly affording it after. Seat 0
-    owns exactly two settlements straight out of setup
-    (`_position_with_a_settlement_in_hand`), so the candidate's one
-    maximal multiset -- a city -- has exactly two legal vertices, and every
-    row it builds leaves the same hand (upgrading a settlement moves no
-    card), so the two rows tie and the row count is exact.
+    wheat short of it before the bundle, exactly affording it after. The
+    baseline builds nothing (nothing is reachable) and the candidate builds
+    its one city at whichever of seat 0's two settlements has the higher
+    pip sum -- one row each, however many legal vertices there were.
     """
     from hexset.clients.netbot import NetworkBot
 
@@ -617,8 +615,8 @@ def test_a_trade_that_changes_an_affordable_kind_reaches_the_head(board, monkeyp
     monkeypatch.setattr(HandValuePolicy, "value_rows", counted)
 
     gain = bot.gains_many(view, [unlocks_city], [1])[0]
-    # One forward: the unbuilt baseline, plus one row per legal city vertex.
-    assert calls == [3]
+    # One forward, one row per side: the unbuilt baseline and the one built city.
+    assert calls == [2]
     assert gain == pytest.approx(
         value_of_hand([0, 0, 0, 0, 0], 0) - value_of_hand([0, 0, 0, 1, 3], 0)
     )
@@ -659,7 +657,7 @@ def test_gate_plies_zero_reads_the_survivor_in_one_forward(board, monkeypatch):
     monkeypatch.setattr(HandValuePolicy, "act_rows", counted_act)
 
     bot.gains_many(view, [unlocks_city], [1])
-    assert value_calls == [3]  # the unbuilt baseline, plus each legal city vertex
+    assert value_calls == [2]  # the unbuilt baseline, plus the one built city
     assert not act_calls, "gate_plies=0 must never roll a continuation"
 
 
@@ -952,25 +950,22 @@ def test_a_policy_policy_gate_is_seated_where_it_is_installed(board):
     assert gate._seated is game and gate.seat == 2 and gate.max_trades == 3
 
 
-def test_the_reachable_gate_stays_within_its_row_and_forward_budget(board, monkeypatch):
-    """`_run_plans` never hands any one `value_rows` call more rows than
-    `_MAX_ROWS` -- patched down here so a modest fixture can exercise the
-    cap without standing up hundreds of legal edges -- and never spends
-    more than three forwards doing it.
+def test_a_survivor_is_exactly_one_row_chosen_by_a_fixed_ordering(board, monkeypatch):
+    """The reachable-purchase gate builds exactly one row per side, chosen
+    deterministically -- no maximum over every placement of every maximal
+    multiset, which is what let a candidate's price drift up with how many
+    options it happened to have.
 
     Seat 0 can afford exactly two roads (no sheep or wheat to spare, so no
-    bank trade stretches the hand into anything else); the fixture's board
-    always leaves seat 0 more than three legal edges open this early, so
-    the first road alone already exceeds the patched budget. A spare wheat
-    also lets it afford one road *and* a settlement jointly, so the
-    survivor carries two incomparable maximal multisets (`2 roads` and `1
-    road, 1 settlement`) needing more than one `value_rows` call between
-    them and the baseline's own two-road plan.
+    bank trade stretches the hand into anything else); a spare wheat also
+    lets it afford one road *and* a settlement jointly, so the survivor's
+    reachable set carries two incomparable maximal multisets -- `2 roads`
+    and `1 road, 1 settlement`. `_choose_multiset` picks the settlement (a
+    victory point) over the second road, and only one `value_rows` call,
+    two rows, ever runs -- one per side, not one per placement.
     """
-    from hexset.clients import netbot
     from hexset.clients.netbot import NetworkBot
-
-    monkeypatch.setattr(netbot, "_MAX_ROWS", 3)
+    from hexset.clients.reachable import reachable_recipes
 
     space = stub_checkpoint(board).space
     bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS)
@@ -993,12 +988,82 @@ def test_the_reachable_gate_stays_within_its_row_and_forward_budget(board, monke
 
     gain = bot.gains_many(view, [unlocks_settlement], [1])[0]
     assert gain != -1.0  # the bundle was covered and reached the gate
-    assert 1 <= len(calls) <= 3, "no more than three forwards"
-    assert all(n <= 3 for n in calls), "no forward exceeded the patched row budget"
+    assert calls == [2]  # one forward, one row per side -- no per-placement fan-out
+
+    ctx = bot._reach_context(0, view)
+    candidate_hand = (2, 2, 1, 1, 0)
+    recipes = reachable_recipes(candidate_hand, **ctx)
+    assert (1, 1, 0, 0) in recipes and (2, 0, 0, 0) in recipes
+    assert bot._choose_multiset(recipes) == (1, 1, 0, 0)  # the settlement, not the second road
+
+
+def test_a_road_building_branch_places_two_roads_before_a_settlement(board):
+    """A seat holding a playable Road Building card reaches a settlement
+    corner its hand alone never could: two free roads placed by the same
+    expansion rule a bought road uses (`_far_endpoint_pips`), opening a
+    vertex `settlement_placeable` would have refused before them, and only
+    then is the settlement paid for and placed.
+
+    `_road_building_context` is run for real against this fixture's board
+    (`edges` below are genuinely legal placements for seat 0 here), but
+    `ctx["legal"]` is hand-lowered to 0 legal settlement corners: this
+    fixture's own guarantee is that *a* spot is already legal, which is
+    exactly the ordinary case the merge in `_recipes_with_road_building`
+    only adds *new* multisets to -- forcing the "before" count to 0 isolates
+    the one case worth a dedicated test, a corner only the free roads
+    reach.
+    """
+    from hexset.cards import DevCard
+    from hexset.clients.netbot import NetworkBot
+    from hexset.clients.reachable import reachable_recipes
+    from hexset.state import road_count
+
+    space = stub_checkpoint(board).space
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS)
+    game = _position_with_a_settlement_in_hand(board)
+    state = game.state(0, hidden=False)
+    # Exactly a settlement's worth of resources, and one matured Road
+    # Building card -- no dev card played yet this turn.
+    state.hands[0] = [1, 1, 1, 1, 0]
+    state.dev_cards[0] = [0, 0, 1, 0, 0]  # one matured Road Building
+    state.deck = []
+    game.dev_card_played = False
+    bot.seat_at(game)
+    view = game.state(0)
+
+    ctx = bot._reach_context(0, view)
+    rb_context = bot._road_building_context(0, view, ctx)
+    assert rb_context is not None
+    edges, room, legal = rb_context
+    assert 1 <= len(edges) <= 2
+
+    no_settlement_yet = dict(ctx, legal=(ctx["legal"][0], 0, ctx["legal"][2]))
+    hand = tuple(view.known[0])
+    without_road_building = reachable_recipes(hand, **no_settlement_yet)
+    assert not any(m[1] >= 1 for m in without_road_building), "the hand-lowered legal count still let a settlement through"
+
+    recipes = bot._recipes_with_road_building(hand, no_settlement_yet, rb_context)
+    settlement_multisets = [m for m, r in recipes.items() if r.branch == "road_building" and m[1] >= 1]
+    assert settlement_multisets, "no settlement reached through the Road Building branch"
+    recipe = recipes[settlement_multisets[0]]
+    assert recipe.param == edges
+
+    seed = bot._seeded(0, hand, view)
+    built = bot._build_row(seed, 0, recipe)
+    built_state = built.state(0, hidden=False)
+    # The two free roads and the bought settlement all actually landed:
+    # the card is spent, the turn's one-card rule is set, and the seat owns
+    # two more roads and one more settlement than it started with.
+    assert built_state.dev_cards[0][DevCard.ROAD_BUILDING] == 0
+    assert built.dev_card_played is True
+    assert road_count(built_state, 0) == road_count(state, 0) + len(edges) + recipe.purchases[0]
+    from hexset.state import settlement_count
+
+    assert settlement_count(built_state, 0) == settlement_count(state, 0) + recipe.purchases[1]
 
 
 def test_the_monopoly_branch_never_reads_a_true_hand_it_cannot_name(board):
-    """Built with `bot._make_plan`, directly: seat 1's *true* hand holds far
+    """Built with `bot._build_row`, directly: seat 1's *true* hand holds far
     more wheat than seat 0's ledger can name, so a Monopoly branch that
     read the true hand would credit seat 0 with all of it. The built
     position must credit only the known amount, leave seat 1's excess
@@ -1048,8 +1113,8 @@ def test_the_monopoly_branch_never_reads_a_true_hand_it_cannot_name(board):
     assert recipe.hand == (0, 0, 0, 2, 3)
 
     seed = bot._seeded(0, hand, view)
-    plan = bot._make_plan(seed, 0, recipe.purchases, recipe)
-    built_state = plan.game._state
+    built = bot._build_row(seed, 0, recipe)
+    built_state = built.state(0, hidden=False)
     assert built_state.hands[0] == [0, 0, 0, 0, 0]  # paid the city off in full
     # Seat 1 loses exactly the known wheat -- five minus one -- never more.
     assert built_state.hands[1] == [0, 0, 0, 4, 0]

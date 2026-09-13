@@ -4,138 +4,10 @@ Changes to the HexSet distribution. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## 0.53.0
-
-### Added
-
-- **The network trade gate's continuation rollout is back, as a
-  per-checkpoint setting.** `gate_plies` (metadata key `gate_plies`,
-  default `0`) asks `NetworkBot` to roll the mover's own greedy policy
-  forward that many plies from each surviving candidate before valuing
-  it, in one belief world drawn per ask from the asking seat's own
-  information set (certified to cover what each candidate says the
-  counterparty gives) -- never on a hand the seat cannot read -- same
-  footing as `search`/`simulations` is for `hexset.mcts.Search`:
-  search on the trade decision, read off the file the same way. `0`, the
-  default every checkpoint gets unless it asks otherwise, is today's
-  single forward over the affordability filter's own after-position --
-  training collection runs at the default, and a served file that wants
-  the rollout asks for it in its own metadata.
-
-- **A duel can be played under the automatic clearing house.**
-  `hexset.arena.compete` takes `trade_mode`/`max_trades` and hands them to
-  every game it plays, and `hexset.bench.duel` exposes them as
-  `--trade-mode {round,auto}` and `--max-trades` (`-1` for the unbounded
-  house studies before 0.50 were recorded under), recording both in the
-  verdict -- so a policy trained against the clearing house can be read in
-  its native environment.
-
-
-## 0.52.0
-
-### Fixed
-
-- **Clicking a player at a finished game to read their cards moved the rest
-  of the page.** `renderHand` had exactly two shapes: a one-line hint when
-  nobody was picked, or the full two-column card grid once somebody was.
-  `#hand` sits in `#play-area`, sized to its own content, with `#log` taking
-  whatever's left below it, so swapping one shape for the other shoved `#log`
-  up or down by however much a header row and a card grid cost over a single
-  line of text. The pane now always lays out the same two columns the
-  viewer's own hand uses during play; with nobody picked they are invisible
-  and CLICK A PLAYER TO SEE THEIR CARDS sits centred over the space they
-  hold, and picking a row reveals them -- no title over the cards, the
-  highlighted roster row says whose they are.
-
-- **The Undo corner button painted over an open modal instead of under it.**
-  `#undo-build` carried a flat `z-index: 60`, above `#modal`'s `55`, so it
-  would reach through *any* modal -- a purpose it only ever needed for the
-  "Steal from" robber-victim modal, whose own hex a self-played Knight
-  stays undoable behind. Every other modal (trade, discard, Monopoly, Year
-  of Plenty) now covers it like it covers the rest of the board: the corner
-  sits at `z-index: 40` by default and only gets `.reach-modal`'s `60` back
-  while `modalMode` is `"steal"`.
+## Unreleased
 
 ### Changed
 
-- **Longest Road no longer recounts every seat's roads on every placement.**
-  `victory.update_longest_road` called `roads.road_lengths` -- an exhaustive
-  route search over every seat's edges, from scratch -- after each of the
-  four places a road or settlement can go down
-  (`game.place_initial_settlement`/`build_settlement`/
-  `place_initial_road`/`build_road`), measured at ~25% of a 4-seat
-  self-play game (9.2M recursive calls a game). Roads are edge-disjoint, so
-  a road just placed by seat `p` can only extend `p`'s own route; a
-  settlement can only *cut* a route passing through its vertex, and only a
-  foreign one, since a builder's own building never blocks the builder's
-  own route. `GameState.road_lengths` now caches each seat's length, and
-  `update_longest_road` recomputes only the seat(s) a placement could have
-  changed before awarding from the cache -- unchanged for any caller that
-  mutates `edge_owner`/`vertex_owner` directly rather than through
-  `place_road`/`place_settlement`, which still gets the historical
-  from-scratch recompute. `hexset.catanatron.state.translate` (rebuilt
-  fresh from a mirrored catanatron game every decision, so it inherits no
-  running cache) computes the field once off its own topology instead.
-
-- **The network trade gate values a candidate exchange in one forward
-  again, filtered by what it lets the seat buy.** `NetworkBot` no longer
-  samples a belief world, imagines two games or rolls a mover's greedy
-  policy forward a few plies to price a trade -- the continuation rollout,
-  and the paired belief worlds it drew, are gone. Every candidate the
-  asking seat can cover is read from its own frame -- its own hand exactly,
-  the counterparty's known lower bound moved the same way -- and an
-  affordability filter decides first whether the trade changes anything the
-  seat can buy (a road, a settlement, a city, a development card): a
-  candidate that leaves every one of those exactly as it was is priced at
-  `0.0` outright and never reaches the head at all, so it can never be
-  offered, accepted or countered with. `gate_rows` -- the cap on how many
-  candidates one batched forward scored -- is gone with the rollout it used
-  to bound; every candidate a seat can cover is now considered, since the
-  filter is the bound.
-
-### Removed
-
-- `NetworkBot.gate_rows` and the checkpoint metadata key of the same name
-  (`hexset.clients.modelmeta.GateConfig.rows`, `DEFAULT_GATE_ROWS`,
-  `MAX_GATE_ROWS`). A checkpoint exported with `gate_rows` in its metadata
-  still loads without complaint; the field is simply never read.
-
-
-## 0.51.0
-
-### Changed
-
-- **The trade gate answers a repeated ask from its last evaluation, and
-  enumerating a board is no longer quadratic in its piece limits.**
-  `gains_many` and `estimate_many` are the seat's own row and the
-  counterparty's row of one evaluation, and `hexset.trading.default_offer`
-  and `default_respond` each ask for both, back to back, over the identical
-  candidates at the identical position -- `hexset.clients.netbot.NetworkBot`
-  now serves the second ask from a one-entry memo keyed on the position and
-  the ask, instead of rebuilding every imagined world and continuation.
-  And `can_place_road` rescanned every edge to count the player's roads once
-  per candidate edge (`can_place_settlement`/`can_upgrade_to_city` the same
-  over vertices); the piece limit is a property of the player, so
-  `actions._building_actions` reads it once and calls the new
-  `state.road_placeable`/`settlement_placeable`/`city_upgradeable` -- the
-  public predicates without that check -- per placement. Neither changes
-  what the gate sees.
-
-
-- **Heximax's `k` is a cap on distinct worlds, not a quota of searches.**
-  `Heximax.worlds` draws `k` samples from the belief through the new
-  `hexset.bots.determinized.distinct_worlds` -- the one place that decides
-  when two draws are the same world, which `determinized` now reads too --
-  keyed on every other seat's hidden holdings (`holdings_signature`; the
-  deck's order is a chance stream and does not distinguish a world), and
-  weights each distinct world by its share of the draws in the root average
-  (`world_weights`). A belief the ledger has pinned to one world -- every
-  duel, and most four-seat positions -- is searched once however large `k`
-  is. Before, `k` identical worlds shared one leaf budget, and at `k=100`
-  the budget was gone after the first few root options.
-
-- **Road Building is not offered to a seat with no road pieces left.** The
-  card places roads; at fifteen on the board there is nothing to place.
 
 - **`summary.afford` says why an affordable build is not offered.** `why`:
   `phase` (not this seat's main phase), `pieces` (none of that piece left),
@@ -308,6 +180,139 @@ Changes to the HexSet distribution. The project follows
   `hand`, `known`, `dev_cards` and `bank` come sparse, a missing name
   meaning zero, as the trade dicts always have. A mid-game reply is about
   a sixth smaller. The HTTP API is untouched.
+
+### Fixed
+
+- **Clicking a player at a finished game to read their cards moved the rest
+  of the page.** `renderHand` had exactly two shapes: a one-line hint when
+  nobody was picked, or the full two-column card grid once somebody was.
+  `#hand` sits in `#play-area`, sized to its own content, with `#log` taking
+  whatever's left below it, so swapping one shape for the other shoved `#log`
+  up or down by however much a header row and a card grid cost over a single
+  line of text. The pane now always lays out the same two columns the
+  viewer's own hand uses during play; with nobody picked they are invisible
+  and CLICK A PLAYER TO SEE THEIR CARDS sits centred over the space they
+  hold, and picking a row reveals them -- no title over the cards, the
+  highlighted roster row says whose they are.
+
+- **The Undo corner button painted over an open modal instead of under it.**
+  `#undo-build` carried a flat `z-index: 60`, above `#modal`'s `55`, so it
+  would reach through *any* modal -- a purpose it only ever needed for the
+  "Steal from" robber-victim modal, whose own hex a self-played Knight
+  stays undoable behind. Every other modal (trade, discard, Monopoly, Year
+  of Plenty) now covers it like it covers the rest of the board: the corner
+  sits at `z-index: 40` by default and only gets `.reach-modal`'s `60` back
+  while `modalMode` is `"steal"`.
+
+
+## 0.53.0
+
+### Added
+
+- **The network trade gate's continuation rollout is back, as a
+  per-checkpoint setting.** `gate_plies` (metadata key `gate_plies`,
+  default `0`) asks `NetworkBot` to roll the mover's own greedy policy
+  forward that many plies from each surviving candidate before valuing
+  it, in one belief world drawn per ask from the asking seat's own
+  information set (certified to cover what each candidate says the
+  counterparty gives) -- never on a hand the seat cannot read -- same
+  footing as `search`/`simulations` is for `hexset.mcts.Search`:
+  search on the trade decision, read off the file the same way. `0`, the
+  default every checkpoint gets unless it asks otherwise, is today's
+  single forward over the affordability filter's own after-position --
+  training collection runs at the default, and a served file that wants
+  the rollout asks for it in its own metadata.
+
+- **A duel can be played under the automatic clearing house.**
+  `hexset.arena.compete` takes `trade_mode`/`max_trades` and hands them to
+  every game it plays, and `hexset.bench.duel` exposes them as
+  `--trade-mode {round,auto}` and `--max-trades` (`-1` for the unbounded
+  house studies before 0.50 were recorded under), recording both in the
+  verdict -- so a policy trained against the clearing house can be read in
+  its native environment.
+
+
+## 0.52.0
+
+### Changed
+
+- **Longest Road no longer recounts every seat's roads on every placement.**
+  `victory.update_longest_road` called `roads.road_lengths` -- an exhaustive
+  route search over every seat's edges, from scratch -- after each of the
+  four places a road or settlement can go down
+  (`game.place_initial_settlement`/`build_settlement`/
+  `place_initial_road`/`build_road`), measured at ~25% of a 4-seat
+  self-play game (9.2M recursive calls a game). Roads are edge-disjoint, so
+  a road just placed by seat `p` can only extend `p`'s own route; a
+  settlement can only *cut* a route passing through its vertex, and only a
+  foreign one, since a builder's own building never blocks the builder's
+  own route. `GameState.road_lengths` now caches each seat's length, and
+  `update_longest_road` recomputes only the seat(s) a placement could have
+  changed before awarding from the cache -- unchanged for any caller that
+  mutates `edge_owner`/`vertex_owner` directly rather than through
+  `place_road`/`place_settlement`, which still gets the historical
+  from-scratch recompute. `hexset.catanatron.state.translate` (rebuilt
+  fresh from a mirrored catanatron game every decision, so it inherits no
+  running cache) computes the field once off its own topology instead.
+
+- **The network trade gate values a candidate exchange in one forward
+  again, filtered by what it lets the seat buy.** `NetworkBot` no longer
+  samples a belief world, imagines two games or rolls a mover's greedy
+  policy forward a few plies to price a trade -- the continuation rollout,
+  and the paired belief worlds it drew, are gone. Every candidate the
+  asking seat can cover is read from its own frame -- its own hand exactly,
+  the counterparty's known lower bound moved the same way -- and an
+  affordability filter decides first whether the trade changes anything the
+  seat can buy (a road, a settlement, a city, a development card): a
+  candidate that leaves every one of those exactly as it was is priced at
+  `0.0` outright and never reaches the head at all, so it can never be
+  offered, accepted or countered with. `gate_rows` -- the cap on how many
+  candidates one batched forward scored -- is gone with the rollout it used
+  to bound; every candidate a seat can cover is now considered, since the
+  filter is the bound.
+
+### Removed
+
+- `NetworkBot.gate_rows` and the checkpoint metadata key of the same name
+  (`hexset.clients.modelmeta.GateConfig.rows`, `DEFAULT_GATE_ROWS`,
+  `MAX_GATE_ROWS`). A checkpoint exported with `gate_rows` in its metadata
+  still loads without complaint; the field is simply never read.
+
+
+## 0.51.0
+
+### Changed
+
+- **The trade gate answers a repeated ask from its last evaluation, and
+  enumerating a board is no longer quadratic in its piece limits.**
+  `gains_many` and `estimate_many` are the seat's own row and the
+  counterparty's row of one evaluation, and `hexset.trading.default_offer`
+  and `default_respond` each ask for both, back to back, over the identical
+  candidates at the identical position -- `hexset.clients.netbot.NetworkBot`
+  now serves the second ask from a one-entry memo keyed on the position and
+  the ask, instead of rebuilding every imagined world and continuation.
+  And `can_place_road` rescanned every edge to count the player's roads once
+  per candidate edge (`can_place_settlement`/`can_upgrade_to_city` the same
+  over vertices); the piece limit is a property of the player, so
+  `actions._building_actions` reads it once and calls the new
+  `state.road_placeable`/`settlement_placeable`/`city_upgradeable` -- the
+  public predicates without that check -- per placement. Neither changes
+  what the gate sees.
+
+- **Heximax's `k` is a cap on distinct worlds, not a quota of searches.**
+  `Heximax.worlds` draws `k` samples from the belief through the new
+  `hexset.bots.determinized.distinct_worlds` -- the one place that decides
+  when two draws are the same world, which `determinized` now reads too --
+  keyed on every other seat's hidden holdings (`holdings_signature`; the
+  deck's order is a chance stream and does not distinguish a world), and
+  weights each distinct world by its share of the draws in the root average
+  (`world_weights`). A belief the ledger has pinned to one world -- every
+  duel, and most four-seat positions -- is searched once however large `k`
+  is. Before, `k` identical worlds shared one leaf budget, and at `k=100`
+  the budget was gone after the first few root options.
+
+- **Road Building is not offered to a seat with no road pieces left.** The
+  card places roads; at fifteen on the board there is nothing to place.
 
 - Size-only readers go through `hexset.economy.hand_size` and
   `hexset.devcards.dev_count` rather than summing a hand or a

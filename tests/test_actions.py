@@ -188,6 +188,22 @@ def test_free_roads_are_placed_before_the_turn_can_end():
         assert ActionType.END_TURN not in kinds
 
 
+def test_free_roads_come_before_everything_else_in_main():
+    """A Road Building card resolves when played, in MAIN exactly as before
+    the roll: while roads are owed no other action is legal. Colonist's
+    server takes nothing else in that state -- two live games were lost
+    sending a settlement and a dev-card buy past owed roads."""
+    game = a_game(players=2)
+    rng = random.Random(2)
+    while game.phase is not Phase.MAIN:
+        step_randomly(game, rng)
+
+    game.free_roads = 2
+    kinds = {a.type for a in legal_actions(game)}
+    if ActionType.BUILD_ROAD in kinds:
+        assert kinds == {ActionType.BUILD_ROAD}
+
+
 def test_a_stranded_free_road_does_not_deadlock():
     game = a_game(players=2)
     rng = random.Random(3)

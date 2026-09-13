@@ -451,12 +451,12 @@
      a counter, Decline all on your own round — carried in title/aria-label.
      Hidden outright in the one mode with no way out, a forced discard. */
   #modal-close {
-    width: 20px; height: 20px; padding: 0; border: 0; border-radius: 0;
+    width: 24px; height: 24px; padding: 0; border: 0; border-radius: 0;
     background: none; color: var(--ink); flex: none;
     display: flex; align-items: center; justify-content: center; opacity: 0.7;
   }
   #modal-close:hover:not(:disabled) { background: none; opacity: 1; }
-  #modal-close svg { width: 16px; height: 16px; display: block; fill: currentColor; }
+  #modal-close svg { width: 19px; height: 19px; display: block; fill: currentColor; }
   #modal-close[hidden] { display: none; }
   /* Body beside the action column, each centred on the other: without this,
      short content (an incoming offer's one row) sits pinned to the top of the
@@ -464,7 +464,7 @@
      aren't — the two columns read as misaligned. */
   #modal-row { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; }
   #modal-body {
-    flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 0.8rem 1rem 1.1rem;
+    flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 1.1rem 1rem 1.4rem;
     display: flex; flex-direction: column; justify-content: center;
     align-items: flex-start; gap: 1rem; width: 100%;
   }
@@ -477,25 +477,24 @@
     flex: none; padding: 0.6rem 0.8rem 1rem 0; display: flex;
     flex-direction: column; justify-content: center; align-items: center; gap: 0.5rem;
   }
-  /* One button size everywhere in the modal, icon only: a 44px square, the
-     smallest target a thumb lands on reliably. The word a glyph stands for
-     lives in title/aria-label rather than drawn under it — the four states
-     name themselves in the title row now, so a column of captions was
-     repeating the heading a second time. */
+  /* One button size everywhere in the modal, icon only: a 40px square. The
+     word a glyph stands for lives in title/aria-label rather than drawn
+     under it — the four states name themselves in the title row now, so a
+     column of captions was repeating the heading a second time. */
   .modal-btn {
-    width: 44px; height: 44px; padding: 0; border-radius: 10px; flex: none;
+    width: 40px; height: 40px; padding: 0; border-radius: 10px; flex: none;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
   }
-  .modal-btn svg { width: 22px; height: 22px; display: block; fill: currentColor; }
+  .modal-btn svg { width: 20px; height: 20px; display: block; fill: currentColor; }
   /* The bank/port square is the one button carrying something its glyph
      cannot say: the rate this composition would go at — 4:1 to the bank, 3:1
      or 2:1 through a port. A smaller glyph makes the room for it, so "give 2"
      and "give 4" stop looking like the same button. */
-  .modal-btn.with-rate svg { width: 18px; height: 18px; }
+  .modal-btn.with-rate svg { width: 16px; height: 16px; }
   .modal-btn-cap { font-size: 0.55rem; font-weight: 700; line-height: 1; letter-spacing: 0.02em; }
   /* Holds a row's space where a button would be but isn't — a seat that has
      not answered yet — so the checks down the pane stay on one x. */
-  .modal-btn-gap { width: 44px; height: 44px; flex: none; }
+  .modal-btn-gap { width: 40px; height: 40px; flex: none; }
   /* Pushes what follows to the right edge of its row: the quiet Accept on a
      quoted offer, and Send under it at the same x. */
   .modal-fill { flex: 1 1 auto; min-width: 0; }
@@ -847,7 +846,7 @@ let watchSeq = 0;          // bumping it retires the long poll already out — s
 let openSeat = null;       // watching only: whose cards the hand area shows — see renderPlayers
 let logSheetOpen = false;  // the full-history sheet is only drawn while it's up — see renderLog
 let modalMode = null;      // which decision the modal is showing, if any — see openModal
-let modalDrag = {x: 0, y: 0};  // #modal-inner offset from center, dragged via #modal-head — see wireModalDrag
+let modalDrag = loadModalDrag();  // #modal-inner offset from center, dragged via #modal-head — see wireModalDrag
 let tradeGive = [0, 0, 0, 0, 0];   // "trade" mode: counts the human gives, by resource index
 let tradeWant = [0, 0, 0, 0, 0];   // "trade" mode: counts the human gets
 let counterOf = null;              // {actor, bundle} of the incoming offer being countered, else null
@@ -1672,9 +1671,11 @@ function render() {
   //
   // Watching rather than playing, there is no seat and so no colour of our
   // own: it falls back to the stylesheet's own #6d5ce8, which belongs to no
-  // seat and highlights nothing anyone can click anyway.
+  // seat and highlights nothing anyone can click anyway. A finished game is
+  // the same story even holding a seat — nothing is ours to click any more,
+  // so the accent stops claiming a side (browsing(), not watching()).
   document.documentElement.style.setProperty(
-    "--accent", watching() ? "#6d5ce8" : SEAT_COLORS[state.seat].fill);
+    "--accent", browsing() ? "#6d5ce8" : SEAT_COLORS[state.seat].fill);
   renderStatus();
   renderPlayers();
   renderHand();
@@ -1847,7 +1848,13 @@ function renderPlayers() {
         select.appendChild(html("option", {value: ""}, "(empty)"));
         select.appendChild(html("option", {value: CLOSE_SEAT}, "(closed)"));
       }
-      for (const name of modelNames) select.appendChild(html("option", {value: name}, name));
+      // Models by name, not in the order /api/models happens to return them:
+      // the list is long enough that finding one by eye is the whole job.
+      // "(empty)" and "(closed)" stay pinned above it — they are what the seat
+      // *is*, not something that could be seated in it. Sorted on a copy so
+      // modelNames keeps the MODEL_OPTIONS order it documents.
+      const sorted = [...modelNames].sort((a, b) => a.localeCompare(b));
+      for (const name of sorted) select.appendChild(html("option", {value: name}, name));
       select.value = p.bot || (closed ? CLOSE_SEAT : "");
       select.classList.toggle("unset", !p.bot);
       select.addEventListener("change", () => {
@@ -1930,15 +1937,16 @@ function devCardPlay(name, g) {
 // make a card do something all come off `legal_actions`, which is empty for a
 // spectator, so every card here is inert without a check of its own.
 //
-// Once the game is over the same click works for a seat's holder too: every
-// hand is revealed to everyone by then, so the row that used to be a model
-// picker is a way to read what that seat was actually holding at the end.
-// Their own is what shows until they click one, and clicking the open row
-// again comes back to it rather than to nobody's.
+// Once the game is over a seat's holder reads the table the same way a
+// spectator does: every hand is revealed to everyone by then, so the row that
+// used to be a model picker is a way to read what that seat was actually
+// holding at the end — their own row included, with no hand pinned open
+// until one is picked. The seat is still theirs (it is what keeps their name
+// on their own row), it just stops being the view's default.
 function renderHand() {
   const container = document.getElementById("hand");
   container.innerHTML = "";
-  const own = watching() ? null : state.seat;
+  const own = browsing() ? null : state.seat;
   const seat = browsing() && openSeat !== null ? openSeat : own;
   const p = seat === null ? null : state.players.find((pp) => pp.seat === seat);
   const hasHand = Boolean(p && p.hand !== undefined);
@@ -2023,9 +2031,10 @@ function renderHand() {
 function renderPieceSupply() {
   const container = document.getElementById("piece-supply");
   container.innerHTML = "";
-  // One seat's own pieces. Watching, there is no such seat, and a supply
-  // count for nobody would read as somebody's.
-  if (watching()) return;
+  // One seat's own pieces, and only while there are pieces left to place:
+  // watching there is no such seat, and once the game is over a supply count
+  // is a stock of moves nobody can make.
+  if (browsing()) return;
   const seat = state.seat;
   const color = SEAT_COLORS[seat];
   const roadsBuilt = state.edge_owner.filter((o) => o === seat).length;
@@ -2254,7 +2263,7 @@ const MODAL_AUTO = new Set(["discard", "steal"]);
 // closing it only backs out to the hex list, not out of the move.
 const MODAL_DISMISSIBLE = new Set(["trade", "monopoly", "year-of-plenty", "steal"]);
 
-// One button size everywhere in the modal: a 44px square carrying a glyph
+// One button size everywhere in the modal: a 40px square carrying a glyph
 // and nothing else. `label` is the full tooltip/screen-reader sentence — the
 // only place the word lives, now that the title row names the state the glyph
 // is answering (an X under "Trade Offer" is Cancel, under "Trade Offer
@@ -2444,14 +2453,15 @@ function openModal(mode, {give = null} = {}) {
   } else if (mode === "monopoly") {
     monopolyPick = null;
   }
-  modalDrag = {x: 0, y: 0};
-  document.getElementById("modal-inner").style.transform = "";
   document.getElementById("modal").classList.add("show");
   // See the CSS comment on #undo-build.reach-modal: every other mode leaves
   // the corner button behind the backdrop like any other board control, only
   // "steal" needs it reaching through.
   document.getElementById("undo-build").classList.toggle("reach-modal", mode === "steal");
   renderModal();
+  // After renderModal, not before: the clamp measures the box, and what the
+  // mode just drew is what decides its height.
+  applyModalDrag();
 }
 
 function closeModal() {
@@ -2683,7 +2693,7 @@ function seatPip(seat) {
   return pip;
 }
 
-// A 44px square holding a row's place where a button would be but isn't —
+// A 40px square holding a row's place where a button would be but isn't —
 // a seat that has not answered yet — so the checks down a pane stay on one x.
 function buttonGap() {
   return html("div", {class: "modal-btn-gap"});
@@ -3058,9 +3068,38 @@ function modalDismissible() {
 document.getElementById("modal").addEventListener("click", (e) => {
   if (e.target.id === "modal" && modalDismissible()) closeModal();
 });
-// Press-and-drag the title bar to reposition the modal. modalDrag is reset
-// to center in openModal, so this is purely a per-decision convenience, not
-// a remembered preference.
+// Press-and-drag the title bar to reposition the modal. Where it was left is
+// remembered the way a seat's token is — one offset for every mode, kept
+// across opens and across reloads, written on release rather than on every
+// pointermove.
+function loadModalDrag() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("hexset.modaldrag"));
+    if (Number.isFinite(saved?.x) && Number.isFinite(saved?.y)) return saved;
+  } catch { /* private mode, or a key some older build wrote */ }
+  return {x: 0, y: 0};
+}
+
+function saveModalDrag() {
+  try { localStorage.setItem("hexset.modaldrag", JSON.stringify(modalDrag)); }
+  catch { /* private mode: it still drags, the position just won't come back */ }
+}
+
+// A position saved on a wide window can put the whole box off a narrow one,
+// and a modal nobody can reach is a game nobody can finish. The offset is
+// from center, so half the slack either way is exactly what keeps it on.
+function applyModalDrag() {
+  const inner = document.getElementById("modal-inner");
+  const box = inner.getBoundingClientRect();
+  const maxX = Math.max(0, (window.innerWidth - box.width) / 2);
+  const maxY = Math.max(0, (window.innerHeight - box.height) / 2);
+  modalDrag = {
+    x: Math.min(maxX, Math.max(-maxX, modalDrag.x)),
+    y: Math.min(maxY, Math.max(-maxY, modalDrag.y)),
+  };
+  inner.style.transform = `translate(${modalDrag.x}px, ${modalDrag.y}px)`;
+}
+
 (function wireModalDrag() {
   const head = document.getElementById("modal-head");
   const inner = document.getElementById("modal-inner");
@@ -3084,7 +3123,11 @@ document.getElementById("modal").addEventListener("click", (e) => {
     };
     inner.style.transform = `translate(${modalDrag.x}px, ${modalDrag.y}px)`;
   });
-  const stopDrag = () => { dragging = false; };
+  const stopDrag = () => {
+    if (!dragging) return;
+    dragging = false;
+    saveModalDrag();
+  };
   head.addEventListener("pointerup", stopDrag);
   head.addEventListener("pointercancel", stopDrag);
 })();

@@ -1,0 +1,155 @@
+# SPDX-License-Identifier: GPL-3.0-only
+"""`Game.locked`: the per-seat setup lock and seat retirement. A declared field,
+so the setup snake, the turn rotation, discards, trading and `imagine` all
+read one rule.
+"""
+
+from __future__ import annotations
+
+import random
+
+from hexset.actions import apply
+from hexset.board.board import random_base_board
+from hexset.board.terrain import NUM_RESOURCES, Resource
+from hexset.game import (
+    Phase,
+    end_turn,
+    imagine,
+    legal_initial_roads,
+    lock_seat,
+    place_initial_road,
+    place_initial_settlement,
+    players_owing_discards,
+    roll_dice,
+    start,
+)
+from hexset.state import can_place_settlement
+from hexset.trading import trade_event
+from helpers import clear_hand, give
+
+
+def a_game(players: int = 3, seed: int = 0, *, first: int = 0):
+    rng = random.Random(seed)
+    return start(random_base_board(rng), players, rng, first=first)
+
+
+def free_vertex(game):
+    return next(
+        v
+        for v in range(game._state.board.topology.num_vertices)
+        if can_place_settlement(game._state, game.current_player, v, connected=False)
+    )
+
+
+def run_setup(game):
+    while game.phase in (Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD):
+        if game.phase is Phase.SETUP_SETTLEMENT:
+            place_initial_settlement(game, free_vertex(game))
+        else:
+            place_initial_road(game, legal_initial_roads(game)[0])
+    return game
+
+
+def a_trade_ready_game(players: int = 3):
+    """Every hand emptied, so a test's own `give` calls are the only cards on the
+    table; setup's yield is random per board and would make it flaky.
+    """
+    game = run_setup(a_game(players=players))
+    game.phase = Phase.MAIN
+    for player in range(players):
+        clear_hand(game._state, player)
+    return game
+
+
+def test_start_first_rotates_the_snake_keeping_its_compensating_property():
+    game = a_game(players=3, first=2)
+    assert game.setup_queue == [2, 0, 1, 1, 0, 2]
+    assert game.current_player == 2
+    assert game.setup_queue[0] == game.setup_queue[-1] == 2
+
+
+
+
+def test_locked_seat_is_skipped_by_the_setup_snake():
+    game = a_game(players=3)
+    lock_seat(game, 1)
+    run_setup(game)
+
+    assert game.phase is Phase.ROLL
+    assert game._state.vertex_owner.count(1) == 0
+    assert game._state.edge_owner.count(1) == 0
+    assert game._state.vertex_owner.count(0) == 2
+    assert game._state.vertex_owner.count(2) == 2
+    assert game.current_player == 0
+
+
+def test_locking_the_seat_currently_up_moves_the_snake_off_it_at_once():
+    game = a_game(players=3)
+    place_initial_settlement(game, free_vertex(game))
+    place_initial_road(game, legal_initial_roads(game)[0])
+    assert game.current_player == 1
+
+    lock_seat(game, 1)
+
+    assert game.current_player == 2
+    assert game.phase is Phase.SETUP_SETTLEMENT
+
+
+def test_locked_seat_is_skipped_by_end_turn():
+    game = run_setup(a_game(players=3))
+    assert game.current_player == 0
+    lock_seat(game, 1)
+
+    roll_dice(game, roll=8)
+    end_turn(game)
+    assert game.current_player == 2
+
+    roll_dice(game, roll=8)
+    end_turn(game)
+    assert game.current_player == 0
+
+
+def test_locked_seat_never_owes_a_discard():
+    game = run_setup(a_game(players=3))
+    lock_seat(game, 1)
+    give(game._state, 1, Resource.WOOD, 8)
+
+    roll_dice(game, roll=7)
+
+    assert 1 not in players_owing_discards(game)
+    assert game.discard_quota[1] == 0
+
+
+def test_a_locked_seat_is_never_a_trade_counterparty():
+    """Skipped in the candidate enumeration, not corrected afterwards."""
+    game = a_trade_ready_game()
+    give(game._state, 0, Resource.WOOD, 2)
+    give(game._state, 1, Resource.ORE, 1)
+    give(game._state, 2, Resource.ORE, 1)
+    lock_seat(game, 1)
+
+    # Direction-aware on purpose: a blanket "always yes" gate would ping-pong
+    # forever between seat 0 and seat 2 once the one ore has moved.
+    def gate(seat, view, received, other):
+        wanted = Resource.ORE if seat == 0 else Resource.WOOD
+        return 1.0 if received[wanted] > 0 else -1.0
+
+    gate.trade_floor = 0.0  # a bare gate callable carries its own floor
+    done = trade_event(game, gate)
+    assert done
+    assert all(trade.b == 2 for trade in done)
+
+
+
+
+def test_imagine_carries_the_lock():
+    game = run_setup(a_game(players=3))
+    lock_seat(game, 1)
+
+    copy = imagine(game, random.Random(99))
+
+    assert copy.locked == frozenset({1})
+    roll_dice(copy, roll=8)
+    end_turn(copy)
+    assert copy.current_player == 2
+    assert game.locked == frozenset({1})

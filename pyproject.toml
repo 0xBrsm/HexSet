@@ -1,0 +1,80 @@
+[project]
+name = "hexset"
+# Keep in sync with hexset.__version__; checked by tests/test_versions.py.
+version = "1.0.0"
+description = "A Catan rules engine with batched training environments, reproducible evaluation, and browser play"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+authors = [{ name = "Brian St. Marie" }]
+keywords = ["catan", "board-game", "game-engine", "reinforcement-learning", "gymnasium", "pettingzoo", "mcts"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Games/Entertainment :: Board Games",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "numpy>=1.26",
+]
+
+# pytest is not needed to run the game, only to check it. Install with
+# `pip install -e ".[test]"`.
+#
+# ONNX Runtime is loaded only for model inference. The browser and the
+# HTTP/MCP server work with the base NumPy dependency.
+[project.urls]
+Homepage = "https://github.com/0xBrsm/HexSet"
+Source = "https://github.com/0xBrsm/HexSet"
+Changelog = "https://github.com/0xBrsm/HexSet/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+# The page tests drive a real Chromium through `playwright.sync_api`. They
+# skip themselves when it is absent, so without this extra they are silently
+# never run -- which is how a deterministic failure in them went unnoticed.
+# The browser binary is a separate download: `playwright install chromium`.
+browser = ["playwright>=1.44"]
+server = ["onnxruntime>=1.18"]
+clients = ["onnxruntime>=1.18"]
+export = ["onnx>=1.16", "onnxruntime>=1.18"]
+# Pin the reference engine so comparison results identify an exact
+# implementation. This build is upstream plus performance work that has not
+# landed upstream yet; its merge base is the previous pin, and the pin returns
+# to an upstream commit once that work lands.
+catanatron = ["catanatron @ git+https://github.com/0xBrsm/catanatron.git@bd1dd7ecc43e015996f35c10fc743016b1002918"]
+# hexset.gym: a PettingZoo AEC environment (`HexSetAEC`) and a Gymnasium
+# wrapper (`HexSetEnv`, registered as "HexSet-v0"). `import hexset` stays
+# numpy-only, and so does `hexset.gym.lanes` -- only the two environments
+# that implement these APIs need them, so the extra is checked where they
+# are reached rather than at `import hexset.gym`.
+gym = ["pettingzoo>=1.27", "gymnasium>=1.3"]
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["hexset", "hexset.*"]
+
+# The browser frontend must also be present in installed wheels.
+[tool.setuptools.package-data]
+"hexset.server" = ["static/*.html"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+# Optional full-game integration checks can be selected with pytest -m slow.
+addopts = "-m \"not slow\""
+markers = [
+    "slow: full-game / behaviour-preservation tests too slow (~20s+) for the default run; select with `pytest -m slow`",
+]

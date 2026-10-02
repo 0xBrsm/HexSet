@@ -1,0 +1,73 @@
+# Copy this to compose.yaml and edit it to taste:
+#
+#     cp compose.example.yaml compose.yaml
+#     docker compose up -d --build
+#
+# then open http://localhost:8770. compose.yaml is gitignored, so your copy is
+# yours — change anything in it and `git pull` will never collide with it.
+#
+# Everything below is a working default with a reason next to it, not a house
+# style. The lines most people touch are the published port and whether hexset/
+# stays bind-mounted.
+services:
+  hexset:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: hexset:local
+    # A convenience, so `docker logs hexset` works without looking the
+    # name up. Drop it if you want to run more than one copy at a time.
+    container_name: hexset
+    restart: unless-stopped
+    ports:
+      # Host side on the left. The container always listens on 8770 (the
+      # Dockerfile's CMD); change the left half to publish it elsewhere.
+      - "8770:8770"
+    volumes:
+      # Bind-mounted rather than baked into the image (see the Dockerfile),
+      # so editing the code is `docker compose restart` and not a rebuild —
+      # and index.html does not even need that much, since it is read fresh
+      # per request. Read-only because nothing here writes to its own source.
+      - ./hexset:/app/hexset:ro
+      # Drop-in opponents: any *.onnx in here shows up in the in-game picker,
+      # named after the file. Read-only because the app only globs and loads
+      # them, never writes one.
+      - ./models:/app/models:ro
+      # The one writable mount. Every game is journalled here in full as it is
+      # played: one JSON lines file per game, every action, hidden cards and
+      # all (see hexset/server/journal.py). Bound to the host so a rebuild or a
+      # `docker compose down` does not take the history with it.
+      #
+      # The container writes as uid 10001 (see the Dockerfile), so the host
+      # directory has to allow that:
+      #
+      #     mkdir -p games && sudo chown 10001 games
+      #
+      # before the first `up`, or set `user:` below to a uid that already owns
+      # it. Getting it wrong costs the journal, not the game: the reason is
+      # printed once to `docker logs` and play carries on.
+      - ./games:/app/games
+    # The image already runs unprivileged as its own uid (see the Dockerfile).
+    # Set this only if your host needs a particular one — to match ownership
+    # on the games mount above, say.
+    # user: "1000:1000"
+    #
+    # The app serves a game, reads two directories and writes one (the bind
+    # mount above, which read_only does not cover). It has no reason to write
+    # anywhere else on its own filesystem, to gain privileges, or to hold any
+    # Linux capability, so it is given none of the three. /tmp is a tmpfs
+    # because numpy and onnxruntime may want scratch space, and because HOME
+    # points there (see the Dockerfile) now that everything else is read-only.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # Uncapped json-file logs grow until the disk does not.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -1,0 +1,31 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+*.log
+.env
+
+# Your own compose file, so a `git pull` on a deployment never collides
+# with it. Start from the tracked compose.example.yaml.
+compose.yaml
+
+# Journalled games. HEXSET_UI_GAMES_DIR defaults here, so anyone running the
+# server straight out of a checkout writes into the working tree: this is a
+# deployment's own history, not source.
+/games/
+
+# Drop-in opponents: binary artifacts produced by the training repo's
+# export_onnx, not source. See models/.gitkeep for why the directory itself
+# stays tracked.
+/models/*.onnx
+
+# Scratch files a session tool drops in whatever directory it is run from.
+# One was swept into `src/` by a `git add -A` in 0.64.1 and tracked from
+# there, which put a timestamp and a session UUID in the published tree.
+:memory:*
+*.ses
+runs/

@@ -17,8 +17,9 @@ own config, and this module does not know whose. `MAX_FRAGMENTS` is the one
 number it keeps, and it is structural rather than a policy --
 `fragment_partitions` enumerates two-way splits only.
 
-Ties between equal scores break towards the smaller exchange, then canonical
-bundle order, then the lower partner seat, for determinism only.
+Ties between equal scores break on canonical bundle order (the counts
+negated, compared resource by resource), then the lower partner seat, for
+determinism only.
 """
 from __future__ import annotations
 
@@ -41,9 +42,9 @@ def _bundle(value: Sequence[int]) -> Bundle:
 
 
 def _tie(bundle: Sequence[int]) -> tuple:
-    """The tie-break part of a ranking key, for `max`: the smaller exchange
-    first, then canonical bundle order."""
-    return -sum(abs(int(n)) for n in bundle), tuple(-int(n) for n in bundle)
+    """The tie-break part of a ranking key, for `max`: canonical bundle
+    order, the counts negated and compared resource by resource."""
+    return (tuple(-int(n) for n in bundle),)
 
 
 def side_counts(bundle: Sequence[int]) -> tuple[int, int]:

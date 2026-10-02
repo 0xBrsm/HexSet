@@ -82,7 +82,7 @@ cleared inside, so a trade made after a build replays after that build.
 | `fragment_trades` | `False` | Plan one gated target a turn and offer it as fragments |
 | `fragment_threshold` | `0.0` | The proposer cutoff a full target is gated on |
 | `max_fragments` | `1` | Fragments one target may be offered as (1 or 2) |
-| `fragment_cards` | `None` | Cards either side of one fragment may move; `None` for `max_give_cards`, else `ENUMERATION_CARDS`. One side of a fragment is always a single card |
+| `fragment_cards` | `None` | Cards either side of one fragment may move; `None` for `ENUMERATION_CARDS`. One side of a fragment is always a single card |
 | `gate_plies` | `0` | Plies rolled forward over the exchanged hand before it is valued |
 | `fit_offers` | `False` | Put first the offers and counters that fit what the counterparty has shown it wants and will give up (`fit`, off the public ledger); elsewhere the same choice as without it. Offers are planned only under `fragment_trades`, so there it orders both; under card caps or a responder price alone it orders counters |
 

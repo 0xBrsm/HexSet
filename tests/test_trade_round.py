@@ -735,16 +735,3 @@ def test_retuning_a_plain_gates_offers_reaches_the_engine():
     assert game.trades == [], "one offer, refused, and no second"
     retune(actor, max_offers=None)
     assert params_of(actor).max_offers is None
-
-
-# -- ties break towards the smaller exchange ---------------------------------
-
-
-def test_equal_gains_prefer_the_smaller_exchange():
-    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1))
-    flat = Gate(lambda r, c: 1.0)
-    small, large = bundle(wood=-1, ore=1), bundle(wood=-2, ore=1)
-    candidates = [(1, large), (1, small)]
-    assert candidates[default_offer(flat, game.state(0), candidates)][1] == small
-    answers = [Response(1, RESPONSE_COUNTER, large), Response(1, RESPONSE_COUNTER, small)]
-    assert answers[default_pick(flat, game.state(0), answers)].bundle == small

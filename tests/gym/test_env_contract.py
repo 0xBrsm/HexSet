@@ -2,7 +2,7 @@
 """What the two PettingZoo/Gymnasium environments promise around the game:
 an action outside the mask never reaches it, an unseeded reset is drawn
 from the environment's own seeded stream, a game that runs out of turns is
-a truncation worth nothing, and the opponents a `HexSetEnv` can name."""
+a truncation, and the opponents a `HexSetEnv` can name."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from hexset.actions import Action, ActionType, legal_actions  # noqa: E402
 from hexset.game import Phase, is_over, to_move  # noqa: E402
 from hexset.gym.aec import HexSetAEC  # noqa: E402
 from hexset.gym.env import HexSetEnv  # noqa: E402
-from hexset.victory import victory_points  # noqa: E402
+from hexset.victory import relative_points, victory_points  # noqa: E402
 
 
 def _snapshot(game) -> tuple:
@@ -142,12 +142,11 @@ def test_an_unseeded_learner_env_reset_follows_the_last_seeded_one():
 
 
 @pytest.mark.parametrize("reward", ["terminal", "relative_points"])
-def test_a_game_out_of_turns_is_truncated_with_nothing_scored(reward):
-    """Including `relative_points`, where the seats' points at the cap would
-    otherwise score an outcome nobody reached. A seed whose seats end the
-    cap on different points is what makes that case bite. Read on the step
-    that ends the game: PettingZoo drops a done agent's entries as it is
-    stepped out."""
+def test_a_game_out_of_turns_is_truncated_and_scored_by_its_mode(reward):
+    """Nothing under `terminal`; under `relative_points`, the seats' points
+    at the cap. A seed whose seats end the cap on different points tells the
+    two apart. Read on the step that ends the game: PettingZoo drops a done
+    agent's entries as it is stepped out."""
     rng = random.Random(0)
     for seed in range(20):
         env = HexSetAEC(num_players=2, reward=reward, turn_cap=30)
@@ -164,8 +163,13 @@ def test_a_game_out_of_turns_is_truncated_with_nothing_scored(reward):
     else:
         pytest.fail("no seed ended the cap with the seats on different points")
     assert all(env.truncations.values()) and not any(env.terminations.values())
-    assert env.rewards == dict.fromkeys(env.possible_agents, 0.0)
-    assert env._cumulative_rewards == dict.fromkeys(env.possible_agents, 0.0)
+    if reward == "terminal":
+        expected = dict.fromkeys(env.possible_agents, 0.0)
+    else:
+        at_cap = tuple(victory_points(game.state(s, hidden=False), s) for s in range(2))
+        values = relative_points(at_cap, winning_points=game.state(0, hidden=False).rules.winning_points)
+        expected = {agent: float(values[s]) for s, agent in enumerate(env.possible_agents)}
+    assert env.rewards == expected
 
 
 def test_the_learner_env_passes_its_turn_cap_to_the_game():

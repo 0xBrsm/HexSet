@@ -243,7 +243,8 @@ outside the mask, before anything is applied.
   mean, divided by the points the game is played to
   (`hexset.victory.relative_points`, zero-sum).
 - A game that reaches `turn_cap` turns without a winner sets `truncations`,
-  not `terminations`, with reward 0 in either mode; random play needs
+  not `terminations`: reward 0 under `"terminal"`, the points at the cap
+  under `"relative_points"`. Random play needs
   `turn_cap=hexset.game.UNSTRUCTURED_TURN_CAP`.
 - During a discard round several seats owe at once; `discard_order="random"`
   picks the next one from a stream seeded by `reset(seed)`, `"seat"` in

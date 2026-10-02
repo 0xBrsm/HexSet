@@ -99,9 +99,10 @@ TRADE_RULES: tuple[str, ...] = ("egalitarian", "nash", "actor")
 
 
 def _tie(received: Sequence[int]) -> tuple:
-    """The tie-break part of a ranking key, for `max`: the smaller exchange
-    first, then canonical bundle order. For determinism only."""
-    return -sum(abs(int(n)) for n in received), tuple(-int(n) for n in received)
+    """The tie-break part of a ranking key, for `max`: canonical bundle
+    order, the counts negated and compared resource by resource. For
+    determinism only; it is not a preference for the smaller exchange."""
+    return (tuple(-int(n) for n in received),)
 
 
 def trade_floor_of(gate: object) -> float:
@@ -488,10 +489,10 @@ def _best_clearing(
     each distinct counterparty's once over the subset that cleared `me`'s
     floor. Among candidates clearing both floors, `"egalitarian"` maximises
     the smaller gain, `"nash"` their product, `"actor"` the acting seat's
-    own; ties break on the acting seat's gain, then the smaller bundle,
-    then canonical bundle order, then the lower counterparty seat, for
-    determinism only. A seated gate that does not trade (`max_offers=0`) is
-    never a counterparty. Batching needs `game.gates`; the `gate` callable is
+    own; ties break on the acting seat's gain, then canonical bundle order
+    (`_tie`), then the lower counterparty seat, for determinism only. A
+    seated gate that does not trade (`max_offers=0`) is never a
+    counterparty. Batching needs `game.gates`; the `gate` callable is
     the unseated fallback.
     """
     state = game._state
@@ -549,8 +550,8 @@ def _best_clearing(
             primary = gain_me * gain_them
         else:  # "actor"
             primary = gain_me
-        # `max` breaks ties towards the smallest bundle, then canonical
-        # bundle order, then the lower counterparty seat.
+        # `max` breaks ties on canonical bundle order, then the lower
+        # counterparty seat.
         return (primary, gain_me, *_tie(receiveds[i]), -thems[i])
 
     cleared = [i for i, gain in theirs.items() if clears_floor(gain, gate_of(thems[i]))]

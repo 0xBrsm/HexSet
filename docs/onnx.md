@@ -33,7 +33,7 @@ ONNX `metadata_props` values are strings.
 | `fragment_trades` | Plan one gated target a turn and broadcast it as fragments | `0`; `1`/`true`/`yes`/`on` enable it |
 | `fragment_threshold` | The proposer cutoff a full target is gated on | 0.0; clamped to `[0.0, 1.0]` |
 | `max_fragments` | Fragments one target may be broadcast as | 1; 1 or 2 |
-| `fragment_cards` | Cards either side of one fragment may move | Absent: `max_give_cards`, else 3; at least 1 |
+| `fragment_cards` | Cards either side of one fragment may move | Absent: 3; at least 1 |
 | `fit_offers` | Order counters, and under `fragment_trades` offers, by what the counterparty has shown it wants and gives up | `0`; `1`/`true`/`yes`/`on` enable it |
 | `trader` | A bot, named as a lineup names it, that answers this checkpoint's trades while the checkpoint plays its moves | Absent or empty: the checkpoint's own gate |
 

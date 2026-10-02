@@ -92,11 +92,10 @@ class TradeParams:
     #: Fragments one target may be offered as, `1` meaning the target is
     #: offered whole. At most `MAX_FRAGMENTS`.
     max_fragments: int = 1
-    #: Cards either side of one *fragment* may move, `None` for as many as
-    #: `max_give_cards` allows (`ENUMERATION_CARDS` where that is undeclared
-    #: too; see `fragment_width`). One side of a fragment is always a single
-    #: card, so at `2` a fragment is `1:1`, `1:2` or `2:1`. Read only under
-    #: `fragment_trades`.
+    #: Cards either side of one *fragment* may move, `None` for
+    #: `ENUMERATION_CARDS` (see `fragment_width`). One side of a fragment is
+    #: always a single card, so at `2` a fragment is `1:1`, `1:2` or `2:1`.
+    #: Read only under `fragment_trades`.
     fragment_cards: int | None = None
     #: The trade gate's continuation budget: plies rolled forward over the
     #: exchanged hand before it is valued, `0` meaning one forward. Read by
@@ -138,8 +137,8 @@ class TradeParams:
             raise ValueError(f"gate_plies must be non-negative: {self.gate_plies}")
         # A fragment cannot be wider than what this gate will move at all: a
         # plan whose pieces it would itself refuse never reaches the table.
-        # An undeclared `fragment_cards` is read at `max_give_cards`, so only
-        # a declared one can contradict it.
+        # Only a declared `fragment_cards` is checked; an undeclared one is
+        # `ENUMERATION_CARDS` wide whatever the cap.
         widest = self.max_give_cards
         if (self.fragment_trades and widest is not None and self.fragment_cards is not None
                 and self.fragment_cards > widest):
@@ -188,12 +187,9 @@ class TradeParams:
     @property
     def fragment_width(self) -> int:
         """Cards either side of one fragment may move: `fragment_cards`,
-        else `max_give_cards`, else `ENUMERATION_CARDS` -- never wider than
-        this gate will itself move."""
+        else `ENUMERATION_CARDS`."""
         if self.fragment_cards is not None:
             return self.fragment_cards
-        if self.max_give_cards is not None:
-            return self.max_give_cards
         return ENUMERATION_CARDS
 
     @classmethod

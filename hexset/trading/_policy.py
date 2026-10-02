@@ -143,8 +143,7 @@ class TradeProtocol:
 
     def fragment_cap(self) -> int:
         """Cards one fragment may move a side: `TradeParams.fragment_width`,
-        this gate's own `fragment_cards`, else its `max_give_cards`, else
-        `ENUMERATION_CARDS`."""
+        this gate's own `fragment_cards`, else `ENUMERATION_CARDS`."""
         return self.params.fragment_width
 
     def consent_gain(
@@ -395,9 +394,9 @@ class TradeProtocol:
             return engine.Response(me, engine.RESPONSE_PASS, None)
         fit = self._fit(view, [(actor, pool[i]) for i, _ in eligible])
         rank = (lambda i: fit(actor, pool[i])) if fit is not None else (lambda i: 0)
-        # Ties break towards the smaller counter, then canonical bundle order.
+        # Ties break on canonical bundle order, for determinism only.
         i, _ = max(eligible, key=lambda row: (
-            rank(row[0]), row[1], -sum(abs(n) for n in pool[row[0]]), tuple(-n for n in pool[row[0]]),
+            rank(row[0]), row[1], tuple(-n for n in pool[row[0]]),
         ))
         return engine.Response(me, engine.RESPONSE_COUNTER, tuple(-n for n in pool[i]))
 

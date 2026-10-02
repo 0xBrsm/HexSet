@@ -4,6 +4,26 @@ Changes to the HexSet distribution. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## 1.1.1
+
+Three changes in 1.1.0 changed behaviour only to match what the documentation
+said. They are reverted, and the documentation now says what the code does.
+
+### Changed
+
+- **Ties break on canonical bundle order again**, as in 1.0.0: the counts
+  negated and compared resource by resource, then the lower counterparty
+  seat. 1.1.0 preferred the smaller exchange first, which changed which
+  equally scored trade a gate makes, counters with or picks. Both orders are
+  arbitrary among equal scores; 1.0.0's is kept so that a bot plays the same
+  on every 1.x release.
+- **`fragment_cards=None` is `ENUMERATION_CARDS` (3) wide again**, whatever
+  `max_give_cards` says. `TradeParams.fragment_width` reports that width.
+- **A gym game that reaches `turn_cap` scores by its reward mode again**:
+  reward 0 under `"terminal"`, the points at the cap under
+  `"relative_points"`, still as a truncation.
+
+
 ## 1.1.0
 
 Fixes and additions on the 1.0.0 interface. A client that leaned on one

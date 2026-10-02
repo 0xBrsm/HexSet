@@ -74,10 +74,11 @@ class HexSetAEC(AECEnv):
     `"relative_points"` gives terminal victory points less the mean of the
     others, over the points the game is played to
     (`hexset.victory.relative_points`). A game that reaches `turn_cap` turns
-    without a winner sets `truncations`, not `terminations`, with reward 0 for
-    every seat in either mode. `turn_cap` defaults to `hexset.game.MAX_TURNS`;
-    play far from a trained policy's -- random seats, an untrained learner --
-    needs `hexset.game.UNSTRUCTURED_TURN_CAP` to finish."""
+    without a winner sets `truncations`, not `terminations`: reward 0 under
+    `"terminal"`, the points at the cap under `"relative_points"`.
+    `turn_cap` defaults to `hexset.game.MAX_TURNS`; play far from a trained
+    policy's -- random seats, an untrained learner -- needs
+    `hexset.game.UNSTRUCTURED_TURN_CAP` to finish."""
 
     metadata = {"render_modes": ["ansi", "human"], "name": "hexset_v0", "is_parallelizable": False}
 
@@ -302,11 +303,7 @@ class HexSetAEC(AECEnv):
 
     def _finish_episode(self, game: Game, acted_agent: str) -> None:
         won = game.won_by
-        if won is None:
-            # The turn cap, not an outcome: nothing to score in either mode.
-            for agent in self.possible_agents:
-                self.rewards[agent] = 0.0
-        elif self.reward_mode == "relative_points":
+        if self.reward_mode == "relative_points":
             points = tuple(
                 victory_points(game.state(seat, hidden=False), seat) for seat in range(self.num_players)
             )

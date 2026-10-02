@@ -1,7 +1,7 @@
 [project]
 name = "hexset"
 # Keep in sync with hexset.__version__; checked by tests/test_versions.py.
-version = "1.1.0"
+version = "1.1.1"
 description = "A Catan rules engine with batched training environments, reproducible evaluation, and browser play"
 readme = "README.md"
 requires-python = ">=3.11"

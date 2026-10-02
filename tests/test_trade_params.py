@@ -173,13 +173,12 @@ def test_a_gate_written_against_the_old_attributes_still_describes_itself():
     assert read.max_offers is None and not read.fragment_trades
 
 
-def test_a_fragment_is_no_wider_than_the_gate_will_move_when_it_declares_no_width():
-    """`fragment_cards=None` is read at `max_give_cards`, so a gate that
-    parts with two never plans a three-card fragment."""
+def test_an_undeclared_fragment_width_is_the_enumeration_width():
+    """`fragment_cards=None` is `ENUMERATION_CARDS`, whatever `max_give_cards`
+    says; a declared width is its own."""
     two = replace(FRAGMENTED, fragment_cards=None, max_give_cards=2)
-    assert two.fragment_width == 2
-    assert TradeProtocol(Eager(), two).fragment_cap() == 2
-    assert replace(two, max_give_cards=None).fragment_width == ENUMERATION_CARDS
+    assert two.fragment_width == ENUMERATION_CARDS
+    assert TradeProtocol(Eager(), two).fragment_cap() == ENUMERATION_CARDS
     assert replace(two, fragment_cards=1).fragment_width == 1
 
 
@@ -198,14 +197,6 @@ def test_install_keeps_the_protocol_so_a_retune_reinstalls_it():
     assert gate.respond.__self__.params.max_give_cards == 2
     retune(gate, max_give_cards=None)
     assert getattr(gate, "respond", None) is None
-
-
-def test_a_planned_target_breaks_a_tie_towards_the_smaller_exchange():
-    from hexset.trading import choose_initial
-
-    scored = [(1, (1, -2, 0, 0, 0), 1.0, 1.0), (1, (1, -1, 0, 0, 0), 1.0, 1.0)]
-    chosen = choose_initial(scored, cutoff=0.0, draw_key=(0, 0, 0, 0), max_cards=2, max_fragments=1)
-    assert chosen.bundle == (1, -1, 0, 0, 0)
 
 
 def test_a_plain_gates_loose_offer_budget_is_its_own():

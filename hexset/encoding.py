@@ -417,11 +417,27 @@ def _encode_globals_batch(
     rows = np.arange(batch)[:, None]
     seats = (perspectives[:, None] + np.arange(players)) % players
 
-    hands = np.asarray([game._state.hands for game in games], dtype=np.int16)
+    # Only the perspective's own piles are read by type; every other seat's by
+    # size (`hand_size`, `dev_count`), as `encode` does, so an observed state
+    # whose other piles are hidden encodes too.
+    own_hands = np.asarray(
+        [game._state.hands[p] for game, p in zip(games, perspectives)], dtype=np.int16
+    )
+    hand_sizes = np.asarray(
+        [[hand_size(game._state, s) for s in range(players)] for game in games],
+        dtype=np.int16,
+    )
     banks = np.asarray([game._state.bank for game in games], dtype=np.int16)
-    cards = np.asarray([game._state.dev_cards for game in games], dtype=np.int16)
-    fresh = np.asarray(
-        [game._state.new_dev_cards for game in games], dtype=np.int16
+    own_cards = np.asarray(
+        [
+            [held + new for held, new in zip(game._state.dev_cards[p], game._state.new_dev_cards[p])]
+            for game, p in zip(games, perspectives)
+        ],
+        dtype=np.int16,
+    )
+    card_counts = np.asarray(
+        [[dev_count(game._state, s) for s in range(players)] for game in games],
+        dtype=np.int16,
     )
     knights = np.asarray(
         [game._state.knights_played for game in games], dtype=np.int16
@@ -439,14 +455,11 @@ def _encode_globals_batch(
         out[:, cursor : cursor + width] = block / scale
         cursor += width
 
-    append(hands[np.arange(batch), perspectives], HAND_SCALE)
-    hand_sizes = hands.sum(axis=2)
+    append(own_hands, HAND_SCALE)
     append(hand_sizes[rows, seats[:, 1:]], HAND_SCALE)
     append(banks, BANK_SCALE)
 
-    all_cards = cards + fresh
-    append(all_cards[np.arange(batch), perspectives], 5.0)
-    card_counts = all_cards.sum(axis=2)
+    append(own_cards, 5.0)
     append(card_counts[rows, seats[:, 1:]], 5.0)
     append(knights[rows, seats], 5.0)
 

@@ -2,9 +2,8 @@
 """Compare batched policies through LaneEnv on reproducible paired boards.
 
 Margins and win-share intervals use board means as samples; win rates include
-games the action cap cut short. Wilson bounds are game-level and assume an
-independence paired games do not have. A game that reaches the turn cap with
-no winner raises `hexset.arena.Exhausted`, as under `arena.compete`.
+games the action cap cut short and games that ran out of turns. Wilson bounds
+are game-level and assume an independence paired games do not have.
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from .metrics import json_metrics
-from ..arena import MAX_ACTIONS, Exhausted, Standing, mean_interval, wilson
+from ..arena import MAX_ACTIONS, Standing, mean_interval, wilson
 from ..game import MAX_TURNS
 from ..casting import Caster, rotating, swapped
 from ..gym.lanes import BoardBots, Episode, LaneEnv, Request
@@ -92,8 +91,8 @@ class Verdict:
 
     `paired_vp`: learner seats' mean terminal victory points minus the
     reference's, averaged over boards. `games` is the readings, twice `boards`
-    under `antithetic`. `truncated` counts games the action cap stopped; a
-    game that runs out of turns is never a reading (`Exhausted`).
+    under `antithetic`. `exhausted` ran out of turns with no winner;
+    `truncated` hit the action cap. Both are readings: neither side won.
     """
 
     games: int
@@ -109,6 +108,7 @@ class Verdict:
     turns_mean: float
     turns_median: float
     turns_max: int
+    exhausted: int
     truncated: int
     seconds: float
     board_win_rate_low: float = 0.0
@@ -138,6 +138,7 @@ class Verdict:
             "turns_mean": self.turns_mean,
             "turns_median": self.turns_median,
             "turns_max": self.turns_max,
+            "exhausted": self.exhausted,
             "truncated": self.truncated,
             "seconds": self.seconds,
         })
@@ -152,12 +153,11 @@ class _Reading:
     winner: int | None
     turns: int
     truncated: bool
+    exhausted: bool
 
 
 def _read(episode: Episode, learner: int) -> _Reading:
-    """Learner minus reference mean victory points, and how the game ended.
-    A game that ended with no winner short of the action cap ran out of
-    turns, and is refused (`Exhausted`) rather than read."""
+    """Learner minus reference mean victory points, and how the game ended."""
     mine = [s for s, pid in enumerate(episode.cast) if pid == learner]
     theirs = [s for s, pid in enumerate(episode.cast) if pid != learner]
     if not mine or not theirs:
@@ -166,11 +166,6 @@ def _read(episode: Episode, learner: int) -> _Reading:
         )
     points = episode.outcome.points
     winner = episode.outcome.winner
-    if winner is None and not episode.outcome.truncated:
-        raise Exhausted(
-            seed=episode.seed, index=episode.index, seating=episode.cast,
-            turns=episode.outcome.turns,
-        )
     return _Reading(
         margin=sum(points[s] for s in mine) / len(mine)
         - sum(points[s] for s in theirs) / len(theirs),
@@ -178,6 +173,7 @@ def _read(episode: Episode, learner: int) -> _Reading:
         winner=None if winner is None else episode.cast[winner],
         turns=episode.outcome.turns,
         truncated=episode.outcome.truncated,
+        exhausted=winner is None and not episode.outcome.truncated,
     )
 
 
@@ -239,9 +235,9 @@ def compete_batched(
     attaches a `Record` to each episode, reaching the caller only under
     `episodes=True`.
 
-    A game that reaches `turn_cap` with no winner raises
-    `hexset.arena.Exhausted`, as `arena.compete` does, rather than being
-    scored as a loss for whichever side it stalled.
+    A game that reaches `turn_cap` with no winner ends there: a reading in
+    which neither side won, scored on the points it reached and counted in
+    `Verdict.exhausted`. `arena.compete` raises `Exhausted` instead.
     """
     if antithetic and games % 2:
         raise ValueError("an antithetic duel requires an even number of games")
@@ -343,6 +339,7 @@ def compete_batched(
         turns_mean=statistics.mean(turns) if turns else 0.0,
         turns_median=statistics.median(turns) if turns else 0.0,
         turns_max=max(turns) if turns else 0,
+        exhausted=sum(1 for row in rows if row.exhausted),
         truncated=sum(1 for row in rows if row.truncated),
         seconds=elapsed,
         standings=tuple(

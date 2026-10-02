@@ -30,7 +30,8 @@ A game is over when a seat wins or when `game.turns` reaches the game's
 `turn_cap` (default `hexset.game.MAX_TURNS`, 300 turns summed over all
 seats), which ends it with `won_by` `None`. `play_game`'s `action_cap`
 defaults to `hexset.arena.MAX_ACTIONS` (20000). `play_game` raises nothing at
-the turn cap; `compete` and `compete_batched` raise `Exhausted`.
+the turn cap; `compete` raises `Exhausted`, and `compete_batched` counts
+the game in `Verdict.exhausted`, with neither side winning.
 
 `deal_board(seed, index)` is the board `deal_game` deals for that
 `(seed, index)`; passing it explicitly lets a bot that needs the board be

@@ -27,7 +27,7 @@ from hexset.encoding import (
     to_frame,
     vertex_features,
 )
-from hexset.game import Phase, is_over, start
+from hexset.game import Phase, is_over, observe, start
 from hexset.play import step_randomly
 from hexset.state import NO_OWNER, Building
 from hexset.victory import building_points, public_victory_points
@@ -71,6 +71,24 @@ def test_batched_encoding_is_byte_identical_to_the_canonical_path():
             checked += 1
 
     assert checked > 300
+
+
+def test_a_seats_observed_position_batch_encodes_as_it_encodes_alone():
+    """Every other seat's hand and development cards are hidden there, so
+    the batch reads them by size, as `encode` does, and matches the true
+    position's encoding from that seat."""
+    games = [a_game(seed=seed, steps=90 + 7 * seed) for seed in range(6)]
+    seats = [seed % 4 for seed in range(6)]
+    seen = [observe(game, seat) for game, seat in zip(games, seats, strict=True)]
+    for got, alone, true in zip(
+        encode_batch(seen, seats),
+        (encode(game, seat) for game, seat in zip(seen, seats, strict=True)),
+        (encode(game, seat) for game, seat in zip(games, seats, strict=True)),
+        strict=True,
+    ):
+        for got_array, alone_array, true_array in zip(arrays(got), arrays(alone), arrays(true), strict=True):
+            assert np.array_equal(got_array, alone_array)
+            assert np.array_equal(got_array, true_array)
 
 
 def test_serializing_one_batched_observation_does_not_carry_the_whole_tick():

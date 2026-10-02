@@ -4,6 +4,26 @@ Changes to the HexSet distribution. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## 1.1.2
+
+### Changed
+
+- **`compete_batched` ends a game that reaches `turn_cap` with no winner**,
+  as it did before 1.0: a reading neither side won, scored on the points it
+  reached and counted in `Verdict.exhausted` (and its `metrics()`), rather
+  than raising `Exhausted` and stopping the run. `arena.compete` still
+  raises.
+
+### Fixed
+
+- **`encode_batch` encodes a seat's observed position**, where every other
+  seat's hand and development cards are hidden. It read those piles' sizes
+  by summing them, which raises `HiddenRead` on a hidden pile; it now reads
+  them through `hand_size` and `dev_count`, as `encode` does. A network
+  gate pricing trades in a batch builds exactly such positions. Every
+  encoding is unchanged.
+
+
 ## 1.1.1
 
 Three changes in 1.1.0 changed behaviour only to match what the documentation

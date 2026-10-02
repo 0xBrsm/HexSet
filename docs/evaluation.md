@@ -37,9 +37,11 @@ rate and a side's combined wins have different denominators. Victory-point
 margins add information but do not replace win rates.
 
 An unfinished game is one the action cap stopped. A game that reaches the
-turn cap with no winner is a defect, not a result: `compete` and
-`compete_batched` raise `hexset.arena.Exhausted` on the first one, naming the
-seed, index and seating to replay it with. Raise the cap (`turn_cap`,
+turn cap with no winner is a defect to `compete`, which raises
+`hexset.arena.Exhausted` on the first one, naming the seed, index and seating
+to replay it with. `compete_batched` ends it there instead: a reading neither
+side won, scored on the points it reached and counted in `Verdict.exhausted`.
+Raise the cap (`turn_cap`,
 `--turn-cap`) only for unstructured play such as random bots.
 
 ### Paired boards

@@ -141,18 +141,18 @@ def test_the_verdict_is_what_the_episodes_say(verdict):
     assert verdict.metrics()["paired_vp"] == verdict.paired_vp
 
 
-def test_a_capped_game_is_truncated_and_a_turn_capped_one_stops_the_run():
-    """As under `arena.compete`: a game the action cap cut short is a reading,
-    and one that ran out of turns with no winner is a defect, never scored as
-    a loss for whichever side it stalled."""
+def test_a_capped_game_ends_there_and_neither_side_wins_it():
+    """A game the action cap cut short is `truncated`, one that ran out of
+    turns with no winner `exhausted`; both are readings, and nobody won."""
     capped = batched(action_cap=40)
     assert capped.games == 4 and capped.boards == 2
-    assert (capped.truncated, capped.wins) == (4, 0)
-    assert "exhausted" not in capped.metrics()
+    assert (capped.truncated, capped.exhausted, capped.wins) == (4, 0, 0)
 
-    with pytest.raises(arena.Exhausted, match="no winner") as stopped:
-        batched(turn_cap=8)
-    assert stopped.value.turns >= 8 and stopped.value.seed == SEED
+    out_of_turns = batched(turn_cap=8)
+    assert out_of_turns.games == 4
+    assert (out_of_turns.exhausted, out_of_turns.truncated, out_of_turns.wins) == (4, 0, 0)
+    assert out_of_turns.metrics()["exhausted"] == 4
+    assert out_of_turns.turns_max >= 8
 
 
 def test_lane_count_does_not_change_the_verdict(verdict):

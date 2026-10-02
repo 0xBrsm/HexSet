@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Measure how fast the engine plays random games: `hexset.arena.compete` with
 the `random` entrant in every seat. `--games` must be a multiple of `--players`.
+Random play takes several times the turns real play does, so the games run
+under `hexset.game.UNSTRUCTURED_TURN_CAP` rather than `MAX_TURNS`.
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ import sys
 from dataclasses import asdict, dataclass
 
 from hexset.arena import PRESETS, compete
+from hexset.game import UNSTRUCTURED_TURN_CAP
 from hexset.experiment import provenance
 
 __all__ = [
@@ -42,7 +45,8 @@ def run(games: int, players: int, seed: int, workers: int) -> Result:
     """Time `games` games with the `random` entrant in all `players` seats, as
     a `Result`."""
     tournament = compete(
-        [PRESETS["random"]] * players, games, seed=seed, workers=workers
+        [PRESETS["random"]] * players, games, seed=seed, workers=workers,
+        turn_cap=UNSTRUCTURED_TURN_CAP,
     )
     return Result(
         games=games,

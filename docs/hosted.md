@@ -123,7 +123,8 @@ own tables:
 - **Discards in one piece.** `discard` asks the bot for one card at a time,
   as the engine does, on a copy where each chosen card is already gone and
   only this seat owes, and returns the whole selection; `None` if the bot has
-  no answer yet.
+  no answer yet. `choose` during a discard asks for this seat's next card the
+  same way.
 - **The host's robber rule.** `restrict_robber(hexes)` limits the robber move
   at hand to `hexes`; `None` restores the rulebook's.
 - **Gains on demand.** `gains(received, counterparty)` is the gate's own gain

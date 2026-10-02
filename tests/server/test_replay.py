@@ -252,7 +252,7 @@ def test_a_game_whose_first_seat_closed_still_replays(tmp_path, monkeypatch):
 
     events = journal.read(next(Path(tmp_path).glob("*.jsonl")))
     assert events[0].get("first", 0) == 0, "the header still names seat 0 first"
-    assert 0 in journal.locked_seats(events), "and seat 0 is the one that closed"
+    assert 0 in journal.retirements(events)[0], "and seat 0 is the one that closed"
     steps, _ = journal.replayable_rounds(events)
     assert steps[0][0] != 0, "so the seat that actually moved first is not 0"
 
@@ -409,5 +409,87 @@ def test_a_journalled_round_reads_offer_answers_and_trade_in_order(tmp_path):
     assert (line.index(" offers ") < line.index(" accepts.")
             < line.index(f" Traded with Player {b + 1} ")) and "declines" not in line
     assert again.index(" offers ") < again.index(" accepts.") < again.index(" Traded with ")
-    assert replace(from_journal(path), actors=()) == replace(record, seed=None, actors=())
+    # The offers and acceptances go on the record where they were shown, the
+    # offer the actor's own and an acceptance signed towards the seat taking it.
+    step, bundle = record.trades[0][0], record.trades[0][3]
+    back = record.trades[1][3]
+    shown = ((step, 0, a, bundle), (step, 0, b, tuple(-n for n in bundle)),
+             (step, 1, a, back), (step, 1, b, tuple(-n for n in back)))
+    assert replace(from_journal(path), actors=()) == replace(
+        record, seed=None, actors=(), shown=shown
+    )
+
+
+def test_a_served_round_replays_to_the_same_ledger(tmp_path):
+    """An offer and its acceptance are public: what they certified and what
+    they said the seats want is on the ledger, and the record has to put it
+    back for a replay to reach the position that was played."""
+    from dataclasses import replace
+
+    from hexset.game import Phase
+    from hexset.record import from_journal, replay
+
+    class _Wants:
+        trade_floor = 0.0
+
+        def __init__(self, resource: int):
+            self.resource = resource
+
+        def gains_many(self, view, received, counterparties):
+            return [1.0 if r[self.resource] > 0 else -1.0 for r in received]
+
+    config = Config(games_dir=str(tmp_path), seed=99)
+    seats = [player("Ada"), bot_seat(), bot_seat(), bot_seat()]
+    session = build_session("ABC123", seats, config, first=0)
+    drive(session, 16, random.Random(4))
+    game = session.game
+    if game.phase is not Phase.MAIN:
+        drive(session, 1, random.Random(5))
+    while game.phase is not Phase.MAIN or game.current_player != 0:
+        drive(session, 1, random.Random(6))
+    state = game.state(0, hidden=False)
+    for _ in range(40):
+        gives = [r for r in range(5) if state.hands[0][r] > 0]
+        gets = [r for r in range(5) if state.hands[1][r] > 0 and r not in gives]
+        if gives and gets and game.phase is Phase.MAIN and game.current_player == 0:
+            break
+        drive(session, 1, random.Random(8))
+    assert gives and gets, "no coverable exchange came up"
+    session.confirm_mode(0)
+    session.set_trader(1, _Wants(gives[0]))
+    received = [0, 0, 0, 0, 0]
+    received[gets[0]] = 1
+    received[gives[0]] = -1
+    session.open_round_for(0, tuple(received))
+    session.execute_round_choice(0, 1, tuple(received))
+    drive(session, 6, random.Random(7))
+    session.journal.finish(game)
+
+    record = replace(from_journal(next(Path(tmp_path).glob("*.jsonl"))), seed=None)
+    assert record.shown, "the round's offer and acceptance are on the record"
+    replayed = replay(record)
+    assert replayed.state(0, hidden=False).hands == game.state(0, hidden=False).hands
+    assert replayed.ledger == game.ledger
+
+
+def test_a_journal_records_its_closed_seats_as_retired(tmp_path):
+    from dataclasses import replace
+
+    from hexset.record import from_events, replay
+
+    registry = new_tables(games_dir=str(tmp_path), seed=99)
+    # No bots: seating one spawns a runner thread that races `drive` below.
+    dealt = registry.handle("POST", "/api/games", {"bots": []}, None)
+    code, token = dealt["code"], dealt["token"]
+    for seat in (1, 2, 3):
+        registry.handle("POST", "/api/close", {"seat": seat}, token)
+    drive(registry.get(code).session, 40, random.Random(4))
+
+    events = journal.read(next(Path(tmp_path).glob("*.jsonl")))
+    record = replace(from_events(events, partial=True), seed=None)
+    assert record.locked == (1, 2, 3)
+    replayed = replay(record)
+    live = registry.get(code).session.game
+    assert replayed.locked == live.locked
+    assert replayed.state(0, hidden=False).hands == live.state(0, hidden=False).hands
 

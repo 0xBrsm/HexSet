@@ -62,8 +62,10 @@ through an explicit gate; without one it never trades. A gate whose
 `TradeParams.max_offers` is `0` opens no trade event on its turn.
 
 `board` takes a fixed board or a function from game index to board (`None`
-for the default deal). `hexset.casting` provides rotation, pairing and
-policy-ID swapping casters.
+for the default deal). A bot serves every lane on its board, so with a fixed
+board one bot serves every lane; before each action the environment calls
+`seat_at(game)` on every gate in that lane. `hexset.casting` provides
+rotation, pairing and policy-ID swapping casters.
 
 ### Collector practice
 
@@ -180,7 +182,13 @@ come from that combined root, and `Node.worlds` lists the per-world roots.
 
 `simulations` is one world's budget, not the decision's: combined visit
 counts still sum to it, and a `k>1` decision costs one tree per distinct
-world. `k` defaults to 1 and reaches `searcher_for` and `onnxbot.searcher` as a keyword and the arena
+world. A root with one legal move is evaluated but not searched; its edge
+holds all `simulations` visits at the root's value. A descent in flight
+counts against its edge as a lost visit, valued at the stance's reading of
+a game another seat won (`hexset.mcts.lost_value`: -1/3 for `relative` at
+four seats), so a wave spreads over the edges whatever the sign of their
+means. `k` defaults to 1
+and reaches `searcher_for` and `onnxbot.searcher` as a keyword and the arena
 as `mcts:<path>@<simulations>w<wave>:k=<n>`. `Search(hidden=False)` roots on
 the true state instead: the omniscient search, an analysis tool that nothing
 seating a bot passes.
@@ -227,19 +235,21 @@ game_type=STANDARD_GAME, turn_cap=MAX_TURNS)` provides one PettingZoo agent
 per seat, `seat_0` to `seat_{n-1}`. Each observation is a dict:
 `observation` holds the encoder's `hexes`, `vertices`, `edges` and `globals`
 arrays, and `action_mask` is the engine's legal actions for the agent about
-to act (all zeros for the others).
+to act (all zeros for the others). `step` raises `ValueError` on an action
+outside the mask, before anything is applied.
 
 - `reward="terminal"` gives 1 to the winner on the terminal step and 0
   elsewhere; `"relative_points"` gives terminal points less the others'
   mean, divided by the points the game is played to
   (`hexset.victory.relative_points`, zero-sum).
 - A game that reaches `turn_cap` turns without a winner sets `truncations`,
-  not `terminations`: reward 0 under `"terminal"`, the points at the cap
-  under `"relative_points"`. Random play needs
+  not `terminations`, with reward 0 in either mode; random play needs
   `turn_cap=hexset.game.UNSTRUCTURED_TURN_CAP`.
 - During a discard round several seats owe at once; `discard_order="random"`
   picks the next one from a stream seeded by `reset(seed)`, `"seat"` in
   ascending order, and `select_agent(agent)` overrides either.
+- `reset()` without a seed draws one from `np_random`, so resets after a
+  seeded one are reproducible.
 
 ```python
 from hexset.gym import HexSetAEC
@@ -282,7 +292,8 @@ env.close()
 `HexSetEnv` returns a flat `Box` observation by default; `flatten=False`
 returns the four arrays as a dict. The action mask is in
 `info["action_mask"]`, and `action_masks()` is the `sb3-contrib` masking
-hook. `info["view"]` is the learner's `View`.
+hook. An action outside the mask is a no-op with reward 0 that leaves the
+game untouched. `info["view"]` is the learner's `View`.
 
 Player trading is not in either action space; bank and port trades are.
 `HexSetAEC` seats no trade gates, so its agents never trade. In `HexSetEnv`

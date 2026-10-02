@@ -95,14 +95,19 @@ def test_every_seated_mutation_refuses_once_the_game_is_over():
 
 
 def test_leave_locks_the_seat_and_hands_the_turn_on():
+    """Leaving mid-turn ends the turn: the next seat starts its own at the
+    roll, not the rest of the leaver's."""
     registry, table, _code, token, leaver, other = _table()
     game = table.session.game
+    turns = game.turns
 
     data = registry.handle("POST", "/api/leave", {}, token)
 
     assert leaver in game.locked
     assert not may_act(game, leaver)
     assert game.current_player == other
+    assert game.phase is Phase.ROLL
+    assert game.turns == turns + 1
     assert data["log"] == table.view(leaver)["log"]
 
 
@@ -140,3 +145,35 @@ def test_leave_refuses_as_a_round_s_still_awaiting_responder():
     assert "open trade round" in excinfo.value.args[0]
     assert leaver not in table.session.game.locked
 
+
+def test_the_last_seat_in_the_game_cannot_leave_it(tmp_path):
+    registry = new_tables(games_dir=str(tmp_path))
+    data = registry.handle("POST", "/api/games", {"bots": []}, None)
+    token = data["token"]
+    table = registry.get(data["code"])
+    me = table.seat_of(token)
+    for seat in range(4):
+        if seat != me:
+            registry.handle("POST", "/api/close", {"seat": seat}, token)
+    path = next(tmp_path.glob("*.jsonl"))
+    before = path.read_bytes()
+
+    with pytest.raises(ApiError, match="last seat") as refused:
+        registry.handle("POST", "/api/leave", {}, token)
+
+    assert refused.value.status == 409
+    assert me not in table.session.game.locked
+    assert path.read_bytes() == before
+
+
+def test_leaving_lets_go_of_a_setup_turn_held_open():
+    """A browser seat that placed its setup road and left before ending the
+    turn would otherwise hold every other seat for good."""
+    registry, table, _code, token, leaver, _other = _table()
+    session = table.session
+    session.awaiting_confirm = leaver
+
+    view = registry.handle("POST", "/api/leave", {}, token)
+
+    assert session.awaiting_confirm is None
+    assert view["awaiting_confirm"] is None

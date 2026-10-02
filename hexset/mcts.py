@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Protocol, Sequence
 
 import numpy as np
@@ -33,6 +34,7 @@ __all__ = [
     "sampled_children",
     "Node",
     "STANCE_ROWS",
+    "lost_value",
     "Search",
     "visit_policy",
 ]
@@ -51,7 +53,7 @@ class Evaluator(Protocol):
     """Scores a whole wave of leaves at once: per leaf, a prior over that leaf's
     `options` and a value per seat. The prior must be normalised over the legal
     options. A value is each seat's chance of winning, the scale on which a
-    finished game is its one-hot winner."""
+    finished game is its one-hot winner; `lost_value` reads a loss off it."""
 
     def evaluate(
         self, leaves: Sequence[Leaf]
@@ -196,6 +198,18 @@ STANCE_ROWS = {
     "relative": _relative_rows,
     "paranoid": _paranoid_rows,
 }
+
+
+@lru_cache(maxsize=None)
+def lost_value(stance: str, seats: int) -> float:
+    """What `stance` reads a game another seat won as: the bottom of the
+    scale its means sit on. An in-flight descent counts against its edge as
+    a visit worth this, so it lowers that edge's mean whatever the mean's
+    sign without pushing it below a sure loss. 0 for `own`, `-1/(seats-1)`
+    for `relative`, -1 for `paranoid`."""
+    won_by_other = np.zeros((1, seats))
+    won_by_other[0, 1] = 1.0
+    return float(STANCE_ROWS[stance](won_by_other, 0)[0])
 
 
 class Search:
@@ -352,12 +366,13 @@ class Search:
         # An unvisited edge scores zero rather than the parent's value, so the
         # prior decides what gets tried first. The stance reads the mean vector,
         # not the mean of what it read per visit; ranking the mean is the max^n
-        # backup, and the two differ for the non-linear `paranoid`.
+        # backup, and the two differ for the non-linear `paranoid`. A descent
+        # still in flight counts as a lost visit (`lost_value`).
         totals = (
             self.rank_rows(node.totals, node.mover)
             if self.stance == "paranoid"
             else node.ranked
-        )
+        ) + lost_value(self.stance, node.totals.shape[1]) * node.virtual
         means = np.where(counts > 0, totals / np.maximum(counts, 1), 0.0)
         bonus = self.exploration * node.prior * math.sqrt(max(total, 1e-8)) / (1 + counts)
         return int(np.argmax(means + bonus))
@@ -427,18 +442,21 @@ class Search:
 
     def _backup(self, path: Sequence[tuple[Node, int]], value: Sequence[float]) -> None:
         vector = np.asarray(value, dtype=np.float64)
-        total = float(vector.sum()) if self.stance == "relative" else 0.0
         for node, index in path:
-            node.visits[index] += 1
             node.virtual[index] -= 1
-            node.totals[index] += vector
-            if self.stance == "own":
-                node.ranked[index] += vector[node.mover]
-            elif self.stance == "relative":
-                seats = vector.size
-                node.ranked[index] += (
-                    vector[node.mover] * seats - total
-                ) / (seats - 1)
+            self._credit(node, index, vector, 1)
+
+    def _credit(self, node: Node, index: int, vector: np.ndarray, visits: int) -> None:
+        """`visits` visits of edge `index`, each worth `vector`."""
+        node.visits[index] += visits
+        node.totals[index] += visits * vector
+        if self.stance == "own":
+            node.ranked[index] += visits * vector[node.mover]
+        elif self.stance == "relative":
+            seats = vector.size
+            node.ranked[index] += visits * (
+                vector[node.mover] * seats - float(vector.sum())
+            ) / (seats - 1)
 
     def _expand(self, nodes: Sequence[Node]) -> None:
         """Give a whole wave of leaves its prior and value in one call."""
@@ -494,7 +512,7 @@ class Search:
             combined.totals[where] += share * root.totals
             if root.prior is not None and root.prior.size:
                 combined.prior[where] += share * root.prior
-            value += share * np.asarray(root.value or np.zeros(seats))
+            value += share * np.asarray(root.value)
         combined.value = tuple(float(v) for v in value)
         mass = float(combined.prior.sum())
         if mass > 0:
@@ -514,6 +532,11 @@ class Search:
         and combined visit counts still sum to `simulations` (the shares sum
         to one). A `k>1` decision therefore costs a tree per distinct world.
 
+        A root with one legal move is evaluated but not searched: its only
+        edge is credited with `simulations` visits at the root's own value,
+        which is what the evaluator says that move leads to. Its value and
+        visits read like any other root's.
+
         The tree is built fresh each decision: reuse is unsound, since the roll
         that happened is one of eleven the subtree averaged over."""
         # Root evaluation cannot observe deck order, and a later BUY edge
@@ -527,19 +550,18 @@ class Search:
             ]
             groups.append(group)
             runs.extend(group)
-        searchable = []
+        searchable = [run for run in runs if not run.root.terminal]
         for run in runs:
             if run.root.terminal:
                 run.done = run.budget
-                continue
-            if len(run.root.options) == 1:
-                run.root.visits = np.ones(1)
-                run.done = run.budget
-            else:
-                searchable.append(run.root)
         if searchable:
-            self._expand(searchable)
-            self._perturb(searchable)
+            self._expand([run.root for run in searchable])
+            forced = [run for run in searchable if len(run.root.options) == 1]
+            for run in forced:
+                vector = np.asarray(run.root.value, dtype=np.float64)
+                self._credit(run.root, 0, vector, run.budget)
+                run.done = run.budget
+            self._perturb([run.root for run in searchable if len(run.root.options) > 1])
 
         while any(run.done < run.budget for run in runs):
             # Virtual loss makes collisions rare, not impossible: a wave wider

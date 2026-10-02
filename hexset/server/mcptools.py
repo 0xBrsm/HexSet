@@ -13,6 +13,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 import time
 from dataclasses import dataclass
 from typing import Iterator
@@ -366,7 +367,12 @@ def _discard(
     while any(remaining.values()):
         resource = next(name for name, left in remaining.items() if left)
         wanted = RESOURCES.index(resource)
-        entry = next(a for a in raw.get("legal_actions") or [] if a.get("type") == "DISCARD" and a.get("a") == wanted)
+        entry = next(
+            (a for a in raw.get("legal_actions") or [] if a.get("type") == "DISCARD" and a.get("a") == wanted),
+            None,
+        )
+        if entry is None:
+            raise ToolError(f"discarding {resource} is not on offer right now; call state() again")
         raw = _call_ok(tables, session, "POST", "/api/action", {"action": entry})
         remaining[resource] -= 1
     return _settle(tables, session, raw, timeout, log_after, full_log)
@@ -395,12 +401,18 @@ def _covers(hand: dict, cost: dict) -> bool:
 
 
 def _positional(counts: dict | None) -> list[int]:
-    """A named count dict as a positional list in `RESOURCES` order."""
+    """A named count dict as a positional list in `RESOURCES` order. Every
+    count is a non-negative integer."""
     counts = counts or {}
+    if not isinstance(counts, dict):
+        raise ToolError("resource counts are an object of resource name -> count")
     unknown = set(counts) - set(RESOURCES)
     if unknown:
         raise ToolError(f"not a resource name: {', '.join(sorted(unknown))}")
-    return [int(counts.get(name, 0)) for name in RESOURCES]
+    bad = {name: n for name, n in counts.items() if type(n) is not int or n < 0}
+    if bad:
+        raise ToolError(f"a count is a non-negative integer, not {bad}")
+    return [counts.get(name, 0) for name in RESOURCES]
 
 
 def _actor_view(bundle: list[int]) -> tuple[dict, dict]:
@@ -1011,12 +1023,13 @@ def _trim_for(session: Session, view: dict, log_after: int | None = None, full_l
 
 def _can_offer(view: dict) -> bool:
     """Whether `offer_trade()` would be accepted right now: `api.open_round`'s
-    MAIN-and-on-move rule, plus something actually legal to do and no round of
-    this seat's own already open."""
+    MAIN-and-on-move rule, with no Road Building roads still to place -- the
+    one time in MAIN that `END_TURN` is not on offer -- and no round of this
+    seat's own already open."""
     return (
         view.get("phase") == "MAIN"
         and view.get("to_move") == view.get("seat")
-        and bool(view.get("legal_actions"))
+        and any(a.get("type") == "END_TURN" for a in view.get("legal_actions") or [])
         and view.get("trade_round") is None
     )
 
@@ -1513,6 +1526,7 @@ def call_tool_events(tables: Tables, session: Session, name: str, arguments: dic
     if entry is None:
         raise ToolError(f"unknown tool: {name}")
     handler, _, _ = entry
+    _check_arguments(arguments)
     try:
         result = handler(tables, session, **arguments)
     except TypeError as error:
@@ -1525,6 +1539,17 @@ def call_tool_events(tables: Tables, session: Session, name: str, arguments: dic
             if item is not KEEPALIVE:
                 _count(session, item)
             yield item
+
+
+def _check_arguments(arguments: dict) -> None:
+    """The arguments every tool shares, checked before any tool runs, so a
+    malformed one refuses the call rather than failing it half-done."""
+    timeout = arguments.get("timeout")
+    if timeout is not None and (type(timeout) not in (int, float) or not math.isfinite(timeout)):
+        raise ToolError("timeout is a number of seconds")
+    log_after = arguments.get("log_after")
+    if log_after is not None and (type(log_after) is not int or log_after < 0):
+        raise ToolError("log_after is the number of log lines you hold")
 
 
 def _count(session: Session, result) -> None:

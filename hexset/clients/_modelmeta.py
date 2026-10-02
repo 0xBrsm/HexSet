@@ -79,8 +79,9 @@ def gate_config_of(checkpoint: object) -> TradeParams:
 def trader_config(meta: dict[str, str]) -> str | None:
     """The bot `meta` names to answer the checkpoint's trades, as a lineup
     names it (`hexset.arena.traded`), or `None` for its own gate. Resolved
-    when the checkpoint is seated, so a name nothing can build fails there,
-    loudly, rather than trading as something else."""
+    when the checkpoint is spawned (`hexset.clients.netbot.declared_trader`),
+    so a name nothing can build fails there, naming the file, rather than
+    trading as something else."""
     return meta.get("trader") or None
 
 

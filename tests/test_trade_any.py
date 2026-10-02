@@ -176,6 +176,18 @@ def _dumping_sheep():
     return game, Offer(0, (0, 0, 0, 0, -1), any=1)
 
 
+def test_a_counter_to_an_open_offer_keeps_the_gates_own_card_cap():
+    from hexset.trading import TradeParams
+
+    game, offer = _dumping_sheep()
+    unbounded = respond(game, _Values(ore=3.0, sheep=-1.0), 1, offer)
+    assert unbounded.kind == RESPONSE_COUNTER and unbounded.bundle[SHEEP] == 2
+    capped = _protocol_gate(TradeParams(max_give_cards=1), ore=3.0, sheep=-1.0)
+    answer = respond(game, capped, 1, offer)
+    assert answer.kind == RESPONSE_COUNTER
+    assert answer.bundle[SHEEP] == 1, "one card out, at most, as the gate declares"
+
+
 def test_a_planning_gate_counters_an_open_offer_with_a_fragment():
     from hexset.trading import legal_fragment
     from traders import FRAGMENTED
@@ -184,4 +196,4 @@ def test_a_planning_gate_counters_an_open_offer_with_a_fragment():
     gate = _protocol_gate(FRAGMENTED, ore=3.0, sheep=-1.0)
     answer = respond(game, gate, 1, offer)
     assert answer.kind == RESPONSE_COUNTER
-    assert legal_fragment(answer.bundle, max_cards=FRAGMENTED.fragment_cards)
+    assert legal_fragment(answer.bundle, max_cards=FRAGMENTED.fragment_width)

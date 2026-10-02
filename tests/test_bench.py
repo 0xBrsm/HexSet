@@ -88,6 +88,23 @@ def test_baselines_json_keeps_raw_games_and_null_small_sample_bounds(monkeypatch
 
 
 
+def test_throughput_plays_random_games_under_the_unstructured_cap(monkeypatch):
+    """Random play takes several times the turns real play does; under
+    `MAX_TURNS` the benchmark aborted on its first long game."""
+    from hexset.bench import throughput
+    from hexset.game import UNSTRUCTURED_TURN_CAP
+
+    seen = {}
+
+    def compete(lineup, games, **kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(seconds=1.0, mean_turns=10.0, unfinished=0)
+
+    monkeypatch.setattr(throughput, "compete", compete)
+    throughput.run(4, 4, seed=0, workers=1)
+    assert seen["turn_cap"] == UNSTRUCTURED_TURN_CAP
+
+
 class _Stop(Exception):
     pass
 

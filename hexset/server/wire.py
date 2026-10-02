@@ -141,6 +141,8 @@ def action_to_wire(action: Action) -> dict:
 
 def wire_to_action(data: dict) -> Action:
     """A wire object back as an `Action`. `ValueError` if it is malformed."""
+    if not isinstance(data, dict):
+        raise ValueError("an action is an object with `type`, `a` and `b`")
     try:
         kind = ActionType[str(data["type"])]
     except (KeyError, TypeError) as exc:

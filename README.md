@@ -20,21 +20,21 @@ Every other bot is registered in process or joins over the API.
 
 ## Documentation
 
-Start with [guide.md](docs/guide.md); the rest are listed by name.
+Start with [guide.md](https://github.com/0xBrsm/HexSet/blob/main/docs/guide.md); the rest are listed by name.
 
 | Document | Contents |
 | --- | --- |
-| [api.md](docs/api.md) | JSON routes, seat tokens, client identity and reclaim |
-| [evaluation.md](docs/evaluation.md) | Designing a comparison, the intervals the runners report, experiment records |
-| [guide.md](docs/guide.md) | Running games, trade rounds, implementing and registering a bot, records, bench commands, the public interface |
-| [hosted.md](docs/hosted.md) | A bot seat at a table hosted elsewhere: the observed game it plays forward |
-| [mcp.md](docs/mcp.md) | MCP tools and their semantics |
-| [onnx.md](docs/onnx.md) | The ONNX model contract, and checking a file against it |
-| [server.md](docs/server.md) | Running the server: configuration, Docker, saved games |
-| [testing.md](docs/testing.md) | Markers, optional extras, a complete check |
-| [trading.md](docs/trading.md) | Trading's three parts: the table's rules, a gate's own `TradeParams`, the shared protocol |
-| [training.md](docs/training.md) | Batched collection, model runtimes, PettingZoo and Gymnasium adapters |
-| [worlds.md](docs/worlds.md) | Cached votes over sampled worlds |
+| [api.md](https://github.com/0xBrsm/HexSet/blob/main/docs/api.md) | JSON routes, seat tokens, client identity and reclaim |
+| [evaluation.md](https://github.com/0xBrsm/HexSet/blob/main/docs/evaluation.md) | Designing a comparison, the intervals the runners report, experiment records |
+| [guide.md](https://github.com/0xBrsm/HexSet/blob/main/docs/guide.md) | Running games, trade rounds, implementing and registering a bot, records, bench commands, the public interface |
+| [hosted.md](https://github.com/0xBrsm/HexSet/blob/main/docs/hosted.md) | A bot seat at a table hosted elsewhere: the observed game it plays forward |
+| [mcp.md](https://github.com/0xBrsm/HexSet/blob/main/docs/mcp.md) | MCP tools and their semantics |
+| [onnx.md](https://github.com/0xBrsm/HexSet/blob/main/docs/onnx.md) | The ONNX model contract, and checking a file against it |
+| [server.md](https://github.com/0xBrsm/HexSet/blob/main/docs/server.md) | Running the server: configuration, Docker, saved games |
+| [testing.md](https://github.com/0xBrsm/HexSet/blob/main/docs/testing.md) | Markers, optional extras, a complete check |
+| [trading.md](https://github.com/0xBrsm/HexSet/blob/main/docs/trading.md) | Trading's three parts: the table's rules, a gate's own `TradeParams`, the shared protocol |
+| [training.md](https://github.com/0xBrsm/HexSet/blob/main/docs/training.md) | Batched collection, model runtimes, PettingZoo and Gymnasium adapters |
+| [worlds.md](https://github.com/0xBrsm/HexSet/blob/main/docs/worlds.md) | Cached votes over sampled worlds |
 
 ## Your own bots
 
@@ -65,14 +65,14 @@ code; `register_spec` adds a parsed spelling (`mybot:depth=3`) beside a
 preset. A name means one bot: registering a different one under a taken name
 raises `ValueError`, HexSet's own names (`random`, `retired`, `catanatron`)
 and prefixes (`network:`, `mcts:`, `catanatron:`) are refused, and
-`unregister_*` frees a name ([docs/guide.md](docs/guide.md#implement-a-bot)).
+`unregister_*` frees a name ([docs/guide.md](https://github.com/0xBrsm/HexSet/blob/main/docs/guide.md#implement-a-bot)).
 
 **Over the API.** A bot in any language joins a served table as a player
 (`POST /api/join`), reads `/api/state` and acts through `/api/action`, as a
-browser does ([docs/api.md](docs/api.md)). `python -m
+browser does ([docs/api.md](https://github.com/0xBrsm/HexSet/blob/main/docs/api.md)). `python -m
 hexset.clients.botclient` is an example of such a client. A Python bot
 that keeps an engine-side game in step with a table hosted elsewhere uses
-`hexset.seat.Seat` ([docs/hosted.md](docs/hosted.md)).
+`hexset.seat.Seat` ([docs/hosted.md](https://github.com/0xBrsm/HexSet/blob/main/docs/hosted.md)).
 
 ## Installation
 
@@ -114,7 +114,7 @@ The opponent picker lists every preset a `--runtime` registered, `catanatron`
 when its extra is installed, and every `*.onnx` file in `models/` (or
 `$HEXSET_UI_MODELS_DIR`) under its filename stem. The directory is rescanned
 on each listing, so a file dropped there appears without a restart; it must
-meet the [ONNX model contract](docs/onnx.md).
+meet the [ONNX model contract](https://github.com/0xBrsm/HexSet/blob/main/docs/onnx.md).
 
 The trade modal makes bank and port trades, offers to other players, and
 answers to their offers. A bot seat makes as many offers a turn as its own
@@ -129,7 +129,7 @@ secret between participants. Reads with a seat token filter hidden
 information.
 
 Configuration, Docker, journals and recovery are in
-[docs/server.md](docs/server.md).
+[docs/server.md](https://github.com/0xBrsm/HexSet/blob/main/docs/server.md).
 
 ## Repository layout
 
@@ -158,18 +158,18 @@ pytest -m slow
 The default run excludes tests marked `slow`; `pytest -m ""` runs every
 marker. Tests for an optional dependency skip themselves when it is absent, so
 the installed extras decide what a green run covered.
-[docs/testing.md](docs/testing.md) maps each extra to its tests, including the
+[docs/testing.md](https://github.com/0xBrsm/HexSet/blob/main/docs/testing.md) maps each extra to its tests, including the
 browser tests, which need a Chromium download beyond their extra.
 
 ## License and attribution
 
-HexSet is licensed under GPL-3.0-only. See [LICENSE](LICENSE). Development
-history is in [CHANGELOG.md](CHANGELOG.md); each release is also one commit
+HexSet is licensed under GPL-3.0-only. See [LICENSE](https://github.com/0xBrsm/HexSet/blob/main/LICENSE). Development
+history is in [CHANGELOG.md](https://github.com/0xBrsm/HexSet/blob/main/CHANGELOG.md); each release is also one commit
 here, whose message is that version's entry.
 
 Dependencies are installed from PyPI or from git, never vendored into this
 repository, and each carries its own licence; the set and their extras are
-declared in [pyproject.toml](pyproject.toml). Catanatron is GPL-3.0. The
+declared in [pyproject.toml](https://github.com/0xBrsm/HexSet/blob/main/pyproject.toml). Catanatron is GPL-3.0. The
 browser interface in
 `hexset/server/static/index.html` loads no third-party scripts, stylesheets or
 web fonts; its system font stack names fonts on the user's device rather than

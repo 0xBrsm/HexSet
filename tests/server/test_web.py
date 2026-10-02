@@ -149,3 +149,20 @@ def test_the_entry_point_serves_the_page():
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
             process.kill()
+
+
+@pytest.mark.parametrize("length", ["-5", "lots"])
+@pytest.mark.parametrize("path", ["/api/games", "/mcp"])
+def test_a_content_length_that_is_not_a_byte_count_is_a_400(live_server, path, length):
+    import http.client
+
+    _, base = live_server
+    connection = http.client.HTTPConnection(base.removeprefix("http://"), timeout=5)
+    connection.putrequest("POST", path)
+    connection.putheader("Content-Type", "application/json")
+    connection.putheader("Content-Length", length)
+    connection.endheaders()
+    response = connection.getresponse()
+    assert response.status == 400
+    assert "Content-Length" in json.loads(response.read())["error"]
+    connection.close()

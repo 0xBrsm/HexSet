@@ -4,6 +4,156 @@ Changes to the HexSet distribution. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## 1.1.0
+
+Fixes and additions on the 1.0.0 interface. A client that leaned on one
+of the old behaviours under Fixed notices the fix. Nothing in the public
+interface is renamed or removed.
+
+### Added
+
+- **`hexset.arena.KIND_HINT`**, the advice an unknown-kind error carries
+  (below, "Errors name the fix").
+- **`hexset.mcts.lost_value(stance, seats)`**, what a stance reads a game
+  another seat won as; the search values an in-flight descent at it.
+- **`hexset.clients.netbot.declared_trader(checkpoint, source)`**, the
+  trader a checkpoint declares, refused at spawn when nothing registers it.
+- **`hexset.onnx_record.NO_MOVE`**, the fixed mask entry of a value-only
+  row for a seat that is not to move.
+- **`hexset.server.api.default_models_dir()`**, where the model picker
+  looks when `HEXSET_UI_MODELS_DIR` is unset.
+- **`Record.locked`**, the seats retired at the deal.
+- **`hexset.server.api.spawn_bot(players=)`**, the table's player count, so
+  a bot is spawned for the game it will play.
+
+### Fixed
+
+- **`game.submit_discard` refuses a seat that owes no discard**, as
+  `discard_one` does. An empty discard from such a seat went through.
+- **The page tests skip when Chromium is not installed**, as they do
+  without the `playwright` package, so a bare `pytest` passes without the
+  `browser` extra.
+- **An illegal engine call changes nothing.** Every build, development card
+  purchase or play, bank trade, setup placement, discard, roll and robber
+  move checks the whole action before it touches the game. Before, a road on
+  an illegal edge could still take the cards or the free-road credit, and a
+  refused card play still used up the turn's one play.
+- **A seat that leaves on its own turn ends that turn.** The next seat starts
+  a fresh turn at the roll, instead of inheriting the rest of the leaver's
+  turn without rolling. If the leaver rolled the seven, the hand-off waits
+  until the other seats have discarded.
+- **A free road with nowhere to go no longer blocks the trade window** for
+  the rest of the turn.
+- **A counter to an open offer keeps the gate's own limits.** A gate with
+  only card caps or a responder price now answers open ("any card") offers
+  through `respond_any` too, so its caps, price and fit apply. Before, the
+  engine default answered them and ignored all of these.
+- **The referee checks every answer a gate gives.** An answer is always the
+  asked seat's. An acceptance is of the offer as it was made, and only where
+  the seat's own hand covers it. A counter must move cards both ways.
+  Anything else is a pass. Executing an exchange refuses locked or unseated
+  seats and one-sided or empty bundles.
+- **A gate never offers more than its own `max_give_cards`.** Before, it
+  could put an offer to the table that it would then refuse to sign.
+- **`max_offers=0` signs nothing.** The gate passes on every offer, and
+  automatic clearing never deals with it.
+- **`retune(max_offers=...)` works on a gate with no `TradeParams`**, and
+  `retune` on a `TradesBy` seat whose trader has an installed protocol no
+  longer raises.
+- **Ties go to the smaller exchange**, as the documentation always said.
+- **`fragment_cards=None` means as wide as `max_give_cards` allows**, so a
+  gate that parts with two cards never plans a three-card fragment.
+- **A network checkpoint's trade gate no longer reads hidden cards.** The
+  counterparty's hand after an exchange is its public size moved by the
+  bundle. A value-only row for a seat that is not to move is masked with the
+  fixed `onnx_record.NO_MOVE` entry, not the mover's legal moves, which
+  encoded the mover's hand. The gate's gains, estimates and value rows no
+  longer change when the other seats' hidden cards are redealt, and the gate
+  prices offers at a hosted `Seat` without raising `HiddenRead`.
+- **A hosted `Seat` seats its bot and gate at its game when it is built or
+  resynced**, so a network gate asked about a trade before the seat's first
+  move prices it instead of answering every offer with a pass.
+- **A record keeps the seats retired at the deal.** Records from arena, lane
+  and served games with closed seats replay; old records read as having
+  none.
+- **A journal's offers and answers reach the record**, so a served game's
+  record replays to the position that was played.
+- **`Seat.choose` during a seven's discards answers for its own seat.**
+  Before, it asked for the lowest owing seat's card, which a hosted seat
+  cannot see.
+- **A forced root is evaluated.** A search root with one legal move carries
+  the evaluator's value and all `simulations` visits, alike for `k=1` and
+  `k>1`.
+- **Virtual loss discourages under every stance.** An in-flight descent
+  counts as a lost visit, valued at what the stance reads a game another
+  seat won as (`mcts.lost_value`: 0 for `own`, -1/3 for `relative` at four
+  seats, -1 for `paranoid`). Before, it counted as a zero-valued one, which
+  raised negative means under `relative` and `paranoid`.
+- **`bench.throughput` plays under `UNSTRUCTURED_TURN_CAP`.** At
+  `MAX_TURNS`, random play aborted the benchmark.
+- **A catanatron seat built without an `rng` draws its own stream.** It used
+  to clone the live game's chance stream, so a sampling player could roll
+  the real game's next dice.
+- **`HexSetAEC.step` raises `ValueError` on an action outside the acting
+  agent's mask, before anything is applied.** `HexSetEnv.step` treats such
+  an action as a no-op with reward 0 that leaves the game untouched.
+- **An unseeded `reset()` is reproducible.** Both environments draw the seed
+  from `np_random`, which a seeded reset reseeds, and the discard-order
+  stream follows it.
+- **A gym game that runs out of turns scores nothing.** It is a truncation
+  with reward 0 in both reward modes, as documented; `relative_points` used
+  to score points at the cap.
+- **Lanes on a pinned board no longer price trades on another lane's game.**
+  Every gate is seated at the lane it is about to step.
+- **A checkpoint naming a trader that nothing registers fails when it is
+  spawned**, with an error naming the file, the `trader` key and
+  `--runtime <module>`, instead of failing at the first trade.
+- **A runner whose bot refuses the position stops** (a checkpoint trained
+  for another player count, say) instead of retrying forever, and an
+  embedded bot answers its own discard while a lower seat also owes one.
+- **The model picker finds `models/` outside Docker.** The default directory
+  was one level above the repository root. It is now `models/` beside
+  `hexset/` in a source tree, or `./models` for an installed package.
+- **A bot that will not load no longer leaves a broken table.** Creating a
+  game, seating a bot or reopening a journalled game spawns every bot first,
+  for the table's player count. A failure is a 400 naming the opponent, with
+  no table, journal line or seat change.
+- **Reopening after a crash no longer loses later events.** A torn last line
+  is closed off before the next write, and a reader skips a bad line instead
+  of stopping at it.
+- **A resumed game keeps what happened before an undo.** Trade-round notes
+  at the step an undo returned to survive, renames are journalled, and a
+  seat that left mid-game is retired at the point it left.
+- **Served trade rounds answer only for seats they wait on.** The actor, a
+  retired seat or a repeat answer is refused. An accept the seat cannot
+  cover is refused like a counter. Undo is refused while the seat's own
+  round is open. No round opens or executes while Road Building roads are
+  owed. Bot offer budgets and `trade_now` follow the engine.
+- **An embedded bot decides holding its table's lock**, so an undo or
+  another seat's discard never changes the game under it mid-decision.
+- **MCP calls always answer.** An unexpected error ends the stream as an
+  `isError` result. Negative or non-integer counts, and malformed `timeout`
+  or `log_after`, are refused.
+- **Malformed requests are a 400, not a 500**: seat numbers, names, the bots
+  list, `version`, actions and Content-Length.
+- **Leaving cannot strand a table.** The last seat still playing cannot
+  leave, and a setup turn held open goes with the seat.
+- **Swapping a bot no longer freezes the table for two seconds.**
+- **A file with no `contract` key is reported as declaring none**, not as
+  `contract='1'`, and a missing or malformed required key names the file and
+  the key.
+- **`hexset.__version__` ignores a `pyproject.toml` that is not hexset's
+  own.**
+- **The guide's "Implement a bot" example runs.** Its random seats used to
+  exhaust the default turn cap.
+
+### Changed
+
+- **Errors name the fix:** an unknown kind points at the worker initializer
+  under spawn or forkserver, and `mcts:<path>:k=4` and `network:<path>@x` say
+  how to spell them.
+
+
 ## 1.0.0
 
 The first stable release: the engine, the gym and the served table, with no

@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""Engine calls the rules refuse before they change anything: each raises
-and leaves the game exactly as it was -- board, hands, bank, deck, ledger,
-every flag of the turn and the chance source alike.
+"""Every engine entry point checks the whole action before it changes
+anything: an illegal call raises and leaves the game exactly as it was --
+board, hands, bank, deck, ledger, every flag of the turn and the chance
+source alike. `HexSetEnv.step` relies on this to treat an illegal action as
+a no-op.
 """
 from __future__ import annotations
 
@@ -14,17 +16,23 @@ from helpers import clear_hand, give
 from hexset.board.board import random_base_board
 from hexset.board.terrain import Resource
 from hexset.cards import DevCard
+from hexset.chance import ChanceError
 from hexset.economy import COSTS, Purchase
 from hexset.game import (
     Phase,
+    build_city,
+    build_road,
     build_settlement,
     buy_development_card,
     discard_one,
     end_turn,
     move_robber_to,
+    observe,
     place_initial_road,
     place_initial_settlement,
+    play_knight_card,
     play_monopoly_card,
+    play_road_building_card,
     play_year_of_plenty_card,
     roll_dice,
     start,
@@ -32,7 +40,7 @@ from hexset.game import (
     trade_with_bank,
 )
 from hexset.robber import occupants, victims
-from hexset.state import Building
+from hexset.state import NO_OWNER, Building, can_place_road
 
 from tests.test_game import free_vertex, run_setup
 
@@ -66,7 +74,57 @@ def hold(game, card: DevCard, seat: int = 0) -> None:
     game._state.dev_ages[seat].append(1)
 
 
+def an_illegal_edge(game, seat: int = 0) -> int:
+    state = game._state
+    return next(e for e in range(state.board.topology.num_edges)
+                if not can_place_road(state, seat, e))
+
+
+def an_illegal_vertex(game, seat: int = 0) -> int:
+    """Next to one of `seat`'s own buildings, so the distance rule forbids it."""
+    state = game._state
+    own = state.vertex_owner.index(seat)
+    return state.board.topology.vertex_neighbors[own][0]
+
+
 # --- building ---------------------------------------------------------------
+
+
+def test_a_paid_road_on_an_illegal_edge_takes_no_cards():
+    game = in_main()
+    fund(game, Purchase.ROAD)
+    refuses(game, build_road, an_illegal_edge(game))
+
+
+@pytest.mark.parametrize("edge", [-1, 10_000])
+def test_a_road_off_the_board_is_refused(edge):
+    game = in_main()
+    fund(game, Purchase.ROAD)
+    refuses(game, build_road, edge)
+
+
+def test_a_free_road_on_an_illegal_edge_keeps_the_credit():
+    game = in_main()
+    game.free_roads = 2
+    refuses(game, build_road, an_illegal_edge(game))
+
+
+def test_a_settlement_on_an_illegal_vertex_takes_no_cards():
+    game = in_main()
+    fund(game, Purchase.SETTLEMENT)
+    refuses(game, build_settlement, an_illegal_vertex(game))
+
+
+def test_a_settlement_off_the_board_is_refused():
+    game = in_main()
+    fund(game, Purchase.SETTLEMENT)
+    refuses(game, build_settlement, -1)
+
+
+def test_a_city_without_a_settlement_under_it_takes_no_cards():
+    game = in_main()
+    fund(game, Purchase.CITY)
+    refuses(game, build_city, an_illegal_vertex(game))
 
 
 def test_nothing_else_is_done_while_a_free_road_can_still_be_placed():
@@ -87,6 +145,43 @@ def test_nothing_else_is_done_while_a_free_road_can_still_be_placed():
 # --- development cards ------------------------------------------------------
 
 
+def test_an_unheld_card_spends_neither_the_turn_s_play_nor_a_card_age():
+    """A seat holding a knight plays cards it does not hold: no card moves,
+    no age entry is taken off, and it may still play a card this turn."""
+    game = in_main()
+    hold(game, DevCard.KNIGHT)
+    refuses(game, play_monopoly_card, Resource.ORE)
+    refuses(game, play_year_of_plenty_card, [Resource.ORE, Resource.ORE])
+    refuses(game, play_road_building_card)
+    assert game.dev_card_played is False
+    play_knight_card(game)
+
+
+def test_an_unheld_knight_is_refused():
+    game = in_main()
+    refuses(game, play_knight_card)
+
+
+def test_year_of_plenty_the_bank_cannot_supply_keeps_the_card():
+    game = in_main()
+    hold(game, DevCard.YEAR_OF_PLENTY)
+    game._state.bank[Resource.ORE] = 1
+    refuses(game, play_year_of_plenty_card, [Resource.ORE, Resource.ORE])
+
+
+@pytest.mark.parametrize("resources", [[Resource.ORE], [-1, 0], [0, 9]])
+def test_year_of_plenty_names_two_real_resources(resources):
+    game = in_main()
+    hold(game, DevCard.YEAR_OF_PLENTY)
+    refuses(game, play_year_of_plenty_card, resources)
+
+
+def test_a_monopoly_on_no_resource_keeps_the_card():
+    game = in_main()
+    hold(game, DevCard.MONOPOLY)
+    refuses(game, play_monopoly_card, -1)
+
+
 def test_a_second_card_in_a_turn_is_refused():
     game = in_main()
     hold(game, DevCard.MONOPOLY)
@@ -105,6 +200,31 @@ def test_an_empty_deck_sells_nothing():
     fund(game, Purchase.DEV_CARD)
     game._state.deck = []
     refuses(game, buy_development_card)
+
+
+# --- an observed game: what the host is asked is part of the state ----------
+
+
+def _observed_main(seat: int = 0):
+    game = in_main()
+    seen = observe(game, seat)
+    seen.phase = Phase.MAIN
+    return seen
+
+
+def test_an_unaffordable_purchase_asks_the_host_for_no_card():
+    seen = _observed_main()
+    seen.chance.expect("draw", int(DevCard.KNIGHT))
+    refuses(seen, buy_development_card)
+    assert seen.chance.pending == [("draw", int(DevCard.KNIGHT))]
+
+
+def test_a_monopoly_the_host_cannot_account_for_moves_no_card():
+    """Seat 0's monopoly against hidden hands, with nothing queued for what
+    they surrendered: refused before the card or any hand moves."""
+    seen = _observed_main()
+    hold(seen, DevCard.MONOPOLY)
+    refuses(seen, play_monopoly_card, Resource.ORE, error=ChanceError)
 
 
 # --- bank trade -------------------------------------------------------------
@@ -167,7 +287,18 @@ def test_the_robber_moves_to_another_hex_on_the_board(where):
     refuses(game, move_robber_to, target, None)
 
 
-# --- discards ---------------------------------------------------------------
+# --- dice and discards ------------------------------------------------------
+
+
+@pytest.mark.parametrize("roll", [1, 13])
+def test_a_roll_two_dice_cannot_make_is_refused(roll):
+    game = in_main()
+    game.phase = Phase.ROLL
+    game.free_roads = 1                    # unplaceable credit, lapsing on a roll
+    for e in range(game._state.board.topology.num_edges):
+        if game._state.edge_owner[e] == NO_OWNER:
+            game._state.edge_owner[e] = 2
+    refuses(game, roll_dice, roll)
 
 
 def _discarding():
@@ -181,12 +312,21 @@ def _discarding():
 
 
 @pytest.mark.parametrize("cards", [
+    [2, 2, 2, -1, 0],        # sums to the quota, by handing a card back
+    [1, 1, 1, 1, 1, 0],      # a sixth resource
     [1, 1, 1, 1],            # four
     [3, 2, 0, 0, 0],         # more wood than the hand holds
 ])
 def test_a_discard_names_cards_the_hand_holds(cards):
     game = _discarding()
     refuses(game, submit_discard, 0, cards)
+
+
+def test_a_discard_by_a_seat_that_owes_none_is_refused():
+    game = _discarding()
+    assert game.discard_quota[1] == 0
+    refuses(game, submit_discard, 1, [0, 0, 0, 0, 0])
+    refuses(game, discard_one, 1, Resource.WOOD)
 
 
 def test_a_discard_by_no_seat_is_refused():

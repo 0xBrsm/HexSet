@@ -108,6 +108,15 @@ class Episode:
         return sum(len(seat) for seat in self.decisions)
 
 
+def _bind_gates(game: Game) -> None:
+    """`seat_at(game)` on every gate `game` asks that has one (a network
+    bot, a search over one, a `TradesBy` seat's trader)."""
+    for gate in game.gates or ():
+        seat_at = getattr(gate, "seat_at", None)
+        if seat_at is not None:
+            seat_at(game)
+
+
 class BoardBots:
     """One bot per board, for a policy id played by a scripted bot; keyed by
     board object and evicted oldest-first.
@@ -164,6 +173,8 @@ class LaneEnv:
     implements the optional trading methods, where a caller-driven seat instead
     supplies `gates[id](game, seat)` -- a `NetworkBot` used only as a gate must
     be bound with `seat_at(game)`, and a missing gate disables trading there.
+    A bot serves every lane on its board (`BoardBots`), so before each action
+    every gate in that lane with a `seat_at` is seated at the lane's game.
 
     `deal_game(seed, index, players)` fixes each game's board and chance stream
     independently of lane count; `first_game`/`stride` shard the index sequence,
@@ -365,6 +376,9 @@ class LaneEnv:
             cleared = lane.game.trades_made
             before = len(lane.game.trades)
             shown_before = len(lane.game.shown)
+            # The action can open a trade event, which asks every gate here;
+            # one shared with another lane was last seated at that lane.
+            _bind_gates(lane.game)
             apply(lane.game, action)
             lane.trades += max(0, lane.game.trades_made - cleared)
             for trade in lane.game.trades[before:]:

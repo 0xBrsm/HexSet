@@ -61,12 +61,14 @@ class TradeParams:
     #: Offers this gate puts to the table on each of its own turns, read as
     #: `trade_offer_budget`. `None` declares no limit, so it keeps offering
     #: while it has an offer it has not already made this turn. `0` is the
-    #: no-trade referent: it opens nothing and signs nothing.
+    #: no-trade referent: it opens nothing and signs nothing -- every offer
+    #: put to it is a pass, and the clearing house never deals with it.
     max_offers: int | None = None
     #: Cards this gate will part with in one exchange, `None` for no limit of
     #: its own -- the cards it holds are then the only bound. The proposer's
-    #: own limit as well as the responder's: an answer moving more is masked
-    #: out of `pick`, and its consent refuses it outright.
+    #: own limit as well as the responder's: it never offers more, an answer
+    #: moving more is masked out of `pick`, and its consent refuses it
+    #: outright.
     max_give_cards: int | None = None
     #: The clearing floor this gate's own gains are held to, on its own value
     #: scale -- win probability for a value head, whatever units a bot's own
@@ -90,9 +92,10 @@ class TradeParams:
     #: Fragments one target may be offered as, `1` meaning the target is
     #: offered whole. At most `MAX_FRAGMENTS`.
     max_fragments: int = 1
-    #: Cards either side of one *fragment* may move, `None` for
-    #: `ENUMERATION_CARDS`. One side of a fragment is always a single card,
-    #: so at `2` a fragment is `1:1`, `1:2` or `2:1`. Read only under
+    #: Cards either side of one *fragment* may move, `None` for as many as
+    #: `max_give_cards` allows (`ENUMERATION_CARDS` where that is undeclared
+    #: too; see `fragment_width`). One side of a fragment is always a single
+    #: card, so at `2` a fragment is `1:1`, `1:2` or `2:1`. Read only under
     #: `fragment_trades`.
     fragment_cards: int | None = None
     #: The trade gate's continuation budget: plies rolled forward over the
@@ -135,9 +138,11 @@ class TradeParams:
             raise ValueError(f"gate_plies must be non-negative: {self.gate_plies}")
         # A fragment cannot be wider than what this gate will move at all: a
         # plan whose pieces it would itself refuse never reaches the table.
-        # An undeclared cap means unbounded, and nothing to contradict.
+        # An undeclared `fragment_cards` is read at `max_give_cards`, so only
+        # a declared one can contradict it.
         widest = self.max_give_cards
-        if self.fragment_trades and widest is not None and (self.fragment_cards or 0) > widest:
+        if (self.fragment_trades and widest is not None and self.fragment_cards is not None
+                and self.fragment_cards > widest):
             raise ValueError(
                 f"fragment_cards ({self.fragment_cards}) exceeds this gate's own "
                 f"widest side ({widest})"
@@ -179,6 +184,17 @@ class TradeParams:
         if self.max_give_cards is None:
             return ENUMERATION_CARDS
         return max(self.max_give_cards, ENUMERATION_CARDS)
+
+    @property
+    def fragment_width(self) -> int:
+        """Cards either side of one fragment may move: `fragment_cards`,
+        else `max_give_cards`, else `ENUMERATION_CARDS` -- never wider than
+        this gate will itself move."""
+        if self.fragment_cards is not None:
+            return self.fragment_cards
+        if self.max_give_cards is not None:
+            return self.max_give_cards
+        return ENUMERATION_CARDS
 
     @classmethod
     def from_meta(cls, meta: dict[str, str], *, base: "TradeParams | None" = None) -> "TradeParams":
@@ -234,9 +250,11 @@ def params_of(gate: object, default: "TradeParams | None" = None) -> "TradeParam
     """The parameters `gate` carries, read by name rather than by inheritance.
 
     A gate exposing `trade_params` answers with its own; anything else is read
-    at `default` (`UNLIMITED`) after adopting whatever loose `trade_floor` and
-    `gate_plies` attributes it does carry. That is how a plain gate describes
-    itself.
+    at `default` (`UNLIMITED`) after adopting whatever loose `trade_floor`,
+    `gate_plies` and offer budget -- `max_offers`, else `trade_offer_budget`,
+    `-1` there for no limit -- it does carry. That is how a plain gate
+    describes itself, and how `retune(gate, max_offers=...)` on one reaches
+    every driver.
     """
     got = getattr(gate, "trade_params", None)
     if isinstance(got, TradeParams):
@@ -244,8 +262,15 @@ def params_of(gate: object, default: "TradeParams | None" = None) -> "TradeParam
     base = UNLIMITED if default is None else default
     floor = getattr(gate, "trade_floor", None)
     plies = getattr(gate, "gate_plies", None)
+    offers = base.max_offers
+    loose = getattr(gate, "max_offers", None)
+    if loose is None:
+        loose = getattr(gate, "trade_offer_budget", None)
+    if loose is not None:
+        offers = None if int(loose) < 0 else int(loose)
     return replace(
         base,
+        max_offers=offers,
         trade_floor=base.trade_floor if floor is None else float(floor),
         gate_plies=base.gate_plies if plies is None else int(plies),
     )

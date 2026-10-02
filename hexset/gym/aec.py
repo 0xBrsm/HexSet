@@ -13,6 +13,11 @@ seeded off `reset(seed)` alone rather than the game's rng, since ascending
 order is biased; `"seat"` is that ascending serialization;
 `select_agent(agent)` overrides either.
 
+`step` refuses an action outside the acting agent's `action_mask` with a
+`ValueError`, before anything is applied. `reset()` without a seed draws one
+from `np_random`, which a seeded `reset` reseeds, so a run of resets after the
+first seeded one is reproducible.
+
 A seat trades by answering a private gate, not by taking an action, and this
 environment seats none for its own agents, so nothing clears here.
 """
@@ -24,6 +29,7 @@ from typing import Any
 
 import numpy as np
 from gymnasium import spaces
+from gymnasium.utils import seeding
 from pettingzoo.utils.env import AECEnv
 
 from hexset import encoding
@@ -68,9 +74,8 @@ class HexSetAEC(AECEnv):
     `"relative_points"` gives terminal victory points less the mean of the
     others, over the points the game is played to
     (`hexset.victory.relative_points`). A game that reaches `turn_cap` turns
-    without a winner sets `truncations`, not `terminations`: reward 0 under
-    `"terminal"`, the points at the cap under `"relative_points"`.
-    `turn_cap` defaults to `hexset.game.MAX_TURNS`;
+    without a winner sets `truncations`, not `terminations`, with reward 0 for
+    every seat in either mode. `turn_cap` defaults to `hexset.game.MAX_TURNS`;
     play far from a trained policy's -- random seats, an untrained learner --
     needs `hexset.game.UNSTRUCTURED_TURN_CAP` to finish."""
 
@@ -107,6 +112,8 @@ class HexSetAEC(AECEnv):
         self.discard_order = discard_order
         self.render_mode = render_mode
         self.turn_cap = turn_cap
+        # Where an unseeded `reset` takes its seed; a seeded one reseeds it.
+        self.np_random, _ = seeding.np_random(None)
 
         self.possible_agents: list[str] = [agent_name(s) for s in range(num_players)]
         self.agents: list[str] = []
@@ -170,6 +177,10 @@ class HexSetAEC(AECEnv):
 
     def reset(self, seed: int | None = None, options: dict[str, Any] | None = None) -> None:
         del options
+        if seed is None:
+            seed = int(self.np_random.integers(2**31))
+        else:
+            self.np_random, _ = seeding.np_random(seed)
         rng = random.Random(seed)
         board = random_base_board(rng)
         self._game = start(
@@ -232,7 +243,9 @@ class HexSetAEC(AECEnv):
         assert game is not None, "step() called before reset()"
 
         seat = self.possible_agents.index(agent)
-        decoded = action if isinstance(action, Action) else self._space.decode(int(action))
+        decoded = self._legal(game, seat, action)
+        if decoded is None:
+            raise ValueError(f"{action!r} is not in {agent}'s action mask")
         # The acting seat is dispatched with the action: a `DISCARD` resolves
         # against whoever `agent_selection` names, and every other action
         # belongs to `to_move` and ignores the argument.
@@ -262,6 +275,22 @@ class HexSetAEC(AECEnv):
 
     # -- internals --------------------------------------------------------
 
+    def _legal(self, game: Game, seat: int, action: int | Action) -> Action | None:
+        """`action` as the `Action` it names, if it is one of `seat`'s legal
+        actions (its `action_mask`), else `None`. Checked here, not left to
+        the engine, so a refused action never reaches the game."""
+        if isinstance(action, Action):
+            decoded = action
+        else:
+            try:
+                index = int(action)
+            except (TypeError, ValueError):
+                return None
+            if not 0 <= index < self._space.size:
+                return None
+            decoded = self._space.decode(index)
+        return decoded if decoded in legal_actions(game, seat) else None
+
     def _next_agent(self, game: Game) -> str:
         """Which single agent AEC hands the next `step()` to: `to_move`, except
         during discards where `discard_order` picks among the owing seats."""
@@ -273,7 +302,11 @@ class HexSetAEC(AECEnv):
 
     def _finish_episode(self, game: Game, acted_agent: str) -> None:
         won = game.won_by
-        if self.reward_mode == "relative_points":
+        if won is None:
+            # The turn cap, not an outcome: nothing to score in either mode.
+            for agent in self.possible_agents:
+                self.rewards[agent] = 0.0
+        elif self.reward_mode == "relative_points":
             points = tuple(
                 victory_points(game.state(seat, hidden=False), seat) for seat in range(self.num_players)
             )

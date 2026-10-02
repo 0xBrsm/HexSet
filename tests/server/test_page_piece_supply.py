@@ -18,7 +18,7 @@ from hexset.game import is_over, to_move
 from hexset.server.api import Config, Seat, SeatKind, build_session
 from hexset.server.wire import action_to_wire
 
-from _page_server import serving
+from _page_server import launch, serving
 
 
 try:
@@ -110,7 +110,7 @@ def test_reading_a_finished_game_shows_the_open_seats_pieces(running_server):
     supply = _get(f"/api/table/{code}/board")["piece_supply"]
     end = _get(f"/api/table/{code}")
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        browser = launch(playwright)
         try:
             page = browser.new_page()
             page.goto(f"{BASE_URL}/{code}", wait_until="load")
@@ -139,7 +139,7 @@ def test_a_replayed_round_shows_the_open_seats_pieces_as_they_stood(running_serv
     opening = _get(f"/api/table/{code}/replay?round=0")
     first = _get(f"/api/table/{code}/replay?round=1")
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        browser = launch(playwright)
         try:
             page = browser.new_page()
             page.goto(f"{BASE_URL}/{code}", wait_until="load")
@@ -177,7 +177,7 @@ def test_a_replayed_round_shows_the_open_seats_pieces_as_they_stood(running_serv
 
 def test_a_seated_player_sees_their_own_pieces_without_a_click(running_server):
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        browser = launch(playwright)
         try:
             page = browser.new_page()
             with page.expect_response(

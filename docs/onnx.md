@@ -33,7 +33,7 @@ ONNX `metadata_props` values are strings.
 | `fragment_trades` | Plan one gated target a turn and broadcast it as fragments | `0`; `1`/`true`/`yes`/`on` enable it |
 | `fragment_threshold` | The proposer cutoff a full target is gated on | 0.0; clamped to `[0.0, 1.0]` |
 | `max_fragments` | Fragments one target may be broadcast as | 1; 1 or 2 |
-| `fragment_cards` | Cards either side of one fragment may move | Absent: 3; at least 1 |
+| `fragment_cards` | Cards either side of one fragment may move | Absent: `max_give_cards`, else 3; at least 1 |
 | `fit_offers` | Order counters, and under `fragment_trades` offers, by what the counterparty has shown it wants and gives up | `0`; `1`/`true`/`yes`/`on` enable it |
 | `trader` | A bot, named as a lineup names it, that answers this checkpoint's trades while the checkpoint plays its moves | Absent or empty: the checkpoint's own gate |
 
@@ -43,8 +43,8 @@ engine's board indexing.
 
 Loading raises for a missing or unsupported `contract`, a missing or
 non-integer `players` or board count, a board count that does not match the
-topology, a present `iteration` that is not an integer, and a
-`fragment_cards` wider than a declared `max_give_cards` under
+topology, a present `iteration` that is not an integer (each naming the file),
+and a `fragment_cards` wider than a declared `max_give_cards` under
 `fragment_trades`. Every other key falls back: search keys are read only
 under `search=mcts`, and a missing, malformed, zero or negative
 `simulations` or `wave` takes its default; a trade key takes its default
@@ -53,8 +53,8 @@ ignored.
 
 `trader` is resolved when the checkpoint is spawned (`onnxbot.spawn`, an
 arena entrant, a served seat), not by `load`. A name this process cannot
-build, usually a bot whose runtime was not loaded, raises there; load the
-registering module with `--runtime <module>` (in code,
+build, usually a bot whose runtime was not loaded, raises there, naming the
+file; load the registering module with `--runtime <module>` (in code,
 `hexset.arena.load_runtime`).
 
 The trade keys together are one `hexset.trading.TradeParams`, the object a
@@ -124,6 +124,13 @@ record does not carry raises when the first inference request is built.
 `own_dev` and `dev_totals` include cards bought this turn; the action mask
 says which may be played. `award_points` is the points from Longest Road and
 Largest Army, not total victory points.
+
+`action_mask` is the perspective seat's own legal actions. A record for a
+seat with no move of its own (a value-only row the trade gate prices for a
+seat that is not acting, or a finished game) carries the fixed mask
+`hexset.onnx_record.NO_MOVE`, `END_TURN` alone, never another seat's moves,
+which would encode that seat's hand. The graph needs at least one legal
+entry to normalise its prior over; `value` must not depend on the mask.
 
 ## Graph outputs
 

@@ -21,7 +21,7 @@ from hexset.game import Phase, is_over, to_move
 from hexset.server.api import Config, Seat, SeatKind, build_session
 from hexset.server.wire import action_to_wire
 
-from _page_server import serving
+from _page_server import launch, serving
 
 
 try:
@@ -153,7 +153,7 @@ def test_playing_then_undoing_a_knight_offers_and_uses_the_board_cancel(running_
     play must be undone by the end.
     """
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        browser = launch(playwright)
         try:
             context, page = _seated_page(browser)
 

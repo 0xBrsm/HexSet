@@ -21,7 +21,7 @@ from hexset.game import Game, imagine, is_over, to_move
 from hexset.mcts import Search
 from hexset.actions import options_for
 from hexset.clients._modelmeta import gate_config_of, trader_of
-from hexset.state import HiddenHand, copy_state, is_hidden
+from hexset.state import HiddenHand, copy_state
 from hexset import trading
 from hexset.trading import UNLIMITED, TradeParams, TradeProtocol, exchange
 from hexset.view import View
@@ -37,6 +37,7 @@ __all__ = [
     "bot_for",
     "searcher_for",
     "register_entrants",
+    "declared_trader",
 ]
 
 
@@ -335,12 +336,11 @@ class NetworkBot(trading.DeclaredTrade):
         )
         their_known = [k - d for k, d in zip(certified.known[them], bundle)]
 
-        # `View` reads `state.hands[them]` for its size alone; the known row
-        # would shrink `them` by every card this seat cannot name.
-        if is_hidden(state.hands[them]):
-            state.hands[them] = HiddenHand(view.sizes[them] - sum(bundle))
-        else:
-            state.hands[them] = [max(0, n - d) for n, d in zip(state.hands[them], bundle)]
+        # `them`'s pile is its public size moved by the bundle, whatever the
+        # live state holds: a concrete hand there is the truth, which this
+        # seat may not read. The known row would shrink `them` by every card
+        # this seat cannot name.
+        state.hands[them] = HiddenHand(view.sizes[them] - sum(bundle))
 
         ledger = view.ledger.copy()
         ledger.seats[them].known = their_known
@@ -499,22 +499,48 @@ def register_entrants(loader) -> None:
 
     # A trader the checkpoint declares answers its trades unless the entrant
     # names its own, which `hexset.arena.spawn` seats after this returns.
-    def own_trader(entrant, checkpoint) -> str | None:
-        return None if entrant.trader is not None else trader_of(checkpoint)
+    def own_trader(entrant, checkpoint, path: str) -> str | None:
+        return None if entrant.trader is not None else declared_trader(checkpoint, path)
 
     def spawn_network(entrant, board: Board, rng):
-        checkpoint = loader(_checkpoint_path(entrant.weights, "network"), board.topology)
+        path = _checkpoint_path(entrant.weights, "network")
+        checkpoint = loader(path, board.topology)
+        trader = own_trader(entrant, checkpoint, path)
         bot = bot_for(checkpoint, rng=rng, trade=entrant.trade)
-        return traded(bot, own_trader(entrant, checkpoint), board, rng)
+        return traded(bot, trader, board, rng)
 
     def spawn_mcts(entrant, board: Board, rng):
-        checkpoint = loader(_checkpoint_path(entrant.weights, "mcts"), board.topology)
+        path = _checkpoint_path(entrant.weights, "mcts")
+        checkpoint = loader(path, board.topology)
+        trader = own_trader(entrant, checkpoint, path)
         bot = searcher_for(
             checkpoint,
             simulations=entrant.simulations, wave=entrant.wave, k=entrant.k,
             rng=rng, trade=entrant.trade,
         )
-        return traded(bot, own_trader(entrant, checkpoint), board, rng)
+        return traded(bot, trader, board, rng)
 
     register_entrant_kind("network", spawn_network)
     register_entrant_kind("mcts", spawn_mcts)
+
+
+def declared_trader(checkpoint: object, source: str) -> str | None:
+    """The trader `checkpoint` declares (`modelmeta.trader_of`), resolved
+    now: a name this process cannot build is refused here, naming `source`
+    and the metadata key, rather than at the first trade it is asked for.
+    `None` where the checkpoint trades through its own gate."""
+    trader = trader_of(checkpoint)
+    if trader is None:
+        return None
+    from hexset.arena import entrant_from_name
+
+    try:
+        entrant_from_name(trader)
+    except ValueError as error:
+        raise ValueError(
+            f"{source}: metadata key `trader` names {trader!r}, which this process "
+            f"cannot build ({error}). Load the module that registers it first "
+            f"(`--runtime <module>`, or `hexset.arena.load_runtime` in code), or "
+            f"remove the key to trade through the checkpoint's own gate"
+        ) from None
+    return trader

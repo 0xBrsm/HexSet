@@ -216,6 +216,27 @@ def test_a_whole_discard_is_the_bots_card_by_card():
     assert seat.game.discard_quota == [4, 0, 5], "nothing left the real hand"
 
 
+def test_choose_during_a_shared_discard_answers_for_its_own_seat():
+    """Seats 0 and 2 both owe. The game has the lowest owing seat to move,
+    whose hand seat 2 cannot see; seat 2's move is still its own card."""
+    rng = random.Random(0)
+    true = start(random_base_board(rng), 3, rng)
+    true.phase = Phase.DISCARD
+    true.current_player = 1
+    for seat, cards in ((0, (WOOD,) * 8), (2, (ORE,) * 6 + (SHEEP,) * 4)):
+        for r in cards:
+            true._state.hands[seat][r] += 1
+            true._state.bank[r] -= 1
+    true.discard_quota = [4, 0, 5]
+    seat = _seat(true, None, seat=2)
+    seat.bot = type("First", (), {"choose": staticmethod(lambda game: legal_actions(game)[0])})()
+
+    action = seat.choose()
+    assert action.type is ActionType.DISCARD
+    assert action.a in (ORE, SHEEP), "a card seat 2 holds"
+    assert seat.game.discard_quota == [4, 0, 5], "nothing left the real hand"
+
+
 def test_a_discard_the_bot_has_not_answered_yet_is_none_not_a_refusal():
     """A seat driven by a person's calls has no answer until they make
     them; that is not a bot giving up half way, which still raises."""
@@ -347,8 +368,12 @@ class Script:
 
 
 def _moving(counter_steps, answers):
-    """Seat 0 on turn offers a wood for an ore; the seat's answers are `answers`."""
+    """Seat 0 on turn offers a wood for an ore; the seat's answers are `answers`.
+    It also holds a brick, so it can take a counter asking for one."""
     true = _main()
+    true._state.hands[0][BRICK] += 1
+    true._state.bank[BRICK] -= 1
+    true.ledger.receive(0, BRICK, 1)
     seat = Seat(observe(true, 0), 0, Script((1, bundle(wood=-1, ore=1)), answers),
                 counter_steps=counter_steps)
     assert seat.offer() == Offer(0, bundle(wood=-1, ore=1))

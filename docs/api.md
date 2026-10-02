@@ -38,17 +38,18 @@ Every refusal is `{"error": "<message>"}` with one of these statuses:
 
 | Status | When |
 | --- | --- |
-| 400 | A malformed body or a bad `client`, an illegal or out-of-turn action, an unknown model |
+| 400 | Malformed body or field (a seat that is not an integer, a name that is not a string, a bad `client`), an illegal or out-of-turn action, an unknown model, a bot that will not load |
 | 401 | A seat route without a token |
 | 403 | An unknown token; a reclaim secret that matches no seat |
 | 404 | An unknown game code or route |
-| 409 | A stale `version`; an action while seats are unresolved (`waiting_for`) or a bot's offer awaits answers (`trade_wait`); any seat POST once the game is over; no open seat to join; seat changes after the first move; a trade-round conflict (below) |
+| 409 | A stale `version`; an action while seats are unresolved (`waiting_for`) or a bot's offer awaits answers (`trade_wait`); any seat POST once the game is over; no open seat to join; seat changes after the first move; the last seat leaving; a trade-round conflict (below) |
 | 500 | An unexpected server error |
 
-`POST /api/games` validates every bot name before dealing: a name not in
-`/api/models` or more than three bots is a 400, and no game is created.
-`POST /api/bot` refuses a seat held by a person (400) and a closed seat after
-the first move (400).
+`POST /api/games` validates every bot before dealing: a name not in
+`/api/models`, more than three bots, or a bot that will not load is a 400,
+and no game is created. `POST /api/bot` refuses a seat held by a person
+(400) and a closed seat after the first move (400), and changes nothing when
+the bot will not load.
 
 ## State
 
@@ -102,7 +103,8 @@ only action, so that the placement stays undoable.
 
 `POST /api/undo` takes back the seat's most recent setup placement, build,
 bank trade, or Road Building or Knight play while it is still the last
-action in the game (400 otherwise).
+action in the game and no trade round of the seat's own is open (400
+otherwise).
 
 `GET /api/table/<code>/replay?round=N` clamps `N` to the game's rounds; a
 missing or non-integer `round` is a 400. A token for a seat at that game reads
@@ -126,7 +128,8 @@ it. `[-1, 0, 0, 1, 0]` means the actor gives one Wood and receives one Wheat.
 
 Opening a round:
 
-- Only the seat whose turn it is, in `MAIN` (409 otherwise).
+- Only the seat whose turn it is, in `MAIN`, with no Road Building roads left
+  to place (409 otherwise).
 - `give` and `want` are on disjoint resources, at least one card each (400).
 - The seat must hold `give` (400).
 - A second offer replaces the seat's open round.
@@ -142,9 +145,10 @@ like the bundle (negative: the actor gives), in `pending` and `trade_round`.
 `pending` in a seat's state lists the offers awaiting its answer, as `actor`
 and `bundle`. Answer by echoing them as `actor` and `received`. 409 for:
 
-- an offer no longer open;
+- an offer no longer open, or a seat the round is not waiting on (the actor
+  included, or a seat that already answered);
 - an accept of an open offer;
-- a counter the answering seat cannot cover.
+- an accept or counter the answering seat cannot cover.
 
 A counter's `bundle` is signed towards the actor, with cards both ways on
 disjoint resources (409 otherwise).
@@ -152,16 +156,18 @@ disjoint resources (409 otherwise).
 The actor's `trade_round` holds `offer`, `responses` (each `seat`, `kind`,
 `bundle`; a pass has a null `bundle`) and `awaiting`. The actor chooses a
 recorded accept or counter by its exact `seat` and `bundle`. Choosing with
-no open round or naming no recorded answer is a 409.
+no open round, with Road Building roads left to place, or naming no recorded
+answer is a 409.
 
 Bot seats answer an offer at once. A manual seat with no cards passes
 automatically.
 A bot's own offer waits for every seat that answers through this API: those
 seats are in `trade_wait`, `to_move` is `null`, and `/api/action` is a 409
-until they answer. A bot offers on entering `MAIN` and keeps offering until
-its own `trade_offer_budget` is spent (one offer when it declares none, no
-limit at `-1`) or it has no offer it has not made this turn; it resolves each
-round after the last answer. Executed trades appear in `trades`
+until they answer. A bot offers on entering `MAIN` (or, for a gate with
+`trade_now`, at the first main-phase point it says yes) and keeps offering
+until its own `max_offers` is spent (no limit when it declares none) or it
+has no offer it has not made this turn; it resolves each round after the
+last answer. Executed trades appear in `trades`
 and in the journal.
 
 The MCP tools `offer_trade`, `answer_trade` and `choose_trade` drive these

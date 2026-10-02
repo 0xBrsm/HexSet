@@ -241,6 +241,28 @@ def test_moves_carries_each_step_with_its_actor_where_the_record_names_one(poiso
     ]
 
 
+def test_a_game_with_retired_seats_replays_through_its_record():
+    """Two seats dealt in and retired: the record has to say so, or every
+    setup step after the first belongs to a seat that never plays."""
+    from hexset.arena import compete, lineup_from_names
+
+    tournament = compete(
+        lineup_from_names(["random", "random", "retired", "retired"]), 4, seed=3,
+        records=True, antithetic=False, trade_mode=NO_ROUNDS, turn_cap=UNSTRUCTURED_TURN_CAP,
+    )
+    assert len(tournament.records) == 4
+    for record in tournament.records:
+        assert len(record.locked) == 2
+        assert from_json(to_json(record)) == record
+        game = replay(record)
+        assert game.locked == frozenset(record.locked)
+        assert (game.won_by, game.turns) == (record.winner, record.turns)
+
+    older = json.loads(to_json(record))
+    del older["locked"]
+    assert from_json(json.dumps(older)).locked == ()
+
+
 def test_a_journal_carries_its_discard_actors_into_the_record(tmp_path):
     from hexset.actions import ActionType as _AT, legal_actions
     from hexset.game import (

@@ -361,9 +361,10 @@ def apply(game: Game, action: Action, seat: int | None = None) -> None:
     actor the position does not fix. `None` means the lowest-indexed owing seat.
 
     After a main-phase action that leaves the game in `MAIN` (and not in the
-    middle of a Road Building card's free roads), the turn's trade window is
-    offered again: `run_trade_event` no-ops once the event is used, and only
-    a gate declaring `trade_now` can still have it open."""
+    middle of a Road Building card's free roads, which a credit with nowhere
+    left to go is not), the turn's trade window is offered again:
+    `run_trade_event` no-ops once the event is used, and only a gate
+    declaring `trade_now` can still have it open."""
     kind = action.type
     was_main = game.phase is Phase.MAIN
     if kind is ActionType.ROLL:
@@ -400,7 +401,7 @@ def apply(game: Game, action: Action, seat: int | None = None) -> None:
         discard_one(game, discarding, Resource(action.a))
     else:
         raise ValueError(f"unhandled action {action}")
-    if was_main and game.phase is Phase.MAIN and game.free_roads == 0:
+    if was_main and game.phase is Phase.MAIN and not pending_free_roads(game):
         run_trade_event(game)
 
 

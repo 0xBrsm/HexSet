@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Sequence
 
 from . import _engine as engine
 from ._fragments import choose_initial, choose_remainder, legal_fragment
-from ._params import ENUMERATION_CARDS, TradeParams
+from ._params import TradeParams
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..view import View
@@ -61,7 +61,8 @@ def hooks_for(params: TradeParams) -> frozenset[str]:
     Nothing is installed for a gate that constrains nothing, so the engine's
     defaults answer for it and a neutral parameter set is not a behaviour
     change in disguise. Planning needs every hook; card caps and a responder
-    price need the answering ones but not `candidates`/`offer`, whose
+    price need the answering ones (`respond`, `respond_any`, `pick`,
+    `consent_gain`) but not `candidates`/`offer`, whose
     alternative -- the bot's own menu, or the engine's open offer menu -- is
     a different protocol rather than a different limit.
     """
@@ -70,7 +71,7 @@ def hooks_for(params: TradeParams) -> frozenset[str]:
     if params.fragment_trades:
         return frozenset(HOOKS)
     if params.constrains_responses:
-        return frozenset({"respond", "pick", "consent_gain"})
+        return frozenset({"respond", "respond_any", "pick", "consent_gain"})
     return frozenset()
 
 
@@ -141,10 +142,10 @@ class TradeProtocol:
         return True
 
     def fragment_cap(self) -> int:
-        """Cards one fragment may move a side: this gate's own
-        `fragment_cards`, or the enumeration width where it declares none."""
-        declared = self.params.fragment_cards
-        return ENUMERATION_CARDS if declared is None else declared
+        """Cards one fragment may move a side: `TradeParams.fragment_width`,
+        this gate's own `fragment_cards`, else its `max_give_cards`, else
+        `ENUMERATION_CARDS`."""
+        return self.params.fragment_width
 
     def consent_gain(
         self, view: "View", received: Bundle, other: int, *, role: str
@@ -394,10 +395,10 @@ class TradeProtocol:
             return engine.Response(me, engine.RESPONSE_PASS, None)
         fit = self._fit(view, [(actor, pool[i]) for i, _ in eligible])
         rank = (lambda i: fit(actor, pool[i])) if fit is not None else (lambda i: 0)
-        i, _ = max(
-            eligible,
-            key=lambda row: (rank(row[0]), row[1], tuple(-n for n in pool[row[0]]), -actor),
-        )
+        # Ties break towards the smaller counter, then canonical bundle order.
+        i, _ = max(eligible, key=lambda row: (
+            rank(row[0]), row[1], -sum(abs(n) for n in pool[row[0]]), tuple(-n for n in pool[row[0]]),
+        ))
         return engine.Response(me, engine.RESPONSE_COUNTER, tuple(-n for n in pool[i]))
 
     def pick(self, view: "View", responses):
@@ -474,10 +475,10 @@ def retune(gate: object, **changes) -> None:
     than to the table.
 
     A gate carrying no `TradeParams` still answers `max_offers`, by taking the
-    budget straight onto the attribute the driver reads: an override a run
-    asked for has to reach every seat, not only the ones built from a
-    parameter set. Anything else it cannot honour is ignored -- a gate with no
-    valuation never trades whatever it is told.
+    budget onto its `trade_offer_budget` (`-1` for `None`), which `params_of`
+    reads: an override a run asked for has to reach every seat, not only the
+    ones built from a parameter set. Anything else it cannot honour is
+    ignored -- a gate with no valuation never trades whatever it is told.
     """
     from dataclasses import replace
 
@@ -485,8 +486,9 @@ def retune(gate: object, **changes) -> None:
         return
     params = getattr(gate, "trade_params", None)
     if not isinstance(params, TradeParams):
-        if "max_offers" in changes and changes["max_offers"] is not None:
-            gate.trade_offer_budget = int(changes["max_offers"])
+        if "max_offers" in changes:
+            wanted = changes["max_offers"]
+            gate.trade_offer_budget = -1 if wanted is None else int(wanted)
         return
     updated = replace(params, **changes)
     gate.trade = updated
@@ -500,8 +502,9 @@ def retune(gate: object, **changes) -> None:
 
 
 def install(gate: object, protocol: TradeProtocol) -> TradeProtocol:
-    """Bind `protocol`'s hooks onto `gate` as instance attributes, and take
-    back every hook its parameters do not need.
+    """Bind `protocol`'s hooks onto `gate` as instance attributes, take back
+    every hook its parameters do not need, and keep `protocol` on the gate
+    as `_protocol`, where `retune` finds it.
 
     `hexset.trading._engine` reads each hook with `getattr(gate, name, None)`,
     so a hook that is not there falls back -- `menu` and `counter_menu` to
@@ -509,12 +512,18 @@ def install(gate: object, protocol: TradeProtocol) -> TradeProtocol:
     the engine's open offer menu and known counter menu, `respond_any` to
     `default_respond_any`, `consent` to `valued`. A gate that constrains
     nothing therefore behaves exactly as an unparameterised one, and a
-    reinstall after `retune` leaves no stale hook bound.
+    reinstall after `retune` leaves no stale hook bound. Every attribute is
+    set and deleted through the gate itself, so a seat that forwards them
+    (`hexset.bots.TradesBy`) installs onto its trader.
     """
     wanted = hooks_for(protocol.params)
     for name in HOOKS:
         if name in wanted:
             setattr(gate, name, getattr(protocol, name))
         else:
-            vars(gate).pop(name, None)
+            try:
+                delattr(gate, name)
+            except AttributeError:
+                pass  # not bound on this instance: the class's own, or none
+    gate._protocol = protocol
     return protocol

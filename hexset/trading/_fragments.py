@@ -16,6 +16,9 @@ The limits arrive as arguments and have no defaults here: they are one gate's
 own config, and this module does not know whose. `MAX_FRAGMENTS` is the one
 number it keeps, and it is structural rather than a policy --
 `fragment_partitions` enumerates two-way splits only.
+
+Ties between equal scores break towards the smaller exchange, then canonical
+bundle order, then the lower partner seat, for determinism only.
 """
 from __future__ import annotations
 
@@ -35,6 +38,12 @@ def _bundle(value: Sequence[int]) -> Bundle:
     if not any(n > 0 for n in out) or not any(n < 0 for n in out):
         raise ValueError("a legal exchange needs cards moving in both directions")
     return out
+
+
+def _tie(bundle: Sequence[int]) -> tuple:
+    """The tie-break part of a ranking key, for `max`: the smaller exchange
+    first, then canonical bundle order."""
+    return -sum(abs(int(n)) for n in bundle), tuple(-int(n) for n in bundle)
 
 
 def side_counts(bundle: Sequence[int]) -> tuple[int, int]:
@@ -173,7 +182,7 @@ def _choose_initial(
             parents.append((int(partner), tuple(bundle), float(raw), float(estimate), ordinal))
     if not parents:
         return None
-    top = max(parents, key=lambda x: (x[2], tuple(-n for n in x[1]), -x[0]))
+    top = max(parents, key=lambda x: (x[2], *_tie(x[1]), -x[0]))
     # Every scored row that can open a plan, indexed by its bundle and kept in
     # `scored` order, so each partition's first fragment is one lookup rather
     # than a pass over the whole pool.
@@ -189,19 +198,18 @@ def _choose_initial(
         ):
             first = part[0]
             for partner, bundle, raw, estimate in openers.get(tuple(first), ()):
-                options.append((rank(partner, bundle), float(raw),
-                                tuple(-n for n in bundle),
-                                -int(partner), parent[2], tuple(-n for n in parent[1]),
-                                -parent[0], tuple(part), int(partner), tuple(bundle),
-                                float(estimate), float(raw), parent))
+                fragment_key = (rank(partner, bundle), float(raw), *_tie(bundle), -int(partner))
+                parent_key = (parent[2], *_tie(parent[1]), -parent[0], tuple(part))
+                options.append((fragment_key, parent_key, tuple(part), int(partner),
+                                tuple(bundle), float(raw), float(estimate), parent))
     # The top raw parent is a hard gate: another parent cannot rescue it when
     # it has no positive legal first fragment.
     if not any(o[-1] == top for o in options):
         return None
-    best_fragment_key = max(o[:4] for o in options)
-    same = [o for o in options if o[:4] == best_fragment_key]
-    chosen = max(same, key=lambda o: (o[4], o[5], o[6], o[7]))
-    return InitialSelection(chosen[8], chosen[9], chosen[11], chosen[10], chosen[7])
+    best_fragment_key = max(o[0] for o in options)
+    same = [o for o in options if o[0] == best_fragment_key]
+    _, _, part, partner, bundle, raw, estimate, _ = max(same, key=lambda o: o[1])
+    return InitialSelection(partner, bundle, raw, estimate, part)
 
 
 def choose_remainder(scored, remainder: Sequence[int], *, max_cards: int,
@@ -218,5 +226,4 @@ def choose_remainder(scored, remainder: Sequence[int], *, max_cards: int,
     ]
     if not options:
         return None
-    return max(options, key=lambda x: (rank(x[0], x[1]), float(x[2]),
-                                       tuple(-n for n in x[1]), -int(x[0])))
+    return max(options, key=lambda x: (rank(x[0], x[1]), float(x[2]), *_tie(x[1]), -int(x[0])))

@@ -25,7 +25,9 @@ The client interfaces are [api.md](api.md) for the JSON routes and
 Environment:
 
 - `HEXSET_UI_MODELS_DIR`: the directory scanned for `*.onnx` opponents, on
-  every request. Unset, it is `models/` under the repository root.
+  every request. Unset, it is `models/` beside `hexset/` in a source checkout
+  (the directory holding `pyproject.toml`), else `models/` under the working
+  directory.
 - `HEXSET_UI_GAMES_DIR`: the journal directory when `--games-dir` is
   omitted; unset, `games` under the working directory; empty disables
   journaling.

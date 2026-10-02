@@ -25,8 +25,8 @@ from hexset.cards import NUM_DEV_CARDS
 from hexset.devcards import dev_count, holdings
 from hexset.economy import hand_size, trade_ratios
 from hexset.game import (
-    Game, Phase, event_hand_sizes, is_over, may_act, players_owing_discards,
-    publish_trade_event, to_move,
+    Game, Phase, event_hand_sizes, is_over, lock_seat, may_act, pending_free_roads,
+    players_owing_discards, publish_trade_event, to_move,
 )
 from hexset.ledger import PublicLedger
 from hexset.roads import road_lengths
@@ -41,6 +41,7 @@ from hexset.trading import (
     Trade,
     apply_trades,
     execute_agreed,
+    params_of,
 )
 from hexset import trading
 from hexset.victory import public_victory_points, victory_points
@@ -695,37 +696,48 @@ class GameSession:
     # -- the trade round (`hexset.trading`): the session drives it, so a round
     # survives between calls -- an answer lands long after the offer.
 
-    def begin_round(self) -> None:
-        """A bot actor's first offer at MAIN entry, once a turn (keyed by
+    def begin_round(self, *, entering: bool = True) -> None:
+        """A bot actor's first offer of the turn, once a turn (keyed by
         `(turns, current_player)`, since a knight re-enters MAIN after its
-        robber move). A manual actor uses `open_round_for` instead. Further
-        offers the same turn -- a gate asking for more than one through
-        `trade_offer_budget` -- are picked up by `_try_broadcast` once each
-        round it opens resolves."""
+        robber move), opened as the engine's own trade event opens
+        (`hexset.game.run_trade_event`): on `entering` MAIN, or, for a gate
+        with a `trade_now(game)` method, at the first main-phase decision
+        point it says yes at -- entering MAIN or after any of its main-phase
+        actions. Never while Road Building roads are still to place. A manual
+        actor uses `open_round_for` instead. Further offers the same turn -- a
+        gate asking for more than one through `trade_offer_budget` -- are
+        picked up by `_try_broadcast` once each round it opens resolves."""
         game = self.game
         me = game.current_player
+        if game.phase is not Phase.MAIN or pending_free_roads(game):
+            return
         if self._broadcast_turn == (game.turns, me):
             return
+        gate = self.traders.get(me)
+        ask = None if me in game.locked else getattr(gate, "trade_now", None)
+        if ask is None and not entering:
+            return
+        if ask is not None and not ask(game):
+            return  # the window stays open until it says yes or the turn ends
         self._broadcast_turn = (game.turns, me)
         self._already_offered = set()
         self._offers_made = 0
         self._close_round()
         if me in game.locked:
             return
-        gate = self.traders.get(me)
         if gate is None or isinstance(gate, PendingGate):
             return
         self._try_broadcast(gate, me)
 
     def _try_broadcast(self, gate: object, me: int) -> None:
         """Put `gate`'s next offer to the table, if it has one and this
-        turn's offer budget -- `trade_offer_budget`, 1 for a gate that
-        names none, `-1` for one declaring no limit of its own -- is not yet
-        spent. The opening is the engine's own (`hexset.trading.offer`): the
+        turn's offer budget -- `trade_offer_budget` as the engine reads it
+        (`hexset.trading.params_of`), `-1` for a gate declaring no limit of
+        its own -- is not yet spent. The opening is the engine's own (`hexset.trading.offer`): the
         gate's menu from its own view -- known, sampled, or the fragmented
         policy's next planned fragment -- and its pick."""
         del me  # the actor is the game's current player, which `offer` reads
-        budget = int(getattr(gate, "trade_offer_budget", 1))
+        budget = params_of(gate).trade_offer_budget
         # `-1` is a gate declaring no limit of its own, not a spent budget: it
         # keeps broadcasting while `offer` still has a bundle the gate has
         # not already put to this table this turn.
@@ -874,11 +886,16 @@ class GameSession:
     def answer_round(self, seat: int, actor: int, received: Bundle, kind: str, bundle: Bundle | None) -> None:
         """A manual `seat` answers `actor`'s open broadcast with `"accept"`,
         `"counter"` (`bundle`) or `"pass"`; `received` is the exact offer its
-        `pending` showed, signed towards `actor`. `ValueError` for an offer no
-        longer open, or a counter `seat` cannot cover."""
+        `pending` showed, signed towards `actor`. Only a seat the round is
+        waiting on answers it, once. `ValueError` for an offer no longer open,
+        a seat it is not waiting on, or an accept or counter `seat` cannot
+        cover -- checked here, against the answering seat's own hand, so a
+        trade that could never execute is never put to the actor."""
         round_ = self.open_round
         if round_ is None or round_.offer.actor != actor or round_.offer.received != received:
             raise ValueError("that offer is no longer open")
+        if seat not in round_.awaiting:
+            raise ValueError("that offer is not waiting on your answer")
         if kind == RESPONSE_ACCEPT and trading.is_open(round_.offer):
             raise ValueError("an offer with any cards is answered by a counter naming them")
         if kind == RESPONSE_COUNTER:
@@ -888,10 +905,13 @@ class GameSession:
             take = [max(0, -n) for n in bundle]
             if not any(give) or not any(take) or any(g and t for g, t in zip(give, take)):
                 raise ValueError("a counter gives and gets on disjoint resources")
+        if kind in (RESPONSE_ACCEPT, RESPONSE_COUNTER):
+            # An accept moves exactly the offer; positive is towards the actor.
+            gives = [max(0, n) for n in (received if kind == RESPONSE_ACCEPT else bundle)]
             # true state: the engine is the referee for coverage.
             hand = self.game.state(0, hidden=False).hands[seat]
-            if any(hand[r] < n for r, n in enumerate(give)):
-                raise ValueError("you cannot cover your side of that counter")
+            if any(hand[r] < n for r, n in enumerate(gives)):
+                raise ValueError("you cannot cover your side of that trade")
         self.game.pending = [
             t for t in self.game.pending
             if not (t.a == actor and t.b == seat and t.received == received)
@@ -909,11 +929,14 @@ class GameSession:
     def execute_round_choice(self, actor: int, seat: int, bundle: Bundle) -> Trade:
         """A manual `actor`'s own pick (`POST .../trade/round/choose`):
         `seat`'s recorded response whose `bundle` matches exactly, executed
-        through `_execute_round_trade`. `ValueError` for no open round or no
-        such response; the round closes on success."""
+        through `_execute_round_trade`. `ValueError` for no open round, no
+        such response, or Road Building roads still to place, which come
+        before any trade; the round closes on success."""
         round_ = self.open_round
         if round_ is None or round_.offer.actor != actor:
             raise ValueError("there is no open round to choose from")
+        if pending_free_roads(self.game):
+            raise ValueError("place the roads Road Building owes first")
         if not any(r.seat == seat and r.kind != RESPONSE_PASS and r.bundle == bundle for r in round_.responses):
             raise ValueError("no such response is open")
         trade = self._execute_round_trade(actor, seat, bundle)
@@ -1021,18 +1044,24 @@ class GameSession:
         steps: list[tuple[int, Action | None, tuple[Trade, ...]]],
         journal: Journal | None = None,
         notes: dict[int, list[tuple[int, RoundNote]]] | None = None,
+        retired: dict[int, list[int]] | None = None,
     ) -> None:
         """Re-apply a journalled game's actions, bringing this session up to
         where it left off. Every step with a real `action` goes through
         `apply_action`, so the log, the per-seat rolls and the round numbering
         are rebuilt as a consequence of replaying; `action is None` is a
         manual trade, re-executed rather than re-gated. `notes` go back at the
-        step each preceded. `journal` is attached only once the replay is
-        done, or the game would be written in a second time."""
+        step each preceded, and each seat in `retired` (`journal.retirements`)
+        is locked there, as the live game locked it. `journal` is attached only
+        once the replay is done, or the game would be written in a second
+        time."""
         if self.journal is not None:
             raise ValueError("restore would rewrite the journal it is reading")
         notes = notes or {}
+        retired = retired or {}
         for index, (actor, action, trades) in enumerate(steps):
+            for seat in retired.get(self.steps, ()):
+                lock_seat(self.game, seat)
             for note_round, note in notes.get(self.steps, ()):
                 self.note(note, round_num=note_round)
             if action is None:
@@ -1046,6 +1075,8 @@ class GameSession:
                     f"step {self.steps}: {action} is not legal in {self.game.phase.name}"
                 )
             self.apply_action(actor, action, replay=trades)
+        for seat in retired.get(self.steps, ()):
+            lock_seat(self.game, seat)
         for note_round, note in notes.get(self.steps, ()):
             self.note(note, round_num=note_round)
         self.journal = journal
@@ -1253,24 +1284,25 @@ class GameSession:
             else None
         )
 
-        if (
-            replay is None
-            and action.type in (ActionType.ROLL, ActionType.MOVE_ROBBER)
-            and self.game.phase is Phase.MAIN
-        ):
-            # MAIN entry opens this turn's round for a bot actor, after this
-            # action's own event and journal line so a trade it executes at
-            # once is its own step. Never on a replay, which asks no gate.
-            self.begin_round()
+        if replay is None and self.game.phase is Phase.MAIN:
+            # A main-phase decision point may open this turn's round for a bot
+            # actor, after this action's own event and journal line so a trade
+            # it executes at once is its own step. Never on a replay, which
+            # asks no gate.
+            self.begin_round(entering=action.type in (ActionType.ROLL, ActionType.MOVE_ROBBER))
 
     def undo_last_build(self, seat: int) -> None:
         """Revert `seat`'s most recent placement, bank trade or Road
         Building/Knight play to exactly how the session stood before it, down
         to whose turn it is and the log line. `ValueError` unless the one
         pending undo point is this seat's — another seat's is never offered.
-        The journal is append-only, so the undo goes in as its own entry."""
+        Refused while the seat's own trade round is open, whose offer and
+        answers were made against the position the undo would take away. The
+        journal is append-only, so the undo goes in as its own entry."""
         if self._undo is None or self._undo.actor != seat:
             raise ValueError("nothing to undo")
+        if not self.can_undo(seat):
+            raise ValueError("close your open trade round first")
         point = self._undo
         self.game.set_state(point.state)
         self.game.ledger = point.ledger
@@ -1288,6 +1320,31 @@ class GameSession:
         # Undoing a setup road lands back before the handoff it was holding,
         # so there is no turn left to end.
         self.awaiting_confirm = None
+
+    def can_undo(self, seat: int | None) -> bool:
+        """Whether `undo_last_build(seat)` would succeed right now: the one
+        pending undo point is `seat`'s, and no trade round of its own is
+        open."""
+        if seat is None or self._undo is None or self._undo.actor != seat:
+            return False
+        return self.open_round is None or self.open_round.offer.actor != seat
+
+    def release(self, seat: int) -> None:
+        """Let go of what a seat leaving the game (`api.Tables.leave_seat`)
+        was holding: a setup turn it had not yet ended, which would hold the
+        table for good, and its take-back, which would hand the turn back to
+        a seat no longer playing."""
+        if self.awaiting_confirm == seat:
+            self.awaiting_confirm = None
+        if self._undo is not None and self._undo.actor == seat:
+            self._undo = None
+
+    def rename(self, seat: int, name: str) -> None:
+        """`seat`'s new display name, journalled so a reopened table keeps it
+        (`journal.players`)."""
+        self.player_names[seat] = name
+        if self.journal is not None:
+            self.journal.renamed(seat=seat, name=name)
 
     def _log_result(self, round_num: int) -> str:
         """The closing line, appended once the game is over, naming the winner
@@ -1394,7 +1451,7 @@ class GameSession:
             "game_over": over,
             # Whether `POST /api/undo` would succeed right now; a session
             # convenience, not a rule, so not in `legal_actions`.
-            "can_undo": self._undo is not None and self._undo.actor == viewer,
+            "can_undo": self.can_undo(viewer),
             # The seat whose setup turn is placed but not yet ended, visible
             # to every reader, not just a bool for itself.
             "awaiting_confirm": self.awaiting_confirm,

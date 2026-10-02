@@ -16,7 +16,8 @@ fresh, unseated session). `DELETE /mcp` drops a session early; `GET /mcp` is 405
 response. Every `tools/call` is answered as `text/event-stream`
 (`_mcp_stream_tool`), since acting tools block until the seat's next move and
 may sit for minutes; `initialize`/`tools/list`/`ping` are single JSON-RPC
-responses.
+responses. A tool that fails in a way it did not anticipate still answers,
+as an `isError` result, so the client is never left on an open stream.
 
 `Origin` is checked as the spec's security section asks: present and naming
 anything but 127.0.0.1/localhost/::1/this server's own `--host` is a 403;
@@ -38,7 +39,7 @@ seats at more than one game.
 Run it with `python -m hexset.server.web`. Opponents come from
 `api.model_options()`: every preset the `--runtime` modules register, plus one
 entry per `*.onnx` file in `HEXSET_UI_MODELS_DIR` (default:
-`<repo root>/models`), picked up without a restart.
+`api.default_models_dir()`), picked up without a restart.
 """
 
 from __future__ import annotations
@@ -114,6 +115,18 @@ class HexSetServer(ThreadingHTTPServer):
         # Every live MCP session: Mcp-Session-Id -> mcptools.Session.
         self.mcp_sessions: dict[str, mcptools.Session] = {}
         self.mcp_lock = threading.Lock()
+
+
+def body_length(header: str | None) -> int | None:
+    """A request's `Content-Length` as a byte count, `0` when absent, or
+    `None` for anything that is not a non-negative integer."""
+    if not header:
+        return 0
+    try:
+        length = int(header)
+    except ValueError:
+        return None
+    return length if length >= 0 else None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -202,11 +215,14 @@ class Handler(BaseHTTPRequestHandler):
         if not self.path.startswith("/api/"):
             self.send_error(404)
             return
-        length = int(self.headers.get("Content-Length") or 0)
+        length = body_length(self.headers.get("Content-Length"))
+        if length is None:
+            self._json({"error": "Content-Length is not a byte count"}, status=400)
+            return
         raw = self.rfile.read(length) if length else b""
         try:
             payload = json.loads(raw) if raw else {}
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             self._json({"error": "invalid JSON body"}, status=400)
             return
         if not isinstance(payload, dict):
@@ -235,11 +251,14 @@ class Handler(BaseHTTPRequestHandler):
         if not self._origin_ok():
             self._mcp_error(403, "Origin not allowed")
             return
-        length = int(self.headers.get("Content-Length") or 0)
+        length = body_length(self.headers.get("Content-Length"))
+        if length is None:
+            self._mcp_error(400, "Content-Length is not a byte count")
+            return
         raw = self.rfile.read(length) if length else b""
         try:
             message = json.loads(raw) if raw else {}
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             self._mcp_error(400, "invalid JSON body")
             return
         if not isinstance(message, dict):
@@ -274,7 +293,8 @@ class Handler(BaseHTTPRequestHandler):
         elif method == "tools/list":
             self._mcp_result(request_id, {"tools": mcptools.tool_list()})
         elif method == "tools/call":
-            params = message.get("params") or {}
+            params = message.get("params")
+            params = params if isinstance(params, dict) else {}
             name = params.get("name")
             arguments = params.get("arguments")
             arguments = arguments if isinstance(arguments, dict) else {}
@@ -283,8 +303,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32601, "message": f"method not found: {method}"}})
 
     def _mcp_initialize(self, message: dict) -> None:
-        params = message.get("params") or {}
-        requested = params.get("protocolVersion")
+        params = message.get("params")
+        requested = params.get("protocolVersion") if isinstance(params, dict) else None
         protocol_version = requested if requested in MCP_PROTOCOL_VERSIONS else DEFAULT_MCP_PROTOCOL_VERSION
         session_id = secrets.token_urlsafe(24)
         with self.server.mcp_lock:
@@ -305,7 +325,8 @@ class Handler(BaseHTTPRequestHandler):
     def _mcp_stream_tool(self, request_id, session: mcptools.Session, name: str, arguments: dict) -> None:
         """Answer a tool call as `text/event-stream`: a `: keepalive` comment
         per wait tick, then one `event: message` carrying the JSON-RPC response
-        (a `ToolError` is the same message with `isError`), then close."""
+        (a `ToolError`, or anything else the tool raised, is the same message
+        with `isError`), then close."""
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
@@ -321,19 +342,27 @@ class Handler(BaseHTTPRequestHandler):
                     response = {"jsonrpc": "2.0", "id": request_id, "result": payload}
                     self.wfile.write(f"event: message\ndata: {json.dumps(response)}\n\n".encode("utf-8"))
                 self.wfile.flush()
-        except mcptools.ToolError as error:
-            response = {
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "result": {"content": [{"type": "text", "text": str(error)}], "isError": True},
-            }
-            try:
-                self.wfile.write(f"event: message\ndata: {json.dumps(response)}\n\n".encode("utf-8"))
-                self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError):
-                pass
         except (BrokenPipeError, ConnectionResetError):
             # The client gave up waiting and closed its side.
+            pass
+        except mcptools.ToolError as error:
+            self._mcp_tool_error(request_id, str(error))
+        except Exception as error:
+            # Logged in full, and answered rather than left hanging.
+            traceback.print_exc()
+            self._mcp_tool_error(request_id, f"internal error: {type(error).__name__}: {error}")
+
+    def _mcp_tool_error(self, request_id, text: str) -> None:
+        """The last message of a tool call's stream: the call failed."""
+        response = {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {"content": [{"type": "text", "text": text}], "isError": True},
+        }
+        try:
+            self.wfile.write(f"event: message\ndata: {json.dumps(response)}\n\n".encode("utf-8"))
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
             pass
 
 

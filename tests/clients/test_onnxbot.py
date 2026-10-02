@@ -212,6 +212,30 @@ def test_a_file_that_names_a_trader_is_seated_with_it(checkpoint_v2, tmp_path):
     assert isinstance(spawn(path, board, rng=random.Random(0)), NetworkBot)
 
 
+def test_a_file_naming_a_trader_nothing_registers_fails_at_spawn_naming_the_fix(
+    checkpoint_v2, tmp_path
+):
+    """At spawn, not at the first trade: the error names the file, the
+    metadata key and how to load the runtime that would register it."""
+    onnx = pytest.importorskip("onnx")
+    from hexset.clients.onnxbot import load, spawn
+
+    path, board = checkpoint_v2
+    model = onnx.load(path)
+    entry = model.metadata_props.add()
+    entry.key, entry.value = "trader", "no-such-bot"
+    named = tmp_path / "unregistered.onnx"
+    onnx.save(model, str(named))
+
+    assert load(str(named), board.topology).trader == "no-such-bot"
+    with pytest.raises(ValueError) as caught:
+        spawn(str(named), board, rng=random.Random(0))
+    message = str(caught.value)
+    assert str(named) in message
+    assert "`trader`" in message and "'no-such-bot'" in message
+    assert "--runtime" in message
+
+
 def test_spawn_refuses_a_checkpoint_trained_for_another_player_count(checkpoint_v2):
     from hexset.clients.onnxbot import spawn
 

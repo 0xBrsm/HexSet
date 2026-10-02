@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
-from .board.terrain import Resource, Terrain
+from .board.terrain import NUM_RESOURCES, Resource, Terrain
 from .chance import UNSEEN, Chance
 from .economy import hand_size
 from .state import NO_OWNER, OFF_BOARD, GameState, is_hidden, pile_size
@@ -163,11 +163,13 @@ def discard(
     state: GameState, player: int, cards: list[int], required: int | None = None
 ) -> None:
     """Return `cards`, counted per resource, from `player`'s hand to the bank.
-    Raises `ValueError` unless `cards` totals `required` (`discard_count` when
-    not given) and the hand holds them; of a hidden hand only the total is
-    checked."""
+    Raises `ValueError`, writing nothing, unless `cards` is `NUM_RESOURCES`
+    non-negative counts totalling `required` (`discard_count` when not given)
+    that the hand holds; of a hidden hand only the total is checked."""
     if required is None:
         required = discard_count(state, player)
+    if len(cards) != NUM_RESOURCES or any(count < 0 for count in cards):
+        raise ValueError(f"a discard is {NUM_RESOURCES} non-negative counts, not {cards}")
     if sum(cards) != required:
         raise ValueError(f"player {player} must discard exactly {required}")
     hand = state.hands[player]

@@ -13,7 +13,7 @@ import re
 
 import pytest
 
-from _page_server import serving
+from _page_server import launch, serving
 
 
 try:
@@ -64,7 +64,7 @@ def _own_seat(response_body: dict) -> dict:
 
 def test_the_page_sends_a_hashed_web_identity_on_deal_and_on_join(running_server):
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        browser = launch(playwright)
         try:
             creator_context = browser.new_context()
             creator_page = creator_context.new_page()

@@ -65,14 +65,14 @@ from hexset.actions import build_space, legal_actions
 from hexset.arena import PRESETS, registered_presets, spawn as spawn_entrant
 from hexset.board.board import Board, random_base_board
 from hexset.bots import Bot
-from hexset.game import Game, Phase, is_over, lock_seat, may_act, start
+from hexset.game import Game, Phase, is_over, lock_seat, may_act, pending_free_roads, start
 from hexset.onnx_record import record_from_game
 from hexset.record import from_events, open_record
 from hexset.trading import holds
 
 from . import _journal as journal
 from ._runner import BotRunner, LocalSearchBrain, LocalTransport
-from ._seating import SETUP_PHASES, advance_setup, unlock_seat
+from ._seating import SETUP_PHASES, unlock_seat
 from ._webplay import GameSession, ResumeError
 from .wire import action_to_wire, board_layout, round_offer_from_wire, signed_bundle_from_wire
 
@@ -92,6 +92,7 @@ __all__ = [
     "SeatKind",
     "Table",
     "Tables",
+    "default_models_dir",
     "listed_models",
     "model_options",
     "spawn_bot",
@@ -146,8 +147,18 @@ def your_move(view: dict) -> tuple[str, list[int]]:
     return "wait", [] if to_move is None else [to_move]
 
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-MODELS_DIR = Path(os.environ.get("HEXSET_UI_MODELS_DIR", REPO_ROOT / "models"))
+def default_models_dir() -> Path:
+    """Where the model picker looks when `HEXSET_UI_MODELS_DIR` names
+    nothing: `models/` at the root of the source tree this package was loaded
+    from (the directory holding `pyproject.toml` beside `hexset/`), or, for an
+    installed package, `models/` under the working directory."""
+    root = Path(__file__).resolve().parents[2]
+    if (root / "pyproject.toml").is_file():
+        return root / "models"
+    return Path.cwd() / "models"
+
+
+MODELS_DIR = Path(os.environ.get("HEXSET_UI_MODELS_DIR") or default_models_dir())
 
 # The base board seats four, so a game does too, whatever its claimed seats: a
 # served checkpoint hard-rejects a mismatched player count.
@@ -163,6 +174,10 @@ MAX_NAME_LENGTH = 40
 
 # How long a game survives with nobody touching it.
 TABLE_TTL_SECONDS = 24 * 60 * 60
+
+# How long a code with no game behind it is remembered as one, so a burst of
+# reads for it scans the journal directory once.
+MISS_SECONDS = 5.0
 
 # The cap on a read's `wait`: the longest it may park for a change.
 MAX_WAIT_SECONDS = 25.0
@@ -195,13 +210,25 @@ def new_code(taken: set[str]) -> str:
             return code
 
 
-def clean_name(name: str | None) -> str | None:
+def clean_name(name: object) -> str | None:
     """A display name, trimmed and capped the same way everywhere one is
-    accepted, or `None` if there's nothing left of it once trimmed."""
+    accepted, or `None` if there's nothing left of it once trimmed. Anything
+    but a string or `None` is a 400."""
     if name is None:
         return None
+    if not isinstance(name, str):
+        raise ApiError("a name is a string")
     name = name.strip()[:MAX_NAME_LENGTH]
     return name or None
+
+
+def seat_field(payload: dict, key: str = "seat") -> int:
+    """A seat number out of a request body: an integer, or a 400. Whether
+    the table has that seat is the route's own check."""
+    value = payload.get(key)
+    if type(value) is not int:
+        raise ApiError(f"`{key}` is a seat number")
+    return value
 
 
 # What a client is on the wire: a hash of a secret it alone holds, used to
@@ -302,7 +329,9 @@ def _check_version(table: "Table", version: int | None) -> None:
     """The optional `version` an acting request can send: 409 if the table has
     moved since the caller read `state()`, rather than applying
     `index`/`seat`/`bundle` meant for an older position. `None` skips the
-    check."""
+    check; anything but an integer is a 400."""
+    if version is not None and type(version) is not int:
+        raise ApiError("`version` is the table's version number")
     if version is not None and version != table.version:
         raise ApiError(f"the table has moved (version {table.version}); read state again", status=409)
 
@@ -352,7 +381,9 @@ class Seat:
 @dataclass
 class Table:
     """A row of seats, a code to reach them by, and the game they're playing.
-    `runners` is every embedded bot-client thread playing a seat here."""
+    `runners` is every embedded bot-client thread playing a seat here, and
+    `stopping` every one told to stop when its seat changed bot, which
+    finishes on its own once the table's lock is free."""
 
     code: str
     seats: list[Seat]
@@ -361,6 +392,7 @@ class Table:
     layout: dict
 
     runners: list[tuple[BotRunner, threading.Thread]] = field(default_factory=list, repr=False)
+    stopping: list[tuple[BotRunner, threading.Thread]] = field(default_factory=list, repr=False)
     last_seen: float = field(default_factory=time.monotonic)
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
@@ -398,9 +430,10 @@ class Table:
         # A runner parked on a long poll cannot see `stop` until woken, and one
         # mid-decision finishes first, which the join below allows for.
         self.bump()
-        for _, thread in self.runners:
+        for _, thread in self.runners + self.stopping:
             thread.join(timeout=15.0)
         self.runners.clear()
+        self.stopping.clear()
 
     def close(self) -> None:
         """Stop every embedded bot runner, then close the journal. Order
@@ -468,10 +501,13 @@ class Table:
         return state
 
 
-def spawn_bot(spec: str, board: Board, rng: random.Random, config: Config) -> Bot:
+def spawn_bot(
+    spec: str, board: Board, rng: random.Random, config: Config, players: int | None = None,
+) -> Bot:
     """One spec (`model_options()`) as a live bot on `board`: a preset name is
     a registered opponent, anything else a path to a checkpoint. How a
-    checkpoint wants to be played is read out of the file by `onnxbot.spawn`.
+    checkpoint wants to be played is read out of the file by `onnxbot.spawn`,
+    which refuses one trained for other than the table's `players`.
     """
     if spec not in PRESETS:
         catanatron_seatable()  # a resumed game names a spec no picker built
@@ -481,7 +517,29 @@ def spawn_bot(spec: str, board: Board, rng: random.Random, config: Config) -> Bo
 
     from hexset.clients.onnxbot import spawn  # onnxruntime-free import boundary
 
-    return spawn(spec, board, rng=rng, device=config.device)
+    return spawn(spec, board, rng=rng, device=config.device, players=players)
+
+
+def seat_spawn(name: str | None, spec: str, board: Board, config: Config, players: int) -> Bot:
+    """`spawn_bot` for a seat about to be filled, run before anything about
+    the table changes. Whatever stops the spec from becoming a bot -- a
+    checkpoint naming a trader nobody registered, a file that will not load,
+    a missing runtime -- is a 400 naming the opponent and the reason, so the
+    caller has nothing to undo."""
+    try:
+        return spawn_bot(spec, board, random.Random(), config, players)
+    except Exception as error:
+        raise ApiError(f"cannot seat {name or spec}: {type(error).__name__}: {error}") from None
+
+
+def deal(config: Config) -> tuple[int, Board]:
+    """The seed a new game is dealt from and the board it deals, so the bots
+    can be spawned on that board before the game exists. Always a concrete
+    seed, so the journal can name the one a resumed game rebuilds from."""
+    seed = config.seed
+    if seed is None:
+        seed = random.SystemRandom().randrange(2**31)
+    return seed, random_base_board(random.Random(seed))
 
 
 def _seat_labels(
@@ -497,19 +555,22 @@ def _seat_labels(
     return bot_names, bot_specs, player_names, clients
 
 
-def build_session(code: str, seats: list[Seat], config: Config, *, first: int) -> GameSession:
+def build_session(
+    code: str,
+    seats: list[Seat],
+    config: Config,
+    *,
+    first: int,
+    dealt: tuple[int, Board] | None = None,
+) -> GameSession:
     """A fresh `MAX_SEATS`-seat game, `first` the seat the setup snake opens
-    on (`Tables.create` passes `0`; a resume passes what the journal
-    recorded). Seats not claimed here are left for `Table.join`/`lock_seat`."""
-    seed = config.seed
-    # Always resolved to a concrete int, so the journal can name the seed a
-    # resumed game rebuilds its board from.
-    if seed is None:
-        seed = random.SystemRandom().randrange(2**31)
+    on, journalled from its header on. `dealt` is the `(seed, board)` `deal`
+    returned, when the caller needed the board first; `None` deals one here.
+    Seats not claimed here are left for `Table.join`/`lock_seat`."""
+    seed, board = dealt if dealt is not None else deal(config)
     # Two Random instances from the same seed, not one shared stream, since
     # `reopen_session` rebuilds a game this way and could not otherwise
     # reconstruct `start`'s rng position.
-    board = random_base_board(random.Random(seed))
     game = start(board, MAX_SEATS, random.Random(seed), first=first)
     # This table drives its own trading (`GameSession.begin_round`, spread over
     # as many requests as its seats need).
@@ -557,8 +618,9 @@ def reopened_seats(events: list[dict]) -> list[Seat]:
 
 def _opening_session(code: str, seats: list[Seat], events: list[dict]) -> GameSession | None:
     """The game `events` opens with — dealt from the header's seed, seated as
-    `seats` says, nothing played into it yet — or `None` when the file does not
-    open like a game.
+    `seats` says, nothing played into it and no seat retired yet (`restore`
+    retires each where the file says) — or `None` when the file does not open
+    like a game.
 
     A header with no seed is a game this server did not deal
     (`journal.journal_of`): its board is the header's own, and its chance
@@ -576,12 +638,6 @@ def _opening_session(code: str, seats: list[Seat], events: list[dict]) -> GameSe
         game = start(board, MAX_SEATS, random.Random(seed), first=first)
     # The trade round is this table's protocol, driven by the session.
     game.trade_mode = "external"
-    game.locked = journal.locked_seats(events)
-    # Seeding `locked` does not move `current_player` off a retired seat, so
-    # the snake has to be pointed past those seats too, or every step replays
-    # one seat out of step.
-    if game.phase in SETUP_PHASES:
-        advance_setup(game)
     claimed = {i for i, s in enumerate(seats) if s.kind is not SeatKind.EMPTY}
     return GameSession(
         game=game,
@@ -604,24 +660,33 @@ def replay_session(code: str, seats: list[Seat], events: list[dict], upto: int) 
         return None
     steps, _ = journal.replayable_rounds(events)
     notes = {at: note for at, note in journal.notes_of(events).items() if at < upto}
-    session.restore(steps[:upto], notes=notes)
+    retired = {at: seats for at, seats in journal.retirements(events).items() if at <= upto}
+    session.restore(steps[:upto], notes=notes, retired=retired)
     return session
 
 
-def reopen_session(code: str, seats: list[Seat], path: Path, events: list[dict]) -> GameSession | None:
+def reopen_session(
+    code: str, seats: list[Seat], path: Path, events: list[dict], *, attach: bool = True
+) -> GameSession | None:
     """The game `path` records, replayed back to exactly where it stopped, or
     `None` when there is nothing left to hand back. Which of three cases a file
     is, is decided from the *replayed game*, never from its closing line, which
     both a won and an abandoned game write: `is_over` comes back read-only with
     no `Journal`, still in play comes back live and journalling onward into the
-    same file, and closed but not over is gone (`None`, a 404)."""
+    same file, and closed but not over is gone (`None`, a 404). `attach=False`
+    leaves a live game unjournalled for the caller to `resume_journal` once
+    nothing else can fail."""
     session = _opening_session(code, seats, events)
     if session is None:
         return None
     closed = journal.is_closed(events)
     try:
         # No journal until the replay says whether this game is still live.
-        session.restore(journal.replayable(events), notes=journal.notes_of(events))
+        session.restore(
+            journal.replayable(events),
+            notes=journal.notes_of(events),
+            retired=journal.retirements(events),
+        )
     except (ResumeError, ValueError, KeyError) as error:
         # The file is kept, but closed, so the next request deals a game
         # instead of failing this way forever.
@@ -634,21 +699,33 @@ def reopen_session(code: str, seats: list[Seat], path: Path, events: list[dict])
         return session
     if closed:
         return None
+    if attach:
+        resume_journal(session, path)
+    return session
+
+
+def resume_journal(session: GameSession, path: Path) -> None:
+    """Journal a reopened live game onward into the file it was replayed
+    from, marking the seam."""
     session.journal = journal.Journal(directory=str(path.parent), game_id=path.stem)
     session.journal.reopened(at_step=session.steps)
-    return session
 
 
 class Tables:
     """Every live game, and the operations the API is made of. Two lock
     granularities: `_registry_lock` guards the dict of games, while each table
     carries its own lock around the game mutation, so one game's turn does not
-    stall every other game's requests."""
+    stall every other game's requests. Nothing slow runs under
+    `_registry_lock`: a reopen reads, replays and spawns with it released."""
 
     def __init__(self, config: Config | None = None) -> None:
         self.config = config or Config()
         self._tables: dict[str, Table] = {}
         self._registry_lock = threading.Lock()
+        # One lock per code being reopened, so two reads of it reopen it once.
+        self._reopening: dict[str, threading.Lock] = {}
+        # Code -> when it was last found to have no game behind it.
+        self._misses: dict[str, float] = {}
 
     # --- registry ---------------------------------------------------------
 
@@ -661,21 +738,19 @@ class Tables:
         """A new game, dealt immediately: the creator at a random seat, any
         named bots seated alongside them, everything else open. `bots` names
         opponents from `model_options()`; none named is none seated. Turn
-        order is seat order."""
+        order is seat order. Every bot
+        is spawned before the game is dealt or journalled, so one that will
+        not spawn is a 400 that leaves nothing behind."""
         if bots is None:
             bots = []
+        if not isinstance(bots, list) or not all(isinstance(entry, str) for entry in bots):
+            raise ApiError("bots is a list of model names")
         options = model_options()
         for entry in bots:
             if entry not in options:
                 raise ApiError(f"unknown model: {entry}")
         if 1 + len(bots) > MAX_SEATS:
             raise ApiError(f"a game seats at most {MAX_SEATS}; asked for {1 + len(bots)}")
-
-        with self._registry_lock:
-            evicted = self._evict_stale(time.monotonic())
-            code = new_code(set(self._tables))
-        for table in evicted:
-            table.close()
 
         creator_seat = random.SystemRandom().randrange(MAX_SEATS)
         client = client or {"id": None, "kind": "api"}
@@ -689,9 +764,20 @@ class Tables:
             seats[seat_index] = Seat(
                 kind=SeatKind.BOT, name=entry, spec=options[entry], token=secrets.token_urlsafe(18)
             )
+        dealt = deal(self.config)
+        spawned = self._spawn_seats(seats, dealt[1])
 
-        session = build_session(code, seats, self.config, first=0)
+        with self._registry_lock:
+            evicted = self._evict_stale(time.monotonic())
+            code = new_code(set(self._tables))
+        for table in evicted:
+            table.close()
+
+        session = build_session(code, seats, self.config, first=0, dealt=dealt)
         session.confirm_mode(creator_seat)
+        for index, bot in spawned.items():
+            # A bot seat brings its own trading gate (`hexset.trading`).
+            session.set_trader(index, bot)
         table = Table(
             code=code,
             seats=seats,
@@ -705,29 +791,33 @@ class Tables:
         # to look itself up by token, which scans `_tables`.
         with self._registry_lock:
             self._tables[code] = table
-        self._spawn_local_bots(table)
+        self._start_runners(table, spawned)
 
         token = seats[creator_seat].token
         assert token is not None
         return table, token
 
-    def _spawn_local_bots(self, table: Table) -> None:
-        """Start one embedded `LocalSearchBrain` runner thread per bot seat
-        `table` already has. The runner drives its bot through the same
-        token-gated `/api/action` route an external client would use, never a
-        direct write to the session."""
-        # true state: the board is public.
-        board = table.session.game.state(0, hidden=False).board
+    def _spawn_seats(self, seats: list[Seat], board: Board) -> dict[int, Bot]:
+        """Seat -> a live bot for every bot seat in `seats`, spawned on
+        `board` (`seat_spawn`, a 400 for any that will not spawn)."""
+        spawned: dict[int, Bot] = {}
+        for index, seat in enumerate(seats):
+            if seat.kind is SeatKind.BOT:
+                assert seat.spec is not None
+                spawned[index] = seat_spawn(seat.name, seat.spec, board, self.config, len(seats))
+        return spawned
+
+    def _start_runners(self, table: Table, bots: dict[int, Bot]) -> None:
+        """Start one embedded `LocalSearchBrain` runner thread per bot in
+        `bots`, already the trader of its seat. The runner drives its bot
+        through the same token-gated `/api/action` route an external client
+        would use, never a direct write to the session."""
         transport = LocalTransport(self)
-        for index, seat in enumerate(table.seats):
-            if seat.kind is not SeatKind.BOT:
-                continue
-            assert seat.spec is not None and seat.token is not None
-            bot = spawn_bot(seat.spec, board, random.Random(), self.config)
-            # A bot seat brings its own trading gate (`hexset.trading`).
-            table.session.set_trader(index, bot)
-            brain = LocalSearchBrain(bot=bot, game=table.session.game)
-            runner = BotRunner(seat=index, token=seat.token, transport=transport, brain=brain)
+        for index, bot in bots.items():
+            token = table.seats[index].token
+            assert token is not None
+            brain = LocalSearchBrain(bot=bot, game=table.session.game, lock=table.lock)
+            runner = BotRunner(seat=index, token=token, transport=transport, brain=brain)
             thread = threading.Thread(
                 target=runner.run, name=f"bot-{table.code}-{index}", daemon=True
             )
@@ -743,45 +833,89 @@ class Tables:
             # would never reap anything.
             evicted = self._evict_stale(time.monotonic(), keep=code)
             table = self._tables.get(code)
-            if table is None:
-                table = self._reopen(code)
         for stale in evicted:
             stale.close()
+        if table is None:
+            table = self._reopen_once(code)
         if table is None:
             raise ApiError(f"no game with code {code}", status=404)
         table.last_seen = time.monotonic()
         return table
 
-    def _reopen(self, code: str) -> Table | None:
-        """Must be called with `_registry_lock` held. Puts a game back together
-        from its journal for a code the registry has lost; `None` for a code
-        with no game behind it, or one walked away from unfinished. A game
-        already over gets no bot runner."""
+    def _reopen_once(self, code: str) -> Table | None:
+        """`_reopen` for one code at a time, with `_registry_lock` held only
+        to look up and to insert. A second read of the same code waits for the
+        first and gets its table; a code found to have nothing behind it is
+        remembered for `MISS_SECONDS`."""
+        with self._registry_lock:
+            gate = self._reopening.setdefault(code, threading.Lock())
+        try:
+            with gate:
+                with self._registry_lock:
+                    table = self._tables.get(code)
+                    missed = self._misses.get(code)
+                if table is not None:
+                    return table
+                if missed is not None and time.monotonic() - missed < MISS_SECONDS:
+                    return None
+                reopened = self._reopen(code)
+                now = time.monotonic()
+                with self._registry_lock:
+                    if reopened is None:
+                        for old in [c for c, at in self._misses.items() if now - at >= MISS_SECONDS]:
+                            del self._misses[old]
+                        self._misses[code] = now
+                        return None
+                    table, spawned = reopened
+                    # Only a reader that arrived as the gate was being dropped
+                    # can have got here first; its table is the one in play.
+                    first = self._tables.setdefault(code, table)
+                    self._misses.pop(code, None)
+                if first is not table:
+                    return first
+                self._start_runners(table, spawned)
+                return table
+        finally:
+            with self._registry_lock:
+                if self._reopening.get(code) is gate:
+                    del self._reopening[code]
+
+    def _reopen(self, code: str) -> tuple[Table, dict[int, Bot]] | None:
+        """Puts a game back together from its journal for a code the registry
+        has lost, with the bots to start once it is registered; `None` for a
+        code with no game behind it, or one walked away from unfinished. A
+        game already over gets no bot. Every bot is spawned before the file is
+        written to, so one that will not spawn is a 400 that leaves the
+        journal as it was."""
         path = journal.most_recent(journal_dir(self.config), code)
         if path is None:
             return None
         # The one read of this file; both callers below work off it.
         events = journal.read(path)
         seats = reopened_seats(events)
-        session = reopen_session(code, seats, path, events)
+        session = reopen_session(code, seats, path, events, attach=False)
         if session is None:
             return None
+        live = not is_over(session.game)
+        # true state: the board is public.
+        board = session.game.state(0, hidden=False).board
+        spawned = self._spawn_seats(seats, board) if live else {}
         # A manual seat is a `PendingGate` from the moment it is claimed.
         for index, seat in enumerate(seats):
             if seat.kind is SeatKind.PLAYER:
                 session.confirm_mode(index)
+        for index, bot in spawned.items():
+            session.set_trader(index, bot)
+        if live:
+            resume_journal(session, path)
         table = Table(
             code=code,
             seats=seats,
             config=self.config,
             session=session,
-            # true state: the board is public.
-            layout=board_layout(session.game.state(0, hidden=False).board),
+            layout=board_layout(board),
         )
-        self._tables[code] = table
-        if not is_over(session.game):
-            self._spawn_local_bots(table)
-        return table
+        return table, spawned
 
     def by_token(self, token: str | None) -> tuple[Table, int]:
         """The game and seat a token names, or a 401 (no token) / 403 (unknown
@@ -881,14 +1015,15 @@ class Tables:
         table.bump()
         return table.view(seat)
 
-    def rename(self, table: Table, seat: int, name: str) -> dict:
+    def rename(self, table: Table, seat: int, name: object) -> dict:
         """`POST /api/name`: set `seat`'s display name. An empty one falls
-        back to the seat's default (`default_seat_name`), as at claim time."""
+        back to the seat's default (`default_seat_name`), as at claim time.
+        Journalled, so a reopened table keeps it."""
         clean = clean_name(name)
         if clean is None:
             clean = default_seat_name((table.seats[seat].client or {}).get("kind", "api"))
         table.seats[seat].name = clean
-        table.session.player_names[seat] = clean
+        table.session.rename(seat, clean)
         table.bump()
         return table.view(seat)
 
@@ -901,28 +1036,37 @@ class Tables:
         old bot's in-flight decision, if any, still lands. A person's seat is
         never taken over and a retired seat never revived.
 
-        The view comes back as `viewer`, the seat that *asked*, not as `seat`,
-        which would hand that seat's hand to whoever touched its picker.
+        The bot is spawned before anything changes, so one that will not
+        spawn is a 400 that leaves the seat, the session and the journal as
+        they were. The view comes back as `viewer`, the seat that *asked*, not
+        as `seat`, which would hand that seat's hand to whoever touched its
+        picker.
         """
-        require_live(table.session.game)
+        game = table.session.game
+        require_live(game)
         if not 0 <= seat < len(table.seats):
             raise ApiError(f"there is no seat {seat} at this game")
         kind = table.seats[seat].kind
         if kind is SeatKind.PLAYER:
             raise ApiError(f"seat {seat} belongs to a player")
-        if kind is SeatKind.EMPTY and seat in table.session.game.locked:
-            # Before the first move a closed seat is still the table's to
-            # change: seating a bot there reopens it. After, it is retired.
-            if table.session.steps > 0:
-                raise ApiError(f"seat {seat} has been retired from this game")
-            unlock_seat(table.session.game, seat)
-            if table.session.journal is not None:
-                table.session.journal.unlocked(seat, at_step=table.session.steps)
+        # Before the first move a closed seat is still the table's to change:
+        # seating a bot there reopens it. After, it is retired.
+        reopening = kind is SeatKind.EMPTY and seat in game.locked
+        if reopening and table.session.steps > 0:
+            raise ApiError(f"seat {seat} has been retired from this game")
         try:
             spec = model_options()[model]
         except KeyError:
             raise ApiError(f"unknown model: {model}") from None
+        # true state: the board is public.
+        bot = seat_spawn(
+            model, spec, game.state(0, hidden=False).board, self.config, game.num_players
+        )
 
+        if reopening:
+            unlock_seat(game, seat)
+            if table.session.journal is not None:
+                table.session.journal.unlocked(seat, at_step=table.session.steps)
         if kind is SeatKind.EMPTY:
             token = secrets.token_urlsafe(18)
             table.seats[seat] = Seat(kind=SeatKind.BOT, name=model, spec=spec, token=token)
@@ -940,22 +1084,15 @@ class Tables:
         for i, (runner, thread) in enumerate(table.runners):
             if runner.seat == seat:
                 runner.stop.set()
-                thread.join(timeout=2.0)
-                del table.runners[i]
+                # A runner parked on a long poll sees `stop` only once woken,
+                # and then waits for this table's lock to read the view it
+                # woke for: joined at `close`, never here under that lock.
+                table.bump()
+                table.stopping = [(r, t) for r, t in table.stopping if t.is_alive()]
+                table.stopping.append(table.runners.pop(i))
                 break
-        # true state: the board is public.
-        board = table.session.game.state(0, hidden=False).board
-        bot = spawn_bot(spec, board, random.Random(), self.config)
         table.session.set_trader(seat, bot)
-        brain = LocalSearchBrain(bot=bot, game=table.session.game)
-        token = table.seats[seat].token
-        assert token is not None
-        new_runner = BotRunner(seat=seat, token=token, transport=LocalTransport(self), brain=brain)
-        new_thread = threading.Thread(
-            target=new_runner.run, name=f"bot-{table.code}-{seat}", daemon=True
-        )
-        table.runners.append((new_runner, new_thread))
-        new_thread.start()
+        self._start_runners(table, {seat: bot})
 
         table.bump()
         return table.view(viewer)
@@ -1001,16 +1138,24 @@ class Tables:
         """`POST /api/leave`: retire your own seat for the rest of this game.
         Nothing happens to its hand or pieces, only to whose turn comes next,
         and permanently. Refuses while a trade round is open naming you as its
-        actor or as a seat it is owed an answer from: resolve that first."""
-        require_live(table.session.game)
+        actor or as a seat it is owed an answer from: resolve that first. The
+        last seat still in the game cannot leave it (409), there being nobody
+        to hand the turn to. A setup turn the seat was holding open, and its
+        own take-back, go with it (`GameSession.release`)."""
+        game = table.session.game
+        require_live(game)
+        if viewer in game.locked:
+            return table.view(viewer)
         round_ = table.session.open_round
         if round_ is not None and (round_.offer.actor == viewer or viewer in round_.awaiting):
             raise ApiError("resolve the open trade round first (answer_trade/choose_trade), then leave")
-        if viewer not in table.session.game.locked:
-            lock_seat(table.session.game, viewer)
-            if table.session.journal is not None:
-                table.session.journal.locked(viewer, at_step=table.session.steps)
-            table.bump()
+        if all(s == viewer or s in game.locked for s in range(game.num_players)):
+            raise ApiError("you are the last seat in this game; there is nobody to hand it to", status=409)
+        lock_seat(game, viewer)
+        table.session.release(viewer)
+        if table.session.journal is not None:
+            table.session.journal.locked(viewer, at_step=table.session.steps)
+        table.bump()
         return table.view(viewer)
 
     # --- the trade round (`hexset.trading`, "The trade round") --------------
@@ -1021,7 +1166,8 @@ class Tables:
         `RESOURCE_NAMES` order, on disjoint resources and covered by the hand;
         `"give_any"`/`"want_any"` add any cards to one side, which makes the
         offer an invitation to counter (`hexset.trading.Offer.any`).
-        How many cards is the seat's own business. Only on `seat`'s own turn in MAIN (409) and only
+        How many cards is the seat's own business. Only on `seat`'s own turn
+        in MAIN with no Road Building roads still to place (409), and only
         while `seat` holds `give` (400). Bots answer at once; a manual seat
         answers later. The returned view's `trade_round` carries the answers
         so far and who is still to answer."""
@@ -1030,6 +1176,8 @@ class Tables:
             raise ApiError(f"trading is only open in MAIN, not {game.phase.name}", status=409)
         if game.current_player != seat:
             raise ApiError("it is not your turn to open a round", status=409)
+        if pending_free_roads(game):
+            raise ApiError("place the roads Road Building owes first", status=409)
         received, any_cards = round_offer_from_wire(
             payload.get("give") or [], payload.get("want") or [],
             payload.get("give_any", 0), payload.get("want_any", 0),
@@ -1047,7 +1195,8 @@ class Tables:
         "received": [5 ints], "kind": "accept"|"counter"|"pass", "bundle":
         [5 ints]?}`. `received` is the exact offer this seat's `pending`
         showed, signed towards `actor`; `bundle` is the counter, signed the
-        same way. 409 for an offer no longer open."""
+        same way. 409 for an offer no longer open, for a seat the round is not
+        waiting on, and for an accept or counter the seat cannot cover."""
         _check_version(table, payload.get("version"))
         actor = payload.get("actor")
         if not isinstance(actor, int):
@@ -1292,15 +1441,13 @@ class Tables:
         if method == "POST" and path == "/api/undo":
             return self.undo(table, seat)
         if method == "POST" and path == "/api/name":
-            return self.rename(table, seat, str(payload.get("name", "")))
+            return self.rename(table, seat, payload.get("name"))
         if method == "POST" and path == "/api/bot":
-            return self.seat_bot(
-                table, seat, int(payload.get("seat", -1)), str(payload.get("model", ""))
-            )
+            return self.seat_bot(table, seat, seat_field(payload), str(payload.get("model", "")))
         if method == "POST" and path == "/api/open":
-            return self.open_seat(table, seat, int(payload.get("seat", -1)))
+            return self.open_seat(table, seat, seat_field(payload))
         if method == "POST" and path == "/api/close":
-            return self.close_seat(table, seat, int(payload.get("seat", -1)))
+            return self.close_seat(table, seat, seat_field(payload))
         if method == "POST" and path == "/api/leave":
             return self.leave_seat(table, seat)
         if method == "POST" and path == f"/api/games/{table.code}/trade/round":

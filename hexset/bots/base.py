@@ -50,8 +50,9 @@ class TradesBy:
     and the arena look up (``candidates``, ``offer``, ``respond``,
     ``respond_any``, ``pick``, ``consent_gain``, ``gains_many``,
     ``estimate_many``, ``observe_trade``, ``trade_params``, the offer budget)
-    -- is the trader's, read and written through, so
-    ``hexset.trading.retune`` on the seat retunes the trader.
+    -- is the trader's, read, written and deleted through, so
+    ``hexset.trading.retune`` on the seat retunes the trader and reinstalls
+    its protocol.
     Neither side knows about the other: any bot can move and any gate can
     trade. The trader is only ever asked about exchanges, so a search bot used
     as one never searches a move.
@@ -71,6 +72,9 @@ class TradesBy:
 
     def __setattr__(self, name: str, value) -> None:
         setattr(self.trader, name, value)
+
+    def __delattr__(self, name: str) -> None:
+        delattr(self.trader, name)
 
     def __reduce__(self):
         return (TradesBy, (self.mover, self.trader))

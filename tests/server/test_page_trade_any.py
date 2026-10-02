@@ -19,7 +19,7 @@ from hexset.actions import ActionType, legal_actions
 from hexset.game import to_move
 from hexset.server.api import Config, Seat, SeatKind, build_session
 
-from _page_server import serving
+from _page_server import launch, serving
 
 
 try:
@@ -102,7 +102,7 @@ def _seated_page(browser):
 
 def test_an_incoming_open_offer_can_only_be_countered(running_server):
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        browser = launch(playwright)
         try:
             context, page = _seated_page(browser)
             page.evaluate(
@@ -127,7 +127,7 @@ def test_an_incoming_open_offer_can_only_be_countered(running_server):
 
 def test_our_open_offer_shows_its_any_card_in_the_acceptance_pane(running_server):
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        browser = launch(playwright)
         try:
             context, page = _seated_page(browser)
             page.evaluate(
@@ -153,7 +153,7 @@ def test_our_open_offer_shows_its_any_card_in_the_acceptance_pane(running_server
 
 def test_composing_an_offer_for_any_card_posts_want_any(running_server):
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        browser = launch(playwright)
         try:
             context, page = _seated_page(browser)
             posted = []

@@ -17,7 +17,7 @@ from typing import Sequence
 
 import numpy as np
 
-from .actions import Action, ActionSpace, legal_actions
+from .actions import Action, ActionSpace, ActionType, legal_actions
 from .board.board import Board
 from .board.terrain import NUM_RESOURCES
 from .cards import NUM_DEV_CARDS
@@ -32,6 +32,7 @@ __all__ = [
     "CONTRACT_VERSION",
     "RECORD_FIELDS",
     "record_shapes",
+    "NO_MOVE",
     "record_from_game",
     "record_batch",
 ]
@@ -114,6 +115,13 @@ def _port_code(board: Board) -> np.ndarray:
     return codes
 
 
+#: The mask of a record whose perspective seat has no move of its own -- a
+#: value-only row for a seat that is not acting. The graph normalises its
+#: prior over the legal entries, so a mask needs at least one, and this one is
+#: the same for every position: it says nothing about any seat's cards.
+NO_MOVE = Action(ActionType.END_TURN)
+
+
 def record_from_game(
     game: Game,
     perspective: int | None,
@@ -121,8 +129,12 @@ def record_from_game(
     options: Sequence[Action] | None = None,
 ) -> dict[str, np.ndarray]:
     """The information-set record for `perspective`, one unbatched row per
-    field. `perspective` defaults to `to_move(game)`, since the mask belongs
-    to whoever is to move; `options` defaults to `legal_actions(game)`."""
+    field. `perspective` defaults to `to_move(game)`.
+
+    `options` defaults to the perspective seat's own legal actions
+    (`legal_actions(game, perspective)`), and to `NO_MOVE` alone where it has
+    none, so the mask never encodes another seat's moves: they would read
+    that seat's hand."""
     state = game._state
     players = state.num_players
     if perspective is None:
@@ -131,7 +143,7 @@ def record_from_game(
         raise ValueError(f"no such player: {perspective}")
 
     if options is None:
-        options = legal_actions(game)
+        options = legal_actions(game, perspective) or (NO_MOVE,)
     mask = np.zeros(space.size, dtype=bool)
     for action in options:
         mask[space.index(action)] = True

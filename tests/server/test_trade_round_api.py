@@ -334,3 +334,160 @@ def test_a_persons_offer_and_the_answers_go_on_the_ledger():
     # The cards moved: both wants met, both wastes used up.
     assert ledger.seats[human].want == [0] * 5 and ledger.seats[human].waste == [0] * 5
     assert ledger.seats[bot].want == [0] * 5 and ledger.seats[bot].waste == [0] * 5
+
+
+# --- who may answer, what an answer must cover, and when a round may run ---------
+
+
+class _Budgeted(_Wants):
+    """`_Wants`, declaring its offer budget the way a gate does: through
+    `trade_params`, with no loose `trade_offer_budget` attribute."""
+
+    def __init__(self, resource: int, max_offers: int):
+        super().__init__(resource)
+        from hexset.trading import TradeParams
+
+        self.trade_params = TradeParams(max_offers=max_offers, trade_floor=0.0)
+
+
+class _WaitsForItsMoment(_Wants):
+    """A gate that goes to the table only once it has built something."""
+
+    def __init__(self, resource: int):
+        super().__init__(resource)
+        self.ready = False
+
+    def trade_now(self, game) -> bool:
+        return self.ready
+
+
+def test_an_accept_the_seat_cannot_cover_is_refused_like_a_counter():
+    registry, table, code, token, human, bot = _table(actor_is_human=False, other_gate=_Wants(Resource.ORE))
+    table.session.begin_round()
+    state = table.session.game._state
+    state.hands[human][Resource.ORE] = 0  # the ore it would give went elsewhere
+    state.bank[Resource.ORE] += 1
+
+    with pytest.raises(ApiError) as accepted:
+        registry.handle("POST", f"/api/games/{code}/trade/round/answer",
+                        {"actor": bot, "received": WOOD_FOR_ORE, "kind": "accept"}, token)
+    with pytest.raises(ApiError) as countered:
+        registry.handle("POST", f"/api/games/{code}/trade/round/answer",
+                        {"actor": bot, "received": WOOD_FOR_ORE, "kind": "counter",
+                         "bundle": [-2, 0, 0, 0, 1]}, token)
+
+    assert accepted.value.status == countered.value.status == 409
+    assert str(accepted.value) == str(countered.value)
+    assert table.session.open_round.awaiting == {human}, "still waiting on a real answer"
+
+
+def test_the_actor_cannot_answer_its_own_round():
+    registry, table, code, token, human, bot = _table(actor_is_human=True, other_gate=_NeverWants())
+    registry.handle("POST", f"/api/games/{code}/trade/round",
+                    {"give": [1, 0, 0, 0, 0], "want": [0, 0, 0, 0, 1]}, token)
+
+    with pytest.raises(ApiError, match="not waiting on your answer") as refused:
+        registry.handle("POST", f"/api/games/{code}/trade/round/answer",
+                        {"actor": human, "received": WOOD_FOR_ORE, "kind": "accept"}, token)
+    assert refused.value.status == 409
+    assert all(r.seat != human for r in table.session.open_round.responses)
+
+
+def test_a_seat_answers_a_round_once():
+    registry, table, code, token, human, bot = _table(actor_is_human=False, other_gate=_Wants(Resource.ORE))
+    session = table.session
+    # Two people at the table, so the first answer leaves the round open.
+    second = next(s for s in range(4) if s not in (human, bot))
+    session.confirm_mode(second)
+    session.game._state.hands[second][Resource.WOOD] = 1
+    session.begin_round()
+    registry.handle("POST", f"/api/games/{code}/trade/round/answer",
+                    {"actor": bot, "received": WOOD_FOR_ORE, "kind": "pass"}, token)
+
+    with pytest.raises(ApiError, match="not waiting on your answer"):
+        registry.handle("POST", f"/api/games/{code}/trade/round/answer",
+                        {"actor": bot, "received": WOOD_FOR_ORE, "kind": "accept"}, token)
+
+
+def test_undo_is_refused_while_the_seats_own_round_is_open():
+    registry, table, code, token, human, bot = _table(actor_is_human=True, other_gate=_Wants(Resource.WOOD))
+    state = table.session.game._state
+    state.hands[human][Resource.BRICK] = 4
+    state.bank[Resource.BRICK] -= 4
+    bank_trade = next(a for a in registry.handle("GET", "/api/state", {}, token)["legal_actions"]
+                      if a["type"] == "BANK_TRADE" and a["a"] == Resource.BRICK)
+    registry.handle("POST", "/api/action", {"action": bank_trade}, token)
+    assert registry.handle("GET", "/api/state", {}, token)["can_undo"] is True
+
+    view = registry.handle("POST", f"/api/games/{code}/trade/round",
+                           {"give": [1, 0, 0, 0, 0], "want": [0, 0, 0, 0, 1]}, token)
+
+    assert view["can_undo"] is False
+    with pytest.raises(ApiError, match="open trade round"):
+        registry.handle("POST", "/api/undo", {}, token)
+    registry.handle("POST", f"/api/games/{code}/trade/round/choose", {"decline": True}, token)
+    assert registry.handle("GET", "/api/state", {}, token)["can_undo"] is True
+
+
+def _owe_road_building(table) -> None:
+    """Leave the actor two Road Building roads to place, with somewhere to
+    place them."""
+    game = table.session.game
+    game._state.edge_owner[0] = game.current_player
+    game.free_roads = 2
+
+
+def test_no_round_opens_while_road_building_roads_are_owed():
+    registry, table, code, token, human, bot = _table(actor_is_human=True, other_gate=_Wants(Resource.WOOD))
+    _owe_road_building(table)
+
+    with pytest.raises(ApiError, match="Road Building") as refused:
+        registry.handle("POST", f"/api/games/{code}/trade/round",
+                        {"give": [1, 0, 0, 0, 0], "want": [0, 0, 0, 0, 1]}, token)
+    assert refused.value.status == 409
+    assert table.session.open_round is None
+
+
+def test_no_answer_is_picked_while_road_building_roads_are_owed():
+    registry, table, code, token, human, bot = _table(actor_is_human=True, other_gate=_Wants(Resource.WOOD))
+    registry.handle("POST", f"/api/games/{code}/trade/round",
+                    {"give": [1, 0, 0, 0, 0], "want": [0, 0, 0, 0, 1]}, token)
+    _owe_road_building(table)
+
+    with pytest.raises(ApiError, match="Road Building"):
+        registry.handle("POST", f"/api/games/{code}/trade/round/choose",
+                        {"seat": bot, "bundle": WOOD_FOR_ORE}, token)
+    assert table.session.game.trades == []
+
+
+def test_a_bot_does_not_open_a_round_while_road_building_roads_are_owed():
+    _registry, table, _code, _token, human, bot = _table(actor_is_human=False, other_gate=_Wants(Resource.ORE))
+    _owe_road_building(table)
+
+    table.session.begin_round()
+
+    assert table.session.open_round is None
+
+
+def test_a_bot_offers_no_more_than_its_declared_budget():
+    _registry, table, _code, _token, human, bot = _table(actor_is_human=False, other_gate=_Wants(Resource.ORE))
+    session = table.session
+    session.set_trader(bot, _Budgeted(Resource.ORE, max_offers=0))
+
+    session.begin_round()
+
+    assert session.open_round is None, "a budget of no offers makes none"
+
+
+def test_a_bot_with_trade_now_opens_its_round_when_it_says_so():
+    _registry, table, _code, _token, human, bot = _table(actor_is_human=False, other_gate=_Wants(Resource.ORE))
+    session = table.session
+    gate = _WaitsForItsMoment(Resource.ORE)
+    session.set_trader(bot, gate)
+
+    session.begin_round()
+    assert session.open_round is None, "not yet: the window stays open"
+    gate.ready = True
+    session.begin_round(entering=False)  # after one of its main-phase actions
+    assert session.open_round is not None
+    assert table.view(human)["pending"] == [{"actor": bot, "bundle": WOOD_FOR_ORE}]

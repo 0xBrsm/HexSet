@@ -257,6 +257,27 @@ def test_a_gate_at_zero_offers_is_the_off_switch():
     assert not traders[0].asked, "a switched-off event should not even ask a gate"
 
 
+def test_a_counterparty_at_zero_offers_signs_nothing_either():
+    """The clearing house never deals with a gate that does not trade, even
+    as the counterparty to a deal it would price above its floor."""
+    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1), (2, Resource.ORE, 1))
+    traders = [Trader(wants(ORE)), Trader(wants(WOOD)), Trader(wants(WOOD)), Trader()]
+    traders[1].trade_params = TradeParams(max_offers=0)
+    done = run(game, traders)
+    assert done and all(trade.b == 2 for trade in done)
+    assert not traders[1].asked
+
+
+def test_a_boolean_gates_tie_clears_the_smallest_exchange():
+    """Every candidate both sides want prices the same, so the tie-break
+    decides, and it decides for the fewest cards moved."""
+    game = stocked((0, Resource.WOOD, 3), (1, Resource.ORE, 3))
+    traders = [Trader(wants(ORE)), Trader(wants(WOOD)), Trader(), Trader()]
+    traders[0].trade_params = TradeParams(max_offers=1)
+    [trade] = run(game, traders)
+    assert trade.received == one_for_one(WOOD, ORE)
+
+
 def test_the_count_and_the_log_reset_with_the_turn():
     game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
     run(game, [Trader(wants(ORE)), Trader(wants(WOOD)), Trader(), Trader()])

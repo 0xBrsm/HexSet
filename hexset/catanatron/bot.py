@@ -97,7 +97,11 @@ class CatanatronBot:
     plays on information a hexset seat may not see. `worlds>0` is the
     information-set read, where each mirror is a world sampled from the
     mover's own `View`. Zero is the default because it is how catanatron's
-    own players play: the reference as published."""
+    own players play: the reference as published.
+
+    `rng` is this seat's own stream, for the catanatron player's search and
+    the world sampling; without one the seat draws a fresh, unseeded stream,
+    never the live game's chance stream."""
 
     def __init__(
         self, player: Callable[[Color], Player] | None = None,
@@ -106,6 +110,7 @@ class CatanatronBot:
         world_key: WorldKey = world_signature,
     ) -> None:
         self.player = player or alpha_beta(2)
+        rng = random.Random() if rng is None else rng
         self._rng = rng
         self._mapping = None
         self._seats = None
@@ -113,8 +118,7 @@ class CatanatronBot:
         self._table = None
         # Sampling must not consume the reference player's search stream.
         sampling_rng = random.Random(0)
-        if rng is not None:
-            sampling_rng.setstate(rng.getstate())
+        sampling_rng.setstate(rng.getstate())
         self._choose = determinized(
             self._decide, worlds, sampling_rng, temperature=temperature,
             select=select, world_key=world_key,

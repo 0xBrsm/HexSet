@@ -16,7 +16,7 @@ from hexset.game import is_over, to_move
 from hexset.server.api import Config, Seat, SeatKind, build_session
 from hexset.server.wire import action_to_wire
 
-from _page_server import serving
+from _page_server import launch, serving
 
 
 try:
@@ -99,7 +99,7 @@ def _assert_boxes_unchanged(before: dict, after: dict) -> None:
 
 def test_clicking_a_player_reveals_cards_in_place(running_server):
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        browser = launch(playwright)
         try:
             context = browser.new_context()
             page = context.new_page()

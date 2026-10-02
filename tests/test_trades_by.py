@@ -69,3 +69,22 @@ def test_a_random_mover_trades_through_a_registered_gate_at_a_real_table():
 
     assert sum(own_trades(alone, i) for i in range(4)) == 0
     assert sum(own_trades(entrants, i) for i in range(4)) > 0
+
+
+def test_retuning_a_seat_whose_trader_carries_a_protocol_reinstalls_it_on_the_trader():
+    """The hooks live on the trader, so a retune through the seat sets and
+    takes them back there."""
+    from dataclasses import replace
+
+    from hexset.trading import TradeProtocol, install
+    from traders import FRAGMENTED
+
+    trader = ScarcityTrader(random.Random(1), replace(FRAGMENTED, fragment_trades=False))
+    install(trader, TradeProtocol(trader, trader.trade, seed=0))
+    seat = TradesBy(RandomBot(random.Random(2)), trader)
+    assert seat.respond.__self__ is trader._protocol
+
+    retune(seat, max_give_cards=1)
+    assert trader.trade.max_give_cards == 1 and trader._protocol.params.max_give_cards == 1
+    retune(seat, max_offers=0)
+    assert getattr(trader, "respond", None) is None and getattr(seat, "pick", None) is None

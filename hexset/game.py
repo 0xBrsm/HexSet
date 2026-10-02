@@ -19,7 +19,7 @@ from .devcards import (
     play_year_of_plenty,
     spend_card,
 )
-from .economy import Purchase, bank_trade, distribute, hand_size, pay
+from .economy import Purchase, bank_trade, check_afford, distribute, hand_size, pay
 from .ledger import PublicLedger
 from .robber import allowed_targets, check_target, discard, discard_count, move_robber, steal, victims
 from .rules import STANDARD, STANDARD_GAME, GameType, Rules
@@ -34,6 +34,9 @@ from .state import (
     MAX_ROADS,
     NO_OWNER,
     GameState,
+    check_city,
+    check_road,
+    check_settlement,
     copy_state,
     is_hidden,
     new_game,
@@ -568,10 +571,12 @@ def roll_dice(game: Game, roll: int | None = None) -> int:
     _require(game, Phase.ROLL)
     if pending_free_roads(game):
         raise ValueError("place the remaining free roads before rolling")
-    # Unplaceable credit expires with the card's resolution.
-    game.free_roads = 0
     if roll is None:
         roll = game.chance.roll()
+    if not MIN_ROLL <= roll <= MAX_ROLL:
+        raise ValueError(f"two dice cannot roll {roll}")
+    # Unplaceable credit expires with the card's resolution.
+    game.free_roads = 0
     game.last_roll = roll
 
     if roll == 7:
@@ -635,16 +640,26 @@ def may_act(game: Game, seat: int) -> bool:
 
 
 def _finish_discards(game: Game) -> None:
-    if not any(game.discard_quota):
+    """Close the discard round once nothing is owed: on to the robber, or --
+    when the seat that rolled the seven retired during the round -- straight
+    to the next seat's turn, there being nobody left to move the robber."""
+    if any(game.discard_quota):
+        return
+    if game.current_player in game.locked:
+        _close_turn(game)
+    else:
         game.phase = Phase.ROBBER
 
 
 def submit_discard(game: Game, player: int, cards: list[int]) -> None:
     """Discard `player`'s whole quota at once, `cards` counted per resource.
-    Raises `ValueError` outside `Phase.DISCARD`, for no such seat, or when
-    `cards` does not total the quota or the hand cannot cover it."""
+    Raises `ValueError` outside `Phase.DISCARD`, for no such seat, when the
+    seat owes nothing, or when `cards` does not total the quota or the hand
+    cannot cover it."""
     _require(game, Phase.DISCARD)
     _require_seat(game, player)
+    if game.discard_quota[player] < 1:
+        raise ValueError(f"player {player} owes no discard")
     if game.discard_quota[player] != sum(cards):
         raise ValueError(f"player {player} must discard {game.discard_quota[player]}")
     before = _snapshot_hands(game)
@@ -704,10 +719,12 @@ def move_robber_to(game: Game, target: int, victim: int | None = None) -> None:
         raise ValueError(f"the robber on hex {target} must rob one of seats {list(robbable)}")
     if victim is not None and victim not in robbable:
         raise ValueError(f"seat {victim} cannot be robbed on hex {target}")
+    # The steal draws before the robber moves, so a chance source that
+    # refuses (a host's stream out of step) leaves the board as it was.
+    stolen = None if victim is None else steal(state, thief, victim, game.chance)
     move_robber(state, target)
     game.robber_allowed = None      # the rule was for this move alone
     if victim is not None:
-        stolen = steal(state, thief, victim, game.chance)
         _record_steal(game, thief, victim, stolen)
     game.phase = game.resume_phase
     run_trade_event(game)
@@ -759,11 +776,17 @@ def pending_free_roads(game: Game) -> list[int]:
 
 
 def build_road(game: Game, edge: int) -> None:
-    """Build a road, spending a free road from road building if one is owed."""
-    if game.phase is not Phase.ROLL or game.free_roads <= 0:
+    """Build a road, spending a free road from road building if one is owed.
+
+    Like every entry point here, it checks the whole action before it
+    changes anything: an illegal call raises `ValueError` and leaves the
+    game exactly as it was."""
+    free = game.free_roads > 0
+    if game.phase is not Phase.ROLL or not free:
         _require(game, Phase.MAIN)
+    check_road(game._state, game.current_player, edge)
     before = _snapshot_hands(game)
-    if game.free_roads > 0:
+    if free:
         game.free_roads -= 1
     else:
         pay(game._state, game.current_player, Purchase.ROAD)
@@ -775,9 +798,11 @@ def build_road(game: Game, edge: int) -> None:
 
 def build_settlement(game: Game, vertex: int) -> None:
     """Build and pay for the current seat's settlement on `vertex`, ending the
-    game if it wins. Raises `ValueError` outside `Phase.MAIN`, while a Road
-    Building road is owed, or when the seat cannot settle there or afford it."""
+    game if it wins. Raises `ValueError`, changing nothing, outside
+    `Phase.MAIN`, while a Road Building road is owed, or when the seat cannot
+    settle there or afford it."""
     _require_main(game)
+    check_settlement(game._state, game.current_player, vertex)
     before = _snapshot_hands(game)
     pay(game._state, game.current_player, Purchase.SETTLEMENT)
     game.ledger.apply_hand_diff(before, game._state.hands)
@@ -792,10 +817,11 @@ def build_settlement(game: Game, vertex: int) -> None:
 
 def build_city(game: Game, vertex: int) -> None:
     """Build and pay for the current seat's city on its settlement at `vertex`,
-    ending the game if it wins. Raises `ValueError` outside `Phase.MAIN`,
-    while a Road Building road is owed, or when the seat cannot upgrade there
-    or afford it."""
+    ending the game if it wins. Raises `ValueError`, changing nothing, outside
+    `Phase.MAIN`, while a Road Building road is owed, or when the seat cannot
+    upgrade there or afford it."""
     _require_main(game)
+    check_city(game._state, game.current_player, vertex)
     before = _snapshot_hands(game)
     pay(game._state, game.current_player, Purchase.CITY)
     game.ledger.apply_hand_diff(before, game._state.hands)
@@ -808,6 +834,12 @@ def buy_development_card(game: Game) -> DevCard | int:
     host drew the card: `game.chance.draw()` says which, or `chance.UNSEEN`
     for a seat whose cards are hidden -- which is then what this returns."""
     _require_main(game)
+    state = game._state
+    if not state.deck:
+        raise ValueError("the development deck is empty")
+    # Checked before the host is asked which card it drew, so a refused
+    # purchase consumes no chance event.
+    check_afford(state, game.current_player, Purchase.DEV_CARD)
     before = _snapshot_hands(game)
     if is_hidden(game._state.deck):
         card = buy_drawn(game._state, game.current_player, game.chance.draw())
@@ -820,7 +852,8 @@ def buy_development_card(game: Game) -> DevCard | int:
 
 def _check_turn_card(game: Game, name: str) -> None:
     """Whether a development card may be played now at all: before rolling
-    or in `MAIN`, and only one a turn."""
+    or in `MAIN`, and only one a turn. `dev_card_played` is set by the play
+    itself, once everything about it has been checked."""
     if game.phase not in (Phase.ROLL, Phase.MAIN):
         raise ValueError(f"cannot play {name} in {game.phase.name}")
     if game.phase is Phase.MAIN:
@@ -840,8 +873,8 @@ def play_knight_card(game: Game) -> None:
     until that phase's own `MOVE_ROBBER` names a victim.
     """
     _check_turn_card(game, "a knight")
-    game.dev_card_played = True
     play_knight(game._state, game.current_player)
+    game.dev_card_played = True
     update_largest_army(game._state)
     _check_win(game)
     if game.phase is Phase.GAME_OVER:
@@ -864,8 +897,8 @@ def play_road_building_card(game: Game) -> None:
     if left < game._state.rules.road_building_min_roads:
         raise ValueError(f"road building needs {game._state.rules.road_building_min_roads} "
                          f"road pieces left, not {left}")
-    game.dev_card_played = True
     spend_card(game._state, game.current_player, DevCard.ROAD_BUILDING)
+    game.dev_card_played = True
     game._state.dev_cards_played[DevCard.ROAD_BUILDING] += 1
     game.free_roads += ROAD_BUILDING_ROADS
 
@@ -873,18 +906,18 @@ def play_road_building_card(game: Game) -> None:
 def play_year_of_plenty_card(game: Game, resources: list[Resource]) -> None:
     """Legal in `ROLL` as well as `MAIN`; see `play_road_building_card`."""
     _check_turn_card(game, "year of plenty")
-    game.dev_card_played = True
     before = _snapshot_hands(game)
     play_year_of_plenty(game._state, game.current_player, resources)
+    game.dev_card_played = True
     game.ledger.apply_hand_diff(before, game._state.hands)
 
 
 def play_monopoly_card(game: Game, resource: Resource) -> int:
     """Legal in `ROLL` as well as `MAIN`; see `play_road_building_card`."""
     _check_turn_card(game, "monopoly")
-    game.dev_card_played = True
     before = _snapshot_hands(game)
     taken = play_monopoly(game._state, game.current_player, resource, game.chance)
+    game.dev_card_played = True
     # Monopoly's transfer is fully public despite touching every seat at
     # once, so it takes `apply_hand_diff`, not a steal's hidden path.
     game.ledger.apply_hand_diff(before, game._state.hands)
@@ -1032,6 +1065,14 @@ def end_turn(game: Game) -> None:
     `Phase.ROLL`, or end the game at the turn cap. Raises `ValueError` outside
     `Phase.MAIN` or while a Road Building road is owed."""
     _require_main(game)
+    _close_turn(game)
+
+
+def _close_turn(game: Game) -> None:
+    """End `current_player`'s turn, whatever phase it is in, and start the
+    next playing seat's at `ROLL`: every per-turn field is reset, so nothing
+    of this turn survives into the next. `end_turn` is this from `MAIN`;
+    `lock_seat` reaches it from anywhere in a turn."""
     mature(game._state, game.current_player)
     game.dev_card_played = False
     game.trades = []
@@ -1041,6 +1082,7 @@ def end_turn(game: Game) -> None:
     # Free roads with nowhere legal to go are simply lost.
     game.free_roads = 0
     game.resume_phase = Phase.MAIN
+    game.robber_allowed = None
     game.turns += 1
     if game.turns >= game.turn_cap:
         game.phase = Phase.GAME_OVER
@@ -1064,8 +1106,14 @@ def lock_seat(game: Game, seat: int) -> None:
     skipped by the setup snake and by turn rotation, can never be `to_move`,
     and is never a counterparty in a trade event.
 
-    Nothing happens to its hand or pieces: this never touches `game._state`,
-    so they are abandoned in place rather than returned to the bank.
+    Retiring the seat whose turn it is ends that turn, as `end_turn` would,
+    and the next playing seat starts its own at `ROLL` -- it does not
+    inherit the rest of the retired seat's. During a discard round the
+    hand-off waits until the other seats have discarded; the robber is then
+    not moved, there being nobody to move it.
+
+    Nothing happens to its hand or pieces: its board and cards are
+    abandoned in place rather than returned to the bank.
     """
     if seat in game.locked:
         return
@@ -1082,6 +1130,6 @@ def lock_seat(game: Game, seat: int) -> None:
         game.setup_step += 1
         _advance_setup(game)
     elif game.phase in (Phase.ROLL, Phase.ROBBER, Phase.MAIN):
-        # The only phases where `to_move` reads `current_player` directly;
-        # DISCARD is handled above, GAME_OVER has no turn to hand off.
-        game.current_player = _next_unlocked(game, seat)
+        # DISCARD is handled above (`_finish_discards` hands the turn on once
+        # the round closes); GAME_OVER has no turn to hand off.
+        _close_turn(game)

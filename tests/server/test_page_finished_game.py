@@ -21,7 +21,7 @@ from hexset.game import is_over, to_move
 from hexset.server.api import Config, Seat, SeatKind, build_session
 from hexset.server.wire import action_to_wire
 
-from _page_server import serving
+from _page_server import launch, serving
 
 
 try:
@@ -116,7 +116,7 @@ def _cards_shown(page) -> int:
 @pytest.fixture(scope="module")
 def browser():
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        browser = launch(playwright)
         yield browser
         browser.close()
 

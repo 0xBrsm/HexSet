@@ -171,3 +171,48 @@ def test_a_gate_written_against_the_old_attributes_still_describes_itself():
     assert read.trade_floor == pytest.approx(0.0197)
     assert read.gate_plies == 4
     assert read.max_offers is None and not read.fragment_trades
+
+
+def test_a_fragment_is_no_wider_than_the_gate_will_move_when_it_declares_no_width():
+    """`fragment_cards=None` is read at `max_give_cards`, so a gate that
+    parts with two never plans a three-card fragment."""
+    two = replace(FRAGMENTED, fragment_cards=None, max_give_cards=2)
+    assert two.fragment_width == 2
+    assert TradeProtocol(Eager(), two).fragment_cap() == 2
+    assert replace(two, max_give_cards=None).fragment_width == ENUMERATION_CARDS
+    assert replace(two, fragment_cards=1).fragment_width == 1
+
+
+def test_install_keeps_the_protocol_so_a_retune_reinstalls_it():
+    """A gate need not keep its protocol itself: `retune` finds the one
+    `install` bound, and a change that drops every limit takes every hook
+    back."""
+    from hexset.trading import DeclaredTrade, retune
+
+    class Mine(DeclaredTrade, Eager):
+        def __init__(self, trade):
+            self.trade = trade
+            install(self, TradeProtocol(self, trade, seed=0))
+
+    gate = Mine(replace(UNLIMITED, max_give_cards=2))
+    assert gate.respond.__self__.params.max_give_cards == 2
+    retune(gate, max_give_cards=None)
+    assert getattr(gate, "respond", None) is None
+
+
+def test_a_planned_target_breaks_a_tie_towards_the_smaller_exchange():
+    from hexset.trading import choose_initial
+
+    scored = [(1, (1, -2, 0, 0, 0), 1.0, 1.0), (1, (1, -1, 0, 0, 0), 1.0, 1.0)]
+    chosen = choose_initial(scored, cutoff=0.0, draw_key=(0, 0, 0, 0), max_cards=2, max_fragments=1)
+    assert chosen.bundle == (1, -1, 0, 0, 0)
+
+
+def test_a_plain_gates_loose_offer_budget_is_its_own():
+    class Loose:
+        trade_floor = 0.0
+        trade_offer_budget = 2
+
+    assert params_of(Loose()).max_offers == 2
+    Loose.trade_offer_budget = -1
+    assert params_of(Loose()).max_offers is None

@@ -126,6 +126,8 @@ class Journal:
     # Flipped by the first write that fails, so a read-only directory
     # complains once instead of once per action.
     _off: bool = field(default=False, repr=False)
+    # Set once this object has made sure the file ends on a line break.
+    _mended: bool = field(default=False, repr=False)
 
     @property
     def path(self) -> Path:
@@ -134,10 +136,20 @@ class Journal:
     def _emit(self, event: dict) -> None:
         if self._off:
             return
+        line = json.dumps(event, separators=(",", ":")) + "\n"
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.path, "a", encoding="utf-8") as handle:
-                handle.write(json.dumps(event, separators=(",", ":")) + "\n")
+            with open(self.path, "a+b") as handle:
+                if not self._mended:
+                    # A file reopened after a crash can end part-way through
+                    # a line. Written straight onto it, this line would be torn
+                    # too, and `read` could not tell either apart from noise.
+                    self._mended = True
+                    if handle.seek(0, os.SEEK_END) > 0:
+                        handle.seek(-1, os.SEEK_END)
+                        if handle.read(1) != b"\n":
+                            handle.write(b"\n")
+                handle.write(line.encode("utf-8"))
         except OSError as error:
             self._off = True
             print(f"game journal disabled ({self.path}): {error}")
@@ -296,16 +308,22 @@ class Journal:
         )
 
     def locked(self, seat: int, *, at_step: int) -> None:
-        """`seat` was closed while still empty (`api.Tables.close_seat`) and
-        is retired for the rest of the game. `at_step` is diagnostic only;
-        `locked_seats` needs only the final set."""
+        """`seat` was closed while still empty (`api.Tables.close_seat`) or
+        left (`api.Tables.leave_seat`), and is retired for the rest of the
+        game. Where the line falls among the action lines is what a replay
+        reads (`retirements`); `at_step` is diagnostic only."""
         self._emit({"kind": "locked", "at": _now(), "seat": seat, "at_step": at_step})
 
     def unlocked(self, seat: int, *, at_step: int) -> None:
-        """`seat` was reopened (`api.Tables.open_seat`), only ever before the
-        first move, so `at_step` is always 0. `locked_seats` reads the two
-        kinds in order."""
+        """`seat` was reopened (`api.Tables.open_seat`, or a bot seated there
+        by `api.Tables.seat_bot`), only ever before the first move, so
+        `at_step` is always 0. `retirements` reads the two kinds in order."""
         self._emit({"kind": "unlocked", "at": _now(), "seat": seat, "at_step": at_step})
+
+    def renamed(self, *, seat: int, name: str) -> None:
+        """A seat's occupant took a new display name (`api.Tables.rename`);
+        `players` folds it in."""
+        self._emit({"kind": "renamed", "at": _now(), "seat": seat, "name": name})
 
     def reopened(self, *, at_step: int) -> None:
         """This game was put back together from the lines above — a server
@@ -422,20 +440,23 @@ CLOSING_KINDS = frozenset({"result", "abandoned"})
 
 
 def read(path: Path | str) -> list[dict]:
-    """Every event in a journal, in the order it was written. Stops at the
-    first line that will not parse instead of raising: only the last line can
-    be torn, and everything before it is still a complete account."""
+    """Every event in a journal, in the order it was written. A line that
+    will not parse is skipped rather than raised on or stopped at: only a
+    crash tears one, and every line after it was written by the game reopened
+    from the lines before, which never saw it."""
     events: list[dict] = []
     try:
-        with open(path, encoding="utf-8") as handle:
+        with open(path, encoding="utf-8", errors="replace") as handle:
             for line in handle:
                 line = line.strip()
                 if not line:
                     continue
                 try:
-                    events.append(json.loads(line))
+                    event = json.loads(line)
                 except json.JSONDecodeError:
-                    break
+                    continue
+                if isinstance(event, dict):
+                    events.append(event)
     except OSError:
         return []
     return events
@@ -517,7 +538,9 @@ def replayable(events: list[dict]) -> list[tuple[int, Action | None, tuple[Trade
 
 def notes_of(events: list[dict]) -> dict[int, list[tuple[int, RoundNote]]]:
     """The trade-round steps (`Journal.note`) as `(round, RoundNote)`, keyed
-    by the step each preceded. An undo drops the notes it took back."""
+    by the step each preceded. An undo drops the notes it took back: those
+    after the step it returned to, not those before it, which still
+    happened."""
     from ._webplay import RoundNote  # local at run time: webplay imports this module
 
     notes: dict[int, list[tuple[int, RoundNote]]] = {}
@@ -536,7 +559,7 @@ def notes_of(events: list[dict]) -> dict[int, list[tuple[int, RoundNote]]]:
                 )
             )
         elif kind == "undo":
-            for step in [s for s in notes if s >= event["back_to"]]:
+            for step in [s for s in notes if s > event["back_to"]]:
                 del notes[step]
     return notes
 
@@ -581,6 +604,8 @@ def players(events: list[dict]) -> dict[int, str]:
                 seats.pop(event["seat"], None)
             else:
                 seats[event["seat"]] = event.get("name") or ""
+        elif event.get("kind") == "renamed" and event["seat"] in seats:
+            seats[event["seat"]] = event.get("name") or ""
     return seats
 
 
@@ -597,18 +622,27 @@ def clients(events: list[dict]) -> dict[int, dict]:
     return result
 
 
-def locked_seats(events: list[dict]) -> frozenset[int]:
-    """The seats closed at the end of the record (`Journal.locked` less any
-    later `Journal.unlocked`). Every close and reopen happens before the first
-    move, so pre-seeding the final set before replay reproduces the same snake
-    the live game walked."""
-    locked: set[int] = set()
+def retirements(events: list[dict]) -> dict[int, list[int]]:
+    """The seats to lock as a game replays, keyed by the step each was
+    locked before: where each `Journal.locked` line falls among the steps
+    `replayable_rounds` counts. Seats closed and reopened before the first
+    move net out at step 0. An undo back past a retirement moves it to the
+    step undone to, since an undo takes back moves, not a seat's leaving."""
+    at: dict[int, list[int]] = {}
+    steps = 0
     for event in events:
-        if event.get("kind") == "locked":
-            locked.add(event["seat"])
-        elif event.get("kind") == "unlocked":
-            locked.discard(event["seat"])
-    return frozenset(locked)
+        kind = event.get("kind")
+        if kind in ("action", "trade"):
+            steps += 1
+        elif kind == "undo":
+            steps = min(steps, int(event["back_to"]))
+            for later in sorted(s for s in at if s > steps):
+                at.setdefault(steps, []).extend(at.pop(later))
+        elif kind == "locked":
+            at.setdefault(steps, []).append(int(event["seat"]))
+        elif kind == "unlocked" and int(event["seat"]) in at.get(steps, []):
+            at[steps].remove(int(event["seat"]))
+    return {step: seats for step, seats in at.items() if seats}
 
 
 def most_recent(directory: str | None, code: str) -> Path | None:

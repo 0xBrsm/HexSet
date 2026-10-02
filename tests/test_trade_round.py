@@ -602,3 +602,149 @@ def test_a_games_counter_steps_carries_into_its_trade_rounds():
     assert len(_run_trade_rounds(game, gates)) == 1
 
 
+
+
+# -- the referee admits a gate's answer only as the rules allow --------------
+
+
+class Answers(Gate):
+    """A gate answering every offer with `answer(view, offer)` as it stands."""
+
+    def __init__(self, answer):
+        super().__init__(lambda r, c: 1.0)
+        self.answer = answer
+
+    def respond(self, view, offer):
+        return self.answer(view, offer)
+
+
+def _one_ore_table():
+    """Seat 0 offers a wood for an ore; seat 1 holds the ore."""
+    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1))
+    return game, Offer(0, bundle(wood=-1, ore=1))
+
+
+def test_an_answer_is_always_the_asked_seats():
+    from hexset import trading
+
+    game, offer = _one_ore_table()
+    spoof = Answers(lambda view, offer: Response(3, RESPONSE_ACCEPT, offer.received))
+    assert trading.respond(game, spoof, 1, offer) == Response(1, RESPONSE_ACCEPT, offer.received)
+
+
+def test_an_acceptance_is_of_the_offer_as_it_was_made():
+    from hexset import trading
+
+    game, offer = _one_ore_table()
+    greedy = Answers(lambda view, offer: Response(1, RESPONSE_ACCEPT, bundle(wood=-2, ore=1)))
+    assert trading.respond(game, greedy, 1, offer) == Response(1, RESPONSE_ACCEPT, offer.received)
+    [trade] = trading.resolve_offer(game, (Gate(lambda r, c: 5.0), greedy, None, None), offer)
+    assert trade.received == offer.received and game._state.hands[0][WOOD] == 1
+
+
+def test_an_acceptance_the_seats_own_hand_cannot_cover_is_a_pass_and_shows_nothing():
+    from hexset import trading
+
+    game = stocked((0, Resource.WOOD, 1))
+    offer = Offer(0, bundle(wood=-1, ore=1))
+    blind = Answers(lambda view, offer: Response(1, RESPONSE_ACCEPT, offer.received))
+    assert trading.respond(game, blind, 1, offer) == Response(1, RESPONSE_PASS)
+    trading.resolve_offer(game, (Gate(lambda r, c: 5.0), blind, None, None), offer)
+    assert [seat for _, seat, _ in game.shown] == [0], "only the offer went to the table"
+
+
+@pytest.mark.parametrize("counter", [
+    bundle(wood=-1),                 # one-sided
+    (0, 0, 0, 0, 0),                 # empty
+    (1, 0, 0, -1),                   # the wrong width
+    (True, 0, 0, 0, -1),             # not counts
+    None,
+])
+def test_a_counter_that_is_not_an_exchange_is_a_pass(counter):
+    from hexset import trading
+
+    game, offer = _one_ore_table()
+    odd = Answers(lambda view, offer: Response(1, RESPONSE_COUNTER, counter))
+    assert trading.respond(game, odd, 1, offer) == Response(1, RESPONSE_PASS)
+
+
+@pytest.mark.parametrize("a,b,received,match", [
+    (0, 4, bundle(wood=-1, ore=1), "not a seat"),
+    (0, 1, bundle(wood=-1), "not an exchange"),
+    (0, 1, (0, 0, 0, 0, 0), "not an exchange"),
+    (0, 2, bundle(wood=-1, ore=1), "locked"),
+])
+def test_the_referee_refuses_an_exchange_outside_the_table(a, b, received, match):
+    from hexset.game import lock_seat
+    from hexset.trading import execute_agreed
+
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1), (2, Resource.ORE, 1))
+    lock_seat(game, 2)
+    with pytest.raises(ValueError, match=match):
+        execute_agreed(game, a, b, received, ask_actor=False, ask_counterparty=False)
+    assert game.trades == []
+
+
+# -- a gate's own limits bind what it offers and what it signs ---------------
+
+
+def test_a_caps_only_gate_never_offers_more_than_it_will_give():
+    """Its menu is the engine's, enumerated at three cards a side; what it
+    would refuse to sign never reaches the table."""
+    from dataclasses import replace
+    from hexset import trading
+    from hexset.trading import UNLIMITED, TradeProtocol, install
+
+    game = stocked((0, Resource.WOOD, 3), (1, Resource.ORE, 3))
+    dumping = Gate(lambda r, c: r[ORE] - r[WOOD])      # rid of wood, after ore
+    gates = (dumping, Gate(lambda r, c: 1.0), None, None)
+    assert trading.offer(game, gates).received[WOOD] == -3
+    capped = Gate(lambda r, c: r[ORE] - r[WOOD])
+    capped.trade_params = replace(UNLIMITED, max_give_cards=2)
+    install(capped, TradeProtocol(capped, capped.trade_params, seed=0))
+    offered = trading.offer(game, (capped,) + gates[1:])
+    assert offered is not None and offered.received[WOOD] == -2
+
+
+def test_a_gate_that_does_not_trade_signs_nothing():
+    """`max_offers=0` opens nothing and answers every offer with a pass,
+    however much it would gain."""
+    from hexset import trading
+
+    game, offer = _one_ore_table()
+    keen = Gate(lambda r, c: 5.0)
+    assert trading.respond(game, keen, 1, offer).kind == RESPONSE_ACCEPT
+    keen.trade_params = TradeParams(max_offers=0)
+    assert trading.respond(game, keen, 1, offer) == Response(1, RESPONSE_PASS)
+    assert trading.resolve_offer(game, (Gate(lambda r, c: 5.0), keen, None, None), offer) == []
+
+
+def test_retuning_a_plain_gates_offers_reaches_the_engine():
+    """A gate with no `TradeParams` is retuned onto its loose budget, which
+    `params_of` reads, so the driver stops where the run asked."""
+    from hexset.game import run_trade_event
+    from hexset.trading import params_of, retune
+
+    game = stocked((1, Resource.ORE, 1), (2, Resource.SHEEP, 1))
+    give(game._state, 0, Resource.WOOD, 1)  # uncertified: nobody can counter for it
+    actor = Gate(lambda r, c: -1.0 if sum(max(n, 0) for n in r) != 1 else 10.0 * r[ORE] + 5.0 * r[SHEEP])
+    retune(actor, max_offers=1)
+    assert params_of(actor).max_offers == 1
+    game.gates = (actor, Gate(lambda r, c: -1.0), Gate(lambda r, c: float(r[WOOD])), None)
+    run_trade_event(game)
+    assert game.trades == [], "one offer, refused, and no second"
+    retune(actor, max_offers=None)
+    assert params_of(actor).max_offers is None
+
+
+# -- ties break towards the smaller exchange ---------------------------------
+
+
+def test_equal_gains_prefer_the_smaller_exchange():
+    game = stocked((0, Resource.WOOD, 2), (1, Resource.ORE, 1))
+    flat = Gate(lambda r, c: 1.0)
+    small, large = bundle(wood=-1, ore=1), bundle(wood=-2, ore=1)
+    candidates = [(1, large), (1, small)]
+    assert candidates[default_offer(flat, game.state(0), candidates)][1] == small
+    answers = [Response(1, RESPONSE_COUNTER, large), Response(1, RESPONSE_COUNTER, small)]
+    assert answers[default_pick(flat, game.state(0), answers)].bundle == small

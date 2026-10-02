@@ -21,7 +21,7 @@ from .board.topology import build as build_topology
 from .bots import Bot
 from .cards import DevCard, make_deck
 from .chance import Balanced, Chance, ChanceError, Live, Recording, Scripted, for_rules
-from .game import MAX_TURNS, NO_TURN_CAP, Game, may_act, start, to_move
+from .game import MAX_TURNS, NO_TURN_CAP, Game, lock_seat, may_act, start, to_move
 from .rules import STANDARD, STANDARD_GAME, GameType, Rules
 from .trading import Trade, apply_trades, show
 
@@ -106,6 +106,10 @@ class Record:
     # Absent means independent. Read only by the seed cross-check, which must
     # regenerate the same draws.
     balanced_dice: bool = False
+    # The seats retired at the deal (`hexset.game.start`'s `locked`): dealt
+    # in, but skipped by the setup snake and turn rotation from the first
+    # action. A record holds no seat retired later. Absent means none.
+    locked: tuple[int, ...] = ()
 
     @property
     def decided(self) -> bool:
@@ -187,7 +191,8 @@ class Tape:
     def sealed(self, game: Game, *, seed: int | str | None = None) -> Record:
         """The finished `Record` of `game`, as this tape watched it played.
         `game` must have been dealt with `recording`; any other chance source is
-        refused."""
+        refused. Its retired seats are recorded as retired at the deal, which
+        is the only way a recorded loop retires one."""
         chance = game.chance
         if not isinstance(chance, Recording):
             raise TypeError(
@@ -210,6 +215,7 @@ class Tape:
             shown=tuple(self.shown),
             winner=game.won_by,
             turns=game.turns,
+            locked=tuple(sorted(game.locked)),
             **board_fields(board),
         )
 
@@ -322,8 +328,9 @@ class _SeedChecked(Chance):
 
 
 def open_record(record: Record) -> Game:
-    """Open a record at its initial position, preserving chance and first seat.
-    Walk it with `moves`/`advance`, or use `replay` for full validation."""
+    """Open a record at its initial position, preserving chance, first seat
+    and retired seats. Walk it with `moves`/`advance`, or use `replay` for
+    full validation."""
     scripted = Scripted(record.chance)
     if record.seed is None:
         chance = scripted
@@ -339,10 +346,15 @@ def open_record(record: Record) -> Game:
     # No contract check on a replay, for the same reason there is no turn cap:
     # the record is authoritative about the game it holds. Checking `seats`
     # here would reject a record of a game that was actually played, which is a
-    # false accusation against the record rather than a finding about it.
-    return start(board_of(record), record.num_players, random.Random(record.seed),
+    # false accusation against the record rather than a finding about it. So
+    # the retired seats are retired after the deal, before the first action,
+    # as a served table closes them: a table one seat played still opens.
+    game = start(board_of(record), record.num_players, random.Random(record.seed),
                  first=record.first, chance=chance, turn_cap=NO_TURN_CAP,
                  game_type=GameType("recorded", record.rules, (record.num_players,)))
+    for seat in record.locked:
+        lock_seat(game, seat)
+    return game
 
 
 def replay(record: Record) -> Game:
@@ -440,6 +452,7 @@ def from_json(line: str) -> Record:
         turns=raw["turns"],
         seed=raw.get("seed"),
         first=raw.get("first", 0),
+        locked=tuple(raw.get("locked", ())),
     )
 
 
@@ -449,8 +462,12 @@ def from_journal(path) -> Record:
     A journalled `Phase.DISCARD` is the one action whose `actor` must be
     believed rather than recomputed; those alone go into `Record.actors`. A
     manual trade folds into the preceding action's `trades`, so an `undo`'s
-    `back_to` is mapped through journal step numbers. A journal with no
-    `result` line is refused."""
+    `back_to` is mapped through journal step numbers. Each offer, acceptance
+    and counter a trade round noted goes into `Record.shown` where the table
+    showed it, signed towards the seat that showed it, as the served table
+    puts it on the ledger. A seat closed before the first action goes into
+    `Record.locked`; one that left later is not a seat retired at the deal,
+    and is not recorded. A journal with no `result` line is refused."""
     from .server import _journal as game_journal
 
     return from_events(game_journal.read(path), where=path)
@@ -471,9 +488,32 @@ def from_events(events: Sequence[dict], *, where="journal", partial: bool = Fals
     # Journal step number -> index into `steps` of the action at or before it,
     # so an undo's `back_to` can be applied to the action list.
     at_step: dict[int, int] = {}
+    # (journal step, index into `steps`, order, seat, received) per shown note.
+    shown: list[tuple[int, int, int, int, tuple[int, ...]]] = []
+    locked: set[int] = set()
     result: dict | None = None
     for event in events[1:]:
         kind = event.get("kind")
+        if kind in ("locked", "unlocked"):
+            if int(event.get("at_step", 0)) == 0:
+                if kind == "locked":
+                    locked.add(int(event["seat"]))
+                else:
+                    locked.discard(int(event["seat"]))
+            continue
+        if kind == "note":
+            bundle = event.get("bundle")
+            if event["note"] not in ("offer", "accept", "counter") or bundle is None:
+                continue
+            if not steps:
+                raise ValueError(f"journal notes a trade round before any action: {where}")
+            # As the served table shows it (`webplay.GameSession._note`): an
+            # offer is the actor's own, an answer is signed towards the actor.
+            sign = 1 if event["note"] == "offer" else -1
+            received = tuple(sign * int(n) for n in bundle)
+            shown.append((int(event["step"]), len(steps) - 1, len(steps[-1][1]),
+                          int(event["seat"]), received))
+            continue
         if kind == "action":
             action = game_journal.action_of(event)
             trades = game_journal.trades_of(event)
@@ -498,6 +538,7 @@ def from_events(events: Sequence[dict], *, where="journal", partial: bool = Fals
             cut = at_step.get(back_to, len(steps))
             del steps[cut:]
             at_step = {step: index for step, index in at_step.items() if index < cut}
+            shown = [row for row in shown if row[0] < back_to and row[1] < cut]
         elif kind == "result":
             result = event
 
@@ -531,12 +572,14 @@ def from_events(events: Sequence[dict], *, where="journal", partial: bool = Fals
         chance=chance,
         trades=trades,
         actors=actors,
+        shown=tuple((index, order, seat, received) for _, index, order, seat, received in shown),
         winner=result["winner"],
         turns=result["turns"],
         seed=header.get("seed"),
         first=header.get("first", 0),
         # A header written before it carried `rules` is a standard game.
         rules=Rules(**header.get("rules", {})),
+        locked=tuple(sorted(locked)),
     )
 
 

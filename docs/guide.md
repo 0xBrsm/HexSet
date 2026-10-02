@@ -89,7 +89,7 @@ it has no offer it has not already made this turn.
 
 The budget is the actor's gate's `trade_offer_budget`
 (`TradeParams.max_offers`): `-1` declares no limit, and `0` is a gate that
-opens nothing. The table has no per-turn budget and
+opens nothing and passes on every offer. The table has no per-turn budget and
 no card limit: each gate bounds what it gives (`max_give_cards`) and the gain
 it signs for (`trade_floor`) in its own `TradeParams`. Each side agrees once,
 and execution checks only that both hands still cover the exchange.
@@ -141,12 +141,16 @@ tournament = compete(
     games=2,
     seed=0,
     worker_initializer=register_example,
+    action_cap=40,
     records=True,
 )
 ```
 
 `tests/test_bot_integration.py` runs this code and replays the records it
-returns.
+returns. `action_cap=40` stops each game after 40 actions. To play random
+seats to the end, pass `turn_cap=hexset.game.UNSTRUCTURED_TURN_CAP` (3000):
+two random seats run past `MAX_TURNS` in most games, and `compete` raises
+`Exhausted` on the first.
 
 `register_entrant_kind(kind, factory)` installs `factory(entrant, board, rng)
 -> bot` for `Entrant.kind`. An `Entrant` holds serialisable settings, not a
@@ -158,7 +162,7 @@ only under the `fork` start method, and some platforms and Python versions
 default to `spawn` or `forkserver`. `start_method="spawn"` forces spawned
 workers, which need importable factories and initialisers and a driver
 guarded by `if __name__ == "__main__":`. A kind no process registered raises
-`ValueError`.
+`ValueError` naming that fix.
 
 A module that registers its bots at import is a runtime:
 
@@ -263,7 +267,7 @@ Commands are modules under `hexset.bench`; each takes `--help`.
   (repeatable), imported first in every worker.
 - The same four take `--game-type` (default `standard`), `--turn-cap`
   (default `MAX_TURNS`) and `--trade-mode` (`round` or `auto`, default
-  `round`).
+  `round`). `throughput` plays under `UNSTRUCTURED_TURN_CAP`.
 - `--workers` defaults to every core (`os.cpu_count()`), except
   `trade_census` (1). Set it explicitly on a shared machine.
 - `--games` must divide evenly over the seats so the rotation completes.

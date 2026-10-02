@@ -1104,3 +1104,44 @@ def test_wait_for_turn_carries_the_summary_too(live_server):
     assert waited["summary"] == client.call_tool("state", full_log=True)["summary"]
 
 
+
+
+# --- a call that fails still answers; malformed arguments are refused ----------
+
+
+def test_a_tool_failing_unexpectedly_answers_is_error_rather_than_hanging(live_server, monkeypatch):
+    def boom(tables, session):
+        raise RuntimeError("something nobody planned for")
+
+    _, description, schema = mcptools._TOOLS["bots"]
+    monkeypatch.setitem(mcptools._TOOLS, "bots", (boom, description, schema))
+    _, base = live_server
+    client = connected(base)
+
+    status, _, data = client.call_tool_raw("bots")
+
+    assert status == 200
+    assert data["result"]["isError"] is True
+    assert "RuntimeError" in data["result"]["content"][0]["text"]
+
+
+@pytest.mark.parametrize("counts", [{"Wood": -1}, {"Wood": 1.5}, {"Wood": "2"}, ["Wood"]])
+def test_resource_counts_are_non_negative_integers(counts):
+    with pytest.raises(mcptools.ToolError):
+        mcptools._positional(counts)
+
+
+@pytest.mark.parametrize(
+    "arguments", [{"timeout": "soon"}, {"timeout": float("nan")}, {"log_after": -1}, {"log_after": 2.5}]
+)
+def test_a_malformed_wait_argument_refuses_the_call(arguments):
+    with pytest.raises(mcptools.ToolError):
+        mcptools.call_tool(new_tables(), mcptools.Session(), "state", arguments)
+
+
+def test_can_offer_is_false_while_road_building_roads_are_owed():
+    view = {"phase": "MAIN", "to_move": 0, "seat": 0, "trade_round": None,
+            "legal_actions": [{"type": "BUILD_ROAD", "a": 3, "b": 0}]}
+    assert mcptools._can_offer(view) is False
+    view["legal_actions"].append({"type": "END_TURN", "a": 0, "b": 0})
+    assert mcptools._can_offer(view) is True

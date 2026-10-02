@@ -75,14 +75,14 @@ cleared inside, so a trade made after a build replays after that build.
 
 | Field | Default | What it is |
 | --- | --- | --- |
-| `max_offers` | `None` | Offers this gate makes on each of its own turns (`trade_offer_budget`). `None`: it offers while it has an offer not yet made this turn. `0`: it opens nothing and signs nothing |
+| `max_offers` | `None` | Offers this gate makes on each of its own turns (`trade_offer_budget`). `None`: it offers while it has an offer not yet made this turn. `0`: it opens nothing and signs nothing; every offer put to it is a pass, and the clearing house never deals with it |
 | `max_give_cards` | `None` | Cards it parts with in one exchange; `None` for no limit of its own |
 | `trade_floor` | `0.0` | The floor its own gains must exceed, on its own value scale |
 | `responder_card_risk` | `0.0` | Charge per outgoing card on a response and on final consent; never charged to the proposer |
 | `fragment_trades` | `False` | Plan one gated target a turn and offer it as fragments |
 | `fragment_threshold` | `0.0` | The proposer cutoff a full target is gated on |
 | `max_fragments` | `1` | Fragments one target may be offered as (1 or 2) |
-| `fragment_cards` | `None` | Cards either side of one fragment may move; `None` for `ENUMERATION_CARDS`. One side of a fragment is always a single card |
+| `fragment_cards` | `None` | Cards either side of one fragment may move; `None` for `max_give_cards`, else `ENUMERATION_CARDS`. One side of a fragment is always a single card |
 | `gate_plies` | `0` | Plies rolled forward over the exchanged hand before it is valued |
 | `fit_offers` | `False` | Put first the offers and counters that fit what the counterparty has shown it wants and will give up (`fit`, off the public ledger); elsewhere the same choice as without it. Offers are planned only under `fragment_trades`, so there it orders both; under card caps or a responder price alone it orders counters |
 
@@ -97,8 +97,9 @@ declares nothing is read at it. A bot's own config lives with the bot: in its
 module for a Python bot, in its ONNX metadata for a checkpoint.
 
 A declared card cap is a **refusal, not a preference**. It applies before
-the valuation and binds the actor as well as the responder: an answer giving
-more is masked out of `pick` rather than chosen and then refused at execution. An undeclared cap is no
+the valuation and binds the actor as well as the responder: `menu` drops
+every offer giving more, and an answer giving more is masked out of `pick`
+rather than chosen and then refused at execution. An undeclared cap is no
 cap.
 
 ## Which hooks a parameter set installs
@@ -114,16 +115,17 @@ stay the bot's own: the valuation (`gains_many`, else `accepts_many`, else
 and `observe_trade`.
 
 `hooks_for(params)` says which hooks a parameter set needs.
-`install(gate, protocol)` binds those as instance attributes and removes the
-other `HOOKS` from the instance; a hook the bot's class defines shows through
-where the protocol does not need it.
+`install(gate, protocol)` binds those as instance attributes, deletes the
+other `HOOKS` from the instance, and keeps the protocol on the gate as
+`_protocol` for `retune`; a hook the bot's class defines shows through where
+the protocol does not need it.
 
 | Parameters | Installed |
 | --- | --- |
 | Declares nothing (`UNLIMITED`) | nothing: the engine's defaults answer |
-| Card caps or a responder price | `respond`, `pick`, `consent_gain` |
+| Card caps or a responder price | `respond`, `respond_any`, `pick`, `consent_gain` |
 | `fragment_trades` | all eight |
-| `max_offers=0` | nothing: the engine's defaults answer |
+| `max_offers=0` | nothing: the engine passes for this gate without asking it |
 
 A gate that constrains nothing therefore behaves as a gate with no
 parameters. A cap alone does not install `candidates` or `offer`: the
@@ -131,9 +133,8 @@ protocol's replacement for the bot's own menu is one planned fragment, a
 different protocol rather than a different limit.
 
 `retune(gate, **changes)` replaces fields on the gate's `TradeParams` and
-reinstalls the protocol the gate keeps as `_protocol`; on a gate with no
-`TradeParams` it only sets `trade_offer_budget` from a `max_offers` that is
-not `None`.
+reinstalls its protocol; on a gate with no `TradeParams` it honours only
+`max_offers`, through `trade_offer_budget`.
 
 ## What a seat may ask for
 
@@ -149,23 +150,28 @@ A counter goes to the actor alone, so its menu, `known_candidates`, asks
 only for what the ledger certifies the actor holds. A gate's own
 `candidates` hook replaces either menu; it is called with `turn=None` for a
 counter. An open offer (one with any cards, `is_open`) cannot be accepted as
-it stands, only countered, and is answered by `respond_any`, else
-`default_respond_any`. The protocol installs `respond_any` under
-`fragment_trades`, where it is the counter `respond` would send, under the
-same caps, response charge and fit.
+it stands, only countered, and is answered by `respond_any`, which under the
+protocol is the counter `respond` would send, under the same caps, response
+charge and fit.
 
 What a gate does with an ask is its own. The network gate scores `-1.0` for
 a counterparty the record proves cannot give its side (`has_room`: its
 uncertified asks exceed its untyped cards), so it never offers what nobody
 can take; the menu still holds the ask.
 
-The referee passes a gate's answer (`respond`) on as the gate gave it,
-except that an acceptance of an open offer is a pass.
+The referee admits an answer (`respond`) only in this form; anything else is
+a pass:
 
-An exchange the referee executes (`execute_agreed`) is between two different
-seats, in `MAIN`, one of them the current player, with both hands covering
-their sides; it raises `ValueError` otherwise. An offer nobody can cover goes
-unanswered.
+- it is the asked seat's;
+- an acceptance is of the offer as made, of a concrete offer, and covered by
+  the seat's own hand (read off its own view, so nothing hidden is
+  consulted);
+- a counter is a five-count exchange with cards both ways.
+
+An exchange the referee executes (`execute_agreed`) is between two seats at
+the table, neither locked, in `MAIN`, one of them the current player, with
+cards both ways, and both hands covering their sides; it raises
+`ValueError` otherwise. An offer nobody can cover goes unanswered.
 
 ## What a seat has shown
 
@@ -291,5 +297,5 @@ declaration for a checkpoint.
 under `Game.trade_rule` (`"egalitarian"` by default) and never asks a gate
 to price its own consent, so neither a card cap nor a response charge is in
 force there. Its trade event raises `ValueError` when any seated gate
-defines `consent_gain`.
+defines `consent_gain`. A gate at `max_offers=0` is never its counterparty.
 `"auto"` is for research only; see [the evaluation rules](evaluation.md).

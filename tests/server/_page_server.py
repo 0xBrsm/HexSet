@@ -16,6 +16,8 @@ from __future__ import annotations
 import contextlib
 import threading
 
+import pytest
+
 from hexset.server.api import Config, Tables
 from hexset.server.web import HexSetServer
 
@@ -37,3 +39,15 @@ def serving(port: int, games_dir: str = ""):
         server.server_close()
         live = [t.name for t in threading.enumerate() if t.name.startswith("bot-")]
         assert not live, f"bot runner threads still alive after this module: {live}"
+
+
+def launch(playwright):
+    """Chromium, or a skip when its binary is not installed: the `browser`
+    extra brings the `playwright` package, and the browser is a separate
+    download (`docs/testing.md`), so a bare `pytest` passes without either."""
+    try:
+        return playwright.chromium.launch()
+    except Exception as error:  # noqa: BLE001 -- playwright's own Error type
+        if "Executable doesn't exist" in str(error):
+            pytest.skip("Chromium is not installed: python -m playwright install chromium")
+        raise

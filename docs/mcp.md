@@ -27,7 +27,7 @@ allowed. A session holds one seat, in memory only.
 A `tools/call` stream sends a `: keepalive` comment every 15 seconds while
 the call waits, then one `message` event with the JSON-RPC response and
 closes. The result is one text content item: compact JSON, or plain text for
-`board`. A call the tools refuse is a result with `isError: true`.
+`board`. A failed call, for any reason, is a result with `isError: true`.
 
 ## Tools
 
@@ -56,9 +56,11 @@ Shared arguments:
 | `full_log` | the acting tools, `wait_for_turn`, `state` | Send the whole transcript |
 
 The acting tools are `new_game`, `join`, `resume_game`, `act`, `discard`,
-`offer_trade`, `answer_trade` and `choose_trade`. Resource counts are objects
-from resource name (`Wood`, `Brick`, `Sheep`, `Wheat`, `Ore`) to a count. An
-argument a tool does not take refuses the call.
+`offer_trade`, `answer_trade` and `choose_trade`. A `timeout` that is not a
+finite number, or a `log_after` that is not a non-negative integer, refuses
+the call. Resource counts are objects from resource name (`Wood`, `Brick`,
+`Sheep`, `Wheat`, `Ore`) to a non-negative integer. An argument a tool does
+not take refuses the call.
 
 `opponents` names one bot per seat, from `bots`. Omitted or empty, the game
 has no bots; empty seats stay open for others to `join` by `code`.
@@ -123,8 +125,8 @@ single `DISCARD` entry works too.
 ## Trading
 
 Every reply carries `can_offer`: true on the seat's own turn in `MAIN`, with
-at least one legal action and no round of its own open. `offer_trade` still
-refuses an offer the hand cannot cover.
+`END_TURN` legal (no Road Building roads left to place) and no round of its
+own open. `offer_trade` still refuses an offer the hand cannot cover.
 `give_any`/`want_any` add that many cards of the answerer's choosing to one
 side, which makes the offer one that is only countered
 ([api.md](api.md#trade-routes)).

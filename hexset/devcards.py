@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 from .board.terrain import NUM_RESOURCES, Resource, check_resource
 from .cards import (
+    NUM_DEV_CARDS,
     PLAYABLE,
     YEAR_OF_PLENTY_RESOURCES,
     DevCard,
@@ -63,15 +64,15 @@ def buy_drawn(state: GameState, player: int, card: int) -> DevCard | int:
     fresh cards grow by one, of no type anyone here can read."""
     if not state.deck:
         raise ValueError("the development deck is empty")
+    fresh = state.new_dev_cards[player]
+    if not is_hidden(fresh) and not 0 <= card < NUM_DEV_CARDS:
+        raise ValueError(f"seat {player}'s cards are seen here: which card did it draw?")
     pay(state, player, Purchase.DEV_CARD)
     state.deck.add(-1)
     _age_bought(state, player)
-    fresh = state.new_dev_cards[player]
     if is_hidden(fresh):
         fresh.add(1)
         return card
-    if card < 0:
-        raise ValueError(f"seat {player}'s cards are seen here: which card did it draw?")
     fresh[card] += 1
     return DevCard(card)
 
@@ -143,8 +144,8 @@ def check_play(state: GameState, player: int, card: DevCard) -> None:
 def spend_card(state: GameState, player: int, card: DevCard) -> None:
     """Take one `card` out of `player`'s playable holding, applying none of its
     effect. Raises `ValueError` as `check_play` does."""
-    _age_played(state, player)
     check_play(state, player, card)
+    _age_played(state, player)
     held = state.dev_cards[player]
     if is_hidden(held):
         held.add(-1)
@@ -162,8 +163,10 @@ def play_knight(state: GameState, player: int) -> None:
 
 def play_year_of_plenty(state: GameState, player: int, resources: list[Resource]) -> None:
     """Spend the card and take the named `resources`, repeats allowed, from the
-    bank. Raises `ValueError` unless exactly `YEAR_OF_PLENTY_RESOURCES` are
-    named, the card may be played and the bank holds them all."""
+    bank. Raises `ValueError`, writing nothing, unless exactly
+    `YEAR_OF_PLENTY_RESOURCES` are named, the card may be played and the bank
+    holds them all."""
+    check_play(state, player, DevCard.YEAR_OF_PLENTY)
     if len(resources) != YEAR_OF_PLENTY_RESOURCES:
         raise ValueError(f"choose exactly {YEAR_OF_PLENTY_RESOURCES} resources")
     wanted = [0] * NUM_RESOURCES
@@ -192,11 +195,13 @@ def play_monopoly(
     """Every other seat hands over all of `resource`. How many a hidden hand
     held is not this state's to read: on an observed state `chance` is the
     host's (`chance.Hosted`), which says what each such seat surrendered --
-    publicly, as it was surrendered at the table."""
+    publicly, as it was surrendered at the table.
+
+    Every surrender is settled before any card moves, so a play the host
+    cannot account for leaves the state as it was."""
+    check_play(state, player, DevCard.MONOPOLY)
     check_resource(resource)
-    spend_card(state, player, DevCard.MONOPOLY)
-    state.dev_cards_played[DevCard.MONOPOLY] += 1
-    taken = 0
+    surrendered: list[tuple[int, int]] = []
     for other in range(state.num_players):
         if other == player:
             continue
@@ -207,9 +212,20 @@ def play_monopoly(
                     f"seat {other}'s hand is hidden: the host must say what it surrendered"
                 )
             given = chance.surrender(hand, int(resource))
-            hand.move(resource, -given)
+            if not 0 <= given <= len(hand):
+                raise ValueError(f"seat {other} holds {len(hand)} cards, not {given}")
         else:
             given = hand[resource]
+        surrendered.append((other, given))
+
+    spend_card(state, player, DevCard.MONOPOLY)
+    state.dev_cards_played[DevCard.MONOPOLY] += 1
+    taken = 0
+    for other, given in surrendered:
+        hand = state.hands[other]
+        if is_hidden(hand):
+            hand.move(resource, -given)
+        else:
             hand[resource] = 0
         taken += given
     mine = state.hands[player]

@@ -21,14 +21,13 @@ import onnxruntime as ort
 
 from hexset.actions import Action, ActionSpace, build_space
 from hexset.board.topology import Topology
-from hexset.clients.netbot import NetworkBot, bot_for, searcher_for
+from hexset.clients.netbot import NetworkBot, bot_for, declared_trader, searcher_for
 from hexset.game import Game
 from hexset.mcts import Search
 from hexset.onnx_record import record_from_game
 from hexset.server.constants import RECORD_CONTRACTS
-from hexset.clients._modelmeta import SearchConfig, gate_config, search_config, trader_config, trader_of
+from hexset.clients._modelmeta import SearchConfig, gate_config, search_config, trader_config
 from hexset.trading import UNLIMITED, TradeParams
-from hexset.actions import options_for
 
 __all__ = [
     "DEFAULT_THREADS",
@@ -110,16 +109,14 @@ class V2Policy:
         return [self.space.decode(int(a)) for a in action_index]
 
     def value_rows(self, rows: Sequence[tuple[Game, int]]) -> list[tuple[float, ...]]:
-        """`value`, already board-seat order. `options_for` stands in for this
-        row's options, since an empty mask leaves the graph nothing legal to
-        normalise over. Routed through `value_of` so a wave of rows still
-        works against a fixed-batch graph."""
+        """`value`, already board-seat order. Each row is masked from its own
+        seat's side (`record_from_game`'s default): that seat's own options,
+        or the fixed public mask where it has none, never another seat's
+        legal moves. Routed through `value_of` so a wave of rows still works
+        against a fixed-batch graph."""
         if not rows:
             return []
-        records = [
-            record_from_game(game, seat, self.space, options_for(game))
-            for game, seat in rows
-        ]
+        records = [record_from_game(game, seat, self.space) for game, seat in rows]
         return [tuple(float(v) for v in row) for row in self.value_of(records)]
 
     def score_rows(
@@ -196,14 +193,29 @@ def _load_cached(
         str(path), sess_options=options, providers=_providers_for(device)
     )
     meta = session.get_modelmeta().custom_metadata_map
+    # First, so a file of another contract is named as one rather than
+    # failing on whichever key its own shape happens to lack.
+    if "contract" not in meta:
+        raise ValueError(
+            f"{path} declares no contract (metadata key `contract`); this server "
+            f"serves {', '.join(sorted(RECORD_CONTRACTS))}"
+        )
+    contract = meta["contract"]
+    if contract not in RECORD_CONTRACTS:
+        # Loudly, rather than guessing at a graph shape and dying on the
+        # first move with a missing-input error.
+        raise ValueError(
+            f"{path} declares contract={contract!r}, which this server does not serve "
+            f"(known: {', '.join(sorted(RECORD_CONTRACTS))})"
+        )
 
-    players = int(meta["players"])
+    players = _required_int(meta, "players", path)
     # Topology fingerprint embedded by the exporter: a graph traced for one
     # board shape would otherwise fail silently when fed another.
     fingerprint = (
-        int(meta["num_hexes"]),
-        int(meta["num_vertices"]),
-        int(meta["num_edges"]),
+        _required_int(meta, "num_hexes", path),
+        _required_int(meta, "num_vertices", path),
+        _required_int(meta, "num_edges", path),
     )
     actual = (topology.num_hexes, topology.num_vertices, topology.num_edges)
     if fingerprint != actual:
@@ -215,14 +227,6 @@ def _load_cached(
     space = build_space(
         topology.num_vertices, topology.num_edges, topology.num_hexes, players
     )
-    contract = meta.get("contract", "1")
-    if contract not in RECORD_CONTRACTS:
-        # Loudly, rather than guessing at a graph shape and dying on the
-        # first move with a missing-input error.
-        raise ValueError(
-            f"{path} declares contract={contract!r}, which this server does not serve "
-            f"(known: {', '.join(sorted(RECORD_CONTRACTS))})"
-        )
     policy = V2Policy(session, space)
     # `max_trades` is the older spelling of `max_offers`; a file carrying it
     # is read rather than silently ignored, which would turn a checkpoint
@@ -232,7 +236,7 @@ def _load_cached(
         policy=policy,
         space=space,
         players=players,
-        iteration=int(meta.get("iteration", 0)),
+        iteration=_required_int(meta, "iteration", path) if "iteration" in meta else 0,
         search=search_config(meta),
         gate=gate_config(
             meta if not legacy_offers or "max_offers" in meta
@@ -240,6 +244,16 @@ def _load_cached(
         ),
         trader=trader_config(meta),
     )
+
+
+def _required_int(meta: dict[str, str], key: str, path: str) -> int:
+    """`meta[key]` as an integer, or a `ValueError` naming the file and key."""
+    if key not in meta:
+        raise ValueError(f"{path} has no `{key}` metadata, which the contract requires")
+    try:
+        return int(meta[key])
+    except ValueError:
+        raise ValueError(f"{path}'s `{key}` metadata is not an integer: {meta[key]!r}") from None
 
 
 def load(
@@ -254,7 +268,8 @@ def load(
 
     `threads` caps onnxruntime's intra- and inter-op pools and defaults to
     `DEFAULT_THREADS`; `threads=None` is onnxruntime's own choice, one thread
-    per core.
+    per core. A trader the file names is not resolved here, since nothing
+    here trades: `spawn` resolves it.
     """
     return _load_cached(path, topology, device, os.stat(path).st_mtime_ns, threads)
 
@@ -310,8 +325,10 @@ def spawn(
     trades, are the file's metadata to declare; `device` describes the host
     and is deliberately never read from it.
 
-    Where the caller passes the table's `players`, a checkpoint trained for
-    another player count is refused here, with the file named."""
+    Everything that would fail later fails here, with the file named: a
+    `trader` no loaded runtime registers (`netbot.declared_trader`) and,
+    where the caller passes the table's `players`, a checkpoint trained for
+    another player count."""
     from hexset.arena import traded
 
     loaded = load(path, board.topology, device, threads)
@@ -319,8 +336,9 @@ def spawn(
         raise ValueError(
             f"{path} was trained for {loaded.players} players, not this table's {players}"
         )
+    trader = declared_trader(loaded, path)
     own = _spawn_own(path, board, loaded, rng, device, threads)
-    return traded(own, trader_of(loaded), board, random.Random() if rng is None else rng)
+    return traded(own, trader, board, random.Random() if rng is None else rng)
 
 
 def _spawn_own(path, board, loaded, rng, device, threads):

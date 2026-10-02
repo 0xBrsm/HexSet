@@ -401,7 +401,7 @@ def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
         return _ENTRANT_KIND_FACTORIES[entrant.kind](entrant, board, rng)
     if entrant.kind in _NETWORK_KINDS:
         raise ValueError(f"entrant kind {entrant.kind!r} {_RUNTIME_HINT}")
-    raise ValueError(f"unknown bot kind: {entrant.kind}")
+    raise ValueError(f"unknown bot kind: {entrant.kind!r}; {KIND_HINT}")
 
 
 def wilson(wins: int, games: int, z: float = Z_95) -> tuple[float, float]:
@@ -1200,7 +1200,7 @@ def _network(name: str) -> Entrant:
     # own config rather than layering over it: an arm that does not trade
     # has nothing else to say about how it trades.
     path, separator, trades = name[len(NETWORK) :].partition("@")
-    if separator and int(trades) != 0:
+    if separator and trades != "0":
         raise ValueError(
             f"{name!r}: `@` is the no-trade switch (`@0`), not an offer "
             f"budget -- a checkpoint declares that in its own metadata"
@@ -1213,13 +1213,23 @@ def _network(name: str) -> Entrant:
     )
 
 
+_MCTS_FORM = "mcts:<path>[@[<simulations>][w<wave>][:k=<worlds>]]"
+
+
 def _mcts(name: str) -> Entrant:
     # `mcts:<path>@<simulations>w<wave>:k=<worlds>`; every part after the
     # path is optional. `k` is `Entrant.k`: determinized worlds searched
     # per decision.
-    path, _, search = name[len(MCTS) :].partition("@")
+    path, at, search = name[len(MCTS) :].partition("@")
+    if not at and any("=" in part for part in path.split(":")[1:]):
+        raise ValueError(
+            f"{name!r}: options follow the `@`, as in {_MCTS_FORM} "
+            "(`mcts:<path>@:k=4` for the default budget)"
+        )
     search, _, options = search.partition(":")
     budget, separator, wave = search.partition("w")
+    if not (budget == "" or budget.isdigit()) or (separator and not wave.isdigit()):
+        raise ValueError(f"{name!r}: the search budget reads {_MCTS_FORM}")
     simulations = int(budget) if budget else 128
     width = int(wave) if separator else 16
     worlds = 1
@@ -1273,6 +1283,16 @@ def entrant_from_name(name: str) -> Entrant:
 #: What an unknown name usually means: the runtime that registers it was
 #: never loaded.
 UNKNOWN_HINT = "a bot hexset does not ship is registered by importing its runtime (`load_runtime`, `--runtime`)"
+
+#: What an unknown `Entrant.kind` usually means: the process building it
+#: never loaded the runtime that registers it.
+KIND_HINT = (
+    "a kind hexset does not ship is registered by its runtime in every process "
+    "that spawns entrants -- `compete(worker_initializer=load_runtime, "
+    "worker_initargs=(module,))`, or `--runtime` -- because a worker started by "
+    "spawn or forkserver (the default start method on some platforms and "
+    "Python versions) does not inherit this process's registrations"
+)
 
 CHECKPOINT_KINDS = (NETWORK, MCTS)
 
@@ -1334,7 +1354,7 @@ __all__ = [
     # runtimes
     "register_entrant_kind", "register_preset", "register_spec",
     "unregister_entrant_kind", "unregister_preset", "unregister_spec",
-    "registered_presets", "load_runtime", "RUNTIME_HELP", "UNKNOWN_HINT",
+    "registered_presets", "load_runtime", "RUNTIME_HELP", "UNKNOWN_HINT", "KIND_HINT",
     "spawn", "traded",
     # the game law
     "MAX_ACTIONS", "board_key", "game_key", "deal_board", "deal_game", "deal_seats",

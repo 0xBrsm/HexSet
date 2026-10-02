@@ -1,7 +1,8 @@
 """The checkpoint runtime, driven by a policy that is not a checkpoint: a stub
 `Policy` drives `choose`, the gate, a real `trade_event` and a `GatedSearch`
-end to end. The stub reads the true hands, which no real runtime could, so
-that the gate's arithmetic is checkable in closed form.
+end to end. The stub values each seat by the cards the row's own seat can
+name (`View.known`), so the gate's arithmetic is checkable in closed form
+and the stub reads nothing a real runtime could not.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from hexset.game import Phase, run_trade_event, start, to_move
 from hexset.actions import options_for
 from hexset.trading import ENUMERATION_CARDS, UNLIMITED, TradeParams, valued_many
 from hexset.trading._engine import _candidates
+from hexset.view import View
 from traders import FRAGMENTED
 from helpers import give
 
@@ -36,8 +38,9 @@ PLAYERS = 4
 
 @dataclass
 class HandValuePolicy:
-    """Value is a fixed linear read of each seat's hand, the prior uniform, the
-    action the lowest-indexed legal one.
+    """Value is a fixed linear read of the cards the row's seat can name in
+    each seat's hand -- its own whole hand, another's `View.known` row -- the
+    prior uniform, the action the lowest-indexed legal one.
     """
 
     space: ActionSpace
@@ -46,21 +49,31 @@ class HandValuePolicy:
         return [min(options, key=self.space.index) for _, _, options in rows]
 
     def value_rows(self, rows):
-        return [self._value(game) for game, _ in rows]
+        return [self._value(game, seat) for game, seat in rows]
 
     def score_rows(self, rows):
         return [
-            ([1.0 / len(options)] * len(options), self._value(game))
-            for game, _, options in rows
+            ([1.0 / len(options)] * len(options), self._value(game, seat))
+            for game, seat, options in rows
         ]
 
-    def _value(self, game):
-        hands = game.state(0, hidden=False).hands
-        return tuple(value_of_hand(hand, seat) for seat, hand in enumerate(hands))
+    def _value(self, game, seat):
+        known = View.from_game(game, seat).known
+        return tuple(value_of_hand(hand, s) for s, hand in enumerate(known))
 
 
 def value_of_hand(hand, seat: int) -> float:
     return sum(WEIGHTS[(r + seat) % len(WEIGHTS)] * n for r, n in enumerate(hand))
+
+
+def their_estimate(view, seat: int, them: int, bundle) -> float:
+    """What the gate's `estimate_many` is in closed form under this stub:
+    `them`'s nameable cards after the exchange -- the known row raised to
+    cover what the bundle says they give, then moved by it -- valued less
+    the row before."""
+    certified = View(view.state, view.ledger, seat, certify=[(them, [max(0, n) for n in bundle])])
+    after = [k - d for k, d in zip(certified.known[them], bundle)]
+    return value_of_hand(after, them) - value_of_hand(view.known[them], them)
 
 
 @dataclass(frozen=True)
@@ -176,19 +189,15 @@ def test_a_runtime_free_policy_drives_the_bot_and_its_gate(board):
     view = game.state(seat)
     candidates = list(_candidates(game.state(seat, hidden=False), seat, frozenset(), ENUMERATION_CARDS))
     estimates = bot.estimate_many(view, candidates)
-    state = game.state(seat, hidden=False)
-    hands = state.hands
+    hand = view.known[seat]
     for i, (them, bundle) in enumerate(candidates):
         if gains[i] == -1.0:
             continue
-        mine = [n + d for n, d in zip(hands[seat], bundle)]
-        theirs = [n - d for n, d in zip(hands[them], bundle)]
+        mine = [n + d for n, d in zip(hand, bundle)]
         assert gains[i] == pytest.approx(
-            value_of_hand(mine, seat) - value_of_hand(hands[seat], seat)
+            value_of_hand(mine, seat) - value_of_hand(hand, seat)
         )
-        assert estimates[i] == pytest.approx(
-            value_of_hand(theirs, them) - value_of_hand(hands[them], them)
-        )
+        assert estimates[i] == pytest.approx(their_estimate(view, seat, them, bundle))
     assert any(g != -1.0 for g in gains)
 
 
@@ -229,7 +238,6 @@ def test_the_after_position_keeps_the_cards_this_seat_cannot_name(board, monkeyp
     """
     from hexset.clients.netbot import NetworkBot
     from hexset.ledger import PublicLedger
-    from hexset.view import View
 
     space = stub_checkpoint(board).space
     bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS)
@@ -365,6 +373,23 @@ def test_a_checkpoint_that_names_a_trader_is_seated_with_it_unless_the_entrant_n
     assert isinstance(named.mover, NetworkBot), "one wrap: the entrant's trader replaces the file's"
 
 
+def test_an_entrant_whose_checkpoint_names_an_unbuildable_trader_fails_at_spawn(
+    board, arena_registry
+):
+    from hexset.arena import entrant_from_name, spawn
+
+    checkpoint = _Traded(stub_checkpoint(board), "no-such-bot")
+    register_entrants(lambda path, topology: checkpoint)
+
+    for spec in ("network:/tmp/x.onnx", "mcts:/tmp/x.onnx"):
+        with pytest.raises(ValueError) as caught:
+            spawn(entrant_from_name(spec), board, random.Random(1))
+        message = str(caught.value)
+        assert "/tmp/x.onnx" in message and "`trader`" in message and "--runtime" in message
+    # The entrant's own trader replaces the file's, so nothing is resolved.
+    assert spawn(entrant_from_name("network:/tmp/x.onnx~random"), board, random.Random(1))
+
+
 @dataclass(frozen=True)
 class _Traded:
     """A stub checkpoint that also names a trader."""
@@ -439,8 +464,7 @@ def test_every_coverable_candidate_reaches_the_head_in_one_forward(board, monkey
         value_of_hand([1, 1, 1, 1, 0], 0) - value_of_hand([1, 1, 1, 0, 0], 0)
     )
     assert bot.estimate_many(view, [(1, unchanged), (1, unlocks_settlement)]) == pytest.approx(
-        [value_of_hand([4, 4, 4, 4, 3], 1) - value_of_hand([4, 4, 4, 4, 4], 1),
-         value_of_hand([4, 4, 4, 3, 4], 1) - value_of_hand([4, 4, 4, 4, 4], 1)]
+        [their_estimate(view, 0, 1, unchanged), their_estimate(view, 0, 1, unlocks_settlement)]
     )
     assert calls == [3], "the paired estimate is answered from the memo, not a second forward"
 
@@ -526,7 +550,6 @@ def test_gate_plies_rolls_on_a_belief_world_not_the_live_tables_true_hands(board
     """
     from hexset.clients.netbot import NetworkBot
     from hexset.ledger import PublicLedger
-    from hexset.view import View
 
     space = stub_checkpoint(board).space
     bot = NetworkBot(

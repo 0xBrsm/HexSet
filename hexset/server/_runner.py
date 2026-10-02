@@ -13,13 +13,15 @@ the runner owes only moves and discards.
 
 from __future__ import annotations
 
+import random
 import sys
 import threading
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from typing import Protocol
 
 from hexset.bots import Bot, seat_at
-from hexset.game import Game
+from hexset.game import Game, Phase, imagine, to_move
 from hexset.server.wire import action_to_wire
 
 
@@ -69,16 +71,36 @@ class LocalSearchBrain:
     The bot is seated at the game on construction (`seat_at`), not at its
     first move: the engine's trade event can ask its gate before that, and a
     checkpoint trained for another player count is refused here, with a
-    `ValueError`, rather than on every turn it is asked to play."""
+    `ValueError`, rather than on every turn it is asked to play.
+
+    `lock` is held for the whole decision: the table's other requests -- an
+    undo, another seat's discard -- change the same `Game` in place, and a
+    bot must not read it halfway through one."""
 
     bot: Bot
     game: Game
+    lock: AbstractContextManager = field(default_factory=nullcontext)
 
     def __post_init__(self) -> None:
         seat_at(self.bot, self.game)
 
     def decide(self, transport: Transport, token: str, seat: int) -> dict:
-        return action_to_wire(self.bot.choose(self.game))
+        with self.lock:
+            return self._decide(seat)
+
+    def _decide(self, seat: int) -> dict:
+        game = self.game
+        if game.phase is not Phase.DISCARD or to_move(game) == seat:
+            return action_to_wire(self.bot.choose(game))
+        # Every owing seat discards at once, but `choose` answers for
+        # `to_move`, the lowest one: ask on a copy where this seat alone owes,
+        # then seat the bot back at the table.
+        asked = imagine(game, random.Random(0), randomize_deck=False)
+        asked.discard_quota = [n if s == seat else 0 for s, n in enumerate(game.discard_quota)]
+        try:
+            return action_to_wire(self.bot.choose(asked))
+        finally:
+            seat_at(self.bot, game)
 
 
 # --- The runner: act while the move is this seat's, wait otherwise ---------
@@ -90,6 +112,12 @@ ERROR_BACKOFF = 1.0
 
 # The duties (`api.your_move`) a runner meets by asking its brain for a move.
 _MOVES = frozenset({"act", "discard"})
+
+
+class Unplayable(Exception):
+    """The brain refused the position with a `ValueError` -- a checkpoint
+    trained for another player count, say. Asking again cannot change the
+    answer, so `BotRunner.run` stops on it rather than retrying."""
 
 
 @dataclass
@@ -116,10 +144,14 @@ class BotRunner:
         """One pass: every move this seat owes now -- its turn's actions, and
         its discards while another seat is `to_move` -- then a wait; `False`
         once the game is over. `stop` is checked before each decision, so a
-        closing table never gets one more move in."""
+        closing table never gets one more move in. Raises `Unplayable` where
+        the brain refuses the position."""
         view = self._state()
         while not self.stop.is_set() and view.get("your_move") in _MOVES:
-            wire = self.brain.decide(self.transport, self.token, self.seat)
+            try:
+                wire = self.brain.decide(self.transport, self.token, self.seat)
+            except ValueError as error:
+                raise Unplayable(str(error)) from error
             result = self.transport.post("/api/action", self.token, {"action": wire})
             if "error" in result:
                 raise RuntimeError(result["error"])
@@ -139,12 +171,17 @@ class BotRunner:
             self._state(f"?after={after}&wait={self.poll_interval}")
 
     def run(self) -> None:
-        """The loop the server hands to a thread. Every error is logged and
-        retried after `ERROR_BACKOFF` rather than killing it."""
+        """The loop the server hands to a thread. An error is logged and
+        retried after `ERROR_BACKOFF` rather than killing it, except
+        `Unplayable`, which is logged and stops the runner."""
         while not self.stop.is_set():
             try:
                 if not self.run_once():
                     return
+            except Unplayable as error:
+                print(f"bot seat {self.seat} stopped: {error}", file=sys.stderr)
+                self.stop.set()
+                return
             except Exception as error:  # noqa: BLE001 — one bad read must not kill the runner
                 print(f"bot seat {self.seat}: {error}", file=sys.stderr)
                 self.stop.wait(ERROR_BACKOFF)

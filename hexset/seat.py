@@ -42,6 +42,7 @@ from typing import Iterable, Sequence
 
 from .actions import Action, ActionType, apply
 from .board.board import Board
+from .bots.base import seat_at
 from .chance import UNSEEN, ChanceError, Hosted
 from .game import (
     NO_TURN_CAP,
@@ -101,6 +102,7 @@ class Seat:
         self.counter_steps = counter_steps
         self._turn: tuple[int, int] | None = None
         self._reset_turn()
+        self._seat_bots()
 
     @classmethod
     def sit(
@@ -191,14 +193,27 @@ class Seat:
         if not isinstance(game.chance, Hosted):
             raise ValueError("a hosted seat's game takes its outcomes from the host")
         self.game = game
+        self._seat_bots()
         self._sync()
+
+    def _seat_bots(self) -> None:
+        # The gate prices offers on this seat's game from the first one, not
+        # from the seat's first move (`hexset.bots.seat_at`).
+        seat_at(self.bot, self.game)
+        if self.gate is not None and self.gate is not self.bot:
+            seat_at(self.gate, self.game)
 
     # -- this seat's moves -----------------------------------------------
 
     def choose(self) -> Action:
-        """The bot's move, asked with the game as every table asks it."""
+        """The bot's move, asked with the game as every table asks it. During
+        a seven's discards it is this seat's next card, asked as `discard`
+        asks it: on a copy where only this seat still owes, since the game
+        itself has the lowest owing seat to move."""
         if not may_act(self.game, self.seat):
             raise ValueError(f"seat {self.seat} has no move in {self.game.phase.name}")
+        if self.game.phase is Phase.DISCARD:
+            return self.bot.choose(self._owing_alone())
         return self.bot.choose(self.game)
 
     def discard(self) -> list[int] | None:
@@ -215,12 +230,7 @@ class Seat:
         driven by a person's calls says before they have made them); a bot
         that stops after it has started raises instead, since what it chose
         so far is not a discard."""
-        game = self.game
-        owed = game.discard_quota[self.seat] if game.phase is Phase.DISCARD else 0
-        if not owed:
-            raise ValueError(f"seat {self.seat} owes no discard")
-        copy = imagine(game, random.Random(0), randomize_deck=False)
-        copy.discard_quota = [owed if s == self.seat else 0 for s in range(game.num_players)]
+        copy = self._owing_alone()
         cards: list[int] = []
         while copy.phase is Phase.DISCARD and copy.discard_quota[self.seat]:
             action = self.bot.choose(copy)
@@ -232,6 +242,16 @@ class Seat:
             cards.append(action.a)
             apply(copy, action, seat=self.seat)
         return cards
+
+    def _owing_alone(self) -> Game:
+        """A copy of the game where this seat's discard is the only one owed."""
+        game = self.game
+        owed = game.discard_quota[self.seat] if game.phase is Phase.DISCARD else 0
+        if not owed:
+            raise ValueError(f"seat {self.seat} owes no discard")
+        copy = imagine(game, random.Random(0), randomize_deck=False)
+        copy.discard_quota = [owed if s == self.seat else 0 for s in range(game.num_players)]
+        return copy
 
     def restrict_robber(self, hexes: Iterable[int] | None) -> None:
         """The host's rule for the robber move at hand: the hexes it will

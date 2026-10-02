@@ -359,6 +359,35 @@ def test_mirror_rng_is_picklable_shared_by_copies_and_isolated_from_live_game():
     assert random.getstate() == global_before
 
 
+def test_a_mirror_without_a_stream_never_draws_the_live_games_dice():
+    """A mirror's stream is its own: a copy of the live chance stream would
+    have a sampling catanatron player roll the real game's next dice."""
+    from catanatron.models.player import Player
+    from hexset.arena import deal_game
+
+    game = deal_game(145, 0, 4)
+    board = game.state(0, hidden=False).board
+    mapping = translate_board(catanatron_map(board))
+    live_next = random.Random()
+    live_next.setstate(game.rng.getstate())
+    live_next = live_next.random()
+
+    mirror = to_catanatron(game, mapping, seating(tuple(Color)))
+    assert mirror.random.random() != live_next
+
+    draws = []
+
+    class RecordingPlayer(Player):
+        def decide(self, mirror, actions):
+            draws.append(mirror.copy().random.random())
+            return actions[0]
+
+    before = game.rng.getstate()
+    CatanatronBot(RecordingPlayer).choose(game)
+    assert draws and draws[0] != live_next
+    assert game.rng.getstate() == before
+
+
 def test_a_catanatron_spec_names_its_depth_and_world_vote(monkeypatch):
     import hexset.catanatron.bot as module
     from hexset.arena import deal_board

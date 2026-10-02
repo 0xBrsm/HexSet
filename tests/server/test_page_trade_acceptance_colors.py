@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """The trade-acceptance pane's check buttons: accent for the row that takes
-the deal exactly as offered, gray for a counter.
+the deal exactly as offered, gray for a counter, none for an answer the hand
+cannot cover.
 
 `acceptancePane` is a function of `state.trade_round` and nothing else, so
 the page is driven to a real server-issued `state` and a synthetic
@@ -19,7 +20,7 @@ from hexset.actions import ActionType, legal_actions
 from hexset.game import to_move
 from hexset.server.api import Config, Seat, SeatKind, build_session
 
-from _page_server import serving
+from _page_server import launch, serving
 
 
 try:
@@ -105,13 +106,14 @@ def test_a_counters_check_is_gray_and_an_accepts_is_colored(running_server):
     hasn't answered. Only seat 1's check should carry `.primary` -- the
     accent color -- afterward."""
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        browser = launch(playwright)
         try:
             context, page = _seated_page(browser)
 
             page.evaluate(
                 """() => {
                     state.pending = [];
+                    state.players.find((p) => p.seat === 0).hand = {Wood: 1, Brick: 1, Sheep: 0, Wheat: 0, Ore: 0};
                     state.trade_round = {
                         offer: {actor: 0, bundle: [-1, 1, 0, 0, 0]},
                         responses: [
@@ -137,6 +139,48 @@ def test_a_counters_check_is_gray_and_an_accepts_is_colored(running_server):
             assert rows.nth(1).inner_text().strip() == "Accepted"
             assert check_is_primary(1), "the accept is the deal to take -- it stays colored"
             assert not check_is_primary(2), "a counter is a different deal, not the one on offer"
+
+            context.close()
+        finally:
+            browser.close()
+
+
+def test_an_answer_the_hand_cannot_cover_is_shaded_and_has_no_check(running_server):
+    """Our open offer is any card for a Brick. Seat 1 counters with a Wood
+    for an Ore this hand doesn't hold; seat 2 counters with a Wood for the
+    Sheep it does. Only seat 2's row can be taken, and seat 1's Ore is
+    shaded as on an offer received."""
+    with sync_playwright() as playwright:
+        browser = launch(playwright)
+        try:
+            context, page = _seated_page(browser)
+
+            page.evaluate(
+                """() => {
+                    state.pending = [];
+                    state.players.find((p) => p.seat === 0).hand = {Wood: 1, Brick: 0, Sheep: 1, Wheat: 3, Ore: 0};
+                    state.trade_round = {
+                        offer: {actor: 0, bundle: [0, 1, 0, 0, 0], any: -1},
+                        responses: [
+                            {seat: 1, kind: "counter", bundle: [1, 0, 0, 0, -1]},
+                            {seat: 2, kind: "counter", bundle: [1, 0, -1, 0, 0]},
+                            {seat: 3, kind: "pass", bundle: null},
+                        ],
+                        awaiting: [],
+                    };
+                    render();
+                }"""
+            )
+            page.wait_for_selector("#modal.show .pane-row")
+            rows = page.locator("#modal .pane-row")
+            assert rows.count() == 4
+
+            short = rows.nth(1)
+            assert short.locator("button.modal-btn").count() == 0, "a counter this hand can't pay has no check"
+            assert short.locator(".card.shortfall").count() == 1, "the Ore this hand lacks is shaded"
+            payable = rows.nth(2)
+            assert payable.locator("button.modal-btn").count() == 1
+            assert payable.locator(".card.shortfall").count() == 0
 
             context.close()
         finally:

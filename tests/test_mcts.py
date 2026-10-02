@@ -23,6 +23,7 @@ from hexset.mcts import (
     _Chance,
     _drawn,
     draws_hidden,
+    lost_value,
     sampled_children,
     visit_policy,
 )
@@ -160,8 +161,10 @@ def test_a_steal_edge_averages_over_the_cards_it_draws():
     game, index = a_steal()
     # `hidden=False`: the victim's hand is the point of this test, and a
     # determinized root would redeal it from the mover's belief.
+    # `wave=1`: no descent is in flight when the root selects, so virtual
+    # loss sends none of the 96 elsewhere.
     search = Search(
-        Stub(favour=index), simulations=96, wave=4, hidden=False, rng=random.Random(3)
+        Stub(favour=index), simulations=96, wave=1, hidden=False, rng=random.Random(3)
     )
     root, _, visits = search.run(game)
 
@@ -176,7 +179,7 @@ def test_a_steal_edge_averages_over_the_cards_it_draws():
 def test_a_bought_card_edge_averages_over_the_deck():
     """Ninety-six visits of a twenty-five card deck reach every kind in it."""
     game, index = a_purchase()
-    search = Search(Stub(favour=index), simulations=96, wave=4, rng=random.Random(3))
+    search = Search(Stub(favour=index), simulations=96, wave=1, rng=random.Random(3))
     root, _, visits = search.run(game)
 
     slot = root.children[index]
@@ -212,7 +215,8 @@ class NoHiddenDraw(Search):
 
 def test_a_tree_that_draws_no_hidden_card_searches_exactly_as_it_did_before():
     """A byte-identity anchor: visit counts and rng stream position both pinned.
-    Only a rules change may re-pin them.
+    Only a change to the rules or to the search's own selection may re-pin
+    them.
     """
     game = after_setup()
     while game.phase is not Phase.MAIN or len(legal_actions(game)) < 6:
@@ -223,8 +227,8 @@ def test_a_tree_that_draws_no_hidden_card_searches_exactly_as_it_did_before():
         Anchor(), simulations=96, wave=8, hidden=False, rng=rng
     ).run(game)
 
-    assert [int(v) for v in visits] == [9, 2, 2, 71, 2, 10]
-    assert rng.random() == 0.34074053550422223
+    assert [int(v) for v in visits] == [5, 4, 3, 72, 3, 9]
+    assert rng.random() == 0.8262955117986266
 
 
 def test_two_descents_that_collide_on_a_leaf_share_one_evaluation():
@@ -241,17 +245,39 @@ def test_two_descents_that_collide_on_a_leaf_share_one_evaluation():
     assert all(len(set(wave)) == len(wave) for wave in positions)
 
 
-def test_a_forced_move_is_not_searched():
-    class OneWay(Search):
-        def _options(self, game):
-            return super()._options(game)[:1]
+class OneWay(Search):
+    def _options(self, game):
+        return super()._options(game)[:1]
 
-    stub = Stub()
+
+def test_a_forced_move_is_evaluated_but_not_searched():
+    """One evaluation, of the root: the value is the evaluator's and the
+    visits are the whole budget, as any other root's are."""
+    stub = Stub(value=(0.5, -0.5, 0.25, -0.25))
     search = OneWay(stub, simulations=64, rng=random.Random(1))
-    _, options, visits = search.run(a_game())
+    root, options, visits = search.run(a_game())
     assert len(options) == 1
-    assert visits.tolist() == [1.0]
-    assert stub.waves == []
+    assert visits.tolist() == [64.0]
+    assert root.value == (0.5, -0.5, 0.25, -0.25)
+    assert [len(wave) for wave in stub.waves] == [1]
+    assert root.totals[0].tolist() == [32.0, -32.0, 16.0, -16.0]
+
+
+def test_a_forced_move_carries_its_value_through_several_worlds():
+    stub = Stub(value=(0.5, -0.5, 0.25, -0.25))
+    game = after_setup()
+    while game.phase is not Phase.MAIN:
+        apply(game, legal_actions(game)[0])
+    # Nobody else's cards are certified, so the mover's view holds several worlds.
+    hands = game.state(0, hidden=False).hands
+    for seat in range(4):
+        if seat != to_move(game):
+            game.ledger.seats[seat].known = [0] * 5
+            game.ledger.seats[seat].unknown = sum(hands[seat])
+    root, _, visits = OneWay(stub, simulations=16, k=4, rng=random.Random(3)).run(game)
+    assert len(root.worlds) > 1
+    assert visits.sum() == pytest.approx(16.0)
+    assert root.value == pytest.approx((0.5, -0.5, 0.25, -0.25))
 
 
 def test_a_finished_game_is_scored_by_the_evaluators_terminal():
@@ -318,6 +344,36 @@ def test_virtual_loss_spreads_one_wave_over_several_edges():
     picks = {search._descend(root)[0][0][1] for _ in range(4)}
     assert len(picks) == 4
     assert root.virtual.sum() == 4
+
+
+def test_a_lost_game_is_the_bottom_of_each_stance():
+    assert lost_value("own", 4) == 0.0
+    assert lost_value("relative", 4) == pytest.approx(-1 / 3)
+    assert lost_value("relative", 2) == pytest.approx(-1.0)
+    assert lost_value("paranoid", 4) == -1.0
+
+
+@pytest.mark.parametrize("stance", sorted(STANCE_ROWS))
+def test_a_descent_in_flight_discourages_another_down_the_same_edge(stance):
+    """Both edges hold low win chances, so `relative` and `paranoid` read
+    negative means. Counting the in-flight descent as a visit worth nothing
+    would raise the first edge's mean towards zero and send the next descent
+    after it. `exploration=0` leaves the means alone to decide."""
+    game = a_game()
+    search = Search(Stub(), stance=stance, exploration=0.0, rng=random.Random(1))
+    node = search._node(imagine(game, search.rng))
+    options = node.options[:2]
+    node = Node(
+        game=node.game, mover=0, options=options, value=(0.25,) * 4,
+        prior=np.array([0.5, 0.5]), visits=np.zeros(2), virtual=np.zeros(2),
+        totals=np.zeros((2, 4)), ranked=np.zeros(2), children=[None, None],
+    )
+    for index, chance in ((0, 0.10), (1, 0.09)):
+        rest = (1.0 - chance) / 3
+        search._credit(node, index, np.array([chance, rest, rest, rest]), 4)
+    assert search._select(node) == 0
+    node.virtual[0] = 1.0
+    assert search._select(node) == 1
 
 
 def test_a_mover_reads_the_value_vector_with_its_own_stance():

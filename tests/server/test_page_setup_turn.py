@@ -17,7 +17,7 @@ from hexset.actions import ActionType, legal_actions
 from hexset.game import to_move
 from hexset.server.api import Config, Seat, SeatKind, build_session
 
-from _page_server import serving
+from _page_server import launch, serving
 
 
 try:
@@ -112,7 +112,7 @@ def _shown(page, fab_id: str) -> bool:
 @pytest.fixture(scope="module")
 def browser():
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        browser = launch(playwright)
         yield browser
         browser.close()
 

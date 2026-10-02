@@ -3198,7 +3198,9 @@ function postRound(path, body) {
 // Every line is drawn from the giving seat's own side (see tradeLine), so an
 // accept is our offer mirrored and a counter is what that seat would hand
 // over first — the pip beside a row and the cards left of "for" always agree.
-function acceptancePane(round) {
+// An answer this hand can't cover has no check: a counter's cards we are
+// short of are shaded, as on an offer received.
+function acceptancePane(round, p) {
   const wrap = html("div", {class: "pane"});
   const signed = round.offer.bundle;   // positive is what this seat gets
   const iGive = signed.map((n) => Math.max(0, -n));
@@ -3244,10 +3246,14 @@ function acceptancePane(round) {
       // row's rule -- redrawing the identical cards here said the same thing
       // twice. Same treatment as "Passed": the one word is the whole answer.
       row.appendChild(html("div", {class: "pane-pass"}, "Accepted"));
-      const take = modalActionButton("check", `Trade with ${seatFullLabel(seat)}`);
-      take.addEventListener("click",
-        () => { closeModal(); postRound("/trade/round/choose", {seat: answer.seat, bundle: answer.bundle}); });
-      row.appendChild(take);
+      if (handCovers(p, iGive)) {
+        const take = modalActionButton("check", `Trade with ${seatFullLabel(seat)}`);
+        take.addEventListener("click",
+          () => { closeModal(); postRound("/trade/round/choose", {seat: answer.seat, bundle: answer.bundle}); });
+        row.appendChild(take);
+      } else {
+        row.appendChild(buttonGap());
+      }
       wrap.appendChild(row);
       continue;
     }
@@ -3256,7 +3262,13 @@ function acceptancePane(round) {
     // is new information the offer above didn't already say.
     const theirGive = answer.bundle.map((n) => Math.max(0, n));
     const theirWant = answer.bundle.map((n) => Math.max(0, -n));
-    row.appendChild(tradeLine(theirGive, theirWant, {small: true}));
+    const shortfall = theirWant.map((n, r) => n > (p.hand[board.resources[r]] || 0));
+    row.appendChild(tradeLine(theirGive, theirWant, {small: true, rightShortfall: shortfall}));
+    if (!handCovers(p, theirWant)) {
+      row.appendChild(buttonGap());
+      wrap.appendChild(row);
+      continue;
+    }
     // Gray, not accent: the row above already reads as a deal on offer, not
     // one struck -- the accent is reserved for the one check that takes a
     // trade exactly as this seat asked for it (see the "accept" branch
@@ -3399,7 +3411,7 @@ function renderTradeMode(title, body, actions) {
     // turn.
     modalCloseGlyph(offers ? "Turn every answer down and close the round"
       : "Close the round", () => { closeModal(); postRound("/trade/round/choose", {decline: true}); });
-    body.appendChild(acceptancePane(round));
+    body.appendChild(acceptancePane(round, p));
     return;
   }
 

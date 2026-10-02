@@ -80,7 +80,9 @@ class HexSetEnv(Env):
 
     The action mask is always `info["action_mask"]`, never in the
     observation, with `action_masks()` as the `sb3-contrib` hook, and
-    `info["view"]` carries the seat's `hexset.view.View`. The learner has no
+    `info["view"]` carries the seat's `hexset.view.View`. An action outside
+    the mask is a no-op with reward 0, for a caller that deliberately ignores
+    the mask such as `check_env`: nothing is applied. The learner has no
     gate, so it never trades and cannot be traded with -- use `LaneEnv`.
     """
 
@@ -167,6 +169,10 @@ class HexSetEnv(Env):
     ) -> tuple[Any, dict[str, Any]]:
         super().reset(seed=seed)
         del options
+        if seed is None:
+            # Off `np_random`, which the seeded reset above reseeded, so the
+            # resets after a seeded one are as reproducible as it is.
+            seed = int(self.np_random.integers(2**31))
         episode_rng = random.Random(seed)
 
         if self.learner_seat_config == "rotate":
@@ -197,15 +203,13 @@ class HexSetEnv(Env):
         if self._aec.agent_selection != learner:
             raise RuntimeError("HexSetEnv.step() called when it is not the learner's turn")
 
-        try:
-            self._aec.step(action if isinstance(action, Action) else int(action))
-        except (ValueError, IndexError):
-            # Not legal for this decision. Every such engine check runs before
-            # any state mutation, so nothing needs undoing, and the illegal
-            # action is a no-op rather than a crashed episode -- for a caller
-            # that deliberately ignores the mask, such as `check_env`.
+        if self._aec._legal(self._aec._game, self._learner_seat, action) is None:
+            # Outside the mask: checked here, before the game is touched, so
+            # it is a no-op rather than a crashed episode -- for a caller that
+            # deliberately ignores the mask, such as `check_env`.
             observation, info = self._observe_learner()
             return observation, 0.0, False, False, info
+        self._aec.step(action)
 
         self._auto_play_opponents()
 

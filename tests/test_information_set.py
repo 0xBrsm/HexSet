@@ -40,6 +40,10 @@ from hexset.view import View
 PLAYERS = 4
 SIMULATIONS = 16
 WAVE = 4
+# The sharp probe's budget: enough descents per edge that, rooted on the
+# truth, its most-visited move follows the hands it reads (the control,
+# `test_the_probe_can_fail`); a wave's virtual losses even out a smaller one.
+SHARP = dict(simulations=256, wave=8)
 
 
 # --------------------------------------------------------------------------
@@ -223,7 +227,7 @@ def mcts_tree(board):
     hand in the leaf it is handed. Nothing but the determinized root keeps this
     arm honest, so it is the sharp probe for the tree itself -- `mcts` above
     can only move if the checkpoint's own priors and values move with it."""
-    return Search(HandReader(), simulations=64, wave=8, rng=random.Random(0))
+    return Search(HandReader(), **SHARP, rng=random.Random(0))
 
 
 BOTS = {
@@ -329,12 +333,8 @@ def test_the_probe_can_fail():
     for truth, seat in positions(wanted=4):
         twin = permuted(truth, seat, random.Random(11))
         for hidden, moved in ((False, omniscient), (True, determinized)):
-            here = Search(
-                HandReader(), simulations=64, wave=8, hidden=hidden, rng=random.Random(0)
-            ).choose(truth)
-            there = Search(
-                HandReader(), simulations=64, wave=8, hidden=hidden, rng=random.Random(0)
-            ).choose(twin)
+            here = Search(HandReader(), **SHARP, hidden=hidden, rng=random.Random(0)).choose(truth)
+            there = Search(HandReader(), **SHARP, hidden=hidden, rng=random.Random(0)).choose(twin)
             if here != there:
                 moved.append(seat)
     assert omniscient, (

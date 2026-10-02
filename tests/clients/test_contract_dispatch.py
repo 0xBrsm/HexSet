@@ -76,12 +76,15 @@ def test_a_contract_6_graph_routes_to_the_record_policy(path):
     assert isinstance(load(str(path), _board().topology).policy, V2Policy)
 
 
-def test_a_contract_1_export_is_refused_by_name():
+def test_a_file_declaring_no_contract_is_refused_as_declaring_none():
+    """Not as `contract='1'`: the file declares nothing, and a message
+    naming a contract it never wrote sends the reader looking for the key."""
     assert "contract" not in _metadata(CONTRACT1)
     with pytest.raises(ValueError) as caught:
         load(str(CONTRACT1), _board().topology)
-    assert "contract='1'" in str(caught.value)
-    assert "6" in str(caught.value)
+    message = str(caught.value)
+    assert "declares no contract" in message and "contract='" not in message
+    assert "6" in message
 
 
 def test_an_offer_protocol_contract_is_refused_by_name():

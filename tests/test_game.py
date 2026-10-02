@@ -568,3 +568,109 @@ def test_setup_hands_the_first_turn_to_a_seat_that_is_still_playing():
     from hexset.game import to_move
 
     assert to_move(game) == 2
+
+
+def _rolled(players: int = 3):
+    """Seat 0 in `MAIN` after an ordinary roll."""
+    game = run_setup(a_game(players=players))
+    roll_dice(game, roll=8)
+    assert game.phase is Phase.MAIN and game.current_player == 0
+    return game
+
+
+def test_retiring_the_seat_on_the_move_ends_its_turn():
+    """The next seat starts a turn of its own at `ROLL` -- it rolls, and its
+    trade event is still to come -- rather than inheriting the rest of the
+    retired seat's."""
+    from hexset.game import lock_seat
+
+    game = _rolled()
+    game.dev_card_played = True
+    game.trades_made = 1
+    turns = game.turns
+    assert game.trade_event_turn == turns
+
+    lock_seat(game, 0)
+
+    assert game.current_player == 1 and game.phase is Phase.ROLL
+    assert game.turns == turns + 1
+    assert game.dev_card_played is False and game.trades_made == 0
+    assert game.trade_event_turn != game.turns
+
+
+def test_retiring_mid_robber_move_hands_on_without_moving_it():
+    from hexset.game import lock_seat
+
+    game = run_setup(a_game(players=3))
+    game._state.dev_cards[0][DevCard.KNIGHT] = 1
+    play_knight_card(game)
+    assert game.phase is Phase.ROBBER and game.resume_phase is Phase.ROLL
+    robber = game._state.robber
+    game.robber_allowed = frozenset({robber + 1})
+
+    lock_seat(game, 0)
+
+    assert game.current_player == 1 and game.phase is Phase.ROLL
+    assert game.resume_phase is Phase.MAIN and game.robber_allowed is None
+    assert game._state.robber == robber
+
+
+def _sevens_with_two_owing():
+    game = run_setup(a_game(players=3))
+    for seat in (0, 1):
+        clear_hand(game._state, seat)
+        for resource in Resource:
+            give(game._state, seat, resource, 2)
+    roll_dice(game, roll=7)
+    assert players_owing_discards(game) == [0, 1]
+    return game
+
+
+def test_retiring_the_roller_mid_discard_waits_for_the_round_then_hands_on():
+    """The other seats still discard; then the next seat's turn starts, and
+    the robber stays where it was -- there is nobody left to move it."""
+    from hexset.game import lock_seat
+
+    game = _sevens_with_two_owing()
+    robber = game._state.robber
+
+    lock_seat(game, 0)
+    assert game.phase is Phase.DISCARD
+    assert players_owing_discards(game) == [1]
+
+    submit_discard(game, 1, [1, 1, 1, 1, 1])
+
+    assert game.current_player == 1 and game.phase is Phase.ROLL
+    assert game._state.robber == robber
+
+
+def test_retiring_the_last_seat_owing_a_discard_closes_the_round():
+    from hexset.game import lock_seat
+
+    game = _sevens_with_two_owing()
+    submit_discard(game, 1, [1, 1, 1, 1, 1])
+
+    lock_seat(game, 0)
+
+    assert game.current_player == 1 and game.phase is Phase.ROLL
+
+
+def test_a_lapsed_free_road_credit_does_not_close_the_trade_window(monkeypatch):
+    """A Road Building credit with nowhere left to go is no road owed:
+    after a main-phase action the trade event is offered again."""
+    from hexset.actions import Action, ActionType, apply
+
+    game = _seated(run_setup(a_game(players=3)))
+    game.phase = Phase.MAIN
+    state = game._state
+    for edge, owner in enumerate(state.edge_owner):
+        if owner == NO_OWNER:
+            state.edge_owner[edge] = 2
+    game.free_roads = 1
+    clear_hand(state, 0)
+    give(state, 0, Resource.WOOD, 4)
+    calls = _spy_on_trade_event(monkeypatch)
+
+    apply(game, Action(ActionType.BANK_TRADE, Resource.WOOD, Resource.ORE))
+
+    assert calls == [Phase.MAIN]

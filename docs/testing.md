@@ -35,8 +35,8 @@ absent, so a bare `pytest` passes without the extras and covers less.
 `tests/test_packaging.py` builds a wheel offline and skips without
 `setuptools`.
 
-The page tests skip when the `playwright` package is missing. With the
-package installed and no browser binary, they fail at launch. The binary is
+The page tests skip when the `playwright` package is missing, and when its
+Chromium binary is (`tests/server/_page_server.launch`). The binary is
 a separate download:
 
 ```sh

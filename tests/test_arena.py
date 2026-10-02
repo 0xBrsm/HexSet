@@ -169,7 +169,7 @@ def test_a_name_is_registered_once_and_shipped_names_never():
 def test_the_checkpoint_kinds_take_whichever_loader_was_installed_last():
     """`network`/`mcts` build from the process's checkpoint loader, and a
     runtime installing another replaces it rather than colliding."""
-    from hexset.arena import Entrant, register_entrant_kind, spawn, unregister_entrant_kind
+    from hexset.arena import KIND_HINT, Entrant, register_entrant_kind, spawn, unregister_entrant_kind
     from hexset.board.board import random_base_board
     import random
 
@@ -182,6 +182,9 @@ def test_the_checkpoint_kinds_take_whichever_loader_was_installed_last():
         unregister_entrant_kind("network")
     with pytest.raises(ValueError, match="register_entrants"):
         spawn(Entrant("n", kind="network", weights="x"), board, random.Random(0))
+    with pytest.raises(ValueError, match="worker_initializer") as error:
+        spawn(Entrant("n", kind="test-unloaded"), board, random.Random(0))
+    assert KIND_HINT in str(error.value)
 
 
 def test_the_longest_registered_prefix_parses_and_a_preset_comes_first():
@@ -216,6 +219,17 @@ def test_an_entrants_options_are_one_setting_whatever_their_order():
         Entrant("x", kind="x", options=(("a", 1), ("a", 2)))
     with pytest.raises(ValueError, match="pair"):
         Entrant("x", kind="x", options=(("a", 1, 2),))
+
+
+def test_a_misplaced_checkpoint_option_is_refused_by_name():
+    with pytest.raises(ValueError, match="follow the `@`"):
+        entrant_from_name("mcts:/tmp/x.pt:k=4")
+    with pytest.raises(ValueError, match="search budget"):
+        entrant_from_name("mcts:/tmp/x.pt@many")
+    with pytest.raises(ValueError, match="no-trade switch"):
+        entrant_from_name("network:/tmp/x.pt@x")
+    # A path may hold a colon of its own.
+    assert entrant_from_name("mcts:C:/runs/x.pt").weights == "C:/runs/x.pt"
 
 
 def test_the_public_surface_is_what_the_module_names():

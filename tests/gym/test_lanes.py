@@ -7,9 +7,12 @@ A lane is not a second engine: for the same `(seed, index)` it must play the
 
 from __future__ import annotations
 
+import random
+
 import pytest
 
 from hexset import arena
+from hexset.board.board import random_base_board
 from hexset.arena import Entrant, _play_one
 from hexset.rules import STANDARD_GAME
 from hexset.game import UNSTRUCTURED_TURN_CAP
@@ -380,6 +383,45 @@ def test_lightweight_policy_collects_batched_training_rows_and_replayable_episod
             assert mask[space.index(decision.action)]
         final = replay(episode.record)
         assert tuple(victory_points(final.state(s, hidden=False), s) for s in range(2)) == episode.outcome.points
+
+
+class SeatedSpy:
+    """One bot for every lane on a pinned board, seated the way a network
+    gate is (`seat_at`, and `choose` itself), counting each trade-gate ask
+    whose view is not the game it was last seated at."""
+
+    trade_floor = 0.0
+    trade_params = TradeParams(max_offers=1)
+
+    def __init__(self):
+        self.seated = None
+        self.asked = 0
+        self.astray = 0
+
+    def seat_at(self, game):
+        self.seated = game
+
+    def choose(self, game):
+        self.seated = game
+        return options_for(game)[0]
+
+    def gains_many(self, view, received, counterparties):
+        self.asked += 1
+        if self.seated is None or view.state is not self.seated.state(0, hidden=False):
+            self.astray += 1
+        return [-1.0] * len(received)
+
+
+def test_a_bot_shared_across_pinned_lanes_is_seated_at_the_lane_it_prices():
+    """With one board, one bot serves both lanes: it is asked for both
+    lanes' moves before either is applied, so without reseating, the first
+    lane's trade event would price on the second lane's game."""
+    spy = SeatedSpy()
+    env = LaneEnv(4, SEED, 2, deal=2, action_cap=400,
+                  board=random_base_board(random.Random(0)), bots={0: lambda board: spy})
+    env.drain()
+    assert spy.asked > 0, "no trade event asked the gate anything"
+    assert spy.astray == 0, f"{spy.astray} of {spy.asked} asks priced another lane's game"
 
 
 def test_a_game_that_runs_out_of_turns_is_exhausted_not_truncated():

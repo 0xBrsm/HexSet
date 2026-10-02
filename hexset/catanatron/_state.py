@@ -214,8 +214,9 @@ def to_catanatron(
     """The catanatron `Game` mirroring `game` right now.
 
     `rng` is the mirror's random stream, shared by its `Game`, its `State`
-    and every copy a search makes; without one the mirror clones `game`'s
-    own, without advancing it."""
+    and every copy a search makes; without one the mirror gets a fresh,
+    unseeded stream. Never a copy of `game`'s own: a mirror that sampled
+    with the live chance stream would roll the real game's future dice."""
     # true state: a catanatron `Player` reads the whole table, so this is the
     # sanctioned true-state read rather than a `View`.
     state = game.state(0, hidden=False)
@@ -275,12 +276,9 @@ def to_catanatron(
 
     cgame = CatanatronGame([], initialize=False)
     cgame.seed = 0
-    # Arena callers supply the entrant's own stream; standalone translation
-    # clones the host's without advancing live chance draws. Game, State and
-    # search copies intentionally share it.
+    # Game, State and search copies intentionally share one stream.
     if rng is None:
-        rng = random.Random(0)
-        rng.setstate(game.rng.getstate())
+        rng = random.Random()
     cgame.random = cstate.random = rng
     cgame.id = ""
     cgame.vps_to_win = state.rules.winning_points

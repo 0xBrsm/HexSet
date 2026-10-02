@@ -65,10 +65,17 @@ falling back to `default_offer`/`default_respond`/`default_respond_any`/
 `default_pick` -- structural, not by inheritance. A gate with an opponent
 model supplies `estimate_many(view, candidates) -> list[float]`, which those
 defaults read in place of guessing an unanswered counterparty.
+
+Whatever a gate returns, the referee holds it to the rules before it counts:
+an answer is always the asked seat's, an acceptance is of the offer as it
+was made and only where the seat's own hand covers it, a counter is a
+two-sided exchange of the table's width, and an offer gives no more than its
+gate's own `max_give_cards`. Anything else is a pass.
 """
 
 from __future__ import annotations
 
+from numbers import Integral
 from typing import TYPE_CHECKING, Callable, Iterable, NamedTuple, Sequence
 
 from ..board.terrain import NUM_RESOURCES
@@ -89,6 +96,12 @@ TRADE_RULES: tuple[str, ...] = ("egalitarian", "nash", "actor")
 # the gate whose candidates they are building (`TradeParams.enumeration_cards`):
 # a call site that forgot it would quietly enumerate at someone else's width,
 # which is a wrong answer rather than an error.
+
+
+def _tie(received: Sequence[int]) -> tuple:
+    """The tie-break part of a ranking key, for `max`: the smaller exchange
+    first, then canonical bundle order. For determinism only."""
+    return -sum(abs(int(n)) for n in received), tuple(-int(n) for n in received)
 
 
 def trade_floor_of(gate: object) -> float:
@@ -350,13 +363,26 @@ def apply_trades(game: "Game", trades: Sequence[Trade]) -> None:
         game.trades_made += 1
 
 
+def _two_sided(received: object) -> bool:
+    """Whether `received` is an exchange at all: one integer count per
+    resource, something moving each way. A signed bundle's two sides are
+    disjoint by construction."""
+    if not isinstance(received, (tuple, list)) or len(received) != NUM_RESOURCES:
+        return False
+    if any(isinstance(n, bool) or not isinstance(n, Integral) for n in received):
+        return False
+    return any(n > 0 for n in received) and any(n < 0 for n in received)
+
+
 def _validate_exchange(game: "Game", actor: int, counterparty: int, received: Bundle) -> None:
     """The referee's checks on an exchange between `actor` and `counterparty`
-    (`received` signed towards `actor`), before any gate is asked: the two
-    seats differ, the phase is `Phase.MAIN`, one of the two is the current
-    player (a seat trades on its own turn with anyone, or on another seat's
-    turn with that seat only), and both sides cover their half from the true
-    hands. Raises `ValueError` naming the first check that fails.
+    (`received` signed towards `actor`), before any gate is asked: both are
+    seats at this table and neither is locked, the two differ, the bundle is
+    two-sided (`_two_sided`), the phase is `Phase.MAIN`, one of the two is
+    the current player (a seat trades on its own turn with anyone, or on
+    another seat's turn with that seat only), and both sides cover their half
+    from the true hands. Raises `ValueError` naming the first check that
+    fails.
 
     No card cap is checked here. How many cards a seat will move is that
     seat's own, refused at its own consent, so a referee cap would either
@@ -364,8 +390,16 @@ def _validate_exchange(game: "Game", actor: int, counterparty: int, received: Bu
     """
     from ..game import Phase  # local: avoids a game/trading import cycle
 
+    seats = game._state.num_players
+    for seat in (actor, counterparty):
+        if isinstance(seat, bool) or not isinstance(seat, int) or not 0 <= seat < seats:
+            raise ValueError(f"seat {seat!r} is not a seat at this table")
+        if seat in game.locked:
+            raise ValueError(f"seat {seat} is locked and cannot trade")
     if actor == counterparty:
         raise ValueError("a seat cannot trade with itself")
+    if not _two_sided(received):
+        raise ValueError(f"{received!r} is not an exchange: one count per resource, cards both ways")
     if game.phase is not Phase.MAIN:
         raise ValueError(f"trading is only open in {Phase.MAIN.name}, not {game.phase.name}")
     if game.current_player not in (actor, counterparty):
@@ -454,19 +488,23 @@ def _best_clearing(
     each distinct counterparty's once over the subset that cleared `me`'s
     floor. Among candidates clearing both floors, `"egalitarian"` maximises
     the smaller gain, `"nash"` their product, `"actor"` the acting seat's
-    own; ties break on the acting seat's gain, then canonical bundle order,
-    then the lower counterparty seat, for determinism only. Batching needs
-    `game.gates`; the `gate` callable is the unseated fallback.
+    own; ties break on the acting seat's gain, then the smaller bundle,
+    then canonical bundle order, then the lower counterparty seat, for
+    determinism only. A seated gate that does not trade (`max_offers=0`) is
+    never a counterparty. Batching needs `game.gates`; the `gate` callable is
+    the unseated fallback.
     """
     state = game._state
-    actor_gate = game.gates[me] if game.gates is not None else gate
+    traders = game.gates
+    actor_gate = traders[me] if traders is not None else gate
+    skipped = frozenset(game.locked)
+    if traders is not None:
+        skipped |= {s for s, g in enumerate(traders) if s != me and not params_of(g).trades}
     candidates = list(_candidates(
-        state, me, game.locked, params_of(actor_gate).enumeration_cards
+        state, me, skipped, params_of(actor_gate).enumeration_cards
     ))
     if not candidates:
         return None
-
-    traders = game.gates
 
     def ask(seat: int, seat_view, receiveds: list[Bundle], counterparties: list[int]) -> list[float]:
         if traders is not None:
@@ -511,10 +549,9 @@ def _best_clearing(
             primary = gain_me * gain_them
         else:  # "actor"
             primary = gain_me
-        # Negated so `max` breaks ties towards the smallest bundle and the
-        # lower counterparty seat.
-        canonical = tuple(-n for n in receiveds[i])
-        return (primary, gain_me, canonical, -thems[i])
+        # `max` breaks ties towards the smallest bundle, then canonical
+        # bundle order, then the lower counterparty seat.
+        return (primary, gain_me, *_tie(receiveds[i]), -thems[i])
 
     cleared = [i for i, gain in theirs.items() if clears_floor(gain, gate_of(thems[i]))]
     if not cleared:
@@ -626,11 +663,7 @@ def default_offer(
     if not eligible:
         return None
 
-    def key(i: int) -> tuple:
-        canonical = tuple(-n for n in receiveds[i])
-        return (own_gains[i], canonical, -thems[i])
-
-    return max(eligible, key=key)
+    return max(eligible, key=lambda i: (own_gains[i], *_tie(receiveds[i]), -thems[i]))
 
 
 def default_respond(gate: object, view: "View", offer: Offer) -> Response:
@@ -673,12 +706,7 @@ def _best_counter(gate: object, view: "View", actor: int) -> Response:
             if clears_floor(estimates[i], gate) and clears_floor(own_gains[i], gate)
         ]
         if eligible:
-
-            def key(i: int) -> tuple:
-                canonical = tuple(-n for n in candidates[i])
-                return (own_gains[i], canonical)
-
-            best = max(eligible, key=key)
+            best = max(eligible, key=lambda i: (own_gains[i], *_tie(candidates[i])))
             return Response(me, RESPONSE_COUNTER, tuple(-n for n in candidates[best]))
 
     return Response(me, RESPONSE_PASS)
@@ -703,7 +731,8 @@ def default_pick(
 ) -> int | None:
     """The default `pick(view, responses) -> index | None` for a gate with
     only `gains_many`: the answer with the highest own gain above this
-    gate's own floor, acceptance or counter, else `None`.
+    gate's own floor, acceptance or counter, else `None`. Ties break as
+    `_best_clearing`'s do.
 
     An acceptance is priced by who took the offer: the offer went out with
     some seat in mind, and the same cards from another seat -- one closer to
@@ -724,8 +753,7 @@ def default_pick(
     for (i, r), gain in zip(eligible, gains):
         if not clears_floor(gain, gate):
             continue
-        canonical = tuple(-n for n in r.bundle)
-        key = (gain, canonical, -r.seat)
+        key = (gain, *_tie(r.bundle), -r.seat)
         if best_key is None or key > best_key:
             best_key, best_idx = key, i
     return best_idx
@@ -817,13 +845,31 @@ def menu(
     for next -- else `open_candidates` at the gate's own proposal width.
     `turn` and `already_offered` are for a planning gate, whose menu depends
     on where in the turn it is. Whatever the menu, it is built from the gate's
-    own view; the engine re-checks coverage when cards move, never before."""
+    own view, and it holds nothing giving more than the gate's own
+    `max_give_cards`: a gate never offers what it would itself refuse. The
+    engine re-checks coverage when cards move, never before."""
+    params = params_of(gate)
     candidates_fn = getattr(gate, "candidates", None)
     if candidates_fn is not None:
-        return list(candidates_fn(
+        out = list(candidates_fn(
             view, list(counterparties), turn=turn, already_offered=already_offered
         ))
-    return open_candidates(view, counterparties, params_of(gate).enumeration_cards)
+    else:
+        out = open_candidates(view, counterparties, params.enumeration_cards)
+    cap = params.max_give_cards
+    if cap is None:
+        return out
+    return [(them, b) for them, b in out if not _gives_more(b, cap)]
+
+
+def _gives_more(received: object, cap: int) -> bool:
+    """Whether `received` (signed towards its proposer) gives more than `cap`
+    cards. Something that is not a bundle at all gives nothing here; the
+    offer stage's own shape check refuses it."""
+    try:
+        return sum(max(-int(n), 0) for n in received) > cap
+    except (TypeError, ValueError):
+        return False
 
 
 def counter_menu(gate: object, view: "View", actor: int) -> list[tuple[int, Bundle]]:
@@ -844,16 +890,10 @@ def _well_formed(view: "View", received: object) -> bool:
     right width, integer counts, both sides nonempty and disjoint, and the
     giving side covered by the actor's own hand. A menu is the gate's word;
     this is the shape check the engine's own enumeration gives for free."""
+    if not _two_sided(received):
+        return False
     hand = view.known[view.perspective]
-    if not isinstance(received, (tuple, list)) or len(received) != len(hand):
-        return False
-    if any(isinstance(n, bool) or not isinstance(n, int) for n in received):
-        return False
-    give = [max(-n, 0) for n in received]
-    take = [max(n, 0) for n in received]
-    if not any(give) or not any(take) or any(g and t for g, t in zip(give, take)):
-        return False
-    return all(g <= int(h) for g, h in zip(give, hand))
+    return all(max(-n, 0) <= int(h) for n, h in zip(received, hand))
 
 
 def offer(
@@ -915,16 +955,44 @@ def respond(game: "Game", gate: object, seat: int, offer: Offer) -> Response:
     """The round's second stage, once per other seat: its gate's
     `respond(view, offer)`, else `default_respond`. The seat reads only its
     own view. An open offer (`is_open`) is its gate's `respond_any(view,
-    offer)`, else `default_respond_any`; an acceptance of one, which cannot
-    be executed, is a pass."""
+    offer)`, else `default_respond_any`. A gate that does not trade
+    (`max_offers=0`) is not asked: it signs nothing, so it passes.
+
+    The answer is the referee's to admit (`_admit`): it is always `seat`'s;
+    an acceptance is of `offer` as it was made, and a pass where `seat`'s
+    own hand does not cover its side or the offer is open; a counter must be
+    a two-sided exchange of the table's width. Anything else is a pass."""
+    if not params_of(gate).trades:
+        return Response(seat, RESPONSE_PASS)
     view = game.state(seat)
     if is_open(offer):
         any_fn = getattr(gate, "respond_any", None)
         response = any_fn(view, offer) if any_fn is not None else default_respond_any(gate, view, offer)
-        if response.kind == RESPONSE_ACCEPT:
-            return Response(seat, RESPONSE_PASS)
-        return response
-    return _answer_concrete(gate, view, offer)
+    else:
+        response = _answer_concrete(gate, view, offer)
+    return _admit(view, seat, offer, response)
+
+
+def _admit(view: "View", seat: int, offer: Offer, response: object) -> Response:
+    """`response`, a gate's answer from `seat` to `offer`, as the referee
+    admits it (`respond`). Coverage is read off `seat`'s own view, whose own
+    hand is exact, so nothing hidden is consulted."""
+    passed = Response(seat, RESPONSE_PASS)
+    kind = getattr(response, "kind", None)
+    if kind == RESPONSE_ACCEPT:
+        if is_open(offer):
+            return passed
+        received = tuple(int(n) for n in offer.received)
+        own = view.known[seat]
+        if not all(own[r] >= n for r, n in enumerate(received) if n > 0):
+            return passed
+        return Response(seat, RESPONSE_ACCEPT, received)
+    if kind == RESPONSE_COUNTER:
+        bundle = getattr(response, "bundle", None)
+        if not _two_sided(bundle):
+            return passed
+        return Response(seat, RESPONSE_COUNTER, tuple(int(n) for n in bundle))
+    return passed
 
 
 def pick(

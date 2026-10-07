@@ -21,7 +21,7 @@ from hexset.game import is_over, to_move
 from hexset.server.api import Config, Seat, SeatKind, build_session
 from hexset.server.wire import action_to_wire
 
-from _page_server import launch, serving
+from _page_server import launch, serving, front_door
 
 
 try:
@@ -165,10 +165,7 @@ def test_the_roster_keeps_its_height_when_a_game_ends(running_server, browser):
     """
     live = browser.new_context()  # nobody: this page deals its own game
     live_page = live.new_page()
-    with live_page.expect_response(
-        lambda r: r.request.method == "POST" and "/api/games" in r.url
-    ):
-        live_page.goto(f"{BASE_URL}/", wait_until="load")
+    front_door(live_page, BASE_URL)
     live_page.wait_for_selector(".player-row")
     live_heights = _row_heights(live_page)
 

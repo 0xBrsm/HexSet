@@ -653,6 +653,49 @@ def test_an_acceptance_the_seats_own_hand_cannot_cover_is_a_pass_and_shows_nothi
     assert [seat for _, seat, _ in game.shown] == [0], "only the offer went to the table"
 
 
+class Heard(Gate):
+    """A gate that keeps what `trade_round_finished` tells it."""
+
+    def __init__(self, gain_fn):
+        super().__init__(gain_fn)
+        self.finished = []
+
+    def trade_round_finished(self, view, offer, responses, trade, *, turn):
+        self.finished.append((tuple(responses), trade))
+
+
+def test_the_pick_passes_over_an_answer_the_actors_hand_cannot_cover():
+    """Seat 0 offers a wood for an ore with no brick in hand. Seat 1 counters
+    asking for a brick, the gate's favourite; seat 2 accepts. The pick takes
+    seat 2's acceptance, and seat 1's counter is still on the ledger and in
+    what the gate hears."""
+    from hexset import trading
+
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1), (2, Resource.ORE, 1))
+    offer = Offer(0, bundle(wood=-1, ore=1))
+    counter = Response(1, RESPONSE_COUNTER, bundle(brick=-1, ore=1))
+    actor = Heard(lambda r, c: 5.0 if r[BRICK] < 0 else 1.0)
+    gates = (actor, Answers(lambda view, offer: counter),
+             Answers(lambda view, offer: Response(2, RESPONSE_ACCEPT, offer.received)), None)
+
+    [trade] = trading.resolve_offer(game, gates, offer)
+
+    assert (trade.b, trade.received) == (2, offer.received)
+    assert (0, 1, bundle(brick=1, ore=-1)) in game.shown, "the counter went to the table"
+    [(responses, heard)] = actor.finished
+    assert counter in responses and heard == trade
+
+
+def test_an_acceptance_of_cards_spent_since_the_offer_is_passed_over():
+    from hexset import trading
+
+    game = stocked((0, Resource.WOOD, 1), (1, Resource.ORE, 1))
+    took = Response(1, RESPONSE_ACCEPT, bundle(wood=-1, ore=1))
+    assert trading.pick(game, Gate(lambda r, c: 5.0), 0, [took]) == took
+    game._state.hands[0][WOOD] = 0
+    assert trading.pick(game, Gate(lambda r, c: 5.0), 0, [took]) is None
+
+
 @pytest.mark.parametrize("counter", [
     bundle(wood=-1),                 # one-sided
     (0, 0, 0, 0, 0),                 # empty

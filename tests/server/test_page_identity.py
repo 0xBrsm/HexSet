@@ -13,7 +13,7 @@ import re
 
 import pytest
 
-from _page_server import launch, serving
+from _page_server import launch, serving, front_door
 
 
 try:
@@ -47,8 +47,10 @@ def stop_bot_runners():
 
 
 def _capture(page, url_suffix: str):
+    if url_suffix in ("", "/"):
+        return front_door(page, BASE_URL)
     with page.expect_response(
-        lambda r: r.request.method == "POST" and ("/api/games" in r.url or "/api/join" in r.url)
+        lambda r: r.request.method == "POST" and "/api/join" in r.url
     ) as response_info:
         page.goto(f"{BASE_URL}{url_suffix}", wait_until="load")
     response = response_info.value

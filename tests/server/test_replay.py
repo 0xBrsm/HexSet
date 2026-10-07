@@ -300,7 +300,8 @@ def test_a_journalled_record_reads_back_as_the_same_record(tmp_path):
     back = from_journal(path)
     # A journal names every discard's seat and says nothing of how the dice
     # were drawn, both of which a record may leave to their defaults.
-    assert replace(back, actors=(), balanced_dice=record.balanced_dice) == replace(
+    assert replace(back, actors=(), balanced_dice=record.balanced_dice,
+                   split_streams=record.split_streams) == replace(
         record, seed=None, actors=()
     )
     assert (replay(back).won_by, replay(back).turns) == (record.winner, record.turns)
@@ -416,7 +417,7 @@ def test_a_journalled_round_reads_offer_answers_and_trade_in_order(tmp_path):
     shown = ((step, 0, a, bundle), (step, 0, b, tuple(-n for n in bundle)),
              (step, 1, a, back), (step, 1, b, tuple(-n for n in back)))
     assert replace(from_journal(path), actors=()) == replace(
-        record, seed=None, actors=(), shown=shown
+        record, seed=None, actors=(), shown=shown, split_streams=False
     )
 
 

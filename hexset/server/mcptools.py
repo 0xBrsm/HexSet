@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass
 from typing import Iterator
 
-from .api import ApiError, Tables
+from .api import ApiError, Origin, Tables
 
 __all__ = [
     "RESOURCES",
@@ -64,11 +64,14 @@ class Session:
     # on the `game_over` reply.
     calls: int = 0
     bytes: int = 0
+    # Where this session's current tool call came from (`api.Origin`), set by
+    # the transport before each call and passed on every request it makes.
+    origin: Origin | None = None
 
 
 def _call_status(tables: Tables, session: Session, method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
     try:
-        return 200, tables.handle(method, path, body or {}, session.token)
+        return 200, tables.handle(method, path, body or {}, session.token, session.origin)
     except ApiError as error:
         return error.status, {"error": str(error)}
 
@@ -122,6 +125,8 @@ def _new_game(
     identity: str,
     opponents: list[str] | None = None,
     name: str | None = None,
+    board_mode: str | None = None,
+    game_type: str | None = None,
     timeout: float | None = None,
     log_after: int | None = None,
     full_log: bool = False,
@@ -131,6 +136,11 @@ def _new_game(
     body: dict = {"name": _display_name(name), "client": client}
     if opponents:
         body["bots"] = opponents
+    # Unnamed, the server's own defaults (`POST /api/games`).
+    if board_mode is not None:
+        body["board_mode"] = board_mode
+    if game_type is not None:
+        body["game_type"] = game_type
     dealt = _seat(session, _call_ok(tables, session, "POST", "/api/games", body))
     _layout(tables, session)  # the board is fixed from here on; fetch it once now
     return _settle(tables, session, dealt, timeout, log_after, full_log)
@@ -868,10 +878,12 @@ def _compact_board(view: dict) -> dict:
 # Wire fields a reader never acts on, dropped from every reply (`_prune`):
 # `version` (no MCP tool takes it), `claimed_seats` (`players[].kind`),
 # `waiting_for`/`trade_wait`/`to_move` (folded into `your_move`/`waiting_on`),
-# `awaiting_confirm` (an MCP seat never sees it) and `can_undo` (no undo tool).
-_DEAD = ("version", "claimed_seats", "waiting_for", "trade_wait", "to_move", "awaiting_confirm", "can_undo")
+# `awaiting_confirm` (an MCP seat never sees it), `can_undo` (no undo tool)
+# and `board_mode` (the `board` tool draws the board itself).
+_DEAD = ("version", "claimed_seats", "waiting_for", "trade_wait", "to_move", "awaiting_confirm", "can_undo",
+         "board_mode")
 # Dropped only while empty.
-_DEAD_WHEN_EMPTY = ("locked", "trades")
+_DEAD_WHEN_EMPTY = ("locked", "trades", "fixed_seats")
 _DEAD_WHEN_NONE = ("winner",)  # seat 0 wins too: only null is nothing to say
 # Per-player fields dropped the same way: `last_roll` is stale off the roller,
 # the award flags repeat `summary.race`'s `held`.
@@ -899,6 +911,10 @@ def _prune(view: dict) -> dict:
             del view[key]
     if view.get("started"):
         del view["started"]  # only an unstarted table is worth saying
+    if view.get("game_type") == "standard":
+        del view["game_type"]  # likewise only another type
+    if not view.get("seats_fixed", True):
+        del view["seats_fixed"]
     if not any(view.get("discard_quota") or []):
         view.pop("discard_quota", None)
     kinds = {s.get("seat"): s.get("kind") for s in view.pop("seats", None) or []}
@@ -1326,6 +1342,16 @@ _TOOLS: dict[str, tuple] = {
                     "description": "Names from bots(), one per bot seat. Omit for no bots.",
                 },
                 "name": _NAME_ARG,
+                "board_mode": {
+                    "type": "string",
+                    "description": "How the board is dealt: spiral (default) or random.",
+                },
+                "game_type": {
+                    "type": "string",
+                    "description": "standard (default; 10 points, 2-4 seats) or duel-variant "
+                                   "(15 points, discard above 9, friendly robber, balanced "
+                                   "dice; two seats, the other two closed).",
+                },
                 **_WAIT_ARGS,
             },
             "required": ["identity"],

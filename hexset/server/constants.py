@@ -9,6 +9,7 @@ from __future__ import annotations
 
 __all__ = [
     "TOKEN_HEADER",
+    "KEY_HEADER",
     "RECORD_CONTRACTS",
 ]
 
@@ -16,6 +17,9 @@ __all__ = [
 # The header a seat's token travels on, between the browser (or an MCP client)
 # and the API.
 TOKEN_HEADER = "X-HexSet-Token"
+
+# The header an API key travels on, from a client the owner issued one to.
+KEY_HEADER = "X-HexSet-Key"
 
 
 # Which graph shape an ONNX checkpoint's `contract` metadata value names; the

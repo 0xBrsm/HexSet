@@ -51,9 +51,9 @@ def place_ports(
     bag: list[Resource | None],
     rng: random.Random | None = None,
 ) -> tuple[Port, ...]:
-    """Distribute ports around the longest coastline. Real boards fix the
-    positions; these are spaced evenly instead, preserving the count, the mix
-    and the rough spacing but not the official arrangement edge for edge."""
+    """Distribute ports around the longest coastline, spaced as evenly as it
+    allows. On the base board's 30-edge coast that is the printed frame's
+    nine harbor positions, turned so the first sits on the ring's first edge."""
     rings = coastal_rings(topology)
     if not rings:
         return ()

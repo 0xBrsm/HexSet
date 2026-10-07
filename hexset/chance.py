@@ -4,7 +4,11 @@
 `random.Random`, `Balanced` draws its rolls from a dice deck,
 `Scripted` replays a recorded stream (so a `Record` replays without a seed),
 `Recording` logs what either returns, `Hosted` takes what a remote table
-showed."""
+showed.
+
+A dealt game (`for_rules`) gives its dice and its steals a generator each, so
+a seed's rolls are the same whatever is played in between: two players
+compared on one seed meet the same dice turn for turn."""
 
 from __future__ import annotations
 
@@ -22,6 +26,10 @@ __all__ = [
     "Live",
     "DICE_DECK_RESHUFFLE_AT",
     "DICE_REPEAT_WEIGHT",
+    "DICE_RECENT_ROLLS",
+    "DICE_RECENT_DISCOUNT",
+    "SEVEN_STREAK_STEP",
+    "SEVEN_ADJUST_MAX",
     "SEVEN_ODDS",
     "BALANCED_SEVEN_ODDS",
     "dice_deck",
@@ -87,6 +95,12 @@ class Chance:
         """Two dice, summed."""
         raise NotImplementedError
 
+    def roll_by(self, seat: int | None) -> int:
+        """Two dice, summed, rolled by `seat` (`None`: unknown). The engine
+        rolls through this; a source whose odds depend on the roller
+        (`Balanced`) overrides it, every other rolls as `roll` does."""
+        return self.roll()
+
     def steal(self, hand: Sequence[int]) -> int | None:
         """Which resource a steal takes from `hand`, or `None` if it is empty.
         An empty hand consumes no event, so `Scripted` expects none."""
@@ -108,23 +122,40 @@ class Chance:
 
 
 class Live(Chance):
-    """Draws from a `random.Random`. The default source."""
+    """Draws from a `random.Random`. The default source.
 
-    def __init__(self, rng: random.Random) -> None:
+    Unsplit, the deck, the dice and the steals all come off `rng` in the
+    order the game asks for them, so one different move -- a steal taken or
+    not -- shifts every roll after it. `split` gives the dice and the steals
+    a generator each, drawn off `rng` here, before the deck: the n-th roll
+    and the n-th steal are then fixed by the seed alone, whatever was played
+    in between. Every dealt game splits (`for_rules`); a search copy
+    (`hexset.game.imagine`) does not, so a search draws as it always has.
+    """
+
+    def __init__(self, rng: random.Random, *, split: bool = False) -> None:
         self.rng = rng
+        self.split = split
+        # Drawn off `rng`, not hashed from its state, so two sources built
+        # one after another on one generator still roll different dice.
+        self.dice = random.Random(rng.getrandbits(64)) if split else rng
+        self.steals = random.Random(rng.getrandbits(64)) if split else rng
 
     def deck_order(self, deck: list[int]) -> list[int]:
         self.rng.shuffle(deck)
         return deck
 
     def roll(self) -> int:
-        return self.rng.randint(1, DICE_SIDES) + self.rng.randint(1, DICE_SIDES)
+        return self.dice.randint(1, DICE_SIDES) + self.dice.randint(1, DICE_SIDES)
 
     def steal(self, hand: Sequence[int]) -> int | None:
         total = sum(hand)
         if total == 0:
             return None
-        pick = self.rng.randrange(total)
+        # Split, a steal takes exactly one draw whatever the hand's size
+        # (`randrange` takes more as it rejects), so the k-th steal of a game
+        # always reads the k-th draw.
+        pick = int(self.steals.random() * total) if self.split else self.rng.randrange(total)
         for resource, count in enumerate(hand):
             if pick < count:
                 return resource
@@ -133,22 +164,33 @@ class Live(Chance):
 
 
 # The dice deck: all 36 two-dice combinations, reshuffled whole once this
-# many cards are left, each draw weighting a card that repeats the previous
-# *sum* at `DICE_REPEAT_WEIGHT` against 1 for every other card.
+# many cards are left. A draw picks a sum by weight -- the cards of that sum
+# left in the deck, each time the sum came up in the last `DICE_RECENT_ROLLS`
+# rolls taking `DICE_RECENT_DISCOUNT` off (never below none) -- then one of
+# its cards. A seven's weight is scaled once more for the roller (`Balanced`):
+# up while it holds less than its share of the sevens so far, down while it
+# holds more, and by `SEVEN_STREAK_STEP` for each seven of the current run --
+# down when the run is the roller's, up when it is another seat's -- the
+# scale kept within 0 and `SEVEN_ADJUST_MAX`.
 DICE_DECK_RESHUFFLE_AT = 12
+DICE_RECENT_ROLLS = 5
+DICE_RECENT_DISCOUNT = 0.34
+SEVEN_STREAK_STEP = 0.4
+SEVEN_ADJUST_MAX = 2.0
+#: The weight of a card repeating the previous sum before 1.4.0 (unused; kept for importers).
 DICE_REPEAT_WEIGHT = 0.7
 
 # How often each source rolls a seven, read through `rules.Rules.seven_odds`.
 #
 # `SEVEN_ODDS` is exact: 6 of 36 combinations.  `BALANCED_SEVEN_ODDS` has no
 # closed form -- the deck is never played out, so the draw is neither with
-# nor without replacement, and `DICE_REPEAT_WEIGHT` makes each draw depend on
-# the previous sum -- so it is measured off this module's own `Balanced`:
-# 0.16532 +- 0.00019 over 4,000,000 rolls at seed 12345.  It sits below the
-# independent rate because a seven, the commonest sum, is the one most often
-# discounted for repeating itself.
+# nor without replacement, and recent sums and the rollers' sevens move each
+# draw's weights -- so it is measured off this module's own `Balanced`, two
+# seats rolling in turn: 0.15584 +- 0.00036 over 4,000,000 rolls at seed
+# 12345.  It sits below the independent rate because a seven, the commonest
+# sum, is the one most often discounted for having come up lately.
 SEVEN_ODDS = 6 / 36
-BALANCED_SEVEN_ODDS = 0.16532
+BALANCED_SEVEN_ODDS = 0.15584
 
 
 def dice_deck() -> list[tuple[int, int]]:
@@ -157,45 +199,96 @@ def dice_deck() -> list[tuple[int, int]]:
 
 
 class Balanced(Live):
-    """`Live`, except rolls come from a dice deck.
+    """`Live`, except rolls come from a dice deck (`DICE_DECK_RESHUFFLE_AT`
+    and the constants after it): the 36 combinations drawn without
+    replacement, reshuffled whole before they run low, so a deck is never
+    played out; sums that came up lately drawn less often; and a seven drawn
+    more often by a seat that has rolled fewer than its share of them and
+    less often by one on a run of them. The roller is what `roll_by` names;
+    `roll` (no roller) leaves the sevens unsteered.
 
-    Draw a card, discard it, reshuffle a whole fresh deck once
-    `DICE_DECK_RESHUFFLE_AT` remain -- so a deck is never played out, and the
-    36 combinations are not a hard quota over any window. Cards repeating the
-    previous sum are drawn at `DICE_REPEAT_WEIGHT`.
-
-    Everything else -- the development deck, steals -- is `Live`'s.
-
-    Only the deck is modelled. A table that also damps streaks of sevens, or
-    steers each seat's share of the sevens toward even, rolls fewer sevens
-    than this source does.
+    Everything else -- the development deck, steals, `split` -- is `Live`'s.
+    The deck's draws depend only on the rolls before them and on who rolls,
+    which the turn order fixes, so split it is as fixed by the seed as
+    `Live`'s dice.
     """
 
-    def __init__(self, rng: random.Random) -> None:
-        super().__init__(rng)
-        self.deck: list[tuple[int, int]] = []
-        self.last: int | None = None
+    def __init__(self, rng: random.Random, *, split: bool = False) -> None:
+        super().__init__(rng, split=split)
+        self.left: dict[int, list[tuple[int, int]]] = {}
+        self.cards = 0
+        self.recent: list[int] = []
+        self.sevens: dict[int, int] = {}       # sevens by roller, every roller seen so far
+        self.run: tuple[int | None, int] = (None, 0)   # the seat on a run of sevens, and its length
+        self._reshuffle()
+
+    def _reshuffle(self) -> None:
+        self.left = {}
+        for a, b in dice_deck():
+            self.left.setdefault(a + b, []).append((a, b))
+        self.cards = DICE_SIDES * DICE_SIDES
+
+    def seven_scale(self, seat: int | None) -> float:
+        """What a seven's weight is scaled by for `seat`'s roll."""
+        if seat is None:
+            return 1.0
+        sevens = dict(self.sevens)
+        sevens.setdefault(seat, 0)          # as its roll would count it
+        total = sum(sevens.values())
+        balance = 1.0
+        if total >= len(sevens):
+            share, ideal = sevens[seat] / total, 1 / len(sevens)
+            balance = 1 + (ideal - share) / ideal
+        owner, length = self.run
+        streak = SEVEN_STREAK_STEP * length * (-1 if owner == seat else 1)
+        return min(SEVEN_ADJUST_MAX, max(0.0, balance + streak))
+
+    def weights(self, seat: int | None = None) -> dict[int, float]:
+        """Each sum's draw weight for `seat`'s next roll."""
+        w = {}
+        for total, cards in self.left.items():
+            recent = self.recent.count(total)
+            w[total] = len(cards) / self.cards * max(0.0, 1 - DICE_RECENT_DISCOUNT * recent)
+        if 7 in w:
+            w[7] *= self.seven_scale(seat)
+        return w
 
     def roll(self) -> int:
-        if len(self.deck) <= DICE_DECK_RESHUFFLE_AT:
-            self.deck = dice_deck()
-            self.rng.shuffle(self.deck)
-        weights = [
-            DICE_REPEAT_WEIGHT if a + b == self.last else 1.0 for a, b in self.deck
-        ]
-        index = self.rng.choices(range(len(self.deck)), weights=weights)[0]
-        a, b = self.deck.pop(index)
-        self.last = a + b
-        return self.last
+        return self.roll_by(None)
+
+    def roll_by(self, seat: int | None) -> int:
+        if seat is not None:
+            self.sevens.setdefault(seat, 0)
+        if self.cards <= DICE_DECK_RESHUFFLE_AT:
+            self._reshuffle()
+        w = self.weights(seat)
+        sums = [t for t in sorted(w) if self.left[t]]
+        total = self.dice.choices(sums, weights=[w[t] for t in sums])[0] if sum(w[t] for t in sums) > 0 \
+            else self.dice.choices(sums, weights=[len(self.left[t]) for t in sums])[0]
+        cards = self.left[total]
+        cards.pop(self.dice.randrange(len(cards)))
+        self.cards -= 1
+        self.recent.append(total)
+        if len(self.recent) > DICE_RECENT_ROLLS:
+            self.recent.pop(0)
+        if total == 7 and seat is not None:
+            self.sevens[seat] += 1
+            owner, length = self.run
+            self.run = (seat, length + 1) if owner == seat else (seat, 1)
+        return total
 
 
-def for_rules(rules, rng: random.Random) -> Live:
+def for_rules(rules, rng: random.Random, *, split: bool = True) -> Live:
     """The source a ruleset asks for: `Balanced` under `balanced_dice`,
     `Live` otherwise. The one place that choice is made, so a caller that
     wraps the source (`Recording`) cannot pick a different one from the game
     it wraps. `rules` is a `hexset.rules.Rules`, not imported: that module
-    imports this one."""
-    return Balanced(rng) if rules.balanced_dice else Live(rng)
+    imports this one.
+
+    Split by default (`Live`): this is how every game is dealt. `split=False`
+    is for rebuilding a game that was dealt before the split, from its seed
+    (`Record.split_streams`, a server journal's `split_streams`)."""
+    return Balanced(rng, split=split) if rules.balanced_dice else Live(rng, split=split)
 
 
 class Scripted(Chance):
@@ -245,6 +338,11 @@ class Recording(Chance):
 
     def roll(self) -> int:
         value = self.inner.roll()
+        self.events.append(("roll", value))
+        return value
+
+    def roll_by(self, seat: int | None) -> int:
+        value = self.inner.roll_by(seat)
         self.events.append(("roll", value))
         return value
 

@@ -5,14 +5,16 @@ from __future__ import annotations
 
 import ast
 import json
+import random
 from pathlib import Path
 
 import pytest
 
 from hexset import gamelog
 from hexset.arena import (
-    Exhausted, compete, journal_tournament, lineup_from_names, read_journal,
+    Exhausted, board_key, compete, deal_board, journal_tournament, lineup_from_names, read_journal,
 )
+from hexset.board.board import spiral_base_board
 from hexset.game import UNSTRUCTURED_TURN_CAP
 from hexset.record import read, to_json
 
@@ -125,3 +127,25 @@ def test_every_run_in_the_package_keeps_its_games():
                     and not any(k.arg == "journal" for k in node.keywords)):
                 offenders.append(f"{rel}:{node.lineno}")
     assert not offenders, f"compete() without journal=: {offenders}"
+
+
+def test_a_spiral_run_deals_spiral_boards_and_says_so_in_its_header(tmp_path):
+    random_journal, spiral_journal = tmp_path / "random.games.jsonl", tmp_path / "spiral.games.jsonl"
+    compete(lineup_from_names(LINEUP), 2, workers=1, records=True, journal=random_journal, **QUICK)
+    # Not antithetic, so game `index` is dealt board `index`.
+    tournament = compete(lineup_from_names(LINEUP), 2, workers=1, records=True, antithetic=False,
+                         board_mode="spiral", journal=spiral_journal, **QUICK)
+    assert "board_mode" not in lines(random_journal)[0]
+    assert lines(spiral_journal)[0]["board_mode"] == "spiral"
+    for index, record in enumerate(tournament.records):
+        dealt = spiral_base_board(random.Random(board_key(0, index)))
+        assert deal_board(0, index, "spiral") == dealt
+        assert tuple(record.tokens) == dealt.tokens
+    with pytest.raises(ValueError, match=r"\(board_mode differ\)"):
+        compete(lineup_from_names(LINEUP), 2, workers=1, records=True, antithetic=False, journal=spiral_journal,
+                resume=True, **QUICK)
+
+
+def test_an_unknown_board_mode_is_refused_before_any_game():
+    with pytest.raises(ValueError, match="unknown board mode"):
+        compete(lineup_from_names(LINEUP), 2, board_mode="hexagonal", **QUICK)

@@ -2,7 +2,8 @@
 """Monte Carlo tree search with PUCT selection and batched policy/value inference.
 
 Leaves are collected in waves; virtual loss discourages duplicate descents.
-Nodes store per-seat value vectors and select with the mover's stance. Dice,
+Nodes store per-seat value vectors and select with the mover's stance, or as
+one side against named seats (`Search.against`). Dice,
 steals and dev-card draws are sampled per simulation, not frozen at expansion.
 """
 
@@ -12,7 +13,7 @@ import math
 import random
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Protocol, Sequence
+from typing import Collection, Protocol, Sequence
 
 import numpy as np
 
@@ -35,6 +36,7 @@ __all__ = [
     "Node",
     "STANCE_ROWS",
     "lost_value",
+    "side_value",
     "Search",
     "visit_policy",
 ]
@@ -200,6 +202,12 @@ STANCE_ROWS = {
 }
 
 
+def side_value(vector: Sequence[float], against: Sequence[int]) -> float:
+    """What a seat playing as one side against `against` reads a value
+    vector of win chances as: the chance none of them wins."""
+    return 1.0 - float(sum(vector[s] for s in against))
+
+
 @lru_cache(maxsize=None)
 def lost_value(stance: str, seats: int) -> float:
     """What `stance` reads a game another seat won as: the bottom of the
@@ -233,7 +241,13 @@ class Search:
     `exploration` is PUCT's c_puct; the values it trades against are the
     stance's reading of win chances: [0, 1] for `own`, [-1/(seats-1), 1] for
     `relative`, [-1, 1] for `paranoid`. `stance` is restricted to `STANCE_ROWS`'s keys, what this
-    tree's backup implements; anything else is refused at construction."""
+    tree's backup implements; anything else is refused at construction.
+
+    `against` names seats the search plays against as one side (`side_value`):
+    at a node whose mover is not one of them, the mover ranks a position by
+    the chance none of them wins, on [0, 1] like `own`; a seat in `against`
+    still moves by `stance`. Empty, the default, every seat moves by
+    `stance`. `play_against` sets it on a search already built."""
 
     def __init__(
         self,
@@ -249,6 +263,7 @@ class Search:
         hidden: bool = True,
         hold: HoldReading | None = None,
         rng: random.Random | None = None,
+        against: Collection[int] = (),
     ) -> None:
         if stance not in STANCE_ROWS:
             raise ValueError(
@@ -271,6 +286,16 @@ class Search:
         self.hidden = hidden
         self.hold = hold
         self.rng = rng or random.Random()
+        self.play_against(against)
+
+    def play_against(self, seats: Collection[int]) -> None:
+        """Search as one side against `seats` (`against`); empty, every seat
+        for itself."""
+        self.against = tuple(sorted({int(s) for s in seats}))
+
+    def _sided(self, mover: int) -> bool:
+        """Whether `mover` ranks as the side against `against`."""
+        return bool(self.against) and mover not in self.against
 
     def worlds(self, game: Game) -> list[tuple[float, Game]]:
         """The determinizations this decision is searched in, each with its
@@ -368,11 +393,15 @@ class Search:
         # not the mean of what it read per visit; ranking the mean is the max^n
         # backup, and the two differ for the non-linear `paranoid`. A descent
         # still in flight counts as a lost visit (`lost_value`).
-        totals = (
-            self.rank_rows(node.totals, node.mover)
-            if self.stance == "paranoid"
-            else node.ranked
-        ) + lost_value(self.stance, node.totals.shape[1]) * node.virtual
+        if self._sided(node.mover):
+            # A side's loss is one of `against` winning: 0, as for `own`.
+            totals = node.ranked
+        else:
+            totals = (
+                self.rank_rows(node.totals, node.mover)
+                if self.stance == "paranoid"
+                else node.ranked
+            ) + lost_value(self.stance, node.totals.shape[1]) * node.virtual
         means = np.where(counts > 0, totals / np.maximum(counts, 1), 0.0)
         bonus = self.exploration * node.prior * math.sqrt(max(total, 1e-8)) / (1 + counts)
         return int(np.argmax(means + bonus))
@@ -450,7 +479,9 @@ class Search:
         """`visits` visits of edge `index`, each worth `vector`."""
         node.visits[index] += visits
         node.totals[index] += visits * vector
-        if self.stance == "own":
+        if self._sided(node.mover):
+            node.ranked[index] += visits * side_value(vector, self.against)
+        elif self.stance == "own":
             node.ranked[index] += visits * vector[node.mover]
         elif self.stance == "relative":
             seats = vector.size

@@ -203,7 +203,10 @@ answers an offer, the actor when it picks an answer. Nobody is asked again
 when the cards move. An acceptance is a different trade depending on who
 gives it, so `default_pick` prices each acceptance by its taker, as it
 prices a counter, and picks the highest gain above the actor's floor, or
-none.
+none. The pick sees an answer the actor's own hand cannot cover (a counter
+asking for a card it lacks, an acceptance of cards spent since the offer)
+as a pass, so it falls to one that can execute; the answer stays on the
+ledger and in what `trade_round_finished` hears.
 
 Execution checks the rules and nothing else: both seats still cover their
 sides. The round's drivers (the engine's `trade_round` and the served table)

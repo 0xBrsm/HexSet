@@ -22,7 +22,9 @@ turn, the actor's own offer budget, and `observe_trade` notifications
 Specify the engine version, board generation, seed, complete entrant
 settings, player count, game type, trading mode, game count, action cap and
 turn cap. Seed model sampling as well as the engine. Use complete seat
-rotations and state how boards are paired. `compete` returns identical
+rotations and state how boards are paired. Two runs on one seed pair game for
+game: the same board, seating, development deck and dice turn for turn, so a
+game they score differently is one where some seat decided differently. `compete` returns identical
 results at any `workers`; a custom runtime keeps that property by keying its
 randomness to the game, seat and decision, not to the worker or lane.
 

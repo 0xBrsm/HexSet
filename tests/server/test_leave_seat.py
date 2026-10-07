@@ -71,6 +71,43 @@ def test_a_closed_seat_can_be_reopened_or_given_a_bot_until_the_first_move():
     assert "retired" in str(refused.value)
 
 
+def test_a_bot_can_be_taken_off_its_seat_until_the_first_move(tmp_path):
+    registry = new_tables(games_dir=str(tmp_path))
+    data = registry.handle("POST", "/api/games", {"bots": []}, None)
+    code, token = data["code"], data["token"]
+    me = registry.get(code).seat_of(token)
+    a, b, c = [s for s in range(4) if s != me]
+
+    registry.handle("POST", "/api/bot", {"seat": a, "model": "test-trader"}, token)
+    view = registry.handle("POST", "/api/open", {"seat": a}, token)
+    assert view["seats"][a]["kind"] == "empty" and view["locked"] == []
+    registry.handle("POST", "/api/bot", {"seat": b, "model": "test-trader"}, token)
+    view = registry.handle("POST", "/api/close", {"seat": b}, token)
+    assert view["seats"][b]["kind"] == "empty" and view["locked"] == [b]
+    assert not registry.get(code).runners
+
+    # A restart reads the journal the same way.
+    reopened = new_tables(games_dir=str(tmp_path)).get(code)
+    assert [seat.kind.value for seat in reopened.seats] == [
+        "player" if s == me else "empty" for s in range(4)
+    ]
+    assert reopened.session.game.locked == {b}
+    assert not reopened.session.bot_names
+    reopened.stop_runners()  # not `close`, which would file the game as abandoned
+
+    # Down to one player: the game is the creator's alone. Seat `a`, still
+    # open, holds the table while the bot sits at `c`.
+    registry.handle("POST", "/api/bot", {"seat": c, "model": "test-trader"}, token)
+    registry.handle("POST", "/api/close", {"seat": c}, token)
+    registry.handle("POST", "/api/close", {"seat": a}, token)
+    state = registry.handle("GET", "/api/state", {}, token)
+    assert state["to_move"] == me and state["locked"] == sorted([a, b, c])
+    registry.handle("POST", "/api/action", {"action": state["legal_actions"][0]}, token)
+    with pytest.raises(ApiError) as refused:
+        registry.handle("POST", "/api/open", {"seat": a}, token)
+    assert refused.value.status == 409
+
+
 def test_every_seated_mutation_refuses_once_the_game_is_over():
     """The one gate in `Tables._seated`, across every route it covers,
     including those with no refusal of their own.

@@ -4,6 +4,310 @@ Changes to the HexSet distribution. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## 1.10.0
+
+Every seeded game deals different dice and steals from 1.9.2's. Records and
+journals written before this release replay unchanged.
+
+### Changed
+
+- **A seed fixes its game's dice turn for turn, whatever is played.** A dealt
+  game (`chance.for_rules`, so `start`, `deal_game`, the arena, the server and
+  the training lanes) now gives its dice and its steals a generator each,
+  drawn off the game's own before the development deck is shuffled. Before,
+  one generator served all three in the order the game asked, so a single
+  different move -- a steal taken or not -- shifted every roll after it, and
+  two entrants compared on one seed met the same dice only until their games
+  first differed. Now the n-th roll of a seed is the same in every game dealt
+  from it, and so is the draw behind its n-th steal (one draw per steal,
+  whatever the hand), so a paired comparison is paired on the dice as well as
+  the board and seating, and the first place two such games part is a
+  decision. The duel variant's dice deck (`Balanced`) is fixed the same way:
+  its draws depend only on the rolls before them and the turn order. A
+  search copy (`hexset.game.imagine`) is unsplit and draws exactly as before.
+  The odds of every roll and steal are unchanged.
+
+### Added
+
+- **`Live(rng, split=...)`, `Balanced(rng, split=...)` and
+  `for_rules(rules, rng, split=True)`.** `split=False` is the shared stream,
+  for rebuilding a game dealt before 1.10.0 from its seed.
+- **`Record.split_streams`** and a server journal header's `split_streams`
+  say how the seed drew the dice, so a seeded record's cross-check and a
+  reopened table deal the way the game was dealt. Absent, both read as the
+  shared stream of every earlier record and journal.
+
+## 1.9.2
+
+### Changed
+
+- **Every New game option button is the same width**, so Board's and
+  Rules' choices line up in columns.
+
+## 1.9.1
+
+### Changed
+
+- **The New game modal picks Rules: Standard or Duel**, in place of a "Duel
+  rules" Off/On switch, and drops the line of rules text under it.
+
+## 1.9.0
+
+### Added
+
+- **API keys raise a client's new-game allowance.** `--api-keys` names a JSON
+  file of keys, each with its holder's name and its own games per period. A
+  `POST /api/games` sent with a key on `X-HexSet-Key` counts against that
+  key's allowance instead of its address's, the journal names the holder
+  (never the key), and the count survives a restart as an address's does.
+  An unknown key is a 401. A key changes only the period allowance: the
+  unfinished-games limit is the same for everyone, since more tables at once
+  would only take the one core from other players.
+
+- **A bot can be taken back off its seat before the first move.** `POST
+  /api/open` and `/api/close` now accept a seat a bot holds, leaving it empty
+  or closed, and the seat picker offers "(empty)" and "(closed)" on a bot's
+  seat until play starts. Before, a bot picked by mistake could only be
+  swapped for another. The journal records an `unseated` line.
+
+### Changed
+
+- **The New game modal states the rules in one line**: "Standard rules, 1-4
+  players" or "Duel variant rules, 1-2 players" with the duel's 15 VP, 9
+  cards, balanced dice and friendly robber, plus "with randomized board" when
+  the board is random (dropped in 1.9.1).
+- **A duel table's second seat can be closed** before the first move, so a
+  person can practise either game type alone; only the two seats the deal
+  closed stay closed for good, listed in the view's new `fixed_seats`. A
+  practice table, not a seat count the type is played at: `hexset.rules` is
+  unchanged.
+- **`--live-tables-per-ip` defaults to 5**, not 3. "Unfinished" includes a
+  game someone walked away from less than 15 minutes ago, so a low cap could
+  shut a player out of a fresh game. More tables at once gain a client no
+  throughput (the server plays its bots on one core), so the cap only has to
+  stop abuse.
+
+## 1.8.0
+
+### Added
+
+- **The journal records where every claimed seat came from.** With the
+  `client` a seat is claimed with, the journal now keeps the client's address,
+  `via` (the route the request really arrived on: `http` or `mcp`) and its
+  `User-Agent`. Before this the journal had only what a client said about
+  itself, and the server's request log only the proxy's address, so a
+  served table could not tell its owner's games from anyone else's. Nothing
+  new is shown to a seat or a spectator.
+- **`--forwarded-header`** names the header a reverse proxy or tunnel puts
+  the client's address in (`CF-Connecting-IP`, or `X-Forwarded-For`, whose
+  last entry is read), for the journal and the request log alike. It is
+  believed from every request: keeping clients from reaching the server
+  except through that proxy is the deployment's job.
+- **New games are limited per client address.** `POST /api/games`, from the
+  page, the API or MCP alike, is a 429 past `--games-per-period` deals in a
+  rolling `--period-days` (default 100 in 30 days, re-counted from the
+  journals at start so a restart does not reset it) or
+  `--live-tables-per-ip` unfinished games in play (default 3; a game stops
+  counting once over or 15 minutes unread). Every bot seat costs the server
+  CPU, and nothing bounded what one client could ask for. `--limit-exempt`
+  names networks under no limit (default loopback); in-process callers are
+  never limited.
+
+### Changed
+
+- **A seat's `kind` is checked against its route.** A seat claimed through
+  the MCP endpoint is `mcp`, and a request to `/api/*` claiming `mcp` is
+  journalled as `api`. `web` and `api` remain the client's own word.
+
+## 1.7.0
+
+### Added
+
+- **A seat is built knowing the table's game type.** `Entrant.game_type` (a
+  `hexset.rules.GAME_TYPES` name, `None` by default) is set by whoever seats
+  the bot. The server sets it from the table when it deals a bot, seats one
+  later (`POST /api/bot`) or reopens a game from its journal, so a bot kind
+  whose factory reads it plays the table's game type: one picker name, one
+  bot per mode. A kind that does not read it is unchanged, and
+  `spawn_bot`/`seat_spawn` take the name as an optional `game_type`.
+- **`register_preset(name, entrant, listed=False)`** keeps a preset out of
+  `registered_presets()`, so the served picker and `GET /api/models` do not
+  offer it. It resolves by name like any other, so lineups, benches and
+  journals that name it are unchanged. For a bench control or a test
+  opponent that is not a bot to sit down against.
+
+### Changed
+
+- **The page opens on the New game modal when there is no table to resume.**
+  With no code in the URL and no last game to go back to, it asks what to
+  deal (board, duel rules) rather than dealing a standard game in the
+  background. A last game is still resumed without asking, and a code in
+  the URL still goes to that table only. With no table behind it the modal
+  has no Cancel, and Escape and a click on the backdrop leave it up.
+
+## 1.6.0
+
+### Added
+
+- **Two ways to deal a board: `random` and `spiral`.**
+  `hexset.board.board.BOARD_MODES` names them and `base_board(mode, rng)`
+  deals by name. `random` is `random_base_board`, unchanged: the number
+  discs in random order with no 6 or 8 adjacent, the rulebook's fully
+  random set-up. `spiral` (`spiral_base_board`) lays the discs in letter
+  order (`SPIRAL_TOKENS`) from a random corner, counterclockwise as drawn
+  toward the centre, skipping the desert. Both shuffle the terrain and deal
+  the harbor kinds to the same positions.
+- **Every place that deals a board takes the mode:**
+  `arena.deal_board(seed, index, mode)`, `deal_game(board_mode=)`,
+  `compete(board_mode=)`, `LaneEnv`, `HexSetAEC` and `HexSetEnv`
+  (`board_mode=`) and the bench commands (`--board`, also recorded in their
+  output), all defaulting to `random`, and the server
+  (`python -m hexset.server.web --board`, `Config.board_mode`), defaulting
+  to `spiral`, so the same seed deals a different board on a server than it
+  did under 1.5.0. A `compete` journal names a mode other than `random` in
+  its header, and a server game journal always does, so a resumed run or
+  game deals the same boards. Journals without it resume as `random`, and
+  an `arena._play_one` job without the slot deals `random`.
+- **A new game is dealt with a board and a game type of its choosing.**
+  `POST /api/games` takes optional `board_mode` (a `BOARD_MODES` name, the
+  server's `--board` when omitted) and `game_type` (a
+  `hexset.rules.GAME_TYPES` name, `standard` when omitted); an unknown name
+  is a 400. The MCP `new_game` tool takes the same two. A `standard` table
+  still starts at four seats, any of which can be closed before the first
+  move. A `duel-variant` table (15 points, discard above 9, friendly robber,
+  balanced dice) is played at two, the only count its contract allows: seats
+  2 and 3 are retired at the deal and the creator sits at 0 or 1. Its seats
+  are fixed from the deal, so closing, reopening or seating a bot on a
+  closed seat is refused. The view carries `game_type`, `board_mode` and
+  `seats_fixed`; an MCP reply drops `board_mode`, and the other two while
+  they say `standard` and false. A server game journal's header names the
+  game type and the seats retired at the deal (`locked`), so a resumed or
+  replayed duel is dealt as one, and `hexset.record.from_journal` reads
+  those seats into `Record.locked`; a header without them is a standard
+  game with none retired.
+- **The web page's New game button opens a modal** choosing the board
+  (Spiral, the default, or Random) and duel rules (off, the default, or on)
+  before dealing. At a duel table the two closed seats are left off the
+  roster and the open seat's picker offers no `(closed)`. A seat's victory
+  point count says how many win.
+
+### Changed
+
+- **The web board's viewBox is fitted to what is drawn**, the vertices and
+  the port markers, plus a little water on every side, instead of an
+  even 80-unit margin past the vertices on every side, so the board draws
+  larger in the same space. It stays wide enough to keep the island
+  centred left to right, whichever side its ports stand out on.
+
+### Fixed
+
+- **A primary button keeps its colour under the pointer.** The page's
+  generic button hover rule outranked `button.primary`, so a chosen option
+  or a confirm button turned grey while hovered.
+
+
+## 1.5.0
+
+### Changed
+
+- **Road Building follows the printed rule only: with one road piece left
+  the card is played and places one road.** `Rules.road_building_min_roads`
+  (0.71.0), which let a table ask for two pieces left, is removed: no table
+  needs it.
+- **Records that carry the removed setting still load:** `rules.rules_from`
+  drops `RETIRED_SETTINGS` from a record's `rules`. Every action the setting
+  allowed is legal without it, so such a record replays unchanged.
+
+
+## 1.4.0
+
+### Changed
+
+- **The duel variant's dice (`chance.Balanced`) discount recent sums and
+  steer the sevens.** A draw now picks a sum by weight -- its cards left in
+  the deck, less `DICE_RECENT_DISCOUNT` (0.34) for each time it came up in
+  the last `DICE_RECENT_ROLLS` (5) rolls -- then one of its cards. A seven's
+  weight is scaled for the roller: up while it holds less than its share of
+  the sevens so far, down while it holds more, and by `SEVEN_STREAK_STEP`
+  (0.4) per seven of the current run, down when the run is its own; the
+  scale stays within 0 and `SEVEN_ADJUST_MAX` (2). The deck and its
+  reshuffle at 12 cards are unchanged. This replaces the 0.7 weight on a card
+  repeating the previous sum (`DICE_REPEAT_WEIGHT`, kept but unused).
+  `BALANCED_SEVEN_ODDS` is re-measured: 0.15584 (was 0.16532). Duel games and
+  seeded duel records from earlier versions do not replay on this one.
+
+### Added
+
+- **`Chance.roll_by(seat)`**, a roll by a named seat; the engine rolls
+  through it, and a source whose odds do not depend on the roller rolls as
+  `roll` does. `Balanced.weights(seat)` and `Balanced.seven_scale(seat)`
+  read the next draw's odds.
+
+
+## 1.3.0
+
+### Added
+
+- **`hexset.bots.Handoff`, one bot's moves through a round and another's
+  after it**, and the `handoff:<round>:<first>|<second>` spec that seats one
+  (`hexset.arena.handoff(first, second, at, name)` builds the entrant). A
+  seat's own turns 1 to `<round>`, and every decision it makes in those
+  rounds, are `<first>`'s; `<second>` plays from round `<round> + 1`
+  (`hexset.bots.handed_off`, read off `Game.turns`, so every seat and every
+  copy of the game agree on it). The seat trades as `<first>` for the whole
+  game, or as the handoff's `~<trader>`. `<second>` is seeded without
+  drawing from the seat's generator, so a handoff pairs game for game with
+  its `<first>` until it hands over. `seat_at` and `play_against` reach both
+  bots. `handoff:` joins the prefixes, and `handoff` the kinds, a runtime may
+  not register.
+
+
+## 1.2.1
+
+### Fixed
+
+- **A bot's pick passes over an answer its own hand cannot cover**: a
+  counter asking for a card it lacks, or an acceptance of cards it has spent
+  since the offer went up. `trading.pick` (and so `Seat.pick` and every
+  round the engine runs) shows the gate such an answer as a pass, so the
+  pick falls to an answer that can execute. Before, a gate could pick it,
+  the referee refused the exchange, and the round closed with no trade,
+  even when another seat had accepted. The answer itself is unchanged
+  elsewhere: it is on the public ledger, in what `trade_round_finished`
+  hears, and open to a counter thread.
+
+
+## 1.2.0
+
+### Added
+
+- **`hexset.bots.Coalition`, any bot seated as one of a side against the
+  rest of its table**, and the `coalition:<entrant>` spec that seats one
+  (`hexset.arena.coalition(inner, name)` builds the entrant). Every
+  `Coalition` seat at a table is a member and every other playing seat a
+  target. Whatever the bot, a member puts the robber on the targets' best
+  hex (the most of their production blocked, then the least of the
+  members') and steals from a target, and never trades with one: each trade
+  hook the bot has is its own with the targets taken out, and a hook it
+  lacks stays absent. Everything else is the bot's. A test opponent: a table
+  that has agreed to stop one seat. A `~` trader over a coalition seat is
+  refused, since it would trade outside the coalition. `coalition` is a
+  kind and `coalition:` a prefix HexSet ships; the preset name `coalition`
+  stays free for a runtime.
+- **`hexset.bots.PlaysAgainst`, the optional hook for playing as one side**:
+  `play_against(seats)` names the seats a bot plays against, every other
+  seat a partner. `hexset.bots.play_against(bot, seats)` calls it on every
+  part of a seat that has it (both halves of a `TradesBy`); a `Coalition`
+  calls it with the table's targets. `hexset.mcts.Search` implements it.
+- **`hexset.mcts.Search(against=...)`, a search that plays as one side
+  against named seats**, and `Search.play_against(seats)` to set them on a
+  search already built. At a node whose mover is not one of those seats the
+  mover ranks a position by the chance none of them wins
+  (`hexset.mcts.side_value`), on [0, 1] like `own`; a seat it plays against
+  still moves by the search's `stance`. Empty, the default, the search is
+  unchanged.
+
+
 ## 1.1.2
 
 ### Changed

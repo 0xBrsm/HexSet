@@ -91,7 +91,7 @@ def played_both_ways():
     try:
         theirs = _play_one(
             ((Entrant("scripted", "test-scripted"),) * 4, FINISHED, SEED, CAP, False,
-             True, "round", STANDARD_GAME, TURN_CAP)
+             True, "round", STANDARD_GAME, TURN_CAP, "random")
         )
     finally:
         arena.unregister_entrant_kind("test-scripted")
@@ -199,6 +199,19 @@ def test_a_board_law_pairs_boards_by_index_and_a_cohort_re_arms_the_bound():
     second = env.drain()
     assert sorted(e.index for e in second) == [4, 5]
     assert env.games_started() == 6 and env.games == 6
+
+
+def test_a_board_mode_deals_every_lane_by_that_mode():
+    from hexset.arena import deal_board
+
+    env = LaneEnv(players=3, seed=5, lanes=2, deal=3, board_mode="spiral", bots={0: spawn},
+                  action_cap=60, records=True)
+    episodes = env.drain()
+    assert sorted(e.index for e in episodes) == [0, 1, 2]
+    for episode in episodes:
+        assert tuple(episode.record.tokens) == deal_board(5, episode.index, "spiral").tokens
+    with pytest.raises(ValueError, match="unknown board mode"):
+        LaneEnv(players=3, seed=5, lanes=2, board_mode="hexagonal")
 
 
 def test_mask_of_is_legal_mask_over_the_options_in_hand():

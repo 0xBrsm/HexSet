@@ -34,7 +34,7 @@ from pettingzoo.utils.env import AECEnv
 
 from hexset import encoding
 from hexset.actions import Action, ActionSpace, apply, build_space, legal_actions
-from hexset.board.board import random_base_board
+from hexset.board.board import BOARD_MODES, base_board
 from hexset.board.maps import BASE_LAYOUT
 from hexset.board.topology import build as build_topology
 from hexset.game import (
@@ -78,7 +78,8 @@ class HexSetAEC(AECEnv):
     `"terminal"`, the points at the cap under `"relative_points"`.
     `turn_cap` defaults to `hexset.game.MAX_TURNS`; play far from a trained
     policy's -- random seats, an untrained learner -- needs
-    `hexset.game.UNSTRUCTURED_TURN_CAP` to finish."""
+    `hexset.game.UNSTRUCTURED_TURN_CAP` to finish. `board_mode` names how
+    each board is dealt (`hexset.board.board.BOARD_MODES`)."""
 
     metadata = {"render_modes": ["ansi", "human"], "name": "hexset_v0", "is_parallelizable": False}
 
@@ -91,6 +92,7 @@ class HexSetAEC(AECEnv):
         render_mode: str | None = None,
         game_type: GameType = STANDARD_GAME,
         turn_cap: int = MAX_TURNS,
+        board_mode: str = "random",
     ) -> None:
         super().__init__()
         # The contract, not a bare seat range: the seat counts this env is
@@ -107,12 +109,15 @@ class HexSetAEC(AECEnv):
 
         if turn_cap < 1:
             raise ValueError(f"a turn cap below one turn ends every game at the deal: {turn_cap}")
+        if board_mode not in BOARD_MODES:
+            raise ValueError(f"unknown board mode {board_mode!r}, expected one of {sorted(BOARD_MODES)}")
 
         self.num_players = num_players
         self.reward_mode = reward
         self.discard_order = discard_order
         self.render_mode = render_mode
         self.turn_cap = turn_cap
+        self.board_mode = board_mode
         # Where an unseeded `reset` takes its seed; a seeded one reseeds it.
         self.np_random, _ = seeding.np_random(None)
 
@@ -183,7 +188,7 @@ class HexSetAEC(AECEnv):
         else:
             self.np_random, _ = seeding.np_random(seed)
         rng = random.Random(seed)
-        board = random_base_board(rng)
+        board = base_board(self.board_mode, rng)
         self._game = start(
             board, self.num_players, rng, game_type=self.game_type, turn_cap=self.turn_cap
         )

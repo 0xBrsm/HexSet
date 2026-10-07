@@ -18,7 +18,7 @@ from hexset.game import is_over, to_move
 from hexset.server.api import Config, Seat, SeatKind, build_session
 from hexset.server.wire import action_to_wire
 
-from _page_server import launch, serving
+from _page_server import launch, serving, front_door
 
 
 try:
@@ -180,11 +180,7 @@ def test_a_seated_player_sees_their_own_pieces_without_a_click(running_server):
         browser = launch(playwright)
         try:
             page = browser.new_page()
-            with page.expect_response(
-                lambda r: r.request.method == "POST" and "/api/games" in r.url
-            ) as dealt:
-                page.goto(f"{BASE_URL}/", wait_until="load")
-            code = dealt.value.json()["code"]
+            code = front_door(page, BASE_URL)[1]["code"]
             page.wait_for_selector("#piece-supply .supply-tile")
             supply = _get(f"/api/table/{code}/board")["piece_supply"]
             assert _tiles(page) == 3

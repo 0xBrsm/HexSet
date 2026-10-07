@@ -195,11 +195,11 @@ def test_the_mask_answers_for_the_seat_it_is_asked_about():
     assert legal_mask(game, space) == legal_mask(game, space, 0)
 
 
-def test_a_table_can_refuse_road_building_on_the_last_road_piece():
-    """`Rules.road_building_min_roads`: one piece left plays the card under
-    the printed rule and does not under a table asking for two -- offered
-    and applied alike."""
-    import dataclasses
+def test_road_building_on_the_last_road_piece_places_one_road():
+    """The printed rule: with one road piece left the card is
+    offered and played, places that one road, and the turn goes on -- no
+    second road is owed once the pieces are gone. With none left it is not
+    offered."""
     import random
 
     import pytest
@@ -207,9 +207,8 @@ def test_a_table_can_refuse_road_building_on_the_last_road_piece():
     from hexset.actions import Action, ActionType, apply, legal_actions
     from hexset.board.board import random_base_board
     from hexset.cards import DevCard
-    from hexset.game import Phase, start
-    from hexset.rules import Rules
-    from hexset.state import MAX_ROADS, NO_OWNER
+    from hexset.game import Phase, pending_free_roads, start
+    from hexset.state import MAX_ROADS, NO_OWNER, road_count
 
     rng = random.Random(3)
     game = start(random_base_board(rng), 2, rng)
@@ -222,11 +221,26 @@ def test_a_table_can_refuse_road_building_on_the_last_road_piece():
     for e in free[: MAX_ROADS - owned - 1]:
         state.edge_owner[e] = seat
     card = Action(ActionType.PLAY_ROAD_BUILDING)
-    assert card in legal_actions(game)                       # printed rule: one piece is enough
+    assert card in legal_actions(game)
+    apply(game, card)
+    road = next(a for a in legal_actions(game) if a.type is ActionType.BUILD_ROAD)
+    apply(game, road)
+    assert road_count(state, seat) == MAX_ROADS
+    assert pending_free_roads(game) == []
+    assert Action(ActionType.END_TURN) in legal_actions(game)
 
-    state.rules = dataclasses.replace(state.rules, road_building_min_roads=2)
-    assert card not in legal_actions(game)
-    with pytest.raises(ValueError, match="road pieces left"):
+    state.dev_cards[seat][DevCard.ROAD_BUILDING] = 1
+    game.dev_card_played = False                               # a later turn's card
+    assert card not in legal_actions(game)                     # no pieces left
+    with pytest.raises(ValueError, match="road piece left"):
         apply(game, card)
-    with pytest.raises(ValueError):
-        Rules(road_building_min_roads=3)
+
+
+def test_a_record_with_a_retired_rules_setting_still_loads():
+    """Records written while `road_building_min_roads` existed (0.71.0 to
+    1.4.0) carry it in their rules; `rules_from` drops it."""
+    from hexset.rules import RETIRED_SETTINGS, STANDARD, rules_from
+
+    assert "road_building_min_roads" in RETIRED_SETTINGS
+    assert rules_from({"road_building_min_roads": 2}) == STANDARD
+    assert rules_from({"winning_points": 15, "road_building_min_roads": 1}).winning_points == 15

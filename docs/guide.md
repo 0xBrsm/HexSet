@@ -35,9 +35,18 @@ the game in `Verdict.exhausted`, with neither side winning.
 
 `deal_board(seed, index)` is the board `deal_game` deals for that
 `(seed, index)`; passing it explicitly lets a bot that needs the board be
-built against it. Every random stream of game `index` is a function of
+built against it. Both take a board mode, a `hexset.board.board.BOARD_MODES`
+name: `"random"` (the default) places the number discs in random order with
+no 6 or 8 adjacent, the rulebook's fully random set-up, and `"spiral"` lays
+them in letter order from a random corner, counterclockwise toward the
+centre, skipping the desert. Terrain is shuffled and harbor kinds are dealt
+to the fixed harbor positions the same way under both. `compete`,
+`LaneEnv`, `HexSetEnv` and `HexSetAEC` take `board_mode` too. Every random stream of game `index` is a function of
 `(seed, index)`, so a tournament and a lockstep environment that deal the
-same index play the same game.
+same index play the same game. Within a game the dice and the steals each
+draw from a generator of their own, so an index rolls the same dice turn for
+turn whatever the seats play: two entrants dealt the same index meet the same
+rolls, and the first place their games part is a decision, not a roll.
 
 `compete` deals a run of games, rotates a lineup through the seats and returns
 a `Tournament`. `lineup_from_names(["mybot", "random"])` resolves entrant
@@ -57,6 +66,8 @@ other name is registered by a runtime ([Implement a bot](#implement-a-bot)).
 | `catanatron`, `catanatron:<key>=<value>[:...]` | Catanatron's alpha-beta player (`CatanatronBot`), depth 2; keys `depth`, `worlds`, `temperature`, `select`. Needs the `catanatron` extra |
 | `network:<path>` | A checkpoint, one forward per decision; `network:<path>@0` is the same checkpoint with trading off |
 | `mcts:<path>[@[<simulations>][w<wave>][:k=<worlds>]]` | A checkpoint under PUCT search; defaults 128 simulations, wave 16, `k=1` |
+| `coalition:<entrant>` | Any entrant as a coalition member (`hexset.bots.Coalition`): every `coalition:` seat at the table plays with the others against the rest. A test opponent ([Coalitions](#coalitions)) |
+| `handoff:<round>:<first>\|<second>` | `<first>`'s moves through round `<round>`, `<second>`'s after it (`hexset.bots.Handoff`), trading as `<first>` throughout ([Handoffs](#handoffs)) |
 
 `catanatron` is hosted natively: HexSet owns the rules, the legal actions and
 the ledger, and the adapter supplies the moves. At its default `worlds=0` the
@@ -69,6 +80,39 @@ seats it directly.
 `network:` and `mcts:` build through the checkpoint loader the process
 registered with `hexset.clients.netbot.register_entrants`; without one they
 raise `ValueError` ([training.md](training.md#model-runtimes)).
+
+### Coalitions
+
+A coalition is a table that has agreed to stop one seat, whatever the scores
+say: `[mybot, coalition:other, coalition:other, coalition:other]` seats
+`mybot` against three members. Every seat seated as a `Coalition` is a
+member, every other playing seat a target, read off the table when the seat
+is seated, so the arena's seat rotation needs no other wiring.
+
+Whatever the bot, a member puts the robber on the targets' best hex (the most
+of their production blocked, then the least of the members') and steals from
+a target, and never trades with one: each trade hook the bot has is its own
+with the targets taken out. A part of the bot that implements
+`hexset.bots.PlaysAgainst` -- either half of a `TradesBy` seat -- is told the
+targets through `play_against(seats)` and plays its own objective as one side
+against them; `hexset.mcts.Search` does, so an `mcts:` member searches for
+the chance no target wins. A bot without it gets the table rules alone. A
+member trades through its own bot, so `coalition:<entrant>~<trader>` is
+refused.
+
+### Handoffs
+
+`handoff:14:heximax|mcts:it50.onnx@128` plays Heximax's moves through round
+14 -- each seat's own turns 1 to 14 and every decision it makes in those
+rounds -- and the search's from round 15 on (`hexset.bots.Handoff`,
+`hexset.bots.handed_off`). The round is read off `Game.turns`, so every seat
+and every copy of the game agree on it. The seat trades as `<first>` for the
+whole game; `handoff:...~<trader>` trades as `<trader>` instead, so the two
+bots name no trader of their own. `<second>` is seeded without drawing from
+the seat's generator, so a handoff plays exactly as `<first>` alone until it
+hands over, and two arms that differ only in the round pair game for game up
+to the earlier one. A coalition member is seated whole, so neither part may
+be one.
 
 ## Trade rounds
 
@@ -186,9 +230,12 @@ A name means one thing in a process. Registering a different factory, entrant
 or parser under a taken name raises `ValueError`; registering the same one
 again does nothing, so a runtime imported twice is harmless.
 `unregister_entrant_kind`, `unregister_preset` and `unregister_spec` free a
-name. The names HexSet resolves itself (`random`, `retired`, `catanatron`)
-and the prefixes it parses (`network:`, `mcts:`, `catanatron:`, and any
-prefix overlapping one) are refused. The kinds `network` and `mcts` are the
+name. The names HexSet resolves itself (`random`, `retired`, `catanatron`, and
+the kinds `coalition` and `handoff`) and the prefixes it parses (`network:`,
+`mcts:`, `catanatron:`, `coalition:`, `handoff:`, and any prefix overlapping
+one) are refused. A
+runtime may name a preset `coalition` (`hexset.arena.coalition(inner,
+name)` builds the entrant). The kinds `network` and `mcts` are the
 exception: `register_entrants` replaces their factories, and the last call
 wins.
 
@@ -225,7 +272,9 @@ them declines every player trade. Bank and port trades are ordinary actions.
 The shared pieces:
 
 - `hexset.bots.base`: `Bot`, `TradeGate`, `TradesBy`, `RandomBot`,
-  `seat_at`.
+  `seat_at`, and `PlaysAgainst` with its `play_against(bot, seats)` helper.
+- `hexset.bots.coalition`: `Coalition`, any bot as one of a side against the
+  rest of its table ([Coalitions](#coalitions)).
 - `hexset.trading`: the referee, `TradeParams` and `TradeProtocol`.
 - `hexset.bots.stances`: per-seat search objectives (`own`, `relative`,
   `paranoid`).
@@ -266,9 +315,9 @@ Commands are modules under `hexset.bench`; each takes `--help`.
 
 - Every command except `throughput` takes `--runtime <module>`
   (repeatable), imported first in every worker.
-- The same four take `--game-type` (default `standard`), `--turn-cap`
-  (default `MAX_TURNS`) and `--trade-mode` (`round` or `auto`, default
-  `round`). `throughput` plays under `UNSTRUCTURED_TURN_CAP`.
+- The same four take `--game-type` (default `standard`), `--board`
+  (default `random`; see `BOARD_MODES` above), `--turn-cap` (default
+  `MAX_TURNS`) and `--trade-mode` (`round` or `auto`, default `round`). `throughput` plays under `UNSTRUCTURED_TURN_CAP`.
 - `--workers` defaults to every core (`os.cpu_count()`), except
   `trade_census` (1). Set it explicitly on a shared machine.
 - `--games` must divide evenly over the seats so the rotation completes.

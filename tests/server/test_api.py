@@ -81,6 +81,28 @@ def drive(session, moves: int, rng: random.Random) -> None:
         session.submit(seat, action_to_wire(rng.choice(legal_actions(session.game))))
 
 
+def test_a_spiral_table_journals_its_mode_and_comes_back_on_the_same_board(tmp_path):
+    from hexset.board.board import spiral_base_board
+
+    config = Config(games_dir=str(tmp_path), seed=99, board_mode="spiral")
+    session = build_session("ABC123", [player("Ada"), bot_seat(), bot_seat(), bot_seat()], config, first=0)
+    assert session.game._state.board == spiral_base_board(random.Random(99))
+    header = journal.read(next(tmp_path.glob("*.jsonl")))[0]
+    assert header["board_mode"] == "spiral"
+    drive(session, 8, random.Random(4))
+
+    resumed = reopened("ABC123", tmp_path)
+
+    assert resumed.board_mode == "spiral"
+    assert resumed.game._state.board == session.game._state.board
+    assert resumed.game._state.vertex_owner == session.game._state.vertex_owner
+
+
+def test_an_unknown_board_mode_is_refused_at_configuration():
+    with pytest.raises(ValueError, match="unknown board mode"):
+        Config(board_mode="hexagonal")
+
+
 def test_an_unfinished_game_comes_back_where_it_was_left(tmp_path):
     config = Config(games_dir=str(tmp_path), seed=99)
     seats = [player("Ada"), bot_seat(), bot_seat(), bot_seat()]

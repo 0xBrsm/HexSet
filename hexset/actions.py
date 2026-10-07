@@ -243,10 +243,9 @@ def _card_actions(game: Game) -> list[Action]:
     held = state.dev_cards[player]
     if held[DevCard.KNIGHT]:
         out.append(Action(ActionType.PLAY_KNIGHT))
-    if (held[DevCard.ROAD_BUILDING]
-            and MAX_ROADS - road_count(state, player) >= state.rules.road_building_min_roads):
+    if held[DevCard.ROAD_BUILDING] and road_count(state, player) < MAX_ROADS:
         # With no road pieces left the card is unplayable, not a free pass;
-        # a table can ask for more pieces than that (`Rules`).
+        # with one, it places one road (the printed rule).
         out.append(Action(ActionType.PLAY_ROAD_BUILDING))
     if held[DevCard.MONOPOLY]:
         out.extend(Action(ActionType.PLAY_MONOPOLY, r) for r in range(NUM_RESOURCES))

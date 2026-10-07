@@ -200,7 +200,23 @@ def test_new_game_records_the_clients_id_and_kind_mcp(live_server):
     data = client.call_tool("new_game", identity=" Claude-Opus-5 ", opponents=SOLO)
     expected_id = hashlib.sha256(b"claude-opus-5").hexdigest()
     seat = server.tables.get(data["code"]).seats[data["seat"]]
-    assert seat.client == {"id": expected_id, "kind": "mcp"}
+    assert {k: seat.client[k] for k in ("id", "kind", "via")} == {"id": expected_id, "kind": "mcp", "via": "mcp"}
+
+
+def test_new_game_deals_the_board_and_game_type_it_names(live_server):
+    server, base = live_server
+    client = connected(base)
+    data = client.call_tool("new_game", identity=IDENTITY, opponents=["test-trader"],
+                            board_mode="random", game_type="duel-variant")
+    session = server.tables.get(data["code"]).session
+    assert (session.board_mode, session.game_type.name) == ("random", "duel-variant")
+    assert data["game_type"] == "duel-variant" and data["seats_fixed"] is True
+    assert data["locked"] == [2, 3] and data["winning_points"] == 15
+    assert "board_mode" not in data
+
+    plain = connected(base).call_tool("new_game", identity="another-model", opponents=SOLO)
+    assert server.tables.get(plain["code"]).session.board_mode == "spiral"
+    assert not {"game_type", "seats_fixed", "board_mode"} & set(plain)
 
 
 # --- act(index, expect): the guard against a position that moved ----------
@@ -463,7 +479,7 @@ class FakeTables:
     def __init__(self, responses: dict[tuple[str, str], dict]) -> None:
         self.responses = responses
 
-    def handle(self, method, path, payload, token):
+    def handle(self, method, path, payload, token, origin=None):
         return self.responses[(method, path)]
 
 
@@ -473,7 +489,7 @@ class RecordingTables(FakeTables):
         super().__init__(responses)
         self.calls: list[tuple[str, str, dict]] = []
 
-    def handle(self, method, path, payload, token):
+    def handle(self, method, path, payload, token, origin=None):
         self.calls.append((method, path, payload))
         answer = self.responses[(method, path)]
         return answer.pop(0) if isinstance(answer, list) else answer

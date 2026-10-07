@@ -119,6 +119,26 @@ def test_an_acceptance_is_priced_by_who_took_it():
     assert seat.pick([two, Response(1, RESPONSE_PASS), Response(3, RESPONSE_PASS)]) is None
 
 
+def test_pick_takes_the_acceptance_over_a_counter_the_hand_cannot_cover():
+    """A hosted seat's pick, as a client asks it: seat 0 holds no brick, so
+    seat 1's counter asking for one is passed over for seat 2's acceptance,
+    though the gate prices the counter higher. The answers the gate hears at
+    close are the ones put to `pick`."""
+    class LovesBrickCounters(Wants):
+        def gains_many(self, view, received, counterparties):
+            return [5.0 if r[BRICK] < 0 else 1.0 for r in received]
+
+    true = _main()
+    gate = LovesBrickCounters(ORE, budget=1)
+    seat = _seat(true, gate)
+    offer = seat.offer()
+    counter = Response(1, RESPONSE_COUNTER, (0, -1, 0, 0, 2))
+    took = Response(2, RESPONSE_ACCEPT, offer.received)
+    assert seat.pick([counter, took, Response(3, RESPONSE_PASS)]) == took
+    seat.close_round(None)
+    assert gate.finished[0][1] == (counter, took, Response(3, RESPONSE_PASS))
+
+
 def test_a_closed_round_tells_the_gate_and_the_turn_is_published_once():
     true = _main()
     gate = Wants(ORE, budget=1)

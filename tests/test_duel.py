@@ -77,9 +77,10 @@ def _fake_compete(seen: dict, points, turns=None, winners=None):
     def compete(lineup, games, *, seed, workers, records=False,
                 worker_initializer=None, worker_initargs=(),
                 trade_mode="round", game_type=STANDARD_GAME,
-                turn_cap=MAX_TURNS, complement=None, progress=None, journal=None,
-                resume=False):
+                turn_cap=MAX_TURNS, board_mode="random", complement=None, progress=None,
+                journal=None, resume=False):
         seen["progress"] = progress
+        seen["board_mode"] = board_mode
         seen["complement"] = complement
         seen["game_type"] = game_type
         seen["worker_initializer"] = worker_initializer
@@ -139,6 +140,17 @@ def test_arena_verdict_defaults_to_blocked_and_records_it(monkeypatch):
     assert verdict["geometry"] == "aabb"
     assert verdict["via"] == "arena.compete"
     assert verdict["paired_vp"] == pytest.approx(2.5)
+
+
+def test_arena_verdict_deals_and_records_the_board_mode(monkeypatch):
+    seen: dict = {}
+    monkeypatch.setattr("hexset.arena.compete", _fake_compete(seen, POINTS))
+
+    assert _via_arena(_arena_args(), "a", "b")["board_mode"] == "random"
+    verdict = _via_arena(_arena_args(board="spiral"), "a", "b")
+
+    assert seen["board_mode"] == "spiral"
+    assert verdict["board_mode"] == "spiral"
 
 
 def test_arena_verdict_reports_game_length_and_unfinished_games(monkeypatch):

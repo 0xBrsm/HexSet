@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 
 from hexset.arena import RUNTIME_HELP
+from hexset.board.board import BOARD_MODES
 from hexset.game import MAX_TURNS, UNSTRUCTURED_TURN_CAP
 from hexset.rules import GAME_TYPES, game_type
 
@@ -76,15 +77,20 @@ def side_swap(mine, theirs, seats: int) -> tuple[int, ...] | None:
 
 
 def add_table_options(parser: argparse.ArgumentParser) -> None:
-    """`--game-type`, `--turn-cap` and `--trade-mode`: what every game of a
-    run is dealt and played under, shared by every command that runs one
-    (`args.game_type` names a `hexset.rules.GAME_TYPES` entry)."""
+    """`--game-type`, `--board`, `--turn-cap` and `--trade-mode`: what every
+    game of a run is dealt and played under, shared by every command that
+    runs one (`args.game_type` names a `hexset.rules.GAME_TYPES` entry,
+    `args.board` a `hexset.board.board.BOARD_MODES` one)."""
     parser.add_argument(
         "--game-type", default="standard", choices=sorted(GAME_TYPES),
         help="the contract every game is dealt under: its ruleset and the seat "
              "counts it is played at. Checked against the entrants that actually "
              "play, so a lineup `a b retired retired` under duel-variant is a "
              "two-seat game at a four-seat table")
+    parser.add_argument(
+        "--board", default="random", choices=sorted(BOARD_MODES),
+        help="how every board is dealt: number discs in random order with 6 and "
+             "8 apart (default), or in the rulebook's lettered spiral")
     parser.add_argument(
         "--turn-cap", type=int, default=MAX_TURNS,
         help="turns after which a game is abandoned and the run aborts. The "
@@ -273,6 +279,7 @@ def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY)
         trade_mode=args.trade_mode,
         game_type=game_type(getattr(args, "game_type", "standard")),
         turn_cap=getattr(args, "turn_cap", MAX_TURNS),
+        board_mode=getattr(args, "board", "random"),
         complement=side_swap(mine, theirs, len(names)),
         journal=journal,
         resume=getattr(args, "resume", False),
@@ -313,6 +320,7 @@ def _via_arena(args, label_a: str, label_b: str, geometry: str = ARENA_GEOMETRY)
         "workers": args.workers, "seconds": seconds, "via": "arena.compete",
         "geometry": geometry,
         "game_type": getattr(args, "game_type", "standard"),
+        "board_mode": getattr(args, "board", "random"),
         "turn_cap": getattr(args, "turn_cap", MAX_TURNS),
         "trade_mode": args.trade_mode,
         "unfinished": tournament.unfinished,

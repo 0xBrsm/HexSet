@@ -98,6 +98,7 @@ class HexSetEnv(Env):
         flatten: bool = True,
         render_mode: str | None = None,
         turn_cap: int = MAX_TURNS,
+        board_mode: str = "random",
         runtime: Sequence[str] = (),
     ) -> None:
         super().__init__()
@@ -123,6 +124,7 @@ class HexSetEnv(Env):
             discard_order=discard_order,
             render_mode=render_mode,
             turn_cap=turn_cap,
+            board_mode=board_mode,
         )
         self.learner_seat_config = learner_seat
         self.opponent_names: tuple[str, ...] = tuple(opponents)

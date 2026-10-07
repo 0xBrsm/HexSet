@@ -44,3 +44,15 @@ def test_player_counts_construct_and_reset(num_players):
     env.reset(seed=0)
     assert env.agents == [f"seat_{s}" for s in range(num_players)]
     assert env.action_space(env.agents[0]).n > 0
+
+
+def test_a_board_mode_deals_the_episode_board_by_that_mode():
+    import random
+
+    from hexset.board.board import spiral_base_board
+
+    env = HexSetAEC(num_players=4, board_mode="spiral")
+    env.reset(seed=3)
+    assert env._game._state.board == spiral_base_board(random.Random(3))
+    with pytest.raises(ValueError, match="unknown board mode"):
+        HexSetAEC(num_players=4, board_mode="hexagonal")

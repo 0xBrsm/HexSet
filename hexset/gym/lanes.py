@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from ..actions import Action, apply, options_for
 from ..arena import MAX_ACTIONS, deal_game, game_key
-from ..board.board import Board
+from ..board.board import BOARD_MODES, Board
 from ..game import MAX_TURNS, Game, is_over, to_move
 from ..record import Record, Tape, recording
 from ..rules import STANDARD
@@ -191,6 +191,7 @@ class LaneEnv:
         action_cap: int = MAX_ACTIONS,
         turn_cap: int = MAX_TURNS,
         board: Board | Callable[[int], Board | None] | None = None,
+        board_mode: str = "random",
         caster: Callable[[int], Sequence[int]] | None = None,
         bots: Mapping[int, Callable[[Board], Bot]] | None = None,
         gates: Mapping[int, Callable[[Game, int], object]] | None = None,
@@ -204,7 +205,8 @@ class LaneEnv:
         since the first `n` games to finish select for short ones.
         `first_game` is where the counter starts. `board` pins every game to
         one geometry, or as a callable is a board law
-        `board(index) -> Board | None`, `None` meaning the default deal.
+        `board(index) -> Board | None`, `None` meaning the default deal,
+        which `board_mode` names (`hexset.arena.deal_board`).
         `records` has each `Episode` carry a `hexset.record.Record`.
         """
         if players < 2:
@@ -217,11 +219,14 @@ class LaneEnv:
             raise ValueError("a lane environment cannot deal backwards or stand still")
         if action_cap < 1:
             raise ValueError("an action cap below one action ends every game empty")
+        if board_mode not in BOARD_MODES:
+            raise ValueError(f"unknown board mode {board_mode!r}: {sorted(BOARD_MODES)}")
         self.players = players
         self.seed = seed
         self.action_cap = action_cap
         self.turn_cap = turn_cap
         self.board = board
+        self.board_mode = board_mode
         self.caster = caster
         self.gates = dict(gates or {})
         self.bots = {
@@ -277,6 +282,7 @@ class LaneEnv:
             index,
             self.players,
             board=board,
+            board_mode=self.board_mode,
             # Lanes deal the standard game (`deal_game`'s default type).
             chance=(lambda rng: recording(rng, STANDARD)) if self.records else None,
             turn_cap=self.turn_cap,

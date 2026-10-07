@@ -9,7 +9,7 @@ bodies are JSON objects. Creating, joining or reclaiming a seat returns a
 | --- | --- |
 | `GET /api/version` | `{"api": 4}`, this API's contract version |
 | `GET /api/models` | `{"models": [...]}`, the names `bots` and `model` accept |
-| `POST /api/games` | Optional `{"name": "Alice", "bots": ["mybot"], "client": {...}}`; deals a game |
+| `POST /api/games` | Optional `{"name": "Alice", "bots": ["mybot"], "board_mode": "spiral", "game_type": "standard", "client": {...}}`; deals a game |
 | `POST /api/join` | `{"code": "abcdef", "name": "Alice", "client": {...}}`; claims a random open seat |
 | `POST /api/reclaim` | `{"code": "abcdef", "secret": "..."}`; a fresh token for the seat whose client id matches |
 | `GET /api/state` | The seat's view, including `legal_actions` |
@@ -19,8 +19,8 @@ bodies are JSON objects. Creating, joining or reclaiming a seat returns a
 | `POST /api/undo` | Take back the seat's last action; see `can_undo` |
 | `POST /api/name` | `{"name": "Alice"}`; an empty name restores the seat's default |
 | `POST /api/bot` | `{"seat": 1, "model": "mybot"}`; seats a bot on an empty seat or replaces a bot |
-| `POST /api/close` | `{"seat": 1}`; closes an empty seat before the first move |
-| `POST /api/open` | `{"seat": 1}`; reopens a closed seat before the first move |
+| `POST /api/close` | `{"seat": 1}`; closes an empty seat, or one a bot holds, before the first move |
+| `POST /api/open` | `{"seat": 1}`; reopens a closed seat, or takes the bot off one, before the first move |
 | `POST /api/leave` | Retires the caller's seat for the rest of the game; 400 while a trade round awaits it or is its own |
 | `GET /api/table/<code>` | Spectator view: every hand, omniscient |
 | `GET /api/table/<code>/board` | Board layout |
@@ -42,14 +42,23 @@ Every refusal is `{"error": "<message>"}` with one of these statuses:
 | 401 | A seat route without a token |
 | 403 | An unknown token; a reclaim secret that matches no seat |
 | 404 | An unknown game code or route |
-| 409 | A stale `version`; an action while seats are unresolved (`waiting_for`) or a bot's offer awaits answers (`trade_wait`); any seat POST once the game is over; no open seat to join; seat changes after the first move; the last seat leaving; a trade-round conflict (below) |
+| 409 | A stale `version`; an action while seats are unresolved (`waiting_for`) or a bot's offer awaits answers (`trade_wait`); any seat POST once the game is over; no open seat to join; seat changes after the first move or at a table with fixed seats; the last seat leaving; a trade-round conflict (below) |
+| 429 | `POST /api/games` from an address over its new-game limits (below) |
 | 500 | An unexpected server error |
 
 `POST /api/games` validates every bot before dealing: a name not in
-`/api/models`, more than three bots, or a bot that will not load is a 400,
-and no game is created. `POST /api/bot` refuses a seat held by a person
-(400) and a closed seat after the first move (400), and changes nothing when
-the bot will not load.
+`/api/models`, more bots than the game type leaves seats for, or a bot that
+will not load is a 400, and no game is created. `board_mode` names a
+`hexset.board.board.BOARD_MODES` entry, `spiral` (the server's `--board`)
+when omitted, and `game_type` a `hexset.rules.GAME_TYPES` entry, `standard`
+when omitted; an unknown name is a 400. Every game has four seats. A
+`standard` game starts with all four open, and closing seats plays it at two
+or three. A `duel-variant` game (15 points, discard above 9, friendly robber,
+balanced dice) is played at two: seats 2 and 3 are closed at the deal, the
+creator sits at seat 0 or 1, at most one bot is named, and its seats are
+fixed, so `/api/close`, `/api/open` and `/api/bot` on a closed seat refuse. `POST /api/bot` refuses a seat held by a person
+(400) and a closed seat after the first move or at a table with fixed seats
+(400), and changes nothing when the bot will not load.
 
 ## State
 
@@ -62,6 +71,7 @@ the bot will not load.
 | `seats` | `{seat, kind, name}` per seat; `kind` is `empty`, `bot` or `player` |
 | `waiting_for` | Empty, unclosed seats holding up setup |
 | `claimed_seats`, `locked`, `started` | Occupied seats, closed or retired seats, whether the first move is made |
+| `game_type`, `board_mode`, `seats_fixed`, `fixed_seats` | The game type and board mode the table was dealt with (`board_mode` is `null` for a board no mode dealt); whether the type is played at one seat count only (duel), and the seats its deal closed for good. A table's other seats can be closed before the first move, down to one person practising alone |
 | `legal_actions` | The seat's moves now, as `{"type", "a", "b"}` objects; empty off turn |
 | `can_undo`, `awaiting_confirm` | Whether `/api/undo` succeeds now; the seat holding its setup turn open |
 | `players` | Per seat: `name`, `bot`, `victory_points`, `hand_size`, `dev_card_count`, `knights_played`, `road_length`, award flags, `last_roll`, ledger `known`/`unknown`; `hand` and `dev_cards` for this seat only |
@@ -183,7 +193,30 @@ routes with named resource counts and response indices ([mcp.md](mcp.md)).
 
 `id` is the SHA-256 hex digest of a secret the client keeps, hashed as UTF-8.
 `kind` is `web`, `api` or `mcp`. Without the object the seat is `api` with no
-recoverable identity.
+recoverable identity. `mcp` is only what the MCP endpoint's own seats are: a
+request to `/api/*` that claims it is journalled as `api`.
+
+The journal also keeps, with each seat a request claims, where the request
+came from: the client's address, `via` (`http` or `mcp`, the route it arrived
+on) and its `User-Agent`. None of it is shown to any seat or spectator.
+
+## New-game limits
+
+A served table spends server time on every bot seated at it, so
+`POST /api/games` is limited per client address, whichever interface it
+comes through: at most `--games-per-period` new games in any rolling
+`--period-days` (default 100 in 30 days, counted across restarts from the
+journals), and at most `--live-tables-per-ip`
+unfinished games in play at once (default 5). A game stops counting toward the
+second once it ends or nobody has read it for 15 minutes. Over either limit
+the deal is a 429 and nothing is created; a deal refused for another reason
+does not count. Loopback addresses (`--limit-exempt`) are under no limit.
+
+A client the server's owner has issued an API key sends it on
+`X-HexSet-Key` with `POST /api/games`. Its deals count against the key's own
+allowance per period instead of its address's (the unfinished-games limit is
+unchanged), and the journal names the key's holder, never the key. An
+unknown key is a 401.
 
 `POST /api/reclaim` takes the code and the secret, finds the seat whose `id`
 matches, and returns a fresh token; the old token stops working. It works on

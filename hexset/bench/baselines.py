@@ -76,6 +76,7 @@ def main(argv: list[str] | None = None) -> int:
         game_type=game_type(args.game_type),
         turn_cap=args.turn_cap,
         trade_mode=args.trade_mode,
+        board_mode=args.board,
         journal=journal,
         resume=args.resume,
     )
@@ -87,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         "seed": args.seed,
         "workers": args.workers,
         "game_type": args.game_type,
+        "board_mode": args.board,
         "turn_cap": args.turn_cap,
         "trade_mode": args.trade_mode,
         "games": result.games,

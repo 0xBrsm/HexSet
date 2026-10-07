@@ -88,7 +88,9 @@
   }
   button:hover:not(:disabled) { background: #2e3444; }
   button:disabled { opacity: 0.45; cursor: default; }
-  button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+  /* Hover included: `button:hover:not(:disabled)` outranks a bare class, and a
+     primary button would turn grey under the pointer. */
+  button.primary, button.primary:hover:not(:disabled) { background: var(--accent); color: white; border-color: var(--accent); }
   button.primary:hover:not(:disabled) { filter: brightness(1.08); }
   /* The replay strip, heading the sidebar above the player pane. Shallow, and
      the padding is the only thing that gives: the buttons stay the size a
@@ -561,6 +563,13 @@
   .modal-fill { flex: 1 1 auto; min-width: 0; }
   .pick-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.3rem 0 0.7rem; }
   .modal-note { font-size: 0.85rem; color: var(--muted); margin: 0.4rem 0 0.7rem; }
+  /* The new-game modal's choices: a caption over a pair of buttons, the
+     chosen one lit in the accent, the way a pressed toggle reads. */
+  .choice-group { display: flex; flex-direction: column; gap: 0.4rem; }
+  .choice-label { font-size: 0.8rem; font-weight: 700; color: var(--muted); }
+  .choice-row { display: flex; gap: 0.4rem; }
+  /* One width for every option in every group, so the columns line up. */
+  .choice-row button { width: 7rem; }
   /* The robber's victims are seats, not resources, so they get plain buttons
      with the same colour swatch the player list uses rather than card tiles —
      stacked, because a seat's name is far too wide to sit five to a row. */
@@ -1016,6 +1025,8 @@ let counterOf = null;              // {actor, bundle} of the incoming offer bein
 // the seat being asked refuses what it will not sign.
 let yopPicks = [];         // 0, 1, or 2 resource indices, "year-of-plenty" mode only
 let monopolyPick = null;   // selected resource index, "monopoly" mode only
+let newGameBoard = "spiral";  // "new-game" mode: the BOARD_MODES name to deal
+let newGameDuel = false;      // "new-game" mode: duel-variant rules rather than standard
 let modelNames = [];       // GET /api/models, in MODEL_OPTIONS order
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -1389,16 +1400,6 @@ function showCodeInUrl(code) {
   history.replaceState(null, "", `/${code}`);
 }
 
-// Deals a game and sits us at it. Every other seat is left open — filling
-// them is a decision made at the table, not before it.
-async function dealGame() {
-  const {ok, data} = await postJSON("/api/games", {client: await clientInfo()});
-  if (!ok) return null;
-  rememberSeat(data.code, data.token);
-  showCodeInUrl(data.code);
-  return data;
-}
-
 // Why the last attempt at a game came back with nothing at all — read by
 // init() to tell somebody handed a dead link what happened to it. A game
 // that exists but has no seat left is not this: that is watching, and it
@@ -1490,17 +1491,37 @@ async function resumeGame(code) {
 
 // --- Static board drawing ------------------------------------------------
 
+// What the board's drawing reaches past a point it is anchored on: a city's
+// corner (half-diagonal 12√2 plus stroke) and the coarse-pointer vertex
+// target (r 18) past a vertex; a port marker's circle (r 18, which holds its
+// ship and label) plus stroke past its centre.
+const VERTEX_REACH = 20;
+const PORT_REACH = 20;
+// Open water around the board, so it does not run into the header, the
+// panels or the screen's edges.
+const BOARD_MARGIN = 24;
+
 function boardBounds() {
+  // Fitted to what is drawn rather than padded evenly on every side: the
+  // ports stand out from the coast on some sides and not others. Widened to
+  // be symmetric about the land, so the island sits centred left to right
+  // whichever side its ports stand out on.
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const v of board.vertices) {
-    minX = Math.min(minX, v.x); maxX = Math.max(maxX, v.x);
-    minY = Math.min(minY, v.y); maxY = Math.max(maxY, v.y);
+  const reach = (x, y, r) => {
+    minX = Math.min(minX, x - r); maxX = Math.max(maxX, x + r);
+    minY = Math.min(minY, y - r); maxY = Math.max(maxY, y + r);
+  };
+  for (const v of board.vertices) reach(v.x, v.y, VERTEX_REACH);
+  for (const p of board.ports) {
+    const pos = portLabelPos(p);
+    reach(pos.x, pos.y, PORT_REACH);
   }
-  // Wide enough to clear a port marker sitting at a true equilateral
-  // triangle's apex off the coast (edge length × √3/2, bigger than the old
-  // fixed 30-unit push) plus its own radius and ship icon.
-  const pad = 80;
-  return {minX: minX - pad, minY: minY - pad, w: (maxX - minX) + pad * 2, h: (maxY - minY) + pad * 2};
+  const xs = board.vertices.map((v) => v.x);
+  const middle = (Math.min(...xs) + Math.max(...xs)) / 2;
+  const half = Math.max(middle - minX, maxX - middle);
+  minX = middle - half - BOARD_MARGIN; maxX = middle + half + BOARD_MARGIN;
+  minY -= BOARD_MARGIN; maxY += BOARD_MARGIN;
+  return {minX, minY, w: maxX - minX, h: maxY - minY};
 }
 
 function centroid() {
@@ -1991,11 +2012,19 @@ function sendAction(action) {
 
 // A new game is a new table with its own address, so this leaves this one
 // where it is — anyone still sitting here keeps playing it — and moves us to
-// the new one. Dealt with every other seat empty, the same as the front
-// door: who else is playing is chosen on the board afterwards.
+// the new one. The button asks first what the table is dealt as, the two
+// things fixed at the deal: the board and the rules (renderNewGameMode).
+// Who else is playing is still chosen on the board afterwards, every seat
+// the rules leave open starting empty, the same as the front door.
 function newGame() {
+  openModal("new-game");
+}
+
+function dealNewGame() {
+  const body = {board_mode: newGameBoard, game_type: newGameDuel ? "duel-variant" : "standard"};
+  closeModal();
   return blocking(async () => {
-    const {ok, data} = await postJSON("/api/games", {client: await clientInfo()});
+    const {ok, data} = await postJSON("/api/games", {...body, client: await clientInfo()});
     if (!ok) { showNotice(data.error || "Could not deal a new game."); return; }
     rememberSeat(data.code, data.token);
     location.href = `/${data.code}`;
@@ -2152,8 +2181,11 @@ function renderPlayers() {
     // starts the seats are fixed -- closing and reopening are refused
     // server-side -- and the row goes, since there is nobody in it and never
     // will be; the seats left renumber (playerNumber) so the table reads
-    // Player 1, 2, 3 and the log's numbering never shifts mid-game.
+    // Player 1, 2, 3 and the log's numbering never shifts mid-game. The seats
+    // a fixed-seat deal (duel rules) retired have nothing to change their
+    // mind about, so they never show at all.
     if (state.started && (state.locked || []).includes(p.seat)) continue;
+    if ((state.fixed_seats || []).includes(p.seat)) continue;
     const color = SEAT_COLORS[p.seat];
     // Whose decision it is — and pinned to a past round, nobody's. Every
     // round's snapshot is the moment after the last seat ended their turn,
@@ -2240,7 +2272,9 @@ function renderPlayers() {
       // "closed" to close it outright -- nothing here ever resolves itself.
       const closed = (state.locked || []).includes(p.seat);
       const select = html("select", {});
-      if (!p.bot) {
+      // Until the first move a bot can be taken back off its seat, leaving it
+      // empty or closed (api.Tables.open_seat/close_seat); after, only swapped.
+      if (!p.bot || !state.started) {
         select.appendChild(html("option", {value: ""}, "(empty)"));
         select.appendChild(html("option", {value: CLOSE_SEAT}, "(closed)"));
       }
@@ -2270,7 +2304,8 @@ function renderPlayers() {
     // grid-template-columns), appended straight onto the row rather than
     // into a wrapping div — that's what lets every row share the same
     // column tracks instead of each row sizing its own flex children.
-    row.appendChild(statChip("victory-point", p.victory_points, "", "Victory points"));
+    row.appendChild(statChip("victory-point", p.victory_points, "",
+      `Victory points (${state.winning_points} to win)`));
     row.appendChild(statChip("card", cards, "", "Resource cards"));
     row.appendChild(statChip("dev-card", p.dev_card_count, "", "Development cards"));
     // Route length and Knights played sit in every row, always — comparable
@@ -2678,7 +2713,7 @@ const MODAL_AUTO = new Set(["discard", "steal"]);
 // the game is actually waiting on: an offer has to be answered, and cards owed
 // to the bank after a seven have to be handed over. "steal" is here because
 // closing it only backs out to the hex list, not out of the move.
-const MODAL_DISMISSIBLE = new Set(["trade", "monopoly", "year-of-plenty", "steal"]);
+const MODAL_DISMISSIBLE = new Set(["trade", "monopoly", "year-of-plenty", "steal", "new-game"]);
 
 // One button size everywhere in the modal: a 40px square carrying a glyph
 // and nothing else. `label` is the full tooltip/screen-reader sentence — the
@@ -2897,15 +2932,20 @@ function loadComposer(signed) {
   tradeWantAny = 0;
 }
 
-// The five modes, and what puts each one up:
+// The six modes, and what puts each one up:
 //   "trade"          clicking a resource card in hand (renderHand)
 //   "monopoly"       clicking the Monopoly card in hand (devCardPlay)
 //   "year-of-plenty" clicking the Year of Plenty card in hand (devCardPlay)
 //   "discard"        cards owed to the bank after a seven (syncModal)
 //   "steal"          a robber hex with more than one victim (syncModal)
+//   "new-game"       the header's New game button (newGame)
 function openModal(mode, {give = null} = {}) {
   modalMode = mode;
-  if (mode === "trade") {
+  if (mode === "new-game") {
+    // Every open starts from what the server deals when told nothing.
+    newGameBoard = "spiral";
+    newGameDuel = false;
+  } else if (mode === "trade") {
     // `give` is the resource clicked in the hand (see renderHand()), one of it.
     resetComposer();
     if (give !== null) tradeGive[give] = 1;
@@ -2977,13 +3017,18 @@ function renderModal() {
   const close = document.getElementById("modal-close");
   close.hidden = true;
   close.onclick = null;
-  const g = groupActions(state.legal_actions);
 
-  if (modalMode === "discard") renderDiscardMode(g, title, body);
-  else if (modalMode === "steal") renderStealMode(g, title, body);
-  else if (modalMode === "monopoly") renderMonopolyMode(g, title, body, actions);
-  else if (modalMode === "year-of-plenty") renderYearOfPlentyMode(g, title, body, actions);
-  else renderTradeMode(title, body, actions);
+  // The one mode about no game in particular, so it reads nothing off
+  // `state`, which a page that could not deal or find one does not have.
+  if (modalMode === "new-game") renderNewGameMode(title, body, actions);
+  else {
+    const g = groupActions(state.legal_actions);
+    if (modalMode === "discard") renderDiscardMode(g, title, body);
+    else if (modalMode === "steal") renderStealMode(g, title, body);
+    else if (modalMode === "monopoly") renderMonopolyMode(g, title, body, actions);
+    else if (modalMode === "year-of-plenty") renderYearOfPlentyMode(g, title, body, actions);
+    else renderTradeMode(title, body, actions);
+  }
 
   // A forced discard, an acceptance pane and a counter being written all
   // have nothing to put in the button column, and an empty gutter reads as a
@@ -3048,6 +3093,45 @@ function renderStealMode(g, title, body) {
 // tap on Confirm is what actually sends it — picking alone doesn't commit,
 // matching Year of Plenty (renderYearOfPlentyMode) so every dev card that
 // takes cards from other players gets a chance to back out first.
+// What the next table is dealt as. Duel is the duel variant
+// (hexset.rules.DUEL_VARIANT_GAME), played at two seats, so the server deals
+// it with the other two closed for good; Standard is dealt at four seats.
+// Either way the playing seats can still be closed before the first move,
+// down to one person practising alone.
+function renderNewGameMode(title, body, actions) {
+  title.textContent = "New game";
+  // With no table behind the page (the front door) there is nothing to go
+  // back to, so the modal has no way out but Deal.
+  if (state) modalCloseGlyph("Cancel", closeModal);
+  body.appendChild(choiceGroup("Board", "board", [["spiral", "Spiral"], ["random", "Random"]],
+    newGameBoard, (value) => { newGameBoard = value; renderModal(); }));
+  body.appendChild(choiceGroup("Rules", "duel", [[false, "Standard"], [true, "Duel"]],
+    newGameDuel, (value) => { newGameDuel = value; renderModal(); }));
+  const deal = modalActionButton("check", "Deal");
+  deal.id = "deal-new-game";
+  deal.addEventListener("click", dealNewGame);
+  actions.appendChild(deal);
+}
+
+// A caption over one button per option, the chosen one pressed. `key` names
+// the group for whoever reads the buttons back (data-choice).
+function choiceGroup(label, key, options, chosen, onPick) {
+  const group = html("div", {class: "choice-group"});
+  group.appendChild(html("div", {class: "choice-label"}, label));
+  const row = html("div", {class: "choice-row", role: "group", "aria-label": label});
+  for (const [value, text] of options) {
+    const on = value === chosen;
+    const btn = html("button", {
+      class: on ? "primary" : "", "aria-pressed": String(on),
+      "data-choice": key, "data-value": String(value),
+    }, text);
+    btn.addEventListener("click", () => onPick(value));
+    row.appendChild(btn);
+  }
+  group.appendChild(row);
+  return group;
+}
+
 function renderMonopolyMode(g, title, body, actions) {
   title.textContent = "Play Monopoly";
   modalCloseGlyph("Cancel", closeModal);
@@ -3548,6 +3632,7 @@ document.getElementById("undo-build").addEventListener("click", undoBuild);
 // out, not the backdrop.
 function modalDismissible() {
   if (!MODAL_DISMISSIBLE.has(modalMode)) return false;
+  if (modalMode === "new-game" && !state) return false;
   return !(modalMode === "trade" && (state.pending || []).length);
 }
 document.getElementById("modal").addEventListener("click", (e) => {
@@ -3645,12 +3730,13 @@ document.addEventListener("keydown", (e) => {
   // address out from under a link that was shared on purpose, and the two
   // games would look identical afterwards. So a full or dead code says so
   // and stops there. With no code, we resume the last game we sat at, and
-  // deal one if there isn't one.
+  // ask what to deal if there isn't one.
   const asked = tableCode;
   if (asked) {
     state = await resumeGame(asked);
   } else {
-    state = await resumeGame(lastCode()) || await dealGame();
+    state = await resumeGame(lastCode());
+    if (!state) { openModal("new-game"); return; }
   }
   if (!state) {
     document.getElementById("phase").textContent =

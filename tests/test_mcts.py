@@ -25,6 +25,7 @@ from hexset.mcts import (
     draws_hidden,
     lost_value,
     sampled_children,
+    side_value,
     visit_policy,
 )
 from hexset.victory import relative_points, victory_points
@@ -215,8 +216,10 @@ class NoHiddenDraw(Search):
 
 def test_a_tree_that_draws_no_hidden_card_searches_exactly_as_it_did_before():
     """A byte-identity anchor: visit counts and rng stream position both pinned.
-    Only a change to the rules or to the search's own selection may re-pin
-    them.
+    Only a change to the rules, to the search's own selection, or to how the
+    position below is dealt may re-pin them. Re-pinned at 1.10.0 for the last:
+    split dice reach another position, and on the old shared stream the
+    search still gave [5, 4, 3, 72, 3, 9] and 0.8262955117986266.
     """
     game = after_setup()
     while game.phase is not Phase.MAIN or len(legal_actions(game)) < 6:
@@ -227,8 +230,8 @@ def test_a_tree_that_draws_no_hidden_card_searches_exactly_as_it_did_before():
         Anchor(), simulations=96, wave=8, hidden=False, rng=rng
     ).run(game)
 
-    assert [int(v) for v in visits] == [5, 4, 3, 72, 3, 9]
-    assert rng.random() == 0.8262955117986266
+    assert [int(v) for v in visits] == [5, 4, 4, 74, 4, 5]
+    assert rng.random() == 0.14886804462324854
 
 
 def test_two_descents_that_collide_on_a_leaf_share_one_evaluation():
@@ -396,6 +399,51 @@ def test_a_mover_reads_the_value_vector_with_its_own_stance():
     search._backup([(node, 0)], [1.0, -1.0, 0.0, 0.0])
     search._backup([(node, 1)], [-1.0, 1.0, 0.0, 0.0])
     assert search._select(node) == 1
+
+
+def test_a_side_reads_the_value_vector_as_the_chance_none_of_its_targets_wins():
+    assert side_value([0.1, 0.6, 0.2, 0.1], (1,)) == pytest.approx(0.4)
+    assert side_value([0.1, 0.6, 0.2, 0.1], (1, 2)) == pytest.approx(0.2)
+
+
+def test_a_seat_on_the_side_ranks_by_its_targets_and_a_target_by_its_stance():
+    """Seat 0 plays against seat 1, so it ranks an edge by the chance seat 1
+    does not win: it takes the edge seat 2 does best on over the ones it
+    does best on itself. Seat 1, the seat played against, still reads the
+    vector by `stance`."""
+    game = a_game()
+    search = Search(Stub(), exploration=0.0, rng=random.Random(1), against=[1])
+    assert search.against == (1,)
+    node = search._node(imagine(game, search.rng))
+    options = node.options[:3]
+
+    def fresh(mover):
+        return Node(
+            game=node.game, mover=mover, options=options, value=(0.25,) * 4,
+            prior=np.full(3, 1 / 3), visits=np.zeros(3), virtual=np.zeros(3),
+            totals=np.zeros((3, 4)), ranked=np.zeros(3), children=[None] * 3,
+        )
+
+    vectors = ([0.5, 0.3, 0.1, 0.1], [0.1, 0.1, 0.7, 0.1], [0.6, 0.4, 0.0, 0.0])
+    member, target = fresh(0), fresh(1)
+    for index, vector in enumerate(vectors):
+        search._credit(member, index, np.array(vector), 1)
+        search._credit(target, index, np.array(vector), 1)
+    assert member.ranked.tolist() == pytest.approx([0.7, 0.9, 0.6])
+    assert search._select(member) == 1
+    assert search._select(target) == 2       # `relative`: seat 1 does best on the third
+    search.play_against(())
+    assert search.against == () and not search._sided(0)
+
+
+def test_a_search_is_told_its_targets_through_the_bot_hook():
+    """`Search` implements `hexset.bots.PlaysAgainst`, so a coalition seat
+    built on one (the `mcts:` seats) plays its search as the side."""
+    from hexset.bots import TradesBy, play_against
+
+    search = Search(Stub(), rng=random.Random(1))
+    play_against(TradesBy(search, object()), {2, 1})
+    assert search.against == (1, 2)
 
 
 def test_the_same_seed_searches_the_same_tree():

@@ -64,7 +64,7 @@ Gymnasium wrapper. `hexset.arena.load_runtime("mybots")` is the same import in
 code; `register_spec` adds a parsed spelling (`mybot:depth=3`) beside a
 preset. A name means one bot: registering a different one under a taken name
 raises `ValueError`, HexSet's own names (`random`, `retired`, `catanatron`)
-and prefixes (`network:`, `mcts:`, `catanatron:`) are refused, and
+and prefixes (`network:`, `mcts:`, `catanatron:`, `coalition:`, `handoff:`) are refused, and
 `unregister_*` frees a name ([docs/guide.md](https://github.com/0xBrsm/HexSet/blob/main/docs/guide.md#implement-a-bot)).
 
 **Over the API.** A bot in any language joins a served table as a player
@@ -105,10 +105,14 @@ python -m hexset.server.web
 
 The server listens on `http://127.0.0.1:8770` (`--host`, `--port`) and opens
 that URL in a browser unless `--no-browser` is given. Share a game's URL to
-invite other players. A new game seats its creator and leaves the other seats
-open. Fill them with people or bots, or close a seat with the picker's `none`
-option. Play starts once every seat is filled or closed. Until the first move
-a seat can be closed, reopened or given a bot; after it the seats are fixed.
+invite other players. The New game button asks for the board (spiral, the
+default, or random) and whether to play the duel rules (15 points, discard
+above 9, a friendly robber and balanced dice, at two seats). A new game seats
+its creator and leaves the other seats open: all four without duel rules, and
+one with them, the other two closed for good. Fill open seats with people or
+bots, or close a seat with the picker's `none` option. Play starts once every
+seat is filled or closed. Until the first move a seat can be closed, reopened
+or given a bot, except at a duel table; after it the seats are fixed.
 
 The opponent picker lists every preset a `--runtime` registered, `catanatron`
 when its extra is installed, and every `*.onnx` file in `models/` (or
@@ -136,7 +140,7 @@ Configuration, Docker, journals and recovery are in
 | Path | Contents |
 | --- | --- |
 | `hexset/` | Rules, board topology, state, ledger, encoding, records, search, and arena |
-| `hexset/bots/` | The bot and trade-gate protocols, `TradesBy`, the random policy, sampled worlds and search stances |
+| `hexset/bots/` | The bot and trade-gate protocols, `TradesBy`, `Coalition`, the random policy, sampled worlds and search stances |
 | `hexset/bench/` | Duels, baselines, trade censuses, throughput measurements and record generation |
 | `hexset/catanatron/` | Seats a Catanatron `Player` as a bot at a HexSet table: board, state and action translation |
 | `hexset/server/` | HTTP and MCP server, sessions, journals, and static browser UI |

@@ -28,6 +28,7 @@ from hexset.board.terrain import NUM_RESOURCES, Resource
 from hexset.cards import NUM_DEV_CARDS, DevCard
 from hexset.devcards import holdings
 from hexset.game import Game
+from hexset.rules import GAME_TYPES, GameType, Rules
 from hexset.trading import Trade
 from hexset.victory import victory_points
 
@@ -161,6 +162,8 @@ class Journal:
         seed: int | None,
         first: int,
         human_seats: list[int],
+        board_mode: str | None = "random",
+        game_type: str = "standard",
         bot_names: dict[int, str],
         bot_specs: dict[int, str],
         player_names: dict[int, str] | None = None,
@@ -172,7 +175,10 @@ class Journal:
         `deck` is the shuffle, the one piece of hidden state fixed at deal
         time. `code` and each bot's `spec` are what rebuild the table on
         resume, and `first` is the seat the setup snake started at, a free
-        per-table choice not derivable from `seed`/`num_players`. A `seed`
+        per-table choice not derivable from `seed`/`num_players`,
+        `board_mode` how the board was dealt from `seed`, `game_type` the
+        `hexset.rules` type it was dealt under and `locked` the seats retired
+        at the deal (`hexset.game.start`'s own `locked`). A `seed`
         of `None` says the board below and the recorded effects are the
         whole of the game's chance, which is how a resume reads it.
         `human_seats` are the seats occupied at deal time, of any kind,
@@ -189,6 +195,12 @@ class Journal:
                 "id": self.game_id,
                 "at": _now(),
                 "seed": seed,
+                "board_mode": board_mode,
+                # How `seed` turns into dice and steals (`chance.Live`'s
+                # `split`); a resume deals the same way. Absent: shared.
+                "split_streams": bool(getattr(game.chance, "split", False)),
+                "game_type": game_type,
+                "locked": sorted(game.locked),
                 "first": first,
                 "code": code,
                 "num_players": state.num_players,
@@ -307,6 +319,12 @@ class Journal:
             {"kind": "seated", "at": _now(), "seat": seat, "name": name, "spec": spec, "client": client}
         )
 
+    def unseated(self, *, seat: int) -> None:
+        """The bot on `seat` was taken off it before the first move, leaving
+        it empty (`api.Tables.open_seat`/`close_seat`); `seating` and `clients`
+        drop it."""
+        self._emit({"kind": "unseated", "at": _now(), "seat": seat})
+
     def locked(self, seat: int, *, at_step: int) -> None:
         """`seat` was closed while still empty (`api.Tables.close_seat`) or
         left (`api.Tables.leave_seat`), and is retired for the rest of the
@@ -353,6 +371,17 @@ class Journal:
                 "points": [victory_points(state, p) for p in range(state.num_players)],
             }
         )
+
+
+def game_type_of(name: str | None, rules: Rules, num_players: int) -> GameType:
+    """The game type a journal names: the shipped type called `name`, or,
+    for a name no shipped type has (`None` included), the shipped type
+    playing `rules`, else a type of its own playing them at `num_players`,
+    as `hexset.record.open_record` reads a record."""
+    if name in GAME_TYPES:
+        return GAME_TYPES[name]
+    shipped = next((t for t in GAME_TYPES.values() if t.rules == rules), None)
+    return shipped or GameType(name or "recorded", rules, (num_players,))
 
 
 def open_journal(seed: int, directory: str | None = None) -> Journal | None:
@@ -410,6 +439,9 @@ def journal_of(
         game=open_record(record),
         claimed_seats=set(range(record.num_players)),
         seed=None,
+        # The board is the record's own, dealt by no mode.
+        board_mode=None,
+        game_type=game_type_of(None, record.rules, record.num_players),
         journal=journal,
         player_names=dict(names or {}),
         code=code.lower(),
@@ -580,6 +612,8 @@ def seating(events: list[dict]) -> dict[int, tuple[str, str]]:
                 seats[event["seat"]] = (event["name"], event["spec"])
             else:
                 seats.pop(event["seat"], None)
+        elif event.get("kind") == "unseated":
+            seats.pop(event["seat"], None)
     return seats
 
 
@@ -619,6 +653,8 @@ def clients(events: list[dict]) -> dict[int, dict]:
     for event in events:
         if event.get("kind") == "seated" and event.get("client"):
             result[event["seat"]] = event["client"]
+        elif event.get("kind") == "unseated":
+            result.pop(event["seat"], None)
     return result
 
 

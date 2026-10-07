@@ -1001,17 +1001,30 @@ def pick(
 ) -> Response | None:
     """The round's third stage: the actor's choice among `responses`, its
     gate's `pick(view, responses)` else `default_pick`. `None` when it
-    declines them all, or picks a pass -- nothing to execute either way."""
+    declines them all, or picks a pass -- nothing to execute either way.
+
+    An answer whose side the actor's own hand cannot cover -- a counter
+    asking for a card it lacks, an acceptance of cards spent since the offer
+    went up -- reaches the gate as a pass, so the pick falls to an answer
+    the referee would execute. Only the pick's copy changes: the answer is
+    already on the ledger (`show_response`), and the caller keeps it for
+    `trade_round_finished` and a counter thread."""
     if not responses:
         return None
     view = game.state(actor)
+    hand = view.known[actor]
+    coverable = [
+        r if r.bundle is None or all(hand[i] >= -n for i, n in enumerate(r.bundle) if n < 0)
+        else Response(r.seat, RESPONSE_PASS, None)
+        for r in responses
+    ]
     pick_fn = getattr(gate, "pick", None)
     chosen = (
-        pick_fn(view, responses) if pick_fn is not None else default_pick(gate, view, responses)
+        pick_fn(view, coverable) if pick_fn is not None else default_pick(gate, view, coverable)
     )
-    if chosen is None or not (0 <= chosen < len(responses)):
+    if chosen is None or not (0 <= chosen < len(coverable)):
         return None
-    response = responses[chosen]
+    response = coverable[chosen]
     if response.kind == RESPONSE_PASS or response.bundle is None:
         return None
     return response

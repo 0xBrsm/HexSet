@@ -22,7 +22,7 @@ from .bots import Bot
 from .cards import DevCard, make_deck
 from .chance import Balanced, Chance, ChanceError, Live, Recording, Scripted, for_rules
 from .game import MAX_TURNS, NO_TURN_CAP, Game, lock_seat, may_act, start, to_move
-from .rules import STANDARD, STANDARD_GAME, GameType, Rules
+from .rules import STANDARD, STANDARD_GAME, GameType, Rules, rules_from
 from .trading import Trade, apply_trades, show
 
 __all__ = [
@@ -106,6 +106,11 @@ class Record:
     # Absent means independent. Read only by the seed cross-check, which must
     # regenerate the same draws.
     balanced_dice: bool = False
+    # Whether the dice and the steals were drawn from generators of their own
+    # (`chance.Live`'s `split`), as every game dealt since 1.10.0 is, rather
+    # than one stream shared with the deck. Absent means shared. Read only by
+    # the seed cross-check, which must regenerate the same draws.
+    split_streams: bool = False
     # The seats retired at the deal (`hexset.game.start`'s `locked`): dealt
     # in, but skipped by the setup snake and turn rotation from the first
     # action. A record holds no seat retired later. Absent means none.
@@ -211,6 +216,7 @@ class Tape:
             actions=tuple(self.actions),
             chance=tuple(chance.events),
             balanced_dice=isinstance(chance.inner, Balanced),
+            split_streams=getattr(chance.inner, "split", False),
             trades=tuple(self.trades),
             shown=tuple(self.shown),
             winner=game.won_by,
@@ -320,6 +326,12 @@ class _SeedChecked(Chance):
         self._check("roll", got, want)
         return got
 
+    def roll_by(self, seat: int | None) -> int:
+        got = self._scripted.roll()
+        want = self._seeded.roll_by(seat)
+        self._check("roll", got, want)
+        return got
+
     def steal(self, hand):
         got = self._scripted.steal(hand)
         want = self._seeded.steal(hand)
@@ -336,7 +348,11 @@ def open_record(record: Record) -> Game:
         chance = scripted
     else:
         seeded = random.Random(record.seed)
-        chance = _SeedChecked(scripted, Balanced(seeded) if record.balanced_dice else Live(seeded))
+        split = record.split_streams
+        chance = _SeedChecked(
+            scripted,
+            Balanced(seeded, split=split) if record.balanced_dice else Live(seeded, split=split),
+        )
     # No turn cap on a replay. The cap is a live-play policy -- how long a
     # game is allowed to run before it is called stuck -- and a record is
     # already authoritative about where its game ended. Applying a cap here
@@ -447,7 +463,8 @@ def from_json(line: str) -> Record:
         ),
         actors=tuple((step, seat) for step, seat in raw.get("actors", ())),
         balanced_dice=raw.get("balanced_dice", False),
-        rules=Rules(**raw.get("rules", {})),
+        split_streams=raw.get("split_streams", False),
+        rules=rules_from(raw.get("rules", {})),
         winner=raw["winner"],
         turns=raw["turns"],
         seed=raw.get("seed"),
@@ -465,8 +482,8 @@ def from_journal(path) -> Record:
     `back_to` is mapped through journal step numbers. Each offer, acceptance
     and counter a trade round noted goes into `Record.shown` where the table
     showed it, signed towards the seat that showed it, as the served table
-    puts it on the ledger. A seat closed before the first action goes into
-    `Record.locked`; one that left later is not a seat retired at the deal,
+    puts it on the ledger. A seat retired at the deal (the header's
+    `locked`) or closed before the first action goes into `Record.locked`; one that left later is not a seat retired at the deal,
     and is not recorded. A journal with no `result` line is refused."""
     from .server import _journal as game_journal
 
@@ -490,7 +507,9 @@ def from_events(events: Sequence[dict], *, where="journal", partial: bool = Fals
     at_step: dict[int, int] = {}
     # (journal step, index into `steps`, order, seat, received) per shown note.
     shown: list[tuple[int, int, int, int, tuple[int, ...]]] = []
-    locked: set[int] = set()
+    # Headers written before they named the seats retired at the deal name
+    # none; those tables closed theirs with `locked` lines instead.
+    locked: set[int] = {int(seat) for seat in header.get("locked", ())}
     result: dict | None = None
     for event in events[1:]:
         kind = event.get("kind")
@@ -578,7 +597,9 @@ def from_events(events: Sequence[dict], *, where="journal", partial: bool = Fals
         seed=header.get("seed"),
         first=header.get("first", 0),
         # A header written before it carried `rules` is a standard game.
-        rules=Rules(**header.get("rules", {})),
+        rules=rules_from(header.get("rules", {})),
+        # How the seed drew its dice, for the seed cross-check. Absent: shared.
+        split_streams=header.get("split_streams", False),
         locked=tuple(sorted(locked)),
     )
 

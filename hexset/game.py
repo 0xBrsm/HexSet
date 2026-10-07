@@ -148,8 +148,9 @@ class Game:
     rng: random.Random
     # The one chance source: every random draw the engine makes goes through
     # this, never through `rng` directly. `rng` is what the default
-    # `Live(rng)` draws from; `imagine` takes a fresh `rng` of its caller's
-    # and never reads this one.
+    # `Live(rng, split=True)` draws its deck and its dice and steal
+    # generators from; `imagine` takes a fresh `rng` of its caller's and
+    # never reads this one.
     chance: Chance
     ledger: PublicLedger
     phase: Phase = Phase.SETUP_SETTLEMENT
@@ -301,7 +302,9 @@ def start(
     retired `first` is skipped like any other.
 
     `chance` defaults to the source the rules ask for -- `Balanced(rng)` under
-    `balanced_dice`, `Live(rng)` otherwise. A caller passing its own
+    `balanced_dice`, `Live(rng)` otherwise, split either way
+    (`chance.for_rules`): the same seed rolls the same dice turn for turn
+    whatever the seats play. A caller passing its own
     (`Scripted`, for replay) drives the game from that instead, whatever the
     rules say: a recording already holds the rolls the deck produced. The deck
     is ordered by `chance.deck_order`, so a scripted game replays the recorded
@@ -355,7 +358,9 @@ def imagine(
     card cannot read the card the real deck is about to deal;
     `randomize_deck=False` defers that to the draw. And the copy's `chance`
     is always a fresh `Live(rng)`, never `game.chance`, which would
-    otherwise drain or pollute the real game's recorded stream.
+    otherwise drain or pollute the real game's recorded stream (or, split,
+    hand the search the real game's coming rolls). It is unsplit: a search
+    takes its dice and steals off its own `rng` in turn, as it always has.
 
     On an observed state (`state.Hidden`) hidden piles copy as counts and
     `randomize_deck` must be `False` -- shuffling a deck known only by its
@@ -572,7 +577,8 @@ def roll_dice(game: Game, roll: int | None = None) -> int:
     if pending_free_roads(game):
         raise ValueError("place the remaining free roads before rolling")
     if roll is None:
-        roll = game.chance.roll()
+        roll_by = getattr(game.chance, "roll_by", None)
+        roll = roll_by(game.current_player) if roll_by is not None else game.chance.roll()
     if not MIN_ROLL <= roll <= MAX_ROLL:
         raise ValueError(f"two dice cannot roll {roll}")
     # Unplaceable credit expires with the card's resolution.
@@ -893,10 +899,8 @@ def play_road_building_card(game: Game) -> None:
     MAIN-only.
     """
     _check_turn_card(game, "road building")
-    left = MAX_ROADS - road_count(game._state, game.current_player)
-    if left < game._state.rules.road_building_min_roads:
-        raise ValueError(f"road building needs {game._state.rules.road_building_min_roads} "
-                         f"road pieces left, not {left}")
+    if road_count(game._state, game.current_player) >= MAX_ROADS:
+        raise ValueError("road building needs a road piece left")
     spend_card(game._state, game.current_player, DevCard.ROAD_BUILDING)
     game.dev_card_played = True
     game._state.dev_cards_played[DevCard.ROAD_BUILDING] += 1

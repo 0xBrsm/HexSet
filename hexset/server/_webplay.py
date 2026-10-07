@@ -30,6 +30,7 @@ from hexset.game import (
 )
 from hexset.ledger import PublicLedger
 from hexset.roads import road_lengths
+from hexset.rules import STANDARD_GAME, GameType
 from hexset.state import GameState, copy_state, is_hidden
 from hexset.trading import (
     RESPONSE_ACCEPT,
@@ -605,6 +606,14 @@ class GameSession:
     # Every seat somebody is playing, whichever kind of client it is.
     claimed_seats: set[int]
     seed: int = 0
+    # The `hexset.board.board.BOARD_MODES` name the board was dealt by,
+    # journalled so a resumed game deals it again; `None` for a board no mode
+    # dealt (`journal.journal_of`'s, a record's own).
+    board_mode: str | None = "random"
+    # The contract the game was dealt under (`hexset.rules`), journalled by
+    # name so a resumed game is dealt under it again. A type played at one
+    # seat count only fixes the table's seats at the deal (`seats_fixed`).
+    game_type: GameType = STANDARD_GAME
     journal: Journal | None = None
     # Seat -> the model-picker display name playing it. Bots only.
     bot_names: dict[int, str] = field(default_factory=dict)
@@ -991,6 +1000,8 @@ class GameSession:
             self.journal.start(
                 self.game,
                 seed=self.seed,
+                board_mode=self.board_mode,
+                game_type=self.game_type.name,
                 # `setup_queue[0]` is `start`'s own `first`, read back.
                 first=self.game.setup_queue[0],
                 human_seats=sorted(self.claimed_seats),
@@ -1000,6 +1011,24 @@ class GameSession:
                 clients=self.clients,
                 code=self.code,
             )
+
+    @property
+    def seats_fixed(self) -> bool:
+        """Whether the seats retired at the deal stay retired and the ones
+        playing stay playing: true under a game type played at one seat
+        count only, where closing or reopening a seat would leave the table
+        at a size the type is not played at."""
+        return len(self.game_type.seats) == 1
+
+    @property
+    def fixed_seats(self) -> list[int]:
+        """The seats retired at the deal of a table whose seats are fixed,
+        never to be opened. Its playing seats can still be closed before the
+        first move, down to a person practising alone: a table setting, not
+        a seat count the type is played at."""
+        if not self.seats_fixed:
+            return []
+        return list(range(max(self.game_type.seats), self.game.num_players))
 
     @property
     def seat_labels(self) -> SeatLabels:
@@ -1460,6 +1489,13 @@ class GameSession:
             "round": self.round,
             # The rule the game is played to, so a client need not assume ten.
             "winning_points": state.rules.winning_points,
+            # What the table was dealt as: its `hexset.rules.GAME_TYPES` name,
+            # the board mode (`None` for a board not dealt by one), and
+            # whether its seats are fixed (`seats_fixed`).
+            "game_type": self.game_type.name,
+            "board_mode": self.board_mode,
+            "seats_fixed": self.seats_fixed,
+            "fixed_seats": self.fixed_seats,
             "last_roll": game.last_roll,
             "robber": state.robber,
             "vertex_owner": state.vertex_owner,

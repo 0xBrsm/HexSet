@@ -109,12 +109,13 @@ def run_census(
     game_type: GameType = STANDARD_GAME,
     turn_cap: int = MAX_TURNS,
     trade_mode: str = "round",
+    board_mode: str = "random",
 ) -> CensusResult:
     """Play `games` games (a multiple of the lineup) and roll `compete`'s
     `ClearedTrade` census up into `TradeRecord` rows; `records=True` also keeps
     each game's `Record` in `CensusResult.records`. `runtimes` are loaded in
-    every worker (`hexset.arena.load_runtime`); `game_type`, `turn_cap` and
-    `trade_mode` are `compete`'s.
+    every worker (`hexset.arena.load_runtime`); `game_type`, `turn_cap`,
+    `trade_mode` and `board_mode` are `compete`'s.
     """
     tournament = compete(
         list(entrants),
@@ -128,6 +129,7 @@ def run_census(
         game_type=game_type,
         turn_cap=turn_cap,
         trade_mode=trade_mode,
+        board_mode=board_mode,
         journal=journal,
         resume=resume,
     )
@@ -317,7 +319,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         entrants, args.games, seed=args.seed, workers=args.workers,
         records=bool(args.records), journal=journal, resume=args.resume,
         runtimes=args.runtime, game_type=game_type_named(args.game_type),
-        turn_cap=args.turn_cap, trade_mode=args.trade_mode,
+        turn_cap=args.turn_cap, trade_mode=args.trade_mode, board_mode=args.board,
     )
     summaries = summarize(result)
 

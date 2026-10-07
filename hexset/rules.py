@@ -8,12 +8,10 @@
 `friendly_robber`: the robber may not take a hex occupied by a seat at or
 below `robber.FRIENDLY_ROBBER_POINTS` *public* points, so a seat that is
 visibly behind can be neither blocked nor robbed.
-`balanced_dice`: rolls come from `chance.Balanced`, a dice deck, rather than
+`balanced_dice`: rolls come from `chance.Balanced`, a dice deck that draws
+recent sums less often and steers the sevens between the rollers, rather than
 two independent uniform dice. It also moves `seven_odds`, the chance of a
 seven on any one roll.
-`road_building_min_roads`: road pieces a seat must still have to play Road
-Building -- one by the printed rule, two at a table that refuses the card's
-last-piece road.
 
 `GameType` is a *contract*: one `Rules` together with the live seat counts it
 is defined for, because the two are inseparable -- the 15-point game is a
@@ -46,6 +44,8 @@ from .chance import BALANCED_SEVEN_ODDS, SEVEN_ODDS
 
 __all__ = [
     "Rules",
+    "RETIRED_SETTINGS",
+    "rules_from",
     "STANDARD",
     "DUEL_VARIANT",
     "GameType",
@@ -59,18 +59,12 @@ __all__ = [
 @dataclass(frozen=True)
 class Rules:
     """The rule settings one game is played to: points to win, the discard
-    limit, the friendly robber, balanced dice and Road Building's piece
-    floor."""
+    limit, the friendly robber and balanced dice."""
 
     winning_points: int = 10
     discard_limit: int = 7
     friendly_robber: bool = False
     balanced_dice: bool = False
-    # Road pieces a player must still have to play Road Building. The printed
-    # rule is one -- with a single piece left the card places a single road --
-    # but a served table can refuse that last-piece road, and a bot that
-    # plays the card there loses it for nothing; such a table sets two.
-    road_building_min_roads: int = 1
 
     @property
     def seven_odds(self) -> float:
@@ -84,10 +78,20 @@ class Rules:
             raise ValueError(f"winning_points must be positive: {self.winning_points}")
         if self.discard_limit < 0:
             raise ValueError(f"discard_limit must be non-negative: {self.discard_limit}")
-        if not 1 <= self.road_building_min_roads <= 2:   # the card's two roads
-            raise ValueError(
-                f"road_building_min_roads must be 1 or 2: {self.road_building_min_roads}")
 
+
+
+#: Settings `Rules` no longer has, which records written before their removal
+#: still carry. `road_building_min_roads` (0.71.0 to 1.4.0) let a table refuse
+#: Road Building on the last road piece; the printed rule is the only one.
+RETIRED_SETTINGS = frozenset({"road_building_min_roads"})
+
+
+def rules_from(raw: dict) -> Rules:
+    """The `Rules` a record's `rules` mapping names, its retired settings
+    dropped. Every action a retired setting allowed is legal without it, so
+    such a record replays unchanged."""
+    return Rules(**{k: v for k, v in raw.items() if k not in RETIRED_SETTINGS})
 
 STANDARD: Rules = Rules()
 DUEL_VARIANT: Rules = Rules(

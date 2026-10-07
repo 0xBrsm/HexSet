@@ -36,6 +36,18 @@ Identity is the token `api.py` mints, sent back on `X-HexSet-Token` and kept
 in the browser's localStorage — not a cookie, because one browser may hold
 seats at more than one game.
 
+## Who is asking
+
+Every request is handed to `Tables.handle` with an `api.Origin`: the client's
+address, the route it came in on and its `User-Agent`, journalled with every
+seat it claims and used for the per-address deal limits. The address is the
+socket peer, or with `--forwarded-header` the address that header carries
+(its last comma-separated entry, the one a proxy appends to
+`X-Forwarded-For`), falling back to the peer when the header is missing or
+holds no address. The header is believed from every request: keeping clients
+from reaching the server except through the proxy that sets it is the
+deployment's job. The request log prints the same address.
+
 Run it with `python -m hexset.server.web`. Opponents come from
 `api.model_options()`: every preset the `--runtime` modules register, plus one
 entry per `*.onnx` file in `HEXSET_UI_MODELS_DIR` (default:
@@ -45,6 +57,7 @@ entry per `*.onnx` file in `HEXSET_UI_MODELS_DIR` (default:
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import secrets
 import threading
@@ -56,6 +69,7 @@ from pathlib import Path
 
 import hexset
 from hexset.arena import RUNTIME_HELP, load_runtime
+from hexset.board.board import BOARD_MODES
 
 from . import _journal as journal, mcptools
 from .api import (
@@ -63,10 +77,12 @@ from .api import (
     CODE_LENGTH,
     ApiError,
     Config,
+    Origin,
     Tables,
+    load_api_keys,
     model_options,
 )
-from .constants import TOKEN_HEADER
+from .constants import KEY_HEADER, TOKEN_HEADER
 
 __all__ = [
     "DEFAULT_MCP_PROTOCOL_VERSION",
@@ -101,15 +117,30 @@ def looks_like_a_code_attempt(path: str) -> bool:
     return len(path.lstrip("/")) == CODE_LENGTH
 
 
+def forwarded_ip(value: str | None) -> str | None:
+    """The client address a forwarding header carries: its last
+    comma-separated entry, or `None` when that is not an address."""
+    if not value:
+        return None
+    try:
+        return str(ipaddress.ip_address(value.split(",")[-1].strip()))
+    except ValueError:
+        return None
+
+
 class HexSetServer(ThreadingHTTPServer):
     """The served table over HTTP: `tables` behind `Handler`, one thread per
-    request, with the live MCP sessions."""
+    request, with the live MCP sessions. `forwarded_header`, when set, names
+    the header a proxy puts the client's address in."""
 
     daemon_threads = True
 
-    def __init__(self, address: tuple[str, int], tables: Tables) -> None:
+    def __init__(
+        self, address: tuple[str, int], tables: Tables, forwarded_header: str | None = None
+    ) -> None:
         super().__init__(address, Handler)
         self.tables = tables
+        self.forwarded_header = forwarded_header
         # This server's configured host, for Origin validation.
         self.host = address[0]
         # Every live MCP session: Mcp-Session-Id -> mcptools.Session.
@@ -135,6 +166,23 @@ class Handler(BaseHTTPRequestHandler):
 
     server: HexSetServer  # narrows the inherited attribute's type
 
+    def client_ip(self) -> str:
+        """The client's address: the one `forwarded_header` carries, else
+        the socket peer."""
+        header = self.server.forwarded_header
+        forwarded = forwarded_ip(self.headers.get(header)) if header else None
+        return forwarded or self.client_address[0]
+
+    def origin(self, via: str) -> Origin:
+        return Origin(
+            ip=self.client_ip(), via=via, user_agent=self.headers.get("User-Agent"),
+            key=self.headers.get(KEY_HEADER),
+        )
+
+    def address_string(self) -> str:
+        # The request log's address: the real client, not the proxy.
+        return self.client_ip()
+
     def _json(self, payload: dict, status: int = 200) -> None:
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
@@ -158,7 +206,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self._json(
                 self.server.tables.handle(
-                    method, self.path, payload, self.headers.get(TOKEN_HEADER)
+                    method, self.path, payload, self.headers.get(TOKEN_HEADER), self.origin("http")
                 )
             )
         except ApiError as error:
@@ -298,6 +346,7 @@ class Handler(BaseHTTPRequestHandler):
             name = params.get("name")
             arguments = params.get("arguments")
             arguments = arguments if isinstance(arguments, dict) else {}
+            session.origin = self.origin("mcp")
             self._mcp_stream_tool(request_id, session, name, arguments)
         else:
             self._json({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32601, "message": f"method not found: {method}"}})
@@ -374,6 +423,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8770)
     parser.add_argument("--seed", type=int, default=None, help="Board/RNG seed.")
+    parser.add_argument(
+        "--board", default="spiral", choices=sorted(BOARD_MODES),
+        help="How boards are dealt: number discs in the rulebook's lettered spiral "
+             "(default), or in random order with 6 and 8 apart.",
+    )
     parser.add_argument("--device", default="cpu", help="Inference device (default: cpu).")
     parser.add_argument("--no-browser", action="store_true", help="Do not auto-open a browser tab.")
     parser.add_argument(
@@ -385,6 +439,39 @@ def main(argv: list[str] | None = None) -> None:
             f"'{journal.DEFAULT_DIR}'). Pass an empty string to journal nothing."
         ),
     )
+    parser.add_argument(
+        "--forwarded-header", default=None, metavar="NAME",
+        help="The header a reverse proxy puts the client's address in (e.g. "
+             "CF-Connecting-IP, X-Forwarded-For). Believed from every request, so "
+             "serve only through that proxy. Default: none, the socket peer.",
+    )
+    parser.add_argument(
+        "--games-per-period", type=int, default=Config.games_per_period,
+        help=f"New games one client address may deal per rolling --period-days, over "
+             f"every interface and across restarts; 0 is no limit "
+             f"(default: {Config.games_per_period}).",
+    )
+    parser.add_argument(
+        "--period-days", type=float, default=Config.period_days,
+        help=f"The rolling window --games-per-period counts over (default: {Config.period_days:g}).",
+    )
+    parser.add_argument(
+        "--live-tables-per-ip", type=int, default=Config.live_tables_per_ip,
+        help=f"Unfinished games one client address may have in play at once; 0 is no "
+             f"limit (default: {Config.live_tables_per_ip}).",
+    )
+    parser.add_argument(
+        "--limit-exempt", action="append", default=None, metavar="CIDR",
+        help="A client network under no per-address limit. Repeatable; default "
+             "loopback only. Naming any replaces the default.",
+    )
+    parser.add_argument(
+        "--api-keys", default=None, metavar="PATH",
+        help=f"A JSON file of API keys, {{\"<key>\": {{\"name\": \"<holder>\", "
+             f"\"games_per_period\": <n>}}}}. A deal sent with one on {KEY_HEADER} "
+             "counts against that key's games per period, not its address's. "
+             "Default: none.",
+    )
     args = parser.parse_args(argv)
     load_runtime(*args.runtime)
 
@@ -392,8 +479,14 @@ def main(argv: list[str] | None = None) -> None:
         device=args.device,
         games_dir=args.games_dir,
         seed=args.seed,
+        board_mode=args.board,
+        games_per_period=args.games_per_period,
+        period_days=args.period_days,
+        live_tables_per_ip=args.live_tables_per_ip,
+        limit_exempt=tuple(args.limit_exempt) if args.limit_exempt is not None else Config.limit_exempt,
+        api_keys=load_api_keys(args.api_keys) if args.api_keys else {},
     )
-    server = HexSetServer((args.host, args.port), Tables(config))
+    server = HexSetServer((args.host, args.port), Tables(config), args.forwarded_header)
 
     url = f"http://{args.host}:{args.port}/"
     print(f"HexSet board: {url}  (models={list(model_options())})")

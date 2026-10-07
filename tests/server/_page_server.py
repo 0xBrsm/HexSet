@@ -14,6 +14,8 @@ its own runners down.
 from __future__ import annotations
 
 import contextlib
+import json
+import re
 import threading
 
 import pytest
@@ -51,3 +53,37 @@ def launch(playwright):
         if "Executable doesn't exist" in str(error):
             pytest.skip("Chromium is not installed: python -m playwright install chromium")
         raise
+
+
+#: Wraps the page's `fetch` to keep the deal's request and response in
+#: sessionStorage, which survives the navigation to the new table. The page
+#: moves on before a test could read the response, and intercepting it from
+#: outside (`page.route`) can leave the next page's first request paused.
+_KEEP_THE_DEAL = """
+(() => {
+  const real = window.fetch;
+  window.fetch = async (input, init) => {
+    const response = await real(input, init);
+    const url = typeof input === "string" ? input : input.url;
+    if (init && init.method === "POST" && new URL(url, location.href).pathname === "/api/games") {
+      sessionStorage.setItem("deal", JSON.stringify({
+        request: JSON.parse(init.body), response: await response.clone().json(),
+      }));
+    }
+    return response;
+  };
+})();
+"""
+
+
+def front_door(page, base_url: str) -> tuple[dict, dict]:
+    """Opens the page with no table to resume, which asks what to deal, and
+    deals the defaults. Call it where the page used to deal on its own.
+    Returns the deal's request and response bodies."""
+    page.add_init_script(_KEEP_THE_DEAL)
+    page.goto(f"{base_url}/", wait_until="load")
+    page.wait_for_selector("#modal.show #deal-new-game")
+    page.click("#deal-new-game")
+    page.wait_for_url(re.compile(r"/[a-z0-9]{6}$"))
+    deal = json.loads(page.evaluate("sessionStorage.getItem('deal')"))
+    return deal["request"], deal["response"]

@@ -105,9 +105,7 @@ def test_a_big_hand_must_discard_on_seven():
 
     game.last_roll = 7
     game.phase = Phase.ROLL
-    game.rng = random.Random(1)
-    while roll_dice(game) != 7:
-        game.phase = Phase.ROLL
+    roll_dice(game, 7)
 
     assert game.phase is Phase.DISCARD
     assert 0 in players_owing_discards(game)
@@ -305,12 +303,9 @@ def test_trade_event_never_runs_during_discard_resolution(monkeypatch):
         give(game._state, 0, resource, 2)
     game.last_roll = 7
     game.phase = Phase.ROLL
-    game.rng = random.Random(1)
     calls = _spy_on_trade_event(monkeypatch)
 
-    while roll_dice(game) != 7:
-        game.phase = Phase.ROLL
-        calls.clear()
+    roll_dice(game, 7)
     assert game.phase is Phase.DISCARD
     assert calls == []
 

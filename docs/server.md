@@ -18,9 +18,23 @@ The client interfaces are [api.md](api.md) for the JSON routes and
 | `--port` | `8770` | Listening port |
 | `--no-browser` | off | Do not open a browser tab at start |
 | `--seed` | none | Deal every game from this seed (same board, same chance) |
+| `--board` | `spiral` | How boards are dealt: `spiral` (the rulebook's lettered spiral) or `random` (number discs in random order, 6 and 8 apart). A game journalled without a board mode resumes as `random` |
 | `--runtime` | none | Module imported first, so the bots it registers can be seated and listed (repeatable) |
 | `--device` | `cpu` | ONNX Runtime device; another value asks for `<DEVICE>ExecutionProvider` with CPU fallback |
 | `--games-dir` | `$HEXSET_UI_GAMES_DIR` | Journal directory; an empty string disables journaling |
+| `--forwarded-header` | none | The header a reverse proxy puts the client's address in (`CF-Connecting-IP`, `X-Forwarded-For`: its last entry); without it, the socket peer |
+| `--games-per-period` | `100` | New games one client address may deal per rolling `--period-days`, through the page, the API and MCP alike, counted across restarts from the journals; `0` is no limit |
+| `--period-days` | `30` | The window `--games-per-period` counts over |
+| `--live-tables-per-ip` | `5` | Unfinished games one client address may have in play at once; `0` is no limit |
+| `--limit-exempt` | `127.0.0.0/8`, `::1/128` | A client network under no per-address limit; repeatable, and naming any replaces the default |
+| `--api-keys` | none | A JSON file of API keys, `{"<key>": {"name": "<holder>", "games_per_period": <n>}}`: a deal sent with one on `X-HexSet-Key` counts against that key's `games_per_period` (`0` is no limit) instead of its address's `--games-per-period`. Read at start |
+
+Behind a reverse proxy or tunnel, name its header with `--forwarded-header`,
+or every request appears to come from the proxy: one address, sharing one set
+of limits, and the journal and request log learn nothing about who played.
+The header is believed from every request, so a client that reaches the
+server without passing through the proxy can name any address it likes.
+Serve only through the proxy if that matters.
 
 Environment:
 

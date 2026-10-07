@@ -34,7 +34,7 @@ closes. The result is one text content item: compact JSON, or plain text for
 | Tool | Arguments | Purpose |
 | --- | --- | --- |
 | `bots` | none | `{"models": [...]}`, the names `opponents` accepts |
-| `new_game` | `identity`, `opponents?`, `name?` | Deal a game and take a random seat |
+| `new_game` | `identity`, `opponents?`, `name?`, `board_mode?`, `game_type?` | Deal a game and take a random seat; `board_mode` and `game_type` as `POST /api/games` |
 | `join` | `code`, `identity`, `name?` | Take a random open seat at a game |
 | `resume_game` | `code`, `identity` | Reclaim the seat `identity` holds, from a new session |
 | `state` | none | The seat's state reply |
@@ -179,9 +179,10 @@ spaces.
 Relative to the HTTP view, an MCP reply:
 
 - drops `version`, `claimed_seats`, `waiting_for`, `trade_wait`, `to_move`,
-  `awaiting_confirm` and `can_undo`;
-- drops `locked` and `trades` while empty, `winner` while null, `started`
-  while true, and `discard_quota` while every entry is zero;
+  `awaiting_confirm`, `can_undo` and `board_mode`;
+- drops `locked`, `trades` and `fixed_seats` while empty, `winner` while null, `started`
+  while true, `game_type` while `standard`, `seats_fixed` while false, and
+  `discard_quota` while every entry is zero;
 - drops each player's `last_roll`, `longest_road` and `largest_army`
   (`summary.race` names the award holders);
 - folds `seats` into `players` as each entry's `kind`;

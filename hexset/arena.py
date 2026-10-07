@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING, Callable, Iterable, Mapping, Sequence
 
 from . import gamelog
 from .actions import apply
-from .board.board import Board, random_base_board
+from .board.board import BOARD_MODES, Board, base_board
 from .economy import hand_size
 from .game import MAX_TURNS, Game, is_over, start, to_move
 from .rules import STANDARD_GAME, GameType
@@ -89,7 +89,12 @@ _RUNTIME_HINT = "requires a runtime loader registered with hexset.clients.netbot
 #: means the same bot in every process. `catanatron`'s own module registers
 #: the `catanatron` names when its extra is loaded.
 SHIPPED_NAMES = frozenset({"random", "retired", "catanatron"})
-SHIPPED_PREFIXES = ("network:", "mcts:", "catanatron:")
+SHIPPED_PREFIXES = ("network:", "mcts:", "catanatron:", "coalition:", "handoff:")
+#: The kinds hexset builds itself: those names, `coalition`, the kind of a
+#: `coalition:<entrant>` seat, and `handoff`, the kind of a
+#: `handoff:<round>:<first>|<second>` seat. No preset is named `coalition`
+#: here, so a runtime may register one (a coalition of its own bot).
+SHIPPED_KINDS = SHIPPED_NAMES | {"coalition", "handoff"}
 
 _ABSENT = object()
 
@@ -107,8 +112,8 @@ def _register(table: dict, key: str, value, what: str) -> None:
     table[key] = value
 
 
-def _refuse_shipped(name: str, what: str) -> None:
-    if name in SHIPPED_NAMES:
+def _refuse_shipped(name: str, what: str, shipped: frozenset[str] = SHIPPED_NAMES) -> None:
+    if name in shipped:
         raise ValueError(f"{what} {name!r} is one hexset ships; give yours another name")
 
 
@@ -116,26 +121,34 @@ def register_entrant_kind(kind: str, factory) -> None:
     """Register a bot-building factory for an `Entrant.kind` hexset does not
     implement itself. `factory(entrant, board, rng) -> Bot`.
 
-    A kind hexset ships (`SHIPPED_NAMES`) is refused, and so is a second,
+    A kind hexset ships (`SHIPPED_KINDS`) is refused, and so is a second,
     different factory for a kind already registered; the same factory again
     is a no-op. The checkpoint kinds `network` and `mcts` are the exception:
     they build from whatever checkpoint loader the process installed
     (`hexset.clients.netbot.register_entrants`), and installing another
     replaces it."""
-    _refuse_shipped(kind, "entrant kind")
+    _refuse_shipped(kind, "entrant kind", SHIPPED_KINDS)
     if kind in _NETWORK_KINDS:
         _ENTRANT_KIND_FACTORIES[kind] = factory
         return
     _register(_ENTRANT_KIND_FACTORIES, kind, factory, "entrant kind")
 
 
-def register_preset(name: str, entrant: "Entrant") -> None:
+#: Presets registered with `listed=False`.
+_UNLISTED_PRESETS: set[str] = set()
+
+
+def register_preset(name: str, entrant: "Entrant", *, listed: bool = True) -> None:
     """Register a named lineup shortcut (`PRESETS[name]`, resolved by
     `entrant_from_name`/`lineup_from_names`) for an entrant hexset does not
     ship itself. A shipped name is refused, as is a name already registered
-    to an unequal entrant; an equal one again is a no-op."""
+    to an unequal entrant; an equal one again is a no-op. An unlisted preset
+    resolves like any other but is left out of `registered_presets`, so the
+    served picker does not offer it: a bench control or a test opponent."""
     _refuse_shipped(name, "preset")
     _register(PRESETS, name, entrant, "preset")
+    if not listed:
+        _UNLISTED_PRESETS.add(name)
 
 
 def register_spec(prefix: str, parse: Callable[[str], "Entrant"]) -> None:
@@ -160,7 +173,7 @@ def register_spec(prefix: str, parse: Callable[[str], "Entrant"]) -> None:
 def unregister_entrant_kind(kind: str) -> None:
     """Undo `register_entrant_kind`. A kind never registered is a no-op; a
     shipped one is refused."""
-    _refuse_shipped(kind, "entrant kind")
+    _refuse_shipped(kind, "entrant kind", SHIPPED_KINDS)
     _ENTRANT_KIND_FACTORIES.pop(kind, None)
 
 
@@ -169,6 +182,7 @@ def unregister_preset(name: str) -> None:
     one is refused."""
     _refuse_shipped(name, "preset")
     PRESETS.pop(name, None)
+    _UNLISTED_PRESETS.discard(name)
 
 
 def unregister_spec(prefix: str) -> None:
@@ -218,9 +232,9 @@ def game_key(seed: int, index: int) -> str:
     return f"{seed}:{index}:game"
 
 
-def deal_board(seed: int, index: int) -> Board:
-    """The `index`-th game's board."""
-    return random_base_board(random.Random(board_key(seed, index)))
+def deal_board(seed: int, index: int, mode: str = "random") -> Board:
+    """The `index`-th game's board, dealt by `hexset.board.board.BOARD_MODES[mode]`."""
+    return base_board(mode, random.Random(board_key(seed, index)))
 
 
 def deal_game(
@@ -229,6 +243,7 @@ def deal_game(
     players: int,
     *,
     board: Board | None = None,
+    board_mode: str = "random",
     chance: Callable[[random.Random], object] | None = None,
     game_type: GameType = STANDARD_GAME,
     locked: Iterable[int] = (),
@@ -239,7 +254,8 @@ def deal_game(
     action. Nothing is seated: gates, their budgets and the loop are the
     caller's.
 
-    `board` overrides the dealt one, pinning every game to one geometry.
+    `board` overrides the dealt one, pinning every game to one geometry;
+    otherwise `board_mode` names how it is dealt (`deal_board`).
     `chance` takes the game's generator rather than being one, so the
     wrapper is built on exactly the stream the game would have used and a
     recorded game is identical to the unrecorded one.
@@ -252,7 +268,7 @@ def deal_game(
     `first` is the seat that opens the setup snake (`hexset.game.start`).
     """
     if board is None:
-        board = deal_board(seed, index)
+        board = deal_board(seed, index, board_mode)
     rng = random.Random(game_key(seed, index))
     return start(
         board, players, rng,
@@ -270,7 +286,8 @@ class Entrant:
 
     name: str
     # Which factory builds it: one hexset ships (`random`, `retired`,
-    # `catanatron`) or one a runtime registered (`register_entrant_kind`).
+    # `catanatron`, `coalition`) or one a runtime registered
+    # (`register_entrant_kind`).
     kind: str
     # The kind's own data, as its factory reads it: for `network` and
     # `mcts`, the path to a checkpoint. Data rather than a loaded object,
@@ -305,6 +322,11 @@ class Entrant:
     # (`hexset.bots.TradesBy`); its moves stay this entrant's. `None` trades
     # with the entrant's own gate. Named `<entrant>~<trader>` in a lineup.
     trader: str | None = None
+    # The `hexset.rules.GAME_TYPES` name of the table this entrant is seated
+    # at, set by whoever seats it (the server does, from the table), for a
+    # kind that plays differently by game type. `None` is the entrant's own
+    # default; a kind that does not read it ignores it.
+    game_type: str | None = None
 
     def __post_init__(self) -> None:
         pairs = self.options.items() if isinstance(self.options, Mapping) else self.options
@@ -360,11 +382,12 @@ _SHIPPED_PRESETS = frozenset(PRESETS)
 
 
 def registered_presets() -> list[str]:
-    """Every preset beyond `random` and `retired`, in the order it was
+    """Every listed preset beyond `random` and `retired`, in the order it was
     registered (`register_preset`): the runtimes' bots, and `catanatron` once
     its module is loaded (the served picker lists it where the extra is
-    installed)."""
-    return [name for name in PRESETS if name not in _SHIPPED_PRESETS]
+    installed). A preset registered `listed=False` is not here, though it
+    still resolves."""
+    return [name for name in PRESETS if name not in _SHIPPED_PRESETS and name not in _UNLISTED_PRESETS]
 
 
 def spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
@@ -389,12 +412,27 @@ def traded(bot: Bot, trader: str | None, board: Board, rng: random.Random) -> Bo
 
 
 def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
-    from .bots import RandomBot
+    from .bots import Coalition, RandomBot
 
     if entrant.kind == RETIRED:
         return RetiredSeat()
     if entrant.kind == "random":
         return RandomBot(rng)
+    if entrant.kind == COALITION_KIND:
+        if entrant.trader is not None:
+            raise ValueError(_coalition_trader(entrant.name))
+        return Coalition(spawn(entrant_from_name(entrant.option("inner")), board, rng))
+    if entrant.kind == HANDOFF_KIND:
+        from .bots import Handoff
+
+        # `second` is seeded off `rng`'s state without drawing from it, as a
+        # trader is (`traded`), so `first` makes exactly the draws it makes
+        # seated alone and a handoff pairs game for game with its `first`
+        # until the round it hands over.
+        first = spawn(entrant_from_name(entrant.option("first")), board, rng)
+        seed = int.from_bytes(hashlib.sha256(repr(rng.getstate()).encode() + b"handoff").digest()[:8], "big")
+        second = spawn(entrant_from_name(entrant.option("second")), board, random.Random(seed))
+        return Handoff(first, second, entrant.option("at"))
     if entrant.kind == "catanatron" and entrant.kind not in _ENTRANT_KIND_FACTORIES:
         _load_presets(("catanatron",))
     if entrant.kind in _ENTRANT_KIND_FACTORIES:
@@ -733,7 +771,7 @@ def deal_seats(
 
 def _play_one(
     job: tuple[tuple[Entrant, ...], int, int, int, "bool | tuple[int, ...]", bool, str,
-               GameType, int],
+               GameType, int, str],
 ) -> Outcome:
     """Play game `index` and return its `Outcome`. `record` and the
     cleared-trade census are built only when the job's `records` flag is
@@ -745,12 +783,15 @@ def _play_one(
     is the complement itself, `True` for `half_turn`, or `False`.
     """
     (entrants, index, seed, action_cap, antithetic, records, trade_mode,
-     game_type, turn_cap) = job
+     game_type, turn_cap, *mode) = job
+    # Callers outside `compete` still build the nine-slot job from before
+    # boards had a mode; theirs deals the default.
+    board_mode = mode[0] if mode else "random"
     seats = len(entrants)
     complement = half_turn(seats) if antithetic is True else (antithetic or None)
     board_index, seating, first = deal_seats(entrants, index, complement)
     seats_taken = list(seating)
-    board = deal_board(seed, board_index)
+    board = deal_board(seed, board_index, board_mode)
     # Read off the lineup, not off the spawned bots: the deal needs to know
     # which seats are playing before it starts, because that is what the game
     # type is checked against.
@@ -937,6 +978,7 @@ def compete(
     trade_mode: str = "round",
     game_type: GameType = STANDARD_GAME,
     turn_cap: int = MAX_TURNS,
+    board_mode: str = "random",
     progress: Callable[[int, int, Outcome], None] | None = None,
     journal: str | os.PathLike | None = None,
     resume: bool = False,
@@ -982,6 +1024,8 @@ def compete(
     two-seat game and `DUEL_VARIANT_GAME` accepts it. Who opens rotates among
     the playing entrants (`deal_seats`).
 
+    `board_mode` is how every board is dealt (`deal_board`).
+
     `records=True` has every job build a `hexset.record.Record` alongside
     the verdict, returned as `Tournament.records` in the same order as
     `winners`/`points`/`turns`; off by default, and then skipped entirely.
@@ -1013,6 +1057,8 @@ def compete(
         raise ValueError("workers must be positive")
     if action_cap <= 0:
         raise ValueError("action_cap must be positive")
+    if board_mode not in BOARD_MODES:
+        raise ValueError(f"unknown board mode {board_mode!r}: {sorted(BOARD_MODES)}")
     if games % seats:
         raise ValueError(f"{games} games does not divide evenly over {seats} seats")
     if antithetic and seats % 2 and games % (2 * seats):
@@ -1029,7 +1075,7 @@ def compete(
                          "it needs antithetic=True")
     jobs = {
         i: (lineup, i, seed, action_cap, pairing, records, trade_mode, game_type,
-            turn_cap)
+            turn_cap, board_mode)
         for i in range(games)
     }
     header = _journal_header(
@@ -1037,6 +1083,9 @@ def compete(
         records=records, trade_mode=trade_mode, game_type=game_type, turn_cap=turn_cap,
         # Only a complement other than the default is a setting of its own.
         complement=None if not pairing or pairing == half_turn(seats) else list(pairing),
+        # Likewise a board mode other than the default, so journals written
+        # before there was a choice still resume.
+        **({} if board_mode == "random" else {"board_mode": board_mode}),
     )
     if resume and journal is None:
         raise ValueError("resume=True needs the journal to resume from")
@@ -1176,6 +1225,63 @@ MCTS = "mcts:"
 #: `catanatron:<key>=<value>[:...]`, parsed by `hexset.catanatron.bot`.
 CATANATRON = "catanatron:"
 
+#: `coalition:<entrant>`: `<entrant>` seated as a coalition member
+#: (`hexset.bots.Coalition`), with every other coalition seat at its table
+#: against the rest.
+COALITION = "coalition:"
+COALITION_KIND = "coalition"
+
+
+def coalition(inner: str, name: str | None = None) -> Entrant:
+    """The entrant `inner` names, seated as a coalition member
+    (`hexset.bots.Coalition`); named `coalition:<inner>` unless `name` says
+    otherwise, as a runtime's preset does."""
+    return Entrant(name or f"{COALITION}{inner}", kind=COALITION_KIND, options=(("inner", inner),))
+
+
+def _coalition(name: str) -> Entrant:
+    inner = name[len(COALITION):]
+    if not inner:
+        raise ValueError(f"{name!r}: name the entrant to seat, as in `{COALITION}<entrant>`")
+    entrant_from_name(inner)  # refuse an unknown entrant here, not at the deal
+    return coalition(inner)
+
+
+#: `handoff:<round>:<first>|<second>`: `<first>`'s moves through round
+#: `<round>`, `<second>`'s after it, trading `<first>`'s throughout
+#: (`hexset.bots.Handoff`).
+HANDOFF = "handoff:"
+HANDOFF_KIND = "handoff"
+_HANDOFF_FORM = "handoff:<round>:<first>|<second>"
+
+
+def handoff(first: str, second: str, at: int, name: str | None = None) -> Entrant:
+    """The seat that plays `first`'s moves through round `at` and `second`'s
+    after it (`hexset.bots.Handoff`); named `handoff:<at>:<first>|<second>`
+    unless `name` says otherwise."""
+    return Entrant(name or f"{HANDOFF}{at}:{first}|{second}", kind=HANDOFF_KIND,
+                   options=(("at", at), ("first", first), ("second", second)))
+
+
+def _handoff(name: str) -> Entrant:
+    at, colon, parts = name[len(HANDOFF):].partition(":")
+    first, bar, second = parts.partition("|")
+    if not (colon and bar and at.isdigit() and first and second):
+        raise ValueError(f"{name!r}: a handoff reads {_HANDOFF_FORM}")
+    for part in (first, second):
+        # Refuse an unknown bot here, not at the deal. A coalition member is
+        # one because its seat is a `Coalition`, which a handoff's is not.
+        if entrant_from_name(part).kind == COALITION_KIND:
+            raise ValueError(f"{name!r}: a coalition member is seated whole, not handed a round")
+    return handoff(first, second, int(at))
+
+
+def _coalition_trader(name: str) -> str:
+    return (
+        f"{name!r}: a coalition seat trades through its own bot; a trader "
+        f"named with `{TRADER}` would trade outside the coalition"
+    )
+
 
 def _load_presets(names: Sequence[str]) -> None:
     wanted = any(name == "catanatron" or name.startswith(CATANATRON) for name in names)
@@ -1258,19 +1364,30 @@ def _mcts(name: str) -> Entrant:
 
 def entrant_from_name(name: str) -> Entrant:
     """Resolve a name, any of them as `<entrant>~<trader>` to trade through
-    another's gate: a checkpoint spec (`network:`, `mcts:`), a preset, or a
-    spec a runtime registered, the longest matching prefix parsing it."""
+    another's gate: a checkpoint spec (`network:`, `mcts:`), a coalition
+    member (`coalition:<entrant>`), a handoff (`handoff:<round>:<a>|<b>`), a
+    preset, or a spec a runtime registered, the longest matching prefix
+    parsing it. A coalition member trades through its own bot, so it takes no
+    `~` trader. A `~` names the trader of the whole name before it, so a
+    handoff's two bots name none of their own: the seat trades as `<a>` or
+    as the handoff's `~` trader."""
     if TRADER in name:
         mover, _, trader = name.partition(TRADER)
         if TRADER in trader:
             raise ValueError(f"{name!r}: one `{TRADER}` names one trader")
         entrant = entrant_from_name(mover)
+        if entrant.kind == COALITION_KIND:
+            raise ValueError(_coalition_trader(name))
         entrant_from_name(trader)  # refuse an unknown trader here, not at the deal
         return replace(entrant, name=f"{entrant.name}{TRADER}{trader}", trader=trader)
     if name.startswith(NETWORK):
         return _network(name)
     if name.startswith(MCTS):
         return _mcts(name)
+    if name.startswith(COALITION):
+        return _coalition(name)
+    if name.startswith(HANDOFF):
+        return _handoff(name)
     _load_presets((name,))
     if name in PRESETS:
         return PRESETS[name]
@@ -1307,7 +1424,7 @@ def lineup_from_names(names: Sequence[str]) -> list[Entrant]:
     unknown = sorted(
         name
         for name in parts
-        if name not in PRESETS and not name.startswith((*CHECKPOINT_KINDS, *_SPEC_PARSERS))
+        if name not in PRESETS and not name.startswith((*CHECKPOINT_KINDS, COALITION, HANDOFF, *_SPEC_PARSERS))
     )
     if unknown:
         raise ValueError(f"unknown bots: {', '.join(unknown)}; {UNKNOWN_HINT}")
@@ -1349,7 +1466,8 @@ def pooled(standings: Sequence[Standing], games: int) -> list[Standing]:
 __all__ = [
     # what to seat, and the names that resolve to it
     "Entrant", "RETIRED", "RetiredSeat", "PRESETS", "SHIPPED_NAMES", "SHIPPED_PREFIXES",
-    "NETWORK", "MCTS", "CATANATRON", "CHECKPOINT_KINDS", "TRADER",
+    "SHIPPED_KINDS", "NETWORK", "MCTS", "CATANATRON", "COALITION", "COALITION_KIND",
+    "CHECKPOINT_KINDS", "TRADER", "coalition", "HANDOFF", "HANDOFF_KIND", "handoff",
     "entrant_from_name", "lineup_from_names", "base_name",
     # runtimes
     "register_entrant_kind", "register_preset", "register_spec",

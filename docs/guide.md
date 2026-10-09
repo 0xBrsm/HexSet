@@ -349,9 +349,10 @@ playing seats, so each side opens equally often.
 
 ## Public interface
 
-From 1.0.0 on, HexSet follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
-a minor release adds to the public interface, and only a major release
-removes or changes any of it.
+HexSet's public interface still changes often and is not yet stable: any
+minor release may change or remove part of it, and the changelog lists each
+such change under `### Breaking`. A release of fixes alone is a patch release
+and changes none of it.
 
 The public interface is every module with no leading underscore in its path,
 as far as its `__all__` lists, together with the HTTP API and its wire format

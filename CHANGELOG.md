@@ -1,8 +1,56 @@
 # Changelog
 
-Changes to the HexSet distribution. The project follows
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Changes to the HexSet distribution. HexSet's API still changes often and is
+not yet stable: any minor release may break it, and `### Breaking` says
+where. A fix alone is a patch release.
 
+
+## 1.11.0
+
+### Added
+
+- **Robber deals, answering side (`hexset.deals`).** A seat moving the
+  robber may ask for a card against no block (the robber stays off the
+  payer's hexes) or no steal (the payer is not robbed); `answer` says
+  whether a seat promises it, and `Seat.deal_answer` asks it of a hosted
+  seat (`Seat(deals=DealParams(answer=True))`). A gate may answer for itself
+  (`deal_answer`); by default the promise is priced with the gate's own
+  `gains_many` (`promise_value`): the swap it makes if spared, times the
+  chance it is spared, plus the robbery it saves, read off a `RobberModel`
+  (`PlainMover`, or one a runtime registers with `register_robber_model`).
+
+- **A hosted seat keeps its robber-deal promise.** Once a `Seat` has
+  promised (`deal_answer`), the mover's robber move settles it: spared (no
+  building of the seat's on the hex for a no-block deal, not the seat robbed
+  for a no-steal one), the seat owes the card, and `Seat.answer` accepts the
+  mover's offer that collects it -- one card of the promised resource for at
+  most one other card -- without pricing it. Hit anyway, it owes nothing. A
+  debt lapses with the mover's turn, and a trade that pays it clears it.
+  Once the robber has moved in a turn, the seat on turn is promised nothing,
+  and a seat with no gate promises nothing. A mover collecting with an open
+  offer ("the card for any of yours") is paid by a counter naming the card
+  the seat's gate values most.
+
+- **A `compete` journal says which code played its games.** Each time a
+  journal is opened, on a new run or a resumed one, it gains a `source` line:
+  the engine version, and the commit of the source checkout it runs from with
+  whether tracked files differ from it (`dirty`; both `null` for an installed
+  package). It is not part of the header a resumed run must match, so a run
+  resumed on other code records a second `source` line, after the `games` it
+  already held. Readers that take `game` lines are unaffected.
+
+### Changed
+
+- **HexSet no longer follows Semantic Versioning.** A breaking change is a
+  minor release, as it was before 1.0.0, and the changelog's `### Breaking`
+  heading marks it. 1.0.0 marked the bots moving out of HexSet, not a
+  stable API.
+
+### Fixed
+
+- `hexset.experiment.provenance()` finds the commit of a source checkout that
+  holds the engine below its root, not only at the root or under `src/`.
+  Such a checkout reported `commit: null`.
 
 ## 1.10.0
 

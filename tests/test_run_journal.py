@@ -53,9 +53,11 @@ def test_a_run_stopped_part_way_resumes_to_its_own_result(tmp_path):
     whole = compete(lineup, 8, workers=1, records=True, **QUICK)
     journal = tmp_path / "run.games.jsonl"
     compete(lineup, 8, workers=1, records=True, journal=journal, **QUICK)
-    # Keep the header and three games, and tear the fourth as a dying writer would.
+    # Keep the header, the source line and three games, and tear the fourth as
+    # a dying writer would.
     kept = journal.read_text().splitlines(keepends=True)
-    journal.write_text("".join(kept[:4]) + kept[4][: len(kept[4]) // 2])
+    assert [json.loads(k)["kind"] for k in kept[:2]] == ["header", "source"]
+    journal.write_text("".join(kept[:5]) + kept[5][: len(kept[5]) // 2])
     assert journal_tournament(journal).games == 3
     played = []
     resumed = compete(lineup, 8, workers=1, records=True, journal=journal, resume=True,
@@ -66,6 +68,27 @@ def test_a_run_stopped_part_way_resumes_to_its_own_result(tmp_path):
     assert [to_json(r) for r in resumed.records] == [to_json(r) for r in whole.records]
     _, outcomes = read_journal(journal)
     assert sorted(outcomes) == list(range(8))
+
+
+def test_each_opening_of_a_journal_says_which_code_writes_the_games_after_it(tmp_path, monkeypatch):
+    from hexset import arena
+    lineup = lineup_from_names(LINEUP)
+    journal = tmp_path / "run.games.jsonl"
+    monkeypatch.setattr(arena, "_source", lambda _file: {"commit": "a" * 40, "dirty": False})
+    compete(lineup, 2, workers=1, journal=journal, **QUICK)
+    # Stop after the first game, then resume on other code: the same run,
+    # and the journal says which code played which games.
+    kept = lines(journal)[:3]
+    assert [e["kind"] for e in kept] == ["header", "source", "game"]
+    journal.write_text("".join(json.dumps(e) + "\n" for e in kept))
+    monkeypatch.setattr(arena, "_source", lambda _file: {"commit": "b" * 40, "dirty": True})
+    compete(lineup, 2, workers=1, journal=journal, resume=True, **QUICK)
+    sources = [e for e in lines(journal) if e["kind"] == "source"]
+    assert [(s["games"], s["commit"], s["dirty"]) for s in sources] == [
+        (0, "a" * 40, False), (1, "b" * 40, True)]
+    assert all(s["hexset"] for s in sources)
+    _, outcomes = read_journal(journal)
+    assert sorted(outcomes) == [0, 1]
 
 
 def test_a_journal_that_holds_a_run_is_not_overwritten(tmp_path):

@@ -4,6 +4,8 @@ import hashlib
 import json
 from dataclasses import dataclass, replace
 
+import subprocess
+
 import pytest
 
 from hexset.arena import Entrant, compete, lineup_from_names
@@ -126,3 +128,25 @@ def test_installed_package_does_not_claim_an_enclosing_repositories_revision(tmp
     monkeypatch.setattr(experiment, "__file__", str(fake))
     monkeypatch.setattr(_source.subprocess, "run", lambda *a, **k: pytest.fail("installed package must not query ancestor Git"))
     assert experiment.provenance()["commit"] is None
+
+
+@pytest.mark.parametrize("prefix", [".", "src", "engine/src"])
+def test_a_source_tree_anywhere_in_a_checkout_reports_that_checkouts_commit(tmp_path, monkeypatch, prefix):
+    from hexset import experiment, _source
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    tree = checkout / prefix
+    (tree / "hexset").mkdir(parents=True, exist_ok=True)
+    (tree / "pyproject.toml").write_text('[project]\nname = "hexset"\nversion = "9.9.9"\n')
+    monkeypatch.setattr(experiment, "__file__", str(tree / "hexset" / "experiment.py"))
+    calls = []
+
+    def run(cmd, **kwargs):
+        calls.append(cmd)
+        out = "c" * 40 if "rev-parse" in cmd else ""
+        return subprocess.CompletedProcess(cmd, 0, stdout=out + "\n", stderr="")
+
+    monkeypatch.setattr(_source.subprocess, "run", run)
+    assert experiment.provenance()["commit"] == "c" * 40
+    assert calls[0][:3] == ["git", "-C", str(checkout.resolve())]
+

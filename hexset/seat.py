@@ -21,7 +21,11 @@ the host moves the cards. `Seat` is the engine's side of such a seat:
   the table's trading looked like (`observe_trade`, once a turn).
 
 The client also reports each offer and answer the table shows, and a chat ask
-for a card, through `shown`, which puts it on the public ledger.
+for a card, through `shown`, which puts it on the public ledger. A robber
+mover's ask for a card against no block or no steal is put to the seat
+through `deal_answer` (`hexset.deals`). A promise binds like any other
+answer: once the robber has moved and spared this seat, `answer` accepts the
+mover's offer that collects the promised card, without pricing it.
 
 A client mirroring a foreign table therefore carries decisions and never
 makes one: it translates the host's events into `play`/`traded` calls, puts
@@ -40,10 +44,12 @@ from __future__ import annotations
 import random
 from typing import Iterable, Sequence
 
-from .actions import Action, ActionType, apply
+from .actions import Action, ActionType, apply, victim_of
 from .board.board import Board
 from .bots.base import seat_at
 from .chance import UNSEEN, ChanceError, Hosted
+from .deals import NO_BLOCK, Ask, DealParams
+from .deals import answer as deal_answer
 from .game import (
     NO_TURN_CAP,
     Game,
@@ -55,10 +61,12 @@ from .game import (
     publish_trade_event,
     start,
 )
+from .robber import occupants
 from .rules import STANDARD_GAME, GameType
 from .state import HiddenRead
 from . import trading
 from .trading import (
+    RESPONSE_ACCEPT,
     RESPONSE_COUNTER,
     RESPONSE_PASS,
     Bundle,
@@ -86,10 +94,13 @@ class Seat:
     gate trades nothing: it offers nothing and passes every offer.
     `counter_steps` is how many counters a thread with the mover may carry
     (`counter`); one, the default, is a counter the actor takes or leaves.
+    `deals` is how the seat answers a robber deal (`deal_answer`); `None`,
+    the default, promises nothing. A promise it made is paid when the robber
+    spares it (`answer`).
     """
 
     def __init__(self, game: Game, seat: int, bot: object, gate: object | None = None,
-                 *, counter_steps: int = 1) -> None:
+                 *, counter_steps: int = 1, deals: DealParams | None = None) -> None:
         if not isinstance(game.chance, Hosted):
             raise ValueError("a hosted seat's game takes its outcomes from the host: "
                              "build it with game.observe or Seat.sit")
@@ -100,6 +111,7 @@ class Seat:
             gate = bot
         self.gate = gate
         self.counter_steps = counter_steps
+        self.deals = deals
         self._turn: tuple[int, int] | None = None
         self._reset_turn()
         self._seat_bots()
@@ -118,12 +130,13 @@ class Seat:
         locked: Iterable[int] = (),
         turn_cap: int = NO_TURN_CAP,
         counter_steps: int = 1,
+        deals: DealParams | None = None,
     ) -> "Seat":
         """Sit down at the deal: a fresh game of `game_type`, as `seat` sees it.
         No turn cap by default -- the host ends the game."""
         dealt = start(board, num_players, random.Random(0), first=first,
                       game_type=game_type, locked=locked, turn_cap=turn_cap)
-        return cls(observe(dealt, seat), seat, bot, gate, counter_steps=counter_steps)
+        return cls(observe(dealt, seat), seat, bot, gate, counter_steps=counter_steps, deals=deals)
 
     # -- the table's events ----------------------------------------------
 
@@ -157,6 +170,7 @@ class Seat:
         for count in surrendered:
             host.expect("surrender", count)
         was_main = game.phase is Phase.MAIN and game.current_player == actor
+        robbed = victim_of(game, action.b) if action.type is ActionType.MOVE_ROBBER else None
         if action.type is ActionType.END_TURN:
             self._turn_over()
         try:
@@ -169,6 +183,9 @@ class Seat:
             raise OutOfStep(f"the table revealed {left} that {action} did not take")
         if was_main and actor == self.seat and action.type is not ActionType.END_TURN:
             self._moves += 1
+        if action.type is ActionType.MOVE_ROBBER:
+            self._robber_moved = True
+            self._settle_promise(actor, action.a, robbed)
         self._sync()
 
     def traded(self, a: int, b: int, received: Bundle) -> Trade:
@@ -183,6 +200,11 @@ class Seat:
             raise OutOfStep(f"the table's trade {a}<->{b} {received} does not apply: "
                             f"{exc}") from exc
         self._trades.append(trade)
+        if self._owed is not None:
+            mover, resource = self._owed
+            towards_mover = received if a == mover else tuple(-n for n in received)
+            if {a, b} == {mover, self.seat} and towards_mover[resource] > 0:
+                self._owed = None
         return trade
 
     def resync(self, game: Game) -> None:
@@ -347,6 +369,12 @@ class Seat:
         if self.gate is None:
             return Response(self.seat, RESPONSE_PASS)
         self._sync()
+        if self._pays(offer):
+            return Response(self.seat, RESPONSE_ACCEPT, tuple(offer.received))
+        named = self._pays_named(offer)
+        if named is not None:
+            self._countered[offer.actor] = (tuple(offer.received), named)
+            return Response(self.seat, RESPONSE_COUNTER, named)
         answer = trading.respond(self.game, self.gate, self.seat, offer)
         if answer.kind == RESPONSE_COUNTER and answer.bundle is not None:
             self._countered[offer.actor] = (tuple(offer.received), tuple(answer.bundle))
@@ -408,6 +436,72 @@ class Seat:
         client may ask `answer` of an offer nobody made."""
         trading.show(self.game, seat, received)
 
+    def deal_answer(self, mover: int, kind: str, resource: int, promised: Sequence[int] = ()) -> bool:
+        """Whether this seat promises `mover` a card of `resource` for a deal
+        of `kind` (`hexset.deals.NO_BLOCK`, `NO_STEAL`), `promised` the seats
+        that already have, in the order they did (`hexset.deals.answer`).
+        A promise is the seat's consent: the client pays the card if the
+        robber spares it. Once the robber has moved this turn, the seat on
+        turn is promised nothing."""
+        if self.gate is None:
+            return False                    # a seat with no gate trades nothing, a promise included
+        self._sync()
+        if self._robber_moved and mover == self.game.current_player:
+            return False                    # this turn's robber has moved: nothing left to promise against
+        promise = deal_answer(self.game, self.seat, self.gate, self.deals, Ask(mover, kind, resource), promised)
+        if promise:
+            self._promise = (mover, kind, resource)
+        return promise
+
+    def _settle_promise(self, mover: int, hex_index: int, robbed: int | None) -> None:
+        """After `mover`'s robber move to `hex_index`, robbing `robbed`: a
+        promise this seat made for it is owed when the move spared the seat
+        -- no building of its on the hex for a no-block deal, not the one
+        robbed for a no-steal one -- and void when it did not."""
+        if self._promise is None or self._promise[0] != mover:
+            return
+        _, kind, resource = self._promise
+        self._promise = None
+        state = self.game.state(self.seat).state
+        if kind == NO_BLOCK:
+            spared = self.seat not in occupants(state, hex_index)
+        else:
+            spared = robbed != self.seat
+        if spared:
+            self._owed = (mover, resource)
+
+    def _pays_named(self, offer: Offer) -> Bundle | None:
+        """The counter that pays a debt the mover collects with an open offer
+        ("the card for any of yours", `any == -1`): the promised card for the
+        one other card this seat values most (`gains`), signed towards the
+        mover; None for any other offer."""
+        if self._owed is None or offer.any != -1 or offer.actor != self._owed[0]:
+            return None
+        resource = self._owed[1]
+        unit = tuple(1 if r == resource else 0 for r in range(len(offer.received)))
+        if tuple(offer.received) != unit or self.game.state(self.seat).state.hands[self.seat][resource] < 1:
+            return None
+        options = [tuple(n - (r == back) for r, n in enumerate(unit))
+                   for back in range(len(unit)) if back != resource]
+        gains = self.gains([tuple(-n for n in b) for b in options], offer.actor)
+        return options[max(range(len(options)), key=lambda i: gains[i])]
+
+    def _pays(self, offer: Offer) -> bool:
+        """Whether `offer` collects the card this seat owes: from the mover
+        it promised, one card of the promised resource, for at most one card
+        of another resource, which the mover chooses (`received` signed
+        towards the mover), and while the seat still holds the card. Every
+        such exchange is a payment, so a client asked to name the card back
+        (an offer with "any card" in return) may take the one it values most."""
+        if self._owed is None or offer.any or offer.actor != self._owed[0]:
+            return False
+        resource = self._owed[1]
+        received = tuple(offer.received)
+        back = [r for r, n in enumerate(received) if r != resource and n]
+        if received[resource] != 1 or len(back) > 1 or any(received[r] != -1 for r in back):
+            return False
+        return self.game.state(self.seat).state.hands[self.seat][resource] >= 1
+
     def gains(self, received: Sequence[Bundle], counterparty: int) -> list[float]:
         """The gate's own gain on each exchange (signed towards this seat),
         for a client that must choose among answers the host's own protocol
@@ -436,6 +530,9 @@ class Seat:
         self._trades: list[Trade] = []
         self._countered: dict[int, tuple[Bundle, Bundle]] = {}   # actor -> (its offer, this seat's counter)
         self._threads: dict[int, CounterThread] = {}             # the other side -> its thread
+        self._promise: tuple[int, str, int] | None = None   # (mover, kind, resource) this seat promised
+        self._owed: tuple[int, int] | None = None           # (mover, resource) the robber spared it for
+        self._robber_moved = False                          # the robber has moved this turn
 
     def _sync(self) -> None:
         """Start a new turn's bookkeeping when the game has moved to one, and

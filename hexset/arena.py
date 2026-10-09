@@ -32,6 +32,7 @@ from multiprocessing import get_context
 from typing import TYPE_CHECKING, Callable, Iterable, Mapping, Sequence
 
 from . import gamelog
+from ._source import source as _source
 from .actions import apply
 from .board.board import BOARD_MODES, Board, base_board
 from .economy import hand_size
@@ -1199,6 +1200,7 @@ def _open_journal(path: str | os.PathLike, header: dict, resume: bool) -> dict[i
     if not held:
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         gamelog.append(path, header)
+        gamelog.append(path, _source_line(0))
         return {}
     if not resume:
         raise FileExistsError(
@@ -1213,7 +1215,19 @@ def _open_journal(path: str | os.PathLike, header: dict, resume: bool) -> dict[i
             f"{path} is a different run ({', '.join(differs)} differ): a resumed "
             "run's games have to be the run's own"
         )
+    gamelog.append(path, _source_line(len(games)))
     return games
+
+
+def _source_line(games: int) -> dict:
+    """The code that plays the games written after this line: the engine's
+    version, and the commit of the checkout it runs from with whether tracked
+    files differ from it (both None for an installed package). Not part of the
+    header, which a resumed run must match: a run resumed on other code adds
+    a second line, after the `games` already held."""
+    from . import __version__
+
+    return {"kind": "source", "games": games, "hexset": __version__, **_source(__file__)}
 
 
 # A checkpoint cannot be a preset, its path being known only at the command

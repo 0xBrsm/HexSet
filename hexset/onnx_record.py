@@ -25,6 +25,7 @@ from .devcards import dev_count
 from .economy import hand_size
 from .encoding import StaticGraph
 from .game import Game, to_move
+from .roads import roads_to_take_all
 from .state import NO_OWNER
 from .victory import award_points
 
@@ -38,10 +39,12 @@ __all__ = [
 ]
 
 
-# The record/graph contract, read off an exported graph's metadata; earlier
-# contracts are refused. Bump only when `RECORD_FIELDS`, the export's output
-# tuple, or the action space changes.
-CONTRACT_VERSION = "6"
+# The record/graph contract, read off an exported graph's metadata. Bump only
+# when `RECORD_FIELDS`, the export's output tuple, or the action space changes.
+# Contract 7 adds `roads_to_take` and `to_move` to contract 6's record; a
+# contract-6 graph declares a subset of these fields and is still served
+# (`hexset.server.constants.RECORD_CONTRACTS`).
+CONTRACT_VERSION = "7"
 
 # Board, then position, then information set, then legality.
 # `hexn.export_onnx` reuses this order for the graph's input names.
@@ -62,6 +65,8 @@ RECORD_FIELDS: tuple[str, ...] = (
     "free_roads",
     "deck_size",
     "turns",
+    "roads_to_take",
+    "to_move",
     "perspective",
     "own_hand",
     "hand_totals",
@@ -93,6 +98,8 @@ def record_shapes(graph: StaticGraph, players: int, space: ActionSpace) -> dict[
         "free_roads": (),
         "deck_size": (),
         "turns": (),
+        "roads_to_take": (players,),
+        "to_move": (),
         "perspective": (),
         "own_hand": (NUM_RESOURCES,),
         "hand_totals": (players,),
@@ -186,6 +193,9 @@ def record_from_game(
         "free_roads": np.int64(game.free_roads),
         "deck_size": np.int64(len(state.deck)),
         "turns": np.int64(game.turns),
+        # Board-seat order, each at most `roads.ROADS_TO_TAKE_CAP`; the graph scales it.
+        "roads_to_take": np.asarray(roads_to_take_all(state), dtype=np.int64),
+        "to_move": np.int64(to_move(game)),
         "perspective": np.int64(perspective),
         "own_hand": np.asarray(state.hands[perspective], dtype=np.int64),
         "hand_totals": hand_totals,

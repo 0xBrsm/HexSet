@@ -2,9 +2,11 @@
 
 HexSet loads ONNX checkpoints through `hexset.clients.onnxbot` (the
 `clients` extra). A checkpoint provides metadata, record inputs and named
-outputs. The only supported contract is `6`; a file with no `contract` key or
-any other value is refused at load. Changing the number alone does not make
-an older graph compatible.
+outputs. The current contract is `7`. Contract `6` is still loaded: its record
+is contract 7's without `roads_to_take` and `to_move`, and the loader feeds a
+graph only the inputs it declares. A file with no `contract` key or any other
+value is refused at load. Changing the number alone does not make an older
+graph compatible.
 
 The contract is `CONTRACT_VERSION`, `RECORD_FIELDS` and `record_shapes` in
 [onnx_record.py](../hexset/onnx_record.py), with the action layout in
@@ -16,7 +18,7 @@ ONNX `metadata_props` values are strings.
 
 | Key | Meaning | Default or validation |
 | --- | --- | --- |
-| `contract` | Record and action-space version | Required: `"6"` |
+| `contract` | Record and action-space version | Required: `"7"` or `"6"` |
 | `players` | Seat count the graph was trained for | Required integer; seating it at a game of another count raises, and so does `spawn` given the table's count |
 | `num_hexes` | Board hex count | Required integer |
 | `num_vertices` | Board vertex count | Required integer |
@@ -101,6 +103,8 @@ record does not carry raises when the first inference request is built.
 | `free_roads` | `(B,)` | int64 |
 | `deck_size` | `(B,)` | int64 |
 | `turns` | `(B,)` | int64 |
+| `roads_to_take` | `(B, players)` | int64 |
+| `to_move` | `(B,)` | int64 |
 | `perspective` | `(B,)` | int64 |
 | `own_hand` | `(B, NUM_RESOURCES)` | int64 |
 | `hand_totals` | `(B, players)` | int64 |
@@ -124,6 +128,12 @@ record does not carry raises when the first inference request is built.
 `own_dev` and `dev_totals` include cards bought this turn; the action mask
 says which may be played. `award_points` is the points from Longest Road and
 Largest Army, not total victory points.
+
+`roads_to_take` is `hexset.roads.roads_to_take_all`: per seat, the new roads it
+needs to take Longest Road, `0` for the holder and `ROADS_TO_TAKE_CAP` (4) for
+four or more or out of reach. `to_move` is `hexset.game.to_move`, the seat
+whose decision it is, which differs from `perspective` when the record is a
+value read for another seat. Contract 6 has neither field.
 
 `action_mask` is the perspective seat's own legal actions. A record for a
 seat with no move of its own (a value-only row the trade gate prices for a

@@ -1,11 +1,12 @@
 """Which graph shape a checkpoint's `contract` metadata routes to, and whether
 a record-contract graph loads and plays. The rule: a contract number names
 exactly one graph shape, this repo reads it and never assigns it, and
-anything else is refused **by name**. Contract 6 is the only one served.
+anything else is refused **by name**. Contract 7 is current; contract 6, whose
+record is contract 7's minus `roads_to_take` and `to_move`, is still served.
 
-The two contract-6 stubs are 24- and 22-input: the pair exists because a
-loader that feeds a graph every field it happens to have, rather than the ones
-it *declares*, breaks on the shorter one.
+The contract-7 stub is 26-input and the two contract-6 stubs are 24- and
+22-input: a loader that feeds a graph every field it happens to have, rather
+than the ones it *declares*, breaks on the shorter ones.
 
 Every fixture here is a stub. `dev-contract2.onnx` and `tiny.onnx` were
 genuine exports with real weights until they were rebuilt by
@@ -34,6 +35,7 @@ from hexset.actions import options_for  # noqa: E402
 
 FIXTURES = Path(__file__).parent / "fixtures"
 STUB = FIXTURES / "stub-contract6.onnx"
+STUB7 = FIXTURES / "stub-contract7.onnx"
 STUB_PARTIAL = FIXTURES / "stub-contract6-partial.onnx"
 DEV_CONTRACT2 = FIXTURES / "dev-contract2.onnx"
 CONTRACT1 = FIXTURES / "tiny.onnx"
@@ -71,9 +73,43 @@ def test_the_contract_2_fixture_is_export_shaped():
 # --- Dispatch ------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("path", [STUB])
-def test_a_contract_6_graph_routes_to_the_record_policy(path):
+@pytest.mark.parametrize("path", [STUB7, STUB])
+def test_a_contract_7_or_6_graph_routes_to_the_record_policy(path):
     assert isinstance(load(str(path), _board().topology).policy, V2Policy)
+
+
+def test_the_served_contracts_are_the_current_one_and_six():
+    from hexset.onnx_record import CONTRACT_VERSION
+    from hexset.server.constants import RECORD_CONTRACTS
+
+    assert CONTRACT_VERSION == "7"
+    assert RECORD_CONTRACTS == {"6", "7"}
+    assert _metadata(STUB7)["contract"] == "7"
+    assert _metadata(STUB)["contract"] == "6"
+
+
+def test_a_contract_6_graph_declares_a_subset_of_the_current_record():
+    """What keeps contract 6 servable: every input it declares is still in
+    the record, and the two it lacks are exactly what contract 7 added."""
+    from hexset.onnx_record import RECORD_FIELDS
+
+    six, seven = set(_declared_inputs(STUB)), set(_declared_inputs(STUB7))
+    assert seven == set(RECORD_FIELDS)
+    assert seven - six == {"roads_to_take", "to_move"}
+
+
+@pytest.mark.parametrize("contract", ["5", "8"])
+def test_a_contract_either_side_of_the_served_ones_is_refused_by_name(contract, tmp_path):
+    onnx = pytest.importorskip("onnx")
+    model = onnx.load(str(STUB7))
+    for entry in model.metadata_props:
+        if entry.key == "contract":
+            entry.value = contract
+    path = tmp_path / f"contract{contract}.onnx"
+    onnx.save(model, str(path))
+    with pytest.raises(ValueError) as caught:
+        load(str(path), _board().topology)
+    assert f"contract={contract!r}" in str(caught.value)
 
 
 def test_a_file_declaring_no_contract_is_refused_as_declaring_none():
@@ -84,7 +120,7 @@ def test_a_file_declaring_no_contract_is_refused_as_declaring_none():
         load(str(CONTRACT1), _board().topology)
     message = str(caught.value)
     assert "declares no contract" in message and "contract='" not in message
-    assert "6" in message
+    assert "6" in message and "7" in message
 
 
 def test_an_offer_protocol_contract_is_refused_by_name():
@@ -96,7 +132,9 @@ def test_an_offer_protocol_contract_is_refused_by_name():
 # --- Loading is not enough: it has to play ------------------------------------
 
 
-@pytest.mark.parametrize("path,expected_inputs", [(STUB, 24), (STUB_PARTIAL, 22)])
+@pytest.mark.parametrize(
+    "path,expected_inputs", [(STUB7, 26), (STUB, 24), (STUB_PARTIAL, 22)]
+)
 def test_a_record_contract_checkpoint_plays_legal_actions_from_every_phase(
     path, expected_inputs
 ):

@@ -898,7 +898,8 @@ def _well_formed(view: "View", received: object) -> bool:
 
 
 def offer(
-    game: "Game", gates: Sequence[object], already_offered: set[Bundle] | None = None
+    game: "Game", gates: Sequence[object], already_offered: set[Bundle] | None = None,
+    slots_left: int | None = None,
 ) -> Offer | None:
     """The round's first stage: the current player's gate picks one offer
     from its `menu`, through its `offer(view, candidates)` or `default_offer`.
@@ -910,6 +911,15 @@ def offer(
     `allow_repeated_offer(view, bundle, turn=)` claims a repeat, which is
     what lets a planned second fragment equal to a first that executed go
     out again while a refused offer stays excluded.
+
+    A gate declaring `open_asks` (`TradeParams`) puts asks for one card up
+    open: where the bundle it picks is a one-for-one and, among its next
+    `open_asks` picks within `slots_left` (the offers it has left this turn,
+    `None` for no limit), at least one other is a one-for-one for the same
+    card, it offers "any card for" that card (`Offer.any == -1`) in their
+    place. That offer counts as many offers as the asks it replaces
+    (`offer_slots`), all of them go into `already_offered`, and the gate asks
+    for that card no more this turn (`Game.open_asks`).
     """
     from ..game import Phase  # local: avoids a game/trading import cycle
 
@@ -926,30 +936,85 @@ def offer(
     offered = already_offered if already_offered is not None else frozenset()
     repeat_fn = getattr(gate, "allow_repeated_offer", None)
 
+    opened = game.open_asks.get(me)
+    closed = opened[1] if opened is not None and opened[0] == game.turns else None
+
     def admitted(received: Bundle) -> bool:
+        if closed is not None and _asked_for(received) == closed:
+            return False                    # this turn's open ask stands for every ask for the card
         if received not in offered:
             return True
         return repeat_fn is not None and bool(repeat_fn(view, received, turn=game.turns))
 
-    candidates = [
-        (them, tuple(received))
-        for them, received in menu(gate, view, others, turn=game.turns, already_offered=offered)
-        if _well_formed(view, received) and admitted(tuple(received))
-    ]
-    if not candidates:
+    def pick(struck) -> Bundle | None:
+        candidates = [
+            (them, tuple(received))
+            for them, received in menu(gate, view, others, turn=game.turns, already_offered=struck)
+            if _well_formed(view, received) and (tuple(received) not in struck or struck is offered)
+            and admitted(tuple(received))
+        ]
+        if not candidates:
+            return None
+        offer_fn = getattr(gate, "offer", None)
+        index = (
+            offer_fn(view, candidates)
+            if offer_fn is not None
+            else default_offer(gate, view, candidates)
+        )
+        if index is None or not (0 <= index < len(candidates)):
+            return None
+        return candidates[index][1]
+
+    received = pick(offered)
+    if received is None:
         return None
-    offer_fn = getattr(gate, "offer", None)
-    index = (
-        offer_fn(view, candidates)
-        if offer_fn is not None
-        else default_offer(gate, view, candidates)
-    )
-    if index is None or not (0 <= index < len(candidates)):
-        return None
-    _them, received = candidates[index]
     if already_offered is not None:
         already_offered.add(received)
-    return Offer(me, received)
+    replaced = _open_asks(params_of(gate).open_asks, received, slots_left, pick, offered)
+    if len(replaced) < 2:
+        return Offer(me, received)
+    card = _asked_for(received)
+    game.open_asks[me] = (game.turns, card, tuple(replaced))
+    if already_offered is not None:
+        already_offered.update(replaced)
+    return Offer(me, tuple(int(i == card) for i in range(NUM_RESOURCES)), -1)
+
+
+def _asked_for(received: Sequence[int]) -> int | None:
+    """The card a one-for-one asks for; None for any other bundle."""
+    got = [r for r, n in enumerate(received) if n > 0]
+    if sum(n for n in received if n > 0) != 1 or sum(-n for n in received if n < 0) != 1:
+        return None
+    return got[0]
+
+
+def _open_asks(look: int, received: Bundle, slots_left: int | None, pick, offered) -> list[Bundle]:
+    """The asks an open ask would stand for: `received` and, among the
+    gate's next picks (`pick`, each with the ones before struck) up to
+    `look` in all and within `slots_left`, the one-for-ones for the card
+    `received` asks for. Fewer than two means no open ask."""
+    card = _asked_for(received)
+    if look < 2 or card is None:
+        return [received]
+    reach = look if slots_left is None or slots_left < 0 else min(look, slots_left)
+    struck, replaced = set(offered) | {received}, [received]
+    for _ in range(reach - 1):
+        nxt = pick(struck)
+        if nxt is None:
+            break
+        struck.add(nxt)
+        if _asked_for(nxt) == card:
+            replaced.append(nxt)
+    return replaced
+
+
+def offer_slots(game: "Game", offered: Offer) -> int:
+    """How many of its actor's offers this turn `offered` counts as: the
+    asks an open ask stands for (`offer`), else one."""
+    opened = game.open_asks.get(offered.actor)
+    if offered.any and opened is not None and opened[0] == game.turns:
+        return len(opened[2])
+    return 1
 
 
 def respond(game: "Game", gate: object, seat: int, offer: Offer) -> Response:
@@ -971,7 +1036,31 @@ def respond(game: "Game", gate: object, seat: int, offer: Offer) -> Response:
         response = any_fn(view, offer) if any_fn is not None else default_respond_any(gate, view, offer)
     else:
         response = _answer_concrete(gate, view, offer)
+        if getattr(response, "kind", None) != RESPONSE_ACCEPT:
+            response = _counter_back(game, gate, view, seat, offer) or response
     return _admit(view, seat, offer, response)
+
+
+def _counter_back(game: "Game", gate: object, view: "View", seat: int, offer: Offer) -> Response | None:
+    """On `seat`'s own turn, after its open ask (`offer`, `Game.open_asks`):
+    a counter that brings the card asked for but wants one `seat` will not
+    give is countered with the card for one of the cards `seat` offered for
+    it, the first, in its own order, that it still holds and that its gate
+    would take from that seat. None where this is no such counter."""
+    opened = game.open_asks.get(seat)
+    if opened is None or opened[0] != game.turns or game.current_player != seat or offer.actor == seat:
+        return None
+    _turn, card, replaced = opened
+    if offer.received[card] != -1:
+        return None
+    hand = view.known[seat]
+    for ask in replaced:                                # signed towards `seat`
+        back = tuple(-int(n) for n in ask)              # signed towards the counter's maker
+        if back == tuple(offer.received) or hand[back.index(1)] < 1:
+            continue
+        if getattr(_answer_concrete(gate, view, Offer(offer.actor, back)), "kind", None) == RESPONSE_ACCEPT:
+            return Response(seat, RESPONSE_COUNTER, back)
+    return None
 
 
 def _admit(view: "View", seat: int, offer: Offer, response: object) -> Response:
@@ -1242,12 +1331,16 @@ def trade_round(
     answer the first (`resolve_offer`, `counter_thread`); the default, one,
     is a counter the actor takes or leaves.
     """
-    offered = offer(game, gates, already_offered)
+    budget = params_of(gates[game.current_player]).trade_offer_budget if gates is not None and \
+        0 <= game.current_player < len(gates) and gates[game.current_player] is not None else -1
+    left = None if budget < 0 or offers_made is None else budget - len(offers_made)
+    offered = offer(game, gates, already_offered, slots_left=left)
     if offered is None:
         return []
     # `already_offered` is a set, so a permitted repeat does not grow it;
     # `offers_made` counts what actually went to the table, which is what a
-    # caller looping over rounds has to stop on.
+    # caller looping over rounds has to stop on -- an open ask as many
+    # offers as the asks it stands for (`offer_slots`).
     if offers_made is not None:
-        offers_made.append(offered.received)
+        offers_made.extend([offered.received] * offer_slots(game, offered))
     return resolve_offer(game, gates, offered, counter_steps=counter_steps)

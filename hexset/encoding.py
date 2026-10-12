@@ -22,6 +22,7 @@ from .cards import NUM_DEV_CARDS, DECK_SIZE
 from .devcards import dev_count
 from .economy import hand_size
 from .game import Game, Phase, to_move
+from .roads import ROADS_TO_TAKE_CAP, roads_to_take_all
 from .state import NO_OWNER, Building, GameState
 
 __all__ = [
@@ -157,6 +158,9 @@ def _global_blocks(players: int) -> list[tuple[str, int]]:
         ("turn", 1),
         # known[5] + unknown per opponent.
         ("ledger", (players - 1) * (NUM_RESOURCES + 1)),
+        # `roads.roads_to_take` per seat over `ROADS_TO_TAKE_CAP`.
+        ("roads_to_take", players),
+        ("to_move", players),
     ]
 
 
@@ -360,6 +364,14 @@ def _ledger_parts(game: Game, perspective: int) -> list[float]:
     return parts
 
 
+def _roads_to_take_parts(game: Game, perspective: int) -> list[float]:
+    """Every seat's `roads.roads_to_take` over `ROADS_TO_TAKE_CAP`, in
+    seat-relative order: 0 for the seat holding Longest Road, 1 for one that
+    needs `ROADS_TO_TAKE_CAP` or more new roads or cannot take it at all."""
+    counts = roads_to_take_all(game._state)
+    return [counts[s] / ROADS_TO_TAKE_CAP for s in to_frame(range(len(counts)), perspective)]
+
+
 def _encode_globals(
     game: Game, perspective: int, building_points: np.ndarray
 ) -> np.ndarray:
@@ -404,6 +416,11 @@ def _encode_globals(
     parts.append(min(game.turns / TURN_SCALE, 1.0))
 
     parts.extend(_ledger_parts(game, perspective))
+
+    parts.extend(_roads_to_take_parts(game, perspective))
+    mover = [0.0] * players
+    mover[_seat(to_move(game), perspective, players)] = 1.0
+    parts.extend(mover)
 
     return np.array(parts, dtype=np.float32)
 
@@ -501,6 +518,16 @@ def _encode_globals_batch(
         dtype=np.float64,
     )
     append(ledger_block, 1.0)
+
+    roads_block = np.asarray(
+        [_roads_to_take_parts(game, int(p)) for game, p in zip(games, perspectives)],
+        dtype=np.float64,
+    )
+    append(roads_block, 1.0)
+
+    movers = np.asarray([to_move(game) for game in games], dtype=np.intp)
+    out[batch_rows, cursor + (movers - perspectives) % players] = 1.0
+    cursor += players
 
     if cursor != out.shape[1]:
         raise AssertionError(f"wrote {cursor} global features into {out.shape[1]}")

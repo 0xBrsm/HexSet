@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from conftest import new_tables
-from hexset.server.api import LIVE_IDLE_SECONDS, ApiError, ApiKey, Origin, load_api_keys, stamp_client
+from hexset.server.api import LIVE_IDLE_SECONDS, ApiError, ApiKey, Origin, load_api_keys, stamp_client, PARALLEL_NOTICE
 from hexset.server.web import HexSetServer, forwarded_ip
 
 WEB = {"id": "a" * 64, "kind": "web"}
@@ -207,3 +207,57 @@ def test_the_keys_file_names_each_holder_once(tmp_path):
     path.write_text(json.dumps({"a": {"name": "alice", "games_per_period": 1}, "b": {"name": "alice", "games_per_period": 2}}))
     with pytest.raises(ValueError):
         load_api_keys(str(path))
+
+
+def test_a_game_limit_refusal_names_the_next_slot_and_the_contact():
+    tables = _limited(games_per_period=1, live_tables_per_ip=0, contact="ask@example.org")
+    _deal_from(tables, "203.0.113.9")
+    with pytest.raises(ApiError) as refused:
+        _deal_from(tables, "203.0.113.9")
+    error = refused.value
+    assert error.status == 429
+    assert str(error).startswith("game limit: 1 per 30 days for this address; next slot ")
+    assert str(error).endswith("; contact: ask@example.org")
+    assert error.fields["contact"] == "ask@example.org"
+    assert error.fields["next_slot"] in str(error)
+    assert 0 < error.retry_after <= 30 * 86400
+
+
+def test_a_refusal_without_a_configured_contact_names_none():
+    tables = _limited(games_per_period=1, live_tables_per_ip=0)
+    _deal_from(tables, "203.0.113.9")
+    with pytest.raises(ApiError) as refused:
+        _deal_from(tables, "203.0.113.9")
+    assert "contact:" not in str(refused.value) and "contact" not in refused.value.fields
+
+
+def test_a_new_game_reports_the_allowance_left_and_warns_of_parallel_play():
+    tables = _limited(games_per_period=12, live_tables_per_ip=5, contact="ask@example.org")
+    first = _deal_from(tables, "203.0.113.9")
+    assert first["allowance"] == {
+        "games_left": 11, "games_per_period": 12, "period_days": 30.0,
+        "live_tables": 1, "live_tables_limit": 5,
+    }
+    assert "notice" not in first
+    second = _deal_from(tables, "203.0.113.9")
+    assert second["allowance"]["games_left"] == 10
+    assert second["allowance"]["contact"] == "ask@example.org"
+    assert second["allowance"]["live_tables"] == 2
+    assert second["notice"] == PARALLEL_NOTICE
+    assert tables.handle("GET", "/api/limits", {}, None, Origin(ip="203.0.113.9")) == second["allowance"]
+    assert "allowance" not in tables.handle("POST", "/api/games", {}, None)  # in-process: no limits
+
+
+def test_over_http_a_game_limit_refusal_carries_retry_after_and_its_fields(serve):
+    base = serve(games_per_period=1, live_tables_per_ip=0, limit_exempt=(), contact="ask@example.org")
+    assert _deal(base)[0] == 200
+    request = urllib.request.Request(
+        base + "/api/games", data=json.dumps({"client": WEB}).encode("utf-8"),
+        headers={"Content-Type": "application/json"}, method="POST",
+    )
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        urllib.request.urlopen(request, timeout=5)
+    body = json.loads(refused.value.read())
+    assert refused.value.code == 429
+    assert int(refused.value.headers["Retry-After"]) > 0
+    assert body["contact"] == "ask@example.org" and body["next_slot"] in body["error"]

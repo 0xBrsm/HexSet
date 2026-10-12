@@ -91,6 +91,19 @@ def trader_of(checkpoint: object) -> str | None:
     return getattr(checkpoint, "trader", None)
 
 
+def trader_veto_config(meta: dict[str, str]) -> bool:
+    """Whether `meta` asks for its own gate to veto its trader
+    (`trader_veto`, `hexset.arena.traded`): each exchange the trader would
+    make must also clear the checkpoint's own value gain above its declared
+    `trade_floor`. Off unless the key reads as true."""
+    return str(meta.get("trader_veto", "")).strip().lower() in ("1", "true", "yes", "on")
+
+
+def trader_veto_of(checkpoint: object) -> bool:
+    """Whether `checkpoint` vetoes its trader, read by name like `trader_of`."""
+    return bool(getattr(checkpoint, "trader_veto", False))
+
+
 def search_config(meta: dict[str, str]) -> SearchConfig:
     """The search `meta` asks for, read only when the file actually asks to be
     searched, so a stale `simulations` cannot turn a policy into a search."""

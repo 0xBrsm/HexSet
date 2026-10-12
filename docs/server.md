@@ -27,6 +27,7 @@ The client interfaces are [api.md](api.md) for the JSON routes and
 | `--period-days` | `30` | The window `--games-per-period` counts over |
 | `--live-tables-per-ip` | `5` | Unfinished games one client address may have in play at once; `0` is no limit |
 | `--limit-exempt` | `127.0.0.0/8`, `::1/128` | A client network under no per-address limit; repeatable, and naming any replaces the default |
+| `--contact` | none | Where to ask for a larger allowance: sent with a period-limit 429 and with an `allowance` of ten or fewer games |
 | `--api-keys` | none | A JSON file of API keys, `{"<key>": {"name": "<holder>", "games_per_period": <n>}}`: a deal sent with one on `X-HexSet-Key` counts against that key's `games_per_period` (`0` is no limit) instead of its address's `--games-per-period`. Read at start |
 
 Behind a reverse proxy or tunnel, name its header with `--forwarded-header`,

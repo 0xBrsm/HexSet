@@ -28,7 +28,10 @@ KEY_HEADER = "X-HexSet-Key"
 #
 # Contract 6 is "record in, decision out": the graph masks, normalises,
 # argmaxes and un-rotates, and the caller only states the position
-# (`hexset.onnx_record.record_from_game`) and reads the answer back. Every
-# other value, and a file with no `contract` key at all, is refused by name at
-# load.
-RECORD_CONTRACTS = frozenset({"6"})
+# (`hexset.onnx_record.record_from_game`) and reads the answer back. Contract 7
+# is the same graph shape over a record with two more fields (`roads_to_take`,
+# `to_move`), so a contract-6 graph's declared inputs are a subset of today's
+# record and it is still served: the loader feeds a graph only the inputs it
+# declares. Every other value, and a file with no `contract` key at all, is
+# refused by name at load.
+RECORD_CONTRACTS = frozenset({"6", "7"})

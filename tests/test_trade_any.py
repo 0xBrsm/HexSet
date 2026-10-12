@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import random
 
+import pytest
+
 from hexset.board.board import random_base_board
 from hexset.board.terrain import Resource
 from hexset.game import Phase, start
@@ -19,6 +21,7 @@ from hexset.trading import (
     Response,
     default_respond,
     is_open,
+    offer,
     resolve_offer,
     respond,
 )
@@ -197,3 +200,76 @@ def test_a_planning_gate_counters_an_open_offer_with_a_fragment():
     answer = respond(game, gate, 1, offer)
     assert answer.kind == RESPONSE_COUNTER
     assert legal_fragment(answer.bundle, max_cards=FRAGMENTED.fragment_width)
+
+
+class _Asker:
+    """A gate whose asks, best first, are `asks` (signed towards it), one a
+    call -- the next not already offered -- declaring `open_asks`."""
+
+    def __init__(self, asks, look=3, budget=3):
+        from hexset.trading import TradeParams
+        self.asks = [tuple(a) for a in asks]
+        self.trade_params = TradeParams(max_offers=budget, open_asks=look)
+        self.answers = {}
+
+    def candidates(self, view, counterparties, *, turn=None, already_offered=()):
+        struck = {tuple(b) for b in already_offered}
+        ask = next((a for a in self.asks if a not in struck), None)
+        return [] if ask is None else [(c, ask) for c in counterparties]
+
+    def offer(self, view, candidates):
+        return 0
+
+    def respond(self, view, offer):
+        kind = self.answers.get(tuple(offer.received), RESPONSE_PASS)
+        return Response(view.perspective, kind, offer.received if kind != RESPONSE_PASS else None)
+
+
+WOOD_ORE, SHEEP_ORE, BRICK_ORE, WOOD_WHEAT = (-1, 0, 0, 0, 1), (0, 0, -1, 0, 1), (0, -1, 0, 0, 1), (-1, 0, 0, 1, 0)
+
+
+def _asking():
+    return _game((0, Resource.WOOD, 2), (0, Resource.SHEEP, 1), (0, Resource.BRICK, 1), (1, Resource.ORE, 1))
+
+
+@pytest.mark.parametrize("asks,slots", [((WOOD_ORE, SHEEP_ORE, BRICK_ORE), 3), ((WOOD_ORE, WOOD_WHEAT, SHEEP_ORE), 2)],
+                         ids=["three-for-ore", "two-for-ore"])
+def test_asks_for_one_card_go_up_as_one_open_ask_counting_as_many_offers(asks, slots):
+    from hexset.trading import offer_slots
+    game, offered = _asking(), set()
+    gates = [_Asker(asks), None, None, None]
+    made = offer(game, gates, offered, slots_left=3)
+    assert made == Offer(0, (0, 0, 0, 0, 1), any=-1) and offer_slots(game, made) == slots
+    following = offer(game, gates, offered, slots_left=3 - slots)
+    # nothing more for the ore this turn: the wheat ask, where one is left, is next
+    assert following == (Offer(0, WOOD_WHEAT) if WOOD_WHEAT in asks else None)
+
+
+@pytest.mark.parametrize("asks,look,left", [((WOOD_ORE, WOOD_WHEAT), 3, 3), ((WOOD_ORE, SHEEP_ORE), 0, 3),
+                                            ((WOOD_ORE, SHEEP_ORE), 3, 1)],
+                         ids=["one-for-ore", "not-declared", "one-offer-left"])
+def test_a_lone_ask_or_an_undeclared_gate_or_no_offers_left_asks_as_it_stands(asks, look, left):
+    from hexset.trading import offer_slots
+    game = _asking()
+    made = offer(game, [_Asker(asks, look=look), None, None, None], set(), slots_left=left)
+    assert made == Offer(0, asks[0]) and offer_slots(game, made) == 1
+
+
+def test_the_same_ask_listed_twice_is_one_ask():
+    game = _asking()
+    assert offer(game, [_Asker((WOOD_ORE, WOOD_ORE)), None, None, None], set(), slots_left=3) == Offer(0, WOOD_ORE)
+
+
+def test_a_counter_bringing_the_card_for_one_it_keeps_is_countered_back_with_one_it_offered():
+    """After its open "any card for your ore": seat 1 counters, its ore for
+    our wheat (we hold none to spare); our gate takes sheep-for-ore, so that
+    is the counter back -- the first card it offered that it still holds and
+    would trade."""
+    game = _asking()
+    gate = _Asker((WOOD_ORE, SHEEP_ORE, BRICK_ORE))
+    gate.answers = {(0, 0, 1, 0, -1): RESPONSE_ACCEPT}       # seat 1 offering its ore for our sheep
+    offer(game, [gate, None, None, None], set(), slots_left=3)
+    back = respond(game, gate, 0, Offer(1, (0, 0, 0, 1, -1)))  # seat 1: my ore for your wheat
+    assert back == Response(0, RESPONSE_COUNTER, (0, 0, 1, 0, -1))
+    game.turns += 1                                           # not on the turn of its open ask: no counter back
+    assert respond(game, gate, 0, Offer(1, (0, 0, 0, 1, -1))).kind == RESPONSE_PASS

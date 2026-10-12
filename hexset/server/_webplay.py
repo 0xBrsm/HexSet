@@ -752,10 +752,11 @@ class GameSession:
         # not already put to this table this turn.
         if 0 <= budget <= self._offers_made:
             return
-        offered = trading.offer(self.game, self._gates(), already_offered=self._already_offered)
+        offered = trading.offer(self.game, self._gates(), already_offered=self._already_offered,
+                                slots_left=None if budget < 0 else budget - self._offers_made)
         if offered is None:
             return
-        self._offers_made += 1
+        self._offers_made += trading.offer_slots(self.game, offered)
         self._broadcast(offered)
 
     def open_round_for(self, actor: int, received: Bundle, any_cards: int = 0) -> None:

@@ -2,7 +2,7 @@
 
     python build_refused_stubs.py    # -> dev-contract2.onnx, tiny.onnx
 
-Contract 6 is the only one served. Contract 2 is one of the offer-protocol
+Contracts 7 and 6 are the ones served. Contract 2 is one of the offer-protocol
 contracts and contract 1 predates the record entirely; both are refused by
 name (`hexset.server.constants.RECORD_CONTRACTS`). Nothing loads either to
 play, so these graphs exist only to be turned away, and the suite asks three

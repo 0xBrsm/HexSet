@@ -193,6 +193,9 @@ MISS_SECONDS = 5.0
 # The cap on a read's `wait`: the longest it may park for a change.
 MAX_WAIT_SECONDS = 25.0
 
+# Sent with a new game when its caller already has another in play.
+PARALLEL_NOTICE = "tables share one CPU core; parallel games each run slower"
+
 # How long an unfinished table counts against its creator's live-table limit
 # after the last time a person read it. An abandoned table stops counting this
 # long after it was left, not when `TABLE_TTL_SECONDS` evicts it.
@@ -206,9 +209,16 @@ class ApiError(Exception):
     """A request that cannot be served, carrying the HTTP status to answer
     with — the same status over HTTP, over MCP and in-process."""
 
-    def __init__(self, message: str, status: int = 400) -> None:
+    def __init__(
+        self, message: str, status: int = 400, *,
+        fields: dict | None = None, retry_after: int | None = None,
+    ) -> None:
         super().__init__(message)
         self.status = status
+        # Machine-readable detail beside `error` in the body, and a
+        # `Retry-After` in seconds, where the refusal has them.
+        self.fields = fields or {}
+        self.retry_after = retry_after
 
 
 def require_live(game: Game) -> None:
@@ -438,6 +448,9 @@ class Config:
     live_tables_per_ip: int = 5
     limit_exempt: tuple[str, ...] = ("127.0.0.0/8", "::1/128")
     api_keys: dict[str, ApiKey] = field(default_factory=dict)
+    # Where to ask for a larger allowance; sent with a game-limit refusal and
+    # with an allowance running low. None sends nothing.
+    contact: str | None = None
 
     def __post_init__(self) -> None:
         if self.board_mode not in BOARD_MODES:
@@ -944,38 +957,76 @@ class Tables:
         the address's. In-process callers and exempt addresses always pass."""
         if origin is None or self.config.is_exempt(origin.ip):
             return
-        key = origin.ip or "?"
-        now = time.monotonic()
-        wall = time.time()
-        if holder is None:
-            cap, whose = self.config.games_per_period, "this address"
-        else:
-            cap, whose = self.config.api_keys[origin.key].games_per_period, "this API key"
+        cap, whose = self._cap(origin, holder)
         with self._registry_lock:
-            dealt = self._dealt.setdefault(_allowance(key, holder), deque())
-            while dealt and wall - dealt[0] > self.config.period_days * 86400:
-                dealt.popleft()
+            dealt = self._window(origin, holder)
             if cap and len(dealt) >= cap:
+                slot = dealt[0] + self.config.period_days * 86400
+                at = time.strftime("%Y-%m-%dT%H:%MZ", time.gmtime(slot))
+                fields = {"next_slot": at}
+                more = ""
+                if self.config.contact:
+                    fields["contact"] = self.config.contact
+                    more = f"; contact: {self.config.contact}"
                 raise ApiError(
-                    f"too many new games from {whose}: at most {cap} "
-                    f"in {self.config.period_days:g} days",
-                    status=429,
+                    f"game limit: {cap} per {self.config.period_days:g} days for {whose}; "
+                    f"next slot {at}{more}",
+                    status=429, fields=fields, retry_after=max(1, int(slot - time.time())),
                 )
             live_cap = self.config.live_tables_per_ip
-            if live_cap:
-                live = sum(
-                    1
-                    for t in self._tables.values()
-                    if t.creator_ip == key
-                    and not is_over(t.session.game)
-                    and now - t.last_seen < LIVE_IDLE_SECONDS
+            if live_cap and self._live(origin) >= live_cap:
+                raise ApiError(
+                    f"live table limit: {live_cap} unfinished games at once for this address",
+                    status=429,
                 )
-                if live >= live_cap:
-                    raise ApiError(
-                        f"too many unfinished games from this address: at most {live_cap} at once",
-                        status=429,
-                    )
-            dealt.append(wall)
+            dealt.append(time.time())
+
+    def _cap(self, origin: Origin, holder: str | None) -> tuple[int, str]:
+        """The period allowance a deal counts against, and whose it is."""
+        if holder is None:
+            return self.config.games_per_period, "this address"
+        return self.config.api_keys[origin.key].games_per_period, "this API key"
+
+    def _window(self, origin: Origin, holder: str | None) -> deque:
+        """The deals inside the rolling period, oldest first, pruned in
+        place. Call under `_registry_lock`."""
+        dealt = self._dealt.setdefault(_allowance(origin.ip or "?", holder), deque())
+        while dealt and time.time() - dealt[0] > self.config.period_days * 86400:
+            dealt.popleft()
+        return dealt
+
+    def _live(self, origin: Origin) -> int:
+        """Unfinished, recently seen tables dealt from `origin`'s address.
+        Call under `_registry_lock`."""
+        now = time.monotonic()
+        return sum(
+            1
+            for t in self._tables.values()
+            if t.creator_ip == (origin.ip or "?")
+            and not is_over(t.session.game)
+            and now - t.last_seen < LIVE_IDLE_SECONDS
+        )
+
+    def allowance(self, origin: Origin | None, holder: str | None) -> dict | None:
+        """`GET /api/limits`, and `allowance` on `POST /api/games`: what is left
+        of this caller's limits. None for a caller under no limit. `contact`
+        rides along once ten or fewer games are left."""
+        if origin is None or self.config.is_exempt(origin.ip):
+            return None
+        cap, _whose = self._cap(origin, holder)
+        with self._registry_lock:
+            used = len(self._window(origin, holder))
+            live = self._live(origin)
+        out = {
+            "games_left": max(0, cap - used) if cap else None,
+            "games_per_period": cap or None,
+            "period_days": self.config.period_days,
+            "live_tables": live,
+            "live_tables_limit": self.config.live_tables_per_ip or None,
+        }
+        if cap and cap - used <= 10 and self.config.contact:
+            out["contact"] = self.config.contact
+        return out
 
     # --- registry ---------------------------------------------------------
 
@@ -1432,7 +1483,9 @@ class Tables:
         actor or as a seat it is owed an answer from: resolve that first. The
         last seat still in the game cannot leave it (409), there being nobody
         to hand the turn to. A setup turn the seat was holding open, and its
-        own take-back, go with it (`GameSession.release`)."""
+        own take-back, go with it (`GameSession.release`). When the seats
+        left are all bots, the table is closed: its runners stop and its
+        journal is filed as abandoned (`Table.close`)."""
         game = table.session.game
         require_live(game)
         if viewer in game.locked:
@@ -1447,6 +1500,15 @@ class Tables:
         if table.session.journal is not None:
             table.session.journal.locked(viewer, at_step=table.session.steps)
         table.bump()
+        if not any(
+            s not in game.locked and seat.kind is not SeatKind.BOT
+            for s, seat in enumerate(table.seats)
+        ):
+            # Only bots are left, with no seat a player could still take: the
+            # game is abandoned rather than played out to nobody. Closed off
+            # this request's thread, since `close` waits on runners that may
+            # need the table this request holds.
+            threading.Thread(target=table.close, daemon=True).start()
         return table.view(viewer)
 
     # --- the trade round (`hexset.trading`, "The trade round") --------------
@@ -1697,8 +1759,17 @@ class Tables:
                 raise
             if origin is not None:
                 table.creator_ip = origin.ip or "?"
+            limits = self.allowance(origin, holder)
             with table.lock:
-                return {"token": new_token, **table.view(table.seat_of(new_token))}
+                out = {"token": new_token, **table.view(table.seat_of(new_token))}
+            if limits is not None:
+                out["allowance"] = limits
+                if limits["live_tables"] > 1:
+                    out["notice"] = PARALLEL_NOTICE
+            return out
+
+        if method == "GET" and path == "/api/limits":
+            return self.allowance(origin, self.holder(origin)) or {}
 
         if method == "POST" and path == "/api/join":
             table = self.get(str(payload.get("code", "")))

@@ -110,6 +110,11 @@ class LocalSearchBrain:
 # table has to change for a failed request to start working again.
 ERROR_BACKOFF = 1.0
 
+# How many times in a row the same error may come back before the runner
+# stops: a failure that repeats unchanged is the position, not the moment,
+# and retrying it forever spends the server's one core on nothing.
+REPEATED_ERROR_LIMIT = 30
+
 # The duties (`api.your_move`) a runner meets by asking its brain for a move.
 _MOVES = frozenset({"act", "discard"})
 
@@ -173,15 +178,27 @@ class BotRunner:
     def run(self) -> None:
         """The loop the server hands to a thread. An error is logged and
         retried after `ERROR_BACKOFF` rather than killing it, except
-        `Unplayable`, which is logged and stops the runner."""
+        `Unplayable`, which is logged and stops the runner, and the same error
+        `REPEATED_ERROR_LIMIT` times in a row, which stops it the same way."""
+        last, repeats = None, 0
         while not self.stop.is_set():
             try:
                 if not self.run_once():
                     return
+                last, repeats = None, 0
             except Unplayable as error:
                 print(f"bot seat {self.seat} stopped: {error}", file=sys.stderr)
                 self.stop.set()
                 return
             except Exception as error:  # noqa: BLE001 — one bad read must not kill the runner
-                print(f"bot seat {self.seat}: {error}", file=sys.stderr)
+                said = f"{type(error).__name__}: {error}"
+                repeats = repeats + 1 if said == last else 1
+                last = said
+                if repeats >= REPEATED_ERROR_LIMIT:
+                    print(f"bot seat {self.seat} stopped after {repeats} identical errors: {said}",
+                          file=sys.stderr)
+                    self.stop.set()
+                    return
+                if repeats == 1:
+                    print(f"bot seat {self.seat}: {said}", file=sys.stderr)
                 self.stop.wait(ERROR_BACKOFF)

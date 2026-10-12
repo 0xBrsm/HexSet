@@ -48,8 +48,9 @@ from .actions import Action, ActionType, apply, victim_of
 from .board.board import Board
 from .bots.base import seat_at
 from .chance import UNSEEN, ChanceError, Hosted
-from .deals import NO_BLOCK, Ask, DealParams
+from .deals import NO_BLOCK, Ask, DealParams, robber_model
 from .deals import answer as deal_answer
+from .deals import targeted as deal_targeted
 from .game import (
     NO_TURN_CAP,
     Game,
@@ -327,10 +328,11 @@ class Seat:
             return self._close_event()  # a move since: the event's decision point is past
         if 0 <= budget <= self._offers_made:
             return self._close_event()
-        offered = trading.offer(game, self._gates(), already_offered=self._already_offered)
+        offered = trading.offer(game, self._gates(), already_offered=self._already_offered,
+                                slots_left=None if budget < 0 else budget - self._offers_made)
         if offered is None:
             return self._close_event()
-        self._offers_made += 1
+        self._offers_made += trading.offer_slots(game, offered)
         self._round = offered
         self._responses = []
         return offered
@@ -452,6 +454,21 @@ class Seat:
         if promise:
             self._promise = (mover, kind, resource)
         return promise
+
+    def deal_targeted(self, mover: int, kind: str, resource: int, promised: Sequence[int] = ()) -> bool:
+        """Whether this seat is the one `mover` is likeliest to hit, for a
+        deal of `kind` asking a card of `resource` (`hexset.deals.targeted`),
+        read with the seat's own robber model -- whether the seat holds the
+        card or not. A seat that answers no deals, or asked once the robber
+        has moved this turn, is targeted by nothing. What lets a client say
+        a true "none" to an ask aimed at it while holding none to pay."""
+        if self.deals is None or not self.deals.answer or kind not in self.deals.kinds:
+            return False
+        self._sync()
+        if self._robber_moved and mover == self.game.current_player:
+            return False
+        return deal_targeted(self.game, self.seat, Ask(mover, kind, resource), tuple(promised),
+                             robber_model(self.deals.model))
 
     def _settle_promise(self, mover: int, hex_index: int, robbed: int | None) -> None:
         """After `mover`'s robber move to `hex_index`, robbing `robbed`: a

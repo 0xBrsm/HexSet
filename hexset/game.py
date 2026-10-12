@@ -202,6 +202,10 @@ class Game:
     # The `turns` value the trade event last ran in, so a knight played in
     # MAIN cannot re-run it when its robber move re-enters MAIN.
     trade_event_turn: int = -1
+    # Each seat's open ask ("any card for" a card, `trading.offer`) as
+    # `(turn, card, asks it stands for)`: read the same turn to ask for the
+    # card no more and to counter back (`trading.respond`).
+    open_asks: dict = field(default_factory=dict)
     # Candidates the trade event found against a manual seat's
     # `PendingGate`: a snapshot of the *last* event, not an accumulating log
     # like `trades`, so nothing pending survives a change of hands it was
@@ -956,9 +960,9 @@ def _run_trade_rounds(game: Game, gates) -> list[Trade]:
     completed: list[Trade] = []
     offered: set = set()
     made: list = []
-    asked = 0
-    while budget < 0 or asked < budget:
-        asked += 1
+    # An open ask counts as the offers it stands for (`trading.offer_slots`),
+    # so the budget is read off what went to the table, not the rounds run.
+    while budget < 0 or len(made) < budget:
         before = len(made)
         cleared = trade_round(game, gates, already_offered=offered, offers_made=made,
                               counter_steps=game.counter_steps)

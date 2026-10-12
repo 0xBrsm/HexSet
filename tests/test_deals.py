@@ -115,8 +115,50 @@ def test_only_a_seat_that_answers_this_kind_and_holds_the_card_is_asked():
     assert not D.answer(game, 1, gate, ANSWERS, D.Ask(0, D.NO_BLOCK, ORE))
     assert not D.answer(game, 0, gate, ANSWERS, D.Ask(0, D.NO_BLOCK, ORE))
     assert asked == []
-    assert D.answer(game, 2, gate, ANSWERS, ASK, (1,))
-    assert asked == [(2, (1,), D.PlainMover)]
+    model = D.PlainMover()
+    target = next(s for s in (2, 3) if D.targeted(game, s, ASK, (1,), model))
+    other = 5 - target
+    assert D.answer(game, target, gate, ANSWERS, ASK, (1,))
+    assert asked == [(target, (1,), D.PlainMover)]
+    if not D.targeted(game, other, ASK, (1,), model):
+        assert not D.answer(game, other, gate, ANSWERS, ASK, (1,))
+        assert len(asked) == 1                 # a seat the mover is not coming for is not asked
+
+
+def test_the_target_is_the_seat_likeliest_to_be_hit():
+    game = a_robber_move()
+    model = D.PlainMover()
+    chance = {s: block_chance(model, game, s) for s in (1, 2, 3)}
+    top = max(chance.values())
+    for s in (1, 2, 3):
+        assert D.targeted(game, s, ASK, (), model) == (chance[s] > 0 and chance[s] >= top - 1e-12)
+    assert not D.targeted(game, 0, ASK, (), model)          # never the mover itself
+    ns = D.Ask(0, D.NO_STEAL, WOOD)
+    stolen = {}
+    for s in (1, 2, 3):
+        hexes, robbed = D.hit_chances(model, game._state, 0, None, {}, s)
+        stolen[s] = sum(p * robbed[h] for h, p in hexes.items())
+    for s in (1, 2, 3):
+        assert D.targeted(game, s, ns, (), model) == (stolen[s] > 0 and stolen[s] >= max(stolen.values()) - 1e-12)
+
+
+def test_a_promise_already_made_moves_the_target():
+    game = a_robber_move()
+    model = D.PlainMover()
+    target = next(s for s in (1, 2, 3) if D.targeted(game, s, ASK, (), model))
+    # the mover reads the target's promise as kept, so its hexes are all but ruled out
+    assert not D.targeted(game, target, ASK, (target,), model)
+
+
+def test_a_hosted_seat_reads_whether_it_is_targeted_holding_the_card_or_not():
+    game = a_robber_move()
+    model = D.PlainMover()
+    target = next(s for s in (1, 2, 3) if D.targeted(game, s, ASK, (), model))
+    clear_hand(game._state, target)
+    seat = Seat(observe(game, target), target, object(), Gate(), deals=ANSWERS)
+    assert seat.deal_targeted(0, D.NO_BLOCK, WOOD)
+    assert not seat.deal_answer(0, D.NO_BLOCK, WOOD)        # nothing to pay with
+    assert not Seat(observe(game, target), target, object(), Gate()).deal_targeted(0, D.NO_BLOCK, WOOD)
 
 
 def test_a_hosted_seat_answers_from_its_own_view():

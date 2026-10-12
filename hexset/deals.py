@@ -21,7 +21,9 @@ chat translates the ask into an `Ask` and the answer back
 (`hexset.seat.Seat.deal_answer`).
 
 **How a seat answers.** Only under `DealParams` with `answer` on, for the
-`kinds` it makes, and only while it holds the card. A gate may answer for
+`kinds` it makes, only while it holds the card, and only as the mover's
+likeliest target (`targeted`): a deal buys off a hit, so a seat the mover is
+not coming for has nothing to buy. A gate may answer for
 itself with `deal_answer(game, seat, ask, promised, model) -> bool`;
 otherwise `default_answer` prices the promise with the gate's own
 `gains_many` (`promise_value`), so each bot values a deal in its own terms.
@@ -197,6 +199,29 @@ def hit_chances(model: RobberModel, state: GameState, mover: int, allowed: froze
     return hexes, robbed
 
 
+def targeted(game: "Game", seat: int, ask: Ask, promised: Sequence[int], model: RobberModel) -> bool:
+    """Whether `seat` is the seat the mover is likeliest to hit, read from
+    `seat`'s own view: blocked (a building on the robber's hex) for a
+    no-block ask, robbed for a no-steal one, with the promises already made
+    taken as kept. A tie for the likeliest counts; a seat with no chance of
+    being hit is never targeted. What a deal is predicated on: a seat the
+    mover is not coming for has no hit to buy off, and says nothing."""
+    st = game.state(seat).state
+    mover, taken = ask.mover, {s: ask.kind for s in promised}
+    hexes = model.hexes(st, mover, allowed_targets(st, mover, game.robber_allowed), taken)
+    if ask.kind == NO_BLOCK:
+        hit = {h: occupants(st, h) for h in hexes}
+    else:
+        hit = {h: model.victims(st, mover, h, taken) for h in hexes}
+    chance = {}
+    for s in range(st.num_players):
+        if s == mover or s in game.locked:
+            continue
+        chance[s] = sum(p * (s in hit[h] if ask.kind == NO_BLOCK else hit[h].get(s, 0.0))
+                        for h, p in hexes.items())
+    return chance.get(seat, 0.0) > 0 and chance[seat] >= max(chance.values())
+
+
 def promise_value(game: "Game", seat: int, gate: object, ask: Ask, promised: Sequence[int],
                   model: RobberModel) -> float:
     """What promising is worth to `seat` over staying silent, in its gate's
@@ -264,12 +289,15 @@ def answer(game: "Game", seat: int, gate: object, params: DealParams | None, ask
            promised: Sequence[int] = ()) -> bool:
     """Whether `seat` promises the card `ask` names, `promised` the seats
     that already have, in the order they did: never without `params` that
-    answer this kind, nor without the card in hand, nor to itself; then the
-    gate's own `deal_answer` where it has one, else `default_answer`."""
+    answer this kind, nor without the card in hand, nor to itself, nor as a
+    seat the mover is not likeliest to hit (`targeted`); then the gate's own
+    `deal_answer` where it has one, else `default_answer`."""
     if (params is None or not params.answer or ask.kind not in params.kinds or seat == ask.mover
             or game.state(seat).state.hands[seat][ask.resource] <= 0):
         return False
     model = robber_model(params.model)
+    if not targeted(game, seat, ask, promised, model):
+        return False
     own = getattr(gate, "deal_answer", None)
     if own is not None:
         return bool(own(game, seat, ask, tuple(promised), model))
@@ -279,5 +307,5 @@ def answer(game: "Game", seat: int, gate: object, params: DealParams | None, ask
 __all__ = [
     "NO_BLOCK", "NO_STEAL", "KINDS", "DICE_STAY", "DealParams", "Ask", "RobberModel", "PlainMover",
     "register_robber_model", "robber_model", "candidate_hexes", "weights_on", "softmax", "hit_chances",
-    "promise_value", "default_answer", "answer",
+    "targeted", "promise_value", "default_answer", "answer",
 ]

@@ -20,7 +20,7 @@ from hexset.clients.policy import Checkpoint, Policy
 from hexset.game import Game, imagine, is_over, to_move
 from hexset.mcts import Search
 from hexset.actions import options_for
-from hexset.clients._modelmeta import gate_config_of, trader_of
+from hexset.clients._modelmeta import gate_config_of, trader_of, trader_veto_of
 from hexset.state import HiddenHand, copy_state
 from hexset import trading
 from hexset.trading import UNLIMITED, TradeParams, TradeProtocol, exchange
@@ -507,7 +507,7 @@ def register_entrants(loader) -> None:
         checkpoint = loader(path, board.topology)
         trader = own_trader(entrant, checkpoint, path)
         bot = bot_for(checkpoint, rng=rng, trade=entrant.trade)
-        return traded(bot, trader, board, rng)
+        return traded(bot, trader, board, rng, veto=trader_veto_of(checkpoint))
 
     def spawn_mcts(entrant, board: Board, rng):
         path = _checkpoint_path(entrant.weights, "mcts")
@@ -518,7 +518,7 @@ def register_entrants(loader) -> None:
             simulations=entrant.simulations, wave=entrant.wave, k=entrant.k,
             rng=rng, trade=entrant.trade,
         )
-        return traded(bot, trader, board, rng)
+        return traded(bot, trader, board, rng, veto=trader_veto_of(checkpoint))
 
     register_entrant_kind("network", spawn_network)
     register_entrant_kind("mcts", spawn_mcts)

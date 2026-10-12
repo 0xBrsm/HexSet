@@ -212,6 +212,18 @@ second once it ends or nobody has read it for 15 minutes. Over either limit
 the deal is a 429 and nothing is created; a deal refused for another reason
 does not count. Loopback addresses (`--limit-exempt`) are under no limit.
 
+A 429 for the period limit reads `game limit: <n> per <days> days for this
+address; next slot <UTC time>`, with `; contact: <contact>` when the server sets
+`--contact`. Its body adds `next_slot` (and `contact`), and `Retry-After`
+gives the seconds to the next slot.
+
+A new game's response carries `allowance`: `games_left`, `games_per_period`,
+`period_days`, `live_tables`, `live_tables_limit` (`null` where there is no
+limit), plus `contact` once ten or fewer games are left. When the caller has
+another game in play it also carries `notice`: tables share one CPU core, so
+games played in parallel each run slower. `GET /api/limits` returns the same
+`allowance` without dealing a game (`{}` for a caller under no limit).
+
 A client the server's owner has issued an API key sends it on
 `X-HexSet-Key` with `POST /api/games`. Its deals count against the key's own
 allowance per period instead of its address's (the unfinished-games limit is

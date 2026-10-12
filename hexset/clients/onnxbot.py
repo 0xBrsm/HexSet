@@ -4,8 +4,10 @@ onnxruntime's half of the model boundary: loading a `.onnx` file, checking what
 it declares, and answering `hexset.clients.policy.Policy` for it. How one is
 *played* lives in `hexset.clients.netbot`; `spawn` is the only entry point the
 package needs. A checkpoint's `contract` metadata names its record shape
-(`hexset.onnx_record.CONTRACT_VERSION`, `6`: the graph masks, normalises,
-argmaxes and un-rotates itself); anything else is refused at load.
+(`hexset.onnx_record.CONTRACT_VERSION`, `7`: the graph masks, normalises,
+argmaxes and un-rotates itself). Contract 6, whose record is contract 7's
+minus `roads_to_take` and `to_move`, is still served; anything else is refused
+at load (`hexset.server.constants.RECORD_CONTRACTS`).
 """
 
 from __future__ import annotations
@@ -26,7 +28,9 @@ from hexset.game import Game
 from hexset.mcts import Search
 from hexset.onnx_record import record_from_game
 from hexset.server.constants import RECORD_CONTRACTS
-from hexset.clients._modelmeta import SearchConfig, gate_config, search_config, trader_config
+from hexset.clients._modelmeta import (
+    SearchConfig, gate_config, search_config, trader_config, trader_veto_config, trader_veto_of,
+)
 from hexset.trading import UNLIMITED, TradeParams
 
 __all__ = [
@@ -159,6 +163,8 @@ class Loaded:
     #: The bot the file names to answer its trades (`hexset.arena.traded`),
     #: `None` for its own gate.
     trader: str | None = None
+    #: Whether the file's own gate vetoes that trader (`trader_veto`).
+    trader_veto: bool = False
 
     @property
     def trade_params(self) -> TradeParams:
@@ -243,6 +249,7 @@ def _load_cached(
             else {**meta, "max_offers": legacy_offers}
         ),
         trader=trader_config(meta),
+        trader_veto=trader_veto_config(meta),
     )
 
 
@@ -338,7 +345,7 @@ def spawn(
         )
     trader = declared_trader(loaded, path)
     own = _spawn_own(path, board, loaded, rng, device, threads)
-    return traded(own, trader, board, random.Random() if rng is None else rng)
+    return traded(own, trader, board, random.Random() if rng is None else rng, veto=trader_veto_of(loaded))
 
 
 def _spawn_own(path, board, loaded, rng, device, threads):

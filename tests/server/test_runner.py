@@ -116,3 +116,34 @@ def test_a_runner_whose_brain_refuses_the_position_stops_instead_of_retrying():
     runner.stop.set()
     assert not alive, "the runner kept retrying a refused position"
     assert asked == [0]
+
+
+def test_a_runner_stops_once_the_same_error_keeps_coming_back(monkeypatch):
+    """An error that is not a refusal is retried, but the same one coming
+    back `REPEATED_ERROR_LIMIT` times in a row is the position, not the
+    moment: the runner stops rather than retrying it forever."""
+    from hexset.server import _runner
+
+    monkeypatch.setattr(_runner, "ERROR_BACKOFF", 0.0)
+    asked = []
+
+    class Transport:
+        def get(self, path, token):
+            return {"version": 1, "to_move": 0, "your_move": "act"}
+
+        def post(self, path, token, body):
+            raise AssertionError("nothing was decided, so nothing is posted")
+
+    class Breaks:
+        def decide(self, transport, token, seat):
+            asked.append(seat)
+            raise KeyError("a feature this position does not have")
+
+    runner = BotRunner(seat=0, token="t", transport=Transport(), brain=Breaks(), poll_interval=0.0)
+    thread = threading.Thread(target=runner.run, daemon=True)
+    thread.start()
+    thread.join(timeout=10)
+    alive = thread.is_alive()
+    runner.stop.set()
+    assert not alive, "the runner kept retrying the same error"
+    assert len(asked) == _runner.REPEATED_ERROR_LIMIT

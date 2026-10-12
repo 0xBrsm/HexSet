@@ -183,11 +183,13 @@ class Handler(BaseHTTPRequestHandler):
         # The request log's address: the real client, not the proxy.
         return self.client_ip()
 
-    def _json(self, payload: dict, status: int = 200) -> None:
+    def _json(self, payload: dict, status: int = 200, headers: dict | None = None) -> None:
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
@@ -210,7 +212,8 @@ class Handler(BaseHTTPRequestHandler):
                 )
             )
         except ApiError as error:
-            self._json({"error": str(error)}, status=error.status)
+            headers = {"Retry-After": str(error.retry_after)} if error.retry_after else None
+            self._json({"error": str(error), **error.fields}, status=error.status, headers=headers)
         except (BrokenPipeError, ConnectionResetError):
             # The client navigated away from a parked read; nobody left to
             # answer.
@@ -472,6 +475,11 @@ def main(argv: list[str] | None = None) -> None:
              "counts against that key's games per period, not its address's. "
              "Default: none.",
     )
+    parser.add_argument(
+        "--contact", default=None, metavar="TEXT",
+        help="Where to ask for a larger allowance, sent with a game-limit refusal "
+             "and with an allowance running low. Default: none.",
+    )
     args = parser.parse_args(argv)
     load_runtime(*args.runtime)
 
@@ -485,6 +493,7 @@ def main(argv: list[str] | None = None) -> None:
         live_tables_per_ip=args.live_tables_per_ip,
         limit_exempt=tuple(args.limit_exempt) if args.limit_exempt is not None else Config.limit_exempt,
         api_keys=load_api_keys(args.api_keys) if args.api_keys else {},
+        contact=args.contact,
     )
     server = HexSetServer((args.host, args.port), Tables(config), args.forwarded_header)
 

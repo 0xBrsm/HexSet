@@ -108,6 +108,15 @@ class TradeParams:
     #: only under `fragment_trades`, so there it orders both; under card caps
     #: or a responder price alone it orders this gate's counters.
     fit_offers: bool = False
+    #: Look this many of its next offers ahead, `0` for none: where the first
+    #: is a one-for-one and at least one other among them, within the offers
+    #: it has left this turn, is a one-for-one for the same card, put one open
+    #: ask up in their place -- "any card for" the card (`Offer.any`) -- that
+    #: counts as many offers as the asks it replaces, ask for the card no more
+    #: this turn, and counter a counter that brings the card for one it will
+    #: not give with the card for one of those it offered (`trading.offer`,
+    #: `trading.respond`).
+    open_asks: int = 0
 
     def __post_init__(self) -> None:
         if self.max_offers is not None and self.max_offers < 0:
@@ -135,6 +144,8 @@ class TradeParams:
             )
         if self.gate_plies < 0:
             raise ValueError(f"gate_plies must be non-negative: {self.gate_plies}")
+        if self.open_asks < 0:
+            raise ValueError(f"open_asks must be non-negative: {self.open_asks}")
         # A fragment cannot be wider than what this gate will move at all: a
         # plan whose pieces it would itself refuse never reaches the table.
         # Only a declared `fragment_cards` is checked; an undeclared one is
@@ -218,6 +229,7 @@ class TradeParams:
             fragment_cards=_int(meta.get("fragment_cards"), on.fragment_cards),
             gate_plies=_int(meta.get("gate_plies"), on.gate_plies, MAX_GATE_PLIES, floor=0),
             fit_offers=_bool(meta.get("fit_offers"), on.fit_offers),
+            open_asks=_int(meta.get("open_asks"), on.open_asks, MAX_OFFERS, floor=0),
         )
 
     def as_meta(self) -> dict[str, str]:
@@ -239,6 +251,8 @@ class TradeParams:
             declared = getattr(self, name)
             if declared is not None:
                 out[name] = str(declared)
+        if self.open_asks:
+            out["open_asks"] = str(self.open_asks)
         return out
 
 

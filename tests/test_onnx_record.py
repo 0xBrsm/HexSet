@@ -82,3 +82,17 @@ def test_record_batch_stacks_each_positions_own_record():
             np.testing.assert_array_equal(batch[name][row], single[name])
     with pytest.raises(ValueError, match="at least one"):
         record_batch([], space)
+
+
+def test_the_record_carries_roads_to_take_and_the_mover_in_board_seat_order():
+    from hexset.game import to_move
+    from hexset.roads import ROADS_TO_TAKE_CAP, roads_to_take_all
+
+    game = a_game(seed=3, steps=300)
+    space = space_for(game)
+    for perspective in range(game._state.num_players):
+        row = record_from_game(game, perspective, space)
+        assert row["roads_to_take"].dtype == np.int64
+        assert tuple(row["roads_to_take"]) == roads_to_take_all(game._state)
+        assert all(0 <= n <= ROADS_TO_TAKE_CAP for n in row["roads_to_take"])
+        assert row["to_move"].shape == () and int(row["to_move"]) == to_move(game)

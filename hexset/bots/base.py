@@ -18,7 +18,9 @@ from typing import Collection, Protocol, Sequence
 
 from ..actions import Action, options_for
 from ..game import Game
-from ..trading import Bundle
+from ..trading import (
+    RESPONSE_ACCEPT, RESPONSE_COUNTER, RESPONSE_PASS, Bundle, Response, clears_floor, valued_many,
+)
 from ..view import View
 
 __all__ = [
@@ -87,6 +89,88 @@ class TradesBy:
         return (TradesBy, (self.mover, self.trader))
 
 
+class Vetoed:
+    """``proposer``'s trading, thinned to the exchanges ``veto`` also gains
+    from: its offers (``candidates``), its answers (``respond``,
+    ``respond_any``: an acceptance or counter the veto refuses is a pass) and
+    its picks (an answer the veto refuses reaches ``proposer`` as a pass).
+    The veto reads each exchange with its own ``gains_many`` and clears it
+    above its own ``trade_floor`` (`hexset.trading.clears_floor`), so a
+    network seat vetoing its trader holds every trade to the floor its
+    checkpoint declares. ``gains_many`` is the proposer's, ``-1.0`` where the
+    veto refuses; every other name is the proposer's.
+
+    The veto never adds, changes or chooses an exchange: it only removes
+    ones the proposer would make. Seat it with
+    ``TradesBy(mover, Vetoed(trader, mover))`` (`hexset.arena.traded` with
+    ``veto=True``) for a mover that vetoes its own trader.
+    """
+
+    __slots__ = ("proposer", "veto")
+
+    def __init__(self, proposer: object, veto: object) -> None:
+        object.__setattr__(self, "proposer", proposer)
+        object.__setattr__(self, "veto", veto)
+
+    def __getattr__(self, name: str):
+        return getattr(object.__getattribute__(self, "proposer"), name)
+
+    def __setattr__(self, name: str, value) -> None:
+        setattr(self.proposer, name, value)
+
+    def __delattr__(self, name: str) -> None:
+        delattr(self.proposer, name)
+
+    def __reduce__(self):
+        return (Vetoed, (self.proposer, self.veto))
+
+    def seat_at(self, game: Game) -> None:
+        seat_at(self.proposer, game)
+        seat_at(self.veto, game)
+
+    def _clears(self, view: View, received: Sequence[Bundle], counterparties: Sequence[int]) -> list[bool]:
+        """Whether the veto gains from each of ``received`` (signed towards
+        this seat) with the matching counterparty, in one batch."""
+        if not received:
+            return []
+        gains = valued_many(self.veto, view, list(received), list(counterparties))
+        return [clears_floor(g, self.veto) for g in gains]
+
+    def candidates(self, view: View, counterparties: Sequence[int], *, turn=None, already_offered=()):
+        menu = list(self.proposer.candidates(view, counterparties, turn=turn, already_offered=already_offered))
+        ok = self._clears(view, [b for _, b in menu], [them for them, _ in menu])
+        return [c for c, keep in zip(menu, ok) if keep]
+
+    def _answer(self, view: View, actor: int, response: Response) -> Response:
+        """``response`` to ``actor``, or a pass where the veto refuses what it
+        would give this seat (bundles are signed towards ``actor``)."""
+        if response.kind not in (RESPONSE_ACCEPT, RESPONSE_COUNTER) or response.bundle is None:
+            return response
+        if self._clears(view, [tuple(-n for n in response.bundle)], [actor])[0]:
+            return response
+        return Response(response.seat, RESPONSE_PASS, None)
+
+    def respond(self, view: View, offer) -> Response:
+        return self._answer(view, offer.actor, self.proposer.respond(view, offer))
+
+    def respond_any(self, view: View, offer) -> Response:
+        return self._answer(view, offer.actor, self.proposer.respond_any(view, offer))
+
+    def pick(self, view: View, responses: Sequence[Response]) -> int | None:
+        live = [i for i, r in enumerate(responses)
+                if r.kind in (RESPONSE_ACCEPT, RESPONSE_COUNTER) and r.bundle is not None]
+        ok = dict(zip(live, self._clears(view, [responses[i].bundle for i in live],
+                                         [responses[i].seat for i in live])))
+        thinned = [r if ok.get(i, True) else Response(r.seat, RESPONSE_PASS, None)
+                   for i, r in enumerate(responses)]
+        return self.proposer.pick(view, thinned)
+
+    def gains_many(self, view: View, received: Sequence[Bundle], counterparties: Sequence[int]) -> list[float]:
+        own = valued_many(self.proposer, view, list(received), list(counterparties))
+        ok = self._clears(view, received, counterparties)
+        return [g if keep else -1.0 for g, keep in zip(own, ok)]
+
+
 def handed_off(game: Game, at: int) -> bool:
     """Whether `game` is past round `at`: every playing seat has had `at`
     main-phase turns. Read off `Game.turns`, which counts turns the playing
@@ -147,6 +231,9 @@ def seat_at(bot: object, game: Game) -> None:
     if isinstance(bot, TradesBy):
         seat_at(bot.mover, game)
         seat_at(bot.trader, game)
+        return
+    if isinstance(bot, Vetoed):
+        bot.seat_at(game)
         return
     if isinstance(bot, Handoff):
         seat_at(bot.first, game)

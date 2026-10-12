@@ -1,6 +1,7 @@
 """Build a record-contract stub graph: right names, right shapes, no weights.
 
-    python build_stub.py 6              # 25 inputs -> stub-contract6.onnx
+    python build_stub.py 7              # 26 inputs -> stub-contract7.onnx
+    python build_stub.py 6              # 24 inputs -> stub-contract6.onnx
     python build_stub.py 6 --partial    # declares only a subset
     python build_stub.py 6 --valued     # value = a linear read of own_hand
     python build_stub.py 6 --valued --fixed-batch   # batch dim pinned to 1
@@ -9,7 +10,9 @@ Semantics are deliberately trivial and deliberately *legal*: uniform over the
 legal mask, first legal slot, zero value. A stub that could emit an illegal
 action would send whoever builds against it chasing a phantom engine bug.
 
-`--partial` drops the two ledger fields, the shape a graph trained before
+Contract 6 is contract 7 without `roads_to_take` and `to_move`; its stubs
+stand for the contract-6 graphs that are still served. `--partial` drops the
+two ledger fields, the shape a graph trained before
 them would have; `--fixed-batch` pins the batch axis to `1`, which
 `V2Policy._batchable` must detect and fall back from.
 
@@ -48,6 +51,8 @@ INPUTS = [
     ("free_roads", TP.INT64, [B]),
     ("deck_size", TP.INT64, [B]),
     ("turns", TP.INT64, [B]),
+    ("roads_to_take", TP.INT64, [B, PLAYERS]),
+    ("to_move", TP.INT64, [B]),
     ("perspective", TP.INT64, [B]),
     ("own_hand", TP.INT64, [B, RESOURCES]),
     ("hand_totals", TP.INT64, [B, PLAYERS]),
@@ -60,10 +65,14 @@ INPUTS = [
 
 # The `contract` metadata number is `hexset.export_onnx._CONTRACT_VERSION`'s.
 LEDGER_FIELDS = ("ledger_known", "ledger_unknown")
+# What contract 7 added to contract 6's record.
+CONTRACT_7_FIELDS = ("roads_to_take", "to_move")
 
-CONTRACT = sys.argv[1] if len(sys.argv) > 1 else "6"
-if CONTRACT != "6":
-    raise SystemExit("contract must be 6")
+CONTRACT = sys.argv[1] if len(sys.argv) > 1 else "7"
+if CONTRACT not in ("6", "7"):
+    raise SystemExit("contract must be 6 or 7")
+if CONTRACT == "6":
+    INPUTS = [row for row in INPUTS if row[0] not in CONTRACT_7_FIELDS]
 PARTIAL = "--partial" in sys.argv
 VALUED = "--valued" in sys.argv
 if PARTIAL:

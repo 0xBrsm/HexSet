@@ -289,7 +289,8 @@ def _ledger_width(players: int = 4) -> int:
 
 def _ledger_tail(obs, players: int = 4):
     """Each opponent's known[5] + unknown, seat-relative, own seat excluded."""
-    tail = obs.globals[-_ledger_width(players):]
+    tail = obs.globals[global_columns(players)["ledger"]]
+    assert len(tail) == _ledger_width(players)
     known = [tail[i * 6 : i * 6 + 5] for i in range(players - 1)]
     unknown = [tail[i * 6 + 5] for i in range(players - 1)]
     return known, unknown
@@ -297,10 +298,73 @@ def _ledger_tail(obs, players: int = 4):
 
 def test_global_features_counts_the_ledger_block():
     """Pinned so a layout change has to own the new width."""
-    assert global_features(4) == 67
+    assert global_features(4) == 75
     assert global_features(4) - global_features(3) == (
-        1 + 1 + 1 + 1 + 2 + (NUM_RESOURCES + 1)
+        1 + 1 + 1 + 1 + 2 + (NUM_RESOURCES + 1) + 1 + 1
     )
+
+
+def test_the_roads_and_mover_blocks_come_last():
+    """Appended after the ledger, so every older column keeps its offset."""
+    players = 4
+    columns = global_columns(players)
+    assert columns["ledger"].stop == 67
+    assert columns["roads_to_take"] == slice(67, 67 + players)
+    assert columns["to_move"] == slice(67 + players, 67 + 2 * players)
+    assert columns["to_move"].stop == global_features(players)
+
+
+def _roads_position(seed: int = 5):
+    """A played-out position with Longest Road held by someone: a real
+    holder where random play reaches one, otherwise the card handed to a seat
+    (`roads_to_take` reads the holder off the state, as the encoder does)."""
+    for attempt in range(40):
+        game = a_game(seed=seed + attempt, steps=400)
+        if not is_over(game) and game._state.longest_road_holder != NO_OWNER:
+            return game
+    game = a_game(seed=seed, steps=200)
+    game._state.longest_road_holder = 2
+    return game
+
+
+def test_roads_to_take_and_the_mover_read_seat_relative():
+    from hexset.game import to_move
+    from hexset.roads import ROADS_TO_TAKE_CAP, roads_to_take_all
+
+    players = 4
+    game = _roads_position()
+    holder = game._state.longest_road_holder
+    assert holder != NO_OWNER
+    counts = roads_to_take_all(game._state)
+    assert counts[holder] == 0
+    mover = to_move(game)
+    columns = global_columns(players)
+    for perspective in range(players):
+        obs = encode(game, perspective)
+        seats = to_frame(range(players), perspective)
+        roads = obs.globals[columns["roads_to_take"]]
+        assert list(roads) == pytest.approx([counts[s] / ROADS_TO_TAKE_CAP for s in seats])
+        assert roads[_seat(holder, perspective, players)] == 0.0
+        assert all(0.0 <= r <= 1.0 for r in roads)
+        moving = obs.globals[columns["to_move"]]
+        assert moving.sum() == 1.0
+        assert moving[_seat(mover, perspective, players)] == 1.0
+        assert (moving[0] == 1.0) == (perspective == mover)
+
+    # The batched path, from every seat, byte for byte.
+    batch = encode_batch([game] * players, list(range(players)))
+    for perspective, got in enumerate(batch):
+        assert np.array_equal(got.globals, encode(game, perspective).globals)
+
+
+def test_the_mover_block_follows_a_discard_not_the_turn():
+    game = a_game(steps=0)
+    game.phase = Phase.DISCARD
+    game.current_player = 0
+    game.discard_quota = [0, 0, 4, 0]
+    game._state.hands[2] = [0, 8, 0, 0, 0]
+    moving = encode(game, 1).globals[global_columns(4)["to_move"]]
+    assert list(moving) == [0.0, 1.0, 0.0, 0.0]  # seat 2, one after seat 1
 
 
 def test_a_steal_shows_up_as_unknown_in_the_encoding():

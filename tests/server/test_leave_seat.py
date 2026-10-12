@@ -214,3 +214,27 @@ def test_leaving_lets_go_of_a_setup_turn_held_open():
 
     assert session.awaiting_confirm is None
     assert view["awaiting_confirm"] is None
+
+
+def test_leaving_a_table_of_only_bots_closes_it(tmp_path):
+    """The last player leaving a table whose other seats are a bot and closed
+    seats abandons the game: the bot stops and the journal says so, rather
+    than the bot playing on to nobody."""
+    registry = new_tables(games_dir=str(tmp_path))
+    data = registry.handle("POST", "/api/games", {"bots": []}, None)
+    token = data["token"]
+    table = registry.get(data["code"])
+    me = table.seat_of(token)
+    bot, *rest = [s for s in range(4) if s != me]
+    registry.handle("POST", "/api/bot", {"seat": bot, "model": "test-trader"}, token)
+    for seat in rest:
+        registry.handle("POST", "/api/close", {"seat": seat}, token)
+
+    registry.handle("POST", "/api/leave", {}, token)
+
+    path = next(tmp_path.glob("*.jsonl"))
+    deadline = time.monotonic() + 20
+    while '"abandoned"' not in path.read_text() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert '"abandoned"' in path.read_text()
+    assert not table.runners

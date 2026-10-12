@@ -5,6 +5,102 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.12.0
+
+### Breaking
+
+- **The observation's globals widen by `2 * players` (8 at four seats), at
+  the end.** After the ledger tail, `hexset.encoding` appends `roads_to_take`
+  (each seat's `roads.roads_to_take` over `ROADS_TO_TAKE_CAP`, seat-relative
+  like `knights_played`: 0 for the Longest Road holder, 1 for four or more or
+  out of reach) and `to_move` (a one-hot of `game.to_move`'s seat relative to
+  the perspective). `global_features(4)` is 75; `global_columns` names both
+  blocks, and every earlier column keeps its offset. `encode` and
+  `encode_batch` agree byte for byte. A network trained on the old width
+  needs its global input projection widened by zero columns to load (HexN's
+  `hexn.migrate_globals` does it without changing what the network computes).
+
+- **Record contract 7.** `hexset.onnx_record.RECORD_FIELDS` adds
+  `roads_to_take` (per seat, board-seat order, int64) and `to_move` (the
+  seat to move, board order, int64), after `turns`; `CONTRACT_VERSION` is
+  `"7"`. Contract-6 graphs still load and play: their declared inputs are a
+  subset of the contract-7 record and the loader feeds a graph only what it
+  declares (`hexset.server.constants.RECORD_CONTRACTS` is `{"6", "7"}`).
+  Older and newer contracts are refused by name.
+
+### Added
+
+- **Open asks for any gate** (`TradeParams.open_asks`, `trading.offer_slots`):
+  a gate declaring `open_asks = n` puts its asks for one card up as one
+  open ask -- "any card for" the card (`Offer.any == -1`) -- where the
+  offer it picks is a one-for-one and at least one other of its next `n`
+  picks, within the offers it has left this turn (`trading.offer`'s
+  `slots_left`), is a one-for-one for the same card. The open ask counts as
+  many offers as the asks it stands for (`offer_slots`, read by the round,
+  the hosted seat and the web table), the gate asks for that card no more
+  that turn (`Game.open_asks`), and `trading.respond` counters a counter
+  that brings the card for one the gate will not give with the card for one
+  of those it offered, where its own gate takes that exchange. An ask its
+  gate lists twice is one ask. `open_asks` round-trips through checkpoint
+  metadata; a gate that declares none offers as before.
+
+- **The API reports what is left of a caller's limits.** `POST /api/games`
+  returns `allowance` (`games_left`, `games_per_period`, `period_days`,
+  `live_tables`, `live_tables_limit`), and `notice` when the caller already
+  has a game in play: tables share one CPU core, so parallel games each run
+  slower. `GET /api/limits` returns the allowance alone. A period-limit 429
+  names the next free slot (`next_slot`, `Retry-After`) and, with the new
+  `--contact`, where to ask for more; the contact also rides on an allowance
+  of ten or fewer games.
+
+- **`hexset.roads.roads_to_take`: how many new roads a seat needs to take
+  Longest Road.** 0 for the holder; otherwise the fewest new roads after
+  which the seat's longest route is longer than every other seat's and at
+  least 5 -- a road joining two of its routes counts both, an opponent's
+  building breaks a route, new roads must join its network, and its remaining
+  road pieces bound the count -- or `ROADS_TO_TAKE_CAP` (4) where that is
+  four or more, or out of reach. `roads_to_take_all` gives every seat's in
+  seat order. Cached on the position's roads and buildings.
+  `longest_with_new_roads`, the trail search under it (the longest route a
+  seat could have with at most `j` new roads), moves here from the bots.
+
+- **Robber deals are answered only by the mover's likeliest target
+  (`hexset.deals.targeted`).** A deal buys off a hit, so `answer` now asks a
+  seat's gate only when that seat is the one the mover is likeliest to hit:
+  blocked for a no-block ask, robbed for a no-steal one, with the promises
+  already made taken as kept, ties included. `Seat.deal_targeted` reads the
+  same for a hosted seat whether or not it holds the card, so a client can
+  answer a true "none" to an ask aimed at it.
+
+- **`hexset.bots.Vetoed`: one gate's trading thinned by a second gate.**
+  Every offer, answer and pick the proposer makes must also clear the veto's
+  own gain above the veto's own floor; the veto never adds or chooses an
+  exchange. `hexset.arena.traded(..., veto=True)` seats a mover over its
+  trader with the mover as that veto, and a checkpoint asks for it with the
+  metadata key `trader_veto` beside `trader` (read by `network:`, `mcts:` and
+  `hexset.clients.onnxbot.spawn`), so a value head can veto a rules trader
+  at the `trade_floor` it declares.
+
+### Changed
+
+- **`roads.roads_to_take(state, seat)` searches that seat alone.** It used
+  to work out every seat's count (`roads_to_take_all`) and return one. The
+  answer is the same and still cached per seat and position, so a caller
+  asking about one seat no longer pays for the other three searches.
+
+### Fixed
+
+- **A server bot seat no longer retries the same error forever.** Its runner
+  stops once the same error comes back `REPEATED_ERROR_LIMIT` (30) times in a
+  row, as it already did for a position its bot refuses; before, a bot that
+  failed the same way on every attempt was retried once a second for as long
+  as the table lived.
+
+- **`POST /api/leave` closes a table that only bots are left at.** When the
+  leaving seat was the last one a player held or could still take, the
+  bots' runners stop and the journal is filed as abandoned, instead of the
+  bots playing on to nobody.
+
 ## 1.11.0
 
 ### Added

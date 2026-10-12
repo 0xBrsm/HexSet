@@ -39,7 +39,7 @@ from .economy import hand_size
 from .game import MAX_TURNS, Game, is_over, start, to_move
 from .rules import STANDARD_GAME, GameType
 from .state import city_count, road_count, settlement_count
-from .trading import TradeParams
+from .trading import TradeParams, params_of
 from .victory import victory_points
 
 if TYPE_CHECKING:
@@ -398,18 +398,28 @@ def spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:
     return traded(_spawn(entrant, board, rng), entrant.trader, board, rng)
 
 
-def traded(bot: Bot, trader: str | None, board: Board, rng: random.Random) -> Bot:
+def traded(bot: Bot, trader: str | None, board: Board, rng: random.Random, *, veto: bool = False) -> Bot:
     """`bot`'s moves over `trader`'s trading (`hexset.bots.TradesBy`), the
     trader named as a lineup names it; `bot` itself where `trader` is `None`.
     The trader is seeded off `rng`'s state without drawing from it, so it
     leaves the mover's own draws exactly as they were, and built bare
-    (`_spawn`, no trader of its own), since a trader only ever trades."""
+    (`_spawn`, no trader of its own), since a trader only ever trades.
+
+    With `veto`, `bot`'s own gate vetoes the trader (`hexset.bots.Vetoed`):
+    every exchange the trader would make must also clear `bot`'s gain above
+    `bot`'s own floor. `bot` must trade (`max_offers` not `0`), or it would
+    veto everything."""
     if trader is None:
         return bot
-    from .bots import TradesBy
+    from .bots import TradesBy, Vetoed
 
     seed = int.from_bytes(hashlib.sha256(repr(rng.getstate()).encode()).digest()[:8], "big")
-    return TradesBy(bot, _spawn(entrant_from_name(trader), board, random.Random(seed)))
+    gate = _spawn(entrant_from_name(trader), board, random.Random(seed))
+    if veto:
+        if not params_of(bot).trades:
+            raise ValueError(f"a seat that does not trade cannot veto its trader {trader!r}")
+        gate = Vetoed(gate, bot)
+    return TradesBy(bot, gate)
 
 
 def _spawn(entrant: Entrant, board: Board, rng: random.Random) -> Bot:

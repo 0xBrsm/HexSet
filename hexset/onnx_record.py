@@ -3,8 +3,8 @@
 
 A position stated **in the rules' own terms, already filtered to what the
 perspective seat may legally know** -- own hand and own development cards
-exact, every other seat by count plus `hexset.ledger`'s public-knowledge
-reconstruction. There is nowhere in it for a hidden card to be. Everything
+exact, every other seat by count plus `hexset.ledger`'s reconstruction as
+the perspective knows it (`PublicLedger.for_seat`). There is nowhere in it for a hidden card to be. Everything
 downstream (one-hot encoding, rotation, scaling) is mechanical and lives in
 `hexn.export_onnx.RecordEncoder`, which also rotates the perspective seat to
 slot 0; rows here stay in board-seat order. **Everything here is numpy, and
@@ -169,12 +169,9 @@ def record_from_game(
 
     # Board-seat order like every other field; `RecordEncoder` rotates it and
     # drops the perspective seat's own entry (exact via `own_hand` above).
-    ledger_known = np.asarray(
-        [game.ledger.seats[s].known for s in range(players)], dtype=np.int64
-    )
-    ledger_unknown = np.asarray(
-        [game.ledger.seats[s].unknown for s in range(players)], dtype=np.int64
-    )
+    rows = game.ledger.for_seat(perspective).seats
+    ledger_known = np.asarray([rows[s].known for s in range(players)], dtype=np.int64)
+    ledger_unknown = np.asarray([rows[s].unknown for s in range(players)], dtype=np.int64)
 
     return {
         "terrain": np.asarray([int(t) for t in state.board.terrain], dtype=np.int64),

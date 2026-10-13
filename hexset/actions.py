@@ -36,6 +36,7 @@ from .game import (
     to_move,
     trade_with_bank,
 )
+from .deals import keep_promises
 from .robber import allowed_targets, may_stand, victims
 from .state import (
     MAX_CITIES, MAX_ROADS, MAX_SETTLEMENTS, can_place_settlement, city_count,
@@ -186,11 +187,13 @@ def _robber_targets(game: Game, kind: ActionType) -> list[Action]:
     state = game._state
     # A host's rule for this move, else the game type's (friendly robber).
     allowed = allowed_targets(state, game.current_player, game.robber_allowed)
+    # ... less what the mover has promised for this move (`hexset.deals`).
+    allowed, spared = keep_promises(state, game.current_player, allowed, dict(game.robber_promised))
     out = []
     for h in range(state.board.num_hexes):
         if not may_stand(state, h) or (allowed is not None and h not in allowed):
             continue
-        reachable = victims(state, h, game.current_player)
+        reachable = [v for v in victims(state, h, game.current_player) if v not in spared]
         if reachable:
             out.extend(Action(kind, h, v) for v in reachable)
         else:

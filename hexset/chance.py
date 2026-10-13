@@ -13,7 +13,8 @@ compared on one seed meet the same dice turn for turn."""
 from __future__ import annotations
 
 import random
-from typing import Sequence
+from dataclasses import dataclass
+from typing import Iterable, Mapping, Sequence
 
 __all__ = [
     "DICE_SIDES",
@@ -33,6 +34,7 @@ __all__ = [
     "SEVEN_ODDS",
     "BALANCED_SEVEN_ODDS",
     "dice_deck",
+    "DiceDeck",
     "Balanced",
     "for_rules",
     "Scripted",
@@ -198,6 +200,94 @@ def dice_deck() -> list[tuple[int, int]]:
     return [(a, b) for a in range(1, DICE_SIDES + 1) for b in range(1, DICE_SIDES + 1)]
 
 
+def _seven_scale(sevens: Mapping[int, int], run: tuple[int | None, int], seat: int | None) -> float:
+    """What a seven's weight is scaled by for `seat`'s roll, from the sevens
+    each roller seen so far has rolled and the current run of them."""
+    if seat is None:
+        return 1.0
+    sevens = dict(sevens)
+    sevens.setdefault(seat, 0)          # as its roll would count it
+    total = sum(sevens.values())
+    balance = 1.0
+    if total >= len(sevens):
+        share, ideal = sevens[seat] / total, 1 / len(sevens)
+        balance = 1 + (ideal - share) / ideal
+    owner, length = run
+    streak = SEVEN_STREAK_STEP * length * (-1 if owner == seat else 1)
+    return min(SEVEN_ADJUST_MAX, max(0.0, balance + streak))
+
+
+def _sum_weights(left: Iterable[tuple[int, int]], cards: int, recent: Sequence[int], scale: float) -> dict[int, float]:
+    """Each sum's draw weight: its cards `left` in the deck of `cards`, less
+    `DICE_RECENT_DISCOUNT` for each time it is among the `recent` sums, a
+    seven's scaled by `scale`. The one formula `Balanced` draws by and
+    `DiceDeck` reads."""
+    w = {}
+    for total, count in left:
+        w[total] = count / cards * max(0.0, 1 - DICE_RECENT_DISCOUNT * recent.count(total))
+    if 7 in w:
+        w[7] *= scale
+    return w
+
+
+_FULL_DECK = tuple(sum(1 for a, b in dice_deck() if a + b == total) for total in range(2, 2 * DICE_SIDES + 1))
+
+
+@dataclass(frozen=True)
+class DiceDeck:
+    """The dice deck's public state, by sum: what `Balanced`'s next roll is
+    drawn from, read off the rolls before it and who rolled them, which
+    every seat sees. A game under `balanced_dice` keeps one on its state
+    (`GameState.dice`) and moves it on at every roll, whatever the source of
+    the roll, so a search can draw from the deck (`Balanced.from_deck`) and
+    read the next roll's odds (`odds`). Immutable: `rolled` returns the next.
+
+    `left` is the cards left of each sum 2..12; the deck is reshuffled as
+    soon as a roll leaves `DICE_DECK_RESHUFFLE_AT` or fewer, so `left` is
+    always what the next roll draws from. `sevens` is each roller seen so
+    far and its sevens, by seat; `run` the seat on a run of sevens and its
+    length."""
+
+    left: tuple[int, ...] = _FULL_DECK
+    cards: int = DICE_SIDES * DICE_SIDES
+    recent: tuple[int, ...] = ()
+    sevens: tuple[tuple[int, int], ...] = ()
+    run: tuple[int | None, int] = (None, 0)
+
+    def weights(self, seat: int | None = None) -> dict[int, float]:
+        """Each sum's draw weight for `seat`'s next roll, as `Balanced.weights`."""
+        return _sum_weights(((total, n) for total, n in enumerate(self.left, 2)), self.cards, self.recent,
+                            _seven_scale(dict(self.sevens), self.run, seat))
+
+    def odds(self, seat: int | None = None) -> tuple[tuple[int, float], ...]:
+        """`(sum, chance)` of `seat`'s next roll, over the sums left in the
+        deck: the weights normalised, or the cards left where every weight
+        is zero -- as `Balanced.roll_by` draws."""
+        w = self.weights(seat)
+        sums = [total for total, n in enumerate(self.left, 2) if n]
+        mass = sum(w[t] for t in sums)
+        if mass > 0:
+            return tuple((t, w[t] / mass) for t in sums)
+        cards = sum(self.left[t - 2] for t in sums)
+        return tuple((t, self.left[t - 2] / cards) for t in sums)
+
+    def rolled(self, seat: int | None, total: int) -> "DiceDeck":
+        """The deck after `seat` rolls `total`."""
+        left = list(self.left)
+        left[total - 2] -= 1
+        cards = self.cards - 1
+        recent = (self.recent + (total,))[-DICE_RECENT_ROLLS:]
+        sevens, run = dict(self.sevens), self.run
+        if seat is not None:
+            sevens.setdefault(seat, 0)
+            if total == 7:
+                sevens[seat] += 1
+                run = (seat, run[1] + 1) if run[0] == seat else (seat, 1)
+        if cards <= DICE_DECK_RESHUFFLE_AT:
+            left, cards = list(_FULL_DECK), DICE_SIDES * DICE_SIDES
+        return DiceDeck(tuple(left), cards, recent, tuple(sorted(sevens.items())), run)
+
+
 class Balanced(Live):
     """`Live`, except rolls come from a dice deck (`DICE_DECK_RESHUFFLE_AT`
     and the constants after it): the 36 combinations drawn without
@@ -228,30 +318,29 @@ class Balanced(Live):
             self.left.setdefault(a + b, []).append((a, b))
         self.cards = DICE_SIDES * DICE_SIDES
 
+    @classmethod
+    def from_deck(cls, rng: random.Random, deck: DiceDeck, *, split: bool = False) -> "Balanced":
+        """A source that rolls on from `deck`: what a search copy of a
+        balanced-dice game draws from (`hexset.game.imagine`). Which of a
+        sum's combinations are left is not tracked and does not matter --
+        a draw reads only how many there are."""
+        source = cls(rng, split=split)
+        source.left = {total: [(a, b) for a, b in dice_deck() if a + b == total][:n]
+                       for total, n in enumerate(deck.left, 2)}
+        source.cards = deck.cards
+        source.recent = list(deck.recent)
+        source.sevens = dict(deck.sevens)
+        source.run = deck.run
+        return source
+
     def seven_scale(self, seat: int | None) -> float:
         """What a seven's weight is scaled by for `seat`'s roll."""
-        if seat is None:
-            return 1.0
-        sevens = dict(self.sevens)
-        sevens.setdefault(seat, 0)          # as its roll would count it
-        total = sum(sevens.values())
-        balance = 1.0
-        if total >= len(sevens):
-            share, ideal = sevens[seat] / total, 1 / len(sevens)
-            balance = 1 + (ideal - share) / ideal
-        owner, length = self.run
-        streak = SEVEN_STREAK_STEP * length * (-1 if owner == seat else 1)
-        return min(SEVEN_ADJUST_MAX, max(0.0, balance + streak))
+        return _seven_scale(self.sevens, self.run, seat)
 
     def weights(self, seat: int | None = None) -> dict[int, float]:
         """Each sum's draw weight for `seat`'s next roll."""
-        w = {}
-        for total, cards in self.left.items():
-            recent = self.recent.count(total)
-            w[total] = len(cards) / self.cards * max(0.0, 1 - DICE_RECENT_DISCOUNT * recent)
-        if 7 in w:
-            w[7] *= self.seven_scale(seat)
-        return w
+        return _sum_weights(((total, len(cards)) for total, cards in self.left.items()), self.cards, self.recent,
+                            self.seven_scale(seat))
 
     def roll(self) -> int:
         return self.roll_by(None)

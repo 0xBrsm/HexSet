@@ -229,3 +229,49 @@ def test_a_world_deals_held_cards_by_the_callers_reading_of_their_age():
     _hold(state, 2, DevCard.KNIGHT, 8)
     vp = _victory_points_dealt(View.from_game(game, 0), random.Random(0), _OldCardsAreVictoryPoints())
     assert vp[2] > 3 * vp[1]
+
+
+def _bounded_view():
+    """Seat 1 holds two cards that can only be wood or ore; seat 2 three
+    untyped cards with no bound."""
+    import random as _random
+    from hexset.board.board import random_base_board as _board
+    from hexset.game import start as _start
+    from hexset.ledger import SeatLedger as _Row
+
+    game = _start(_board(_random.Random(0)), 3, _random.Random(0))
+    state = game._state
+    for seat, hand in enumerate(([1, 0, 0, 0, 0], [1, 0, 0, 0, 1], [0, 1, 1, 1, 0])):
+        for r, n in enumerate(state.hands[seat]):
+            state.bank[r] += n
+        state.hands[seat] = list(hand)
+        for r, n in enumerate(hand):
+            state.bank[r] -= n
+    game.ledger.seats[0] = _Row(known=[1, 0, 0, 0, 0])
+    game.ledger.seats[1] = _Row(unknown=2, most=[1, 0, 0, 0, 2])
+    game.ledger.seats[2] = _Row(unknown=3)
+    return View.from_game(game, 0)
+
+
+def test_a_view_deals_within_each_seats_bounds():
+    import random as _random
+
+    view = _bounded_view()
+    assert view.bounded == [False, True, False]
+    assert view.room[1] == [1, 0, 0, 0, 2]
+    rng = _random.Random(3)
+    for _ in range(200):
+        hand = view.sample(rng).hands[1]
+        assert hand[1] == hand[2] == hand[3] == 0 and hand[0] <= 1
+
+
+def test_a_views_odds_and_expectation_keep_the_bounds():
+    view = _bounded_view()
+    assert view.p_holds(1, [0, 1, 0, 0, 0]) == 0.0
+    assert view.p_holds(1, [0, 0, 0, 0, 1]) == 1.0 or view.p_holds(1, [0, 0, 0, 0, 1]) > 0.5
+    expected = view.expected_hand(1)
+    assert expected[1] == expected[2] == expected[3] == 0.0
+    assert expected[0] <= 1.0 and abs(sum(expected) - 2.0) < 1e-9
+    from hexset.trading._engine import has_room
+    assert not has_room(view, 1, [0, 1, 0, 0, 0])
+    assert has_room(view, 1, [0, 0, 0, 0, 1])

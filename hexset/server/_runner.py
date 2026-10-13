@@ -95,7 +95,7 @@ class LocalSearchBrain:
         # Every owing seat discards at once, but `choose` answers for
         # `to_move`, the lowest one: ask on a copy where this seat alone owes,
         # then seat the bot back at the table.
-        asked = imagine(game, random.Random(0), randomize_deck=False)
+        asked = imagine(game, random.Random(0), randomize_deck=False, seat=seat)
         asked.discard_quota = [n if s == seat else 0 for s, n in enumerate(game.discard_quota)]
         try:
             return action_to_wire(self.bot.choose(asked))

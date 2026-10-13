@@ -72,8 +72,8 @@ def _feed(hands_before, fresh_before, true, action, actor, observers):
 
 def _check(true, seen, seat):
     """`seen` is exactly `observed_by(true, seat)`, plus the same game fields
-    and the same ledger -- the ledger is common knowledge, identical from
-    every seat."""
+    and the same ledger as `seat` knows it: the common rows, identical from
+    every seat, and `seat`'s own, which add the steals it was party to."""
     want = observed_by(true._state, seat)
     got = seen._state
     for name in ("vertex_owner", "vertex_building", "edge_owner", "robber", "bank",
@@ -90,7 +90,8 @@ def _check(true, seen, seat):
     for name in ("phase", "current_player", "setup_step", "last_settlement", "last_roll",
                  "dev_card_played", "discard_quota", "free_roads", "resume_phase", "turns"):
         assert getattr(seen, name) == getattr(true, name), name
-    assert seen.ledger == true.ledger
+    assert seen.ledger.seats == true.ledger.seats
+    assert seen.ledger.for_seat(seat).seats == true.ledger.for_seat(seat).seats
     if not is_over(true):
         assert legal_actions(seen, seat) == legal_actions(true, seat)
 

@@ -204,12 +204,13 @@ def test_a_planning_gate_counters_an_open_offer_with_a_fragment():
 
 class _Asker:
     """A gate whose asks, best first, are `asks` (signed towards it), one a
-    call -- the next not already offered -- declaring `open_asks`."""
+    call -- the next not already offered -- making open asks unless `open_`
+    is off (`TradeParams.open_asks`)."""
 
-    def __init__(self, asks, look=3, budget=3):
+    def __init__(self, asks, open_=True, budget=3):
         from hexset.trading import TradeParams
         self.asks = [tuple(a) for a in asks]
-        self.trade_params = TradeParams(max_offers=budget, open_asks=look)
+        self.trade_params = TradeParams(max_offers=budget, open_asks=open_)
         self.answers = {}
 
     def candidates(self, view, counterparties, *, turn=None, already_offered=()):
@@ -245,13 +246,13 @@ def test_asks_for_one_card_go_up_as_one_open_ask_counting_as_many_offers(asks, s
     assert following == (Offer(0, WOOD_WHEAT) if WOOD_WHEAT in asks else None)
 
 
-@pytest.mark.parametrize("asks,look,left", [((WOOD_ORE, WOOD_WHEAT), 3, 3), ((WOOD_ORE, SHEEP_ORE), 0, 3),
-                                            ((WOOD_ORE, SHEEP_ORE), 3, 1)],
-                         ids=["one-for-ore", "not-declared", "one-offer-left"])
-def test_a_lone_ask_or_an_undeclared_gate_or_no_offers_left_asks_as_it_stands(asks, look, left):
+@pytest.mark.parametrize("asks,open_,left", [((WOOD_ORE, WOOD_WHEAT), True, 3), ((WOOD_ORE, SHEEP_ORE), False, 3),
+                                             ((WOOD_ORE, SHEEP_ORE), True, 1)],
+                         ids=["one-for-ore", "turned-off", "one-offer-left"])
+def test_a_lone_ask_or_a_gate_turning_it_off_or_no_offers_left_asks_as_it_stands(asks, open_, left):
     from hexset.trading import offer_slots
     game = _asking()
-    made = offer(game, [_Asker(asks, look=look), None, None, None], set(), slots_left=left)
+    made = offer(game, [_Asker(asks, open_=open_), None, None, None], set(), slots_left=left)
     assert made == Offer(0, asks[0]) and offer_slots(game, made) == 1
 
 
@@ -273,3 +274,16 @@ def test_a_counter_bringing_the_card_for_one_it_keeps_is_countered_back_with_one
     assert back == Response(0, RESPONSE_COUNTER, (0, 0, 1, 0, -1))
     game.turns += 1                                           # not on the turn of its open ask: no counter back
     assert respond(game, gate, 0, Offer(1, (0, 0, 0, 1, -1))).kind == RESPONSE_PASS
+
+
+def test_open_asks_are_on_by_default_and_reach_the_offers_left():
+    """A gate that says nothing makes open asks, over every offer it has left
+    (`MAX_OFFERS` with no limit), and the metadata round trip keeps it."""
+    from hexset.trading import TradeParams, offer_slots
+    assert TradeParams().open_asks
+    assert TradeParams.from_meta(TradeParams(open_asks=False).as_meta()).open_asks is False
+    assert TradeParams.from_meta(TradeParams().as_meta()).open_asks is True
+    game = _asking()
+    asks = (WOOD_ORE, SHEEP_ORE, BRICK_ORE)
+    made = offer(game, [_Asker(asks, budget=None), None, None, None], set(), slots_left=None)
+    assert made.any == -1 and offer_slots(game, made) == 3

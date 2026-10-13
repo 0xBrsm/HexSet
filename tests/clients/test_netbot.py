@@ -237,7 +237,7 @@ def test_the_after_position_keeps_the_cards_this_seat_cannot_name(board, monkeyp
     would price poorer on every candidate.
     """
     from hexset.clients.netbot import NetworkBot
-    from hexset.ledger import PublicLedger
+    from hexset.ledger import PublicLedger, SeatLedger
 
     space = stub_checkpoint(board).space
     bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS)
@@ -250,9 +250,9 @@ def test_the_after_position_keeps_the_cards_this_seat_cannot_name(board, monkeyp
     state.deck = []
     ledger = PublicLedger.new(state.num_players)
     ledger.apply_hand_diff([[0] * 5 for _ in state.hands], state.hands)
-    # Seat 0 can name only one wheat and one ore of seat 1's five cards.
-    ledger.seats[1].known = [0, 0, 0, 1, 1]
-    ledger.seats[1].unknown = 3
+    # Seat 0 can name only one wheat and one ore of seat 1's five cards,
+    # and bounds none of them.
+    ledger.seats[1] = SeatLedger(known=[0, 0, 0, 1, 1], unknown=3)
     game.ledger = ledger
     game.phase = Phase.MAIN
     game.current_player = 0
@@ -549,7 +549,7 @@ def test_gate_plies_rolls_on_a_belief_world_not_the_live_tables_true_hands(board
     back a seat-1 hand nothing like the true one.
     """
     from hexset.clients.netbot import NetworkBot
-    from hexset.ledger import PublicLedger
+    from hexset.ledger import PublicLedger, SeatLedger
 
     space = stub_checkpoint(board).space
     bot = NetworkBot(
@@ -598,6 +598,141 @@ def test_gate_plies_rolls_on_a_belief_world_not_the_live_tables_true_hands(board
         assert world.state(1, hidden=False).hands[1] != true_hand_1
 
     assert game.state(0, hidden=False).hands[1] == true_hand_1
+
+
+def _off_turn_position(board):
+    """Seat 0 answering on seat 1's turn, with a ledger naming one wheat and
+    one ore of seat 1's eight cards and every card of seat 0's own."""
+    from hexset.ledger import PublicLedger, SeatLedger
+
+    game = _position_with_a_settlement_in_hand(board)
+    state = game.state(0, hidden=False)
+    state.hands[0] = [1, 1, 1, 0, 0]
+    state.hands[1] = [0, 0, 3, 2, 3]
+    state.deck = []
+    ledger = PublicLedger.new(state.num_players)
+    ledger.apply_hand_diff([[0] * 5 for _ in state.hands], state.hands)
+    ledger.seats[1] = SeatLedger(known=[0, 0, 0, 1, 1], unknown=6)
+    game.ledger = ledger
+    game.current_player = 1
+    return game
+
+
+def _captured_value_rows(monkeypatch):
+    captured: list = []
+    original = HandValuePolicy.value_rows
+
+    def capture(self, rows):
+        captured.extend(rows)
+        return original(self, rows)
+
+    monkeypatch.setattr(HandValuePolicy, "value_rows", capture)
+    return captured
+
+
+def test_on_another_seats_turn_the_gate_reads_from_the_movers_frame(board, monkeypatch):
+    """Off-turn, every position reaches the head from the seat to move's
+    frame, on a world sampled from this seat's belief rather than the true
+    hands, in one forward, and the gain is this seat's entry of the vector."""
+    from hexset.clients.netbot import NetworkBot
+
+    space = stub_checkpoint(board).space
+    bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, rng=random.Random(7))
+    game = _off_turn_position(board)
+    true_hand_1 = list(game.state(0, hidden=False).hands[1])
+    bot.seat_at(game)
+    view = game.state(0)
+    gets_wheat = (0, 0, 0, 1, 0)
+
+    original_sample = View.sample
+
+    def fake_sample(self, rng):
+        sampled = original_sample(self, rng)
+        sampled.hands[1] = [9, 9, 9, 9, 9]
+        return sampled
+
+    monkeypatch.setattr(View, "sample", fake_sample)
+    captured = _captured_value_rows(monkeypatch)
+
+    gains = bot.gains_many(view, [gets_wheat], [1])
+    assert len(captured) == 2
+    for world, frame in captured:
+        assert frame == 1
+        assert world.state(1, hidden=False).hands[1] != true_hand_1
+    # Seat 1's frame names all of seat 0's cards, so the stub's read of seat
+    # 0 is its whole hand moved by the bundle.
+    assert gains == [pytest.approx(
+        value_of_hand([1, 1, 1, 1, 0], 0) - value_of_hand([1, 1, 1, 0, 0], 0)
+    )]
+    assert game.state(0, hidden=False).hands[1] == true_hand_1
+
+
+def test_an_off_turn_read_imagines_this_seats_own_rows_and_no_other_seats(board, monkeypatch):
+    """What another seat saw stolen stays out of every world this seat values
+    -- the mover's frame reads the table's rows there -- and what this seat
+    saw goes in."""
+    from hexset.clients.netbot import NetworkBot
+
+    space = stub_checkpoint(board).space
+    captured = _captured_value_rows(monkeypatch)
+    gets_wheat = (0, 0, 0, 1, 0)
+
+    def read(mover_saw: bool):
+        game = _off_turn_position(board)
+        ledger = game.ledger
+        ledger.private = [None] * PLAYERS
+        mine = ledger.knowledge(0)
+        mine.seats[1].known = [0, 0, 1, 1, 1]
+        mine.seats[1].unknown = 5
+        ledger.private[0] = mine
+        if mover_saw:
+            theirs = ledger.knowledge(1)
+            theirs.seats[2].known = list(game.state(0, hidden=False).hands[2])
+            theirs.seats[2].unknown = 0
+            ledger.private[1] = theirs
+        bot = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS, rng=random.Random(7))
+        bot.seat_at(game)
+        captured.clear()
+        gains = bot.gains_many(game.state(0), [gets_wheat], [1])
+        assert captured and all(frame == 1 for _, frame in captured)
+        for world, _ in captured:
+            assert world.ledger.for_seat(1) is world.ledger
+        # The world before the exchange; after it, seat 1's wheat has moved.
+        assert captured[0][0].ledger.for_seat(0).seats[1].known == [0, 0, 1, 1, 1]
+        return gains, [world.ledger.seats for world, _ in captured]
+
+    assert read(True) == read(False)
+
+
+def test_gate_own_frame_reads_off_turn_from_this_seats_frame(board, monkeypatch):
+    """`gate_own_frame` keeps the one-forward read from this seat's own frame
+    on every turn, over `_after`'s copy of the live view, with no world
+    sampled; on its own turn the gate reads that way regardless."""
+    from hexset.clients.netbot import NetworkBot
+
+    space = stub_checkpoint(board).space
+    captured = _captured_value_rows(monkeypatch)
+
+    def no_sample(self, rng):
+        raise AssertionError("an own-frame read samples no world")
+
+    monkeypatch.setattr(View, "sample", no_sample)
+    gets_wheat = (0, 0, 0, 1, 0)
+
+    own = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS,
+                     trade=TradeParams(gate_own_frame=True))
+    game = _off_turn_position(board)
+    own.seat_at(game)
+    own.gains_many(game.state(0), [gets_wheat], [1])
+    assert [frame for _, frame in captured] == [0, 0]
+    assert captured[0][0] is game
+
+    captured.clear()
+    mover = NetworkBot(policy=HandValuePolicy(space), players=PLAYERS)
+    game.current_player = 0
+    mover.seat_at(game)
+    mover.gains_many(game.state(0), [gets_wheat], [1])
+    assert [frame for _, frame in captured] == [0, 0]
 
 
 def test_the_memo_misses_when_the_board_moves_without_a_hand(board, monkeypatch):

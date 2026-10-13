@@ -840,3 +840,54 @@ def test_a_trade_filed_after_a_bank_trade_or_a_build_is_in_the_log():
         "Player 1 (A) traded 4 Sheep for 1 Ore with the bank.",
         "Player 1 (A) traded 4 Sheep for 1 Ore with the bank.",
     ]
+
+
+class _AsksWood:
+    """Asks a wood for an ore while the turn has not struck it, within
+    three offers."""
+
+    trade_floor = 0.0
+    trade_offer_budget = 3
+
+    def gains_many(self, view, received, counterparties):
+        return [1.0] * len(received)
+
+    def candidates(self, view, counterparties, *, turn=None, already_offered=()):
+        from hexset.board.terrain import Resource
+
+        ask = [0] * 5
+        ask[Resource.WOOD], ask[Resource.ORE] = -1, 1
+        if turn is None or tuple(ask) in {tuple(b) for b in already_offered}:
+            return []
+        return [(c, tuple(ask)) for c in counterparties]
+
+
+@pytest.mark.parametrize("takers,trades", [((1, 2), 2), ((1,), 1)])
+def test_a_served_bot_offers_again_what_two_seats_took(takers, trades):
+    """Seat 0 holds two wood and asks a wood for an ore. Two seats taking
+    it lets the offer go out again, and seat 2 takes the second; one seat
+    taking it does not, though it holds the ore for a second."""
+    from hexset.board.terrain import Resource
+    from hexset.game import roll_dice
+
+    game = a_game(seed=13)
+    game.phase = Phase.ROLL
+    game.current_player = 0
+    game.trade_mode = "external"
+    for hand in game._state.hands:
+        hand[:] = [0, 0, 0, 0, 0]
+    game._state.hands[0][Resource.WOOD] = 2
+    for seat in takers:
+        game._state.hands[seat][Resource.ORE] = 2 if len(takers) == 1 else 1
+    session = a_session(game, set())
+    session.set_trader(0, _AsksWood())
+    for seat in (1, 2):
+        session.set_trader(seat, _Wants(Resource.WOOD))
+    roll_dice(game, 8)
+    assert game.phase is Phase.MAIN and not game.trades
+
+    session.begin_round()
+
+    assert len(game.trades) == trades
+    offers = [e for e in session.events if e.note is not None and e.note.kind == "offer"]
+    assert len(offers) == trades

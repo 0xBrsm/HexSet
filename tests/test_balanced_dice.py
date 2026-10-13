@@ -22,6 +22,7 @@ from hexset.chance import (
     DICE_RECENT_DISCOUNT,
     SEVEN_ADJUST_MAX,
     Balanced,
+    DiceDeck,
     Live,
     dice_deck,
 )
@@ -157,3 +158,110 @@ def test_a_seat_yet_to_roll_is_counted_with_no_sevens():
     source.sevens = {0: 1}
     source.run = (0, 1)
     assert source.seven_scale(1) == pytest.approx(1.4)   # no share term until each seat could hold one; +0.4 for the other's run
+
+
+def _duel(seed: int, chance=None):
+    from hexset.board.board import random_base_board
+    from hexset.game import start
+
+    rng = random.Random(seed)
+    return start(random_base_board(rng), 2, rng, game_type=DUEL_VARIANT_GAME, chance=chance)
+
+
+def _played(game, seed: int):
+    """`game` with random play, one action at a time, as a generator of the game before each roll."""
+    from hexset.actions import ActionType, apply, legal_actions
+    from hexset.game import is_over, to_move
+
+    rng = random.Random(seed)
+    while not is_over(game) and game.turns < 400:
+        legal = legal_actions(game, to_move(game))
+        if any(a.type is ActionType.ROLL for a in legal):
+            yield game
+        apply(game, rng.choice(legal))
+
+
+def _expected_odds(source: Balanced, seat: int) -> dict[int, float]:
+    """`source`'s next roll by `seat`, as `roll_by` draws it (the reshuffle first)."""
+    if source.cards <= DICE_DECK_RESHUFFLE_AT:
+        source = Balanced.from_deck(random.Random(0), DiceDeck(recent=tuple(source.recent),
+                                                               sevens=tuple(sorted(source.sevens.items())), run=source.run))
+    w = source.weights(seat)
+    sums = [t for t in sorted(w) if source.left[t]]
+    mass = sum(w[t] for t in sums)
+    return {t: w[t] / mass for t in sums}
+
+
+def test_the_state_tracks_the_deck_the_dice_are_drawn_from():
+    """Before every roll of played duels, `GameState.dice` gives the odds the
+    game's own `Balanced` source draws that roll by."""
+    checked = 0
+    for seed in range(4):
+        game = _duel(seed)
+        assert game._state.dice == DiceDeck()
+        for g in _played(game, seed):
+            want = _expected_odds(g.chance, g.current_player)
+            got = dict(g._state.dice.odds(g.current_player))
+            assert got.keys() == want.keys()
+            assert all(got[t] == pytest.approx(want[t], abs=1e-12) for t in want)
+            checked += 1
+    assert checked > 200
+
+
+def test_a_source_built_from_the_deck_rolls_on_as_the_game_would():
+    """`Balanced.from_deck` continues the real deck: on the same generator it
+    draws the same sums the game's source draws, roll for roll."""
+    from hexset.game import roll_dice
+
+    source = Balanced(random.Random(7))           # unsplit: its dice are its generator
+    game = _duel(7, chance=source)
+    for g in _played(game, 7):
+        if g.turns >= 30:
+            break
+    copy = Balanced.from_deck(random.Random(), g._state.dice)
+    copy.dice.setstate(source.dice.getstate())
+    for i in range(60):
+        seat = i % 2
+        assert copy.roll_by(seat) == source.roll_by(seat)
+
+
+def test_a_search_copy_rolls_from_the_deck_under_balanced_dice_only():
+    from hexset.board.board import random_base_board
+    from hexset.game import ROLL_ODDS, imagine, roll_odds, start
+
+    game = _duel(3)
+    for g in _played(game, 3):
+        if g.turns >= 20:
+            break
+    copy = imagine(g, random.Random(0))
+    assert isinstance(copy.chance, Balanced) and copy._state.dice == g._state.dice
+    assert dict(roll_odds(g)) == dict(g._state.dice.odds(g.current_player))
+    standard = start(random_base_board(random.Random(0)), 4, random.Random(0), game_type=STANDARD_GAME)
+    assert standard._state.dice is None
+    assert type(imagine(standard, random.Random(0)).chance) is Live
+    assert roll_odds(standard) is ROLL_ODDS
+
+
+def test_a_given_roll_moves_the_deck_on():
+    """A search enumerating rolls (`roll_dice(game, roll)`) moves its copy's
+    deck as a drawn roll would, and leaves the original's alone."""
+    from hexset.game import imagine, roll_dice
+
+    game = _duel(5)
+    for g in _played(game, 5):
+        if g.turns >= 10:
+            break
+    before = g._state.dice
+    copy = imagine(g, random.Random(0))
+    roll_dice(copy, 8)
+    assert copy._state.dice == before.rolled(g.current_player, 8)
+    assert g._state.dice is before
+
+
+def test_the_deck_is_public():
+    """Every seat's view carries the same deck as the true state."""
+    game = _duel(2)
+    for g in _played(game, 2):
+        if g.turns >= 15:
+            break
+    assert g.state(0).state.dice == g.state(1).state.dice == g._state.dice

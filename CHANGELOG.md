@@ -5,6 +5,263 @@ not yet stable: any minor release may break it, and `### Breaking` says
 where. A fix alone is a patch release.
 
 
+## 1.13.0
+
+### Breaking
+
+- **Open asks are a switch, on for every gate** (`TradeParams.open_asks`,
+  on unless a gate turns it off; checkpoint metadata `open_asks=0` turns it
+  off). It was a count of picks: a gate now looks at its next picks within
+  the offers it has left this turn (`MAX_OFFERS` for a gate with no limit),
+  and a gate planning its offers (`fragment_trades`) offers its plan
+  instead.
+
+### Added
+
+- **Promise models for a robber deal's mover: `hexset.deals.PromiseModel`,
+  `register_promise_model`, `promise_model`.** A model gives the chance a
+  seat holding the asked card promises (`promise_chance(game, seat, ask)`)
+  and the chance a spared promiser pays (`pay_chance(game, mover)`).
+  `DealParams` names one (`promise=<name>`) and gains what an ask costs the
+  mover in win chance (`ask_cost`, `cost=<win chance>`); both round-trip
+  through `parse` and `spec`.
+
+- **`NetworkBot.gains_across(seat, asks)`**: `gains_many` at several
+  positions in one forward, each `(game, received, counterparties)` priced
+  as if the bot were seated at that game, with the same rows and so the
+  same numbers; a position the gate prices over sampled worlds is priced
+  on its own. The bot is left seated where it was. `GatedSearch` passes it
+  to its gate.
+
+- **Many games per process with their network forwards batched:
+  `hexset.lockstep` and `hexset.arena.compete_lanes`.** `play_lanes(play,
+  jobs, lanes)` runs `play(job)` for up to `lanes` jobs at once, each in a
+  lane of its own with one running at a time; when none can run, every
+  forward they are waiting on is answered in one onnxruntime `run` per
+  session, each lane getting its own rows. A lane is a greenlet where the new
+  `lanes` extra (`greenlet`) is installed, else a thread pinned to the
+  caller's CPU (`backend=`, `pin=`), since a lane woken on another core pays
+  for moving the interpreter's state across at every forward. Every
+  `V2Policy` forward goes through `lockstep.forward` -- a served file's
+  moves, its value-head gate and veto, robber deals, a search's leaves -- and
+  outside a lane it is `session.run` as before. `pool_lanes` spreads the
+  jobs over worker processes. `compete_lanes(jobs, journal, lanes=...,
+  workers=...)` plays `jobs[key] = (entrants, seed, index)`, each the game
+  `compete` plays as its `index`-th (same deal, seating and seats), so arms
+  of a paired comparison are jobs on one `seed` and `index`; each game is
+  journalled and fsynced under its key the moment it finishes, and
+  `resume=True` plays only the keys the journal lacks (`read_lane_journal`
+  reads one part-way). A lane never runs a lone row, which a reduction can
+  sum differently from the same row beside another;
+  `lockstep.batch_invariant(session, feed)` checks that a graph's rows do not
+  depend on the rows run with them, which is when lane games are the same at
+  any lane and worker count.
+
+- **Each seat's own ledger: `PublicLedger.for_seat(seat)`.** A steal shows
+  its card to the thief and the victim, and each keeps rows of its own from
+  its first such steal (`PublicLedger.private`), with every public change
+  applied to them as to the common rows. `for_seat` is what that seat
+  knows: its own rows, or the common ones where it has seen no steal.
+  `knowledge(seat)` is a standalone copy of it and `scrubbed(seat)` a copy
+  keeping that seat's rows and no other seat's. `PublicLedger.steal` takes
+  the card as an optional `resource`; the engine passes it, or nothing on an
+  observed state not party to the steal.
+
+- **Upper bounds in every ledger row: `SeatLedger.most`.** Beside `known`,
+  the lower bound, each row keeps the most of each resource the seat can
+  hold. Public flows move it with the cards; a Monopoly leaves every other
+  seat holding none of the resource (`PublicLedger.emptied`, which
+  `play_monopoly_card` calls); a steal's card can only be one the victim
+  could hold, so the thief's bounds rise for those resources alone.
+  `SeatLedger.settle` holds the bounds to `known + unknown` and types the
+  unknown cards a resource's room must take (`room()`). A row built by hand
+  from `known` and `unknown` alone claims no bound; `PublicLedger.new`'s
+  rows start at zero, as the hands do.
+
+- **`View.room`, `View.bounded` and `View.expected_hand(seat)`.** Per seat,
+  how many of its unknown cards each resource may be, whether any bound
+  binds, and its expected hand with each resource held to its room.
+
+- **`imagine(..., seat=)`**: a copy that is `seat`'s world keeps `seat`'s own
+  rows and drops every other seat's (`PublicLedger.scrubbed`). Every copy
+  the engine makes of a world sampled from a seat's belief -- the network
+  gate's, the searches', the determinized bots', the deal planner's -- and
+  `observe` pass it.
+
+- **A hosted seat deals as the robber's mover** (`hexset.seat.Seat`): with a
+  gate that asks (`DealParams(ask=True)`), `deal_ask` says whether to ask the
+  table for a card before the robber move and which; `deal_promised` takes
+  the seats that promised, counts those the seat's own view allows and that
+  are not blacklisted, and decides whom the move spares; once the turn is
+  open to trading, `offer` first puts the deal's exchange to the table, and
+  `close_round` records who took it and which spared promisers did not.
+  `deal_log` keeps the seat's deals across a rebuilt game. `deals.value_net`
+  also finds the network behind a search's own gate, so a searching seat
+  deals off its value head.
+
+- **`hexset.outlook`: every seat's points over the coming round, counted.**
+  The round is the mover's turn under way, then each other seat's next turn.
+  `outlook_of(state, mover)` reads one concrete world; `outlook(view)` averages
+  worlds drawn from a seat's information set. For each seat, `Outlook.can` is
+  its expected points change when it makes the best purchase its cards allow,
+  by dice odds over what its hexes produce, at its bank and port rates, with
+  one development card played; `Outlook.events` its chance of being able to
+  build a settlement, a city, buy a card, take Longest Road or take Largest
+  Army; `Outlook.lose` its chance that another seat can take each award it
+  holds. `Outlook.will(rates)` scales each event by the share of the time a
+  seat that can do it does (`Rates`). No model of play: an upper bound on what
+  seats do, read by arithmetic. `standing(state, seat, rates, mover=...)`:
+  each seat's points now plus its `will` through the end of `seat`'s next
+  turn, so positions `seat` could move to are read over the same turns.
+
+- **`TradeParams.gate_own_frame`** (checkpoint metadata `gate_own_frame`,
+  off by default): a network gate values every position from its own frame,
+  whoever is to move, rather than reading another seat's turn from that
+  seat's frame.
+
+- **`chance.DiceDeck` and `GameState.dice`: the dice deck's public state.**
+  Under `balanced_dice` a game's state carries the deck by sum -- the cards
+  of each sum left, the recent sums, each roller's sevens and the current
+  run of them -- and `roll_dice` moves it on at every roll, whatever the
+  source of the roll (a drawn one, a given one, a hosted one). It is read
+  off the rolls and who made them, so every seat's view carries it.
+  `DiceDeck.odds(seat)` is a roller's next-roll odds, as `Balanced` draws;
+  `Balanced.weights` and `DiceDeck.weights` share one formula. `None` under
+  independent dice.
+
+- **`hexset.game.roll_odds(game)`**: the seat on turn's next-roll odds --
+  `ROLL_ODDS` under independent dice, the deck's under balanced dice.
+
+- **`Balanced.from_deck(rng, deck)`**: a source that rolls on from a
+  `DiceDeck`.
+
+- **Robber deals, the mover's side, at the engine's own tables.** A seat
+  whose gate carries `DealParams(ask=True)` (`Dealing`, `Entrant.deals`,
+  `<entrant>^answer,ask` in a lineup) asks as the robber phase opens and the
+  other seats answer in turn (`deals.answer`). A promise binds nobody: the
+  mover sets aside promises from a seat its view says cannot hold the card
+  (`Deal.void`) or that it has blacklisted (`Deal.ignored`, `blacklist`),
+  chooses which of the rest to spare for, and its robber move spares them
+  (`Game.robber_promised`). Once the turn is open to trading, if it spared a
+  promiser it puts the exchange -- the asked card for one of its own -- to
+  the whole table as an ordinary offer: the spared promisers answer by
+  honouring the deal or not, everyone else as they answer any offer, and the
+  mover takes whichever answer its own trading picks. A spared promiser that
+  does not take it (`Deal.rejected`), or one that promised void, is
+  blacklisted by that mover for the rest of the game. Hooks: `deal_ask`,
+  `deal_accept`, `deal_return`. Every ask and what came of it is in
+  `Game.deal_log`, `Outcome.deals` and each `compete` journal line (`deals`).
+  A table where no seat asks plays exactly as before.
+
+- **A value mover for robber deals** (`DealParams(mover="value")`,
+  `ValueDealer`): a seat with a network decides its deals off its own trading
+  and value head. Of the cards its trading wants one for one (its proposer's
+  offers in turn) and the seats it would offer each to, it asks for the card
+  where deals are worth most: the network's best-ranked robber move that
+  spares such a seat, plus the exchange's value-head gain weighed by the
+  chance it honours the deal (`DealParams.pay`), against the network's own
+  robber pick, each exchange at the best card back its trading would take. It spares for
+  the one promise worth most, priced after the steal where its own trading
+  would or would not take the exchange, and offers back the card it minds
+  least. Only those robber moves are valued, averaged over the card the
+  steal takes, with odds read off the mover's own view.
+
+- **Answerers** (`Answerer`, `register_answerer`, `DealParams.answerer`): a
+  registered answerer promises for a seat, and says whether it honours a
+  deal, in place of its own rule.
+
+### Changed
+
+- **The value dealer asks where the ask is worth its cost.** An ask for a
+  card is worth the one deal it expects to make: the best of the seats that
+  promise, each seat by the chance it holds the card and, under a promise
+  model, promises it, and each payment by the model's chance that a spared
+  promiser pays (else `DealParams.pay`). `ValueDealer.ask` asks for the card
+  worth most where that beats `DealParams.ask_cost`; at no cost and no
+  model it asks wherever a deal beats its robber pick, as before, choosing
+  the card by that expected deal rather than by the sum over seats.
+
+- **The value dealer asks only for a seat whose promise it would take.**
+  `ValueDealer.ask` prices each seat's deal as `accept` prices its
+  promise: in the positions after the move that spares the seat, card by
+  card of the steal, at the best card back its trading would take there
+  (`_Plan.worth`). The exchange priced before the move only picks which
+  seats are priced so. An ask that rested on a seat whose deal the steal
+  undoes is no longer made, and `accept` reads the prices the ask made.
+  Every position is priced in one forward (`gains_across`), and where the
+  veto is the dealer's own network its trading's consent is read off that
+  gain instead of a second forward, in `give_back` too.
+
+- **Every seat answers robber deals unless it says otherwise.** A gate that
+  names no deal parameters is read as `hexset.deals.ANSWERING` (answers both
+  kinds, never asks), at every table that trades: the arena, the server, the
+  engine's own games. A hosted `Seat` answers by default too. Answering is
+  passive -- a deal happens only when the mover asks -- so a table where no
+  seat asks plays as it did. `^none` opts a seat out (`DealParams.parse`).
+
+- **A seat's encoding, record and belief read the ledger as that seat knows
+  it.** `hexset.encoding`'s ledger block, `onnx_record`'s `ledger_known` and
+  `ledger_unknown`, and `View`'s `known` and `unknown` come from
+  `PublicLedger.for_seat(perspective)`: a card the seat stole, or had stolen
+  from it, is typed in the other party's row rather than counted unknown.
+  The shape is unchanged; the values change only after such a steal.
+
+- **The common ledger types a steal the table can.** Where the victim can
+  hold one resource only, the thief's row gains that resource rather than
+  an unknown card.
+
+- **A view's belief keeps every seat within its bounds.** `View.sample`
+  deals each seat's unknown cards only from resources with room: whole
+  deals are drawn until one fits every seat, the exact conditional, and
+  after `DEAL_TRIES` (16) the seats are dealt tightest first, card by card.
+  Where no bound binds, a deal is the single shuffle it was, from the same
+  random stream. `View.p_holds` is zero for a bundle past a bound and draws
+  within the bounds; `trading.has_room` is false for one; and a view's
+  `signature` carries `room` where a bound binds.
+
+- **An offer more than one seat accepted may go out again the same turn.**
+  A turn's offers still exclude a bundle already put to the table, except
+  where the round executed it as made and two or more seats had accepted
+  it: another of the same exchange is then as good as agreed, and the
+  actor's gate decides whether to ask for it. Each round that clears so
+  reopens it, so a gate can take every seat that matched, one round each,
+  as far as its `trade_offer_budget` goes; a repeat counts against it like
+  any offer. A refused offer, one cleared on a counter or with a single
+  taker, and an open offer stay excluded. Only a gate with an offer budget
+  repeats: one with none (`max_offers=None`) keeps each bundle struck for
+  the turn, which is what ends its offers. All three tables apply it as a
+  round closes -- the engine's own loop (`resolve_offer`, which takes
+  `already_offered`), `hexset.seat.Seat` and the served table -- through
+  the new `hexset.trading.clear_repeat`.
+
+- **A network gate reads a trade on another seat's turn from that seat's
+  frame.** A value head learns only from positions encoded for the seat
+  deciding, so a position where someone else is to move, read from the
+  gate's own frame, is one it never saw. `NetworkBot` now values such a
+  trade on one world sampled from its own belief (certified to cover the
+  candidates, the draw `gate_plies > 0` already makes), encoded for the seat
+  to move, and reads its own entry of the value vector: the gain is still
+  `V(after)[seat] - V(before)[seat]`, `estimate_many` the counterparty's
+  entry of the same vectors. At `gate_plies > 0` every leaf is read from the
+  frame of the seat to move there. On its own turn the gate reads as before,
+  one forward over the live view. It costs one belief sample per ask, and
+  applies wherever the gate prices: trade replies, a veto it holds over a
+  trader, deal answers. `TradeParams.gate_own_frame` keeps the own-frame
+  read.
+
+- **A search copy of a balanced-dice game rolls from the dice deck.**
+  `imagine` gives the copy `Balanced.from_deck(rng, state.dice)` in place of
+  `Live(rng)`, and `mcts` samples a chance node's roll at `roll_odds`, so a
+  search in the duel variant meets the dice the game is drawn from, not
+  independent two-dice rolls. Searches under independent dice are unchanged.
+
+### Fixed
+
+- **A network gate at `gate_plies > 0` prices at a hosted seat.** Its
+  sampled worlds were copied with a shuffled deck, and a hosted seat's deck
+  is a count, so every ask raised `HiddenRead`. The world sampled from the
+  seat's belief deals its own deck, and the copies now take it as it is.
+
 ## 1.12.0
 
 ### Breaking

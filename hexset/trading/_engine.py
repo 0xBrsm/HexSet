@@ -80,7 +80,7 @@ from typing import TYPE_CHECKING, Callable, Iterable, NamedTuple, Sequence
 
 from ..board.terrain import NUM_RESOURCES
 from ..state import BANK_PER_RESOURCE, GameState, is_hidden
-from ._params import ENUMERATION_CARDS, params_of
+from ._params import ENUMERATION_CARDS, MAX_OFFERS, params_of
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..game import Game
@@ -763,12 +763,16 @@ def default_pick(
 def has_room(view: "View", seat: int, received: Sequence[int]) -> bool:
     """Whether `seat`'s public hand has room for its side of `received`
     (signed towards the perspective, so `seat` gives the positive counts):
-    every card it is not certified to hold fits among its untyped cards.
+    every card it is not certified to hold fits among its untyped cards,
+    each resource within the room its upper bound leaves (`View.room`).
     False means the record proves `seat` cannot make the exchange. A gate's
     opponent model reads this, never the menu: an offer may still ask for
     anything, since some other seat may hold it."""
     known = view.known[seat]
-    return sum(max(0, n - k) for n, k in zip(received, known)) <= view.unknown[seat]
+    short = [max(0, n - k) for n, k in zip(received, known)]
+    if sum(short) > view.unknown[seat]:
+        return False
+    return not view.bounded[seat] or all(n <= r for n, r in zip(short, view.room[seat]))
 
 
 def fit(view: "View", seat: int, received: Sequence[int]) -> int:
@@ -910,13 +914,15 @@ def offer(
     this turn and gains the one returned -- except where the gate's
     `allow_repeated_offer(view, bundle, turn=)` claims a repeat, which is
     what lets a planned second fragment equal to a first that executed go
-    out again while a refused offer stays excluded.
+    out again while a refused offer stays excluded. A round that executed
+    an offer more than one seat accepted strikes it out again for a gate
+    with an offer budget (`clear_repeat`), so the gate may ask again.
 
-    A gate declaring `open_asks` (`TradeParams`) puts asks for one card up
-    open: where the bundle it picks is a one-for-one and, among its next
-    `open_asks` picks within `slots_left` (the offers it has left this turn,
-    `None` for no limit), at least one other is a one-for-one for the same
-    card, it offers "any card for" that card (`Offer.any == -1`) in their
+    A gate making open asks (`TradeParams.open_asks`, on by default) puts
+    asks for one card up open: where the bundle it picks is a one-for-one
+    and, among its next picks within `slots_left` (the offers it has left
+    this turn; `MAX_OFFERS` for no limit), at least one other is a
+    one-for-one for the same card, it offers "any card for" that card (`Offer.any == -1`) in their
     place. That offer counts as many offers as the asks it replaces
     (`offer_slots`), all of them go into `already_offered`, and the gate asks
     for that card no more this turn (`Game.open_asks`).
@@ -970,7 +976,10 @@ def offer(
         return None
     if already_offered is not None:
         already_offered.add(received)
-    replaced = _open_asks(params_of(gate).open_asks, received, slots_left, pick, offered)
+    params = params_of(gate)
+    # A planned gate's menu is its plan's next fragment, which a look ahead
+    # never folds, so it is not asked again for one.
+    replaced = _open_asks(params.open_asks and not params.fragment_trades, received, slots_left, pick, offered)
     if len(replaced) < 2:
         return Offer(me, received)
     card = _asked_for(received)
@@ -988,15 +997,15 @@ def _asked_for(received: Sequence[int]) -> int | None:
     return got[0]
 
 
-def _open_asks(look: int, received: Bundle, slots_left: int | None, pick, offered) -> list[Bundle]:
+def _open_asks(open_: bool, received: Bundle, slots_left: int | None, pick, offered) -> list[Bundle]:
     """The asks an open ask would stand for: `received` and, among the
-    gate's next picks (`pick`, each with the ones before struck) up to
-    `look` in all and within `slots_left`, the one-for-ones for the card
-    `received` asks for. Fewer than two means no open ask."""
+    gate's next picks (`pick`, each with the ones before struck) within
+    `slots_left` (`MAX_OFFERS` for a gate with no limit), the one-for-ones
+    for the card `received` asks for. Fewer than two means no open ask."""
     card = _asked_for(received)
-    if look < 2 or card is None:
+    if not open_ or card is None:
         return [received]
-    reach = look if slots_left is None or slots_left < 0 else min(look, slots_left)
+    reach = MAX_OFFERS if slots_left is None or slots_left < 0 else min(MAX_OFFERS, slots_left)
     struck, replaced = set(offered) | {received}, [received]
     for _ in range(reach - 1):
         nxt = pick(struck)
@@ -1015,6 +1024,42 @@ def offer_slots(game: "Game", offered: Offer) -> int:
     if offered.any and opened is not None and opened[0] == game.turns:
         return len(opened[2])
     return 1
+
+
+def clear_repeat(
+    gate: object, already_offered: set[Bundle] | None, offer: Offer,
+    responses: Sequence[Response], trade: Trade | None,
+) -> None:
+    """Strike `offer` from `already_offered` again -- so its actor, whose
+    gate is `gate`, may put the same bundle to the table once more -- where
+    the round executed the offer as made and more than one seat accepted
+    it: another of the same exchange is then as good as agreed, and whether
+    to ask for it is the gate's own call. Each round that clears so reopens
+    it, so the actor can take every seat that matched, one round each, as
+    far as its offers go. A refused offer, one that cleared on a counter or
+    with a single taker, and an open offer stay excluded.
+
+    Only a gate with an offer budget (`TradeParams.max_offers`) repeats: the
+    budget is what ends its turn's offers. A gate with none keeps every
+    bundle it put up struck for the turn, which is what ends its offers --
+    one that would trade a card away and back would otherwise never stop.
+    Every table calls it as its round closes, before the actor's next offer."""
+    if already_offered is None or trade is None or is_open(offer):
+        return
+    if gate is None or params_of(gate).max_offers is None:
+        return
+    received = tuple(int(n) for n in offer.received)
+    executed = tuple(int(n) for n in trade.received)
+    if trade.b == offer.actor:      # recorded from the taker's side
+        executed = tuple(-n for n in executed)
+    elif trade.a != offer.actor:
+        return
+    if executed != received:
+        return
+    takers = {r.seat for r in responses
+              if r.kind == RESPONSE_ACCEPT and r.bundle is not None and tuple(r.bundle) == received}
+    if len(takers) > 1:
+        already_offered.discard(received)
 
 
 def respond(game: "Game", gate: object, seat: int, offer: Offer) -> Response:
@@ -1264,6 +1309,7 @@ def counter_thread(
 
 def resolve_offer(
     game: "Game", gates: Sequence[object], offer: Offer, *, counter_steps: int = 1,
+    already_offered: set[Bundle] | None = None,
 ) -> list[Trade]:
     """The round after its broadcast: the offer goes on the public ledger
     (`show_offer`), every other seated, unlocked gate `respond`s once and
@@ -1276,7 +1322,11 @@ def resolve_offer(
     Where the actor picks nothing and `counter_steps` allows more than the
     one counter a seat answers with, each counter in turn, in seat order,
     goes on as a `counter_thread` until one executes; a round still clears
-    at most one exchange."""
+    at most one exchange.
+
+    `already_offered`, when given, is the turn's set `offer` struck the
+    bundle in; `clear_repeat` strikes it out again where more than one seat
+    accepted and the offer executed, for an actor with an offer budget."""
     me = offer.actor
     show_offer(game, offer)
     # Each answer is public as it is given, as at the served table, so a
@@ -1295,6 +1345,7 @@ def resolve_offer(
                                        counter_steps, {tuple(offer.received)})
                 if trade is not None:
                     break
+    clear_repeat(gates[me], already_offered, offer, responses, trade)
     finished_fn = getattr(gates[me], "trade_round_finished", None)
     if finished_fn is not None:
         finished_fn(game.state(me), offer, responses, trade, turn=game.turns)
@@ -1315,7 +1366,8 @@ def trade_round(
     the `Game` is seated. Nothing counts or caps rounds. `already_offered`,
     when given, excludes bundles already put to the table this turn and
     gains the one broadcast here -- except where the actor's gate claims a
-    repeat through `allow_repeated_offer`. `offers_made`, when given, gains
+    repeat through `allow_repeated_offer`, or the round cleared it with more
+    than one taker and the actor has an offer budget (`clear_repeat`). `offers_made`, when given, gains
     the bundle actually broadcast; unlike `already_offered` it is a list, so
     a permitted repeat still registers and a caller looping over rounds can
     tell "offered again" from "had nothing to offer". A seat with no gate,
@@ -1343,4 +1395,5 @@ def trade_round(
     # offers as the asks it stands for (`offer_slots`).
     if offers_made is not None:
         offers_made.extend([offered.received] * offer_slots(game, offered))
-    return resolve_offer(game, gates, offered, counter_steps=counter_steps)
+    return resolve_offer(game, gates, offered, counter_steps=counter_steps,
+                         already_offered=already_offered)

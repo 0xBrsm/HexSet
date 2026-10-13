@@ -53,31 +53,37 @@ SHARP = dict(simulations=256, wave=8)
 def positions(seed=5, wanted=4, players=PLAYERS, phase=Phase.MAIN, devs_needed=1):
     """Decisions where the acting seat has several real options, several
     untyped opponent cards, and (by default) opponents holding dev cards --
-    everything the probe needs something to permute."""
-    rng = random.Random(seed)
-    game = start(random_base_board(rng), players, rng)
+    everything the probe needs something to permute. A seat knows the cards
+    it stole and lost, so a game may hold too few; the next seed's game is
+    searched then."""
     found = []
-    for _ in range(3000):
-        if is_over(game) or len(found) == wanted:
+    for game_seed in range(seed, seed + 20):
+        rng = random.Random(game_seed)
+        game = start(random_base_board(rng), players, rng)
+        for _ in range(3000):
+            if is_over(game) or len(found) == wanted:
+                break
+            seat = to_move(game)
+            if game.phase is phase and len(options_for(game)) > 3:
+                view = View.from_game(game, seat)
+                # true state: the probe is a test of what a bot may read, so it
+                # reads the truth to decide whether there is anything to permute.
+                state = game.state(0, hidden=False)
+                devs = sum(dev_count(state, s) for s in range(players) if s != seat)
+                if sum(view.unknown) >= 4 and devs >= devs_needed:
+                    found.append((imagine(game, random.Random(1), randomize_deck=False), seat))
+            step_randomly(game, rng)
+        if len(found) == wanted:
             break
-        seat = to_move(game)
-        if game.phase is phase and len(options_for(game)) > 3:
-            view = View.from_game(game, seat)
-            # true state: the probe is a test of what a bot may read, so it
-            # reads the truth to decide whether there is anything to permute.
-            state = game.state(0, hidden=False)
-            devs = sum(dev_count(state, s) for s in range(players) if s != seat)
-            if sum(view.unknown) >= 4 and devs >= devs_needed:
-                found.append((imagine(game, random.Random(1), randomize_deck=False), seat))
-        step_randomly(game, rng)
     assert len(found) == wanted, f"only {len(found)} usable positions"
     return found
 
 
 def permuted(game, seat, rng):
     """`game` with every other seat's hidden cards redealt among them, each
-    hand's size and each seat's dev-card count preserved."""
-    twin = imagine(game, random.Random(1), randomize_deck=False)
+    hand's size and each seat's dev-card count preserved, and every other
+    seat's own ledger rows -- the steals it saw -- dropped."""
+    twin = imagine(game, random.Random(1), randomize_deck=False, seat=seat)
     state = copy_state(game.state(0, hidden=False))
     seats = [s for s in range(state.num_players) if s != seat]
 

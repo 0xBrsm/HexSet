@@ -24,7 +24,7 @@ from .actions import (
     legal_actions,
     victim_of,
 )
-from .game import ROLL_ODDS, Game, imagine, is_over, roll_dice, to_move
+from .game import Game, imagine, is_over, roll_dice, roll_odds, to_move
 from .view import HoldReading
 
 __all__ = [
@@ -315,7 +315,7 @@ class Search:
         for share, state in distinct_worlds(
             game.state(seat), self.rng, self.k, holdings_signature, self.hold
         ):
-            world = imagine(game, self.rng, randomize_deck=False)
+            world = imagine(game, self.rng, randomize_deck=False, seat=seat)
             world.set_state(state)
             out.append((share, world))
         return out
@@ -440,7 +440,7 @@ class Search:
                     slot = _Chance()
                     node.children[index] = slot
                 assert isinstance(slot, _Chance)
-                roll = self._roll()
+                roll = self._roll(node.game)
                 child = slot.outcomes.get(roll)
                 if child is None:
                     child = self._step(node, index, roll)
@@ -460,14 +460,16 @@ class Search:
                 node = slot
         return path, node
 
-    def _roll(self) -> int:
+    def _roll(self, game: Game) -> int:
+        """A roll for the seat on turn, at the position's odds (`roll_odds`)."""
+        odds = roll_odds(game)
         draw = self.rng.random()
         cumulative = 0.0
-        for roll, weight in ROLL_ODDS:
+        for roll, weight in odds:
             cumulative += weight
             if draw < cumulative:
                 return roll
-        return ROLL_ODDS[-1][0]
+        return odds[-1][0]
 
     def _backup(self, path: Sequence[tuple[Node, int]], value: Sequence[float]) -> None:
         vector = np.asarray(value, dtype=np.float64)

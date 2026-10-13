@@ -110,7 +110,7 @@ def determinized(
         search_rng = random.Random(rng.getrandbits(128))
         votes: Counter[Action] = Counter()
         for share, sampled in distinct_worlds(belief, rng, worlds, world_key):
-            world = imagine(game, search_rng, randomize_deck=False)
+            world = imagine(game, search_rng, randomize_deck=False, seat=seat)
             world.set_state(sampled)
             action = choose(world)
             if action is not None:

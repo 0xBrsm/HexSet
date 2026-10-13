@@ -58,8 +58,10 @@ def test_the_record_carries_the_ledger_in_board_seat_order():
     from hexset.ledger import SeatLedger
 
     game = a_game(seed=6, steps=60)
-    game.ledger.seats[0] = SeatLedger(known=[1, 0, 0, 0, 0], unknown=2)
-    game.ledger.seats[1] = SeatLedger(known=[0, 3, 0, 0, 1], unknown=0)
+    # The rows seat 0 knows: its own, where a steal showed it a card.
+    rows = game.ledger.for_seat(0).seats
+    rows[0] = SeatLedger(known=[1, 0, 0, 0, 0], unknown=2)
+    rows[1] = SeatLedger(known=[0, 3, 0, 0, 1], unknown=0)
     space = space_for(game)
 
     row = record_from_game(game, 0, space)
@@ -67,8 +69,8 @@ def test_the_record_carries_the_ledger_in_board_seat_order():
     assert row["ledger_known"].shape == (game._state.num_players, 5)
     assert row["ledger_unknown"].shape == (game._state.num_players,)
     for seat in range(game._state.num_players):
-        assert list(row["ledger_known"][seat]) == game.ledger.seats[seat].known
-        assert int(row["ledger_unknown"][seat]) == game.ledger.seats[seat].unknown
+        assert list(row["ledger_known"][seat]) == rows[seat].known
+        assert int(row["ledger_unknown"][seat]) == rows[seat].unknown
 
 
 def test_record_batch_stacks_each_positions_own_record():

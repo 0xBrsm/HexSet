@@ -442,3 +442,15 @@ def test_off_turn_it_answers_the_movers_counter_to_its_own_counter():
     assert seat.answer(offered).kind == RESPONSE_COUNTER
     assert seat.counter(1, bundle(ore=-1, brick=-1, wood=1)).kind == RESPONSE_ACCEPT
     assert seat.counter(2, bundle(ore=-1, wood=1)).kind == RESPONSE_PASS             # seat 2 is not on turn
+
+
+@pytest.mark.parametrize("takers,again", [((1, 2), True), ((1,), False)])
+def test_its_offer_goes_out_again_once_two_seats_took_it(takers, again):
+    """The seat's offer executed with seat 1: where seat 2 accepted it too,
+    the seat may offer it again this turn; where seat 1 alone did, not."""
+    wood_for_ore = bundle(wood=-1, ore=1)
+    seat = _moving(1, {})
+    seat.gate.trade_offer_budget = 3
+    seat.pick([Response(s, RESPONSE_ACCEPT, wood_for_ore) for s in takers])
+    seat.close_round(seat.traded(0, 1, wood_for_ore))
+    assert seat.offer() == (Offer(0, wood_for_ore) if again else None)

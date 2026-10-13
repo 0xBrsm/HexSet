@@ -367,8 +367,9 @@ def test_the_mover_block_follows_a_discard_not_the_turn():
     assert list(moving) == [0.0, 1.0, 0.0, 0.0]  # seat 2, one after seat 1
 
 
-def test_a_steal_shows_up_as_unknown_in_the_encoding():
-    """The one-resource hand makes the outcome deterministic whatever was drawn."""
+def test_a_steal_from_a_certified_one_resource_hand_is_typed_for_the_table():
+    """The one-resource hand makes the outcome deterministic whatever was
+    drawn, and certified, every seat can name the card."""
     from hexset.game import Phase, move_robber_to
     from hexset.ledger import SeatLedger
 
@@ -390,14 +391,16 @@ def test_a_steal_shows_up_as_unknown_in_the_encoding():
 
     move_robber_to(game, target, victim)
 
-    assert game.ledger.seats[thief].unknown == 1
+    assert game.ledger.seats[thief].unknown == 0
+    assert game.ledger.seats[thief].known == [1, 0, 0, 0, 0]
     assert game.ledger.seats[victim].known == [0, 0, 0, 0, 0]
     assert game.ledger.seats[victim].unknown == 0
 
     known, unknown = _ledger_tail(encode(game, bystander))
     thief_slot = _seat(thief, bystander, 4) - 1
     victim_slot = _seat(victim, bystander, 4) - 1
-    assert unknown[thief_slot] == pytest.approx(0.1)
+    assert unknown[thief_slot] == pytest.approx(0.0)
+    assert known[thief_slot][0] == pytest.approx(0.1)
     assert not known[victim_slot].any()
     assert unknown[victim_slot] == pytest.approx(0.0)
 

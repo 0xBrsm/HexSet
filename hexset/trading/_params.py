@@ -101,6 +101,13 @@ class TradeParams:
     #: exchanged hand before it is valued, `0` meaning one forward. Read by
     #: `hexset.clients.netbot`; a bot that searches sets its own depth.
     gate_plies: int = 0
+    #: Value every position from this seat's own frame, whoever is to move.
+    #: Off, a position where another seat is to move is valued from that
+    #: seat's frame on a world sampled from this seat's belief -- the frame a
+    #: value head learns from, since a game is encoded for the seat deciding
+    #: -- and this seat's entry of the value vector is read. Read by
+    #: `hexset.clients.netbot`.
+    gate_own_frame: bool = False
     #: Put first the offers that fit what their counterparty has shown it
     #: wants and will give up (`hexset.trading.fit`, off the public ledger),
     #: and counter an offer the same way; among the rest, and wherever nobody
@@ -108,15 +115,16 @@ class TradeParams:
     #: only under `fragment_trades`, so there it orders both; under card caps
     #: or a responder price alone it orders this gate's counters.
     fit_offers: bool = False
-    #: Look this many of its next offers ahead, `0` for none: where the first
-    #: is a one-for-one and at least one other among them, within the offers
-    #: it has left this turn, is a one-for-one for the same card, put one open
-    #: ask up in their place -- "any card for" the card (`Offer.any`) -- that
-    #: counts as many offers as the asks it replaces, ask for the card no more
-    #: this turn, and counter a counter that brings the card for one it will
-    #: not give with the card for one of those it offered (`trading.offer`,
-    #: `trading.respond`).
-    open_asks: int = 0
+    #: Make open asks: where its next offer is a one-for-one and at least one
+    #: other among the offers it has left this turn (`max_offers`, else
+    #: `MAX_OFFERS`) is a one-for-one for the same card, put one open ask up in
+    #: their place -- "any card for" the card (`Offer.any`) -- that counts as
+    #: many offers as the asks it replaces, ask for the card no more this turn,
+    #: and counter a counter that brings the card for one it will not give with
+    #: the card for one of those it offered (`trading.offer`,
+    #: `trading.respond`). On unless a gate turns it off; a gate planning its
+    #: offers (`fragment_trades`) offers its plan instead.
+    open_asks: bool = True
 
     def __post_init__(self) -> None:
         if self.max_offers is not None and self.max_offers < 0:
@@ -144,8 +152,6 @@ class TradeParams:
             )
         if self.gate_plies < 0:
             raise ValueError(f"gate_plies must be non-negative: {self.gate_plies}")
-        if self.open_asks < 0:
-            raise ValueError(f"open_asks must be non-negative: {self.open_asks}")
         # A fragment cannot be wider than what this gate will move at all: a
         # plan whose pieces it would itself refuse never reaches the table.
         # Only a declared `fragment_cards` is checked; an undeclared one is
@@ -228,8 +234,9 @@ class TradeParams:
             max_fragments=_int(meta.get("max_fragments"), on.max_fragments, MAX_FRAGMENTS),
             fragment_cards=_int(meta.get("fragment_cards"), on.fragment_cards),
             gate_plies=_int(meta.get("gate_plies"), on.gate_plies, MAX_GATE_PLIES, floor=0),
+            gate_own_frame=_bool(meta.get("gate_own_frame"), on.gate_own_frame),
             fit_offers=_bool(meta.get("fit_offers"), on.fit_offers),
-            open_asks=_int(meta.get("open_asks"), on.open_asks, MAX_OFFERS, floor=0),
+            open_asks=_bool(meta.get("open_asks"), on.open_asks),
         )
 
     def as_meta(self) -> dict[str, str]:
@@ -251,8 +258,10 @@ class TradeParams:
             declared = getattr(self, name)
             if declared is not None:
                 out[name] = str(declared)
-        if self.open_asks:
-            out["open_asks"] = str(self.open_asks)
+        if not self.open_asks:
+            out["open_asks"] = "0"
+        if self.gate_own_frame:
+            out["gate_own_frame"] = "1"
         return out
 
 

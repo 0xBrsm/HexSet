@@ -312,8 +312,9 @@ def test_engine_rounds_try_a_distinct_offer_after_refusal(budget, expected_trade
             return index
 
     actor = Actor(one_card)
-    if budget is not None:
-        actor.trade_params = TradeParams(max_offers=budget)
+    # `offers` logs every call to `offer`; an open ask's look ahead is a call
+    # too, and this test is about the offers made, so it makes none.
+    actor.trade_params = TradeParams(max_offers=budget, open_asks=False)
     game.gates = (actor, Gate(lambda r, c: -1.0), Gate(lambda r, c: float(r[WOOD])), None)
     run_trade_event(game)
     assert offers[0] == bundle(wood=-1, ore=1)
@@ -493,6 +494,8 @@ def test_a_gate_supplies_its_own_menu_for_offers_and_counters():
             return [(c, self.extra) for c in counterparties]
 
     actor = Sampler(lambda r, c: 5.0 if r[ORE] > 0 else -1.0, bundle(wood=-1, ore=1))
+    # `asked` logs every menu read; an open ask's look ahead is one too.
+    actor.trade_params = TradeParams(open_asks=False)
     gates = (actor, Gate(lambda r, c: 1.0), None, None)
 
     assert trading.offer(game, gates) == Offer(0, bundle(wood=-1, ore=1))
@@ -778,3 +781,86 @@ def test_retuning_a_plain_gates_offers_reaches_the_engine():
     assert game.trades == [], "one offer, refused, and no second"
     retune(actor, max_offers=None)
     assert params_of(actor).max_offers is None
+
+
+WOOD_FOR_ORE = bundle(wood=-1, ore=1)
+
+
+class Asker:
+    """Asks a wood for an ore while the turn has not struck it, within
+    `budget` offers (`None` for no limit), and takes any acceptance
+    (`default_pick`)."""
+
+    trade_floor = 0.0
+
+    def __init__(self, budget=3):
+        self.trade_offer_budget = -1 if budget is None else budget
+
+    def gains_many(self, view, received, counterparties):
+        return [1.0] * len(received)
+
+    def candidates(self, view, counterparties, *, turn=None, already_offered=()):
+        if turn is None or WOOD_FOR_ORE in {tuple(b) for b in already_offered}:
+            return []
+        return [(c, WOOD_FOR_ORE) for c in counterparties]
+
+
+TAKES = {(0, WOOD_FOR_ORE): (RESPONSE_ACCEPT, WOOD_FOR_ORE)}
+
+
+@pytest.mark.parametrize("budget,wood,takers,ore,trades", [
+    (3, 2, (1, 2), 1, 2),       # two took it: it goes out again, and the other seat takes the second
+    (3, 2, (1,), 2, 1),         # one took it: not again, though that seat could take a second
+    (3, 3, (1, 2, 3), 1, 3),    # every seat that matched, one round each
+    (2, 3, (1, 2, 3), 1, 2),    # ... as far as its offers go
+    (None, 3, (1, 2, 3), 1, 1), # no budget: each bundle once a turn
+])
+def test_an_offer_two_seats_took_may_go_out_again(budget, wood, takers, ore, trades):
+    """Seat 0 asks a wood for an ore of every seat holding one."""
+    from hexset.game import _run_trade_rounds
+
+    game = stocked((0, Resource.WOOD, wood), *[(s, Resource.ORE, ore) for s in takers])
+    gates = (Asker(budget), Scripted(answers=TAKES), Scripted(answers=TAKES), Scripted(answers=TAKES))
+    done = _run_trade_rounds(game, gates)
+    assert [t.received for t in done] == [WOOD_FOR_ORE] * trades
+
+
+def test_a_gate_trading_a_card_away_and_back_stops_at_its_budget():
+    """Seat 0 swaps a wood for an ore and back for as long as it may, and
+    every seat takes both: its budget ends the turn."""
+    from hexset.game import _run_trade_rounds
+
+    back = tuple(-n for n in WOOD_FOR_ORE)
+
+    class Swapper(Asker):
+        def candidates(self, view, counterparties, *, turn=None, already_offered=()):
+            struck = {tuple(b) for b in already_offered}
+            return [] if turn is None else [(c, b) for b in (WOOD_FOR_ORE, back) if b not in struck
+                                            for c in counterparties]
+
+    takes = {**TAKES, (0, back): (RESPONSE_ACCEPT, back)}
+    game = stocked((0, Resource.WOOD, 1), *[(s, r, 2) for s in (1, 2, 3) for r in (Resource.WOOD, Resource.ORE)])
+    gates = (Swapper(3), *(Scripted(answers=takes) for _ in range(3)))
+    assert len(_run_trade_rounds(game, gates)) == 3
+
+
+def test_clear_repeat_needs_two_takers_of_the_offer_as_made():
+    from hexset.trading import clear_repeat
+
+    offer = Offer(0, WOOD_FOR_ORE)
+    took = [Response(1, RESPONSE_ACCEPT, WOOD_FOR_ORE), Response(2, RESPONSE_ACCEPT, WOOD_FOR_ORE)]
+    executed = Trade(0, 1, WOOD_FOR_ORE)
+    for gate, responses, trade, struck in [
+        (Asker(), took, executed, False),
+        (Asker(), took, Trade(1, 0, tuple(-n for n in WOOD_FOR_ORE)), False),   # the taker's side
+        (Asker(None), took, executed, True),                                   # no offer budget
+        (Asker(), took, None, True),                                           # declined
+        (Asker(), took[:1] + [Response(2, RESPONSE_COUNTER, bundle(wood=-2, ore=1))], executed, True),
+        (Asker(), took, Trade(0, 2, bundle(wood=-2, ore=1)), True),            # cleared on a counter
+    ]:
+        offered = {WOOD_FOR_ORE}
+        clear_repeat(gate, offered, offer, responses, trade)
+        assert (WOOD_FOR_ORE in offered) is struck
+    offered = {WOOD_FOR_ORE}
+    clear_repeat(Asker(), offered, Offer(0, WOOD_FOR_ORE, -1), took, executed)  # an open offer
+    assert offered == {WOOD_FOR_ORE}

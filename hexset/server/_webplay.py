@@ -864,6 +864,7 @@ class GameSession:
                 trade = self._execute_round_trade(actor, response.seat, response.bundle)
             except ValueError:
                 trade = None
+        trading.clear_repeat(gate, self._already_offered, round_.offer, round_.responses, trade)
         finished_fn = getattr(gate, "trade_round_finished", None)
         if finished_fn is not None:
             finished_fn(self.game.state(actor), round_.offer, round_.responses, trade, turn=self.game.turns)

@@ -25,6 +25,7 @@ from hexset.actions import Action, ActionSpace, build_space
 from hexset.board.topology import Topology
 from hexset.clients.netbot import NetworkBot, bot_for, declared_trader, searcher_for
 from hexset.game import Game
+from hexset.lockstep import forward
 from hexset.mcts import Search
 from hexset.onnx_record import record_from_game
 from hexset.server.constants import RECORD_CONTRACTS
@@ -83,7 +84,9 @@ class V2Policy:
                 "it was exported against a newer contract than this server builds"
             )
         inputs = {key: np.stack([record[key] for record in records]) for key in wanted}
-        return self.session.run(outputs, inputs)
+        # `session.run`, or inside a `hexset.lockstep` lane, these rows of a
+        # run shared with the other lanes' waiting forwards.
+        return forward(self.session, outputs, inputs)
 
     def _batchable(self, count: int) -> bool:
         """Whether the graph's declared input shapes allow a batch of `count`

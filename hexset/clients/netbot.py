@@ -74,7 +74,8 @@ class NetworkBot(trading.DeclaredTrade):
     #: the clearing floor, the card caps and direction, the responder price,
     #: the offer budget, the fragment plan and the continuation budget.
     trade: TradeParams = UNLIMITED
-    # Stream behind `gate_plies > 0`'s sampled worlds; unread at `0`.
+    # Stream behind the gate's sampled worlds: read off-turn, and on every
+    # read at `gate_plies > 0`.
     rng: random.Random = field(default_factory=random.Random, repr=False, compare=False)
     _salt: int | None = field(default=None, repr=False, compare=False)
     # Seat this bot is installed at, which the view must then agree with, or
@@ -140,7 +141,7 @@ class NetworkBot(trading.DeclaredTrade):
         self, view: View, candidates: Sequence[tuple[int, Bundle]]
     ) -> list[float]:
         """`V(after)[them] - V(before)[them]` per `(counterparty, bundle)`, on
-        the positions `gains_many` scores, from this seat's own frame."""
+        the positions `gains_many` scores, read in the same frames."""
         if not self.trade.trades or self._seated is None or not candidates:
             return [-1.0] * len(candidates)
         seat = self._perspective(view)
@@ -206,29 +207,20 @@ class NetworkBot(trading.DeclaredTrade):
         self, seat: int, view: View, received: Sequence[Bundle], counterparties: Sequence[int]
     ) -> tuple[tuple[float, ...], dict[int, tuple[float, ...]]]:
         """The live position's value vector and every coverable candidate's,
-        keyed by candidate index. At `gate_plies == 0` each post-trade position
-        is read from `seat`'s own frame (`_after`), never the true hand; at
-        `gate_plies > 0` the rollout *acts*, so worlds are sampled from `seat`'s
-        belief and certified against negative exchanges, all from one draw."""
+        keyed by candidate index. On `seat`'s own turn at `gate_plies == 0`
+        each post-trade position is read from `seat`'s own frame (`_after`),
+        never the true hand. Otherwise worlds are sampled from `seat`'s belief
+        and certified against negative exchanges, all from one draw: a
+        rollout *acts* on them, and on another seat's turn they are read from
+        that seat's frame, which needs a whole hand for it (`_continue`)."""
         game = self._seated
         assert game is not None  # callers check this first
         hand = list(view.known[seat])
-
-        coverable: list[tuple[int, int, Bundle]] = []  # (candidate index, them, bundle)
-        for i, bundle in enumerate(received):
-            if any(n + d < 0 for n, d in zip(hand, bundle)):
-                continue
-            # An offer may ask for cards no seat is known to hold, so a
-            # candidate can name a counterparty the public record says cannot
-            # cover it. There is no position after that exchange to value.
-            if not trading.has_room(view, counterparties[i], bundle):
-                continue
-            coverable.append((i, counterparties[i], bundle))
-
+        coverable = self._coverable(seat, view, received, counterparties)
         if not coverable:
             return (), {}
 
-        if self.gate_plies == 0:
+        if self._reads_own_frame(game, seat):
             afters = {
                 i: self._after(seat, them, hand, bundle, view)
                 for i, them, bundle in coverable
@@ -254,12 +246,15 @@ class NetworkBot(trading.DeclaredTrade):
             (i, them, bundle) for i, them, bundle in coverable
             if trading.holds(sampled, them, [max(0, n) for n in bundle])
         ]
-        before = imagine(game, rng, randomize_deck=True)
+        # `sampled` deals its own deck from this seat's belief, so the copies
+        # take it as it is: a hosted seat's deck is a count, which no shuffle
+        # may read.
+        before = imagine(game, rng, randomize_deck=False, seat=seat)
         before.set_state(sampled)
 
         afters: dict[int, Game] = {}
         for i, them, bundle in coverable:
-            after = imagine(game, rng, randomize_deck=True)
+            after = imagine(game, rng, randomize_deck=False, seat=seat)
             exchanged = copy_state(sampled)
             hands_before = [h[:] for h in exchanged.hands]
             exchange(exchanged, seat, them, bundle)
@@ -271,6 +266,71 @@ class NetworkBot(trading.DeclaredTrade):
         values = self._continue(to_move(game), seat, worlds, self.gate_plies)
         afters_values = {i: values[row] for row, i in enumerate(afters, start=1)}
         return values[0], afters_values
+
+    def _coverable(
+        self, seat: int, view: View, received: Sequence[Bundle], counterparties: Sequence[int]
+    ) -> list[tuple[int, int, Bundle]]:
+        """`(candidate index, them, bundle)` for each candidate `seat`'s hand
+        covers and its counterparty's public record allows."""
+        hand = list(view.known[seat])
+        coverable: list[tuple[int, int, Bundle]] = []
+        for i, bundle in enumerate(received):
+            if any(n + d < 0 for n, d in zip(hand, bundle)):
+                continue
+            # An offer may ask for cards no seat is known to hold, so a
+            # candidate can name a counterparty the public record says cannot
+            # cover it. There is no position after that exchange to value.
+            if not trading.has_room(view, counterparties[i], bundle):
+                continue
+            coverable.append((i, counterparties[i], bundle))
+        return coverable
+
+    def _reads_own_frame(self, game: Game, seat: int) -> bool:
+        """Whether a trade at `game` is priced in `seat`'s own frame, one
+        value-head read a position (`_after`), rather than over sampled worlds."""
+        return self.gate_plies == 0 and (self.trade.gate_own_frame or to_move(game) == seat)
+
+    def gains_across(
+        self, seat: int, asks: Sequence[tuple[Game, Sequence[Bundle], Sequence[int]]]
+    ) -> list[list[float]]:
+        """`gains_many` at several positions in one forward: for each
+        `(game, received, counterparties)`, `seat`'s gain from each candidate
+        as if seated at that game, `-1.0` for one it cannot cover. The same
+        rows `gains_many` reads, so the same numbers; a position it would
+        price over sampled worlds is priced on its own. Leaves the bot
+        seated where it was."""
+        out: list[list[float]] = [[-1.0] * len(received) for _, received, _ in asks]
+        if not self.trade.trades:
+            return out
+        rows: list[tuple[Game, int]] = []
+        slots: list[tuple[int, int, dict[int, int]]] = []   # (ask, before row, {candidate: row})
+        seated, memo = self._seated, self._memo
+        try:
+            for k, (game, received, counterparties) in enumerate(asks):
+                if not received:
+                    continue
+                self.seat_at(game)
+                view = game.state(seat)
+                if not self._reads_own_frame(game, seat):
+                    out[k] = self.gains_many(view, received, counterparties)
+                    continue
+                coverable = self._coverable(seat, view, received, counterparties)
+                if not coverable:
+                    continue
+                hand = list(view.known[seat])
+                before, afters = len(rows), {}
+                rows.append((game, seat))
+                for i, them, bundle in coverable:
+                    afters[i] = len(rows)
+                    rows.append((self._after(seat, them, hand, bundle, view), seat))
+                slots.append((k, before, afters))
+            values = self.policy.value_rows(rows) if rows else []
+        finally:
+            self._seated, self._memo = seated, memo
+        for k, before, afters in slots:
+            for i, row in afters.items():
+                out[k][i] = float(values[row][seat] - values[before][seat])
+        return out
 
     def _world_rng(self, view: View, seat: int) -> random.Random:
         """Seeded by the information set alone, salted once from this bot's
@@ -284,10 +344,12 @@ class NetworkBot(trading.DeclaredTrade):
     def _continue(
         self, mover: int, seat: int, worlds: Sequence[Game], plies: int
     ) -> list[tuple[float, ...]]:
-        """Each world's value vector, from `seat`'s frame, after `mover`'s best
-        play from it, `plies` deep. Worlds advance in lockstep, one batched
-        `act_rows` per ply, and must be belief-sampled copies, never the live
-        table's own state."""
+        """Each world's value vector after `mover`'s best play from it, `plies`
+        deep, read from the frame of the seat to move there -- the frame a
+        value head is trained in -- or from `seat`'s under `gate_own_frame`.
+        Values are in board-seat order either way. Worlds advance in
+        lockstep, one batched `act_rows` per ply, and must be belief-sampled
+        copies, never the live table's own state."""
         live = [i for i, g in enumerate(worlds) if not is_over(g) and to_move(g) == mover]
         for _ in range(plies):
             if not live:
@@ -311,7 +373,10 @@ class NetworkBot(trading.DeclaredTrade):
             else:
                 pending.append(i)
         if pending:
-            values = self.policy.value_rows([(worlds[i], seat) for i in pending])
+            own = self.trade.gate_own_frame
+            values = self.policy.value_rows(
+                [(worlds[i], seat if own else to_move(worlds[i])) for i in pending]
+            )
             for i, v in zip(pending, values):
                 out[i] = tuple(v)
         return out  # type: ignore[return-value]
@@ -324,7 +389,8 @@ class NetworkBot(trading.DeclaredTrade):
         known row is raised to cover what the bundle says they give before being
         moved by it, so the true hand is never read and the subtraction cannot
         go negative. The ledger must be copied too: `View` reads `them`'s known
-        cards from it, not from `state.hands`."""
+        cards from it, not from `state.hands`; the copy is `seat`'s own view,
+        the only one this position is read in."""
         game = self._seated
         assert game is not None  # callers check this first
         state = copy_state(view.state)
@@ -342,11 +408,16 @@ class NetworkBot(trading.DeclaredTrade):
         # this seat cannot name.
         state.hands[them] = HiddenHand(view.sizes[them] - sum(bundle))
 
-        ledger = view.ledger.copy()
-        ledger.seats[them].known = their_known
-        ledger.seats[them].unknown = certified.unknown[them]
+        ledger = view.ledger.knowledge(seat)
+        row = ledger.seats[them]
+        row.known = their_known
+        row.unknown = certified.unknown[them]
+        # The bundle moves `them`'s upper bounds as it moves the cards.
+        row.most = [max(0, m - d) for m, d in zip(row.most, bundle)]
+        row.settle()
         ledger.seats[seat].known = list(state.hands[seat])
         ledger.seats[seat].unknown = 0
+        ledger.seats[seat].most = list(state.hands[seat])
 
         after = copy.copy(game)
         after.set_state(state)
@@ -425,6 +496,11 @@ class GatedSearch(trading.DeclaredTrade, Search):
         self, view: View, received: Sequence[Bundle], counterparties: Sequence[int]
     ) -> list[float]:
         return self.gate.gains_many(view, received, counterparties)
+
+    def gains_across(
+        self, seat: int, asks: Sequence[tuple[Game, Sequence[Bundle], Sequence[int]]]
+    ) -> list[list[float]]:
+        return self.gate.gains_across(seat, asks)
 
     def estimate_many(self, view: View, candidates: Sequence[tuple[int, Bundle]]) -> list[float]:
         return self.gate.estimate_many(view, candidates)

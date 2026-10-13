@@ -37,7 +37,8 @@ class View:
     """What one seat can know about every hand, and how to draw from it.
 
     `known[s]` is the certified lower bound on each resource and `unknown[s]`
-    the cards the record cannot type; the perspective's own seat is exact and
+    the cards the record cannot type, as the perspective knows them
+    (`PublicLedger.for_seat`: the common rows, plus the steals it saw); the perspective's own seat is exact and
     must be concrete, or `state.HiddenRead` is raised here. Hidden cards are
     drawn from one shared **residual pool**: per resource, those neither in
     the bank nor certified in any seat's `known`.
@@ -73,12 +74,20 @@ class View:
         self.sizes = [hand_size(state, seat) for seat in range(n)]
         self.known: list[list[int]] = []
         self.unknown: list[int] = []
+        self.room: list[list[int]] = []
+        #: Per seat, whether its upper bounds bind: some resource has room
+        #: for fewer than all its unknown cards.
+        self.bounded: list[bool] = []
+        # What this seat knows: its own rows where a steal showed it a card.
+        rows = ledger.for_seat(perspective).seats
         for seat in range(n):
             if seat == perspective:
                 self.known.append(state.hands[seat][:])
                 self.unknown.append(0)
+                self.room.append([0] * NUM_RESOURCES)
+                self.bounded.append(False)
                 continue
-            known = ledger.seats[seat].known[:]
+            known = rows[seat].known[:]
             for who, bundle in certify:
                 if who == seat:
                     for r, need in enumerate(bundle):
@@ -93,7 +102,21 @@ class View:
                 known[r] -= taken
                 excess -= taken
             self.known.append(known)
-            self.unknown.append(self.sizes[seat] - sum(known))
+            hidden = self.sizes[seat] - sum(known)
+            self.unknown.append(hidden)
+            # Built for every seat of every view, so the unbound case -- every
+            # resource with room for all the unknown cards -- is one pass.
+            gaps = [m - k for m, k in zip(rows[seat].most, known)]
+            bound = hidden > 0 and min(gaps) < hidden
+            if bound:
+                room = [0 if g < 0 else g if g < hidden else hidden for g in gaps]
+                if sum(room) < hidden:
+                    # Bounds the certified cards contradict: drop them.
+                    bound = False
+            if not bound:
+                room = [hidden] * NUM_RESOURCES
+            self.room.append(room)
+            self.bounded.append(bound)
 
         pool = [
             BANK_PER_RESOURCE - state.bank[r] - sum(self.known[s][r] for s in range(n))
@@ -113,15 +136,18 @@ class View:
                    card_played=game.dev_card_played, turn=game.turns)
 
     def signature(self) -> tuple:
-        """`known`/`unknown`/`pool` as one hashable tuple: everything a
-        belief over the hidden cards reads. Built once; the three are never
-        mutated."""
+        """`known`/`unknown`/`pool`, and `room` where a bound binds, as one
+        hashable tuple: everything a belief over the hidden cards reads.
+        Built once; none of them is ever mutated."""
         if self._signature is None:
-            self._signature = (
+            signature: tuple = (
                 tuple(tuple(known) for known in self.known),
                 tuple(self.unknown),
                 tuple(self.pool),
             )
+            if any(self.bounded):
+                signature += (tuple(tuple(room) for room in self.room),)
+            self._signature = signature
         return self._signature
 
     def __eq__(self, other: object) -> bool:
@@ -157,10 +183,11 @@ class View:
         rng: random.Random | None = None,
     ) -> float:
         """Probability, on this view, that `seat` holds at least `bundle`
-        (a count per resource). Exact where `known` decides it -- always, for
-        the perspective's own seat -- or one card of one type is short;
-        otherwise a Monte-Carlo estimate over `draws` hands dealt from the
-        pool, `rng` defaulting to a fixed stream."""
+        (a count per resource). Exact where `known` or the upper bounds
+        decide it -- always, for the perspective's own seat -- or one card of
+        one type is short of a seat no bound binds; otherwise a Monte-Carlo
+        estimate over `draws` hands dealt from the pool within the seat's
+        bounds, `rng` defaulting to a fixed stream."""
         known = self.known[seat]
         need = [max(0, b - k) for b, k in zip(bundle, known)]
         short = sum(need)
@@ -171,14 +198,20 @@ class View:
             return 0.0
         if any(n > p for n, p in zip(need, self.pool)):
             return 0.0
-        if short == 1:
+        bounded = self.bounded[seat]
+        if bounded and any(n > r for n, r in zip(need, self.room[seat])):
+            return 0.0
+        if short == 1 and not bounded:
             r = need.index(1)
             return 1.0 - _hypergeometric_miss(self.pool_size, self.pool[r], hidden)
         rng = rng or random.Random(0)
         cards = self._pool_cards()
         hits = 0
         for _ in range(draws):
-            drawn = rng.sample(cards, hidden)
+            drawn = (
+                _capped_draw(rng, cards, hidden, self.room[seat]) if bounded
+                else rng.sample(cards, hidden)
+            )
             counts = known[:]
             for r in drawn:
                 counts[r] += 1
@@ -188,6 +221,75 @@ class View:
 
     def _pool_cards(self) -> list[int]:
         return [r for r in range(NUM_RESOURCES) for _ in range(self.pool[r])]
+
+    def _deal(self, rng: random.Random) -> list[list[int]]:
+        """Each seat's hidden cards, dealt from the pool without replacement:
+        one shuffle sliced seat by seat where no bound binds. Where one does,
+        whole deals are drawn until one keeps every seat within its bounds
+        (`DEAL_TRIES`), the exact conditional; failing that, seats are dealt
+        tightest first, card by card from what their bounds allow."""
+        cards = self._pool_cards()
+        seats = [s for s in range(self.num_players) if s != self.perspective]
+        out: list[list[int]] = [[] for _ in range(self.num_players)]
+        if not any(self.bounded):
+            rng.shuffle(cards)
+            cursor = 0
+            for seat in seats:
+                hidden = self.unknown[seat]
+                out[seat] = cards[cursor : cursor + hidden]
+                cursor += hidden
+            return out
+        for _ in range(DEAL_TRIES):
+            rng.shuffle(cards)
+            cursor, fits = 0, True
+            for seat in seats:
+                hidden = self.unknown[seat]
+                dealt = cards[cursor : cursor + hidden]
+                cursor += hidden
+                if self.bounded[seat] and not _within(dealt, self.room[seat]):
+                    fits = False
+                    break
+                out[seat] = dealt
+            if fits:
+                return out
+        pool = list(self.pool)
+        order = sorted(seats, key=lambda s: (sum(self.room[s]) - self.unknown[s], s))
+        for seat in order:
+            out[seat] = _capped_draw(rng, None, self.unknown[seat], self.room[seat], pool)
+        return out
+
+    def expected_hand(self, seat: int) -> list[float]:
+        """`known` plus the hidden cards spread in the pool's proportions,
+        each resource held to its room: what a resource's room cannot take
+        goes to the others, in their proportions. Exact in expectation where
+        no bound binds."""
+        known = self.known[seat]
+        hidden = self.unknown[seat]
+        if not hidden or not self.pool_size:
+            return [float(k) for k in known]
+        if not self.bounded[seat]:
+            share = hidden / self.pool_size
+            return [k + share * p for k, p in zip(known, self.pool)]
+        room = self.room[seat]
+        spread = [0.0] * NUM_RESOURCES
+        open_ = [r for r in range(NUM_RESOURCES) if room[r] > 0]
+        left = float(hidden)
+        while open_ and left > 1e-9:
+            weight = sum(self.pool[r] for r in open_)
+            if weight <= 0:
+                weights = {r: 1.0 / len(open_) for r in open_}
+            else:
+                weights = {r: self.pool[r] / weight for r in open_}
+            capped = [r for r in open_ if spread[r] + left * weights[r] >= room[r]]
+            if not capped:
+                for r in open_:
+                    spread[r] += left * weights[r]
+                break
+            for r in capped:
+                left -= room[r] - spread[r]
+                spread[r] = float(room[r])
+                open_.remove(r)
+        return [k + e for k, e in zip(known, spread)]
 
     def sample(self, rng: random.Random, hold: HoldReading | None = None) -> GameState:
         """One determinized world consistent with everything public: a concrete
@@ -199,17 +301,12 @@ class View:
         proportion to the unseen cards of the kind times `hold.weight(kind,
         age)`."""
         state = copy_state(self.state)
-        cards = self._pool_cards()
-        rng.shuffle(cards)
-        cursor = 0
-        for seat in range(self.num_players):
+        for seat, hidden in enumerate(self._deal(rng)):
             if seat == self.perspective:
                 continue
             hand = self.known[seat][:]
-            hidden = self.unknown[seat]
-            for r in cards[cursor : cursor + hidden]:
+            for r in hidden:
                 hand[r] += 1
-            cursor += hidden
             state.hands[seat] = hand
 
         composition = self.unseen_dev_cards()
@@ -260,6 +357,60 @@ class View:
 
 
 __all__ = ["View"]
+
+
+#: Whole deals `View.sample` draws for one that keeps every seat within its
+#: upper bounds, before dealing seat by seat.
+DEAL_TRIES = 16
+
+
+def _within(cards: Sequence[int], room: Sequence[int]) -> bool:
+    counts = [0] * len(room)
+    for r in cards:
+        counts[r] += 1
+        if counts[r] > room[r]:
+            return False
+    return True
+
+
+def _capped_draw(
+    rng: random.Random, cards: Sequence[int] | None, n: int, room: Sequence[int],
+    pool: list[int] | None = None,
+) -> list[int]:
+    """`n` cards for one seat without replacement, no resource past its
+    `room`: by rejection from `cards` while that is cheap, else card by card
+    in proportion to what is left of `pool` (built from `cards` if not
+    given, and drawn down in place). A resource the pool has run out of
+    within the bounds is taken past them rather than not at all."""
+    if cards is not None:
+        for _ in range(DEAL_TRIES):
+            drawn = rng.sample(cards, n)
+            if _within(drawn, room):
+                return drawn
+    if pool is None:
+        pool = [0] * len(room)
+        for r in cards or ():
+            pool[r] += 1
+    left = list(room)
+    out: list[int] = []
+    for _ in range(n):
+        allowed = [r for r in range(len(pool)) if pool[r] > 0 and left[r] > 0]
+        if not allowed:
+            allowed = [r for r in range(len(pool)) if pool[r] > 0] or list(range(len(pool)))
+        total = sum(pool[r] for r in allowed)
+        if total > 0:
+            pick = rng.random() * total
+            for r in allowed:
+                pick -= pool[r]
+                if pick < 0:
+                    break
+        else:
+            r = rng.choice(allowed)
+        out.append(r)
+        if pool[r] > 0:
+            pool[r] -= 1
+        left[r] -= 1
+    return out
 
 
 def _padded(pool: list[int], deficit: int) -> list[int]:

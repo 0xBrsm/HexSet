@@ -1,7 +1,7 @@
 [project]
 name = "hexset"
 # Keep in sync with hexset.__version__; checked by tests/test_versions.py.
-version = "1.12.0"
+version = "1.13.0"
 description = "A Catan rules engine with batched training environments, reproducible evaluation, and browser play"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -45,6 +45,9 @@ test = ["pytest>=8"]
 browser = ["playwright>=1.44"]
 server = ["onnxruntime>=1.18"]
 clients = ["onnxruntime>=1.18"]
+# `hexset.lockstep` runs its lanes as greenlets where this is installed, and
+# as pinned threads where it is not; greenlets hand over on one core.
+lanes = ["greenlet>=3"]
 export = ["onnx>=1.16", "onnxruntime>=1.18"]
 # Pin the reference engine so comparison results identify an exact
 # implementation. This build is upstream plus performance work that has not

@@ -162,6 +162,14 @@ def test_an_explicit_zero_is_honoured_where_zero_is_meaningful():
     assert TradeParams.from_meta({}, base=base).gate_plies == 8
 
 
+def test_the_own_frame_read_round_trips_and_is_off_by_default():
+    assert not UNLIMITED.gate_own_frame
+    assert "gate_own_frame" not in UNLIMITED.as_meta()
+    own = replace(UNLIMITED, gate_own_frame=True)
+    assert TradeParams.from_meta(own.as_meta()) == own
+    assert TradeParams.from_meta({"gate_own_frame": "0"}, base=own) == UNLIMITED
+
+
 def test_a_gate_written_against_the_old_attributes_still_describes_itself():
     class Old:
         trade_floor = 0.0197

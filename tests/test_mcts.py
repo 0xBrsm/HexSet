@@ -12,6 +12,7 @@ from hexset.actions import Action, ActionType, apply, legal_actions, victim_of
 from hexset.board.board import random_base_board
 from hexset.board.terrain import Resource
 from hexset.cards import DevCard
+from hexset.ledger import SeatLedger
 from hexset.game import Phase, imagine, is_over, start, to_move
 from hexset.bots import STANCES
 from hexset.mcts import (
@@ -271,12 +272,12 @@ def test_a_forced_move_carries_its_value_through_several_worlds():
     game = after_setup()
     while game.phase is not Phase.MAIN:
         apply(game, legal_actions(game)[0])
-    # Nobody else's cards are certified, so the mover's view holds several worlds.
+    # Nobody else's cards are certified or bounded, so the mover's view holds
+    # several worlds.
     hands = game.state(0, hidden=False).hands
     for seat in range(4):
         if seat != to_move(game):
-            game.ledger.seats[seat].known = [0] * 5
-            game.ledger.seats[seat].unknown = sum(hands[seat])
+            game.ledger.seats[seat] = SeatLedger(unknown=sum(hands[seat]))
     root, _, visits = OneWay(stub, simulations=16, k=4, rng=random.Random(3)).run(game)
     assert len(root.worlds) > 1
     assert visits.sum() == pytest.approx(16.0)

@@ -10,6 +10,7 @@ from typing import Sequence
 from .board.board import Board
 from .board.terrain import NUM_RESOURCES, TERRAIN_RESOURCE, Terrain
 from .cards import NUM_DEV_CARDS, make_deck
+from .chance import DiceDeck
 from .rules import STANDARD, Rules
 
 __all__ = [
@@ -249,6 +250,10 @@ class GameState:
     # rules applies: the win check, the discard limit, the robber shield,
     # Road Building. Immutable and shared by reference.
     rules: Rules = STANDARD
+    # Under `rules.balanced_dice`, the dice deck's public state, moved on at
+    # every roll (`hexset.game.roll_dice`): what the next roll is drawn from.
+    # `None` under independent dice. Immutable and shared by reference.
+    dice: DiceDeck | None = None
 
     def __post_init__(self) -> None:
         # A state built without the card ages holds none, one entry a seat.
@@ -289,6 +294,7 @@ def new_game(
         dev_ages=[[] for _ in range(num_players)],
         road_lengths=[0] * num_players,
         rules=rules,
+        dice=DiceDeck() if rules.balanced_dice else None,
     )
 
 
@@ -315,6 +321,7 @@ def copy_state(state: GameState) -> GameState:
         longest_road_holder=state.longest_road_holder,
         largest_army_holder=state.largest_army_holder,
         rules=state.rules,
+        dice=state.dice,
     )
 
 

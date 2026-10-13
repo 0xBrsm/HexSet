@@ -4,7 +4,8 @@
 *Seat-relative*: seats are rotated so the perspective seat -- the player to
 move unless `encode` is told another -- is always seat 0.
 *Information-set correct*: own hand and development cards are exact, opponents
-contribute counts plus what `hexset.ledger` reconstructs from public events.
+contribute counts plus what `hexset.ledger` reconstructs from public events
+and the steals the perspective saw.
 """
 
 from __future__ import annotations
@@ -352,13 +353,15 @@ def _encode_edges(state: GameState, perspective: int) -> np.ndarray:
 
 
 def _ledger_parts(game: Game, perspective: int) -> list[float]:
-    """Each opponent's reconstructed hand composition (`hexset.ledger`), in
-    seat-relative order, own seat excluded: per opponent `known[5]` scaled like a
-    hand then `unknown`, so `(players - 1) * (NUM_RESOURCES + 1)` floats."""
+    """Each opponent's reconstructed hand composition as `perspective` knows
+    it (`hexset.ledger`, `PublicLedger.for_seat`), in seat-relative order, own
+    seat excluded: per opponent `known[5]` scaled like a hand then `unknown`,
+    so `(players - 1) * (NUM_RESOURCES + 1)` floats."""
     players = game._state.num_players
+    rows = game.ledger.for_seat(perspective).seats
     parts: list[float] = []
     for seat in to_frame(range(players), perspective)[1:]:
-        seat_ledger = game.ledger.seats[seat]
+        seat_ledger = rows[seat]
         parts.extend(k / HAND_SCALE for k in seat_ledger.known)
         parts.append(seat_ledger.unknown / HAND_SCALE)
     return parts

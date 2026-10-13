@@ -158,7 +158,8 @@ def test_a_hosted_seat_reads_whether_it_is_targeted_holding_the_card_or_not():
     seat = Seat(observe(game, target), target, object(), Gate(), deals=ANSWERS)
     assert seat.deal_targeted(0, D.NO_BLOCK, WOOD)
     assert not seat.deal_answer(0, D.NO_BLOCK, WOOD)        # nothing to pay with
-    assert not Seat(observe(game, target), target, object(), Gate()).deal_targeted(0, D.NO_BLOCK, WOOD)
+    assert not Seat(observe(game, target), target, object(), Gate(),
+                    deals=D.DealParams()).deal_targeted(0, D.NO_BLOCK, WOOD)
 
 
 def test_a_hosted_seat_answers_from_its_own_view():
@@ -168,7 +169,10 @@ def test_a_hosted_seat_answers_from_its_own_view():
     target = max(chance, key=chance.get)
     seat = Seat(observe(game, target), target, object(), Gate(), deals=ANSWERS)
     assert seat.deal_answer(0, D.NO_BLOCK, WOOD)
-    assert not Seat(observe(game, target), target, object(), Gate()).deal_answer(0, D.NO_BLOCK, WOOD)
+    assert not Seat(observe(game, target), target, object(), Gate(),
+                    deals=D.DealParams()).deal_answer(0, D.NO_BLOCK, WOOD)
+    # Answering is a hosted seat's default.
+    assert Seat(observe(game, target), target, object(), Gate()).deal_answer(0, D.NO_BLOCK, WOOD)
 
 
 def test_a_robber_model_registers_once():
@@ -287,3 +291,119 @@ def test_a_debt_collected_with_an_open_offer_is_paid_by_naming_the_best_card():
     seat.play(0, Action(ActionType.MOVE_ROBBER, robber_hex(seat, False), 4))
     answer = seat.answer(Offer(0, (1, 0, 0, 0, 0), any=-1))
     assert answer.kind == RESPONSE_COUNTER and answer.bundle == (1, 0, 0, -1, 0)
+
+
+# --- the hosted seat as the robber's mover -------------------------------------
+
+
+class Asker(Gate):
+    """A gate that deals as the mover: asks for wood, spares the first promise,
+    offers ore back, takes any exchange and proposes nothing of its own."""
+
+    deal_params = D.DealParams(ask=True)
+
+    def deal_ask(self, game, seat):
+        return D.Ask(seat, D.NO_BLOCK, WOOD)
+
+    def deal_accept(self, game, seat, ask, promised):
+        return promised[:1]
+
+    def deal_return(self, game, seat, payers, resource):
+        return ORE
+
+    def gains_many(self, view, received, counterparties):
+        return [1.0] * len(received)
+
+    def candidates(self, view, counterparties, **kw):
+        return []
+
+
+def a_mover(game=None):
+    game = game or a_robber_move()
+    return Seat(observe(game, 0), 0, object(), Asker())
+
+
+def test_a_hosted_mover_asks_once_a_robber_move():
+    seat = a_mover()
+    ask = seat.deal_ask()
+    assert ask == D.Ask(0, D.NO_BLOCK, WOOD) and seat.deal_ask() is ask
+    assert len(seat.deal_log) == 1 and seat.deal_log[0].resource == WOOD
+    assert Seat(observe(a_robber_move(), 0), 0, object(), Gate()).deal_ask() is None   # a gate that does not ask
+
+
+def test_a_hosted_mover_counts_promises_its_view_allows_and_spares_its_pick():
+    game = a_robber_move()
+    clear_hand(game._state, 3)
+    game.ledger.seats[3].known = [0] * 5          # the record: seat 3 holds nothing
+    game.ledger.seats[3].unknown = 0
+    seat = a_mover(game)
+    seat.deal_ask()
+    assert seat.deal_promised((3, 2, 1)) == (2,)
+    (deal,) = seat.deal_log
+    assert deal.promised == (3, 2, 1) and deal.void == (3,) and deal.counted == (2, 1)
+    assert seat.game.robber_promised == ((2, D.NO_BLOCK),)
+
+
+def test_a_hosted_mover_ignores_a_blacklisted_seat():
+    seat = a_mover()
+    seat.deal_ask()
+    seat._deal_log.insert(0, D.Deal(0, 0, D.NO_BLOCK, WOOD, promised=(1,), kept=(1,), rejected=(1,)))
+    assert seat.deal_promised((1, 2)) == (2,)
+    assert seat.deal_log[-1].ignored == (1,)
+
+
+def a_spared_deal():
+    """Seat 0 asked for wood; seats 1 and 2 promised; it spared seat 1 and robbed seat 2."""
+    seat = a_mover()
+    seat.deal_ask()
+    assert seat.deal_promised((1, 2)) == (1,)
+    state = seat.game._state
+    hex_ = next(h for h in range(state.board.num_hexes)
+                if 2 in occupants(state, h) and 1 not in occupants(state, h) and h != state.robber)
+    seat.play(0, Action(ActionType.MOVE_ROBBER, hex_, 2), stolen=WOOD)
+    return seat
+
+
+def test_a_hosted_mover_s_robber_move_settles_whom_it_spared():
+    seat = a_spared_deal()
+    (deal,) = seat.deal_log
+    assert deal.kept == (1,) and deal.broken == (2,) and deal.victim == 2
+    assert seat.game.phase is Phase.MAIN and seat.game.robber_promised == ()
+
+
+def test_the_deal_s_exchange_is_the_mover_s_first_offer_and_any_seat_may_take_it():
+    seat = a_spared_deal()
+    offer = seat.offer()
+    assert offer == Offer(0, (1, 0, 0, 0, -1))           # wood for ore
+    taken = seat.pick([offer_answer(1, RESPONSE_PASS), offer_answer(3, RESPONSE_ACCEPT, offer.received)])
+    assert taken.seat == 3
+    trade = seat.traded(0, 3, offer.received)
+    seat.close_round(trade)
+    (deal,) = seat.deal_log
+    assert deal.offered == ORE and deal.taker == 3 and deal.paid == () and deal.rejected == (1,)
+    assert D.blacklist(seat.game, 0) == {1}
+    assert seat.offer() is None                           # the deal's offer goes once
+
+
+def test_a_spared_promiser_that_takes_it_is_paid_and_not_blacklisted():
+    seat = a_spared_deal()
+    offer = seat.offer()
+    seat.pick([offer_answer(1, RESPONSE_ACCEPT, offer.received)])
+    seat.close_round(seat.traded(0, 1, offer.received))
+    (deal,) = seat.deal_log
+    assert deal.paid == ((1, ORE),) and deal.rejected == () and D.blacklist(seat.game, 0) == set()
+
+
+def test_the_deal_log_survives_a_rebuilt_game():
+    seat = a_spared_deal()
+    offer = seat.offer()
+    seat.pick([])
+    seat.close_round(None)
+    rebuilt = observe(seat.game, 0)
+    seat.resync(rebuilt)
+    assert D.blacklist(seat.game, 0) == {1}
+
+
+def offer_answer(seat, kind, bundle=None):
+    from hexset.trading import Response
+    return Response(seat, kind, bundle)

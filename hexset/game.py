@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Iterable, Sequence
 from .board.board import MAX_ROLL, MIN_ROLL, Board, pips
 from .board.terrain import TERRAIN_RESOURCE, Resource, check_resource
 from .cards import ROAD_BUILDING_ROADS, DevCard
-from .chance import Chance, Live, for_rules as chance_for
+from .chance import Balanced, Chance, Live, for_rules as chance_for
 from .devcards import buy as buy_dev_card
 from .devcards import (
     buy_drawn,
@@ -20,6 +20,7 @@ from .devcards import (
     spend_card,
 )
 from .economy import Purchase, bank_trade, check_afford, distribute, hand_size, pay
+from .deals import Deal, close_deal, keep_promises, run_deal_event, settle_deals
 from .ledger import PublicLedger
 from .robber import allowed_targets, check_target, discard, discard_count, move_robber, steal, victims
 from .rules import STANDARD, STANDARD_GAME, GameType, Rules
@@ -63,6 +64,7 @@ __all__ = [
     "UNSTRUCTURED_TURN_CAP",
     "NO_TURN_CAP",
     "ROLL_ODDS",
+    "roll_odds",
     "Phase",
     "Game",
     "start",
@@ -126,6 +128,15 @@ ROLL_ODDS: tuple[tuple[int, float], ...] = tuple(
 )
 
 
+def roll_odds(game: "Game") -> tuple[tuple[int, float], ...]:
+    """`(roll, chance)` of the seat on turn's next roll: `ROLL_ODDS` under
+    independent dice; under balanced dice the dice deck's odds for that
+    roller (`chance.DiceDeck.odds`), read off public rolls. What a search
+    enumerates or samples a roll by."""
+    dice = game._state.dice
+    return ROLL_ODDS if dice is None else dice.odds(game.current_player)
+
+
 class Phase(IntEnum):
     """Where a game is in its turn structure; `legal_actions` reads it."""
 
@@ -177,6 +188,18 @@ class Game:
     # the move is made so it cannot outlive the prompt it answered; copied
     # by `imagine` so a search sees the same table.
     robber_allowed: frozenset[int] | None = None
+    # The promises the mover accepted for *this* robber move, as `(payer,
+    # kind)` (`hexset.deals`): its legality keeps them (`deals.keep_promises`).
+    # Set as the robber phase opens, cleared once the robber has moved;
+    # copied by `imagine` so a search keeps them too.
+    robber_promised: tuple[tuple[int, str], ...] = ()
+    # The deal of the robber move at hand, until the robber moves; then the
+    # deals whose payments are owed, until the mover's turn opens to trading.
+    # Neither is copied by `imagine`: a hypothetical makes no payment.
+    open_deal: "Deal | None" = None
+    deal_payments: list["Deal"] = field(default_factory=list)
+    # Every deal asked this game, in order, with what came of it.
+    deal_log: list["Deal"] = field(default_factory=list)
     turns: int = 0
     won_by: int | None = None
     # This turn's executed trades and their count, cleared by `end_turn`.
@@ -353,7 +376,8 @@ def start(
 
 
 def imagine(
-    game: Game, rng: random.Random, *, randomize_deck: bool = True
+    game: Game, rng: random.Random, *, randomize_deck: bool = True,
+    seat: int | None = None,
 ) -> Game:
     """A copy for hypothetical play, safe to mutate and to draw from.
 
@@ -361,14 +385,22 @@ def imagine(
     copied deck is shuffled by default, so a search that buys a development
     card cannot read the card the real deck is about to deal;
     `randomize_deck=False` defers that to the draw. And the copy's `chance`
-    is always a fresh `Live(rng)`, never `game.chance`, which would
+    is always a fresh source on `rng`, never `game.chance`, which would
     otherwise drain or pollute the real game's recorded stream (or, split,
-    hand the search the real game's coming rolls). It is unsplit: a search
-    takes its dice and steals off its own `rng` in turn, as it always has.
+    hand the search the real game's coming rolls): `Live(rng)`, or under
+    balanced dice `Balanced.from_deck(rng, state.dice)`, rolling on from the
+    dice deck's public state. It is unsplit: a search takes its dice and
+    steals off its own `rng` in turn, as it always has.
 
     On an observed state (`state.Hidden`) hidden piles copy as counts and
     `randomize_deck` must be `False` -- shuffling a deck known only by its
     length is an identity read and raises `state.HiddenRead`.
+
+    `seat` names whose world the copy is: its ledger keeps that seat's own
+    rows and no other seat's (`PublicLedger.scrubbed`), so a seat's search
+    never reads a card another seat saw stolen. Pass it wherever the copy
+    takes a world sampled from that seat's belief. Left `None`, the ledger
+    is copied whole, as a copy of the table itself must be.
     """
     state = copy_state(game._state)
     if randomize_deck:
@@ -376,8 +408,8 @@ def imagine(
     return Game(
         _state=state,
         rng=rng,
-        chance=Live(rng),
-        ledger=game.ledger.copy(),
+        chance=Live(rng) if state.dice is None else Balanced.from_deck(rng, state.dice),
+        ledger=game.ledger.copy() if seat is None else game.ledger.scrubbed(seat),
         phase=game.phase,
         current_player=game.current_player,
         setup_queue=game.setup_queue[:],
@@ -389,6 +421,7 @@ def imagine(
         free_roads=game.free_roads,
         resume_phase=game.resume_phase,
         robber_allowed=game.robber_allowed,
+        robber_promised=game.robber_promised,
         turns=game.turns,
         won_by=game.won_by,
         trades=game.trades[:],
@@ -409,8 +442,8 @@ def observe(game: Game, seat: int, chance: Chance | None = None) -> Game:
 
     A copy whose other seats' hands and development cards, and the deck, are
     hidden piles of the same size (`state.observed_by`), with everything
-    public carried over -- the board, the ledger, whose turn it is and every
-    flag of it. It is advanced by the ordinary `actions.apply` as the table's
+    public carried over -- the board, the ledger as `seat` knows it
+    (`PublicLedger.scrubbed`), whose turn it is and every flag of it. It is advanced by the ordinary `actions.apply` as the table's
     events arrive, every seat's actions alike: a hidden hand takes each
     public change by name into its count (`state.HiddenHand.move`, which the
     ledger reads), and what no seat here can draw for itself -- the dice, a
@@ -430,7 +463,7 @@ def observe(game: Game, seat: int, chance: Chance | None = None) -> Game:
     """
     from .chance import Hosted
 
-    seen = imagine(game, random.Random(0), randomize_deck=False)
+    seen = imagine(game, random.Random(0), randomize_deck=False, seat=seat)
     seen.set_state(observed_by(seen._state, seat))
     seen.chance = Hosted() if chance is None else chance
     seen.trade_mode = "external"
@@ -509,12 +542,13 @@ def _record_steal(
 ) -> None:
     """The one hand mutation `_snapshot_hands`/`apply_hand_diff` must never
     see: a steal moves one card whose identity is public to nobody but the
-    thief and the victim. `stolen` is read only for its `None`-ness (the
-    victim held nothing), never for the resource it names, which
-    `PublicLedger.steal` must not be told."""
+    thief and the victim. `stolen` is `None` where the victim held nothing,
+    and `chance.UNSEEN` on an observed state not party to the steal;
+    `PublicLedger.steal` gives the card to the thief's and the victim's own
+    rows only."""
     if stolen is None:
         return
-    game.ledger.steal(thief, victim)
+    game.ledger.steal(thief, victim, int(stolen))
 
 
 def _grant_initial_resources(game: Game, vertex: int) -> None:
@@ -588,6 +622,9 @@ def roll_dice(game: Game, roll: int | None = None) -> int:
     # Unplaceable credit expires with the card's resolution.
     game.free_roads = 0
     game.last_roll = roll
+    state = game._state
+    if state.dice is not None:
+        state.dice = state.dice.rolled(game.current_player, roll)
 
     if roll == 7:
         # Quotas are fixed here rather than recomputed as hands shrink, so
@@ -601,6 +638,8 @@ def roll_dice(game: Game, roll: int | None = None) -> int:
         # A seven always resumes into MAIN once discard/robber resolve.
         game.resume_phase = Phase.MAIN
         game.phase = Phase.DISCARD if any(game.discard_quota) else Phase.ROBBER
+        if game.phase is Phase.ROBBER:
+            run_deal_event(game)
     else:
         before = _snapshot_hands(game)
         distribute(game._state, roll)
@@ -659,6 +698,7 @@ def _finish_discards(game: Game) -> None:
         _close_turn(game)
     else:
         game.phase = Phase.ROBBER
+        run_deal_event(game)
 
 
 def submit_discard(game: Game, player: int, cards: list[int]) -> None:
@@ -722,6 +762,7 @@ def move_robber_to(game: Game, target: int, victim: int | None = None) -> None:
     thief = game.current_player
     check_target(state, target)
     allowed = allowed_targets(state, thief, game.robber_allowed)
+    allowed, spared = keep_promises(state, thief, allowed, dict(game.robber_promised))
     if allowed is not None and target not in allowed:
         raise ValueError(f"the table does not allow the robber on hex {target}")
     robbable = victims(state, target, thief)
@@ -729,6 +770,8 @@ def move_robber_to(game: Game, target: int, victim: int | None = None) -> None:
         raise ValueError(f"the robber on hex {target} must rob one of seats {list(robbable)}")
     if victim is not None and victim not in robbable:
         raise ValueError(f"seat {victim} cannot be robbed on hex {target}")
+    if victim is not None and victim in spared:
+        raise ValueError(f"seat {victim} was promised it would not be robbed")
     # The steal draws before the robber moves, so a chance source that
     # refuses (a host's stream out of step) leaves the board as it was.
     stolen = None if victim is None else steal(state, thief, victim, game.chance)
@@ -736,7 +779,9 @@ def move_robber_to(game: Game, target: int, victim: int | None = None) -> None:
     game.robber_allowed = None      # the rule was for this move alone
     if victim is not None:
         _record_steal(game, thief, victim, stolen)
+    close_deal(game, target, victim)
     game.phase = game.resume_phase
+    settle_deals(game)
     run_trade_event(game)
 
 
@@ -891,6 +936,7 @@ def play_knight_card(game: Game) -> None:
         return
     game.resume_phase = game.phase
     game.phase = Phase.ROBBER
+    run_deal_event(game)
 
 
 def play_road_building_card(game: Game) -> None:
@@ -927,8 +973,12 @@ def play_monopoly_card(game: Game, resource: Resource) -> int:
     taken = play_monopoly(game._state, game.current_player, resource, game.chance)
     game.dev_card_played = True
     # Monopoly's transfer is fully public despite touching every seat at
-    # once, so it takes `apply_hand_diff`, not a steal's hidden path.
+    # once, so it takes `apply_hand_diff`, not a steal's hidden path; and
+    # every other seat is left publicly holding none of the resource.
     game.ledger.apply_hand_diff(before, game._state.hands)
+    for other in range(game._state.num_players):
+        if other != game.current_player:
+            game.ledger.emptied(other, int(resource))
     return taken
 
 
@@ -1065,6 +1115,7 @@ def enter_main(game: Game) -> None:
     driver has to remember to run the event itself.
     """
     game.phase = Phase.MAIN
+    settle_deals(game)
     run_trade_event(game)
 
 
@@ -1091,6 +1142,11 @@ def _close_turn(game: Game) -> None:
     game.free_roads = 0
     game.resume_phase = Phase.MAIN
     game.robber_allowed = None
+    game.robber_promised = ()
+    game.open_deal = None
+    for deal in game.deal_payments:         # the turn ended before they could be paid
+        deal.unpaid = deal.unpaid + tuple(s for s in deal.kept if s not in {p for p, _ in deal.paid})
+    game.deal_payments = []
     game.turns += 1
     if game.turns >= game.turn_cap:
         game.phase = Phase.GAME_OVER
